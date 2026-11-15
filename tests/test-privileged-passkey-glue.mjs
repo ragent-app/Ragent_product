@@ -10,19 +10,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-privileged-passkey-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-privileged-passkey-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_INSTANCE_ROOT: process.env.RAGENT_INSTANCE_ROOT,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-mkdirSync(process.env.AGENTOC_WORK_ROOT_DIR, { recursive: true });
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+mkdirSync(process.env.RAGENT_WORK_ROOT_DIR, { recursive: true });
 
 const sha256Hex = (value) => createHash('sha256').update(String(value)).digest('hex');
 
@@ -43,7 +43,7 @@ function createFakeStore() {
 }
 
 function deleteBatch(buildPrivilegedBatch, runId, approvalId = 'gate-delete-1') {
-  const command = 'rm -rf /var/cache/agentoc-stale';
+  const command = 'rm -rf /var/cache/ragent-stale';
   return buildPrivilegedBatch({
     runId,
     turnId: 'turn-passkey',
@@ -53,13 +53,13 @@ function deleteBatch(buildPrivilegedBatch, runId, approvalId = 'gate-delete-1') 
       cwd: '/tmp',
       declaredCategory: 'delete',
       description: 'Clean stale cache',
-      wrapperCommand: `agentoc-privileged --description "Clean stale cache" --category delete -- ${command}`,
+      wrapperCommand: `ragent-privileged --description "Clean stale cache" --category delete -- ${command}`,
     }],
   });
 }
 
 function writeProof(token, { purpose, sessionId, requestId, manifestHash }) {
-  const dir = join(process.env.AGENTOC_CONFIG_DIR, 'owner-webauthn-proofs');
+  const dir = join(process.env.RAGENT_CONFIG_DIR, 'owner-webauthn-proofs');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${sha256Hex(token)}.json`), JSON.stringify({
     purpose,
@@ -83,7 +83,7 @@ async function createTestRun(createRun, sessionId, requestId) {
     manifest: {
       sessionId,
       requestId,
-      folder: process.env.AGENTOC_WORK_ROOT_DIR,
+      folder: process.env.RAGENT_WORK_ROOT_DIR,
       tool: 'claude-bidi',
       runtimeFamily: 'claude-stream-json-bidi',
       prompt: 'clean stale cache',
@@ -110,10 +110,10 @@ try {
   const { TEMPORARY_CONTROL_CAPABILITIES, TEMPORARY_CONTROL_SESSION_SCOPE,
     createTemporaryControlApprovalActor } = await import('../lib/temporary-control-policy.mjs');
 
-  // The passkey checkpoint is opt-in (AGENTOC_OWNER_HOST_PASSKEY_REQUIRED=1).
+  // The passkey checkpoint is opt-in (RAGENT_OWNER_HOST_PASSKEY_REQUIRED=1).
   // Keep the original passkey-path coverage under that mode, then assert the
   // default owner-click mode below.
-  process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED = '1';
+  process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED = '1';
 
   // --- valid proof → execute once, response queue approved ---
   const successRun = await createTestRun(createRun, 'session_passkey_success', 'req_passkey_success');
@@ -449,7 +449,7 @@ try {
 
   // --- owner-click mode (default): the proof layer is skipped, the subset
   // binding and one-shot execution are preserved, and no credential is claimed.
-  delete process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED;
+  delete process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED;
   const clickRun = await createTestRun(createRun, 'session_passkey_click', 'req_passkey_click');
   const clickBatch = deleteBatch(buildPrivilegedBatch, clickRun.id, 'gate-delete-click');
   const clickStore = createFakeStore();

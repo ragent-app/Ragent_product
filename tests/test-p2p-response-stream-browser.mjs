@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { AgentoCP2PClient, P2PResponseStreamAssembler } from '../static/p2p/agentoc-p2p-client.js';
+import { RagentP2PClient, P2PResponseStreamAssembler } from '../static/p2p/ragent-p2p-client.js';
 
 function frames(id, text) {
   const payload = Buffer.from(JSON.stringify({ type: 'http_response', id, status: 200, bodyBase64: Buffer.from(text).toString('base64') }));
@@ -53,13 +53,13 @@ test('bounds aggregate response allocations and rejects oversized frames', async
 });
 
 test('browser preserves business IDs in headers and frees partial streams on timeout', async () => {
-  const client = new AgentoCP2PClient({ signalingUrl: '', roomId: '', secret: '', requestTimeoutMs: 40 });
+  const client = new RagentP2PClient({ signalingUrl: '', roomId: '', secret: '', requestTimeoutMs: 40 });
   let sent;
   client.channel = { readyState: 'open', send(value) { sent = JSON.parse(value); }, close() {} };
   const pending = client.request({ method: 'POST', path: '/fixture', requestId: 'business:id', idempotencyKey: 'business:id' });
   assert.notEqual(sent.id, 'business:id');
   assert.match(sent.id, /^[A-Za-z0-9_-]+$/);
-  assert.equal(sent.headers['X-AgentoC-Request-Id'], 'business:id');
+  assert.equal(sent.headers['X-Ragent-Request-Id'], 'business:id');
   assert.equal(sent.headers['Idempotency-Key'], 'business:id');
   assert.equal(sent.acceptResponseStream, true);
   await client.responseStreams.add(frames(sent.id, 'a'.repeat(40_000))[0]);

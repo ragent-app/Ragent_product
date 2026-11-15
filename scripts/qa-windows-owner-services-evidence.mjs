@@ -17,10 +17,10 @@ assert.deepEqual(r.refusals.map(row=>[row.case,row.observation.exitCode,row.obse
   ['existing-data',1,'OSP_EXISTING_DATA_REFUSED',false],['retained-lock',1,'OSP_PREPARATION_INCOMPLETE',false],['hardlink',1,'OBD_FILE_IDENTITY_INVALID',false],['foreign-write',1,'OBD_OBJECT_WRITABLE_BY_FOREIGN_IDENTITY',false],['existing-services',1,'OSP_EXISTING_SERVICE_REFUSED',false],
 ]);
 assert.equal(r.observed.length,2);const sids=new Set();
-for(const [index,name]of ['AgentoC-ControlPlane','AgentoC-RunnerSupervisor'].entries()){
+for(const [index,name]of ['Ragent-ControlPlane','Ragent-RunnerSupervisor'].entries()){
   const s=r.observed[index];assert.equal(s.name,name);assert.equal(s.account,'NT SERVICE\\'+name);assert.equal(s.state,'Stopped');assert.equal(s.startMode,'Disabled');assert.equal(s.pid,0);assert.match(s.sid,/^S-1-5-80-(?:\d+-){4}\d+$/);sids.add(s.sid);assert.deepEqual(s.privileges,['SeChangeNotifyPrivilege']);assert.equal(s.sidType,'UNRESTRICTED');
   const planned=r.prepared.result.plan.find(p=>p.name===name);assert.equal(planned.command,s.command);assert.equal(planned.startMode,'Disabled');assert.equal(planned.account,s.account);
-  assert.ok(s.command.startsWith('"C:\\Program Files\\AgentoC\\AgentoC.ServiceHost.exe" --role '));
+  assert.ok(s.command.startsWith('"C:\\Program Files\\Ragent\\Ragent.ServiceHost.exe" --role '));
 }
 assert.equal(sids.size,2);
 const verified={verificationPass:true,preparationPass:true,runId,sourceCommit,sourceSha256,reportSha256:createHash('sha256').update(bytes).digest('hex'),actualScmRegistration:true,actualDisabledServiceAccounts:true,actualRunningTokenVerified:false,syntheticInputs:true,installedProductReady:false,authorityIssued:false,cleanupConfirmed:true};

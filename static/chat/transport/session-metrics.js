@@ -1,13 +1,13 @@
 "use strict";
 
 // Pure event-refresh / streaming-render metrics store (Stage 2 extraction of
-// session-http.js). Owns the __agentocEventRefreshMetrics accumulator on the
+// session-http.js). Owns the __ragentEventRefreshMetrics accumulator on the
 // attach root (the legacy code reached the browser global itself; here the
 // attach root IS the store host, so the module stays free of browser globals
 // and runs identically in Node):
 //
 //   - ensureEventRefreshMetricsStore() creates the store shape on first use
-//     and installs agentocGetEventRefreshMetrics() as a deep-snapshot getter
+//     and installs ragentGetEventRefreshMetrics() as a deep-snapshot getter
 //     on the same root.
 //   - recordEventRefreshMetric() tallies full/delta request outcomes and
 //     rendered reset/append/noop totals, keeping the last sample plus a
@@ -19,12 +19,12 @@
 // Locked against the legacy implementation by
 // tests/test-chat-session-metrics-core.mjs.
 
-(function attachAgentocSessionMetricsCore(root) {
+(function attachRagentSessionMetricsCore(root) {
   const EVENT_REFRESH_METRICS_SAMPLE_LIMIT = 80;
 
   function ensureEventRefreshMetricsStore() {
-    if (!root.__agentocEventRefreshMetrics || typeof root.__agentocEventRefreshMetrics !== "object") {
-      root.__agentocEventRefreshMetrics = {
+    if (!root.__ragentEventRefreshMetrics || typeof root.__ragentEventRefreshMetrics !== "object") {
+      root.__ragentEventRefreshMetrics = {
         startedAt: new Date().toISOString(),
         totals: {
           fullFetches: 0,
@@ -45,13 +45,13 @@
         samples: [],
       };
     }
-    if (typeof root.agentocGetEventRefreshMetrics !== "function") {
-      root.agentocGetEventRefreshMetrics = () => {
-        const snapshot = root.__agentocEventRefreshMetrics || {};
+    if (typeof root.ragentGetEventRefreshMetrics !== "function") {
+      root.ragentGetEventRefreshMetrics = () => {
+        const snapshot = root.__ragentEventRefreshMetrics || {};
         return JSON.parse(JSON.stringify(snapshot));
       };
     }
-    return root.__agentocEventRefreshMetrics;
+    return root.__ragentEventRefreshMetrics;
   }
 
   function recordEventRefreshMetric(sample = {}) {
@@ -121,7 +121,7 @@
     }
   }
 
-  root.AgentocSessionMetricsCore = {
+  root.RagentSessionMetricsCore = {
     ensureEventRefreshMetricsStore,
     recordEventRefreshMetric,
     recordStreamingRenderMetric,

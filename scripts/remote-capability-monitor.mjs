@@ -8,18 +8,18 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const HOME = homedir();
-const DEFAULT_CONFIG_PATH = join(HOME, '.config', 'agentoc', 'remote-capability-monitor', 'config.json');
-const DEFAULT_STATE_PATH = join(HOME, '.config', 'agentoc', 'remote-capability-monitor', 'state.json');
-const DEFAULT_REPORT_DIR = join(HOME, '.agentoc', 'research', 'remote-capability-monitor');
-const DEFAULT_NOTIFICATION_DIR = join(HOME, '.config', 'agentoc', 'remote-capability-monitor', 'notifications');
-const DEFAULT_NOTIFIER_PATH = join(HOME, '.agentoc', 'scripts', 'send-multi-channel-reminder.mjs');
-const DEFAULT_AGENTOC_BASE_URL = 'http://127.0.0.1:7690';
-const DEFAULT_AGENTOC_AUTH_FILE = join(HOME, '.config', 'agentoc', 'auth.json');
-const DEFAULT_AGENTOC_SESSION_FOLDER = join(HOME, 'code', 'agentoc');
+const DEFAULT_CONFIG_PATH = join(HOME, '.config', 'ragent', 'remote-capability-monitor', 'config.json');
+const DEFAULT_STATE_PATH = join(HOME, '.config', 'ragent', 'remote-capability-monitor', 'state.json');
+const DEFAULT_REPORT_DIR = join(HOME, '.ragent', 'research', 'remote-capability-monitor');
+const DEFAULT_NOTIFICATION_DIR = join(HOME, '.config', 'ragent', 'remote-capability-monitor', 'notifications');
+const DEFAULT_NOTIFIER_PATH = join(HOME, '.ragent', 'scripts', 'send-multi-channel-reminder.mjs');
+const DEFAULT_RAGENT_BASE_URL = 'http://127.0.0.1:7690';
+const DEFAULT_RAGENT_AUTH_FILE = join(HOME, '.config', 'ragent', 'auth.json');
+const DEFAULT_RAGENT_SESSION_FOLDER = join(HOME, 'code', 'ragent');
 const DEFAULT_BOOTSTRAP_HOURS = 168;
 const DEFAULT_LOOKBACK_HOURS = 168;
 const DEFAULT_MAX_ITEMS = 10;
-const DEFAULT_NOTIFICATION_LOG = join(HOME, '.agentoc', 'logs', 'reminders', 'remote-capability-monitor.jsonl');
+const DEFAULT_NOTIFICATION_LOG = join(HOME, '.ragent', 'logs', 'reminders', 'remote-capability-monitor.jsonl');
 const FETCH_TIMEOUT_MS = 15000;
 const INTERESTING_SCORE_THRESHOLD = 4;
 const LOW_CONFIDENCE_SCORE_THRESHOLD = 6;
@@ -168,9 +168,9 @@ Options:
 Config shape:
   {
     "bootstrapHours": 168,
-    "reportDir": "~/.agentoc/research/remote-capability-monitor",
+    "reportDir": "~/.ragent/research/remote-capability-monitor",
     "notification": {
-      "notifierPath": "~/.agentoc/scripts/send-multi-channel-reminder.mjs",
+      "notifierPath": "~/.ragent/scripts/send-multi-channel-reminder.mjs",
       "channels": [ ... ]
     },
     "sources": [ ... ]
@@ -715,7 +715,7 @@ function renderReport({ startedAt, firstRun, sourceResults, allInteresting, pend
 async function fetchText(url) {
   const options = {
     headers: {
-      'User-Agent': 'AgentoC remote-capability-monitor/1.0',
+      'User-Agent': 'Ragent remote-capability-monitor/1.0',
       Accept: 'application/atom+xml, application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8',
     },
   };
@@ -828,7 +828,7 @@ function buildSessionDigestMessage({
     'Source: Remote capability monitor',
     `Cycle: ${formatTimestamp(runAt)}`,
     `Mode: ${firstRun ? 'bootstrap' : 'incremental'}`,
-    'Focus: AgentoC Live / remote control for local coding agents',
+    'Focus: Ragent Live / remote control for local coding agents',
     '',
     'Tracked sources this cycle:',
   ];
@@ -880,7 +880,7 @@ function buildSessionDigestMessage({
   lines.push('');
   lines.push('Please review this digest and respond with:');
   lines.push('1. Delta');
-  lines.push('2. Why it matters for AgentoC');
+  lines.push('2. Why it matters for Ragent');
   lines.push('3. Proposal');
   lines.push('4. Ignore / watch');
 
@@ -904,8 +904,8 @@ async function waitForRunCompletion(baseUrl, runId, cookie) {
   throw new Error(`Timed out waiting for run ${runId}`);
 }
 
-async function submitDigestToAgentoC(config, { runAt, firstRun, pendingInteresting, allInteresting, sourceResults, reportPaths, dryRun }) {
-  const remoteConfig = config?.agentoc || {};
+async function submitDigestToRagent(config, { runAt, firstRun, pendingInteresting, allInteresting, sourceResults, reportPaths, dryRun }) {
+  const remoteConfig = config?.ragent || {};
   const sessionConfig = remoteConfig?.session || {};
   const agentId = trimString(sessionConfig.agentId || sessionConfig.appId);
   if (!agentId) {
@@ -925,8 +925,8 @@ async function submitDigestToAgentoC(config, { runAt, firstRun, pendingInteresti
     };
   }
 
-  const baseUrl = normalizeBaseUrl(trimString(remoteConfig.baseUrl) || DEFAULT_AGENTOC_BASE_URL);
-  const authFile = trimString(remoteConfig.authFile) || DEFAULT_AGENTOC_AUTH_FILE;
+  const baseUrl = normalizeBaseUrl(trimString(remoteConfig.baseUrl) || DEFAULT_RAGENT_BASE_URL);
+  const authFile = trimString(remoteConfig.authFile) || DEFAULT_RAGENT_AUTH_FILE;
   const cookie = await authenticateOwner(baseUrl, authFile);
   const agent = await loadAutomationAgent(baseUrl, agentId, cookie);
   if (!agent) {
@@ -934,7 +934,7 @@ async function submitDigestToAgentoC(config, { runAt, firstRun, pendingInteresti
   }
 
   const sessionPayload = {
-    folder: expandHome(trimString(sessionConfig.folder) || trimString(remoteConfig.sessionFolder) || DEFAULT_AGENTOC_SESSION_FOLDER),
+    folder: expandHome(trimString(sessionConfig.folder) || trimString(remoteConfig.sessionFolder) || DEFAULT_RAGENT_SESSION_FOLDER),
     tool: trimString(sessionConfig.tool) || trimString(agent.tool) || trimString(remoteConfig.tool) || 'codex',
     name: trimString(sessionConfig.name) || trimString(agent.name) || 'Agent Radar',
     sourceId: 'automation',
@@ -1045,7 +1045,7 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
   if (pendingInteresting.length === 0) {
     const noSignalTitle = sessionResult?.success
       ? `${sessionResult.appName || 'Agent Radar'}: review refreshed`
-      : 'AgentoC scout: no new signals';
+      : 'Ragent scout: no new signals';
     const noSignalBody = sessionResult?.success
       ? 'No new signals; the review session was refreshed.'
       : 'No new high-signal remote-agent changes in this cycle.';
@@ -1053,7 +1053,7 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
       title: noSignalTitle,
       body: noSignalBody,
       text: [
-        `AgentoC scout completed an ${firstRun ? 'initial bootstrap' : 'incremental'} cycle and found no new high-signal items.`,
+        `Ragent scout completed an ${firstRun ? 'initial bootstrap' : 'incremental'} cycle and found no new high-signal items.`,
         '',
         ...(sessionResult?.success ? [
           `Review session: ${sessionResult.appName || 'Agent Radar'} (${sessionResult.sessionId})`,
@@ -1070,13 +1070,13 @@ function buildNotificationMessage({ pendingInteresting, allInteresting, reportPa
 
   const title = sessionResult?.success
     ? `Agent Radar: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'} ready`
-    : `AgentoC scout: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'}`;
+    : `Ragent scout: ${pendingInteresting.length} new signal${pendingInteresting.length === 1 ? '' : 's'}`;
   const firstHeadline = truncate(focusItems[0]?.headline || 'New remote-agent signal', 72);
   const body = sessionResult?.success
     ? `Review is ready in ${sessionResult.appName || 'the scout session'}`
     : (pendingInteresting.length === 1 ? firstHeadline : `${firstHeadline}; +${pendingInteresting.length - 1} more`);
   const lines = [
-    `AgentoC scout found ${pendingInteresting.length} new high-signal item${pendingInteresting.length === 1 ? '' : 's'}.`,
+    `Ragent scout found ${pendingInteresting.length} new high-signal item${pendingInteresting.length === 1 ? '' : 's'}.`,
     '',
     'Top proposals:',
   ];
@@ -1117,7 +1117,7 @@ function materializeNotificationChannels(channelTemplates, message) {
     if (type === 'email') {
       next.subject = trimString(channel?.subject) || message.title;
       next.text = trimString(channel?.text) || message.text;
-    } else if (type === 'agentoc_web_push') {
+    } else if (type === 'ragent_web_push') {
       next.title = trimString(channel?.title) || message.title;
       next.body = trimString(channel?.body) || message.body;
       next.url = trimString(message?.url) || trimString(channel?.url) || '/?tab=sessions';
@@ -1309,7 +1309,7 @@ export async function runMonitor(rawOptions) {
   };
 
   if (pendingInteresting.length > 0 || options.forceNotify) {
-    sessionResult = await submitDigestToAgentoC(config, {
+    sessionResult = await submitDigestToRagent(config, {
       runAt,
       firstRun,
       pendingInteresting,

@@ -29,12 +29,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-reviewer-readonly-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-reviewer-readonly-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 // S12 is on for this process so the runtime-adapter certification branch is
 // active; each scenario that needs the off state pins it explicitly (either
 // with an injected resolver or through a child process below).
-process.env.AGENTOC_REVIEWER_ENABLED = '1';
+process.env.RAGENT_REVIEWER_ENABLED = '1';
 
 const {
   buildBwrapArgs,
@@ -93,9 +93,9 @@ try {
   // ── 1) bwrap arg construction: readOnly variant + unchanged default ────────
   beginSection('bwrap-args');
 
-  const ws = makeDir('agentoc-reviewer-ws-');
-  const rh = makeDir('agentoc-reviewer-home-');
-  const hide = join(configDir, 'agentoc-reviewer-hide');
+  const ws = makeDir('ragent-reviewer-ws-');
+  const rh = makeDir('ragent-reviewer-home-');
+  const hide = join(configDir, 'ragent-reviewer-hide');
   mkdirSync(hide, { recursive: true });
 
   // readOnly=true: the run workspace is mounted with --ro-bind and never with
@@ -173,7 +173,7 @@ try {
   // ── 3) run admission: reviewer read lease ─────────────────────────────────
   beginSection('admission-read-lease');
 
-  const root = makeDir('agentoc-reviewer-adm-root-');
+  const root = makeDir('ragent-reviewer-adm-root-');
   mkdirSync(join(root, '.git'), { recursive: true });
   const project = await createProject({ name: 'Reviewer Admission', rootPath: root });
   const session = { id: 's_rev', folder: root, projectId: project.id, templateId: 'app_rev' };
@@ -222,8 +222,8 @@ try {
   // ── 4) reviewer certification off-state (child process) ───────────────────
   beginSection('certification-off-state');
 
-  const childEnv = { ...process.env, AGENTOC_CONFIG_DIR: configDir };
-  delete childEnv.AGENTOC_REVIEWER_ENABLED;
+  const childEnv = { ...process.env, RAGENT_CONFIG_DIR: configDir };
+  delete childEnv.RAGENT_REVIEWER_ENABLED;
   const childScript = `
     import { resolveRuntimeReadOnlyCapability, REVIEWER_RUNTIME_ID } from ${JSON.stringify(pathToFileURL(join(repoRoot, 'chat/runtime-adapter.mjs')).href)};
     const cap = resolveRuntimeReadOnlyCapability({ runnerId: REVIEWER_RUNTIME_ID });

@@ -1,6 +1,6 @@
 // Durable WorkspaceLease store (Execution-Scope slice 3, design section 7).
 //
-// Coordinates reader/writer admission per physical Workspace so two AgentoC
+// Coordinates reader/writer admission per physical Workspace so two Ragent
 // writers can never be admitted on the same canonical lockKey. Persists to
 // CONFIG_DIR/runtime-coordination.db using node:sqlite + WAL (same pattern as
 // chat/collaboration-store.mjs), independent of the collaboration store.

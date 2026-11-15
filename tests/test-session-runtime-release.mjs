@@ -24,15 +24,15 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-session-runtime-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-session-runtime-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
-process.env.AGENTOC_SESSION_RUNTIME_TTL_MS = '';
-process.env.AGENTOC_SESSION_RUNTIME_SWEEP_MS = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
+process.env.RAGENT_SESSION_RUNTIME_TTL_MS = '';
+process.env.RAGENT_SESSION_RUNTIME_SWEEP_MS = '';
 
-await fs.mkdir(path.join(tempHome, '.config', 'agentoc'), { recursive: true });
+await fs.mkdir(path.join(tempHome, '.config', 'ragent'), { recursive: true });
 await fs.writeFile(
-  path.join(tempHome, '.config', 'agentoc', 'tools.json'),
+  path.join(tempHome, '.config', 'ragent', 'tools.json'),
   `${JSON.stringify([
     {
       id: 'codex',
@@ -298,8 +298,8 @@ async function makeIdleRuntimeState(sessionId) {
 
 // --- 10. idle TTL sweep (end-to-end, unref'd interval) ----------------------
 {
-  process.env.AGENTOC_SESSION_RUNTIME_TTL_MS = '200';
-  process.env.AGENTOC_SESSION_RUNTIME_SWEEP_MS = '40';
+  process.env.RAGENT_SESSION_RUNTIME_TTL_MS = '200';
+  process.env.RAGENT_SESSION_RUNTIME_SWEEP_MS = '40';
 
   const freshSession = await createTestSession();
   ensureSessionRuntimeState(freshSession);
@@ -329,8 +329,8 @@ async function makeIdleRuntimeState(sessionId) {
   await waitFor(() => __getSessionRuntimeSnapshot().generationEntries === 0, 'generation-only entry swept', 4000);
   assert.equal(stopSessionRuntimeStateSweep(), true, 'sweep stops cleanly');
 
-  process.env.AGENTOC_SESSION_RUNTIME_TTL_MS = '';
-  process.env.AGENTOC_SESSION_RUNTIME_SWEEP_MS = '';
+  process.env.RAGENT_SESSION_RUNTIME_TTL_MS = '';
+  process.env.RAGENT_SESSION_RUNTIME_SWEEP_MS = '';
   console.log('test-session-runtime-release: idle TTL sweep ok');
 }
 

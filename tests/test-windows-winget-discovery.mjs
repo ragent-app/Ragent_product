@@ -42,7 +42,7 @@ assert.equal(call.options.cwd, 'E:\\WinNT\\System32');
   }
 }
 await assert.rejects(discoverWindowsWinget({ platform: 'linux', execFile: fixture({ executable: expected, family, signature: 'Valid' }) }));
-if (process.platform === 'win32' && process.env.AGENTOC_TEST_INSTALLED_WINGET === '1') {
+if (process.platform === 'win32' && process.env.RAGENT_TEST_INSTALLED_WINGET === '1') {
   assert.match(await discoverWindowsWinget({ programFiles: '' }), /\\winget\.exe$/i);
 }
 console.log('windows-winget-discovery: verified package identity checks passed');

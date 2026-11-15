@@ -109,7 +109,7 @@ function createSchedulerContext({ hidden = false } = {}) {
 }
 
 function schedulerMetrics(context) {
-  return context.window.agentocGetRefreshSchedulerMetrics();
+  return context.window.ragentGetRefreshSchedulerMetrics();
 }
 
 {
@@ -364,7 +364,7 @@ function createIntegrationContext({ hidden = false, ignoreAbortOnFirstFetch = fa
         href: 'http://127.0.0.1/',
         pathname: '/',
       },
-      AgentoCTimelineRuntime: timelineRuntime,
+      RagentTimelineRuntime: timelineRuntime,
       focus() {},
       addEventListener() {},
       crypto: {

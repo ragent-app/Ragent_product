@@ -10,7 +10,7 @@ if (process.platform !== 'win32') {
   console.log('codex-windows-ripgrep-hook: skipped (requires Windows)');
   process.exit(0);
 }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-rg-hook-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-rg-hook-'));
 try {
   await writeFile(path.join(root, 'ordinary.txt'), 'fixture');
   await writeFile(path.join(root, '.hidden.txt'), 'ordinary hidden fixture');

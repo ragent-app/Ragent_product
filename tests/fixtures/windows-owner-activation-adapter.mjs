@@ -4,7 +4,7 @@ import {registerHooks} from 'node:module';
 import {EventEmitter} from 'node:events';
 import {createHash} from 'node:crypto';
 if(process.platform!=='win32')Object.defineProperty(process,'platform',{value:'win32'});
-const adapter=new URL('../../lib/windows-owner-bootstrap.mjs',import.meta.url).href,helper='C:/Program Files/AgentoC/payload/AgentoC.OwnerBootstrap.exe',bytes=Buffer.from('QA ONLY'),hash=createHash('sha256').update(bytes).digest('hex');
+const adapter=new URL('../../lib/windows-owner-bootstrap.mjs',import.meta.url).href,helper='C:/Program Files/Ragent/payload/Ragent.OwnerBootstrap.exe',bytes=Buffer.from('QA ONLY'),hash=createHash('sha256').update(bytes).digest('hex');
 const policy={domain:'owner.activation.v1',instanceId:'inst_'+'a'.repeat(32),controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1};
 const frame={version:1,operation:'owner.activation.request',instanceId:policy.instanceId,requestId:'a'.repeat(32),expiresAtUnixMs:Date.now()+20000,challenge:'a'.repeat(43),launchNonce:'b'.repeat(64)};
 const facts={pid:999,createdTicks:'134368500000000000',sid:policy.ownerSid,sessionId:1,integrityRid:8192,elevated:false,enabledAdministrators:false,queryOnlyAuthorityVerified:true};

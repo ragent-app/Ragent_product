@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 ACTION="${1:-start}"
-CONFIG_DIR="$HOME/.config/agentoc/voice-connector"
+CONFIG_DIR="$HOME/.config/ragent/voice-connector"
 CONFIG_PATH="$CONFIG_DIR/config.json"
 PID_FILE="$CONFIG_DIR/connector.pid"
 LOG_PATH="$CONFIG_DIR/connector.log"

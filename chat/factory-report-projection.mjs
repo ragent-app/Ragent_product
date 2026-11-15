@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { stripAssistantControlBlocks } from './assistant-control-blocks.mjs';
 
-const START = '<agentoc-result-packet>';
-const END = '</agentoc-result-packet>';
+const START = '<ragent-result-packet>';
+const END = '</ragent-result-packet>';
 const STATES = new Set(['completed', 'failed', 'blocked', 'waiting']);
 const MAX_BLOCK_BYTES = 32768;
 const FIELDS = ['changedFiles', 'tests', 'risks', 'blockers', 'acceptanceNotes', 'unresolvedItems'];
@@ -17,13 +17,13 @@ export function projectFactoryReport(packet) {
     return { schemaVersion: 1, source: 'unverified', declaration: { status: 'unavailable' }, readable: false };
   }
   let visibleText = stripAssistantControlBlocks(raw, { preservePotentialStart: true }).trim();
-  const starts = [...raw.matchAll(/<agentoc-result-packet>/gi)];
-  const ends = [...raw.matchAll(/<\/agentoc-result-packet>/gi)];
-  const markers = [...raw.matchAll(/<\/?agentoc-result-packet\b/gi)];
+  const starts = [...raw.matchAll(/<ragent-result-packet>/gi)];
+  const ends = [...raw.matchAll(/<\/ragent-result-packet>/gi)];
+  const markers = [...raw.matchAll(/<\/?ragent-result-packet\b/gi)];
   if (markers.length !== starts.length + ends.length) {
     // A partial or malformed marker and its suffix are protocol fragments,
     // not report text. Preserve only any text preceding the fragment.
-    const malformed = /<\/?agentoc-result-packet\b(?!>)/i.exec(raw);
+    const malformed = /<\/?ragent-result-packet\b(?!>)/i.exec(raw);
     if (malformed) visibleText = stripAssistantControlBlocks(raw.slice(0,malformed.index), {preservePotentialStart:true}).trim();
   }
   let declaration = { status: 'absent' };

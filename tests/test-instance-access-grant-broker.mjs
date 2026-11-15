@@ -23,7 +23,7 @@ const broker = createOwnerAuthBroker({ store, clock: () => currentNow, verifyGoo
 function proof({ operation = 'issue', grantId = '', requestId = 'request_access_fixture_001', member = accountId,
   issuingKey = keys, issuingInstance = instance } = {}) {
   const fields = { instance: issuingInstance, ownerAccountId, accountId: member, operation, grantId, requestId,
-    issuedAt: new Date(now).toISOString(), audience: 'agentoc-instance-access-grant' };
+    issuedAt: new Date(now).toISOString(), audience: 'ragent-instance-access-grant' };
   const message = buildInstanceAccessGrantMessage({ ...fields, instanceId: issuingInstance.instanceId,
     keyFingerprint: issuingInstance.keyFingerprint });
   return { ...fields, signature: sign(null, Buffer.from(message), issuingKey.privateKey).toString('base64url') };

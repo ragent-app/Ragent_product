@@ -6,9 +6,9 @@ import { verifyCurrentResponsibilityRepository } from './responsibility-reposito
 
 const deny = message => { throw factoryError('FACTORY_FORBIDDEN',message,403); };
 function authorizeService(actor, organizationId) {
-  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim();
-  const organizations=String(process.env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map(x=>x.trim()).filter(Boolean);
-  if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true' || process.env.AGENTOC_FACTORY_SCHEDULER_ENABLED!=='1'
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID || '').trim();
+  const organizations=String(process.env.RAGENT_FACTORY_ORGANIZATIONS || '').split(',').map(x=>x.trim()).filter(Boolean);
+  if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true' || process.env.RAGENT_FACTORY_SCHEDULER_ENABLED!=='1'
       || !owner || actor?.kind!=='service' || actor.role!=='responsibility_admission'
       || actor.principalId!==`responsibility-admission:${owner}` || !organizations.includes(organizationId)) deny('Responsibility admission service is not configured for this organization');
   return owner;
@@ -75,11 +75,11 @@ function planSchema(db) { db.exec(`CREATE TABLE IF NOT EXISTS responsibility_pla
 
 function checkPlanEntry(db,entry,policy,org,projectFactId) {
   const {step,catalog}=entry;
-  if(catalog.capability==='project-report' && step.templateId==='agentoc-project-report' && step.templateVersion===1) {
+  if(catalog.capability==='project-report' && step.templateId==='ragent-project-report' && step.templateVersion===1) {
     if(catalog.resource?.networkPolicy!=='inherit_existing_permissions' || policy.networkPermissionConfirmed!==true) deny('Plan network authority is unavailable');
     return 'project-report';
   }
-  if(catalog.capability==='project-code' && step.templateId==='agentoc-reviewed-change' && step.templateVersion===3) {
+  if(catalog.capability==='project-code' && step.templateId==='ragent-reviewed-change' && step.templateVersion===3) {
     const fact=db.prepare('SELECT * FROM responsibility_repository_facts WHERE id=?').get(catalog.repositoryFactId);
     const baseline=db.prepare('SELECT * FROM responsibility_code_baselines WHERE id=?').get(catalog.codeBaselineId);
     const action=JSON.parse(org.policy_json||'{}').factoryChecks?.find(entry=>entry.id===catalog.checkActionId);
@@ -174,7 +174,7 @@ export async function admitResponsibilityWorkflow(input,actor) {
     const proposal=compileFactoryWorkflow({...input,objective:responsibility.objective});
     if (proposal.templateDigest!==input.templateDigest) deny('Template digest changed');
     if(provider==='generic-planner') constrainPlannerPrompt(proposal,authority.policy,input.history);
-    if (proposal.templateId==='agentoc-reviewed-change' && proposal.templateVersion===3) {
+    if (proposal.templateId==='ragent-reviewed-change' && proposal.templateVersion===3) {
       const policy=JSON.parse(org.policy_json || '{}');
       const decision=JSON.parse(db.prepare('SELECT proposal_json FROM responsibility_decisions WHERE id=?').get(input.decisionId)?.proposal_json || '{}');
       if (!input.checkActionId || authority.policy.checkActionId!==input.checkActionId || decision.checkActionId!==input.checkActionId) deny('Check action is not authorized by the responsibility and decision');

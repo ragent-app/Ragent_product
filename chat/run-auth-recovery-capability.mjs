@@ -12,10 +12,10 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 export const RUN_AUTH_RECOVERY_CAPABILITY_VERSION = 'run-auth-recovery/v1';
 export const RUN_AUTH_RECOVERY_OPERATION = 'run.auth.recover';
 export const RUN_AUTH_RECOVERY_ENDPOINT = '/api/internal/run-auth-recovery';
-export const RUN_AUTH_RECOVERY_TOKEN_HEADER = 'x-agentoc-run-auth-recovery-token';
-export const RUN_AUTH_RECOVERY_RUN_ID_HEADER = 'x-agentoc-run-auth-recovery-run-id';
-export const RUN_AUTH_RECOVERY_SESSION_ID_HEADER = 'x-agentoc-run-auth-recovery-session-id';
-export const RUN_AUTH_RECOVERY_TURN_ID_HEADER = 'x-agentoc-run-auth-recovery-turn-id';
+export const RUN_AUTH_RECOVERY_TOKEN_HEADER = 'x-ragent-run-auth-recovery-token';
+export const RUN_AUTH_RECOVERY_RUN_ID_HEADER = 'x-ragent-run-auth-recovery-run-id';
+export const RUN_AUTH_RECOVERY_SESSION_ID_HEADER = 'x-ragent-run-auth-recovery-session-id';
+export const RUN_AUTH_RECOVERY_TURN_ID_HEADER = 'x-ragent-run-auth-recovery-turn-id';
 
 const DEFAULT_TTL_MS = 15 * 60 * 1000;
 
@@ -90,7 +90,7 @@ export function createRunAuthRecoveryCapability({
   turnId,
   now = Date.now(),
   ttlMs = DEFAULT_TTL_MS,
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
 } = {}) {
   const normalizedRunId = trimString(runId);
   const normalizedSessionId = trimString(sessionId);
@@ -126,7 +126,7 @@ export function createRunAuthRecoveryCapability({
 }
 
 export function createRunAuthRecoveryAuthenticator({
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   getRunImpl = async () => null,
   getRunManifestImpl = async () => null,
   now = () => Date.now(),

@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-projection-debounce-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-projection-debounce-'));
 const previousHome = process.env.HOME;
 process.env.HOME = home;
 
 const sessionId = 'session-projection-debounce';
-const projectionFile = join(home, '.config', 'agentoc', 'chat-history', sessionId, 'audit-projection.json');
+const projectionFile = join(home, '.config', 'ragent', 'chat-history', sessionId, 'audit-projection.json');
 
 try {
   const {

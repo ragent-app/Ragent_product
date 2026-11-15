@@ -18,16 +18,16 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert(!windowsAssetUrl(url.replace("ragent-app/Ragent_product", "ragent-app/other")));
   assert(!windowsAssetUrl(url.replace("setup.exe", "payload.exe")));
   assert(!windowsAsset({ ...asset, browser_download_url: "https://evil.example/releases/download/x" }));
-  assert(!windowsAsset({ ...asset, name: "agentoc-arm64.msi" }));
+  assert(!windowsAsset({ ...asset, name: "ragent-arm64.msi" }));
   for (const [platform, arch, name] of [
     ["linux", "x64", "Ragent-1.2.3-linux-x64.deb"],
     ["linux", "x64", "Ragent-1.2.3-ubuntu24.04-x86_64.deb"],
     ["linux", "x64", "ragent_1.2.3_amd64.deb"],
-    ["linux", "x64", "agentoc_1.2.3_amd64.deb"],
+    ["linux", "x64", "ragent_1.2.3_amd64.deb"],
     ["darwin", "arm64", "Ragent-1.2.3-macos-arm64.dmg"],
     ["darwin", "arm64", "Ragent-1.2.3-macos13plus-arm64.dmg"],
     ["darwin", "arm64", "ragent_1.2.3-darwin-arm64.dmg"],
-    ["darwin", "arm64", "agentoc_1.2.3-darwin-arm64.dmg"],
+    ["darwin", "arm64", "ragent_1.2.3-darwin-arm64.dmg"],
   ]) {
     const platformUrl = `https://github.com/ragent-app/Ragent_product/releases/download/v1.2.3/${name}`;
     const platformAsset = { name, browser_download_url: platformUrl };
@@ -65,7 +65,7 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert.equal((await check("1.2.3.1", fetcher)).updateAvailable, false);
   const olderCommit = "a".repeat(40), publishedCommit = "b".repeat(40);
   const digest = "c".repeat(64);
-  const labeled = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: `<!-- agentoc-build:0.0.24:${publishedCommit}:sha256:${digest} -->`, assets: [{ ...asset, digest: `sha256:${digest}` }] }] });
+  const labeled = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: `<!-- ragent-build:0.0.24:${publishedCommit}:sha256:${digest} -->`, assets: [{ ...asset, digest: `sha256:${digest}` }] }] });
   assert.equal((await check("1.2.3", labeled, { currentCommit: olderCommit })).buildChanged, true);
   assert.equal((await check("1.2.3", labeled, { currentCommit: olderCommit })).updateAvailable, true);
   assert.equal((await check("1.2.3", labeled, { currentCommit: publishedCommit })).updateAvailable, false);
@@ -76,10 +76,10 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert.equal((await check("1.2.3.1", labeled, { currentCommit: olderCommit })).updateAvailable, false);
   assert.equal((await check("1.2.3", labeled, { currentCommit: "unknown" })).updateAvailable, false);
   assert.equal((await check("1.2.3", labeled, { currentCommit: "unknown" })).buildIdentityUnavailable, true);
-  const malformed = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: `<!-- agentoc-build:0.0.24:${publishedCommit}:sha256:${digest} -->`, assets: [{ ...asset, digest: `sha256:${"d".repeat(64)}` }] }] });
+  const malformed = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: `<!-- ragent-build:0.0.24:${publishedCommit}:sha256:${digest} -->`, assets: [{ ...asset, digest: `sha256:${"d".repeat(64)}` }] }] });
   assert.equal((await check("1.2.3", malformed, { currentCommit: olderCommit })).updateAvailable, false);
   assert.equal((await check("1.2.3", malformed, { currentCommit: olderCommit })).buildIdentityUnavailable, true);
-  const duplicateMarker = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: (`<!-- agentoc-build:0.0.24:${publishedCommit}:sha256:${digest} -->`).repeat(2), assets: [{ ...asset, digest: `sha256:${digest}` }] }] });
+  const duplicateMarker = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: (`<!-- ragent-build:0.0.24:${publishedCommit}:sha256:${digest} -->`).repeat(2), assets: [{ ...asset, digest: `sha256:${digest}` }] }] });
   assert.equal((await check("1.2.3", duplicateMarker, { currentCommit: olderCommit })).buildIdentityUnavailable, true);
   await assert.rejects(check("unknown", fetcher));
   await assert.rejects(check("1.0.0", async () => ({ ok: false })));

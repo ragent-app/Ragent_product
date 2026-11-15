@@ -67,7 +67,7 @@ test('phone inventory and exact-ID release recover quota without a reachable PC 
     state = draft; return result;
   }); tail = pending.catch(() => {}); return pending; },
   async readPhoneTurnInventorySnapshot() { inventoryReads++; return structuredClone(state); } };
-  const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+  const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
   let qaPool;
   if (url) {
     const { Pool } = await import('pg'), { createPostgresStore } = await import('../accounts/store/postgres.mjs');
@@ -173,7 +173,7 @@ test('phone inventory and exact-ID release recover quota without a reachable PC 
     for (const query of ['?limit=0', '?limit=101', '?after=invalid']) assert.equal((await request(inventory + query)).status, 400);
     const freshId = createTurnLeaseId(logical(ownA.deviceId), undefined, now);
     const reserveBody = { protocolVersion: 2, accountId, instance, deviceId: ownA.deviceId, deviceKind: 'phone',
-      connectionId: freshId, expiresAt: iso(60000), issuedAt: iso(), audience: 'agentoc-owner-auth-device' };
+      connectionId: freshId, expiresAt: iso(60000), issuedAt: iso(), audience: 'ragent-owner-auth-device' };
     reserveBody.requestId = createTurnOperationRequestId({ ...reserveBody, instanceId: instance.instanceId, purpose: 'turn-reserve' });
     reserveBody.signature = sign(null, Buffer.from(buildOwnerAuthDeviceMessage({ instanceId: instance.instanceId,
       transactionId: reserveBody.requestId, issuedAt: iso(), audience: reserveBody.audience, purpose: 'turn-reserve' })), pcKeys.privateKey).toString('base64');

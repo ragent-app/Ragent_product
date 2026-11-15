@@ -10,8 +10,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tmp = mkdtempSync(join(tmpdir(), 'agentoc-spool-tail-'));
-process.env.AGENTOC_CONFIG_DIR = tmp;
+const tmp = mkdtempSync(join(tmpdir(), 'ragent-spool-tail-'));
+process.env.RAGENT_CONFIG_DIR = tmp;
 const { readRunSpoolRecords } = await import('../chat/runs.mjs');
 
 const RUN_ID = 'run_spool_tail_test';

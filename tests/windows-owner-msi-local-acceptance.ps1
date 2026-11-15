@@ -9,11 +9,11 @@ param(
     [switch]$LocalWindowsHost
 )
 $ErrorActionPreference = 'Stop'
-$qaProduct = if ($LocalWindowsHost) { 'G:\Program Files\AgentoC Owner Acceptance' } else { 'C:\Program Files\AgentoC Desktop Acceptance' }
-$qaData = 'C:\ProgramData\AgentoC'
-$env:AGENTOC_INSTALL_ROOT = $qaProduct
-$qaServices = @('AgentoC-ControlPlane', 'AgentoC-RunnerSupervisor')
-$expectedCandidateName = 'AgentoC-0.3.16.0-x64-unsigned.msi'
+$qaProduct = if ($LocalWindowsHost) { 'G:\Program Files\Ragent Owner Acceptance' } else { 'C:\Program Files\Ragent Desktop Acceptance' }
+$qaData = 'C:\ProgramData\Ragent'
+$env:RAGENT_INSTALL_ROOT = $qaProduct
+$qaServices = @('Ragent-ControlPlane', 'Ragent-RunnerSupervisor')
+$expectedCandidateName = 'Ragent-0.3.16.0-x64-unsigned.msi'
 $expectedCandidateSha256 = '3257b4bd4b487112e8fa1151b6bffc3663f2d094d4dd093cdb9958d1fe688b2f'
 if ([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw 'DESKTOP_MSI_TEMP_REQUIRED' }
 $qaRoot = [IO.Path]::GetFullPath($EvidenceDirectory)
@@ -64,8 +64,8 @@ function Assert-CleanRunner {
         $related = @($installer.RelatedProducts('{2D1D9C6B-5BA7-4C70-9A7A-7E7A55E3A001}'))
         if ($related.Count -gt 0) { throw 'DESKTOP_MSI_RELATED_PRODUCT_ALREADY_INSTALLED' }
         foreach ($path in @(
-            (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\AgentoC'),
-            (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentoC')
+            (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Ragent'),
+            (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ragent')
         )) {
             if (Test-Path -LiteralPath $path) { throw 'DESKTOP_MSI_SHARED_START_MENU_ENTRY_EXISTS' }
         }
@@ -233,7 +233,7 @@ function Invoke-ManagerSmoke([string]$Stage, [string]$Mode) {
 function Invoke-WaitRetryManagerSmoke {
     $exe = Join-Path $qaProduct 'payload\Desktop\Ragent.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'DESKTOP_MSI_APP_MISSING' }
-    $controlService = Get-Service -Name 'AgentoC-ControlPlane' -ErrorAction Stop
+    $controlService = Get-Service -Name 'Ragent-ControlPlane' -ErrorAction Stop
     if ($controlService.Status -ne 'Running') { throw 'DESKTOP_MSI_CONTROL_PLANE_NOT_RUNNING_BEFORE_WAIT_TEST' }
     Stop-Service -Name $controlService.Name -Force
     $portDeadline = (Get-Date).AddSeconds(20)
@@ -283,7 +283,7 @@ function Save-ServiceSnapshot([string]$Stage) {
 function Assert-Removed([string]$Stage) {
     $services = @($qaServices | ForEach-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
     $processes = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($qaProduct + '\', [StringComparison]::OrdinalIgnoreCase) })
-    $productExists = Test-Path -LiteralPath (Join-Path $qaProduct 'AgentoC.ServiceHost.exe')
+    $productExists = Test-Path -LiteralPath (Join-Path $qaProduct 'Ragent.ServiceHost.exe')
     $pass = $services.Count -eq 0 -and $processes.Count -eq 0 -and -not $productExists
     $script:report.probes += @{stage=$Stage; servicesRemaining=$services.Count; productProcesses=@($processes | Select-Object ProcessId,Name); productExists=$productExists; passed=$pass}
     if (-not $pass) { throw ('DESKTOP_MSI_REMOVE_INCOMPLETE:' + $Stage) }
@@ -334,10 +334,10 @@ try {
     Assert-OwnerSessionPersistence 'fresh-install' $ownerCookies $identityHash $secretHash
 
     $shortcutRoots = @(
-        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\AgentoC'),
-        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentoC')
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Ragent'),
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ragent')
     )
-    $shortcut = Get-ChildItem -LiteralPath $shortcutRoots -Filter 'AgentoC.lnk' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $shortcut = Get-ChildItem -LiteralPath $shortcutRoots -Filter 'Ragent.lnk' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $shortcut) { throw 'DESKTOP_MSI_START_MENU_SHORTCUT_MISSING' }
     $shell = New-Object -ComObject WScript.Shell
     $target = $shell.CreateShortcut($shortcut.FullName).TargetPath
@@ -374,7 +374,7 @@ try {
         $installStarted = [DateTime]::Parse($report.startedAt).ToLocalTime()
         $appEvents = @()
         $serviceEvents = @()
-        try { $appEvents = @(Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='AgentoC'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated,Id,LevelDisplayName,Message) } catch {}
+        try { $appEvents = @(Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Ragent'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated,Id,LevelDisplayName,Message) } catch {}
         try { $serviceEvents = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Where-Object { $_.Id -in @(7000,7009,7011,7023,7024,7031,7034) } | Select-Object -First 30 TimeCreated,Id,LevelDisplayName,Message) } catch {}
         $serviceRows = @()
         foreach ($name in $qaServices) {

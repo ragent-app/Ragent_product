@@ -48,7 +48,7 @@ function applyResumeIds(session, { agyProviderProfileId, agyConversationId }) {
   return changed;
 }
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-cross-account-conv-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-cross-account-conv-'));
 
 try {
   // ── Case 1: 同账号第一次 Run 绑定 conversation

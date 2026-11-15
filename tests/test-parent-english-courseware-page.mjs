@@ -52,8 +52,8 @@ function request(port, path) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-parent-page-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-parent-page-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -70,13 +70,13 @@ async function startServer({ home, configDir, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'inherit', 'inherit'],

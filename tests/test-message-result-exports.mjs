@@ -7,12 +7,12 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const root = process.env.AGENTOC_EXPORT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-result-export-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_ASSET_STORAGE_BASE_URL;
-delete process.env.AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL;
+const root = process.env.RAGENT_EXPORT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-result-export-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_ASSET_STORAGE_BASE_URL;
+delete process.env.RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL;
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 const { createSessionWithOutcome, getSessionMeta } = await import('../chat/session-manager.mjs');
 const { createRun, updateRun } = await import('../chat/runs.mjs');
@@ -78,7 +78,7 @@ async function download(path, manifest, resource) {
 
 try {
   if (process.argv[2] === 'cold') {
-    const testCase = JSON.parse(process.env.AGENTOC_EXPORT_TEST_CASE);
+    const testCase = JSON.parse(process.env.RAGENT_EXPORT_TEST_CASE);
     const response = await request(chunkPath(testCase.path, testCase.manifest, testCase.resource.resourceId, 0));
     assert.equal(response.status, 200); assert.equal(response.body.chunkSha256, testCase.firstHash);
     assert.equal(response.body.revision, testCase.manifest.revision);
@@ -137,7 +137,7 @@ try {
     assert.equal((await request(path, revokedDownload)).status, 403);
     assert.equal((await request(chunkPath(path, manifest, 'text', 0), revokedDownload)).status, 403);
     await promisify(execFile)(process.execPath, [import.meta.filename, 'cold'], { env: { ...process.env,
-      AGENTOC_EXPORT_TEST_ROOT: root, AGENTOC_EXPORT_TEST_CASE: JSON.stringify({ path, manifest, resource: fileResource,
+      RAGENT_EXPORT_TEST_ROOT: root, RAGENT_EXPORT_TEST_CASE: JSON.stringify({ path, manifest, resource: fileResource,
         firstHash: hash(bytes.subarray(0, 65_536)) }) } });
     assert.equal(await readFile(statePath, 'utf8'), stateBefore);
     assert.equal(await readFile(join(CONFIG_DIR, 'chat-sessions.json'), 'utf8'), sessionsBefore);
@@ -162,7 +162,7 @@ try {
 } finally {
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
   if (process.argv[2] !== 'cold') {
-    assert.equal(resolve(dirname(root)), resolve(tmpdir())); assert.ok(basename(root).startsWith('agentoc-result-export-'));
+    assert.equal(resolve(dirname(root)), resolve(tmpdir())); assert.ok(basename(root).startsWith('ragent-result-export-'));
     await rm(root, { recursive: true, force: true });
   }
 }

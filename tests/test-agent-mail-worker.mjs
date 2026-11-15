@@ -8,17 +8,17 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-agent-mail-worker-'));
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
-const workRoot = join(tempHome, '.agentoc', 'workspace');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-agent-mail-worker-'));
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
+const workRoot = join(tempHome, '.ragent', 'workspace');
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workRoot;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workRoot;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 
 const mailboxRoot = join(configDir, 'agent-mailbox');
 mkdirSync(configDir, { recursive: true });
@@ -38,12 +38,12 @@ const {
 } = await import(pathToFileURL(join(repoRoot, 'lib', 'agent-mailbox.mjs')).href);
 const { saveUiRuntimeSelection } = await import(pathToFileURL(join(repoRoot, 'lib', 'runtime-selection.mjs')).href);
 const {
-  createAgentoCRuntime,
+  createRagentRuntime,
   ensureAuthCookie,
-  requestAgentoC,
+  requestRagent,
 } = await import(pathToFileURL(join(repoRoot, 'scripts', 'agent-mail-worker.mjs')).href);
 
-const authRefreshRuntime = createAgentoCRuntime('http://127.0.0.1:7690');
+const authRefreshRuntime = createRagentRuntime('http://127.0.0.1:7690');
 authRefreshRuntime.authCookie = 'session_token=stale-cookie';
 authRefreshRuntime.authToken = 'stale-token';
 authRefreshRuntime.readOwnerToken = async () => 'fresh-token';
@@ -60,7 +60,7 @@ assert.equal(
   'mail worker should reread the current owner token on forced auth refresh',
 );
 
-const retryProbeRuntime = createAgentoCRuntime('http://127.0.0.1:7690');
+const retryProbeRuntime = createRagentRuntime('http://127.0.0.1:7690');
 retryProbeRuntime.authCookie = 'session_token=stale-cookie';
 retryProbeRuntime.authToken = 'stale-token';
 retryProbeRuntime.readOwnerToken = async () => 'fresh-token';
@@ -74,7 +74,7 @@ retryProbeRuntime.requestJson = async (_baseUrl, _path, options = {}) => {
   return { response: { status: 200, ok: true }, json: { ok: true }, text: '{"ok":true}' };
 };
 
-const retryProbeResult = await requestAgentoC(retryProbeRuntime, '/api/probe');
+const retryProbeResult = await requestRagent(retryProbeRuntime, '/api/probe');
 assert.equal(retryProbeResult.response.status, 200, 'mail worker should retry after an auth failure');
 assert.deepEqual(
   retryProbeCookies,
@@ -596,13 +596,13 @@ try {
   sessionCreates.length = 0;
   messageSubmissions.length = 0;
 
-  const guestAuthDir = join(tempHome, '.agentoc', 'instances', 'trial6', 'config');
+  const guestAuthDir = join(tempHome, '.ragent', 'instances', 'trial6', 'config');
   const guestAuthFile = join(guestAuthDir, 'auth.json');
   mkdirSync(guestAuthDir, { recursive: true });
   writeFileSync(guestAuthFile, JSON.stringify({
     token: 'trial6-auth-token',
   }, null, 2));
-  writeFileSync(join(tempHome, '.config', 'agentoc', 'guest-instances.json'), JSON.stringify([
+  writeFileSync(join(tempHome, '.config', 'ragent', 'guest-instances.json'), JSON.stringify([
     {
       name: 'trial6',
       authFile: guestAuthFile,
@@ -691,7 +691,7 @@ try {
   sessionCreates.length = 0;
   messageSubmissions.length = 0;
 
-  const localPartMailboxRoot = join(tempHome, '.config', 'agentoc', 'agent-mailbox-local-part');
+  const localPartMailboxRoot = join(tempHome, '.config', 'ragent', 'agent-mailbox-local-part');
   await initializeMailbox({
     rootDir: localPartMailboxRoot,
     name: 'Rowan',
@@ -713,13 +713,13 @@ try {
     },
   });
 
-  const trial1AuthDir = join(tempHome, '.agentoc', 'instances', 'trial1', 'config');
+  const trial1AuthDir = join(tempHome, '.ragent', 'instances', 'trial1', 'config');
   const trial1AuthFile = join(trial1AuthDir, 'auth.json');
   mkdirSync(trial1AuthDir, { recursive: true });
   writeFileSync(trial1AuthFile, JSON.stringify({
     token: 'trial1-auth-token',
   }, null, 2));
-  writeFileSync(join(tempHome, '.config', 'agentoc', 'guest-instances.json'), JSON.stringify([
+  writeFileSync(join(tempHome, '.config', 'ragent', 'guest-instances.json'), JSON.stringify([
     {
       name: 'trial1',
       authFile: trial1AuthFile,

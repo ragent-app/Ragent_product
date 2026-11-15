@@ -8,18 +8,18 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = await mkdtemp(join(tmpdir(), 'agentoc-session-migration-'));
+const tempHome = await mkdtemp(join(tmpdir(), 'ragent-session-migration-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const work = join(tempHome, 'work');
 const sourceRoot = join(work, 'source-project');
 const targetRoot = join(work, 'target-project');
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
 await writeFile(
-  join(process.env.AGENTOC_CONFIG_DIR, 'auth.json'),
+  join(process.env.RAGENT_CONFIG_DIR, 'auth.json'),
   JSON.stringify({ username: 'testowner', passwordHash: 'not-a-real-hash' }),
   'utf8',
 );
@@ -78,7 +78,7 @@ function makeBodyReq(body) {
   const chunk = Buffer.from(JSON.stringify(body));
   return {
     method: 'POST',
-    headers: { host: 'a.agentoc.test' },
+    headers: { host: 'a.ragent.test' },
     on(event, handler) {
       if (event === 'data') queueMicrotask(() => handler(chunk));
       if (event === 'end') queueMicrotask(() => handler());

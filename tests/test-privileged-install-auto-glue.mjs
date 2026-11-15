@@ -4,17 +4,17 @@ import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-privileged-install-auto-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-privileged-install-auto-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-mkdirSync(process.env.AGENTOC_WORK_ROOT_DIR, { recursive: true });
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+mkdirSync(process.env.RAGENT_WORK_ROOT_DIR, { recursive: true });
 
 function createFakeStore() {
   const events = [];
@@ -42,7 +42,7 @@ function installBatch(buildPrivilegedBatch, runId, approvalId = 'gate-install-1'
       command,
       declaredCategory: 'install',
       description: 'Install nginx',
-      wrapperCommand: `agentoc-privileged --description "Install nginx" --category install -- ${command}`,
+      wrapperCommand: `ragent-privileged --description "Install nginx" --category install -- ${command}`,
     }],
   });
 }
@@ -60,7 +60,7 @@ async function createTestRun(createRun, sessionId, requestId, runtimeFamily = 'c
     manifest: {
       sessionId,
       requestId,
-      folder: process.env.AGENTOC_WORK_ROOT_DIR,
+      folder: process.env.RAGENT_WORK_ROOT_DIR,
       tool,
       runtimeFamily,
       prompt: 'install nginx',
@@ -201,9 +201,9 @@ try {
   await killAll();
   if (previousEnv.HOME === undefined) delete process.env.HOME;
   else process.env.HOME = previousEnv.HOME;
-  if (previousEnv.AGENTOC_CONFIG_DIR === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousEnv.AGENTOC_CONFIG_DIR;
-  if (previousEnv.AGENTOC_WORK_ROOT_DIR === undefined) delete process.env.AGENTOC_WORK_ROOT_DIR;
-  else process.env.AGENTOC_WORK_ROOT_DIR = previousEnv.AGENTOC_WORK_ROOT_DIR;
+  if (previousEnv.RAGENT_CONFIG_DIR === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousEnv.RAGENT_CONFIG_DIR;
+  if (previousEnv.RAGENT_WORK_ROOT_DIR === undefined) delete process.env.RAGENT_WORK_ROOT_DIR;
+  else process.env.RAGENT_WORK_ROOT_DIR = previousEnv.RAGENT_WORK_ROOT_DIR;
   rmSync(home, { recursive: true, force: true });
 }

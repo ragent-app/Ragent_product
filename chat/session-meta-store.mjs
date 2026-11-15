@@ -38,7 +38,7 @@ import {
 let sessionsMetaCache = null;
 let sessionsMetaCacheMtimeMs = null;
 let sessionsMetaWritesInFlight = 0;
-// Perf (AGENTOC_PERF_WRITE_DEBOUNCE=off / AGENTOC_PERF_COMPACT_JSON=off):
+// Perf (RAGENT_PERF_WRITE_DEBOUNCE=off / RAGENT_PERF_COMPACT_JSON=off):
 // every session-meta mutation used to rewrite the whole chat-sessions.json
 // (1.76MB, pretty-printed) through one global serial queue, so each mutation
 // blocked every session's meta writes. Now the in-memory cache updates
@@ -48,10 +48,10 @@ let sessionsMetaWritesInFlight = 0;
 // state (name/pin/taskCard/goal/...); scope changes and explicit API mutations
 // now persist before returning. activeRunId — the only field
 // boot rehydration reads — and run state (which lives in chat-runs) survive.
-const AGENTOC_PERF_WRITE_DEBOUNCE_ENV = 'AGENTOC_PERF_WRITE_DEBOUNCE';
-const PERF_WRITE_DEBOUNCE_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_WRITE_DEBOUNCE_ENV], { defaultValue: true });
-const AGENTOC_PERF_COMPACT_JSON_ENV = 'AGENTOC_PERF_COMPACT_JSON';
-const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_COMPACT_JSON_ENV], { defaultValue: true });
+const RAGENT_PERF_WRITE_DEBOUNCE_ENV = 'RAGENT_PERF_WRITE_DEBOUNCE';
+const PERF_WRITE_DEBOUNCE_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_WRITE_DEBOUNCE_ENV], { defaultValue: true });
+const RAGENT_PERF_COMPACT_JSON_ENV = 'RAGENT_PERF_COMPACT_JSON';
+const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_COMPACT_JSON_ENV], { defaultValue: true });
 const SESSIONS_META_FLUSH_DELAY_MS = 800;
 const COMPACT_JSON_OPTIONS = PERF_COMPACT_JSON_ENABLED ? { spaces: 0 } : {};
 let sessionsMetaFlushTimer = null;

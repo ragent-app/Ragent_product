@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Web.Script.Serialization;
-public static partial class AgentoCLegacyOwnerInstallGuard {
+public static partial class RagentLegacyOwnerInstallGuard {
     public static int TestRun(string root) {
         var results = new List<string>();
         Action<string,Action,string> check = (name,action,expected) => {
@@ -25,7 +25,7 @@ public static partial class AgentoCLegacyOwnerInstallGuard {
         }
         foreach(var path in new [] {Path.Combine(product,@"payload\owner-bootstrap-release.json"),Path.Combine(package,"owner-bootstrap-release.json"),Path.Combine(package,@"payload\owner-bootstrap-release.json")})
             check("signed state "+path,()=>inspect(p=>p==path,empty),"OLG_SIGNED_INSTALLER_REQUIRED");
-        foreach(var name in Services)foreach(var account in new [] {@"NT SERVICE\AgentoC-ControlPlane",@"NT SERVICE\AgentoC-RunnerSupervisor",@"DESKTOP\Owner","NetworkService","",null})
+        foreach(var name in Services)foreach(var account in new [] {@"NT SERVICE\Ragent-ControlPlane",@"NT SERVICE\Ragent-RunnerSupervisor",@"DESKTOP\Owner","NetworkService","",null})
             check("non-SYSTEM "+name+":"+account,()=>inspect(absent,()=>new [] {new KeyValuePair<string,string>(name,account)}),"OLG_SERVICE_IDENTITY_MANAGED");
         check("duplicate SCM rows",()=>inspect(absent,()=>new [] {system[0],system[0]}),"OLG_SERVICE_STATE_INVALID");
         check("unexpected service",()=>inspect(absent,()=>new [] {new KeyValuePair<string,string>("foreign","LocalSystem")}),"OLG_SERVICE_STATE_INVALID");
@@ -58,4 +58,4 @@ public static partial class AgentoCLegacyOwnerInstallGuard {
         Console.WriteLine(new JavaScriptSerializer().Serialize(new {pass=true,checks=results}));return 0;
     }
 }
-public static class LegacyOwnerGuardTests { public static int Main(string[] args) { return AgentoCLegacyOwnerInstallGuard.TestRun(args[0]); } }
+public static class LegacyOwnerGuardTests { public static int Main(string[] args) { return RagentLegacyOwnerInstallGuard.TestRun(args[0]); } }

@@ -56,8 +56,8 @@ function request(port, path, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-source-runtime-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-source-runtime-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
     join(configDir, 'auth.json'),
@@ -73,16 +73,16 @@ async function startServer({ home, port, fakeReleaseRoot }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_ENABLE_ACTIVE_RELEASE: '1',
-      AGENTOC_ACTIVE_RELEASE_ROOT: fakeReleaseRoot,
-      AGENTOC_ACTIVE_RELEASE_ID: 'obsolete-release-id',
-      AGENTOC_ACTIVE_RELEASE_FILE: join(home, '.config', 'agentoc', 'active-release.json'),
-      AGENTOC_DISABLE_ACTIVE_RELEASE: '0',
+      RAGENT_ENABLE_ACTIVE_RELEASE: '1',
+      RAGENT_ACTIVE_RELEASE_ROOT: fakeReleaseRoot,
+      RAGENT_ACTIVE_RELEASE_ID: 'obsolete-release-id',
+      RAGENT_ACTIVE_RELEASE_FILE: join(home, '.config', 'ragent', 'active-release.json'),
+      RAGENT_DISABLE_ACTIVE_RELEASE: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -130,7 +130,7 @@ async function main() {
     assert.equal(loginRes.status, 200, 'login page should still render');
     assert.ok(loginRes.text.includes(loginMarker), 'runtime should serve source template edits directly');
 
-    writeFileSync(sourceProbePath, 'window.__AGENTOC_SOURCE_RUNTIME_PROBE__ = true;\n', 'utf8');
+    writeFileSync(sourceProbePath, 'window.__RAGENT_SOURCE_RUNTIME_PROBE__ = true;\n', 'utf8');
     const sourceProbeRes = await request(port, `/chat/${sourceProbeName}`);
     assert.equal(sourceProbeRes.status, 200, 'runtime should serve new source static files directly');
     assert.match(sourceProbeRes.text, /SOURCE_RUNTIME_PROBE/);

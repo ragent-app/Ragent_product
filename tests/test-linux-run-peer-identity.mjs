@@ -20,7 +20,7 @@ import { readProtectedLinuxRunResult } from '../chat/linux-run-peer-result-clien
 const execAsync = promisify(execFile);
 
 const expected = { runId: 'run_peerfixture1', launchAttempt: 2 };
-const path = '/agentoc.slice/agentoc-runners.slice/agentoc-runner-run_peerfixture1-a2.service';
+const path = '/ragent.slice/ragent-runners.slice/ragent-runner-run_peerfixture1-a2.service';
 test('peer cgroup must match one exact launch unit', () => {
   assert.equal(matchesLinuxRunPeerCgroup(`0::${path}\n`, expected), true);
   assert.equal(matchesLinuxRunPeerCgroup(`0::${path}/child\n`, expected), false);
@@ -29,11 +29,11 @@ test('peer cgroup must match one exact launch unit', () => {
 });
 
 test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
-  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.AGENTOC_TEST_SYSTEMD_PEER !== '1', timeout: 30000 }, async () => {
-    const root = await mkdtemp('/srv/agentoc-peer-test-');
-    const unit = 'agentoc-runner-run_peerfixture1-a2.service';
-    const otherUnit = 'agentoc-runner-run_peerfixture2-a2.service';
-    const zombieUnit = 'agentoc-runner-run_peerfixture3-a2.service';
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.RAGENT_TEST_SYSTEMD_PEER !== '1', timeout: 30000 }, async () => {
+    const root = await mkdtemp('/srv/ragent-peer-test-');
+    const unit = 'ragent-runner-run_peerfixture1-a2.service';
+    const otherUnit = 'ragent-runner-run_peerfixture2-a2.service';
+    const zombieUnit = 'ragent-runner-run_peerfixture3-a2.service';
     const sockets = [], started = [];
     let server, inbox;
     const stop = name => {
@@ -45,7 +45,7 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       for (const name of [unit, otherUnit, zombieUnit]) {
         assert.equal(execFileSync('/usr/bin/systemctl', ['show', '--property=LoadState', '--value', name], { encoding: 'utf8' }).trim(), 'not-found');
       }
-      const account = execFileSync('/usr/bin/getent', ['passwd', 'agentoc-runner'], { encoding: 'utf8' }).trim().split(':');
+      const account = execFileSync('/usr/bin/getent', ['passwd', 'ragent-runner'], { encoding: 'utf8' }).trim().split(':');
       const uid = Number(account[2]);
       assert.ok(Number.isSafeInteger(uid) && uid > 0);
       const helper = `${root}/peercred`;
@@ -67,7 +67,7 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
           ? 'import array,os,socket,sys,time\na,b=socket.socketpair()\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); b.sendmsg([b"x"],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array("i",[s.fileno()]))]); os._exit(0)\nelse:\n a.recvmsg(1,socket.CMSG_SPACE(4)); time.sleep(120)'
           : 'import os,socket,subprocess,sys\nif os.fork() == 0:\n s=socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])\n while True:\n  signal=s.recv(1)\n  if signal not in (b"r",b"w",b"n"): break\n  p=subprocess.run(["/usr/bin/node","--input-type=module","-e",sys.argv[5],sys.argv[2],sys.argv[3],sys.argv[4],signal.decode()],capture_output=True,timeout=5); s.sendall(p.stdout or b\'{"ok":false}\\n\')\n os._exit(0)\nelse:\n os.wait()';
         execFileSync('/usr/bin/systemd-run', ['--quiet', '--collect', '--service-type=exec', `--unit=${name}`,
-          '--slice=agentoc-runners.slice', '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes',
+          '--slice=ragent-runners.slice', '--property=User=ragent-runner', '--property=NoNewPrivileges=yes',
           '/usr/bin/python3', '-c', code, socketPath, inboxPath, helper,
           new URL('../chat/linux-run-peer-result-client.mjs', import.meta.url).href, clientCode], { timeout: 10000 });
         started.push(name);
@@ -197,8 +197,8 @@ test('SO_PEERCRED distinguishes same-UID clients in separate systemd units',
       assert.deepEqual(JSON.parse(clientResult.stdout), result);
       const activatedPath = `${root}/activated.sock`;
       const activationCode = 'const {startProtectedResultBroker}=await import(process.argv[1]);const {createLinuxRunPeerResultServer}=await import(process.argv[2]);const server=await startProtectedResultBroker({readUser:async()=>"nobody",createServer:opts=>createLinuxRunPeerResultServer({...opts,socketPath:process.argv[3],resultDirectory:process.argv[4],peerHelper:process.argv[5]})});process.on("SIGTERM",async()=>{await server.close();process.exit(0)});';
-      const activation = spawn('/usr/bin/systemd-socket-activate', [`--listen=${activatedPath}`, '--fdname=agentoc-peer-result',
-        `--setenv=AGENTOC_LINUX_RUN_CONTEXT_DIR=${directory}`, `--setenv=AGENTOC_LINUX_SERVICE_PIN_DIR=${pinDirectory}`,
+      const activation = spawn('/usr/bin/systemd-socket-activate', [`--listen=${activatedPath}`, '--fdname=ragent-peer-result',
+        `--setenv=RAGENT_LINUX_RUN_CONTEXT_DIR=${directory}`, `--setenv=RAGENT_LINUX_SERVICE_PIN_DIR=${pinDirectory}`,
         '/usr/bin/node', '--input-type=module', '-e', activationCode,
         new URL('../scripts/linux-run-peer-result-broker.mjs', import.meta.url).href,
         new URL('../scripts/linux-run-peer-result-server.mjs', import.meta.url).href,

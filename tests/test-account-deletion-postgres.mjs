@@ -13,18 +13,18 @@ import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
 import { normalizeDevicePublicKey, createDevicePublicKeyFingerprint, buildAccountSessionMessage } from '../lib/device-auth-protocol.mjs';
 
-const urlText = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const urlText = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('actual isolated PostgreSQL account deletion and legacy admission boundary', { skip: !urlText }, async t => {
-  const url = new URL(urlText), nonce = process.env.AGENTOC_TEST_RUN_NONCE;
+  const url = new URL(urlText), nonce = process.env.RAGENT_TEST_RUN_NONCE;
   assert.equal(url.protocol, 'postgresql:'); assert.equal(url.hostname, '127.0.0.1');
   assert.equal(url.username, 'qa_deletion'); assert.equal(url.pathname, '/postgres');
   assert(/^[a-f0-9]{32}$/.test(nonce || ''));
   const schema = 'qa_deletion_' + randomBytes(12).toString('hex');
   const bootstrap = new Pool({ connectionString: url.href, max: 1, connectionTimeoutMillis: 5000 });
   const pool = new Pool({ connectionString: url.href, max: 4, connectionTimeoutMillis: 5000,
-    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=agentoc-deletion-qa` });
+    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=ragent-deletion-qa` });
   const check = (await bootstrap.query("select current_setting('cluster_name') as name")).rows[0];
-  assert.equal(check.name, 'agentoc-deletion-' + nonce);
+  assert.equal(check.name, 'ragent-deletion-' + nonce);
   let owned = false;
   t.after(async () => { await pool.end(); try { if (owned) await bootstrap.query(`drop schema "${schema}" cascade`); } finally { await bootstrap.end(); } });
   await bootstrap.query(`create schema "${schema}"`); owned = true;
@@ -56,7 +56,7 @@ test('actual isolated PostgreSQL account deletion and legacy admission boundary'
   const request = (accountId, overrides = {}) => {
     const requestId = randomUUID(), receiptSecret = randomBytes(32).toString('base64url'), now = Date.now();
     const claims = { accountId, providerSubject:'synthetic_'+accountId.replace('acct_deletion_',''), confirmationId: randomUUID(), requestId, receiptSecretHash: hash(receiptSecret),
-      audience: 'agentoc-account-deletion', purpose: 'delete-account-and-associated-data', issuedAt: now, expiresAt: now + 120_000, ...overrides };
+      audience: 'ragent-account-deletion', purpose: 'delete-account-and-associated-data', issuedAt: now, expiresAt: now + 120_000, ...overrides };
     return { requestId, receiptSecret, proof: seal(claims) };
   };
   const store = createPostgresStore({ pool, schema });
@@ -197,7 +197,7 @@ test('actual isolated PostgreSQL account deletion and legacy admission boundary'
   });
 
   await t.test('old snapshot writer preserves the fence on unrelated work and cannot reactivate the account', async () => {
-    const path=process.env.AGENTOC_TEST_SECOND_STORE_MODULE; assert(path,'Pin the exact previous PG writer');
+    const path=process.env.RAGENT_TEST_SECOND_STORE_MODULE; assert(path,'Pin the exact previous PG writer');
     const legacy=(await import(pathToFileURL(resolve(path)))).createPostgresStore({pool,schema});
     await legacy.mutate(draft=>{const x=draft.accounts.find(a=>a.accountId===victim.id);assert.equal(x.deletionRequestedAt,undefined);});
     await legacy.mutate(draft=>{draft.accounts.find(a=>a.accountId==='acct_deletion_invalid').name='unrelated fixture write';});
@@ -209,13 +209,13 @@ test('actual isolated PostgreSQL account deletion and legacy admission boundary'
 
   await t.test('same transaction lock blocks deletion until the preceding writer actually commits',async()=>{
     const f=await seed('lock'), blocker=await pool.connect(); await blocker.query('begin');
-    await blocker.query('select pg_advisory_xact_lock(hashtext($1))',['agentoc_accounts_store_v1']);
+    await blocker.query('select pg_advisory_xact_lock(hashtext($1))',['ragent_accounts_store_v1']);
     let pending;
     try {
       pending=repository().accept(request(f.id));
       let seen=false;
       for(let n=0;n<40;n++) {
-        const r=await pool.query("select 1 from pg_stat_activity where application_name='agentoc-deletion-qa' and wait_event_type='Lock' and query like '%pg_advisory_xact_lock%'");
+        const r=await pool.query("select 1 from pg_stat_activity where application_name='ragent-deletion-qa' and wait_event_type='Lock' and query like '%pg_advisory_xact_lock%'");
         if(r.rowCount){seen=true;break;} await new Promise(resolve=>setTimeout(resolve,25));
       }
       assert(seen,'Observe the actual blocked backend, not a timer-only wait');
@@ -293,7 +293,7 @@ test('actual isolated PostgreSQL account deletion and legacy admission boundary'
   await t.test('owned repository process killed after COMMIT recovers its original receipt from a cold connection',async()=>{
     const f=await seed('crash'), req=request(f.id);
     const child=fork(new URL('./helpers/account-deletion-commit-child.mjs',import.meta.url),[],{silent:true,
-      env:{...process.env,AGENTOC_DELETION_CHILD_INPUT:JSON.stringify({schema,request:req,publicKey})}});
+      env:{...process.env,RAGENT_DELETION_CHILD_INPUT:JSON.stringify({schema,request:req,publicKey})}});
     const timeout=setTimeout(()=>child.kill('SIGKILL'),15_000); let message;
     try{
       message=await Promise.race([once(child,'message').then(x=>x[0]),once(child,'exit').then(()=>{throw Error('Owned child exited before commit signal');})]);

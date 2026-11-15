@@ -6,11 +6,11 @@ Requires=docker.service
 [Service]
 Type=simple
 User=root
-Group=agentoc-admin
-RuntimeDirectory=agentoc-admin
+Group=ragent-admin
+RuntimeDirectory=ragent-admin
 RuntimeDirectoryMode=0750
 UMask=0007
-ExecStart=/usr/bin/python3 /opt/agentoc-admin/current/helper.py
+ExecStart=/usr/bin/python3 /opt/ragent-admin/current/helper.py
 Restart=on-failure
 RestartSec=2
 TimeoutStopSec=10
@@ -28,9 +28,9 @@ LockPersonality=true
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETGID CAP_SETUID
-ReadWritePaths=/etc/agentoc /var/lib/agentoc/accounts /var/lib/agentoc-admin /var/log/agentoc-admin /run/agentoc-admin
+ReadWritePaths=/etc/ragent /var/lib/ragent/accounts /var/lib/ragent-admin /var/log/ragent-admin /run/ragent-admin
 
 [Install]
 WantedBy=multi-user.target
 # Transitional alias for an existing installation.
-Alias=agentoc-admin-helper.service
+Alias=ragent-admin-helper.service

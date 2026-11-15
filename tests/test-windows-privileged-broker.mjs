@@ -174,7 +174,7 @@ assert.deepEqual(resolveWindowsBrokerProfileDecision('', 'win32'), {
   const response = await client.health();
   assert.equal(response.code, 'BROKER_DISABLED');
   assert.deepEqual(calls, [{
-    path: String.raw`\\.\pipe\AgentoC.PrivilegedBroker.Health.v2`,
+    path: String.raw`\\.\pipe\Ragent.PrivilegedBroker.Health.v2`,
     allowHalfOpen: true,
   }]);
 }
@@ -188,7 +188,7 @@ assert.deepEqual(resolveWindowsBrokerProfileDecision('', 'win32'), {
   });
   const response = await client.propose(validProposal);
   assert.equal(response.status, 'awaiting_device');
-  assert.equal(calls[0].path, String.raw`\\.\pipe\AgentoC.PrivilegedBroker.Request.v2`);
+  assert.equal(calls[0].path, String.raw`\\.\pipe\Ragent.PrivilegedBroker.Request.v2`);
   const frame = sockets[0].written;
   const length = frame.readUInt32LE(0);
   assert.equal(length, frame.length - 4);
@@ -340,7 +340,7 @@ assert.deepEqual(resolveWindowsBrokerProfileDecision('', 'win32'), {
 {
   let proposed = false;
   const response = await callRoute({
-    req: fakeHttpRequest('POST', { ...validProposal, targetId: 'AgentoC-ControlPlane' }),
+    req: fakeHttpRequest('POST', { ...validProposal, targetId: 'Ragent-ControlPlane' }),
     pathname: WINDOWS_BROKER_REQUESTS_PATH,
     authSession: { role: 'owner' },
     brokerClient: { async propose() { proposed = true; } },

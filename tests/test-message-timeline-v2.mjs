@@ -7,11 +7,11 @@ import { createServer } from 'node:net';
 import { writeFile } from 'node:fs/promises';
 import { withMessageTimelineIdentity, projectMessageTimelineIdentities } from '../chat/message-timeline.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-message-v2-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(root, 'work');
+const root = await mkdtemp(join(tmpdir(), 'ragent-message-v2-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(root, 'work');
 const { buildSessionDisplayEvents } = await import('../chat/session-display-events.mjs');
 
 const message = (seq, id, content, extra = {}) => ({ seq, type: 'message', role: 'assistant', runId: 'run', providerMessageId: id, content, ...extra });
@@ -70,15 +70,15 @@ try {
   await new Promise(resolve => net.listen(0, '127.0.0.1', resolve));
   const port = net.address().port;
   await new Promise(resolve => net.close(resolve));
-  await writeFile(join(process.env.AGENTOC_CONFIG_DIR, 'auth-sessions.json'), JSON.stringify({
+  await writeFile(join(process.env.RAGENT_CONFIG_DIR, 'auth-sessions.json'), JSON.stringify({
     'timeline-test': { role: 'owner', expiry: Date.now() + 60_000 },
   }));
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: new URL('..', import.meta.url),
     env: { ...process.env, CHAT_PORT: String(port), SECURE_COOKIES: '0',
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', AGENTOC_AUTH_SESSION_SECRET: 'isolated-timeline-v2',
-      AGENTOC_PROVIDER_HOMES_DIR: join(root, 'provider-homes'), AGENTOC_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: '', AGENTOC_RUNNER_SUPERVISOR_SOCKET: '' },
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', RAGENT_AUTH_SESSION_SECRET: 'isolated-timeline-v2',
+      RAGENT_PROVIDER_HOMES_DIR: join(root, 'provider-homes'), RAGENT_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: '', RAGENT_RUNNER_SUPERVISOR_SOCKET: '' },
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let diagnostic = '';

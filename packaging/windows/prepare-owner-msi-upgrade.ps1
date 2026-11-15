@@ -54,15 +54,15 @@ function Assert-UpgradeFileMetadata([string]$Path,[string[]]$Allowed,[long]$Mini
  if(-not(Test-OwnerServicePreparationPresence $Path)){throw 'OMU_EXISTING_FILE_REQUIRED'}
  $attributes=[IO.File]::GetAttributes($Path);if(($attributes -band [IO.FileAttributes]::Directory) -or ($attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'OMU_EXISTING_FILE_INVALID'}
  $stream=[IO.FileStream]::new($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
- try{[AgentoCOwnerFilePin]::Verify($stream.SafeFileHandle,$Path,$false);if($stream.Length -lt $Minimum -or $stream.Length -gt $Maximum){throw 'OMU_EXISTING_FILE_INVALID'};Assert-OwnerObjectAcl $Path $Allowed;$pins.Add($stream)}catch{$stream.Dispose();throw}
+ try{[RagentOwnerFilePin]::Verify($stream.SafeFileHandle,$Path,$false);if($stream.Length -lt $Minimum -or $stream.Length -gt $Maximum){throw 'OMU_EXISTING_FILE_INVALID'};Assert-OwnerObjectAcl $Path $Allowed;$pins.Add($stream)}catch{$stream.Dispose();throw}
 }
 function Assert-ExistingOwnerState([string]$ControlSid,[string]$ExecutorSid,$Policy){
  $layout=@(Get-OwnerDataLayout $ControlSid $ExecutorSid $Policy.ownerSid)
- for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
+ for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  foreach($row in $layout){
   $path=if($row.relative){Join-Path $dataRoot $row.relative}else{$dataRoot}
   if(-not(Test-OwnerServicePreparationPresence $path)){throw 'OMU_DATA_LAYOUT_INCOMPLETE'}
-  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$actual=[IO.Directory]::GetAccessControl($path);$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
+  $pins.Add([RagentOwnerFilePin]::Directory($path));$actual=[IO.Directory]::GetAccessControl($path);$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
   $actualSddl=Get-OwnerDataAclSddl $actual ([Security.AccessControl.AccessControlSections]'Owner,Access');$expectedSddl=Get-OwnerDataAclSddl $expected ([Security.AccessControl.AccessControlSections]'Owner,Access')
   $metadataPath=$row.relative -cin @('','instances','instances\owner')
   $legacySddl=if($metadataPath){Get-OwnerDataAclSddl (New-LegacyOwnerMetadataAcl $ControlSid $ExecutorSid) ([Security.AccessControl.AccessControlSections]'Owner,Access')}else{$null}
@@ -131,7 +131,7 @@ function Assert-ExistingPolicy($Policy,[byte[]]$PolicyBytes,[string]$ControlSid,
 }
 function Write-UpgradeReceipt([string]$Path,$Value){
  $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($Value|ConvertTo-Json -Compress));$stream=[IO.FileStream]::new($Path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
- try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true);[AgentoCOwnerFilePin]::Verify($stream.SafeFileHandle,$Path,$false);Assert-OwnerObjectAcl $Path @(Get-OwnerAdministrativeSids)}finally{$stream.Dispose()}
+ try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true);[RagentOwnerFilePin]::Verify($stream.SafeFileHandle,$Path,$false);Assert-OwnerObjectAcl $Path @(Get-OwnerAdministrativeSids)}finally{$stream.Dispose()}
  $readPins=[Collections.Generic.List[IDisposable]]::new()
  try{$check=Read-OwnerPinnedFile $Path @(Get-OwnerAdministrativeSids) $readPins;if([Convert]::ToBase64String($check) -cne [Convert]::ToBase64String($bytes)){throw 'OMU_RECEIPT_CONFIRMATION_FAILED'}}finally{for($index=$readPins.Count-1;$index -ge 0;$index--){$readPins[$index].Dispose()}}
  return ,$bytes
@@ -177,8 +177,8 @@ try {
  switch($Action){
   'Begin' {
    foreach($name in @('owner-msi.upgrade-transaction.json','owner-msi.prepared.json','owner-msi.policy.json','owner-msi.prepare-lock','owner-policy.prepare-lock')){if(Test-OwnerServicePreparationPresence (Join-Path $product $name)){throw 'OMU_PRIOR_MSI_RECEIPT_REFUSED'}}
-   $controlSid=[Security.Principal.NTAccount]::new('NT SERVICE','AgentoC-ControlPlane').Translate([Security.Principal.SecurityIdentifier]).Value
-   $executorSid=[Security.Principal.NTAccount]::new('NT SERVICE','AgentoC-RunnerSupervisor').Translate([Security.Principal.SecurityIdentifier]).Value
+   $controlSid=[Security.Principal.NTAccount]::new('NT SERVICE','Ragent-ControlPlane').Translate([Security.Principal.SecurityIdentifier]).Value
+   $executorSid=[Security.Principal.NTAccount]::new('NT SERVICE','Ragent-RunnerSupervisor').Translate([Security.Principal.SecurityIdentifier]).Value
    $policyInput=Read-UpgradeJson (Join-Path $ownerRoot 'security\owner-bootstrap-install.json') 8192;$policy=$policyInput.value
    Assert-ExistingPolicy $policy $policyInput.bytes $controlSid $executorSid
    $metadataRows=@(Get-ExistingOwnerMetadataAclMigration $controlSid $executorSid $policy)
@@ -224,7 +224,7 @@ try {
    Assert-ExistingPolicy $policy $policyInput.bytes $control $executor
    if($policy.ownerSid -cne $prepared.ownerSid){throw 'OMU_POLICY_OWNER_MISMATCH'}
    $null=Assert-ExistingOwnerState $control $executor $policy
-   $admin=@(Get-OwnerAdministrativeSids);$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json';$helperPath=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe'
+   $admin=@(Get-OwnerAdministrativeSids);$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json';$helperPath=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe'
    $releaseBytes=Read-OwnerPinnedFile $releasePath $admin $pins 8192;$release=[Text.UTF8Encoding]::new($false,$true).GetString($releaseBytes)|ConvertFrom-Json;Assert-OwnerPolicyRelease $release
    $helperBytes=Read-OwnerPinnedFile $helperPath $admin $pins 4194304
    if($release.helperSha256 -cne (Get-OwnerDigest $helperBytes)){throw 'OMU_HELPER_HASH_MISMATCH'}

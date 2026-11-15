@@ -16,7 +16,7 @@ const realtime = read('static/chat/realtime.js');
 const init = read('static/chat/init.js');
 const template = read('templates/chat.html');
 
-assert.match(catalog, /SESSION_NAVIGATION_STATE_KEY = "agentocSessionNavigation"/);
+assert.match(catalog, /SESSION_NAVIGATION_STATE_KEY = "ragentSessionNavigation"/);
 assert.match(catalog, /historyMode === "push"/);
 assert.match(catalog, /function navigateHomeFromUi/);
 assert.match(catalog, /function handleSessionNavigationPopState/);
@@ -467,7 +467,7 @@ function extractFunctionSource(source, functionName) {
 assert.match(realtime, /historyMode: "push"/);
 assert.match(init, /function replaceUrlPreservingHistoryState/);
 assert.doesNotMatch(init, /history\.replaceState\(null/);
-assert.doesNotMatch(gestures, /agentocCanNavigateBack|agentocNavigateBack/);
+assert.doesNotMatch(gestures, /ragentCanNavigateBack|ragentNavigateBack/);
 assert.match(template, /id="homeBtn"[\s\S]*data-icon="home"/);
 
 const browser = await chromium.launch({ headless: true });
@@ -476,15 +476,15 @@ try {
   await page.setContent('<!doctype html><html><body></body></html>');
   await page.addScriptTag({ content: backHandler });
   const preserved = await page.evaluate(() => {
-    history.replaceState({ agentocSessionNavigation: true, sessionId: 'session-a' }, '');
-    window.AgentoCBackHandler.push({ id: 'test-overlay', onBack: () => true });
+    history.replaceState({ ragentSessionNavigation: true, sessionId: 'session-a' }, '');
+    window.RagentBackHandler.push({ id: 'test-overlay', onBack: () => true });
     return history.state;
   });
-  assert.equal(preserved.agentocSessionNavigation, true, 'overlay history entries must preserve session navigation state');
+  assert.equal(preserved.ragentSessionNavigation, true, 'overlay history entries must preserve session navigation state');
   assert.equal(preserved.sessionId, 'session-a', 'overlay history entries must preserve the active session');
 
   const returned = await page.evaluate(() => new Promise((resolve) => {
-    history.pushState({ agentocSessionNavigation: true, sessionId: 'session-b' }, '');
+    history.pushState({ ragentSessionNavigation: true, sessionId: 'session-b' }, '');
     window.addEventListener('popstate', (event) => resolve(event.state), { once: true });
     history.back();
   }));

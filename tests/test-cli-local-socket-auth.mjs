@@ -81,8 +81,8 @@ function socketRequest(socketPath, method, path, extraHeaders = {}) {
 }
 
 function makeTempInstance() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-cli-socket-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-cli-socket-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
   // chat-server 启动要求 auth.json 存在（auth 模块顶层加载）
   writeFileSync(
@@ -98,21 +98,21 @@ async function startServer({ home, configDir, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: 'test-cli-socket-secret',
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: 'test-cli-socket-secret',
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
-  const cliSocketPath = join(configDir, 'agentoc-cli.sock');
+  const cliSocketPath = join(configDir, 'ragent-cli.sock');
   await waitFor(async () => {
     try {
       const res = await tcpRequest(port, 'GET', '/healthz');
@@ -186,11 +186,11 @@ async function main() {
     // 5) cli.js api 子进程经 socket 免密调用 owner 路由
     const cli = await runCliApi({
       env: {
-        AGENTOC_CONFIG_DIR: configDir,
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+        RAGENT_CONFIG_DIR: configDir,
+        RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
         HOME: home,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
       },
       args: ['GET', '/api/models', '--base-url', `http://127.0.0.1:${port}`],
     });

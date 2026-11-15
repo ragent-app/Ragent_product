@@ -6,15 +6,15 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 if (!process.argv.includes('--owned-child')) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-workbench-policy-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-workbench-policy-'));
   await mkdir(join(root, 'home'));
   const policy = join(root, 'ceiling.json');
   await writeFile(policy, JSON.stringify({ schemaVersion: 1, agentType: 'codex', authType: 'oauth', model: 'gpt-5.6-luna', providerProfileId: 'review-codex' }), { mode: 0o600 });
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTOC_|CHAT_|CODEX_|CLAUDE_|OPENAI_|ANTHROPIC_|GOOGLE_)/.test(key)));
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(RAGENT_|CHAT_|CODEX_|CLAUDE_|OPENAI_|ANTHROPIC_|GOOGLE_)/.test(key)));
   Object.assign(env, { HOME: join(root, 'home'), USERPROFILE: join(root, 'home'),
-    AGENTOC_INSTANCE_ROOT: root, AGENTOC_CONFIG_DIR: join(root, 'config'),
-    AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE: policy });
-  for (const profile of [null, 'agentoc-review']) {
+    RAGENT_INSTANCE_ROOT: root, RAGENT_CONFIG_DIR: join(root, 'config'),
+    RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', RAGENT_WORKBENCH_EXECUTION_POLICY_FILE: policy });
+  for (const profile of [null, 'ragent-review']) {
     await writeFile(policy, JSON.stringify({ schemaVersion: 1, agentType: 'codex', authType: 'oauth',
       model: 'gpt-5.6-luna', providerProfileId: 'review-codex', ...(profile ? { codexPermissionProfile: profile } : {}) }));
     const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--owned-child'], { env, timeout: 45_000, encoding: 'utf8' });
@@ -40,10 +40,10 @@ if (!process.argv.includes('--owned-child')) {
   const expectedApproval = policy.codexPermissionProfile ? 'never' : 'untrusted';
   const controlEnv = { Path: 'owned-runtime-path', CODEX_HOME: join(process.env.HOME, 'codex'),
     SystemRoot: 'owned-system-root', LANG: 'C.UTF-8', LC_CTYPE: 'C.UTF-8',
-    AGENTOC_SESSION_SECRET: 'synthetic-session-secret', AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: 'synthetic-lock-token',
+    RAGENT_SESSION_SECRET: 'synthetic-session-secret', RAGENT_NATIVE_OAUTH_LOCK_TOKEN: 'synthetic-lock-token',
     OPENAI_API_KEY: 'synthetic-unselected-api-key', HTTPS_PROXY: 'synthetic-private-proxy',
     LC_CONTROL_TOKEN: 'synthetic-control-token', NODE_OPTIONS: 'synthetic-startup-override',
-    AGENTOC_USER_SHELL_ENV_B64: 'synthetic-shell-snapshot', UNRECOGNIZED_CONTROL_VALUE: 'synthetic-control-value' };
+    RAGENT_USER_SHELL_ENV_B64: 'synthetic-shell-snapshot', UNRECOGNIZED_CONTROL_VALUE: 'synthetic-control-value' };
   assert.equal(buildWorkbenchCodexEnvironment(controlEnv, null), controlEnv);
   assert.deepEqual(buildWorkbenchCodexEnvironment(controlEnv), { Path: 'owned-runtime-path',
     CODEX_HOME: controlEnv.CODEX_HOME, SystemRoot: 'owned-system-root', LANG: 'C.UTF-8', LC_CTYPE: 'C.UTF-8' });
@@ -123,7 +123,7 @@ if (!process.argv.includes('--owned-child')) {
   await handleHarnessRoutes({ req: { method: 'POST' }, res: { writeHead: (value) => { status = value; }, end: (value) => { body = JSON.parse(value); } }, pathname: '/api/harnesses/claude/install' });
   assert.equal(status, 403); assert.equal(body.code, 'WORKBENCH_EXECUTION_POLICY_DENIED');
   const { pickRunnerEnvAllowlist } = await import('../lib/runner-env.mjs');
-  assert.equal(pickRunnerEnvAllowlist(process.env).AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE, process.env.AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE);
+  assert.equal(pickRunnerEnvAllowlist(process.env).RAGENT_WORKBENCH_EXECUTION_POLICY_FILE, process.env.RAGENT_WORKBENCH_EXECUTION_POLICY_FILE);
   // Auxiliary processes must not become an unsandboxed alternative to Codex.
   const { createManagedProcess } = await import('../chat/managed-processes.mjs');
   await assert.rejects(createManagedProcess({ sessionId: 'synthetic-denied-session',
@@ -139,12 +139,12 @@ if (!process.argv.includes('--owned-child')) {
     createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);
       if(m.id!==undefined) process.stdout.write(JSON.stringify({id:m.id,result:{thread:{id:'owned-fixture-thread'},echo:m.params,
         upstreamEnv:{hasPath:!!process.env.PATH,codeHome:process.env.CODEX_HOME,
-          controlCanaryPresent: 'AGENTOC_TEST_CONTROL_CANARY' in process.env,
-          lockTokenPresent: 'AGENTOC_NATIVE_OAUTH_LOCK_TOKEN' in process.env}}})+'\\n');});`);
+          controlCanaryPresent: 'RAGENT_TEST_CONTROL_CANARY' in process.env,
+          lockTokenPresent: 'RAGENT_NATIVE_OAUTH_LOCK_TOKEN' in process.env}}})+'\\n');});`);
   const socketPath = codexAppServerBrokerSocketPath(home);
   const broker = await ensureCodexAppServerBroker({ socketPath, upstreamFile: process.execPath,
     upstreamArgs: [upstream], env: { ...process.env, CODEX_HOME: home,
-      AGENTOC_TEST_CONTROL_CANARY: 'synthetic-control-canary', AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: 'synthetic-lock-token' },
+      RAGENT_TEST_CONTROL_CANARY: 'synthetic-control-canary', RAGENT_NATIVE_OAUTH_LOCK_TOKEN: 'synthetic-lock-token' },
     lockPath: join(home, 'owned.lock') });
   let socket;
   try {

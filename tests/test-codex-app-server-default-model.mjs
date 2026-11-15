@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { resolveImplicitCodexAppServerModel } from '../chat/codex-app-server-default-model.mjs';
 
-const home = 'D:\\AgentoC-QA\\codex-model-fixture';
+const home = 'D:\\Ragent-QA\\codex-model-fixture';
 const official = async () => ({ auth_mode: 'chatgpt', tokens: { access_token: 'fixture' } });
 const staleConfig = async () => { throw new Error('stale config must not be selected'); };
 

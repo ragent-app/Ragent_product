@@ -37,7 +37,7 @@ function Assert-OwnerPolicyRelease($Release){
 }
 function Assert-OwnerPolicyDirectory([string]$Path,[string[]]$Allowed,[Collections.Generic.List[IDisposable]]$Pins){
   for($cursor=[IO.Path]::GetFullPath($Path);$cursor;$cursor=[IO.Path]::GetDirectoryName($cursor)){
-    $Pins.Add([AgentoCOwnerFilePin]::Directory($cursor));Assert-OwnerObjectAcl $cursor $Allowed -Ancestor -Pins $Pins
+    $Pins.Add([RagentOwnerFilePin]::Directory($cursor));Assert-OwnerObjectAcl $cursor $Allowed -Ancestor -Pins $Pins
   }
 }
 # Private primitive accepts an already trusted root/administrator set for isolated
@@ -60,7 +60,7 @@ function Publish-OwnerInstallPolicy([string]$Root,$Policy,[string[]]$Administrat
     foreach($kind in @('security','runtime')){
       $path=Join-Path $rootPath $kind
       if(-not [IO.Directory]::Exists($path)){$null=[IO.Directory]::CreateDirectory($path,(New-OwnerPolicySecurity $Policy $kind $Administrators))}
-      $pins.Add([AgentoCOwnerFilePin]::Directory($path))
+      $pins.Add([RagentOwnerFilePin]::Directory($path))
       Assert-OwnerObjectAcl $path $(if($kind -eq 'runtime'){$Administrators+@($Policy.controlSid)}else{$Administrators})
       $actual=[IO.Directory]::GetAccessControl($path)
       if(-not $actual.AreAccessRulesProtected -or $actual.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne (New-OwnerPolicySecurity $Policy $kind $Administrators).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)){throw 'OIP_DIRECTORY_POLICY_MISMATCH'}
@@ -73,23 +73,23 @@ function Publish-OwnerInstallPolicy([string]$Root,$Policy,[string[]]$Administrat
       $check=[byte[]]::new($bytes.Length);$offset=0
       while($offset -lt $check.Length){$count=$stream.Read($check,$offset,$check.Length-$offset);if($count -le 0){throw 'OIP_WRITE_VERIFY_FAILED'};$offset+=$count}
       if([Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($check)){throw 'OIP_WRITE_VERIFY_FAILED'}
-      [AgentoCOwnerFilePin]::Verify($stream.SafeFileHandle,$temporary,$false)
+      [RagentOwnerFilePin]::Verify($stream.SafeFileHandle,$temporary,$false)
     }finally{$stream.Dispose()}
-    if(-not ('AgentoCOwnerPolicyPublish' -as [type])){
+    if(-not ('RagentOwnerPolicyPublish' -as [type])){
       Add-Type -TypeDefinition @'
 using System;using System.Runtime.InteropServices;
-public static class AgentoCOwnerPolicyPublish {
+public static class RagentOwnerPolicyPublish {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] public static extern bool CreateHardLink(string target,string source,IntPtr security);
 }
 '@
     }
-    if(-not [AgentoCOwnerPolicyPublish]::CreateHardLink($target,$temporary,[IntPtr]::Zero)){throw 'OIP_PUBLISH_REFUSED'}
+    if(-not [RagentOwnerPolicyPublish]::CreateHardLink($target,$temporary,[IntPtr]::Zero)){throw 'OIP_PUBLISH_REFUSED'}
     # Only this newly created, protected pending pathname is removed. If any
     # following step fails, retain the install lock and evidence for repair.
     [IO.File]::Delete($temporary)
     $read=Read-OwnerPinnedFile $target $Administrators $pins 8192 $ancestorAdministrators
     if([Convert]::ToBase64String($bytes) -cne [Convert]::ToBase64String($read)){throw 'OIP_WRITE_VERIFY_FAILED'}
-    [AgentoCOwnerFilePin]::Verify($lease.SafeFileHandle,$lock,$false)
+    [RagentOwnerFilePin]::Verify($lease.SafeFileHandle,$lock,$false)
     $result=@{policyPrepared=$true;servicesActivated=$false;migrationReady=$false;policySha256=(Get-OwnerDigest $read)}
     $success=$true
     return $result
@@ -102,7 +102,7 @@ public static class AgentoCOwnerPolicyPublish {
 
 function Read-OwnerPolicyInstallPreflight {
   $services=@()
-  foreach($name in @('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')){
+  foreach($name in @('Ragent-ControlPlane','Ragent-RunnerSupervisor')){
     $service=Get-CimInstance Win32_Service -Filter "Name='$name'"
     if(-not $service){throw 'OIP_SERVICE_MISSING'}
     if($service.StartName -ine ('NT SERVICE\'+$name)){throw 'OIP_SERVICE_IDENTITY_NOT_SEPARATED'}
@@ -122,7 +122,7 @@ if(-not $ownerPolicyLibraryOnly){
     if(-not $PolicyFile){throw 'OIP_POLICY_REQUIRED'}
     $policyInputStream=[IO.FileStream]::new([IO.Path]::GetFullPath($PolicyFile),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     try{
-      [AgentoCOwnerFilePin]::Verify($policyInputStream.SafeFileHandle,[IO.Path]::GetFullPath($PolicyFile),$false)
+      [RagentOwnerFilePin]::Verify($policyInputStream.SafeFileHandle,[IO.Path]::GetFullPath($PolicyFile),$false)
       if($policyInputStream.Length -lt 1 -or $policyInputStream.Length -gt 8192){throw 'OIP_POLICY_INVALID'}
       $reader=[IO.StreamReader]::new($policyInputStream,[Text.UTF8Encoding]::new($false,$true),$true,4096,$true)
       try{$policy=$reader.ReadToEnd()|ConvertFrom-Json}finally{$reader.Dispose()}
@@ -133,7 +133,7 @@ if(-not $ownerPolicyLibraryOnly){
     try{
       $admin=@('S-1-5-32-544','S-1-5-18')
       $release=Read-OwnerPinnedFile (Join-Path $product 'payload\owner-bootstrap-release.json') $admin $pins
-      $helperPath=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe'
+      $helperPath=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe'
       $helper=Read-OwnerPinnedFile $helperPath $admin $pins 4194304
       $metadata=[Text.UTF8Encoding]::new($false,$true).GetString($release)|ConvertFrom-Json
       Assert-OwnerPolicyRelease $metadata

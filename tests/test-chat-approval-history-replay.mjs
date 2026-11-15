@@ -121,11 +121,11 @@ function createHarness() {
     },
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput() {},
     applyEvent() {},
   };
-  context.window.AgentoCDecisions = {
+  context.window.RagentDecisions = {
     noteRequest(evt) {
       decisions.push({ method: 'noteRequest', evt });
     },

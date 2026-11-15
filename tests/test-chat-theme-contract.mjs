@@ -36,9 +36,9 @@ for (const alias of [
   assert.match(baseCss, new RegExp(`${alias.replaceAll('-', '\\-')}\\s*:`), `${alias} must be declared`);
 }
 
-assert.match(bootstrap, /window\.agentocApplyMonetTheme\s*=\s*applyMonetTheme/);
-assert.match(bootstrap, /agentoc:monet-theme/);
-assert.match(bootstrap, /AgentoCMonetThemeContract/);
+assert.match(bootstrap, /window\.ragentApplyMonetTheme\s*=\s*applyMonetTheme/);
+assert.match(bootstrap, /ragent:monet-theme/);
+assert.match(bootstrap, /RagentMonetThemeContract/);
 assert.match(monetContract, /version:\s*1/);
 assert.match(monetContract, /CSS\?\.supports/);
 assert.match(monetContract, /root\.style\.removeProperty\(variable\)/);
@@ -73,7 +73,7 @@ assert.match(baseCss, /--indicator-unread:\s*#2563eb;[\s\S]*?--indicator-needs-a
 assert.match(baseCss, /@media \(prefers-color-scheme:\s*dark\)[\s\S]*?--indicator-unread:\s*#60a5fa;[\s\S]*?--indicator-needs-action:\s*#fbbf24;/, 'dark attention markers should only adjust for contrast, not selected Material theme');
 assert.doesNotMatch(m3Tokens, /--status-(?:unread|needs-action)\s*:/, 'sidebar attention markers must not be aliases in the unified workflow status palette');
 assert.doesNotMatch(m3Tokens, /--status-running:\s*var\(--m3-secondary\)/, 'running status must not alias the M3 secondary role');
-assert.match(bootstrap, /AgentocAndroidMonet/);
+assert.match(bootstrap, /RagentAndroidMonet/);
 assert.match(bootstrap, /requestTheme/);
 assert.match(monetContract, /--m3-primary/);
 assert.ok(

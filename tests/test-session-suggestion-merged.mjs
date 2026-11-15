@@ -3,7 +3,7 @@
 // workflow-state suggestions coalesce into ONE model call. The fake provider
 // logs every prompt kind it sees, so the test can prove both writebacks came
 // from a single merged call, and that the legacy per-kind triggers still work
-// when AGENTOC_SUGGESTION_MERGED=off.
+// when RAGENT_SUGGESTION_MERGED=off.
 import assert from 'assert/strict';
 import { appendFileSync, chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -11,9 +11,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-suggestion-merged-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-suggestion-merged-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 const callLogPath = join(tempHome, 'fake-call-log.jsonl');
 
 mkdirSync(tempBin, { recursive: true });
@@ -111,7 +111,7 @@ writeFileSync(
   'utf8',
 );
 
-const previousMergedSetting = process.env.AGENTOC_SUGGESTION_MERGED;
+const previousMergedSetting = process.env.RAGENT_SUGGESTION_MERGED;
 process.env.HOME = tempHome;
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 process.env.FAKE_CALL_LOG = callLogPath;
@@ -176,9 +176,9 @@ try {
   assert.equal(countKind('legacy-task-card'), 0, 'merged mode must not call the legacy task-card trigger');
   assert.equal(countKind('legacy-workflow'), 0, 'merged mode must not call the legacy workflow trigger');
 
-  // Phase B: legacy mode (AGENTOC_SUGGESTION_MERGED=off) — the old separate
+  // Phase B: legacy mode (RAGENT_SUGGESTION_MERGED=off) — the old separate
   // triggers still update each part independently.
-  process.env.AGENTOC_SUGGESTION_MERGED = 'off';
+  process.env.RAGENT_SUGGESTION_MERGED = 'off';
   const legacySession = await createSession(tempHome, 'fake-codex', 'Legacy Case');
   await sendMessage(legacySession.id, 'LEGACY_CASE 旧路径单独触发，验证兼容。', [], {
     tool: 'fake-codex',
@@ -206,8 +206,8 @@ try {
 
   console.log('test-session-suggestion-merged: ok');
 } finally {
-  if (previousMergedSetting === undefined) delete process.env.AGENTOC_SUGGESTION_MERGED;
-  else process.env.AGENTOC_SUGGESTION_MERGED = previousMergedSetting;
+  if (previousMergedSetting === undefined) delete process.env.RAGENT_SUGGESTION_MERGED;
+  else process.env.RAGENT_SUGGESTION_MERGED = previousMergedSetting;
   killAll();
   rmSync(tempHome, { recursive: true, force: true });
 }

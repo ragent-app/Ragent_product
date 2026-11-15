@@ -11,10 +11,10 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-suggestion-merge-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-suggestion-merge-'));
 const integrationHome = join(tempHome, 'integration');
 const tempBin = join(integrationHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 const ledgerDir = join(configDir, 'usage-ledger');
 const operationLedgerDir = join(ledgerDir, 'operations');
 
@@ -22,9 +22,9 @@ mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_USAGE_LEDGER_DIR = ledgerDir;
-process.env.AGENTOC_OPERATION_LEDGER_DIR = operationLedgerDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_USAGE_LEDGER_DIR = ledgerDir;
+process.env.RAGENT_OPERATION_LEDGER_DIR = operationLedgerDir;
 
 const fakeCodexPath = join(tempBin, 'fake-codex');
 writeFileSync(

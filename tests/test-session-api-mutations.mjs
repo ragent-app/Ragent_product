@@ -14,10 +14,10 @@ import {
   parseSessionApiMutation, projectSessionApiContext, sessionApiReceipts,
 } from '../chat/session-api-mutation-contract.mjs';
 
-const root = process.env.AGENTOC_MUTATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-session-api-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
+const root = process.env.RAGENT_MUTATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-session-api-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
 const store = await import('../chat/session-meta-store.mjs');
 const { CHAT_SESSIONS_FILE, CHAT_HISTORY_DIR } = await import('../lib/config.mjs');
 assert.equal(CHAT_SESSIONS_FILE, join(root, 'config', 'chat-sessions.json'));
@@ -83,7 +83,7 @@ if (process.argv[2] === 'crash-server') {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   process.send({ type: 'listening', port: server.address().port });
 } else if (process.argv[2] === 'cold-replay') {
-  const input = JSON.parse(process.env.AGENTOC_MUTATION_TEST_REQUEST);
+  const input = JSON.parse(process.env.RAGENT_MUTATION_TEST_REQUEST);
   const receipt = await store.applySessionApiMutation('s1', input);
   assert.equal(receipt.duplicate, true);
   const lookup = await store.readSessionApiMutationReceipt('s1', input.requestId);
@@ -188,7 +188,7 @@ if (process.argv[2] === 'crash-server') {
     const c = await seed(); const input = request(c, 'lost-reply', 'setReviewed', true);
     const original = await store.applySessionApiMutation('s1', input);
     const child = await promisify(execFile)(process.execPath, [fileURLToPath(import.meta.url), 'cold-replay'], {
-      env: { ...process.env, AGENTOC_MUTATION_TEST_ROOT: root, AGENTOC_MUTATION_TEST_REQUEST: JSON.stringify(input) },
+      env: { ...process.env, RAGENT_MUTATION_TEST_ROOT: root, RAGENT_MUTATION_TEST_REQUEST: JSON.stringify(input) },
       timeout: 30000, maxBuffer: 1024 * 1024,
     });
     const result = JSON.parse(child.stdout.trim());
@@ -201,7 +201,7 @@ if (process.argv[2] === 'crash-server') {
     const c = await seed(); const input = request(c, 'crash-before-response', 'setReviewed', true);
     const child = fork(fileURLToPath(import.meta.url), ['crash-server'], {
       execArgv: [], windowsHide: true, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: { ...process.env, AGENTOC_MUTATION_TEST_ROOT: root },
+      env: { ...process.env, RAGENT_MUTATION_TEST_ROOT: root },
     });
     child.stdout.resume(); child.stderr.resume();
     t.signal.addEventListener('abort', () => child.kill('SIGKILL'), { once: true });
@@ -234,7 +234,7 @@ if (process.argv[2] === 'crash-server') {
       child.kill('SIGKILL'); await exited;
       assert.equal((await unknownHttp).received, false);
       const replay = await promisify(execFile)(process.execPath, [fileURLToPath(import.meta.url), 'cold-replay'], {
-        env: { ...process.env, AGENTOC_MUTATION_TEST_ROOT: root, AGENTOC_MUTATION_TEST_REQUEST: JSON.stringify(input) }, timeout: 15000,
+        env: { ...process.env, RAGENT_MUTATION_TEST_ROOT: root, RAGENT_MUTATION_TEST_REQUEST: JSON.stringify(input) }, timeout: 15000,
       });
       const result = JSON.parse(replay.stdout.trim());
       assert.deepEqual({ ...result.receipt, duplicate: false }, receipt);

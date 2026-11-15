@@ -11,13 +11,13 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-gmail-drive-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-gmail-drive-'));
 process.env.HOME = tempHome;
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_PUBLIC_BASE_URL;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_PUBLIC_BASE_URL;
 
-const connectorDir = join(tempHome, '.config', 'agentoc', 'calendar-connector');
+const connectorDir = join(tempHome, '.config', 'ragent', 'calendar-connector');
 const credentialsPath = join(connectorDir, 'google-oauth-client.json');
 const tokenPath = join(connectorDir, 'google-calendar-token.json');
 mkdirSync(connectorDir, { recursive: true });

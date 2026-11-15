@@ -2,7 +2,7 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("agentocDesktop", Object.freeze({
+contextBridge.exposeInMainWorld("ragentDesktop", Object.freeze({
   getUpdateState: () => ipcRenderer.invoke("desktop:update-get"),
   checkForUpdates: () => ipcRenderer.invoke("desktop:update-check"),
   openUpdate: () => ipcRenderer.invoke("desktop:update-open"),

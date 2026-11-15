@@ -6,48 +6,48 @@ import { createInterface } from 'node:readline';
 import os from 'node:os';
 import path from 'node:path';
 
-if ((process.platform !== 'win32' && process.env.AGENTOC_QA_POSIX !== '1') || process.env.AGENTOC_RUN_CLAUDE_LOCAL_GATE !== '1') {
+if ((process.platform !== 'win32' && process.env.RAGENT_QA_POSIX !== '1') || process.env.RAGENT_RUN_CLAUDE_LOCAL_GATE !== '1') {
   console.log('claude-windows-local-gate: skipped (opt-in Windows integration test)'); process.exit(0);
 }
-const binary = process.env.AGENTOC_TEST_CLAUDE_BINARY;
+const binary = process.env.RAGENT_TEST_CLAUDE_BINARY;
 if (!binary || !path.isAbsolute(binary)) throw new Error('absolute Claude executable required');
-const unicodeFixture = process.env.AGENTOC_QA_CLAUDE_UNICODE === '1';
-const root = await mkdtemp(path.join(os.tmpdir(), unicodeFixture ? 'agentoc-claude-local-gate-项目 空格-' : 'agentoc-claude-local-gate-'));
+const unicodeFixture = process.env.RAGENT_QA_CLAUDE_UNICODE === '1';
+const root = await mkdtemp(path.join(os.tmpdir(), unicodeFixture ? 'ragent-claude-local-gate-项目 空格-' : 'ragent-claude-local-gate-'));
 // The real admission snapshot protects the instance's control directories.
 // Keep those outside the project so ordinary recursive project searches do
 // not inadvertently search the fixture's own Ragent configuration.
-const separateInstance = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
-  ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-instance-')) : '';
+const separateInstance = process.env.RAGENT_QA_BOUND_CONTEXT === '1'
+  ? await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-instance-')) : '';
 const instance = separateInstance || path.join(root, 'instance');
 const config = path.join(root, 'config');
 await mkdir(config);
-const askAll = process.env.AGENTOC_QA_CLAUDE_ASK_ALL === '1';
-const taskToolCase = process.env.AGENTOC_QA_CLAUDE_TASK_TOOL || '';
+const askAll = process.env.RAGENT_QA_CLAUDE_ASK_ALL === '1';
+const taskToolCase = process.env.RAGENT_QA_CLAUDE_TASK_TOOL || '';
 if (taskToolCase && (!askAll || !['TaskList', 'TaskCreate', 'TaskGet', 'TaskUpdate'].includes(taskToolCase))) throw new Error('task fixture requires an explicit supported tool and command gate');
 const taskFollowup = ['TaskGet', 'TaskUpdate'].includes(taskToolCase);
-const cliReadCase = process.env.AGENTOC_QA_CLAUDE_CLI_READ || '';
-const assetPrefix = process.env.AGENTOC_QA_ASSET_PREFIX || 'msys';
-if (cliReadCase === 'asset' && !['agentoc', 'ragent', 'node', 'msys'].includes(assetPrefix)) throw new Error('invalid asset CLI prefix');
+const cliReadCase = process.env.RAGENT_QA_CLAUDE_CLI_READ || '';
+const assetPrefix = process.env.RAGENT_QA_ASSET_PREFIX || 'msys';
+if (cliReadCase === 'asset' && !['ragent', 'ragent', 'node', 'msys'].includes(assetPrefix)) throw new Error('invalid asset CLI prefix');
 if (cliReadCase && (!askAll || !['list', 'session', 'source', 'help', 'asset', 'create'].includes(cliReadCase))) throw new Error('invalid CLI read fixture');
 if (cliReadCase) process.env.CHAT_PORT = '18669';
-process.env.AGENTOC_INSTANCE_ROOT = instance;
-process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(instance, 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(instance, 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(instance, 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
+process.env.RAGENT_INSTANCE_ROOT = instance;
+process.env.RAGENT_CONFIG_DIR = path.join(instance, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(instance, 'workspace');
+process.env.RAGENT_MEMORY_DIR = path.join(instance, 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(instance, 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
 const { buildClaudeBidiArgs } = await import('../chat/adapters/claude-bidi.mjs');
 const { buildPlatformSpawnSpec } = await import('../lib/executable-resolution.mjs');
 const { buildClaudeBidiApprovalResponseMessage, buildClaudeBidiInitializeMessage, buildClaudeBidiUserMessage, readClaudeBidiApprovalRequest, serializeClaudeBidiMessage } = await import('../chat/claude-bidi-protocol.mjs');
 const { appendRunSpoolRecord, createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
 const { flushClaudeBidiApprovalResponses, trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const { observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
-const protectedCase = process.env.AGENTOC_QA_CLAUDE_PROTECTED === '1';
-const installCase = process.env.AGENTOC_QA_CLAUDE_INSTALL === '1';
-const uninstallCase = process.env.AGENTOC_QA_CLAUDE_UNINSTALL === '1';
-const phoneQueueCase = process.env.AGENTOC_QA_SAMSUNG_CLAUDE_QUEUE === '1';
-const phoneGroupCase = phoneQueueCase && process.env.AGENTOC_QA_CLAUDE_GROUP === '1';
-if (phoneQueueCase && (!uninstallCase || process.env.AGENTOC_QA_MODE !== 'recommended' || !askAll)) throw new Error('phone queue fixture requires the isolated recommended uninstall case');
+const protectedCase = process.env.RAGENT_QA_CLAUDE_PROTECTED === '1';
+const installCase = process.env.RAGENT_QA_CLAUDE_INSTALL === '1';
+const uninstallCase = process.env.RAGENT_QA_CLAUDE_UNINSTALL === '1';
+const phoneQueueCase = process.env.RAGENT_QA_SAMSUNG_CLAUDE_QUEUE === '1';
+const phoneGroupCase = phoneQueueCase && process.env.RAGENT_QA_CLAUDE_GROUP === '1';
+if (phoneQueueCase && (!uninstallCase || process.env.RAGENT_QA_MODE !== 'recommended' || !askAll)) throw new Error('phone queue fixture requires the isolated recommended uninstall case');
 const phoneSessionId = 'samsung-fixture';
 let phoneApproval = null; const phoneApprovals = []; let phoneQueued = false; let phoneToolResultObserved = false;
 let resolvePhoneStatus; const phoneStatusObserved = new Promise(resolve => { resolvePhoneStatus = resolve; });
@@ -58,40 +58,40 @@ if (phoneQueueCase) await withSessionsMetaMutation(async (rows, save) => {
   rows.push({ id: phoneSessionId, name: 'Samsung real Claude fixture', folder: root, tool: 'claude', sessionPlane: 'user', sessionClass: 'ROOT_LEADERSHIP', userAddressable: true });
   await save(rows, { immediate: true, durable: true });
 });
-const deleteCase = process.env.AGENTOC_QA_CLAUDE_DELETE === '1';
-const nativePowerShell = process.env.AGENTOC_QA_CLAUDE_NATIVE_POWERSHELL === '1';
-const deleteList = process.env.AGENTOC_QA_CLAUDE_DELETE_LIST === '1';
-const deleteSteps = process.env.AGENTOC_QA_CLAUDE_DELETE_STEPS === '1';
-if (nativePowerShell && !deleteCase && !['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(process.env.AGENTOC_QA_CLAUDE_READ) && !cliReadCase) throw new Error('native PowerShell fixture requires deletion, read or CLI-read mode');
+const deleteCase = process.env.RAGENT_QA_CLAUDE_DELETE === '1';
+const nativePowerShell = process.env.RAGENT_QA_CLAUDE_NATIVE_POWERSHELL === '1';
+const deleteList = process.env.RAGENT_QA_CLAUDE_DELETE_LIST === '1';
+const deleteSteps = process.env.RAGENT_QA_CLAUDE_DELETE_STEPS === '1';
+if (nativePowerShell && !deleteCase && !['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(process.env.RAGENT_QA_CLAUDE_READ) && !cliReadCase) throw new Error('native PowerShell fixture requires deletion, read or CLI-read mode');
 if (deleteList && (!deleteCase || !nativePowerShell)) throw new Error('deletion list requires native PowerShell fixture');
 if (deleteSteps && (!deleteList || !nativePowerShell)) throw new Error('deletion steps require native PowerShell list fixture');
-const outsideFileCase = process.env.AGENTOC_QA_CLAUDE_FILE_OUTSIDE === '1';
-const dotnetCase = process.env.AGENTOC_QA_CLAUDE_DOTNET === '1';
-const guidanceCase = process.env.AGENTOC_QA_CLAUDE_ELEVATION === '1';
-const readCase = process.env.AGENTOC_QA_CLAUDE_READ || '';
-const webDownload = process.env.AGENTOC_QA_WEB_DOWNLOAD === '1';
+const outsideFileCase = process.env.RAGENT_QA_CLAUDE_FILE_OUTSIDE === '1';
+const dotnetCase = process.env.RAGENT_QA_CLAUDE_DOTNET === '1';
+const guidanceCase = process.env.RAGENT_QA_CLAUDE_ELEVATION === '1';
+const readCase = process.env.RAGENT_QA_CLAUDE_READ || '';
+const webDownload = process.env.RAGENT_QA_WEB_DOWNLOAD === '1';
 if (readCase === 'rg-text' && !askAll) throw new Error('rg-text fixture requires the production command gate');
-const outsideCase = deleteCase && process.env.AGENTOC_QA_CLAUDE_DELETE_OUTSIDE === '1';
-const conservativeOutside = outsideFileCase && process.env.AGENTOC_QA_MODE === 'conservative-auto';
+const outsideCase = deleteCase && process.env.RAGENT_QA_CLAUDE_DELETE_OUTSIDE === '1';
+const conservativeOutside = outsideFileCase && process.env.RAGENT_QA_MODE === 'conservative-auto';
 const reviewCase = protectedCase || outsideCase || conservativeOutside || uninstallCase;
-const relativeDelete = deleteCase && (process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.AGENTOC_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
+const relativeDelete = deleteCase && (process.env.RAGENT_QA_CLAUDE_DELETE_RELATIVE === '1' || process.env.RAGENT_QA_CLAUDE_DELETE_RELATIVE_DIRECT === '1');
 if ((installCase && (protectedCase || deleteCase)) || (reviewCase && relativeDelete) || (outsideCase && protectedCase) || (outsideFileCase && (installCase || deleteCase || protectedCase)) || (dotnetCase && (installCase || deleteCase)) || (guidanceCase && (installCase || deleteCase || dotnetCase || protectedCase || outsideFileCase))) throw new Error('fixture modes are mutually exclusive');
 if (readCase && (!['numbered', 'relative', 'relative-file-tool', 'relative-cd', 'fallback', 'cd-rg', 'cwd-change', 'cwd-change-rg', 'relative-write', 'unconditional-file-delete', 'npm-task', 'rg-text', 'curl', 'glob', 'list', 'git-status', 'git-show', 'git-log-format', 'git-diff-file', 'git-c-outside', 'conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(readCase) || (['conditional', 'conditional-write', 'stderr-null', 'output-filters', 'where-filter', 'system-copy', 'select-string'].includes(readCase) && !nativePowerShell) || (readCase === 'cwd-change-rg' && process.platform === 'win32') || installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase)) throw new Error('invalid read fixture mode');
 const cwdChangeCase = ['cwd-change', 'cwd-change-rg'].includes(readCase);
 if (uninstallCase && (installCase || deleteCase || dotnetCase || guidanceCase || protectedCase || outsideFileCase || readCase)) throw new Error('uninstall fixture must be isolated');
-if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') && !path.isAbsolute(process.env.AGENTOC_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
-const safeDeleteHelper = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
+if ((installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') && !path.isAbsolute(process.env.RAGENT_TEST_BASH_BINARY || '')) throw new Error('absolute Git Bash executable required');
+const safeDeleteHelper = process.env.RAGENT_TEST_SAFE_DELETE_BINARY;
 if (deleteCase && !path.isAbsolute(safeDeleteHelper || '')) throw new Error('absolute safe deletion helper required');
-const installCommand = `winget ${process.env.AGENTOC_QA_CLAUDE_INSTALL_ALIAS === '1' ? 'add' : 'install'} --${process.env.AGENTOC_QA_CLAUDE_INSTALL_QUERY === '1' ? 'query' : 'id'}=Vendor.App --source=winget --scope=user`;
+const installCommand = `winget ${process.env.RAGENT_QA_CLAUDE_INSTALL_ALIAS === '1' ? 'add' : 'install'} --${process.env.RAGENT_QA_CLAUDE_INSTALL_QUERY === '1' ? 'query' : 'id'}=Vendor.App --source=winget --scope=user`;
 // The admitted-context fixture uses an actually sensitive profile directory,
 // rather than injecting an extra protected root directly into gate state.
-const protectedRoot = path.join(root, process.env.AGENTOC_QA_BOUND_CONTEXT === '1' ? '.ssh' : 'protected');
+const protectedRoot = path.join(root, process.env.RAGENT_QA_BOUND_CONTEXT === '1' ? '.ssh' : 'protected');
 if (protectedCase) await mkdir(protectedRoot);
-const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-')) : '';
-const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-file-')) : '';
-const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-git-')) : '';
+const outsideRoot = outsideCase ? await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-outside-')) : '';
+const outsideFileRoot = outsideFileCase ? await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-outside-file-')) : '';
+const outsideGitRoot = readCase === 'git-c-outside' ? await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-outside-git-')) : '';
 if (outsideGitRoot) { execFileSync('git', ['init', '-q'], { cwd: outsideGitRoot, windowsHide: true }); await writeFile(path.join(outsideGitRoot, 'fixture.md'), 'outside git fixture\n'); }
-const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && (process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1' || process.env.AGENTOC_QA_BOUND_NAME_LIST === '1')) || cliReadCase === 'asset' || webDownload ? await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-outside-read-')) : '';
+const outsideReadRoot = ['relative-file-tool', 'select-string'].includes(readCase) || (readCase === 'conditional' && (process.env.RAGENT_QA_STATIC_PATH_VARIABLE === '1' || process.env.RAGENT_QA_BOUND_NAME_LIST === '1')) || cliReadCase === 'asset' || webDownload ? await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-outside-read-')) : '';
 if (outsideReadRoot) await writeFile(path.join(outsideReadRoot, 'fixture.md'), 'local read fixture\n');
 const deleteTarget = path.join(outsideCase ? outsideRoot : protectedCase ? protectedRoot : root, unicodeFixture ? '构建 输出' : 'delete-fixture');
 const keepFile = path.join(root, 'keep-fixture.txt');
@@ -110,7 +110,7 @@ const artifact = path.join(cliReadCase === 'asset' || readCase === 'select-strin
 if (cliReadCase === 'asset') await writeFile(artifact, 'isolated asset fixture\n');
 const bashQuote = value => `'${value.replaceAll("'", `'"'"'`)}'`;
 if (readCase) await writeFile(artifact, webDownload ? 'before download\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
-if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); if (process.env.AGENTOC_QA_RG_HIDDEN === '1') await writeFile(path.join(root, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n'); }
+if (readCase === 'rg-text') { await writeFile(path.join(root, '.env'), 'SEARCH_TOKEN=private\n'); await writeFile(path.join(root, '.ignore'), '!.env\n'); if (process.env.RAGENT_QA_RG_HIDDEN === '1') await writeFile(path.join(root, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n'); }
 if (readCase === 'npm-task') await writeFile(path.join(root, 'package.json'), JSON.stringify({ private: true, scripts: { 'qa-fixture': 'echo safe-task-fixture' } }));
 if (cwdChangeCase) { await mkdir(path.join(root, 'child')); await writeFile(path.join(root, 'child', 'fixture.md'), 'CHILD_MARKER\n'); }
 if (readCase === 'cwd-change-rg') { await writeFile(path.join(root, 'child', '.env'), 'CHILD_MARKER_PRIVATE\n'); await writeFile(path.join(root, 'child', '.ignore'), '!.env\n'); }
@@ -128,32 +128,32 @@ const bashArtifact = artifact.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.
 const bashRoot = root.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 const bashGitRoot = outsideGitRoot.replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`).replaceAll('\\', '/');
 let readCommand = readCase === 'conditional'
-  ? process.env.AGENTOC_QA_BOUND_NAME_LIST === '1'
-    ? `Get-ChildItem -Path '${path.join(outsideReadRoot, '*.md').replaceAll("'", "''")}' -Force${process.env.AGENTOC_QA_BOUND_LIST_FILE === '1' ? ' -File' : ''}${process.env.AGENTOC_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.AGENTOC_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
-    : process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
-    ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
+  ? process.env.RAGENT_QA_BOUND_NAME_LIST === '1'
+    ? `Get-ChildItem -Path '${path.join(outsideReadRoot, '*.md').replaceAll("'", "''")}' -Force${process.env.RAGENT_QA_BOUND_LIST_FILE === '1' ? ' -File' : ''}${process.env.RAGENT_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.RAGENT_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
+    : process.env.RAGENT_QA_STATIC_PATH_VARIABLE === '1'
+    ? `$p=${process.env.RAGENT_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(outsideReadRoot) + path.sep).replaceAll("'", "''")}' + '${path.basename(outsideReadRoot).replaceAll("'", "''")}')` : `'${outsideReadRoot.replaceAll("'", "''")}'`}; if (Test-Path -LiteralPath $p) { Get-ChildItem -LiteralPath $p -Force | Select-Object Name | Out-String } else { 'TARGET_MISSING' }`
     : `if (Test-Path -LiteralPath '${root.replaceAll("'", "''")}') { Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' -Force | Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize | Out-String } else { 'TARGET_MISSING' }`
-  : readCase === 'conditional-write' ? `if (${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '-not (' : ''}Test-Path -LiteralPath '${(artifact + (process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '.missing' : '')).replaceAll("'", "''")}'${process.env.AGENTOC_QA_TEST_PATH_TYPE === '1' ? ' -PathType Leaf' : ''}${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? ')' : ''}) { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
-  : readCase === 'stderr-null' ? `${process.env.AGENTOC_QA_CONTEXT_OUTPUT === '2' ? 'Write-Output "context=$env:AGENTOC_SESSION_ID"; ' : process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1' ? '"context=$env:AGENTOC_SESSION_ID"; ' : ''}Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`
-  : readCase === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideReadRoot, '*.md') : artifact).replaceAll("'", "''")}' -Pattern 'local read fixture'`
+  : readCase === 'conditional-write' ? `if (${process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? '-not (' : ''}Test-Path -LiteralPath '${(artifact + (process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? '.missing' : '')).replaceAll("'", "''")}'${process.env.RAGENT_QA_TEST_PATH_TYPE === '1' ? ' -PathType Leaf' : ''}${process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? ')' : ''}) { Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
+  : readCase === 'stderr-null' ? `${process.env.RAGENT_QA_CONTEXT_OUTPUT === '2' ? 'Write-Output "context=$env:RAGENT_SESSION_ID"; ' : process.env.RAGENT_QA_CONTEXT_OUTPUT === '1' ? '"context=$env:RAGENT_SESSION_ID"; ' : ''}Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}' 2>$null`
+  : readCase === 'select-string' ? `Select-String ${process.env.RAGENT_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.RAGENT_QA_SEARCH_GLOB === '1' ? path.join(outsideReadRoot, '*.md') : artifact).replaceAll("'", "''")}' -Pattern 'local read fixture'`
   : readCase === 'output-filters' ? `Set-Content -LiteralPath '${artifact.replaceAll("'", "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${artifact.replaceAll("'", "''")}' | Format-List Name,Length | Out-String`
-  : readCase === 'where-filter' ? `Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like '*.md') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like '*.md' }" : "Name -like '*.md'"} | Select-Object Name | Out-String`
+  : readCase === 'where-filter' ? `Get-ChildItem -LiteralPath '${root.replaceAll("'", "''")}' | Where-Object ${process.env.RAGENT_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like '*.md') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.RAGENT_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like '*.md' }" : "Name -like '*.md'"} | Select-Object Name | Out-String`
   : readCase === 'system-copy' ? `Copy-Item -LiteralPath '${path.join(process.env.SystemRoot, 'win.ini').replaceAll("'", "''")}' -Destination '${artifact.replaceAll("'", "''")}' -Force; Get-Item -LiteralPath '${artifact.replaceAll("'", "''")}' | Select-Object Name | Out-String`
-  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'fallback' ? 'grep missing fixture.md 2>/dev/null || cat fixture.md' : readCase === 'cd-rg' ? 'cd child && rg -n SEARCH_TOKEN .' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'unconditional-file-delete' ? 'if true; then rm -f fixture.md; fi' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? `rg ${process.env.AGENTOC_QA_RG_GLOB === '1' ? "--hidden -g '*' " : process.env.AGENTOC_QA_RG_HIDDEN === '1' ? '-uu ' : ''}-n SEARCH_TOKEN .` : readCase === 'git-status' ? 'git status --short' : readCase === 'git-show' ? 'git show --stat HEAD' : readCase === 'git-log-format' ? "git log -1 --format='%h %s'" : readCase === 'git-diff-file' ? 'git diff HEAD -- fixture.md' : readCase === 'git-c-outside' ? `git -C ${bashQuote(bashGitRoot)} status --short` : `ls -lah ${bashQuote(bashRoot)}`;
+  : readCase === 'numbered' ? `cat -n ${bashQuote(bashArtifact)}` : readCase === 'relative' ? 'cat fixture.md' : readCase === 'relative-cd' ? 'cd . && cat fixture.md' : readCase === 'fallback' ? 'grep missing fixture.md 2>/dev/null || cat fixture.md' : readCase === 'cd-rg' ? 'cd child && rg -n SEARCH_TOKEN .' : readCase === 'relative-write' ? 'echo changed > fixture.md && cat fixture.md' : readCase === 'unconditional-file-delete' ? 'if true; then rm -f fixture.md; fi' : readCase === 'npm-task' ? 'npm run qa-fixture' : readCase === 'rg-text' ? `rg ${process.env.RAGENT_QA_RG_GLOB === '1' ? "--hidden -g '*' " : process.env.RAGENT_QA_RG_HIDDEN === '1' ? '-uu ' : ''}-n SEARCH_TOKEN .` : readCase === 'git-status' ? 'git status --short' : readCase === 'git-show' ? 'git show --stat HEAD' : readCase === 'git-log-format' ? "git log -1 --format='%h %s'" : readCase === 'git-diff-file' ? 'git diff HEAD -- fixture.md' : readCase === 'git-c-outside' ? `git -C ${bashQuote(bashGitRoot)} status --short` : `ls -lah ${bashQuote(bashRoot)}`;
 const powershell = process.platform === 'win32' ? path.join(process.env.SystemRoot || process.env.WINDIR, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : '/usr/bin/unused-powershell';
-const dotnetScript = `[System.IO.File]::WriteAllText('${artifact.replaceAll("'", "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`;
+const dotnetScript = `[System.IO.File]::WriteAllText('${artifact.replaceAll("'", "''")}', 'dotnet fixture'${process.env.RAGENT_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`;
 const dotnetCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(dotnetScript)}`;
 const guidanceMarker = path.join(root, 'admin-command-ran.txt');
-const guidanceAction = process.env.AGENTOC_QA_CLAUDE_ELEVATION_REGISTRY === '1'
-  ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf"
-  : "Start-Service -Name 'AgentoC-Nonexistent-Fixture'";
+const guidanceAction = process.env.RAGENT_QA_CLAUDE_ELEVATION_REGISTRY === '1'
+  ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\Ragent-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf"
+  : "Start-Service -Name 'Ragent-Nonexistent-Fixture'";
 const guidanceScript = `${guidanceAction}; [System.IO.File]::WriteAllText('${guidanceMarker.replaceAll("'", "''")}', 'unexpected')`;
 const guidanceCommand = `${bashQuote(powershell)} -NoProfile -NonInteractive -Command ${bashQuote(guidanceScript)}`;
 let requests = 0;
 let preflights = 0; let submissions = 0; let webHits = 0; let webResultObserved = false; let toolResultObserved = false; let contextOutputObserved = false; let guidanceObserved = false; let privateSearchObserved = false; let hiddenSearchObserved = false; let cwdMarkerCount = 0; let rootMarkerCount = 0;
 let cliReads = 0;
 const server = createServer((req, res) => {
-  if (process.env.AGENTOC_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
+  if (process.env.RAGENT_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
   if (webDownload && req.method === 'GET' && req.url === '/fixture/download') { webHits++; res.writeHead(200, { 'content-type': 'text/plain' }).end('local read fixture\n'); return; }
   if (phoneQueueCase && req.url.startsWith('/api/')) {
     void (async () => {
@@ -188,7 +188,7 @@ const server = createServer((req, res) => {
   }
   if (phoneQueueCase && req.method === 'GET' && req.url === '/fixture/status') { res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ queued: phoneQueued })); if (phoneQueued) resolvePhoneStatus(); return; }
   if (cliReadCase && req.method === 'GET' && req.url === '/api/triggers?sessionId=claude-local-fixture') {
-    if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture') { res.writeHead(403).end(); return; }
+    if (req.headers['x-ragent-session-control-token'] !== 'fixture-token' || req.headers['x-ragent-session-control-session-id'] !== 'claude-local-fixture') { res.writeHead(403).end(); return; }
     cliReads++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ triggers: [{ id: 'fixture-trigger' }] })); return;
   }
   if (req.method === 'GET' && req.url === '/fixture/read') { res.writeHead(200).end('local read fixture'); return; }
@@ -197,25 +197,25 @@ const server = createServer((req, res) => {
   req.on('end', () => {
     let request; try { request = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
     if (cliReadCase === 'create' && req.method === 'POST' && req.url === '/api/triggers') {
-      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture' || request.sessionId !== 'claude-local-fixture' || request.text !== 'isolated follow-up' || !request.scheduledAt) { res.writeHead(400).end(); return; }
+      if (req.headers['x-ragent-session-control-token'] !== 'fixture-token' || req.headers['x-ragent-session-control-session-id'] !== 'claude-local-fixture' || request.sessionId !== 'claude-local-fixture' || request.text !== 'isolated follow-up' || !request.scheduledAt) { res.writeHead(400).end(); return; }
       cliReads++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ trigger: { id: 'fixture-trigger', ...request } })); return;
     }
     if (cliReadCase === 'asset' && req.method === 'POST' && req.url === '/api/sessions/claude-local-fixture/assets') {
-      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'claude-local-fixture' || request.localPath !== artifact) { res.writeHead(403).end(); return; }
+      if (req.headers['x-ragent-session-control-token'] !== 'fixture-token' || req.headers['x-ragent-session-control-session-id'] !== 'claude-local-fixture' || request.localPath !== artifact) { res.writeHead(403).end(); return; }
       cliReads++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ asset: { assetId: 'fixture-asset' } })); return;
     }
     if (installCase && req.url === '/api/internal/approved-actions/propose' && req.method === 'POST') {
-      if (req.headers['x-agentoc-approved-action-token'] !== 'fixture-token' || request.actions?.[0]?.command !== installCommand || request.runId !== run.id) { res.writeHead(400).end(); return; }
+      if (req.headers['x-ragent-approved-action-token'] !== 'fixture-token' || request.actions?.[0]?.command !== installCommand || request.runId !== run.id) { res.writeHead(400).end(); return; }
       if (request.autoInstallPreflight === true) { preflights++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ kind: 'automatic_install_preflight', ready: true })); }
       else { submissions++; res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ kind: 'automatic_install', status: 'succeeded' })); }
       return;
     }
     if (req.method !== 'POST' || !req.url.startsWith('/v1/messages')) { res.writeHead(404).end(); return; }
     requests++;
-    if (process.env.AGENTOC_QA_TRACE_TASK_SCHEMAS === '1' && requests === 1) {
+    if (process.env.RAGENT_QA_TRACE_TASK_SCHEMAS === '1' && requests === 1) {
       process.stderr.write(`[fixture] task schemas: ${JSON.stringify((request.tools || []).filter(item => ['TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate'].includes(item.name)).map(({ name, input_schema }) => ({ name, input_schema })))}\n`);
     }
-    if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+    if (process.env.RAGENT_QA_TRACE_CLAUDE === '1') {
       const last = request.messages?.at(-1);
       process.stderr.write(`[fixture] model request ${requests}: ${JSON.stringify({ url: req.url, lastRole: last?.role, lastContentTypes: Array.isArray(last?.content) ? last.content.map(item => item.type) : [], toolNames: (request.tools || []).map(item => item.name), toolChoice: request.tool_choice })}\n`);
       if (readCase === 'cwd-change') process.stderr.write(`[fixture] tool results: ${JSON.stringify((request.messages || []).flatMap(message => Array.isArray(message.content) ? message.content.filter(block => block.type === 'tool_result').map(block => block.content) : []))}\n`);
@@ -224,14 +224,14 @@ const server = createServer((req, res) => {
     const tool = requests === 1 || ((cwdChangeCase || taskFollowup) && requests === 2);
     const toolName = (taskFollowup && requests === 1 ? 'TaskCreate' : taskToolCase) || (readCase === 'glob' ? 'Glob' : readCase === 'relative-file-tool' ? 'Read' : nativePowerShell ? 'PowerShell' : installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || ['asset', 'create'].includes(cliReadCase) ? 'Bash' : 'Write');
     if (tool && !request.tools?.some((item) => item.name === toolName)) { res.writeHead(400).end(); return; }
-    if (!tool && ['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) contextOutputObserved ||= JSON.stringify(request.messages || []).includes('context=fixture-context');
-    if (!tool && process.env.AGENTOC_QA_WEB_PROBE === '1') webResultObserved ||= JSON.stringify(request.messages || []).includes('status=204');
+    if (!tool && ['1', '2'].includes(process.env.RAGENT_QA_CONTEXT_OUTPUT)) contextOutputObserved ||= JSON.stringify(request.messages || []).includes('context=fixture-context');
+    if (!tool && process.env.RAGENT_QA_WEB_PROBE === '1') webResultObserved ||= JSON.stringify(request.messages || []).includes('status=204');
     if (!tool && installCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('Installation completed successfully');
     if (!tool && deleteCase) toolResultObserved ||= JSON.stringify(request.messages || []).includes('deleted');
     if (!tool && guidanceCase) guidanceObserved ||= JSON.stringify(request.messages || []).includes('ragent_request_actions');
     if (!tool && phoneQueueCase) phoneToolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item => item.type === 'tool_result'));
     if (!tool && cliReadCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content) && message.content.some(item =>
-      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && (cliReadCase === 'help' ? /(?:agentoc|ragent) trigger <command>/.test(JSON.stringify(item.content)) : JSON.stringify(item.content).includes(cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger'))));
+      item.type === 'tool_result' && item.tool_use_id === 'toolu_fixture_1' && item.is_error !== true && (cliReadCase === 'help' ? /(?:ragent|ragent) trigger <command>/.test(JSON.stringify(item.content)) : JSON.stringify(item.content).includes(cliReadCase === 'asset' ? 'fixture-asset' : 'fixture-trigger'))));
     if (!tool && taskToolCase) toolResultObserved ||= (request.messages || []).some(message => Array.isArray(message.content)
       && message.content.some(item => item.type === 'tool_result' && item.tool_use_id === `toolu_fixture_${taskFollowup ? 2 : 1}` && item.is_error !== true
         && (!['TaskCreate', 'TaskGet'].includes(taskToolCase) || JSON.stringify(item.content).includes('Fixture task'))));
@@ -253,11 +253,11 @@ const server = createServer((req, res) => {
     if (tool) {
       const taskResult = taskFollowup && requests === 2 ? JSON.stringify(request.messages || []).match(/Task #(\d+) created successfully/) : null;
       if (taskFollowup && requests === 2 && !taskResult) { res.writeHead(400).end(); return; }
-      const cliSuffix = cliReadCase === 'session' ? '--session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'source' ? '--source-session $env:AGENTOC_SESSION_ID --json' : cliReadCase === 'help' ? '--help' : '--json';
-      const psAssetCommand = `agentoc api POST /api/sessions/$env:AGENTOC_SESSION_ID/assets --body '${JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }).replaceAll("'", "''")}'`;
-      const input = JSON.stringify(cliReadCase === 'asset' ? { command: nativePowerShell ? psAssetCommand : `${['agentoc', 'ragent'].includes(assetPrefix) ? assetPrefix : `${assetPrefix === 'msys' ? 'MSYS_NO_PATHCONV=1 ' : ''}node "$AGENTOC_PROJECT_ROOT/cli.js"`} api POST ${assetPrefix === 'ragent' ? '/api/sessions/$AGENTOC_SESSION_ID/assets' : '"/api/sessions/$AGENTOC_SESSION_ID/assets"'} --body ${bashQuote(JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }))}`, description: 'Publish isolated fixture' } : cliReadCase === 'create' ? { command: "ragent trigger create --in 1h --text 'isolated follow-up' --json", description: 'Create isolated trigger fixture' } : cliReadCase ? { command: process.env.AGENTOC_QA_TRIGGER_TOP_HELP === '1' ? 'agentoc trigger --help | Out-String' : `node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
+      const cliSuffix = cliReadCase === 'session' ? '--session $env:RAGENT_SESSION_ID --json' : cliReadCase === 'source' ? '--source-session $env:RAGENT_SESSION_ID --json' : cliReadCase === 'help' ? '--help' : '--json';
+      const psAssetCommand = `ragent api POST /api/sessions/$env:RAGENT_SESSION_ID/assets --body '${JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }).replaceAll("'", "''")}'`;
+      const input = JSON.stringify(cliReadCase === 'asset' ? { command: nativePowerShell ? psAssetCommand : `${['ragent', 'ragent'].includes(assetPrefix) ? assetPrefix : `${assetPrefix === 'msys' ? 'MSYS_NO_PATHCONV=1 ' : ''}node "$RAGENT_PROJECT_ROOT/cli.js"`} api POST ${assetPrefix === 'ragent' ? '/api/sessions/$RAGENT_SESSION_ID/assets' : '"/api/sessions/$RAGENT_SESSION_ID/assets"'} --body ${bashQuote(JSON.stringify({ localPath: artifact, originalName: 'fixture.md', mimeType: 'text/plain', text: 'fixture' }))}`, description: 'Publish isolated fixture' } : cliReadCase === 'create' ? { command: "ragent trigger create --in 1h --text 'isolated follow-up' --json", description: 'Create isolated trigger fixture' } : cliReadCase ? { command: process.env.RAGENT_QA_TRIGGER_TOP_HELP === '1' ? 'ragent trigger --help | Out-String' : `node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list ${cliSuffix} | Out-String`, description: 'Read isolated trigger list' } : toolName === 'TaskList' ? {} : toolName === 'TaskCreate' ? { subject: 'Fixture task', description: 'Isolated test task' }
         : toolName === 'TaskGet' ? { taskId: taskResult[1] } : toolName === 'TaskUpdate' ? { taskId: taskResult[1], status: 'completed' } : installCase ? { command: installCommand, description: 'Fixture installation' } : uninstallCase
-        ? { command: 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact', description: 'Fixture uninstall' } : deleteCase
+        ? { command: 'winget uninstall --id Ragent.Nonexistent.Test.Fixture --exact', description: 'Fixture uninstall' } : deleteCase
         ? { command: deleteSteps ? (relativeDelete ? 'Remove-Item delete-extra.txt -Force; Remove-Item delete-fixture -Recurse -Force' : `Remove-Item '${extraFile.replaceAll("'", "''")}' -Force; Remove-Item '${deleteTarget.replaceAll("'", "''")}' -Recurse -Force`) : deleteList ? (relativeDelete ? 'Remove-Item -LiteralPath delete-fixture,delete-extra.txt -Recurse -Force' : `Remove-Item -LiteralPath '${deleteTarget.replaceAll("'", "''")}','${extraFile.replaceAll("'", "''")}' -Recurse -Force`) : relativeDelete ? (nativePowerShell ? 'Remove-Item -LiteralPath delete-fixture -Recurse -Force' : 'rm -rf delete-fixture') : deleteCommand, description: 'Delete fixture' }
         : dotnetCase ? { command: dotnetCommand, description: 'Write isolated fixture' }
         : guidanceCase ? { command: guidanceCommand, description: 'Administrative fixture' }
@@ -275,7 +275,7 @@ const server = createServer((req, res) => {
 await new Promise((resolve) => server.listen(phoneQueueCase ? 18667 : cliReadCase ? 18669 : 0, '127.0.0.1', resolve));
 if (readCase === 'curl') readCommand = `curl -fsS http://127.0.0.1:${server.address().port}/fixture/read`;
 if (webDownload) readCommand = `Invoke-WebRequest -Uri 'http://127.0.0.1:${server.address().port}/fixture/download' -UseBasicParsing -OutFile '${artifact.replaceAll("'", "''")}'; Get-Content -LiteralPath '${artifact.replaceAll("'", "''")}'`;
-if (process.env.AGENTOC_QA_WEB_PROBE === '1') readCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${server.address().port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "local read fixture status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
+if (process.env.RAGENT_QA_WEB_PROBE === '1') readCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${server.address().port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "local read fixture status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
 const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: root, LOCALAPPDATA: root,
   XDG_CACHE_HOME: path.join(root, 'cache'), XDG_CONFIG_HOME: path.join(root, 'xdg-config'),
   CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: `http://127.0.0.1:${server.address().port}`,
@@ -283,8 +283,8 @@ const env = { ...process.env, HOME: root, USERPROFILE: root, APPDATA: root, LOCA
   HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', ALL_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1,localhost',
   http_proxy: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', all_proxy: 'http://127.0.0.1:9', no_proxy: '127.0.0.1,localhost' };
 delete env.ANTHROPIC_AUTH_TOKEN;
-const mode = ['full-auto', 'conservative-auto'].includes(process.env.AGENTOC_QA_MODE) ? process.env.AGENTOC_QA_MODE : 'recommended';
-const boundContext = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
+const mode = ['full-auto', 'conservative-auto'].includes(process.env.RAGENT_QA_MODE) ? process.env.RAGENT_QA_MODE : 'recommended';
+const boundContext = process.env.RAGENT_QA_BOUND_CONTEXT === '1'
   ? await (await import('./fixtures/windows-admitted-context.mjs')).admittedWindowsContext(root, 'claude-local-fixture') : null;
 const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'claude-local-fixture';
 const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 'fixture', state: 'running', tool: 'claude' },
@@ -294,19 +294,19 @@ const gateState = { riskMode: mode, permissionMode: 'default', cwd: root, projec
   riskContext: boundContext?.riskContext ?? { platform: process.platform, trustedWorkspaceRoot: root, protectedRoots: protectedCase ? [protectedRoot] : [] }, pendingApprovals: new Map(), sentApprovalResponseIds: new Set(), autoApprovedMcpRequestIds: new Set() };
 let cliReadHelperPath = '';
 if (cliReadCase) {
-  const source = process.env.AGENTOC_TEST_INSTALLED_PAYLOAD, helper = process.env.AGENTOC_TEST_CLI_READ_BINARY;
+  const source = process.env.RAGENT_TEST_INSTALLED_PAYLOAD, helper = process.env.RAGENT_TEST_CLI_READ_BINARY;
   if (!path.isAbsolute(source || '') || !path.isAbsolute(helper || '')) throw new Error('CLI fixture requires absolute isolated payload and helper inputs');
   const payload = path.join(root, 'cli-payload'); await mkdir(path.join(payload, 'bin'), { recursive: true });
   await copyFile(path.join(source, 'node.exe'), path.join(payload, 'node.exe'));
   await Promise.all(['cli.js', 'package.json'].map(file => copyFile(path.join(source, file), path.join(payload, file))));
   await cp(path.join(source, 'lib'), path.join(payload, 'lib'), { recursive: true });
-  cliReadHelperPath = path.join(payload, 'bin', 'agentoc-cli-read-bridge.exe'); await copyFile(helper, cliReadHelperPath);
-  Object.assign(env, { AGENTOC_SESSION_ID: 'claude-local-fixture', AGENTOC_SESSION_CONTROL_SESSION_ID: 'claude-local-fixture',
-    AGENTOC_SESSION_CONTROL_RUN_ID: run.id, AGENTOC_SESSION_CONTROL_TURN_ID: 'fixture-turn', AGENTOC_SESSION_CONTROL_TOKEN: 'fixture-token' });
+  cliReadHelperPath = path.join(payload, 'bin', 'ragent-cli-read-bridge.exe'); await copyFile(helper, cliReadHelperPath);
+  Object.assign(env, { RAGENT_SESSION_ID: 'claude-local-fixture', RAGENT_SESSION_CONTROL_SESSION_ID: 'claude-local-fixture',
+    RAGENT_SESSION_CONTROL_RUN_ID: run.id, RAGENT_SESSION_CONTROL_TURN_ID: 'fixture-turn', RAGENT_SESSION_CONTROL_TOKEN: 'fixture-token' });
   gateState.sessionControlReadAvailable = true; gateState.sessionControlReadRunId = run.id;
 }
-if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') env.CLAUDE_CODE_GIT_BASH_PATH = process.env.AGENTOC_TEST_BASH_BINARY;
-if (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) env.AGENTOC_SESSION_ID = 'fixture-context';
+if (installCase || uninstallCase || deleteCase || dotnetCase || guidanceCase || readCase || cliReadCase === 'asset') env.CLAUDE_CODE_GIT_BASH_PATH = process.env.RAGENT_TEST_BASH_BINARY;
+if (['1', '2'].includes(process.env.RAGENT_QA_CONTEXT_OUTPUT)) env.RAGENT_SESSION_ID = 'fixture-context';
 if (nativePowerShell) env.CLAUDE_CODE_USE_POWERSHELL_TOOL = '1';
 if (guidanceCase) {
   gateState.windowsManagedActionChannel = true;
@@ -314,9 +314,9 @@ if (guidanceCase) {
 }
 if (installCase) {
   const endpoint = `http://127.0.0.1:${server.address().port}/api/internal/approved-actions/propose`;
-  Object.assign(env, { CLAUDE_CODE_GIT_BASH_PATH: process.env.AGENTOC_TEST_BASH_BINARY,
-    AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-    AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'claude-local-fixture', AGENTOC_APPROVED_ACTIONS_RUN_ID: run.id, AGENTOC_APPROVED_ACTIONS_TURN_ID: 'fixture-turn' });
+  Object.assign(env, { CLAUDE_CODE_GIT_BASH_PATH: process.env.RAGENT_TEST_BASH_BINARY,
+    RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+    RAGENT_APPROVED_ACTIONS_SESSION_ID: 'claude-local-fixture', RAGENT_APPROVED_ACTIONS_RUN_ID: run.id, RAGENT_APPROVED_ACTIONS_TURN_ID: 'fixture-turn' });
   gateState.windowsManagedActionChannel = true;
   gateState.windowsManagedActionBinding = { endpoint, token: 'fixture-token', sessionId: 'claude-local-fixture', runId: run.id, turnId: 'fixture-turn' };
 }
@@ -345,30 +345,30 @@ output.on('line', (line) => {
   void (async () => {
     let event; try { event = JSON.parse(line); } catch { return; }
     await observeClaudePosixCwdResult(gateState, event);
-    if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+    if (process.env.RAGENT_QA_TRACE_CLAUDE === '1') {
       process.stderr.write(`[fixture] CLI event: ${JSON.stringify({ type: event.type, subtype: event.subtype || event.request?.subtype, toolName: event.request?.tool_name || event.name, toolUseName: event.message?.content?.find?.(item => item.type === 'tool_use')?.name })}\n`);
       if (readCase === 'cwd-change' && event.type === 'user') process.stderr.write(`[fixture] tool result metadata: ${JSON.stringify({ keys: Object.keys(event), content: event.message?.content, toolUseResult: event.tool_use_result, meta: event.tool_result_meta })}\n`);
     }
     const approval = readClaudeBidiApprovalRequest(event);
     if (approval) {
-      if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1' && readCase === 'cwd-change') process.stderr.write(`[fixture] gate metadata: ${JSON.stringify({ requestId: approval.providerRequestId, toolUseId: approval.params?.tool_use_id })}\n`);
+      if (process.env.RAGENT_QA_TRACE_CLAUDE === '1' && readCase === 'cwd-change') process.stderr.write(`[fixture] gate metadata: ${JSON.stringify({ requestId: approval.providerRequestId, toolUseId: approval.params?.tool_use_id })}\n`);
       approvals++;
       // Never let a regression execute the uninstall, even for the nonexistent
       // package: only a deny response can reach the real CLI in this fixture.
-      const gatedChild = uninstallCase || (readCase === 'select-string' && process.env.AGENTOC_QA_SEARCH_GLOB === '1') ? { stdin: { writable: true, write(value) {
+      const gatedChild = uninstallCase || (readCase === 'select-string' && process.env.RAGENT_QA_SEARCH_GLOB === '1') ? { stdin: { writable: true, write(value) {
         const response = JSON.parse(String(value));
         if (uninstallCase) assert.equal(response?.response?.response?.behavior, 'deny', 'uninstall must never be auto-approved');
         else {
           const result = response?.response?.response;
           assert.equal(result?.behavior, 'allow', 'ordinary wildcard search must be approved');
-          assert.match(result?.updatedInput?.command || '', /agentoc-safe-search\.exe.*--request/i);
+          assert.match(result?.updatedInput?.command || '', /ragent-safe-search\.exe.*--request/i);
           assert.doesNotMatch(result?.updatedInput?.command || '', /\*/);
         }
         return child.stdin.write(value);
       } } } : child;
       await trackClaudeBidiApprovalRequest(run.id, gateState, event, gatedChild, deleteCase ? { safeDeleteHelperPath: safeDeleteHelper } : cliReadCase ? { cliReadHelperPath } :
-        process.env.AGENTOC_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER } : {});
-      if (process.env.AGENTOC_QA_TRACE_CLAUDE === '1') {
+        process.env.RAGENT_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.RAGENT_QA_SAFE_SEARCH_HELPER } : {});
+      if (process.env.RAGENT_QA_TRACE_CLAUDE === '1') {
         const current = await getRun(run.id);
         const pending = current.appServerPendingApprovals?.find((item) => item.approvalId === approval.approvalId);
         process.stderr.write(`[fixture] gate outcome: ${JSON.stringify({ pending: Boolean(pending), riskReasonCodes: pending?.riskReasonCodes, riskTier: pending?.riskTier })}\n`);
@@ -429,7 +429,7 @@ try {
     else if (readCase === 'system-copy') assert.deepEqual(await readFile(artifact), await readFile(path.join(process.env.SystemRoot, 'win.ini')));
     else assert.equal((await readFile(artifact, 'utf8')).replaceAll('\r\n', '\n'), readCase === 'relative-write' ? 'changed\n' : ['git-diff-file', 'conditional-write', 'output-filters'].includes(readCase) ? 'changed fixture\n' : readCase === 'rg-text' ? 'local read fixture\nSEARCH_TOKEN=public\n' : 'local read fixture\n');
     if (['rg-text', 'cd-rg'].includes(readCase)) assert.equal(privateSearchObserved, false, 'sensitive file contents must not be included in the search result');
-    if (readCase === 'rg-text' && process.env.AGENTOC_QA_RG_HIDDEN === '1') assert.equal(hiddenSearchObserved, true, 'ordinary hidden file must remain searchable');
+    if (readCase === 'rg-text' && process.env.RAGENT_QA_RG_HIDDEN === '1') assert.equal(hiddenSearchObserved, true, 'ordinary hidden file must remain searchable');
     if (readCase === 'relative-write') assert.equal(approvals, 1, 'real Claude must exercise the relative-operation approval callback');
     if (readCase === 'unconditional-file-delete') assert.equal(approvals, 1, 'real Claude must exercise the conditional deletion approval callback');
     if (readCase === 'stderr-null') assert.equal(approvals, 1, 'real Claude must exercise the PowerShell null-redirection approval callback');
@@ -447,8 +447,8 @@ try {
     if (readCase === 'relative-file-tool') assert.equal(approvals, 1, 'fixture must exercise the file-tool approval callback');
     assert.ok(toolResultObserved, 'actual Claude must receive the read result');
     if (webDownload) { assert.equal(webHits, 1); assert.equal(approvals, 1); }
-    if (process.env.AGENTOC_QA_WEB_PROBE === '1') { assert.ok(webResultObserved, 'actual Claude receives the HEAD status'); assert.equal(webHits, 1); assert.equal(approvals, 1); }
-    if (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) { assert.ok(contextOutputObserved, 'actual Claude receives the context output'); assert.equal(approvals, 1); }
+    if (process.env.RAGENT_QA_WEB_PROBE === '1') { assert.ok(webResultObserved, 'actual Claude receives the HEAD status'); assert.equal(webHits, 1); assert.equal(approvals, 1); }
+    if (['1', '2'].includes(process.env.RAGENT_QA_CONTEXT_OUTPUT)) { assert.ok(contextOutputObserved, 'actual Claude receives the context output'); assert.equal(approvals, 1); }
     if (cwdChangeCase) assert.ok(process.platform === 'win32' ? cwdMarkerCount >= 1 && rootMarkerCount >= 1 : cwdMarkerCount >= 2,
       'both commands must succeed with the provider working-directory behavior');
     if (cwdChangeCase && process.platform !== 'win32') assert.equal(gateState.cwd, await realpath(path.join(root, 'child')));
@@ -462,15 +462,15 @@ try {
   if (phoneQueueCase) { assert.equal(phoneQueued, true); assert.equal(phoneToolResultObserved, true, 'real Claude must return the denied tool result to the local model'); }
   const spool = await readRunSpoolRecords(run.id);
   if (deleteCase && !reviewCase) assert.ok(spool.some((record) => record.json?.reason === 'handle-bound workspace deletion'), 'actual sidecar must use the handle-bound deletion helper');
-  else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('ragent_request_actions')), 'actual sidecar must persist managed executor guidance');
-  else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
-  else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
-  else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'agentoc.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');
+  else if (guidanceCase) assert.ok(spool.some((record) => record.json?.type === 'ragent.approval_response' && record.json?.autoDenied === true && record.json?.reason?.includes('ragent_request_actions')), 'actual sidecar must persist managed executor guidance');
+  else if (readCase === 'git-status' && approvals > 0) assert.ok(spool.some((record) => record.json?.type === 'ragent.approval_response' && record.json?.autoApproved === true), 'a surfaced read-only Git request must be automatically approved');
+  else if (!reviewCase && (!readCase || approvals) && readCase !== 'git-status') assert.ok(spool.some((record) => record.json?.type === 'ragent.approval_response' && record.json?.autoApproved === true), 'actual sidecar must persist the automatic decision');
+  else if (reviewCase && mode !== 'recommended') assert.ok(spool.some((record) => record.json?.type === 'ragent.approval_response' && record.json?.autoDenied === true), 'unattended protected write must be denied');
   console.log(`claude-windows-local-gate: ${mode} real CLI${nativePowerShell ? ' native PowerShell' : ''} ${cliReadCase ? `${cliReadCase === 'asset' ? 'asset publication' : `trigger ${cliReadCase}`} completed` : taskToolCase ? `${taskToolCase} completed` : installCase ? 'controlled install reached mock service' : reviewCase ? 'dangerous operation denied' : deleteCase ? 'handle-bound fixture deletion completed' : guidanceCase ? 'managed executor guidance received' : readCase ? `${readCase} ${approvals ? 'approval observed' : 'read completed without approval request'}` : dotnetCase ? 'trusted PowerShell wrapped file write completed' : outsideFileCase ? 'outside-workspace file write completed' : 'file approval completed'}`);
 } finally {
   child.kill(); output.close(); await new Promise((resolve) => server.close(resolve));
   const parent = path.resolve(os.tmpdir()).toLowerCase();
-  for (const [target, prefix] of [[root, 'agentoc-claude-local-gate-'], [separateInstance, 'agentoc-claude-instance-'], [outsideRoot, 'agentoc-claude-outside-'], [outsideFileRoot, 'agentoc-claude-outside-file-'], [outsideGitRoot, 'agentoc-claude-outside-git-'], [outsideReadRoot, 'agentoc-claude-outside-read-']]) {
+  for (const [target, prefix] of [[root, 'ragent-claude-local-gate-'], [separateInstance, 'ragent-claude-instance-'], [outsideRoot, 'ragent-claude-outside-'], [outsideFileRoot, 'ragent-claude-outside-file-'], [outsideGitRoot, 'ragent-claude-outside-git-'], [outsideReadRoot, 'ragent-claude-outside-read-']]) {
     if (!target) continue;
     const resolved = path.resolve(target);
     if (path.dirname(resolved).toLowerCase() !== parent || !path.basename(resolved).startsWith(prefix)) throw new Error('unsafe fixture cleanup target');

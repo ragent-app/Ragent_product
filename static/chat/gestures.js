@@ -32,7 +32,7 @@ function isSwipeGestureBlockedTarget(target, startX) {
   const context = getSwipeContext();
   const projectLevelBack = context.sidebarOpen
     && isInProjectLevelEdgeZone(startX, screenWidth)
-    && window.AgentocProjectView?.canStartEdgeBackSwipe?.();
+    && window.RagentProjectView?.canStartEdgeBackSwipe?.();
   // If we're in an edge zone with a valid action context, don't block
   if (
     (inLeftEdge && (context.rightSidebarOpen || context.auditOpen))
@@ -88,7 +88,7 @@ function getSwipeGestureAction(direction, startX, screenWidth, context) {
     if (
       sidebarOpen
       && isInProjectLevelEdgeZone(startX, screenWidth)
-      && window.AgentocProjectView?.canStartEdgeBackSwipe?.()
+      && window.RagentProjectView?.canStartEdgeBackSwipe?.()
     ) {
       // L2 owns the left-edge back gesture while the sessions sidebar is open.
       // It wins over the global left-edge gesture that opens the sidebar.
@@ -112,10 +112,10 @@ function getSwipeGestureAction(direction, startX, screenWidth, context) {
       // Close audit panel — find the currently active tab and toggle on it
       return {
         run: () => {
-          if (typeof window.agentocOpenWorkbenchInspectorTab === "function") {
+          if (typeof window.ragentOpenWorkbenchInspectorTab === "function") {
             const activeBtn = document.querySelector('[data-inspector-tab][aria-selected="true"]');
             const currentTab = activeBtn?.dataset?.inspectorTab || "activity";
-            window.agentocOpenWorkbenchInspectorTab(currentTab, { toggle: true });
+            window.ragentOpenWorkbenchInspectorTab(currentTab, { toggle: true });
           }
           return Promise.resolve();
         },
@@ -211,12 +211,12 @@ function beginSessionSidebarGesture(action) {
 
 function beginProjectLevelBackGesture(action) {
   if (!isProjectLevelBackGesture(action)) return false;
-  return window.AgentocProjectView?.beginEdgeBackSwipe?.() === true;
+  return window.RagentProjectView?.beginEdgeBackSwipe?.() === true;
 }
 
 function setProjectLevelBackGestureDistance(action, distance) {
   if (!isProjectLevelBackGesture(action)) return false;
-  return window.AgentocProjectView?.updateEdgeBackSwipe?.(distance) === true;
+  return window.RagentProjectView?.updateEdgeBackSwipe?.(distance) === true;
 }
 
 function settleSessionSidebarGesture(action, committed, onSettled) {
@@ -266,7 +266,7 @@ function settleProjectLevelBackGesture(action, committed, onSettled) {
     onSettled?.();
     return;
   }
-  window.AgentocProjectView?.settleEdgeBackSwipe?.(committed, onSettled);
+  window.RagentProjectView?.settleEdgeBackSwipe?.(committed, onSettled);
 }
 
 function cancelSwipeGesture() {
@@ -400,7 +400,7 @@ function handleSwipeGestureEnd(event) {
   );
   const projectLevelBack = isProjectLevelBackGesture(action);
   const triggerDistance = projectLevelBack
-    ? (window.AgentocProjectView?.getEdgeBackSwipeTriggerDistance?.() || SWIPE_GESTURE_TRIGGER_DISTANCE_PX)
+    ? (window.RagentProjectView?.getEdgeBackSwipeTriggerDistance?.() || SWIPE_GESTURE_TRIGGER_DISTANCE_PX)
     : SWIPE_GESTURE_TRIGGER_DISTANCE_PX;
   const shouldTrigger =
     state.locked &&

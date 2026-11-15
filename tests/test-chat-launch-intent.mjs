@@ -137,7 +137,7 @@ function createHarness({ href, search, isStandalone = true, userAgent = 'Android
           addEventListener() {},
         };
       },
-      agentocResolveProductPath(path) {
+      ragentResolveProductPath(path) {
         return path;
       },
     },
@@ -313,7 +313,7 @@ const settingsInstallHarness = createHarness({
   userAgent: 'Macintosh',
 });
 await runInit(settingsInstallHarness);
-await settingsInstallHarness.context.window.agentocOpenInstallFlow({ source: 'settings_button' });
+await settingsInstallHarness.context.window.ragentOpenInstallFlow({ source: 'settings_button' });
 
 assert.equal(
   settingsInstallHarness.serviceWorkerCalls.length,

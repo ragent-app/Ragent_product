@@ -7,11 +7,11 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-auth-poll-broker-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-auth-poll-broker-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   loadOrCreateInstanceIdentity,
@@ -32,12 +32,12 @@ const REQUEST_PATH = (tx) => `/v1/owner-auth/transactions/${tx}/instance-redeem`
 
 function startPollProof({ actor = identity, transactionId = 'poll_tx_1', purpose = 'bind' } = {}) {
   const signature = signInstanceProof(actor, {
-    transactionId, purpose, returnUrl: '', issuedAt: issuedAt(), audience: 'agentoc-owner-auth-poll',
+    transactionId, purpose, returnUrl: '', issuedAt: issuedAt(), audience: 'ragent-owner-auth-poll',
   });
   return {
     transactionId, purpose, deliveryMode: 'instance_poll',
     instance: publicInstanceIdentity(actor), issuedAt: issuedAt(),
-    audience: 'agentoc-owner-auth-poll', signature: signature.signature,
+    audience: 'ragent-owner-auth-poll', signature: signature.signature,
   };
 }
 
@@ -49,7 +49,7 @@ function pollRedeemProof({ actor = identity, transactionId = 'poll_tx_1', reques
   return {
     requestId, purpose, deliveryMode,
     instance: publicInstanceIdentity(actor), issuedAt: at,
-    audience: 'agentoc-owner-auth-poll', signature: signature.signature,
+    audience: 'ragent-owner-auth-poll', signature: signature.signature,
   };
 }
 
@@ -86,12 +86,12 @@ try {
 
   await check('browser_callback 事务缺 returnUrl 仍被拒绝', async () => {
     const signature = signInstanceProof(identity, {
-      transactionId: 'cb_tx_no_url', purpose: 'bind', returnUrl: '', issuedAt: issuedAt(), audience: 'agentoc-owner-auth',
+      transactionId: 'cb_tx_no_url', purpose: 'bind', returnUrl: '', issuedAt: issuedAt(), audience: 'ragent-owner-auth',
     });
     await assert.rejects(() => broker.start({
       transactionId: 'cb_tx_no_url', purpose: 'bind', deliveryMode: 'browser_callback',
       instance: publicInstanceIdentity(identity), issuedAt: issuedAt(),
-      audience: 'agentoc-owner-auth', signature: signature.signature,
+      audience: 'ragent-owner-auth', signature: signature.signature,
     }), { code: 'owner_auth_request_invalid' });
   });
 
@@ -165,11 +165,11 @@ try {
   await check('错误 audience 的 canonical message 被拒绝', async () => {
     const signature = signOwnerAuthPollProof(identity, {
       transactionId: 'poll_tx_1', requestId: 'opll_request_1', purpose: 'bind', deliveryMode: 'instance_poll',
-      issuedAt: issuedAt(), requestPath: REQUEST_PATH('poll_tx_1'), audience: 'agentoc-owner-auth',
+      issuedAt: issuedAt(), requestPath: REQUEST_PATH('poll_tx_1'), audience: 'ragent-owner-auth',
     });
     await assert.rejects(
       () => broker.instanceRedeem(
-        { transactionId: 'poll_tx_1', requestId: 'opll_request_1', purpose: 'bind', deliveryMode: 'instance_poll', instance: publicInstanceIdentity(identity), issuedAt: issuedAt(), audience: 'agentoc-owner-auth', signature: signature.signature },
+        { transactionId: 'poll_tx_1', requestId: 'opll_request_1', purpose: 'bind', deliveryMode: 'instance_poll', instance: publicInstanceIdentity(identity), issuedAt: issuedAt(), audience: 'ragent-owner-auth', signature: signature.signature },
         { requestPath: REQUEST_PATH('poll_tx_1') },
       ),
       { code: 'owner_auth_request_invalid' },
@@ -220,12 +220,12 @@ try {
   const callbackTx = 'cb_tx_1';
   const callbackReturn = `https://instance.example.test/api/auth/google/complete?tx=${callbackTx}`;
   const cbSignature = signInstanceProof(identity, {
-    transactionId: callbackTx, purpose: 'bind', returnUrl: callbackReturn, issuedAt: issuedAt(), audience: 'agentoc-owner-auth',
+    transactionId: callbackTx, purpose: 'bind', returnUrl: callbackReturn, issuedAt: issuedAt(), audience: 'ragent-owner-auth',
   });
   await broker.start({
     transactionId: callbackTx, purpose: 'bind', returnUrl: callbackReturn,
     instance: publicInstanceIdentity(identity), issuedAt: issuedAt(),
-    audience: 'agentoc-owner-auth', signature: cbSignature.signature,
+    audience: 'ragent-owner-auth', signature: cbSignature.signature,
   });
   await check('callback 事务访问 poll 端点被拒绝（delivery mode 不匹配）', async () => {
     await assert.rejects(

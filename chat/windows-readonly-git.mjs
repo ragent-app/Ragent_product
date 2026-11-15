@@ -19,7 +19,7 @@ const LS_FILES_FLAGS = new Set(['-c', '--cached', '-m', '--modified', '-d', '--d
 // which can request the contents of an explicitly named sensitive file.
 function isLiteralRevision(value) {
   return typeof value === 'string' && !value.startsWith('-') && /^[a-zA-Z0-9_./~^@{}+-]+$/.test(value)
-    && !/(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i.test(value);
+    && !/(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent)(?:\/|$)/i.test(value);
 }
 
 function isReadOnlyLogArgs(args) {

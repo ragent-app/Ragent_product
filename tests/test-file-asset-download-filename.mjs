@@ -78,8 +78,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-download-filename-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-download-filename-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -183,22 +183,22 @@ async function startServer({ home, configDir, port, storagePort }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
       SECURE_COOKIES: '0',
-      AGENTOC_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: 'tos',
-      AGENTOC_ASSET_STORAGE_REGION: 'cn-beijing',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
-      AGENTOC_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
-      AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED: '1',
+      RAGENT_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: 'tos',
+      RAGENT_ASSET_STORAGE_REGION: 'cn-beijing',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+      RAGENT_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
+      RAGENT_ASSET_DIRECT_UPLOAD_ENABLED: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -226,7 +226,7 @@ const testCases = [
   { name: 'ASCII filename', originalName: 'report.pdf', mimeType: 'application/pdf', content: 'pdf-content' },
   { name: 'Unicode filename', originalName: '演示结果.mp4', mimeType: 'video/mp4', content: 'video-content' },
   { name: 'Filename with spaces', originalName: 'my document (final).docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', content: 'docx-content' },
-  { name: 'iOS shortcut file', originalName: 'AgentoC 快捷指令.shortcut', mimeType: 'application/x-apple-shortcut', content: 'shortcut-binary' },
+  { name: 'iOS shortcut file', originalName: 'Ragent 快捷指令.shortcut', mimeType: 'application/x-apple-shortcut', content: 'shortcut-binary' },
 ];
 
 try {

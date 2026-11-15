@@ -50,7 +50,7 @@ class ProbeActivity : Activity() {
     }
     private companion object {
         const val TARGET = "com.agentoncloud.android"
-        const val SERVICE_BASE = "com.andysagent.agentoc.integration.appfunctions.BaseAgentoCAppFunctionService"
-        const val SERVICE = "com.andysagent.agentoc.integration.appfunctions.AgentoCAppFunctionService"
+        const val SERVICE_BASE = "com.andysagent.ragent.integration.appfunctions.BaseRagentAppFunctionService"
+        const val SERVICE = "com.andysagent.ragent.integration.appfunctions.RagentAppFunctionService"
     }
 }

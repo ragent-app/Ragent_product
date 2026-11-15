@@ -32,19 +32,19 @@ assert.match(
 
 assert.match(
   decisionSheetSource,
-  /if \(!ok\) \{[\s\S]*?\} else if \(decision === "approve"\) \{\s*window\.AgentoCHaptics\?\.approval\?\.\(\);[\s\S]*?\}/,
+  /if \(!ok\) \{[\s\S]*?\} else if \(decision === "approve"\) \{\s*window\.RagentHaptics\?\.approval\?\.\(\);[\s\S]*?\}/,
   'decision sheet should pulse approval haptics only after a successful approve',
 );
 
 assert.match(
   composeSource,
-  /cancelBtn\.addEventListener\("click", \(\) => \{\s*window\.AgentoCHaptics\?\.danger\?\.\(\);[\s\S]*?dispatchAction\(\{ action: "cancel" \}\);[\s\S]*?\}\)/,
+  /cancelBtn\.addEventListener\("click", \(\) => \{\s*window\.RagentHaptics\?\.danger\?\.\(\);[\s\S]*?dispatchAction\(\{ action: "cancel" \}\);[\s\S]*?\}\)/,
   'stop-run button should pulse danger haptics before dispatching cancel',
 );
 
 assert.match(
   sessionHttpSource,
-  /(?:window|chatGlobal)\.AgentoCHaptics\?\.observeRunState\?\.\(session\);/,
+  /(?:window|chatGlobal)\.RagentHaptics\?\.observeRunState\?\.\(session\);/,
   'attached session state should feed the run-state observer',
 );
 
@@ -67,10 +67,10 @@ try {
 
   // 1. The four kinds play their own patterns.
   await page.evaluate(() => {
-    window.AgentoCHaptics.approval();
-    window.AgentoCHaptics.danger();
-    window.AgentoCHaptics.complete();
-    window.AgentoCHaptics.fail();
+    window.RagentHaptics.approval();
+    window.RagentHaptics.danger();
+    window.RagentHaptics.complete();
+    window.RagentHaptics.fail();
   });
   assert.deepEqual(
     await page.evaluate(() => window.__vibrations),
@@ -83,8 +83,8 @@ try {
   await page.waitForTimeout(650);
   const afterThrottle = await page.evaluate(() => {
     window.__vibrations.length = 0;
-    window.AgentoCHaptics.approval();
-    window.AgentoCHaptics.approval();
+    window.RagentHaptics.approval();
+    window.RagentHaptics.approval();
     return window.__vibrations.length;
   });
   assert.equal(afterThrottle, 1, 'same-kind plays inside 600ms should be throttled');
@@ -94,7 +94,7 @@ try {
     const realMatchMedia = window.matchMedia;
     window.matchMedia = (query) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query });
     window.__vibrations.length = 0;
-    window.AgentoCHaptics.complete();
+    window.RagentHaptics.complete();
     window.matchMedia = realMatchMedia;
     return window.__vibrations.length;
   });
@@ -105,11 +105,11 @@ try {
     const realVibrate = navigator.vibrate;
     // Shade the prototype method (delete is a no-op on inherited props).
     navigator.vibrate = undefined;
-    const supportedWhileMissing = window.AgentoCHaptics.isSupported();
+    const supportedWhileMissing = window.RagentHaptics.isSupported();
     let threw = false;
     try {
-      window.AgentoCHaptics.approval();
-      window.AgentoCHaptics.complete();
+      window.RagentHaptics.approval();
+      window.RagentHaptics.complete();
     } catch {
       threw = true;
     }
@@ -127,13 +127,13 @@ try {
     });
     window.__vibrations.length = 0;
     visibility = 'hidden';
-    window.AgentoCHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'running' } } });
-    window.AgentoCHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'completed' } } });
+    window.RagentHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'running' } } });
+    window.RagentHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'completed' } } });
     const backgroundCount = window.__vibrations.length;
     // Coming back to the foreground with the transition already consumed:
     // the observer memory moved on, so no delayed buzz either.
     visibility = 'visible';
-    window.AgentoCHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'completed' } } });
+    window.RagentHaptics.observeRunState({ activity: { run: { runId: 'r1', state: 'completed' } } });
     const foregroundSameStateCount = window.__vibrations.length;
     return { backgroundCount, foregroundSameStateCount };
   });
@@ -145,7 +145,7 @@ try {
 
   // 6. Observer semantics: same-runId terminal transitions only.
   const observer = await page.evaluate(() => {
-    const h = window.AgentoCHaptics;
+    const h = window.RagentHaptics;
     const out = [];
     const probe = (label, runId, state) => {
       const before = window.__vibrations.length;

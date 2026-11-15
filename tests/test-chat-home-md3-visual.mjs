@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "home-md3");
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "home-md3");
 await mkdir(outputDir, { recursive: true });
 
 const [baseCss, homeCss, iconsSource, homeSource] = await Promise.all([
@@ -115,9 +115,9 @@ async function makePage({ theme, viewport }) {
     window.__markedSession = "";
     window.__newSessionClicks = 0;
     window.__crossDeviceOpen = null;
-    window.agentocGetActiveUiLanguage = () => "en-US";
+    window.ragentGetActiveUiLanguage = () => "en-US";
     window.applyNavigationState = ({ sessionId }) => { window.__openedSession = sessionId; };
-    window.AgentoCCrossDevicePanel = {
+    window.RagentCrossDevicePanel = {
       open(options) {
         window.__crossDeviceOpen = options;
         return true;

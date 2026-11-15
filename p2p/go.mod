@@ -1,4 +1,4 @@
-module agentoc/p2p
+module ragent/p2p
 
 go 1.26.0
 

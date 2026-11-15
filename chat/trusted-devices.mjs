@@ -66,7 +66,7 @@ function hashSecret(value) {
  */
 export function deriveDeviceP2PSecret(instanceSecret, deviceId) {
   return createHmac('sha256', String(instanceSecret || ''))
-    .update(`agentoc-p2p-device-secret-v1:${String(deviceId || '')}`)
+    .update(`ragent-p2p-device-secret-v1:${String(deviceId || '')}`)
     .digest('hex');
 }
 
@@ -219,7 +219,7 @@ export async function loadState() {
 async function mutateState(mutator) {
   return runTrustedDeviceMutation(async () => {
     const draft = await loadState();
-    const originalTokens = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? new Set(draft.authTokens.map(entry => entry.tokenHash)) : null;
+    const originalTokens = process.env.RAGENT_RUNTIME_MODE === 'proot' ? new Set(draft.authTokens.map(entry => entry.tokenHash)) : null;
     const generation = originalTokens ? readProotAccountLink().generation : null;
     const originalChallenges = originalTokens ? new Set(draft.challenges.map(entry => entry.challengeId)) : null;
     const result = await mutator(draft);
@@ -309,7 +309,7 @@ export async function createTrustedDeviceAccountIntent({
   accountClaimToken = '',
   renewExistingDeviceId = '',
 } = {}) {
-  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
+  const prootGeneration = process.env.RAGENT_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalized = normalizeDevicePublicKey(devicePublicKey);
   if (!normalized) {
     const error = new Error('A valid device public key is required');
@@ -333,7 +333,7 @@ export async function createTrustedDeviceAccountIntent({
     devicePublicKeyFingerprint,
     nonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
     publicEndpoint: normalizedPublicEndpoint,
   }).signature;
   await mutateState((draft) => {
@@ -504,7 +504,7 @@ function deriveAccountCompletionCredential(state, intent) {
   // Only the protected instance secret can reproduce the original bearer.
   // No plaintext bearer is retained in the intent or token table.
   return `rda_${createHmac('sha256', state.instanceSecret)
-    .update('agentoc-account-completion-credential-v1:')
+    .update('ragent-account-completion-credential-v1:')
     .update(JSON.stringify([
       state.instanceId, intent.intentId, intent.accountId,
       intent.completionRequestId, intent.deviceId, intent.devicePublicKeyFingerprint,
@@ -762,7 +762,7 @@ export async function completeTrustedDeviceAccountIntent({
       tokenHash: hashSecret(token),
       deviceId: device.id,
       kind: 'bound',
-      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: Number.isSafeInteger(intent.prootGeneration) ? intent.prootGeneration : -1 } : {}),
+      ...(process.env.RAGENT_RUNTIME_MODE === 'proot' ? { prootGeneration: Number.isSafeInteger(intent.prootGeneration) ? intent.prootGeneration : -1 } : {}),
       bindingAuthorityRevision,
       scope: 'device-access',
       createdAt: now,
@@ -827,7 +827,7 @@ export async function createTrustedDeviceInvitation(options = {}) {
       deviceId: '',
     };
     draft.invitations.push(invitation);
-    const pairingUri = new URL('agentoc://pair');
+    const pairingUri = new URL('ragent://pair');
     pairingUri.searchParams.set('v', String(protocolVersion));
     // This QR is an account-claim ticket only. It deliberately contains no
     // endpoint, signaling address, room, or transport metadata.
@@ -1094,7 +1094,7 @@ export async function authenticateTrustedDeviceToken(token) {
   if (normalizedToken.startsWith('rda_') || normalizedToken.startsWith('rdp_')) {
     const authToken = state.authTokens.find((entry) => entry.tokenHash === tokenHash);
     if (!authToken) return null;
-    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+    if (process.env.RAGENT_RUNTIME_MODE === 'proot') {
       const link = readProotAccountLink();
       if (link.state !== 'active' || authToken.prootGeneration !== link.generation) return null;
     }
@@ -1113,7 +1113,7 @@ export async function authenticateTrustedDeviceToken(token) {
       try { authority = await authorizeDeviceBinding(device, { credential: true, tokenRevision: authToken.bindingAuthorityRevision }); }
       catch { return null; }
     }
-    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+    if (process.env.RAGENT_RUNTIME_MODE === 'proot') {
       const link = readProotAccountLink();
       if (link.state !== 'active' || authToken.prootGeneration !== link.generation) return null;
     }
@@ -1127,14 +1127,14 @@ export async function authenticateTrustedDeviceToken(token) {
       ...(authority ? { accountId: authority.accountId, bindingAuthorityRevision: authority.revision,
         ...(authority.workspaceAccess ? { workspaceAccess: authority.workspaceAccess } : {}) } : {}),
       authMethod: provisional ? 'provisional_pairing' : 'trusted_device_challenge',
-      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: authToken.prootGeneration } : {}),
+      ...(process.env.RAGENT_RUNTIME_MODE === 'proot' ? { prootGeneration: authToken.prootGeneration } : {}),
       scope: provisional ? 'provisional-google' : 'device-access',
       expiry: expiresAtMs,
     };
   }
 
   // rdt_ legacy bearer token.
-  if (process.env.AGENTOC_RUNTIME_MODE === 'proot') return null;
+  if (process.env.RAGENT_RUNTIME_MODE === 'proot') return null;
   const device = state.devices.find((entry) => entry.tokenHash === tokenHash && !entry.revokedAt);
   if (!device) return null;
   // Enforce persisted expiresAt for legacy devices.
@@ -1214,7 +1214,7 @@ export async function promoteTrustedDevice(deviceId, accountId) {
 // succeed. Keeping the two local writes together avoids a bound device with no
 // replacement credential when the second write fails.
 export async function convergeTrustedDevice(deviceId, accountId, { bindingAuthorityRevision = '' } = {}) {
-  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
+  const prootGeneration = process.env.RAGENT_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalizedDeviceId = trimString(deviceId);
   const normalizedAccountId = trimString(accountId);
   if (!normalizedDeviceId || !normalizedAccountId) {
@@ -1273,7 +1273,7 @@ export async function convergeTrustedDevice(deviceId, accountId, { bindingAuthor
 }
 
 export async function issueTrustedDeviceCredential(deviceId) {
-  const prootGeneration = process.env.AGENTOC_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
+  const prootGeneration = process.env.RAGENT_RUNTIME_MODE === 'proot' ? readProotAccountLink().generation : null;
   const normalizedDeviceId = trimString(deviceId);
   await authorizeDeviceBinding(await getTrustedDeviceStatus(normalizedDeviceId));
   return mutateState((draft) => {
@@ -1413,7 +1413,7 @@ export async function updateTrustedDeviceEntryUrl(deviceId, entryUrl) {
 
 export async function createTrustedDeviceAuthChallenge(deviceId, options = {}) {
   const normalizedDeviceId = trimString(deviceId);
-  const audience = trimString(options.audience) || 'agentoc-device-access';
+  const audience = trimString(options.audience) || 'ragent-device-access';
   const publicKey = trimString(options.devicePublicKey);
   const fingerprint = publicKey ? createDevicePublicKeyFingerprint(publicKey) : '';
   if (publicKey && (!normalizeDevicePublicKey(publicKey) || !fingerprint)) {
@@ -1495,7 +1495,7 @@ export async function createTrustedDeviceAuthChallenge(deviceId, options = {}) {
       expiresAt,
       audience,
       instanceId,
-      ...(process.env.AGENTOC_RUNTIME_MODE === 'proot' ? { prootGeneration: readProotAccountLink().generation } : {}),
+      ...(process.env.RAGENT_RUNTIME_MODE === 'proot' ? { prootGeneration: readProotAccountLink().generation } : {}),
     };
     draft.challenges.push(challenge);
 
@@ -1552,7 +1552,7 @@ export async function verifyTrustedDeviceAuthChallenge({
       error.statusCode = 404;
       throw error;
     }
-    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+    if (process.env.RAGENT_RUNTIME_MODE === 'proot') {
       const link = readProotAccountLink();
       if (link.state !== 'active' || challenge.prootGeneration !== link.generation)
         throw Object.assign(new Error('Challenge authorization changed'), { statusCode: 401 });

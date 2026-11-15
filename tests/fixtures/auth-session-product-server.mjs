@@ -4,10 +4,10 @@ import {writeFile} from 'node:fs/promises';
 import {join,relative,resolve} from 'node:path';
 import {randomBytes,createHmac} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
-const root=resolve(process.env.AGENTOC_INSTANCE_ROOT||''),config=resolve(process.env.AGENTOC_CONFIG_DIR||'');
-assert.ok(process.env.AGENTOC_TEST_INSTANCE_ID&&relative(root,config)==='config');
-assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));assert.equal(new URL(process.env.AGENTOC_ACCOUNTS_URL).hostname,'127.0.0.1');
-process.env.AGENTOC_LOCAL_WEB_AUTH='0';
+const root=resolve(process.env.RAGENT_INSTANCE_ROOT||''),config=resolve(process.env.RAGENT_CONFIG_DIR||'');
+assert.ok(process.env.RAGENT_TEST_INSTANCE_ID&&relative(root,config)==='config');
+assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));assert.equal(new URL(process.env.RAGENT_ACCOUNTS_URL).hostname,'127.0.0.1');
+process.env.RAGENT_LOCAL_WEB_AUTH='0';
 const legacy=randomBytes(32).toString('hex');await writeFile(join(config,'auth-sessions.json'),JSON.stringify({[legacy]:{role:'owner',expiry:Date.now()+60000}}));
 let sql;
 try{
@@ -16,7 +16,7 @@ try{
   const call=(path,options={})=>fetch(origin+path,{redirect:'manual',...options});
   assert.equal((await call('/api/auth/me')).status,401);
   const info=await call('/api/auth/me',{headers:{Cookie:'session_token='+legacy}});assert.equal(info.status,200);assert.match(info.headers.get('set-cookie'),/HttpOnly/);assert.equal((await info.json()).role,'owner');
-  const key='s'+createHmac('sha256',process.env.AGENTOC_AUTH_SESSION_SECRET).update(legacy).digest('hex');sql=new DatabaseSync(join(config,'auth-sessions.sqlite'),{readOnly:true});
+  const key='s'+createHmac('sha256',process.env.RAGENT_AUTH_SESSION_SECRET).update(legacy).digest('hex');sql=new DatabaseSync(join(config,'auth-sessions.sqlite'),{readOnly:true});
   assert.ok(sql.prepare('SELECT expiry FROM sessions WHERE token_hash=?').get(key).expiry>Date.now()+3600000);sql.close();sql=null;
   const logout=await call('/logout',{headers:{Cookie:'session_token='+legacy}});assert.equal(logout.status,302);assert.equal(auth.sessions.get(key),null);assert.equal((await call('/api/auth/me',{headers:{Cookie:'session_token='+legacy}})).status,401);
   await writeFile(join(config,'auth.json'),JSON.stringify({username:'qa-owner',passwordHash:await auth.hashPasswordAsync('SYNTHETIC-PASSWORD-123')}));

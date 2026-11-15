@@ -97,7 +97,7 @@ try {
       const open = await page.evaluate(() => {
         const menu = document.getElementById('composerRuntimeMenu');
         const trigger = document.getElementById('composerRuntimeBtn');
-        window.AgentoCComposerMenuPortal.sync(menu, trigger, true, { align: 'right' });
+        window.RagentComposerMenuPortal.sync(menu, trigger, true, { align: 'right' });
         menu.hidden = false;
         menu.classList.add('is-open');
         const cs = getComputedStyle(menu);
@@ -135,7 +135,7 @@ try {
       const closedAgain = await page.evaluate(() => {
         const menu = document.getElementById('composerRuntimeMenu');
         const trigger = document.getElementById('composerRuntimeBtn');
-        window.AgentoCComposerMenuPortal.sync(menu, trigger, false);
+        window.RagentComposerMenuPortal.sync(menu, trigger, false);
         menu.hidden = true;
         menu.classList.remove('is-open');
         return { hidden: menu.hidden, display: getComputedStyle(menu).display };

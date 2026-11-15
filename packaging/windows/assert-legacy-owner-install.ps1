@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param([string]$PackageRoot='')
 $ErrorActionPreference='Stop'
-if(-not ('AgentoCLegacyOwnerInstallGuard' -as [type])) {
+if(-not ('RagentLegacyOwnerInstallGuard' -as [type])) {
     Add-Type -Path (Join-Path $PSScriptRoot 'legacy-owner-install-guard.cs') -ReferencedAssemblies System.Management,System.Core
 }
-[AgentoCLegacyOwnerInstallGuard]::AssertCompatible($PackageRoot)
+[RagentLegacyOwnerInstallGuard]::AssertCompatible($PackageRoot)

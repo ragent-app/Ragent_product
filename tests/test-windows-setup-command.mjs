@@ -9,15 +9,15 @@ import {
 
 const env = {
   ProgramData: 'C:\\ProgramData',
-  AGENTOC_POWERSHELL: 'powershell-fixture.exe',
+  RAGENT_POWERSHELL: 'powershell-fixture.exe',
 };
 
 assert.deepEqual(resolveWindowsServiceSetupPaths({ platform: 'win32', env }), {
-  dataRoot: 'C:\\ProgramData\\AgentoC',
-  instanceRoot: 'C:\\ProgramData\\AgentoC\\instances\\owner',
-  configDir: 'C:\\ProgramData\\AgentoC\\instances\\owner\\config',
-  runtimeDir: 'C:\\ProgramData\\AgentoC\\instances\\owner\\runtime',
-  authFile: 'C:\\ProgramData\\AgentoC\\instances\\owner\\config\\auth.json',
+  dataRoot: 'C:\\ProgramData\\Ragent',
+  instanceRoot: 'C:\\ProgramData\\Ragent\\instances\\owner',
+  configDir: 'C:\\ProgramData\\Ragent\\instances\\owner\\config',
+  runtimeDir: 'C:\\ProgramData\\Ragent\\instances\\owner\\runtime',
+  authFile: 'C:\\ProgramData\\Ragent\\instances\\owner\\config\\auth.json',
 });
 assert.throws(
   () => resolveWindowsServiceSetupPaths({ platform: 'win32', env: { ProgramData: '\\\\server\\share' } }),
@@ -30,8 +30,8 @@ assert.throws(
 
 const probe = buildWindowsSetupServiceProbePowerShell();
 assert.match(probe, /Get-Service -Name/);
-assert.match(probe, /AgentoC-RunnerSupervisor/);
-assert.match(probe, /AgentoC-ControlPlane/);
+assert.match(probe, /Ragent-RunnerSupervisor/);
+assert.match(probe, /Ragent-ControlPlane/);
 assert.match(probe, /ConvertTo-Json/);
 assert.doesNotMatch(probe, /bash|systemctl/);
 
@@ -42,7 +42,7 @@ const result = await runWindowsSetupCommand([], {
   env,
   powershellPath: 'powershell-fixture.exe',
   nodePath: 'C:\\Program Files\\nodejs\\node.exe',
-  sourceRoot: 'C:\\Program Files\\AgentoC\\current\\payload',
+  sourceRoot: 'C:\\Program Files\\Ragent\\current\\payload',
   execFileImpl: async (command, args, options) => {
     calls.push({ type: 'probe', command, args, options });
     return {
@@ -50,8 +50,8 @@ const result = await runWindowsSetupCommand([], {
         installed: true,
         missing: [],
         states: {
-          'AgentoC-RunnerSupervisor': 'Running',
-          'AgentoC-ControlPlane': 'Running',
+          'Ragent-RunnerSupervisor': 'Running',
+          'Ragent-ControlPlane': 'Running',
         },
       }),
     };
@@ -71,9 +71,9 @@ const result = await runWindowsSetupCommand([], {
 
 assert.equal(result, 0);
 assert.deepEqual(calls.map((call) => call.type), ['probe', 'password', 'lifecycle', 'health']);
-assert.deepEqual(calls[1].args, ['C:\\Program Files\\AgentoC\\current\\payload\\set-password.mjs']);
-assert.equal(calls[1].options.env.AGENTOC_WINDOWS_SERVICE_MODE, '1');
-assert.equal(calls[1].options.env.AGENTOC_CONFIG_DIR, 'C:\\ProgramData\\AgentoC\\instances\\owner\\config');
+assert.deepEqual(calls[1].args, ['C:\\Program Files\\Ragent\\current\\payload\\set-password.mjs']);
+assert.equal(calls[1].options.env.RAGENT_WINDOWS_SERVICE_MODE, '1');
+assert.equal(calls[1].options.env.RAGENT_CONFIG_DIR, 'C:\\ProgramData\\Ragent\\instances\\owner\\config');
 assert.equal(calls[2].options.action, 'restart');
 assert.equal(calls[2].options.service, 'all');
 assert.match(output.join(''), /Windows setup complete/);
@@ -83,7 +83,7 @@ await assert.rejects(
   runWindowsSetupCommand(['--check-only'], {
     platform: 'win32',
     env,
-    execFileImpl: async () => ({ stdout: JSON.stringify({ installed: false, missing: ['AgentoC-ControlPlane'] }) }),
+    execFileImpl: async () => ({ stdout: JSON.stringify({ installed: false, missing: ['Ragent-ControlPlane'] }) }),
     writer: () => {},
   }),
   (error) => error.code === 'WINDOWS_SETUP_MSI_REQUIRED',

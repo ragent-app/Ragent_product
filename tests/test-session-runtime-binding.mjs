@@ -5,26 +5,26 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomBytes } from 'crypto';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-runtime-binding-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-runtime-binding-'));
 const workspace = join(home, 'workspace');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = join(home, '.agentoc', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = join(home, 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = join(home, 'data', 'chat-runs');
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = process.platform === 'win32'
-  ? `\\\\.\\pipe\\agentoc-test-binding-${randomBytes(12).toString('hex')}` : '';
-process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = join(home, '.ragent', 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = join(home, 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = join(home, 'data', 'chat-runs');
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = process.platform === 'win32'
+  ? `\\\\.\\pipe\\ragent-test-binding-${randomBytes(12).toString('hex')}` : '';
+process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 
 mkdirSync(workspace, { recursive: true });
 mkdirSync(configDir, { recursive: true });
-mkdirSync(process.env.AGENTOC_MEMORY_DIR, { recursive: true });
+mkdirSync(process.env.RAGENT_MEMORY_DIR, { recursive: true });
 writeFileSync(join(configDir, 'tools.json'), JSON.stringify([
   {
     id: 'runtime-fake',

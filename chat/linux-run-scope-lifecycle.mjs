@@ -4,8 +4,8 @@ import { connect } from 'node:net';
 // callers must not treat this best-effort signal as a complete cancellation
 // boundary until the executor and lifecycle service synchronize operations.
 async function sendScopeRequest(run, type, scopeGrant, {
-  enabled = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1',
-  socketPath = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
+  enabled = process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1',
+  socketPath = process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET,
   connectImpl = connect, timeoutMs = 2000,
 } = {}) {
   if (!enabled) return { state: 'disabled' };

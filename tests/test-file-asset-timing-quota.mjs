@@ -8,14 +8,14 @@ import { PassThrough, Readable } from 'node:stream';
 
 test('quota timing observes failure and retry without changing verified receipt behavior', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ragent-timing-quota-'));
-  process.env.AGENTOC_INSTANCE_ROOT = root;
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-  process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-  process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example';
-  process.env.AGENTOC_ATTACHMENT_TIMING = '1';
-  for (const key of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
-    'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE',
-    'AGENTOC_ASSET_STORAGE_BASE_URL', 'AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID', 'AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[key];
+  process.env.RAGENT_INSTANCE_ROOT = root;
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+  process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example';
+  process.env.RAGENT_ATTACHMENT_TIMING = '1';
+  for (const key of ['RAGENT_MEMORY_DIR', 'RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR',
+    'RAGENT_WORK_ROOT_DIR', 'RAGENT_PLATFORM_SKILLS_DIR', 'RAGENT_INSTANCE_KEY_FILE',
+    'RAGENT_ASSET_STORAGE_BASE_URL', 'RAGENT_ASSET_STORAGE_ACCESS_KEY_ID', 'RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[key];
   const originalFetch = globalThis.fetch, originalError = console.error, timings = [];
   console.error = (...args) => { if (String(args[0]).startsWith('[attachment-timing] ')) timings.push(String(args[0])); };
   try {

@@ -2,16 +2,16 @@
   "schemaVersion": 1,
   "modules": [
     {
-      "id": "agentoc",
+      "id": "ragent",
       "title": "Ragent Core",
       "kind": "core",
-      "modeKey": "AGENTOC_MODE",
+      "modeKey": "RAGENT_MODE",
       "defaultMode": "on",
       "requiredEnv": [],
       "requiredCommands": ["node"],
       "requiredManifestPaths": ["host.repoCheckoutPath", "systemd.ownerUnit"],
       "repoCheckoutRequired": true,
-      "systemdUnit": "agentoc",
+      "systemdUnit": "ragent",
       "healthCheck": "http://127.0.0.1:7690/login"
     },
     {
@@ -27,8 +27,8 @@
         "CLOUDFLARE_TUNNEL_NAME"
       ],
       "requiredCommands": ["cloudflared"],
-      "dependsOn": ["agentoc"],
-      "startAfter": ["agentoc"],
+      "dependsOn": ["ragent"],
+      "startAfter": ["ragent"],
       "systemdUnit": "cloudflared-thelab",
       "healthCheck": "public owner hostname resolves through Cloudflare Tunnel"
     },
@@ -44,9 +44,9 @@
         "AGENT_MAIL_PUBLIC_BASE_URL"
       ],
       "requiredCommands": ["node"],
-      "dependsOn": ["agentoc"],
-      "startAfter": ["agentoc"],
-      "systemdUnit": "agentoc-agent-mail-http-bridge",
+      "dependsOn": ["ragent"],
+      "startAfter": ["ragent"],
+      "systemdUnit": "ragent-agent-mail-http-bridge",
       "healthCheck": "mail webhook bridge accepts authenticated requests"
     },
     {
@@ -57,9 +57,9 @@
       "defaultMode": "auto",
       "requiredEnv": ["AGENT_MAILBOX_ADDRESS"],
       "requiredCommands": ["node"],
-      "dependsOn": ["agentoc", "connector.email"],
+      "dependsOn": ["ragent", "connector.email"],
       "startAfter": ["connector.email"],
-      "systemdUnit": "agentoc-agent-mail-worker",
+      "systemdUnit": "ragent-agent-mail-worker",
       "healthCheck": "mailbox queue can drain approved items"
     },
     {
@@ -74,8 +74,8 @@
         "CALENDAR_GOOGLE_TOKEN_FILE"
       ],
       "requiredCommands": ["node"],
-      "dependsOn": ["agentoc"],
-      "startAfter": ["agentoc"],
+      "dependsOn": ["ragent"],
+      "startAfter": ["ragent"],
       "healthCheck": "calendar provider credentials can complete a list or insert flow"
     }
   ]

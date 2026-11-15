@@ -199,7 +199,7 @@ class RunPipeCandidate {
       stage="policy-read";
       var policy = Parse(ParentLine());
       string name = Str(policy,"pipeName");
-      Require(name != null && System.Text.RegularExpressions.Regex.IsMatch(name,"^agentoc-run-candidate-[a-f0-9]{32}$"), "IPC_PIPE_INVALID");
+      Require(name != null && System.Text.RegularExpressions.Regex.IsMatch(name,"^ragent-run-candidate-[a-f0-9]{32}$"), "IPC_PIPE_INVALID");
       long remaining = Num(policy,"expiresAtUnixMs") - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
       Require(remaining > 0 && remaining <= 120000, "IPC_DEADLINE_INVALID");
       watchdog.Change(remaining,Timeout.Infinite);

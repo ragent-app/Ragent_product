@@ -33,8 +33,8 @@ func TestMSIPublisherRejectsUnsignedAndReleasedPins(t *testing.T) {
 }
 
 func TestMSIPublisherSignedFixture(t *testing.T) {
-	source := os.Getenv("AGENTOC_TEST_SIGNED_MSI")
-	publisher := os.Getenv("AGENTOC_TEST_SIGNED_MSI_PUBLISHER_SHA256")
+	source := os.Getenv("RAGENT_TEST_SIGNED_MSI")
+	publisher := os.Getenv("RAGENT_TEST_SIGNED_MSI_PUBLISHER_SHA256")
 	if source == "" || publisher == "" {
 		t.Skip("signed MSI fixture not configured")
 	}

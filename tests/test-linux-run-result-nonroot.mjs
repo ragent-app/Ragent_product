@@ -13,9 +13,9 @@ test('non-root control recovers a distinct runner result after root broker retur
       const fields = execFileSync('/usr/bin/getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':');
       return { uid: Number(fields[2]), gid: Number(fields[3]) };
     };
-    const owner = account(process.env.AGENTOC_TEST_OWNER_USER || 'pinggu'), runner = account('agentoc-runner');
+    const owner = account(process.env.RAGENT_TEST_OWNER_USER || 'pinggu'), runner = account('ragent-runner');
     assert.ok(owner.uid > 0 && runner.uid > 0 && owner.uid !== runner.uid);
-    const root = await mkdtemp('/srv/agentoc-nonroot-result-');
+    const root = await mkdtemp('/srv/ragent-nonroot-result-');
     let broker, control;
     const deadline = setTimeout(() => control?.kill('SIGKILL'), 25000);
     deadline.unref?.();
@@ -29,15 +29,15 @@ test('non-root control recovers a distinct runner result after root broker retur
       await chown(`${root}/runner-home`, runner.uid, runner.gid);
       await mkdir(`${root}/contexts`, { mode: 0o700 });
       const socketPath = `${root}/broker.sock`;
-      const common = { ...process.env, AGENTOC_TEST_ROOT: root, AGENTOC_TEST_RUNNER_UID: String(runner.uid),
-        AGENTOC_RUN_SPOOL_DIR: `${root}/spool`, AGENTOC_RUNNER_LIFECYCLE_SOCKET: socketPath };
+      const common = { ...process.env, RAGENT_TEST_ROOT: root, RAGENT_TEST_RUNNER_UID: String(runner.uid),
+        RAGENT_RUN_SPOOL_DIR: `${root}/spool`, RAGENT_RUNNER_LIFECYCLE_SOCKET: socketPath };
       const fixture = fileURLToPath(new URL('./fixtures/linux-scope-nonroot-control.mjs', import.meta.url));
       let controlError = '', lines;
       const startControl = (recover = false) => {
         control = spawn('/usr/bin/setpriv', ['--reuid', String(owner.uid), '--regid', String(owner.gid), '--clear-groups', '--',
-          process.execPath, fixture], { env: { ...common, HOME: `${root}/home`, AGENTOC_CONFIG_DIR: `${root}/config`,
-            AGENTOC_MEMORY_DIR: `${root}/memory`, AGENTOC_RUNNER_SAME_USER: '0', AGENTOC_RUNNER_USER: 'agentoc-runner',
-            AGENTOC_LINUX_RUN_SCOPE_GRANTS: recover ? '0' : '1', AGENTOC_TEST_RECOVER: recover ? '1' : '0' },
+          process.execPath, fixture], { env: { ...common, HOME: `${root}/home`, RAGENT_CONFIG_DIR: `${root}/config`,
+            RAGENT_MEMORY_DIR: `${root}/memory`, RAGENT_RUNNER_SAME_USER: '0', RAGENT_RUNNER_USER: 'ragent-runner',
+            RAGENT_LINUX_RUN_SCOPE_GRANTS: recover ? '0' : '1', RAGENT_TEST_RECOVER: recover ? '1' : '0' },
         stdio: ['pipe', 'pipe', 'pipe'] });
         control.stderr.on('data', (chunk) => { controlError += chunk; });
         lines = createInterface({ input: control.stdout })[Symbol.asyncIterator]();
@@ -57,10 +57,10 @@ test('non-root control recovers a distinct runner result after root broker retur
       const sidecar = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
         process.execPath, '--input-type=module', '-e',
         `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; try { await writeRunResult(${JSON.stringify(ready.runId)}, ${JSON.stringify(outcome)}); process.exit(1); } catch (e) { process.exit(e.code === 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' ? 23 : 2); }`],
-      { env: { ...common, HOME: `${root}/runner-home`, AGENTOC_CONFIG_DIR: `${root}/runner-home`,
-        AGENTOC_MEMORY_DIR: `${root}/runner-home/memory`, AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0',
-        AGENTOC_RUNNER_DISTINCT_IDENTITY: '1', AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1',
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}` }, stdio: ['ignore', 'ignore', 'pipe'] });
+      { env: { ...common, HOME: `${root}/runner-home`, RAGENT_CONFIG_DIR: `${root}/runner-home`,
+        RAGENT_MEMORY_DIR: `${root}/runner-home/memory`, RAGENT_LINUX_RUN_SCOPE_GRANTS: '0',
+        RAGENT_RUNNER_DISTINCT_IDENTITY: '1', RAGENT_LINUX_SCOPE_FINISH_ENABLED: '1',
+        RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}` }, stdio: ['ignore', 'ignore', 'pipe'] });
       let runnerError = ''; sidecar.stderr.on('data', (chunk) => { runnerError += chunk; });
       const code = await new Promise((resolve, reject) => { sidecar.once('error', reject); sidecar.once('close', resolve); });
       assert.equal(code, 23, runnerError);
@@ -72,8 +72,8 @@ test('non-root control recovers a distinct runner result after root broker retur
       control.stdin.end('exit\n');
       assert.equal(await closed, 0, controlError);
       control = null;
-      broker = await createRunnerLifecycleServer({ socketPath, serviceUser: 'agentoc-runner',
-        serviceGroup: 'root', controlUser: process.env.AGENTOC_TEST_OWNER_USER || 'pinggu', controlGroup: 'root',
+      broker = await createRunnerLifecycleServer({ socketPath, serviceUser: 'ragent-runner',
+        serviceGroup: 'root', controlUser: process.env.RAGENT_TEST_OWNER_USER || 'pinggu', controlGroup: 'root',
         runScopeRegistration: { directory: `${root}/contexts`, pinDirectory: `${root}/unused` } });
       startControl(true);
       assert.equal((await next()).uid, owner.uid);

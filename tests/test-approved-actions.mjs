@@ -55,14 +55,14 @@ assert.deepEqual(getApprovedActionCapability({
   passkeyAvailable: false,
   requiresHost: true,
 }), { state: 'available', reason: '' });
-process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED = '1';
+process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED = '1';
 assert.equal(getApprovedActionCapability({
   session: { riskMode: 'recommended' },
   runtime: { runtimeFamily: 'codex-app-server-json', supportsManagedActionMcp: true },
   passkeyAvailable: false,
   requiresHost: true,
 }).reason, 'passkey_missing');
-delete process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED;
+delete process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED;
 passed += 2;
 check('host capability TTL remains 15 minutes', approvedActionCapabilityTtlMs('host') === APPROVED_ACTION_HOST_CAPABILITY_TTL_MS
   && APPROVED_ACTION_HOST_CAPABILITY_TTL_MS === 15 * 60 * 1000);
@@ -80,7 +80,7 @@ check('host action is manifest bound', host.executionClass === APPROVED_ACTION_E
 // Default policy is owner-click: host actions no longer project needsPasskey.
 check('host action is click-only by default', host.needsPasskey === false);
 check('passkey checkpoint returns under policy env', (() => {
-  process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED = '1';
+  process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED = '1';
   try {
     const repasskey = buildApprovedAction({
       command: 'sudo systemctl restart nginx',
@@ -89,7 +89,7 @@ check('passkey checkpoint returns under policy env', (() => {
     }, context);
     return repasskey.needsPasskey === true;
   } finally {
-    delete process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED;
+    delete process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED;
   }
 })());
 check('approved action carries bounded expiry', Date.parse(host.expiresAt) - Date.parse(host.createdAt) === APPROVED_ACTION_TTL_MS);

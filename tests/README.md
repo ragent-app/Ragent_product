@@ -15,9 +15,9 @@ Scenario-style validation scripts are in this directory.
 
 Live agent smoke tests are intentionally opt-in because they spend real model/runtime budget and hit the running owner instance.
 
-- `tests/test-agenda-agent-live-smoke.mjs` validates the end-to-end `agentoc agenda` flow through a real agent session.
+- `tests/test-agenda-agent-live-smoke.mjs` validates the end-to-end `ragent agenda` flow through a real agent session.
 - Default smoke profile is `codex` with `effort=low`.
-- Override the smoke agent with `AGENTOC_SMOKE_TOOL`, `AGENTOC_SMOKE_MODEL`, and `AGENTOC_SMOKE_EFFORT` when you want to trial a cheaper or alternate profile.
+- Override the smoke agent with `RAGENT_SMOKE_TOOL`, `RAGENT_SMOKE_MODEL`, and `RAGENT_SMOKE_EFFORT` when you want to trial a cheaper or alternate profile.
 
 High-value smoke scripts:
 

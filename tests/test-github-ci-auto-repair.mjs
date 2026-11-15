@@ -10,8 +10,8 @@ import { buildSessionMessage, selectLatestFailureCandidates, truncateLogText } f
 
 const testsRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(testsRoot, '..');
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-github-ci-auto-repair-'));
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-github-ci-auto-repair-'));
+const configDir = join(tempHome, '.config', 'ragent');
 const binDir = join(tempHome, 'bin');
 const stateFile = join(tempHome, 'state.json');
 const snapshotDir = join(tempHome, 'snapshots');
@@ -302,8 +302,8 @@ try {
 
   const childEnv = {
     ...process.env,
-    AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-    AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+    RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+    RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
     HOME: tempHome,
     PATH: `${binDir}:${process.env.PATH}`,
   };
@@ -327,7 +327,7 @@ try {
 
   const storedState = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(storedState.handledRuns['101'].sessionId, 'session_ci_1');
-  assert.equal(storedState.handledRuns['101'].agentocRunId, 'run_ci_1');
+  assert.equal(storedState.handledRuns['101'].ragentRunId, 'run_ci_1');
 
   const secondRun = await runNode(command, childEnv);
 

@@ -16,7 +16,7 @@ import { buildTemporaryControlClaimMessage, temporaryControlInvitationDigest } f
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 
 async function fixture(t, bound = true) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-control-broker-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-control-broker-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let now = 1_800_000_000_000;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

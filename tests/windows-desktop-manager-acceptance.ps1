@@ -11,11 +11,11 @@ param(
 $ErrorActionPreference = 'Stop'
 $localRunId = [Guid]::NewGuid().ToString('N')
 $script:localInstallBase = if ($LocalHost -and -not [string]::IsNullOrWhiteSpace($LocalInstallBase)) { [IO.Path]::GetFullPath($LocalInstallBase) } else { [IO.Path]::GetFullPath($env:ProgramFiles) }
-$qaProduct = if ($LocalHost) { Join-Path $script:localInstallBase ('AgentoC Owner QA ' + $localRunId) } else { 'C:\Program Files\AgentoC Desktop Acceptance' }
-$qaData = 'C:\ProgramData\AgentoC'
-$env:AGENTOC_INSTALL_ROOT = $qaProduct
-$qaServices = @('AgentoC-ControlPlane', 'AgentoC-RunnerSupervisor')
-$expectedCandidateName = 'AgentoC-0.3.16.0-x64-unsigned.msi'
+$qaProduct = if ($LocalHost) { Join-Path $script:localInstallBase ('Ragent Owner QA ' + $localRunId) } else { 'C:\Program Files\Ragent Desktop Acceptance' }
+$qaData = 'C:\ProgramData\Ragent'
+$env:RAGENT_INSTALL_ROOT = $qaProduct
+$qaServices = @('Ragent-ControlPlane', 'Ragent-RunnerSupervisor')
+$expectedCandidateName = 'Ragent-0.3.16.0-x64-unsigned.msi'
 if (-not $LocalHost -and [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) { throw 'DESKTOP_MSI_TEMP_REQUIRED' }
 $qaRoot = [IO.Path]::GetFullPath($EvidenceDirectory)
 $candidatePath = [IO.Path]::GetFullPath($MsiPath)
@@ -37,16 +37,16 @@ function Assert-DisposableRunner {
         if ((Get-Item -LiteralPath $candidate -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'DESKTOP_MSI_ARTIFACT_REPARSE' }
         if (Test-Path -LiteralPath $qaProduct) { throw 'DESKTOP_MSI_LOCAL_UNIQUE_ROOT_EXISTS' }
         if (Test-Path -LiteralPath $qaData) { throw 'DESKTOP_MSI_LOCAL_OWNER_DATA_EXISTS' }
-        foreach ($service in @('AgentoC-ControlPlane', 'AgentoC-RunnerSupervisor', 'AgentoC-PrivilegedBroker')) {
+        foreach ($service in @('Ragent-ControlPlane', 'Ragent-RunnerSupervisor', 'Ragent-PrivilegedBroker')) {
             if (Get-Service -Name $service -ErrorAction SilentlyContinue) { throw ('DESKTOP_MSI_LOCAL_EXISTING_SERVICE_REFUSED:' + $service) }
         }
         if (Get-NetTCPConnection -LocalPort 7690 -State Listen -ErrorAction SilentlyContinue) { throw 'DESKTOP_MSI_PORT_OCCUPIED' }
         $shortcutRoots = @(
-            (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\AgentoC'),
-            (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentoC')
+            (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Ragent'),
+            (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ragent')
         )
         foreach ($path in $shortcutRoots) { if (Test-Path -LiteralPath $path) { throw 'DESKTOP_MSI_LOCAL_EXISTING_SHORTCUT_GROUP_REFUSED' } }
-        $eventSource = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\AgentoC'
+        $eventSource = 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\Ragent'
         if (Test-Path -LiteralPath $eventSource) { throw 'DESKTOP_MSI_LOCAL_EXISTING_EVENT_SOURCE_REFUSED' }
         $uninstallRoots = @(
             'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -56,7 +56,7 @@ function Assert-DisposableRunner {
             if (Test-Path -LiteralPath $root) {
                 foreach ($entry in Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue) {
                     $product = Get-ItemProperty -LiteralPath $entry.PSPath -ErrorAction SilentlyContinue
-                    if ($product.DisplayName -like 'AgentoC*') { throw 'DESKTOP_MSI_LOCAL_EXISTING_PRODUCT_REFUSED' }
+                    if ($product.DisplayName -like 'Ragent*') { throw 'DESKTOP_MSI_LOCAL_EXISTING_PRODUCT_REFUSED' }
                 }
             }
         }
@@ -262,7 +262,7 @@ function Invoke-ManagerSmoke([string]$Stage, [string]$Mode) {
 function Invoke-WaitRetryManagerSmoke {
     $exe = Join-Path $qaProduct 'payload\Desktop\Ragent.exe'
     if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'DESKTOP_MSI_APP_MISSING' }
-    $controlService = Get-Service -Name 'AgentoC-ControlPlane' -ErrorAction Stop
+    $controlService = Get-Service -Name 'Ragent-ControlPlane' -ErrorAction Stop
     if ($controlService.Status -ne 'Running') { throw 'DESKTOP_MSI_CONTROL_PLANE_NOT_RUNNING_BEFORE_WAIT_TEST' }
     Stop-Service -Name $controlService.Name -Force
     $portDeadline = (Get-Date).AddSeconds(20)
@@ -312,7 +312,7 @@ function Save-ServiceSnapshot([string]$Stage) {
 function Assert-Removed([string]$Stage) {
     $services = @($qaServices | ForEach-Object { Get-Service -Name $_ -ErrorAction SilentlyContinue })
     $processes = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($qaProduct + '\', [StringComparison]::OrdinalIgnoreCase) })
-    $productExists = Test-Path -LiteralPath (Join-Path $qaProduct 'AgentoC.ServiceHost.exe')
+    $productExists = Test-Path -LiteralPath (Join-Path $qaProduct 'Ragent.ServiceHost.exe')
     if ($LocalHost -and (Test-Path -LiteralPath $qaProduct -PathType Container)) {
         $rootItem = Get-Item -LiteralPath $qaProduct -Force
         if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'DESKTOP_MSI_LOCAL_INSTALL_ROOT_REPARSE_REFUSED' }
@@ -323,14 +323,14 @@ function Assert-Removed([string]$Stage) {
     $shortcutGroupExists = $false
     $productRegistrationExists = $false
     if ($LocalHost) {
-        $eventSourceExists = Test-Path -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\AgentoC'
-        $shortcutGroupExists = (Test-Path -LiteralPath (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\AgentoC')) -or
-            (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentoC'))
+        $eventSourceExists = Test-Path -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\Ragent'
+        $shortcutGroupExists = (Test-Path -LiteralPath (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Ragent')) -or
+            (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ragent'))
         foreach ($registryRoot in @('HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
             if (Test-Path -LiteralPath $registryRoot) {
                 foreach ($entry in Get-ChildItem -LiteralPath $registryRoot -ErrorAction SilentlyContinue) {
                     $product = Get-ItemProperty -LiteralPath $entry.PSPath -ErrorAction SilentlyContinue
-                    if ($product.DisplayName -like 'AgentoC*') { $productRegistrationExists = $true }
+                    if ($product.DisplayName -like 'Ragent*') { $productRegistrationExists = $true }
                 }
             }
         }
@@ -387,10 +387,10 @@ try {
     Assert-OwnerSessionPersistence 'fresh-install' $ownerCookies $identityHash $secretHash
 
     $shortcutRoots = @(
-        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\AgentoC'),
-        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\AgentoC')
+        (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Ragent'),
+        (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Ragent')
     )
-    $shortcut = Get-ChildItem -LiteralPath $shortcutRoots -Filter 'AgentoC.lnk' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+    $shortcut = Get-ChildItem -LiteralPath $shortcutRoots -Filter 'Ragent.lnk' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $shortcut) { throw 'DESKTOP_MSI_START_MENU_SHORTCUT_MISSING' }
     $shell = New-Object -ComObject WScript.Shell
     $target = $shell.CreateShortcut($shortcut.FullName).TargetPath
@@ -427,7 +427,7 @@ try {
         $installStarted = [DateTime]::Parse($report.startedAt).ToLocalTime()
         $appEvents = @()
         $serviceEvents = @()
-        try { $appEvents = @(Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='AgentoC'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated,Id,LevelDisplayName,Message) } catch {}
+        try { $appEvents = @(Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Ragent'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated,Id,LevelDisplayName,Message) } catch {}
         try { $serviceEvents = @(Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'; StartTime=$installStarted} -ErrorAction SilentlyContinue | Where-Object { $_.Id -in @(7000,7009,7011,7023,7024,7031,7034) } | Select-Object -First 30 TimeCreated,Id,LevelDisplayName,Message) } catch {}
         $serviceRows = @()
         foreach ($name in $qaServices) {

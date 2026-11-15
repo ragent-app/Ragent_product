@@ -12,7 +12,7 @@ import {openAuthSessionStore,readAuthSessionStoreUsage} from '../lib/auth-sessio
 const secret='SYNTHETIC-AUTH-STORE-TEST-SECRET',key=()=> 's'+randomBytes(32).toString('hex'),session=()=>({role:'owner',expiry:Date.now()+60000});
 const fixtureCleanups=new Map();
 async function fixture(t){
-  const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-auth-store-')),stores=[],cleanups=[];fixtureCleanups.set(root,cleanups);
+  const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-auth-store-')),stores=[],cleanups=[];fixtureCleanups.set(root,cleanups);
   t.after(async()=>{for(const cleanup of cleanups.reverse())await cleanup();for(const store of stores)store.close();await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:25});fixtureCleanups.delete(root);});
   const options={legacyFile:join(root,'auth-sessions.json'),databaseFile:join(root,'auth-sessions.sqlite'),secret};
   const open=(patch={})=>{const store=openAuthSessionStore({...options,...patch});stores.push(store);return store;};return {root,options,open,cleanups};

@@ -11,7 +11,7 @@ import {OWNER_BOOTSTRAP_INSTALLED_PATHS,ownerDiscoveryPurposePath,validateOwnerD
 import {createOwnerBootstrapIssuer} from '../lib/windows-owner-bootstrap-protocol.mjs';
 const hex=()=>randomBytes(32).toString('hex');
 function config(){const authority={instanceId:randomUUID(),controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1,expiresAtUnixMs:Date.now()+25000};
-  return {authority,releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),
+  return {authority,releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),
     installationJson:JSON.stringify({version:1,instanceId:authority.instanceId,controlSid:authority.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:authority.ownerSid,port:7690})};}
 function nativeFixture(){const values=[];let pid=1000;
   const serveEndpoint=async options=>{let resolve,reject;const completion=new Promise((yes,no)=>{resolve=yes;reject=no;});completion.catch(()=>{});
@@ -24,12 +24,12 @@ function nativeFixture(){const values=[];let pid=1000;
       requestId:options.policy.requestId,expiresAtUnixMs:options.policy.expiresAtUnixMs,challenge:randomBytes(32).toString('base64url'),launchNonce:hex()}});
     values.push({options,resolve,reject,endpoint,request,facts});return endpoint;
   };return {values,serveEndpoint};}
-async function fixture(t,options={}){const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-owner-set-')),c=config(),native=nativeFixture(),issued={cli:0,browser:0},revoked=[];
+async function fixture(t,options={}){const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-owner-set-')),c=config(),native=nativeFixture(),issued={cli:0,browser:0},revoked=[];
   const paths={cli:join(root,'cli.json'),browser:join(root,'browser.json'),publisher:join(root,'publisher.json')};
   const callbacks={issueOwnerSession:async()=>{issued.cli++;return hex();},revokeOwnerSession:async token=>{revoked.push(token);},issueBrowserTicket:async()=>{issued.browser++;return hex();},revokeBrowserTicket:async token=>{revoked.push(token);},confirmBrowserTicket:()=>{}};
   const setup={...c,...callbacks,publisherStore:createOwnerDiscoveryFileStore({filePath:paths.publisher}),stores:Object.fromEntries(['cli','browser'].map(p=>[p,createOwnerDiscoveryFileStore({filePath:paths[p]})])),serveEndpoint:native.serveEndpoint,...options};
   const controller=await createOwnerDiscoverySetController(setup);
-  t.after(async()=>{await controller.close();const actual=await realpath(root);assert.equal(actual.toLowerCase(),root.toLowerCase());assert.equal(dirname(actual).toLowerCase(),(await realpath(tmpdir())).toLowerCase());assert.ok(basename(actual).startsWith('agentoc-owner-set-'));await rm(actual,{recursive:true,force:true});});
+  t.after(async()=>{await controller.close();const actual=await realpath(root);assert.equal(actual.toLowerCase(),root.toLowerCase());assert.equal(dirname(actual).toLowerCase(),(await realpath(tmpdir())).toLowerCase());assert.ok(basename(actual).startsWith('ragent-owner-set-'));await rm(actual,{recursive:true,force:true});});
   const read=async purpose=>JSON.parse(await readFile(paths[purpose],'utf8'));
   return {root,c,native,controller,paths,setup,issued,revoked,read};}
 async function absent(path){await assert.rejects(lstat(path),{code:'ENOENT'});}
@@ -57,7 +57,7 @@ test('purpose selection fixes two owned paths and rejects caller paths/unknown p
   for(const purpose of ['legacy','CLI','../browser','C:/override',undefined,{},null]){assert.throws(()=>ownerDiscoveryPurposePath(purpose),{code:'OBD_PURPOSE_INVALID'});if(purpose!==undefined)await assert.rejects(inspectInstalledOwnerBootstrap({purpose}),{code:'OBD_PURPOSE_INVALID'});}
 });
 test('a signed/ACL-shaped private descriptor still cannot cross purpose slots or downgrade to v1',()=>{
-  const c=config(),policy={...c.authority,protocolVersion:2,purpose:'browser',pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')};
+  const c=config(),policy={...c.authority,protocolVersion:2,purpose:'browser',pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')};
   const peer={pid:1234,createdTicks:'134368500000000000',sid:policy.controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false};
   const descriptor=ownerDiscoveryDescriptor({...c,policy,peer}),release=JSON.parse(c.releaseJson);
   const evidence={version:1,aclVerified:true,signatureStatus:'Valid',helperSha256:release.helperSha256,publisherSha256:release.publisherSha256,releaseJson:c.releaseJson,

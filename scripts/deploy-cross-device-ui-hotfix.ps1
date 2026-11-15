@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$serviceName = 'AgentoC-ControlPlane'
+$serviceName = 'Ragent-ControlPlane'
 $healthUrl = 'http://127.0.0.1:7690/healthz'
 $assets = @(
   'qr-creator.min.js',
@@ -72,7 +72,7 @@ $isElevated = ([Security.Principal.WindowsPrincipal] [Security.Principal.Windows
 if ($Rollback) {
   if (-not $BackupPath) { throw 'Rollback requires -BackupPath pointing to a backup created by this script.' }
   $BackupPath = [IO.Path]::GetFullPath($BackupPath)
-  $allowedBackupRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'AgentoC\backups\cross-device-ui')).TrimEnd('\') + '\'
+  $allowedBackupRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'Ragent\backups\cross-device-ui')).TrimEnd('\') + '\'
   if (-not $BackupPath.StartsWith($allowedBackupRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to restore from outside $allowedBackupRoot" }
   if (-not (Test-Path -LiteralPath (Join-Path $BackupPath 'manifest.json'))) { throw "Backup manifest was not found in $BackupPath" }
   $manifest = Get-Content -LiteralPath (Join-Path $BackupPath 'manifest.json') -Raw | ConvertFrom-Json
@@ -117,7 +117,7 @@ if ($WhatIfPreference) {
   return
 }
 
-$backupRoot = Join-Path $env:ProgramData 'AgentoC\backups\cross-device-ui'
+$backupRoot = Join-Path $env:ProgramData 'Ragent\backups\cross-device-ui'
 $backup = Join-Path $backupRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
 if ($PSCmdlet.ShouldProcess($payload, 'Install cross-device pairing UI assets and restart the idle ControlPlane service')) {
   New-Item -ItemType Directory -Path $backup -Force | Out-Null

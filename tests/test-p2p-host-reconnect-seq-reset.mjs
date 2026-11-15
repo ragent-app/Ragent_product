@@ -20,7 +20,7 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const binaryPath = process.env.AGENTOC_TEST_P2P_BINARY || resolveP2PHostBinary();
+const binaryPath = process.env.RAGENT_TEST_P2P_BINARY || resolveP2PHostBinary();
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
   server.listen(0, '127.0.0.1', () => resolve(server.address()));

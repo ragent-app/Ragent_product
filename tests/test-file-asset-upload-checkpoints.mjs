@@ -10,11 +10,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { Readable, PassThrough } from 'node:stream';
 
-const root = process.env.AGENTOC_CHECKPOINT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-upload-checkpoints-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-for (const key of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
-  'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE']) delete process.env[key];
+const root = process.env.RAGENT_CHECKPOINT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-upload-checkpoints-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+for (const key of ['RAGENT_MEMORY_DIR', 'RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR',
+  'RAGENT_WORK_ROOT_DIR', 'RAGENT_PLATFORM_SKILLS_DIR', 'RAGENT_INSTANCE_KEY_FILE']) delete process.env[key];
 const assets = await import('../chat/file-assets.mjs');
 const { FileAssetUploadCheckpoints, UPLOAD_CHUNK_BYTES: chunkBytes, UPLOAD_BATCH_BYTES, UPLOAD_CHECKPOINT_TTL_MS,
   UPLOAD_CHECKPOINT_MAX_LIFETIME_MS, MAX_STABLE_UPLOAD_BYTES, uploadChunkHeaders } = await import('../chat/file-asset-upload-checkpoints.mjs');
@@ -31,7 +31,7 @@ const seed = async (extra = {}) => (await assets.createFileAssetUploadIntent({ .
 const paths = id => ({ manifest: join(directory, `${id}.json`), body: join(directory, `${id}.part`) });
 const chunk = (id, offset = 0, data = bytes.subarray(offset, Math.min(offset + chunkBytes, bytes.length)), options = {}) =>
   assets.appendFileAssetUploadChunk(id, Readable.from([data]), { offset, length: data.length, sha256: hash(data), ...options });
-const childEnv = { ...process.env, AGENTOC_CHECKPOINT_TEST_ROOT: root };
+const childEnv = { ...process.env, RAGENT_CHECKPOINT_TEST_ROOT: root };
 
 if (process.argv[2] === 'crash-before-manifest') {
   let authorizations = 0;
@@ -102,13 +102,13 @@ if (process.argv[2] === 'crash-before-manifest') {
     });
 
     await t.test('chunk headers reject ambiguous, unbounded and non-binary input', () => {
-      const headers = { 'content-type': 'application/octet-stream', 'x-agentoc-upload-offset': '0',
-        'x-agentoc-upload-length': String(chunkBytes), 'x-agentoc-upload-sha256': hash(bytes) };
+      const headers = { 'content-type': 'application/octet-stream', 'x-ragent-upload-offset': '0',
+        'x-ragent-upload-length': String(chunkBytes), 'x-ragent-upload-sha256': hash(bytes) };
       assert.deepEqual(uploadChunkHeaders(headers), { offset: 0, length: chunkBytes, sha256: hash(bytes) });
       assert.equal(MAX_STABLE_UPLOAD_BYTES, 1024 * 1024 * 1024);
-      assert.equal(uploadChunkHeaders({ ...headers, 'x-agentoc-upload-offset': '1073741824' }).offset, 1073741824);
+      assert.equal(uploadChunkHeaders({ ...headers, 'x-ragent-upload-offset': '1073741824' }).offset, 1073741824);
       for (const bad of ['-1', '00', '1.0', '1e3', ' 1', '9007199254740992', ['0', '1'], undefined])
-        assert.throws(() => uploadChunkHeaders({ ...headers, 'x-agentoc-upload-offset': bad }), { code: 'INVALID_ARGUMENT' });
+        assert.throws(() => uploadChunkHeaders({ ...headers, 'x-ragent-upload-offset': bad }), { code: 'INVALID_ARGUMENT' });
       assert.throws(() => uploadChunkHeaders({ ...headers, 'content-type': 'text/plain' }), { statusCode: 415 });
     });
 
@@ -384,8 +384,8 @@ if (process.argv[2] === 'crash-before-manifest') {
       assert.equal((await request('PATCH', 'upload', { body: bytes.subarray(0, chunkBytes) })).status, 415);
       const part = bytes.subarray(0, chunkBytes);
       const response = await request('PATCH', 'upload', { body: part, headers: {
-        'content-type': 'application/octet-stream', 'x-agentoc-upload-offset': '0',
-        'x-agentoc-upload-length': String(part.length), 'x-agentoc-upload-sha256': hash(part) } });
+        'content-type': 'application/octet-stream', 'x-ragent-upload-offset': '0',
+        'x-ragent-upload-length': String(part.length), 'x-ragent-upload-sha256': hash(part) } });
       assert.equal(response.status, 200); assert.equal(response.body.offset, chunkBytes);
       assert.equal((await request('DELETE', 'upload-checkpoint')).body.status, 'cancelled');
       assert.equal((await request('GET', 'upload-checkpoint')).status, 410);

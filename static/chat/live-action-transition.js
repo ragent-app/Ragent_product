@@ -85,5 +85,5 @@
     if (!element.ownerDocument) element.textContent = nextText;
   }
 
-  root.AgentoCLiveActionTransition = { setText, getText };
+  root.RagentLiveActionTransition = { setText, getText };
 })(typeof globalThis !== "undefined" ? globalThis : window);

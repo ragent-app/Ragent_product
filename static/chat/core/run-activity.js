@@ -6,7 +6,7 @@
 // formatting, plan-item normalization and
 // progress presentation, tool-kind inference and optimistic activity
 // projections. i18n (t) is injected via the environment contract
-// (root.AgentocRunActivityEnvironment) with the same fallbacks as the
+// (root.RagentRunActivityEnvironment) with the same fallbacks as the
 // legacy module (key passthrough / String(value ?? "")). Two legacy
 // bindings are deliberately not ported: formatRunActivitySummary's
 // default `activity = currentActivity` (module-singleton state; callers
@@ -15,12 +15,12 @@
 // Locked against the legacy implementation by
 // tests/test-chat-run-activity-core.mjs.
 
-(function attachAgentocRunActivityCore(root) {
+(function attachRagentRunActivityCore(root) {
   const DEFAULT_ENVIRONMENT = Object.freeze({
     t: null,
   });
   const environment = new Proxy(
-    root.AgentocRunActivityEnvironment || {},
+    root.RagentRunActivityEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -281,7 +281,7 @@
     return null;
   }
 
-  root.AgentocRunActivityCore = {
+  root.RagentRunActivityCore = {
     eventBoundary,
     baseName,
     clip,

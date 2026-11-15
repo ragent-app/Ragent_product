@@ -1199,7 +1199,7 @@ export function createPostgresStore({
       try {
         await scope(client);
         await client.query('select set_config($1, $2, true)', ['lock_timeout', `${lockTimeoutMs}ms`]);
-        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['agentoc_accounts_store_v1']);
+        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['ragent_accounts_store_v1']);
         const snapshot = await readSnapshot(client), before = JSON.stringify(snapshot);
         let result;
         if (finalize) {
@@ -1235,7 +1235,7 @@ export function createPostgresStore({
       try {
         await scope(client);
         await client.query('select set_config($1, $2, true)', ['lock_timeout', `${lockTimeoutMs}ms`]);
-        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['agentoc_accounts_store_v1']);
+        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['ragent_accounts_store_v1']);
         const rows = await client.query('select * from account_join_intents where rendezvous_request_id = $1 for update', [requestId]);
         const draft = { accountJoinIntents: rows.rows.map(rowToAccountJoinIntent) };
         const original = JSON.parse(JSON.stringify(draft));
@@ -1275,7 +1275,7 @@ export function createPostgresStore({
       try {
         await scope(client);
         await client.query('select set_config($1, $2, true)', ['lock_timeout', `${lockTimeoutMs}ms`]);
-        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['agentoc_accounts_store_v1']);
+        await client.query('select pg_advisory_xact_lock(hashtext($1))', ['ragent_accounts_store_v1']);
         const credentials = await client.query('select * from account_credentials where token_hash = $1', [tokenHash]);
         const credential = credentials.rows[0];
         const draft = { accounts: [], accountCredentials: credentials.rows.map(rowToAccountCredential),

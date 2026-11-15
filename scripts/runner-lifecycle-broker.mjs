@@ -52,17 +52,17 @@ import { registerLinuxRunContext, renewLinuxRunContext, revokeLinuxRunContext } 
 
 const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = process.env.AGENTOC_PROJECT_ROOT || join(__dirname, '..');
+const PROJECT_ROOT = process.env.RAGENT_PROJECT_ROOT || join(__dirname, '..');
 const RUNNER_ENTRY = join(PROJECT_ROOT, 'chat', 'runner-sidecar.mjs');
-const NODE_RUNTIME = process.env.AGENTOC_NODE_RUNTIME || process.execPath;
-const DEFAULT_SOCKET_PATH = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET
+const NODE_RUNTIME = process.env.RAGENT_NODE_RUNTIME || process.execPath;
+const DEFAULT_SOCKET_PATH = process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET
   || join(CONFIG_DIR, 'runner-lifecycle.sock');
-const SERVICE_USER_FILE = process.env.AGENTOC_SERVICE_USER_FILE || '/etc/agentoc/service-user';
-const RUNNER_USER_FILE = process.env.AGENTOC_RUNNER_USER_FILE || '/etc/agentoc/runner-user';
-const RUNNER_GROUPS_FILE = process.env.AGENTOC_RUNNER_GROUPS_FILE || '/etc/agentoc/runner-groups';
-const DEFAULT_RUNNER_USER = 'agentoc-runner';
-const DEFAULT_RUNNER_GROUP = 'agentoc-runners';
-const RUN_SPOOL_DIR = process.env.AGENTOC_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs');
+const SERVICE_USER_FILE = process.env.RAGENT_SERVICE_USER_FILE || '/etc/ragent/service-user';
+const RUNNER_USER_FILE = process.env.RAGENT_RUNNER_USER_FILE || '/etc/ragent/runner-user';
+const RUNNER_GROUPS_FILE = process.env.RAGENT_RUNNER_GROUPS_FILE || '/etc/ragent/runner-groups';
+const DEFAULT_RUNNER_USER = 'ragent-runner';
+const DEFAULT_RUNNER_GROUP = 'ragent-runners';
+const RUN_SPOOL_DIR = process.env.RAGENT_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs');
 const MAX_REQUEST_BYTES = 16 * 1024;
 const RUN_ID_RE = /^run_[A-Za-z0-9_-]{8,128}$/;
 const lifecycleLaunchPromises = new Map();
@@ -130,7 +130,7 @@ export async function resolveControlUser({ file = SERVICE_USER_FILE, readFileImp
     const fromFile = trimString((await readFileImpl(file, 'utf8')).split(/\r?\n/, 1)[0]);
     if (fromFile) return fromFile;
   } catch {}
-  return 'agentoc';
+  return 'ragent';
 }
 
 // Same-user is the product default. Ordinary Runs must be able to edit files
@@ -139,7 +139,7 @@ export async function resolveControlUser({ file = SERVICE_USER_FILE, readFileImp
 // an explicit compatibility mode only; a stale runner-user file must never
 // silently switch a same-user installation back to another UID.
 export function isSameUserRunnerMode(environment = process.env) {
-  return String(environment?.AGENTOC_RUNNER_SAME_USER ?? '1').trim() !== '0';
+  return String(environment?.RAGENT_RUNNER_SAME_USER ?? '1').trim() !== '0';
 }
 
 export async function resolveRunnerUser({
@@ -150,10 +150,10 @@ export async function resolveRunnerUser({
   environment = process.env,
 } = {}) {
   const controlUser = await resolveControlUser({ file: controlUserFile, readFileImpl });
-  const configured = trimString(environment?.AGENTOC_RUNNER_USER);
+  const configured = trimString(environment?.RAGENT_RUNNER_USER);
   if (isSameUserRunnerMode(environment)) {
     if (configured && configured !== controlUser) {
-      throw new Error(`Same-user runner mode rejects AGENTOC_RUNNER_USER=${configured}; expected ${controlUser}`);
+      throw new Error(`Same-user runner mode rejects RAGENT_RUNNER_USER=${configured}; expected ${controlUser}`);
     }
     return controlUser;
   }
@@ -169,16 +169,29 @@ export async function resolveRunnerUser({
   throw Object.assign(new Error('Separate runner account is unavailable'), { code: 'RUNNER_IDENTITY_INVALID' });
 }
 
-// Runner group resolution: explicit AGENTOC_RUNNER_GROUP env wins, then a group
-// named after the runner user (legacy layouts), then the shared agentoc-runners
-// group that the dedicated runner user is a member of.
+// Same-user mode must use the control account's actual primary group, matching
+// the group selected by the package's id -gn service configuration.
 export async function resolveRunnerGroup(runnerUser, {
   getentImpl = execFileAsync,
   environment = process.env,
 } = {}) {
-  const configured = trimString(environment?.AGENTOC_RUNNER_GROUP);
-  if (isSameUserRunnerMode(environment) && configured && configured !== runnerUser) {
-    throw new Error(`Same-user runner mode rejects AGENTOC_RUNNER_GROUP=${configured}; expected ${runnerUser}`);
+  const configured = trimString(environment?.RAGENT_RUNNER_GROUP);
+  if (isSameUserRunnerMode(environment)) {
+    let primaryGroup;
+    try {
+      const passwd = (await getentImpl('getent', ['passwd', runnerUser], { timeout: 2_000, maxBuffer: 16 * 1024 })).stdout.trim().split(':');
+      const gid = passwd[3];
+      if (!/^\d+$/.test(gid || '')) throw new Error('Invalid primary group ID');
+      const group = (await getentImpl('getent', ['group', gid], { timeout: 2_000, maxBuffer: 16 * 1024 })).stdout.trim().split(':');
+      if (!group[0] || group[2] !== gid) throw new Error('Primary group unavailable');
+      primaryGroup = group[0];
+    } catch {
+      throw Object.assign(new Error('Cannot resolve runner primary group'), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    if (configured && configured !== primaryGroup) {
+      throw Object.assign(new Error(`Same-user runner mode rejects RAGENT_RUNNER_GROUP=${configured}; expected ${primaryGroup}`), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    return primaryGroup;
   }
   if (configured) return configured;
   if (runnerUser && await getentGroupExists(runnerUser, { getentImpl })) return runnerUser;
@@ -245,7 +258,7 @@ async function resolveServiceHome(serviceUser) {
     const home = String(stdout || '').trim().split(':')[5] || '';
     if (home) return home;
   } catch {}
-  return process.env.AGENTOC_RUNNER_HOME || `/home/${serviceUser}`;
+  return process.env.RAGENT_RUNNER_HOME || `/home/${serviceUser}`;
 }
 
 export async function resolveRunnerInheritedGroups(serviceUser, {
@@ -254,7 +267,7 @@ export async function resolveRunnerInheritedGroups(serviceUser, {
   readFileImpl = readFile,
   execFileImpl = execFileAsync,
 } = {}) {
-  const configured = trimString(environment?.AGENTOC_RUNNER_INHERITED_GROUPS);
+  const configured = trimString(environment?.RAGENT_RUNNER_INHERITED_GROUPS);
   if (configured) return normalizeRunnerInheritedGroups(configured);
   try {
     const { stdout } = await execFileImpl('id', ['-Gn', serviceUser], {
@@ -275,13 +288,13 @@ export async function resolveRunnerInheritedGroups(serviceUser, {
 }
 
 // Control-plane mask targets under the config root.  The config directory
-// itself is masked (not its /var/lib/agentoc parent) so sibling state the
+// itself is masked (not its /var/lib/ragent parent) so sibling state the
 // control plane legitimately shares with ordinary Runs — today the managed
-// work root /var/lib/agentoc/workspace — stays reachable inside the transient
+// work root /var/lib/ragent/workspace — stays reachable inside the transient
 // unit.  Logging keeps its own root path.
 export function buildControlPlaneMaskPaths(environment = process.env) {
-  const configDir = trimString(environment?.AGENTOC_CONFIG_DIR) || CONFIG_DIR;
-  return [configDir, '/var/log/agentoc'];
+  const configDir = trimString(environment?.RAGENT_CONFIG_DIR) || CONFIG_DIR;
+  return [configDir, '/var/log/ragent'];
 }
 
 // The same desktop UID can ask its user service manager to start a process
@@ -313,13 +326,13 @@ export function resolveRunnerResourceProfile(manifest = null, environment = proc
     ? requested
     : (/(^|[/\\])android([/\\]|$)/.test(cwd) ? 'android' : 'default');
   const base = RESOURCE_PROFILES[profileName];
-  const prefix = `AGENTOC_RUN_${profileName.toUpperCase()}_`;
+  const prefix = `RAGENT_RUN_${profileName.toUpperCase()}_`;
   return {
     name: profileName,
     memoryHigh: positiveInteger(environment?.[`${prefix}MEMORY_HIGH_BYTES`], base.memoryHigh),
     memoryMax: positiveInteger(environment?.[`${prefix}MEMORY_MAX_BYTES`], base.memoryMax),
     tasksMax: positiveInteger(environment?.[`${prefix}TASKS_MAX`], base.tasksMax),
-    cpuWeight: positiveInteger(environment?.[`${prefix}CPU_WEIGHT`], positiveInteger(environment?.AGENTOC_RUN_CPU_WEIGHT, base.cpuWeight)),
+    cpuWeight: positiveInteger(environment?.[`${prefix}CPU_WEIGHT`], positiveInteger(environment?.RAGENT_RUN_CPU_WEIGHT, base.cpuWeight)),
   };
 }
 
@@ -327,7 +340,7 @@ export function buildLifecycleSystemdArgs(runId, {
   projectRoot = PROJECT_ROOT,
   runnerEntry = RUNNER_ENTRY,
   processExecPath = NODE_RUNTIME,
-  serviceUser = 'agentoc',
+  serviceUser = 'ragent',
   serviceGroup = serviceUser,
   unitName = buildDetachedRunnerUnitName(runId),
   workspaceAccessGroup = '',
@@ -345,7 +358,7 @@ export function buildLifecycleSystemdArgs(runId, {
   const args = [
     '--quiet', '--collect', '--no-block', '--service-type=exec',
     '--unit', unitName,
-    '--slice', 'agentoc-runners.slice',
+    '--slice', 'ragent-runners.slice',
     '--working-directory', projectRoot,
     '--description', `Ragent Run ${runId}`,
     '--property', `User=${groupDrop ? 'root' : serviceUser}`,
@@ -362,16 +375,16 @@ export function buildLifecycleSystemdArgs(runId, {
     // paths outside the workspace, but control-plane roots remain opaque even
     // when a desktop user's ordinary group is inherited for home-directory
     // access. These paths are not needed by the sidecar; spool/provider state
-    // lives under /var/lib/agentoc-run.
+    // lives under /var/lib/ragent-run.
     //
     // The config directory itself (not its parent) is masked so the managed
-    // work root /var/lib/agentoc/workspace stays reachable when a Run's
-    // execution scope points there: masking /var/lib/agentoc made the default
+    // work root /var/lib/ragent/workspace stays reachable when a Run's
+    // execution scope points there: masking /var/lib/ragent made the default
     // workspace unreadable inside the unit namespace even though the ACL/grant
     // layer had explicitly allowed it.
     // Prefix the optional executor socket with `-`: systemd treats a missing
     // path as non-fatal when the executor has not created its RuntimeDirectory.
-    '--property', `InaccessiblePaths=/etc/agentoc ${buildControlPlaneMaskPaths(environment).join(' ')} /run/agentoc -/run/agentoc-privileged-executor`,
+    '--property', `InaccessiblePaths=/etc/ragent ${buildControlPlaneMaskPaths(environment).join(' ')} /run/ragent -/run/ragent-privileged-executor`,
     // P2-A: transient-unit hardening.  The runner is a low-privilege user, so
     // the baseline runner identity boundary is already in place; these add
     // kernel-surface and device restrictions that do not impede normal
@@ -394,7 +407,7 @@ export function buildLifecycleSystemdArgs(runId, {
     '--property', `MemoryMax=${resourceProfile.memoryMax}`,
     '--property', `TasksMax=${resourceProfile.tasksMax}`,
     '--property', `CPUWeight=${resourceProfile.cpuWeight}`,
-    '--property', `IOWeight=${environment?.AGENTOC_RUN_IO_WEIGHT || '100'}`,
+    '--property', `IOWeight=${environment?.RAGENT_RUN_IO_WEIGHT || '100'}`,
   ];
   const guiEnvironment = pickRunnerGuiEnvironment(environment);
   const guiBindPaths = buildRunnerGuiBindPaths(guiEnvironment);
@@ -405,7 +418,7 @@ export function buildLifecycleSystemdArgs(runId, {
     args.push('--property', `BindReadOnlyPaths=${guiBindPaths.map((path) => `-${path}`).join(' ')}`);
   }
   // Codex treats <cwd>/.codex/config.toml as a project configuration even
-  // when CODEX_HOME points at AgentoC's managed provider home.  A user-owned
+  // when CODEX_HOME points at Ragent's managed provider home.  A user-owned
   // file there must never become part of a managed Run (and may be unreadable
   // to the runner, producing a misleading Permission denied).  Mount an
   // empty read-only directory over that one project-config subtree.  This is
@@ -414,7 +427,7 @@ export function buildLifecycleSystemdArgs(runId, {
   if (isCodexRun && normalizedRunCwd && isAbsolute(normalizedRunCwd)
     && !normalizedRunCwd.includes('\0') && !/[\r\n]/.test(normalizedRunCwd)) {
     const projectCodexHome = resolve(join(normalizedRunCwd, '.codex'));
-    const externalCodexHome = trimString(environment?.AGENTOC_CODEX_HOME_DIR);
+    const externalCodexHome = trimString(environment?.RAGENT_CODEX_HOME_DIR);
     // Native Codex OAuth always uses the prepared machine-local provider home.
     // Keep this compatibility check for older non-native launch envelopes,
     // but do not let a user-owned ~/.codex path disable the project guard.
@@ -431,7 +444,7 @@ export function buildLifecycleSystemdArgs(runId, {
   }
   if (workspaceAccessGroup) {
     // '+' makes this cleanup command run with root privileges even though the
-    // transient service itself runs as agentoc-runner.  It restores the ACL
+    // transient service itself runs as ragent-runner.  It restores the ACL
     // snapshot and removes the one-Run supplementary group on every exit.
     args.push('--property', `ExecStopPost=+"${processExecPath}" "${workspaceAccessScript}" revoke --run-id ${workspaceAccessRunId}`);
     // The recursive ACL revoke walks the workspace (which can be a large repo).
@@ -447,7 +460,7 @@ export function buildLifecycleSystemdArgs(runId, {
   // broker's EnvironmentFile and are never placed in argv.
   // ExecStopPost must use the same root-owned state store as the broker when
   // an operator overrides it. This value is a path, not an authorization token.
-  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME', 'AGENTOC_RUNNER_ACCESS_DIR'];
+  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME', 'RAGENT_RUNNER_ACCESS_DIR'];
   const inheritedEnv = stripDeniedRunnerEnvKeys(
     Object.fromEntries(
       inheritedKeys
@@ -460,10 +473,10 @@ export function buildLifecycleSystemdArgs(runId, {
       args.push('--setenv', `${key}=${String(value)}`);
     }
   }
-  args.push('--setenv', `AGENTOC_RUNNER_LAUNCH_MODE=${DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE}`);
-  args.push('--setenv', `AGENTOC_RUNNER_UNIT_NAME=${unitName}`);
-  args.push('--setenv', 'AGENTOC_RUNNER_UNIT_SCOPE=system');
-  args.push('--setenv', `AGENTOC_RUNNER_LAUNCH_ATTEMPT=${normalizeLaunchAttempt(launchAttempt)}`);
+  args.push('--setenv', `RAGENT_RUNNER_LAUNCH_MODE=${DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE}`);
+  args.push('--setenv', `RAGENT_RUNNER_UNIT_NAME=${unitName}`);
+  args.push('--setenv', 'RAGENT_RUNNER_UNIT_SCOPE=system');
+  args.push('--setenv', `RAGENT_RUNNER_LAUNCH_ATTEMPT=${normalizeLaunchAttempt(launchAttempt)}`);
   if (groupDrop) args.push(groupDrop.command, ...groupDrop.args);
   else args.push(processExecPath, runnerEntry, runId);
   return args;
@@ -587,7 +600,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     }
     distinctIdentity = true;
   }
-  const groupDropSetting = trimString(environment.AGENTOC_RUNNER_DROP_GROUPS).toLowerCase();
+  const groupDropSetting = trimString(environment.RAGENT_RUNNER_DROP_GROUPS).toLowerCase();
   const useGroupDrop = groupDropSetting === '1'
     || (groupDropSetting === 'auto' && isSameUserRunnerMode(environment));
   let restrictedIds = null;
@@ -667,8 +680,8 @@ async function launchLifecycleRunnerUnlocked(runId, {
   // Legacy/dev deployments may not define the relocated provider-home root.
   // Keep that fallback under the runner's own HOME; never pass the control
   // CONFIG_DIR-backed managed home through the Run environment.
-  const providerHomesDir = trimString(environment.AGENTOC_PROVIDER_HOMES_DIR)
-    || join(resolvedServiceHome, '.config', 'agentoc', 'provider-runtime-homes');
+  const providerHomesDir = trimString(environment.RAGENT_PROVIDER_HOMES_DIR)
+    || join(resolvedServiceHome, '.config', 'ragent', 'provider-runtime-homes');
   const providerApp = isClaude ? 'claude' : (isCodex ? 'codex' : (isAgy ? 'agy' : ''));
   // Native preparation materializes per-Run provider metadata under
   // providerHomesDir/by-provider/<provider-hash>/by-run/<run-hash>. For
@@ -707,9 +720,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
         // The broker runs as root during preparation, so resolve the external
         // Codex home from the configured control user's home rather than root's
         // HOME.  An explicit path is useful for multi-user installations.
-        externalCodexAuthFile: trimString(environment.AGENTOC_EXTERNAL_CODEX_AUTH_FILE)
-          || (trimString(environment.AGENTOC_EXTERNAL_CODEX_HOME)
-            ? join(trimString(environment.AGENTOC_EXTERNAL_CODEX_HOME), 'auth.json')
+        externalCodexAuthFile: trimString(environment.RAGENT_EXTERNAL_CODEX_AUTH_FILE)
+          || (trimString(environment.RAGENT_EXTERNAL_CODEX_HOME)
+            ? join(trimString(environment.RAGENT_EXTERNAL_CODEX_HOME), 'auth.json')
             : join(resolvedServiceHome, '.codex', 'auth.json')),
         externalOAuthOwnership: isCodex ? useExternalCodexOAuthOwnership : false,
         // Ordinary Codex OAuth Runs share the machine-local app-server broker;
@@ -800,7 +813,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     try {
       // The runner identity is intentionally usable outside the recommended
       // workspace. This per-Run grant is only a temporary access assist for a
-      // workspace whose owner permissions do not reach agentoc-runner; its
+      // workspace whose owner permissions do not reach ragent-runner; its
       // failure must not turn an otherwise valid ordinary Run into a hard
       // denial. Sensitive/control-plane targets remain gated by the semantic
       // policy and executor boundaries.
@@ -815,9 +828,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
       );
     }
   }
-  // AGENTOC_RUN_SPOOL_DIR is the controlled write-back channel: the sidecar
+  // RAGENT_RUN_SPOOL_DIR is the controlled write-back channel: the sidecar
   // writes run results here (control-plane chat-runs) without being told the
-  // production AGENTOC_CONFIG_DIR.  It rides the allowlist inheritedKeys.
+  // production RAGENT_CONFIG_DIR.  It rides the allowlist inheritedKeys.
   // P0-C: the channel is env-configurable so it can be relocated out of the
   // control CONFIG_DIR; the default stays at the legacy config/chat-runs until
   // the migration step flips it (and removes the config traverse ACL).
@@ -830,20 +843,20 @@ async function launchLifecycleRunnerUnlocked(runId, {
     ...(await resolveRunnerProxyEnvironment(environment)),
     HOME: resolvedServiceHome,
     ...(useGroupDrop ? { USER: resolvedServiceUser, LOGNAME: resolvedServiceUser } : {}),
-    AGENTOC_RUNNER_DISTINCT_IDENTITY: distinctIdentity ? '1' : '0',
-    AGENTOC_LINUX_SCOPE_FINISH_ENABLED: scopeRegistrationEligible ? '1' : '0',
-    AGENTOC_CODEX_HOME_DIR: runCodexHomeDir,
-    AGENTOC_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
-    AGENTOC_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
-    AGENTOC_RUN_SPOOL_DIR: environment.AGENTOC_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs'),
-    AGENTOC_PROVIDER_HOMES_DIR: runProviderHomesDir,
+    RAGENT_RUNNER_DISTINCT_IDENTITY: distinctIdentity ? '1' : '0',
+    RAGENT_LINUX_SCOPE_FINISH_ENABLED: scopeRegistrationEligible ? '1' : '0',
+    RAGENT_CODEX_HOME_DIR: runCodexHomeDir,
+    RAGENT_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
+    RAGENT_AGY_HOME_DIR: isAgy ? runAgyHomeDir : '',
+    RAGENT_RUN_SPOOL_DIR: environment.RAGENT_RUN_SPOOL_DIR || join(CONFIG_DIR, 'chat-runs'),
+    RAGENT_PROVIDER_HOMES_DIR: runProviderHomesDir,
     ...(nativeResult?.oauthLock?.path && nativeResult?.oauthLock?.token
       ? {
-        AGENTOC_NATIVE_OAUTH_LOCK_PATH: nativeResult.oauthLock.path,
-        AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: nativeResult.oauthLock.token,
+        RAGENT_NATIVE_OAUTH_LOCK_PATH: nativeResult.oauthLock.path,
+        RAGENT_NATIVE_OAUTH_LOCK_TOKEN: nativeResult.oauthLock.token,
       }
       : {}),
-    ...(effectiveCodexServiceTier ? { AGENTOC_CODEX_SERVICE_TIER: effectiveCodexServiceTier } : {}),
+    ...(effectiveCodexServiceTier ? { RAGENT_CODEX_SERVICE_TIER: effectiveCodexServiceTier } : {}),
   };
   let groupDrop = null;
   if (useGroupDrop) {
@@ -983,7 +996,7 @@ export async function createRunnerLifecycleServer({
   const normalizedSocketPath = trimString(socketPath);
   if (!normalizedSocketPath) throw new Error('Runner lifecycle socket path is required');
 
-  // P2-C: when systemd pre-bound our socket (agentoc-runner-lifecycle.socket),
+  // P2-C: when systemd pre-bound our socket (ragent-runner-lifecycle.socket),
   // accept the inherited listening fd instead of creating the socket file.  The
   // systemd-owned socket survives broker restarts, so the control plane never
   // hits ECONNREFUSED during a restart window.
@@ -1086,7 +1099,6 @@ export async function createRunnerLifecycleServer({
     });
   } else {
     const resolvedControlUser = controlUser || await resolveControlUser();
-    const resolvedControlGroup = controlGroup || resolvedControlUser;
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(normalizedSocketPath, () => {
@@ -1097,9 +1109,17 @@ export async function createRunnerLifecycleServer({
     await chmod(normalizedSocketPath, 0o660);
     try {
       const uid = Number.parseInt((await execFileAsync('id', ['-u', resolvedControlUser])).stdout.trim(), 10);
-      const gid = Number.parseInt((await execFileAsync('id', ['-g', resolvedControlGroup])).stdout.trim(), 10);
-      if (Number.isInteger(uid) && Number.isInteger(gid)) await chownImpl(normalizedSocketPath, uid, gid);
-    } catch {}
+      const groupOutput = controlGroup
+        ? (await execFileAsync('getent', ['group', controlGroup])).stdout.trim().split(':')[2]
+        : (await execFileAsync('id', ['-g', resolvedControlUser])).stdout.trim();
+      const gid = Number.parseInt(groupOutput, 10);
+      if (!Number.isInteger(uid) || !Number.isInteger(gid)) throw new Error('Invalid control socket ownership');
+      await chownImpl(normalizedSocketPath, uid, gid);
+    } catch (error) {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(normalizedSocketPath, { force: true });
+      throw error;
+    }
   }
   return {
     server,
@@ -1117,8 +1137,8 @@ export async function createRunnerLifecycleServer({
 }
 
 async function main() {
-  const directory = trimString(process.env.AGENTOC_LINUX_RUN_CONTEXT_DIR);
-  const pinDirectory = trimString(process.env.AGENTOC_LINUX_SERVICE_PIN_DIR);
+  const directory = trimString(process.env.RAGENT_LINUX_RUN_CONTEXT_DIR);
+  const pinDirectory = trimString(process.env.RAGENT_LINUX_SERVICE_PIN_DIR);
   // The optional directories are root-configured; request fields never choose
   // them. The feature remains inactive until both protected stores are set up.
   const runScopeRegistration = directory && pinDirectory ? { directory, pinDirectory } : null;

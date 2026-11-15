@@ -98,9 +98,9 @@ test('HTTP admission overload returns Retry-After and leaves the first waiter in
 });
 
 async function fastifyFixture() {
-  assert(!process.env.AGENTOC_TEMPORARY_PAIRING_KEY_FILE,'No production claim key may enter this fixture');
-  const root=await mkdtemp(join(tmpdir(),'agentoc-result-wait-fastify-'));
-  await writeFile(join(root,'.agentoc-owned-qa'),'result-wait-http');
+  assert(!process.env.RAGENT_TEMPORARY_PAIRING_KEY_FILE,'No production claim key may enter this fixture');
+  const root=await mkdtemp(join(tmpdir(),'ragent-result-wait-fastify-'));
+  await writeFile(join(root,'.ragent-owned-qa'),'result-wait-http');
   const f=rendezvousWaitFixture();
   const app=await startAccountsServer({port:0,host:'127.0.0.1',store:f.store,
     publicBaseUrl:'https://accounts.example.test',dataFile:join(root,'accounts.json'),
@@ -115,8 +115,8 @@ async function fastifyFixture() {
   return {f,app,stop,port:app.server.address().port,close:async()=>{
     await stop();
     assert(resolve(root).startsWith(resolve(tmpdir())+sep));
-    assert(basename(root).startsWith('agentoc-result-wait-fastify-'));
-    assert.equal(await readFile(join(root,'.agentoc-owned-qa'),'utf8'),'result-wait-http');
+    assert(basename(root).startsWith('ragent-result-wait-fastify-'));
+    assert.equal(await readFile(join(root,'.ragent-owned-qa'),'utf8'),'result-wait-http');
     await rm(root,{recursive:true});
   }};
 }

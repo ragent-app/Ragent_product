@@ -75,7 +75,7 @@ try {
     await page.addScriptTag({ path: contractPath });
 
     const result = await page.evaluate((payload) => {
-      const applied = window.AgentoCMonetThemeContract.apply(payload);
+      const applied = window.RagentMonetThemeContract.apply(payload);
       document.querySelector('meta[name="theme-color"][media*="light"]')?.setAttribute("content", applied.themeColorOverrides.light);
       document.querySelector('meta[name="theme-color"][media*="dark"]')?.setAttribute("content", applied.themeColorOverrides.dark);
       const root = document.documentElement;

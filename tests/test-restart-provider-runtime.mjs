@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { listProviderRuntimeProcesses, verifyProviderRuntime } from '../scripts/restart-provider-runtime.mjs';
 
-const root = join(tmpdir(), `agentoc-provider-restart-${process.pid}`);
+const root = join(tmpdir(), `ragent-provider-restart-${process.pid}`);
 await mkdir(root, { recursive: true });
 try {
-  const commandPath = '/opt/agentoc/vendor/cc-switch/cc-switch';
+  const commandPath = '/opt/ragent/vendor/cc-switch/cc-switch';
   const writeProc = async (pid, argv) => {
     const procDir = join(root, String(pid));
     await mkdir(procDir, { recursive: true });
@@ -22,14 +22,14 @@ try {
 
   const unhealthy = await verifyProviderRuntime({
     procRoot: root,
-    environment: { AGENTOC_CC_SWITCH_COMMAND: commandPath },
+    environment: { RAGENT_CC_SWITCH_COMMAND: commandPath },
   });
   assert.equal(unhealthy.ok, false);
   await rm(join(root, '1001'), { recursive: true, force: true });
   await rm(join(root, '1002'), { recursive: true, force: true });
   const healthy = await verifyProviderRuntime({
     procRoot: root,
-    environment: { AGENTOC_CC_SWITCH_COMMAND: commandPath },
+    environment: { RAGENT_CC_SWITCH_COMMAND: commandPath },
   });
   assert.equal(healthy.ok, true);
   console.log('test-restart-provider-runtime: ok');

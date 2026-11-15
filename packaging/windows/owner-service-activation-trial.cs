@@ -27,8 +27,8 @@ public sealed class OwnerServiceActivationTrial:IDisposable {
  public static OwnerServiceActivationTrial OpenForRemovalCheck(string name,string expectedCommand){return new OwnerServiceActivationTrial(name,expectedCommand,true,false);}
  OwnerServiceActivationTrial(string name,string expectedCommand,bool removing,bool canMutate){
   Need(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator),"OAT_ADMIN_REQUIRED");
-  Need(name=="AgentoC-ControlPlane"||name=="AgentoC-RunnerSupervisor","OAT_SERVICE_NAME_REFUSED");Need(!String.IsNullOrEmpty(expectedCommand),"OAT_COMMAND_REQUIRED");
-  removal=removing;mutating=canMutate;Name=name;command=expectedCommand;account=@"NT SERVICE\"+name;dependency=name=="AgentoC-ControlPlane"?"AgentoC-RunnerSupervisor":"";
+  Need(name=="Ragent-ControlPlane"||name=="Ragent-RunnerSupervisor","OAT_SERVICE_NAME_REFUSED");Need(!String.IsNullOrEmpty(expectedCommand),"OAT_COMMAND_REQUIRED");
+  removal=removing;mutating=canMutate;Name=name;command=expectedCommand;account=@"NT SERVICE\"+name;dependency=name=="Ragent-ControlPlane"?"Ragent-RunnerSupervisor":"";
   var manager=OpenSCManager(null,null,1);Need(manager!=IntPtr.Zero,"OAT_SCM_OPEN_REFUSED");try{handle=OpenService(manager,name,removing?(canMutate?0x10027u:5u):0x37u);}finally{CloseServiceHandle(manager);}Need(handle!=IntPtr.Zero,"OAT_SERVICE_OPEN_REFUSED");
   try{VerifyConfig(removing);var state=State();if(removing){Need(state.state==1||state.state==4,"OAT_REMOVAL_STATE_REFUSED");if(state.state==4){Pin(state);startIssued=startAttempted=true;}changed=canMutate;}else Need(state.state==1,"OAT_STOPPED_REQUIRED");}catch{Dispose();throw;}
  }

@@ -29,7 +29,7 @@ test('privileged registration requires different numeric users and no forwarded 
   assert.equal(isLinuxRunScopeRegistrationEligible({ ...base, guiEnvironment: { XDG_RUNTIME_DIR: '/run/user/1000' } }), false);
 });
 test('broker only accepts its own root-configured store paths', { skip: process.platform !== 'linux' }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-scope-broker-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-scope-broker-'));
   const calls = [], revocations = [], renewals = [], configuration = { directory: '/root/trusted-context', pinDirectory: '/root/trusted-pin' };
   const base = { serviceUser: userInfo().username, serviceGroup: userInfo().username, controlUser: userInfo().username,
     chownImpl: async () => {}, launchRunner: async (runId, options) => { calls.push({ runId, options }); return { pid: 10, privilegedContextRegistered: true }; } };
@@ -60,9 +60,9 @@ test('broker only accepts its own root-configured store paths', { skip: process.
       { enabled: true, socketPath: disabled.socketPath }), { state: 'unavailable' });
     assert.deepEqual(await revokeLinuxRunScope({ id: 'bad', runnerLaunchAttempt: 2 },
       { enabled: true, socketPath: enabled.socketPath }), { state: 'unavailable' });
-    const previous = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS;
+    const previous = process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS;
     try {
-      process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
       const result = await launchDetachedRunnerViaLifecycleBroker('run_12345678', { socketPath: enabled.socketPath,
         launchAttempt: 2, issueScopeGrant: async (id, attempt) => { assert.equal(id, 'run_12345678'); assert.equal(attempt, 2); return grant; } });
       assert.equal(result.privilegedContextRegistered, true);
@@ -72,13 +72,13 @@ test('broker only accepts its own root-configured store paths', { skip: process.
       assert.equal(ordinary.pid, 10);
       assert.equal(Object.hasOwn(calls[3].options, 'scopeGrant'), false);
     } finally {
-      if (previous === undefined) delete process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS;
-      else process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = previous;
+      if (previous === undefined) delete process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS;
+      else process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = previous;
     }
   } finally { await enabled.close(); await disabled.close(); await rm(root, { recursive: true, force: true }); }
 });
 test('root broker durably creates the revocation marker', { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-  const root = await mkdtemp('/srv/agentoc-revoke-broker-');
+  const root = await mkdtemp('/srv/ragent-revoke-broker-');
   const directory = `${root}/contexts`;
   await mkdir(directory, { mode: 0o700 });
   const server = await createRunnerLifecycleServer({ socketPath: `${root}/broker.sock`, serviceUser: 'root', serviceGroup: 'root',

@@ -16,12 +16,12 @@ const SESSION_LIST_ORGANIZER_SYSTEM_PROMPT = [
   'Your job is to improve the owner\'s non-archived session sidebar structure using the provided metadata snapshot.',
   'Do not rename sessions, archive or unarchive them, change pin state, edit prompts, or ask the user follow-up questions.',
   'Only update existing sessions by calling the owner-authenticated Ragent API from this machine.',
-  'Use `agentoc api GET /api/sessions` if you need to double-check current state.',
-  'Use `agentoc api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.',
+  'Use `ragent api GET /api/sessions` if you need to double-check current state.',
+  'Use `ragent api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.',
   'Only writable API fields for this task are `group` and `sidebarOrder`.',
   'Never send read-only snapshot keys such as `title`, `brief`, `existingGroup`, `existingSidebarOrder`, `currentGroup`, or `currentSidebarOrder` in PATCH bodies.',
-  'Example PATCH body: {"group":"AgentoC","sidebarOrder":3}',
-  'If `agentoc` is unavailable in PATH, use `node "$AGENTOC_PROJECT_ROOT/cli.js" api ...` instead.',
+  'Example PATCH body: {"group":"Ragent","sidebarOrder":3}',
+  'If `ragent` is unavailable in PATH, use `node "$RAGENT_PROJECT_ROOT/cli.js" api ...` instead.',
   '`sidebarOrder` must be a positive integer; smaller numbers sort first.',
   'Assign unique contiguous `sidebarOrder` values across the current non-archived sessions you organize.',
   'Prefer a small number of clear, stable groups; avoid one giant catch-all group when the list is dense.',
@@ -122,14 +122,14 @@ function buildFakeCodexScript() {
     '        if (sessions.some((session) => Object.prototype.hasOwnProperty.call(session, "currentGroup") || Object.prototype.hasOwnProperty.call(session, "currentSidebarOrder"))) {',
     '          throw new Error("organizer payload should use existing* snapshot fields");',
     '        }',
-    '        const projectRoot = process.env.AGENTOC_PROJECT_ROOT || process.cwd();',
-    '        const baseUrl = process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${process.env.CHAT_PORT || "7690"}`;',
+    '        const projectRoot = process.env.RAGENT_PROJECT_ROOT || process.cwd();',
+    '        const baseUrl = process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${process.env.CHAT_PORT || "7690"}`;',
     '        const cliPath = `${projectRoot}/cli.js`;',
     '        sessions.sort((left, right) => String(left.title || "").localeCompare(String(right.title || "")));',
     '        for (let index = 0; index < sessions.length; index += 1) {',
     '          const session = sessions[index];',
     '          const title = String(session.title || "");',
-    '          const group = /quartz/i.test(title) ? "Quartz" : "AgentoC";',
+    '          const group = /quartz/i.test(title) ? "Quartz" : "Ragent";',
     '          await execFileAsync(process.execPath, [',
     '            cliPath,',
     '            "api",',
@@ -167,8 +167,8 @@ function buildFakeCodexScript() {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-session-list-organize-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-session-list-organize-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -209,11 +209,11 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -255,7 +255,7 @@ try {
   const agentoCSession = await request(port, 'POST', '/api/sessions', {
     folder: repoRoot,
     tool: 'fake-codex',
-    name: 'AgentoC workflow cleanup',
+    name: 'Ragent workflow cleanup',
   });
   assert.equal(agentoCSession.status, 201, 'first session should be created');
 
@@ -284,7 +284,7 @@ try {
     text: buildSessionListOrganizerTask([
       {
         id: agentoCSession.json.session.id,
-        title: 'AgentoC workflow cleanup',
+        title: 'Ragent workflow cleanup',
         brief: 'Clean up the session grouping and structure.',
         existingGroup: '',
         existingSidebarOrder: null,
@@ -307,7 +307,7 @@ try {
   assert.equal(completedRun?.state, 'completed', 'organizer run should complete successfully');
 
   const organizerManifest = JSON.parse(
-    readFileSync(join(home, '.config', 'agentoc', 'chat-runs', organize.json.run.id, 'manifest.json'), 'utf8'),
+    readFileSync(join(home, '.config', 'ragent', 'chat-runs', organize.json.run.id, 'manifest.json'), 'utf8'),
   );
   assert.match(
     organizerManifest.prompt,
@@ -336,8 +336,8 @@ try {
 
   const agentoCEntry = listed.json.sessions.find((entry) => entry.id === agentoCSession.json.session.id);
   const quartzEntry = listed.json.sessions.find((entry) => entry.id === quartzSession.json.session.id);
-  assert.equal(agentoCEntry?.group, 'AgentoC', 'organizer should patch the AgentoC group');
-  assert.equal(agentoCEntry?.sidebarOrder, 2, 'organizer should patch the AgentoC sidebar order');
+  assert.equal(agentoCEntry?.group, 'Ragent', 'organizer should patch the Ragent group');
+  assert.equal(agentoCEntry?.sidebarOrder, 2, 'organizer should patch the Ragent sidebar order');
   assert.equal(quartzEntry?.group, 'Quartz', 'organizer should patch the Quartz group');
   assert.equal(quartzEntry?.sidebarOrder, 1, 'organizer should patch the Quartz sidebar order');
 

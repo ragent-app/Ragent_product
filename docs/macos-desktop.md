@@ -11,7 +11,7 @@ so this mode treats other local users and programs as trusted. Remote access
 requires its own authentication and an appropriate network boundary.
 
 On first launch the app creates an owner password and stores it in the current
-user's `~/.config/agentoc/owner-credentials.txt` with owner-only permissions.
+user's `~/.config/ragent/owner-credentials.txt` with owner-only permissions.
 After recording it and changing the password in Settings, delete that file.
 The configuration directory and existing credentials are retained on upgrade.
 Before replacing the app, stop its service and disable login startup if it is
@@ -33,7 +33,7 @@ inspect them manually.
 ## Login startup
 
 Login startup is opt-in. Stop an existing Ragent service first, then run
-`/Applications/AgentoC.app/Contents/Resources/agentoc-login enable` in Terminal.
+`/Applications/Ragent.app/Contents/Resources/ragent-login enable` in Terminal.
 Use the same command with `status` to inspect it or `disable` to stop and
 unregister it. The tool leaves configuration, credentials, workspaces and
 logs in place. It will not overwrite a different LaunchAgent or unload another
@@ -48,7 +48,7 @@ upgrades still require acceptance using the final installed app.
 
 ## Runner isolation
 
-The optional `AGENTOC_RUN_SANDBOX=1` setting currently requires the Linux
+The optional `RAGENT_RUN_SANDBOX=1` setting currently requires the Linux
 bubblewrap implementation. If explicitly enabled on macOS, Runs fail instead
 of silently starting without that isolation. Leaving the setting unset does
 not provide a macOS product sandbox; platform-specific isolation still needs
@@ -68,19 +68,19 @@ the Linux resolver as a macOS security boundary without platform validation.
 
 Build on a clean committed Apple Silicon Mac with Node 24, the Go version in
 `p2p/go.mod`, Xcode command-line tools and sufficient disk space. Set
-`AGENTOC_PACKAGE_VERSION` to a three-part version, `AGENTOC_DMG_OUTPUT_DIR` to
-the output directory, and `AGENTOC_NODE_CACHE_DIR` to a writable cache, then run
+`RAGENT_PACKAGE_VERSION` to a three-part version, `RAGENT_DMG_OUTPUT_DIR` to
+the output directory, and `RAGENT_NODE_CACHE_DIR` to a writable cache, then run
 `bash scripts/build-dmg.sh`. Set temporary and dependency cache locations for
 the build environment before starting. The builder records the full source
 commit, rejects tracked changes and nonignored untracked files, and checks again before
 notarization and before returning the artifact. An optional prebuilt P2P host requires
-both `AGENTOC_P2P_HOST_BINARY` and `AGENTOC_P2P_HOST_SHA256`; the input digest
+both `RAGENT_P2P_HOST_BINARY` and `RAGENT_P2P_HOST_SHA256`; the input digest
 before app signing is recorded with the bundled runtime versions.
 
 For a build without a second checkout or worktree, the same builder can read
 from a bare Git object store containing the complete objects required by the
 desktop payload. Provide an explicit output directory, set
-`AGENTOC_SOURCE_GIT_DIR` to that bare store and `AGENTOC_SOURCE_COMMIT` to its
+`RAGENT_SOURCE_GIT_DIR` to that bare store and `RAGENT_SOURCE_COMMIT` to its
 full expected HEAD commit. Invoke the builder and its staging scripts from a
 bootstrap copy of those exact committed files, including the matching Node
 license. The builder compares the bootstrap scripts with Git, stages the
@@ -91,9 +91,9 @@ mode does not require a Git checkout on the Mac.
 
 Without a signing identity the build is ad-hoc signed and is suitable only for
 controlled testing. For a direct-distribution candidate, set
-`AGENTOC_MAC_SIGN_IDENTITY` to a Developer ID Application identity available
+`RAGENT_MAC_SIGN_IDENTITY` to a Developer ID Application identity available
 in the Mac keychain. To submit the signed DMG to Apple, also set
-`AGENTOC_MAC_NOTARY_PROFILE` to a previously configured `notarytool` keychain
+`RAGENT_MAC_NOTARY_PROFILE` to a previously configured `notarytool` keychain
 profile. The builder waits for acceptance, staples and validates the ticket,
 and records a signing status and, when applicable, the notary result beside the
 DMG. It fails if signing changes the bundled Claude Code binary. These paths

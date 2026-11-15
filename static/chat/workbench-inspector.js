@@ -1,8 +1,8 @@
 "use strict";
 
 (function attachWorkbenchInspector(root) {
-  const INSPECTOR_OPEN_STORAGE_KEY = "agentoc.workbenchInspectorOpen";
-  const INSPECTOR_TAB_STORAGE_KEY = "agentoc.workbenchInspectorTab";
+  const INSPECTOR_OPEN_STORAGE_KEY = "ragent.workbenchInspectorOpen";
+  const INSPECTOR_TAB_STORAGE_KEY = "ragent.workbenchInspectorTab";
   const DESKTOP_QUERY = "(min-width: 1181px)";
   const FILE_EDIT_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
   const INSPECTOR_TABS = new Set(["outcome", "changes", "activity"]);
@@ -72,7 +72,7 @@
   };
 
   function tr(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function escapeHtml(value) {
@@ -82,7 +82,7 @@
   }
 
   function renderIcon(name, className = "") {
-    return root.AgentoCIcons?.render(name, { className }) || "";
+    return root.RagentIcons?.render(name, { className }) || "";
   }
 
   function readStoredTab() {
@@ -733,11 +733,11 @@
   }
 
   function resolveProductPath(path) {
-    if (typeof root.agentocResolveProductPath === "function") {
-      return root.agentocResolveProductPath(path);
+    if (typeof root.ragentResolveProductPath === "function") {
+      return root.ragentResolveProductPath(path);
     }
-    if (root.AgentoCProductPaths?.resolveProductPath) {
-      return root.AgentoCProductPaths.resolveProductPath(path);
+    if (root.RagentProductPaths?.resolveProductPath) {
+      return root.RagentProductPaths.resolveProductPath(path);
     }
     return path;
   }
@@ -1511,7 +1511,7 @@
           </div>
           <div class="markdown-reader-actions">
             <a class="markdown-reader-action markdown-reader-raw" href="#" target="_blank" rel="noreferrer noopener">${escapeHtml(tr("workbench.markdown.openRaw"))}</a>
-            <a class="markdown-reader-action markdown-reader-download markdown-reader-download--icon" href="#" target="_blank" rel="noreferrer noopener" aria-label="${escapeHtml(tr("action.download"))}" title="${escapeHtml(tr("action.download"))}">${(window.AgentoCIcons && window.AgentoCIcons.render && window.AgentoCIcons.render("download")) || escapeHtml(tr("action.download"))}</a>
+            <a class="markdown-reader-action markdown-reader-download markdown-reader-download--icon" href="#" target="_blank" rel="noreferrer noopener" aria-label="${escapeHtml(tr("action.download"))}" title="${escapeHtml(tr("action.download"))}">${(window.RagentIcons && window.RagentIcons.render && window.RagentIcons.render("download")) || escapeHtml(tr("action.download"))}</a>
           </div>
         </header>
         <div class="markdown-reader-body">
@@ -1571,7 +1571,7 @@
   function closeMarkdownReader() {
     if (!markdownReader.node) return;
     if (markdownReaderBackEntryId) {
-      window.AgentoCBackHandler?.pop?.(markdownReaderBackEntryId);
+      window.RagentBackHandler?.pop?.(markdownReaderBackEntryId);
       markdownReaderBackEntryId = null;
     }
     if (markdownReader.focusScopeDeactivate) {
@@ -1603,7 +1603,7 @@
     setMarkdownReaderStatus(tr("workbench.markdown.loading"));
     reader.node.hidden = false;
     document.body.classList.add("markdown-reader-open");
-    markdownReader.focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(reader.node, {
+    markdownReader.focusScopeDeactivate = root.RagentFocusScope?.activate?.(reader.node, {
       containmentRoot: document.body,
       initialFocus: () => reader.node?.querySelector?.("[data-markdown-reader-close]"),
       restoreFocus: () => (markdownReader.trigger && markdownReader.trigger.isConnected !== false)
@@ -1612,7 +1612,7 @@
       modal: true,
       onEscape: () => closeMarkdownReader(),
     }) || null;
-    markdownReaderBackEntryId = window.AgentoCBackHandler?.push?.({
+    markdownReaderBackEntryId = window.RagentBackHandler?.push?.({
       id: "markdown-reader",
       onBack: () => {
         closeMarkdownReader();
@@ -1620,7 +1620,7 @@
       },
     }) || null;
     try {
-      const response = await (root.agentocFetch || fetch)(sourceUrl, {
+      const response = await (root.ragentFetch || fetch)(sourceUrl, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -1696,8 +1696,8 @@
     button.disabled = true;
     try {
       setOpen(true);
-      if (typeof root.agentocOpenSessionReference === "function") {
-        await root.agentocOpenSessionReference(sessionId, {
+      if (typeof root.ragentOpenSessionReference === "function") {
+        await root.ragentOpenSessionReference(sessionId, {
           tab: "sessions",
           inspectorTab,
           forceFresh: true,
@@ -1918,7 +1918,7 @@
       activity: renderActivityTab,
     };
     dom.body.innerHTML = (renderers[activeTab] || renderOutcome)(model);
-    root.AgentoCIcons?.hydrate?.(dom.body);
+    root.RagentIcons?.hydrate?.(dom.body);
     animateInspectorBody(`content:${state.sessionId}:${activeTab}`);
     notifyRenderSubscribers();
   }
@@ -2178,7 +2178,7 @@
   root.syncWorkbenchInspectorSession = syncSession;
   root.scheduleWorkbenchInspectorRefresh = scheduleRefresh;
   root.applyWorkbenchInspectorEventDelta = applyEventDelta;
-  root.agentocOpenWorkbenchInspectorTab = openTab;
+  root.ragentOpenWorkbenchInspectorTab = openTab;
 
   // Public surface for the mobile Run Sheet: it mirrors the same session model
   // and renderers so the sheet stays byte-for-byte consistent with the audit
@@ -2189,7 +2189,7 @@
     activity: renderActivityTab,
   };
 
-  root.AgentoCWorkbench = {
+  root.RagentWorkbench = {
     normalizeTab: normalizeInspectorTab,
     // True once a session is attached (mirrors the inspector's own gating).
     hasSession() {
@@ -2249,7 +2249,7 @@
       }
       const model = currentInspectorModel();
       container.innerHTML = (TAB_RENDERERS[activeTab] || renderOutcome)(model);
-      root.AgentoCIcons?.hydrate?.(container);
+      root.RagentIcons?.hydrate?.(container);
       return "content";
     },
     // Wire the same content interactions (markdown reader, plan actions, session

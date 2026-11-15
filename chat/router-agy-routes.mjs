@@ -1,4 +1,4 @@
-// AgY Provider HTTP Routes for AgentoC
+// AgY Provider HTTP Routes for Ragent
 // Handles AgY-specific API endpoints for model listing, agent management, and execution
 
 import { readBody } from '../lib/utils.mjs';

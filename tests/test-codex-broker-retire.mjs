@@ -53,8 +53,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const socketPath = codexAppServerBrokerSocketPath(home);
   const brokerEntry = process.env.RAGENT_TEST_BROKER_ENTRY || fileURLToPath(new URL('../chat/codex-app-server-broker.mjs', import.meta.url));
   const broker = spawn(process.execPath, [brokerEntry, '--broker'], {
-    env: { ...process.env, CODEX_HOME: home, AGENTOC_CODEX_BROKER_SOCKET: socketPath,
-      AGENTOC_CODEX_BROKER_UPSTREAM_FILE: process.execPath, AGENTOC_CODEX_BROKER_UPSTREAM_ARGS: JSON.stringify([fixture]) },
+    env: { ...process.env, CODEX_HOME: home, RAGENT_CODEX_BROKER_SOCKET: socketPath,
+      RAGENT_CODEX_BROKER_UPSTREAM_FILE: process.execPath, RAGENT_CODEX_BROKER_UPSTREAM_ARGS: JSON.stringify([fixture]) },
     stdio: 'ignore',
   });
   t.after(async () => {
@@ -69,20 +69,20 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   }
   assert.ok(client, 'broker socket available');
   for (let attempt = 0; attempt < 100; attempt++) {
-    client.send({ type: 'agentoc-codex-broker-ping' });
+    client.send({ type: 'ragent-codex-broker-ping' });
     if ((await client.next()).ready) break;
     await delay(30);
   }
   client.send({ id: 1, method: 'turn/start', params: { threadId: 'fixture-thread' } });
   assert.equal((await client.next()).id, 1);
   const concurrent = await openSocket(socketPath);
-  concurrent.send({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
+  concurrent.send({ type: 'ragent-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
   assert.equal((await concurrent.next()).accepted, false, 'cannot retire while another client is connected');
   concurrent.socket.end();
   client.socket.end();
   await delay(100);
   const control = await openSocket(socketPath);
-  const retire = (digest) => control.send({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: digest });
+  const retire = (digest) => control.send({ type: 'ragent-codex-broker-retire', expectedAccountDigest: digest });
   retire(codexBrokerAccountDigest('other-account'));
   assert.equal((await control.next()).accepted, false);
   retire(codexBrokerAccountDigest('fixture-account'));
@@ -93,7 +93,7 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   control.socket.end();
   await delay(100);
   const oauthProbe = await openSocket(socketPath);
-  oauthProbe.send({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
+  oauthProbe.send({ type: 'ragent-codex-broker-retire', expectedAccountDigest: codexBrokerAccountDigest('fixture-account') });
   assert.equal((await oauthProbe.next()).accepted, false);
   oauthProbe.socket.end();
   await delay(1000);

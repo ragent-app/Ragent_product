@@ -22,20 +22,20 @@ public static class OwnerMsiRollbackServiceTrust {
  [DllImport("advapi32.dll")]static extern bool CloseServiceHandle(IntPtr handle);
  static void Need(bool ok,string code){if(!ok)throw new InvalidOperationException(code);}
  public static void Restore(string name,string expectedCommand,string expectedAccount){
-  Need(name=="AgentoC-ControlPlane"||name=="AgentoC-RunnerSupervisor","ORR_SERVICE_NAME_REFUSED");
+  Need(name=="Ragent-ControlPlane"||name=="Ragent-RunnerSupervisor","ORR_SERVICE_NAME_REFUSED");
   IntPtr manager=OpenSCManager(null,null,3);Need(manager!=IntPtr.Zero,"ORR_SCM_OPEN_FAILED");
   try{IntPtr service=OpenService(manager,name,0x40007);
    if(service==IntPtr.Zero){
     Need(Marshal.GetLastWin32Error()==1060,"ORR_SERVICE_OPEN_FAILED");
-    string dependencies=name=="AgentoC-ControlPlane"?"AgentoC-RunnerSupervisor\0\0":null;
-    string display=name=="AgentoC-ControlPlane"?"AgentoC Control Plane":"AgentoC Runner Supervisor";
+    string dependencies=name=="Ragent-ControlPlane"?"Ragent-RunnerSupervisor\0\0":null;
+    string display=name=="Ragent-ControlPlane"?"Ragent Control Plane":"Ragent Runner Supervisor";
     service=CreateService(manager,name,display,0xF01FF,16,2,1,expectedCommand,null,IntPtr.Zero,dependencies,expectedAccount,null);
     Need(service!=IntPtr.Zero,"ORR_SERVICE_RECREATE_FAILED");
    }
    try{uint n;QueryServiceConfig(service,IntPtr.Zero,0,out n);Need(n>0&&n<=65536,"ORR_SERVICE_CONFIG_INVALID");IntPtr memory=Marshal.AllocHGlobal((int)n);
     try{Need(QueryServiceConfig(service,memory,n,out n),"ORR_SERVICE_CONFIG_INVALID");var c=(Config)Marshal.PtrToStructure(memory,typeof(Config));
      string dependency=c.dependencies==IntPtr.Zero?"":Marshal.PtrToStringUni(c.dependencies);
-     Need(c.type==16&&(c.start==2||c.start==4)&&Marshal.PtrToStringUni(c.command)==expectedCommand&&String.Equals(Marshal.PtrToStringUni(c.account),expectedAccount,StringComparison.OrdinalIgnoreCase)&&dependency==(name=="AgentoC-ControlPlane"?"AgentoC-RunnerSupervisor":""),"ORR_SERVICE_BINDING_CHANGED");
+     Need(c.type==16&&(c.start==2||c.start==4)&&Marshal.PtrToStringUni(c.command)==expectedCommand&&String.Equals(Marshal.PtrToStringUni(c.account),expectedAccount,StringComparison.OrdinalIgnoreCase)&&dependency==(name=="Ragent-ControlPlane"?"Ragent-RunnerSupervisor":""),"ORR_SERVICE_BINDING_CHANGED");
      if(c.start==4)Need(ChangeServiceConfig(service,0xffffffff,2,0xffffffff,null,null,IntPtr.Zero,null,null,null,null),"ORR_SERVICE_AUTO_REPAIR_FAILED");
     }finally{Marshal.FreeHGlobal(memory);}
     Status status;int needed;Need(QueryServiceStatusEx(service,0,out status,Marshal.SizeOf(typeof(Status)),out needed)&&status.state==1&&status.pid==0,"ORR_SERVICE_NOT_STOPPED");
@@ -64,13 +64,13 @@ foreach($plan in $plans){
   throw 'ORR_SERVICE_BINDING_CHANGED'
  }
 }
-$broker=Get-CimInstance Win32_Service -Filter "Name='AgentoC-PrivilegedBroker'"
-$brokerPath=Join-Path $product 'Broker\AgentoC.PrivilegedBroker.exe'
+$broker=Get-CimInstance Win32_Service -Filter "Name='Ragent-PrivilegedBroker'"
+$brokerPath=Join-Path $product 'Broker\Ragent.PrivilegedBroker.exe'
 if(-not $broker -or $broker.PathName -cnotin @($brokerPath,('"'+$brokerPath+'"')) -or $broker.StartName -ine 'LocalSystem' -or $broker.StartMode -ne 'Auto'){
  throw 'ORR_BROKER_BINDING_CHANGED'
 }
 $stage='STOP'
-foreach($name in @('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')){
+foreach($name in @('Ragent-ControlPlane','Ragent-RunnerSupervisor')){
  $present=Get-Service -Name $name -ErrorAction SilentlyContinue
  if($present -and $present.Status -ne 'Stopped'){Stop-Service -Name $name -ErrorAction Stop}
 }
@@ -87,18 +87,18 @@ if(Test-Path -LiteralPath $lock){
  [IO.File]::Delete($lock)
 }
 $stage='BROKER_START'
-if((Get-Service -Name 'AgentoC-PrivilegedBroker' -ErrorAction Stop).Status -ne 'Running'){
- Start-Service -Name 'AgentoC-PrivilegedBroker' -ErrorAction Stop
+if((Get-Service -Name 'Ragent-PrivilegedBroker' -ErrorAction Stop).Status -ne 'Running'){
+ Start-Service -Name 'Ragent-PrivilegedBroker' -ErrorAction Stop
 }
 $stage='OWNER_START'
-Start-Service -Name 'AgentoC-RunnerSupervisor' -ErrorAction Stop
-Start-Service -Name 'AgentoC-ControlPlane' -ErrorAction Stop
+Start-Service -Name 'Ragent-RunnerSupervisor' -ErrorAction Stop
+Start-Service -Name 'Ragent-ControlPlane' -ErrorAction Stop
 $stage='VERIFY'
 foreach($plan in $plans){
  $service=Get-CimInstance Win32_Service -Filter ("Name='"+$plan.name+"'")
  if(-not $service -or $service.State -ne 'Running' -or $service.PathName -cne $plan.command -or $service.StartName -ine $plan.account){throw 'ORR_SERVICE_RESTART_FAILED'}
 }
-if((Get-Service -Name 'AgentoC-PrivilegedBroker' -ErrorAction Stop).Status -ne 'Running'){throw 'ORR_BROKER_RESTART_FAILED'}
+if((Get-Service -Name 'Ragent-PrivilegedBroker' -ErrorAction Stop).Status -ne 'Running'){throw 'ORR_BROKER_RESTART_FAILED'}
 @{ok=$true;servicesRestored=$true;brokerRestored=$true;ownerResetRetained=$true}|ConvertTo-Json -Compress
 }catch{
  $code=$_.Exception.GetBaseException().Message

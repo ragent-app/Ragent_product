@@ -107,7 +107,7 @@ function createHarness({ sessionSnapshot = false } = {}) {
       addEventListener() {},
       focus() {},
       crypto: { randomUUID: () => 'req-test' },
-      ...(sessionSnapshot ? { __AGENTOC_BOOTSTRAP__: { features: { sessionSnapshot: true } } } : {}),
+      ...(sessionSnapshot ? { __RAGENT_BOOTSTRAP__: { features: { sessionSnapshot: true } } } : {}),
     },
     document: {
       visibilityState: 'visible',
@@ -234,7 +234,7 @@ function createHarness({ sessionSnapshot = false } = {}) {
       return timelineSnapshot;
     },
   };
-  context.window.AgentoCTimelineRuntime = timelineRuntime;
+  context.window.RagentTimelineRuntime = timelineRuntime;
 
   return { context, calls, emptyState, messagesInner, messagesEl, renderedEventState, timelineRuntime };
 }
@@ -354,7 +354,7 @@ assert.equal(
   assert.equal(full.calls.incremental.length, 0);
   assert.equal(full.calls.batch[0].options.paginationMode, 'latest');
   assert.equal(full.calls.batch[0].options.historyPrepend, undefined);
-  const fullMetrics = full.context.window.agentocGetEventRefreshMetrics();
+  const fullMetrics = full.context.window.ragentGetEventRefreshMetrics();
   assert.equal(fullMetrics.last.mode, 'full');
   assert.equal(fullMetrics.last.renderMs, 7, 'full refresh metrics should measure the durable DOM projection');
 }
@@ -446,7 +446,7 @@ assert.equal(
     'delta and operation updates must enter one durable projector call',
   );
   assert.equal(delta.calls.batch[0].options.source, 'http');
-  const deltaMetrics = delta.context.window.agentocGetEventRefreshMetrics();
+  const deltaMetrics = delta.context.window.ragentGetEventRefreshMetrics();
   assert.equal(deltaMetrics.last.mode, 'delta');
   assert.equal(deltaMetrics.last.renderMs, 7, 'delta refresh metrics should measure the durable DOM projection');
 }
@@ -603,7 +603,7 @@ assert.equal(
   assert.equal(older.calls.batch[0].options.paginationMode, 'before');
   assert.equal(older.calls.batch[0].options.pagination.nextBeforeSeq, 49);
   assert.equal(older.renderedEventState.loadingOlder, false);
-  const olderMetrics = older.context.window.agentocGetEventRefreshMetrics();
+  const olderMetrics = older.context.window.ragentGetEventRefreshMetrics();
   assert.equal(olderMetrics.last.outcome, 'older_applied');
   assert.equal(olderMetrics.last.renderMode, 'prepend');
   assert.equal(olderMetrics.last.renderMs, 7, 'history prepend metrics should measure the durable DOM projection');

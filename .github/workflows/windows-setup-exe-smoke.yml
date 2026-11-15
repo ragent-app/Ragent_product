@@ -24,7 +24,7 @@ jobs:
           EXPECTED_SHA256: ${{ inputs.sha256 }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $dir = Join-Path $env:RUNNER_TEMP 'agentoc-installer'
+          $dir = Join-Path $env:RUNNER_TEMP 'ragent-installer'
           New-Item -ItemType Directory -Path $dir | Out-Null
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern '*.exe' --dir $dir
           if ($LASTEXITCODE -ne 0) { throw 'Installer download failed' }
@@ -37,20 +37,20 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:RUNNER_TEMP -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted') { throw 'A disposable GitHub-hosted runner is required' }
-          $services = @('AgentoC-ControlPlane', 'AgentoC-RunnerSupervisor', 'AgentoC-PrivilegedBroker')
-          if (@(Get-Service -Name $services -ErrorAction SilentlyContinue).Count) { throw 'Existing AgentoC service detected' }
-          $installer = (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'agentoc-installer') -Filter '*.exe' -File).FullName
-          $log = Join-Path $env:RUNNER_TEMP 'agentoc-msi.log'
+          $services = @('Ragent-ControlPlane', 'Ragent-RunnerSupervisor', 'Ragent-PrivilegedBroker')
+          if (@(Get-Service -Name $services -ErrorAction SilentlyContinue).Count) { throw 'Existing Ragent service detected' }
+          $installer = (Get-ChildItem (Join-Path $env:RUNNER_TEMP 'ragent-installer') -Filter '*.exe' -File).FullName
+          $log = Join-Path $env:RUNNER_TEMP 'ragent-msi.log'
           $installStarted = (Get-Date).AddSeconds(-5)
           $p = Start-Process -FilePath $installer -ArgumentList @('/qn', '/norestart', '/l*v', ('"' + $log + '"')) -PassThru
           if (-not $p.WaitForExit(300000)) {
-            Get-Process -Name msiexec,AgentoC* -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Responding,MainWindowTitle | Format-Table
+            Get-Process -Name msiexec,Ragent* -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,Responding,MainWindowTitle | Format-Table
             if (Test-Path $log) { Get-Content $log -Tail 35 } else { Write-Host 'MSI log was not created.' }
             throw 'Installer timed out after five minutes'
           }
           if ($p.ExitCode -ne 0) {
             Select-String -Path $log -Pattern 'Return value 3' -Context 20,5 | ForEach-Object { $_.ToString() }
-            $diagnostic = 'C:\ProgramData\AgentoC\instances\owner\runtime\owner-msi-activation-failure.json'
+            $diagnostic = 'C:\ProgramData\Ragent\instances\owner\runtime\owner-msi-activation-failure.json'
             if (Test-Path -LiteralPath $diagnostic) { Get-Content -LiteralPath $diagnostic -Raw }
             # The installer can unregister its event source during rollback.
             # Filter the Application log by event ID first, then by provider;
@@ -58,16 +58,16 @@ jobs:
             # the original installer exit code. Print only stable error codes.
             try {
               $events = Get-WinEvent -FilterHashtable @{ LogName='Application'; Id=@(1002,1004,1006,4101); StartTime=$installStarted } -MaxEvents 200 -ErrorAction Stop |
-                Where-Object { $_.ProviderName -eq 'AgentoC' } | Select-Object -First 20
+                Where-Object { $_.ProviderName -eq 'Ragent' } | Select-Object -First 20
               foreach ($event in $events) {
                 $values = @($event.Properties | ForEach-Object { [string]$_.Value })
                 foreach ($value in $values) {
                   foreach ($match in [regex]::Matches($value, '\b(?:SHT|OAT|OAX|OMI)_[A-Z0-9_]+\b')) {
-                    Write-Host ("AgentoC event {0}: {1}" -f $event.Id, $match.Value)
+                    Write-Host ("Ragent event {0}: {1}" -f $event.Id, $match.Value)
                   }
                 }
               }
-            } catch { Write-Host 'AgentoC startup event diagnostics unavailable.' }
+            } catch { Write-Host 'Ragent startup event diagnostics unavailable.' }
             throw "Installer exited $($p.ExitCode)"
           }
           foreach ($name in $services) {

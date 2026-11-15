@@ -2,7 +2,7 @@
 // DS-01: source -> installed/runtime artifact parity gate (P0).
 //
 // Compares the committed source tree against the installed deployment root
-// (/opt/agentoc/app by default) and the recorded package manifest, and emits a
+// (/opt/ragent/app by default) and the recorded package manifest, and emits a
 // machine-readable JSON report with five layer fields:
 //
 //   source-tested   — the source tree's git state for the compared paths
@@ -43,8 +43,8 @@ const execFileAsync = promisify(execFile);
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
-const DEFAULT_INSTALL_ROOT = '/opt/agentoc/app';
-const DEFAULT_DATA_ROOT = '/opt/agentoc/runtime';
+const DEFAULT_INSTALL_ROOT = '/opt/ragent/app';
+const DEFAULT_DATA_ROOT = '/opt/ragent/runtime';
 const DEFAULT_LIVE_URL = 'http://127.0.0.1:7690';
 const LIVE_TIMEOUT_MS = 1500;
 const MANIFEST_FORMAT = 1;
@@ -118,8 +118,8 @@ class UsageError extends Error {}
 
 const USAGE = [
   '  --source DIR         source tree root (default: repo root)',
-  '  --install DIR        installed deployment root (default: /opt/agentoc/app)',
-  '  --data-root DIR      key data root for informational markers (default: /opt/agentoc/runtime)',
+  '  --install DIR        installed deployment root (default: /opt/ragent/app)',
+  '  --data-root DIR      key data root for informational markers (default: /opt/ragent/runtime)',
   '  --manifest PATH      recorded package manifest (default: <source>/scripts/parity-manifest.json)',
   '  --live-url URL|none  live probe base URL (default: http://127.0.0.1:7690)',
   '  --allow-dirty-source permit uncommitted source changes; hash checks stay enforced',

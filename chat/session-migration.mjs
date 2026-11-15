@@ -37,8 +37,8 @@ import { pathExists, readJson, writeJsonAtomic } from './fs-utils.mjs';
 import { SESSION_API_PRIVATE_FIELDS } from './session-api-mutation-contract.mjs';
 
 export const SESSION_MIGRATION_SCHEMA_VERSION = 1;
-export const SESSION_MIGRATION_TYPE = 'agentoc-selected-session-migration';
-const MIGRATION_DIRECTORY = '.agentoc-migrations';
+export const SESSION_MIGRATION_TYPE = 'ragent-selected-session-migration';
+const MIGRATION_DIRECTORY = '.ragent-migrations';
 const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,160}$/;
 const SAFE_FILENAME_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9._-]+$/;
 const EPHEMERAL_SESSION_FIELDS = [

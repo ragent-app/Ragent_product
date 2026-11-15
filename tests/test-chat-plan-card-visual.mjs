@@ -6,7 +6,7 @@
 // Gemini review) AND asserts geometry the author can read as text.
 //
 // Run standalone:  node tests/test-chat-plan-card-visual.mjs
-// (PNGs + manifest land in /var/lib/agentoc/workspace/plan-card-visual/<stamp>)
+// (PNGs + manifest land in /var/lib/ragent/workspace/plan-card-visual/<stamp>)
 import assert from 'assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -28,8 +28,8 @@ const cssFiles = [
 const styles = cssFiles.map((p) => readFileSync(join(repoRoot, p), 'utf8')).join('\n');
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || join('/var/lib/agentoc/workspace/plan-card-visual', stamp);
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || join('/var/lib/ragent/workspace/plan-card-visual', stamp);
 mkdirSync(outputDir, { recursive: true });
 
 const CHEVRON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';

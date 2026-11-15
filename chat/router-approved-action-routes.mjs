@@ -32,7 +32,7 @@ export async function handleApprovedActionInternalRoutes({
     writeJson(res, 403, { error: 'Approved action channel is local-only', code: 'APPROVED_ACTION_LOCAL_ONLY' });
     return true;
   }
-  const token = trimString(req.headers?.['x-agentoc-approved-action-token']);
+  const token = trimString(req.headers?.['x-ragent-approved-action-token']);
   if (!token) {
     writeJson(res, 401, { error: 'Approved action channel token is required', code: 'APPROVED_ACTION_TOKEN_REQUIRED' });
     return true;

@@ -40,7 +40,7 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 
-public static class AgentocWindowsFacts {
+public static class RagentWindowsFacts {
   private const uint GENERIC_READ = 0x80000000;
   private const uint FILE_SHARE_READ = 0x00000001;
   private const uint FILE_SHARE_WRITE = 0x00000002;
@@ -132,21 +132,21 @@ function Normalize-FinalPath([string]$Value) {
 `;
 
 const PATH_REALPATH_SCRIPT = String.raw`${WINDOWS_NATIVE_HELPER}
-$path = $env:AGENTOC_FACTS_PATH
+$path = $env:RAGENT_FACTS_PATH
 try { $null = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
 catch [System.Management.Automation.ItemNotFoundException] { @{ platform = 'win32'; notFound = $true } | ConvertTo-Json -Compress; return }
-$final = [AgentocWindowsFacts]::FinalPath($path)
+$final = [RagentWindowsFacts]::FinalPath($path)
 if ([string]::IsNullOrWhiteSpace($final)) { throw 'Windows final path unavailable' }
 [ordered]@{ platform = 'win32'; canonicalPath = (Normalize-FinalPath $final) } | ConvertTo-Json -Compress
 `;
 
 const PATH_STAT_SCRIPT = String.raw`${WINDOWS_NATIVE_HELPER}
-$path = $env:AGENTOC_FACTS_PATH
+$path = $env:RAGENT_FACTS_PATH
 try { $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop }
 catch [System.Management.Automation.ItemNotFoundException] { @{ platform = 'win32'; notFound = $true } | ConvertTo-Json -Compress; return }
-$identity = [AgentocWindowsFacts]::Identity($item.FullName)
+$identity = [RagentWindowsFacts]::Identity($item.FullName)
 if ($null -eq $identity) { throw 'Windows file identity unavailable' }
-$final = [AgentocWindowsFacts]::FinalPath($item.FullName)
+$final = [RagentWindowsFacts]::FinalPath($item.FullName)
 if ([string]::IsNullOrWhiteSpace($final)) { throw 'Windows final path unavailable' }
 $attributes = [IO.File]::GetAttributes($item.FullName)
 $type = if ($item.PSIsContainer) { 'dir' } elseif ($item -is [IO.FileInfo]) { 'file' } else { 'other' }
@@ -164,7 +164,7 @@ $size = if ($type -eq 'file') { [int64]$item.Length } else { 0 }
 `;
 
 const DIRECTORY_SCRIPT = String.raw`${WINDOWS_NATIVE_HELPER}
-$path = $env:AGENTOC_FACTS_PATH
+$path = $env:RAGENT_FACTS_PATH
 $items = @(Get-ChildItem -LiteralPath $path -Force -ErrorAction Stop | ForEach-Object {
   $attributes = [IO.File]::GetAttributes($_.FullName)
   [ordered]@{
@@ -180,7 +180,7 @@ ConvertTo-Json -InputObject $items -Compress
 // PowerShell source). The MSI adapter's artifact revalidation requires this.
 const ARTIFACT_DIGEST_SCRIPT = String.raw`
 $ProgressPreference = 'SilentlyContinue'
-$p = $env:AGENTOC_FACTS_PATH
+$p = $env:RAGENT_FACTS_PATH
 try {
   $hash = Get-FileHash -LiteralPath $p -Algorithm SHA256 -ErrorAction Stop
   [ordered]@{ exists = $true; digest = $hash.Hash.ToLower() } | ConvertTo-Json -Compress
@@ -190,7 +190,7 @@ try {
 `;
 
 const SERVICE_SCRIPT = String.raw`${WINDOWS_NATIVE_HELPER}
-$name = $env:AGENTOC_SERVICE_NAME
+$name = $env:RAGENT_SERVICE_NAME
 $matches = @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop | Where-Object { $_.Name -ceq $name })
 if ($matches.Count -gt 1) { throw 'Ambiguous Windows service identity' }
 if ($matches.Count -eq 0) {
@@ -221,13 +221,13 @@ $definitionJson = $definition | ConvertTo-Json -Compress
 `;
 
 const ACL_SCRIPT = String.raw`${WINDOWS_NATIVE_HELPER}
-$path = $env:AGENTOC_FACTS_PATH
+$path = $env:RAGENT_FACTS_PATH
 $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
 $acl = Get-Acl -LiteralPath $item.FullName -ErrorAction Stop
 $sddl = [string]$acl.Sddl
 if ([string]::IsNullOrWhiteSpace($sddl)) { throw 'Windows ACL descriptor unavailable' }
 $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-$final = [AgentocWindowsFacts]::FinalPath($item.FullName)
+$final = [RagentWindowsFacts]::FinalPath($item.FullName)
 if ([string]::IsNullOrWhiteSpace($final)) { throw 'Windows ACL canonical path unavailable' }
 [ordered]@{
   platform = 'win32'
@@ -553,13 +553,13 @@ export function createWindowsRuntimeFactsProvider({
     name: WINDOWS_RUNTIME_FACTS_PROVIDER_VERSION,
     async realpath(input) {
       const requested = assertWindowsPath(input);
-      const facts = await run(PATH_REALPATH_SCRIPT, { AGENTOC_FACTS_PATH: requested });
+      const facts = await run(PATH_REALPATH_SCRIPT, { RAGENT_FACTS_PATH: requested });
       if (facts?.platform === 'win32' && facts?.notFound === true && Object.keys(facts).length === 2) throw Object.assign(new Error('Windows path not found'), { code: 'ENOENT' });
       return parseWindowsRealpathFacts(JSON.stringify(facts));
     },
     async stat(input) {
       const requested = assertWindowsPath(input);
-      const facts = await run(PATH_STAT_SCRIPT, { AGENTOC_FACTS_PATH: requested });
+      const facts = await run(PATH_STAT_SCRIPT, { RAGENT_FACTS_PATH: requested });
       if (facts?.platform === 'win32' && facts?.notFound === true && Object.keys(facts).length === 2) throw Object.assign(new Error('Windows path not found'), { code: 'ENOENT' });
       return parseWindowsPathFacts(JSON.stringify(facts));
     },
@@ -568,7 +568,7 @@ export function createWindowsRuntimeFactsProvider({
     },
     async readdir(input) {
       const requested = assertWindowsPath(input);
-      return parseWindowsDirectoryFacts(JSON.stringify(await run(DIRECTORY_SCRIPT, { AGENTOC_FACTS_PATH: requested }, { array: true })));
+      return parseWindowsDirectoryFacts(JSON.stringify(await run(DIRECTORY_SCRIPT, { RAGENT_FACTS_PATH: requested }, { array: true })));
     },
     async packageFacts(input) {
       if (platform !== 'win32') return null;
@@ -578,10 +578,10 @@ export function createWindowsRuntimeFactsProvider({
       // MSI artifact revalidation: identity (volume:fileId) from stat plus a
       // SHA-256 digest. Any failure to resolve either is an unresolved artifact.
       const requested = assertWindowsPath(typeof input === 'string' ? input : input?.canonicalPath);
-      const stat = parseWindowsPathFacts(JSON.stringify(await run(PATH_STAT_SCRIPT, { AGENTOC_FACTS_PATH: requested })));
+      const stat = parseWindowsPathFacts(JSON.stringify(await run(PATH_STAT_SCRIPT, { RAGENT_FACTS_PATH: requested })));
       if (stat.type !== 'file' || stat.reparsePoint) throw fail('WINDOWS_FACTS_UNAVAILABLE', 'Windows artifact must be a regular file');
-      const artifact = parseWindowsArtifactFacts(JSON.stringify(await run(ARTIFACT_DIGEST_SCRIPT, { AGENTOC_FACTS_PATH: requested })));
-      const after = parseWindowsPathFacts(JSON.stringify(await run(PATH_STAT_SCRIPT, { AGENTOC_FACTS_PATH: requested })));
+      const artifact = parseWindowsArtifactFacts(JSON.stringify(await run(ARTIFACT_DIGEST_SCRIPT, { RAGENT_FACTS_PATH: requested })));
+      const after = parseWindowsPathFacts(JSON.stringify(await run(PATH_STAT_SCRIPT, { RAGENT_FACTS_PATH: requested })));
       if (after.type !== 'file' || after.reparsePoint || after.identity !== stat.identity
           || after.size !== stat.size || !samePath(after.canonicalPath, stat.canonicalPath)) {
         throw fail('WINDOWS_FACTS_UNAVAILABLE', 'Windows artifact changed during inspection');
@@ -594,11 +594,11 @@ export function createWindowsRuntimeFactsProvider({
         if (platform !== 'win32') throw fail('WINDOWS_FACTS_PLATFORM_REQUIRED', 'Windows facts provider requires win32');
         return parseWindowsServiceFacts(JSON.stringify(await serviceInspector({ serviceName: requested })), requested);
       }
-      return parseWindowsServiceFacts(JSON.stringify(await run(SERVICE_SCRIPT, { AGENTOC_SERVICE_NAME: requested })), requested);
+      return parseWindowsServiceFacts(JSON.stringify(await run(SERVICE_SCRIPT, { RAGENT_SERVICE_NAME: requested })), requested);
     },
     async aclFacts({ canonicalPath } = {}) {
       const requested = assertWindowsPath(canonicalPath);
-      return parseWindowsAclFacts(JSON.stringify(await run(ACL_SCRIPT, { AGENTOC_FACTS_PATH: requested })), requested);
+      return parseWindowsAclFacts(JSON.stringify(await run(ACL_SCRIPT, { RAGENT_FACTS_PATH: requested })), requested);
     },
   };
 }

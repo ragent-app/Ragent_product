@@ -9,7 +9,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Web.Script.Serialization;
-using AgentoC.ServiceHost;
+using Ragent.ServiceHost;
 
 internal static class LegacyVoiceRetirement {
  internal sealed class Entry { public string name {get;set;} public string sha256 {get;set;} }
@@ -41,8 +41,8 @@ internal static class LegacyVoiceRetirement {
  static string Digest(Stream file){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(file)).Replace("-","").ToLowerInvariant();}
  static string HashFile(string path){using(var file=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)){ServiceDirectoryPin.VerifyFile(file.SafeFileHandle,path);return Digest(file);}}
  static bool Inside(string root,string path){return path.StartsWith(root.TrimEnd('\\')+"\\",StringComparison.OrdinalIgnoreCase);}
- static string Stage(string runtime){return Path.Combine(Path.GetDirectoryName(runtime),".agentoc-retired-whisper");}
- static string Sid(){return new NTAccount("NT SERVICE","AgentoC-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;}
+ static string Stage(string runtime){return Path.Combine(Path.GetDirectoryName(runtime),".ragent-retired-whisper");}
+ static string Sid(){return new NTAccount("NT SERVICE","Ragent-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;}
  static void SafeAcl(string path,string serviceSid,bool directory){
   FileSystemSecurity acl=directory?(FileSystemSecurity)Directory.GetAccessControl(path):File.GetAccessControl(path);
   var trusted=new HashSet<string>(new[]{"S-1-5-18","S-1-5-32-544",serviceSid});

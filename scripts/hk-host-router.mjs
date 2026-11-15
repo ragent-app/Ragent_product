@@ -14,7 +14,7 @@ const HUB_LABEL = normalizeLabel(process.env.HK_HOST_ROUTER_HUB_LABEL || 'hub');
 const HUB_PORT = Number.parseInt(process.env.HK_HOST_ROUTER_HUB_PORT, 10) || 7699;
 const ADMIN_LABEL = normalizeLabel(process.env.HK_HOST_ROUTER_ADMIN_LABEL || 'admin');
 const ADMIN_PORT = Number.parseInt(process.env.HK_HOST_ROUTER_ADMIN_PORT, 10) || 7689;
-const GUEST_REGISTRY_FILE = join(homedir(), '.config', 'agentoc', 'guest-instances.json');
+const GUEST_REGISTRY_FILE = join(homedir(), '.config', 'ragent', 'guest-instances.json');
 
 let registryCache = { loadedAt: 0, routes: new Map() };
 

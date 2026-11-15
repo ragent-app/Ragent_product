@@ -16,7 +16,7 @@ try {
     window.getChatStoreStateSnapshot = () => ({currentSessionId:'foreground'});
     window.getChatStoreSession = id => ({id, name:'QA'});
     window.getApprovalTitle = () => 'Bash';
-    window.agentocT = (key, vars = {}) => ({
+    window.ragentT = (key, vars = {}) => ({
       'decisionSheet.operation.delete':'delete', 'decisionSheet.operation.may':'May {action}',
       'decisionSheet.operationRisk.partial':'Review conditional command',
       'decisionSheet.operationRisk.delete':'Deletion may be irreversible',
@@ -30,7 +30,7 @@ try {
   for (const content of scripts) await page.addScriptTag({content});
   const event = {type:'approval_request',approvalId:'qa',kind:'command',status:'pending',reason:'Read target',
     command:'if true; then rm -f /tmp/example_file.txt; fi',explanation:{operation:'delete', targets:['/tmp/example_file.txt'],conditional:true,partial:true,riskCode:'composite_unanalyzed',summary:'old',reason:'old',providerConflict:true}};
-  await page.evaluate(event => window.AgentoCAttentionPopup.onRealtimeEvents('background',[event]), event);
+  await page.evaluate(event => window.RagentAttentionPopup.onRealtimeEvents('background',[event]), event);
   assert.equal(await page.locator('#attentionPopupTitle').textContent(), 'May delete: /tmp/example_file.txt');
   await page.locator('#attentionPopupTitle').click();
   const popup = page.locator('#attentionPopupHost');
@@ -38,8 +38,8 @@ try {
   assert.match(await popup.innerText(), /Read target/);
   assert.match(await popup.innerText(), /provider description may conflict/);
   assert.match(await popup.innerText(), /rm -f/);
-  await page.evaluate(() => window.AgentoCAttentionPopup._reset());
-  await page.evaluate(explanation => window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+  await page.evaluate(() => window.RagentAttentionPopup._reset());
+  await page.evaluate(explanation => window.RagentAttentionPopup.onRealtimeEvents('background', [{
     type:'privileged_batch_request',batchId:'batch',runId:'r',other:[
       {opId:'one',description:'First',command:'rm /tmp/example_file.txt',explanation},
       {opId:'two',description:'Second',command:'rm /tmp/other.txt',explanation:{...explanation,targets:['/tmp/other.txt']}}
@@ -52,8 +52,8 @@ try {
   assert.match(batchText, /other\.txt/);
   assert.match(batchText, /First/);
   assert.match(batchText, /Second/);
-  await page.evaluate(() => window.AgentoCAttentionPopup._reset());
-  await page.evaluate(event => window.AgentoCDecisions.noteRequest(event), event);
+  await page.evaluate(() => window.RagentAttentionPopup._reset());
+  await page.evaluate(event => window.RagentDecisions.noteRequest(event), event);
   assert.equal(await page.locator('#decisionSheet .oneui-notification__title').textContent(), 'May delete: /tmp/example_file.txt');
   await page.locator('#decisionSheet .oneui-notification__summary').click();
   const sheetText = await page.locator('#decisionSheet').innerText();
@@ -62,9 +62,9 @@ try {
   assert.match(sheetText, /Deletion may be irreversible/);
   assert.match(sheetText, /rm -f/);
   assert.equal((sheetText.match(/May delete: \/tmp\/example_file\.txt/g) || []).length, 1);
-  await page.evaluate(() => { window.AgentoCDecisions.noteResponse({approvalId:'qa'}); window.getApprovalTitle = e => e.reason; });
+  await page.evaluate(() => { window.RagentDecisions.noteResponse({approvalId:'qa'}); window.getApprovalTitle = e => e.reason; });
   await page.waitForTimeout(250);
-  await page.evaluate(() => window.AgentoCDecisions.noteRequest({type:'approval_request',approvalId:'legacy',kind:'command',
+  await page.evaluate(() => window.RagentDecisions.noteRequest({type:'approval_request',approvalId:'legacy',kind:'command',
     reason:'Remove example',command:'if true; then rm example; fi',explanation:{summary:'包含 3 步操作',
       reason:'命令串联了多个步骤，部分行为无法静态确认',saferAlternative:'拆成单条命令逐步确认后再执行'}}));
   await page.locator('#decisionSheet .oneui-notification__summary').click();
@@ -77,27 +77,27 @@ try {
   await localePage.addScriptTag({content: await read('static/chat/i18n.js')});
   await localePage.addScriptTag({content: scripts[0]});
   const localized = await localePage.evaluate(explanation => {
-    window.agentocSetUiLanguagePreference('zh-CN');
-    const zh = window.agentocApprovalExplanation(explanation, window.agentocT);
-    window.agentocSetUiLanguagePreference('en');
-    const en = window.agentocApprovalExplanation(explanation, window.agentocT);
+    window.ragentSetUiLanguagePreference('zh-CN');
+    const zh = window.ragentApprovalExplanation(explanation, window.ragentT);
+    window.ragentSetUiLanguagePreference('en');
+    const en = window.ragentApprovalExplanation(explanation, window.ragentT);
     return {zh, en};
   }, event.explanation);
   assert.equal(localized.zh.summary, '可能删除: /tmp/example_file.txt');
   assert.equal(localized.en.summary, 'May delete: /tmp/example_file.txt');
   assert.doesNotMatch(localized.en.reason, /[\u4e00-\u9fff]/);
   await localePage.close();
-  if (process.env.AGENTOC_APPROVAL_REPLAY_FILE) {
-    const encoded = await readFile(process.env.AGENTOC_APPROVAL_REPLAY_FILE, 'utf8');
+  if (process.env.RAGENT_APPROVAL_REPLAY_FILE) {
+    const encoded = await readFile(process.env.RAGENT_APPROVAL_REPLAY_FILE, 'utf8');
     const captured = JSON.parse(Buffer.from(encoded.trim(), 'base64').toString('utf8')).events[0];
     const replay = await browser.newPage();
     await replay.setContent('<!doctype html><div id="inputArea"><div id="liveBar"></div></div>');
     await replay.addScriptTag({content: await read('static/chat/i18n.js')});
-    await replay.evaluate(() => window.agentocSetUiLanguagePreference('en'));
+    await replay.evaluate(() => window.ragentSetUiLanguagePreference('en'));
     await replay.addScriptTag({content: scripts[0]});
     await replay.addScriptTag({content: scripts[2]});
     await replay.addScriptTag({content: scripts[3]});
-    await replay.evaluate(e => window.AgentoCDecisions.noteRequest(e), captured);
+    await replay.evaluate(e => window.RagentDecisions.noteRequest(e), captured);
     const title = await replay.locator('#decisionSheet .oneui-notification__title').textContent();
     assert.ok(title.startsWith('May delete: '));
     assert.ok(title.includes(captured.explanation.targets[0]));

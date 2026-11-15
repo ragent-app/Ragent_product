@@ -78,7 +78,7 @@ const externalLink = createLink('https://example.com/docs');
 const context = {
   console,
   window: {
-    agentocResolveProductPath(path) {
+    ragentResolveProductPath(path) {
       return `/trial6${path}`;
     },
   },

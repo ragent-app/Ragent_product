@@ -6,11 +6,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-usage-ledger-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-usage-ledger-'));
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.AGENTOC_USAGE_LEDGER_DIR = join(tempHome, '.config', 'agentoc', 'usage-ledger');
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.RAGENT_USAGE_LEDGER_DIR = join(tempHome, '.config', 'ragent', 'usage-ledger');
 
 const usageLedger = await import(
   pathToFileURL(join(repoRoot, 'chat', 'usage-ledger.mjs')).href

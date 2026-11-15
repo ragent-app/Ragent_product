@@ -94,7 +94,7 @@ assert.equal(matrix.harnesses[1].version.status, 'unavailable');
 
 const versionCalls = [];
 const wrapperPath = process.platform === 'win32'
-  ? 'C:\\ProgramData\\AgentoC\\harnesses\\codex\\node_modules\\.bin\\codex.cmd'
+  ? 'C:\\ProgramData\\Ragent\\harnesses\\codex\\node_modules\\.bin\\codex.cmd'
   : '/tmp/codex';
 const wrapperVersion = await probeHarnessVersion({ ...codex, path: wrapperPath }, {
   execFileImpl: async (file, args, options) => {

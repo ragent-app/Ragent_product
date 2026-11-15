@@ -1,13 +1,13 @@
 # Disposable local Windows Installer probe for an existing, independently
-# registered service. It never targets an AgentoC service or user data.
+# registered service. It never targets an Ragent service or user data.
 [CmdletBinding()]
 param([string]$EvidencePath='')
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'SMT_ADMIN_REQUIRED'}
 if(-not (Get-Command wix.exe -ErrorAction SilentlyContinue)){throw 'SMT_WIX_REQUIRED'}
-$id=[Guid]::NewGuid().ToString('N');$service='AgentoC-MsiTakeoverQa-'+$id.Substring(0,12)
-$installRoot=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) ('AgentoC-MsiTakeoverQa-'+$id)
-$qaRoot=Join-Path ([IO.Path]::GetTempPath()) ('agentoc-msi-service-takeover-'+$id)
+$id=[Guid]::NewGuid().ToString('N');$service='Ragent-MsiTakeoverQa-'+$id.Substring(0,12)
+$installRoot=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) ('Ragent-MsiTakeoverQa-'+$id)
+$qaRoot=Join-Path ([IO.Path]::GetTempPath()) ('ragent-msi-service-takeover-'+$id)
 $msi=Join-Path $qaRoot 'service-takeover.msi';$wxs=Join-Path $qaRoot 'service-takeover.wxs';$log=Join-Path $qaRoot 'install.log'
 if(Test-Path -LiteralPath $installRoot){throw 'SMT_INSTALL_ROOT_EXISTS'}
 if(Get-CimInstance Win32_Service -Filter ("Name='"+$service+"'")){throw 'SMT_SERVICE_EXISTS'}
@@ -16,10 +16,10 @@ $component=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$upgrade=[Guid]::N
 $xml=@"
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="AgentoC MSI service takeover QA" Manufacturer="AgentoC QA" Version="0.0.0.1" ProductCode="$productCode" UpgradeCode="$upgrade" Scope="perMachine">
+  <Package Name="Ragent MSI service takeover QA" Manufacturer="Ragent QA" Version="0.0.0.1" ProductCode="$productCode" UpgradeCode="$upgrade" Scope="perMachine">
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="AgentoC-MsiTakeoverQa-$id">
+      <Directory Id="INSTALLFOLDER" Name="Ragent-MsiTakeoverQa-$id">
         <Component Id="QaService" Guid="$component">
           <File Id="QaServiceBinary" Source="!(bindpath.System)\cmd.exe" KeyPath="yes" />
           <ServiceInstall Id="QaServiceInstall" Name="$service" DisplayName="$service" Type="ownProcess" Start="demand" Account="LocalSystem" ErrorControl="normal" />
@@ -31,7 +31,7 @@ $xml=@"
 </Wix>
 "@
 [IO.File]::WriteAllText($wxs,$xml,[Text.UTF8Encoding]::new($false))
-$report=[ordered]@{pass=$false;test='ServiceInstall against an independently registered same-name SCM service';serviceName=$service;installRoot=$installRoot;msiExitCode=$null;before=$null;after=$null;cleanupConfirmed=$false;productionAgentoCServicesTouched=$false}
+$report=[ordered]@{pass=$false;test='ServiceInstall against an independently registered same-name SCM service';serviceName=$service;installRoot=$installRoot;msiExitCode=$null;before=$null;after=$null;cleanupConfirmed=$false;productionRagentServicesTouched=$false}
 try{
   & wix.exe --acceptEula wix7 build -arch x64 $wxs -bindpath ('System='+[Environment]::GetFolderPath([Environment+SpecialFolder]::System)) -o $msi | Out-Null
   if($LASTEXITCODE -ne 0){throw 'SMT_MSI_BUILD_FAILED'}
@@ -59,7 +59,7 @@ finally{
     $report.cleanupConfirmed=$true
   }catch{$report.cleanupError=$_.Exception.GetBaseException().Message;$report.pass=$false}
   if($EvidencePath){[IO.File]::WriteAllText([IO.Path]::GetFullPath($EvidencePath),($report|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))}
-  if(Test-Path -LiteralPath $qaRoot){$full=[IO.Path]::GetFullPath($qaRoot);$parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\');if([IO.Path]::GetDirectoryName($full) -cne $parent -or [IO.Path]::GetFileName($full) -cne ('agentoc-msi-service-takeover-'+$id) -or ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SMT_QA_CLEANUP_ROOT_REFUSED'};foreach($item in @(Get-ChildItem -LiteralPath $full -Force -Recurse)){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'SMT_QA_CLEANUP_REPARSE_REFUSED'}};Remove-Item -LiteralPath $full -Recurse -Force}
+  if(Test-Path -LiteralPath $qaRoot){$full=[IO.Path]::GetFullPath($qaRoot);$parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\');if([IO.Path]::GetDirectoryName($full) -cne $parent -or [IO.Path]::GetFileName($full) -cne ('ragent-msi-service-takeover-'+$id) -or ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SMT_QA_CLEANUP_ROOT_REFUSED'};foreach($item in @(Get-ChildItem -LiteralPath $full -Force -Recurse)){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'SMT_QA_CLEANUP_REPARSE_REFUSED'}};Remove-Item -LiteralPath $full -Recurse -Force}
 }
 $report|ConvertTo-Json -Depth 6 -Compress
 if(-not $report.pass){exit 1}

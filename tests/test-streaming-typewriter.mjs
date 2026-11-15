@@ -146,7 +146,7 @@ function createStreamingRenderHarness() {
     },
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput(evt) {
       runActivityCalls.push({ method: 'noteFormalOutput', evt });
     },

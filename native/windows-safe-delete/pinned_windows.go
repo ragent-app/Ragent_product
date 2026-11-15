@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var protectedName = regexp.MustCompile(`(?i)^(?:\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc|\.env(?:\..*)?|ntuser\.dat(?:\.log\d*)?|system volume information|\$recycle\.bin)$`)
+var protectedName = regexp.MustCompile(`(?i)^(?:\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent|\.env(?:\..*)?|ntuser\.dat(?:\.log\d*)?|system volume information|\$recycle\.bin)$`)
 var protectedProfilePath = regexp.MustCompile(`(?i)(?:^|\\)appdata\\(?:local|roaming)\\microsoft\\(?:credentials|protect)(?:\\|$)`)
 var deviceName = regexp.MustCompile(`(?i)^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$`)
 

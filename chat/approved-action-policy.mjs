@@ -29,11 +29,11 @@ export const APPROVED_ACTION_CAPABILITY_REASON = Object.freeze({
 // dangerous (host-class) approval is authorized by the explicit owner click
 // alone on web and Android; the passkey/WebAuthn assertion layer is skipped
 // end to end and the stored authorization records no credential. The warning
-// UI stays. Set AGENTOC_OWNER_HOST_PASSKEY_REQUIRED=1 to restore the passkey
+// UI stays. Set RAGENT_OWNER_HOST_PASSKEY_REQUIRED=1 to restore the passkey
 // checkpoint without a code change. This switch only lowers the SECOND factor
 // at approval time: the action manifest, selection hash, one-shot capability,
 // executor revalidation, and audit chain all still apply.
-export const OWNER_HOST_PASSKEY_ENV = 'AGENTOC_OWNER_HOST_PASSKEY_REQUIRED';
+export const OWNER_HOST_PASSKEY_ENV = 'RAGENT_OWNER_HOST_PASSKEY_REQUIRED';
 
 export function isOwnerHostPasskeyRequired(env = process.env) {
   return /^(1|true|yes|on)$/i.test(trimString(env?.[OWNER_HOST_PASSKEY_ENV]));

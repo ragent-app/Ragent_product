@@ -3,9 +3,9 @@
 // Temporary, per-Run access for workspaces owned by a different Unix user.
 //
 // The lifecycle broker is root, while ordinary Runs execute as the dedicated
-// agentoc-runner user.  A user-selected workspace can therefore be perfectly
+// ragent-runner user.  A user-selected workspace can therefore be perfectly
 // valid for the control plane but unreachable by the runner (for example
-// /home/example/agentoc-dev when /home/example is mode 0750).  This helper gives
+// /home/example/ragent-dev when /home/example is mode 0750).  This helper gives
 // one Run a unique supplementary group, grants that group access only to the
 // selected workspace, and removes both the ACL entries and group when the
 // transient unit stops.
@@ -34,9 +34,9 @@ import { isDeepStrictEqual, promisify } from 'util';
 
 const execFileAsync = promisify(execFileCallback);
 
-const DEFAULT_ACCESS_ROOT = '/var/lib/agentoc-runner-access';
-const LEGACY_ACCESS_ROOT = '/run/agentoc-runner-access';
-export const RUNNER_ACCESS_ROOT = process.env.AGENTOC_RUNNER_ACCESS_DIR || DEFAULT_ACCESS_ROOT;
+const DEFAULT_ACCESS_ROOT = '/var/lib/ragent-runner-access';
+const LEGACY_ACCESS_ROOT = '/run/ragent-runner-access';
+export const RUNNER_ACCESS_ROOT = process.env.RAGENT_RUNNER_ACCESS_DIR || DEFAULT_ACCESS_ROOT;
 export const RUN_ID_RE = /^run_[A-Za-z0-9_-]{8,128}$/;
 const GROUP_NAME_PREFIX = 'aor-';
 const GROUP_NAME_RE = /^aor-[a-f0-9]{16}$/;
@@ -47,16 +47,16 @@ const LOCK_RETRY_MS = 50;
 // lifecycle broker's entire 120s request budget while waiting behind another
 // large workspace scan.  If the assist cannot acquire the lock promptly, the
 // ordinary Run still launches with its normal inherited groups.
-const parsedLockTimeoutMs = Number.parseInt(process.env.AGENTOC_RUNNER_ACCESS_LOCK_TIMEOUT_MS || '15000', 10);
+const parsedLockTimeoutMs = Number.parseInt(process.env.RAGENT_RUNNER_ACCESS_LOCK_TIMEOUT_MS || '15000', 10);
 const LOCK_TIMEOUT_MS = Number.isFinite(parsedLockTimeoutMs) && parsedLockTimeoutMs > 0
   ? Math.min(parsedLockTimeoutMs, 30_000) : 15_000;
-const parsedCommandTimeoutMs = Number.parseInt(process.env.AGENTOC_RUNNER_ACCESS_COMMAND_TIMEOUT_MS || '15000', 10);
+const parsedCommandTimeoutMs = Number.parseInt(process.env.RAGENT_RUNNER_ACCESS_COMMAND_TIMEOUT_MS || '15000', 10);
 const ACL_COMMAND_TIMEOUT_MS = Number.isFinite(parsedCommandTimeoutMs) && parsedCommandTimeoutMs > 0
   ? Math.min(parsedCommandTimeoutMs, 30_000) : 15_000;
-const SETFACL = process.env.AGENTOC_SETFACL || '/usr/bin/setfacl';
-const FIND = process.env.AGENTOC_FIND || '/usr/bin/find';
-const GROUPADD = process.env.AGENTOC_GROUPADD || '/usr/sbin/groupadd';
-const GROUPDEL = process.env.AGENTOC_GROUPDEL || '/usr/sbin/groupdel';
+const SETFACL = process.env.RAGENT_SETFACL || '/usr/bin/setfacl';
+const FIND = process.env.RAGENT_FIND || '/usr/bin/find';
+const GROUPADD = process.env.RAGENT_GROUPADD || '/usr/sbin/groupadd';
+const GROUPDEL = process.env.RAGENT_GROUPDEL || '/usr/sbin/groupdel';
 const LOCK_OWNER_FILE = 'owner.json';
 const SENSITIVE_DIRECTORY_NAMES = Object.freeze([
   '.codex',
@@ -65,7 +65,7 @@ const SENSITIVE_DIRECTORY_NAMES = Object.freeze([
   '.aws',
 ]);
 const SENSITIVE_CONFIG_CHILDREN = Object.freeze([
-  '.config/agentoc',
+  '.config/ragent',
   '.config/claude',
 ]);
 
@@ -182,7 +182,7 @@ async function withLock(task, {
 }
 
 function legacyRootFor(accessRoot) {
-  return !process.env.AGENTOC_RUNNER_ACCESS_DIR && accessRoot === DEFAULT_ACCESS_ROOT ? LEGACY_ACCESS_ROOT : '';
+  return !process.env.RAGENT_RUNNER_ACCESS_DIR && accessRoot === DEFAULT_ACCESS_ROOT ? LEGACY_ACCESS_ROOT : '';
 }
 
 async function ensureTrustedRootStore(path) {
@@ -249,10 +249,10 @@ function isContained(root, candidate) {
 }
 
 function protectedRoot(path) {
-  // The managed workspace under /var/lib/agentoc is intentionally allowed;
+  // The managed workspace under /var/lib/ragent is intentionally allowed;
   // the control-plane subtrees must remain opaque to a Run.
-  return ['/var/lib/agentoc/config', '/var/lib/agentoc/memory',
-    '/var/lib/agentoc/retired', '/var/log/agentoc', '/etc/agentoc', '/opt/agentoc']
+  return ['/var/lib/ragent/config', '/var/lib/ragent/memory',
+    '/var/lib/ragent/retired', '/var/log/ragent', '/etc/ragent', '/opt/ragent']
     .some((root) => isContained(root, path));
 }
 
@@ -303,7 +303,7 @@ function sensitiveFindPredicates() {
     '-o', '-name', '.ssh',
     '-o', '-name', '.gnupg',
     '-o', '-name', '.aws',
-    '-o', '-path', '*/.config/agentoc',
+    '-o', '-path', '*/.config/ragent',
     '-o', '-path', '*/.config/claude',
     ')',
     '-prune',

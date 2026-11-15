@@ -1,5 +1,5 @@
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 function esc(s) {
@@ -141,7 +141,7 @@ function getSessionQueuedCapabilities(session) {
 function shouldRenderQueuedSteerActions(session) {
   const tool = getSessionQueuedToolId(session);
   const capabilities = getSessionQueuedCapabilities(session);
-  // Queue editing is an AgentoC control-plane operation and does not require
+  // Queue editing is an Ragent control-plane operation and does not require
   // a provider stdin/control channel. AgY explicitly advertises this split:
   // delete/edit/clear are available while steer remains hidden.
   if (capabilities?.supportsQueuedMessageMutations === true || tool === "agy") return true;
@@ -191,7 +191,7 @@ function upsertQueuedSessionSnapshot(session) {
 
 function closeQueuedSteerMenu() {
   if (queuedSteerMenuBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(queuedSteerMenuBackEntryId);
+    window.RagentBackHandler?.pop?.(queuedSteerMenuBackEntryId);
     queuedSteerMenuBackEntryId = null;
   }
   const menus = typeof document.querySelectorAll === "function"
@@ -387,7 +387,7 @@ function openQueuedSteerMenu(anchor, session, item, row) {
   });
 
   document.body.appendChild(menu);
-  queuedSteerMenuBackEntryId = window.AgentoCBackHandler?.push?.({
+  queuedSteerMenuBackEntryId = window.RagentBackHandler?.push?.({
     id: "queued-steer-menu",
     onBack: () => {
       closeQueuedSteerMenu();
@@ -776,26 +776,26 @@ function getSessionMetaStatusInfo(session) {
     return liveStatus;
   }
   const workflowStatus = typeof window !== "undefined"
-    && window.AgentoCSessionStateModel
-    && typeof window.AgentoCSessionStateModel.getWorkflowStatusInfo === "function"
-    ? window.AgentoCSessionStateModel.getWorkflowStatusInfo(session?.workflowState)
+    && window.RagentSessionStateModel
+    && typeof window.RagentSessionStateModel.getWorkflowStatusInfo === "function"
+    ? window.RagentSessionStateModel.getWorkflowStatusInfo(session?.workflowState)
     : null;
   return workflowStatus || liveStatus;
 }
 
 function getSessionReviewStatusInfo(session) {
   return typeof window !== "undefined"
-    && window.AgentoCSessionStateModel
-    && typeof window.AgentoCSessionStateModel.getSessionReviewStatusInfo === "function"
-    ? window.AgentoCSessionStateModel.getSessionReviewStatusInfo(session)
+    && window.RagentSessionStateModel
+    && typeof window.RagentSessionStateModel.getSessionReviewStatusInfo === "function"
+    ? window.RagentSessionStateModel.getSessionReviewStatusInfo(session)
     : null;
 }
 
 function isSessionCompleteAndReviewed(session) {
   return typeof window !== "undefined"
-    && window.AgentoCSessionStateModel
-    && typeof window.AgentoCSessionStateModel.isSessionCompleteAndReviewed === "function"
-    ? window.AgentoCSessionStateModel.isSessionCompleteAndReviewed(session)
+    && window.RagentSessionStateModel
+    && typeof window.RagentSessionStateModel.isSessionCompleteAndReviewed === "function"
+    ? window.RagentSessionStateModel.isSessionCompleteAndReviewed(session)
     : false;
 }
 
@@ -814,7 +814,7 @@ function getSessionStatusItemClass(statusInfo) {
 }
 
 function getSessionRunStateItemClass(session) {
-  const model = typeof globalThis !== "undefined" ? globalThis.AgentoCSessionStateModel : null;
+  const model = typeof globalThis !== "undefined" ? globalThis.RagentSessionStateModel : null;
   const activity = typeof model?.normalizeSessionActivity === "function"
     ? model.normalizeSessionActivity(session)
     : null;
@@ -822,7 +822,7 @@ function getSessionRunStateItemClass(session) {
 }
 
 function getSessionListIndicatorInfo(session) {
-  const model = typeof globalThis !== "undefined" ? globalThis.AgentoCSessionStateModel : null;
+  const model = typeof globalThis !== "undefined" ? globalThis.RagentSessionStateModel : null;
   const activity = typeof model?.normalizeSessionActivity === "function"
     ? model.normalizeSessionActivity(session)
     : null;
@@ -905,7 +905,7 @@ let sidebarActionSheetBackgroundLock = null;
 let queuedSteerMenuBackEntryId = null;
 
 function prefersSidebarReducedMotion() {
-  return window.AgentoCMotion?.prefersReducedMotion?.()
+  return window.RagentMotion?.prefersReducedMotion?.()
     || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 }
 
@@ -993,16 +993,16 @@ async function resolveSidebarProjectTarget(project) {
   const target = project && typeof project === "object" ? project : {};
   const targetId = normalizeSidebarProjectId(target.id);
   const targetRoot = normalizeSidebarProjectRoot(target.rootPath);
-  if (typeof window.agentocEnsureProjectsReady !== "function") {
+  if (typeof window.ragentEnsureProjectsReady !== "function") {
     return targetId ? { ...target, id: targetId } : null;
   }
 
   let catalog;
   try {
-    const refreshed = await window.agentocEnsureProjectsReady({ force: true });
+    const refreshed = await window.ragentEnsureProjectsReady({ force: true });
     catalog = Array.isArray(refreshed)
       ? refreshed
-      : (typeof window.agentocGetProjects === "function" ? window.agentocGetProjects() : []);
+      : (typeof window.ragentGetProjects === "function" ? window.ragentGetProjects() : []);
   } catch (error) {
     if (targetId) return { ...target, id: targetId };
     throw error;
@@ -1029,7 +1029,7 @@ function closeSidebarActionSheet({ restoreFocus = true, immediate = false } = {}
     return;
   }
   if (sessionContextMenuBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(sessionContextMenuBackEntryId);
+    window.RagentBackHandler?.pop?.(sessionContextMenuBackEntryId);
     sessionContextMenuBackEntryId = null;
   }
   const sheet = _activeContextMenu;
@@ -1157,13 +1157,13 @@ async function runSidebarActionSheetTask(task) {
 }
 
 async function refreshSidebarAfterProjectMutation() {
-  if (typeof window.agentocEnsureProjectsReady === "function") {
-    await window.agentocEnsureProjectsReady({ force: true });
+  if (typeof window.ragentEnsureProjectsReady === "function") {
+    await window.ragentEnsureProjectsReady({ force: true });
   }
   if (typeof fetchSessionsList === "function") {
     await fetchSessionsList({ forceFresh: true });
-  } else if (typeof window.agentocRefreshWorkspaceSessions === "function") {
-    await window.agentocRefreshWorkspaceSessions();
+  } else if (typeof window.ragentRefreshWorkspaceSessions === "function") {
+    await window.ragentRefreshWorkspaceSessions();
   }
   window.refreshProjectsView?.();
 }
@@ -1200,11 +1200,11 @@ async function deleteProjectFromSidebarAction(project, deleteSessions) {
     // action. Treat that state as already complete after one authoritative
     // catalog refresh; it is the desired end state of this operation.
     let catalog = [];
-    if (typeof window.agentocEnsureProjectsReady === "function") {
-      const refreshed = await window.agentocEnsureProjectsReady({ force: true });
+    if (typeof window.ragentEnsureProjectsReady === "function") {
+      const refreshed = await window.ragentEnsureProjectsReady({ force: true });
       catalog = Array.isArray(refreshed)
         ? refreshed
-        : (typeof window.agentocGetProjects === "function" ? window.agentocGetProjects() : []);
+        : (typeof window.ragentGetProjects === "function" ? window.ragentGetProjects() : []);
     }
     const stillExists = catalog.some((entry) => normalizeSidebarProjectId(entry?.id) === projectId);
     if (!stillExists) {
@@ -1580,7 +1580,7 @@ function openSidebarActionSheet(kind, target, anchorEl, initialView = "actions")
     _renderedView: "",
   };
   renderSidebarActionSheet();
-  sessionContextMenuBackEntryId = window.AgentoCBackHandler?.push?.({
+  sessionContextMenuBackEntryId = window.RagentBackHandler?.push?.({
     // Keep the historical id so browser-back behavior and existing shell
     // coverage remain stable while the surface itself becomes a sheet.
     id: "session-context-menu",
@@ -1603,14 +1603,14 @@ function openSessionContextMenu(session, anchorEl, renameWrapper) {
   return openSidebarActionSheet("session", session, anchorEl);
 }
 
-window.agentocOpenSidebarActionSheet = openSidebarActionSheet;
-window.agentocOpenSessionRename = function openSessionRename(session, anchorEl) {
+window.ragentOpenSidebarActionSheet = openSidebarActionSheet;
+window.ragentOpenSessionRename = function openSessionRename(session, anchorEl) {
   return openSidebarActionSheet("session", session, anchorEl, "rename");
 };
-window.agentocOpenSessionDelete = function openSessionDelete(session, anchorEl) {
+window.ragentOpenSessionDelete = function openSessionDelete(session, anchorEl) {
   return openSidebarActionSheet("session", session, anchorEl, "delete");
 };
-window.agentocOpenProjectActionSheet = function openProjectActionSheet(project, anchorEl) {
+window.ragentOpenProjectActionSheet = function openProjectActionSheet(project, anchorEl) {
   return openSidebarActionSheet("project", project, anchorEl);
 };
 
@@ -1728,7 +1728,7 @@ function bindSidebarLongPress(target, onLongPress) {
   }, true);
 }
 
-window.agentocBindSidebarLongPress = bindSidebarLongPress;
+window.ragentBindSidebarLongPress = bindSidebarLongPress;
 
 // --- delegated long-press for session rows ----------------------------------
 // renderSessionList() rebuilds every row element on each render (it clears
@@ -1789,7 +1789,7 @@ function ensureSessionListLongPressDelegation() {
     if (event.pointerType && event.pointerType !== "touch") return;
     if (event.button && event.button !== 0) return;
     const row = findSessionRowFromEvent(event);
-    const session = row?.__agentocSessionModel;
+    const session = row?.__ragentSessionModel;
     if (!row || !session) return;
     cancelSessionRowHold();
     sessionRowHold = {
@@ -1833,7 +1833,7 @@ function ensureSessionListLongPressDelegation() {
       sessionRowHold.row.classList.remove("is-pressing", "is-long-press");
       row.classList.add("is-pressing");
       sessionRowHold.row = row;
-      sessionRowHold.session = row.__agentocSessionModel || sessionRowHold.session;
+      sessionRowHold.session = row.__ragentSessionModel || sessionRowHold.session;
       return;
     }
     cancelSessionRowHold();
@@ -1887,7 +1887,7 @@ function ensureSessionListLongPressDelegation() {
     event.preventDefault();
     if (!rightClick) return;
     cancelSessionRowHold();
-    openSessionRowContextMenu(row.__agentocSessionModel, row);
+    openSessionRowContextMenu(row.__ragentSessionModel, row);
   });
 
   // A long-press must not synthesize a navigation click on pointerup; the
@@ -1917,7 +1917,7 @@ function createActiveSessionItem(session, { showGroup = false } = {}) {
     // Current row model for the delegated long-press (see
     // ensureSessionListLongPressDelegation): rebuilt rows carry fresh data,
     // so a hold that survives a rebuild re-anchors to up-to-date state.
-    button.__agentocSessionModel = session;
+    button.__ragentSessionModel = session;
   }
   button.className =
     "session-item"

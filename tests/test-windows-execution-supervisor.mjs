@@ -11,21 +11,21 @@ if (process.platform !== 'win32') {
   process.exit(0);
 }
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-identity-live-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-identity-live-'));
 const instance = { instanceDir: root, configDir: join(root, 'config'),
   spoolDir: join(root, 'data', 'chat-runs'), providerHomesDir: join(root, 'provider-homes'),
   memoryDir: join(root, 'memory'), workRootDir: join(root, 'workspace'),
   port: 48329, id: 'identity-test', ttlSeconds: 60 };
 const childEnvironment = buildChildEnvironment(instance);
 for (const name of Object.keys(process.env)) {
-  if (/^(AGENTOC_|CHAT_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_|FCM_|FIREBASE_)/.test(name)) delete process.env[name];
+  if (/^(RAGENT_|CHAT_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_|FCM_|FIREBASE_)/.test(name)) delete process.env[name];
 }
 Object.assign(process.env, childEnvironment);
 const { assertOrdinaryWindowsExecutionIdentity, readWindowsExecutionIdentity } = await import('../lib/windows-execution-identity.mjs');
 const { createRunnerSupervisorServer, spawnSupervisedRunner } = await import('../chat/runner-supervisor-daemon.mjs');
 const { launchDetachedRunnerViaSupervisor } = await import('../chat/run-launcher.mjs');
 const { createRun, getRun } = await import('../chat/runs.mjs');
-const pipe = '\\\\.\\pipe\\agentoc-identity-test-' + randomBytes(12).toString('hex');
+const pipe = '\\\\.\\pipe\\ragent-identity-test-' + randomBytes(12).toString('hex');
 const prepareProviderImpl = async () => ({});
 let server, child, childExit, childOutput = '';
 let normalExit = false;
@@ -102,6 +102,6 @@ await writeFile(${JSON.stringify(receipt)},JSON.stringify({identity,runId:proces
   const actualRoot = await realpath(root);
   const actualParent = await realpath(tmpdir());
   assert.equal(dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-  assert.ok(basename(actualRoot).startsWith('agentoc-identity-live-'));
+  assert.ok(basename(actualRoot).startsWith('ragent-identity-live-'));
   await rm(actualRoot, { recursive: true, force: true });
 }

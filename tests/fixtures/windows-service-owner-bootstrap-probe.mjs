@@ -19,21 +19,21 @@ export async function serviceOwnerBootstrap(root,role,spec){
       const instance=join(root,'state/control','owner-auth-r'+round),config=join(instance,'config');await mkdir(config,{recursive:true});
       signingKey=randomBytes(32).toString('hex');signingFile=join(config,'auth-session-secret');await writeFile(signingFile,signingKey,{flag:'wx'});
       await writeFile(join(config,'auth.json'),JSON.stringify({username:'isolated-owner-qa',passwordHash:'SYNTHETIC-NO-PASSWORD-LOGIN'}));
-      Object.assign(process.env,{AGENTOC_WINDOWS_SERVICE_MODE:'1',AGENTOC_INSTANCE_ROOT:instance,AGENTOC_CONFIG_DIR:config,
-        AGENTOC_RUN_SPOOL_DIR:join(instance,'data/chat-runs'),AGENTOC_PROVIDER_HOMES_DIR:join(instance,'provider-homes'),
-        AGENTOC_MEMORY_DIR:join(instance,'memory'),AGENTOC_WORK_ROOT_DIR:join(instance,'workspace'),AGENTOC_AUTH_SESSION_SECRET:signingKey,
-        AGENTOC_LOCAL_WEB_AUTH:'0',ProgramData:'C:/ProgramData'});
+      Object.assign(process.env,{RAGENT_WINDOWS_SERVICE_MODE:'1',RAGENT_INSTANCE_ROOT:instance,RAGENT_CONFIG_DIR:config,
+        RAGENT_RUN_SPOOL_DIR:join(instance,'data/chat-runs'),RAGENT_PROVIDER_HOMES_DIR:join(instance,'provider-homes'),
+        RAGENT_MEMORY_DIR:join(instance,'memory'),RAGENT_WORK_ROOT_DIR:join(instance,'workspace'),RAGENT_AUTH_SESSION_SECRET:signingKey,
+        RAGENT_LOCAL_WEB_AUTH:'0',ProgramData:'C:/ProgramData'});
       auth=await import('../../lib/auth.mjs');
       httpServer=http.createServer((req,res)=>{
         if(req.url!=='/api/owner-proof'){res.writeHead(404);res.end();return;}
         const session=auth.getAuthSession(req),allowed=auth.isAuthenticated(req)&&session?.role==='owner';
         if(allowed)validHttp++;res.writeHead(allowed?200:401,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({owner:allowed}));
       });await new Promise(done=>httpServer.listen(0,'127.0.0.1',done));
-      const releaseJson=JSON.stringify({version:1,protocolVersion:1,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:spec['OwnerBootstrap.exe'],publisherSha256:'a'.repeat(64)});
+      const releaseJson=JSON.stringify({version:1,protocolVersion:1,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:spec['OwnerBootstrap.exe'],publisherSha256:'a'.repeat(64)});
       const installationJson=JSON.stringify({version:1,instanceId:spec.ownerInstanceId,controlSid:spec.controlSid,executorSid:spec.executorSid,ownerSid:spec.requestorSid,port:7690});
       const publicationPath=join(config,'owner-bootstrap-live.json');
       for(const scenario of ownerBootstrapScenarios){
-        const policy={pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,
+        const policy={pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,
           requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:spec.controlSid,ownerSid:spec.requestorSid,ownerSessionId:spec.ownerSessionId};
         const before=issuances;
         controller=await createOwnerDiscoveryController({releaseJson,installationJson,store:createOwnerDiscoveryFileStore({filePath:publicationPath}),executablePath:join(root,'runtime/OwnerBootstrap.exe'),
@@ -44,7 +44,7 @@ export async function serviceOwnerBootstrap(root,role,spec){
         const first=await controller.start(policy);let retired=null;
         if(scenario==='success'){
           retired={policy:first.descriptor.policy,peer:first.ready.facts};
-          const replacement={...policy,pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')};
+          const replacement={...policy,pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')};
           active={...await controller.refresh(replacement),close:()=>controller.close()};
           assert.notEqual(active.descriptor.policy.requestId,retired.policy.requestId);
         }else active={...first,close:()=>controller.close()};
@@ -84,7 +84,7 @@ export async function serviceOwnerBootstrap(root,role,spec){
     report.pass=true;
   }catch(error){report.error=error.code||error.name;}
   finally{if(controller)await controller.close();if(httpServer)await new Promise(done=>httpServer.close(done));
-    if(signingFile){await unlink(signingFile).catch(error=>{if(error.code!=='ENOENT')throw error;});report.signingFileRemoved=true;delete process.env.AGENTOC_AUTH_SESSION_SECRET;}
+    if(signingFile){await unlink(signingFile).catch(error=>{if(error.code!=='ENOENT')throw error;});report.signingFileRemoved=true;delete process.env.RAGENT_AUTH_SESSION_SECRET;}
   }
   return report;
 }

@@ -56,7 +56,7 @@ func msiInstallSigningBytes(grant msiInstallGrant) ([]byte, error) {
 	if err != nil {
 		return nil, errMSIInstallGrant
 	}
-	return append([]byte("AgentoC Windows MSI install v1\x00"), encoded...), nil
+	return append([]byte("Ragent Windows MSI install v1\x00"), encoded...), nil
 }
 
 func verifyMSIInstallGrant(grant msiInstallGrant, signature string, key ed25519.PublicKey, now time.Time) error {

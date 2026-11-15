@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgyRotationStore } from '../lib/provider-runtime/agy-rotation.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-rotation-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-rotation-'));
 const profiles = [
   { id: 'agy-a', agentType: 'agy', enabled: true, status: 'ready' },
   { id: 'agy-b', agentType: 'agy', enabled: true, status: 'ready' },

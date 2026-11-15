@@ -34,7 +34,7 @@ $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
 $p2pRoot = Join-Path $SourceRoot 'p2p'
 if (-not (Test-Path (Join-Path $p2pRoot 'go.mod') -PathType Leaf) -or
-    -not (Test-Path (Join-Path $p2pRoot 'cmd\agentoc-p2p-host\main.go') -PathType Leaf)) {
+    -not (Test-Path (Join-Path $p2pRoot 'cmd\ragent-p2p-host\main.go') -PathType Leaf)) {
     throw 'SourceRoot does not contain the P2P host Go module.'
 }
 $go = Get-Command go.exe -ErrorAction SilentlyContinue
@@ -51,7 +51,7 @@ try {
     $env:CGO_ENABLED = '0'
     Push-Location $p2pRoot
     try {
-        & $go.Source build -trimpath -o $OutputPath './cmd/agentoc-p2p-host'
+        & $go.Source build -trimpath -o $OutputPath './cmd/ragent-p2p-host'
         if ($LASTEXITCODE -ne 0) { throw "Windows P2P host build failed (go exit $LASTEXITCODE)." }
     } finally {
         Pop-Location

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildChildEnvironment } from '../scripts/launch-test-instance.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-permission-admission-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-permission-admission-'));
 const configDir = join(root, 'config');
 const workspace = join(root, 'workspace');
 const spoolDir = join(root, 'spool');
@@ -29,13 +29,13 @@ Object.assign(process.env, buildChildEnvironment(instance));
 const kimiBinDir = join(harnessRoot, 'kimi-code', 'node_modules', '.bin');
 const kimiCommand = join(kimiBinDir, 'kimi.cmd');
 const kimiHarnessScript = join(root, 'fake-kimi-acp.mjs');
-const kimiHandshakeReceipt = join(workspace, '.agentoc-kimi-acp-handshake.json');
-const runnerSupervisorPipe = `\\\\.\\pipe\\agentoc-permission-profile-${process.pid}-${Date.now()}`;
-process.env.AGENTOC_HARNESS_ROOT = harnessRoot;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = runnerSupervisorPipe;
-process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '1';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+const kimiHandshakeReceipt = join(workspace, '.ragent-kimi-acp-handshake.json');
+const runnerSupervisorPipe = `\\\\.\\pipe\\ragent-permission-profile-${process.pid}-${Date.now()}`;
+process.env.RAGENT_HARNESS_ROOT = harnessRoot;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = runnerSupervisorPipe;
+process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '1';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 mkdirSync(configDir, { recursive: true });
 mkdirSync(workspace, { recursive: true });
 mkdirSync(kimiBinDir, { recursive: true });
@@ -54,7 +54,7 @@ if (process.argv.includes('--version')) {
 const requests = [];
 let selectedMode = '';
 let sessionCwd = process.cwd();
-function save() { writeFileSync(join(sessionCwd, '.agentoc-kimi-acp-handshake.json'), JSON.stringify({ requests, selectedMode })); }
+function save() { writeFileSync(join(sessionCwd, '.ragent-kimi-acp-handshake.json'), JSON.stringify({ requests, selectedMode })); }
 function respond(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n'); }
 for await (const line of createInterface({ input: process.stdin })) {
   let request;
@@ -112,9 +112,9 @@ const launchedSessions = [];
 try {
   if (process.platform === 'win32') {
     const supervisorEnv = buildChildEnvironment(instance);
-    supervisorEnv.AGENTOC_HARNESS_ROOT = harnessRoot;
-    supervisorEnv.AGENTOC_RUNNER_SUPERVISOR_SOCKET = runnerSupervisorPipe;
-    supervisorEnv.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '1';
+    supervisorEnv.RAGENT_HARNESS_ROOT = harnessRoot;
+    supervisorEnv.RAGENT_RUNNER_SUPERVISOR_SOCKET = runnerSupervisorPipe;
+    supervisorEnv.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '1';
     const repoRoot = fileURLToPath(new URL('..', import.meta.url));
     supervisor = spawn(process.execPath, [join(repoRoot, 'chat', 'runner-supervisor-daemon.mjs')], {
       cwd: repoRoot,
@@ -150,8 +150,8 @@ try {
       });
     });
   } else {
-    process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = '';
-    process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '';
+    process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = '';
+    process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '';
   }
   for (const tool of ['permission-codex-cli', 'permission-cline', 'permission-kilo', 'permission-opencode']) {
     const session = await createSession(workspace, tool, `Manual ${tool}`, { riskMode: 'recommended' });

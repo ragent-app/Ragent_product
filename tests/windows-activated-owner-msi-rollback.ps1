@@ -6,8 +6,8 @@ param(
   [Parameter(Mandatory=$true)][string]$EvidenceDirectory
 )
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
-$product='C:\Program Files\AgentoC';$data='C:\ProgramData\AgentoC'
-$names=@('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')
+$product='C:\Program Files\Ragent';$data='C:\ProgramData\Ragent'
+$names=@('Ragent-ControlPlane','Ragent-RunnerSupervisor')
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'owner/private-qa-repository' -or $env:RUNNER_OS -cne 'Windows' -or $env:GITHUB_REF -cnotmatch '^refs/heads/qa/windows-msi-[a-z0-9-]+$'){throw 'AOMR_DISPOSABLE_RUNNER_REQUIRED'}
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'AOMR_ADMIN_REQUIRED'}
 if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){throw 'AOMR_TEMP_REQUIRED'}

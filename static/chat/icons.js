@@ -1,6 +1,6 @@
 "use strict";
 
-const AGENTOC_ICONS = Object.freeze({
+const RAGENT_ICONS = Object.freeze({
   menu: '<path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/>',
   // Match Android's compact filled home glyph rather than the older outlined
   // roof-and-door construction.
@@ -76,30 +76,30 @@ function normalizeIconClassName(className) {
     .join(" ");
 }
 
-function renderAgentoCIcon(name, options = {}) {
-  const body = AGENTOC_ICONS[name];
+function renderRagentIcon(name, options = {}) {
+  const body = RAGENT_ICONS[name];
   if (!body) return "";
   const className = normalizeIconClassName(`rl-icon ${options.className || ""}`);
   return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
-function hydrateAgentoCIcons(root = document) {
+function hydrateRagentIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach((node) => {
     const iconName = node.getAttribute("data-icon");
     if (!iconName) return;
-    node.innerHTML = renderAgentoCIcon(iconName, {
+    node.innerHTML = renderRagentIcon(iconName, {
       className: node.getAttribute("data-icon-class") || "",
     });
   });
 }
 
-window.AgentoCIcons = Object.freeze({
-  hydrate: hydrateAgentoCIcons,
-  render: renderAgentoCIcon,
+window.RagentIcons = Object.freeze({
+  hydrate: hydrateRagentIcons,
+  render: renderRagentIcon,
 });
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => hydrateAgentoCIcons(), { once: true });
+  document.addEventListener("DOMContentLoaded", () => hydrateRagentIcons(), { once: true });
 } else {
-  hydrateAgentoCIcons();
+  hydrateRagentIcons();
 }

@@ -15,7 +15,7 @@ import {
   isUnrequestedCodexThreadEvent,
 } from '../chat/runner-sidecar.mjs';
 
-const fixtureRoot = process.env.AGENTOC_TEST_EVIDENCE_ROOT || tmpdir();
+const fixtureRoot = process.env.RAGENT_TEST_EVIDENCE_ROOT || tmpdir();
 
 async function providerHome(auth) {
   const root = await mkdtemp(join(fixtureRoot, 'codex-catalog-fixture-'));

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Accounts PostgreSQL store 集成测试。
-// 需要 AGENTOC_ACCOUNTS_DATABASE_URL（本地开发用 compose 里的 accounts 库）；
+// 需要 RAGENT_ACCOUNTS_DATABASE_URL（本地开发用 compose 里的 accounts 库）；
 // 未配置时打印 skip 并正常退出，避免在没有数据库的机器上阻塞测试。
 import assert from 'node:assert/strict';
 import { Pool } from 'pg';
@@ -8,9 +8,9 @@ import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { createPostgresStore, createPostgresStoreFromUrl } from '../accounts/store/postgres.mjs';
 import { loadOrCreateInstanceIdentity, publicInstanceIdentity, signInstanceProof } from '../lib/instance-identity.mjs';
 
-const databaseUrl = process.env.AGENTOC_ACCOUNTS_DATABASE_URL;
+const databaseUrl = process.env.RAGENT_ACCOUNTS_DATABASE_URL;
 if (!databaseUrl) {
-  console.log('test-accounts-postgres: skipped (AGENTOC_ACCOUNTS_DATABASE_URL not set)');
+  console.log('test-accounts-postgres: skipped (RAGENT_ACCOUNTS_DATABASE_URL not set)');
   process.exit(0);
 }
 
@@ -89,13 +89,13 @@ await resetTables();
     returnUrl,
     instance: publicInstanceIdentity(identity),
     issuedAt,
-    audience: 'agentoc-owner-auth',
+    audience: 'ragent-owner-auth',
     signature: signInstanceProof(identity, {
       transactionId,
       purpose: 'login',
       returnUrl,
       issuedAt,
-      audience: 'agentoc-owner-auth',
+      audience: 'ragent-owner-auth',
     }).signature,
   });
   assert.ok(started.bootstrap);

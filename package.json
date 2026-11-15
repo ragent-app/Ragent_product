@@ -1,5 +1,5 @@
 {
-  "name": "agentoc",
+  "name": "ragent",
   "version": "0.0.2",
   "description": "AI workbench for super-individuals: orchestrate agents and distribute agentic-native apps",
   "type": "module",
@@ -34,7 +34,6 @@
     "darwin"
   ],
   "bin": {
-    "agentoc": "cli.js",
     "ragent": "cli.js"
   },
   "directories": {
@@ -103,7 +102,7 @@
     "test:pi-adapter": "node tests/test-pi-adapter.mjs",
     "test:harness-registry": "node tests/test-harness-registry.mjs",
     "test:harness-provider-bridge": "node tests/test-harness-provider-bridge.mjs",
-    "test:orchestration": "node tests/test-orchestration-store.mjs && node tests/test-orchestration-tools.mjs && node tests/test-orchestration-reconciler.mjs && node tests/test-orchestration-routes.mjs && node tests/test-orchestration-approval-bridge.mjs && node tests/test-agentoc-mcp-server.mjs",
+    "test:orchestration": "node tests/test-orchestration-store.mjs && node tests/test-orchestration-tools.mjs && node tests/test-orchestration-reconciler.mjs && node tests/test-orchestration-routes.mjs && node tests/test-orchestration-approval-bridge.mjs && node tests/test-ragent-mcp-server.mjs",
     "test:deepseek-harness-adapter": "node tests/test-deepseek-harness-adapter.mjs",
     "test:qwen-code-adapter": "node tests/test-qwen-code-adapter.mjs",
     "test:opencode-adapter": "node tests/test-opencode-adapter.mjs",

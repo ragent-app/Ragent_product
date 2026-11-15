@@ -10,7 +10,7 @@ import {chromium} from '@playwright/test';
 import {DatabaseSync} from 'node:sqlite';
 import {createLocalUiBootstrap,createLocalUiBootstrapClaimStore} from '../lib/local-ui-bootstrap.mjs';
 import {createOwnerBootstrapIssuer} from '../lib/windows-owner-bootstrap-protocol.mjs';
-const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-ui-browser-')),config=join(root,'config'),claims=join(root,'claims');
+const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-ui-browser-')),config=join(root,'config'),claims=join(root,'claims');
 await mkdir(config);await mkdir(claims);
 const evidence=resolve('artifacts/showcase/T2-current-20261017/owner-purpose');await mkdir(evidence,{recursive:true});
 const report={pass:false,level:'real Chromium, actual loopback HTTP, original auth with isolated synthetic key',checks:[],productionChanged:false,nativeIpc:false,signedInstallation:false,phoneOrTurn:false};
@@ -18,10 +18,10 @@ let browser,server,component,auth;
 try{
   const secret=randomBytes(32).toString('hex');
   await writeFile(join(config,'auth.json'),JSON.stringify({username:'isolated-bootstrap-qa',passwordHash:'SYNTHETIC-NO-PASSWORD-LOGIN'}));
-  Object.assign(process.env,{AGENTOC_WINDOWS_SERVICE_MODE:'1',AGENTOC_INSTANCE_ROOT:root,AGENTOC_CONFIG_DIR:config,
-    AGENTOC_RUN_SPOOL_DIR:join(root,'data/chat-runs'),AGENTOC_PROVIDER_HOMES_DIR:join(root,'provider-homes'),
-    AGENTOC_MEMORY_DIR:join(root,'memory'),AGENTOC_WORK_ROOT_DIR:join(root,'workspace'),AGENTOC_AUTH_SESSION_SECRET:secret,
-    AGENTOC_LOCAL_WEB_AUTH:'0',SECURE_COOKIES:'0'});
+  Object.assign(process.env,{RAGENT_WINDOWS_SERVICE_MODE:'1',RAGENT_INSTANCE_ROOT:root,RAGENT_CONFIG_DIR:config,
+    RAGENT_RUN_SPOOL_DIR:join(root,'data/chat-runs'),RAGENT_PROVIDER_HOMES_DIR:join(root,'provider-homes'),
+    RAGENT_MEMORY_DIR:join(root,'memory'),RAGENT_WORK_ROOT_DIR:join(root,'workspace'),RAGENT_AUTH_SESSION_SECRET:secret,
+    RAGENT_LOCAL_WEB_AUTH:'0',SECURE_COOKIES:'0'});
   const paths=await import('../lib/config.mjs');assert.equal(resolve(paths.CONFIG_DIR),resolve(config));
   // Assert isolation before importing auth (which reads auth/session files).
   auth=await import('../lib/auth.mjs');
@@ -40,7 +40,7 @@ try{
     revokeOwnerSession:async token=>{auth.revokeSession(token);await auth.saveAuthSessions();},setCookie:auth.setCookie});
   const issue=()=>component.issue({launchNonce:randomBytes(32).toString('hex'),expiresAtUnixMs:Date.now()+30000});
   async function privateBrowserIssue(){
-    const policy={protocolVersion:2,purpose:'browser',pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1};
+    const policy={protocolVersion:2,purpose:'browser',pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1};
     const event={kind:'request',facts:{sid:policy.ownerSid,sessionId:1,pid:1234,createdTicks:'134368500000000000',integrityRid:8192,elevated:false,enabledAdministrators:false,queryOnlyAuthorityVerified:true},frame:{version:2,operation:'owner.browser',instanceId,requestId:policy.requestId,expiresAtUnixMs:policy.expiresAtUnixMs,challenge:randomBytes(32).toString('base64url'),launchNonce:randomBytes(32).toString('hex')}};
     const issuer=createOwnerBootstrapIssuer({policy,issueBrowserTicket:async(_,binding)=>component.issueTicket(binding)}),result=await issuer.accept(event);
     return {ticket:result.bootstrapTicket,url:origin+'/local-bootstrap#'+new URLSearchParams({ticket:result.bootstrapTicket,nonce:result.launchNonce,instance:instanceId})};
@@ -100,6 +100,6 @@ try{
 finally{
   component?.close();await browser?.close();if(server){server.closeAllConnections();await new Promise(done=>server.close(done));}auth?.closeAuthSessionStore();
   // This exact freshly-created fixture root alone is removed.
-  assert.ok(relative(await realpath(tmpdir()),root).startsWith('agentoc-ui-browser-'));await rm(root,{recursive:true,force:true});
+  assert.ok(relative(await realpath(tmpdir()),root).startsWith('ragent-ui-browser-'));await rm(root,{recursive:true,force:true});
   report.cleanup=true;await writeFile(join(evidence,'browser.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
 }

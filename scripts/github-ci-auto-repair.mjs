@@ -59,7 +59,7 @@ Behavior:
   - Looks at the latest matching run for each branch/workflow group
   - Skips runs that are still in progress, already handled, or still within the settle window
   - Submits failed run identifiers to the responsibility event endpoint; the server verifies GitHub facts
-  - Uses AGENTOC_CI_OWNER_USERNAME and AGENTOC_CI_OWNER_PASSWORD with the existing password login;
+  - Uses RAGENT_CI_OWNER_USERNAME and RAGENT_CI_OWNER_PASSWORD with the existing password login;
     the retired static owner token is not accepted. Credentials are not written to config.
 `;
   console.log(message);
@@ -108,11 +108,11 @@ function slugify(value, fallback = 'item') {
 }
 
 function defaultStateFile(repo) {
-  return join(homedir(), '.config', 'agentoc', 'github-ci-auto-repair', `${repoKey(repo)}.json`);
+  return join(homedir(), '.config', 'ragent', 'github-ci-auto-repair', `${repoKey(repo)}.json`);
 }
 
 function defaultSnapshotDir(repo) {
-  return join(homedir(), '.config', 'agentoc', 'github-ci-auto-repair', 'snapshots', repoKey(repo));
+  return join(homedir(), '.config', 'ragent', 'github-ci-auto-repair', 'snapshots', repoKey(repo));
 }
 
 async function ensureDir(path) {
@@ -137,7 +137,7 @@ async function writeJson(path, value) {
 }
 
 function normalizeBaseUrl(value) {
-  return trimString(value || process.env.AGENTOC_CHAT_BASE_URL || DEFAULT_CHAT_BASE_URL).replace(/\/+$/, '') || DEFAULT_CHAT_BASE_URL;
+  return trimString(value || process.env.RAGENT_CHAT_BASE_URL || DEFAULT_CHAT_BASE_URL).replace(/\/+$/, '') || DEFAULT_CHAT_BASE_URL;
 }
 
 function parseArgs(argv = []) {
@@ -683,9 +683,9 @@ export function buildSessionMessage({ repo, sessionFolder, run, commit, failedJo
 }
 
 async function loginWithPassword(baseUrl) {
-  const username=String(process.env.AGENTOC_CI_OWNER_USERNAME||'');
-  const password=String(process.env.AGENTOC_CI_OWNER_PASSWORD||'');
-  if (!username || !password) throw new Error('CI monitor requires AGENTOC_CI_OWNER_USERNAME and AGENTOC_CI_OWNER_PASSWORD; static token login is retired');
+  const username=String(process.env.RAGENT_CI_OWNER_USERNAME||'');
+  const password=String(process.env.RAGENT_CI_OWNER_PASSWORD||'');
+  if (!username || !password) throw new Error('CI monitor requires RAGENT_CI_OWNER_USERNAME and RAGENT_CI_OWNER_PASSWORD; static token login is retired');
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}/login`, {
     method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
     body:new URLSearchParams({username,password}),
@@ -732,7 +732,7 @@ async function ensureAuthCookie(runtime, forceRefresh = false) {
   return runtime.authCookie;
 }
 
-async function requestAgentoC(runtime, path, options = {}) {
+async function requestRagent(runtime, path, options = {}) {
   const cookie = await ensureAuthCookie(runtime, false);
   let result = await requestJson(runtime.baseUrl, path, { ...options, cookie });
   if ([401, 403].includes(result.response.status)) {
@@ -756,7 +756,7 @@ async function triggerRepairSession(options, runtime, incident) {
     systemPrompt: buildSessionSystemPrompt(),
     externalTriggerId,
   };
-  const createResult = await requestAgentoC(runtime, '/api/sessions', {
+  const createResult = await requestRagent(runtime, '/api/sessions', {
     method: 'POST',
     body: sessionPayload,
   });
@@ -781,7 +781,7 @@ async function triggerRepairSession(options, runtime, incident) {
   if (options.model) messagePayload.model = options.model;
   if (options.effort) messagePayload.effort = options.effort;
 
-  const submitResult = await requestAgentoC(runtime, `/api/sessions/${createResult.json.session.id}/messages`, {
+  const submitResult = await requestRagent(runtime, `/api/sessions/${createResult.json.session.id}/messages`, {
     method: 'POST',
     body: messagePayload,
   });
@@ -792,7 +792,7 @@ async function triggerRepairSession(options, runtime, incident) {
   return {
     sessionId: createResult.json.session.id,
     sessionName: trimString(createResult.json.session.name || sessionPayload.name),
-    agentocRunId: submitResult.json.run.id,
+    ragentRunId: submitResult.json.run.id,
     requestId,
     externalTriggerId,
   };
@@ -923,7 +923,7 @@ export async function runGithubCiAutoRepair(argv = []) {
       continue;
     }
 
-    const response = await requestAgentoC(runtime, `/api/responsibilities/${encodeURIComponent(options.responsibilityId)}/github-event`, {
+    const response = await requestRagent(runtime, `/api/responsibilities/${encodeURIComponent(options.responsibilityId)}/github-event`, {
       method: 'POST', body: {repository:options.repo,runId:String(incident.run.id)},
     });
     if (!response.response.ok || !response.json?.wakeId) throw new Error(response.json?.error || response.text || `Failed to submit CI event (${response.response.status})`);

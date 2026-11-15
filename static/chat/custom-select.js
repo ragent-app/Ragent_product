@@ -255,7 +255,7 @@
       this.trigger.setAttribute("aria-expanded", "true");
       document.addEventListener("pointerdown", this._outsideHandler, true);
       document.addEventListener("keydown", this._keydownHandler, true);
-      this._backEntryId = window.AgentoCBackHandler?.push?.({
+      this._backEntryId = window.RagentBackHandler?.push?.({
         id: `custom-select-${++customSelectBackEntrySeq}`,
         onBack: () => {
           this.close();
@@ -317,7 +317,7 @@
     close() {
       if (!this._open) return;
       if (this._backEntryId) {
-        window.AgentoCBackHandler?.pop?.(this._backEntryId);
+        window.RagentBackHandler?.pop?.(this._backEntryId);
         this._backEntryId = null;
       }
       this._open = false;
@@ -342,7 +342,7 @@
         this.panel.style.maxWidth = "";
         this._restorePanelToWrap();
       };
-      if (window.AgentoCMotion?.prefersReducedMotion?.()) {
+      if (window.RagentMotion?.prefersReducedMotion?.()) {
         finishClose();
       } else {
         this._closeTimer = setTimeout(finishClose, 120);

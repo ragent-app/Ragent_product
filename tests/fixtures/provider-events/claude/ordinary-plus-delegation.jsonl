@@ -1,4 +1,4 @@
-{"type":"system","subtype":"init","cwd":"/home/example/agentoc-dev","session_id":"sess-mixed-1","tools":["Task","Bash"]}
+{"type":"system","subtype":"init","cwd":"/home/example/ragent-dev","session_id":"sess-mixed-1","tools":["Task","Bash"]}
 {"type":"assistant","timestamp":3001,"message":{"content":[{"type":"tool_use","id":"call_bash_first","name":"Bash","input":{"command":"git status --short"}}]}}
 {"type":"user","timestamp":3002,"message":{"content":[{"type":"tool_result","tool_use_id":"call_bash_first","content":"clean"}]}}
 {"type":"assistant","timestamp":3003,"message":{"content":[{"type":"tool_use","id":"task_real_child","name":"Task","input":{"description":"Actual native child","child_session_id":"claude-mixed-child"}}]}}

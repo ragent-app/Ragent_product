@@ -9,12 +9,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
-const dir = mkdtempSync(join(tmpdir(), 'agentoc-accounts-modernization-'));
+const dir = mkdtempSync(join(tmpdir(), 'ragent-accounts-modernization-'));
 const { startAccountsServer } = await import(pathToFileURL(join(root, 'accounts/server.mjs')).href);
 const { createAccountsLogger } = await import(pathToFileURL(join(root, 'accounts/log.mjs')).href);
 const identityModule = await import(pathToFileURL(join(root, 'lib/instance-identity.mjs')).href);
-process.env.AGENTOC_CONFIG_DIR = join(dir, 'instance-config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = join(dir, 'instance-config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 const identity = await identityModule.loadOrCreateInstanceIdentity({ filePath: join(dir, 'instance-identity.json') });
 
 function jsonRequest(port, method, path, body, headers = {}) {
@@ -70,14 +70,14 @@ const check = (name, condition) => {
   const tx = 'otx_modern_1';
   const returnUrl = `http://instance.test/api/auth/google/complete?tx=${tx}`;
   const issuedAt = new Date().toISOString();
-  const proof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt, audience: 'agentoc-owner-auth' });
+  const proof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt, audience: 'ragent-owner-auth' });
   const started = await jsonRequest(port, 'POST', '/accounts/v1/owner-auth/transactions', {
     transactionId: tx,
     purpose: 'login',
     returnUrl,
     instance: identityModule.publicInstanceIdentity(identity),
     issuedAt,
-    audience: 'agentoc-owner-auth',
+    audience: 'ragent-owner-auth',
     signature: proof.signature,
   });
   check('事务创建 route 正常（POST 限流内）', started.status === 201);
@@ -97,12 +97,12 @@ const check = (name, condition) => {
   const deviceIssuedAt = new Date().toISOString();
   const deviceProof = identityModule.signOwnerAuthDeviceProof(identity, {
     transactionId: 'op_dev_http_1', purpose: 'devices',
-    issuedAt: deviceIssuedAt, audience: 'agentoc-owner-auth-device',
+    issuedAt: deviceIssuedAt, audience: 'ragent-owner-auth-device',
   });
   const deviceList = await jsonRequest(port, 'POST', '/accounts/v1/owner-auth/devices/acct_google_http', {
     transactionId: 'op_dev_http_1', purpose: 'devices',
     instance: identityModule.publicInstanceIdentity(identity),
-    issuedAt: deviceIssuedAt, audience: 'agentoc-owner-auth-device',
+    issuedAt: deviceIssuedAt, audience: 'ragent-owner-auth-device',
     signature: deviceProof.signature,
   });
   check('设备清单 route 对未绑定实例返回 403 mismatch（HTTP 接线）', deviceList.status === 403);
@@ -110,12 +110,12 @@ const check = (name, condition) => {
   const unbindIssuedAt = new Date().toISOString();
   const unbindProof = identityModule.signOwnerAuthDeviceProof(identity, {
     transactionId: 'op_unbind_http_1', purpose: 'unbind',
-    issuedAt: unbindIssuedAt, audience: 'agentoc-owner-auth-device',
+    issuedAt: unbindIssuedAt, audience: 'ragent-owner-auth-device',
   });
   const unbindList = await jsonRequest(port, 'POST', '/accounts/v1/owner-auth/devices/acct_google_http/unbind', {
     transactionId: 'op_unbind_http_1', purpose: 'unbind',
     instance: identityModule.publicInstanceIdentity(identity),
-    issuedAt: unbindIssuedAt, audience: 'agentoc-owner-auth-device',
+    issuedAt: unbindIssuedAt, audience: 'ragent-owner-auth-device',
     signature: unbindProof.signature,
   });
   check('unbind route 对未绑定实例返回 404 binding missing（HTTP 接线）', unbindList.status === 404);

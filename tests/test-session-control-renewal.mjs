@@ -19,7 +19,7 @@ import {
   createSessionControlRenewalAuthenticator,
 } from '../chat/session-control-capability.mjs';
 import { handleSessionControlInternalRoutes } from '../chat/router-session-control-routes.mjs';
-import { createAgentoCHttpClient } from '../lib/agentoc-http-client.mjs';
+import { createRagentHttpClient } from '../lib/ragent-http-client.mjs';
 
 const secret = 'session-control-renewal-test-secret';
 const issuedAt = Date.parse('2026-01-01T00:00:00.000Z');
@@ -84,7 +84,7 @@ const expiredResult = await expiredAuth({
   method: 'POST',
   url: `/api/sessions/${run.sessionId}/assets`,
   headers: {
-    'x-agentoc-session-control-token': capability.token,
+    'x-ragent-session-control-token': capability.token,
     [SESSION_CONTROL_RUN_ID_HEADER]: run.id,
     [SESSION_CONTROL_SESSION_ID_HEADER]: run.sessionId,
     [SESSION_CONTROL_TURN_ID_HEADER]: 'turn-renewal',
@@ -209,7 +209,7 @@ globalThis.fetch = async (url, init = {}) => {
       },
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
-  const token = init.headers['x-agentoc-session-control-token'];
+  const token = init.headers['x-ragent-session-control-token'];
   if (token === oldToken) {
     return new Response(JSON.stringify({
       error: 'Session-control capability has expired',
@@ -222,7 +222,7 @@ globalThis.fetch = async (url, init = {}) => {
   });
 };
 try {
-  const client = createAgentoCHttpClient({
+  const client = createRagentHttpClient({
     baseUrl: 'http://127.0.0.1:7690',
     sessionControlToken: oldToken,
     sessionControlRenewalToken: renewal.token,
@@ -237,13 +237,13 @@ try {
   assert.deepEqual(results.map((result) => result.response.status), [201, 201]);
   assert.equal(requests.filter((entry) => entry.url.endsWith('/renew')).length, 1);
   assert.equal(requests.filter((entry) => entry.url.includes('/assets')).length, 4);
-  assert.ok(requests.some((entry) => entry.init.headers['x-agentoc-session-control-renewal-token'] === renewal.token));
+  assert.ok(requests.some((entry) => entry.init.headers['x-ragent-session-control-renewal-token'] === renewal.token));
 
-  const renewalDir = await mkdtemp(join(tmpdir(), 'agentoc-session-control-renewal-client-'));
+  const renewalDir = await mkdtemp(join(tmpdir(), 'ragent-session-control-renewal-client-'));
   try {
     const renewalFile = join(renewalDir, 'session-control-renewal.cap');
     await writeFile(renewalFile, `${upgradedRenewal.token}\n`, 'utf8');
-    const legacyClient = createAgentoCHttpClient({
+    const legacyClient = createRagentHttpClient({
       baseUrl: 'http://127.0.0.1:7690',
       sessionControlToken: oldToken,
       sessionControlRenewalTokenFile: renewalFile,
@@ -258,7 +258,7 @@ try {
     assert.equal(legacyClientResult.response.status, 201);
     const fileRenewalRequest = requests.findLast((entry) => String(entry.url).endsWith('/renew'));
     assert.equal(
-      fileRenewalRequest.init.headers['x-agentoc-session-control-renewal-token'],
+      fileRenewalRequest.init.headers['x-ragent-session-control-renewal-token'],
       upgradedRenewal.token,
     );
   } finally {

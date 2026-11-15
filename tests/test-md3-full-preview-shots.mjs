@@ -11,7 +11,7 @@ import { chromium } from "@playwright/test";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const previewRoot = join(repoRoot, "artifacts", "md3-full-ui-preview");
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "md3-full-ui-preview-shots");
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "md3-full-ui-preview-shots");
 await mkdir(outputDir, { recursive: true });
 
 const MIME = {

@@ -34,7 +34,7 @@ function validatePlan(plan,policy) {
 function automaticAdmissionAllowed(plan,policy) {
   if(policy.planApproval!=='within_policy'||policy.planAutoAdmissionConfirmed!==true) return false;
   // No uncontrolled tools or external actions may be inferred from a model's proposal.
-  return plan.steps.every(step=>{const entry=matchingCatalogEntry(step,policy.planCatalog);return entry?.capability==='project-report' && entry.templateId==='agentoc-project-report' && entry.templateVersion===1 && entry.autoApproval===true && entry.requiresHumanApproval===false && (entry.resource?.networkPolicy==='deny' || (entry.resource?.networkPolicy==='inherit_existing_permissions' && policy.networkPermissionConfirmed===true));});
+  return plan.steps.every(step=>{const entry=matchingCatalogEntry(step,policy.planCatalog);return entry?.capability==='project-report' && entry.templateId==='ragent-project-report' && entry.templateVersion===1 && entry.autoApproval===true && entry.requiresHumanApproval===false && (entry.resource?.networkPolicy==='deny' || (entry.resource?.networkPolicy==='inherit_existing_permissions' && policy.networkPermissionConfirmed===true));});
 }
 
 // Synchronous transaction-only verifier used again before admission and dispatch.
@@ -106,7 +106,7 @@ export async function collectResponsibilityPlans() {
 
 // Approval is durable before this handoff; an idempotent Factory receipt owns the graph.
 export async function dispatchApprovedResponsibilityPlans() {
-  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim();if(!owner||process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return;
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim();if(!owner||process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return;
   const pending=await read(db=>{const hasExecutions=!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_plan_executions'").get();return db.prepare(`SELECT p.*,a.id AS approval_id,r.organization_id,r.project_id FROM responsibility_plans p JOIN responsibility_plan_approvals a ON a.plan_id=p.id JOIN responsibilities r ON r.id=p.responsibility_id
     LEFT JOIN responsibility_plan_dispatch_retry retry ON retry.plan_id=p.id WHERE r.lifecycle='active' AND r.revision=p.responsibility_revision AND r.policy_revision=p.policy_revision AND (retry.next_retry_at IS NULL OR retry.next_retry_at<=?) ${hasExecutions?'AND NOT EXISTS(SELECT 1 FROM responsibility_plan_executions e WHERE e.plan_id=p.id)':''} ORDER BY a.created_at LIMIT 20`).all(now());});
   const actor={kind:'service',role:'responsibility_admission',principalId:`responsibility-admission:${owner}`};

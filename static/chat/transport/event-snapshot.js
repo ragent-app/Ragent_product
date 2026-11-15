@@ -14,11 +14,11 @@
 // Ambient facts the legacy file reads from its shared scope
 // (renderedEventState, currentSessionId, read-only share mode, expanded
 // operation ids) are injected via the environment contract
-// (root.AgentocEventSnapshotEnvironment) so this module stays free of browser
+// (root.RagentEventSnapshotEnvironment) so this module stays free of browser
 // globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-event-snapshot-core.mjs.
 
-(function attachAgentocEventSnapshotCore(root) {
+(function attachRagentEventSnapshotCore(root) {
   const EVENT_DELTA_REFRESH_ENABLED = true;
   const SESSION_EVENT_PAGE_SIZE = 50;
   const SESSION_EVENT_SNAPSHOT_CACHE_TTL_MS = 2 * 60 * 1000;
@@ -37,7 +37,7 @@
     getExpandedOperationIds: null,
   });
   const environment = new Proxy(
-    root.AgentocEventSnapshotEnvironment || {},
+    root.RagentEventSnapshotEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -363,7 +363,7 @@
     };
   }
 
-  root.AgentocEventSnapshotCore = {
+  root.RagentEventSnapshotCore = {
     getEventStartSeq,
     getEventBoundarySeq,
     getLatestEventSeq,

@@ -66,8 +66,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-result-file-assets-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-result-file-assets-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const renderReviewDir = join(home, 'code', 'render-review');
   mkdirSync(configDir, { recursive: true });
@@ -194,26 +194,26 @@ async function startServer({ home, configDir, localBin, port, storagePort }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-http-assets",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_AUTH_SESSION_SECRET: "test-secret-ragent-http-assets",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${localBin}:${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
-      AGENTOC_WORK_ROOT_DIR: join(home, '.agentoc', 'workspace'),
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
+      RAGENT_WORK_ROOT_DIR: join(home, '.ragent', 'workspace'),
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
       SECURE_COOKIES: '0',
-      AGENTOC_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: 's3',
-      AGENTOC_ASSET_STORAGE_REGION: 'auto',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
-      AGENTOC_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
-      AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED: '1',
+      RAGENT_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: 's3',
+      RAGENT_ASSET_STORAGE_REGION: 'auto',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+      RAGENT_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
+      RAGENT_ASSET_DIRECT_UPLOAD_ENABLED: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

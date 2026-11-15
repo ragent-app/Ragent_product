@@ -93,7 +93,7 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
         return new Response(JSON.stringify({
           subscriptionUrl: "https://cal.example.test/cal/feedtoken.ics",
           webcalUrl: "webcal://cal.example.test/cal/feedtoken.ics",
-          calendarName: "AgentoC",
+          calendarName: "Ragent",
           eventCount: 3,
         }), {
           status: 200,
@@ -146,7 +146,7 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
       "compose.agent.loading": "Loading agents…",
       "compose.agent.loadingFailed": "Agents unavailable",
       "compose.agent.none": "No agents available yet.",
-      "compose.agent.defaultDetail": "Use AgentoC's default conversation behavior",
+      "compose.agent.defaultDetail": "Use Ragent's default conversation behavior",
       "compose.agent.customDetail": "Reusable workflow for the next message",
       "compose.agent.selected": "Selected",
       "settings.apps.ownerOnly": "Only available to the owner.",
@@ -228,9 +228,9 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
         template,
       );
     };
-    window.AgentoCBackHandler = { push: () => null, pop: () => {} };
-    window.AgentoCConnectorPanel = { close: () => window.AgentoCConnectorPanel._close?.() };
-    window.AgentoCAgentPanel = { close: () => window.AgentoCAgentPanel._close?.() };
+    window.RagentBackHandler = { push: () => null, pop: () => {} };
+    window.RagentConnectorPanel = { close: () => window.RagentConnectorPanel._close?.() };
+    window.RagentAgentPanel = { close: () => window.RagentAgentPanel._close?.() };
   });
   await page.addScriptTag({ content: agentSource });
   await page.addScriptTag({ content: connectorSource });
@@ -242,7 +242,7 @@ try {
   await light.evaluate(() => {
     const trigger = document.getElementById("composerAgentsMenuItem");
     trigger.focus();
-    window.AgentoCAgentPanel.open();
+    window.RagentAgentPanel.open();
   });
   await light.waitForTimeout(220);
   const agentProbe = await light.evaluate(() => {
@@ -316,7 +316,7 @@ try {
 
   await light.evaluate(() => {
     document.getElementById("composerConnectorsMenuItem").focus();
-    window.AgentoCConnectorPanel.open();
+    window.RagentConnectorPanel.open();
   });
   await light.waitForTimeout(220);
   const connectorProbe = await light.evaluate(() => {
@@ -406,10 +406,10 @@ try {
   await light.waitForTimeout(180);
   assert.equal(await light.locator("#composerConnectorPanel").isHidden(), true, "tapping the mobile sheet backdrop should dismiss the panel");
 
-  await light.evaluate(() => window.AgentoCConnectorPanel.close());
+  await light.evaluate(() => window.RagentConnectorPanel.close());
   await light.evaluate(() => {
     document.getElementById("composerConnectorsMenuItem").focus();
-    window.AgentoCConnectorPanel.open();
+    window.RagentConnectorPanel.open();
   });
   await light.waitForTimeout(220);
   const handleBox = await light.locator("#composerConnectorPanel .composer-add-panel-handle-zone").boundingBox();
@@ -422,7 +422,7 @@ try {
   assert.equal(await light.locator("#composerConnectorPanel").isHidden(), true, "dragging the sheet handle downward should dismiss the panel");
   await light.evaluate(() => {
     document.getElementById("composerConnectorsMenuItem").focus();
-    window.AgentoCConnectorPanel.open();
+    window.RagentConnectorPanel.open();
   });
   await light.waitForTimeout(220);
   await light.locator("#composerConnectorList .is-actionable").click();
@@ -431,7 +431,7 @@ try {
   await light.close();
 
   const dark = await makePage({ theme: "dark" });
-  await dark.evaluate(() => window.AgentoCConnectorPanel.open());
+  await dark.evaluate(() => window.RagentConnectorPanel.open());
   await dark.waitForTimeout(220);
   await dark.screenshot({ path: join(artifactDir, "composer-panel-connector-mobile-dark.png"), fullPage: true });
   const darkProbe = await dark.evaluate(() => {
@@ -451,7 +451,7 @@ try {
   const desktop = await makePage({ viewport: { width: 1440, height: 900 } });
   await desktop.evaluate(() => {
     document.getElementById("composerAgentsMenuItem").focus();
-    window.AgentoCAgentPanel.open();
+    window.RagentAgentPanel.open();
   });
   await desktop.waitForTimeout(220);
   const desktopAgentProbe = await desktop.evaluate(() => {
@@ -470,9 +470,9 @@ try {
   await desktop.screenshot({ path: join(artifactDir, "composer-panel-agent-desktop-light.png"), fullPage: true });
   await desktop.locator("#composerAgentPanel").screenshot({ path: join(artifactDir, "composer-panel-agent-desktop-light-element.png") });
   await desktop.evaluate(() => {
-    window.AgentoCAgentPanel.close();
+    window.RagentAgentPanel.close();
     document.getElementById("composerConnectorsMenuItem").focus();
-    window.AgentoCConnectorPanel.open();
+    window.RagentConnectorPanel.open();
   });
   await desktop.waitForTimeout(220);
   await desktop.screenshot({ path: join(artifactDir, "composer-panel-connector-desktop-light.png"), fullPage: true });
@@ -491,7 +491,7 @@ try {
     { width: 1024, height: 768 },
   ]) {
     const page = await makePage({ viewport, reducedMotion: true });
-    await page.evaluate(() => window.AgentoCConnectorPanel.open());
+    await page.evaluate(() => window.RagentConnectorPanel.open());
     await page.waitForTimeout(40);
     const probe = await page.evaluate(() => {
       const panel = document.getElementById("composerConnectorPanel");
@@ -516,10 +516,10 @@ try {
   }
 
   const reduced = await makePage({ reducedMotion: true });
-  await reduced.evaluate(() => window.AgentoCAgentPanel.open());
+  await reduced.evaluate(() => window.RagentAgentPanel.open());
   await reduced.waitForTimeout(30);
   assert.equal(await reduced.locator("#composerAgentPanel").isVisible(), true, "reduced-motion panel should open immediately");
-  await reduced.evaluate(() => window.AgentoCAgentPanel.close());
+  await reduced.evaluate(() => window.RagentAgentPanel.close());
   assert.equal(await reduced.locator("#composerAgentPanel").isHidden(), true, "reduced-motion panel should close without a delayed hidden state");
   await reduced.close();
 

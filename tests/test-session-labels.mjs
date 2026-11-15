@@ -11,19 +11,19 @@ const prompt = buildSessionLabelsPromptBlock({
   name: '分析会话标题生成机制',
   autoRenamePending: true,
 }, {
-  knownGroups: ['AgentoC', 'AgentoC', '视频工作流'],
+  knownGroups: ['Ragent', 'Ragent', '视频工作流'],
 });
 assert.match(prompt, /Session presentation metadata \(hidden protocol\)/);
-assert.match(prompt, /<agentoc-session-labels>/);
+assert.match(prompt, /<ragent-session-labels>/);
 assert.match(prompt, /user's language/);
 assert.match(prompt, /For English requests, write the title, group, and description in English/);
-assert.match(prompt, /Existing reusable groups: "AgentoC", "视频工作流"/);
+assert.match(prompt, /Existing reusable groups: "Ragent", "视频工作流"/);
 
 assert.equal(
   buildSessionLabelsPromptBlock({
     name: 'Stable title',
     autoRenamePending: false,
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Improve session naming.',
   }),
   '',
@@ -41,22 +41,22 @@ assert.match(
 
 const parsed = parseSessionLabelsFromAssistantContent([
   'Visible final answer.',
-  '<agentoc-session-labels>{"schemaVersion":1,"title":"AgentoC 标题机制修复","group":"AgentoC","description":"修复会话标题生成与持久化链路。"}</agentoc-session-labels>',
+  '<ragent-session-labels>{"schemaVersion":1,"title":"Ragent 标题机制修复","group":"Ragent","description":"修复会话标题生成与持久化链路。"}</ragent-session-labels>',
 ].join('\n'));
 assert.deepEqual(parsed, {
   schemaVersion: 1,
   title: '标题机制修复',
-  group: 'AgentoC',
+  group: 'Ragent',
   description: '修复会话标题生成与持久化链路。',
 });
 
 assert.equal(
-  parseSessionLabelsFromAssistantContent('<agentoc-session-labels>{bad json}</agentoc-session-labels>'),
+  parseSessionLabelsFromAssistantContent('<ragent-session-labels>{bad json}</ragent-session-labels>'),
   null,
   'malformed metadata should fail closed',
 );
 assert.equal(
-  parseSessionLabelsFromAssistantContent('<agentoc-session-labels>{"schemaVersion":2,"title":"Future"}</agentoc-session-labels>'),
+  parseSessionLabelsFromAssistantContent('<ragent-session-labels>{"schemaVersion":2,"title":"Future"}</ragent-session-labels>'),
   null,
   'unknown schema versions should not mutate session metadata',
 );
@@ -73,7 +73,7 @@ assert.equal(applyAssistantSessionLabelsToSession(pendingSession, parsed, {
 assert.equal(pendingSession.name, '标题机制修复');
 assert.equal(pendingSession.autoRenamePending, false);
 assert.equal(pendingSession.titleSource, 'assistant');
-assert.equal(pendingSession.group, 'AgentoC');
+assert.equal(pendingSession.group, 'Ragent');
 
 const manuallyRenamed = {
   name: 'Owner title',

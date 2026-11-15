@@ -3,8 +3,8 @@ param()
 $ErrorActionPreference = 'Stop'
 $candidateSource = Split-Path -Parent $PSScriptRoot
 $candidateId = [Guid]::NewGuid().ToString('N')
-$candidateRoot = Join-Path $env:LOCALAPPDATA "AgentoC\restricted-runs\$candidateId"
-$candidateProfile = "agentoc.restricted.$candidateId"
+$candidateRoot = Join-Path $env:LOCALAPPDATA "Ragent\restricted-runs\$candidateId"
+$candidateProfile = "ragent.restricted.$candidateId"
 $candidateEvidence = Join-Path $candidateSource 'artifacts\showcase\T2-current-20261017\restricted-provider'
 $candidateIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if ($candidateIdentity.IsSystem -or ([Security.Principal.WindowsPrincipal]::new($candidateIdentity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -14,7 +14,7 @@ $candidateReport = [ordered]@{case=$candidateId;pass=$false;root=$candidateRoot;
 New-Item -ItemType Directory -Path $candidateRoot | Out-Null
 & "$env:SystemRoot\System32\icacls.exe" $candidateRoot '/inheritance:r' '/grant:r' "*$($candidateIdentity.User.Value):(OI)(CI)F" | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Private root ACL failed' }
-[IO.File]::WriteAllText((Join-Path $candidateRoot '.agentoc-restricted-run'),$candidateProfile)
+[IO.File]::WriteAllText((Join-Path $candidateRoot '.ragent-restricted-run'),$candidateProfile)
 foreach ($candidatePart in @('runtime','workspace','control','state','evidence')) {
   New-Item -ItemType Directory -Path (Join-Path $candidateRoot $candidatePart) | Out-Null
 }
@@ -66,9 +66,9 @@ try {
 finally {
   # Exact fresh marked root only; no recursive delete, all reports retained.
   $candidateResolved = [IO.Path]::GetFullPath($candidateRoot)
-  $candidateParent = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'AgentoC\restricted-runs')).TrimEnd('\')+'\'
+  $candidateParent = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Ragent\restricted-runs')).TrimEnd('\')+'\'
   if (-not $candidateResolved.StartsWith($candidateParent,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($candidateResolved) -ne $candidateId) { throw 'Cleanup root mismatch' }
-  if ([IO.File]::ReadAllText((Join-Path $candidateRoot '.agentoc-restricted-run')) -ne $candidateProfile) { throw 'Cleanup marker mismatch' }
+  if ([IO.File]::ReadAllText((Join-Path $candidateRoot '.ragent-restricted-run')) -ne $candidateProfile) { throw 'Cleanup marker mismatch' }
   if ((Get-Acl -LiteralPath $candidateRoot).GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $candidateIdentity.User.Value) { throw 'Cleanup owner mismatch' }
   foreach ($candidateFile in @($candidateRoot,(Join-Path $candidateRoot 'runtime'),$candidateHelper,(Join-Path $candidateRoot 'runtime\node.exe'))) {
     if ((Get-Item -LiteralPath $candidateFile).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Cleanup reparse mismatch' }

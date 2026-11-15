@@ -10,9 +10,9 @@
 //      never reach a Run;
 //   3. HOME is overridden to the resolved runner home, not the control home;
 //   4. the ONLY config-derived value a Run receives is the controlled
-//      AGENTOC_RUN_SPOOL_DIR spool write-back channel.
+//      RAGENT_RUN_SPOOL_DIR spool write-back channel.
 //
-// The real cross-Unix-user scenario (running the sidecar as agentoc-runner on
+// The real cross-Unix-user scenario (running the sidecar as ragent-runner on
 // a production tree) is environment-gated and skipped without root; this env
 // contract is the part that is always provable.
 
@@ -27,8 +27,8 @@ const REPO_ROOT = join(__dirname, '..');
 
 // CONFIG_DIR is read at config.mjs import time; point it at a throwaway dir so
 // the spool channel resolves under the test tree, never the production config.
-const testConfigDir = await mkdtemp(join(tmpdir(), 'agentoc-p0d-config-'));
-process.env.AGENTOC_CONFIG_DIR = testConfigDir;
+const testConfigDir = await mkdtemp(join(tmpdir(), 'ragent-p0d-config-'));
+process.env.RAGENT_CONFIG_DIR = testConfigDir;
 
 const { RUNNER_ENV_DENYLIST } = await import('../lib/runner-env.mjs');
 const { CONFIG_DIR } = await import('../lib/config.mjs');
@@ -36,45 +36,45 @@ const { launchLifecycleRunner } = await import('../scripts/runner-lifecycle-brok
 
 const HOSTILE_PRODUCTION_ENV = {
   // Every denylisted production location, with plausible values.
-  AGENTOC_CONFIG_DIR: '/var/lib/agentoc/config',
-  AGENTOC_INSTANCE_ROOT: '/var/lib/agentoc',
-  AGENTOC_MEMORY_DIR: '/var/lib/agentoc/memory',
-  AGENTOC_CONTROL_SOCKET: '/run/agentoc-control.sock',
-  AGENTOC_PRIVILEGED_EXECUTOR_SOCKET: '/run/agentoc-privileged-executor/sock',
-  AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE: '/var/log/agentoc-privileged/audit.jsonl',
-  AGENTOC_RUNNER_SUPERVISOR_SOCKET: '/var/lib/agentoc/config/runner-supervisor.sock',
-  AGENTOC_RUNNER_LIFECYCLE_SOCKET: '/var/lib/agentoc/config/runner-lifecycle.sock',
-  AGENTOC_LINUX_PEER_RESULT_SOCKET: '/run/agentoc-peer-result/result.sock',
-  AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: '/usr/lib/agentoc/privileged-peercred',
-  AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
-  AGENTOC_RUNNER_LIFECYCLE_REQUIRED: '1',
-  AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '1',
-  AGENTOC_PUBLIC_BASE_URL: 'https://example.com',
-  AGENTOC_NODE_RUNTIME: '/opt/agentoc/runtime/node',
-  AGENTOC_SERVICE_USER: 'agentoc',
-  AGENTOC_RUNNER_USER: 'agentoc-runner',
+  RAGENT_CONFIG_DIR: '/var/lib/ragent/config',
+  RAGENT_INSTANCE_ROOT: '/var/lib/ragent',
+  RAGENT_MEMORY_DIR: '/var/lib/ragent/memory',
+  RAGENT_CONTROL_SOCKET: '/run/ragent-control.sock',
+  RAGENT_PRIVILEGED_EXECUTOR_SOCKET: '/run/ragent-privileged-executor/sock',
+  RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE: '/var/log/ragent-privileged/audit.jsonl',
+  RAGENT_RUNNER_SUPERVISOR_SOCKET: '/var/lib/ragent/config/runner-supervisor.sock',
+  RAGENT_RUNNER_LIFECYCLE_SOCKET: '/var/lib/ragent/config/runner-lifecycle.sock',
+  RAGENT_LINUX_PEER_RESULT_SOCKET: '/run/ragent-peer-result/result.sock',
+  RAGENT_LINUX_PEER_CREDENTIAL_HELPER: '/usr/lib/ragent/privileged-peercred',
+  RAGENT_LINUX_PEER_RESULT_RUNNER: '1',
+  RAGENT_RUNNER_LIFECYCLE_REQUIRED: '1',
+  RAGENT_RUNNER_SUPERVISOR_REQUIRED: '1',
+  RAGENT_PUBLIC_BASE_URL: 'https://example.com',
+  RAGENT_NODE_RUNTIME: '/opt/ragent/runtime/node',
+  RAGENT_SERVICE_USER: 'ragent',
+  RAGENT_RUNNER_USER: 'ragent-runner',
   // Secret-pattern variables the strip gate must drop even if not denylisted.
-  AGENTOC_AUTH_SESSION_SECRET: 's3cret-cookie-hmac',
-  AGENTOC_OAUTH_CLIENT_SECRET: 's3cret-client',
+  RAGENT_AUTH_SESSION_SECRET: 's3cret-cookie-hmac',
+  RAGENT_OAUTH_CLIENT_SECRET: 's3cret-client',
   PROVIDER_API_TOKEN: 's3cret-token',
   PROVIDER_PASSWORD: 's3cret-pass',
   // Allowlisted keys a hostile env could set to production-looking values.
   PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin',
   LANG: 'C.UTF-8',
   TERM: 'xterm',
-  AGENTOC_PROJECT_ROOT: '/opt/agentoc/app',
-  AGENTOC_CHAT_BASE_URL: 'http://127.0.0.1:7690',
+  RAGENT_PROJECT_ROOT: '/opt/ragent/app',
+  RAGENT_CHAT_BASE_URL: 'http://127.0.0.1:7690',
   CHAT_PORT: '7690',
   // The control-plane home; the broker must override it, not pass it through.
-  HOME: '/home/agentoc',
+  HOME: '/home/ragent',
 };
 
 async function main() {
   const captures = [];
   const launched = await launchLifecycleRunner('run_abc12345', {
-    serviceUser: 'agentoc-runner',
-    serviceGroup: 'agentoc-runners',
-    serviceHome: '/home/agentoc-runner',
+    serviceUser: 'ragent-runner',
+    serviceGroup: 'ragent-runners',
+    serviceHome: '/home/ragent-runner',
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive' }),
     environment: HOSTILE_PRODUCTION_ENV,
     execFileImpl: async (bin, args) => {
@@ -106,35 +106,35 @@ async function main() {
   }
 
   // 3) HOME is the runner home, never the control-plane home.
-  assert.ok(setenvValues.includes('HOME=/home/agentoc-runner'), 'HOME must point at the runner home');
-  assert.ok(!setenvValues.includes('HOME=/home/agentoc'), 'control-plane HOME must not pass through');
+  assert.ok(setenvValues.includes('HOME=/home/ragent-runner'), 'HOME must point at the runner home');
+  assert.ok(!setenvValues.includes('HOME=/home/ragent'), 'control-plane HOME must not pass through');
 
   // 4) the only config-derived value is the controlled spool write-back channel.
   const configPrefix = `${CONFIG_DIR}/`;
   const spoolValue = join(CONFIG_DIR, 'chat-runs');
   for (const value of setenvValues) {
-    if (value.startsWith('AGENTOC_RUN_SPOOL_DIR=')) continue;
+    if (value.startsWith('RAGENT_RUN_SPOOL_DIR=')) continue;
     assert.ok(
       !value.includes(configPrefix),
       `no production config path may reach a Run outside the spool channel: ${value}`,
     );
     assert.ok(
-      !value.includes('/var/lib/agentoc/'),
-      `no production /var/lib/agentoc path may reach a Run: ${value}`,
+      !value.includes('/var/lib/ragent/'),
+      `no production /var/lib/ragent path may reach a Run: ${value}`,
     );
   }
   assert.ok(
-    setenvValues.includes(`AGENTOC_RUN_SPOOL_DIR=${spoolValue}`),
+    setenvValues.includes(`RAGENT_RUN_SPOOL_DIR=${spoolValue}`),
     'the controlled spool channel must still be passed to the runner',
   );
 
   // 5) the runner identity is set on the transient unit.
-  assert.ok(captures[0].args.includes('User=agentoc-runner'), 'unit must run as agentoc-runner');
-  assert.ok(captures[0].args.includes('Group=agentoc-runners'), 'unit must run as agentoc-runners');
+  assert.ok(captures[0].args.includes('User=ragent-runner'), 'unit must run as ragent-runner');
+  assert.ok(captures[0].args.includes('Group=ragent-runners'), 'unit must run as ragent-runners');
 
   // 6) real launch result comes back with the transient unit name.
   assert.equal(launched.pid, 4242);
-  assert.equal(launched.unitName, 'agentoc-runner-run_abc12345');
+  assert.equal(launched.unitName, 'ragent-runner-run_abc12345');
 
   console.log('test-runner-isolation-env: ok');
   console.log(`  runner env keys passed: ${setenvValues.length}`);

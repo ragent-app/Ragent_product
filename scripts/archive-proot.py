@@ -17,7 +17,7 @@ executable_sources = {item['path'] for item in manifest['files'] if item['mode']
 # text-mode newline handling. Fail before writing any archive if they do.
 for rel in ('VERSION', 'RELEASE_ID', 'ragent', 'install.sh', 'termux-ragent', 'runtime/npm',
             'runtime/corepack', 'runtime/codex', 'runtime/claude',
-            'runtime/agentoc-codex-app-server'):
+            'runtime/ragent-codex-app-server'):
     data = (root / rel).read_bytes()
     if b'\r' in data or not data.endswith(b'\n'):
         raise SystemExit(f'{rel} must use LF line endings')
@@ -64,7 +64,7 @@ def archive_mode(info):
         info.mode = 0o755
     elif info.isfile():
         executable = (rel in {'ragent', 'install.sh', 'termux-ragent', 'app/bin/ragent-p2p-host', 'runtime/node', 'runtime/npm', 'runtime/corepack',
-                              'runtime/codex', 'runtime/claude', 'runtime/agentoc-codex-app-server',
+                              'runtime/codex', 'runtime/claude', 'runtime/ragent-codex-app-server',
                               'vendor/claude/claude'}
                       or rel.startswith('app/') and rel[4:] in executable_sources
                       or rel.startswith('app/node_modules/.bin/')

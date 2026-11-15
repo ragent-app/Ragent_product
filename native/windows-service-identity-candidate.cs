@@ -1,4 +1,4 @@
-// Isolated identity/ACL canary, never the installed AgentoC ServiceHost.
+// Isolated identity/ACL canary, never the installed Ragent ServiceHost.
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -32,7 +32,7 @@ sealed class IdentityCanary : ServiceBase {
       var token=Facts(GetCurrentProcess());Need((string)token["sid"]=="S-1-5-18"&&(int)token["sessionId"]==0,"PREPARER_SYSTEM_SESSION0_REQUIRED");
       Need((bool)spec["crossServiceProvider"],"PREPARER_PROVIDER_CASE_REQUIRED");int round=Convert.ToInt32(spec["ipcRound"]);Need(round==1||round==2,"PREPARER_ROUND_INVALID");
       string executor=(string)spec["executorSid"];Need(executor.StartsWith("S-1-5-80-"),"PREPARER_EXECUTOR_INVALID");
-      string name="AgentoC-QA-"+(string)spec["caseId"]+"-r"+round;
+      string name="Ragent-QA-"+(string)spec["caseId"]+"-r"+round;
       var descriptor=new RawSecurityDescriptor("O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x6002b;;;"+executor+")S:(ML;;NW;;;LW)");
       byte[] bytes=new byte[descriptor.BinaryLength];descriptor.GetBinaryForm(bytes,0);IntPtr memory=Marshal.AllocHGlobal(bytes.Length);
       try{Marshal.Copy(bytes,0,memory,bytes.Length);var attrs=new ObjectSecurity{length=Marshal.SizeOf(typeof(ObjectSecurity)),descriptor=memory,inherit=false};
@@ -164,14 +164,14 @@ sealed class IdentityCanary : ServiceBase {
     Need(role=="control"||role=="executor"||role=="preparer","SERVICE_ROLE_INVALID");
     root=Path.GetFullPath(root);var spec=Spec(root,false);
     if(role=="preparer")Need(spec.ContainsKey("crossServiceProvider")&&(bool)spec["crossServiceProvider"],"PREPARER_PROVIDER_CASE_REQUIRED");
-    string name="AgentoC-IdentityQA-"+(role=="control"?"Control-":role=="executor"?"Executor-":"Preparer-")+(string)spec["caseId"];
+    string name="Ragent-IdentityQA-"+(role=="control"?"Control-":role=="executor"?"Executor-":"Preparer-")+(string)spec["caseId"];
     string binary=Path.Combine(root,"runtime","IdentityCanary.exe"),account=role=="preparer"?"LocalSystem":"NT SERVICE\\"+name;
     Need(String.Equals(Process.GetCurrentProcess().MainModule.FileName,binary,StringComparison.OrdinalIgnoreCase),"REGISTER_STAGED_BINARY_REQUIRED");
     IntPtr manager=OpenSCManagerW(null,null,2);Check(manager!=IntPtr.Zero,"SCM_CREATE_OPEN");
     try{
       // Virtual accounts require a NULL password pointer, not an empty string.
       // No arbitrary account, binary, start type or password is accepted.
-      IntPtr service=CreateServiceW(manager,name,"AgentoC isolated identity QA "+role,0,0x10,3,1,
+      IntPtr service=CreateServiceW(manager,name,"Ragent isolated identity QA "+role,0,0x10,3,1,
         Quote(binary)+" "+Quote(root)+" "+role+" "+name,null,IntPtr.Zero,null,account,IntPtr.Zero);
       Check(service!=IntPtr.Zero,"VIRTUAL_SERVICE_CREATE");CloseServiceHandle(service);
       return new{pass=true,name=name,account=account,passwordNull=true,startType="Manual"};
@@ -181,10 +181,10 @@ sealed class IdentityCanary : ServiceBase {
   static Dictionary<string,object> Spec(string root,bool self){
     root=Path.GetFullPath(root).TrimEnd('\\');string id=Path.GetFileName(root);
     Need(Regex.IsMatch(id,"^case-[a-f0-9]{32}$"),"ROOT_ID_INVALID");
-    string parent=self?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AgentoC","identity-qa")
-      :Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AgentoCIdentityQA");
+    string parent=self?Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Ragent","identity-qa")
+      :Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"RagentIdentityQA");
     Need(String.Equals(Path.GetDirectoryName(root),parent,StringComparison.OrdinalIgnoreCase),"ROOT_PREFIX_INVALID");NoReparse(root);
-    Need(File.ReadAllText(Path.Combine(root,".agentoc-identity-qa")).Trim()==id,"ROOT_MARKER_INVALID");
+    Need(File.ReadAllText(Path.Combine(root,".ragent-identity-qa")).Trim()==id,"ROOT_MARKER_INVALID");
     var path=Path.Combine(root,"manifest.json");Need(new FileInfo(path).Length<16384,"MANIFEST_TOO_LARGE");
     var spec=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(path));Need((string)spec["caseId"]==id.Substring(5),"MANIFEST_ID_INVALID");
     foreach(var file in new[]{"node.exe","probe.mjs","IdentityCanary.exe"}){
@@ -225,8 +225,8 @@ sealed class IdentityCanary : ServiceBase {
       ||Path.GetFileName(roleDir)=="preparer"&&Path.GetFileName(path)=="desktop-report.json"),"REPORT_PATH_DENIED");
     string id=Path.GetFileName(root);
     Need(Regex.IsMatch(id,"^case-[a-f0-9]{32}$")&&String.Equals(Path.GetDirectoryName(root),
-      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AgentoCIdentityQA"),StringComparison.OrdinalIgnoreCase),"REPORT_ROOT_DENIED");
-    NoReparse(path);Need(File.ReadAllText(Path.Combine(root,".agentoc-identity-qa")).Trim()==id,"REPORT_MARKER_INVALID");
+      Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"RagentIdentityQA"),StringComparison.OrdinalIgnoreCase),"REPORT_ROOT_DENIED");
+    NoReparse(path);Need(File.ReadAllText(Path.Combine(root,".ragent-identity-qa")).Trim()==id,"REPORT_MARKER_INVALID");
     // Pin the file without write/delete sharing, then verify its actual target
     // before reading bytes. A service report must not become an elevated read
     // gadget through a junction or file-link replacement.
@@ -248,7 +248,7 @@ sealed class IdentityCanary : ServiceBase {
     try{
       string runtime=Path.Combine(root,"runtime"),work=Path.Combine(root,"workspace"),state=Path.Combine(root,"state",role);
       string windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-      string env="AGENTOC_IDENTITY_QA_ROLE="+role+"\0AGENTOC_IDENTITY_QA_ROOT="+root+"\0HOME="+state+"\0LOCALAPPDATA="+state+"\0PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+state+"\0TMP="+state+"\0USERPROFILE="+state+"\0WINDIR="+windows+"\0\0";
+      string env="RAGENT_IDENTITY_QA_ROLE="+role+"\0RAGENT_IDENTITY_QA_ROOT="+root+"\0HOME="+state+"\0LOCALAPPDATA="+state+"\0PATH="+Path.Combine(windows,"System32")+"\0SystemRoot="+windows+"\0TEMP="+state+"\0TMP="+state+"\0USERPROFILE="+state+"\0WINDIR="+windows+"\0\0";
       environment=Marshal.StringToHGlobalUni(env);job=CreateJobObjectW(IntPtr.Zero,null);Check(job!=IntPtr.Zero,"JOB_CREATE");
       var limits=new JobLimits();limits.basic.flags=0x2000|8;limits.basic.active=8;Check(SetInformationJobObject(job,9,ref limits,Marshal.SizeOf(limits)),"JOB_LIMITS");
       var startup=new Startup{cb=Marshal.SizeOf(typeof(Startup))};string node=Path.Combine(runtime,"node.exe");
@@ -281,7 +281,7 @@ sealed class IdentityCanary : ServiceBase {
     var report=new Dictionary<string,object>{{"role",role},{"pass",false}};
 
     try{
-      var spec=Spec(root,false);string expected="AgentoC-IdentityQA-"+(role=="control"?"Control-":role=="executor"?"Executor-":"Preparer-")+(string)spec["caseId"];
+      var spec=Spec(root,false);string expected="Ragent-IdentityQA-"+(role=="control"?"Control-":role=="executor"?"Executor-":"Preparer-")+(string)spec["caseId"];
       Need(ServiceName==expected,"SERVICE_NAME_INVALID");if(role=="preparer"){PrepareDesktopObjects(spec);return;}string sid=(string)spec[role+"Sid"];
       int timeout=(spec.ContainsKey("crossServiceProvider")&&(bool)spec["crossServiceProvider"]||spec.ContainsKey("crossServiceOwnerBootstrap")&&(bool)spec["crossServiceOwnerBootstrap"]||spec.ContainsKey("crossServiceCredentialChannel")&&(bool)spec["crossServiceCredentialChannel"])?105000:25000;
       var before=Facts(GetCurrentProcess());Need((string)before["sid"]==sid&&sid.StartsWith("S-1-5-80-"),"VIRTUAL_ACCOUNT_REQUIRED");report["initialToken"]=before;
@@ -290,7 +290,7 @@ sealed class IdentityCanary : ServiceBase {
       if(role=="control"){
         var acl=new PipeSecurity();acl.SetAccessRuleProtection(true,false);
         acl.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(sid),PipeAccessRights.FullControl,AccessControlType.Allow));
-        ownerPipe=new NamedPipeServerStream("agentoc-identity-owner-"+(string)spec["caseId"],PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous,4096,4096,acl,HandleInheritability.None);
+        ownerPipe=new NamedPipeServerStream("ragent-identity-owner-"+(string)spec["caseId"],PipeDirection.InOut,1,PipeTransmissionMode.Byte,PipeOptions.Asynchronous,4096,4096,acl,HandleInheritability.None);
         var wait=ownerPipe.BeginWaitForConnection(null,null);
         report["node"]=RunNode(root,role,sid,timeout);Need(wait.AsyncWaitHandle.WaitOne(5000),"OWNER_PIPE_POSITIVE_MISSING");ownerPipe.EndWaitForConnection(wait);ownerPipe.Disconnect();
         ownerPipe.BeginWaitForConnection(null,null);

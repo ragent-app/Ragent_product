@@ -3,7 +3,7 @@
 // surfaces (fork / fork-at / delegate / session-spawn / message) plus the
 // controlled Task -> Attempt -> child Session injection exemption.
 //
-// The main process runs with AGENTOC_MANAGED_INPUT_ENFORCEMENT=1 so the
+// The main process runs with RAGENT_MANAGED_INPUT_ENFORCEMENT=1 so the
 // rejection matrix and the HTTP-layer continuation rejection are exercised
 // in-process. Flag-off behavior is verified with subprocess probes (config is
 // read once at module load, so the default-off baseline cannot be tested in
@@ -16,20 +16,20 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-managed-input-'));
-const probeHome = mkdtempSync(join(tmpdir(), 'agentoc-managed-input-probe-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-managed-input-'));
+const probeHome = mkdtempSync(join(tmpdir(), 'ragent-managed-input-probe-'));
 
 // Isolate config + session storage before importing anything that reads it.
 process.env.HOME = tempHome;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
-delete process.env.AGENTOC_ORG_SCHEMA_ENABLED;
-delete process.env.AGENTOC_ORG_SHADOW_PROJECTION;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
+delete process.env.RAGENT_ORG_SCHEMA_ENABLED;
+delete process.env.RAGENT_ORG_SHADOW_PROJECTION;
 // Main process: flag ON for the rejection matrix.
-process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT = '1';
+process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT = '1';
 
 const workspace = join(tempHome, 'workspace');
 mkdirSync(workspace, { recursive: true });
@@ -69,7 +69,7 @@ const a = new Proxy(assert, {
 
 function childEnv(overrides = {}) {
   const env = { ...process.env };
-  for (const key of ['AGENTOC_MANAGED_INPUT_ENFORCEMENT']) {
+  for (const key of ['RAGENT_MANAGED_INPUT_ENFORCEMENT']) {
     delete env[key];
   }
   for (const [key, value] of Object.entries(overrides)) {
@@ -330,12 +330,12 @@ async function testMessagesContinuationHttp(managed) {
 // ---------------------------------------------------------------------------
 
 function testFlagOnProbe() {
-  const out = runProbe(probeManagedScript(), { AGENTOC_MANAGED_INPUT_ENFORCEMENT: '1' });
+  const out = runProbe(probeManagedScript(), { RAGENT_MANAGED_INPUT_ENFORCEMENT: '1' });
   a.ok(out.includes('PROBE_ON_OK'), 'flag-on subprocess probe passes');
 }
 
 function testFlagOffProbe() {
-  const out = runProbe(probeFlagOffScript(), { AGENTOC_MANAGED_INPUT_ENFORCEMENT: undefined });
+  const out = runProbe(probeFlagOffScript(), { RAGENT_MANAGED_INPUT_ENFORCEMENT: undefined });
   a.ok(out.includes('PROBE_OFF_OK'), 'flag-off subprocess probe passes (default behavior unchanged)');
 }
 

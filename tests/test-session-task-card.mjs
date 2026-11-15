@@ -10,7 +10,7 @@ import {
 const normalized = normalizeSessionTaskCard({
   mode: 'project',
   summary: '整理销售周报的 Excel 和 PPT，并产出一版可复用流程。',
-  goal: '把手工周报整理流程交给 AgentoC 处理。',
+  goal: '把手工周报整理流程交给 Ragent 处理。',
   background: ['用户每周都要重复整理一次。'],
   rawMaterials: ['sales-weekly.xlsx', 'review-deck.pptx', '截图 2 张'],
   assumptions: ['本周先做一版样例。'],

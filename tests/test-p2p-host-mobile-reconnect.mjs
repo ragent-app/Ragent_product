@@ -18,16 +18,16 @@ const listen = (server) => new Promise((resolve, reject) => {
 });
 const close = (server) => new Promise((resolve) => server.close(resolve));
 
-const builtBinaryPath = process.env.AGENTOC_PHASE0_P2P_BINARY
+const builtBinaryPath = process.env.RAGENT_PHASE0_P2P_BINARY
   ? ''
-  : join(tmpdir(), `agentoc-p2p-host-reconnect-${process.pid}.exe`);
+  : join(tmpdir(), `ragent-p2p-host-reconnect-${process.pid}.exe`);
 if (builtBinaryPath) {
-  execFileSync('go', ['build', '-o', builtBinaryPath, './cmd/agentoc-p2p-host'], {
+  execFileSync('go', ['build', '-o', builtBinaryPath, './cmd/ragent-p2p-host'], {
     cwd: new URL('../p2p/', import.meta.url),
     stdio: 'ignore',
   });
 }
-const binaryPath = process.env.AGENTOC_PHASE0_P2P_BINARY || builtBinaryPath || resolveP2PHostBinary();
+const binaryPath = process.env.RAGENT_PHASE0_P2P_BINARY || builtBinaryPath || resolveP2PHostBinary();
 await access(binaryPath);
 
 const resources = [];
@@ -61,7 +61,7 @@ try {
   resources.push(async () => { host.stop(); await host.done; });
   await host.ready;
 
-  const clientSource = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+  const clientSource = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
   const web = http.createServer((request, response) => {
     if (request.url === '/client.js') {
       response.writeHead(200, { 'content-type': 'text/javascript' });
@@ -79,9 +79,9 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const result = await page.evaluate(async ({ signalingUrl, roomId, secret }) => {
-    const { AgentoCP2PClient } = await import('/client.js');
+    const { RagentP2PClient } = await import('/client.js');
     const connectAndProbe = async () => {
-      const client = new AgentoCP2PClient({
+      const client = new RagentP2PClient({
         signalingUrl,
         roomId,
         secret,

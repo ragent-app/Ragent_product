@@ -23,18 +23,18 @@ function exists(relativePath) {
 
 const buildScript = read('scripts/build-deb.sh');
 const restartScript = read('restart.sh');
-const mainService = read('packaging/deb/agentoc.service');
+const mainService = read('packaging/deb/ragent.service');
 const ragentMainService = read('packaging/deb/ragent.service');
-const runnerLifecycleService = read('packaging/deb/agentoc-runner-lifecycle.service');
-const runnerSupervisorService = read('packaging/deb/agentoc-runner-supervisor.service');
-const privilegedExecutorService = read('packaging/deb/agentoc-privileged-executor.service');
-const storageGcService = read('packaging/deb/agentoc-storage-gc.service');
-const storageGcTimer = read('packaging/deb/agentoc-storage-gc.timer');
-const environmentFile = read('packaging/deb/agentoc.env');
+const runnerLifecycleService = read('packaging/deb/ragent-runner-lifecycle.service');
+const runnerSupervisorService = read('packaging/deb/ragent-runner-supervisor.service');
+const privilegedExecutorService = read('packaging/deb/ragent-privileged-executor.service');
+const storageGcService = read('packaging/deb/ragent-storage-gc.service');
+const storageGcTimer = read('packaging/deb/ragent-storage-gc.timer');
+const environmentFile = read('packaging/deb/ragent.env');
 const preinst = read('packaging/deb/preinst');
 const postinst = read('packaging/deb/postinst');
-assert.match(runnerLifecycleService, /^Environment=AGENTOC_RUNNER_DROP_GROUPS=auto$/m);
-assert.match(runnerLifecycleService, /^EnvironmentFile=\/etc\/agentoc\/agentoc\.env$/m);
+assert.match(runnerLifecycleService, /^Environment=RAGENT_RUNNER_DROP_GROUPS=auto$/m);
+assert.match(runnerLifecycleService, /^EnvironmentFile=\/etc\/ragent\/ragent\.env$/m);
 const prerm = read('packaging/deb/prerm');
 const postrm = read('packaging/deb/postrm');
 const runAsServiceUser = read('packaging/deb/run-as-service-user');
@@ -42,25 +42,25 @@ const legacyCcSwitchRetirement = read('packaging/deb/retire-legacy-cc-switch');
 const repairStateAccess = read('packaging/deb/repair-state-access');
 const packageJson = JSON.parse(read('package.json'));
 
-assert.equal(ragentMainService.replace(/^Alias=agentoc\.service\r?\n/m, ''), mainService,
+assert.equal(ragentMainService.replace(/^Alias=ragent\.service\r?\n/m, ''), mainService,
   'renaming the main unit must retain all service security and dependency settings');
-assert.match(ragentMainService, /^Alias=agentoc\.service$/m);
-assert.match(buildScript, /ln -s ragent\.service "\$STAGE\/lib\/systemd\/system\/agentoc\.service"/);
+assert.match(ragentMainService, /^Alias=ragent\.service$/m);
+assert.match(buildScript, /ln -s ragent\.service "\$STAGE\/lib\/systemd\/system\/ragent\.service"/);
 assert.match(postinst, /systemctl restart "\$main_service"/);
 
 assert.match(buildScript, /Debian packaging requires a clean committed source tree/);
-assert.match(buildScript, /SOURCE_COMMIT.*agentoc-source-commit/s);
+assert.match(buildScript, /SOURCE_COMMIT.*ragent-source-commit/s);
 assert.match(buildScript, /Source changed during packaging; refusing to publish the candidate/);
-assert.match(buildScript, /AGENTOC_CLAUDE_BINARY_SHA256/);
+assert.match(buildScript, /RAGENT_CLAUDE_BINARY_SHA256/);
 assert.match(buildScript, /CLAUDE_LICENSE_SOURCE/);
 assert.doesNotMatch(buildScript, /\$STAGE\/usr\/bin\/(?:codex|claude)/,
   'bundled provider launchers must not replace system-wide user commands');
 assert.match(buildScript, /vendor\/licenses\/claude-code\/LICENSE\.md/);
 
 const retiredPackagePaths = [
-  'packaging/deb/agentoc-maintenance-admin',
-  'packaging/deb/agentoc-maintenance-broker.service',
-  'packaging/deb/agentoc-maintenance-control.service',
+  'packaging/deb/ragent-maintenance-admin',
+  'packaging/deb/ragent-maintenance-broker.service',
+  'packaging/deb/ragent-maintenance-control.service',
   'packaging/deb/deferred-maintenance-restart',
   'native/maintenance-peercred.c',
 ];
@@ -75,33 +75,33 @@ for (const path of retiredPackagePaths) {
 }
 
 assert.match(buildScript, /native\/privileged-peercred\.c/);
-assert.match(buildScript, /usr\/lib\/agentoc\/privileged-peercred/);
-assert.match(buildScript, /agentoc-privileged-executor\.service/);
-assert.doesNotMatch(buildScript, /agentoc-maintenance|deferred-maintenance|maintenance-peercred/i);
+assert.match(buildScript, /usr\/lib\/ragent\/privileged-peercred/);
+assert.match(buildScript, /ragent-privileged-executor\.service/);
+assert.doesNotMatch(buildScript, /ragent-maintenance|deferred-maintenance|maintenance-peercred/i);
 
-assert.match(environmentFile, /^AGENTOC_PRIVILEGED_EXECUTOR_SOCKET=\/run\/agentoc-privileged-executor\/sock$/m);
-assert.match(environmentFile, /^AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE=\/var\/log\/agentoc-privileged\/audit\.jsonl$/m);
-assert.match(environmentFile, /^AGENTOC_PRIVILEGED_EXECUTOR_GROUP=agentoc-privileged$/m);
-assert.doesNotMatch(environmentFile, /maintenance|AGENTOC_CONTROL_SOCKET|AGENTOC_ENABLE_DEVELOPER/i);
+assert.match(environmentFile, /^RAGENT_PRIVILEGED_EXECUTOR_SOCKET=\/run\/ragent-privileged-executor\/sock$/m);
+assert.match(environmentFile, /^RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE=\/var\/log\/ragent-privileged\/audit\.jsonl$/m);
+assert.match(environmentFile, /^RAGENT_PRIVILEGED_EXECUTOR_GROUP=ragent-privileged$/m);
+assert.doesNotMatch(environmentFile, /maintenance|RAGENT_CONTROL_SOCKET|RAGENT_ENABLE_DEVELOPER/i);
 
-assert.match(mainService, /^After=agentoc-privileged-executor\.service$/m);
-assert.match(mainService, /^Wants=agentoc-privileged-executor\.service$/m);
-assert.match(mainService, /^SupplementaryGroups=agentoc-privileged$/m);
-assert.doesNotMatch(mainService, /agentoc-maintenance|maintenance-control/i);
-assert.doesNotMatch(runnerSupervisorService, /agentoc-maintenance|maintenance-control/i);
-assert.match(runnerSupervisorService, /^After=agentoc-runner-lifecycle\.service$/m);
-assert.match(runnerSupervisorService, /^Requires=agentoc-runner-lifecycle\.service$/m);
-assert.match(runnerSupervisorService, /^InaccessiblePaths=\/etc\/agentoc \/var\/log\/agentoc \/run\/agentoc -\/run\/agentoc-privileged-executor$/m);
+assert.match(mainService, /^After=ragent-privileged-executor\.service$/m);
+assert.match(mainService, /^Wants=ragent-privileged-executor\.service$/m);
+assert.match(mainService, /^SupplementaryGroups=ragent-privileged$/m);
+assert.doesNotMatch(mainService, /ragent-maintenance|maintenance-control/i);
+assert.doesNotMatch(runnerSupervisorService, /ragent-maintenance|maintenance-control/i);
+assert.match(runnerSupervisorService, /^After=ragent-runner-lifecycle\.service$/m);
+assert.match(runnerSupervisorService, /^Requires=ragent-runner-lifecycle\.service$/m);
+assert.match(runnerSupervisorService, /^InaccessiblePaths=\/etc\/ragent \/var\/log\/ragent \/run\/ragent -\/run\/ragent-privileged-executor$/m);
 assert.match(runnerLifecycleService, /runner-lifecycle-broker\.mjs/);
-assert.match(runnerLifecycleService, /^RuntimeDirectory=agentoc$/m,
-  'the lifecycle service must create the protected /run/agentoc directory before the supervisor starts');
+assert.match(runnerLifecycleService, /^RuntimeDirectory=ragent$/m,
+  'the lifecycle service must create the protected /run/ragent directory before the supervisor starts');
 assert.match(privilegedExecutorService, /privileged-executor\.mjs serve/);
-assert.match(buildScript, /agentoc-storage-gc\.service/);
-assert.match(buildScript, /agentoc-storage-gc\.timer/);
+assert.match(buildScript, /ragent-storage-gc\.service/);
+assert.match(buildScript, /ragent-storage-gc\.timer/);
 assert.match(storageGcService, /storage-inventory-gc\.mjs --apply --json --scheduled/);
 assert.match(storageGcService, /Nice=19/);
 assert.match(storageGcService, /IOSchedulingClass=idle/);
-assert.match(storageGcService, /ReadWritePaths=\/var\/lib\/agentoc\/config \/var\/lib\/agentoc\/workspace/);
+assert.match(storageGcService, /ReadWritePaths=\/var\/lib\/ragent\/config \/var\/lib\/ragent\/workspace/);
 assert.match(storageGcTimer, /OnCalendar=\*-\*-\* 03:30:00/);
 assert.match(storageGcTimer, /Persistent=true/);
 
@@ -110,21 +110,21 @@ assert.match(storageGcTimer, /Persistent=true/);
 assert.match(postinst, /retire_legacy_maintenance_runtime\(\)/);
 assert.match(postinst, /systemctl disable --now "\$retired_unit"/);
 assert.match(postinst, /retire_legacy_maintenance_data\(\)/);
-assert.match(postinst, /retired_root=\/var\/lib\/agentoc\/retired/);
+assert.match(postinst, /retired_root=\/var\/lib\/ragent\/retired/);
 assert.match(postinst, /maintenance-audit-\$retired_stamp/);
 assert.match(postinst, /find \. -type f ! -name SHA256SUMS -exec sha256sum/);
 assert.match(postinst, /chown -R root:root "\$retired_destination"/);
 assert.match(postinst, /find "\$retired_destination" -type d -exec chmod 0700/);
-assert.match(postinst, /! -path \/var\/lib\/agentoc\/retired/);
-assert.match(postinst, /agentoc-privileged/);
-assert.doesNotMatch(postinst, /developer_maintenance_enabled|ensure_control_env|AGENTOC_MAINTENANCE_BROKER_INSTALL/);
-assert.match(postinst, /grep -q 'agentoc-privileged-executor\.service' \/proc\/self\/cgroup/);
+assert.match(postinst, /! -path \/var\/lib\/ragent\/retired/);
+assert.match(postinst, /ragent-privileged/);
+assert.doesNotMatch(postinst, /developer_maintenance_enabled|ensure_control_env|RAGENT_MAINTENANCE_BROKER_INSTALL/);
+assert.match(postinst, /grep -q 'ragent-privileged-executor\.service' \/proc\/self\/cgroup/);
 assert.match(postinst, /systemd-run --on-active=15/,
   'executor-owned package configuration must defer its own restart until dpkg exits');
 
-assert.doesNotMatch(prerm, /agentoc-maintenance|maintenance-control/);
-assert.match(prerm, /stop_unit agentoc-privileged-executor\.service/);
-assert.match(prerm, /stop_unit agentoc-storage-gc\.timer[\s\S]*stop_unit agentoc-storage-gc\.service/);
+assert.doesNotMatch(prerm, /ragent-maintenance|maintenance-control/);
+assert.match(prerm, /stop_unit ragent-privileged-executor\.service/);
+assert.match(prerm, /stop_unit ragent-storage-gc\.timer[\s\S]*stop_unit ragent-storage-gc\.service/);
 // Exercise the real removal guard with simulated systemd outcomes, without
 // stopping the system services on the machine running the test.
 if (process.platform !== 'win32') {
@@ -155,21 +155,21 @@ if (process.platform !== 'win32') {
     ]) {
       const script = `getent() { printf '%s\\n' "$PASSWD_ENTRY"; }\n${userGuard}\nresolve_service_user`;
       const result = spawnSync('sh', ['-c', script], {
-        env: { ...process.env, AGENTOC_SERVICE_USER: 'service', PASSWD_ENTRY: entry }, encoding: 'utf8',
+        env: { ...process.env, RAGENT_SERVICE_USER: 'service', PASSWD_ENTRY: entry }, encoding: 'utf8',
       });
       assert.equal(result.status, expectedStatus, `service user entry ${entry}`);
     }
   }
 }
 assert.match(postrm, /! -name accounts/);
-assert.match(postrm, /\/var\/lib\/agentoc-run \/var\/log\/agentoc/);
-assert.match(postinst, /mktemp \/etc\/agentoc\/\.initial-credentials\.XXXXXX/);
+assert.match(postrm, /\/var\/lib\/ragent-run \/var\/log\/ragent/);
+assert.match(postinst, /mktemp \/etc\/ragent\/\.initial-credentials\.XXXXXX/);
 assert.match(postinst, /chmod 0600 "\$credentials_tmp"/);
 assert.doesNotMatch(postinst, /echo "初始登录密码：\$INITIAL_PASSWORD/);
-assert.match(postrm, /\/etc\/agentoc\/initial-credentials/);
-assert.match(postrm, /delgroup --system agentoc-privileged/);
-assert.match(postrm, /delgroup --system agentoc-maintenance/);
-assert.doesNotMatch(restartScript, /agentoc-maintenance|maintenance-control/);
+assert.match(postrm, /\/etc\/ragent\/initial-credentials/);
+assert.match(postrm, /delgroup --system ragent-privileged/);
+assert.match(postrm, /delgroup --system ragent-maintenance/);
+assert.doesNotMatch(restartScript, /ragent-maintenance|maintenance-control/);
 
 assert.match(preinst, /repair_provider_runtime_access\(\)/);
 assert.match(repairStateAccess, /owner-account-binding\.json/);
@@ -179,8 +179,8 @@ assert.match(repairStateAccess, /repair_private_tree "\$CONFIG_ROOT\/chat-histor
 assert.match(repairStateAccess, /--quick\|--full/);
 assert.match(mainService, /repair-state-access --quick/);
 assert.match(postinst, /repair-state-access --full/);
-assert.match(postinst, /agentoc-storage-gc\.timer/);
-assert.match(prerm, /agentoc-storage-gc\.timer/);
+assert.match(postinst, /ragent-storage-gc\.timer/);
+assert.match(prerm, /ragent-storage-gc\.timer/);
 assert.doesNotMatch(mainService, /repair-state-access\s*$/m);
 assert.match(repairStateAccess, /find "\$path" -type d -exec chmod 0700 \{\} \+/);
 assert.match(repairStateAccess, /find "\$path" -type f -exec chmod 0600 \{\} \+/);
@@ -189,17 +189,17 @@ assert.ok(packageJson.files.includes('restart.sh'));
 
 assert.match(
   buildScript,
-  /PACKAGE_PUBLIC_BASE_URL="\$\{AGENTOC_PACKAGE_PUBLIC_BASE_URL:-https:\/\/app\.agentoncloud\.com\}"/,
+  /PACKAGE_PUBLIC_BASE_URL="\$\{RAGENT_PACKAGE_PUBLIC_BASE_URL:-https:\/\/app\.agentoncloud\.com\}"/,
   'Deb packages must default the portal URL to app.agentoncloud.com',
 );
-assert.match(buildScript, /PACKAGE_ACCOUNTS_URL="\$\{AGENTOC_PACKAGE_ACCOUNTS_URL:-https:\/\/ragent\.agentoncloud\.com\/accounts\}"/);
-assert.match(buildScript, /PACKAGE_TURN_BROKER_URL="\$\{AGENTOC_PACKAGE_TURN_BROKER_URL:-https:\/\/ragent\.agentoncloud\.com\/turn\}"/);
-assert.match(buildScript, /PACKAGE_NAME="\$\{AGENTOC_DEB_PACKAGE_NAME:-ragent\}"/);
+assert.match(buildScript, /PACKAGE_ACCOUNTS_URL="\$\{RAGENT_PACKAGE_ACCOUNTS_URL:-https:\/\/ragent\.agentoncloud\.com\/accounts\}"/);
+assert.match(buildScript, /PACKAGE_TURN_BROKER_URL="\$\{RAGENT_PACKAGE_TURN_BROKER_URL:-https:\/\/ragent\.agentoncloud\.com\/turn\}"/);
+assert.match(buildScript, /PACKAGE_NAME="\$\{RAGENT_DEB_PACKAGE_NAME:-ragent\}"/);
 assert.match(buildScript, /OUTPUT_NAME="\$\{PACKAGE_NAME\}_\$\{VERSION\}_\$\{ARCH\}\.deb"/);
 assert.match(buildScript, /GOOS=linux GOARCH="\$P2P_GOARCH" CGO_ENABLED=0 go build/);
 assert.match(buildScript, /P2P_GOARCH=arm64/);
 assert.match(buildScript, /P2P_GOARCH=amd64/);
-assert.match(buildScript, /NPM_REGISTRY="\$\{AGENTOC_NPM_REGISTRY:-https:\/\/registry\.npmjs\.org\}"/);
+assert.match(buildScript, /NPM_REGISTRY="\$\{RAGENT_NPM_REGISTRY:-https:\/\/registry\.npmjs\.org\}"/);
 assert.match(buildScript, /resolve_npm_version\(\)/);
 assert.match(buildScript, /verify_npm_sri\(\)/);
 assert.match(buildScript, /registry metadata does not include a sha512 SRI digest/);
@@ -207,8 +207,8 @@ assert.match(buildScript, /@openai\/codex@\$CODEX_VERSION/);
 assert.match(buildScript, /@openai\/codex@\$CODEX_NATIVE_VERSION/);
 assert.match(buildScript, /harness-version-catalog\.mjs/);
 assert.match(buildScript, /CODEX_ADAPTER_TARGET_VERSION/);
-assert.match(buildScript, /AGENTOC_CODEX_VERSION:-\$CODEX_ADAPTER_TARGET_VERSION/);
-assert.match(buildScript, /AGENTOC_CLAUDE_VERSION:-\$CLAUDE_ADAPTER_TARGET_VERSION/);
+assert.match(buildScript, /RAGENT_CODEX_VERSION:-\$CODEX_ADAPTER_TARGET_VERSION/);
+assert.match(buildScript, /RAGENT_CLAUDE_VERSION:-\$CLAUDE_ADAPTER_TARGET_VERSION/);
 assert.match(buildScript, /CLAUDE_ADAPTER_COMPATIBLE/);
 assert.match(buildScript, /CODEX_ADAPTER_COMPATIBLE/);
 assert.match(buildScript, /@anthropic-ai\/claude-code/);
@@ -220,19 +220,19 @@ assert.match(buildScript, /CODEX_MAIN_CONTENTS=.*codex-launcher-contents\.txt/);
 assert.match(buildScript, /CLAUDE_NATIVE_CONTENTS=.*claude-native-contents\.txt/);
 assert.doesNotMatch(buildScript, /tar -tzf "\$CODEX_MAIN_CACHE_PATH" \| grep -qx/);
 assert.doesNotMatch(buildScript, /tar -tzf "\$CLAUDE_NATIVE_CACHE_PATH" \| grep -qx/);
-assert.doesNotMatch(buildScript, /CLAUDE_VERSION="\$\{AGENTOC_CLAUDE_VERSION:-2\.1\./);
-assert.doesNotMatch(buildScript, /CODEX_NATIVE_VERSION="\$\{AGENTOC_CODEX_NATIVE_VERSION:-0\./);
-assert.match(buildScript, /rm -f "\$APP_DIR\/bin\/agentoc-p2p-host-amd64" "\$APP_DIR\/bin\/agentoc-p2p-host-arm64"/);
+assert.doesNotMatch(buildScript, /CLAUDE_VERSION="\$\{RAGENT_CLAUDE_VERSION:-2\.1\./);
+assert.doesNotMatch(buildScript, /CODEX_NATIVE_VERSION="\$\{RAGENT_CODEX_NATIVE_VERSION:-0\./);
+assert.match(buildScript, /rm -f "\$APP_DIR\/bin\/ragent-p2p-host-amd64" "\$APP_DIR\/bin\/ragent-p2p-host-arm64"/);
 assert.match(buildScript, /Built deb contains an architecture-specific P2P sidecar/);
 assert.match(buildScript, /Built deb is missing the canonical P2P host sidecar/);
 assert.match(postinst, /retire_legacy_p2p_host_variants\(\)/);
-assert.match(postinst, /\/opt\/agentoc\/app\/bin\/agentoc-p2p-host-amd64/);
-assert.match(postinst, /\/opt\/agentoc\/app\/bin\/agentoc-p2p-host-arm64/);
+assert.match(postinst, /\/opt\/ragent\/app\/bin\/ragent-p2p-host-amd64/);
+assert.match(postinst, /\/opt\/ragent\/app\/bin\/ragent-p2p-host-arm64/);
 assert.match(buildScript, /install -m 0755 "\$P2P_HOST_BINARY" "\$APP_DIR\/bin\/ragent-p2p-host"/);
 
 execFileSync('bash', ['-n', join(root, 'scripts/build-deb.sh')]);
 
-const fakeNpmRoot = mkdtempSync(join(tmpdir(), 'agentoc-deb-version-gate-'));
+const fakeNpmRoot = mkdtempSync(join(tmpdir(), 'ragent-deb-version-gate-'));
 try {
   const fakeNpm = join(fakeNpmRoot, 'npm');
   writeFileSync(fakeNpm, [
@@ -250,9 +250,9 @@ try {
     env: {
       ...process.env,
       PATH: `${fakeNpmRoot}:${process.env.PATH}`,
-      AGENTOC_PACKAGE_VERSION: '0.0.0-version-gate-test',
-      AGENTOC_CODEX_VERSION: '0.165.0',
-      AGENTOC_CLAUDE_VERSION: '2.1.310',
+      RAGENT_PACKAGE_VERSION: '0.0.0-version-gate-test',
+      RAGENT_CODEX_VERSION: '0.165.0',
+      RAGENT_CLAUDE_VERSION: '2.1.310',
     },
   });
   assert.notEqual(mismatch.status, 0, 'Deb packaging must refuse an explicit unvalidated runtime override');

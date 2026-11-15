@@ -3,21 +3,21 @@
 // Pure Monet/Material-3 theme contract helpers (Stage 2 extraction of
 // monet-theme-contract.js): role-name normalization, color validity (with a
 // CSS.supports probe injected via the environment contract
-// (root.AgentocMonetThemeContractEnvironment), falling back to the same
+// (root.RagentMonetThemeContractEnvironment), falling back to the same
 // token regexes as the legacy module when the probe is absent), payload
 // slicing and the role→CSS-variable binding table. The DOM application
 // half (apply/clear, which mutate CSS variables on the root element) stays
 // in the legacy module. Locked against the legacy implementation by
 // tests/test-chat-theme-contract-core.mjs.
 
-(function attachAgentocMonetThemeContractCore(root) {
+(function attachRagentMonetThemeContractCore(root) {
   // Live environment: reads always go to the injected object (mutations
   // after attach are visible), falling back to the defaults for absent keys.
   const DEFAULT_ENVIRONMENT = Object.freeze({
     cssSupports: null,
   });
   const environment = new Proxy(
-    root.AgentocMonetThemeContractEnvironment || {},
+    root.RagentMonetThemeContractEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -111,7 +111,7 @@
     return { roles, lightSurface, darkSurface };
   }
 
-  root.AgentocMonetThemeContractCore = Object.freeze({
+  root.RagentMonetThemeContractCore = Object.freeze({
     version: 1,
     roleBindings: ROLE_BINDINGS,
     isRecord,

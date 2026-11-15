@@ -296,7 +296,7 @@ const context = {
       addEventListener() {},
       removeEventListener() {},
     },
-    AgentoCSessionStateModel: {
+    RagentSessionStateModel: {
       createEmptyStatus() {
         return {};
       },
@@ -310,8 +310,8 @@ const context = {
         return { primary: { label: 'Idle', tone: 'idle' } };
       },
     },
-    __AGENTOC_BUILD__: { assetVersion: 'test-build', title: 'test build' },
-    __AGENTOC_BOOTSTRAP__: { auth: { role: 'owner' } },
+    __RAGENT_BUILD__: { assetVersion: 'test-build', title: 'test build' },
+    __RAGENT_BOOTSTRAP__: { auth: { role: 'owner' } },
   },
 };
 
@@ -369,7 +369,7 @@ context.dispatchAction = (payload) => {
   return true;
 };
 // The project migration gates session creation behind an active project
-// (sidebar-ui.js `agentocHasActiveProject`). With no project loaded in this
+// (sidebar-ui.js `ragentHasActiveProject`). With no project loaded in this
 // VM, the shortcut must refuse and surface project creation instead of
 // dispatching a dangling session.
 assert.equal(
@@ -378,7 +378,7 @@ assert.equal(
   'new session shortcut should be blocked when no project is active',
 );
 // The dispatch contract check then satisfies the gate so it can fire.
-context.window.agentocHasActiveProject = () => true;
+context.window.ragentHasActiveProject = () => true;
 assert.equal(
   context.createNewSessionShortcut({ closeSidebar: false }),
   true,

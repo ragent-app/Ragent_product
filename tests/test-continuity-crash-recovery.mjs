@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-continuity-crash-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-continuity-crash-'));
 const moduleUrl = new URL('../chat/continuity-store.mjs', import.meta.url).href;
 const worker = spawn(process.execPath, ['--input-type=module', '-e', `
   import { createContinuityStore } from ${JSON.stringify(moduleUrl)};

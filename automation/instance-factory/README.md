@@ -2,7 +2,7 @@
 
 This directory is the repo-native home for whole-host automation.
 
-It intentionally does **not** replace `agentoc guest-instance`, which remains the same-host multi-instance layer.
+It intentionally does **not** replace `ragent guest-instance`, which remains the same-host multi-instance layer.
 
 ## Scope split
 
@@ -18,7 +18,7 @@ It intentionally does **not** replace `agentoc guest-instance`, which remains th
 - `contracts/install.env.example`: private install bundle example
 - `contracts/install.env.schema.json`: documented env contract
 - `feature-map.json`: module catalog, dependencies, startup order, and required inputs
-- `scripts/inspect-agentoc-host.mjs`: current-machine fact pass for routing whole-host work
+- `scripts/inspect-ragent-host.mjs`: current-machine fact pass for routing whole-host work
 - `templates/systemd/`: unit templates and drop-ins that installers can render later
 
 ## Current executable path
@@ -45,4 +45,4 @@ It intentionally does **not** replace `agentoc guest-instance`, which remains th
 - Feature modes are always `on`, `off`, or `auto`.
 - Users never declare derived module states directly.
 - The installer computes `installed`, `configured`, `enabled`, `runnable`, `started`, and `healthy`.
-- If `agentoc` is runnable but an enabled sidecar or connector is not, the profile is `degraded`.
+- If `ragent` is runnable but an enabled sidecar or connector is not, the profile is `degraded`.

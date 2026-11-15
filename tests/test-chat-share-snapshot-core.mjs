@@ -72,13 +72,13 @@ function loadCore() {
     Error,
   };
   const env = { getActiveShareSnapshotPayload: null };
-  context.AgentocShareSnapshotEnvironment = env;
+  context.RagentShareSnapshotEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/share-snapshot.js'), 'utf8'),
     context,
     { filename: 'transport/share-snapshot.js' },
   );
-  const core = context.AgentocShareSnapshotCore;
+  const core = context.RagentShareSnapshotCore;
   let payload = null;
   env.getActiveShareSnapshotPayload = () => payload;
   return {

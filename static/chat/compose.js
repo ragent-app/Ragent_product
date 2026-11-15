@@ -16,7 +16,7 @@ function fallbackTranslate(key) {
 }
 
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : fallbackTranslate(key);
+  return window.ragentT ? window.ragentT(key, vars) : fallbackTranslate(key);
 }
 
 function getComposerPendingSendSnapshot() {
@@ -209,7 +209,7 @@ async function uploadComposerAttachmentToAsset(sessionId, attachment, { signal }
     throw new Error("Upload intent is incomplete");
   }
 
-  const uploadResponse = await (window.agentocFetch || fetch)(upload.url, {
+  const uploadResponse = await (window.ragentFetch || fetch)(upload.url, {
     method: upload.method || "PUT",
     headers: upload.headers || {},
     body: file,
@@ -503,14 +503,14 @@ function isComposerBlockingForSession(sessionId = currentSessionId) {
 
 function isComposerEditorFocused() {
   const markdownEditorFocused = typeof window !== "undefined"
-    && window.AgentoCMarkdownComposer?.isEditorFocused?.(msgInput) === true;
+    && window.RagentMarkdownComposer?.isEditorFocused?.(msgInput) === true;
   return markdownEditorFocused
     || (typeof document !== "undefined" && document.activeElement === msgInput);
 }
 
 function blurComposerEditorForPendingSend() {
-  const editable = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-    || window.AgentoCMarkdownComposer?.getEditor?.(msgInput);
+  const editable = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+    || window.RagentMarkdownComposer?.getEditor?.(msgInput);
   if (editable?.blur) editable.blur();
   if (typeof document !== "undefined" && document.activeElement === msgInput) {
     msgInput.blur?.();
@@ -1306,7 +1306,7 @@ function resolveComposerRequestId(existingRequestId) {
 
 function sendMessage(existingRequestId) {
   if (typeof shareSnapshotMode !== "undefined" && shareSnapshotMode) return;
-  window.AgentoCMarkdownComposer?.flush?.(msgInput);
+  window.RagentMarkdownComposer?.flush?.(msgInput);
   const text = msgInput.value.trim();
   const currentSession = getCurrentSession();
   const queuedImages = getComposerAttachmentsSnapshot(currentSessionId);
@@ -1483,8 +1483,8 @@ function sendMessage(existingRequestId) {
       msg.requestId = requestId;
       // Carry the active UI language so the server can localize session
       // artifacts (e.g. per-message system prompts) for this conversation.
-      if (typeof window.AgentoCI18n?.getActiveUiLanguage === "function") {
-        const activeUiLanguage = window.AgentoCI18n.getActiveUiLanguage();
+      if (typeof window.RagentI18n?.getActiveUiLanguage === "function") {
+        const activeUiLanguage = window.RagentI18n.getActiveUiLanguage();
         if (activeUiLanguage) msg.uiLanguage = activeUiLanguage;
       }
       if (!visitorMode) {
@@ -1599,7 +1599,7 @@ function syncComposerEditResendButton(active) {
     // The icon factory is already loaded for the static composer. Render the
     // changed icon directly because hydrate() only visits descendants, while
     // these buttons carry data-icon on the button itself.
-    const renderer = typeof window !== "undefined" ? window.AgentoCIcons : null;
+    const renderer = typeof window !== "undefined" ? window.RagentIcons : null;
     if (renderer?.render && button.getAttribute?.("data-rendered-icon") !== iconName) {
       button.innerHTML = renderer.render(iconName);
       button.setAttribute?.("data-rendered-icon", iconName);
@@ -1607,7 +1607,7 @@ function syncComposerEditResendButton(active) {
   }
 
   const cancelTitle = t("message.editResend.cancelAria");
-  const renderer = typeof window !== "undefined" ? window.AgentoCIcons : null;
+  const renderer = typeof window !== "undefined" ? window.RagentIcons : null;
   for (const button of getComposerEditResendCancelButtons()) {
     button.classList?.toggle?.("is-visible", isActive);
     button.setAttribute?.("data-icon", "close");
@@ -1730,8 +1730,8 @@ async function submitEditResend(pendingEditResend, text, queuedImages) {
         : "";
       if (pickerAgentId) body.agentId = pickerAgentId;
     }
-    if (typeof window.AgentoCI18n?.getActiveUiLanguage === "function") {
-      const activeUiLanguage = window.AgentoCI18n.getActiveUiLanguage();
+    if (typeof window.RagentI18n?.getActiveUiLanguage === "function") {
+      const activeUiLanguage = window.RagentI18n.getActiveUiLanguage();
       if (activeUiLanguage) body.uiLanguage = activeUiLanguage;
     }
     const data = await fetchJsonOrRedirect(`/api/sessions/${encodeURIComponent(sessionId)}/resend-edited`, {
@@ -1769,7 +1769,7 @@ async function submitEditResend(pendingEditResend, text, queuedImages) {
 }
 
 cancelBtn.addEventListener("click", () => {
-  window.AgentoCHaptics?.danger?.();
+  window.RagentHaptics?.danger?.();
   dispatchAction({ action: "cancel" });
 });
 
@@ -1803,7 +1803,7 @@ function handleComposerKeydown(e) {
   }
 }
 msgInput.addEventListener("keydown", handleComposerKeydown);
-window.AgentoCMarkdownComposer?.getEditor?.(msgInput)?.addEventListener("keydown", handleComposerKeydown);
+window.RagentMarkdownComposer?.getEditor?.(msgInput)?.addEventListener("keydown", handleComposerKeydown);
 
 // ---- Composer height ----
 // Empty composer sits at a single line (user decision: no manual height
@@ -1822,8 +1822,8 @@ const INPUT_AUTO_MAX_LINES_MOBILE = 5;
 const INPUT_AUTO_MAX_LINES_MOBILE_PAD = 8;
 
 function getInputLineHeight() {
-  const editor = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-    || window.AgentoCMarkdownComposer?.getEditor?.(msgInput)
+  const editor = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+    || window.RagentMarkdownComposer?.getEditor?.(msgInput)
     || msgInput;
   return parseFloat(getComputedStyle(editor).lineHeight) || 24;
 }
@@ -1848,15 +1848,15 @@ function clampInputHeight(height) {
 function autoResizeInput() {
   // Re-evaluate the expand affordance first so its visibility and the
   // textarea height stay in sync for the measurement below.
-  window.AgentoCComposerFullscreen?.sync?.();
-  const editor = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-    || window.AgentoCMarkdownComposer?.getEditor?.(msgInput)
+  window.RagentComposerFullscreen?.sync?.();
+  const editor = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+    || window.RagentMarkdownComposer?.getEditor?.(msgInput)
     || msgInput;
   // Vditor's editable `pre` is intentionally overflow-visible. The composer
   // shell is the actual scroll owner, so capture it before changing the
   // editable height; Chromium can clamp an ancestor while the content box is
   // temporarily measured at its natural height.
-  const scrollContainer = window.AgentoCMarkdownComposer?.getEditor?.(msgInput)
+  const scrollContainer = window.RagentMarkdownComposer?.getEditor?.(msgInput)
     || editor;
   const previousScrollTop = Number(scrollContainer.scrollTop) || 0;
   const previousMaxScrollTop = Math.max(
@@ -1884,7 +1884,7 @@ function autoResizeInput() {
   // the shell's single scroll range.
   editor.style.height = "auto";
   if (editor === msgInput) editor.style.height = newH + "px";
-  window.AgentoCMarkdownComposer?.setHeight?.(msgInput, newH);
+  window.RagentMarkdownComposer?.setHeight?.(msgInput, newH);
   const nextMaxScrollTop = Math.max(
     0,
     (Number(scrollContainer.scrollHeight) || 0) - (Number(scrollContainer.clientHeight) || 0),
@@ -1898,8 +1898,8 @@ function syncInputHeightForLayout() {
   autoResizeInput();
 }
 
-if (window.AgentoCLayout?.subscribe) {
-  window.AgentoCLayout.subscribe(() => {
+if (window.RagentLayout?.subscribe) {
+  window.RagentLayout.subscribe(() => {
     syncInputHeightForLayout();
   });
 } else {
@@ -1979,7 +1979,7 @@ function flushScheduledDraftSave() {
 }
 
 function flushComposerStateForPageLifecycle() {
-  window.AgentoCMarkdownComposer?.flush?.(msgInput);
+  window.RagentMarkdownComposer?.flush?.(msgInput);
   flushScheduledDraftSave();
 }
 
@@ -2027,7 +2027,7 @@ function syncComposerInputFocus() {
   const collapseLocked = typeof isComposerCollapseLockedForCurrentSession === "function"
     && isComposerCollapseLockedForCurrentSession();
   const markdownEditorFocused = typeof window !== "undefined"
-    && window.AgentoCMarkdownComposer?.isEditorFocused?.(msgInput) === true;
+    && window.RagentMarkdownComposer?.isEditorFocused?.(msgInput) === true;
   if (!pendingForCurrentSession && !collapseLocked && (markdownEditorFocused || document.activeElement === msgInput)) {
     composerExpandedByInteraction = true;
   }
@@ -2082,8 +2082,8 @@ function focusComposerFromShell(event) {
   // control owns the tap; every other point in the compact capsule expands it.
   if (isVisibleComposerControl(explicitControl)) return;
 
-  const editable = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-    || window.AgentoCMarkdownComposer?.getEditor?.(msgInput);
+  const editable = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+    || window.RagentMarkdownComposer?.getEditor?.(msgInput);
   const blocked = !editable
     || editable.getAttribute?.("contenteditable") === "false"
     || editable.closest?.(".is-disabled");
@@ -2138,8 +2138,8 @@ if (typeof document !== "undefined" && typeof document.addEventListener === "fun
         + ".composer-permission-menu, .composer-config-backdrop, .composer-fullscreen"
     )) return;
     composerExpandedByInteraction = false;
-    const editable = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-      || window.AgentoCMarkdownComposer?.getEditor?.(msgInput);
+    const editable = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+      || window.RagentMarkdownComposer?.getEditor?.(msgInput);
     editable?.blur?.();
     if (document.activeElement === msgInput) msgInput.blur?.();
     syncComposerInputFocus();

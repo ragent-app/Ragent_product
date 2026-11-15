@@ -8,7 +8,7 @@ import { notifySessionEvents } from './session-event-waiter.mjs';
 let wss = null;
 const MAX_WS_BUFFERED_BYTES = Math.max(
   64 * 1024,
-  Number.parseInt(process.env.AGENTOC_WS_MAX_BUFFERED_BYTES || String(2 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_WS_MAX_BUFFERED_BYTES || String(2 * 1024 * 1024), 10)
     || 2 * 1024 * 1024,
 );
 const MAX_WS_SLOW_SENDS = 5;
@@ -20,21 +20,21 @@ export function sendWithBackpressure(client, data, fallbackData = null) {
   }
   const bufferedAmount = Number(client?.bufferedAmount) || 0;
   if (bufferedAmount > MAX_WS_BUFFERED_BYTES) {
-    client._agentocSlowSendCount = (client._agentocSlowSendCount || 0) + 1;
+    client._ragentSlowSendCount = (client._ragentSlowSendCount || 0) + 1;
     // An invalidation is cheap and lets the client recover the authoritative
     // delta later.  Never keep queueing full event batches for a slow mobile
     // or tunnel connection.
     if (fallbackData && bufferedAmount <= MAX_WS_BUFFERED_BYTES * 2) {
       try { client.send(fallbackData); } catch {}
     }
-    if (client._agentocSlowSendCount >= MAX_WS_SLOW_SENDS) {
+    if (client._ragentSlowSendCount >= MAX_WS_SLOW_SENDS) {
       try { client.close?.(1013, 'client too slow'); } catch {}
     }
     return false;
   }
   try {
     client.send(data);
-    client._agentocSlowSendCount = 0;
+    client._ragentSlowSendCount = 0;
     return true;
   } catch {
     return false;

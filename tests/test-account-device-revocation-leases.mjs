@@ -41,7 +41,7 @@ const token = session.credential.token;
 function proof(pc, purpose, overrides = {}) {
   const transactionId = 'device-operation-revocation-test';
   const instance = { ...pc.instance, ...overrides };
-  const fields = { instanceId: instance.instanceId, transactionId, purpose, issuedAt: iso(), audience: 'agentoc-owner-auth-device' };
+  const fields = { instanceId: instance.instanceId, transactionId, purpose, issuedAt: iso(), audience: 'ragent-owner-auth-device' };
   return { transactionId, issuedAt: fields.issuedAt, audience: fields.audience, instance,
     signature: sign(null, Buffer.from(buildOwnerAuthDeviceMessage(fields)), pc.privateKey).toString('base64') };
 }
@@ -75,7 +75,7 @@ try {
   assert.equal((await revoke('inst_foreign')).status, 404);
   assert.equal((await request(`/v1/owner-auth/account/devices/${a.instance.instanceId}/revoke`)).status, 401);
   assert.deepEqual(state, beforeRejected, 'Rejected account requests cannot release anything');
-  if (process.env.AGENTOC_TEST_REVOCATION_SCENARIO !== 'quota') {
+  if (process.env.RAGENT_TEST_REVOCATION_SCENARIO !== 'quota') {
     const forged = await native(attacker, 'unbind', { instanceId: b.instance.instanceId });
     assert.equal(forged.status, 403, 'A self-signed key cannot impersonate the retained computer identity');
     assert.deepEqual(state, beforeRejected);

@@ -13,7 +13,7 @@ function Assert-NoReparse([string]$Target){
 function Get-QaServiceNames {
   param([Parameter(Mandatory=$true)][ValidatePattern('^[a-f0-9]{32}$')][string]$CaseId)
   # Interpolation avoids PowerShell '+' / ',' array-expression precedence.
-  @("AgentoC-IdentityQA-Control-$CaseId", "AgentoC-IdentityQA-Executor-$CaseId")
+  @("Ragent-IdentityQA-Control-$CaseId", "Ragent-IdentityQA-Executor-$CaseId")
 }
 Assert-NoReparse $BundleRoot
 $qaManifestFile=Join-Path $BundleRoot 'manifest.json'
@@ -41,10 +41,10 @@ if(($qaSpec.crossServiceOwnerBootstrap -or $qaSpec.crossServiceCredentialChannel
 }
 $qaRuntimeFiles=@($qaRuntimeFiles|Select-Object -Unique)
 if($qaSpec.caseId -cnotmatch '^[a-f0-9]{32}$' -or $qaSpec.requestorSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'Invalid canary identity'}
-$qaParent=Join-Path $env:ProgramData 'AgentoCIdentityQA'
+$qaParent=Join-Path $env:ProgramData 'RagentIdentityQA'
 $qaRoot=Join-Path $qaParent ('case-'+$qaSpec.caseId)
 $qaNames=@(Get-QaServiceNames -CaseId $qaSpec.caseId)
-if($qaNames.Count -ne 2 -or $qaNames[0] -ceq $qaNames[1] -or @($qaNames|Where-Object {$_ -cnotmatch '^AgentoC-IdentityQA-(Control|Executor)-[a-f0-9]{32}$'}).Count){throw 'Invalid exact service names'}
+if($qaNames.Count -ne 2 -or $qaNames[0] -ceq $qaNames[1] -or @($qaNames|Where-Object {$_ -cnotmatch '^Ragent-IdentityQA-(Control|Executor)-[a-f0-9]{32}$'}).Count){throw 'Invalid exact service names'}
 foreach($qaName in $qaNames){if(Get-Service -Name $qaName -ErrorAction SilentlyContinue){throw 'Canary service collision; refusing adoption'}}
 if(Test-Path -LiteralPath $qaRoot){throw 'Canary root collision; refusing adoption'}
 function New-QaAcl([hashtable]$Grants){
@@ -113,7 +113,7 @@ try{
     if((Get-FileHash -LiteralPath $qaTarget -Algorithm SHA256).Hash.ToLowerInvariant() -cne $qaExpectedHash){throw 'Staged runtime hash mismatch'}
   }
   $qaExe=Join-Path $qaRoot 'runtime\IdentityCanary.exe'
-  [IO.File]::WriteAllText((Join-Path $qaRoot '.agentoc-identity-qa'),('case-'+$qaSpec.caseId))
+  [IO.File]::WriteAllText((Join-Path $qaRoot '.ragent-identity-qa'),('case-'+$qaSpec.caseId))
   [IO.File]::WriteAllText((Join-Path $qaRoot 'manifest.json'),($qaSpec|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
   $qaReport.registrations=@()
   for($qaIndex=0;$qaIndex -lt 2;$qaIndex++){
@@ -131,7 +131,7 @@ try{
   }
   $qaControl=$qaSpec.controlSid;$qaExecutor=$qaSpec.executorSid
   if($qaSpec.crossServiceProvider){
-    $qaPreparerName='AgentoC-IdentityQA-Preparer-'+$qaSpec.caseId
+    $qaPreparerName='Ragent-IdentityQA-Preparer-'+$qaSpec.caseId
     if(Get-Service -Name $qaPreparerName -ErrorAction SilentlyContinue){throw 'QA preparer service collision'}
     $qaPreparerRaw=& $qaExe '--register-canary' $qaRoot 'preparer'
     if($LASTEXITCODE -ne 0){throw 'Fixed desktop preparer registration failed'}
@@ -151,7 +151,7 @@ try{
   }
   Set-Acl -LiteralPath $qaParent -AclObject $qaParentAcl
   Set-QaAcl $qaRoot @{$qaControl='ReadAndExecute';$qaExecutor='ReadAndExecute';$qaSpec.requestorSid='ReadAndExecute'}
-  [IO.File]::WriteAllText((Join-Path $qaRoot '.agentoc-identity-qa'),('case-'+$qaSpec.caseId))
+  [IO.File]::WriteAllText((Join-Path $qaRoot '.ragent-identity-qa'),('case-'+$qaSpec.caseId))
   Set-QaAcl (Join-Path $qaRoot 'runtime') @{$qaControl='ReadAndExecute';$qaExecutor='ReadAndExecute'}
   if($qaSpec.crossServiceIpc -or ($qaSpec.crossServiceOwnerBootstrap -or $qaSpec.crossServiceCredentialChannel)){
     foreach($qaDir in @('runtime\chat','runtime\tests','runtime\tests\helpers','runtime\tests\fixtures')){Set-QaAcl (Join-Path $qaRoot $qaDir) @{$qaControl='ReadAndExecute';$qaExecutor='ReadAndExecute'}}

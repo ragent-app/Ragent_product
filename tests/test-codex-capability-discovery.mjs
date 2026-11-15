@@ -12,8 +12,8 @@ function connectFixture() {
   socket.destroy = () => { socket.destroyed = true; };
   socket.write = (line) => {
     const request = JSON.parse(line);
-    if (request.type === 'agentoc-codex-broker-ping') {
-      queueMicrotask(() => { if (!socket.destroyed) socket.emit('data', Buffer.from(`${JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true, accountMatches })}\n`)); });
+    if (request.type === 'ragent-codex-broker-ping') {
+      queueMicrotask(() => { if (!socket.destroyed) socket.emit('data', Buffer.from(`${JSON.stringify({ type: 'ragent-codex-broker-pong', ready: true, accountMatches })}\n`)); });
       return true;
     }
     if (!Object.hasOwn(request, 'id')) return true;

@@ -17,7 +17,7 @@ import {
 } from '../lib/provider-runtime/credential-mutation.mjs';
 import { normalizeAccountSyncRecord } from '../lib/provider-runtime/sync.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-cred-mutation-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-cred-mutation-'));
 
 function mutation(overrides = {}) {
   return normalizeCredentialMutation({

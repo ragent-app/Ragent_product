@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { chromium } from '@playwright/test';
 
 const repoRoot = new URL('..', import.meta.url).pathname;
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'agentoc-theme-surfaces-visual-'));
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'ragent-theme-surfaces-visual-'));
 if (requestedOutputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [

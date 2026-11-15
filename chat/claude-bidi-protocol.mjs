@@ -19,7 +19,7 @@
  * this module only owns the stdin side (turn injection) plus helpers the
  * sidecar needs for terminal/error detection.
  *
- * Claude Code exposes SDK control requests on the same stdin channel. AgentoC
+ * Claude Code exposes SDK control requests on the same stdin channel. Ragent
  * initializes that control channel, uses the native `interrupt` request to stop
  * the active turn, then sends the redirect text as the next user message. This
  * is stop-and-redirect steering, not surgical mutation of an in-flight turn.
@@ -90,8 +90,8 @@ const CLAUDE_BIDI_MANAGED_MCP_TOOLS = new Set([
   'ragent_request_actions',
   'ragent_create_agent',
   // Accept approvals for runs started before the name migration.
-  'agentoc_request_actions',
-  'agentoc_create_agent',
+  'ragent_request_actions',
+  'ragent_create_agent',
 ]);
 
 function readClaudeBidiMcpToolParts(toolName) {

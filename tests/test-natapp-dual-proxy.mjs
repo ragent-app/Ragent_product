@@ -4,11 +4,11 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const homeDir = mkdtempSync(join(tmpdir(), 'agentoc-natapp-dual-proxy-'));
-const agentocConfigDir = join(homeDir, '.config', 'agentoc');
+const homeDir = mkdtempSync(join(tmpdir(), 'ragent-natapp-dual-proxy-'));
+const ragentConfigDir = join(homeDir, '.config', 'ragent');
 const launchAgentsDir = join(homeDir, 'LaunchAgents');
 
-mkdirSync(agentocConfigDir, { recursive: true });
+mkdirSync(ragentConfigDir, { recursive: true });
 mkdirSync(launchAgentsDir, { recursive: true });
 
 const trial4LaunchAgentPath = join(launchAgentsDir, 'com.chatserver.trial4.plist');
@@ -23,7 +23,7 @@ writeFileSync(trial4LaunchAgentPath, `<?xml version="1.0" encoding="UTF-8"?>
 </plist>
 `, 'utf8');
 
-writeFileSync(join(agentocConfigDir, 'guest-instances.json'), JSON.stringify([
+writeFileSync(join(ragentConfigDir, 'guest-instances.json'), JSON.stringify([
   {
     name: 'trial4',
     port: 7699,

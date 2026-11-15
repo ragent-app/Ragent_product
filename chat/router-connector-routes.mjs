@@ -143,10 +143,10 @@ function buildProxyRequestHeaders(req, { mountPath = '', nonce = '' } = {}) {
   }
   if (mountPath) {
     headers['x-forwarded-prefix'] = mountPath;
-    headers['x-agentoc-connector-mount'] = mountPath;
+    headers['x-ragent-connector-mount'] = mountPath;
   }
   if (nonce) {
-    headers['x-agentoc-csp-nonce'] = nonce;
+    headers['x-ragent-csp-nonce'] = nonce;
   }
   return headers;
 }
@@ -188,10 +188,10 @@ async function fetchConnectorSurfaceDescription(surface, { mountPath = '', nonce
   const headers = {};
   if (mountPath) {
     headers['x-forwarded-prefix'] = mountPath;
-    headers['x-agentoc-connector-mount'] = mountPath;
+    headers['x-ragent-connector-mount'] = mountPath;
   }
   if (nonce) {
-    headers['x-agentoc-csp-nonce'] = nonce;
+    headers['x-ragent-csp-nonce'] = nonce;
   }
 
   try {
@@ -575,7 +575,7 @@ export async function handleCalendarFeedRoute({ req, res, pathname }) {
 
   res.writeHead(200, {
     'Content-Type': 'text/calendar; charset=utf-8',
-    'Content-Disposition': 'inline; filename="agentoc.ics"',
+    'Content-Disposition': 'inline; filename="ragent.ics"',
     'ETag': etag,
     'Cache-Control': 'public, max-age=300',
     'Last-Modified': new Date().toUTCString(),

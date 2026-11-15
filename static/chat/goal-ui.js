@@ -14,8 +14,8 @@
 //     picks the latest thread/goal/* event and paints status + token usage on
 //     the chip without an HTTP round-trip. The next attach repaints from meta.
 (function attachGoalUi(root) {
-  if (root.__agentocGoalUiAttached === true) return;
-  root.__agentocGoalUiAttached = true;
+  if (root.__ragentGoalUiAttached === true) return;
+  root.__ragentGoalUiAttached = true;
 
   const STATUS_LABEL = {
     '': 'not set',
@@ -40,8 +40,8 @@
   // quirks or a missing i18n bundle.
   function statusLabel(status) {
     const key = STATUS_I18N_KEY[status] || '';
-    if (key && typeof root.agentocT === 'function') {
-      const translated = root.agentocT(key);
+    if (key && typeof root.ragentT === 'function') {
+      const translated = root.ragentT(key);
       if (typeof translated === 'string' && translated.length > 0 && translated !== key) return translated;
     }
     return STATUS_LABEL[status] || (status || STATUS_LABEL['']);
@@ -57,7 +57,7 @@
   };
 
   // Goal-chasing (cross-turn auto-continuation) copy. Hardcoded Chinese fallback
-  // so the controls render regardless of i18n load order; agentocT overrides when
+  // so the controls render regardless of i18n load order; ragentT overrides when
   // the keys exist. The toggle button label is context-dependent: when chasing it
   // offers to pause, when paused it offers to resume (重新开始).
   const CHASE_LABEL_FALLBACK = {
@@ -77,8 +77,8 @@
   const pendingGoalMemory = new Set();
 
   function translatedGoalCopy(key, fallback) {
-    if (typeof root.agentocT === 'function') {
-      const translated = root.agentocT(key);
+    if (typeof root.ragentT === 'function') {
+      const translated = root.ragentT(key);
       if (typeof translated === 'string' && translated.length > 0 && translated !== key) return translated;
     }
     return fallback;
@@ -91,7 +91,7 @@
 
   function pendingGoalStorageKey(sessionId) {
     const sid = resolveSessionId(sessionId);
-    return sid ? `agentoc.goal.pending.v1:${sid}` : '';
+    return sid ? `ragent.goal.pending.v1:${sid}` : '';
   }
 
   function isPendingGoalArmed(sessionId) {
@@ -125,8 +125,8 @@
 
   function chaseLabel(key) {
     const i18nKey = CHASE_LABEL_I18N_KEY[key] || '';
-    if (i18nKey && typeof root.agentocT === 'function') {
-      const translated = root.agentocT(i18nKey);
+    if (i18nKey && typeof root.ragentT === 'function') {
+      const translated = root.ragentT(i18nKey);
       if (typeof translated === 'string' && translated.length > 0 && translated !== i18nKey) return translated;
     }
     return CHASE_LABEL_FALLBACK[key] || '';
@@ -205,8 +205,8 @@
   }
 
   function isClaudeRuntimeSelected() {
-    const tool = typeof root.agentocGetSelectedToolDefinition === 'function'
-      ? root.agentocGetSelectedToolDefinition()
+    const tool = typeof root.ragentGetSelectedToolDefinition === 'function'
+      ? root.ragentGetSelectedToolDefinition()
       : null;
     const runtimeFamily = String(tool?.runtimeFamily || '').trim().toLowerCase();
     const toolId = String(
@@ -354,8 +354,8 @@
     }
     if (dom.playPauseIcon) {
       dom.playPauseIcon.setAttribute('data-icon', isChasing ? 'pause' : 'play');
-      if (root.AgentoCIcons && typeof root.AgentoCIcons.hydrate === 'function' && dom.playPauseBtn) {
-        root.AgentoCIcons.hydrate(dom.playPauseBtn);
+      if (root.RagentIcons && typeof root.RagentIcons.hydrate === 'function' && dom.playPauseBtn) {
+        root.RagentIcons.hydrate(dom.playPauseBtn);
       }
     }
 
@@ -406,8 +406,8 @@
     } catch (err) {
       console.error('[goal-ui] start auto-continue failed', err);
       openSheet();
-      setFormError(typeof root.agentocT === 'function'
-        ? root.agentocT('goal.saveError')
+      setFormError(typeof root.ragentT === 'function'
+        ? root.ragentT('goal.saveError')
         : 'Could not save the goal. Check your connection and try again.');
     }
   }
@@ -427,8 +427,8 @@
       dom.clearBtn.hidden = false;
       const hasSavedGoal = !!(goal && goal.objective);
       const key = hasSavedGoal ? 'goal.clear' : 'goal.turnOff';
-      const label = typeof root.agentocT === 'function'
-        ? root.agentocT(key)
+      const label = typeof root.ragentT === 'function'
+        ? root.ragentT(key)
         : (hasSavedGoal ? 'Clear goal' : 'Turn off goal mode');
       dom.clearBtn.textContent = label;
       dom.clearBtn.setAttribute('data-i18n', key);
@@ -521,29 +521,29 @@
     setFormError();
     syncSheetForm(lastGoal || null);
     dom.sheet.setAttribute('aria-hidden', 'false');
-    if (root.AgentoCMotion && typeof root.AgentoCMotion.setPresence === 'function') {
-      root.AgentoCMotion.setPresence(dom.sheet, true, { duration: 180 });
+    if (root.RagentMotion && typeof root.RagentMotion.setPresence === 'function') {
+      root.RagentMotion.setPresence(dom.sheet, true, { duration: 180 });
     } else {
       dom.sheet.hidden = false;
       dom.sheet.classList.add('is-open');
     }
-    focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(dom.sheet, {
+    focusScopeDeactivate = root.RagentFocusScope?.activate?.(dom.sheet, {
       containmentRoot: document.body,
       initialFocus: dom.objective,
       restoreFocus: () => lastFocusedElement || dom.composerGoalPill || dom.chip,
       modal: true,
       onEscape: () => closeSheet(),
     }) || null;
-    backEntryId = (window.AgentoCBackHandler && typeof window.AgentoCBackHandler.push === 'function')
-      ? window.AgentoCBackHandler.push({ id: 'goal-sheet', onBack: () => { closeSheet(); return true; } })
+    backEntryId = (window.RagentBackHandler && typeof window.RagentBackHandler.push === 'function')
+      ? window.RagentBackHandler.push({ id: 'goal-sheet', onBack: () => { closeSheet(); return true; } })
       : null;
     if (dom.objective && typeof dom.objective.focus === 'function') dom.objective.focus();
   }
 
   function closeSheet() {
     if (!dom.sheet) return;
-    if (backEntryId && window.AgentoCBackHandler && typeof window.AgentoCBackHandler.pop === 'function') {
-      window.AgentoCBackHandler.pop(backEntryId);
+    if (backEntryId && window.RagentBackHandler && typeof window.RagentBackHandler.pop === 'function') {
+      window.RagentBackHandler.pop(backEntryId);
       backEntryId = null;
     }
     if (focusScopeDeactivate) {
@@ -558,8 +558,8 @@
       }
       lastFocusedElement = null;
     };
-    if (root.AgentoCMotion && typeof root.AgentoCMotion.setPresence === 'function') {
-      root.AgentoCMotion.setPresence(dom.sheet, false, { duration: 150, onAfterClose: restoreFocus });
+    if (root.RagentMotion && typeof root.RagentMotion.setPresence === 'function') {
+      root.RagentMotion.setPresence(dom.sheet, false, { duration: 150, onAfterClose: restoreFocus });
     } else {
       dom.sheet.classList.remove('is-open', 'is-closing');
       dom.sheet.hidden = true;
@@ -599,8 +599,8 @@
     } catch (err) {
       console.error('[goal-ui] save failed', err);
       openSheet();
-      setFormError(typeof root.agentocT === 'function'
-        ? root.agentocT('goal.saveError')
+      setFormError(typeof root.ragentT === 'function'
+        ? root.ragentT('goal.saveError')
         : 'Could not save the goal. Check your connection and try again.');
     }
   }
@@ -639,8 +639,8 @@
     if (!sid) return;
     const hasSavedGoal = !!(lastGoal && lastGoal.objective);
     if (confirm && hasSavedGoal && typeof window.confirm === 'function') {
-      const message = typeof root.agentocT === 'function'
-        ? root.agentocT('goal.clearConfirm')
+      const message = typeof root.ragentT === 'function'
+        ? root.ragentT('goal.clearConfirm')
         : 'Clear this session goal?';
       if (!window.confirm(message && message !== 'goal.clearConfirm' ? message : 'Clear this session goal?')) return;
     }
@@ -657,8 +657,8 @@
       } catch (err) {
         console.error('[goal-ui] clear failed', err);
         openSheet();
-        setFormError(typeof root.agentocT === 'function'
-          ? root.agentocT('goal.saveError')
+        setFormError(typeof root.ragentT === 'function'
+          ? root.ragentT('goal.saveError')
           : 'Could not save the goal. Check your connection and try again.');
       }
     }
@@ -697,7 +697,7 @@
     }
   }
 
-  if (!root.AgentoCFocusScope) document.addEventListener('keydown', handleSheetKeydown);
+  if (!root.RagentFocusScope) document.addEventListener('keydown', handleSheetKeydown);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', ready, { once: true });

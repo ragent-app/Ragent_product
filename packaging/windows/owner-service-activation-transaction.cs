@@ -1,9 +1,9 @@
 // Private fixed-root metadata/SCM transaction. Its public dispatcher MUST retain
 // full trusted admission. QA may exercise this primitive with declared adapters;
 // it cannot stand in for a genuine signed-helper/product activation positive.
-using System;using System.IO;using System.Text;using System.Collections.Generic;using System.Security.Cryptography;using System.Security.Principal;using System.Security.AccessControl;using System.Runtime.InteropServices;using System.Web.Script.Serialization;using AgentoC.ServiceHost;
+using System;using System.IO;using System.Text;using System.Collections.Generic;using System.Security.Cryptography;using System.Security.Principal;using System.Security.AccessControl;using System.Runtime.InteropServices;using System.Web.Script.Serialization;using Ragent.ServiceHost;
 public sealed class OwnerServiceActivationTransaction:IDisposable {
- static readonly string Root=Path.GetFullPath(Environment.GetEnvironmentVariable("AGENTOC_INSTALL_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"AgentoC")).TrimEnd('\\');
+ static readonly string Root=Path.GetFullPath(Environment.GetEnvironmentVariable("RAGENT_INSTALL_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"Ragent")).TrimEnd('\\');
  static readonly string Marker=Path.Combine(Root,"owner-activation.prepare-lock");
  static readonly string CommittedMarker=Path.Combine(Root,"owner-activation.committed-lock");
  readonly OwnerServiceActivationTrial supervisor,control;readonly List<IDisposable> pins=new List<IDisposable>();
@@ -23,7 +23,7 @@ public sealed class OwnerServiceActivationTransaction:IDisposable {
  void Create(string name,object value){string path=Path.Combine(Root,name);var bytes=new UTF8Encoding(false,true).GetBytes(new JavaScriptSerializer().Serialize(value));using(var file=new FileStream(path,FileMode.CreateNew,FileAccess.Write,FileShare.Read)){file.Write(bytes,0,bytes.Length);file.Flush(true);ServiceDirectoryPin.VerifyFile(file.SafeFileHandle,path);SafeAcl(path,false);}}
  public OwnerServiceActivationTransaction(string instanceId,byte[] expectedPrepared,byte[] expectedPolicy,OwnerServiceActivationTrial supervisorLease,OwnerServiceActivationTrial controlLease){
   Need(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator),"OAX_ADMIN_REQUIRED");Need(System.Text.RegularExpressions.Regex.IsMatch(instanceId??"",@"\Ainst_[a-f0-9]{32}\z"),"OAX_INSTANCE_REQUIRED");
-  Need(supervisorLease!=null&&controlLease!=null&&supervisorLease.Name=="AgentoC-RunnerSupervisor"&&controlLease.Name=="AgentoC-ControlPlane","OAX_SERVICE_LEASES_REQUIRED");Need(expectedPrepared!=null&&expectedPolicy!=null&&expectedPrepared.Length>0&&expectedPrepared.Length<=8192&&expectedPolicy.Length>0&&expectedPolicy.Length<=8192,"OAX_RECEIPTS_REQUIRED");
+  Need(supervisorLease!=null&&controlLease!=null&&supervisorLease.Name=="Ragent-RunnerSupervisor"&&controlLease.Name=="Ragent-ControlPlane","OAX_SERVICE_LEASES_REQUIRED");Need(expectedPrepared!=null&&expectedPolicy!=null&&expectedPrepared.Length>0&&expectedPrepared.Length<=8192&&expectedPolicy.Length>0&&expectedPolicy.Length<=8192,"OAX_RECEIPTS_REQUIRED");
   instance=instanceId;prepared=(byte[])expectedPrepared.Clone();policy=(byte[])expectedPolicy.Clone();supervisor=supervisorLease;control=controlLease;
   try{for(string p=Root;p!=null;p=Path.GetDirectoryName(p)){pins.Add(ServiceDirectoryPin.Directory(p));if(String.Equals(p,Root,StringComparison.OrdinalIgnoreCase))SafeAcl(p,true);}foreach(var name in new[]{"owner-activation.prepare-lock","owner-activation.committed-lock","owner-msi.activated.json","owner-msi.activation-health.json","owner-msi.prepared.activated.json","owner-msi.policy.activated.json","owner-msi.prepare-lock","owner-policy.prepare-lock","owner-identity.initialize-lock","owner-services.prepare-lock","owner-data.prepare-lock"})Need(!Present(Path.Combine(Root,name)),"OAX_EXISTING_TRANSACTION_REFUSED");Match("owner-msi.prepared.json",prepared);Match("owner-msi.policy.json",policy);}catch{Dispose();throw;}
  }

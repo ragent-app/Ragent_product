@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-rename-fallback-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-rename-fallback-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 const workRoot = join(tempHome, 'workspace');
 
 mkdirSync(tempBin, { recursive: true });
@@ -20,7 +20,7 @@ writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
 const delayMs = 120;
-const text = 'main task finished\\n<agentoc-session-labels>{bad json}</agentoc-session-labels>';
+const text = 'main task finished\\n<ragent-session-labels>{bad json}</ragent-session-labels>';
 
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'run-thread' }));
 console.log(JSON.stringify({ type: 'turn.started' }));
@@ -65,8 +65,8 @@ writeFileSync(
 );
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workRoot;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workRoot;
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 
 const {

@@ -67,7 +67,7 @@ function buildContext({ currentSessionId, sessions }) {
   };
   const context = vm.createContext({
     document,
-    window: { AgentoCRunActivity: { subscribe() { return () => {}; } } },
+    window: { RagentRunActivity: { subscribe() { return () => {}; } } },
     PointerEvent: function PointerEvent() {},
     requestAnimationFrame() { return 0; },
     setTimeout(callback, delay) {

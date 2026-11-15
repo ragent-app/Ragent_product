@@ -14,11 +14,11 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempRoot = mkdtempSync(join(tmpdir(), 'agentoc-guest-audit-'));
+const tempRoot = mkdtempSync(join(tmpdir(), 'ragent-guest-audit-'));
 const sourceRoot = join(tempRoot, 'source-instance');
 const targetRoot = join(tempRoot, 'target-instance');
 const archivePath = join(tempRoot, 'source-instance.tgz');
-const legacyInstanceRoot = '/Users/legacy/.agentoc/instances/trial24';
+const legacyInstanceRoot = '/Users/legacy/.ragent/instances/trial24';
 const legacyExternalToolPath = '/Users/legacy/code/custom-tool';
 
 mkdirSync(join(sourceRoot, 'workspace', 'project-a'), { recursive: true });
@@ -151,12 +151,12 @@ try {
   rmSync(tempRoot, { recursive: true, force: true });
 }
 
-const tempRoot2 = mkdtempSync(join(tmpdir(), 'agentoc-guest-audit-advisory-'));
+const tempRoot2 = mkdtempSync(join(tmpdir(), 'ragent-guest-audit-advisory-'));
 const sourceRoot2 = join(tempRoot2, 'source-instance');
 const targetRoot2 = join(tempRoot2, 'target-instance');
-const legacyRepoRoot = '/Users/legacy/code/agentoc';
+const legacyRepoRoot = '/Users/legacy/code/ragent';
 const legacyRepoToolPath = `${legacyRepoRoot}/scripts/micro-agent-router.mjs`;
-const ephemeralSessionFolder = '/var/folders/s6/demo123/T/agentoc-session-source-context-AbCdEf';
+const ephemeralSessionFolder = '/var/folders/s6/demo123/T/ragent-session-source-context-AbCdEf';
 const ephemeralPathReference = '/tmp/report-build.XXXXXX';
 
 mkdirSync(join(sourceRoot2, 'memory', 'tasks'), { recursive: true });

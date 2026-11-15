@@ -5,7 +5,7 @@ import { buildAccountSessionMessage, normalizeDevicePublicKey, verifyDeviceAuthS
 const fail = (suffix, statusCode = 400) => { const e = new Error('Account pairing request rejected');
   e.code = `account_pairing_${suffix}`; e.statusCode = statusCode; throw e; };
 const stamp = (b) => JSON.stringify([b.accountId, b.instanceKeyFingerprint, b.boundAt]);
-const aad = (r) => JSON.stringify(['agentoc-account-pairing-session-v1', r.instanceId, r.invitationId, r.claim?.transactionId]);
+const aad = (r) => JSON.stringify(['ragent-account-pairing-session-v1', r.instanceId, r.invitationId, r.claim?.transactionId]);
 const projection = (r) => ({ instanceId: r.instanceId, invitationId: r.invitationId, status: r.status, expiresAt: r.expiresAt });
 
 // Ordinary pairing only. The transaction callback issues the phone's own

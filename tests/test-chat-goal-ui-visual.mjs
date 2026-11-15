@@ -8,8 +8,8 @@ import { join } from "node:path";
 import { chromium } from "@playwright/test";
 
 const repoRoot = process.cwd();
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || "/var/lib/agentoc/workspace/visual-ui-reviews/chat-goal-m3";
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || "/var/lib/ragent/workspace/visual-ui-reviews/chat-goal-m3";
 await mkdir(outputDir, { recursive: true });
 
 const css = await Promise.all([
@@ -27,7 +27,7 @@ const markup = `
       <button class="header-btn" type="button" aria-label="Sessions">☰</button>
       <button class="header-btn" type="button" aria-label="Home">⌂</button>
       <div class="header-title-block">
-        <h1>AgentoC Chat</h1>
+        <h1>Ragent Chat</h1>
         <button class="goal-chip" type="button" data-state="active" data-tone="working" aria-label="Session goal">
           <span class="goal-chip-dot" data-tone="working" aria-hidden="true"></span>
           <span class="goal-chip-text">Prepare the weekly operations summary</span>

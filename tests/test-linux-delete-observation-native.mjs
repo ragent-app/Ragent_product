@@ -48,7 +48,7 @@ const result = await prepareSemanticApproval({ request, trustedContext: { cwd: r
 process.stdout.write(JSON.stringify(result.projection));`;
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(request), root],
     { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,
-      env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, AGENTOC_CONFIG_DIR: `${testHome}/config` } });
+      env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, RAGENT_CONFIG_DIR: `${testHome}/config` } });
   assert.equal(child.status, 0, child.stderr);
   const projection = JSON.parse(child.stdout);
   assert.equal(projection.decision, 'ASK');
@@ -139,7 +139,7 @@ process.stdout.write(JSON.stringify(result.projection));`;
   // may have occurred, so the caller must see unknown and the nonce stays used.
   const nextChild = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(request), root],
     { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,
-      env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, AGENTOC_CONFIG_DIR: `${testHome}/config` } });
+      env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, RAGENT_CONFIG_DIR: `${testHome}/config` } });
   assert.equal(nextChild.status, 0, nextChild.stderr);
   const nextProjection = JSON.parse(nextChild.stdout);
   const nextAttestation = await inspectAndAttestLinuxTarget({ helperPath: helper, expectedSha256: digest, privateKey: keys.privateKey, targetPath: target, context });
@@ -164,7 +164,7 @@ process.stdout.write(JSON.stringify(result.projection));`;
   assert.equal((await claimLinuxDeleteNonce({ directory: ledgerDirectory, nonce: auditFailureCapability.nonce,
     capabilityId: auditFailureCapability.capabilityId, runId: auditFailureCapability.runId,
     selectionHash: auditFailureCapability.selectionManifestHash })).state, 'consumed');
-  if (process.env.AGENTOC_TEST_SYSTEMD_INVOCATION) {
+  if (process.env.RAGENT_TEST_SYSTEMD_INVOCATION) {
     // End-to-end isolated fixture: root registration + live systemd unit +
     // signed v2 observation + owner-proof substitute + fixed native helper.
     await writeFile(target, 'registered-fixture', { mode: 0o600 });
@@ -180,14 +180,14 @@ process.stdout.write(JSON.stringify(result.projection));`;
     await enrollLinuxServiceKeyPin({ directory: pinDirectory, publicKey: serviceKeys.publicKey, expectedKeyId: serviceKeyId });
     const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: attempt, privateKey: serviceKeys.privateKey });
     await registerLinuxRunContext({ directory: contextDirectory, pinDirectory, run, manifest, grant, launchAttempt: attempt,
-      runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) });
+      runnerUid: Number(process.env.RAGENT_TEST_SYSTEMD_UID) });
     const actualRequest = { ...request, runId };
     const actualChild = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(actualRequest), root],
       { uid: sourceStat.uid, gid: sourceStat.gid, encoding: 'utf8', maxBuffer: 1024 * 1024,
-        env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, AGENTOC_CONFIG_DIR: `${testHome}/config` } });
+        env: { PATH: '/usr/bin:/bin', HOME: testHome, TMPDIR: testHome, RAGENT_CONFIG_DIR: `${testHome}/config` } });
     assert.equal(actualChild.status, 0, actualChild.stderr);
     const actualDecision = JSON.parse(actualChild.stdout).decisions[0];
-    const actualContext = { ...context, runId, launchAttempt: attempt, invocationId: process.env.AGENTOC_TEST_SYSTEMD_INVOCATION };
+    const actualContext = { ...context, runId, launchAttempt: attempt, invocationId: process.env.RAGENT_TEST_SYSTEMD_INVOCATION };
     const observed = await inspectAndAttestLinuxTarget({ helperPath: helper, expectedSha256: digest,
       privateKey: keys.privateKey, targetPath: target, context: actualContext });
     const selectedDecision = bindLinuxDeleteObservation({ decision: actualDecision, attestation: observed, trustedPublicKey: keys.publicKey });

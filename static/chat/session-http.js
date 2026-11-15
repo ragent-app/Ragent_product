@@ -75,14 +75,14 @@ if (
   && typeof navigator.serviceWorker?.addEventListener === "function"
 ) {
   navigator.serviceWorker.addEventListener("message", (event) => {
-    if (event.data?.type !== "agentoc:open-session") return;
+    if (event.data?.type !== "ragent:open-session") return;
     applyNavigationState(event.data);
     window.focus();
     return queueForegroundRefresh({
       forceFresh: true,
       viewportIntent: "session_entry_bottom",
     }).then(() => {
-      if (event.data?.responsibilityId) return window.AgentocOrganizationView?.openResponsibilityLink?.(event.data.sessionId, event.data.responsibilityId);
+      if (event.data?.responsibilityId) return window.RagentOrganizationView?.openResponsibilityLink?.(event.data.sessionId, event.data.responsibilityId);
     }).catch(() => {});
   });
 }
@@ -95,7 +95,7 @@ function notifyCompletion(session) {
   const name = session?.name || folder;
   const n = new Notification("Ragent", {
     body: `${name} — task completed`,
-    tag: "agentoc-done",
+    tag: "ragent-done",
   });
   n.onclick = () => {
     window.focus();
@@ -138,7 +138,7 @@ let sessionHistoryAutofillFrame = 0;
 
 function getTimelineRuntimeSnapshot(sessionId) {
   if (typeof window === "undefined" || !sessionId) return null;
-  const snapshot = window.AgentoCTimelineRuntime?.getSnapshot?.();
+  const snapshot = window.RagentTimelineRuntime?.getSnapshot?.();
   return snapshot?.sessionId === sessionId ? snapshot : null;
 }
 
@@ -179,8 +179,8 @@ function estimatePayloadBytes(payload) {
 
 function ensureEventRefreshMetricsStore() {
   const root = typeof window !== "undefined" ? window : globalThis;
-  if (!root.__agentocEventRefreshMetrics || typeof root.__agentocEventRefreshMetrics !== "object") {
-    root.__agentocEventRefreshMetrics = {
+  if (!root.__ragentEventRefreshMetrics || typeof root.__ragentEventRefreshMetrics !== "object") {
+    root.__ragentEventRefreshMetrics = {
       startedAt: new Date().toISOString(),
       totals: {
         fullFetches: 0,
@@ -201,13 +201,13 @@ function ensureEventRefreshMetricsStore() {
       samples: [],
     };
   }
-  if (typeof root.agentocGetEventRefreshMetrics !== "function") {
-    root.agentocGetEventRefreshMetrics = () => {
-      const snapshot = root.__agentocEventRefreshMetrics || {};
+  if (typeof root.ragentGetEventRefreshMetrics !== "function") {
+    root.ragentGetEventRefreshMetrics = () => {
+      const snapshot = root.__ragentEventRefreshMetrics || {};
       return JSON.parse(JSON.stringify(snapshot));
     };
   }
-  return root.__agentocEventRefreshMetrics;
+  return root.__ragentEventRefreshMetrics;
 }
 
 function recordEventRefreshMetric(sample = {}) {
@@ -245,7 +245,7 @@ function recordEventRefreshMetric(sample = {}) {
 
 // Streaming render timing: called from realtime-render.js's
 // pumpStreamingAnimation once per frame that actually re-renders markdown.
-// Shares the __agentocEventRefreshMetrics store and sample cap with the event
+// Shares the __ragentEventRefreshMetrics store and sample cap with the event
 // refresh metrics; samples carry kind "streaming-render" so both families
 // coexist in one array. Progressive enhancement: callers guard with
 // typeof recordStreamingRenderMetric === "function".
@@ -460,12 +460,12 @@ const SESSION_LIST_ORGANIZER_SYSTEM_PROMPT = [
   "Your job is to improve the owner's non-archived session sidebar structure using the provided metadata snapshot.",
   "Do not rename sessions, archive or unarchive them, change pin state, edit prompts, or ask the user follow-up questions.",
   "Only update existing sessions by calling the owner-authenticated Ragent API from this machine.",
-  "Use `agentoc api GET /api/sessions` if you need to double-check current state.",
-  "Use `agentoc api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.",
+  "Use `ragent api GET /api/sessions` if you need to double-check current state.",
+  "Use `ragent api PATCH /api/sessions/<sessionId> --body ...` to update `group` and `sidebarOrder`.",
   "Only writable API fields for this task are `group` and `sidebarOrder`.",
   "Never send read-only snapshot keys such as `title`, `brief`, `existingGroup`, `existingSidebarOrder`, `currentGroup`, or `currentSidebarOrder` in PATCH bodies.",
   "Example PATCH body: {\"group\":\"Ragent\",\"sidebarOrder\":3}",
-  "If `agentoc` is unavailable in PATH, use `node \"$AGENTOC_PROJECT_ROOT/cli.js\" api ...` instead.",
+  "If `ragent` is unavailable in PATH, use `node \"$RAGENT_PROJECT_ROOT/cli.js\" api ...` instead.",
   "`sidebarOrder` must be a positive integer; smaller numbers sort first.",
   "Assign unique contiguous `sidebarOrder` values across the current non-archived sessions you organize.",
   "Prefer a small number of clear, stable groups; avoid one giant catch-all group when the list is dense.",
@@ -563,10 +563,10 @@ async function createSessionListOrganizerRun(payload) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      folder: typeof window.agentocGetSelectedSessionFolder === "function"
-        ? window.agentocGetSelectedSessionFolder()
-        : (typeof window.agentocGetDefaultSessionFolder === "function"
-          ? window.agentocGetDefaultSessionFolder()
+      folder: typeof window.ragentGetSelectedSessionFolder === "function"
+        ? window.ragentGetSelectedSessionFolder()
+        : (typeof window.ragentGetDefaultSessionFolder === "function"
+          ? window.ragentGetDefaultSessionFolder()
           : "~"),
       tool: payload?.tool || "claude",
       name: "sort session list",
@@ -767,7 +767,7 @@ function syncFetchedRunActivity(runActivity) {
   renderedEventState.runActivity = runActivity && typeof runActivity === "object"
     ? runActivity
     : null;
-  window.AgentoCRunActivity?.setActivity?.(renderedEventState.runActivity);
+  window.RagentRunActivity?.setActivity?.(renderedEventState.runActivity);
 }
 
 function reconcilePendingMessageState(event) {
@@ -1097,9 +1097,9 @@ function upsertSession(session) {
   // not pass through applySessionListState. Give the in-app attention layer the
   // same before/after transition signal without fetching that session's event
   // history.
-  if (previous && typeof window.AgentoCAttentionPopup?.onSessionsApplied === "function") {
+  if (previous && typeof window.RagentAttentionPopup?.onSessionsApplied === "function") {
     try {
-      window.AgentoCAttentionPopup.onSessionsApplied(
+      window.RagentAttentionPopup.onSessionsApplied(
         new Map([[normalized.id, previous]]),
         [normalized],
       );
@@ -1125,18 +1125,18 @@ async function fetchSessionSidebar(sessionId, { forceFresh = false, signal = nul
 }
 
 function getWorkspaceFilteredSessionListUrl(baseUrl) {
-  const projectId = typeof window.agentocGetSelectedProjectId === "function"
-    ? window.agentocGetSelectedProjectId()
+  const projectId = typeof window.ragentGetSelectedProjectId === "function"
+    ? window.ragentGetSelectedProjectId()
     : "";
   const normalizedProjectId = typeof projectId === "string" ? projectId.trim() : "";
   if (normalizedProjectId) {
     const separator = String(baseUrl).includes("?") ? "&" : "?";
     return `${baseUrl}${separator}projectId=${encodeURIComponent(normalizedProjectId)}`;
   }
-  const folder = typeof window.agentocGetSelectedSessionFolder === "function"
-    ? window.agentocGetSelectedSessionFolder()
-    : (typeof window.agentocGetDefaultSessionFolder === "function"
-      ? window.agentocGetDefaultSessionFolder()
+  const folder = typeof window.ragentGetSelectedSessionFolder === "function"
+    ? window.ragentGetSelectedSessionFolder()
+    : (typeof window.ragentGetDefaultSessionFolder === "function"
+      ? window.ragentGetDefaultSessionFolder()
       : "");
   const normalizedFolder = typeof folder === "string" ? folder.trim() : "";
   if (!normalizedFolder) return baseUrl;
@@ -1194,8 +1194,8 @@ async function fetchSessionsList({ forceFresh = false, essential = false } = {})
     intent: { forceFresh },
     essential,
     run: async ({ signal }) => {
-      if (typeof window.agentocEnsureProjectsReady === "function") {
-        await window.agentocEnsureProjectsReady({ force: forceFresh });
+      if (typeof window.ragentEnsureProjectsReady === "function") {
+        await window.ragentEnsureProjectsReady({ force: forceFresh });
       }
       // Cross-project catalog: the session bar is not scoped to one workspace.
       // The first level groups every project and the second level filters by the
@@ -1327,10 +1327,10 @@ function applyAttachedSessionState(id, session, { hasAttachedSession: explicitHa
   }
   const chatGlobal = typeof window === "object" ? window : globalThis;
   const resumeDecisionSheet = () => {
-    if (nextHasAttachedSession) chatGlobal.AgentoCDecisionSheet?.resume?.();
+    if (nextHasAttachedSession) chatGlobal.RagentDecisionSheet?.resume?.();
   };
-  if (typeof chatGlobal.AgentocOrganizationView?.onSessionChanged === "function") {
-    chatGlobal.AgentocOrganizationView.onSessionChanged(id);
+  if (typeof chatGlobal.RagentOrganizationView?.onSessionChanged === "function") {
+    chatGlobal.RagentOrganizationView.onSessionChanged(id);
   }
   // The home workspace and empty state derive their visibility from the
   // attached-session flags. Commit the new session first; syncing before this
@@ -1350,7 +1350,7 @@ function applyAttachedSessionState(id, session, { hasAttachedSession: explicitHa
   }
   // Observe run terminal transitions before the early-return below so haptic
   // feedback stays correct even when the UI signature already matched.
-  chatGlobal.AgentoCHaptics?.observeRunState?.(session);
+  chatGlobal.RagentHaptics?.observeRunState?.(session);
   if (typeof chatGlobal.updateGoalChip === "function") {
     chatGlobal.updateGoalChip(session);
   }
@@ -1726,16 +1726,16 @@ function normalizeSessionReferenceFolder(folder) {
 
 function switchWorkspaceForSessionReference(session) {
   const projectId = typeof session?.projectId === "string" ? session.projectId.trim() : "";
-  if (projectId && typeof window.agentocGetSelectedProjectId === "function") {
-    const selectedProjectId = String(window.agentocGetSelectedProjectId() || "").trim();
+  if (projectId && typeof window.ragentGetSelectedProjectId === "function") {
+    const selectedProjectId = String(window.ragentGetSelectedProjectId() || "").trim();
     if (selectedProjectId === projectId) return projectId;
-    if (typeof window.agentocEnsureProjectsReady === "function") {
-      void window.agentocEnsureProjectsReady().then(() => {
-        const project = typeof window.agentocGetProjects === "function"
-          ? window.agentocGetProjects().find((entry) => entry?.id === projectId)
+    if (typeof window.ragentEnsureProjectsReady === "function") {
+      void window.ragentEnsureProjectsReady().then(() => {
+        const project = typeof window.ragentGetProjects === "function"
+          ? window.ragentGetProjects().find((entry) => entry?.id === projectId)
           : null;
-        if (project?.rootPath && typeof window.agentocSetSelectedSessionFolderForNavigation === "function") {
-          window.agentocSetSelectedSessionFolderForNavigation(project.rootPath);
+        if (project?.rootPath && typeof window.ragentSetSelectedSessionFolderForNavigation === "function") {
+          window.ragentSetSelectedSessionFolderForNavigation(project.rootPath);
         }
       });
     }
@@ -1743,15 +1743,15 @@ function switchWorkspaceForSessionReference(session) {
   }
   const folder = normalizeSessionReferenceFolder(session?.folder);
   if (!folder) return "";
-  const selectedFolder = typeof window.agentocGetSelectedSessionFolder === "function"
-    ? normalizeSessionReferenceFolder(window.agentocGetSelectedSessionFolder())
+  const selectedFolder = typeof window.ragentGetSelectedSessionFolder === "function"
+    ? normalizeSessionReferenceFolder(window.ragentGetSelectedSessionFolder())
     : "";
   if (selectedFolder === folder) return folder;
-  if (typeof window.agentocSetSelectedSessionFolderForNavigation === "function") {
-    return window.agentocSetSelectedSessionFolderForNavigation(folder);
+  if (typeof window.ragentSetSelectedSessionFolderForNavigation === "function") {
+    return window.ragentSetSelectedSessionFolderForNavigation(folder);
   }
-  if (typeof window.agentocSetSelectedSessionFolder === "function") {
-    return window.agentocSetSelectedSessionFolder(folder);
+  if (typeof window.ragentSetSelectedSessionFolder === "function") {
+    return window.ragentSetSelectedSessionFolder(folder);
   }
   return folder;
 }
@@ -1777,8 +1777,8 @@ async function openSessionReference(sessionId, {
       if (typeof fetchSessionsList === "function") {
         await fetchSessionsList({ forceFresh: true, essential: true }).catch(() => {});
       }
-      if (typeof window.agentocOpenWorkbenchInspectorTab === "function" && inspectorTab) {
-        window.agentocOpenWorkbenchInspectorTab(inspectorTab);
+      if (typeof window.ragentOpenWorkbenchInspectorTab === "function" && inspectorTab) {
+        window.ragentOpenWorkbenchInspectorTab(inspectorTab);
       }
       if (typeof window.scheduleWorkbenchInspectorRefresh === "function") {
         window.scheduleWorkbenchInspectorRefresh(session.id, { forceFresh: true, delay: 0 });
@@ -1788,7 +1788,7 @@ async function openSessionReference(sessionId, {
 }
 
 if (typeof window !== "undefined") {
-  window.agentocOpenSessionReference = openSessionReference;
+  window.ragentOpenSessionReference = openSessionReference;
 }
 
 // ---- Session loading skeleton + chunked render ----
@@ -1816,8 +1816,8 @@ let sessionLoadRetryInFlight = false;
 
 function sessionLoadingText(key, fallback) {
   try {
-    if (typeof window.agentocT === "function") {
-      const value = window.agentocT(key);
+    if (typeof window.ragentT === "function") {
+      const value = window.ragentT(key);
       if (typeof value === "string" && value) return value;
     }
   } catch { /* fall through to fallback */ }
@@ -2247,7 +2247,7 @@ async function fetchSessionEventsInternal(
 ) {
   const requestStartedAt = nowPerfMs();
   const normalizedViewportIntent = normalizeSessionViewportIntent(viewportIntent);
-  const timelineRuntime = window.AgentoCTimelineRuntime;
+  const timelineRuntime = window.RagentTimelineRuntime;
   if (!timelineRuntime?.renderBatch || !timelineRuntime?.renderIncremental) {
     const error = new Error("Timeline runtime is unavailable");
     error.code = "TIMELINE_RUNTIME_UNAVAILABLE";
@@ -2613,7 +2613,7 @@ async function loadOlderSessionEvents({ forceFresh = false } = {}) {
         // anchoring only for this synchronous render/restore transaction.
         setMessageViewportPrependMode?.(true);
         const renderStartedAt = nowPerfMs();
-        const projected = window.AgentoCTimelineRuntime?.renderBatch?.(events, {
+        const projected = window.RagentTimelineRuntime?.renderBatch?.(events, {
           sessionId,
           runState: renderedEventState.runState,
           historyPrepend: true,
@@ -2801,7 +2801,7 @@ async function runCurrentSessionRefresh(
     ? getChatStoreSession(sessionId)
     : (sessions.find((entry) => entry.id === sessionId) || null);
   const knownRunState = getSessionRunState(knownSession);
-  const sessionSnapshotEnabled = window.__AGENTOC_BOOTSTRAP__?.features?.sessionSnapshot === true;
+  const sessionSnapshotEnabled = window.__RAGENT_BOOTSTRAP__?.features?.sessionSnapshot === true;
   const useCombinedSnapshot = sessionSnapshotEnabled && !isShareSnapshotReadOnlyMode()
     && (knownRunState !== "running" || !hasRenderedEventSnapshot(sessionId));
   if (useCombinedSnapshot) {
@@ -3051,8 +3051,8 @@ async function setupPushNotifications() {
     const persistSubscription = async (subscription) => {
       const payload = subscription?.toJSON ? subscription.toJSON() : subscription;
       if (!payload?.endpoint) return;
-      const subscribeUrl = typeof window.agentocResolveProductPath === "function"
-        ? window.agentocResolveProductPath("/api/push/subscribe")
+      const subscribeUrl = typeof window.ragentResolveProductPath === "function"
+        ? window.ragentResolveProductPath("/api/push/subscribe")
         : "/api/push/subscribe";
       await fetch(subscribeUrl, {
         method: "POST",
@@ -3067,8 +3067,8 @@ async function setupPushNotifications() {
       await persistSubscription(existing);
       return;
     }
-    const vapidPublicKeyUrl = typeof window.agentocResolveProductPath === "function"
-      ? window.agentocResolveProductPath("/api/push/vapid-public-key")
+    const vapidPublicKeyUrl = typeof window.ragentResolveProductPath === "function"
+      ? window.ragentResolveProductPath("/api/push/vapid-public-key")
       : "/api/push/vapid-public-key";
     const res = await fetch(vapidPublicKeyUrl);
     if (!res.ok) return;
@@ -3087,17 +3087,17 @@ async function setupPushNotifications() {
 async function ensureServiceWorkerRegistration() {
   if (!("serviceWorker" in navigator)) return null;
   try {
-    const serviceWorkerUrl = typeof window.agentocResolveProductPath === "function"
-      ? window.agentocResolveProductPath(`/sw.js?v=${encodeURIComponent(buildAssetVersion)}`)
+    const serviceWorkerUrl = typeof window.ragentResolveProductPath === "function"
+      ? window.ragentResolveProductPath(`/sw.js?v=${encodeURIComponent(buildAssetVersion)}`)
       : `/sw.js?v=${encodeURIComponent(buildAssetVersion)}`;
     const reg = await navigator.serviceWorker.register(
       serviceWorkerUrl,
       { updateViaCache: "none" },
     );
     await reg.update().catch(() => {});
-    reg.installing?.postMessage({ type: "agentoc:clear-caches" });
-    reg.waiting?.postMessage({ type: "agentoc:clear-caches" });
-    reg.active?.postMessage({ type: "agentoc:clear-caches" });
+    reg.installing?.postMessage({ type: "ragent:clear-caches" });
+    reg.waiting?.postMessage({ type: "ragent:clear-caches" });
+    reg.active?.postMessage({ type: "ragent:clear-caches" });
     await navigator.serviceWorker.ready.catch(() => {});
     return reg;
   } catch (err) {

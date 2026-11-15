@@ -1,12 +1,12 @@
 #!/bin/bash
 # Migrate one enabled timer and its inactive oneshot service as a pair.
 set -Eeuo pipefail
-usage() { echo 'Usage: migrate-systemd-timer-pair.sh [--user] <agentoc-base> <ragent-base>' >&2; exit 2; }
+usage() { echo 'Usage: migrate-systemd-timer-pair.sh [--user] <ragent-base> <ragent-base>' >&2; exit 2; }
 mode=system
 if [[ ${1:-} == --user ]]; then mode=user; shift; fi
 [[ $# == 2 ]] || usage
 old=$1; new=$2
-[[ $old =~ ^agentoc-[a-z0-9][a-z0-9-]*$ && $new == "ragent-${old#agentoc-}" ]] || usage
+[[ $old =~ ^ragent-[a-z0-9][a-z0-9-]*$ && $new == "ragent-${old#ragent-}" ]] || usage
 ctl=(systemctl)
 if [[ $mode == user ]]; then
   ctl+=(--user); unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"

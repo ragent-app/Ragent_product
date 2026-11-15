@@ -9,12 +9,12 @@ const hostLocalAppData = process.env.LOCALAPPDATA;
 const hostUserProfile = process.env.USERPROFILE;
 
 test('restricted host binds original temporary Run, result and stop acknowledgement', async t => {
-  const root = await mkdtemp(join(await realpath(tmpdir()), 'agentoc-restricted-host-'));
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'ragent-restricted-host-'));
   const instance = { instanceDir: root, configDir: join(root, 'config'), memoryDir: join(root, 'memory'),
     spoolDir: join(root, 'spool'), providerHomesDir: join(root, 'providers'), workRootDir: join(root, 'work'),
     port: 48172, id: 'restricted-host-test', ttlSeconds: 60 };
   const env = buildChildEnvironment(instance);
-  for (const key of Object.keys(process.env)) if (/^(AGENTOC_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(key)) delete process.env[key];
+  for (const key of Object.keys(process.env)) if (/^(RAGENT_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(key)) delete process.env[key];
   Object.assign(process.env, env);
   await Promise.all([instance.configDir, instance.workRootDir, instance.spoolDir].map(p => mkdir(p, { recursive: true })));
   const frozenSourceFiles = await Promise.all(['chat/restricted-run-host.mjs','chat/run-api-store.mjs',
@@ -313,7 +313,7 @@ test('restricted host binds original temporary Run, result and stop acknowledgem
       const { createNativeProviderRegistry } = await import('../lib/provider-runtime/registry.mjs');
       const { assertOrdinaryWindowsExecutionIdentity } = await import('../lib/windows-execution-identity.mjs');
       const { runRestrictedProviderCandidate } = await import('../scripts/qa-windows-restricted-provider.mjs');
-      const configDir = 'C:/ProgramData/AgentoC/instances/owner/config';
+      const configDir = 'C:/ProgramData/Ragent/instances/owner/config';
       const registry = createNativeProviderRegistry({ configDir });
       const provider = (await registry.listProviderProfiles()).find(p => p.agentType === 'claude' && p.enabled !== false && p.status === 'ready');
       assert.ok(provider, 'Ready internal static Claude profile is required');
@@ -367,7 +367,7 @@ test('restricted host binds original temporary Run, result and stop acknowledgem
       await readFile(new URL('../'+frozen.path,import.meta.url))).digest('hex'),frozen.sha256,'Source changed during host test');
     } finally {
     const actual = await realpath(root); assert.equal(dirname(actual).toLowerCase(), (await realpath(tmpdir())).toLowerCase());
-    assert.ok(basename(actual).startsWith('agentoc-restricted-host-'));
+    assert.ok(basename(actual).startsWith('ragent-restricted-host-'));
     await rm(actual, { recursive: true, force: true });
     }
   }

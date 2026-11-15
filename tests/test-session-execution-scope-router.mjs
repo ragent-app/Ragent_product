@@ -7,10 +7,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(testsDir);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-execution-scope-router-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-execution-scope-router-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
 const tasksDir = join(memoryDir, 'tasks');
 const promptLogPath = join(tempHome, 'execution-prompt.log');
 
@@ -25,10 +25,10 @@ writeFileSync(
 ## 报账支出流程
 
 - Type: recurring workflow
-- Paths: \`~/.agentoc/instances/trial6/config/file-assets/reimbursement/报账支出主表.xlsx\`
+- Paths: \`~/.ragent/instances/trial6/config/file-assets/reimbursement/报账支出主表.xlsx\`
 - Triggers: 报账、报销、票据、小票
-- First read: \`~/.agentoc/instances/trial6/memory/tasks/reimbursement-expense-workflow.md\`
-- Then inspect: \`~/.agentoc/instances/trial6/config/file-assets/reimbursement/报账支出主表.xlsx\`
+- First read: \`~/.ragent/instances/trial6/memory/tasks/reimbursement-expense-workflow.md\`
+- Then inspect: \`~/.ragent/instances/trial6/config/file-assets/reimbursement/报账支出主表.xlsx\`
 - Default action: 收到新的报账邮件后，以现有主表为基础追加更新，核对文字与图片后回传更新后的 Excel。
 
 ## Media Workflow
@@ -36,7 +36,7 @@ writeFileSync(
 - Type: recurring non-repo domain
 - Paths: \`~/my_docs/Media/\`
 - Triggers: media, rough cut, transcript, review
-- First read: \`~/.agentoc/skills/media-review.md\`
+- First read: \`~/.ragent/skills/media-review.md\`
 `,
   'utf8',
 );
@@ -184,10 +184,10 @@ try {
   const promptLog = readFileSync(promptLogPath, 'utf8');
   assert.match(promptLog, /lightweight external context hook/);
   assert.match(promptLog, /Stable context entry points:/);
-  assert.match(promptLog, /Projects: ~\/\.agentoc\/memory\/projects\.md/);
-  assert.match(promptLog, /Tasks directory: ~\/\.agentoc\/memory\/tasks\//);
+  assert.match(promptLog, /Projects: ~\/\.ragent\/memory\/projects\.md/);
+  assert.match(promptLog, /Tasks directory: ~\/\.ragent\/memory\/tasks\//);
   assert.match(promptLog, /Model-managed writable context root:/);
-  assert.match(promptLog, /~\/\.agentoc\/memory\/model-context/);
+  assert.match(promptLog, /~\/\.ragent\/memory\/model-context/);
   assert.doesNotMatch(promptLog, /Likely scope-router matches for this turn/);
   assert.doesNotMatch(promptLog, /Recent related session imports for this turn/);
 

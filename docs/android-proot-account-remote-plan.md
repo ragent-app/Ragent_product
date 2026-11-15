@@ -78,8 +78,8 @@
 
 | 层 | 现有文件 / 模块 | 拟增或调整 |
 | --- | --- | --- |
-| Android 入口与状态 | `android/app/src/main/java/com/andysagent/agentoc/MainActivity.kt`、`TargetRuntime.kt`、`android/core/datastore/.../ClientConfigStore.kt` | 本机关联、冲突、退出待同步和远程状态；本机目录继续独立，不更改 APK 身份 |
-| Android 账号与安全存储 | `android/core/auth/.../AccountSessionManager.kt`、`PairingAuthenticator.kt`、`CredentialStore.kt`、`AccountProfileTransitions.kt`，`android/app/.../AgentoCApplication.kt` | 接入账号建立/切换/失效/退出及目录切换；明确同意、双向一次性授权、独立关联状态、退出 generation/tombstone 和持久待投递，状态不能随账号 profile 清除 |
+| Android 入口与状态 | `android/app/src/main/java/com/andysagent/ragent/MainActivity.kt`、`TargetRuntime.kt`、`android/core/datastore/.../ClientConfigStore.kt` | 本机关联、冲突、退出待同步和远程状态；本机目录继续独立，不更改 APK 身份 |
+| Android 账号与安全存储 | `android/core/auth/.../AccountSessionManager.kt`、`PairingAuthenticator.kt`、`CredentialStore.kt`、`AccountProfileTransitions.kt`，`android/app/.../RagentApplication.kt` | 接入账号建立/切换/失效/退出及目录切换；明确同意、双向一次性授权、独立关联状态、退出 generation/tombstone 和持久待投递，状态不能随账号 profile 清除 |
 | 本机实例认证 | `lib/proot-local-pairing.mjs`、`lib/auth.mjs`、`chat/ws.mjs` | 延续仅回环 bearer；增加严格限定的能力协商与账号联动事务入口，不让普通本地 bearer 升级为云端授权 |
 | 实例账号与事务 | `lib/owner-account-auth.mjs`、`chat/router-device-pairing-routes.mjs`、`chat/router-account-pairing-routes.mjs`、`chat/account-pairing-service.mjs` | 复用已有 claim / v4 事务；仅在需要时新增受认证、短期、单次、实例和 Android 设备绑定的本机交接及持续状态事件接口 |
 | Accounts 服务 | `accounts/` 下 owner-auth、account-pairing、实例目录与撤销相关路由/存储 | 明确 owner 归属、签发各端独立凭据、权威撤销和 revision；如现有协议不够，先定版本化 schema 与迁移，不能假设已有同步 API |
@@ -117,7 +117,7 @@ Android 首次实机 APK 来源 `a2f73a75ec0d9b45b8ae09d23effa177b56f8a78`；PRo
 
 最终说明文档修订包的 README 来源为 `8948cd31f6be5baa87e4523eb01a07a76aef01ad`，release ID 为 `0.0.2-3b8b9bc00e1970c2`，归档 SHA-256 为 `65831b736a14d5f64ddd4f5d4102633ab0cf084583c17251de2d8dc2b19400da`。两个包的内容清单各有 9540 项，逐项比较仅 README 不同；release ID 和内容清单是由 README 派生的元数据。其余运行时文件的路径、大小和 SHA-256 一致。最终修订包经原安装器在手机上安装成功，首次实机 APK 原位安装成功，数据保留。
 
-针对 Demo 连接遮罩的修复版 APK 源码为 `9795b473610d602de0e914bd6b60c034ac6e6d55`，文件为 `G:\AgentoC\.task-temp\android-delivery-9795b473\app-debug.apk`，SHA-256 为 `f308f1e32a652604cadc73f29c5eb2cd34f0931bbb1b3a2aa3e48c9177b29a03`。增量构建成功，405 项任务中 16 项执行、389 项复用；同签名原位安装成功并保留数据。安装后原分屏拆开，全屏一次本机请求显示运行环境不可用，未读到目录；新包本机目录和 Demo 遮罩修复尚未实机验证通过。
+针对 Demo 连接遮罩的修复版 APK 源码为 `9795b473610d602de0e914bd6b60c034ac6e6d55`，文件为 `G:\Ragent\.task-temp\android-delivery-9795b473\app-debug.apk`，SHA-256 为 `f308f1e32a652604cadc73f29c5eb2cd34f0931bbb1b3a2aa3e48c9177b29a03`。增量构建成功，405 项任务中 16 项执行、389 项复用；同签名原位安装成功并保留数据。安装后原分屏拆开，全屏一次本机请求显示运行环境不可用，未读到目录；新包本机目录和 Demo 遮罩修复尚未实机验证通过。
 
 旧 APK 的真实业务验收：手机账号与实例成功关联（active/g1），退出后实例为 signed_out/g2，P2P host 停止，本机 WebSocket 重新连接，真实 Ubuntu 目录可访问。关闭 Wi-Fi 和移动数据后，在 App 未登录、实例 signed_out/g2 的状态下重新进入并刷新本机工作区，真实目录仍可访问。实例反向登录入口出现新的隐私与语音使用协议，未代用户同意，反向登录尚未验证；独立远程设备传输和 provider sync 也尚未验证。P2P host 启动或信令日志不能证明独立远程业务通过。
 

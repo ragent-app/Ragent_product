@@ -37,7 +37,7 @@
 // The scheduler owns no session state: it only coordinates requests. All
 // state application stays in session-http.js behind its existing guards.
 // Progress counters are exposed for instrumentation via
-// window.agentocGetRefreshSchedulerMetrics().
+// window.ragentGetRefreshSchedulerMetrics().
 
 const REFRESH_SCHEDULER_METRICS_SAMPLE_LIMIT = 40;
 
@@ -45,8 +45,8 @@ const refreshRequestRegistry = new Map();
 
 function ensureRefreshSchedulerMetricsStore() {
   const root = typeof window !== "undefined" ? window : globalThis;
-  if (!root.__agentocRefreshSchedulerMetrics || typeof root.__agentocRefreshSchedulerMetrics !== "object") {
-    root.__agentocRefreshSchedulerMetrics = {
+  if (!root.__ragentRefreshSchedulerMetrics || typeof root.__ragentRefreshSchedulerMetrics !== "object") {
+    root.__ragentRefreshSchedulerMetrics = {
       startedAt: new Date().toISOString(),
       totals: {
         started: 0,
@@ -62,13 +62,13 @@ function ensureRefreshSchedulerMetricsStore() {
       samples: [],
     };
   }
-  if (typeof root.agentocGetRefreshSchedulerMetrics !== "function") {
-    root.agentocGetRefreshSchedulerMetrics = () => {
-      const snapshot = root.__agentocRefreshSchedulerMetrics || {};
+  if (typeof root.ragentGetRefreshSchedulerMetrics !== "function") {
+    root.ragentGetRefreshSchedulerMetrics = () => {
+      const snapshot = root.__ragentRefreshSchedulerMetrics || {};
       return JSON.parse(JSON.stringify(snapshot));
     };
   }
-  return root.__agentocRefreshSchedulerMetrics;
+  return root.__ragentRefreshSchedulerMetrics;
 }
 
 function recordRefreshSchedulerMetric(sample = {}) {

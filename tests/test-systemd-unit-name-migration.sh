@@ -7,7 +7,7 @@ export XDG_STATE_HOME="$scratch/state"
 unit_dir="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$unit_dir" "$scratch/bin"
 token=$(basename "$scratch" | tr -cd 'a-z0-9')
-old="agentoc-qa-$token.service"; new="ragent-qa-$token.service"
+old="ragent-qa-$token.service"; new="ragent-qa-$token.service"
 cleanup() {
   systemctl --user disable "$new" "$old" >/dev/null 2>&1 || true
   systemctl --user stop "$new" "$old" >/dev/null 2>&1 || true

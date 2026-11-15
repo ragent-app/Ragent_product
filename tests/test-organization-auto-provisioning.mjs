@@ -4,14 +4,14 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-auto-provision-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-auto-provision-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
-process.env.AGENTOC_ORG_AUTONOMOUS_LEADER_ENABLED = '1';
-process.env.AGENTOC_ORG_AUTONOMOUS_PROVISIONING_ENABLED = '1';
-process.env.AGENTOC_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED = '1';
+process.env.RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED = '1';
+process.env.RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const { createSession, killAll } = await import('../chat/session-manager.mjs');

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-cache-eviction-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-cache-eviction-'));
 const previousHome = process.env.HOME;
 process.env.HOME = home;
 

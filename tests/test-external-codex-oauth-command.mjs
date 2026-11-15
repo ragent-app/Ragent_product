@@ -4,13 +4,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-external-codex-oauth-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-external-codex-oauth-'));
 const configDir = join(root, 'config');
 const externalAuthFile = join(root, 'codex', 'auth.json');
 mkdirSync(join(root, 'codex'), { recursive: true });
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_EXTERNAL_CODEX_AUTH_FILE = externalAuthFile;
-process.env.AGENTOC_CODEX_EXTERNAL_OAUTH_HANDOFF_POLICY = 'explicit';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_EXTERNAL_CODEX_AUTH_FILE = externalAuthFile;
+process.env.RAGENT_CODEX_EXTERNAL_OAUTH_HANDOFF_POLICY = 'explicit';
 
 const { runExternalCodexOAuthCommand } = await import('../lib/external-codex-oauth-command.mjs');
 
@@ -49,7 +49,7 @@ try {
   const takeoverOut = capture();
   assert.equal(await runExternalCodexOAuthCommand(['takeover', '--account', 'account-a', '--json'], { stdout: takeoverOut }), 0);
   const takeover = JSON.parse(takeoverOut.text());
-  assert.equal(takeover.ownership.records.find((row) => row.accountId === 'account-a').status, 'agentoc-owned');
+  assert.equal(takeover.ownership.records.find((row) => row.accountId === 'account-a').status, 'ragent-owned');
 
   await assert.rejects(
     () => runExternalCodexOAuthCommand(['takeover', '--account', 'account-b'], { stdout: capture() }),

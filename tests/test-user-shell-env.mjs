@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-user-shell-env-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-user-shell-env-'));
 const shellBin = join(tempHome, 'shell-bin');
 const processBin = join(tempHome, 'process-bin');
 
@@ -24,7 +24,7 @@ for (const target of [
 writeFileSync(
   join(tempHome, '.bash_profile'),
   [
-    'export AGENTOC_SHELL_TEST_FLAG="from-shell-profile"',
+    'export RAGENT_SHELL_TEST_FLAG="from-shell-profile"',
     'export PATH="$HOME/shell-bin:$PATH"',
   ].join('\n'),
   'utf8',
@@ -34,14 +34,14 @@ const originalEnv = {
   HOME: process.env.HOME,
   PATH: process.env.PATH,
   SHELL: process.env.SHELL,
-  AGENTOC_USER_SHELL_ENV_B64: process.env.AGENTOC_USER_SHELL_ENV_B64,
+  RAGENT_USER_SHELL_ENV_B64: process.env.RAGENT_USER_SHELL_ENV_B64,
   IS_SANDBOX: process.env.IS_SANDBOX,
 };
 
 process.env.HOME = tempHome;
 process.env.SHELL = '/bin/bash';
 process.env.PATH = `${processBin}:${process.env.PATH || ''}`;
-delete process.env.AGENTOC_USER_SHELL_ENV_B64;
+delete process.env.RAGENT_USER_SHELL_ENV_B64;
 
 try {
   const shellEnvModule = await import(pathToFileURL(join(repoRoot, 'lib', 'user-shell-env.mjs')).href);
@@ -59,7 +59,7 @@ try {
   );
 
   const env = buildToolProcessEnv();
-  assert.equal(env.AGENTOC_SHELL_TEST_FLAG, 'from-shell-profile', 'tool env should inherit shell-exported variables');
+  assert.equal(env.RAGENT_SHELL_TEST_FLAG, 'from-shell-profile', 'tool env should inherit shell-exported variables');
 
   process.env.IS_SANDBOX = '';
   const envDefault = buildToolProcessEnv();
@@ -81,8 +81,8 @@ try {
   if (originalEnv.SHELL === undefined) delete process.env.SHELL;
   else process.env.SHELL = originalEnv.SHELL;
 
-  if (originalEnv.AGENTOC_USER_SHELL_ENV_B64 === undefined) delete process.env.AGENTOC_USER_SHELL_ENV_B64;
-  else process.env.AGENTOC_USER_SHELL_ENV_B64 = originalEnv.AGENTOC_USER_SHELL_ENV_B64;
+  if (originalEnv.RAGENT_USER_SHELL_ENV_B64 === undefined) delete process.env.RAGENT_USER_SHELL_ENV_B64;
+  else process.env.RAGENT_USER_SHELL_ENV_B64 = originalEnv.RAGENT_USER_SHELL_ENV_B64;
   if (originalEnv.IS_SANDBOX === undefined) delete process.env.IS_SANDBOX;
   else process.env.IS_SANDBOX = originalEnv.IS_SANDBOX;
 

@@ -13,23 +13,23 @@
   let refreshPromise = null;
 
   function translate(key, vars = {}) {
-    return typeof globalScope.agentocT === "function" ? globalScope.agentocT(key, vars) : key;
+    return typeof globalScope.ragentT === "function" ? globalScope.ragentT(key, vars) : key;
   }
 
   function canManage() {
-    return globalScope.__AGENTOC_BOOTSTRAP__?.auth?.role === "owner";
+    return globalScope.__RAGENT_BOOTSTRAP__?.auth?.role === "owner";
   }
 
   function resolveApiPath(path) {
-    return typeof globalScope.agentocResolveProductPath === "function"
-      ? globalScope.agentocResolveProductPath(path)
+    return typeof globalScope.ragentResolveProductPath === "function"
+      ? globalScope.ragentResolveProductPath(path)
       : path;
   }
 
   async function request(path, options = {}) {
     const responseOrPayload = await (typeof globalScope.fetchJsonOrRedirect === "function"
       ? globalScope.fetchJsonOrRedirect(resolveApiPath(path), options)
-      : (globalScope.agentocFetch || globalScope.fetch)(resolveApiPath(path), { credentials: "same-origin", ...options }));
+      : (globalScope.ragentFetch || globalScope.fetch)(resolveApiPath(path), { credentials: "same-origin", ...options }));
     if (!responseOrPayload || typeof responseOrPayload.json !== "function") return responseOrPayload || {};
     const response = responseOrPayload;
     let payload = {};
@@ -193,16 +193,16 @@
         body: JSON.stringify(payload),
       });
       const nextHarness = response?.harness || harness;
-      globalScope.dispatchEvent(new CustomEvent("agentoc:harnesschange", {
+      globalScope.dispatchEvent(new CustomEvent("ragent:harnesschange", {
         detail: { harness: nextHarness, operation },
       }));
-      if (typeof globalScope.agentocRefreshRuntimeCatalog === "function") {
-        await globalScope.agentocRefreshRuntimeCatalog({
+      if (typeof globalScope.ragentRefreshRuntimeCatalog === "function") {
+        await globalScope.ragentRefreshRuntimeCatalog({
           harnessId: harness.id,
           clearCurrentSelection: operation === "uninstall",
         });
       }
-      await globalScope.AgentoCModelProviders?.refresh?.({ refreshHarnesses: true });
+      await globalScope.RagentModelProviders?.refresh?.({ refreshHarnesses: true });
       await refresh({ quiet: true });
       setStatus(translate(nextHarness.cleanupPending ? "harnesses.cleanupPending" : "harnesses.actionCompleted"), "success");
     } catch (error) {
@@ -213,8 +213,8 @@
 
   function openPage(event, sourceButton) {
     event?.preventDefault?.();
-    if (typeof globalScope.agentocOpenSidebarSubpage === "function") {
-      globalScope.agentocOpenSidebarSubpage("harnesses", sourceButton || settingsOpenButton);
+    if (typeof globalScope.ragentOpenSidebarSubpage === "function") {
+      globalScope.ragentOpenSidebarSubpage("harnesses", sourceButton || settingsOpenButton);
     } else if (typeof globalScope.switchTab === "function") {
       globalScope.switchTab("harnesses");
     }
@@ -226,7 +226,7 @@
   settingsOpenButton?.addEventListener("click", (event) => openPage(event, settingsOpenButton));
   providersOpenButton?.addEventListener("click", (event) => openPage(event, providersOpenButton));
   refreshButton?.addEventListener("click", () => void refresh({ force: true }));
-  globalScope.addEventListener("agentoc:localechange", render);
+  globalScope.addEventListener("ragent:localechange", render);
   if (canManage()) void refresh({ quiet: true });
-  globalScope.AgentoCHarnesses = Object.freeze({ open: openPage, refresh, list: () => [...harnesses] });
+  globalScope.RagentHarnesses = Object.freeze({ open: openPage, refresh, list: () => [...harnesses] });
 })(window);

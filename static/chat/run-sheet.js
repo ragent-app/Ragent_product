@@ -3,8 +3,8 @@
 // Run Sheet — the single run-detail surface. It is a bottom sheet on mobile and
 // a modal on desktop, backed by the dedicated lightweight run-sheet projection.
 (function attachRunSheet(root) {
-  if (root.__agentocRunSheetAttached === true) return;
-  root.__agentocRunSheetAttached = true;
+  if (root.__ragentRunSheetAttached === true) return;
+  root.__ragentRunSheetAttached = true;
   const MAX_FILES = 8;
   const MAX_FILES_DETAILED = 16;
   const BACKGROUND_REFRESH_DELAY_MS = 140;
@@ -13,7 +13,7 @@
   const BACKGROUND_IDLE_POLL_MS = 30000;
   const MODEL_CACHE_LIMIT = 12;
   const MODEL_CACHE_MAX_AGE_MS = 5000;
-  // Push is the primary update channel (AgentocRunActivity / chat store
+  // Push is the primary update channel (RagentRunActivity / chat store
   // subscriptions refresh immediately on new activity). The model also stays
   // warm while the sheet is closed: entering a conversation preloads the
   // projection in the background and update hooks keep landing, so opening
@@ -26,7 +26,7 @@
   // (a layer inside the sheet) collapses first, mirroring the Escape order.
   let backEntryId = null;
   function registerBackEntry() {
-    backEntryId = window.AgentoCBackHandler?.push?.({
+    backEntryId = window.RagentBackHandler?.push?.({
       id: "run-sheet",
       onBack: () => {
         if (state.readerOpen) {
@@ -40,7 +40,7 @@
   }
   function unregisterBackEntry() {
     if (!backEntryId) return;
-    window.AgentoCBackHandler?.pop?.(backEntryId);
+    window.RagentBackHandler?.pop?.(backEntryId);
     backEntryId = null;
   }
 
@@ -96,7 +96,7 @@
   const terminalSessionRefreshes = new Set();
 
   function tr(key, vars = {}) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function esc(value) {
@@ -146,7 +146,7 @@
       motionTimer = null;
       dom.sheet?.classList.remove("run-sheet--opening");
     }, 230);
-    focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(dom.sheet, {
+    focusScopeDeactivate = root.RagentFocusScope?.activate?.(dom.sheet, {
       containmentRoot: dom.sheet,
       initialFocus: dom.closeBtn,
       restoreFocus: () => lastFocusedElement,
@@ -242,7 +242,7 @@
   }
 
   function visualStatus(session) {
-    const model = root.AgentoCSessionStateModel;
+    const model = root.RagentSessionStateModel;
     if (model && typeof model.getSessionVisualStatus === "function") {
       try {
         return model.getSessionVisualStatus(session, {}) || null;
@@ -254,7 +254,7 @@
   }
 
   function normalizeActivity(session) {
-    const model = root.AgentoCSessionStateModel;
+    const model = root.RagentSessionStateModel;
     if (model && typeof model.normalizeSessionActivity === "function") {
       try {
         return model.normalizeSessionActivity(session || {});
@@ -299,7 +299,7 @@
   }
 
   function sessionSortTime(session) {
-    const model = root.AgentoCSessionStateModel;
+    const model = root.RagentSessionStateModel;
     if (model && typeof model.getSessionSortTime === "function") {
       try {
         return model.getSessionSortTime(session || {});
@@ -479,10 +479,10 @@
       </li>`;
     }).join("");
     // Chevron: right when collapsed, down when expanded (user-set direction).
-    const chevronCollapsed = root.AgentoCIcons?.render?.("chevron-right", {
+    const chevronCollapsed = root.RagentIcons?.render?.("chevron-right", {
       className: "run-sheet__plan-chevron-icon",
     }) || "";
-    const chevronExpanded = root.AgentoCIcons?.render?.("chevron-down", {
+    const chevronExpanded = root.RagentIcons?.render?.("chevron-down", {
       className: "run-sheet__plan-chevron-icon",
     }) || "";
     return `<details class="run-sheet__plan-details">
@@ -513,8 +513,8 @@
   }
 
   function projectionUrl(sessionId, forceFresh = false) {
-    const base = typeof root.agentocResolveProductPath === "function"
-      ? root.agentocResolveProductPath(`api/sessions/${encodeURIComponent(sessionId)}/run-sheet`)
+    const base = typeof root.ragentResolveProductPath === "function"
+      ? root.ragentResolveProductPath(`api/sessions/${encodeURIComponent(sessionId)}/run-sheet`)
       : `/api/sessions/${encodeURIComponent(sessionId)}/run-sheet`;
     if (!forceFresh) return base;
     return `${base}${base.includes("?") ? "&" : "?"}_=${Date.now()}`;
@@ -545,7 +545,7 @@
     };
     const payload = typeof root.fetchJsonOrRedirect === "function"
       ? await root.fetchJsonOrRedirect(url, requestOptions)
-      : await (root.agentocFetch || fetch)(url, requestOptions).then(async (response) => {
+      : await (root.ragentFetch || fetch)(url, requestOptions).then(async (response) => {
         if (!response.ok) throw new Error(`${response.status} ${response.statusText || ""}`.trim());
         return response.json();
       });
@@ -575,7 +575,7 @@
     const status = visualStatus(model.session);
     const tone = toneForStatus(status?.key);
     const liveSummary = isCurrentAttachedSession(model.session) && isRunningSession(model.session)
-      ? (root.AgentoCRunActivity?.getPresentation?.()?.text || "")
+      ? (root.RagentRunActivity?.getPresentation?.()?.text || "")
       : "";
     const label = esc(liveSummary || status?.label || tr("runSheet.now"));
     return `
@@ -791,7 +791,7 @@
     dom.reader.classList.add("run-sheet__reader--opening");
     dom.backdrop?.classList.add("run-sheet-backdrop--visible");
     registerBackEntry();
-    readerFocusScopeDeactivate = root.AgentoCFocusScope?.activate?.(dom.reader, {
+    readerFocusScopeDeactivate = root.RagentFocusScope?.activate?.(dom.reader, {
       containmentRoot: dom.reader,
       initialFocus: () => dom.reader?.querySelector?.("[data-run-sheet-reader-close]"),
       restoreFocus: () => readerTrigger,
@@ -799,7 +799,7 @@
       onEscape: () => closeMarkdownPreview(),
     }) || null;
     try {
-      const response = await (root.agentocFetch || fetch)(sourceUrl, {
+      const response = await (root.ragentFetch || fetch)(sourceUrl, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -1075,7 +1075,7 @@
     dom.sheet.style.height = targetHeight + "px";
     state.expanded = nearest.expanded;
     renderContent();
-    if (root.AgentoCMotion?.prefersReducedMotion?.()) {
+    if (root.RagentMotion?.prefersReducedMotion?.()) {
       if (snapTimer) clearTimeout(snapTimer);
       snapTimer = null;
       dom.sheet.style.height = "";
@@ -1236,7 +1236,7 @@
         </div>
         <header class="run-sheet__reader-header">
           <button type="button" class="run-sheet__reader-back" data-run-sheet-reader-close aria-label="${esc(tr("action.close"))}">
-            ${root.AgentoCIcons?.render?.("chevron-left", { className: "run-sheet__reader-back-icon" }) || "‹"}
+            ${root.RagentIcons?.render?.("chevron-left", { className: "run-sheet__reader-back-icon" }) || "‹"}
           </button>
           <div class="run-sheet__reader-title-block">
             <div class="run-sheet__reader-eyebrow">${esc(tr("workbench.markdown.readerEyebrow"))}</div>
@@ -1244,7 +1244,7 @@
           </div>
           <div class="run-sheet__reader-actions">
             <a class="run-sheet__reader-action run-sheet__reader-raw" href="#" target="_blank" rel="noreferrer noopener">${esc(tr("workbench.markdown.openRaw"))}</a>
-            <a class="run-sheet__reader-action run-sheet__reader-download run-sheet__reader-download--icon" href="#" target="_blank" rel="noreferrer noopener" aria-label="${esc(tr("action.download"))}" title="${esc(tr("action.download"))}">${(window.AgentoCIcons && window.AgentoCIcons.render && window.AgentoCIcons.render("download")) || esc(tr("action.download"))}</a>
+            <a class="run-sheet__reader-action run-sheet__reader-download run-sheet__reader-download--icon" href="#" target="_blank" rel="noreferrer noopener" aria-label="${esc(tr("action.download"))}" title="${esc(tr("action.download"))}">${(window.RagentIcons && window.RagentIcons.render && window.RagentIcons.render("download")) || esc(tr("action.download"))}</a>
           </div>
         </header>
         <div class="run-sheet__reader-body">
@@ -1351,7 +1351,7 @@
 
     normalizeHeaderMarkup();
 
-    unsubscribeMotion = root.AgentoCMotion?.subscribeReducedMotion?.((reduced) => {
+    unsubscribeMotion = root.RagentMotion?.subscribeReducedMotion?.((reduced) => {
       if (!reduced || !dom.sheet) return;
       if (snapTimer) {
         clearTimeout(snapTimer);
@@ -1367,8 +1367,8 @@
       syncDOM();
     }) || null;
 
-    if (typeof root.AgentoCRunActivity?.subscribe === "function") {
-      unsubscribeActivity = root.AgentoCRunActivity.subscribe(() => {
+    if (typeof root.RagentRunActivity?.subscribe === "function") {
+      unsubscribeActivity = root.RagentRunActivity.subscribe(() => {
         scheduleContentRefresh({ delay: state.open ? 0 : BACKGROUND_REFRESH_DELAY_MS });
       });
     }

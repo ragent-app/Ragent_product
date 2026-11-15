@@ -17,7 +17,7 @@ const BRIDGE_SERVICE_UPSTREAM_PORT = Number.parseInt(process.env.NATAPP_BRIDGE_S
 const BRIDGE_SERVICE_NAME = normalizeRouteName(process.env.NATAPP_BRIDGE_SERVICE_NAME || 'owner', 'owner');
 const BRIDGE_SERVICE_PREFIX = `/${BRIDGE_SERVICE_NAME}`;
 const ADMIN_UPSTREAM_PORT = Number.parseInt(process.env.NATAPP_ADMIN_PORT, 10) || 7689;
-const GUEST_REGISTRY_FILE = join(homedir(), '.config', 'agentoc', 'guest-instances.json');
+const GUEST_REGISTRY_FILE = join(homedir(), '.config', 'ragent', 'guest-instances.json');
 const FALLBACK_PREFIXED_ROUTES = Object.freeze([
   Object.freeze({
     name: 'trial6',
@@ -358,7 +358,7 @@ async function renderRootIndexHtml() {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AgentoC Prefix Bridge</title>
+    <title>Ragent Prefix Bridge</title>
     <style>
       :root { color-scheme: light; }
       body { margin: 0; font: 16px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; background: #f6f7f8; color: #172126; }
@@ -374,7 +374,7 @@ async function renderRootIndexHtml() {
   </head>
   <body>
     <main>
-      <h1>AgentoC Prefix Bridge</h1>
+      <h1>Ragent Prefix Bridge</h1>
       <p>This bridge is prefix-only. Open product surfaces under <code>/{name}/</code>.</p>
       <p>Known routes:</p>
       <ul>${items}</ul>

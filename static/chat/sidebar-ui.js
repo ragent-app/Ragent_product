@@ -1,5 +1,5 @@
 // ---- Sidebar ----
-const SESSIONS_SIDEBAR_COLLAPSED_STORAGE_KEY = "agentoc.sessionsSidebarCollapsed";
+const SESSIONS_SIDEBAR_COLLAPSED_STORAGE_KEY = "ragent.sessionsSidebarCollapsed";
 let sidebarSearchMode = false;
 let sidebarSearchReturnTab = "sessions";
 let sidebarAccountPopoverOpen = false;
@@ -20,7 +20,7 @@ let sidebarSymbolTransitionCleanup = null;
 let sidebarSymbolTransitionToken = 0;
 
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 function readStoredSessionsSidebarCollapsed() {
@@ -103,7 +103,7 @@ function openSidebar() {
   syncSessionsSidebarControlState();
   // Android back button: search mode is a layer inside the drawer, so it
   // collapses first, then the drawer itself.
-  sidebarBackEntryId = window.AgentoCBackHandler?.push?.({
+  sidebarBackEntryId = window.RagentBackHandler?.push?.({
     id: "sidebar-drawer",
     onBack: () => {
       if (sidebarSearchMode) {
@@ -114,8 +114,8 @@ function openSidebar() {
       // to the sessions tab before closing the drawer itself.
       const tab = sidebar?.dataset?.sidebarMode;
       if (tab && tab !== "sessions" && typeof switchTab === "function") {
-        if (typeof window.agentocReturnFromSidebarSubpage === "function") {
-          window.agentocReturnFromSidebarSubpage();
+        if (typeof window.ragentReturnFromSidebarSubpage === "function") {
+          window.ragentReturnFromSidebarSubpage();
         } else {
           switchTab(tab === "model-providers" ? "settings" : "sessions");
         }
@@ -129,7 +129,7 @@ function openSidebar() {
 function closeSidebarFn() {
   clearSidebarSymbolTransition();
   if (sidebarBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(sidebarBackEntryId);
+    window.RagentBackHandler?.pop?.(sidebarBackEntryId);
     sidebarBackEntryId = null;
   }
   closeSidebarTransientSurfaces();
@@ -159,7 +159,7 @@ function closeSidebarAccountPopover({ restoreFocus = false } = {}) {
   if (sidebarAccountPopover) sidebarAccountPopover.hidden = true;
   sidebarAccountBtn?.setAttribute("aria-expanded", "false");
   if (sidebarAccountPopoverBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(sidebarAccountPopoverBackEntryId);
+    window.RagentBackHandler?.pop?.(sidebarAccountPopoverBackEntryId);
     sidebarAccountPopoverBackEntryId = null;
   }
   if (restoreFocus) sidebarAccountBtn?.focus?.();
@@ -277,7 +277,7 @@ function openSidebarAccountWorkspace() {
   // the persistent account button that origin instead of the just-hidden
   // popover action.
   sidebarAccountBtn?.focus?.({ preventScroll: true });
-  const opened = window.AgentoCCrossDevicePanel?.open?.({ view: "account" });
+  const opened = window.RagentCrossDevicePanel?.open?.({ view: "account" });
   if (opened === true) return;
   renderSidebarAccountPopover({
     state: "error",
@@ -289,7 +289,7 @@ function openSidebarAccountWorkspace() {
     sidebarAccountPopover.hidden = false;
     sidebarAccountPopoverOpen = true;
     sidebarAccountBtn?.setAttribute("aria-expanded", "true");
-    sidebarAccountPopoverBackEntryId = window.AgentoCBackHandler?.push?.({
+    sidebarAccountPopoverBackEntryId = window.RagentBackHandler?.push?.({
       id: "sidebar-account-popover",
       onBack: () => {
         closeSidebarAccountPopover();
@@ -605,8 +605,8 @@ function returnFromSidebarSubpageWithSymbol() {
   return true;
 }
 
-window.agentocOpenSidebarSubpage = openSidebarSubpageWithSymbol;
-window.agentocReturnFromSidebarSubpage = returnFromSidebarSubpageWithSymbol;
+window.ragentOpenSidebarSubpage = openSidebarSubpageWithSymbol;
+window.ragentReturnFromSidebarSubpage = returnFromSidebarSubpageWithSymbol;
 
 function syncSidebarShellState(tab = "sessions") {
   const normalizedTab = typeof normalizeSidebarTab === "function"
@@ -657,7 +657,7 @@ function syncSidebarShellState(tab = "sessions") {
         ? "terminal"
         : "gear-solid";
     subpageIconElement.setAttribute("data-icon", iconName);
-    subpageIconElement.innerHTML = window.AgentoCIcons?.render?.(iconName) || "";
+    subpageIconElement.innerHTML = window.RagentIcons?.render?.(iconName) || "";
   }
   // The agents/settings subpages sit inside the second level, so the L2
   // project header (back button + project name) above the subpage header
@@ -697,7 +697,7 @@ async function renderSidebarAgentSearchResults(query) {
   sidebarAgentSearchResults.appendChild(heading);
 
   try {
-    const agents = await window.AgentoCManagedAgents?.list?.();
+    const agents = await window.RagentManagedAgents?.list?.();
     if (generation !== sidebarAgentSearchGeneration || !sidebarSearchMode) return;
     const matches = (Array.isArray(agents) ? agents : []).filter((agent) => {
       const haystack = [agent?.name, agent?.id, agent?.tool]
@@ -719,7 +719,7 @@ async function renderSidebarAgentSearchResults(query) {
       button.className = "sidebar-agent-search-result";
       const icon = document.createElement("span");
       icon.className = "sidebar-agent-search-result-icon";
-      icon.innerHTML = window.AgentoCIcons?.render?.("agent") || "";
+      icon.innerHTML = window.RagentIcons?.render?.("agent") || "";
       const copy = document.createElement("span");
       copy.className = "sidebar-agent-search-result-copy";
       const name = document.createElement("span");
@@ -733,7 +733,7 @@ async function renderSidebarAgentSearchResults(query) {
       button.addEventListener("click", async () => {
         button.disabled = true;
         try {
-          await window.AgentoCManagedAgents?.open?.(agent?.id);
+          await window.RagentManagedAgents?.open?.(agent?.id);
         } finally {
           button.disabled = false;
         }
@@ -812,9 +812,9 @@ function createNewSessionShortcut({
   const current = typeof getCurrentSession === "function" ? getCurrentSession() : null;
   const tool = selectedTool || preferredTool || toolsList[0]?.id;
   if (!tool) return false;
-  if (typeof window.agentocHasActiveProject === "function" && !window.agentocHasActiveProject()) {
-    if (typeof window.agentocOpenProjectCreateDialog === "function") {
-      void window.agentocOpenProjectCreateDialog();
+  if (typeof window.ragentHasActiveProject === "function" && !window.ragentHasActiveProject()) {
+    if (typeof window.ragentOpenProjectCreateDialog === "function") {
+      void window.ragentOpenProjectCreateDialog();
     }
     return false;
   }
@@ -857,10 +857,10 @@ function createNewSessionShortcut({
   }
   const createPayload = {
     action: "create",
-    folder: typeof window.agentocGetSelectedSessionFolder === "function"
-      ? window.agentocGetSelectedSessionFolder()
-      : (typeof window.agentocGetDefaultSessionFolder === "function"
-        ? window.agentocGetDefaultSessionFolder()
+    folder: typeof window.ragentGetSelectedSessionFolder === "function"
+      ? window.ragentGetSelectedSessionFolder()
+      : (typeof window.ragentGetDefaultSessionFolder === "function"
+        ? window.ragentGetDefaultSessionFolder()
         : "~"),
     tool,
     sourceId: DEFAULT_APP_ID,
@@ -871,8 +871,8 @@ function createNewSessionShortcut({
     ...(rememberedModel ? { model: rememberedModel } : {}),
     ...(projectId
       ? { projectId }
-      : (typeof window.agentocGetSelectedProjectId === "function" && window.agentocGetSelectedProjectId()
-        ? { projectId: window.agentocGetSelectedProjectId() }
+      : (typeof window.ragentGetSelectedProjectId === "function" && window.ragentGetSelectedProjectId()
+        ? { projectId: window.ragentGetSelectedProjectId() }
         : {})),
     ...(forceComposerFocus ? { forceComposerFocus: true } : {}),
     ...(sourceContext && typeof sourceContext === "object" ? { sourceContext } : {}),
@@ -882,12 +882,12 @@ function createNewSessionShortcut({
 
 // Legacy workspace storage keys retained for getLegacyWorkspaceFolderForProjectSelection
 // (project selection reads the old custom-workspace folder to migrate prior selections).
-const WORKSPACE_CUSTOM_FOLDER_STORAGE_KEY = "agentoc.customWorkspaceFolder";
-const WORKSPACE_SELECTION_STORAGE_KEY = "agentoc.selectedWorkspaceFolder";
+const WORKSPACE_CUSTOM_FOLDER_STORAGE_KEY = "ragent.customWorkspaceFolder";
+const WORKSPACE_SELECTION_STORAGE_KEY = "ragent.selectedWorkspaceFolder";
 
 function getDefaultWorkspaceFolder() {
-  return typeof window.agentocGetDefaultSessionFolder === "function"
-    ? window.agentocGetDefaultSessionFolder()
+  return typeof window.ragentGetDefaultSessionFolder === "function"
+    ? window.ragentGetDefaultSessionFolder()
     : "~";
 }
 
@@ -905,7 +905,7 @@ function setWorkspacePickerExpanded(expanded) {
   workspacePickerExpanded = nextExpanded;
   syncProjectUi();
   if (nextExpanded) {
-    workspacePickerBackEntryId = window.AgentoCBackHandler?.push?.({
+    workspacePickerBackEntryId = window.RagentBackHandler?.push?.({
       id: "workspace-picker",
       onBack: () => {
         setWorkspacePickerExpanded(false);
@@ -913,7 +913,7 @@ function setWorkspacePickerExpanded(expanded) {
       },
     }) || null;
   } else if (workspacePickerBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(workspacePickerBackEntryId);
+    window.RagentBackHandler?.pop?.(workspacePickerBackEntryId);
     workspacePickerBackEntryId = null;
   }
 }
@@ -935,8 +935,8 @@ function handleWorkspaceOutsidePointerDown(event) {
   const picker = getWorkspacePickerElement();
   if (!picker) return;
   if (picker.contains(event.target) || isWorkspaceFloatingPanelTarget(event.target)) return;
-  if (typeof window.agentocCloseProjectPicker === "function") {
-    window.agentocCloseProjectPicker();
+  if (typeof window.ragentCloseProjectPicker === "function") {
+    window.ragentCloseProjectPicker();
     return;
   }
   setWorkspacePickerExpanded(false);
@@ -944,8 +944,8 @@ function handleWorkspaceOutsidePointerDown(event) {
 
 function handleWorkspaceEscape(event) {
   if (event.key !== "Escape" || !workspacePickerExpanded) return;
-  if (typeof window.agentocCloseProjectPicker === "function") {
-    window.agentocCloseProjectPicker();
+  if (typeof window.ragentCloseProjectPicker === "function") {
+    window.ragentCloseProjectPicker();
     workspaceSummaryButton?.focus?.();
     return;
   }
@@ -1039,8 +1039,8 @@ if (workspaceSummaryButton) {
     event.preventDefault();
     event.stopPropagation();
     closeSidebarAccountPopover();
-    if (typeof window.agentocToggleProjectPicker === "function") {
-      window.agentocToggleProjectPicker();
+    if (typeof window.ragentToggleProjectPicker === "function") {
+      window.ragentToggleProjectPicker();
       return;
     }
     setWorkspacePickerExpanded(!workspacePickerExpanded);
@@ -1073,7 +1073,7 @@ if (emptyCreateAgentBtn) {
   });
 }
 
-const PROJECT_SELECTION_STORAGE_KEY = "agentoc.selectedProjectId";
+const PROJECT_SELECTION_STORAGE_KEY = "ragent.selectedProjectId";
 const projectCreateButton = document.getElementById("projectCreateButton");
 const projectList = document.getElementById("projectList");
 let projectCatalog = [];
@@ -1148,8 +1148,8 @@ function chooseInitialProjectId(projects = []) {
 }
 
 function resolveProjectApiPath(path) {
-  if (typeof window.agentocResolveProductPath === "function") {
-    return window.agentocResolveProductPath(path);
+  if (typeof window.ragentResolveProductPath === "function") {
+    return window.ragentResolveProductPath(path);
   }
   return path;
 }
@@ -1157,7 +1157,7 @@ function resolveProjectApiPath(path) {
 async function fetchProjectCatalog({ force = false } = {}) {
   if (projectCatalogPromise && !force) return projectCatalogPromise;
   projectCatalogPromise = (async () => {
-    const response = await (window.agentocFetch || fetch)(resolveProjectApiPath("/api/projects"), {
+    const response = await (window.ragentFetch || fetch)(resolveProjectApiPath("/api/projects"), {
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -1181,7 +1181,7 @@ async function fetchProjectCatalog({ force = false } = {}) {
 function dispatchProjectChange() {
   const project = getActiveProject();
   try {
-    window.dispatchEvent(new CustomEvent("agentoc:projectchange", {
+    window.dispatchEvent(new CustomEvent("ragent:projectchange", {
       detail: {
         project,
         projectId: project?.id || "",
@@ -1190,7 +1190,7 @@ function dispatchProjectChange() {
     }));
   } catch {}
   try {
-    window.dispatchEvent(new CustomEvent("agentoc:workspacechange", {
+    window.dispatchEvent(new CustomEvent("ragent:workspacechange", {
       detail: {
         workspace: project?.rootPath || "",
         mode: "project",
@@ -1238,7 +1238,7 @@ function renderProjectList() {
     button.type = "button";
     button.className = `sidebar-project-option${projectId === activeProjectId ? " active" : ""}`;
     button.innerHTML = `
-      <span class="sidebar-project-option-icon">${window.AgentoCIcons?.render?.("folder-solid") || ""}</span>
+      <span class="sidebar-project-option-icon">${window.RagentIcons?.render?.("folder-solid") || ""}</span>
       <span class="sidebar-project-option-copy">
         <span class="sidebar-project-option-name"></span>
         <span class="sidebar-project-option-path"></span>
@@ -1368,7 +1368,7 @@ function ensureProjectCreateDialog() {
       </footer>
     </section>`;
   document.body.appendChild(dialog);
-  window.AgentoCIcons?.hydrate?.(dialog);
+  window.RagentIcons?.hydrate?.(dialog);
   dialog.querySelectorAll("[data-project-create-close]").forEach((node) => {
     node.addEventListener("click", closeProjectCreateDialog);
   });
@@ -1410,14 +1410,14 @@ async function openProjectCreateDialog() {
   updateProjectCreateSelectedPath(startPath);
   projectCreateDialogTrigger = document.activeElement;
   projectFolderPicker?.destroy?.();
-  projectFolderPicker = window.AgentoCFolderTreePicker?.create?.({
+  projectFolderPicker = window.RagentFolderTreePicker?.create?.({
     container: pickerMount,
     startPath,
     onChange: ({ path }) => updateProjectCreateSelectedPath(path),
   });
   dialog.hidden = false;
   document.body.classList.add("project-create-dialog-open");
-  projectCreateFocusScopeDeactivate = window.AgentoCFocusScope?.activate?.(dialog, {
+  projectCreateFocusScopeDeactivate = window.RagentFocusScope?.activate?.(dialog, {
     containmentRoot: document.body,
     initialFocus: nameInput,
     restoreFocus: () => (projectCreateDialogTrigger && projectCreateDialogTrigger.isConnected !== false)
@@ -1427,7 +1427,7 @@ async function openProjectCreateDialog() {
     onEscape: () => closeProjectCreateDialog(),
   }) || null;
   nameInput?.focus?.();
-  projectCreateDialogBackEntryId = window.AgentoCBackHandler?.push?.({
+  projectCreateDialogBackEntryId = window.RagentBackHandler?.push?.({
     id: "project-create-dialog",
     onBack: () => {
       closeProjectCreateDialog();
@@ -1439,7 +1439,7 @@ async function openProjectCreateDialog() {
 function closeProjectCreateDialog() {
   if (!projectCreateDialog) return;
   if (projectCreateDialogBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(projectCreateDialogBackEntryId);
+    window.RagentBackHandler?.pop?.(projectCreateDialogBackEntryId);
     projectCreateDialogBackEntryId = null;
   }
   if (projectCreateFocusScopeDeactivate) {
@@ -1470,7 +1470,7 @@ async function submitProjectCreateDialog() {
     errorEl.textContent = "";
   }
   try {
-    const response = await (window.agentocFetch || fetch)(resolveProjectApiPath("/api/projects"), {
+    const response = await (window.ragentFetch || fetch)(resolveProjectApiPath("/api/projects"), {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
@@ -1514,70 +1514,70 @@ projectCreateButton?.addEventListener("click", (event) => {
   void openProjectCreateDialog();
 });
 
-window.agentocEnsureProjectsReady = function agentocEnsureProjectsReady(options = {}) {
+window.ragentEnsureProjectsReady = function ragentEnsureProjectsReady(options = {}) {
   return fetchProjectCatalog(options);
 };
-window.agentocGetProjects = function agentocGetProjects() {
+window.ragentGetProjects = function ragentGetProjects() {
   return projectCatalog.slice();
 };
-window.agentocGetSelectedProjectId = function agentocGetSelectedProjectId() {
+window.ragentGetSelectedProjectId = function ragentGetSelectedProjectId() {
   // Level-two browsing scopes the "selected" project: session-creation paths
   // (agents panel, managed apps, new-session shortcuts) resolve against the
   // project the user is inside, falling back to the persisted selection
   // elsewhere. The backend keys sessions by folder, so this only needs to
-  // agree with agentocGetSelectedSessionFolder below.
-  if (typeof window.agentocGetBrowsingProject === "function") {
-    const browsing = window.agentocGetBrowsingProject();
+  // agree with ragentGetSelectedSessionFolder below.
+  if (typeof window.ragentGetBrowsingProject === "function") {
+    const browsing = window.ragentGetBrowsingProject();
     if (browsing?.id) return String(browsing.id).trim();
   }
   return activeProjectId;
 };
-window.agentocGetSelectedProject = function agentocGetSelectedProject() {
+window.ragentGetSelectedProject = function ragentGetSelectedProject() {
   const project = getActiveProject();
   return project ? { ...project } : null;
 };
-window.agentocHasProjects = function agentocHasProjects() {
+window.ragentHasProjects = function ragentHasProjects() {
   return projectCatalog.length > 0;
 };
-window.agentocHasActiveProject = function agentocHasActiveProject() {
+window.ragentHasActiveProject = function ragentHasActiveProject() {
   return !!getActiveProject();
 };
-window.agentocGetSelectedSessionFolder = function agentocGetSelectedSessionFolder() {
-  // Matches agentocGetSelectedProjectId: while a project is being browsed at
+window.ragentGetSelectedSessionFolder = function ragentGetSelectedSessionFolder() {
+  // Matches ragentGetSelectedProjectId: while a project is being browsed at
   // level two, new sessions (agents panel, managed apps, …) land in THAT
   // project's root path — the backend assigns project membership by folder.
-  if (typeof window.agentocGetBrowsingProject === "function") {
-    const browsing = window.agentocGetBrowsingProject();
+  if (typeof window.ragentGetBrowsingProject === "function") {
+    const browsing = window.ragentGetBrowsingProject();
     if (browsing?.rootPath) return browsing.rootPath;
   }
   return getActiveProject()?.rootPath || "";
 };
-window.agentocSetSelectedSessionFolder = function agentocSetSelectedSessionFolder(folder) {
+window.ragentSetSelectedSessionFolder = function ragentSetSelectedSessionFolder(folder) {
   const project = getProjectByRootPath(folder);
   return project ? setActiveProject(project.id, { refresh: true }) : "";
 };
-window.agentocSetSelectedSessionFolderForNavigation = function agentocSetSelectedSessionFolderForNavigation(folder) {
+window.ragentSetSelectedSessionFolderForNavigation = function ragentSetSelectedSessionFolderForNavigation(folder) {
   const project = getProjectByRootPath(folder);
   return project ? setActiveProject(project.id, { refresh: false }) : "";
 };
-window.agentocSessionMatchesSelectedWorkspace = function agentocSessionMatchesSelectedWorkspace(session) {
+window.ragentSessionMatchesSelectedWorkspace = function ragentSessionMatchesSelectedWorkspace(session) {
   const activeProject = getActiveProject();
   if (!activeProject) return false;
   if (session?.projectId) return normalizeProjectIdValue(session.projectId) === activeProject.id;
   return normalizeProjectRootPath(session?.folder) === normalizeProjectRootPath(activeProject.rootPath);
 };
-window.agentocRefreshWorkspaceSessions = function agentocRefreshWorkspaceSessions() {
+window.ragentRefreshWorkspaceSessions = function ragentRefreshWorkspaceSessions() {
   return queueWorkspaceSessionListRefresh();
 };
-window.agentocOpenProjectCreateDialog = openProjectCreateDialog;
-window.agentocToggleProjectPicker = toggleProjectPicker;
-window.agentocCloseProjectPicker = closeProjectPicker;
+window.ragentOpenProjectCreateDialog = openProjectCreateDialog;
+window.ragentToggleProjectPicker = toggleProjectPicker;
+window.ragentCloseProjectPicker = closeProjectPicker;
 
 window.syncSessionsSidebarCollapseState = syncSessionsSidebarCollapseState;
-window.agentocSetSessionsSidebarCollapsed = setSessionsSidebarCollapsed;
+window.ragentSetSessionsSidebarCollapsed = setSessionsSidebarCollapsed;
 syncSessionsSidebarCollapseState();
 
-window.agentocProjectsReady = fetchProjectCatalog().catch((error) => {
+window.ragentProjectsReady = fetchProjectCatalog().catch((error) => {
   console.warn("[projects] Failed to load projects:", error?.message || error);
   projectCatalogLoaded = true;
   projectCatalog = [];
@@ -1602,8 +1602,8 @@ sidebarSessionSurface?.addEventListener("click", (event) => {
 sidebarSearchBtn?.addEventListener("click", () => setSidebarSearchMode(true));
 sidebarSearchCloseBtn?.addEventListener("click", () => setSidebarSearchMode(false));
 sidebarSubpageCloseBtn?.addEventListener("click", () => {
-  if (typeof window.agentocReturnFromSidebarSubpage === "function") {
-    window.agentocReturnFromSidebarSubpage();
+  if (typeof window.ragentReturnFromSidebarSubpage === "function") {
+    window.ragentReturnFromSidebarSubpage();
   } else if (typeof switchTab === "function") {
     switchTab(["model-providers", "harnesses", "account-policy"].includes(sidebar?.dataset?.sidebarMode) ? "settings" : "sessions");
   }
@@ -1614,7 +1614,7 @@ sidebarAgentBtn?.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
   closeSidebarAccountPopover();
-  if (workspacePickerExpanded && typeof window.agentocCloseProjectPicker === "function") window.agentocCloseProjectPicker();
+  if (workspacePickerExpanded && typeof window.ragentCloseProjectPicker === "function") window.ragentCloseProjectPicker();
   else if (workspacePickerExpanded) setWorkspacePickerExpanded(false);
   openSidebarSubpageWithSymbol("agents", event.currentTarget || sidebarAgentBtn);
 });
@@ -1624,21 +1624,21 @@ sidebarFilterBtn?.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
   closeSidebarAccountPopover();
-  if (workspacePickerExpanded && typeof window.agentocCloseProjectPicker === "function") window.agentocCloseProjectPicker();
+  if (workspacePickerExpanded && typeof window.ragentCloseProjectPicker === "function") window.ragentCloseProjectPicker();
   else if (workspacePickerExpanded) setWorkspacePickerExpanded(false);
   openSidebarSubpageWithSymbol("settings", event.currentTarget || sidebarFilterBtn);
 });
 sidebarAccountBtn?.addEventListener("click", (event) => {
   event.preventDefault();
   event.stopPropagation();
-  if (workspacePickerExpanded && typeof window.agentocCloseProjectPicker === "function") window.agentocCloseProjectPicker();
+  if (workspacePickerExpanded && typeof window.ragentCloseProjectPicker === "function") window.ragentCloseProjectPicker();
   else if (workspacePickerExpanded) setWorkspacePickerExpanded(false);
   sidebarAccountPopoverOpen = !sidebarAccountPopoverOpen;
   if (sidebarAccountPopover) sidebarAccountPopover.hidden = !sidebarAccountPopoverOpen;
   sidebarAccountBtn.setAttribute("aria-expanded", String(sidebarAccountPopoverOpen));
   if (sidebarAccountPopoverOpen) {
     void requestSidebarAccountStatus();
-    sidebarAccountPopoverBackEntryId = window.AgentoCBackHandler?.push?.({
+    sidebarAccountPopoverBackEntryId = window.RagentBackHandler?.push?.({
       id: "sidebar-account-popover",
       onBack: () => {
         closeSidebarAccountPopover();
@@ -1723,8 +1723,8 @@ newSessionBtn.addEventListener("click", () => {
     ? getSidebarViewLevel()
     : "projects";
   if (level === "projects") {
-    if (typeof window.agentocOpenProjectCreateDialog === "function") {
-      void window.agentocOpenProjectCreateDialog();
+    if (typeof window.ragentOpenProjectCreateDialog === "function") {
+      void window.ragentOpenProjectCreateDialog();
     }
     return;
   }
@@ -2003,11 +2003,11 @@ function setComposerAddMenuOpen(open) {
     && !imgBtn.disabled
     && !(typeof hasPendingComposerSend === "function" && hasPendingComposerSend());
   composerAddMenuOpen = canOpen;
-  window.AgentoCComposerMenuPortal?.sync(composerAddMenu, imgBtn, canOpen, {
+  window.RagentComposerMenuPortal?.sync(composerAddMenu, imgBtn, canOpen, {
     align: "left",
   });
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(composerAddMenu, canOpen, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(composerAddMenu, canOpen, {
       duration: 160,
     });
   } else {
@@ -2016,7 +2016,7 @@ function setComposerAddMenuOpen(open) {
   imgBtn.setAttribute("aria-expanded", canOpen ? "true" : "false");
   inputArea?.classList.toggle("composer-add-menu-open", canOpen);
   if (canOpen) {
-    composerAddMenuBackEntryId = window.AgentoCBackHandler?.push?.({
+    composerAddMenuBackEntryId = window.RagentBackHandler?.push?.({
       id: "composer-add-menu",
       onBack: () => {
         setComposerAddMenuOpen(false);
@@ -2024,7 +2024,7 @@ function setComposerAddMenuOpen(open) {
       },
     }) || null;
   } else if (composerAddMenuBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(composerAddMenuBackEntryId);
+    window.RagentBackHandler?.pop?.(composerAddMenuBackEntryId);
     composerAddMenuBackEntryId = null;
   }
 }
@@ -2034,7 +2034,7 @@ function closeComposerAddMenu() {
 }
 // Exposed so the fullscreen composer can collapse a leftover add menu when it
 // closes (the trigger is re-parented and must not leave a floating menu).
-window.AgentoCComposerAddMenu = Object.freeze({ close: closeComposerAddMenu });
+window.RagentComposerAddMenu = Object.freeze({ close: closeComposerAddMenu });
 
 function toggleComposerAddMenu() {
   setComposerAddMenuOpen(!composerAddMenuOpen);
@@ -2069,8 +2069,8 @@ composerPlanMenuItem?.addEventListener("click", () => {
 
 composerAgentsMenuItem?.addEventListener("click", () => {
   closeComposerAddMenu();
-  if (typeof window.AgentoCAgentPanel?.open === "function") {
-    window.AgentoCAgentPanel.open();
+  if (typeof window.RagentAgentPanel?.open === "function") {
+    window.RagentAgentPanel.open();
     return;
   }
   if (typeof switchTab === "function") switchTab("agents");
@@ -2079,8 +2079,8 @@ composerAgentsMenuItem?.addEventListener("click", () => {
 
 composerConnectorsMenuItem?.addEventListener("click", () => {
   closeComposerAddMenu();
-  if (typeof window.AgentoCConnectorPanel?.open === "function") {
-    window.AgentoCConnectorPanel.open();
+  if (typeof window.RagentConnectorPanel?.open === "function") {
+    window.RagentConnectorPanel.open();
     return;
   }
   if (typeof switchTab === "function") switchTab("settings");
@@ -2149,7 +2149,7 @@ function handleComposerPaste(e) {
 msgInput.addEventListener("paste", handleComposerPaste);
 
 // Vditor binds its own paste/drop listeners on the editable element and calls
-// stopPropagation() before AgentoC's bubble-phase listeners can see the
+// stopPropagation() before Ragent's bubble-phase listeners can see the
 // transfer, so file pastes and drops landed inside the draft as inline base64
 // images. Binding the attachment routing in the capture phase on each editor
 // shell runs before Vditor's listeners; non-file transfers are ignored here

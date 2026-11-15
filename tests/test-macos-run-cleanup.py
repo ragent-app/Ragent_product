@@ -24,17 +24,17 @@ print(p.pid,flush=True)
 time.sleep(120)
 """
 env = dict(os.environ)
-env.pop('AGENTOC_RUN_ID',None)
-tagged_env = dict(env, AGENTOC_RUN_ID='run-cancel-a')
+env.pop('RAGENT_RUN_ID',None)
+tagged_env = dict(env, RAGENT_RUN_ID='run-cancel-a')
 tagged = subprocess.Popen([sys.executable,'-c',tagged_code],env=tagged_env,stdout=subprocess.PIPE,text=True)
 grandchild = int(tagged.stdout.readline())
-other = subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],env=dict(env,AGENTOC_RUN_ID='run-cancel-b'))
-spoof = subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)','AGENTOC_RUN_ID=run-cancel-a'],env=env)
+other = subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)'],env=dict(env,RAGENT_RUN_ID='run-cancel-b'))
+spoof = subprocess.Popen([sys.executable,'-c','import time; time.sleep(120)','RAGENT_RUN_ID=run-cancel-a'],env=env)
 with open(sys.argv[1],'w') as f: json.dump([tagged.pid,grandchild,other.pid,spoof.pid],f)
 time.sleep(120)
 '''
     env = dict(os.environ)
-    env.pop("AGENTOC_RUN_ID", None)
+    env.pop("RAGENT_RUN_ID", None)
     parent = subprocess.Popen([sys.executable, "-c", code, str(fixture)], env=env)
     pids = []
     try:

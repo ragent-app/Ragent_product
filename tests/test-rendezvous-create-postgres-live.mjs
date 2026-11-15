@@ -11,7 +11,7 @@ import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage 
 import { inboxWaitFixture } from './fixtures/rendezvous-inbox-wait.mjs';
 import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
 
-const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('scoped creation preserves replay, revocation, rollback and retention in PostgreSQL', { skip: !url }, async t => {
   assert.match(new URL(url).pathname.slice(1), /^qa_rendezvous_[a-f0-9]{24}$/);
   const schema = `qa_create_${randomBytes(12).toString('hex')}`;
@@ -40,7 +40,7 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     return createPostgresStore({ schema, enableScopedRendezvousCreation: scoped, pool: { connect: async () => {
       const client = await pool.connect();
       return { release: () => client.release(), async query(sql, values = []) {
-        if (sql.includes('pg_advisory_xact_lock')) values = [`agentoc_accounts_store_v1:${schema}`];
+        if (sql.includes('pg_advisory_xact_lock')) values = [`ragent_accounts_store_v1:${schema}`];
         const result = await client.query(sql, values);
         if (failInsert && sql.startsWith('insert into account_join_intents')) throw new Error('injected insert failure');
         return result;
@@ -167,7 +167,7 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     const proof = { intentId: selected.intentId, requestId: `qa_shared_authorize_request_000${index}`,
       deviceId: selected.deviceId, devicePublicKeyFingerprint: selected.devicePublicKeyFingerprint,
       nonce: selected.nonce, issuedAt: selected.issuedAt,
-      deviceSignature: foreign.signMessage(buildAccountJoinIntentMessage({ ...selected, audience: 'agentoc-account-join' })) };
+      deviceSignature: foreign.signMessage(buildAccountJoinIntentMessage({ ...selected, audience: 'ragent-account-join' })) };
     await broker.authorizeAccountJoinIntent(proof, foreign.credential);
     const retained = await pool.query('select workspace_grant_id from account_join_grants where intent_id = $1', [selected.intentId]);
     assert.equal(retained.rows[0].workspace_grant_id, access.grant.grantId);
@@ -186,7 +186,7 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
       targetInstanceId: qrTarget.instanceId, targetInstance: qrTarget, accountClaimToken: claim, device: foreign.device }, foreign.credential)));
     assert.equal(qr.intent.instanceKeyFingerprint, qrTarget.keyFingerprint);
     assert.equal(qr.intent.accountClaimTokenHash, sha256(claim));
-    const joinMessage = buildAccountJoinIntentMessage({ ...qr.intent, audience: 'agentoc-account-join' });
+    const joinMessage = buildAccountJoinIntentMessage({ ...qr.intent, audience: 'ragent-account-join' });
     const deviceSignature = foreign.signMessage(joinMessage);
     const authorization = { intentId: qr.intent.intentId,
       requestId: `qa_qr_authorize_request_000${index}`, deviceId: qr.intent.deviceId,
@@ -195,7 +195,7 @@ test('scoped creation preserves replay, revocation, rollback and retention in Po
     await assert.rejects(broker.authorizeAccountJoinIntent(authorization, f.credential),
       { code: 'owner_auth_account_join_mismatch' });
     const grant = await broker.authorizeAccountJoinIntent(authorization, foreign.credential);
-    const issuedAt = new Date(now).toISOString(), audience = 'agentoc-account-join';
+    const issuedAt = new Date(now).toISOString(), audience = 'ragent-account-join';
     const proofMessage = buildAccountJoinIntentProofMessage({ instanceId: qrTarget.instanceId, intentId: qr.intent.intentId,
       deviceId: qr.intent.deviceId, devicePublicKeyFingerprint: qr.intent.devicePublicKeyFingerprint,
       nonce: qr.intent.nonce, issuedAt, audience, publicEndpoint: '' });

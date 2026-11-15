@@ -434,7 +434,7 @@ export function buildCrossProviderContinuityBundle({
     openQuestions,
     nextActions,
     provenance: {
-      source: 'agentoc-continuity-state',
+      source: 'ragent-continuity-state',
       checkpointRevision: Number.isInteger(state.revision) ? state.revision : 0,
       eventDigest: text(state.coverage?.eventDigest, 240),
       generatedAt: generated,

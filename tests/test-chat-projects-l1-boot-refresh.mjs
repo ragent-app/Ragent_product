@@ -54,19 +54,19 @@ try {
     });
     window.FILTER_ALL_VALUE = '__all__'; // defined in bootstrap.js in the app
     window.marked = { use: () => {} };   // markdown extensions registered at load
-    window.agentocT = (key) => key;
+    window.ragentT = (key) => key;
     window.renderUiIcon = () => '<svg aria-hidden="true"></svg>';
     // The projects catalog resolves before any session data exists.
-    window.agentocProjectsReady = Promise.resolve();
-    window.agentocGetProjects = () => [
+    window.ragentProjectsReady = Promise.resolve();
+    window.ragentGetProjects = () => [
       { id: 'p1', name: 'Alpha', rootPath: '/home/example' },
       { id: 'p2', name: 'Beta', rootPath: '/home/example/work' },
     ];
     // Scoped-out workspace: the classic sessions list would see nothing; the
     // two-level navigation must still read the full cross-project catalog.
-    window.agentocSessionMatchesSelectedWorkspace = () => false;
-    window.agentocOpenProjectCreateDialog = () => {};
-    window.agentocGetSelectedProjectId = () => '';
+    window.ragentSessionMatchesSelectedWorkspace = () => false;
+    window.ragentOpenProjectCreateDialog = () => {};
+    window.ragentGetSelectedProjectId = () => '';
     window.sessionSearchQuery = '';
     window.sidebarSearchMode = false;
     window.getActiveSidebarTabValue = () => 'sessions';
@@ -164,14 +164,14 @@ try {
   // the current browser tab, then the fetched catalog/session state populates
   // the same project list instead of dropping the user back at L1. ----
   const restored = await page.evaluate(() => {
-    sessionStorage.setItem('agentoc.projectViewState', JSON.stringify({
+    sessionStorage.setItem('ragent.projectViewState', JSON.stringify({
       level: 'project-sessions',
       projectId: 'p1',
     }));
-    const didRestore = window.AgentocProjectView.restoreStoredProjectSessionsView();
+    const didRestore = window.RagentProjectView.restoreStoredProjectSessionsView();
     return {
       didRestore,
-      level: window.AgentocProjectView.getSidebarViewLevel(),
+      level: window.RagentProjectView.getSidebarViewLevel(),
       title: document.getElementById('sidebarProjectTitle').textContent,
       rows: [...document.querySelectorAll('#sessionList .session-item-name')].map((el) => el.textContent),
       projectsHidden: document.getElementById('projectsView').hidden,

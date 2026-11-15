@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
-const source = await readFile('packaging/windows/agentoc-installer-embedded-ui.cpp', 'utf8');
+const source = await readFile('packaging/windows/ragent-installer-embedded-ui.cpp', 'utf8');
 const table = await readFile('packaging/windows/installer-locales.h', 'utf8');
 const appLocales = await readFile('android/app/src/main/res/xml/locales_config.xml', 'utf8');
 const calls = [...source.matchAll(/Text\(L"((?:\\.|[^"\\])*)"\s*,\s*L"((?:\\.|[^"\\])*)"\)/g)];

@@ -15,13 +15,13 @@ if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 }
 
 $TargetRoot = [IO.Path]::GetFullPath($TargetRoot).TrimEnd('\')
-if ($TargetRoot -cnotmatch '^[A-Za-z]:\\Program Files\\AgentoC\\BrokerQA$') {
+if ($TargetRoot -cnotmatch '^[A-Za-z]:\\Program Files\\Ragent\\BrokerQA$') {
 	throw 'APB_LOCAL_TARGET_PATH_REFUSED'
 }
 if (Test-Path -LiteralPath $TargetRoot) { throw 'APB_EXISTING_TARGET_ROOT_REFUSED' }
 $targetParent = Split-Path -Parent $TargetRoot
 $targetParentExisted = Test-Path -LiteralPath $targetParent
-$serviceName = 'AgentoC-Broker-QA-Target'
+$serviceName = 'Ragent-Broker-QA-Target'
 if (Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop) { throw 'APB_EXISTING_TARGET_SERVICE_REFUSED' }
 
 if ([string]::IsNullOrWhiteSpace($ReportPath)) {
@@ -36,8 +36,8 @@ $testOutput = @()
 $testExitCode = 1
 $caughtError = $null
 try {
-	$env:AGENTOC_BROKER_RUN_LOCAL_SCM_TARGET_TEST = '1'
-	$env:AGENTOC_BROKER_LOCAL_TARGET_ROOT = $TargetRoot
+	$env:RAGENT_BROKER_RUN_LOCAL_SCM_TARGET_TEST = '1'
+	$env:RAGENT_BROKER_LOCAL_TARGET_ROOT = $TargetRoot
 	Push-Location $module
 	try {
 		$testOutput = @(& go.exe test -count=1 -run '^TestBrokerSignedApprovalRestartsFixedLocalSCMService$' -v . 2>&1 | ForEach-Object { [string]$_ })
@@ -46,8 +46,8 @@ try {
 } catch {
 	$caughtError = $_.Exception.GetBaseException().Message
 } finally {
-	Remove-Item Env:AGENTOC_BROKER_RUN_LOCAL_SCM_TARGET_TEST -ErrorAction SilentlyContinue
-	Remove-Item Env:AGENTOC_BROKER_LOCAL_TARGET_ROOT -ErrorAction SilentlyContinue
+	Remove-Item Env:RAGENT_BROKER_RUN_LOCAL_SCM_TARGET_TEST -ErrorAction SilentlyContinue
+	Remove-Item Env:RAGENT_BROKER_LOCAL_TARGET_ROOT -ErrorAction SilentlyContinue
 }
 
 $serviceRemains = [bool](Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop)

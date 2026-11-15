@@ -104,9 +104,9 @@ function loadCore({ timeline, MockDate }) {
   };
   vm.runInNewContext(RENDERED_SHAPE, context);
   const env = { renderedEventState: null };
-  context.AgentocWsPushSuppressEnvironment = env;
+  context.RagentWsPushSuppressEnvironment = env;
   vm.runInNewContext(
-    'AgentocWsPushSuppressEnvironment.renderedEventState = renderedEventState;',
+    'RagentWsPushSuppressEnvironment.renderedEventState = renderedEventState;',
     context,
   );
   vm.runInNewContext(
@@ -114,7 +114,7 @@ function loadCore({ timeline, MockDate }) {
     context,
     { filename: 'transport/ws-push-suppress.js' },
   );
-  const core = context.AgentocWsPushSuppressCore;
+  const core = context.RagentWsPushSuppressCore;
   return {
     api: {
       mark: (sessionId, events) => core.markWsEventPushApplied(sessionId, events),

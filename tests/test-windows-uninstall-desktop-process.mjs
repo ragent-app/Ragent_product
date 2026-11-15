@@ -6,7 +6,7 @@ import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 
 assert.equal(process.platform,'win32');
-const exec=promisify(execFile), root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-uninstall-desktop-'));
+const exec=promisify(execFile), root=await mkdtemp(join(await realpath(tmpdir()),'ragent-uninstall-desktop-'));
 const ownDir=join(root,'installed'),otherDir=join(root,'other'),own=join(ownDir,'Ragent.exe'),other=join(otherDir,'Ragent.exe');
 const csc='C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe',runner=join(root,'shutdown-fixture.exe');
 let owned,unrelated;
@@ -16,7 +16,7 @@ try{
   await copyFile(own,other);
   await exec(csc,['/nologo','/target:exe','/platform:x64','/main:DesktopShutdownFixture',
     '/r:System.Management.dll','/r:System.ServiceProcess.dll','/r:System.Security.dll','/r:System.Web.Extensions.dll',`/out:${runner}`,
-    resolve('packaging/windows/managed-owner-msi-bridge.cs'),resolve('packaging/windows/AgentoC.ServiceHost.cs'),
+    resolve('packaging/windows/managed-owner-msi-bridge.cs'),resolve('packaging/windows/Ragent.ServiceHost.cs'),
     resolve('packaging/windows/owner-service-activation-trial.cs'),resolve('packaging/windows/owner-msi-relocation-journal.cs'),
     resolve('tests/fixtures/windows-desktop-shutdown.cs')],{windowsHide:true});
   owned=spawn(own,[],{windowsHide:true});unrelated=spawn(other,[],{windowsHide:true});

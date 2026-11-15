@@ -333,13 +333,13 @@ function fixtureEvents(runId, turnId) {
     }),
     event(7, 'evt-artifact', 'artifact.created', {
       artifactId: 'artifact-fixture-1',
-      filePath: '/tmp/agentoc-harness-fixture.txt',
+      filePath: '/tmp/ragent-harness-fixture.txt',
       sha256: 'a'.repeat(64),
       sizeBytes: 12,
     }),
     event(8, 'evt-artifact-published', 'artifact.published', {
       artifactId: 'artifact-fixture-1',
-      filePath: '/tmp/agentoc-harness-fixture.txt',
+      filePath: '/tmp/ragent-harness-fixture.txt',
     }),
     event(9, 'evt-cancel-requested', 'run.cancel_requested'),
     event(10, 'evt-cancel-acknowledged', 'run.cancel_acknowledged'),

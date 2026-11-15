@@ -18,7 +18,7 @@
     "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAyUlwyVkU0gbzhQ7YRcg1cFa1UMSuBYAx19bulTu6RX8=\n-----END PUBLIC KEY-----\n",
     "signature": "Xrt2ehOtw_LsRDFwt5SXOZBLUnbO2_5GB7WAyoYUjLcqKpgxwUlmcJZfDtycnBiVQg7kGSNylTRzVnim0XvBDQ"
   },
-  "invitationMessage": "[\"agentoc-temporary-invitation-v1\",\"rti_0123456789abcdefghijklmnopqrstuv\",\"inst_b397ffbd4c855cc4af1d7133e0efbead\",\"b397ffbd4c855cc4af1d7133e0efbead19085fc791080ca97a2138c885e14b9e\",\"075e976729e074021ee128f8c48485c2b676652d9bd7e75d784a1560b4815151\",1800000000000,1800000120000,1800000600000,[\"file.download\",\"task.read\"],\"created-sessions\"]",
+  "invitationMessage": "[\"ragent-temporary-invitation-v1\",\"rti_0123456789abcdefghijklmnopqrstuv\",\"inst_b397ffbd4c855cc4af1d7133e0efbead\",\"b397ffbd4c855cc4af1d7133e0efbead19085fc791080ca97a2138c885e14b9e\",\"075e976729e074021ee128f8c48485c2b676652d9bd7e75d784a1560b4815151\",1800000000000,1800000120000,1800000600000,[\"file.download\",\"task.read\"],\"created-sessions\"]",
   "claim": {
     "instanceId": "inst_b397ffbd4c855cc4af1d7133e0efbead",
     "invitationId": "rti_0123456789abcdefghijklmnopqrstuv",
@@ -27,5 +27,5 @@
     "devicePublicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEyu1nWuP2j6soyQBlt/jeJg1yTciSSTXBsZEK0GX/GlP8NnNnSahV6qQ+P9SCPvmHbCd63M4vpp/5RgULxOYLlA==",
     "signature": "MEUCIGh_f-3YTwYpaPVZ4ntIMVvwJH3ljTNurH3y0GNd2WomAiEArqfqeKry3q7pKP_cuDvizKc5xeAPj_c4jTXGmGybyFA"
   },
-  "claimMessage": "[\"agentoc-temporary-claim-v1\",\"inst_b397ffbd4c855cc4af1d7133e0efbead\",\"rti_0123456789abcdefghijklmnopqrstuv\",\"830e920f62a9c1eced985f3c9a464ab2bd1b471cb2e79af66a678f3b46f92a04\",\"rtr_0123456789abcdefghijklmnopqrstuv\",\"b2b5a5a548f74bdb237019a33b23851cc9a07f7ec2d1d208768b4c144b252122\"]"
+  "claimMessage": "[\"ragent-temporary-claim-v1\",\"inst_b397ffbd4c855cc4af1d7133e0efbead\",\"rti_0123456789abcdefghijklmnopqrstuv\",\"830e920f62a9c1eced985f3c9a464ab2bd1b471cb2e79af66a678f3b46f92a04\",\"rtr_0123456789abcdefghijklmnopqrstuv\",\"b2b5a5a548f74bdb237019a33b23851cc9a07f7ec2d1d208768b4c144b252122\"]"
 }

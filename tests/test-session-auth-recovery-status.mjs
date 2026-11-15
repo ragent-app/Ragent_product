@@ -14,12 +14,12 @@ const labels = {
   'taskFlow.reauthRequired': 'Sign-in required',
 };
 const context = {
-  agentocT(key) { return labels[key] || key; },
+  ragentT(key) { return labels[key] || key; },
 };
 context.globalThis = context;
 vm.runInNewContext(source, context, { filename: 'static/chat/session-state-model.js' });
 
-const model = context.AgentoCSessionStateModel;
+const model = context.RagentSessionStateModel;
 const session = {
   id: 'session-a',
   activity: {

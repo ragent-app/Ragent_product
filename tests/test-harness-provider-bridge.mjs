@@ -14,8 +14,8 @@ for (const harness of ['pi', 'qwen-code', 'opencode', 'kimi-code', 'goose', 'ope
   assert.equal(resolveHarnessProviderCompatibility(harness, codexProfile).ok, true);
   const result = buildHarnessProviderFiles(harness, { ...codexProfile, model: 'test-model' }, { authType: 'api-key', apiKey: 'secret' });
   assert.equal(result.ok, true);
-  assert.match(result.files[0].content, /AGENTOC_PROVIDER_PROTOCOL="openai-chat"/);
-  assert.ok(result.files.some((file) => file.name === '.agentoc-provider.env'));
+  assert.match(result.files[0].content, /RAGENT_PROVIDER_PROTOCOL="openai-chat"/);
+  assert.ok(result.files.some((file) => file.name === '.ragent-provider.env'));
 }
 
 assert.equal(resolveHarnessProviderCompatibility('pi', { protocol: 'agy' }).ok, false);
@@ -49,7 +49,7 @@ const hermes = buildHarnessProviderFiles('hermes', {
   protocol: 'anthropic-messages', baseUrl: 'https://anthropic.example/v1', model: 'claude-sonnet',
 }, { authType: 'api-key', apiKey: 'secret' });
 assert.equal(hermes.ok, true);
-assert.match(hermes.files.find((file) => file.name === 'config.yaml').content, /provider: "agentoc"/);
+assert.match(hermes.files.find((file) => file.name === 'config.yaml').content, /provider: "ragent"/);
 assert.match(hermes.files.find((file) => file.name === 'config.yaml').content, /transport: anthropic_messages/);
 const cline = buildHarnessProviderFiles('cline', {
   protocol: 'openai-chat', baseUrl: 'https://gateway.example/v1', model: 'test-model',
@@ -66,9 +66,9 @@ const kilo = buildHarnessProviderFiles('kilo', {
 assert.equal(kilo.ok, true);
 const kiloConfig = kilo.files.find((file) => file.name === 'kilo.jsonc');
 assert.ok(kiloConfig);
-assert.match(kiloConfig.content, /"model": "agentoc\/test-model"/);
+assert.match(kiloConfig.content, /"model": "ragent\/test-model"/);
 assert.match(kiloConfig.content, /"npm": "@ai-sdk\/openai-compatible"/);
-assert.match(kiloConfig.content, /"env": \[\s*"AGENTOC_PROVIDER_API_KEY"\s*\]/);
+assert.match(kiloConfig.content, /"env": \[\s*"RAGENT_PROVIDER_API_KEY"\s*\]/);
 assert.match(kiloConfig.content, /"baseURL": "https:\/\/gateway\.example\/v1"/);
 assert.match(kiloConfig.content, /"context": 128000/);
 assert.doesNotMatch(kiloConfig.content, /"apiKey"/);

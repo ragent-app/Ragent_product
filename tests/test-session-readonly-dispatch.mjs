@@ -8,7 +8,7 @@ if (process.platform !== 'linux') {
   process.exit(0);
 }
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-readonly-dispatch-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-readonly-dispatch-'));
 console.log(`fixture root: ${root}`);
 const projectDir = join(root, 'project');
 const configDir = join(root, 'config');
@@ -27,13 +27,13 @@ console.log(JSON.stringify({ type: 'done' }));
 chmodSync(fake, 0o755);
 writeFileSync(join(configDir, 'tools.json'), JSON.stringify([{ id: 'fake-codex', name: 'Fixture', command: fake,
   runtimeFamily: 'cline-json', models: [{ id: 'fake-model', label: 'Fake' }] }]));
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_REVIEWER_ENABLED = '1';
-process.env.AGENTOC_REPLY_SELF_CHECK = 'off';
-delete process.env.AGENTOC_RUN_SANDBOX;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_REVIEWER_ENABLED = '1';
+process.env.RAGENT_REPLY_SELF_CHECK = 'off';
+delete process.env.RAGENT_RUN_SANDBOX;
 const { createProject } = await import('../chat/projects.mjs');
 const { createSession, getSession, sendMessage, killAll } = await import('../chat/session-manager.mjs');
 const { getRun, getRunManifest } = await import('../chat/runs.mjs');
@@ -66,5 +66,5 @@ try {
   console.log('session dispatch retained read-only scope and the actual child could not write the project');
 } finally {
   await killAll();
-  if (process.env.AGENTOC_KEEP_TEST_FIXTURE !== '1') rmSync(root, { recursive: true, force: true });
+  if (process.env.RAGENT_KEEP_TEST_FIXTURE !== '1') rmSync(root, { recursive: true, force: true });
 }

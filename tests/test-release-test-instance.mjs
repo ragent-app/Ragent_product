@@ -34,20 +34,20 @@ try {
     const env = buildChildEnvironment({ id: 'env', instanceDir: dir, configDir: join(dir, 'config'),
       memoryDir: join(dir, 'memory'), workRootDir: join(dir, 'workspace'),
       spoolDir: join(dir, 'data', 'chat-runs'), providerHomesDir: join(dir, 'provider-homes'), port: 41234,
-    }, { PATH: process.env.PATH, AGENTOC_WINDOWS_SERVICE_MODE: '1', AGENTOC_RUN_SPOOL_DIR: '/production',
-      agentoc_provider_homes_dir: '/production', AGENTOC_ACCOUNTS_URL: 'https://production.invalid',
-      AGENTOC_AUTH_SESSION_SECRET: 'production-secret', OPENAI_API_KEY: 'production-api-key',
+    }, { PATH: process.env.PATH, RAGENT_WINDOWS_SERVICE_MODE: '1', RAGENT_RUN_SPOOL_DIR: '/production',
+      ragent_provider_homes_dir: '/production', RAGENT_ACCOUNTS_URL: 'https://production.invalid',
+      RAGENT_AUTH_SESSION_SECRET: 'production-secret', OPENAI_API_KEY: 'production-api-key',
       GOOGLE_APPLICATION_CREDENTIALS: '/production-key.json', GOOGLE_APPLICATION_CREDENTIALS_JSON: 'private' });
-    for (const key of ['AGENTOC_INSTANCE_ROOT', 'AGENTOC_CONFIG_DIR', 'AGENTOC_MEMORY_DIR',
-      'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR']) {
+    for (const key of ['RAGENT_INSTANCE_ROOT', 'RAGENT_CONFIG_DIR', 'RAGENT_MEMORY_DIR',
+      'RAGENT_WORK_ROOT_DIR', 'RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR']) {
       const rel = relative(dir, env[key]);
       assert.ok(rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)), key);
     }
-    for (const key of ['AGENTOC_WINDOWS_SERVICE_MODE', 'agentoc_provider_homes_dir', 'OPENAI_API_KEY',
+    for (const key of ['RAGENT_WINDOWS_SERVICE_MODE', 'ragent_provider_homes_dir', 'OPENAI_API_KEY',
       'GOOGLE_APPLICATION_CREDENTIALS', 'GOOGLE_APPLICATION_CREDENTIALS_JSON']) assert.equal(env[key], undefined, key);
-    assert.notEqual(env.AGENTOC_AUTH_SESSION_SECRET, 'production-secret');
-    for (const key of ['AGENTOC_ACCOUNTS_URL', 'AGENTOC_ACCOUNTS_JWKS_URL', 'AGENTOC_TURN_BROKER_URL',
-      'AGENTOC_P2P_SIGNALING_URL']) assert.equal(new URL(env[key]).hostname, '127.0.0.1');
+    assert.notEqual(env.RAGENT_AUTH_SESSION_SECRET, 'production-secret');
+    for (const key of ['RAGENT_ACCOUNTS_URL', 'RAGENT_ACCOUNTS_JWKS_URL', 'RAGENT_TURN_BROKER_URL',
+      'RAGENT_P2P_SIGNALING_URL']) assert.equal(new URL(env[key]).hostname, '127.0.0.1');
   });
   await check('actual config import resolves inside isolated roots on this platform', async () => {
     const script = `const c=await import(${JSON.stringify(new URL('../lib/config.mjs', import.meta.url).href)});
@@ -117,7 +117,7 @@ try {
   });
   await check('replaced ownership marker refuses cleanup and reports cleaned=false', async () => {
     const result = await run(['--', process.execPath, '-e', `const fs=require('fs');const path=require('path');
-      const p=path.join(process.env.AGENTOC_INSTANCE_ROOT,'instance.json');
+      const p=path.join(process.env.RAGENT_INSTANCE_ROOT,'instance.json');
       setTimeout(()=>{const m=JSON.parse(fs.readFileSync(p,'utf8'));m.ownerNonce='changed';
       fs.writeFileSync(p,JSON.stringify(m));},100);`]);
     assert.equal(result.code, 1);

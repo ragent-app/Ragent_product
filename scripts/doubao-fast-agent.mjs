@@ -13,7 +13,7 @@ import {
 import { terminateProviderProcessTree } from '../lib/windows-managed-spawn.mjs';
 
 const HOME = homedir();
-const DEFAULT_CONFIG_PATH = join(HOME, '.config', 'agentoc', 'doubao-fast-agent.json');
+const DEFAULT_CONFIG_PATH = join(HOME, '.config', 'ragent', 'doubao-fast-agent.json');
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 const DEFAULT_MODEL = 'doubao-seed-2-0-pro-260215';
 const DEFAULT_MAX_ITERATIONS = 2;
@@ -970,7 +970,7 @@ function aggregateUsage(accumulator, usage = {}) {
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 
 function parseAttachmentPathsEnv() {
-  const raw = trimString(process.env.AGENTOC_ATTACHMENT_PATHS);
+  const raw = trimString(process.env.RAGENT_ATTACHMENT_PATHS);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);

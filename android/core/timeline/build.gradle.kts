@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.timeline"
+    namespace = "com.andysagent.ragent.core.timeline"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

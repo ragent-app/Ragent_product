@@ -190,7 +190,7 @@ const context = {
   console,
   queuedPanel,
   msgInput,
-  // openQueuedSteerMenu pokes window.AgentoCBackHandler?.push?.() — an
+  // openQueuedSteerMenu pokes window.RagentBackHandler?.push?.() — an
   // absent handler must be a no-op in the harness.
   window: {},
   currentSessionId: 'session-a',

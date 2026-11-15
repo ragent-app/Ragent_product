@@ -48,7 +48,7 @@ export async function beginCodexMcpOAuth({ providerId, accountId, accountBinding
     socket.on('error', fail);
     socket.on('end', fail);
     socket.on('close', () => { if (job.state === 'pending') fail(); });
-    socket.once('connect', () => write({ type: 'agentoc-codex-broker-ping', expectedAccountDigest: digest }));
+    socket.once('connect', () => write({ type: 'ragent-codex-broker-ping', expectedAccountDigest: digest }));
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       if (Buffer.byteLength(buffer, 'utf8') > 1024 * 1024) return fail();
@@ -58,7 +58,7 @@ export async function beginCodexMcpOAuth({ providerId, accountId, accountBinding
         try { message = JSON.parse(buffer.slice(0, newline)); } catch { return fail(); }
         buffer = buffer.slice(newline + 1);
         if (phase === 'account') {
-          if (message?.type !== 'agentoc-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) return fail();
+          if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) return fail();
           phase = 'initialize'; write(buildCodexAppServerInitializeMessage()); continue;
         }
         if (phase === 'initialize' && message.id === 0) {

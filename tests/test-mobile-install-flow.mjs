@@ -69,8 +69,8 @@ function request(port, method, path, { body = null, headers = {} } = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-mobile-install-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-mobile-install-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
     join(configDir, 'auth.json'),
@@ -92,8 +92,8 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
@@ -180,7 +180,7 @@ async function main() {
 
     const installPage = await request(port, 'GET', redirectedUrl.pathname + redirectedUrl.search);
     assert.equal(installPage.status, 200, 'install page should render with a handoff token');
-    assert.match(installPage.text, /window\.__AGENTOC_BOOTSTRAP__ = /, 'install page should inline bootstrap data');
+    assert.match(installPage.text, /window\.__RAGENT_BOOTSTRAP__ = /, 'install page should inline bootstrap data');
     assert.match(
       installPage.text,
       new RegExp(`manifest\\.install\\.json\\?h=${handoffToken}`),

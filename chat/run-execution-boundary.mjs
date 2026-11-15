@@ -29,13 +29,13 @@ function unavailable() {
  */
 export function assertRunManifestExecutionBoundary(manifest) {
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) throw unavailable();
-  if (process.env.AGENTOC_RUNTIME_MODE === 'proot'
+  if (process.env.RAGENT_RUNTIME_MODE === 'proot'
       && !['safe', 'recommended', 'conservative-auto', 'full-auto'].includes(manifest.options?.riskMode)) {
     const error = new Error('PRoot execution requires an explicit supported risk mode');
     error.code = RESTRICTED_EXECUTION_UNAVAILABLE;
     throw error;
   }
-  if (process.env.AGENTOC_RUNTIME_MODE === 'proot' && manifest.options?.privilegedMode === true) {
+  if (process.env.RAGENT_RUNTIME_MODE === 'proot' && manifest.options?.privilegedMode === true) {
     const error = new Error('Privileged execution requires an OS isolation boundary unavailable in PRoot');
     error.code = RESTRICTED_EXECUTION_UNAVAILABLE;
     throw error;
@@ -84,7 +84,7 @@ export async function assertRunLaunchBoundary(runId, { checkControl = checkTempo
 
 /** Ask the control plane, because runner identities cannot read its registry. */
 async function checkTemporaryControlRun(runId, publicationId) {
-  const base = process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`;
+  const base = process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`;
   let url;
   try { url = new URL(base); } catch { throw unavailable(); }
   if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]'].includes(url.hostname)

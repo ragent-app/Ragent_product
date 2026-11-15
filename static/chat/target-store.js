@@ -1,10 +1,10 @@
 // Browser-side target directory and active target selection.
 // The store contains only non-secret target metadata; credentials remain in
 // the selected runtime adapter.
-(function attachAgentoCTargetStore(root) {
+(function attachRagentTargetStore(root) {
   "use strict";
 
-  const STORAGE_KEY = "agentoc.active-target-id.v1";
+  const STORAGE_KEY = "ragent.active-target-id.v1";
   const STATES = new Set(["paired", "connecting", "online", "degraded", "offline", "revoked"]);
   const listeners = new Set();
   let state = Object.freeze({
@@ -77,7 +77,7 @@
       try { listener(next, previous); } catch (error) { root.setTimeout?.(() => { throw error; }, 0); }
     }
     if (typeof root.CustomEvent === "function" && typeof root.dispatchEvent === "function") {
-      root.dispatchEvent(new root.CustomEvent("agentoc:target-change", { detail: next }));
+      root.dispatchEvent(new root.CustomEvent("ragent:target-change", { detail: next }));
     }
   }
 
@@ -161,7 +161,7 @@
     return () => listeners.delete(listener);
   }
 
-  root.AgentoCTargetStore = Object.freeze({
+  root.RagentTargetStore = Object.freeze({
     getSnapshot: snapshot,
     getActiveTarget: () => state.targets.find((target) => target.targetId === state.activeTargetId) || null,
     getTarget: (targetId) => state.targets.find((target) => target.targetId === text(targetId, 160)) || null,

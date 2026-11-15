@@ -6,12 +6,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-run-auth-manager-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-run-auth-manager-'));
 process.env.HOME = root;
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'manager-recovery-test-secret';
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'manager-recovery-test-secret';
 
 try {
   const { createCredentialMutationLedger } = await import('../lib/provider-runtime/credential-mutation.mjs');
@@ -24,7 +24,7 @@ try {
   } = await import('../chat/runs.mjs');
   const { killAll, recoverRunAuthFailure } = await import('../chat/session-manager.mjs');
 
-  const configDir = process.env.AGENTOC_CONFIG_DIR;
+  const configDir = process.env.RAGENT_CONFIG_DIR;
   const registry = createNativeProviderRegistry({ configDir });
   const secretStore = createSecretStore({ configDir });
   const credentialLedger = createCredentialMutationLedger({ configDir });

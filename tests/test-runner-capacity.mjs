@@ -12,9 +12,9 @@ const GiB = 1024 * 1024 * 1024;
 
 assert.deepEqual(
   resolveRunnerCapacityLimits({
-    AGENTOC_RUN_CAPACITY_MAX_CONCURRENT: '3',
-    AGENTOC_RUN_CAPACITY_MAX_MEMORY_BYTES: String(9 * GiB),
-    AGENTOC_RUN_CAPACITY_MAX_TASKS: '400',
+    RAGENT_RUN_CAPACITY_MAX_CONCURRENT: '3',
+    RAGENT_RUN_CAPACITY_MAX_MEMORY_BYTES: String(9 * GiB),
+    RAGENT_RUN_CAPACITY_MAX_TASKS: '400',
   }),
   { maxConcurrentRuns: 3, maxMemoryBytes: 9 * GiB, maxTasks: 400 },
 );
@@ -30,22 +30,22 @@ const snapshot = await readLinuxRunnerFleetSnapshot({
   roots: ['/cgroup/test'],
   readFileImpl: async (path) => path.endsWith('memory.current') ? '123\n' : '45\n',
   readdirImpl: async () => [
-    'agentoc-runner-run_first.service',
-    'agentoc-runner-run_second.service',
+    'ragent-runner-run_first.service',
+    'ragent-runner-run_second.service',
     'unrelated.service',
   ],
 });
 assert.deepEqual(snapshot, {
   root: '/cgroup/test',
   activeRuns: 2,
-  activeRunnerUnits: ['agentoc-runner-run_first.service', 'agentoc-runner-run_second.service'],
+  activeRunnerUnits: ['ragent-runner-run_first.service', 'ragent-runner-run_second.service'],
   memoryCurrentBytes: 123,
   pidsCurrent: 45,
 });
 
 const check = await checkRunnerCapacity({
   platform: 'win32',
-  environment: { AGENTOC_RUN_CAPACITY_MAX_CONCURRENT: '2' },
+  environment: { RAGENT_RUN_CAPACITY_MAX_CONCURRENT: '2' },
   readSnapshot: async () => ({ activeRuns: 2, memoryCurrentBytes: 0, pidsCurrent: 0 }),
 });
 assert.equal(check.accepted, false);

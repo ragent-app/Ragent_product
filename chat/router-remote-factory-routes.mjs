@@ -26,7 +26,7 @@ export async function handleRemoteFactoryRoutes({req,res,pathname,authSession,wr
       if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
       if(authSession?.role!=='owner'||['target_runtime_gateway','run_capability','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Instance owner required'});return true;}
       const actor=await resolveResponsibilityActor(req,authSession); if(!actor) {writeJson(res,403,{error:'Verified instance owner required'});return true;}
-      if(process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FACTORY_DISABLED',error:'Remote Factory admission is disabled'});return true;}
+      if(process.env.RAGENT_REMOTE_FACTORY_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FACTORY_DISABLED',error:'Remote Factory admission is disabled'});return true;}
       if(!jsonSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
       const raw=await readBody(req,65536); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       writeJson(res,200,await (sourceConfig?configureRemoteFactorySourceBinding(body,actor):configureRemoteFactoryBinding(body,actor)));return true;
@@ -38,7 +38,7 @@ export async function handleRemoteFactoryRoutes({req,res,pathname,authSession,wr
     const bindingId=operation[1],operationId=operation[2];
     if(req.method==='GET') {writeJson(res,200,await signRemoteFactoryReceipt(await getRemoteFactoryOperation(bindingId,operationId,authSession,{queryChild:getRemoteFactoryChild})));return true;}
     if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
-    if(process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FACTORY_DISABLED',error:'Remote Factory admission is disabled'});return true;}
+    if(process.env.RAGENT_REMOTE_FACTORY_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FACTORY_DISABLED',error:'Remote Factory admission is disabled'});return true;}
     if(!jsonSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
     const raw=await readBody(req,65536); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
     writeJson(res,200,await signRemoteFactoryReceipt(await acceptRemoteFactoryOperation({...body,bindingId,operationId},authSession,{admit:admitRemoteFactoryAttempt})));return true;

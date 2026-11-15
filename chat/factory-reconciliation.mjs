@@ -87,7 +87,7 @@ export async function recordFactoryReconciliationFailure(organizationId,item,err
   return factoryTransaction(db => { schema(db); authorize(db,organizationId,actor,'factory.execution');
     const current=selectItem(db,organizationId,item.id); if(current.execution_epoch!==item.executionEpoch) return null;
     const previous=db.prepare('SELECT * FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? AND execution_epoch=?').get(organizationId,item.id,item.executionEpoch);
-    const configured=Number(process.env.AGENTOC_FACTORY_RECONCILIATION_MAX_FAILURES);
+    const configured=Number(process.env.RAGENT_FACTORY_RECONCILIATION_MAX_FAILURES);
     const maxFailures=Number.isInteger(configured)&&configured>=1&&configured<=32?configured:8;
     const failures=Math.min((previous?.failures||0)+1,maxFailures), state=previous?.state==='dead_letter'||failures>=maxFailures?'dead_letter':'retry';
     const next=new Date(Date.now()+Math.min(60000,1000*2**failures)).toISOString(), ts=now();

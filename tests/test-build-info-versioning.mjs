@@ -64,8 +64,8 @@ function request(port, path, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-build-info-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-build-info-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -89,9 +89,9 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_AUTH_SESSION_SECRET: 'test-build-info-auth-session-secret',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_AUTH_SESSION_SECRET: 'test-build-info-auth-session-secret',
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
@@ -186,12 +186,12 @@ async function main() {
       'combined title should join service and frontend descriptions',
     );
     assert.equal(
-      initialBuild.headers['x-agentoc-service-build'],
+      initialBuild.headers['x-ragent-service-build'],
       initial.serviceTitle,
       'build info headers should expose the service identity',
     );
     assert.equal(
-      initialBuild.headers['x-agentoc-frontend-build'],
+      initialBuild.headers['x-ragent-frontend-build'],
       initial.frontendTitle,
       'build info headers should expose the frontend identity',
     );
@@ -208,13 +208,13 @@ async function main() {
     assert.equal(chatPage.status, 200, 'chat page should render');
     assert.match(
       chatPage.text,
-      new RegExp(escapeRegex(`name="agentoc-build" content="${initial.title}"`)),
+      new RegExp(escapeRegex(`name="ragent-build" content="${initial.title}"`)),
       'chat metadata should expose the current service and frontend build title',
     );
     assert.match(chatPage.text, new RegExp(escapeRegex(initial.title)));
 
     await sleep(350);
-    writeFileSync(frontendProbePath, 'window.__AGENTOC_BUILD_INFO_PROBE__ = true;\n', 'utf8');
+    writeFileSync(frontendProbePath, 'window.__RAGENT_BUILD_INFO_PROBE__ = true;\n', 'utf8');
     await waitFor(
       () => wsMessages.find((msg) => msg.type === 'build_info' && msg.buildInfo?.assetVersion && msg.buildInfo.assetVersion !== initial.assetVersion),
       'frontend build websocket update',
@@ -246,7 +246,7 @@ async function main() {
     await stopServer(server);
     server = null;
 
-    writeFileSync(serviceProbePath, 'export const __AGENTOC_SERVICE_BUILD_PROBE__ = true;\n', 'utf8');
+    writeFileSync(serviceProbePath, 'export const __RAGENT_SERVICE_BUILD_PROBE__ = true;\n', 'utf8');
     await sleep(50);
 
     server = await startServer({ home, port });

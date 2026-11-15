@@ -8,7 +8,7 @@ import path from 'node:path';
 import { buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from '../chat/windows-claude-relative-operation-bridge.mjs';
 
 if (process.platform !== 'win32') { console.log('claude-relative-read-bridge: skipped (Windows only)'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-claude-cwd-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-claude-cwd-'));
 const workspace = path.join(root, 'workspace'); const outside = path.join(root, 'outside');
 await mkdir(workspace); await mkdir(outside);
 await writeFile(path.join(workspace, 'readme.txt'), 'SAFE_WORKSPACE\n');
@@ -26,7 +26,7 @@ await writeFile(path.join(root, '.curlrc'), '--request POST\n');
 const server = createServer((req, res) => { res.end(`METHOD:${req.method}`); });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const approval = command => ({ providerMethod: 'can_use_tool', kind: 'command', params: { tool_name: 'Bash', input: { command, description: 'read fixture' } } });
-const bash = process.env.AGENTOC_TEST_BASH_BINARY;
+const bash = process.env.RAGENT_TEST_BASH_BINARY;
 assert.ok(bash, 'real Git Bash path is required');
 for (const riskMode of ['recommended', 'full-auto']) {
   const state = { riskMode, turnActive: true, riskContextValid: true, cwd: workspace, riskContext: { trustedWorkspaceRoot: workspace, protectedRoots: [] } };
@@ -184,6 +184,6 @@ for (const riskMode of ['recommended', 'full-auto']) {
 const actual = await realpath(root); const parent = await realpath(os.tmpdir());
 await new Promise(resolve => server.close(resolve));
 assert.equal(path.dirname(actual).toLowerCase(), parent.toLowerCase());
-assert.ok(path.basename(actual).startsWith('agentoc-claude-cwd-'));
+assert.ok(path.basename(actual).startsWith('ragent-claude-cwd-'));
 await rm(actual, { recursive: true, force: true });
 console.log('claude-relative-read-bridge: real Bash cwd binding and risk boundaries passed');

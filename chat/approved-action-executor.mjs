@@ -92,7 +92,7 @@ function executorOp(action, selectionManifestHash = '') {
 function isSemanticAptAction(action) {
   const projection = action?.semanticProjection;
   const decisions = Array.isArray(projection?.decisions) ? projection.decisions : [];
-  return process.env.AGENTOC_SEMANTIC_APT_ADAPTER_ENABLED === '1'
+  return process.env.RAGENT_SEMANTIC_APT_ADAPTER_ENABLED === '1'
     && trimString(action?.executionClass) === 'host'
     && trimString(projection?.decision) === 'ASK'
     && decisions.length > 0
@@ -954,7 +954,7 @@ export async function executeApprovedAction(action, {
     if (productExecution) {
       try {
         const mutation = await executeMutationImpl({
-          workspaceId: 'agentoc-product-state',
+          workspaceId: 'ragent-product-state',
           runId,
           resourceKeys: [`file:${APPS_FILE}`],
           mutate: async () => {

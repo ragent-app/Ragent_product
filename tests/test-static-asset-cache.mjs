@@ -57,8 +57,8 @@ function request(port, path, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-static-cache-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-static-cache-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
   writeFileSync(
     join(configDir, 'auth.json'),
@@ -80,8 +80,8 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
@@ -110,19 +110,19 @@ async function main() {
   const port = randomPort();
   const probeName = `__static_cache_probe_${Date.now().toString(36)}.js`;
   const probePath = join(repoRoot, 'static', 'chat', probeName);
-  const originalContent = 'window.__AGENTOC_STATIC_PROBE__ = true;\n';
+  const originalContent = 'window.__RAGENT_STATIC_PROBE__ = true;\n';
   writeFileSync(probePath, originalContent, 'utf8');
 
   const server = await startServer({ home, port });
   try {
     const first = await request(port, `/chat/${probeName}`);
     assert.equal(first.status, 200);
-    assert.match(first.text, /__AGENTOC_STATIC_PROBE__ = true/, 'first request serves the file from disk');
+    assert.match(first.text, /__RAGENT_STATIC_PROBE__ = true/, 'first request serves the file from disk');
 
     // Same-size rewrite with the mtime restored: the cache must serve the
     // previous content (mtime+size match → cache hit, no disk re-read).
     const probeStats = statSync(probePath);
-    const staleReplacement = 'window.__AGENTOC_STATIC_PROBE__ = null;\n'; // same byte length as the original
+    const staleReplacement = 'window.__RAGENT_STATIC_PROBE__ = null;\n'; // same byte length as the original
     assert.equal(
       Buffer.byteLength(staleReplacement, 'utf8'),
       Buffer.byteLength(originalContent, 'utf8'),
@@ -134,20 +134,20 @@ async function main() {
     utimesSync(probePath, probeStats.atimeMs / 1000, probeStats.mtimeMs / 1000);
     const staleServed = await request(port, `/chat/${probeName}`);
     assert.equal(staleServed.status, 200);
-    assert.match(staleServed.text, /__AGENTOC_STATIC_PROBE__ = true/, 'unchanged mtime+size serves the cached asset');
+    assert.match(staleServed.text, /__RAGENT_STATIC_PROBE__ = true/, 'unchanged mtime+size serves the cached asset');
 
     // Real file change (mtime advances): the cache must invalidate and
     // re-read the file — the hot-reload contract.
     writeFileSync(probePath, staleReplacement, 'utf8');
     const freshServed = await request(port, `/chat/${probeName}`);
     assert.equal(freshServed.status, 200);
-    assert.match(freshServed.text, /__AGENTOC_STATIC_PROBE__ = null/, 'mtime change invalidates the cache and re-reads the file');
+    assert.match(freshServed.text, /__RAGENT_STATIC_PROBE__ = null/, 'mtime change invalidates the cache and re-reads the file');
 
     // Versioned requests use a separate cache key and still re-read on mtime
     // change (CSS rewrite versioning path stays correct).
     const versioned = await request(port, `/chat/${probeName}?v=build-1`);
     assert.equal(versioned.status, 200);
-    assert.match(versioned.text, /__AGENTOC_STATIC_PROBE__ = null/, 'versioned request serves the current file');
+    assert.match(versioned.text, /__RAGENT_STATIC_PROBE__ = null/, 'versioned request serves the current file');
 
     console.log('✅ Static asset memory cache validated');
   } finally {

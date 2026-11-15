@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { createProjectBootstrap } from '../chat/project-bootstrap.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-bootstrap-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-bootstrap-'));
 try {
   const parentRoot = join(root, 'managed');
   const databasePath = join(root, 'bootstrap.sqlite');
@@ -69,7 +69,7 @@ try {
   assert.equal(createCount, 2, 'recovery must find the original creation operation');
   assert.equal(await readFile(join(recovered.directory, 'INTAKE.md'), 'utf8'), 'kept user edits');
   assert.equal((await readdir(parentRoot)).length, 2);
-  await unlink(join(recovered.directory, '.agentoc-intake.json'));
+  await unlink(join(recovered.directory, '.ragent-intake.json'));
   await assert.rejects(() => reopened.ensureForIntake(crashPlan),
     (error) => error.code === 'PROJECT_PATH_CONFLICT', 'a completed receipt must recheck directory ownership');
   console.log('test-project-bootstrap: ok');

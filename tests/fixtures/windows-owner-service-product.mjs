@@ -10,9 +10,9 @@ import {createOwnerDiscoverySetController} from '../../lib/windows-owner-discove
 import {createOwnerDiscoveryFileStore} from '../../lib/windows-owner-discovery-publication.mjs';
 import {createOwnerBootstrapIssuer} from '../../lib/windows-owner-bootstrap-protocol.mjs';
 assert.equal(process.platform,'win32');
-const root=resolve(process.env.AGENTOC_INSTANCE_ROOT||''),config=resolve(process.env.AGENTOC_CONFIG_DIR||''),mode=process.argv[2];
-assert.ok(process.env.AGENTOC_TEST_INSTANCE_ID&&relative(root,config)==='config');assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));assert.equal(new URL(process.env.AGENTOC_ACCOUNTS_URL).hostname,'127.0.0.1');
-process.env.AGENTOC_WINDOWS_SERVICE_MODE='1';process.env.AGENTOC_WINDOWS_SERVICE_ROLE='control';process.env.AGENTOC_LOCAL_WEB_AUTH='1';
+const root=resolve(process.env.RAGENT_INSTANCE_ROOT||''),config=resolve(process.env.RAGENT_CONFIG_DIR||''),mode=process.argv[2];
+assert.ok(process.env.RAGENT_TEST_INSTANCE_ID&&relative(root,config)==='config');assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));assert.equal(new URL(process.env.RAGENT_ACCOUNTS_URL).hostname,'127.0.0.1');
+process.env.RAGENT_WINDOWS_SERVICE_MODE='1';process.env.RAGENT_WINDOWS_SERVICE_ROLE='control';process.env.RAGENT_LOCAL_WEB_AUTH='1';
 const runtime=join(config,'native-owner');await mkdir(runtime);
 const old=randomBytes(32).toString('hex');await writeFile(join(config,'auth-sessions.json'),JSON.stringify({[old]:{role:'owner',authMethod:'local_web',expiry:Date.now()+60000}}));
 const life=new URL('../../lib/windows-owner-service.mjs',import.meta.url).href,serverUrl=new URL('../../chat-server.mjs',import.meta.url).href,authUrl=new URL('../../lib/auth.mjs',import.meta.url).href;
@@ -22,7 +22,7 @@ const qa={endpoints:[],inspections:0,drained:false,authClosed:false};globalThis.
 const paths={cli:join(runtime,'cli.json'),browser:join(runtime,'browser.json'),publisher:join(runtime,'publisher.json')};
 qa.inspect=async context=>{assert.equal(resolve(context.instanceRoot),root);assert.equal(context.port,Number(process.env.CHAT_PORT));qa.inspections++;
   const installation={version:1,instanceId:context.instanceId,controlSid:'S-1-5-80-1-2-3-4-5',executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:'S-1-5-21-1-2-3-1001',port:7690};
-  return {releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson:JSON.stringify(installation),
+  return {releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson:JSON.stringify(installation),
     authority:{instanceId:context.instanceId,controlSid:installation.controlSid,ownerSid:installation.ownerSid,ownerSessionId:1,expiresAtUnixMs:Date.now()+(mode==='activation'?1500:15000)}};
 };
 qa.createSet=async options=>{

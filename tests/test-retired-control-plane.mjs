@@ -32,9 +32,9 @@ const RETIRED_PATHS = [
   'scripts/maintenance-control-service.mjs',
   'scripts/rebuild-maintenance-audit-projection.mjs',
   'docs/maintenance-sessions.md',
-  'packaging/deb/agentoc-maintenance-admin',
-  'packaging/deb/agentoc-maintenance-broker.service',
-  'packaging/deb/agentoc-maintenance-control.service',
+  'packaging/deb/ragent-maintenance-admin',
+  'packaging/deb/ragent-maintenance-broker.service',
+  'packaging/deb/ragent-maintenance-control.service',
   'packaging/deb/deferred-maintenance-restart',
   'native/maintenance-peercred.c',
 ];
@@ -42,12 +42,12 @@ const RETIRED_PATHS = [
 const FORBIDDEN_MARKERS = [
   /\bmaintenanceMode\b/i,
   /\/api\/maintenance\b/i,
-  /agentoc-maintenance(?:[-/.]|$)/i,
+  /ragent-maintenance(?:[-/.]|$)/i,
   /maintenance-(?:audit|broker|command|control|lifecycle|peercred|protocol|request|session|status)/i,
   /deferred-maintenance/i,
   /manageMaintenance/i,
   /OWNER_WEBAUTHN_MAINTENANCE/i,
-  /AGENTOC_[A-Z0-9_]*MAINTENANCE[A-Z0-9_]*/i,
+  /RAGENT_[A-Z0-9_]*MAINTENANCE[A-Z0-9_]*/i,
   /\b(?:WebParityPage|SettingsPage)\.Maintenance\b/,
   /settings_maintenance_audit/i,
 ];

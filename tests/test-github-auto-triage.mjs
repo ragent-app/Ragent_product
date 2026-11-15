@@ -7,8 +7,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-github-triage-'));
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-github-triage-'));
+const configDir = join(tempHome, '.config', 'ragent');
 const binDir = join(tempHome, 'bin');
 mkdirSync(configDir, { recursive: true });
 mkdirSync(binDir, { recursive: true });
@@ -131,7 +131,7 @@ chmodSync(ghPath, 0o755);
 const requests = [];
 let submittedRequestId = '';
 let submittedText = '';
-const assistantReply = 'Thanks — the GitHub connector is now routing through AgentoC sessions.';
+const assistantReply = 'Thanks — the GitHub connector is now routing through Ragent sessions.';
 
 const server = http.createServer(async (req, res) => {
   let body = '';
@@ -226,8 +226,8 @@ async function runTriage() {
       cwd: repoRoot,
       env: {
         ...process.env,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
         HOME: tempHome,
         PATH: `${binDir}:${process.env.PATH}`,
         FAKE_GH_STATE: fakeGhStatePath,
@@ -257,7 +257,7 @@ async function runTriage() {
 try {
   await runTriage();
 
-  const triageStatePath = join(tempHome, '.config', 'agentoc', 'github-triage', 'owner__repo.json');
+  const triageStatePath = join(tempHome, '.config', 'ragent', 'github-triage', 'owner__repo.json');
   const triageState = JSON.parse(readFileSync(triageStatePath, 'utf8'));
   assert.equal(triageState.items['7'].automation.status, 'reply_sent');
   assert.equal(triageState.items['7'].automation.sessionId, 'sess_1');
@@ -266,9 +266,9 @@ try {
 
   const ghStateAfterFirstRun = JSON.parse(readFileSync(fakeGhStatePath, 'utf8'));
   assert.equal(ghStateAfterFirstRun.comments.length, 1);
-  assert.match(ghStateAfterFirstRun.comments[0].body, /Thanks — the GitHub connector is now routing through AgentoC sessions\./);
-  assert.match(ghStateAfterFirstRun.comments[0].body, /agentoc-github-auto-triage/);
-  assert.match(ghStateAfterFirstRun.comments[0].body, /agentoc-github-request-id:/);
+  assert.match(ghStateAfterFirstRun.comments[0].body, /Thanks — the GitHub connector is now routing through Ragent sessions\./);
+  assert.match(ghStateAfterFirstRun.comments[0].body, /ragent-github-auto-triage/);
+  assert.match(ghStateAfterFirstRun.comments[0].body, /ragent-github-request-id:/);
 
   await runTriage();
 

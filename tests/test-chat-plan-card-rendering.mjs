@@ -223,7 +223,7 @@ const context = {
   },
   window: {
     setTimeout() {},
-    AgentoCIcons: {
+    RagentIcons: {
       render() {
         return '';
       },
@@ -271,7 +271,7 @@ const didRenderPlan = context.renderMarkdownIntoNode(
     'Before the handoff:',
     '',
     '<proposed_plan>',
-    '# AgentoC UI Plan',
+    '# Ragent UI Plan',
     '',
     '## Summary',
     '',
@@ -287,7 +287,7 @@ assert.equal(planNode.children.length, 3, 'surrounding markdown and plan card sh
 assert.equal(planNode.children[1].className, 'plan-card', 'plan block should become a plan card');
 assert.equal(collectText(planNode).includes('<proposed_plan>'), false, 'raw opening tag should not be visible');
 assert.equal(collectText(planNode).includes('</proposed_plan>'), false, 'raw closing tag should not be visible');
-assert.equal(collectText(planNode).includes('AgentoC UI Plan'), true, 'plan title should be visible');
+assert.equal(collectText(planNode).includes('Ragent UI Plan'), true, 'plan title should be visible');
 assert.equal(collectText(planNode).includes('Make Plan mode clear.'), true, 'plan body should be visible');
 assert.equal(planNode.children[1].children.at(-1).className, 'plan-card__actions', 'plan card should expose an action row');
 assert.equal(planNode.children[1].children.at(-1).children.length, 3, 'plan card should expose copy/revise/execute actions');
@@ -416,14 +416,14 @@ const originalProposalCard = context.renderPlanEventInto(crossRunContainer, {
   planId: 'shared-plan-ui-test',
   runId: 'run-original-plan',
   planIntent: 'proposal',
-  source: 'agentoc-plan-fallback',
+  source: 'ragent-plan-fallback',
 });
 const executingProposalCard = context.renderPlanEventInto(crossRunContainer, {
   ...codexPlan,
   planId: 'shared-plan-ui-test',
   runId: 'run-execute-plan',
   planIntent: 'proposal',
-  source: 'agentoc-plan-action',
+  source: 'ragent-plan-action',
   state: 'executing',
 });
 assert.equal(crossRunContainer.children.length, 1, 'same proposal plan id from an executing run should update the original card');
@@ -435,7 +435,7 @@ const completedProposalCard = context.renderPlanEventInto(crossRunContainer, {
   planId: 'shared-plan-ui-test',
   runId: 'run-execute-plan',
   planIntent: 'proposal',
-  source: 'agentoc-plan-action',
+  source: 'ragent-plan-action',
   state: 'completed',
 });
 assert.equal(crossRunContainer.children.length, 1, 'later proposal updates should not append at the end of the transcript');
@@ -447,7 +447,7 @@ const orphanPlanActionCard = context.renderPlanEventInto(orphanPlanActionContain
   planId: 'orphan-action-plan-ui-test',
   runId: 'run-orphan-action-plan',
   planIntent: 'proposal',
-  source: 'agentoc-plan-action',
+  source: 'ragent-plan-action',
   state: 'completed',
 });
 assert.equal(orphanPlanActionCard, null, 'proposal state updates without an existing anchor should not render as orphan cards');

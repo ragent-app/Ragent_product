@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rebuild missing file-asset descriptor files (<id>.json) for /var/lib/agentoc/config/file-assets.
+// Rebuild missing file-asset descriptor files (<id>.json) for /var/lib/ragent/config/file-assets.
 //
 // The 928 descriptors vanished between 05:04 and 05:14 UTC on 2026-08-05 while the
 // objects/ payload files mostly survived. This tool reconstructs descriptors from:
@@ -17,11 +17,11 @@
 import { readdir, readFile, stat, writeFile, mkdir } from 'fs/promises';
 import { join, basename } from 'path';
 
-const DEFAULT_ROOT = '/var/lib/agentoc/config';
-const DEFAULT_INVENTORY = '/var/lib/agentoc/workspace/storage-inventory/inventory.json';
+const DEFAULT_ROOT = '/var/lib/ragent/config';
+const DEFAULT_INVENTORY = '/var/lib/ragent/workspace/storage-inventory/inventory.json';
 // Legacy instance data dir: holds 90 original descriptors (same asset ids) plus
 // object payloads that were never copied to the new instance objects dir.
-const LEGACY_DIR = '/srv/agentoc-promoted-data/config/file-assets';
+const LEGACY_DIR = '/srv/ragent-promoted-data/config/file-assets';
 
 const MIME_BY_EXT = {
   '.css': 'text/css',

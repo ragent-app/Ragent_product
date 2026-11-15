@@ -8,10 +8,10 @@ import { createServer, request } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
 
-const root = process.env.AGENTOC_RUN_CRASH_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-run-api-crash-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
+const root = process.env.RAGENT_RUN_CRASH_ROOT || await mkdtemp(join(tmpdir(), 'ragent-run-api-crash-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
 const meta = await import('../chat/session-meta-store.mjs');
 const runs = await import('../chat/runs.mjs');
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
@@ -42,7 +42,7 @@ if (mode === 'server') {
     await meta.mutateSessionMeta('crash_session', row => { row.activeRunId = run.id; return true; });
     const context = await meta.readSessionApiContext('crash_session');
     const scope = { version: 1, sessionId: context.sessionId, expectedScopeRevision: context.scopeRevision, expectedProjectId: context.projectId };
-    const env = { ...process.env, AGENTOC_RUN_CRASH_ROOT: root };
+    const env = { ...process.env, RAGENT_RUN_CRASH_ROOT: root };
     const child = fork(import.meta.filename, ['server'], { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
     const signals = []; let wake;
@@ -63,7 +63,7 @@ if (mode === 'server') {
       const received = new Promise(resolve => {
         http = request({ hostname: '127.0.0.1', port: listening.port, path: `/api/sessions/crash_session/app-api-runs/${run.id}/cancel`,
           method: 'POST', headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body),
-            'x-agentoc-app-api-scope': Buffer.from(JSON.stringify(scope)).toString('base64url') } }, response => {
+            'x-ragent-app-api-scope': Buffer.from(JSON.stringify(scope)).toString('base64url') } }, response => {
           response.resume(); resolve({ status: response.statusCode });
         });
         http.on('error', error => resolve({ error: error.code })); http.end(body);

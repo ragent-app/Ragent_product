@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows/svc"
 )
 
-const serviceName = "AgentoC-Broker-QA-Target"
+const serviceName = "Ragent-Broker-QA-Target"
 
 type targetService struct{ name string }
 
@@ -37,7 +37,7 @@ func (s targetService) Execute(args []string, requests <-chan svc.ChangeRequest,
 
 func main() {
 	name := serviceName
-	if len(os.Args) == 3 && os.Args[1] == "--service-name" && regexp.MustCompile(`^AgentoC-QA-Service-[a-f0-9]{32}$`).MatchString(os.Args[2]) {
+	if len(os.Args) == 3 && os.Args[1] == "--service-name" && regexp.MustCompile(`^Ragent-QA-Service-[a-f0-9]{32}$`).MatchString(os.Args[2]) {
 		name = os.Args[2]
 	} else if len(os.Args) != 1 {
 		fmt.Fprintln(os.Stderr, "APB_QA_TARGET_ARGUMENTS_REFUSED")

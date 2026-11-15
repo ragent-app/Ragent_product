@@ -61,8 +61,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-session-confirmation-http-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-session-confirmation-http-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -106,15 +106,15 @@ async function startServer({ home, configDir, localBin, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
+      RAGENT_REPLY_SELF_CHECK: 'off',
       PATH: `${localBin}:${process.env.PATH || ''}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -184,7 +184,7 @@ try {
   assert.equal(create.status, 201, `confirmation create should succeed: ${create.text}`);
   assert.equal(create.json.duplicate, false);
   assert.equal(create.json.confirmation?.type, 'approval_request');
-  assert.equal(create.json.confirmation?.source, 'agentoc-confirmation');
+  assert.equal(create.json.confirmation?.source, 'ragent-confirmation');
   assert.equal(create.json.confirmation?.kind, 'confirmation');
   assert.equal(create.json.confirmation?.confirmLabel, 'Restart');
   assert.equal(create.json.confirmation?.denyLabel, 'Skip');
@@ -212,7 +212,7 @@ try {
   assert.equal(decision.json.duplicate, false);
   assert.equal(decision.json.responseEvent?.type, 'approval_response');
   assert.equal(decision.json.responseEvent?.status, 'denied');
-  assert.equal(decision.json.responseEvent?.source, 'agentoc-confirmation');
+  assert.equal(decision.json.responseEvent?.source, 'ragent-confirmation');
 
   const duplicateDecision = await request(port, 'POST', `/api/sessions/${encodeURIComponent(session.id)}/confirmations/confirm-http`, {
     decision: 'deny',
@@ -224,9 +224,9 @@ try {
   const events = await request(port, 'GET', `/api/sessions/${encodeURIComponent(session.id)}/events?filter=visible`);
   assert.equal(events.status, 200, `visible events should succeed: ${events.text}`);
   const requestEvents = events.json.events.filter((event) =>
-    event.type === 'approval_request' && event.source === 'agentoc-confirmation');
+    event.type === 'approval_request' && event.source === 'ragent-confirmation');
   const responseEvents = events.json.events.filter((event) =>
-    event.type === 'approval_response' && event.source === 'agentoc-confirmation');
+    event.type === 'approval_response' && event.source === 'ragent-confirmation');
   assert.equal(requestEvents.length, 1, 'confirmation request should be stored once');
   assert.equal(responseEvents.length, 1, 'confirmation response should be stored once');
 

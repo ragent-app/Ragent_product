@@ -1,0 +1,102 @@
+#!/bin/bash
+# Ragent.app double-click entry: bootstrap first run, start the local
+# chat server if it is not already running, then open the workbench URL.
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../Resources/ragent-env.sh"
+
+open_manager() {
+  if [ -d "$RAGENT_RESOURCES_DIR/Ragent.app" ]; then
+    open "$RAGENT_RESOURCES_DIR/Ragent.app" --args "--ragent-service-port=$PORT"
+  else
+    open "$BASE_URL"
+  fi
+}
+
+report_start_failure() {
+  local message="$1" log_path=''
+  [ ! -f "$RAGENT_RUN_LOG" ] || log_path="$RAGENT_RUN_LOG"
+  ragent_log "$message${log_path:+; inspect $log_path}" >&2
+  # Finder-launched shell scripts have no visible terminal. Pass text as
+  # arguments rather than embedding paths in AppleScript source.
+  if command -v osascript >/dev/null 2>&1; then
+    osascript - "$message" "$log_path" <<'APPLESCRIPT' >/dev/null 2>&1 || true
+on run argv
+  set detail to item 1 of argv
+  if item 2 of argv is not "" then set detail to detail & return & return & "日志：" & item 2 of argv
+  display alert "Ragent 无法启动" message detail as warning
+end run
+APPLESCRIPT
+  fi
+}
+
+if ! ragent_first_run_bootstrap; then
+  report_start_failure "无法初始化本地配置或凭据。请检查 $(ragent_config_dir) 的文件和访问权限。"
+  exit 1
+fi
+if ! ragent_source_instance_env; then
+  report_start_failure "无法读取本地配置，请检查 $(ragent_config_dir)/instance.env。"
+  exit 1
+fi
+if ! ragent_ensure_runtime_shims; then
+  report_start_failure '应用内的运行组件缺失，请重新安装完整的 Ragent 应用。'
+  exit 1
+fi
+
+# Preserve an explicitly enabled login service when upgrading the app name.
+# Never create a login item on a fresh installation.
+if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ] || [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ]; then
+  if ! "$RAGENT_NODE_BIN" "$RAGENT_RESOURCES_DIR/ragent-login.cjs" migrate \
+    "$RAGENT_RESOURCES_DIR" "$(ragent_config_dir)" "${CHAT_PORT:-7690}"; then
+    report_start_failure '无法安全迁移登录自启动服务。原配置已保留，请检查登录项。'
+    exit 1
+  fi
+fi
+
+PORT="${CHAT_PORT:-7690}"
+BASE_URL="http://127.0.0.1:${PORT}"
+
+mkdir -p "$(dirname "$RAGENT_RUN_LOG")"
+
+if ragent_server_running; then
+  if ragent_server_matches_installed_build; then
+    open_manager
+    exit 0
+  fi
+  report_start_failure '已运行的 Ragent 服务与当前应用版本不一致，或无法确认版本。请先停止旧服务；如果启用了登录自启动，请先停用后再重新启用。'
+  exit 1
+fi
+
+if lsof -ti ":${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+  report_start_failure "端口 ${PORT} 已被其他程序占用。请关闭占用该端口的程序或调整 Ragent 的端口设置。"
+  exit 1
+fi
+
+(
+  # The service log can contain workspace and session details. Protect a new
+  # file from creation and tighten an existing file before opening it.
+  umask 077
+  touch "$RAGENT_RUN_LOG"
+  chmod 600 "$RAGENT_RUN_LOG"
+  exec nohup "$RAGENT_NODE_BIN" "$RAGENT_APP_DIR/chat-server.mjs" >>"$RAGENT_RUN_LOG" 2>&1
+) &
+echo $! > "$RAGENT_PID_FILE"
+
+ready=0
+for _ in $(seq 1 60); do
+  if ragent_server_running && curl -sf -o /dev/null --max-time 1 "$BASE_URL/healthz" 2>/dev/null && ragent_server_matches_installed_build; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "$(cat "$RAGENT_PID_FILE")" 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
+
+if [ "$ready" -ne 1 ]; then
+  report_start_failure '本地服务未能启动，请查看日志了解原因。'
+  exit 1
+fi
+open_manager

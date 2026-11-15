@@ -10,13 +10,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-history-capabilities-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-history-capabilities-'));
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(tempHome, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(tempHome, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'workspace');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const history = await import(
   pathToFileURL(join(repoRoot, 'chat', 'history.mjs')).href

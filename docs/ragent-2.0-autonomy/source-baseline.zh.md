@@ -10,19 +10,19 @@
 
 ```text
 android/app/src/main/AndroidManifest.xml
-android/app/src/main/java/com/andysagent/agentoc/AgentoCApplication.kt
-android/app/src/main/java/com/andysagent/agentoc/MainActivity.kt
-android/app/src/main/java/com/andysagent/agentoc/TargetRuntime.kt
+android/app/src/main/java/com/andysagent/ragent/RagentApplication.kt
+android/app/src/main/java/com/andysagent/ragent/MainActivity.kt
+android/app/src/main/java/com/andysagent/ragent/TargetRuntime.kt
 android/app/src/main/res/values-zh-rCN/strings.xml
 android/app/src/main/res/values/strings.xml
-android/core/auth/src/main/kotlin/com/andysagent/agentoc/core/auth/AccountSessionManager.kt
-android/core/auth/src/main/kotlin/com/andysagent/agentoc/core/auth/AndroidTemporaryEncryptedStore.kt
-android/core/auth/src/main/kotlin/com/andysagent/agentoc/core/auth/PairingAuthenticator.kt
-android/core/datastore/src/main/kotlin/com/andysagent/agentoc/core/datastore/ClientConfigStore.kt
-android/core/network/src/main/kotlin/com/andysagent/agentoc/core/network/OkHttpAgentoCTransport.kt
-android/feature/workbench/src/main/java/com/andysagent/agentoc/feature/workbench/GoogleSignInGuideScreen.kt
-android/feature/workbench/src/main/java/com/andysagent/agentoc/feature/workbench/WelcomeScreen.kt
-android/feature/workbench/src/main/java/com/andysagent/agentoc/feature/workbench/WorkbenchScreen.kt
+android/core/auth/src/main/kotlin/com/andysagent/ragent/core/auth/AccountSessionManager.kt
+android/core/auth/src/main/kotlin/com/andysagent/ragent/core/auth/AndroidTemporaryEncryptedStore.kt
+android/core/auth/src/main/kotlin/com/andysagent/ragent/core/auth/PairingAuthenticator.kt
+android/core/datastore/src/main/kotlin/com/andysagent/ragent/core/datastore/ClientConfigStore.kt
+android/core/network/src/main/kotlin/com/andysagent/ragent/core/network/OkHttpRagentTransport.kt
+android/feature/workbench/src/main/java/com/andysagent/ragent/feature/workbench/GoogleSignInGuideScreen.kt
+android/feature/workbench/src/main/java/com/andysagent/ragent/feature/workbench/WelcomeScreen.kt
+android/feature/workbench/src/main/java/com/andysagent/ragent/feature/workbench/WorkbenchScreen.kt
 android/feature/workbench/src/main/res/values-zh-rCN/strings.xml
 android/feature/workbench/src/main/res/values/strings.xml
 chat-server.mjs
@@ -55,8 +55,8 @@ tests/test-session-api-scope.mjs
 未跟踪：
 
 ```text
-android/app/src/main/java/com/andysagent/agentoc/LocalAccountLink.kt
-android/app/src/main/java/com/andysagent/agentoc/LocalRuntime.kt
+android/app/src/main/java/com/andysagent/ragent/LocalAccountLink.kt
+android/app/src/main/java/com/andysagent/ragent/LocalRuntime.kt
 android/app/src/main/res/xml/network_security_config.xml
 chat/proot-account-link-routes.mjs
 docs/android-proot-account-remote-plan.md

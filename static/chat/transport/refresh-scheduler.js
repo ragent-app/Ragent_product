@@ -39,15 +39,15 @@
 // The scheduler owns no session state: it only coordinates requests. All
 // state application stays in the caller behind its existing guards. Progress
 // counters are exposed for instrumentation via
-// agentocGetRefreshSchedulerMetrics() on the attach root.
+// ragentGetRefreshSchedulerMetrics() on the attach root.
 //
 // Platform probes are injected: tab visibility and AbortController come from
-// the environment contract (root.AgentocRefreshSchedulerEnvironment), so this
+// the environment contract (root.RagentRefreshSchedulerEnvironment), so this
 // module stays free of browser globals and runs identically in Node. Locked
 // against the legacy implementation by
 // tests/test-chat-refresh-scheduler-core.mjs.
 
-(function attachAgentocRefreshSchedulerCore(root) {
+(function attachRagentRefreshSchedulerCore(root) {
   const REFRESH_SCHEDULER_METRICS_SAMPLE_LIMIT = 40;
 
   const refreshRequestRegistry = new Map();
@@ -64,15 +64,15 @@
     nowMs: () => (typeof Date !== "undefined" && typeof Date.now === "function" ? Date.now() : 0),
   });
   const environment = new Proxy(
-    root.AgentocRefreshSchedulerEnvironment || {},
+    root.RagentRefreshSchedulerEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
   );
 
   function ensureRefreshSchedulerMetricsStore() {
-    if (!root.__agentocRefreshSchedulerMetrics || typeof root.__agentocRefreshSchedulerMetrics !== "object") {
-      root.__agentocRefreshSchedulerMetrics = {
+    if (!root.__ragentRefreshSchedulerMetrics || typeof root.__ragentRefreshSchedulerMetrics !== "object") {
+      root.__ragentRefreshSchedulerMetrics = {
         startedAt: new Date().toISOString(),
         totals: {
           started: 0,
@@ -88,13 +88,13 @@
         samples: [],
       };
     }
-    if (typeof root.agentocGetRefreshSchedulerMetrics !== "function") {
-      root.agentocGetRefreshSchedulerMetrics = () => {
-        const snapshot = root.__agentocRefreshSchedulerMetrics || {};
+    if (typeof root.ragentGetRefreshSchedulerMetrics !== "function") {
+      root.ragentGetRefreshSchedulerMetrics = () => {
+        const snapshot = root.__ragentRefreshSchedulerMetrics || {};
         return JSON.parse(JSON.stringify(snapshot));
       };
     }
-    return root.__agentocRefreshSchedulerMetrics;
+    return root.__ragentRefreshSchedulerMetrics;
   }
 
   function recordRefreshSchedulerMetric(sample = {}) {
@@ -344,7 +344,7 @@
     return abortedCount;
   }
 
-  root.AgentocRefreshSchedulerCore = {
+  root.RagentRefreshSchedulerCore = {
     ensureRefreshSchedulerMetricsStore,
     recordRefreshSchedulerMetric,
     isRefreshTabHidden,

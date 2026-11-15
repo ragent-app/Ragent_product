@@ -371,7 +371,7 @@ export function setApiRequestCorrelation(values = {}) {
 
 // Error handlers run inside the same AsyncLocalStorage scope as the request.
 // Expose the generated correlation id so structured error responses can carry
-// it even when the caller did not provide X-AgentoC-Request-Id.
+// it even when the caller did not provide X-Ragent-Request-Id.
 export function getApiRequestCorrelation() {
   const context = requestContext.getStore();
   return context?.correlation && typeof context.correlation === 'object'
@@ -412,7 +412,7 @@ export function startApiRequestLog(req, res) {
   const startedAt = new Date();
   const startedHr = process.hrtime.bigint();
   const bodyBytes = requestBytes(req);
-  const suppliedRequestId = sanitizeCorrelationValue(req.headers?.['x-agentoc-request-id']);
+  const suppliedRequestId = sanitizeCorrelationValue(req.headers?.['x-ragent-request-id']);
   const requestId = suppliedRequestId || `http-${process.pid}-${requestSeq}`;
 
   let responseBytes = 0;
@@ -426,7 +426,7 @@ export function startApiRequestLog(req, res) {
 
   // Echo the correlation id so a failed session load can be located directly
   // in the API log without exposing request payloads or cookies.
-  if (!res.headersSent) res.setHeader('X-AgentoC-Request-Id', requestId);
+  if (!res.headersSent) res.setHeader('X-Ragent-Request-Id', requestId);
 
   const originalWriteHead = res.writeHead.bind(res);
   const originalWrite = res.write.bind(res);

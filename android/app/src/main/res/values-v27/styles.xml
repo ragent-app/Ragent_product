@@ -1,10 +1,10 @@
 <resources>
     <!-- Navigation-bar icon appearance was added in API 27. Keep the full splash
          style in this qualified resource so API 26 never resolves the newer attr. -->
-    <style name="Theme.Agentoc.Splash" parent="Theme.SplashScreen">
+    <style name="Theme.Ragent.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_symbol</item>
-        <item name="postSplashScreenTheme">@style/Theme.Agentoc</item>
+        <item name="postSplashScreenTheme">@style/Theme.Ragent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
     </style>

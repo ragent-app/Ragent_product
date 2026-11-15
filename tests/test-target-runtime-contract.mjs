@@ -231,7 +231,7 @@ const controlRoutesSource = readFileSync(new URL('../chat/router-control-routes.
 assert.match(controlRoutesSource, /\/api\/target-runtime\/context/);
 assert.match(controlRoutesSource, /createLocalTargetRuntimeContext/);
 
-const routeTestRoot = await mkdtemp(join(tmpdir(), 'agentoc-target-runtime-route-'));
+const routeTestRoot = await mkdtemp(join(tmpdir(), 'ragent-target-runtime-route-'));
 const routeConfigDir = join(routeTestRoot, 'config');
 await mkdir(routeConfigDir, { recursive: true });
 await writeFile(join(routeConfigDir, 'auth.json'), JSON.stringify({
@@ -239,8 +239,8 @@ await writeFile(join(routeConfigDir, 'auth.json'), JSON.stringify({
   passwordHash: 'not-a-real-hash',
 }), 'utf8');
 process.env.HOME = routeTestRoot;
-process.env.AGENTOC_CONFIG_DIR = routeConfigDir;
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = routeConfigDir;
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 try {
   const { handleControlRoutes } = await import('../chat/router-control-routes.mjs');

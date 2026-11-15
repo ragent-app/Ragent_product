@@ -21,7 +21,7 @@ const report={pass:false,caseId:spec.caseId,servicesCreated:false,productionChan
 try{
   const self=await native('facts');assert.equal(self.code,0);assert.equal(self.event.facts.sid,spec.requestorSid);assert.equal(self.event.facts.sessionId,spec.ownerSessionId);
   assert.equal(self.event.facts.integrityRid,8192);assert.equal(self.event.facts.elevated,false);assert.equal(self.event.facts.enabledAdministrators,false);report.ordinaryIdentity=self.event.facts;
-  const policy={pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,
+  const policy={pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,
     controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:spec.requestorSid,ownerSessionId:spec.ownerSessionId};
   for(const [name,mode,input,expected] of [
     ['unknown-mode','shell',undefined,'OBC_MODE_INVALID'],

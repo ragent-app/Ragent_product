@@ -1,4 +1,4 @@
-// Translate the stable external-harness event vocabulary into AgentoC's
+// Translate the stable external-harness event vocabulary into Ragent's
 // existing normalized event vocabulary. The bridge is deliberately stateless:
 // lifecycle ownership, persistence, approvals and terminal Run transitions
 // remain with the control plane.
@@ -64,7 +64,7 @@ function numberFields(data, keys) {
 
 /**
  * Convert one Harness Adapter Contract event into zero or one existing
- * normalized AgentoC event. Unknown/empty events are ignored intentionally;
+ * normalized Ragent event. Unknown/empty events are ignored intentionally;
  * the adapter contract validator handles declaration errors separately.
  */
 export function bridgeHarnessEvent(event, context = {}) {

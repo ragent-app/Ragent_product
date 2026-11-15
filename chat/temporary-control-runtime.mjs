@@ -18,7 +18,7 @@ let servicePromise;
 export async function getTemporaryControlRegistry() {
   // Enable explicitly for private QA. Public availability requires the
   // separately recorded task/expiry/revoke/file acceptance gates.
-  if (process.env.AGENTOC_TEMPORARY_PAIRING_ENABLED !== '1') {
+  if (process.env.RAGENT_TEMPORARY_PAIRING_ENABLED !== '1') {
     throw temporaryPairingError('temporary_host_disabled', 503);
   }
   if (!registryPromise) {
@@ -53,7 +53,7 @@ export async function getTemporaryControlService() {
       const host = await getTemporaryControlHost();
       const { ACCOUNTS_URL, TURN_BROKER_URL, P2P_SIGNALING_URL } = await import('../lib/config.mjs');
       const client = createTemporaryControlClient({ baseUrl: ACCOUNTS_URL, identity: registry.identity,
-        allowInsecure: process.env.AGENTOC_ALLOW_INSECURE_ACCOUNTS_URL === '1' });
+        allowInsecure: process.env.RAGENT_ALLOW_INSECURE_ACCOUNTS_URL === '1' });
       let connectionService = null;
       if (TURN_BROKER_URL && P2P_SIGNALING_URL) {
         const { TemporaryControlConnectionService } = await import('./temporary-control-connection-service.mjs');
@@ -92,7 +92,7 @@ export async function getTemporaryControlCarrierIngress(carrierDevice) {
   return createTemporaryControlCarrierIngress({
       carrierDevice: Object.freeze({ ...carrierDevice }),
       authenticate: async ({ req, route }) => {
-        if (req.headers.cookie || req.headers['x-agentoc-browser-principal'] || req.headers['x-agentoc-target-grant']) {
+        if (req.headers.cookie || req.headers['x-ragent-browser-principal'] || req.headers['x-ragent-target-grant']) {
           throw temporaryPairingError('temporary_control_credential_mixed', 401);
         }
         const match = /^DPoP ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(String(req.headers.authorization || ''));

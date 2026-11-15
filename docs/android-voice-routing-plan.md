@@ -98,7 +98,7 @@ Windows 语音路由接收 Android 录好的 WAV 并直接交给 Whisper；Windo
 - **升级时已经安装 Whisper**：保留文件和服务偏好。用户此前关闭服务时，升级或重启不得擅自重新启用。
 - **服务运行期间**：Ragent 只在 Whisper 已安装且启用时运行识别服务。启用状态随 Ragent 启动；关闭时停止服务但保留文件。用户可从 Windows Ragent 设置或 Android 分别管理对应电脑的开关。
 
-默认把运行时、模型和安装暂存放在 Ragent 受保护的本地配置目录。Windows 管理员可以通过 `HKLM\Software\AgentoC\LocalVoiceSettings\RuntimeDirectory` 指定另一块本地磁盘；目录仅允许 Ragent ControlPlane 服务身份、SYSTEM 和管理员写入。用户语音偏好保存在独立的受保护配置目录。
+默认把运行时、模型和安装暂存放在 Ragent 受保护的本地配置目录。Windows 管理员可以通过 `HKLM\Software\Ragent\LocalVoiceSettings\RuntimeDirectory` 指定另一块本地磁盘；目录仅允许 Ragent ControlPlane 服务身份、SYSTEM 和管理员写入。用户语音偏好保存在独立的受保护配置目录。
 
 ## 音频路径、接口与安全边界
 

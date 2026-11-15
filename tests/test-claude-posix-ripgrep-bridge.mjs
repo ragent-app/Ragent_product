@@ -6,7 +6,7 @@ import path from 'node:path';
 
 if (process.platform === 'win32') { console.log('claude-posix-ripgrep: skipped on Windows'); process.exit(0); }
 if (spawnSync('rg', ['--version'], { stdio: 'ignore' }).status !== 0) { console.log('claude-posix-ripgrep: skipped (ripgrep unavailable)'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-posix-rg-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-posix-rg-'));
 const workspace = path.join(root, 'workspace'); const outside = path.join(root, 'outside'); const protectedRoot = path.join(root, 'protected');
 await mkdir(workspace); await mkdir(outside); await mkdir(protectedRoot);
 await writeFile(path.join(outside, 'readme.txt'), 'SEARCH_TOKEN=public\n');
@@ -14,12 +14,12 @@ await writeFile(path.join(outside, '.hidden.txt'), 'SEARCH_TOKEN=hidden-public\n
 await writeFile(path.join(outside, '.env'), 'SEARCH_TOKEN=private\n');
 await writeFile(path.join(outside, '.ignore'), '!.env\n');
 await writeFile(path.join(root, 'rg-config'), '--hidden\n');
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
 const { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');

@@ -15,7 +15,7 @@ const peers = {};
 try {
   for (const role of ['host', 'mobile']) {
     const child = spawn(binary, [], { env: { ...process.env, RAGENT_P2P_PROVIDER_SYNC: '1', RAGENT_P2P_PROVIDER_ROLE: role,
-      AGENTOC_P2P_ICE_SERVERS_JSON: JSON.stringify([{ urls: ['stun:127.0.0.1:9'] }]) }, stdio: ['pipe', 'pipe', 'pipe'] });
+      RAGENT_P2P_ICE_SERVERS_JSON: JSON.stringify([{ urls: ['stun:127.0.0.1:9'] }]) }, stdio: ['pipe', 'pipe', 'pipe'] });
     children.push(child); peers[role] = child;
     child.stderr.resume();
     child.on('error', rejectFinished);

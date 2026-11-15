@@ -12,8 +12,8 @@ import { chromium } from '@playwright/test';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 const outputDir = String(
-  process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || '/var/lib/agentoc/workspace/visual-ui-reviews/2026-08-08-keyboard-message-follow-after',
+  process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || '/var/lib/ragent/workspace/visual-ui-reviews/2026-08-08-keyboard-message-follow-after',
 ).trim();
 mkdirSync(outputDir, { recursive: true });
 
@@ -105,7 +105,7 @@ try {
   });
   await page.addScriptTag({ content: layoutSource });
   await page.evaluate(() => {
-    window.AgentoCLayout.syncNow('initial');
+    window.RagentLayout.syncNow('initial');
     window.messagesEl.scrollTop = window.messagesEl.scrollHeight;
     window.__scrollToBottomCalls = 0;
     window.__snapshotSticky = true;
@@ -117,7 +117,7 @@ try {
     // the shortened visual viewport.
     window.messagesEl.scrollTop = 0;
     window.setSyntheticVisualHeight(460);
-    window.AgentoCLayout.syncNow('visual-viewport-resize');
+    window.RagentLayout.syncNow('visual-viewport-resize');
   });
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.screenshot({ path: join(outputDir, 'keyboard-open-message-follow.png') });

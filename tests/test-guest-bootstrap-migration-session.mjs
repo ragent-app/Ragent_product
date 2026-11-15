@@ -8,8 +8,8 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 
-const sandboxHome = mkdtempSync(join(tmpdir(), 'agentoc-guest-bootstrap-'));
-const instanceRoot = join(sandboxHome, '.agentoc', 'instances', 'trial-migrate');
+const sandboxHome = mkdtempSync(join(tmpdir(), 'ragent-guest-bootstrap-'));
+const instanceRoot = join(sandboxHome, '.ragent', 'instances', 'trial-migrate');
 const configDir = join(instanceRoot, 'config');
 const memoryDir = join(instanceRoot, 'memory');
 const localBin = join(sandboxHome, '.local', 'bin');
@@ -51,10 +51,10 @@ writeFileSync(join(localBin, 'fake-codex'), '#!/usr/bin/env bash\nexit 0\n', 'ut
 chmodSync(join(localBin, 'fake-codex'), 0o755);
 
 process.env.HOME = sandboxHome;
-process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
+process.env.RAGENT_INSTANCE_ROOT = instanceRoot;
 process.env.CHAT_PORT = '43123';
-process.env.AGENTOC_BRIDGE_BASE_URL = '';
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
+process.env.RAGENT_BRIDGE_BASE_URL = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
 process.chdir(repoRoot);
 
 try {

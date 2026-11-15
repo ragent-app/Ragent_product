@@ -19,7 +19,7 @@ import {
 import {
   createWindowsRuntimeFactsProvider,
 } from './windows-runtime-facts-provider.mjs';
-import { computeSelfProtectionFacts, deriveAgentoCSelfProtectionRoots } from './self-protection.mjs';
+import { computeSelfProtectionFacts, deriveRagentSelfProtectionRoots } from './self-protection.mjs';
 import { systemPathRootsForPlatform } from './risk-policy.mjs';
 import { validateWindowsSelectedInstallerFacts } from './windows-winget-installer-facts.mjs';
 import { createWindowsPrivilegedBrokerClient } from './windows-privileged-broker.mjs';
@@ -265,7 +265,7 @@ async function resolveFilesystem(target, caller, options, provider) {
     : outside ? 'outside_project' : (target.recursive ? 'project' : 'project');
   const selfProtection = computeSelfProtectionFacts({
     canonicalPaths: [resolved.canonical],
-    protectedRoots: options.selfProtectionRoots || deriveAgentoCSelfProtectionRoots({ platform: 'win32' }),
+    protectedRoots: options.selfProtectionRoots || deriveRagentSelfProtectionRoots({ platform: 'win32' }),
     workspaceRoot: trusted.workspaceRoot || trusted.projectRoot || '',
     platform: 'win32',
   });
@@ -403,7 +403,7 @@ async function resolveAcl(target, caller, options, provider) {
 
 export function createDefaultWindowsFactsProvider({
   platform = process.platform,
-  serviceMode = process.env.AGENTOC_WINDOWS_SERVICE_MODE === '1',
+  serviceMode = process.env.RAGENT_WINDOWS_SERVICE_MODE === '1',
   createProvider = createWindowsRuntimeFactsProvider,
   broker = createWindowsPrivilegedBrokerClient(),
 } = {}) {

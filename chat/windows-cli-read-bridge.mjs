@@ -42,17 +42,17 @@ export async function buildWindowsCliAssetBridge({ approval, state, helperPath, 
       typeof input.command !== 'string' || input.command.length > 8192 || /[\r\n\0]/.test(input.command)) return null;
   let rawBody;
   if (params.tool_name === 'PowerShell') {
-    const match = /^\s*(?:agentoc(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+("?)\/api\/sessions\/\$env:(?:AGENTOC|RAGENT)_SESSION_ID\/assets\1\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
+    const match = /^\s*(?:ragent(?:\.cmd)?|ragent(?:\.cmd)?|node(?:\.exe)?\s+"\$env:(?:RAGENT|RAGENT)_PROJECT_ROOT[\\/]cli\.js")\s+api\s+POST\s+("?)\/api\/sessions\/\$env:(?:RAGENT|RAGENT)_SESSION_ID\/assets\1\s+--body\s+'((?:[^']|'')*)'\s*$/i.exec(input.command);
     if (!match) return null;
     rawBody = match[2].replaceAll("''", "'");
   } else {
-    const sessionRoute = /(?:"\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets"|\/api\/sessions\/(?:\$(?:AGENTOC|RAGENT)_SESSION_ID|\$\{(?:AGENTOC|RAGENT)_SESSION_ID\})\/assets)(?=\s|$)/;
+    const sessionRoute = /(?:"\/api\/sessions\/(?:\$(?:RAGENT|RAGENT)_SESSION_ID|\$\{(?:RAGENT|RAGENT)_SESSION_ID\})\/assets"|\/api\/sessions\/(?:\$(?:RAGENT|RAGENT)_SESSION_ID|\$\{(?:RAGENT|RAGENT)_SESSION_ID\})\/assets)(?=\s|$)/;
     if (!sessionRoute.test(input.command)) return null;
     const command = input.command.replace(/^\s*MSYS_NO_PATHCONV=1\s+/, '')
-      .replace(/^\s*node(?:\.exe)?\s+"(?:\$(?:AGENTOC|RAGENT)_PROJECT_ROOT|\$\{(?:AGENTOC|RAGENT)_PROJECT_ROOT\})\/cli\.js"\s+/, 'agentoc ')
+      .replace(/^\s*node(?:\.exe)?\s+"(?:\$(?:RAGENT|RAGENT)_PROJECT_ROOT|\$\{(?:RAGENT|RAGENT)_PROJECT_ROOT\})\/cli\.js"\s+/, 'ragent ')
       .replace(sessionRoute, "'__SESSION_ASSETS__'");
     const words = parseLiteralBashWords(command);
-    if (!words || words.length !== 6 || !['agentoc', 'ragent'].includes(words[0]) || words[1] !== 'api' || words[2] !== 'POST' ||
+    if (!words || words.length !== 6 || !['ragent', 'ragent'].includes(words[0]) || words[1] !== 'api' || words[2] !== 'POST' ||
         words[3] !== '__SESSION_ASSETS__' || words[4] !== '--body') return null;
     rawBody = words[5];
   }
@@ -96,7 +96,7 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   if (typeof command !== 'string' || command.length > 8192) return null;
   if (params.tool_name === 'Bash') {
     const words = parseLiteralBashWords(command);
-    const recognized = words && ['agentoc', 'ragent'].includes(words[0]);
+    const recognized = words && ['ragent', 'ragent'].includes(words[0]);
     const args = recognized ? staticTriggerCreate(words) : null;
     const read = recognized && words[1] === 'trigger' && (words.length === 3 && ['--help', '-h'].includes(words[2]) || words[2] === 'list' && (words.length === 3 || words.length === 4 && ['--json', '--help', '-h'].includes(words[3])));
     let binary; try { binary = (args || read) && await inspect(helperPath); } catch { return null; }
@@ -114,7 +114,7 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   // The documented fallback uses only these two Run-provided environment
   // variables. Replace the whole command with the fixed helper; do not pass
   // shell text or environment-derived paths to the helper.
-  const fallback = /^\s*node(?:\.exe)?\s+"\$env:(?:AGENTOC|RAGENT)_PROJECT_ROOT[\\/]cli\.js"\s+trigger\s+list(?:\s+--(?:session|source-session)\s+(?:\$env:(?:AGENTOC|RAGENT)_SESSION_ID|"\$env:(?:AGENTOC|RAGENT)_SESSION_ID"))?(?:\s+(--json|--help))?\s*(?:2\s*>\s*&\s*1\s*)?(?:\|\s*Out-String\s*)?$/i.exec(command);
+  const fallback = /^\s*node(?:\.exe)?\s+"\$env:(?:RAGENT|RAGENT)_PROJECT_ROOT[\\/]cli\.js"\s+trigger\s+list(?:\s+--(?:session|source-session)\s+(?:\$env:(?:RAGENT|RAGENT)_SESSION_ID|"\$env:(?:RAGENT|RAGENT)_SESSION_ID"))?(?:\s+(--json|--help))?\s*(?:2\s*>\s*&\s*1\s*)?(?:\|\s*Out-String\s*)?$/i.exec(command);
   let ast, binary;
   try { [ast, binary] = await Promise.all([parse(command), inspect(helperPath)]); } catch { return null; }
   if (!binary?.isFile() || binary.isSymbolicLink() || ast.errors.length || (!fallback && ast.dynamicNodes.length) ||
@@ -122,12 +122,12 @@ export async function buildWindowsCliReadBridge({ approval, state, helperPath, p
   const first = ast.commands[0];
   const originalWords = first.elements.map(element => element.kind === 'literal' ? String(element.value) : element.kind === 'parameter' && String(element.name).toLowerCase() === 'h' && !element.argumentType && element.value == null ? '-h' : null);
   const words = originalWords.map(value => value?.toLowerCase() ?? null);
-  const triggerCreate = !fallback && ['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0])
+  const triggerCreate = !fallback && ['ragent', 'ragent.cmd', 'ragent', 'ragent.cmd'].includes(words[0])
     && originalWords.every(value => value !== null) ? staticTriggerCreate(originalWords) : null;
-  const triggerHelp = !fallback && ['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) && words[1] === 'trigger' &&
+  const triggerHelp = !fallback && ['ragent', 'ragent.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) && words[1] === 'trigger' &&
     (words.length === 3 && ['--help', '-h'].includes(words[2]) || words.length === 4 && words[2] === 'list' && ['--help', '-h'].includes(words[3]));
   if (!['unknown', 'ampersand'].includes(String(first.invocation).toLowerCase()) || first.pipelineInput ||
-      (!fallback && !triggerCreate && !triggerHelp && (!['agentoc', 'agentoc.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) || words[1] !== 'trigger' || words[2] !== 'list' ||
+      (!fallback && !triggerCreate && !triggerHelp && (!['ragent', 'ragent.cmd', 'ragent', 'ragent.cmd'].includes(words[0]) || words[1] !== 'trigger' || words[2] !== 'list' ||
       ![3, 4].includes(words.length) || (words.length === 4 && words[3] !== '--json'))) ||
       (fallback && (!['node', 'node.exe'].includes(words[0]) || ast.dynamicNodes.some(node => !['VariableExpressionAst', 'ExpandableStringExpressionAst'].includes(node)))) ||
       first.redirections > 1 || first.redirectFacts?.length !== first.redirections ||

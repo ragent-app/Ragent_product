@@ -99,7 +99,7 @@ try {
     const requestId = "req-test-dock-1";
     insertComposerLocalEcho({
       requestId,
-      text: "How does the docking and auto-scroll threshold work in AgentoC?",
+      text: "How does the docking and auto-scroll threshold work in Ragent?",
       sessionId: "session_dock_test",
       scroll: true,
     });

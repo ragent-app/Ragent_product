@@ -58,8 +58,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-session-patch-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-session-patch-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -83,12 +83,12 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       // Without a secret, lib/auth.mjs refuses to load auth-sessions.json and
       // every cookie-authenticated request 401s (invisible in clean CI but
       // fatal when the suite runs inside a live agent session).
-      AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-http-session-patch",
+      RAGENT_AUTH_SESSION_SECRET: "test-secret-ragent-http-session-patch",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',

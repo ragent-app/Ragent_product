@@ -1,6 +1,6 @@
 "use strict";
 
-// AgentoCDecisions — a tiny pub/sub store for the active session's pending
+// RagentDecisions — a tiny pub/sub store for the active session's pending
 // runtime approval. Mirrors the run-activity-ui.js pattern (subscribe with an
 // immediate first call, notify on change, return-unsubscribe). The store itself
 // has no UI dependencies; the Decision Sheet VIEW (decision-sheet.js) subscribes.
@@ -279,7 +279,7 @@
     notify();
   }
 
-  // HTTP 200/202 means the owner decision was accepted by AgentoC, not that
+  // HTTP 200/202 means the owner decision was accepted by Ragent, not that
   // the provider has finished applying it. Clear the interactive surface now
   // and retain a bounded tombstone so a delayed approval_request replay cannot
   // reopen the sheet before the authoritative approval_response arrives.
@@ -555,7 +555,7 @@
     return () => actionSubscribers.delete(subscriber);
   }
 
-  root.AgentoCDecisions = Object.freeze({
+  root.RagentDecisions = Object.freeze({
     subscribe,
     subscribeBatch,
     noteRequest,

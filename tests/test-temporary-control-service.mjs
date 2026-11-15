@@ -13,7 +13,7 @@ import { buildTemporaryControlClaimMessage, temporaryControlInvitationDigest } f
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 
 test('control service registers, imports a claimed phone, confirms it, and publishes only the confirmed credential', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-control-service-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-control-service-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let now = 1_800_000_000_000;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

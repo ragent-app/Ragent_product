@@ -1,12 +1,12 @@
 "use strict";
 
-const buildInfo = window.__AGENTOC_BUILD__ || {};
+const buildInfo = window.__RAGENT_BUILD__ || {};
 const pageBootstrap =
-  window.__AGENTOC_BOOTSTRAP__ && typeof window.__AGENTOC_BOOTSTRAP__ === "object"
-    ? window.__AGENTOC_BOOTSTRAP__
+  window.__RAGENT_BOOTSTRAP__ && typeof window.__RAGENT_BOOTSTRAP__ === "object"
+    ? window.__RAGENT_BOOTSTRAP__
     : {};
 const buildAssetVersion = buildInfo.assetVersion || "dev";
-const bootstrapT = window.agentocT || ((key) => key);
+const bootstrapT = window.ragentT || ((key) => key);
 
 function normalizeBootstrapText(value) {
   if (typeof value !== "string") return "";
@@ -196,7 +196,7 @@ function syncComposerMenuPortal(menu, trigger, open, options = {}) {
   window.requestAnimationFrame?.(reposition);
 }
 
-window.AgentoCComposerMenuPortal = Object.freeze({
+window.RagentComposerMenuPortal = Object.freeze({
   position: positionComposerPortaledMenu,
   sync: syncComposerMenuPortal,
 });
@@ -341,13 +341,13 @@ function normalizeBootstrapAssetUploads(raw) {
 const bootstrapAssetUploads = normalizeBootstrapAssetUploads(pageBootstrap.assetUploads);
 
 const bootstrapDefaultSessionFolder = normalizeBootstrapText(pageBootstrap.defaultSessionFolder) || "~";
-window.agentocGetDefaultSessionFolder = function agentocGetDefaultSessionFolder() {
+window.ragentGetDefaultSessionFolder = function ragentGetDefaultSessionFolder() {
   return bootstrapDefaultSessionFolder || "~";
 };
-window.agentocGetSelectedSessionFolder = function agentocGetSelectedSessionFolder() {
+window.ragentGetSelectedSessionFolder = function ragentGetSelectedSessionFolder() {
   return bootstrapDefaultSessionFolder || "~";
 };
-window.agentocSetSelectedSessionFolder = function agentocSetSelectedSessionFolder(folder) {
+window.ragentSetSelectedSessionFolder = function ragentSetSelectedSessionFolder(folder) {
   return normalizeBootstrapText(folder) || bootstrapDefaultSessionFolder || "~";
 };
 
@@ -408,7 +408,7 @@ function normalizeBootstrapShareSnapshot(rawPayload, rawMeta = null) {
 }
 
 const bootstrapShareSnapshot = normalizeBootstrapShareSnapshot(
-  window.__AGENTOC_SHARE__,
+  window.__RAGENT_SHARE__,
   pageBootstrap.shareSnapshot,
 );
 
@@ -434,7 +434,7 @@ function getBootstrapAssetUploads() {
 }
 
 console.info(
-  "AgentoC build",
+  "Ragent build",
   buildInfo.title || buildInfo.serviceTitle || buildAssetVersion,
 );
 
@@ -447,7 +447,7 @@ async function clearFrontendCaches() {
     () => null,
   );
   if (!registration) return;
-  const message = { type: "agentoc:clear-caches" };
+  const message = { type: "ragent:clear-caches" };
   registration.installing?.postMessage(message);
   registration.waiting?.postMessage(message);
   registration.active?.postMessage(message);
@@ -491,7 +491,7 @@ async function reloadForFreshBuild(nextBuildInfo) {
   buildRefreshScheduled = true;
   refreshFrontendBtn?.setAttribute("aria-busy", "true");
   console.info(
-    "AgentoC frontend updated; reloading",
+    "Ragent frontend updated; reloading",
     nextBuildInfo?.title ||
       newerBuildInfo?.title ||
       nextBuildInfo?.assetVersion ||
@@ -522,7 +522,7 @@ async function applyBuildInfo(nextBuildInfo) {
   return false;
 }
 
-window.AgentoCBuild = {
+window.RagentBuild = {
   applyBuildInfo,
   reloadForFreshBuild,
 };
@@ -725,7 +725,7 @@ function normalizeSidebarShellMarkup() {
   legacySearch?.remove?.();
   sidebarElement.prepend(appBar, searchHeader, subpageHeader, primaryNav, sessionSurface);
   sidebarElement.append(bottomFrost, bottomActions, accountPopover);
-  window.AgentoCIcons?.hydrate?.(sidebarElement);
+  window.RagentIcons?.hydrate?.(sidebarElement);
   return true;
 }
 
@@ -932,8 +932,8 @@ function syncHeaderOverflowMenu() {
     headerOverflowOpen && !headerMoreBtn.hidden ? "true" : "false",
   );
   const shouldShowMenu = headerOverflowOpen && !headerMoreBtn.hidden;
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(headerOverflowMenu, shouldShowMenu, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(headerOverflowMenu, shouldShowMenu, {
       duration: 160,
     });
   } else {
@@ -976,7 +976,7 @@ function closeMobileDisclosures() {
 
 function syncHeaderOverflowBackEntry(open) {
   if (open) {
-    headerOverflowBackEntryId = window.AgentoCBackHandler?.push?.({
+    headerOverflowBackEntryId = window.RagentBackHandler?.push?.({
       id: "header-overflow",
       onBack: () => {
         setHeaderOverflowOpen(false);
@@ -984,14 +984,14 @@ function syncHeaderOverflowBackEntry(open) {
       },
     }) || null;
   } else if (headerOverflowBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(headerOverflowBackEntryId);
+    window.RagentBackHandler?.pop?.(headerOverflowBackEntryId);
     headerOverflowBackEntryId = null;
   }
 }
 
 function syncComposerControlsBackEntry(open) {
   if (open) {
-    composerControlsBackEntryId = window.AgentoCBackHandler?.push?.({
+    composerControlsBackEntryId = window.RagentBackHandler?.push?.({
       id: "composer-controls",
       onBack: () => {
         setComposerControlsOpen(false);
@@ -999,7 +999,7 @@ function syncComposerControlsBackEntry(open) {
       },
     }) || null;
   } else if (composerControlsBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(composerControlsBackEntryId);
+    window.RagentBackHandler?.pop?.(composerControlsBackEntryId);
     composerControlsBackEntryId = null;
   }
 }
@@ -1100,8 +1100,8 @@ function getHeaderCurrentSession() {
 headerOverflowRenameBtn?.addEventListener("click", () => {
   setHeaderOverflowOpen(false);
   const session = getHeaderCurrentSession();
-  if (session && typeof window.agentocOpenSessionRename === "function") {
-    window.agentocOpenSessionRename(session);
+  if (session && typeof window.ragentOpenSessionRename === "function") {
+    window.ragentOpenSessionRename(session);
   }
 });
 
@@ -1132,8 +1132,8 @@ headerOverflowDropToolsBtn?.addEventListener("click", () => {
 headerOverflowDeleteBtn?.addEventListener("click", () => {
   setHeaderOverflowOpen(false);
   const session = getHeaderCurrentSession();
-  if (session && typeof window.agentocOpenSessionDelete === "function") {
-    window.agentocOpenSessionDelete(session);
+  if (session && typeof window.ragentOpenSessionDelete === "function") {
+    window.ragentOpenSessionDelete(session);
   }
 });
 
@@ -1223,7 +1223,7 @@ const ACTIVE_SIDEBAR_TAB_STORAGE_KEY = "activeSidebarTab";
 const LEGACY_SESSION_SEND_FAILURES_STORAGE_KEY = "sessionSendFailures";
 const SESSION_REVIEW_MARKERS_STORAGE_KEY = "sessionReviewedAtById";
 const SESSION_REVIEW_BASELINE_AT_STORAGE_KEY = "sessionReviewBaselineAt";
-const UI_THEME_STORAGE_KEY = "agentoc.theme";
+const UI_THEME_STORAGE_KEY = "ragent.theme";
 // Source filtering was removed from the sidebar UI (the funnel button now opens
 // Settings). Sessions always render unfiltered; FILTER_* constants remain for
 // the store model and list rendering which still key off the "all" value.
@@ -1280,9 +1280,9 @@ const UI_THEMES = {
   },
 };
 let monetThemeColorOverrides = null;
-const monetThemeContract = window.AgentoCMonetThemeContract;
+const monetThemeContract = window.RagentMonetThemeContract;
 if (!monetThemeContract) {
-  throw new Error("AgentoCMonetThemeContract must load before bootstrap.js");
+  throw new Error("RagentMonetThemeContract must load before bootstrap.js");
 }
 
 function applyMonetTheme(rawTheme) {
@@ -1293,9 +1293,9 @@ function applyMonetTheme(rawTheme) {
 }
 
 function requestAndroidMonetTheme() {
-  const bridge = window.AgentocAndroidMonet;
+  const bridge = window.RagentAndroidMonet;
   if (!bridge || typeof bridge.requestTheme !== "function") {
-    window.dispatchEvent(new CustomEvent("agentoc:monet-status", {
+    window.dispatchEvent(new CustomEvent("ragent:monet-status", {
       detail: { state: "fallback", reason: "android-bridge-unavailable" },
     }));
     return false;
@@ -1304,28 +1304,28 @@ function requestAndroidMonetTheme() {
     Promise.resolve(bridge.requestTheme()).then((payload) => {
       const theme = typeof payload === "string" ? JSON.parse(payload) : payload;
       applyMonetTheme(theme);
-      window.dispatchEvent(new CustomEvent("agentoc:monet-status", {
+      window.dispatchEvent(new CustomEvent("ragent:monet-status", {
         detail: { state: "applied", applied: true },
       }));
     }).catch(() => {
-      window.dispatchEvent(new CustomEvent("agentoc:monet-status", {
+      window.dispatchEvent(new CustomEvent("ragent:monet-status", {
         detail: { state: "fallback", reason: "android-bridge-rejected" },
       }));
     });
   } catch {
-    window.dispatchEvent(new CustomEvent("agentoc:monet-status", {
+    window.dispatchEvent(new CustomEvent("ragent:monet-status", {
       detail: { state: "fallback", reason: "android-bridge-error" },
     }));
   }
   return true;
 }
-const sessionStateModel = window.AgentoCSessionStateModel;
+const sessionStateModel = window.RagentSessionStateModel;
 if (!sessionStateModel) {
-  throw new Error("AgentoCSessionStateModel must load before bootstrap.js");
+  throw new Error("RagentSessionStateModel must load before bootstrap.js");
 }
-const chatStoreModel = window.AgentoCChatStore;
+const chatStoreModel = window.RagentChatStore;
 if (!chatStoreModel) {
-  throw new Error("AgentoCChatStore must load before bootstrap.js");
+  throw new Error("RagentChatStore must load before bootstrap.js");
 }
 
 function normalizeThemePreference(value) {
@@ -1378,8 +1378,8 @@ function applyThemePreference(themePreference) {
 function applyThemeTextOverrides(themePreference) {
   const normalized = normalizeThemePreference(themePreference);
   const overrides = (UI_THEMES[normalized] || UI_THEMES.system).textOverrides;
-  if (typeof window.agentocApplyTranslations === "function") {
-    window.agentocApplyTranslations();
+  if (typeof window.ragentApplyTranslations === "function") {
+    window.ragentApplyTranslations();
   }
   if (!overrides) return;
   const doc = document;
@@ -1394,9 +1394,9 @@ function applyThemeTextOverrides(themePreference) {
 let currentThemePreference = applyThemePreference(readStoredThemePreference());
 applyThemeTextOverrides(currentThemePreference);
 
-window.agentocApplyMonetTheme = applyMonetTheme;
-window.agentocRequestMonetTheme = requestAndroidMonetTheme;
-window.addEventListener("agentoc:monet-theme", (event) => {
+window.ragentApplyMonetTheme = applyMonetTheme;
+window.ragentRequestMonetTheme = requestAndroidMonetTheme;
+window.addEventListener("ragent:monet-theme", (event) => {
   applyMonetTheme(event?.detail?.theme || event?.detail || null);
 });
 
@@ -1404,43 +1404,43 @@ document.addEventListener("DOMContentLoaded", () => {
   applyThemeTextOverrides(currentThemePreference);
 }, { once: true });
 
-window.agentocGetThemePreference = function getThemePreference() {
+window.ragentGetThemePreference = function getThemePreference() {
   return currentThemePreference;
 };
 
-window.agentocGetThinkingBlockDisplayMode = function getThinkingBlockDisplayMode() {
+window.ragentGetThinkingBlockDisplayMode = function getThinkingBlockDisplayMode() {
   return "collapsed";
 };
 
-window.agentocShouldExpandThinkingBlocksByDefault = function agentocShouldExpandThinkingBlocksByDefault() {
+window.ragentShouldExpandThinkingBlocksByDefault = function ragentShouldExpandThinkingBlocksByDefault() {
   return getThinkingBlockDisplayExpandedState();
 };
 
-window.agentocGetThinkingBlockDisplayOptions = function getThinkingBlockDisplayOptions() {
-  const t = typeof window.agentocT === "function" ? window.agentocT : (key) => key;
+window.ragentGetThinkingBlockDisplayOptions = function getThinkingBlockDisplayOptions() {
+  const t = typeof window.ragentT === "function" ? window.ragentT : (key) => key;
   return [{ value: "collapsed", label: t("settings.thinkingBlocks.optionCollapsed") }];
 };
 
-window.agentocSetThemePreference = function setThemePreference(value) {
+window.ragentSetThemePreference = function setThemePreference(value) {
   currentThemePreference = applyThemePreference(value);
   applyThemeTextOverrides(currentThemePreference);
   try {
     localStorage.setItem(UI_THEME_STORAGE_KEY, currentThemePreference);
   } catch {}
   try {
-    window.dispatchEvent(new CustomEvent("agentoc:themechange", {
+    window.dispatchEvent(new CustomEvent("ragent:themechange", {
       detail: { preference: currentThemePreference },
     }));
   } catch {}
   return currentThemePreference;
 };
 
-window.agentocSetThinkingBlockDisplayMode = function setThinkingBlockDisplayMode(value) {
+window.ragentSetThinkingBlockDisplayMode = function setThinkingBlockDisplayMode(value) {
   return "collapsed";
 };
 
-window.agentocGetThemeOptions = function getThemeOptions() {
-  const t = typeof window.agentocT === "function" ? window.agentocT : (key) => key;
+window.ragentGetThemeOptions = function getThemeOptions() {
+  const t = typeof window.ragentT === "function" ? window.ragentT : (key) => key;
   return [
     { value: "system", label: t("settings.theme.optionSystem") },
     { value: "light", label: t("settings.theme.optionLight") },
@@ -1461,7 +1461,7 @@ window.addEventListener("storage", (event) => {
   applyThemeTextOverrides(currentThemePreference);
 });
 
-window.addEventListener("agentoc:localechange", () => {
+window.addEventListener("ragent:localechange", () => {
   applyThemeTextOverrides(currentThemePreference);
 });
 
@@ -1536,7 +1536,7 @@ let principalId = normalizeBootstrapText(bootstrapAuthInfo?.principalId || boots
 // must never reuse a response parsed under an earlier authenticated context,
 // even when the visible principal id happens to be the same.
 const authEpoch = `auth-${principalId || 'anonymous'}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-window.agentocAuthEpoch = authEpoch;
+window.ragentAuthEpoch = authEpoch;
 let authCapabilities = bootstrapAuthInfo?.capabilities
   ? { ...bootstrapAuthInfo.capabilities }
   : cloneAuthCapabilityDefaults(surfaceMode);
@@ -1679,15 +1679,15 @@ chatStore.subscribe((nextState) => {
     // Approval state is scoped to the selected session, including the null/home
     // state. Reset on every transition so an approval from the previous session
     // cannot survive an attach, a failed attach, or a return to the home view.
-    window.AgentoCDecisions?.reset?.();
+    window.RagentDecisions?.reset?.();
     const generation = typeof window.getSessionNavigationGeneration === "function"
       ? window.getSessionNavigationGeneration()
       : 0;
-    window.AgentoCDecisions?.beginSessionContext?.(nextState.currentSessionId || "", generation, { resetState: false });
+    window.RagentDecisions?.beginSessionContext?.(nextState.currentSessionId || "", generation, { resetState: false });
   }
 });
 syncChatStoreGlobals();
-window.AgentoCDecisions?.beginSessionContext?.(currentSessionId || "", 0);
+window.RagentDecisions?.beginSessionContext?.(currentSessionId || "", 0);
 
 function getChatStore() {
   return chatStore;
@@ -1913,8 +1913,8 @@ function shouldEnableOwnerPushFeatures() {
 }
 
 function withVisitorModeUrl(url) {
-  const resolvedUrl = typeof window.agentocResolveProductUrl === "function"
-    ? window.agentocResolveProductUrl(url)
+  const resolvedUrl = typeof window.ragentResolveProductUrl === "function"
+    ? window.ragentResolveProductUrl(url)
     : new URL(String(url || ""), window.location.href).toString();
   const parsed = new URL(resolvedUrl, window.location.href);
   if (shouldUseVisitorRequests()) {
@@ -2016,7 +2016,7 @@ function setPreferredAgentTemplate(value, { name = "", persist = true } = {}) {
       }
     } catch {}
   }
-  window.dispatchEvent(new CustomEvent("agentoc:preferred-agent-change", {
+  window.dispatchEvent(new CustomEvent("ragent:preferred-agent-change", {
     detail: {
       templateId: preferredAgentTemplateId,
       templateName: preferredAgentTemplateName,

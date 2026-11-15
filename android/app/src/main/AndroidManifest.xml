@@ -12,7 +12,7 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
-        android:name=".AgentoCApplication"
+        android:name=".RagentApplication"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
@@ -21,23 +21,23 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:theme="@style/Theme.Agentoc">
+        android:theme="@style/Theme.Ragent">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.Agentoc.Splash"
+            android:theme="@style/Theme.Ragent.Splash"
             android:windowSoftInputMode="adjustResize">
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/capture_shortcuts" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 配对深链: 相机/其他 App 识别 agentoc://pair 后可直接唤起本 App -->
+            <!-- 配对深链: 相机/其他 App 识别 ragent://pair 后可直接唤起本 App -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="agentoc" android:host="pair" />
+                <data android:scheme="ragent" android:host="pair" />
                 <data android:scheme="riollant" android:host="pair" />
                 <data android:scheme="ragent" android:host="pair" />
             </intent-filter>
@@ -45,7 +45,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="agentoc" android:host="session" />
+                <data android:scheme="ragent" android:host="session" />
                 <data android:scheme="riollant" android:host="session" />
                 <data android:scheme="ragent" android:host="session" />
             </intent-filter>
@@ -113,7 +113,7 @@
             android:name=".StopBackgroundDeliveryReceiver"
             android:exported="false" />
         <service
-            android:name=".AgentoCFirebaseMessagingService"
+            android:name=".RagentFirebaseMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

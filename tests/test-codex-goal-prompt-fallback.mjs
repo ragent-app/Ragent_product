@@ -4,13 +4,13 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-codex-goal-prompt-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-codex-goal-prompt-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
 
-await fs.mkdir(path.join(tempHome, '.config', 'agentoc'), { recursive: true });
+await fs.mkdir(path.join(tempHome, '.config', 'ragent'), { recursive: true });
 await fs.writeFile(
-  path.join(tempHome, '.config', 'agentoc', 'tools.json'),
+  path.join(tempHome, '.config', 'ragent', 'tools.json'),
   `${JSON.stringify([
     {
       id: 'micro-agent',

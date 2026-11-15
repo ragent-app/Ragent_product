@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const artifactDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(tmpdir(), 'agentoc-visual-review');
+const artifactDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || join(tmpdir(), 'ragent-visual-review');
 mkdirSync(artifactDir, { recursive: true });
 
 const cssFiles = [
@@ -78,7 +78,7 @@ function renderL1Html(theme = 'light') {
       <aside class="sidebar" id="sidebar">
         <!-- App Bar -->
         <div class="sidebar-app-bar" id="sidebarAppBar">
-          <div class="sidebar-brand">AgentoC</div>
+          <div class="sidebar-brand">Ragent</div>
           <div class="sidebar-app-bar-actions">
             <button class="sidebar-icon-btn" id="sidebarSearchBtn" type="button" title="Search" data-icon="search"></button>
             <button class="sidebar-icon-btn" id="closeSidebar" type="button" title="Close" data-icon="close"></button>
@@ -89,7 +89,7 @@ function renderL1Html(theme = 'light') {
         <div class="sidebar-device-bar" id="sidebarDeviceBar">
           <button class="sidebar-device-name-btn" id="sidebarDeviceNameBtn" type="button" title="Switch device">
             <span class="sidebar-device-name-icon" data-icon="monitor" aria-hidden="true"></span>
-            <span class="sidebar-device-name-text">agentoc-dev (Linux Host)</span>
+            <span class="sidebar-device-name-text">ragent-dev (Linux Host)</span>
             <span class="sidebar-device-name-chevron" data-icon="chevron-down" aria-hidden="true"></span>
           </button>
           <button class="sidebar-device-add-btn" id="sidebarDeviceAddBtn" type="button" title="Add device" data-icon="monitor-plus"></button>
@@ -115,7 +115,7 @@ function renderL1Html(theme = 'light') {
               <div class="sidebar-project-head-row">
                 <button type="button" class="sidebar-project-head is-open" data-running="true">
                   <span class="sidebar-project-head-icon" data-icon="folder-solid"></span>
-                  <span class="sidebar-project-head-name">AgentoC Core</span>
+                  <span class="sidebar-project-head-name">Ragent Core</span>
                   <span class="sidebar-project-head-pin" data-icon="pinned" title="Pinned"></span>
                   <span class="sidebar-project-head-count">4</span>
                   <span class="sidebar-project-head-chevron" data-icon="chevron-right"></span>
@@ -193,7 +193,7 @@ function renderL1Html(theme = 'light') {
 
     <script>
       ${iconsJs}
-      window.AgentoCIcons.hydrate(document);
+      window.RagentIcons.hydrate(document);
     </script>
   </body>
   </html>`;
@@ -243,7 +243,7 @@ function renderL2Html(theme = 'light') {
       <aside class="sidebar" id="sidebar">
         <!-- App Bar -->
         <div class="sidebar-app-bar" id="sidebarAppBar">
-          <div class="sidebar-brand">AgentoC</div>
+          <div class="sidebar-brand">Ragent</div>
           <div class="sidebar-app-bar-actions">
             <button class="sidebar-icon-btn" id="sidebarSearchBtn" type="button" title="Search" data-icon="search"></button>
             <button class="sidebar-icon-btn" id="closeSidebar" type="button" title="Close" data-icon="close"></button>
@@ -254,7 +254,7 @@ function renderL2Html(theme = 'light') {
         <div class="sidebar-project-header" id="sidebarProjectHeader">
           <button class="sidebar-icon-btn" id="sidebarProjectBackBtn" type="button" title="Back to projects" data-icon="chevron-left"></button>
           <span class="sidebar-project-header-icon" data-icon="folder-solid" aria-hidden="true"></span>
-          <span class="sidebar-project-header-title" id="sidebarProjectTitle">AgentoC Core</span>
+          <span class="sidebar-project-header-title" id="sidebarProjectTitle">Ragent Core</span>
           <button class="sidebar-icon-btn sidebar-project-settings-btn" id="sidebarProjectSettingsBtn" type="button" title="Project settings" data-icon="gear"></button>
         </div>
 
@@ -329,7 +329,7 @@ function renderL2Html(theme = 'light') {
 
     <script>
       ${iconsJs}
-      window.AgentoCIcons.hydrate(document);
+      window.RagentIcons.hydrate(document);
     </script>
   </body>
   </html>`;

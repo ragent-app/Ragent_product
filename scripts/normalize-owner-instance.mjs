@@ -15,9 +15,9 @@ const execFileAsync = promisify(execFileCallback);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(__dirname, '..');
 const HOME_DIR = homedir();
-const OWNER_INSTANCE_ROOT = join(HOME_DIR, '.agentoc', 'instances', 'owner');
-const LEGACY_CONFIG_DIR = join(HOME_DIR, '.config', 'agentoc');
-const LEGACY_MEMORY_DIR = join(HOME_DIR, '.agentoc', 'memory');
+const OWNER_INSTANCE_ROOT = join(HOME_DIR, '.ragent', 'instances', 'owner');
+const LEGACY_CONFIG_DIR = join(HOME_DIR, '.config', 'ragent');
+const LEGACY_MEMORY_DIR = join(HOME_DIR, '.ragent', 'memory');
 const OWNER_LAUNCH_AGENT_PATH = join(HOME_DIR, 'Library', 'LaunchAgents', 'com.chatserver.claude.plist');
 const OWNER_BUILD_INFO_URL = 'http://127.0.0.1:7690/api/build-info';
 const DEFAULT_OWNER_PORT = '7690';
@@ -188,9 +188,9 @@ async function main() {
       : {}),
     HOME: trimString(currentPlist.EnvironmentVariables?.HOME) || HOME_DIR,
     CHAT_PORT: trimString(currentPlist.EnvironmentVariables?.CHAT_PORT) || DEFAULT_OWNER_PORT,
-    AGENTOC_INSTANCE_ROOT: OWNER_INSTANCE_ROOT,
-    AGENTOC_SESSION_DISPATCH: 'on',
-    AGENTOC_USER_SHELL_ENV_B64: trimString(currentPlist.EnvironmentVariables?.AGENTOC_USER_SHELL_ENV_B64)
+    RAGENT_INSTANCE_ROOT: OWNER_INSTANCE_ROOT,
+    RAGENT_SESSION_DISPATCH: 'on',
+    RAGENT_USER_SHELL_ENV_B64: trimString(currentPlist.EnvironmentVariables?.RAGENT_USER_SHELL_ENV_B64)
       || serializeUserShellEnvSnapshot(),
   };
 

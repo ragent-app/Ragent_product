@@ -6,14 +6,14 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-session-connector-state-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-session-connector-state-'));
 process.env.HOME = tempHome;
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_PUBLIC_BASE_URL;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_PUBLIC_BASE_URL;
 
 const workspace = join(tempHome, 'workspace');
-const mailboxRoot = join(tempHome, '.config', 'agentoc', 'agent-mailbox');
+const mailboxRoot = join(tempHome, '.config', 'ragent', 'agent-mailbox');
 mkdirSync(workspace, { recursive: true });
 
 const {

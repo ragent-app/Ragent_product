@@ -96,7 +96,7 @@ function createContext({ session = null } = {}) {
     visualViewport: { height: null, addEventListener() {} },
   };
   const consoleMock = { ...console, warn() {} };
-  windowTarget.AgentoCLayout = {
+  windowTarget.RagentLayout = {
     getViewportHeight() { return 900; },
     subscribe() { return () => {}; },
   };

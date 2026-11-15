@@ -12,7 +12,7 @@ if($qaFunctions.Count -ne 1){throw 'One service-name builder is required'}
 foreach($qaId in @('0123456789abcdef0123456789abcdef','fedcba9876543210fedcba9876543210')){
   $qaNames=@(Get-QaServiceNames -CaseId $qaId)
   if($qaNames.Count -ne 2){throw 'Two distinct SCM arguments required'}
-  if($qaNames[0] -cne "AgentoC-IdentityQA-Control-$qaId" -or $qaNames[1] -cne "AgentoC-IdentityQA-Executor-$qaId"){throw 'Unexpected service-name expression'}
+  if($qaNames[0] -cne "Ragent-IdentityQA-Control-$qaId" -or $qaNames[1] -cne "Ragent-IdentityQA-Executor-$qaId"){throw 'Unexpected service-name expression'}
   if(@($qaNames|Where-Object {$_ -match '\s|[/\\]'}).Count){throw 'Unsafe service name'}
 }
 foreach($qaBad in @('x',('a'*31),('a'*33),'../outside')){

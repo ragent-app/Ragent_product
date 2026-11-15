@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.designsystem"
+    namespace = "com.andysagent.ragent.core.designsystem"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

@@ -4,8 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
 
-const root = process.env.AGENTOC_TEST_ROOT;
-const runnerUid = Number(process.env.AGENTOC_TEST_RUNNER_UID);
+const root = process.env.RAGENT_TEST_ROOT;
+const runnerUid = Number(process.env.RAGENT_TEST_RUNNER_UID);
 const runId = 'run_nonrootfixture1', sessionId = 's1', requestId = 't1';
 const { createRun, getRunAcceptanceEvidence, getRunResult } = await import('../../chat/runs.mjs');
 const { computeExecutionScopeDigest } = await import('../../chat/execution-scope.mjs');
@@ -14,7 +14,7 @@ const { handleTemporaryControlRunCheck } = await import('../../chat/router-tempo
 const token = Buffer.alloc(32, 11).toString('base64url');
 const scope = { sessionId, cwd: { realPath: '/srv/work' }, scopeRoot: { realPath: '/srv/work' },
   riskContext: { platform: 'linux', cwd: '/srv/work', trustedWorkspaceRoot: '/srv/work' } };
-if (process.env.AGENTOC_TEST_RECOVER !== '1') {
+if (process.env.RAGENT_TEST_RECOVER !== '1') {
   await createRun({ status: { id: runId, sessionId, requestId, state: 'running', runnerLaunchAttempt: 0 },
     manifest: { sessionId, requestId, executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope),
       options: { approvedActionChannel: { turnId: requestId, token, tokenHash: createHash('sha256').update(token).digest('hex') } } } });

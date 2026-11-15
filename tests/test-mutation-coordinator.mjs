@@ -17,8 +17,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-mutation-coordinator-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-mutation-coordinator-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { prepareRunExecution } = await import('../chat/run-admission.mjs');
 const { createProject } = await import('../chat/projects.mjs');
@@ -83,7 +83,7 @@ function sleep(ms) {
 try {
   // ── run admission takes no workspace lease ────────────────────────────────
   beginSection('admission-no-lease');
-  const root = makeRoot('agentoc-mc-root-');
+  const root = makeRoot('ragent-mc-root-');
   mkdirSync(join(root, '.git'), { recursive: true });
   const projectA = await createProject({ name: 'MC A', rootPath: root });
   const projectB = await createProject({ name: 'MC B', rootPath: root });
@@ -130,7 +130,7 @@ try {
 
   // ── readOnlyRequired without certification -> READ_ONLY_RUNTIME_UNAVAILABLE ─
   beginSection('readonly-required');
-  const rootReq = makeRoot('agentoc-mc-required-root-');
+  const rootReq = makeRoot('ragent-mc-required-root-');
   mkdirSync(join(rootReq, '.git'), { recursive: true });
   const projectReq = await createProject({ name: 'MC Required', rootPath: rootReq });
   await rejects(

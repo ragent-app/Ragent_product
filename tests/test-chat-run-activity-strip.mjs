@@ -89,8 +89,8 @@ const context = vm.createContext({
   Date: class extends Date { static now() { return now; } },
   document,
   window: {
-    AgentoCSessionStateModel: model,
-    AgentoCRunActivity: runActivity,
+    RagentSessionStateModel: model,
+    RagentRunActivity: runActivity,
     openRunSheet() { runSheetOpenCount += 1; },
   },
   setInterval(callback) {

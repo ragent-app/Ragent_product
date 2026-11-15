@@ -8,9 +8,9 @@ import { pathToFileURL } from 'node:url';
 test('account handoff failures provide safe actionable messages', async () => {
   const parent = resolve(tmpdir());
   const root = await mkdtemp(join(parent, 'ragent-handoff-guidance-'));
-  process.env.AGENTOC_INSTANCE_ROOT = root;
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-  process.env.AGENTOC_WORK_ROOT_DIR = join(root, 'workspace');
+  process.env.RAGENT_INSTANCE_ROOT = root;
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+  process.env.RAGENT_WORK_ROOT_DIR = join(root, 'workspace');
   try {
     const { createProviderPreparationError } = await import(process.env.RAGENT_TEST_RUN_LAUNCHER_ENTRY
       ? pathToFileURL(process.env.RAGENT_TEST_RUN_LAUNCHER_ENTRY).href : '../chat/run-launcher.mjs');

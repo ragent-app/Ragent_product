@@ -39,7 +39,7 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const binaryPath = process.env.AGENTOC_P2P_HOST_BINARY || resolveP2PHostBinary();
+const binaryPath = process.env.RAGENT_P2P_HOST_BINARY || resolveP2PHostBinary();
 await access(binaryPath);
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
@@ -75,26 +75,26 @@ try {
   resources.push(async () => { host.stop(); await host.done; });
   await host.ready;
 
-  const clientSource = await readFile(process.env.AGENTOC_P2P_CLIENT_SOURCE || new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+  const clientSource = await readFile(process.env.RAGENT_P2P_CLIENT_SOURCE || new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
   const web = http.createServer((request, response) => {
-    if (request.url === '/agentoc-p2p-client.js') {
+    if (request.url === '/ragent-p2p-client.js') {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end(clientSource);
       return;
     }
     response.writeHead(200, { 'content-type': 'text/html' });
-    response.end('<!doctype html><title>AgentoC P2P large response test</title>');
+    response.end('<!doctype html><title>Ragent P2P large response test</title>');
   });
   resources.push(() => close(web));
   const webAddress = await listen(web);
 
-  const browser = await chromium.launch({ headless: true, executablePath: process.env.AGENTOC_CHROME_PATH || undefined });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.RAGENT_CHROME_PATH || undefined });
   resources.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const results = await page.evaluate(async ({ signalingUrl: url, roomId: room, secret: roomSecret, deviceToken, cases }) => {
-    const { AgentoCP2PClient } = await import('/agentoc-p2p-client.js');
-    const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 15000 });
+    const { RagentP2PClient } = await import('/ragent-p2p-client.js');
+    const client = new RagentP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 15000 });
     await client.connect();
     const outcome = {};
     for (const [name, path] of Object.entries(cases)) {
@@ -139,7 +139,7 @@ try {
   assert.equal(results.large.ok, true, `large response should not fail: ${JSON.stringify(results.large)}`);
   assert.equal(results.large.valid, true, 'large response body must be intact JSON');
   assert.equal(results.large.bytes, PAYLOADS.large.length, 'large response byte count must match');
-  if (process.env.AGENTOC_P2P_EXPECT_LEGACY_LIMIT === '1') {
+  if (process.env.RAGENT_P2P_EXPECT_LEGACY_LIMIT === '1') {
     assert.equal(results.huge.ok, true, 'legacy clients should receive an explicit response');
     assert.equal(results.huge.status, 413, 'legacy oversized response should fail promptly');
   } else {

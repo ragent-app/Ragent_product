@@ -102,11 +102,11 @@ static class AppContainerProbe {
   }
   static string VerifyRoot(string root,string profile) {
     root=Path.GetFullPath(root).TrimEnd('\\');
-    string parent=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AgentoC","isolation-probes")+"\\";
+    string parent=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Ragent","isolation-probes")+"\\";
     if(!root.StartsWith(parent,StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(Path.GetFileName(root),"^[a-f0-9]{32}$")
-        || !Regex.IsMatch(profile,"^agentoc[.]t2probe[.][a-f0-9]{32}$")) throw new InvalidOperationException("Not an owned probe root/profile");
+        || !Regex.IsMatch(profile,"^ragent[.]t2probe[.][a-f0-9]{32}$")) throw new InvalidOperationException("Not an owned probe root/profile");
     NoReparse(root);
-    string marker=Path.Combine(root,".agentoc-isolation-probe"); NoReparse(marker);
+    string marker=Path.Combine(root,".ragent-isolation-probe"); NoReparse(marker);
     if(File.ReadAllText(marker).Trim()!=profile) throw new InvalidOperationException("Probe marker mismatch");
     var owner=(SecurityIdentifier)Directory.GetAccessControl(root).GetOwner(typeof(SecurityIdentifier));
     if(owner.Value!=WindowsIdentity.GetCurrent().User.Value) throw new InvalidOperationException("Probe root owner mismatch");
@@ -152,7 +152,7 @@ static class AppContainerProbe {
       var startup=new StartupInfoEx{attributes=list}; startup.basic.cb=Marshal.SizeOf(typeof(StartupInfoEx)); startup.basic.flags=0x100;
       startup.basic.stdin=input; startup.basic.stdout=output; startup.basic.stderr=error;
       string windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows),work=Path.Combine(root,"workspace");
-      string env="AGENTOC_PROBE_HANDLE="+canaryHandle.ToInt64()+"\0AGENTOC_PROBE_HANDLE_ID="+canaryIdentity.Key()+"\0HOME="+work+"\0LOCALAPPDATA="+work+"\0PATH="+runtime.TrimEnd('\\')+";"+Path.Combine(windows,"System32")+"\0PATHEXT=.EXE;.COM\0SystemRoot="+windows+"\0TEMP="+work+"\0TMP="+work+"\0USERPROFILE="+work+"\0WINDIR="+windows+"\0\0";
+      string env="RAGENT_PROBE_HANDLE="+canaryHandle.ToInt64()+"\0RAGENT_PROBE_HANDLE_ID="+canaryIdentity.Key()+"\0HOME="+work+"\0LOCALAPPDATA="+work+"\0PATH="+runtime.TrimEnd('\\')+";"+Path.Combine(windows,"System32")+"\0PATHEXT=.EXE;.COM\0SystemRoot="+windows+"\0TEMP="+work+"\0TMP="+work+"\0USERPROFILE="+work+"\0WINDIR="+windows+"\0\0";
       environment=Marshal.StringToHGlobalUni(env);
       job=CreateJobObjectW(IntPtr.Zero,null); Check(job!=IntPtr.Zero,"Create job");
       var limits=new JobExtended(); limits.basic.flags=0x2000|8; limits.basic.activeLimit=8;
@@ -225,7 +225,7 @@ static class AppContainerProbe {
       Console.WriteLine(Json.Serialize(new{valid=valid,leaked=leaked,denied=denied,error=error,exceptionCode=exceptionCode})); return denied?0:1;
     }
     if(args.Length==1 && args[0]=="facts") { Console.WriteLine(Json.Serialize(TokenFacts(GetCurrentProcess()))); return 0; }
-    if(args.Length==2 && args[0]=="derive" && Regex.IsMatch(args[1],"^agentoc[.]t2probe[.][a-f0-9]{32}$")) {
+    if(args.Length==2 && args[0]=="derive" && Regex.IsMatch(args[1],"^ragent[.]t2probe[.][a-f0-9]{32}$")) {
       IntPtr derived; int hr=DeriveAppContainerSidFromAppContainerName(args[1],out derived);
       if(hr!=0) Marshal.ThrowExceptionForHR(hr);
       try { Console.WriteLine(new SecurityIdentifier(derived).Value); } finally { FreeSid(derived); }
@@ -238,7 +238,7 @@ static class AppContainerProbe {
       var host=TokenFacts(GetCurrentProcess());
       if((bool)host["isSystem"] || (bool)host["isElevated"] || (int)host["integrityRid"]>=12288 || (bool)host["isAppContainer"]) throw new InvalidOperationException("Probe requires ordinary host user");
       profile=args[1]; root=VerifyRoot(args[0],profile); report["hostToken"]=host;
-      int hr=CreateAppContainerProfile(profile,"AgentoC isolation feasibility probe","Disposable synthetic test; no production credentials",IntPtr.Zero,0,out sid);
+      int hr=CreateAppContainerProfile(profile,"Ragent isolation feasibility probe","Disposable synthetic test; no production credentials",IntPtr.Zero,0,out sid);
       if(hr!=0) Marshal.ThrowExceptionForHR(hr); created=true;
       var package=new SecurityIdentifier(sid); report["packageSid"]=package.Value;
       Grant(Path.Combine(root,"runtime"),package,FileSystemRights.ReadAndExecute);

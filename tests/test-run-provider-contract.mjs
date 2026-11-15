@@ -4,16 +4,16 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-run-provider-contract-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-run-provider-contract-'));
 const previousEnv = {
-  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_INSTANCE_ROOT: process.env.RAGENT_INSTANCE_ROOT,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, '.agentoc', 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, '.ragent', 'workspace');
 
 try {
   const { buildRuntimeInvocation } = await import('../chat/process-runner.mjs');
@@ -266,7 +266,7 @@ try {
   let metricsRequested = false;
   const usageService = createRunProjectionService({
     buildCodexContextMetricsPayload: (metrics) => ({
-      type: 'agentoc.context_metrics',
+      type: 'ragent.context_metrics',
       contextTokens: metrics.contextTokens,
       contextWindowTokens: metrics.contextWindowTokens,
     }),
@@ -367,11 +367,11 @@ try {
 
   console.log('test-run-provider-contract: ok');
 } finally {
-  if (previousEnv.AGENTOC_INSTANCE_ROOT === undefined) delete process.env.AGENTOC_INSTANCE_ROOT;
-  else process.env.AGENTOC_INSTANCE_ROOT = previousEnv.AGENTOC_INSTANCE_ROOT;
-  if (previousEnv.AGENTOC_CONFIG_DIR === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousEnv.AGENTOC_CONFIG_DIR;
-  if (previousEnv.AGENTOC_WORK_ROOT_DIR === undefined) delete process.env.AGENTOC_WORK_ROOT_DIR;
-  else process.env.AGENTOC_WORK_ROOT_DIR = previousEnv.AGENTOC_WORK_ROOT_DIR;
+  if (previousEnv.RAGENT_INSTANCE_ROOT === undefined) delete process.env.RAGENT_INSTANCE_ROOT;
+  else process.env.RAGENT_INSTANCE_ROOT = previousEnv.RAGENT_INSTANCE_ROOT;
+  if (previousEnv.RAGENT_CONFIG_DIR === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousEnv.RAGENT_CONFIG_DIR;
+  if (previousEnv.RAGENT_WORK_ROOT_DIR === undefined) delete process.env.RAGENT_WORK_ROOT_DIR;
+  else process.env.RAGENT_WORK_ROOT_DIR = previousEnv.RAGENT_WORK_ROOT_DIR;
   rmSync(home, { recursive: true, force: true });
 }

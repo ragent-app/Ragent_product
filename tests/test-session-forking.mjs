@@ -4,19 +4,19 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'os';
 import { delimiter, join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-fork-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-fork-'));
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 const workspace = join(home, 'workspace');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 const localBin = join(home, '.local', 'bin');
 mkdirSync(workspace, { recursive: true });
 mkdirSync(configDir, { recursive: true });
 mkdirSync(localBin, { recursive: true });
-delete process.env.AGENTOC_USER_SHELL_ENV_B64;
+delete process.env.RAGENT_USER_SHELL_ENV_B64;
 process.env.PATH = `${localBin}${delimiter}${process.env.PATH || ''}`;
 writeFileSync(
   join(localBin, 'codex-fake-fork'),
@@ -173,7 +173,7 @@ try {
     source: 'manual',
   });
 
-  const sessionsPath = join(home, '.config', 'agentoc', 'chat-sessions.json');
+  const sessionsPath = join(home, '.config', 'ragent', 'chat-sessions.json');
   const storedSessions = JSON.parse(readFileSync(sessionsPath, 'utf8'));
   const parentRecord = storedSessions.find((entry) => entry.id === parent.id);
   assert.ok(parentRecord, 'parent session record should exist');

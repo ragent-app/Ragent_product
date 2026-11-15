@@ -12,10 +12,10 @@ import { buildAccountJoinIntentMessage, createDevicePublicKeyFingerprint } from 
 import { handleOwnerAuthRoutes } from '../accounts/owner-auth-routes.mjs';
 import { verifyBindingAuthorityAssertion } from '../lib/binding-authority.mjs';
 
-const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const databaseUrl = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 assert(databaseUrl, 'An explicit isolated-schema database URL is required');
-const { createPostgresStore } = await import(pathToFileURL(resolve(process.env.AGENTOC_TEST_STORE_MODULE || 'accounts/store/postgres.mjs')));
-const legacyPath = process.env.AGENTOC_TEST_SECOND_STORE_MODULE;
+const { createPostgresStore } = await import(pathToFileURL(resolve(process.env.RAGENT_TEST_STORE_MODULE || 'accounts/store/postgres.mjs')));
+const legacyPath = process.env.RAGENT_TEST_SECOND_STORE_MODULE;
 assert(legacyPath, 'Pin the previous writer which does not know authority tables');
 const legacyFactory = (await import(pathToFileURL(resolve(legacyPath)))).createPostgresStore;
 const schema = `qa_auth_rev_${randomBytes(12).toString('hex')}`;
@@ -24,10 +24,10 @@ const bootstrap = new Pool({ connectionString: databaseUrl, max: 1, connectionTi
 const pools = [];
 let owned = false;
 let httpServer;
-const lockKey = `agentoc_accounts_store_v1:${schema}`;
+const lockKey = `ragent_accounts_store_v1:${schema}`;
 function store(factory) {
   const pool = new Pool({ connectionString: databaseUrl, max: 2, connectionTimeoutMillis: 5000,
-    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=agentoc-authority-qa` });
+    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=ragent-authority-qa` });
   pools.push(pool);
   return factory({ schema, pool: { connect: async () => {
     const client = await pool.connect();
@@ -37,7 +37,7 @@ function store(factory) {
       assert(!/\bpublic\s*\./i.test(sql), 'No production namespace access');
       if (/pg_advisory/.test(sql)) {
         assert.equal(sql, 'select pg_advisory_xact_lock(hashtext($1))');
-        assert.deepEqual(values, ['agentoc_accounts_store_v1']);
+        assert.deepEqual(values, ['ragent_accounts_store_v1']);
         return client.query(sql, [lockKey]);
       }
       return client.query(sql, values);
@@ -70,10 +70,10 @@ const event = (id, action) => ({ instanceId: id, accountId, action, occurredAt: 
 const performanceEvidence = {};
 try {
   await bootstrap.query(`create schema "${schema}"`); owned = true;
-  if (process.env.AGENTOC_TEST_OWNED_SCHEMA_REPORT) {
-    assert(/^[a-f0-9]{32}$/.test(process.env.AGENTOC_TEST_RUN_NONCE || ''), 'An owned cleanup nonce is required');
-    await writeFile(process.env.AGENTOC_TEST_OWNED_SCHEMA_REPORT,
-      JSON.stringify({ schema, runNonce: process.env.AGENTOC_TEST_RUN_NONCE, pid: process.pid }));
+  if (process.env.RAGENT_TEST_OWNED_SCHEMA_REPORT) {
+    assert(/^[a-f0-9]{32}$/.test(process.env.RAGENT_TEST_RUN_NONCE || ''), 'An owned cleanup nonce is required');
+    await writeFile(process.env.RAGENT_TEST_OWNED_SCHEMA_REPORT,
+      JSON.stringify({ schema, runNonce: process.env.RAGENT_TEST_RUN_NONCE, pid: process.pid }));
   }
   const setup = await bootstrap.connect();
   try {
@@ -309,7 +309,7 @@ try {
   await emptyPending();
   // Real HTTP -> broker -> PostgreSQL -> Ed25519 assertion. Only Google identity
   // verification is substituted; instance/device proofs are actual signatures.
-  const { createOwnerAuthBroker, deriveDesktopReplayValues } = await import(pathToFileURL(resolve(process.env.AGENTOC_TEST_AUTHORITY_BROKER_MODULE || 'accounts/owner-auth-broker.mjs')));
+  const { createOwnerAuthBroker, deriveDesktopReplayValues } = await import(pathToFileURL(resolve(process.env.RAGENT_TEST_AUTHORITY_BROKER_MODULE || 'accounts/owner-auth-broker.mjs')));
   const pcKeys = generateKeyPairSync('ed25519'), phoneKeys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const publicKey = pcKeys.publicKey.export({ format: 'pem', type: 'spki' }).toString();
   const keyFingerprint = createInstancePublicKeyFingerprint(publicKey);
@@ -348,7 +348,7 @@ try {
   async function joinInput(id) {
     const nonce = `synthetic-${id}-nonce`;
     const fields = { instanceId: pc.instanceId, intentId: id, deviceId: phoneId,
-      devicePublicKeyFingerprint: phoneFingerprint, nonce, issuedAt, audience: 'agentoc-account-join' };
+      devicePublicKeyFingerprint: phoneFingerprint, nonce, issuedAt, audience: 'ragent-account-join' };
     const signature = sign(null, Buffer.from(buildAccountJoinIntentProofMessage(fields)), pcKeys.privateKey).toString('base64');
     assert.equal((await post('/v1/owner-auth/account-intents', { intentId: id, nonce, issuedAt, audience: fields.audience,
       instance: pc, device: { deviceId: phoneId, publicKey: phonePublic, devicePublicKeyFingerprint: phoneFingerprint,
@@ -402,7 +402,7 @@ try {
   async function browserInput(id, poll = false) {
     const fields = { instanceId: pc.instanceId, transactionId: id, purpose: 'login',
       returnUrl: poll ? '' : `https://authority.fixture.invalid/api/auth/google/complete?tx=${id}`,
-      issuedAt, audience: poll ? 'agentoc-owner-auth-poll' : 'agentoc-owner-auth' };
+      issuedAt, audience: poll ? 'ragent-owner-auth-poll' : 'ragent-owner-auth' };
     const proof = { ...fields, instance: pc,
       signature: sign(null, Buffer.from(buildInstanceProofMessage(fields)), pcKeys.privateKey).toString('base64') };
     const started = await broker.start({ ...proof, deliveryMode: poll ? 'instance_poll' : 'browser_callback' });
@@ -469,7 +469,7 @@ try {
   assert.equal((await post(pollSignFailure.path, pollSignFailure.body)).body.assertion, retriedPoll.body.assertion);
   function nativeInput(requestId, { target = pc, keys = pcKeys, deviceId = phoneId, fingerprint = phoneFingerprint } = {}) {
     const fields = { instanceId: target.instanceId, requestId, purpose: 'native', deviceId,
-      devicePublicKeyFingerprint: fingerprint, deviceAlias: 'Synthetic phone', issuedAt, audience: 'agentoc-owner-auth-native' };
+      devicePublicKeyFingerprint: fingerprint, deviceAlias: 'Synthetic phone', issuedAt, audience: 'ragent-owner-auth-native' };
     return { requestId, purpose: 'native', instance: target,
       device: { deviceId, devicePublicKeyFingerprint: fingerprint, alias: fields.deviceAlias },
       idToken: 'synthetic-native-google', issuedAt, audience: fields.audience,
@@ -479,7 +479,7 @@ try {
     const fields = { instanceId: input.instance.instanceId, requestId: input.requestId, accountId,
       deviceId: input.device.deviceId, devicePublicKeyFingerprint: input.device.devicePublicKeyFingerprint,
       expectedRevision: verified.bindingAuthorityRevision, expectedCompletionId: verified.nativeCompletionId,
-      issuedAt, audience: 'agentoc-owner-auth-native-rollback' };
+      issuedAt, audience: 'ragent-owner-auth-native-rollback' };
     return { ...fields, instance: input.instance, device: input.device,
       signature: sign(null, Buffer.from(buildNativeOwnerAuthRollbackMessage(fields)), keys.privateKey).toString('base64') };
   }
@@ -572,7 +572,7 @@ try {
   async function statusRequest({ target = pc, keys = pcKeys, requestedAccount = accountId } = {}) {
     const fields = { instanceId: target.instanceId, keyFingerprint: target.keyFingerprint, accountId: requestedAccount,
       requestId: 'authority_status_' + randomBytes(12).toString('hex'), nonce: randomBytes(32).toString('base64url'),
-      issuedAt, audience: 'agentoc-binding-authority' };
+      issuedAt, audience: 'ragent-binding-authority' };
     const response = await post('/v1/owner-auth/instances/authority', { ...fields, instance: target,
       signature: sign(null, Buffer.from(buildBindingAuthorityProofMessage(fields)), keys.privateKey).toString('base64url') });
     assert.equal(response.status, 200, 'Signed binding status must be available from the actual PostgreSQL authority read');

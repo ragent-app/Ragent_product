@@ -6,13 +6,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-session-confirmation-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-session-confirmation-'));
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(tempHome, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(tempHome, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'workspace');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const sessionManager = await import(
   pathToFileURL(join(repoRoot, 'chat', 'session-manager.mjs')).href
@@ -47,7 +47,7 @@ try {
 
   assert.equal(created.duplicate, false, 'first confirmation request should be new');
   assert.equal(created.confirmation.type, 'approval_request');
-  assert.equal(created.confirmation.source, 'agentoc-confirmation');
+  assert.equal(created.confirmation.source, 'ragent-confirmation');
   assert.equal(created.confirmation.kind, 'confirmation');
   assert.equal(created.confirmation.confirmLabel, 'Restart');
   assert.equal(created.confirmation.denyLabel, 'Skip');
@@ -74,7 +74,7 @@ try {
   assert.equal(decided.duplicate, false, 'first confirmation decision should be new');
   assert.equal(decided.responseEvent.type, 'approval_response');
   assert.equal(decided.responseEvent.status, 'denied');
-  assert.equal(decided.responseEvent.source, 'agentoc-confirmation');
+  assert.equal(decided.responseEvent.source, 'ragent-confirmation');
 
   const duplicateDecision = await submitSessionConfirmationDecision(session.id, 'confirm-test', {
     decision: 'deny',
@@ -87,12 +87,12 @@ try {
     includeMessageBodies: true,
   });
   assert.equal(
-    events.filter((event) => event.type === 'approval_request' && event.source === 'agentoc-confirmation').length,
+    events.filter((event) => event.type === 'approval_request' && event.source === 'ragent-confirmation').length,
     1,
     'confirmation request should be stored once',
   );
   assert.equal(
-    events.filter((event) => event.type === 'approval_response' && event.source === 'agentoc-confirmation').length,
+    events.filter((event) => event.type === 'approval_response' && event.source === 'ragent-confirmation').length,
     1,
     'confirmation response should be stored once',
   );

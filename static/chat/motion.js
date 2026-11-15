@@ -1,5 +1,5 @@
 // Shared motion helpers for UI presence and local disclosure transitions.
-(function initAgentoCMotion() {
+(function initRagentMotion() {
   const presenceStates = new WeakMap();
   const activePresenceStates = new Set();
   const reducedMotionSubscribers = new Set();
@@ -392,7 +392,7 @@
     };
   }
 
-  window.AgentoCMotion = {
+  window.RagentMotion = {
     prefersReducedMotion,
     subscribeReducedMotion,
     setPresence,

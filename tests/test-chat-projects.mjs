@@ -3,9 +3,9 @@
 // project identity, and the legacy-folder → project migration (grouping, projectId writeback,
 // ~ expansion, hidden internal sessions, idempotency).
 //
-// Config isolation: AGENTOC_CONFIG_DIR must point at a throwaway dir BEFORE any
+// Config isolation: RAGENT_CONFIG_DIR must point at a throwaway dir BEFORE any
 // module that imports lib/config.mjs is loaded, because CONFIG_DIR is resolved at
-// import time. This process's homedir() is not a temporary agentoc home, so the
+// import time. This process's homedir() is not a temporary ragent home, so the
 // instance-scope guard in resolveInstanceScopedOverridePath passes the explicit
 // path through unchanged.
 import assert from 'assert/strict';
@@ -13,8 +13,8 @@ import { mkdtempSync, rmSync, unlinkSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { isAbsolute, join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-projects-test-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-projects-test-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 const createdRootDirs = [];
 
 const {
@@ -60,12 +60,12 @@ function makeRootDir(prefix) {
 try {
   // ── Pure helpers: stable ids and path normalization ───────────────────────
   assert.equal(
-    projectIdForRootPath('/srv/agentoc'),
-    projectIdForRootPath('/srv/agentoc'),
+    projectIdForRootPath('/srv/ragent'),
+    projectIdForRootPath('/srv/ragent'),
     'projectIdForRootPath should be deterministic for the same path',
   );
   assert.notEqual(
-    projectIdForRootPath('/srv/agentoc'),
+    projectIdForRootPath('/srv/ragent'),
     projectIdForRootPath('/srv/other'),
     'projectIdForRootPath should differ across paths',
   );
@@ -88,8 +88,8 @@ try {
 
   // ── createProject: required rootPath, shared workspace, distinct ids ──────
   resetStore();
-  const rootA = makeRootDir('agentoc-proj-root-a-');
-  const rootB = makeRootDir('agentoc-proj-root-b-');
+  const rootA = makeRootDir('ragent-proj-root-a-');
+  const rootB = makeRootDir('ragent-proj-root-b-');
   const alpha = await createProject({ name: 'Alpha', rootPath: rootA });
   assert.ok(alpha.id.startsWith('prj_'), 'created project should get a project id');
   assert.equal(alpha.rootPath, rootA);
@@ -116,7 +116,7 @@ try {
   //    folder inside project "example" (root /home/example) landing in a later
   //    project "alpha" whose name sorts before "example". ─────────────────────
   resetStore();
-  const sharedRoot = makeRootDir('agentoc-proj-shared-root-');
+  const sharedRoot = makeRootDir('ragent-proj-shared-root-');
   const example = await createProject({ name: 'example', rootPath: sharedRoot });
   const sharedLater = await createProject({ name: 'alpha', rootPath: sharedRoot });
   assert.notEqual(sharedLater.id, example.id, 'shared-root projects keep independent ids');
@@ -141,15 +141,15 @@ try {
 
   // ── Migration: folder → project grouping, writeback, ~ expansion, hidden ──
   resetStore();
-  const folderAlpha = join(tmpdir(), 'agentoc-proj-migrate-alpha');
-  const folderBeta = join(tmpdir(), 'agentoc-proj-migrate-beta');
+  const folderAlpha = join(tmpdir(), 'ragent-proj-migrate-alpha');
+  const folderBeta = join(tmpdir(), 'ragent-proj-migrate-beta');
   await seedSessions([
     { id: 's1', folder: folderAlpha },
     { id: 's2', folder: folderAlpha },
     { id: 's3', folder: folderBeta },
-    { id: 's4', folder: '~/agentoc-proj-migrate-gamma' },
-    { id: 's5', internalRole: 'legacy_internal', folder: join(tmpdir(), 'agentoc-proj-hidden-1') },
-    { id: 's6', visitorId: 'vis-1', folder: join(tmpdir(), 'agentoc-proj-hidden-2') },
+    { id: 's4', folder: '~/ragent-proj-migrate-gamma' },
+    { id: 's5', internalRole: 'legacy_internal', folder: join(tmpdir(), 'ragent-proj-hidden-1') },
+    { id: 's6', visitorId: 'vis-1', folder: join(tmpdir(), 'ragent-proj-hidden-2') },
   ]);
 
   await ensureProjectsInitialized();
@@ -168,7 +168,7 @@ try {
   // ~ expansion is written back onto the session folder.
   assert.equal(
     byId.get('s4').folder,
-    join(homedir(), 'agentoc-proj-migrate-gamma'),
+    join(homedir(), 'ragent-proj-migrate-gamma'),
     'migration should normalize ~ folders onto the session meta',
   );
 
@@ -180,7 +180,7 @@ try {
   const byRoot = new Map(projects.map((project) => [project.rootPath, project]));
   assert.equal(byRoot.get(folderAlpha).sessionCount, 2);
   assert.equal(byRoot.get(folderBeta).sessionCount, 1);
-  assert.equal(byRoot.get(join(homedir(), 'agentoc-proj-migrate-gamma')).sessionCount, 1);
+  assert.equal(byRoot.get(join(homedir(), 'ragent-proj-migrate-gamma')).sessionCount, 1);
 
   // ── Migration idempotency: rerunning must not duplicate or rewrite ids ────
   const idsBefore = metas.map((meta) => meta.projectId).filter(Boolean).sort();
@@ -201,7 +201,7 @@ try {
   assert.equal(projectsAfter.length, 3, 'rerunning migration should not duplicate projects');
 
   // ── updateProject: rename + archive, and listProjects archive filtering ──
-  const gammaProject = byRoot.get(join(homedir(), 'agentoc-proj-migrate-gamma'));
+  const gammaProject = byRoot.get(join(homedir(), 'ragent-proj-migrate-gamma'));
   const renamed = await updateProject(gammaProject.id, { name: 'Gamma Renamed' });
   assert.equal(renamed.name, 'Gamma Renamed');
   await updateProject(gammaProject.id, { archived: true });
@@ -214,10 +214,10 @@ try {
   // The unbound internal session has no projectId (system-created, skipped by the
   // migration) but its folder lives under the project root; it must stay
   // visible in the project-scoped list, mirroring the frontend
-  // agentocSessionMatchesSelectedWorkspace folder fallback contract.
-  const prjRoot = makeRootDir('agentoc-prj-scope-');
+  // ragentSessionMatchesSelectedWorkspace folder fallback contract.
+  const prjRoot = makeRootDir('ragent-prj-scope-');
   const scopeProject = await createProject({ rootPath: prjRoot });
-  const otherRoot = makeRootDir('agentoc-prj-other-');
+  const otherRoot = makeRootDir('ragent-prj-other-');
   const otherProject = await createProject({ rootPath: otherRoot });
   // Keep the project file (do not resetStore): the project catalog must stay
   // authoritative so listSessions resolves the real project root for the scope.
@@ -240,7 +240,7 @@ try {
     'unscoped list should still include the unbound internal session');
 
   // ── Project actions: pin + delete with explicit session policy ───────────
-  const inboxRoot = makeRootDir('agentoc-prj-inbox-');
+  const inboxRoot = makeRootDir('ragent-prj-inbox-');
   const inboxProject = await createProject({ name: 'Inbox source', rootPath: inboxRoot });
   await seedSessions([
     { id: 'sess-inbox-a', projectId: inboxProject.id, folder: inboxRoot },
@@ -261,7 +261,7 @@ try {
   assert.equal(metas.find((entry) => entry.id === 'sess-inbox-a').projectId, '',
     'project initialization must not reattach an inbox session by folder');
 
-  const deleteRoot = makeRootDir('agentoc-prj-delete-');
+  const deleteRoot = makeRootDir('ragent-prj-delete-');
   const deleteProjectRecord = await createProject({ name: 'Delete source', rootPath: deleteRoot });
   await seedSessions([
     { id: 'sess-delete', projectId: deleteProjectRecord.id, folder: deleteRoot },
@@ -277,7 +277,7 @@ try {
 
 
   // ── Execution binding freeze + revision (slice 2) ─────────────────────────
-  const freezeRoot = makeRootDir('agentoc-prj-freeze-');
+  const freezeRoot = makeRootDir('ragent-prj-freeze-');
   const freezeProject = await createProject({ name: 'Freeze', rootPath: freezeRoot });
   assert.equal(freezeProject.revision, 1, 'a fresh project should start at revision 1');
 

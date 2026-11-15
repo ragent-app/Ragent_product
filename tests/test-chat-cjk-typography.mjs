@@ -17,7 +17,7 @@
 // Produces 360/390/430 PNGs for Gemini visual review.
 //
 // Run standalone:  node tests/test-chat-cjk-typography.mjs
-// (PNGs + manifest land in /var/lib/agentoc/workspace/cjk-typography-visual/<stamp>)
+// (PNGs + manifest land in /var/lib/ragent/workspace/cjk-typography-visual/<stamp>)
 import assert from 'assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -34,8 +34,8 @@ const cssFiles = [
 const styles = cssFiles.map((p) => readFileSync(join(repoRoot, p), 'utf8')).join('\n');
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || join('/var/lib/agentoc/workspace/cjk-typography-visual', stamp);
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || join('/var/lib/ragent/workspace/cjk-typography-visual', stamp);
 mkdirSync(outputDir, { recursive: true });
 
 // Long mixed-script paragraph: Chinese + English + digits + punctuation.

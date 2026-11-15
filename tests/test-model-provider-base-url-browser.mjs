@@ -8,15 +8,15 @@ const require = createRequire(import.meta.url);
 const playwright = (() => {
   try { return require('@playwright/test'); }
   catch (error) {
-    if (error.code !== 'MODULE_NOT_FOUND' || !process.env.AGENTOC_TEST_MODULE_ROOT) throw error;
-    return createRequire(resolve(process.env.AGENTOC_TEST_MODULE_ROOT, 'package.json'))('@playwright/test');
+    if (error.code !== 'MODULE_NOT_FOUND' || !process.env.RAGENT_TEST_MODULE_ROOT) throw error;
+    return createRequire(resolve(process.env.RAGENT_TEST_MODULE_ROOT, 'package.json'))('@playwright/test');
   }
 })();
 const source = await readFile(new URL('../static/chat/model-providers.js', import.meta.url), 'utf8');
 const html = `<!doctype html><html><body><div id="modelProvidersSettingsSection"></div><div id="modelProvidersPanel"></div>
 <button id="modelProvidersOpenBtn">open</button><button id="modelProvidersAddBtn">add</button>
 <div id="modelProvidersList"></div><div id="modelProvidersStatus"></div>
-<script>window.__AGENTOC_BOOTSTRAP__={auth:{role:'owner'}};</script><script src="/providers.js"></script></body></html>`;
+<script>window.__RAGENT_BOOTSTRAP__={auth:{role:'owner'}};</script><script src="/providers.js"></script></body></html>`;
 const server = createServer((req, res) => {
   res.setHeader('Content-Type', req.url === '/providers.js' ? 'application/javascript' : 'text/html');
   res.end(req.url === '/providers.js' ? source : html);
@@ -70,8 +70,8 @@ try {
   const initialCatalog = page.waitForResponse((response) => response.url() === `${origin}/api/harnesses`);
   await page.goto(origin);
   await initialCatalog;
-  await page.waitForFunction(() => !!window.AgentoCModelProviders);
-  await page.evaluate(() => window.AgentoCModelProviders.refresh());
+  await page.waitForFunction(() => !!window.RagentModelProviders);
+  await page.evaluate(() => window.RagentModelProviders.refresh());
   const field = (label) => page.locator('.model-provider-modal .provider-helper-field')
     .filter({ has: page.locator('label').filter({ hasText: label }) });
   const base = () => field('modelProviders.baseUrl').locator('input');
@@ -85,7 +85,7 @@ try {
   assert.equal(await base().inputValue(), 'https://api.openai.com/v1', 'new Codex uses its default');
   await mode().selectOption('api-key');
   await base().fill(gateway);
-  await page.evaluate(() => { void window.AgentoCModelProviders.refresh({ refreshHarnesses: true }); });
+  await page.evaluate(() => { void window.RagentModelProviders.refresh({ refreshHarnesses: true }); });
   await protocol().selectOption('chat');
   assert.equal(await base().inputValue(), gateway, 'protocol change preserves custom gateway');
   await mode().selectOption('oauth');

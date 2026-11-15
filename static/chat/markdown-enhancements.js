@@ -3,7 +3,7 @@
  *
  * This deliberately stays local to the chat surface: code highlighting is a
  * readable token treatment, not a second editor, and Mermaid support renders
- * the two workflow shapes AgentoC uses most often without loading a remote
+ * the two workflow shapes Ragent uses most often without loading a remote
  * runtime into an authenticated chat page.
  */
 (function installMarkdownEnhancements(root) {
@@ -421,7 +421,7 @@
     enhanceColorChips(rootNode);
   }
 
-  root.AgentoCMarkdownEnhancements = {
+  root.RagentMarkdownEnhancements = {
     enhanceCodeBlocks,
     enhanceColorChips,
     highlightCode,

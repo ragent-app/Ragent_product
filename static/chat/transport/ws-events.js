@@ -18,11 +18,11 @@
 //
 // Channel URL resolution and approval-error classification are pure as well.
 // Platform hooks (visitor-mode URL rewriting) are injected via the
-// environment contract (root.AgentocWsEventsEnvironment), so this module
+// environment contract (root.RagentWsEventsEnvironment), so this module
 // stays free of browser globals and runs identically in Node. Locked against
 // the legacy implementation by tests/test-chat-ws-events-core.mjs.
 
-(function attachAgentocWsEventsCore(root) {
+(function attachRagentWsEventsCore(root) {
   const REALTIME_EVENT_ID_CACHE_LIMIT = 8192;
   const REALTIME_TEXT_STREAM_CACHE_LIMIT = 128;
   const REALTIME_TEXT_BATCH_CACHE_LIMIT = 64;
@@ -37,7 +37,7 @@
     withVisitorModeUrl: null,
   });
   const environment = new Proxy(
-    root.AgentocWsEventsEnvironment || {},
+    root.RagentWsEventsEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -252,7 +252,7 @@
     return status === 404 || status === 409 || status === 410;
   }
 
-  root.AgentocWsEventsCore = {
+  root.RagentWsEventsCore = {
     resolveWsUrl,
     rememberRealtimeEventId,
     getRealtimeTextStreamIdentityKeys,

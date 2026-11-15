@@ -12,7 +12,7 @@ function loadFixture(name) {
 const context = { console };
 context.globalThis = context;
 vm.runInNewContext(readFileSync(join(repoRoot, 'static/chat/core/event-sync.js'), 'utf8'), context, { filename: 'event-sync.js' });
-const core = context.AgentoCEventSyncCore;
+const core = context.RagentEventSyncCore;
 assert.ok(core, 'event sync core should attach its pure API');
 
 const complete = loadFixture('01-streaming-run-complete.json');

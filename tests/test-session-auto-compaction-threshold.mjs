@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // P0 (2026-07-31): focused unit test for the auto-compact threshold logic.
-// Verifies the 70% default, the AGENTOC_AUTO_COMPACT_WINDOW_PERCENT override,
-// the absolute AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS override, and that the
-// codex-app-server-json family always skips AgentoC-side compaction.
+// Verifies the 70% default, the RAGENT_AUTO_COMPACT_WINDOW_PERCENT override,
+// the absolute RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS override, and that the
+// codex-app-server-json family always skips Ragent-side compaction.
 import assert from 'assert/strict';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -37,9 +37,9 @@ async function loadFresh() {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: undefined,
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: undefined,
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       const run = (contextInputTokens, contextWindowTokens, runtimeFamily = 'claude-stream-json-bidi') => ({
@@ -57,14 +57,14 @@ async function loadFresh() {
   );
 }
 
-// 2. AGENTOC_AUTO_COMPACT_WINDOW_PERCENT overrides the percent.
+// 2. RAGENT_AUTO_COMPACT_WINDOW_PERCENT overrides the percent.
 {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: '50',
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: '50',
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       const run = (contextInputTokens, contextWindowTokens) => ({
@@ -83,9 +83,9 @@ async function loadFresh() {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: 'not-a-number',
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: 'not-a-number',
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       const run = (contextInputTokens, contextWindowTokens) => ({
@@ -99,14 +99,14 @@ async function loadFresh() {
   );
 }
 
-// 4. Absolute AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS wins over the percent.
+// 4. Absolute RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS wins over the percent.
 {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: '5000',
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: '90',
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: '5000',
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: '90',
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       const run = (contextInputTokens) => ({
@@ -125,9 +125,9 @@ async function loadFresh() {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: undefined,
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: undefined,
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       assert.equal(
@@ -137,7 +137,7 @@ async function loadFresh() {
           runtimeFamily: 'codex-app-server-json',
         }),
         false,
-        'codex-app-server-json must skip AgentoC compaction (native compaction handles it)',
+        'codex-app-server-json must skip Ragent compaction (native compaction handles it)',
       );
     },
   );
@@ -146,9 +146,9 @@ async function loadFresh() {
   const { shouldAutoCompactRun: should2 } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: undefined,
-      AGENTOC_CODEX_NATIVE_COMPACT: 'off',
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: undefined,
+      RAGENT_CODEX_NATIVE_COMPACT: 'off',
     },
     () => {
       assert.equal(
@@ -169,9 +169,9 @@ async function loadFresh() {
   const { shouldAutoCompactRun } = await loadFresh();
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: undefined,
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: undefined,
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       assert.equal(
@@ -201,11 +201,11 @@ async function loadFresh() {
   });
   withEnv(
     {
-      AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
-      AGENTOC_AUTO_COMPACT_WINDOW_PERCENT: undefined,
-      AGENTOC_PROGRESSIVE_TOOL_TRIM_PERCENT: undefined,
-      AGENTOC_EMERGENCY_CLEAR_PERCENT: undefined,
-      AGENTOC_CODEX_NATIVE_COMPACT: undefined,
+      RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS: undefined,
+      RAGENT_AUTO_COMPACT_WINDOW_PERCENT: undefined,
+      RAGENT_PROGRESSIVE_TOOL_TRIM_PERCENT: undefined,
+      RAGENT_EMERGENCY_CLEAR_PERCENT: undefined,
+      RAGENT_CODEX_NATIVE_COMPACT: undefined,
     },
     () => {
       assert.equal(getProgressiveCompactionLevel(run(49, 100)), COMPACTION_LEVEL.NONE, '49% must be below every level');

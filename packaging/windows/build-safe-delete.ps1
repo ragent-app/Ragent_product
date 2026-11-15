@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or -not [Environment]::Is64BitOperatingSystem) { throw 'Safe deletion helper requires native 64-bit Windows.' }
 $module = Join-Path ([IO.Path]::GetFullPath($SourceRoot)) 'native\windows-safe-delete'
 if (-not (Test-Path -LiteralPath (Join-Path $module 'go.mod') -PathType Leaf) -or
-    -not (Test-Path -LiteralPath (Join-Path $module 'cmd\agentoc-safe-delete\main_windows.go') -PathType Leaf)) { throw 'Safe deletion helper source is missing.' }
+    -not (Test-Path -LiteralPath (Join-Path $module 'cmd\ragent-safe-delete\main_windows.go') -PathType Leaf)) { throw 'Safe deletion helper source is missing.' }
 $go = Get-Command go.exe -ErrorAction SilentlyContinue
 if (-not $go) { throw 'go.exe is required to build the safe deletion helper.' }
 $OutputPath = [IO.Path]::GetFullPath($OutputPath)
@@ -13,7 +13,7 @@ $oldOs=$env:GOOS; $oldArch=$env:GOARCH; $oldCgo=$env:CGO_ENABLED
 try {
     $env:GOOS='windows'; $env:GOARCH='amd64'; $env:CGO_ENABLED='0'
     Push-Location $module
-    try { & $go.Source build -trimpath -o $OutputPath './cmd/agentoc-safe-delete'; if ($LASTEXITCODE -ne 0) { throw 'Safe deletion helper build failed.' } }
+    try { & $go.Source build -trimpath -o $OutputPath './cmd/ragent-safe-delete'; if ($LASTEXITCODE -ne 0) { throw 'Safe deletion helper build failed.' } }
     finally { Pop-Location }
 } finally {
     if ($null -eq $oldOs) { Remove-Item Env:GOOS -ErrorAction SilentlyContinue } else { $env:GOOS=$oldOs }

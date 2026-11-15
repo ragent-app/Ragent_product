@@ -47,10 +47,10 @@ try {
 
   check('native audience 使用显式 allowlist，并兼容旧变量', () => {
     assert.deepEqual(resolveGoogleNativeServerClientIds({
-      AGENTOC_GOOGLE_NATIVE_SERVER_CLIENT_IDS: 'server-a, server-b',
-      AGENTOC_ANDROID_GOOGLE_CLIENT_ID: 'legacy-only',
+      RAGENT_GOOGLE_NATIVE_SERVER_CLIENT_IDS: 'server-a, server-b',
+      RAGENT_ANDROID_GOOGLE_CLIENT_ID: 'legacy-only',
     }), ['server-a', 'server-b']);
-    assert.deepEqual(resolveGoogleNativeServerClientIds({ AGENTOC_ANDROID_GOOGLE_CLIENT_ID: 'legacy-only' }), ['legacy-only']);
+    assert.deepEqual(resolveGoogleNativeServerClientIds({ RAGENT_ANDROID_GOOGLE_CLIENT_ID: 'legacy-only' }), ['legacy-only']);
     assert.deepEqual(resolveGoogleNativeServerClientIds({}), []);
   });
 

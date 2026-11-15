@@ -12,9 +12,9 @@ export async function getResponsibilityCapabilities({ organizationId, projectId 
   if (!org || (projectId && org.projectId !== projectId) || ['archived', 'lifecycle_pending'].includes(org.state)) {
     throw Object.assign(new Error('Organization or project unavailable'), { statusCode: 404, code: 'RESPONSIBILITY_NOT_FOUND' });
   }
-  const report = getFactoryFormula('agentoc-project-report', 1);
-  const planner = getFactoryFormula('agentoc-responsibility-planner', 1);
-  const ci = getFactoryFormula('agentoc-reviewed-change', 3);
+  const report = getFactoryFormula('ragent-project-report', 1);
+  const planner = getFactoryFormula('ragent-responsibility-planner', 1);
+  const ci = getFactoryFormula('ragent-reviewed-change', 3);
   const template = f => ({ id: f.id, version: f.version, digest: f.digest });
   return {
     schemaVersion: 1,

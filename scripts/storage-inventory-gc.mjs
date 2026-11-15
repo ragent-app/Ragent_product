@@ -33,23 +33,23 @@
 // disk-usage threshold alerts.
 //
 // Config (env, resolved lazily so tests can change them):
-//   AGENTOC_STORAGE_GC_ENABLED                  default 1       master switch
-//   AGENTOC_STORAGE_GC_API_LOGS_RETENTION_MS    default 180d    delete .gz logs
-//   AGENTOC_STORAGE_GC_API_LOGS_COMPRESS_AFTER_MS default 7d    gzip plain logs
-//   AGENTOC_STORAGE_GC_CACHE_RETENTION_MS       default 30d
-//   AGENTOC_STORAGE_GC_BUILDS_RETENTION_MS      default 90d
-//   AGENTOC_STORAGE_GC_BUILDS_KEEP_MIN          default 5
-//   AGENTOC_STORAGE_GC_RELEASES_RETENTION_MS    default 365d
-//   AGENTOC_STORAGE_GC_RELEASES_KEEP_MIN        default 3
-//   AGENTOC_STORAGE_GC_BACKUPS_KEEP_MIN         default 3
-//   AGENTOC_STORAGE_GC_TMP_RETENTION_MS         default 1d
-//   AGENTOC_STORAGE_GC_DIAG_RETENTION_MS        default 7d
-//   AGENTOC_STORAGE_GC_ARTIFACTS_RETENTION_MS   default 90d
-//   AGENTOC_STORAGE_GC_REF_SCAN_MAX_MB          default 256     history corpus cap
-//   AGENTOC_STORAGE_GC_DISK_WARN_PCT            default 85
-//   AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT        default 95
-//   AGENTOC_STORAGE_GC_STATE_FILE               default <config>/storage-gc-state.json
-//   AGENTOC_STORAGE_GC_INSTALLED_VERSION        override installed version
+//   RAGENT_STORAGE_GC_ENABLED                  default 1       master switch
+//   RAGENT_STORAGE_GC_API_LOGS_RETENTION_MS    default 180d    delete .gz logs
+//   RAGENT_STORAGE_GC_API_LOGS_COMPRESS_AFTER_MS default 7d    gzip plain logs
+//   RAGENT_STORAGE_GC_CACHE_RETENTION_MS       default 30d
+//   RAGENT_STORAGE_GC_BUILDS_RETENTION_MS      default 90d
+//   RAGENT_STORAGE_GC_BUILDS_KEEP_MIN          default 5
+//   RAGENT_STORAGE_GC_RELEASES_RETENTION_MS    default 365d
+//   RAGENT_STORAGE_GC_RELEASES_KEEP_MIN        default 3
+//   RAGENT_STORAGE_GC_BACKUPS_KEEP_MIN         default 3
+//   RAGENT_STORAGE_GC_TMP_RETENTION_MS         default 1d
+//   RAGENT_STORAGE_GC_DIAG_RETENTION_MS        default 7d
+//   RAGENT_STORAGE_GC_ARTIFACTS_RETENTION_MS   default 90d
+//   RAGENT_STORAGE_GC_REF_SCAN_MAX_MB          default 256     history corpus cap
+//   RAGENT_STORAGE_GC_DISK_WARN_PCT            default 85
+//   RAGENT_STORAGE_GC_DISK_CRITICAL_PCT        default 95
+//   RAGENT_STORAGE_GC_STATE_FILE               default <config>/storage-gc-state.json
+//   RAGENT_STORAGE_GC_INSTALLED_VERSION        override installed version
 //
 // Usage:
 //   node scripts/storage-inventory-gc.mjs [--apply] [--json] [--scheduled] [--workspace <dir>] [--help]
@@ -119,25 +119,25 @@ function parseEnvPct(env, key, fallback) {
 
 export function resolveGcConfig(env = process.env, { configDir = CONFIG_DIR, workspaceDir = MANAGED_WORK_ROOT_DIR } = {}) {
   return {
-    enabled: env.AGENTOC_STORAGE_GC_ENABLED !== '0',
+    enabled: env.RAGENT_STORAGE_GC_ENABLED !== '0',
     configDir,
     workspaceDir,
-    stateFile: env.AGENTOC_STORAGE_GC_STATE_FILE || join(configDir, 'storage-gc-state.json'),
-    installedVersion: env.AGENTOC_STORAGE_GC_INSTALLED_VERSION || null,
-    apiLogsRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_API_LOGS_RETENTION_MS', 180 * DAY_MS),
-    apiLogsCompressAfterMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_API_LOGS_COMPRESS_AFTER_MS', 7 * DAY_MS),
-    cacheRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_CACHE_RETENTION_MS', 30 * DAY_MS),
-    buildsRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_BUILDS_RETENTION_MS', 90 * DAY_MS),
-    buildsKeepMin: parseEnvInt(env, 'AGENTOC_STORAGE_GC_BUILDS_KEEP_MIN', 5),
-    releasesRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_RELEASES_RETENTION_MS', 365 * DAY_MS),
-    releasesKeepMin: parseEnvInt(env, 'AGENTOC_STORAGE_GC_RELEASES_KEEP_MIN', 3),
-    backupsKeepMin: parseEnvInt(env, 'AGENTOC_STORAGE_GC_BACKUPS_KEEP_MIN', 3),
-    tmpRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_TMP_RETENTION_MS', 1 * DAY_MS),
-    diagRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_DIAG_RETENTION_MS', 7 * DAY_MS),
-    artifactsRetentionMs: parseEnvMs(env, 'AGENTOC_STORAGE_GC_ARTIFACTS_RETENTION_MS', 90 * DAY_MS),
-    refScanMaxBytes: parseEnvInt(env, 'AGENTOC_STORAGE_GC_REF_SCAN_MAX_MB', 256) * 1024 * 1024,
-    diskWarnPct: parseEnvPct(env, 'AGENTOC_STORAGE_GC_DISK_WARN_PCT', 85),
-    diskCriticalPct: parseEnvPct(env, 'AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT', 95),
+    stateFile: env.RAGENT_STORAGE_GC_STATE_FILE || join(configDir, 'storage-gc-state.json'),
+    installedVersion: env.RAGENT_STORAGE_GC_INSTALLED_VERSION || null,
+    apiLogsRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_API_LOGS_RETENTION_MS', 180 * DAY_MS),
+    apiLogsCompressAfterMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_API_LOGS_COMPRESS_AFTER_MS', 7 * DAY_MS),
+    cacheRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_CACHE_RETENTION_MS', 30 * DAY_MS),
+    buildsRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_BUILDS_RETENTION_MS', 90 * DAY_MS),
+    buildsKeepMin: parseEnvInt(env, 'RAGENT_STORAGE_GC_BUILDS_KEEP_MIN', 5),
+    releasesRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_RELEASES_RETENTION_MS', 365 * DAY_MS),
+    releasesKeepMin: parseEnvInt(env, 'RAGENT_STORAGE_GC_RELEASES_KEEP_MIN', 3),
+    backupsKeepMin: parseEnvInt(env, 'RAGENT_STORAGE_GC_BACKUPS_KEEP_MIN', 3),
+    tmpRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_TMP_RETENTION_MS', 1 * DAY_MS),
+    diagRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_DIAG_RETENTION_MS', 7 * DAY_MS),
+    artifactsRetentionMs: parseEnvMs(env, 'RAGENT_STORAGE_GC_ARTIFACTS_RETENTION_MS', 90 * DAY_MS),
+    refScanMaxBytes: parseEnvInt(env, 'RAGENT_STORAGE_GC_REF_SCAN_MAX_MB', 256) * 1024 * 1024,
+    diskWarnPct: parseEnvPct(env, 'RAGENT_STORAGE_GC_DISK_WARN_PCT', 85),
+    diskCriticalPct: parseEnvPct(env, 'RAGENT_STORAGE_GC_DISK_CRITICAL_PCT', 95),
   };
 }
 
@@ -464,7 +464,7 @@ function parseRunState(corpus) {
 
 export async function resolveInstalledVersion(cfg, { query = execFileAsync } = {}) {
   if (cfg.installedVersion) return cfg.installedVersion;
-  for (const name of ['ragent', 'agentoc']) {
+  for (const name of ['ragent', 'ragent']) {
     try {
       const { stdout } = await query('dpkg-query', ['-W', '-f=${db:Status-Status}\t${Version}', name], {
         timeout: 5_000, encoding: 'utf8',
@@ -735,7 +735,7 @@ export async function runStorageGc({
   };
 
   if (!cfg.enabled) {
-    addAlert(report, 'info', 'storage GC disabled via AGENTOC_STORAGE_GC_ENABLED=0');
+    addAlert(report, 'info', 'storage GC disabled via RAGENT_STORAGE_GC_ENABLED=0');
     return report;
   }
 
@@ -1009,7 +1009,7 @@ async function main() {
     apply: options.apply,
     workspaceDir: options.workspaceDir || MANAGED_WORK_ROOT_DIR,
     previousState: await loadState(
-      (process.env.AGENTOC_STORAGE_GC_STATE_FILE || join(CONFIG_DIR, 'storage-gc-state.json')),
+      (process.env.RAGENT_STORAGE_GC_STATE_FILE || join(CONFIG_DIR, 'storage-gc-state.json')),
     ),
   });
   if (options.json) {

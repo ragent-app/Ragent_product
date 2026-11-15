@@ -29,12 +29,12 @@ assert.equal(shouldUseLocalWebAuth({ remoteAddress: '127.0.0.1', url: '/api/mode
 assert.equal(shouldUseLocalWebAuth({ remoteAddress: '127.0.0.1', accept: '*/*' }), false);
 assert.equal(shouldUseLocalWebAuth({ remoteAddress: '127.0.0.1', accept: 'text/html', viaTunnel: true }), false);
 assert.equal(shouldUseLocalWebAuth({ remoteAddress: '127.0.0.1', accept: 'text/html', viaTunnel: false }), true);
-assert.equal(isTunneledRequest({ headers: { 'x-agentoc-tunnel': '1' } }), true);
-assert.equal(isTunneledRequest({ headers: { 'x-agentoc-tunnel': '' } }), false);
+assert.equal(isTunneledRequest({ headers: { 'x-ragent-tunnel': '1' } }), true);
+assert.equal(isTunneledRequest({ headers: { 'x-ragent-tunnel': '' } }), false);
 assert.equal(isTunneledRequest({ headers: {} }), false);
 assert.equal(isTunneledRequest({}), false);
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-windows-auth-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-windows-auth-'));
 try {
   const authFile = join(root, 'config', 'auth.json');
   const created = await ensureWindowsOwnerAuth({

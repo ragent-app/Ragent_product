@@ -42,7 +42,7 @@ function makeFakeServer(socketPath, handler) {
   });
 }
 
-const tmpDir = await mkdtemp(join(tmpdir(), 'agentoc-p3b-test-'));
+const tmpDir = await mkdtemp(join(tmpdir(), 'ragent-p3b-test-'));
 
 // --- createPrivilegedExecutorRequestId ---
 check('preq_ prefix', createPrivilegedExecutorRequestId().startsWith('preq_'));
@@ -52,12 +52,12 @@ check('preq_ id starts with preq_', id1.startsWith('preq_'));
 check('preq_ ids unique', id1 !== createPrivilegedExecutorRequestId());
 
 // --- resolvePrivilegedExecutorSocketPath ---
-const savedEnv = process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET;
-delete process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET;
+const savedEnv = process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET;
+delete process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET;
 check('default socket path', resolvePrivilegedExecutorSocketPath() === DEFAULT_PRIVILEGED_EXECUTOR_SOCKET_PATH);
-process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET = '/custom/sock';
+process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET = '/custom/sock';
 check('env override', resolvePrivilegedExecutorSocketPath() === '/custom/sock');
-if (savedEnv !== undefined) process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET = savedEnv; else delete process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET;
+if (savedEnv !== undefined) process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET = savedEnv; else delete process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET;
 
 // --- constants ---
 check('exec action constant', PRIVILEGED_EXECUTOR_ACTION_EXEC === 'exec');

@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$serviceName = 'AgentoC-ControlPlane'
+$serviceName = 'Ragent-ControlPlane'
 $healthUrl = 'http://127.0.0.1:7690/healthz'
 $updates = @(
   @{ source = 'static/qr-creator.min.js'; target = 'static/qr-creator.min.js'; served = 'qr-creator.min.js' },
@@ -117,7 +117,7 @@ $isElevated = ([Security.Principal.WindowsPrincipal] [Security.Principal.Windows
 if ($Rollback) {
   if (-not $BackupPath) { throw 'Rollback requires -BackupPath pointing to a backup created by this script.' }
   $BackupPath = [IO.Path]::GetFullPath($BackupPath)
-  $allowedBackupRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'AgentoC\backups\temporary-access')).TrimEnd('\') + '\'
+  $allowedBackupRoot = [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'Ragent\backups\temporary-access')).TrimEnd('\') + '\'
   if (-not $BackupPath.StartsWith($allowedBackupRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Refusing to restore from outside $allowedBackupRoot" }
   $manifestPath = Join-Path $BackupPath 'manifest.json'
   if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Backup manifest was not found.' }
@@ -151,7 +151,7 @@ if ($WhatIfPreference) {
   return
 }
 
-$backupRoot = Join-Path $env:ProgramData 'AgentoC\backups\temporary-access'
+$backupRoot = Join-Path $env:ProgramData 'Ragent\backups\temporary-access'
 $backup = Join-Path $backupRoot ([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))
 if ($PSCmdlet.ShouldProcess($payload, 'Install temporary-access runtime and pairing UI fixes, then restart the idle ControlPlane service')) {
   New-Item -ItemType Directory -Path $backup -Force | Out-Null

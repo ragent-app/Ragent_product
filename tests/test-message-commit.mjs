@@ -12,13 +12,13 @@ import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { test, after, afterEach } from 'node:test';
 
-const root = process.env.AGENTOC_MESSAGE_COMMIT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-message-commit-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '0';
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
-await writeFile(join(process.env.AGENTOC_CONFIG_DIR, 'tools.json'), JSON.stringify([{
+const root = process.env.RAGENT_MESSAGE_COMMIT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-message-commit-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '0';
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
+await writeFile(join(process.env.RAGENT_CONFIG_DIR, 'tools.json'), JSON.stringify([{
   id: 'scoped-fixture', name: 'Scoped fixture runtime', command: process.execPath,
   runtimeFamily: 'codex-json', models: [{ id: 'frozen-model', label: 'Fixture model' }],
 }, {
@@ -40,7 +40,7 @@ const { handleSessionMainRoutes } = await import('../chat/router-session-main-ro
 const projects = await import('../chat/projects.mjs');
 const apps = await import('../chat/apps.mjs');
 const seededProject = process.argv[2] ? null : await projects.createProject({ name: 'Scoped commit fixture', rootPath: root });
-const scopeHeader = 'x-agentoc-app-api-scope';
+const scopeHeader = 'x-ragent-app-api-scope';
 const tracked = new Set();
 let seq = 0;
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; };
@@ -82,7 +82,7 @@ const executeOptions = execute => ({ execute, settleFailure: failure });
 const committedPath = value => `/api/sessions/${value.sessionId}/app-api-message-preparations/${value.request.requestId}/commit`;
 
 if (process.argv[2] === 'cold-start') {
-  const value = JSON.parse(process.env.AGENTOC_MESSAGE_COMMIT_INPUT);
+  const value = JSON.parse(process.env.RAGENT_MESSAGE_COMMIT_INPUT);
   assert.equal((await meta.findSessionMeta(value.sessionId)).activeRunId, undefined);
   assert.equal((await api.readMessageRun(value.runId)).run.state, 'queued');
   await manager.startDetachedRunObservers();
@@ -93,19 +93,19 @@ if (process.argv[2] === 'cold-start') {
   process.stdout.write('COLD_STARTED=' + JSON.stringify(receipt) + '\n');
   manager.killAll(); await meta.flushSessionsMetaNow();
 } else if (process.argv[2] === 'cold-resume') {
-  const value = JSON.parse(process.env.AGENTOC_MESSAGE_COMMIT_INPUT);
+  const value = JSON.parse(process.env.RAGENT_MESSAGE_COMMIT_INPUT);
   const evidence = await api.readMessageRun(value.runId);
   assert.equal(evidence.run.state, 'preparing'); assert.equal(evidence.manifest.preparation, undefined);
-  process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = process.platform === 'win32'
-    ? `\\\\.\\pipe\\agentoc-commit-missing-${process.pid}` : join(root, 'missing-broker.sock');
-  process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = '1';
+  process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = process.platform === 'win32'
+    ? `\\\\.\\pipe\\ragent-commit-missing-${process.pid}` : join(root, 'missing-broker.sock');
+  process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = '1';
   await manager.scheduleScopedMessageRun(value.sessionId, value.runId);
   const receipt = await api.readSessionApiMessageCommit(value.sessionId, value.scope, value.request.requestId);
   const events = await history.readEventsAfter(value.sessionId, 0);
   process.stdout.write('COLD_RESUMED=' + JSON.stringify({ receipt, userEvents: events.filter(row => row.id === `message-run:${value.runId}`).length }) + '\n');
   manager.killAll(); await meta.flushSessionsMetaNow();
 } else if (process.argv[2] === 'crash-prepared') {
-  const value = JSON.parse(process.env.AGENTOC_MESSAGE_COMMIT_INPUT);
+  const value = JSON.parse(process.env.RAGENT_MESSAGE_COMMIT_INPUT);
   const rename = fs.promises.rename;
   fs.promises.rename = async (from, to) => {
     const result = await rename(from, to);
@@ -122,13 +122,13 @@ if (process.argv[2] === 'cold-start') {
   await manager.scheduleScopedMessageRun(value.sessionId, value.runId);
   throw new Error('Prepared manifest checkpoint was not reached');
 } else if (process.argv[2] === 'cold') {
-  const value = JSON.parse(process.env.AGENTOC_MESSAGE_COMMIT_INPUT);
+  const value = JSON.parse(process.env.RAGENT_MESSAGE_COMMIT_INPUT);
   const receipt = await api.readSessionApiMessageCommit(value.sessionId, value.scope, value.request.requestId);
   const duplicate = await api.commitSessionApiMessage(value.sessionId, value.scope, value.request.requestId, value.payload, 'owner');
   process.stdout.write('COLD_COMMIT=' + JSON.stringify({ receipt, duplicate }) + '\n');
   await meta.flushSessionsMetaNow();
 } else if (process.argv[2] === 'crash-http') {
-  const value = JSON.parse(process.env.AGENTOC_MESSAGE_COMMIT_INPUT);
+  const value = JSON.parse(process.env.RAGENT_MESSAGE_COMMIT_INPUT);
   manager.ensureSessionRuntimeState(value.sessionId).pendingCompact = true;
   const server = createServer(async (req, res) => {
     const parsedUrl = new URL(req.url, 'http://localhost');
@@ -356,8 +356,8 @@ test('cold server startup discovers a durable queued Run without an active Sessi
   const value = await seed({}, { runOptions: { planAction: 'execute', planId: 'missing_plan_for_cold_start' } });
   const queued = await commit(value); await meta.flushSessionsMetaNow();
   const result = await promisify(execFile)(process.execPath, [fileURLToPath(import.meta.url), 'cold-start'], { env: {
-    ...process.env, AGENTOC_MESSAGE_COMMIT_TEST_ROOT: root,
-    AGENTOC_MESSAGE_COMMIT_INPUT: JSON.stringify({ ...value, runId: queued.runId }) }, timeout: 15000 });
+    ...process.env, RAGENT_MESSAGE_COMMIT_TEST_ROOT: root,
+    RAGENT_MESSAGE_COMMIT_INPUT: JSON.stringify({ ...value, runId: queued.runId }) }, timeout: 15000 });
   const receipt = JSON.parse(result.stdout.split('\n').find(line => line.startsWith('COLD_STARTED=')).slice('COLD_STARTED='.length));
   assert.equal(receipt.runId, queued.runId); assert.equal(receipt.state, 'failed');
   assert.equal(receipt.failureCode, 'PREPARATION_FAILED'); assert.equal(receipt.dispatched, false);
@@ -477,8 +477,8 @@ test('production continuation reaches ordinary message validation and retains th
 test('production pipeline publishes immutable prepared inputs and logical launch admission before a real broker rejection', { timeout: 30000 }, async () => {
   const value = await seed({ tool: 'scoped-gated-fixture', riskMode: 'full-auto', riskModeExplicit: true });
   const accepted = await commit(value); const requests = []; const entered = deferred(); const release = deferred();
-  const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\agentoc-commit-fixture-${process.pid}` : join(root, 'broker.sock');
-  const previous = { socket: process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET, required: process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED };
+  const socketPath = process.platform === 'win32' ? `\\\\.\\pipe\\ragent-commit-fixture-${process.pid}` : join(root, 'broker.sock');
+  const previous = { socket: process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET, required: process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED };
   const server = createBroker(socket => {
     socket.setEncoding('utf8'); let text = '';
     socket.on('data', chunk => { text += chunk; if (!text.includes('\n')) return;
@@ -488,8 +488,8 @@ test('production pipeline publishes immutable prepared inputs and logical launch
     });
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
-  process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = socketPath;
-  process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = '1';
+  process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = socketPath;
+  process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = '1';
   try {
     const pending = manager.scheduleScopedMessageRun(value.sessionId, accepted.runId);
     await entered.promise;
@@ -506,8 +506,8 @@ test('production pipeline publishes immutable prepared inputs and logical launch
   } finally {
     release.resolve();
     await new Promise(resolve => server.close(resolve));
-    if (previous.socket === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET; else process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = previous.socket;
-    if (previous.required === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED; else process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = previous.required;
+    if (previous.socket === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET; else process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = previous.socket;
+    if (previous.required === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED; else process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = previous.required;
   }
 });
 
@@ -526,7 +526,7 @@ test('HTTP authorization, strict input and scope errors cannot create acceptance
 test('actual HTTP process death after durable acceptance before reply recovers one original queued Run', async () => {
   const value = await seed(); await meta.flushSessionsMetaNow();
   const child = fork(new URL(import.meta.url), ['crash-http'], { env: { ...process.env,
-    AGENTOC_MESSAGE_COMMIT_TEST_ROOT: root, AGENTOC_MESSAGE_COMMIT_INPUT: JSON.stringify(value) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    RAGENT_MESSAGE_COMMIT_TEST_ROOT: root, RAGENT_MESSAGE_COMMIT_INPUT: JSON.stringify(value) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let pending;
   const message = type => new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error('Child checkpoint timeout')), 15000);
@@ -545,7 +545,7 @@ test('actual HTTP process death after durable acceptance before reply recovers o
     tracked.add(checkpoint.body.runId);
     const exited = new Promise(resolve => child.once('exit', resolve)); child.kill('SIGKILL'); await exited;
     const cold = await promisify(execFile)(process.execPath, [new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), 'cold'], {
-      env: { ...process.env, AGENTOC_MESSAGE_COMMIT_TEST_ROOT: root, AGENTOC_MESSAGE_COMMIT_INPUT: JSON.stringify(value) }, timeout: 15000 });
+      env: { ...process.env, RAGENT_MESSAGE_COMMIT_TEST_ROOT: root, RAGENT_MESSAGE_COMMIT_INPUT: JSON.stringify(value) }, timeout: 15000 });
     const parsed = JSON.parse(cold.stdout.split('\n').find(line => line.startsWith('COLD_COMMIT=')).slice('COLD_COMMIT='.length));
     assert.equal(parsed.receipt.runId, checkpoint.body.runId); assert.equal(parsed.receipt.accepted, true);
     assert.equal(parsed.duplicate.runId, checkpoint.body.runId); assert.equal(parsed.duplicate.duplicate, true);
@@ -557,7 +557,7 @@ test('actual continuation process death after prepared manifest replacement reco
   const accepted = await commit(value); const input = { ...value, runId: accepted.runId };
   await meta.flushSessionsMetaNow();
   const child = fork(new URL(import.meta.url), ['crash-prepared'], { env: { ...process.env,
-    AGENTOC_MESSAGE_COMMIT_TEST_ROOT: root, AGENTOC_MESSAGE_COMMIT_INPUT: JSON.stringify(input) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+    RAGENT_MESSAGE_COMMIT_TEST_ROOT: root, RAGENT_MESSAGE_COMMIT_INPUT: JSON.stringify(input) }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
   try {
     await new Promise((resolve, reject) => {
@@ -567,7 +567,7 @@ test('actual continuation process death after prepared manifest replacement reco
     });
     const exited = new Promise(resolve => child.once('exit', resolve)); child.kill('SIGKILL'); await exited;
     const cold = await promisify(execFile)(process.execPath, [fileURLToPath(import.meta.url), 'cold-resume'], { env: {
-      ...process.env, AGENTOC_MESSAGE_COMMIT_TEST_ROOT: root, AGENTOC_MESSAGE_COMMIT_INPUT: JSON.stringify(input) }, timeout: 15000 });
+      ...process.env, RAGENT_MESSAGE_COMMIT_TEST_ROOT: root, RAGENT_MESSAGE_COMMIT_INPUT: JSON.stringify(input) }, timeout: 15000 });
     const result = JSON.parse(cold.stdout.split('\n').find(line => line.startsWith('COLD_RESUMED=')).slice('COLD_RESUMED='.length));
     assert.equal(result.receipt.runId, accepted.runId); assert.equal(result.receipt.accepted, true);
     assert.equal(result.receipt.state, 'failed'); assert.equal(result.receipt.dispatched, false);

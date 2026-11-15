@@ -25,7 +25,7 @@ vm.runInNewContext(source, context, {
   filename: 'session-state-model.js',
 });
 
-const model = context.AgentoCSessionStateModel;
+const model = context.RagentSessionStateModel;
 
 assert.ok(model, 'session state model should attach to the global scope');
 

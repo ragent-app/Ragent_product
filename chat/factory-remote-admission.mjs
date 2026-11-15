@@ -68,15 +68,15 @@ function checkedContract(facts,org,node) {
 // Invoked only by the authenticated target operation receiver. It creates a
 // local execution child, never a source acceptance decision or a second runner.
 export async function admitRemoteFactoryAttempt({binding,operation}={}) {
-  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true'||process.env.AGENTOC_FACTORY_SCHEDULER_ENABLED!=='1') fail('Target Factory admission is disabled');
+  if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true'||process.env.RAGENT_FACTORY_SCHEDULER_ENABLED!=='1') fail('Target Factory admission is disabled');
   if(!binding?.id||!operation?.operationId) fail('Remote operation identity required');
   const remoteKnowledge=await factoryRead(db=>remoteKnowledgeScope(facts(db,binding.id,operation.operationId)));
   if(remoteKnowledge.knowledgeRefs.length) {
     const {fetchLiveRemoteKnowledge}=await import('./factory-remote-knowledge.mjs');
     await fetchLiveRemoteKnowledge(remoteKnowledge);
   }
-  const organizations=String(process.env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map(value=>value.trim()).filter(Boolean);
-  if(!String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim() || !organizations.includes(binding.organizationId)) fail('Target organization is not enabled for Factory');
+  const organizations=String(process.env.RAGENT_FACTORY_ORGANIZATIONS || '').split(',').map(value=>value.trim()).filter(Boolean);
+  if(!String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID || '').trim() || !organizations.includes(binding.organizationId)) fail('Target organization is not enabled for Factory');
   const session=await getSession(binding.sessionId);
   if(!session || session.sessionPlane!=='organization' || session.organizationId!==binding.organizationId
       || session.organizationNodeId!==binding.nodeId || !session.templateId || !session.tool || !session.model || !session.effort) fail('Target managed session is unavailable');
@@ -105,7 +105,7 @@ export async function admitRemoteFactoryAttempt({binding,operation}={}) {
 export function verifyRemoteFactoryChild(db,item,{bindingGeneration=item.binding_generation,requireDispatch=true}={}) {
   const source=JSON.parse(item.source_json || '{}'), parent=source.parentRemoteOperation;
   if(!parent) return null;
-  if(requireDispatch && process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1') fail('Remote Factory dispatch is disabled');
+  if(requireDispatch && process.env.RAGENT_REMOTE_FACTORY_ENABLED!=='1') fail('Remote Factory dispatch is disabled');
   const f=facts(db,parent.bindingId,parent.operationId), b=f.binding;
   if(requireDispatch && (!Number.isSafeInteger(f.payload.reservedTokens) || f.payload.reservedTokens<=0)) fail('Remote execution requires a reserved token budget');
   const link=db.prepare('SELECT * FROM factory_remote_children WHERE binding_id=? AND operation_id=? AND work_item_id=?').get(parent.bindingId,parent.operationId,item.id);

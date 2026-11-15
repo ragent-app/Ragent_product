@@ -4,12 +4,12 @@
   "generatedAt": "2026-08-07",
   "datasets": [
     {
-      "id": "agentoc-boundaries",
-      "path": "agentoc-boundaries.jsonl",
+      "id": "ragent-boundaries",
+      "path": "ragent-boundaries.jsonl",
       "label": "policy-gold",
-      "source": "AgentoC risk-v3 maintained fixture",
+      "source": "Ragent risk-v3 maintained fixture",
       "revision": "local-2026-08-07",
-      "license": "Apache-2.0 (AgentoC)",
+      "license": "Apache-2.0 (Ragent)",
       "sha256": "503611632e174905767563a4eef127fe09941f767baa594027599a2dc7f141e7",
       "records": 26
     }

@@ -10,19 +10,19 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-auth-poll-runtime-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-auth-poll-runtime-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'owner-auth-poll-runtime-session-secret';
-// 关键：没有 AGENTOC_PUBLIC_BASE_URL —— 模拟无公网实例。
-delete process.env.AGENTOC_PUBLIC_BASE_URL;
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ACCOUNTS_ISSUER = 'https://accounts.example.test';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'owner-auth-poll-runtime-session-secret';
+// 关键：没有 RAGENT_PUBLIC_BASE_URL —— 模拟无公网实例。
+delete process.env.RAGENT_PUBLIC_BASE_URL;
+delete process.env.RAGENT_INSTANCE_ROOT;
 process.env.SECURE_COOKIES = '0';
-mkdirSync(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
-writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'not-used' }));
+mkdirSync(process.env.RAGENT_CONFIG_DIR, { recursive: true });
+writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'not-used' }));
 
 const {
   startOwnerAccountAuth,
@@ -181,7 +181,7 @@ function responseRecorder() {
 }
 
 function transactionFile() {
-  return JSON.parse(readFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'owner-account-transactions.json'), 'utf8'));
+  return JSON.parse(readFileSync(join(process.env.RAGENT_CONFIG_DIR, 'owner-account-transactions.json'), 'utf8'));
 }
 
 try {
@@ -209,7 +209,7 @@ try {
     const sent = created.get(bindStart.transactionId);
     assert.equal(sent.deliveryMode, 'instance_poll');
     assert.equal(sent.returnUrl, undefined);
-    assert.equal(sent.audience, 'agentoc-owner-auth-poll');
+    assert.equal(sent.audience, 'ragent-owner-auth-poll');
   });
 
   await check('本地事务只保存元数据，不含凭据', async () => {
@@ -283,7 +283,7 @@ try {
     completeLocal: async (input) => {
       setupCalls.local++;
       assert.equal(input.verifiedAccountCompletion, true);
-      writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
+      writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
         version: 1,
         instanceId: rendezvousIntent.instanceId,
         instanceSecret: 'runtime-p2p-instance-secret',
@@ -557,7 +557,7 @@ try {
   const loginStart = await startOwnerAccountAuth({ purpose: 'login', fetchImpl: mockFetch, clock: () => now });
   await check('无公网 URL 时 login 同样走 instance_poll', async () => {
     assert.equal(loginStart.deliveryMode, 'instance_poll');
-    assert.match(loginStart.stateCookie, /^agentoc_owner_account_state=/);
+    assert.match(loginStart.stateCookie, /^ragent_owner_account_state=/);
     assert.equal(/grant|assertion|idToken|Bearer/i.test(loginStart.stateCookie), false);
   });
 

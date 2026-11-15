@@ -26,23 +26,23 @@ function releaseBuildInfo(release, asset, { allowLegacy = true } = {}) {
     return build ? { build, commit: named[0][3] } : null;
   }
   if (!allowLegacy) return null;
-  const matches = [...body.matchAll(/<!--\s*agentoc-build:(\d+\.\d+\.\d+):([a-f0-9]{40}|[a-f0-9]{64}):sha256:([a-f0-9]{64})\s*-->/g)];
+  const matches = [...body.matchAll(/<!--\s*ragent-build:(\d+\.\d+\.\d+):([a-f0-9]{40}|[a-f0-9]{64}):sha256:([a-f0-9]{64})\s*-->/g)];
   if (matches.length !== 1 || asset?.digest !== `sha256:${matches[0][3]}`) return null;
   const match = matches[0];
   const build = match && version(match[1]);
   return build ? { build, commit: match[2] } : null;
 }
 function assetVersion(asset) {
-  const match = /^(?:Ragent-|AgentoC-|ragent_|agentoc_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
+  const match = /^(?:Ragent-|Ragent-|ragent_|ragent_)([0-9]+(?:\.[0-9]+){2,3})(?=[-_])/i.exec(String(asset?.name || ""));
   return match ? version(match[1]) : null;
 }
 function releaseAsset(asset, platform = process.platform, arch = process.arch) {
   if (!asset || typeof asset.name !== "string") return false;
   const patterns = {
-    "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:windows-x64|windows11-x86_64)-setup\.exe|(?:Ragent|AgentoC)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
-    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:linux-x64|ubuntu24\.04-x86_64)|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
+    "win32-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:windows-x64|windows11-x86_64)-setup\.exe|(?:Ragent|Ragent)-[0-9]+(?:\.[0-9]+){2,3}-windows-x64\.msi)$/i,
+    "linux-x64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:linux-x64|ubuntu24\.04-x86_64)|(?:ragent|ragent)_[0-9]+(?:\.[0-9]+){2,3}_amd64)\.deb$/i,
     "linux-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-ubuntu24\.04-arm64|ragent_[0-9]+(?:\.[0-9]+){2,3}_arm64)\.deb$/i,
-    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:macos-arm64|macos13plus-arm64)|(?:ragent|agentoc)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
+    "darwin-arm64": /^(?:Ragent-[0-9]+(?:\.[0-9]+){2,3}-(?:macos-arm64|macos13plus-arm64)|(?:ragent|ragent)_[0-9]+(?:\.[0-9]+){2,3}-darwin-arm64)\.dmg$/i,
   };
   const pattern = patterns[`${platform}-${arch}`];
   if (!pattern || !pattern.test(asset.name)) return false;

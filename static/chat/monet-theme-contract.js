@@ -125,7 +125,7 @@
     return { applied, rejected, themeColorOverrides };
   }
 
-  global.AgentoCMonetThemeContract = Object.freeze({
+  global.RagentMonetThemeContract = Object.freeze({
     version: 1,
     roleBindings: ROLE_BINDINGS,
     normalizeRoleName,

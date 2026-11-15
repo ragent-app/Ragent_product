@@ -34,7 +34,7 @@ const stale = createReviewProviderAccessReader({ expectedAccountId: 'owner-fixtu
 });
 await assert.rejects(stale(), { code: 'review_provider_owner_unavailable' });
 
-const socket = process.platform === 'win32' ? String.raw`\\.\pipe\agentoc-review-owner-${randomUUID()}` : join(tmpdir(), `review-owner-${randomUUID()}.sock`);
+const socket = process.platform === 'win32' ? String.raw`\\.\pipe\ragent-review-owner-${randomUUID()}` : join(tmpdir(), `review-owner-${randomUUID()}.sock`);
 let calls = 0;
 const server = createServer(client => {
   let text = '';

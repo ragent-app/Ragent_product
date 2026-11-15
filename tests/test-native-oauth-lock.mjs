@@ -58,7 +58,7 @@ async function pathExists(path) {
   }
 }
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-native-oauth-lock-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-native-oauth-lock-'));
 const providerHome = join(root, 'provider-home');
 const lockPath = nativeOAuthLockPath(providerHome);
 const moduleUrl = pathToFileURL(join(process.cwd(), 'lib/provider-runtime/oauth-lock.mjs')).href;

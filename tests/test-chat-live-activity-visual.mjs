@@ -8,8 +8,8 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'agentoc-live-activity-visual-'));
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'ragent-live-activity-visual-'));
 if (requestedOutputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [
@@ -74,7 +74,7 @@ function fixtureHtml() {
           <span class="live-operation-row__chevron">›</span>
         </button>
         <div class="live-operation-row__body" hidden>
-          <code class="live-operation-row__detail-body">/srv/agentoc-promoted/static/chat/ui.js</code>
+          <code class="live-operation-row__detail-body">/srv/ragent-promoted/static/chat/ui.js</code>
         </div>
       </div>
       <div class="visual-approval runtime-approval-card" data-status="pending">

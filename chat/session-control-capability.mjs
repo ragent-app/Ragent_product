@@ -16,11 +16,11 @@ export const SESSION_CONTROL_CAPABILITY_ENDPOINT = '/api/internal/session-contro
 export const SESSION_CONTROL_RENEWAL_ENDPOINT = '/api/internal/session-control/renew';
 export const SESSION_CONTROL_RENEWAL_VERSION = 'session-control-renewal/v1';
 export const SESSION_CONTROL_RENEWAL_OPERATION = 'session-control.renew';
-export const SESSION_CONTROL_CAPABILITY_HEADER = 'x-agentoc-session-control-token';
-export const SESSION_CONTROL_RENEWAL_TOKEN_HEADER = 'x-agentoc-session-control-renewal-token';
-export const SESSION_CONTROL_RUN_ID_HEADER = 'x-agentoc-session-control-run-id';
-export const SESSION_CONTROL_SESSION_ID_HEADER = 'x-agentoc-session-control-session-id';
-export const SESSION_CONTROL_TURN_ID_HEADER = 'x-agentoc-session-control-turn-id';
+export const SESSION_CONTROL_CAPABILITY_HEADER = 'x-ragent-session-control-token';
+export const SESSION_CONTROL_RENEWAL_TOKEN_HEADER = 'x-ragent-session-control-renewal-token';
+export const SESSION_CONTROL_RUN_ID_HEADER = 'x-ragent-session-control-run-id';
+export const SESSION_CONTROL_SESSION_ID_HEADER = 'x-ragent-session-control-session-id';
+export const SESSION_CONTROL_TURN_ID_HEADER = 'x-ragent-session-control-turn-id';
 export const SESSION_CONTROL_CAPABILITY_TOKEN_FILE = 'session-control.cap';
 export const SESSION_CONTROL_RENEWAL_TOKEN_FILE = 'session-control-renewal.cap';
 export const SESSION_CONTROL_CAPABILITY_TTL_MS = 15 * 60 * 1000;
@@ -238,7 +238,7 @@ export function createRunSessionControlCapability({
   now = Date.now(),
   ttlMs = SESSION_CONTROL_CAPABILITY_TTL_MS,
   maxExpiresAtMs = Infinity,
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   scope = null,
 } = {}) {
   const normalizedRunId = text(runId);
@@ -281,7 +281,7 @@ export function createRunSessionControlRenewalCapability({
   now = Date.now(),
   runCreatedAt = now,
   maxLifetimeMs = SESSION_CONTROL_MAX_RUN_LIFETIME_MS,
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   scope = null,
 } = {}) {
   const normalizedRunId = text(runId);
@@ -341,7 +341,7 @@ function invalidResult(code = SESSION_CONTROL_ERROR_CODES.INVALID, message = 'Se
 async function authenticateSessionControlDetailed(req, {
   pathname = req?.url || '',
   method = req?.method || 'GET',
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   getRunImpl = getRun,
   getRunManifestImpl = getRunManifest,
   getSessionImpl,
@@ -467,7 +467,7 @@ export function isStrictLoopbackRequest(req) {
 }
 
 export function createSessionControlRenewalAuthenticator({
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   getRunImpl = getRun,
   getRunManifestImpl = getRunManifest,
   now = () => Date.now(),

@@ -6,12 +6,12 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-history-page-budget-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-history-page-budget-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
 
 const { appendEvents, readEventBody, readEventsPage } = await import('../chat/history.mjs');
 const { getSessionEventsPage } = await import('../chat/session-manager.mjs');

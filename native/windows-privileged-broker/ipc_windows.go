@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	healthPipeName       = `\\.\pipe\AgentoC.PrivilegedBroker.Health.v2`
-	requestPipeName      = `\\.\pipe\AgentoC.PrivilegedBroker.Request.v2`
-	adminPipeName        = `\\.\pipe\AgentoC.PrivilegedBroker.Admin.v2`
+	healthPipeName       = `\\.\pipe\Ragent.PrivilegedBroker.Health.v2`
+	requestPipeName      = `\\.\pipe\Ragent.PrivilegedBroker.Request.v2`
+	adminPipeName        = `\\.\pipe\Ragent.PrivilegedBroker.Admin.v2`
 	pipeOperationMS      = 5000
 	pipeFrameTimeout     = 5000
 	maxRequestsPerMinute = 120
@@ -73,7 +73,7 @@ type pipeClientFacts struct {
 }
 
 func newBrokerIPCServer(store *brokerStore) (*brokerIPCServer, error) {
-	sid, _, _, err := windows.LookupSID("", `NT SERVICE\AgentoC-ControlPlane`)
+	sid, _, _, err := windows.LookupSID("", `NT SERVICE\Ragent-ControlPlane`)
 	if err != nil {
 		return nil, fmt.Errorf("resolve ControlPlane service SID: %w", err)
 	}
@@ -112,7 +112,7 @@ func newBrokerIPCServerForPipeNamesAndAdmin(store *brokerStore, controlPlaneSID 
 	}
 	if localTest {
 		validTestName := func(name string) bool {
-			for _, prefix := range []string{`\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.`, `\\.\pipe\AgentoC.PrivilegedBroker.IdentityTest.`, `\\.\pipe\AgentoC.PrivilegedBroker.RemoteTest.`} {
+			for _, prefix := range []string{`\\.\pipe\Ragent.PrivilegedBroker.LocalTest.`, `\\.\pipe\Ragent.PrivilegedBroker.IdentityTest.`, `\\.\pipe\Ragent.PrivilegedBroker.RemoteTest.`} {
 				if strings.HasPrefix(name, prefix) {
 					return true
 				}

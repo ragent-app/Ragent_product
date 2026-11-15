@@ -14,7 +14,7 @@ if (-not $OutputDirectory.StartsWith($tempPrefix, [StringComparison]::OrdinalIgn
 }
 
 $androidLogo = Join-Path $SourceRoot 'android\app\src\main\res\drawable-nodpi\adaptive_foreground_png.png'
-$webLogo = Join-Path $SourceRoot 'static\desktop\agentoc-android-logo.png'
+$webLogo = Join-Path $SourceRoot 'static\desktop\ragent-android-logo.png'
 if (-not (Test-Path -LiteralPath $androidLogo -PathType Leaf) -or -not (Test-Path -LiteralPath $webLogo -PathType Leaf)) {
     throw 'The Android launcher foreground and its desktop web asset are required.'
 }
@@ -26,7 +26,7 @@ Add-Type -AssemblyName System.Drawing
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $logo = [System.Drawing.Bitmap]::FromFile($androidLogo)
 try {
-    Copy-Item -LiteralPath $androidLogo -Destination (Join-Path $OutputDirectory 'agentoc-android-logo.png') -Force
+    Copy-Item -LiteralPath $androidLogo -Destination (Join-Path $OutputDirectory 'ragent-android-logo.png') -Force
 
     $sizes = @(16, 24, 32, 48, 64, 128, 256)
     $frames = [System.Collections.Generic.List[byte[]]]::new()
@@ -49,7 +49,7 @@ try {
         }
     }
 
-    $iconPath = Join-Path $OutputDirectory 'agentoc.ico'
+    $iconPath = Join-Path $OutputDirectory 'ragent.ico'
     $stream = [IO.File]::Create($iconPath)
     $writer = [IO.BinaryWriter]::new($stream)
     try {

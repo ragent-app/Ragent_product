@@ -10,15 +10,15 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-entry-switch-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-entry-switch-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 // 会话签发（B 端入口成功路径）依赖此密钥——必须在 import lib/auth.mjs 之前设置（模块级读取）
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'test-secret-agentoc-entry-switch';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'test-secret-ragent-entry-switch';
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 mkdirSync(configDir, { recursive: true });
 writeFileSync(join(configDir, 'auth.json'), JSON.stringify({
   username: 'testowner',
@@ -103,7 +103,7 @@ function makeBodyReq(body, extraHeaders = {}) {
   const chunk = Buffer.from(JSON.stringify(body));
   return {
     method: 'POST',
-    headers: { host: 'a.agentoc.test', ...extraHeaders },
+    headers: { host: 'a.ragent.test', ...extraHeaders },
     on(event, handler) {
       if (event === 'data') queueMicrotask(() => handler(chunk));
       if (event === 'end') queueMicrotask(() => handler());
@@ -117,7 +117,7 @@ function makeGetReq(url, extraHeaders = {}) {
   return {
     method: 'GET',
     url,
-    headers: { host: 'a.agentoc.test', ...extraHeaders },
+    headers: { host: 'a.ragent.test', ...extraHeaders },
   };
 }
 
@@ -489,7 +489,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   // lib 层：非法协议 400 / 未知设备 404 / 设置 / 清单可见
   let rejected = false;
   try {
-    await updateTrustedDeviceEntryUrl('rdev_entrytest', 'ftp://b.agentoc.test');
+    await updateTrustedDeviceEntryUrl('rdev_entrytest', 'ftp://b.ragent.test');
   } catch (error) {
     rejected = error.statusCode === 400;
   }
@@ -590,7 +590,7 @@ check('sourceInstance 与 from 不一致 → 拒绝', failed);
   check('entry-url 未知设备 → 404', res2.statusCode === 404);
   const res3 = makeRes();
   await handleDevicePairingOwnerRoutes({
-    req: makeBodyReq({ entryUrl: 'ftp://b.agentoc.test' }),
+    req: makeBodyReq({ entryUrl: 'ftp://b.ragent.test' }),
     res: res3, pathname: '/api/device-pairing/devices/rdev_entrytest/entry-url',
     authSession: { role: 'owner' }, writeJson,
   });

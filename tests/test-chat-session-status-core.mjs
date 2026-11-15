@@ -14,7 +14,7 @@ function loadCore(name, globalName) {
   return context[globalName];
 }
 
-const core = loadCore('session-status.js', 'AgentoCSessionStatusCore');
+const core = loadCore('session-status.js', 'RagentSessionStatusCore');
 
 assert.equal(core.normalizeSessionWorkflowState('needs-input'), 'waiting_user');
 assert.equal(core.normalizeSessionWorkflowPriority('P1'), 'high');

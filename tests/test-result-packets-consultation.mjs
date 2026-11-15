@@ -15,9 +15,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DatabaseSync } from 'node:sqlite';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-result-packets-consultation-'));
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-result-packets-consultation-'));
 process.env.HOME = configDir;
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   normalizeResultPacket,
@@ -154,7 +154,7 @@ try {
   // ── consultation round-trip through the store ─────────────────────────────
   beginSection('consultation-round-trip');
   {
-    const root = makeRoot('agentoc-rpc-rt-root-');
+    const root = makeRoot('ragent-rpc-rt-root-');
     const project = await makeProject('RPC Round Trip', root);
     const runId = nextRunId('run_consult');
     await makeTerminalRun({
@@ -197,7 +197,7 @@ try {
   // ── array-shaped recommendation is valid ──────────────────────────────────
   beginSection('array-recommendation');
   {
-    const root = makeRoot('agentoc-rpc-arr-root-');
+    const root = makeRoot('ragent-rpc-arr-root-');
     const project = await makeProject('RPC Array', root);
     const runId = nextRunId('run_consult_arr');
     await makeTerminalRun({ project, sessionId: 'sess_arr', runId });
@@ -215,7 +215,7 @@ try {
   // ── model cannot forge backend-bound fields ───────────────────────────────
   beginSection('forgery-rejection');
   {
-    const root = makeRoot('agentoc-rpc-forge-root-');
+    const root = makeRoot('ragent-rpc-forge-root-');
     const project = await makeProject('RPC Forge', root);
     const runId = nextRunId('run_forge');
     await makeTerminalRun({ project, sessionId: 'sess_forge', runId });
@@ -279,7 +279,7 @@ try {
       'non-structured string recommendation throws',
     );
 
-    const root = makeRoot('agentoc-rpc-inv-root-');
+    const root = makeRoot('ragent-rpc-inv-root-');
     const project = await makeProject('RPC Invalid', root);
     const runId = nextRunId('run_invalid');
     await makeTerminalRun({ project, sessionId: 'sess_invalid', runId });
@@ -305,7 +305,7 @@ try {
       db.close();
     }
 
-    const root = makeRoot('agentoc-rpc-db-root-');
+    const root = makeRoot('ragent-rpc-db-root-');
     const project = await makeProject('RPC DB', root);
     const runId = nextRunId('run_db');
     await makeTerminalRun({ project, sessionId: 'sess_db', runId });
@@ -328,7 +328,7 @@ try {
   // ── idempotency: same runId returns the existing packet ──────────────────
   beginSection('idempotency');
   {
-    const root = makeRoot('agentoc-rpc-idem-root-');
+    const root = makeRoot('ragent-rpc-idem-root-');
     const project = await makeProject('RPC Idempotent', root);
     const runId = nextRunId('run_idem');
     await makeTerminalRun({ project, sessionId: 'sess_idem', runId });
@@ -358,7 +358,7 @@ try {
   // ── checkpoint aggregation path is unaffected ─────────────────────────────
   beginSection('checkpoint-unaffected');
   {
-    const root = makeRoot('agentoc-rpc-ckpt-root-');
+    const root = makeRoot('ragent-rpc-ckpt-root-');
     const project = await makeProject('RPC Checkpoint', root);
     const runA = nextRunId('run_ckpt_a');
     const runB = nextRunId('run_ckpt_b');

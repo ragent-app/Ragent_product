@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	targetExecutableName = "AgentoC-Broker-QA-Target.exe"
+	targetExecutableName = "Ragent-Broker-QA-Target.exe"
 	targetStopTimeout    = 15 * time.Second
 	targetStartTimeout   = 15 * time.Second
 	targetBinaryMaxBytes = 128 * 1024 * 1024
@@ -170,7 +170,7 @@ func fingerprintBrokerTargetHandle(service windows.Handle) (string, error) {
 
 func brokerTargetFingerprint(input brokerTargetFingerprintInput) string {
 	encoded, _ := json.Marshal(input)
-	digest := sha256.Sum256(append([]byte("AgentoC Broker QA Target v1\x00"), encoded...))
+	digest := sha256.Sum256(append([]byte("Ragent Broker QA Target v1\x00"), encoded...))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -199,7 +199,7 @@ func verifyProtectedTargetPath(path string) error {
 		}
 	}
 	if !strings.EqualFold(filepath.Base(filepath.Dir(clean)), "BrokerQA") ||
-		!strings.EqualFold(filepath.Base(filepath.Dir(filepath.Dir(clean))), "AgentoC") ||
+		!strings.EqualFold(filepath.Base(filepath.Dir(filepath.Dir(clean))), "Ragent") ||
 		!strings.EqualFold(filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(clean)))), "Program Files") {
 		return errTargetPolicy
 	}

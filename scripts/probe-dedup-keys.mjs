@@ -12,9 +12,9 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const tmp = mkdtempSync(join(tmpdir(), 'ds09-probe-'));
-process.env.AGENTOC_CONFIG_DIR = tmp;
-process.env.AGENTOC_MEMORY_DIR = join(tmp, 'memory');
-process.env.AGENTOC_INSTANCE_ROOT = tmp;
+process.env.RAGENT_CONFIG_DIR = tmp;
+process.env.RAGENT_MEMORY_DIR = join(tmp, 'memory');
+process.env.RAGENT_INSTANCE_ROOT = tmp;
 
 const { appendEvent, loadHistory } = await import('../chat/history.mjs');
 const { getProviderEventDedupKey } = await import('../chat/provider-event-dedup.mjs');

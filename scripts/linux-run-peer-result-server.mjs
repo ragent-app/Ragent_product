@@ -60,7 +60,7 @@ function decodeRequest(buffer) {
 }
 
 export async function createLinuxRunPeerResultServer({ socketPath, directory, pinDirectory, resultDirectory,
-  controlUid, peerHelper = '/usr/lib/agentoc/privileged-peercred', inheritFd = null } = {}) {
+  controlUid, peerHelper = '/usr/lib/ragent/privileged-peercred', inheritFd = null } = {}) {
   if (process.platform !== 'linux' || process.geteuid?.() !== 0 || !validAbsolute(socketPath) ||
       !Number.isSafeInteger(controlUid) || controlUid <= 0 || controlUid > 0xfffffffe ||
       (inheritFd !== null && (!Number.isSafeInteger(inheritFd) || inheritFd < 3))) fail();

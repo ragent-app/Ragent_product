@@ -9,7 +9,7 @@ import { chmod, lstat, mkdir, open, realpath } from 'node:fs/promises';
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { posix as path } from 'node:path';
 
-export const DEFAULT_LINUX_TARGET_KEY_DIRECTORY = '/var/lib/agentoc-privileged-target';
+export const DEFAULT_LINUX_TARGET_KEY_DIRECTORY = '/var/lib/ragent-privileged-target';
 const PRIVATE_NAME = 'observation-private.json';
 const PUBLIC_NAME = 'observation-public.json';
 const MAX_KEY_BYTES = 8192;

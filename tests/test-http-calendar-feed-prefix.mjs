@@ -57,8 +57,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-calendar-feed-'));
-  const instanceRoot = join(home, '.agentoc', 'instances', 'trial24');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-calendar-feed-'));
+  const instanceRoot = join(home, '.ragent', 'instances', 'trial24');
   const configDir = join(instanceRoot, 'config');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
@@ -97,8 +97,8 @@ function setupTempHome() {
 }
 
 async function seedCalendarEvent(instanceRoot) {
-  process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
-  process.env.AGENTOC_PUBLIC_BASE_URL = 'https://trial24.example.test';
+  process.env.RAGENT_INSTANCE_ROOT = instanceRoot;
+  process.env.RAGENT_PUBLIC_BASE_URL = 'https://trial24.example.test';
   const { addCalendarFeedEvent } = await import(`../lib/connector-calendar-feed.mjs?test=${Date.now()}`);
   await addCalendarFeedEvent({
     summary: 'Prefix feed event',
@@ -113,13 +113,13 @@ async function startServer({ home, instanceRoot, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_INSTANCE_ROOT: instanceRoot,
-      AGENTOC_PUBLIC_BASE_URL: 'https://trial24.example.test',
+      RAGENT_INSTANCE_ROOT: instanceRoot,
+      RAGENT_PUBLIC_BASE_URL: 'https://trial24.example.test',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

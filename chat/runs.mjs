@@ -66,8 +66,8 @@ const MAX_SPOOL_PREVIEW_CHARS = 4096;
 // the cached text is served; after it the next read re-reads the file).
 const MAX_RUN_ARTIFACT_TEXT_CHARS = 2 * 1024 * 1024;
 const MAX_RUN_ARTIFACT_CACHE_ENTRIES = 256;
-const MAX_RUN_ARTIFACT_CACHE_BYTES = readEnvPositiveInt('AGENTOC_RUN_ARTIFACT_CACHE_BYTES', cacheBudget('runs.artifact', 0.5));
-const MAX_RUN_ARTIFACT_CACHE_TTL_MS = readEnvPositiveInt('AGENTOC_RUN_ARTIFACT_CACHE_TTL_MS', 10 * 60 * 1000);
+const MAX_RUN_ARTIFACT_CACHE_BYTES = readEnvPositiveInt('RAGENT_RUN_ARTIFACT_CACHE_BYTES', cacheBudget('runs.artifact', 0.5));
+const MAX_RUN_ARTIFACT_CACHE_TTL_MS = readEnvPositiveInt('RAGENT_RUN_ARTIFACT_CACHE_TTL_MS', 10 * 60 * 1000);
 // Maximum width of one UTF-8 sequence; a bounded artifact read over-reads this
 // many bytes past the char cap so the decoded string can be sliced cleanly.
 const MAX_UTF8_SEQUENCE_BYTES = 4;
@@ -114,19 +114,19 @@ function normalizeApprovalSuppressionIds(value) {
     .slice(-MAX_APPROVAL_SUPPRESSION_IDS);
 }
 
-// Perf (AGENTOC_PERF_CACHES=off restores unbounded Maps + JSON clone): the run
+// Perf (RAGENT_PERF_CACHES=off restores unbounded Maps + JSON clone): the run
 // read caches previously retained every run ever touched for the life of the
 // process (2,909 runs, status up to 348KB each). BoundedLruMap caps them; a
 // miss re-reads the file, so eviction is always safe. runArtifactCache keeps
 // its own inline entry cap below.
-const AGENTOC_PERF_CACHES_ENV = 'AGENTOC_PERF_CACHES';
-const PERF_CACHES_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_CACHES_ENV], { defaultValue: true });
-// Perf (AGENTOC_PERF_COMPACT_JSON=off): status.json (up to 348KB), manifest,
+const RAGENT_PERF_CACHES_ENV = 'RAGENT_PERF_CACHES';
+const PERF_CACHES_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_CACHES_ENV], { defaultValue: true });
+// Perf (RAGENT_PERF_COMPACT_JSON=off): status.json (up to 348KB), manifest,
 // and result are machine-only files — every reader uses JSON.parse — so they
 // serialize compact instead of pretty (2-3x smaller writes). The files become
 // single-line; jq still works.
-const AGENTOC_PERF_COMPACT_JSON_ENV = 'AGENTOC_PERF_COMPACT_JSON';
-const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_COMPACT_JSON_ENV], { defaultValue: true });
+const RAGENT_PERF_COMPACT_JSON_ENV = 'RAGENT_PERF_COMPACT_JSON';
+const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_COMPACT_JSON_ENV], { defaultValue: true });
 const COMPACT_JSON_OPTIONS = PERF_COMPACT_JSON_ENABLED ? { spaces: 0 } : {};
 
 function makeLruOrMap(options) {
@@ -191,7 +191,7 @@ const linuxScopeResultRetry = new BoundedLruMap({ maxEntries: 4096, ttlMs: 1000 
 // Artifact text cache (DS-08): bounded by entries, total bytes AND TTL. Each
 // cached value is already capped at MAX_RUN_ARTIFACT_TEXT_CHARS on read; the
 // byte cap keeps aggregate resident text flat even when every entry sits near
-// that cap. Perf toggle AGENTOC_PERF_CACHES=off still swaps in an unbounded
+// that cap. Perf toggle RAGENT_PERF_CACHES=off still swaps in an unbounded
 // Map (escape hatch, matching the other read caches).
 const runArtifactCache = makeLruOrMap({
   maxEntries: MAX_RUN_ARTIFACT_CACHE_ENTRIES,
@@ -309,7 +309,7 @@ async function withRunMutationLock(runId, task) {
 const REQUEST_INDEX_VERSION = 1;
 const REQUEST_INDEX_PATH = join(CHAT_RUNS_DIR, 'request-index.jsonl');
 const REQUEST_INDEX_REPAIR_SCAN_LIMIT = readEnvPositiveInt(
-  'AGENTOC_REQUEST_INDEX_REPAIR_SCAN_LIMIT',
+  'RAGENT_REQUEST_INDEX_REPAIR_SCAN_LIMIT',
   128,
 );
 const REQUEST_INDEX_PENDING_RETRY_LIMIT = 3;
@@ -329,11 +329,11 @@ const RUN_INDEX_VERSION = 1;
 const RUN_INDEX_PATH = join(CHAT_RUNS_DIR, 'run-index.jsonl');
 const RUN_INDEX_LOCK_PATH = join(CHAT_RUNS_DIR, 'run-index.lock');
 const RUN_INDEX_COMPACT_BYTES = readEnvPositiveInt(
-  'AGENTOC_RUN_INDEX_COMPACT_BYTES',
+  'RAGENT_RUN_INDEX_COMPACT_BYTES',
   8 * 1024 * 1024,
 );
 const RUN_INDEX_COMPACT_RECORDS = readEnvPositiveInt(
-  'AGENTOC_RUN_INDEX_COMPACT_RECORDS',
+  'RAGENT_RUN_INDEX_COMPACT_RECORDS',
   5_000,
 );
 const RUN_INDEX_SIZE_CHECK_EVERY = 128;
@@ -810,12 +810,12 @@ async function appendRequestIndexRecord(run, op = 'put') {
 // into one write so every provider frame does not pay a filesystem round trip.
 // The terminal path explicitly flushes this buffer before publishing a final
 // result/status, so the bounded delay is only for live observers.
-const SPOOL_BUFFER_MAX_RECORDS = readEnvPositiveInt('AGENTOC_SPOOL_BUFFER_MAX_RECORDS', 32);
+const SPOOL_BUFFER_MAX_RECORDS = readEnvPositiveInt('RAGENT_SPOOL_BUFFER_MAX_RECORDS', 32);
 const SPOOL_BUFFER_MAX_BYTES = readEnvPositiveInt(
-  'AGENTOC_SPOOL_BUFFER_MAX_BYTES',
+  'RAGENT_SPOOL_BUFFER_MAX_BYTES',
   16 * 1024 * 1024,
 );
-const SPOOL_BUFFER_DELAY_MS = readEnvPositiveInt('AGENTOC_SPOOL_BUFFER_DELAY_MS', 25);
+const SPOOL_BUFFER_DELAY_MS = readEnvPositiveInt('RAGENT_SPOOL_BUFFER_DELAY_MS', 25);
 // `fs.promises.appendFile` has no AbortSignal support.  A wedged network or
 // FUSE filesystem must not leave a sidecar's ordered stdout chain waiting
 // forever, because that prevents a terminal result from ever being published.
@@ -823,7 +823,7 @@ const SPOOL_BUFFER_DELAY_MS = readEnvPositiveInt('AGENTOC_SPOOL_BUFFER_DELAY_MS'
 // permanently fenced from further spool appends in this process; issuing a
 // second append would otherwise risk reordering evidence behind the detached
 // first write.
-const SPOOL_WRITE_TIMEOUT_MS = readEnvPositiveInt('AGENTOC_SPOOL_WRITE_TIMEOUT_MS', 20_000);
+const SPOOL_WRITE_TIMEOUT_MS = readEnvPositiveInt('RAGENT_SPOOL_WRITE_TIMEOUT_MS', 20_000);
 const spoolBufferByRunId = new Map();
 const spoolBufferTimers = new Map();
 const spoolWriteFailureByRunId = new Map();
@@ -1099,12 +1099,12 @@ export function runPendingResultPath(runId) {
 }
 
 function isolatedScopeRunner() {
-  return process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS !== '1' &&
-    process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY === '1' && process.env.AGENTOC_LINUX_SCOPE_FINISH_ENABLED === '1';
+  return process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS !== '1' &&
+    process.env.RAGENT_RUNNER_DISTINCT_IDENTITY === '1' && process.env.RAGENT_LINUX_SCOPE_FINISH_ENABLED === '1';
 }
 
 export function isLinuxPeerResultRunner() {
-  return isolatedScopeRunner() && process.env.AGENTOC_LINUX_PEER_RESULT_RUNNER === '1';
+  return isolatedScopeRunner() && process.env.RAGENT_LINUX_PEER_RESULT_RUNNER === '1';
 }
 
 function hasUnresolvedResultApproval(run, result) {
@@ -1125,8 +1125,8 @@ function linuxScopeResultUnavailable() {
 
 export function linuxPeerResultClientOptions() {
   return {
-    socketPath: process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET || '/run/agentoc-peer-result/result.sock',
-    peerHelper: process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER || '/usr/lib/agentoc/privileged-peercred',
+    socketPath: process.env.RAGENT_LINUX_PEER_RESULT_SOCKET || '/run/ragent-peer-result/result.sock',
+    peerHelper: process.env.RAGENT_LINUX_PEER_CREDENTIAL_HELPER || '/usr/lib/ragent/privileged-peercred',
   };
 }
 
@@ -1941,7 +1941,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // Object-form callers and spread-style updater callbacks produce fresh
     // objects, so compare their shallow fields too before touching disk.
     const originalChanged = proposed !== draft && Object.keys(proposed || {}).some((key) => !runFieldEqual(proposed[key], latest[key]));
-    const scopeTracking = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+    const scopeTracking = process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1';
     const mightProtectScope = scopeTracking && (latest.cancelRequested === true || isTerminalRunState(latest.state) ||
       (proposed !== draft && (proposed?.cancelRequested === true || isTerminalRunState(proposed?.state))));
     if (!originalChanged && !mightProtectScope) return clone(latest);
@@ -1955,7 +1955,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     // transaction from a later explicit cancellation. Persist the cancellation
     // and revocation outbox for each protected attempt before changing status.
     if (next.cancelRequested === true && process.platform === 'linux' && !isolatedScopeRunner() &&
-        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
+        process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.RAGENT_RUNNER_LAUNCH_MODE &&
         /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
       const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
       const pendingAttempts = await findLinuxRunResultTransactionAttempts(runId);
@@ -1969,7 +1969,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     }
     let protectsScope = scopeTracking && (next.cancelRequested === true || isTerminalRunState(next.state));
     if (!scopeTracking && process.platform === 'linux' && !isolatedScopeRunner() &&
-        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
+        process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.RAGENT_RUNNER_LAUNCH_MODE &&
         (next.cancelRequested === true || isTerminalRunState(next.state))) {
       const { hasLinuxRunControlBinding } = await import('./linux-run-control-binding.mjs');
       protectsScope = await hasLinuxRunControlBinding(runId, linuxScopeAttempt(next));
@@ -2005,7 +2005,7 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
     let resultTransaction = false;
     let peerBoundResult = false;
     if (process.platform === 'linux' && !isolatedScopeRunner() &&
-        (scopeTracking || (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE)) &&
+        (scopeTracking || (process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.RAGENT_RUNNER_LAUNCH_MODE)) &&
         isTerminalRunState(next.state) && next.result && typeof next.result === 'object' && !Array.isArray(next.result) &&
         (!isTerminalRunState(latest.state) || !runFieldEqual(next.result, latest.result))) {
       try {
@@ -2232,9 +2232,9 @@ export async function renewRunSessionControlCapability({
 }
 
 export async function getRunResult(runId) {
-  let recoverPending = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
-  const checkTransactions = process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
-    !process.env.AGENTOC_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId);
+  let recoverPending = process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1';
+  const checkTransactions = process.platform === 'linux' && process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' &&
+    !process.env.RAGENT_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId);
   if (checkTransactions) {
     try {
       const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
@@ -2243,8 +2243,8 @@ export async function getRunResult(runId) {
       if ((await listLinuxRunControlBindings(runId)).some(binding => binding.resultChannel === 'peer-v1')) recoverPending = true;
     } catch { throw linuxScopeResultUnavailable(); }
   }
-  if (process.platform === 'linux' && !recoverPending && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
-      !process.env.AGENTOC_RUNNER_LAUNCH_MODE) {
+  if (process.platform === 'linux' && !recoverPending && process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' &&
+      !process.env.RAGENT_RUNNER_LAUNCH_MODE) {
     // A disabled feature must not strand results staged by the previous
     // control-service process. Recovery only revokes; it cannot grant scope.
     try { await lstat(runPendingResultPath(runId)); recoverPending = true; }
@@ -2472,8 +2472,8 @@ export async function writeRunResult(runId, result) {
   await runMutationQueue(runId, () => withRunMutationLock(runId, async () => {
     await ensureRunDirectory(runId);
     let staged = false;
-    if (process.platform === 'linux' && process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' &&
-        !process.env.AGENTOC_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
+    if (process.platform === 'linux' && process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' &&
+        !process.env.RAGENT_RUNNER_LAUNCH_MODE && /^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
       try {
         const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
         if ((await findLinuxRunResultTransactionAttempts(runId)).length) throw linuxScopeResultUnavailable();
@@ -2500,8 +2500,8 @@ export async function writeRunResult(runId, result) {
         staged = true;
         await requireRunnerScopeFinalization(run, await getRunManifestUnlocked(runId));
       }
-    } else if (process.platform === 'linux' && (process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' ||
-        (process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE))) {
+    } else if (process.platform === 'linux' && (process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1' ||
+        (process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1' && !process.env.RAGENT_RUNNER_LAUNCH_MODE))) {
       const run = await getRunUnlocked(runId);
       if (run && hasUnresolvedResultApproval(run, result)) {
         const attempt = linuxScopeAttempt(run);
@@ -2547,8 +2547,8 @@ export async function writeRunResult(runId, result) {
 async function clearRunResultUnderLock(runId) {
     let protectedAttempt = null;
     let peerAttempts = [];
-    if (process.platform === 'linux' && !process.env.AGENTOC_RUNNER_LAUNCH_MODE &&
-        process.env.AGENTOC_RUNNER_DISTINCT_IDENTITY !== '1') {
+    if (process.platform === 'linux' && !process.env.RAGENT_RUNNER_LAUNCH_MODE &&
+        process.env.RAGENT_RUNNER_DISTINCT_IDENTITY !== '1') {
       if (/^run_[A-Za-z0-9_-]{8,128}$/.test(runId)) {
         try {
           const { findLinuxRunResultTransactionAttempts } = await import('./linux-run-result-transaction.mjs');
@@ -3186,7 +3186,7 @@ export async function materializeRunSpoolLine(runId, record) {
 }
 
 export async function requestRunCancel(runId, { beforeWrite = null, authorizeWrite = null } = {}) {
-  const trackRevocation = process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1';
+  const trackRevocation = process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1';
   const updated = await updateRun(runId, (run) => ({
     ...run,
     cancelRequested: true,
@@ -3230,7 +3230,7 @@ async function retryLinuxRunScopeRevocation(run) {
 // Routine retries then use the compact pending flag. This is recovery, not a
 // claim that a cancellation already reached the root executor.
 export async function recoverLinuxRunScopeRevocations({ scanAll = false, limit = 50 } = {}) {
-  if (process.platform !== 'linux' || process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS !== '1') return { attempted: 0, revoked: 0 };
+  if (process.platform !== 'linux' || process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS !== '1') return { attempted: 0, revoked: 0 };
   const entries = await listRunIndexEntries();
   let attempted = 0, revoked = 0;
   for (const entry of entries) {

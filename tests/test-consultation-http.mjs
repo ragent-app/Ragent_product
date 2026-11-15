@@ -9,7 +9,7 @@
 //     → GET round DECIDED + decidedDecisionRecordId → GET decisions
 //   - 未认证 → 401;未知 round → 404;非法状态迁移 → 409 + code;
 //     guard 非法 → 400 + CONSULTATION_GUARD_INVALID
-//   - AGENTOC_CONSULTATION_V1_ENABLED 关闭时路由不处理(子进程探针,
+//   - RAGENT_CONSULTATION_V1_ENABLED 关闭时路由不处理(子进程探针,
 //     因开关在 import 时读一次)
 import assert from 'assert/strict';
 import { execFile } from 'child_process';
@@ -23,16 +23,16 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// 隔离临时 HOME + AGENTOC_CONFIG_DIR,并在 import 被测模块前打开开关。
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consultation-http-'));
+// 隔离临时 HOME + RAGENT_CONFIG_DIR,并在 import 被测模块前打开开关。
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consultation-http-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_CONSULTATION_V1_ENABLED = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
-delete process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_CONSULTATION_V1_ENABLED = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
+delete process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT;
 
 const { handleConsultationRoutes } = await import('../chat/router-consultation-routes.mjs');
 const store = await import('../chat/consultation-store.mjs');
@@ -287,15 +287,15 @@ await writeFile(probePath, `
   import { mkdtempSync, rmSync } from 'fs';
   import { tmpdir } from 'os';
   import { join } from 'path';
-  const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consult-flagoff-'));
+  const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consult-flagoff-'));
   process.env.HOME = tempHome;
-  process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-  process.env.AGENTOC_CONSULTATION_V1_ENABLED = '0';
-  delete process.env.AGENTOC_INSTANCE_ROOT;
-  delete process.env.AGENTOC_WORK_ROOT_DIR;
-  delete process.env.AGENTOC_MEMORY_DIR;
-  delete process.env.AGENTOC_RUN_SPOOL_DIR;
-  delete process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT;
+  process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+  process.env.RAGENT_CONSULTATION_V1_ENABLED = '0';
+  delete process.env.RAGENT_INSTANCE_ROOT;
+  delete process.env.RAGENT_WORK_ROOT_DIR;
+  delete process.env.RAGENT_MEMORY_DIR;
+  delete process.env.RAGENT_RUN_SPOOL_DIR;
+  delete process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT;
   const mod = await import(${JSON.stringify(routesUrl)});
   const response = {};
   const handled = await mod.handleConsultationRoutes({

@@ -34,16 +34,16 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createGunzip } from 'zlib';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-spool-stream-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-spool-stream-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, '.agentoc', 'workspace');
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, '.ragent', 'workspace');
 
 const iso = (ms) => new Date(ms).toISOString();
 const OLD = iso(Date.now() - 48 * 3600 * 1000);
@@ -102,7 +102,7 @@ try {
     __resetRunArchiveSchedulerForTest,
   } = await import('../chat/run-spool-archive.mjs');
 
-  const runsRoot = join(process.env.AGENTOC_CONFIG_DIR, 'chat-runs');
+  const runsRoot = join(process.env.RAGENT_CONFIG_DIR, 'chat-runs');
 
   const wipeRunsRoot = () => {
     rmSync(runsRoot, { recursive: true, force: true });
@@ -314,11 +314,11 @@ try {
   const tickB = mkTerminalRun(`run_${'k'.repeat(24)}`);
   writeSpoolFile(join(tickA, 'spool.jsonl'), lineCountFor(2 * 1024 * 1024));
   writeSpoolFile(join(tickB, 'spool.jsonl'), lineCountFor(256 * 1024));
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED = '1';
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_AGE_MS = '0';
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_BYTES = '0';
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT = '1';
-  const stateFile = join(process.env.AGENTOC_CONFIG_DIR, 'run-spool-archive-state.json');
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_ENABLED = '1';
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_AGE_MS = '0';
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_BYTES = '0';
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT = '1';
+  const stateFile = join(process.env.RAGENT_CONFIG_DIR, 'run-spool-archive-state.json');
   const { writeFile } = await import('fs/promises');
   await writeFile(stateFile, JSON.stringify({ lastRunAt: iso(Date.now() - 48 * 3600 * 1000), lastSummary: null }, null, 2));
   const tick = await processRunArchiveDueNow();
@@ -329,10 +329,10 @@ try {
   const stateAfter = JSON.parse(readFileSync(stateFile, 'utf8'));
   assert.equal(stateAfter.lastTick.archived, 1, 'state records last tick archived count');
   assert.equal(stateAfter.lastTick.tickStopped, 'per-tick-limit', 'state records stop reason');
-  delete process.env.AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT;
-  delete process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_AGE_MS;
-  delete process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_BYTES;
-  delete process.env.AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED;
+  delete process.env.RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT;
+  delete process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_AGE_MS;
+  delete process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_BYTES;
+  delete process.env.RAGENT_RUN_SPOOL_ARCHIVE_ENABLED;
 
   // --- 9. CLI --verify -----------------------------------------------------------
   wipeRunsRoot();
@@ -342,7 +342,7 @@ try {
   await archiveAll();
   const script = join(import.meta.dirname, '..', 'scripts', 'archive-run-spools.mjs');
   const cleanOut = join(home, 'verify-clean.json');
-  execFileSync(process.execPath, [script, '--root', process.env.AGENTOC_CONFIG_DIR, '--verify', '--json-out', cleanOut]);
+  execFileSync(process.execPath, [script, '--root', process.env.RAGENT_CONFIG_DIR, '--verify', '--json-out', cleanOut]);
   const cleanReport = JSON.parse(readFileSync(cleanOut, 'utf8'));
   assert.equal(cleanReport.checked, 1, 'verify scanned the archive');
   assert.equal(cleanReport.invalid.length, 0, 'clean verify report has no invalid archives');
@@ -353,7 +353,7 @@ try {
   corruptBytes2[Math.floor(corruptBytes2.length / 3)] ^= 0x3c;
   writeFileSync(gzCli, corruptBytes2);
   const badOut = join(home, 'verify-bad.json');
-  const bad = spawnSync(process.execPath, [script, '--root', process.env.AGENTOC_CONFIG_DIR, '--verify', '--json-out', badOut]);
+  const bad = spawnSync(process.execPath, [script, '--root', process.env.RAGENT_CONFIG_DIR, '--verify', '--json-out', badOut]);
   assert.equal(bad.status, 1, 'verify exits 1 on corrupted archive');
   const badReport = JSON.parse(readFileSync(badOut, 'utf8'));
   assert.ok(badReport.invalid.length >= 1, 'corrupted archive reported invalid');

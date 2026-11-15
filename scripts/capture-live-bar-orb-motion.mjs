@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(
+const outputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || join(
   repoRoot,
   'artifacts',
   'orb-rework',
@@ -36,9 +36,9 @@ try {
   const loaderUrl = `data:text/javascript;base64,${Buffer.from(loaderSource).toString('base64')}`;
   const hdrUrl = `data:application/octet-stream;base64,${hdrSource.toString('base64')}`;
   await page.evaluate(({ moduleUrl: threeUrl, loaderUrl: hdrLoaderUrl, hdrUrl: environmentUrl }) => {
-    window.__AGENTOC_THREE_MODULE_URL = threeUrl;
-    window.__AGENTOC_HDR_LOADER_URL = hdrLoaderUrl;
-    window.__AGENTOC_HDR_URL = environmentUrl;
+    window.__RAGENT_THREE_MODULE_URL = threeUrl;
+    window.__RAGENT_HDR_LOADER_URL = hdrLoaderUrl;
+    window.__RAGENT_HDR_URL = environmentUrl;
   }, { moduleUrl, loaderUrl, hdrUrl });
   await page.addScriptTag({
     content: `${liveStatusUi}\nwindow.__liveBarThreeVisual = { createLiveBarOrb, renderLiveBarOrb };`,

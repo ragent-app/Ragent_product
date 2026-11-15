@@ -32,7 +32,7 @@ export async function retireCodexBrokerAndAcquireHome({ homeRoot, accountId, tim
     catch (error) { finish(error); return; }
     socket.once('connect', () => {
       connected = true;
-      socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-retire', expectedAccountDigest: digest })}\n`);
+      socket.write(`${JSON.stringify({ type: 'ragent-codex-broker-retire', expectedAccountDigest: digest })}\n`);
     });
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
@@ -41,7 +41,7 @@ export async function retireCodexBrokerAndAcquireHome({ homeRoot, accountId, tim
       if (end < 0) return;
       let reply;
       try { reply = JSON.parse(buffer.slice(0, end)); } catch { return finish(Object.assign(new Error('Invalid broker response'), { code: 'CODEX_RETIRE_PROTOCOL' })); }
-      if (reply?.type !== 'agentoc-codex-broker-retire-result') return finish(Object.assign(new Error('Unsupported broker retirement protocol'), { code: 'CODEX_RETIRE_PROTOCOL' }));
+      if (reply?.type !== 'ragent-codex-broker-retire-result') return finish(Object.assign(new Error('Unsupported broker retirement protocol'), { code: 'CODEX_RETIRE_PROTOCOL' }));
       if (reply.accepted !== true) return finish(Object.assign(new Error('Codex broker is busy or account could not be verified'), { code: 'CODEX_RETIRE_BUSY' }));
       finish();
     });

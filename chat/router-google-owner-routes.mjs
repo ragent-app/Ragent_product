@@ -59,7 +59,7 @@ function normalizeDeviceAlias(value) {
 
 // Caddy exposes the owner instance through more than one HTTPS hostname in
 // some deployments (for example the historical thelab alias and the current
-// agentoc hostname). The state cookie is host-only, so an Accounts transaction
+// ragent hostname). The state cookie is host-only, so an Accounts transaction
 // started on an alias must return to that same alias. Trust only the HTTPS
 // forwarded host supplied by the reverse proxy; direct/internal requests keep
 // using the configured canonical URL.
@@ -269,8 +269,8 @@ export async function handleGoogleOwnerAuthRoutes({ req, res, pathname, authSess
       const started = await startOwnerAccountAuth({
         // A linked PRoot instance must reauthenticate its existing owner;
         // a fresh bind could change cloud ownership before a local conflict check.
-        purpose: process.env.AGENTOC_RUNTIME_MODE === 'proot' && await getOwnerAccountBinding() ? 'login' : 'bind',
-        localLinkAuthorization: process.env.AGENTOC_RUNTIME_MODE === 'proot',
+        purpose: process.env.RAGENT_RUNTIME_MODE === 'proot' && await getOwnerAccountBinding() ? 'login' : 'bind',
+        localLinkAuthorization: process.env.RAGENT_RUNTIME_MODE === 'proot',
         alias,
         publicBaseUrl: resolveOwnerAuthPublicBaseUrl(req),
       });
@@ -522,7 +522,7 @@ export async function handleGoogleOwnerAuthRoutes({ req, res, pathname, authSess
         temporaryDeviceAccess: false,
         // Same-account device access is the normal path. QR is only the
         // explicit account-claim flow for an instance that is not bound yet.
-        accountJoin: process.env.AGENTOC_ACCOUNT_JOIN_ENABLED !== '0' && ownerAuth.mode === 'accounts',
+        accountJoin: process.env.RAGENT_ACCOUNT_JOIN_ENABLED !== '0' && ownerAuth.mode === 'accounts',
       },
       ...(device ? {
         deviceState: pendingActive ? pendingDeviceState : device.status,

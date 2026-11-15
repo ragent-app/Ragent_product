@@ -16,23 +16,23 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-storage-gc-'));
-const configDir = join(home, '.config', 'agentoc');
-const workspaceDir = join(home, '.agentoc', 'workspace');
+const home = mkdtempSync(join(tmpdir(), 'ragent-storage-gc-'));
+const configDir = join(home, '.config', 'ragent');
+const workspaceDir = join(home, '.ragent', 'workspace');
 const stateFile = join(home, 'storage-gc-state.json');
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
-  AGENTOC_STORAGE_GC_STATE_FILE: process.env.AGENTOC_STORAGE_GC_STATE_FILE,
-  AGENTOC_STORAGE_GC_INSTALLED_VERSION: process.env.AGENTOC_STORAGE_GC_INSTALLED_VERSION,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
+  RAGENT_STORAGE_GC_STATE_FILE: process.env.RAGENT_STORAGE_GC_STATE_FILE,
+  RAGENT_STORAGE_GC_INSTALLED_VERSION: process.env.RAGENT_STORAGE_GC_INSTALLED_VERSION,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workspaceDir;
-process.env.AGENTOC_STORAGE_GC_STATE_FILE = stateFile;
-process.env.AGENTOC_STORAGE_GC_INSTALLED_VERSION = '0.3.3';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workspaceDir;
+process.env.RAGENT_STORAGE_GC_STATE_FILE = stateFile;
+process.env.RAGENT_STORAGE_GC_INSTALLED_VERSION = '0.3.3';
 
 const NOW = new Date('2026-08-07T12:00:00.000Z');
 const DAY = 24 * 60 * 60 * 1000;
@@ -111,14 +111,14 @@ function buildFixture() {
     write(join(dir, 'out'), 'b');
     age(dir, 96 - i); // age the directory itself; keep newest 5, delete oldest build-1
   }
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.3.3_amd64.deb'), 'deb'), 500); // installed version: protected
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.2.0_amd64.deb'), 'deb'), 370);
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.1.9_amd64.deb'), 'deb'), 380);
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.1.8_amd64.deb'), 'deb'), 390);
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.1.7_amd64.deb'), 'deb'), 400); // delete candidate
-  age(write(join(workspaceDir, 'releases', 'agentoc_0.1.6_amd64.deb'), 'deb'), 410); // handoff-referenced: protected
+  age(write(join(workspaceDir, 'releases', 'ragent_0.3.3_amd64.deb'), 'deb'), 500); // installed version: protected
+  age(write(join(workspaceDir, 'releases', 'ragent_0.2.0_amd64.deb'), 'deb'), 370);
+  age(write(join(workspaceDir, 'releases', 'ragent_0.1.9_amd64.deb'), 'deb'), 380);
+  age(write(join(workspaceDir, 'releases', 'ragent_0.1.8_amd64.deb'), 'deb'), 390);
+  age(write(join(workspaceDir, 'releases', 'ragent_0.1.7_amd64.deb'), 'deb'), 400); // delete candidate
+  age(write(join(workspaceDir, 'releases', 'ragent_0.1.6_amd64.deb'), 'deb'), 410); // handoff-referenced: protected
   write(join(configDir, 'install-handoffs.json'),
-    JSON.stringify({ handoffs: [{ debPath: join(workspaceDir, 'releases', 'agentoc_0.1.6_amd64.deb') }] }));
+    JSON.stringify({ handoffs: [{ debPath: join(workspaceDir, 'releases', 'ragent_0.1.6_amd64.deb') }] }));
 
   // user workspace safety: an arbitrary project dir must never be touched
   age(write(join(workspaceDir, 'my-project', 'notes.md'), 'user data'), 400);
@@ -177,10 +177,10 @@ function pathsByAction(report, category = null) {
 
   // releases: only 0.1.7 is a candidate; 0.3.3 (installed) and 0.1.6 (handoff) protected
   assert.deepEqual(byAction.delete.filter((p) => p.includes('releases')),
-    [join(workspaceDir, 'releases', 'agentoc_0.1.7_amd64.deb')]);
-  assert.ok(byAction.alert.includes(join(workspaceDir, 'releases', 'agentoc_0.3.3_amd64.deb')));
-  assert.ok(byAction.alert.includes(join(workspaceDir, 'releases', 'agentoc_0.1.6_amd64.deb')));
-  const protectedDeb = report.candidates.find((c) => c.path.endsWith('agentoc_0.3.3_amd64.deb'));
+    [join(workspaceDir, 'releases', 'ragent_0.1.7_amd64.deb')]);
+  assert.ok(byAction.alert.includes(join(workspaceDir, 'releases', 'ragent_0.3.3_amd64.deb')));
+  assert.ok(byAction.alert.includes(join(workspaceDir, 'releases', 'ragent_0.1.6_amd64.deb')));
+  const protectedDeb = report.candidates.find((c) => c.path.endsWith('ragent_0.3.3_amd64.deb'));
   assert.ok(protectedDeb.reference.detail.includes('installed version'));
 
   // backups: keep-newest-3 (incl. the fresh snapshot) => two oldest candidates; fresh protected
@@ -261,7 +261,7 @@ function pathsByAction(report, category = null) {
   assert.ok(!existsSync(join(configDir, 'file-assets', 'old-unref.bin')));
   assert.ok(!existsSync(join(configDir, 'file-assets-cache', 'cache-old.bin')));
   assert.ok(!existsSync(join(workspaceDir, 'builds', 'build-1')));
-  assert.ok(!existsSync(join(workspaceDir, 'releases', 'agentoc_0.1.7_amd64.deb')));
+  assert.ok(!existsSync(join(workspaceDir, 'releases', 'ragent_0.1.7_amd64.deb')));
   assert.ok(!existsSync(join(configDir, 'backups', 'snap-2026-07-01')));
   assert.ok(!existsSync(join(configDir, 'backups', 'snap-2026-07-10')));
   assert.ok(!existsSync(join(configDir, 'tmp', 'stale.tmp')));
@@ -281,8 +281,8 @@ function pathsByAction(report, category = null) {
 
   // protected
   assert.ok(existsSync(join(configDir, 'api-logs', '2026-08-07.jsonl')));
-  assert.ok(existsSync(join(workspaceDir, 'releases', 'agentoc_0.3.3_amd64.deb')));
-  assert.ok(existsSync(join(workspaceDir, 'releases', 'agentoc_0.1.6_amd64.deb')));
+  assert.ok(existsSync(join(workspaceDir, 'releases', 'ragent_0.3.3_amd64.deb')));
+  assert.ok(existsSync(join(workspaceDir, 'releases', 'ragent_0.1.6_amd64.deb')));
   assert.ok(existsSync(join(configDir, 'images', 'old-ref.png')));
   assert.ok(existsSync(join(workspaceDir, 'cache', 'ref-cache.bin')));
   assert.ok(existsSync(join(configDir, 'chat-runs', 'r2', 'artifacts', 'artifact-ref.bin')));
@@ -304,7 +304,7 @@ function pathsByAction(report, category = null) {
 // ------------------------------------------------------------- 3. growth + thresholds
 {
   buildFixture();
-  const baseEnv = { ...process.env, AGENTOC_STORAGE_GC_DISK_WARN_PCT: '100', AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT: '100' };
+  const baseEnv = { ...process.env, RAGENT_STORAGE_GC_DISK_WARN_PCT: '100', RAGENT_STORAGE_GC_DISK_CRITICAL_PCT: '100' };
   const first = await runStorageGc({ configDir, workspaceDir, now: NOW, apply: false, previousState: null, env: baseEnv });
   assert.equal(first.growth, null); // no previous state
 
@@ -317,7 +317,7 @@ function pathsByAction(report, category = null) {
     now: later,
     apply: false,
     previousState: await import('../scripts/storage-inventory-gc.mjs').then((m) => m.loadState(stateFile)),
-    env: { ...baseEnv, AGENTOC_STORAGE_GC_STATE_FILE: stateFile },
+    env: { ...baseEnv, RAGENT_STORAGE_GC_STATE_FILE: stateFile },
   });
   assert.ok(second.growth, 'growth computed');
   const cacheGrowth = second.growth.categories['workspace-cache'];
@@ -328,14 +328,14 @@ function pathsByAction(report, category = null) {
   // disk threshold alerts: warn threshold 0 triggers warn; critical 0 triggers critical
   const warnReport = await runStorageGc({
     configDir, workspaceDir, now: NOW, apply: false, previousState: null,
-    env: { ...process.env, AGENTOC_STORAGE_GC_DISK_WARN_PCT: '0', AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT: '100' },
+    env: { ...process.env, RAGENT_STORAGE_GC_DISK_WARN_PCT: '0', RAGENT_STORAGE_GC_DISK_CRITICAL_PCT: '100' },
   });
   assert.ok(warnReport.alerts.some((a) => a.severity === 'warn' && a.message.startsWith('disk usage')));
   assert.equal(exitCodeForReport(warnReport), 1);
 
   const criticalReport = await runStorageGc({
     configDir, workspaceDir, now: NOW, apply: false, previousState: null,
-    env: { ...process.env, AGENTOC_STORAGE_GC_DISK_WARN_PCT: '0', AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT: '0' },
+    env: { ...process.env, RAGENT_STORAGE_GC_DISK_WARN_PCT: '0', RAGENT_STORAGE_GC_DISK_CRITICAL_PCT: '0' },
   });
   assert.ok(criticalReport.alerts.some((a) => a.severity === 'critical'));
   assert.equal(exitCodeForReport(criticalReport), 2);
@@ -360,7 +360,7 @@ function pathsByAction(report, category = null) {
     now: NOW,
     apply: true, // even apply must not delete under an incomplete scan
     previousState: null,
-    env: { ...process.env, AGENTOC_STORAGE_GC_REF_SCAN_MAX_MB: '1' },
+    env: { ...process.env, RAGENT_STORAGE_GC_REF_SCAN_MAX_MB: '1' },
   });
   const imageCandidate = cappedReport.candidates.find((c) => c.path.endsWith('old-unref.png'));
   assert.ok(imageCandidate, 'candidate still listed');
@@ -394,8 +394,8 @@ function pathsByAction(report, category = null) {
     env: {
       ...process.env,
       // The CLI fixture should not inherit the host's disk-pressure state.
-      AGENTOC_STORAGE_GC_DISK_WARN_PCT: '100',
-      AGENTOC_STORAGE_GC_DISK_CRITICAL_PCT: '100',
+      RAGENT_STORAGE_GC_DISK_WARN_PCT: '100',
+      RAGENT_STORAGE_GC_DISK_CRITICAL_PCT: '100',
     },
     encoding: 'utf8',
   });

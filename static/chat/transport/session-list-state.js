@@ -12,21 +12,21 @@
 // and the Stage 3 wiring sorts it at the boundary.
 //
 // The ambient facts are injected via the environment contract
-// (root.AgentocSessionListStateEnvironment): the current session id is read
+// (root.RagentSessionListStateEnvironment): the current session id is read
 // through a getter function so it never freezes at attach time. The record
 // normalizer and the comparable-signature helpers are inlined copies of the
 // session-record / session-signature ports (self-contained module convention);
 // both copies and this module's output are parity-locked against the legacy
 // implementation by tests/test-chat-session-list-state-core.mjs.
 
-(function attachAgentocSessionListStateCore(root) {
+(function attachRagentSessionListStateCore(root) {
   const DEFAULT_ENVIRONMENT = Object.freeze({
     getCurrentSessionId: null,
     getLocalSessionReviewedAt: null,
     getSessionReviewBaselineAt: null,
   });
   const environment = new Proxy(
-    root.AgentocSessionListStateEnvironment || {},
+    root.RagentSessionListStateEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -227,7 +227,7 @@
     };
   }
 
-  root.AgentocSessionListStateCore = {
+  root.RagentSessionListStateCore = {
     reduceSessionListState,
     mergeUniqueSessions,
     shouldPreserveCurrentSessionAcrossListRefresh,

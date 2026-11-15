@@ -6,9 +6,52 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # A source archive's commit marker alone does not prove its contents. For
 # archive builds, require the committed Git objects and stage a fresh,
 # allowlisted source tree; this does not create a Git worktree.
-SOURCE_GIT_DIR="${AGENTOC_SOURCE_GIT_DIR:-}"
+SOURCE_GIT_DIR="${RAGENT_SOURCE_GIT_DIR:-}"
 FROZEN_WORK_DIR=''
-if [ -n "$SOURCE_GIT_DIR" ]; then
+DEV_ARCHIVE="${RAGENT_DEV_SNAPSHOT_ARCHIVE:-}"
+DEV_SHA="${RAGENT_DEV_SNAPSHOT_SHA256:-}"
+DEV_MODE=0
+if [ -n "$DEV_ARCHIVE" ] || [ -n "$DEV_SHA" ]; then
+  [ -n "$DEV_ARCHIVE" ] && [[ "$DEV_SHA" =~ ^[a-f0-9]{64}$ ]] && [ -z "$SOURCE_GIT_DIR" ] || {
+    echo 'Development builds require an archive and its full SHA256, without a frozen Git source.' >&2; exit 1;
+  }
+  [ -z "${RAGENT_PACKAGE_VERSION:-}${RAGENT_PACKAGE_BUILD_VERSION:-}" ] || {
+    echo 'Development snapshot versions cannot be overridden.' >&2; exit 1;
+  }
+  [ -n "${RAGENT_DEB_OUTPUT_DIR:-}" ] || { echo 'Development builds require an explicit output directory.' >&2; exit 1; }
+  command -v python3 >/dev/null || { echo 'Development snapshot builds require python3.' >&2; exit 1; }
+  DEV_ARCHIVE="$(cd "$(dirname "$DEV_ARCHIVE")" && pwd -P)/$(basename "$DEV_ARCHIVE")"
+  FROZEN_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ragent-dev-source.XXXXXX")"
+  trap 'rm -rf "$FROZEN_WORK_DIR"' EXIT
+  cp -- "$DEV_ARCHIVE" "$FROZEN_WORK_DIR/snapshot.tar"
+  DEV_ARCHIVE="$FROZEN_WORK_DIR/snapshot.tar"
+  [ "$(sha256sum "$DEV_ARCHIVE" | awk '{print $1}')" = "$DEV_SHA" ] || { echo 'Development snapshot SHA256 mismatch.' >&2; exit 1; }
+  mkdir -m 0700 "$FROZEN_WORK_DIR/source"
+  python3 - "$DEV_ARCHIVE" "$FROZEN_WORK_DIR/source" <<'PYDEV'
+import os, pathlib, re, shutil, sys, tarfile
+root = pathlib.Path(sys.argv[2])
+seen = set()
+with tarfile.open(sys.argv[1], 'r:*') as archive:
+    for member in archive:
+        name = member.name
+        if not member.isfile() or not re.fullmatch(r'[A-Za-z0-9_@+.,/-]+', name) or any(p in ('', '.', '..') for p in name.split('/')) or name in seen:
+            raise SystemExit('Invalid or duplicate development snapshot entry: ' + repr(name))
+        seen.add(name)
+        target = root.joinpath(*name.split('/'))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.extractfile(member) as source, target.open('xb') as destination:
+            shutil.copyfileobj(source, destination)
+        os.chmod(target, member.mode & 0o755)
+PYDEV
+  cmp -s "$ROOT/scripts/build-deb.sh" "$FROZEN_WORK_DIR/source/scripts/build-deb.sh" || {
+    echo 'Development snapshot build script differs from the executing script.' >&2; exit 1;
+  }
+  ROOT="$FROZEN_WORK_DIR/source"
+  DEV_MODE=1
+fi
+if [ "$DEV_MODE" = 1 ]; then
+  :
+elif [ -n "$SOURCE_GIT_DIR" ]; then
   SOURCE_GIT_DIR="$(cd "$SOURCE_GIT_DIR" && pwd -P)"
   export GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
   [ ! -e "$SOURCE_GIT_DIR/objects/info/alternates" ] &&
@@ -18,12 +61,12 @@ if [ -n "$SOURCE_GIT_DIR" ]; then
   [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --is-bare-repository)" = true ] || {
     echo 'Frozen source Git directory must be bare.' >&2; exit 1;
   }
-  SOURCE_COMMIT="${AGENTOC_SOURCE_COMMIT:-}"
+  SOURCE_COMMIT="${RAGENT_SOURCE_COMMIT:-}"
   [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] &&
     [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] || {
       echo 'Frozen source requires the expected full commit ID at bare HEAD.' >&2; exit 1;
     }
-  FROZEN_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb-source.XXXXXX")"
+  FROZEN_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ragent-deb-source.XXXXXX")"
   trap 'rm -rf "$FROZEN_WORK_DIR"' EXIT
   for input in scripts/build-deb.sh scripts/stage-runtime-payload.mjs scripts/verify-runtime-payload.mjs; do
     git -C "$SOURCE_GIT_DIR" show "$SOURCE_COMMIT:$input" > "$FROZEN_WORK_DIR/bootstrap-input" || exit 1
@@ -34,20 +77,20 @@ if [ -n "$SOURCE_GIT_DIR" ]; then
   node "$ROOT/scripts/stage-runtime-payload.mjs" --source "$SOURCE_GIT_DIR" \
     --destination "$FROZEN_WORK_DIR/source" --profile desktop --source-mode git-objects
   ROOT="$FROZEN_WORK_DIR/source"
-  [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+  [ "$(cat "$ROOT/.ragent-source-commit")" = "$SOURCE_COMMIT" ] || {
     echo 'Frozen source staging returned a different commit.' >&2; exit 1;
   }
   FROZEN_MANIFEST_SHA="$(sha256sum "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')"
 elif [ ! -e "$ROOT/.git" ]; then
-  echo 'A source archive requires AGENTOC_SOURCE_GIT_DIR and AGENTOC_SOURCE_COMMIT.' >&2
+  echo 'A source archive requires RAGENT_SOURCE_GIT_DIR and RAGENT_SOURCE_COMMIT.' >&2
   exit 1
 fi
 
-# DS-01 parity preflight (off by default; enable with AGENTOC_PARITY_GATE=1).
+# DS-01 parity preflight (off by default; enable with RAGENT_PARITY_GATE=1).
 # Compares the source tree against itself: fails on uncommitted changes to
 # shipped artifacts or drift from the recorded package manifest. Never touches
 # the installed root or any running service.
-if [ "${AGENTOC_PARITY_GATE:-0}" = "1" ]; then
+if [ "${RAGENT_PARITY_GATE:-0}" = "1" ]; then
   node "$ROOT/scripts/verify-source-parity.mjs" \
     --source "$ROOT" --install "$ROOT" --live-url none >/dev/null || {
     echo "Parity preflight failed (dirty source or package-manifest drift); refusing to package." >&2
@@ -55,29 +98,29 @@ if [ "${AGENTOC_PARITY_GATE:-0}" = "1" ]; then
   }
 fi
 
-ARCH="${AGENTOC_PACKAGE_ARCH:-$(dpkg --print-architecture)}"
-PACKAGE_NAME="${AGENTOC_DEB_PACKAGE_NAME:-ragent}"
-case "$PACKAGE_NAME" in ragent|agentoc) ;; *) echo 'Invalid Debian package name.' >&2; exit 1 ;; esac
-OUTPUT_DIR="${AGENTOC_DEB_OUTPUT_DIR:-/srv/agentoc-promoted-data/workspace/releases}"
-SIGNALING_URL="${AGENTOC_PACKAGE_SIGNALING_URL:-}"
-PACKAGE_PUBLIC_BASE_URL="${AGENTOC_PACKAGE_PUBLIC_BASE_URL:-https://app.agentoncloud.com}"
-PACKAGE_ACCOUNTS_URL="${AGENTOC_PACKAGE_ACCOUNTS_URL:-https://ragent.agentoncloud.com/accounts}"
-PACKAGE_ACCOUNTS_JWKS_URL="${AGENTOC_PACKAGE_ACCOUNTS_JWKS_URL:-https://ragent.agentoncloud.com/accounts/.well-known/jwks.json}"
-PACKAGE_ACCOUNTS_ISSUER="${AGENTOC_PACKAGE_ACCOUNTS_ISSUER:-https://ragent.agentoncloud.com}"
-PACKAGE_TURN_BROKER_URL="${AGENTOC_PACKAGE_TURN_BROKER_URL:-https://ragent.agentoncloud.com/turn}"
-PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS="${AGENTOC_PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS:-}"
+ARCH="${RAGENT_PACKAGE_ARCH:-$(dpkg --print-architecture)}"
+PACKAGE_NAME="${RAGENT_DEB_PACKAGE_NAME:-ragent}"
+case "$PACKAGE_NAME" in ragent) ;; *) echo 'Invalid Debian package name.' >&2; exit 1 ;; esac
+OUTPUT_DIR="${RAGENT_DEB_OUTPUT_DIR:-/srv/ragent-promoted-data/workspace/releases}"
+SIGNALING_URL="${RAGENT_PACKAGE_SIGNALING_URL:-}"
+PACKAGE_PUBLIC_BASE_URL="${RAGENT_PACKAGE_PUBLIC_BASE_URL:-https://app.agentoncloud.com}"
+PACKAGE_ACCOUNTS_URL="${RAGENT_PACKAGE_ACCOUNTS_URL:-https://ragent.agentoncloud.com/accounts}"
+PACKAGE_ACCOUNTS_JWKS_URL="${RAGENT_PACKAGE_ACCOUNTS_JWKS_URL:-https://ragent.agentoncloud.com/accounts/.well-known/jwks.json}"
+PACKAGE_ACCOUNTS_ISSUER="${RAGENT_PACKAGE_ACCOUNTS_ISSUER:-https://ragent.agentoncloud.com}"
+PACKAGE_TURN_BROKER_URL="${RAGENT_PACKAGE_TURN_BROKER_URL:-https://ragent.agentoncloud.com/turn}"
+PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS="${RAGENT_PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS:-}"
 
 # Auto-version: resolve a version strictly higher than the highest version this
 # host already knows about (installed package + previously built debs in
-# OUTPUT_DIR, or an explicit AGENTOC_ONLINE_VERSION seed). AGENTOC_PACKAGE_VERSION
+# OUTPUT_DIR, or an explicit RAGENT_ONLINE_VERSION seed). RAGENT_PACKAGE_VERSION
 # keeps its old meaning as a manual override.
 resolve_package_version() {
   local pkg_version best candidate name package
   pkg_version="$(node -p "require('$ROOT/package.json').version")"
-  best="${AGENTOC_ONLINE_VERSION:-}"
+  best="${RAGENT_ONLINE_VERSION:-}"
 
   if command -v dpkg-query >/dev/null 2>&1; then
-    for package in ragent agentoc; do
+    for package in ragent; do
       candidate="$(dpkg-query -W -f='${Version}' "$package" 2>/dev/null || true)"
       if [ -n "$candidate" ]; then
         if [ -z "$best" ] || dpkg --compare-versions "$candidate" gt "$best"; then
@@ -87,11 +130,10 @@ resolve_package_version() {
     done
   fi
 
-  for name in "$OUTPUT_DIR"/ragent_*_"$ARCH".deb "$OUTPUT_DIR"/agentoc_*_"$ARCH".deb; do
+  for name in "$OUTPUT_DIR"/ragent_*_"$ARCH".deb; do
     [ -e "$name" ] || continue
     candidate="$(basename "$name")"
     candidate="${candidate#ragent_}"
-    candidate="${candidate#agentoc_}"
     candidate="${candidate%_${ARCH}.deb}"
     if [ -z "$best" ] || dpkg --compare-versions "$candidate" gt "$best"; then
       best="$candidate"
@@ -100,8 +142,8 @@ resolve_package_version() {
 
   local source_commit
   source_commit="$(git -C "$ROOT" rev-parse --short=8 HEAD 2>/dev/null || true)"
-  if [ -z "$source_commit" ] && [ -f "$ROOT/.agentoc-source-commit" ]; then
-    source_commit="$(cut -c1-8 "$ROOT/.agentoc-source-commit")"
+  if [ -z "$source_commit" ] && [ -f "$ROOT/.ragent-source-commit" ]; then
+    source_commit="$(cut -c1-8 "$ROOT/.ragent-source-commit")"
   fi
 
   if [ -n "$best" ]; then
@@ -109,7 +151,7 @@ resolve_package_version() {
     upstream="${best%%+*}"
     IFS='.' read -r major minor patch <<< "$upstream"
     if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]]; then
-      echo "Cannot parse online version '$best'; set AGENTOC_PACKAGE_VERSION explicitly" >&2
+      echo "Cannot parse online version '$best'; set RAGENT_PACKAGE_VERSION explicitly" >&2
       exit 1
     fi
     if ! dpkg --compare-versions "$pkg_version" gt "$upstream"; then
@@ -123,26 +165,30 @@ resolve_package_version() {
     "$(date +%Y%m%d%H%M)"
 }
 
-if [ -n "${AGENTOC_PACKAGE_VERSION:-}" ]; then
-  VERSION="$AGENTOC_PACKAGE_VERSION"
+if [ "$DEV_MODE" = 1 ]; then
+  base_version="$(node -p "require('$ROOT/package.json').version")"
+  [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Invalid development base version.' >&2; exit 1; }
+  VERSION="${base_version}~dev.${DEV_SHA:0:16}"
+elif [ -n "${RAGENT_PACKAGE_VERSION:-}" ]; then
+  VERSION="$RAGENT_PACKAGE_VERSION"
 else
   VERSION="$(resolve_package_version)"
 fi
-BUILD_VERSION="${AGENTOC_PACKAGE_BUILD_VERSION:-$VERSION}"
-if [ -n "${AGENTOC_PACKAGE_BUILD_VERSION:-}" ] && ! [[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+BUILD_VERSION="${RAGENT_PACKAGE_BUILD_VERSION:-$VERSION}"
+if [ -n "${RAGENT_PACKAGE_BUILD_VERSION:-}" ] && ! [[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   echo 'Internal build version must have three numeric components.' >&2; exit 1
 fi
-if [ "${AGENTOC_PRINT_VERSION_ONLY:-0}" = "1" ]; then
+if [ "${RAGENT_PRINT_VERSION_ONLY:-0}" = "1" ]; then
   printf '%s\n' "$VERSION"
   exit 0
 fi
-NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.12.0}"
+NODE_VERSION="${RAGENT_NODE_VERSION:-v24.12.0}"
 [[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
   echo 'Bundled Node version requires its matching third-party license notice.' >&2
   exit 1
 }
-NODE_CACHE_DIR="${AGENTOC_NODE_CACHE_DIR:-/srv/agentoc-promoted-data/workspace/cache/node}"
-NPM_REGISTRY="${AGENTOC_NPM_REGISTRY:-https://registry.npmjs.org}"
+NODE_CACHE_DIR="${RAGENT_NODE_CACHE_DIR:-/srv/ragent-promoted-data/workspace/cache/node}"
+NPM_REGISTRY="${RAGENT_NPM_REGISTRY:-https://registry.npmjs.org}"
 QRCODE_TERMINAL_VERSION=0.12.0
 QRCODE_TERMINAL_SHA256=3a6260c4e0d80bd527a3f930e90ea2348c03646621f25aa0bd960ee205a0a706
 
@@ -209,7 +255,7 @@ case "$ARCH" in
     CODEX_NATIVE_TARGET=linux-arm64
     CODEX_NATIVE_PACKAGE='@openai/codex-linux-arm64'
     CLAUDE_NATIVE_PACKAGE='@anthropic-ai/claude-code-linux-arm64'
-    P2P_HOST_BINARY="$ROOT/bin/agentoc-p2p-host"
+    P2P_HOST_BINARY="$ROOT/bin/ragent-p2p-host"
     EXPECTED_ELF_MACHINE=b700
     ;;
   amd64)
@@ -218,7 +264,7 @@ case "$ARCH" in
     CODEX_NATIVE_TARGET=linux-x64
     CODEX_NATIVE_PACKAGE='@openai/codex-linux-x64'
     CLAUDE_NATIVE_PACKAGE='@anthropic-ai/claude-code-linux-x64'
-    P2P_HOST_BINARY="$ROOT/bin/agentoc-p2p-host-amd64"
+    P2P_HOST_BINARY="$ROOT/bin/ragent-p2p-host-amd64"
     EXPECTED_ELF_MACHINE=3e00
     ;;
   *)
@@ -233,8 +279,8 @@ CODEX_ADAPTER_TARGET_VERSION="$(node --input-type=module -e \
 CLAUDE_ADAPTER_TARGET_VERSION="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.HARNESS_VERSION_CONTRACTS.claude.targetVersion))' \
   "$ROOT/lib/harness-version-catalog.mjs")"
-CODEX_VERSION="$(resolve_npm_version '@openai/codex' "${AGENTOC_CODEX_VERSION:-$CODEX_ADAPTER_TARGET_VERSION}")"
-CLAUDE_VERSION="$(resolve_npm_version '@anthropic-ai/claude-code' "${AGENTOC_CLAUDE_VERSION:-$CLAUDE_ADAPTER_TARGET_VERSION}")"
+CODEX_VERSION="$(resolve_npm_version '@openai/codex' "${RAGENT_CODEX_VERSION:-$CODEX_ADAPTER_TARGET_VERSION}")"
+CLAUDE_VERSION="$(resolve_npm_version '@anthropic-ai/claude-code' "${RAGENT_CLAUDE_VERSION:-$CLAUDE_ADAPTER_TARGET_VERSION}")"
 case "$CODEX_VERSION" in
   *[!0-9.]*|'') echo "Invalid Codex version from registry: '$CODEX_VERSION'" >&2; exit 1 ;;
 esac
@@ -260,7 +306,9 @@ printf 'Bundling Codex %s and Claude Code %s from %s\n' "$CODEX_VERSION" "$CLAUD
 # Do not attribute a package built from a dirty tree to a clean commit. A
 # frozen runtime payload produced by stage-runtime-payload has no .git but
 # carries the full source identity in its own manifest.
-if [ -e "$ROOT/.git" ]; then
+if [ "$DEV_MODE" = 1 ]; then
+  SOURCE_COMMIT=''
+elif [ -e "$ROOT/.git" ]; then
   SOURCE_STATUS="$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" || {
     echo 'Unable to verify Debian source tree status.' >&2; exit 1;
   }
@@ -269,15 +317,17 @@ if [ -e "$ROOT/.git" ]; then
   }
   SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
 else
-  SOURCE_COMMIT="$(cat "$ROOT/.agentoc-source-commit" 2>/dev/null || true)"
+  SOURCE_COMMIT="$(cat "$ROOT/.ragent-source-commit" 2>/dev/null || true)"
 fi
-[[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
-  echo 'A full committed source identity is required for Debian packaging.' >&2; exit 1;
-}
+if [ "$DEV_MODE" != 1 ]; then
+  [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] || {
+    echo 'A full committed source identity is required for Debian packaging.' >&2; exit 1;
+  }
+fi
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-deb.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ragent-deb.XXXXXX")"
 STAGE="$WORK_DIR/stage"
-APP_DIR="$STAGE/opt/agentoc/app"
+APP_DIR="$STAGE/opt/ragent/app"
 OUTPUT_NAME="${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 OUTPUT="$WORK_DIR/$OUTPUT_NAME"
 FINAL_OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
@@ -288,16 +338,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$APP_DIR" "$STAGE/opt/agentoc/runtime" "$STAGE/usr/bin" "$STAGE/usr/sbin" "$STAGE/usr/lib/agentoc"
-mkdir -p "$STAGE/opt/agentoc/vendor"
-mkdir -p "$STAGE/lib/systemd/system" "$STAGE/etc/agentoc" "$STAGE/usr/share/applications"
+mkdir -p "$APP_DIR" "$STAGE/opt/ragent/runtime" "$STAGE/usr/bin" "$STAGE/usr/sbin" "$STAGE/usr/lib/ragent"
+mkdir -p "$STAGE/opt/ragent/vendor"
+mkdir -p "$STAGE/lib/systemd/system" "$STAGE/etc/ragent" "$STAGE/usr/share/applications"
 mkdir -p "$STAGE/usr/share/icons/hicolor/512x512/apps" "$STAGE/DEBIAN" "$OUTPUT_DIR"
 if [ ! -w "$OUTPUT_DIR" ]; then
-  echo "Package output directory is not writable: $OUTPUT_DIR. Set AGENTOC_DEB_OUTPUT_DIR or repair its ownership." >&2
+  echo "Package output directory is not writable: $OUTPUT_DIR. Set RAGENT_DEB_OUTPUT_DIR or repair its ownership." >&2
   exit 1
 fi
 if [ ! -w "$NODE_CACHE_DIR" ]; then
-  echo "Package cache is not writable: $NODE_CACHE_DIR. Set AGENTOC_NODE_CACHE_DIR or repair its ownership." >&2
+  echo "Package cache is not writable: $NODE_CACHE_DIR. Set RAGENT_NODE_CACHE_DIR or repair its ownership." >&2
   exit 1
 fi
 
@@ -314,9 +364,14 @@ tar -xzf "$WORK_DIR/$PACK_FILE" -C "$APP_DIR" --strip-components=1 \
 # explicit version available to the running service so frontend asset URLs
 # still change after each packaged deployment instead of reusing a stale PWA
 # cache when the normalized mtimes happen to be identical.
-printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
-printf '%s\n' "${BUILD_VERSION%%+*}" > "$APP_DIR/.agentoc-package-build"
-printf '%s\n' "$SOURCE_COMMIT" > "$APP_DIR/.agentoc-source-commit"
+printf '%s\n' "$VERSION" > "$APP_DIR/.ragent-package-version"
+printf '%s\n' "${BUILD_VERSION%%+*}" > "$APP_DIR/.ragent-package-build"
+if [ "$DEV_MODE" = 1 ]; then
+  rm -f "$APP_DIR/.ragent-source-commit"
+  printf '%s\n' "$DEV_SHA" > "$APP_DIR/.ragent-development-snapshot-sha256"
+else
+  printf '%s\n' "$SOURCE_COMMIT" > "$APP_DIR/.ragent-source-commit"
+fi
 
 PROD_DIRECT_DEPENDENCY_LIST="$WORK_DIR/prod-direct-dependencies.txt"
 [ -f "$ROOT/package-lock.json" ] || { echo "Missing package-lock.json; cannot stage reproducible production dependencies" >&2; exit 1; }
@@ -342,7 +397,7 @@ if [ "$ARCH" != "$(dpkg --print-architecture)" ]; then
   exit 1
 fi
 DESKTOP_BUILD="$WORK_DIR/desktop-build"
-DESKTOP_ROOT="$STAGE/opt/agentoc/Desktop"
+DESKTOP_ROOT="$STAGE/opt/ragent/Desktop"
 mkdir -p "$DESKTOP_BUILD" "$DESKTOP_ROOT"
 install -m 0644 "$ROOT/desktop/package.json" "$ROOT/desktop/package-lock.json" "$DESKTOP_BUILD/"
 (cd "$DESKTOP_BUILD" && ELECTRON_CACHE="${ELECTRON_CACHE:-$NODE_CACHE_DIR/electron}" npm ci --no-audit --no-fund)
@@ -357,7 +412,7 @@ mkdir -p "$DESKTOP_APP/assets"
 for name in main.cjs preload.cjs update-check.cjs auto-update.cjs update-linux.sh update-macos.sh update-windows.ps1 wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$DESKTOP_APP/$name"
 done
-install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$DESKTOP_APP/assets/agentoc-android-logo.png"
+install -m 0644 "$ROOT/static/desktop/ragent-android-logo.png" "$DESKTOP_APP/assets/ragent-android-logo.png"
 install -m 0644 "$ROOT/static/icon-512.png" "$DESKTOP_APP/assets/ragent-icon.png"
 DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
 printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$DESKTOP_APP/package.json"
@@ -378,9 +433,9 @@ EXPECTED_SHA="$(awk -v name="$NODE_TARBALL" '$2 == name { print $1 }' "$WORK_DIR
 ACTUAL_SHA="$(sha256sum "$NODE_CACHE_DIR/$NODE_TARBALL" | awk '{ print $1 }')"
 [ "$EXPECTED_SHA" = "$ACTUAL_SHA" ] || { echo "Node runtime checksum mismatch" >&2; exit 1; }
 tar -xJf "$NODE_CACHE_DIR/$NODE_TARBALL" -C "$WORK_DIR"
-cp "$WORK_DIR/$NODE_DIST/bin/node" "$STAGE/opt/agentoc/runtime/node"
-chmod 0755 "$STAGE/opt/agentoc/runtime/node" "$APP_DIR/cli.js"
-bash "$ROOT/scripts/stage-posix-node-toolchain.sh" "$WORK_DIR/$NODE_DIST" "$STAGE/opt/agentoc/runtime"
+cp "$WORK_DIR/$NODE_DIST/bin/node" "$STAGE/opt/ragent/runtime/node"
+chmod 0755 "$STAGE/opt/ragent/runtime/node" "$APP_DIR/cli.js"
+bash "$ROOT/scripts/stage-posix-node-toolchain.sh" "$WORK_DIR/$NODE_DIST" "$STAGE/opt/ragent/runtime"
 
 # Fetch the Codex launcher and target-native engine from the same official
 # release. A source checkout's vendored launcher may be older, and combining
@@ -395,8 +450,8 @@ grep -Fx 'package/bin/codex.js' "$CODEX_MAIN_CONTENTS" >/dev/null || {
   echo "Codex launcher tarball has no package/bin/codex.js" >&2
   exit 1
 }
-mkdir -p "$STAGE/opt/agentoc/vendor/codex"
-tar -xzf "$CODEX_MAIN_CACHE_PATH" -C "$STAGE/opt/agentoc/vendor/codex" --strip-components=1
+mkdir -p "$STAGE/opt/ragent/vendor/codex"
+tar -xzf "$CODEX_MAIN_CACHE_PATH" -C "$STAGE/opt/ragent/vendor/codex" --strip-components=1
 
 # The current Codex package publishes platform executables as package aliases
 # of the same release (`@openai/codex@<version>-linux-<arch>`). Keep the
@@ -406,25 +461,25 @@ CODEX_NATIVE_VERSION="$CODEX_VERSION-$CODEX_NATIVE_TARGET"
 CODEX_NATIVE_TARBALL="codex-${CODEX_NATIVE_VERSION}.tgz"
 CODEX_NATIVE_CACHE_PATH="$NODE_CACHE_DIR/$CODEX_NATIVE_TARBALL"
 download_npm_package "@openai/codex@$CODEX_NATIVE_VERSION" "$CODEX_NATIVE_CACHE_PATH" "Codex native engine $CODEX_NATIVE_VERSION"
-mkdir -p "$STAGE/opt/agentoc/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE"
+mkdir -p "$STAGE/opt/ragent/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE"
 tar -xzf "$CODEX_NATIVE_CACHE_PATH" \
-  -C "$STAGE/opt/agentoc/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE" \
+  -C "$STAGE/opt/ragent/vendor/codex/node_modules/$CODEX_NATIVE_PACKAGE" \
   --strip-components=1
-cat > "$STAGE/opt/agentoc/runtime/codex" <<'EOF'
+cat > "$STAGE/opt/ragent/runtime/codex" <<'EOF'
 #!/bin/sh
-exec /opt/agentoc/runtime/node /opt/agentoc/vendor/codex/bin/codex.js "$@"
+exec /opt/ragent/runtime/node /opt/ragent/vendor/codex/bin/codex.js "$@"
 EOF
-cat > "$STAGE/opt/agentoc/runtime/agentoc-codex-app-server" <<'EOF'
+cat > "$STAGE/opt/ragent/runtime/ragent-codex-app-server" <<'EOF'
 #!/bin/sh
-exec /opt/agentoc/runtime/node /opt/agentoc/vendor/codex/bin/codex.js "$@"
+exec /opt/ragent/runtime/node /opt/ragent/vendor/codex/bin/codex.js "$@"
 EOF
-chmod 0755 "$STAGE/opt/agentoc/runtime/codex" "$STAGE/opt/agentoc/runtime/agentoc-codex-app-server"
+chmod 0755 "$STAGE/opt/ragent/runtime/codex" "$STAGE/opt/ragent/runtime/ragent-codex-app-server"
 
 # Prefer the official current Claude Code native package. An explicit local
 # binary remains an escape hatch for offline rebuilds, but never silently
 # falls back to a stale version under ~/.local/share/claude.
-CLAUDE_BINARY_SOURCE="${AGENTOC_CLAUDE_BINARY_SOURCE:-}"
-CLAUDE_LICENSE_SOURCE="${AGENTOC_CLAUDE_LICENSE_SOURCE:-}"
+CLAUDE_BINARY_SOURCE="${RAGENT_CLAUDE_BINARY_SOURCE:-}"
+CLAUDE_LICENSE_SOURCE="${RAGENT_CLAUDE_LICENSE_SOURCE:-}"
 if [ -z "$CLAUDE_BINARY_SOURCE" ]; then
   CLAUDE_NATIVE_TARBALL="claude-code-${CLAUDE_VERSION}-linux-${NODE_ARCH}.tgz"
   CLAUDE_NATIVE_CACHE_PATH="$NODE_CACHE_DIR/$CLAUDE_NATIVE_TARBALL"
@@ -442,8 +497,8 @@ if [ -z "$CLAUDE_BINARY_SOURCE" ]; then
   CLAUDE_LICENSE_SOURCE="$CLAUDE_EXTRACT_DIR/LICENSE.md"
 else
   # An offline override must be attributable and accompanied by its license.
-  CLAUDE_EXPECTED_SHA="${AGENTOC_CLAUDE_BINARY_SHA256:-}"
-  [[ "$CLAUDE_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Offline Claude binary requires AGENTOC_CLAUDE_BINARY_SHA256.' >&2; exit 1; }
+  CLAUDE_EXPECTED_SHA="${RAGENT_CLAUDE_BINARY_SHA256:-}"
+  [[ "$CLAUDE_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Offline Claude binary requires RAGENT_CLAUDE_BINARY_SHA256.' >&2; exit 1; }
   [ -f "$CLAUDE_BINARY_SOURCE" ] || { echo 'Offline Claude binary is missing.' >&2; exit 1; }
   [ "$(sha256sum "$CLAUDE_BINARY_SOURCE" | awk '{print $1}')" = "$CLAUDE_EXPECTED_SHA" ] || { echo 'Offline Claude binary checksum mismatch.' >&2; exit 1; }
 fi
@@ -459,23 +514,27 @@ CLAUDE_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$CLAUDE_BINARY_SOURCE" | tr -d ' \n'
   echo "Refusing to package Claude Code binary for the wrong architecture: expected $EXPECTED_ELF_MACHINE, got $CLAUDE_ELF_MACHINE" >&2
   exit 1
 }
-install -m 0755 "$CLAUDE_BINARY_SOURCE" "$STAGE/opt/agentoc/vendor/claude"
-mkdir -p "$STAGE/opt/agentoc/vendor/licenses/claude-code"
-install -m 0644 "$CLAUDE_LICENSE_SOURCE" "$STAGE/opt/agentoc/vendor/licenses/claude-code/LICENSE.md"
-CLAUDE_BINARY_SHA="$(sha256sum "$STAGE/opt/agentoc/vendor/claude" | awk '{print $1}')"
-cat > "$STAGE/opt/agentoc/runtime/claude" <<'EOF'
+install -m 0755 "$CLAUDE_BINARY_SOURCE" "$STAGE/opt/ragent/vendor/claude"
+mkdir -p "$STAGE/opt/ragent/vendor/licenses/claude-code"
+install -m 0644 "$CLAUDE_LICENSE_SOURCE" "$STAGE/opt/ragent/vendor/licenses/claude-code/LICENSE.md"
+CLAUDE_BINARY_SHA="$(sha256sum "$STAGE/opt/ragent/vendor/claude" | awk '{print $1}')"
+cat > "$STAGE/opt/ragent/runtime/claude" <<'EOF'
 #!/bin/sh
-exec /opt/agentoc/vendor/claude "$@"
+exec /opt/ragent/vendor/claude "$@"
 EOF
-chmod 0755 "$STAGE/opt/agentoc/runtime/claude"
-printf 'codex=%s\nclaude=%s\nclaude_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$CLAUDE_BINARY_SHA" > "$STAGE/opt/agentoc/runtime/provider-versions"
+chmod 0755 "$STAGE/opt/ragent/runtime/claude"
+printf 'codex=%s\nclaude=%s\nclaude_sha256=%s\n' "$CODEX_VERSION" "$CLAUDE_VERSION" "$CLAUDE_BINARY_SHA" > "$STAGE/opt/ragent/runtime/provider-versions"
 
-P2P_BUILD_BINARY="$WORK_DIR/agentoc-p2p-host-$ARCH"
+P2P_BUILD_BINARY="$WORK_DIR/ragent-p2p-host-$ARCH"
 command -v go >/dev/null 2>&1 || {
   echo "Go toolchain is required to build the P2P host sidecar from source" >&2
   exit 1
 }
-(cd "$ROOT/p2p" && GOOS=linux GOARCH="$P2P_GOARCH" CGO_ENABLED=0 go build -trimpath -o "$P2P_BUILD_BINARY" ./cmd/agentoc-p2p-host)
+if [ "$DEV_MODE" = 1 ]; then
+  (cd "$ROOT/p2p" && GOOS=linux GOARCH="$P2P_GOARCH" CGO_ENABLED=0 go build -buildvcs=false -trimpath -o "$P2P_BUILD_BINARY" ./cmd/ragent-p2p-host)
+else
+  (cd "$ROOT/p2p" && GOOS=linux GOARCH="$P2P_GOARCH" CGO_ENABLED=0 go build -trimpath -o "$P2P_BUILD_BINARY" ./cmd/ragent-p2p-host)
+fi
 P2P_HOST_BINARY="$P2P_BUILD_BINARY"
 [ -x "$P2P_HOST_BINARY" ] || { echo "Missing P2P host sidecar: $P2P_HOST_BINARY" >&2; exit 1; }
 P2P_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$P2P_HOST_BINARY" | tr -d ' \n')"
@@ -487,18 +546,10 @@ P2P_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$P2P_HOST_BINARY" | tr -d ' \n')"
 # not let a source checkout's architecture-specific helper leak into the
 # package, where it could shadow the freshly built sidecar after an upgrade.
 mkdir -p "$APP_DIR/bin"
-rm -f "$APP_DIR/bin/agentoc-p2p-host-amd64" "$APP_DIR/bin/agentoc-p2p-host-arm64"
-rm -f "$APP_DIR/bin/agentoc-p2p-host-darwin-arm64" "$APP_DIR/bin/agentoc-p2p-host-darwin-x64"
-rm -f "$APP_DIR/bin/agentoc-p2p-host" "$APP_DIR/bin/agentoc-p2p-host.exe"
+rm -f "$APP_DIR/bin/ragent-p2p-host-amd64" "$APP_DIR/bin/ragent-p2p-host-arm64"
+rm -f "$APP_DIR/bin/ragent-p2p-host-darwin-arm64" "$APP_DIR/bin/ragent-p2p-host-darwin-x64"
+rm -f "$APP_DIR/bin/ragent-p2p-host" "$APP_DIR/bin/ragent-p2p-host.exe"
 install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/ragent-p2p-host"
-# A legacy Debian package may own this path.  The renamed package must take
-# over every owned file during dpkg's package rename, or the old package can
-# remain installed and later remove live files.  Keep a compatibility link to
-# the new binary until all legacy installations have completed the upgrade.
-if [ "$PACKAGE_NAME" = ragent ]; then
-  ln -s ragent-p2p-host "$APP_DIR/bin/agentoc-p2p-host"
-fi
-
 QRCODE_TARBALL="qrcode-terminal-${QRCODE_TERMINAL_VERSION}.tgz"
 QRCODE_CACHE_PATH="$NODE_CACHE_DIR/$QRCODE_TARBALL"
 if [ ! -f "$QRCODE_CACHE_PATH" ]; then
@@ -508,51 +559,45 @@ if [ ! -f "$QRCODE_CACHE_PATH" ]; then
 fi
 QRCODE_ACTUAL_SHA="$(sha256sum "$QRCODE_CACHE_PATH" | awk '{ print $1 }')"
 [ "$QRCODE_TERMINAL_SHA256" = "$QRCODE_ACTUAL_SHA" ] || { echo "qrcode-terminal checksum mismatch" >&2; exit 1; }
-mkdir -p "$STAGE/opt/agentoc/vendor/qrcode-terminal"
-tar -xzf "$QRCODE_CACHE_PATH" -C "$STAGE/opt/agentoc/vendor/qrcode-terminal" --strip-components=1
-cat > "$STAGE/opt/agentoc/runtime/qrcode-terminal" <<'EOF'
+mkdir -p "$STAGE/opt/ragent/vendor/qrcode-terminal"
+tar -xzf "$QRCODE_CACHE_PATH" -C "$STAGE/opt/ragent/vendor/qrcode-terminal" --strip-components=1
+cat > "$STAGE/opt/ragent/runtime/qrcode-terminal" <<'EOF'
 #!/bin/sh
-exec /opt/agentoc/runtime/node /opt/agentoc/vendor/qrcode-terminal/bin/qrcode-terminal.js "$@"
+exec /opt/ragent/runtime/node /opt/ragent/vendor/qrcode-terminal/bin/qrcode-terminal.js "$@"
 EOF
-chmod 0755 "$STAGE/opt/agentoc/runtime/qrcode-terminal"
+chmod 0755 "$STAGE/opt/ragent/runtime/qrcode-terminal"
 
-install -m 0755 "$ROOT/packaging/deb/agentoc-wrapper" "$STAGE/usr/bin/agentoc"
-install -m 0755 "$ROOT/packaging/deb/agentoc-wrapper" "$STAGE/usr/bin/ragent"
-install -m 0755 "$ROOT/packaging/deb/run-as-service-user" "$STAGE/usr/lib/agentoc/run-as-service-user"
-install -m 0755 "$ROOT/packaging/deb/repair-state-access" "$STAGE/usr/lib/agentoc/repair-state-access"
-install -m 0755 "$ROOT/packaging/deb/retire-legacy-cc-switch" "$STAGE/usr/lib/agentoc/retire-legacy-cc-switch"
-install -m 0755 "$ROOT/packaging/deb/notify-exec" "$STAGE/usr/lib/agentoc/notify-exec"
-PRIVILEGED_CC="${AGENTOC_PRIVILEGED_CC:-cc}"
+install -m 0755 "$ROOT/packaging/deb/ragent-wrapper" "$STAGE/usr/bin/ragent"
+install -m 0755 "$ROOT/packaging/deb/run-as-service-user" "$STAGE/usr/lib/ragent/run-as-service-user"
+install -m 0755 "$ROOT/packaging/deb/repair-state-access" "$STAGE/usr/lib/ragent/repair-state-access"
+install -m 0755 "$ROOT/packaging/deb/retire-legacy-cc-switch" "$STAGE/usr/lib/ragent/retire-legacy-cc-switch"
+install -m 0755 "$ROOT/packaging/deb/notify-exec" "$STAGE/usr/lib/ragent/notify-exec"
+install -m 0644 "$ROOT/packaging/deb/socket-paths.env" "$STAGE/usr/lib/ragent/socket-paths.env"
+PRIVILEGED_CC="${RAGENT_PRIVILEGED_CC:-cc}"
 "$PRIVILEGED_CC" -O2 -Wall -Wextra \
   "$ROOT/native/privileged-peercred.c" \
-  -o "$STAGE/usr/lib/agentoc/privileged-peercred"
-chmod 0755 "$STAGE/usr/lib/agentoc/privileged-peercred"
-PRIVILEGED_PEERCRED_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$STAGE/usr/lib/agentoc/privileged-peercred" | tr -d ' \n')"
+  -o "$STAGE/usr/lib/ragent/privileged-peercred"
+chmod 0755 "$STAGE/usr/lib/ragent/privileged-peercred"
+PRIVILEGED_PEERCRED_ELF_MACHINE="$(od -An -tx1 -j18 -N2 "$STAGE/usr/lib/ragent/privileged-peercred" | tr -d ' \n')"
 [ "$PRIVILEGED_PEERCRED_ELF_MACHINE" = "$EXPECTED_ELF_MACHINE" ] || {
   echo "Refusing to package privileged peercred helper for the wrong architecture: expected $EXPECTED_ELF_MACHINE, got $PRIVILEGED_PEERCRED_ELF_MACHINE" >&2
   exit 1
 }
-if [ "$PACKAGE_NAME" = ragent ]; then
-  install -m 0644 "$ROOT/packaging/deb/ragent.service" "$STAGE/lib/systemd/system/ragent.service"
-  ln -s ragent.service "$STAGE/lib/systemd/system/agentoc.service"
-else
-  install -m 0644 "$ROOT/packaging/deb/agentoc.service" "$STAGE/lib/systemd/system/agentoc.service"
-fi
-install -m 0644 "$ROOT/packaging/deb/agentoc-runner-lifecycle.service" "$STAGE/lib/systemd/system/agentoc-runner-lifecycle.service"
-install -m 0644 "$ROOT/packaging/deb/agentoc-runner-supervisor.service" "$STAGE/lib/systemd/system/agentoc-runner-supervisor.service"
+install -m 0644 "$ROOT/packaging/deb/ragent.service" "$STAGE/lib/systemd/system/ragent.service"
+install -m 0644 "$ROOT/packaging/deb/ragent-runner-lifecycle.service" "$STAGE/lib/systemd/system/ragent-runner-lifecycle.service"
+install -m 0644 "$ROOT/packaging/deb/ragent-runner-supervisor.service" "$STAGE/lib/systemd/system/ragent-runner-supervisor.service"
 # P2-C: systemd socket-activation units for the runner services.
-install -m 0644 "$ROOT/packaging/deb/agentoc-runner-lifecycle.socket" "$STAGE/lib/systemd/system/agentoc-runner-lifecycle.socket"
-install -m 0644 "$ROOT/packaging/deb/agentoc-runner-supervisor.socket" "$STAGE/lib/systemd/system/agentoc-runner-supervisor.socket"
+install -m 0644 "$ROOT/packaging/deb/ragent-runner-lifecycle.socket" "$STAGE/lib/systemd/system/ragent-runner-lifecycle.socket"
+install -m 0644 "$ROOT/packaging/deb/ragent-runner-supervisor.socket" "$STAGE/lib/systemd/system/ragent-runner-supervisor.socket"
 # Installed for later integration, but deliberately not enabled by postinst.
-install -m 0644 "$ROOT/packaging/deb/agentoc-peer-result.socket" "$STAGE/lib/systemd/system/agentoc-peer-result.socket"
-install -m 0644 "$ROOT/packaging/deb/agentoc-peer-result.service" "$STAGE/lib/systemd/system/agentoc-peer-result.service"
-install -m 0644 "$ROOT/packaging/deb/agentoc-privileged-executor.service" "$STAGE/lib/systemd/system/agentoc-privileged-executor.service"
-install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.service" "$STAGE/lib/systemd/system/agentoc-storage-gc.service"
-install -m 0644 "$ROOT/packaging/deb/agentoc-storage-gc.timer" "$STAGE/lib/systemd/system/agentoc-storage-gc.timer"
-install -m 0640 "$ROOT/packaging/deb/agentoc.env" "$STAGE/etc/agentoc/agentoc.env"
-install -m 0644 "$ROOT/packaging/deb/agentoc.desktop" "$STAGE/usr/share/applications/agentoc.desktop"
+install -m 0644 "$ROOT/packaging/deb/ragent-peer-result.socket" "$STAGE/lib/systemd/system/ragent-peer-result.socket"
+install -m 0644 "$ROOT/packaging/deb/ragent-peer-result.service" "$STAGE/lib/systemd/system/ragent-peer-result.service"
+install -m 0644 "$ROOT/packaging/deb/ragent-privileged-executor.service" "$STAGE/lib/systemd/system/ragent-privileged-executor.service"
+install -m 0644 "$ROOT/packaging/deb/ragent-storage-gc.service" "$STAGE/lib/systemd/system/ragent-storage-gc.service"
+install -m 0644 "$ROOT/packaging/deb/ragent-storage-gc.timer" "$STAGE/lib/systemd/system/ragent-storage-gc.timer"
+install -m 0640 "$ROOT/packaging/deb/ragent.env" "$STAGE/etc/ragent/ragent.env"
 install -m 0644 "$ROOT/packaging/deb/ragent.desktop" "$STAGE/usr/share/applications/ragent.desktop"
-install -m 0644 "$ROOT/static/icon-512.png" "$STAGE/usr/share/icons/hicolor/512x512/apps/agentoc.png"
+install -m 0644 "$ROOT/static/icon-512.png" "$STAGE/usr/share/icons/hicolor/512x512/apps/ragent.png"
 install -m 0755 "$ROOT/packaging/deb/postinst" "$STAGE/DEBIAN/postinst"
 install -m 0755 "$ROOT/packaging/deb/preinst" "$STAGE/DEBIAN/preinst"
 install -m 0755 "$ROOT/packaging/deb/prerm" "$STAGE/DEBIAN/prerm"
@@ -560,8 +605,8 @@ install -m 0755 "$ROOT/packaging/deb/postrm" "$STAGE/DEBIAN/postrm"
 
 if [ -n "$SIGNALING_URL" ]; then
   case "$SIGNALING_URL" in
-    https://*) printf 'AGENTOC_P2P_SIGNALING_URL=%s\n' "$SIGNALING_URL" > "$STAGE/etc/agentoc/connectivity.env" ;;
-    *) echo 'AGENTOC_PACKAGE_SIGNALING_URL must use https://' >&2; exit 1 ;;
+    https://*) printf 'RAGENT_P2P_SIGNALING_URL=%s\n' "$SIGNALING_URL" > "$STAGE/etc/ragent/connectivity.env" ;;
+    *) echo 'RAGENT_PACKAGE_SIGNALING_URL must use https://' >&2; exit 1 ;;
   esac
 fi
 
@@ -585,25 +630,25 @@ done
 if [ -n "$PACKAGE_PUBLIC_BASE_URL" ]; then
   case "$PACKAGE_PUBLIC_BASE_URL" in
     https://[A-Za-z0-9._/-]*) ;;
-    *) echo 'AGENTOC_PACKAGE_PUBLIC_BASE_URL must be an absolute https:// URL without shell metacharacters' >&2; exit 1 ;;
+    *) echo 'RAGENT_PACKAGE_PUBLIC_BASE_URL must be an absolute https:// URL without shell metacharacters' >&2; exit 1 ;;
   esac
   case "$PACKAGE_PUBLIC_BASE_URL" in
-    *[!A-Za-z0-9:/._-]*) echo 'AGENTOC_PACKAGE_PUBLIC_BASE_URL contains unsupported characters' >&2; exit 1 ;;
+    *[!A-Za-z0-9:/._-]*) echo 'RAGENT_PACKAGE_PUBLIC_BASE_URL contains unsupported characters' >&2; exit 1 ;;
   esac
 fi
 case "$PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS" in
-  *[!A-Za-z0-9.,_-]*) echo 'AGENTOC_PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS contains unsupported characters' >&2; exit 1 ;;
+  *[!A-Za-z0-9.,_-]*) echo 'RAGENT_PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS contains unsupported characters' >&2; exit 1 ;;
 esac
 
-ACCOUNT_AUTH_ENV="$STAGE/etc/agentoc/account-auth.env"
+ACCOUNT_AUTH_ENV="$STAGE/etc/ragent/account-auth.env"
 {
   printf '%s\n' '# Generated at package build time; installation preserves this conffile.'
-  printf 'AGENTOC_PUBLIC_BASE_URL=%s\n' "$PACKAGE_PUBLIC_BASE_URL"
-  printf 'AGENTOC_ACCOUNTS_URL=%s\n' "$PACKAGE_ACCOUNTS_URL"
-  printf 'AGENTOC_ACCOUNTS_JWKS_URL=%s\n' "$PACKAGE_ACCOUNTS_JWKS_URL"
-  printf 'AGENTOC_ACCOUNTS_ISSUER=%s\n' "$PACKAGE_ACCOUNTS_ISSUER"
-  printf 'AGENTOC_TURN_BROKER_URL=%s\n' "$PACKAGE_TURN_BROKER_URL"
-  printf 'AGENTOC_GOOGLE_NATIVE_SERVER_CLIENT_IDS=%s\n' "$PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS"
+  printf 'RAGENT_PUBLIC_BASE_URL=%s\n' "$PACKAGE_PUBLIC_BASE_URL"
+  printf 'RAGENT_ACCOUNTS_URL=%s\n' "$PACKAGE_ACCOUNTS_URL"
+  printf 'RAGENT_ACCOUNTS_JWKS_URL=%s\n' "$PACKAGE_ACCOUNTS_JWKS_URL"
+  printf 'RAGENT_ACCOUNTS_ISSUER=%s\n' "$PACKAGE_ACCOUNTS_ISSUER"
+  printf 'RAGENT_TURN_BROKER_URL=%s\n' "$PACKAGE_TURN_BROKER_URL"
+  printf 'RAGENT_GOOGLE_NATIVE_SERVER_CLIENT_IDS=%s\n' "$PACKAGE_GOOGLE_NATIVE_SERVER_CLIENT_IDS"
 } > "$ACCOUNT_AUTH_ENV"
 chmod 0640 "$ACCOUNT_AUTH_ENV"
 
@@ -621,59 +666,72 @@ Description: Ragent local AI workbench with TURN-first mobile pairing
  without requiring a public domain or routing application state through a
  second control plane.
 EOF
-if [ "$PACKAGE_NAME" = ragent ]; then
-  printf 'Replaces: agentoc\n' >> "$STAGE/DEBIAN/control"
+
+if [ "$DEV_MODE" = 1 ]; then
+  printf 'X-Ragent-Development-Snapshot-SHA256: %s\n' "$DEV_SHA" >> "$STAGE/DEBIAN/control"
 fi
 
 cat > "$STAGE/DEBIAN/conffiles" <<EOF
-/etc/agentoc/agentoc.env
+/etc/ragent/ragent.env
 EOF
-if [ -f "$STAGE/etc/agentoc/connectivity.env" ]; then
-  printf '/etc/agentoc/connectivity.env\n' >> "$STAGE/DEBIAN/conffiles"
+if [ -f "$STAGE/etc/ragent/connectivity.env" ]; then
+  printf '/etc/ragent/connectivity.env\n' >> "$STAGE/DEBIAN/conffiles"
 fi
-if [ -f "$STAGE/etc/agentoc/account-auth.env" ]; then
-  printf '/etc/agentoc/account-auth.env\n' >> "$STAGE/DEBIAN/conffiles"
+if [ -f "$STAGE/etc/ragent/account-auth.env" ]; then
+  printf '/etc/ragent/account-auth.env\n' >> "$STAGE/DEBIAN/conffiles"
 fi
 
-chmod -R a+rX "$APP_DIR" "$STAGE/opt/agentoc/vendor"
+chmod -R a+rX "$APP_DIR" "$STAGE/opt/ragent/vendor"
 find "$STAGE" -type d -exec chmod 0755 {} +
-# Embed the staged payload inventory in the preinst, so a rename is accepted
-# only when every file owned by the legacy package will be taken over.
-node "$ROOT/scripts/render-deb-payload-manifest.mjs" "$STAGE" > "$WORK_DIR/package-paths"
-cat >> "$STAGE/DEBIAN/preinst" <<'EOF'
-
-: <<'RAGENT_PAYLOAD_MANIFEST'
-# RAGENT_PAYLOAD_MANIFEST_BEGIN
-EOF
-cat "$WORK_DIR/package-paths" >> "$STAGE/DEBIAN/preinst"
-cat >> "$STAGE/DEBIAN/preinst" <<'EOF'
-# RAGENT_PAYLOAD_MANIFEST_END
-RAGENT_PAYLOAD_MANIFEST
-EOF
 dpkg-deb --root-owner-group --build "$STAGE" "$OUTPUT" >/dev/null
 
 DEB_CONTENTS="$WORK_DIR/deb-contents.txt"
 dpkg-deb --fsys-tarfile "$OUTPUT" | tar -tf - > "$DEB_CONTENTS"
-if grep -Eq '^\./opt/agentoc/app/bin/agentoc-p2p-host-(amd64|arm64)$' "$DEB_CONTENTS"; then
+if grep -Eq '^\./opt/ragent/app/bin/ragent-p2p-host-(amd64|arm64)$' "$DEB_CONTENTS"; then
   echo "Built deb contains an architecture-specific P2P sidecar; only the canonical package path is allowed" >&2
   exit 1
 fi
-grep -Fx './opt/agentoc/app/bin/ragent-p2p-host' "$DEB_CONTENTS" >/dev/null || {
+grep -Fx './opt/ragent/app/bin/ragent-p2p-host' "$DEB_CONTENTS" >/dev/null || {
   echo "Built deb is missing the canonical P2P host sidecar" >&2
   exit 1
 }
 while IFS= read -r package_name; do
   [ -n "$package_name" ] || continue
-  expected_path="./opt/agentoc/app/node_modules/$package_name/package.json"
+  expected_path="./opt/ragent/app/node_modules/$package_name/package.json"
   if ! grep -Fx "$expected_path" "$DEB_CONTENTS" >/dev/null; then
     echo "Built deb is missing production dependency: $package_name" >&2
     exit 1
   fi
 done < "$PROD_DIRECT_DEPENDENCY_LIST"
 
-if [ -n "$SOURCE_GIT_DIR" ]; then
+if [ "$DEV_MODE" = 1 ]; then
+  [ "$(sha256sum "$DEV_ARCHIVE" | awk '{print $1}')" = "$DEV_SHA" ] || { echo 'Development archive changed during packaging.' >&2; exit 1; }
+  python3 - "$DEV_ARCHIVE" "$ROOT" <<'PYVERIFY'
+import hashlib, pathlib, sys, tarfile
+root = pathlib.Path(sys.argv[2])
+expected = set()
+with tarfile.open(sys.argv[1], 'r:*') as archive:
+    for item in archive:
+        path = root.joinpath(*item.name.split('/'))
+        if path.is_symlink() or not path.is_file():
+            raise SystemExit('Development source missing or unsafe: ' + item.name)
+        with archive.extractfile(item) as original, path.open('rb') as current:
+            while True:
+                a, b = original.read(1024 * 1024), current.read(1024 * 1024)
+                if a != b: raise SystemExit('Development source changed: ' + item.name)
+                if not a: break
+        if (path.stat().st_mode & 0o777) != (item.mode & 0o755):
+            raise SystemExit('Development source mode changed: ' + item.name)
+        expected.add(item.name)
+for path in root.rglob('*'):
+    if path.is_symlink() or (not path.is_file() and not path.is_dir()):
+        raise SystemExit('Unsafe development source entry: ' + str(path))
+    if path.is_file() and path.relative_to(root).as_posix() not in expected:
+        raise SystemExit('Unexpected development source entry: ' + str(path))
+PYVERIFY
+elif [ -n "$SOURCE_GIT_DIR" ]; then
   [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] &&
-    [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] &&
+    [ "$(cat "$ROOT/.ragent-source-commit")" = "$SOURCE_COMMIT" ] &&
     [ "$(sha256sum "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')" = "$FROZEN_MANIFEST_SHA" ] || {
       echo 'Frozen source identity changed during Debian packaging.' >&2; exit 1;
     }
@@ -693,7 +751,7 @@ function walk(dir, prefix = '') {
     if (st.isSymbolicLink()) throw new Error(`Frozen source contains a symlink: ${rel}`);
     if (st.isDirectory()) { walk(file, rel); continue; }
     if (!st.isFile()) throw new Error(`Frozen source contains a non-file: ${rel}`);
-    if (!prefix && ['.agentoc-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
+    if (!prefix && ['.ragent-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
     if (!expected.has(rel) || createHash('sha256').update(readFileSync(file)).digest('hex') !== expected.get(rel)) {
       throw new Error(`Frozen source changed: ${rel}`);
     }
@@ -717,7 +775,7 @@ fi
 [ ! -e "$FINAL_OUTPUT" ] || { echo 'Candidate output already exists; refusing to overwrite it.' >&2; exit 1; }
 mv -n "$OUTPUT" "$FINAL_OUTPUT"
 [ ! -e "$OUTPUT" ] || { echo 'Candidate output appeared during publishing; refusing to overwrite it.' >&2; exit 1; }
-if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+if [ "$DEV_MODE" != 1 ] && [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
   node "$ROOT/scripts/create-release-buildinfo.mjs" "$FINAL_OUTPUT" "$VERSION" "$SOURCE_COMMIT" "$BUILD_VERSION"
 fi
 printf '%s\n' "$FINAL_OUTPUT"

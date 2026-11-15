@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const testInstanceRoot = await mkdtemp(join(tmpdir(), 'agentoc-calendar-feed-'));
-process.env.AGENTOC_INSTANCE_ROOT = testInstanceRoot;
+const testInstanceRoot = await mkdtemp(join(tmpdir(), 'ragent-calendar-feed-'));
+process.env.RAGENT_INSTANCE_ROOT = testInstanceRoot;
 
 // We need to test the core logic without relying on config.mjs import order.
 // Test the iCal generation function directly.
@@ -20,7 +20,7 @@ async function testIcsGeneration() {
     calendarName: 'Test Calendar',
     events: [
       {
-        uid: 'test-event-001@agentoc',
+        uid: 'test-event-001@ragent',
         summary: 'Team standup',
         description: 'Daily sync meeting',
         location: 'Conference Room A',
@@ -31,7 +31,7 @@ async function testIcsGeneration() {
         updatedAt: '2026-04-06T00:00:00Z',
       },
       {
-        uid: 'test-event-002@agentoc',
+        uid: 'test-event-002@ragent',
         summary: 'Lunch with client',
         description: '',
         location: '',
@@ -51,15 +51,15 @@ async function testIcsGeneration() {
   assert.ok(ics.includes('BEGIN:VCALENDAR'), 'should have VCALENDAR begin');
   assert.ok(ics.includes('END:VCALENDAR'), 'should have VCALENDAR end');
   assert.ok(ics.includes('VERSION:2.0'), 'should have VERSION');
-  assert.ok(ics.includes('PRODID:-//AgentoC//Calendar Feed//EN'), 'should have PRODID');
+  assert.ok(ics.includes('PRODID:-//Ragent//Calendar Feed//EN'), 'should have PRODID');
   assert.ok(ics.includes('METHOD:PUBLISH'), 'should have METHOD:PUBLISH');
   assert.ok(ics.includes('X-WR-CALNAME:Test Calendar'), 'should have calendar name');
   assert.ok(ics.includes('REFRESH-INTERVAL;VALUE=DURATION:PT5M'), 'should have refresh interval');
 
   // Verify events
   assert.ok(ics.includes('BEGIN:VEVENT'), 'should have VEVENT');
-  assert.ok(ics.includes('UID:test-event-001@agentoc'), 'should have first event UID');
-  assert.ok(ics.includes('UID:test-event-002@agentoc'), 'should have second event UID');
+  assert.ok(ics.includes('UID:test-event-001@ragent'), 'should have first event UID');
+  assert.ok(ics.includes('UID:test-event-002@ragent'), 'should have second event UID');
   assert.ok(ics.includes('SUMMARY:Team standup'), 'should have first event summary');
   assert.ok(ics.includes('SUMMARY:Lunch with client'), 'should have second event summary');
   assert.ok(ics.includes('DESCRIPTION:Daily sync meeting'), 'should have description');
@@ -114,7 +114,7 @@ async function testIcsSpecialCharacters() {
     calendarName: 'Test',
     events: [
       {
-        uid: 'special@agentoc',
+        uid: 'special@ragent',
         summary: 'Meeting; with, semicolons\\and backslashes',
         description: 'Line one\nLine two',
         location: '',
@@ -147,7 +147,7 @@ async function testIcsInvalidDate() {
     calendarName: 'Test',
     events: [
       {
-        uid: 'valid@agentoc',
+        uid: 'valid@ragent',
         summary: 'Valid event',
         startTime: '2026-05-01T10:00:00Z',
         endTime: '2026-05-01T11:00:00Z',
@@ -156,7 +156,7 @@ async function testIcsInvalidDate() {
         updatedAt: '2026-04-06T00:00:00Z',
       },
       {
-        uid: 'invalid@agentoc',
+        uid: 'invalid@ragent',
         summary: 'Invalid event',
         startTime: 'not-a-date',
         endTime: '',
@@ -171,8 +171,8 @@ async function testIcsInvalidDate() {
 
   const eventCount = (ics.match(/BEGIN:VEVENT/g) || []).length;
   assert.equal(eventCount, 1, 'should only include valid event');
-  assert.ok(ics.includes('UID:valid@agentoc'), 'should include valid event');
-  assert.ok(!ics.includes('UID:invalid@agentoc'), 'should skip invalid event');
+  assert.ok(ics.includes('UID:valid@ragent'), 'should include valid event');
+  assert.ok(!ics.includes('UID:invalid@ragent'), 'should skip invalid event');
 
   console.log('    PASS');
 }
@@ -186,7 +186,7 @@ async function testIcsInvalidReminder() {
     calendarName: 'Test',
     events: [
       {
-        uid: 'no-reminder@agentoc',
+        uid: 'no-reminder@ragent',
         summary: 'No reminder event',
         startTime: '2026-05-01T12:00:00Z',
         endTime: '2026-05-01T13:00:00Z',
@@ -199,7 +199,7 @@ async function testIcsInvalidReminder() {
   };
 
   const ics = generateIcsContent(doc);
-  assert.ok(ics.includes('UID:no-reminder@agentoc'), 'event should still be present');
+  assert.ok(ics.includes('UID:no-reminder@ragent'), 'event should still be present');
   assert.ok(!ics.includes('BEGIN:VALARM'), 'invalid reminder should not create an alarm');
 
   console.log('    PASS');
@@ -315,7 +315,7 @@ async function testMultipleReminders() {
     calendarName: 'Test',
     events: [
       {
-        uid: 'multi-alarm@agentoc',
+        uid: 'multi-alarm@ragent',
         summary: 'Multi-alarm event',
         startTime: '2026-05-01T10:00:00Z',
         endTime: '2026-05-01T11:00:00Z',
@@ -362,7 +362,7 @@ async function testLegacyReminderBackwardCompat() {
     calendarName: 'Test',
     events: [
       {
-        uid: 'legacy@agentoc',
+        uid: 'legacy@ragent',
         summary: 'Legacy event',
         startTime: '2026-05-01T14:00:00Z',
         endTime: '2026-05-01T15:00:00Z',

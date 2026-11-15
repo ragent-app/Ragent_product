@@ -3,11 +3,11 @@ import { mkdtemp, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-tool-range-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-tool-range-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, '.agentoc', 'memory');
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, '.ragent', 'memory');
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
 
 const { appendEvent, loadHistory } = await import('../chat/history.mjs');
 const { createToolResultDescriptor, readHistoryToolResultRange } = await import('../chat/tool-result-descriptor.mjs');

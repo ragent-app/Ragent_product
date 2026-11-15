@@ -26,13 +26,13 @@ const browserRequest = (permissions) => ({
   method: 'GET',
   url: '/healthz',
   headers: {
-    'x-agentoc-browser-principal': 'browser',
-    'x-agentoc-browser-permissions': permissions,
-    'x-agentoc-browser-account-id': 'acct_signal_test',
-    'x-agentoc-browser-instance-id': instanceId,
-    'x-agentoc-browser-client-id': clientId,
-    'x-agentoc-browser-connection-id': connectionId,
-    'x-agentoc-browser-grant-jti': 'bcg_signal_test',
+    'x-ragent-browser-principal': 'browser',
+    'x-ragent-browser-permissions': permissions,
+    'x-ragent-browser-account-id': 'acct_signal_test',
+    'x-ragent-browser-instance-id': instanceId,
+    'x-ragent-browser-client-id': clientId,
+    'x-ragent-browser-connection-id': connectionId,
+    'x-ragent-browser-grant-jti': 'bcg_signal_test',
   },
 });
 assert.equal(policy.decide(browserRequest('remote.read.health')).kind, 'authenticated');

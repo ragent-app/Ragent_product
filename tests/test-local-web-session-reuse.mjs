@@ -3,12 +3,12 @@ import {mkdtemp,mkdir,writeFile,rm,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-local-cookie-'));
+const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-local-cookie-'));
 await mkdir(join(root,'config'));
 await writeFile(join(root,'config','auth.json'),JSON.stringify({username:'fixture',passwordHash:'fixture'}));
-Object.assign(process.env,{AGENTOC_WINDOWS_SERVICE_MODE:'1',AGENTOC_INSTANCE_ROOT:root,
-  AGENTOC_CONFIG_DIR:join(root,'config'),AGENTOC_MEMORY_DIR:join(root,'memory'),
-  AGENTOC_WORK_ROOT_DIR:join(root,'workspace'),AGENTOC_AUTH_SESSION_SECRET:'local-cookie-test-secret',AGENTOC_LOCAL_WEB_AUTH:'1'});
+Object.assign(process.env,{RAGENT_WINDOWS_SERVICE_MODE:'1',RAGENT_INSTANCE_ROOT:root,
+  RAGENT_CONFIG_DIR:join(root,'config'),RAGENT_MEMORY_DIR:join(root,'memory'),
+  RAGENT_WORK_ROOT_DIR:join(root,'workspace'),RAGENT_AUTH_SESSION_SECRET:'local-cookie-test-secret',RAGENT_LOCAL_WEB_AUTH:'1'});
 const auth=await import('../lib/auth.mjs');
 const {requireAuth}=await import('../chat/middleware.mjs');
 function request(cookie='',accept='text/html',extra={}){return {url:'/?desktop=manager',headers:{accept,cookie,...extra},socket:{remoteAddress:'127.0.0.1'}};}
@@ -22,7 +22,7 @@ try {
   const passwordCookie=`session_token=${passwordToken}`;
   const explicit=response();assert.equal(await requireAuth(request(passwordCookie),explicit),true);
   assert.equal(explicit.headers['Set-Cookie'],undefined,'a password owner session must not be replaced by a local-only session');
-  const explicitTunnel=response();assert.equal(await requireAuth(request(passwordCookie,'text/html',{'x-agentoc-tunnel':'1'}),explicitTunnel),true);
+  const explicitTunnel=response();assert.equal(await requireAuth(request(passwordCookie,'text/html',{'x-ragent-tunnel':'1'}),explicitTunnel),true);
   const visitorToken=await auth.issueSession({role:'visitor',agentId:'visitor-fixture'});
   const visitorReq=request(`visitor_session_token=${visitorToken}`);visitorReq.url='/?visitor=1';
   const visitorRes=response();assert.equal(await requireAuth(visitorReq,visitorRes),true);
@@ -31,7 +31,7 @@ try {
   const missingVisitor=request();missingVisitor.url='/?visitor=1';
   const missingVisitorRes=response();assert.equal(await requireAuth(missingVisitor,missingVisitorRes),false);
   assert.equal(missingVisitorRes.headers['Set-Cookie'],undefined,'a missing visitor credential must not mint an owner session');
-  const tunneled=response();assert.equal(await requireAuth(request(cookie,'text/html',{'x-agentoc-tunnel':'1'}),tunneled),false);assert.equal(tunneled.status,302);
+  const tunneled=response();assert.equal(await requireAuth(request(cookie,'text/html',{'x-ragent-tunnel':'1'}),tunneled),false);assert.equal(tunneled.status,302);
   for(let i=0;i<1000;i++){const probe=response();await requireAuth(request('','*/*'),probe);}
   assert.equal(auth.sessions.size,3,'cookie-free non-HTML probes must not mint sessions');
   console.log('local web session reuse, tunnel isolation, and cookie-free probes: passed');

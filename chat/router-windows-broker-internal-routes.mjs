@@ -36,7 +36,7 @@ export async function handleWindowsBrokerInternalRoutes({
   res.setHeader?.('Cache-Control', 'private, no-store');
   try {
     if (!loopback(req)) throw error('BROKER_RUN_LOCAL_ONLY');
-    const token = value(req.headers?.['x-agentoc-windows-broker-token']);
+    const token = value(req.headers?.['x-ragent-windows-broker-token']);
     if (!token) throw error('BROKER_RUN_TOKEN_REQUIRED');
     const query = req.method === 'GET' ? new URL(req.url, 'http://localhost').searchParams : null;
     if (query && [...query.keys()].length !== new Set(query.keys()).size) {

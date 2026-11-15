@@ -215,21 +215,21 @@ const codeAnchor = context.getStreamingCaretAnchor(codeBody);
 assert.equal(codeAnchor, code, 'getStreamingCaretAnchor should anchor directly inside code rather than wrapping pre');
 
 // Test streamingUserScrollDetached trigger & reset
-assert.equal(typeof context.window.AgentoCStreamingPresentation.isScrollDetached, 'function', 'isScrollDetached should be exposed');
-assert.equal(context.window.AgentoCStreamingPresentation.isScrollDetached(), false, 'should initially be false');
+assert.equal(typeof context.window.RagentStreamingPresentation.isScrollDetached, 'function', 'isScrollDetached should be exposed');
+assert.equal(context.window.RagentStreamingPresentation.isScrollDetached(), false, 'should initially be false');
 
-context.window.AgentoCStreamingPresentation.setScrollDetached(true);
-assert.equal(context.window.AgentoCStreamingPresentation.isScrollDetached(), true, 'setScrollDetached(true) should set isScrollDetached to true');
+context.window.RagentStreamingPresentation.setScrollDetached(true);
+assert.equal(context.window.RagentStreamingPresentation.isScrollDetached(), true, 'setScrollDetached(true) should set isScrollDetached to true');
 
 // Scroll-detach is user intent: pacing resets fire at every inter-chunk drain
 // and on presentation cancel, so they must NOT re-attach mid-turn. Only turn
 // boundaries clear the flag (new streaming bubble, transcript reset, FAB
 // click, near-bottom attach).
 context.resetStreamingPacingState();
-assert.equal(context.window.AgentoCStreamingPresentation.isScrollDetached(), true, 'resetStreamingPacingState must preserve isScrollDetached (only turn boundaries clear it)');
+assert.equal(context.window.RagentStreamingPresentation.isScrollDetached(), true, 'resetStreamingPacingState must preserve isScrollDetached (only turn boundaries clear it)');
 
-context.window.AgentoCStreamingPresentation.setScrollDetached(false);
+context.window.RagentStreamingPresentation.setScrollDetached(false);
 context.resetStreamingPacingState();
-assert.equal(context.window.AgentoCStreamingPresentation.isScrollDetached(), false, 'resetStreamingPacingState must not set isScrollDetached on its own');
+assert.equal(context.window.RagentStreamingPresentation.isScrollDetached(), false, 'resetStreamingPacingState must not set isScrollDetached on its own');
 
 console.log('test-chat-streaming-and-menu-motion: ok');

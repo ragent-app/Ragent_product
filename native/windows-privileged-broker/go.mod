@@ -1,4 +1,4 @@
-module agentoc/windows-privileged-broker
+module ragent/windows-privileged-broker
 
 go 1.26.0
 

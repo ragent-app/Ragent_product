@@ -5,10 +5,10 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const root = process.env.AGENTOC_RECEIPT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-receipt-api-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const root = process.env.RAGENT_RECEIPT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-receipt-api-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+delete process.env.RAGENT_INSTANCE_ROOT;
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 const { createSessionWithOutcome, getMessageSubmissionReceipt } = await import('../chat/session-manager.mjs');
 const { withSessionsMetaMutation } = await import('../chat/session-meta-store.mjs');
@@ -35,7 +35,7 @@ async function lookup(sessionId, requestId, allowed = true) {
 }
 
 if (process.argv[2] === 'cold') {
-  const cases = JSON.parse(process.env.AGENTOC_RECEIPT_TEST_CASES);
+  const cases = JSON.parse(process.env.RAGENT_RECEIPT_TEST_CASES);
   for (const [sessionId, requestId, state, queued, runId] of cases) {
     const result = await lookup(sessionId, requestId);
     assert.equal(result.status, 200);
@@ -79,7 +79,7 @@ if (process.argv[2] === 'cold') {
     assert.equal(accessChecks, checks, 'Malformed input must not perform a resource lookup');
     await assert.rejects(getMessageSubmissionReceipt(session.id, ''), { statusCode: 400 });
     await promisify(execFile)(process.execPath, [import.meta.filename, 'cold'], {
-      env: { ...process.env, AGENTOC_RECEIPT_TEST_ROOT: root, AGENTOC_RECEIPT_TEST_CASES: JSON.stringify(cases) },
+      env: { ...process.env, RAGENT_RECEIPT_TEST_ROOT: root, RAGENT_RECEIPT_TEST_CASES: JSON.stringify(cases) },
     });
     assert.equal(await readFile(join(root, 'config', 'chat-sessions.json'), 'utf8'), metadataBefore);
     assert.equal(await readFile(runStatusPath, 'utf8'), runBefore);
@@ -87,7 +87,7 @@ if (process.argv[2] === 'cold') {
     console.log('Receipt route: authenticated read-only Run/queued/planning/recent evidence, missing evidence and cold recovery passed.');
   } finally {
     assert.equal(resolve(dirname(root)), resolve(tmpdir()));
-    assert.ok(basename(root).startsWith('agentoc-receipt-api-'));
+    assert.ok(basename(root).startsWith('ragent-receipt-api-'));
     await rm(root, { recursive: true, force: true });
   }
 }

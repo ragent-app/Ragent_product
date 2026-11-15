@@ -14,10 +14,10 @@ import {
   signInstanceProof,
 } from '../../lib/instance-identity.mjs';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-auth-phone-pages-'));
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-auth-phone-pages-'));
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const state = {};
 let broker;
@@ -67,13 +67,13 @@ function proofFor(transactionId, returnUrl) {
     returnUrl,
     instance: publicInstanceIdentity(identity),
     issuedAt,
-    audience: 'agentoc-owner-auth',
+    audience: 'ragent-owner-auth',
     signature: signInstanceProof(identity, {
       transactionId,
       purpose: 'login',
       returnUrl,
       issuedAt,
-      audience: 'agentoc-owner-auth',
+      audience: 'ragent-owner-auth',
     }).signature,
   };
 }

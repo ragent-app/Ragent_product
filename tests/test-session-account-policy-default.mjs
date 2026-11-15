@@ -4,12 +4,12 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-session-account-policy-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-session-account-policy-'));
 const configDir = join(root, 'config');
 await mkdir(configDir, { recursive: true });
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_PERF_WRITE_DEBOUNCE = 'off';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_PERF_WRITE_DEBOUNCE = 'off';
 
 const { createSession } = await import('../chat/session-manager.mjs');
 const { loadAccountPolicy, saveAccountPolicy } = await import('../lib/account-policy.mjs');

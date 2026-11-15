@@ -29,12 +29,12 @@ func TestDecodeBrokerRequestRequiresVersionedStructuredOperation(t *testing.T) {
 		t.Fatalf("valid proposal was rejected: %v", err)
 	}
 	for name, payload := range map[string][]byte{
-		"unknown field":                 []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"AgentoC-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a","command":"powershell"}`),
-		"self-asserted caller identity": []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"AgentoC-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a","serviceSid":"S-1-5-80-1-2-3-4-5","approved":true}`),
-		"shell operation":               []byte(`{"version":2,"type":"propose","operation":"shell.exec","targetId":"AgentoC-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a"}`),
+		"unknown field":                 []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"Ragent-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a","command":"powershell"}`),
+		"self-asserted caller identity": []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"Ragent-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a","serviceSid":"S-1-5-80-1-2-3-4-5","approved":true}`),
+		"shell operation":               []byte(`{"version":2,"type":"propose","operation":"shell.exec","targetId":"Ragent-Broker-QA-Target","requestId":"r","sessionId":"s","runId":"run","turnId":"t","actionId":"a"}`),
 		"unsupported version":           []byte(`{"version":1,"type":"health"}`),
 		"extra JSON value":              []byte(`{"version":1,"type":"health"} {}`),
-		"missing correlation":           []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"AgentoC-Broker-QA-Target","requestId":"r"}`),
+		"missing correlation":           []byte(`{"version":2,"type":"propose","operation":"service.restart","targetId":"Ragent-Broker-QA-Target","requestId":"r"}`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := decodeBrokerRequest(payload); err == nil {

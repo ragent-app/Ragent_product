@@ -25,7 +25,7 @@ import {
 const MAX = 5;
 const WINDOW_MS = 60 * 60 * 1000;
 
-const tmpDir = await mkdtemp(join(tmpdir(), 'agentoc-quota-test-'));
+const tmpDir = await mkdtemp(join(tmpdir(), 'ragent-quota-test-'));
 let passed = 0;
 const eq = (label, actual, expected) => {
   assert.equal(actual, expected, label);

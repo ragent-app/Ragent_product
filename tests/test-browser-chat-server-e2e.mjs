@@ -58,7 +58,7 @@ async function jsonRequest(url, body) {
   return { response, body: await response.json() };
 }
 
-const tempHome = await mkdtemp(join(tmpdir(), 'agentoc-browser-chat-e2e-'));
+const tempHome = await mkdtemp(join(tmpdir(), 'ragent-browser-chat-e2e-'));
 const configDir = join(tempHome, 'config');
 const localBin = join(tempHome, 'bin');
 const { privateKey: authorityPrivateKey, publicKey: authorityPublicKey } = generateKeyPairSync('ed25519');
@@ -69,11 +69,11 @@ const accountId = 'account-browser-chat-e2e';
 const deviceId = 'device-browser-chat-e2e';
 const instanceSecret = 'browser-chat-e2e-instance-secret';
 const signalSecret = createHmac('sha256', instanceSecret)
-  .update(`agentoc-p2p-device-secret-v1:${deviceId}`)
+  .update(`ragent-p2p-device-secret-v1:${deviceId}`)
   .digest('hex');
 const roomId = createP2PRoomId(signalSecret);
-const binaryPath = process.env.AGENTOC_PHASE0_P2P_BINARY || join(tmpdir(), `agentoc-p2p-host-browser-e2e-${process.pid}`);
-const builtBinary = !process.env.AGENTOC_PHASE0_P2P_BINARY;
+const binaryPath = process.env.RAGENT_PHASE0_P2P_BINARY || join(tmpdir(), `ragent-p2p-host-browser-e2e-${process.pid}`);
+const builtBinary = !process.env.RAGENT_PHASE0_P2P_BINARY;
 const resources = [];
 const policyEvents = [];
 const gatewayEvents = [];
@@ -95,7 +95,7 @@ try {
     privateKey: instancePrivateKey.export({ type: 'pkcs8', format: 'pem' }).toString(),
     createdAt: new Date().toISOString(),
   }), { mode: 0o600 });
-  process.env.AGENTOC_INSTANCE_KEY_FILE = join(configDir, 'instance-identity.json');
+  process.env.RAGENT_INSTANCE_KEY_FILE = join(configDir, 'instance-identity.json');
   await Promise.all([
     mkdir(localBin, { recursive: true }),
     writeFile(join(configDir, 'auth.json'), JSON.stringify({ token: '0'.repeat(64) })),
@@ -123,13 +123,13 @@ try {
       accountJoinIntents: [],
     })),
   ]);
-  process.env.AGENTOC_CONFIG_DIR = configDir;
-  if (builtBinary) execFileSync('go', ['build', '-o', binaryPath, './cmd/agentoc-p2p-host'], { cwd: join(repoRoot, 'p2p'), stdio: 'ignore' });
+  process.env.RAGENT_CONFIG_DIR = configDir;
+  if (builtBinary) execFileSync('go', ['build', '-o', binaryPath, './cmd/ragent-p2p-host'], { cwd: join(repoRoot, 'p2p'), stdio: 'ignore' });
   await access(binaryPath);
 
   const chatPort = 40000 + Math.floor(Math.random() * 2000);
   const chatBase = `http://127.0.0.1:${chatPort}`;
-  process.env.AGENTOC_P2P_SIGNALING_URL = chatBase;
+  process.env.RAGENT_P2P_SIGNALING_URL = chatBase;
 
   // This server exercises the production broker client/service boundary with
   // a Cloudflare-shaped, short-lived fixture. It is deliberately not a TURN
@@ -169,9 +169,9 @@ try {
   });
   const turnBrokerAddress = await listen(turnBroker);
   resources.push(() => close(turnBroker));
-  process.env.AGENTOC_TURN_BROKER_URL = `http://127.0.0.1:${turnBrokerAddress.port}`;
-  process.env.AGENTOC_TURN_BROKER_TOKEN = 'browser-chat-e2e-broker';
-  process.env.AGENTOC_TURN_BROKER_AUTH_MODE = 'static';
+  process.env.RAGENT_TURN_BROKER_URL = `http://127.0.0.1:${turnBrokerAddress.port}`;
+  process.env.RAGENT_TURN_BROKER_TOKEN = 'browser-chat-e2e-broker';
+  process.env.RAGENT_TURN_BROKER_AUTH_MODE = 'static';
 
   const { loadOrCreateInstanceIdentity } = await import('../lib/instance-identity.mjs');
   const { buildDeviceConnectionBootstrapContract } = await import('../chat/connection-bootstrap-service.mjs');
@@ -202,24 +202,24 @@ try {
       CHAT_PORT: String(chatPort),
       CHAT_BIND_HOST: '127.0.0.1',
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(tempHome, 'memory'),
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_AUTH_SESSION_SECRET: 'browser-chat-e2e-session-secret',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_TURN_BROKER_URL: '',
-      AGENTOC_TURN_BROKER_TOKEN: '',
-      AGENTOC_TURN_BROKER_AUTH_MODE: 'static',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(tempHome, 'memory'),
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_AUTH_SESSION_SECRET: 'browser-chat-e2e-session-secret',
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_TURN_BROKER_URL: '',
+      RAGENT_TURN_BROKER_TOKEN: '',
+      RAGENT_TURN_BROKER_AUTH_MODE: 'static',
       // This test owns the host in the parent process so it can collect
       // policy/gateway evidence; do not let the child auto-recover the same
       // room and replace that host's signaling membership.
-      AGENTOC_P2P_HOST_RECOVERY: 'off',
-      AGENTOC_BROWSER_SIGNAL_ISSUER: authorityIssuer,
-      AGENTOC_BROWSER_SIGNAL_TRUSTED_KEYS_JSON: JSON.stringify({
+      RAGENT_P2P_HOST_RECOVERY: 'off',
+      RAGENT_BROWSER_SIGNAL_ISSUER: authorityIssuer,
+      RAGENT_BROWSER_SIGNAL_TRUSTED_KEYS_JSON: JSON.stringify({
         [authorityKeyId]: authorityPublicKey.export({ type: 'spki', format: 'pem' }),
       }),
     },
@@ -343,11 +343,11 @@ try {
 
   const pocHtml = await readFile(join(repoRoot, 'web-connectivity-poc/index.html'));
   const pocClient = await readFile(join(repoRoot, 'web-connectivity-poc/client.js'));
-  const p2pClient = await readFile(join(repoRoot, 'static/p2p/agentoc-p2p-client.js'));
+  const p2pClient = await readFile(join(repoRoot, 'static/p2p/ragent-p2p-client.js'));
   const pageServer = http.createServer((request, response) => {
     if (request.url === '/web-connectivity-poc/index.html') { response.writeHead(200, { 'content-type': 'text/html' }); response.end(pocHtml); return; }
     if (request.url === '/web-connectivity-poc/client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(pocClient); return; }
-    if (request.url === '/static/p2p/agentoc-p2p-client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(p2pClient); return; }
+    if (request.url === '/static/p2p/ragent-p2p-client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(p2pClient); return; }
     response.writeHead(404); response.end();
   });
   resources.push(() => close(pageServer));
@@ -357,7 +357,7 @@ try {
 
   const configurePage = async (page) => {
     await page.addInitScript(({ grantUrl }) => {
-      window.AGENTOC_BROWSER_CONNECTIVITY_CONFIG = {
+      window.RAGENT_BROWSER_CONNECTIVITY_CONFIG = {
         grantEndpoint: grantUrl,
         instanceId: 'instance-browser-chat-e2e',
         accountId: 'account-browser-chat-e2e',
@@ -365,14 +365,14 @@ try {
       };
     }, { grantUrl: `http://127.0.0.1:${grantAddress.port}/grant` });
     await page.goto(`http://127.0.0.1:${pageAddress.port}/web-connectivity-poc/index.html`, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => Boolean(window.AGENTOCA_BROWSER_CONNECTIVITY_POC));
+    await page.waitForFunction(() => Boolean(window.RAGENTA_BROWSER_CONNECTIVITY_POC));
   };
 
   const positivePage = await browser.newPage();
   await configurePage(positivePage);
   const positive = await positivePage.evaluate(async () => {
-    await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.connect();
-    await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.health();
+    await window.RAGENTA_BROWSER_CONNECTIVITY_POC.connect();
+    await window.RAGENTA_BROWSER_CONNECTIVITY_POC.health();
     return {
       state: document.getElementById('connection').textContent,
       bootstrap: document.getElementById('bootstrap').textContent,
@@ -390,11 +390,11 @@ try {
   assert.ok(gatewayEvents.some((event) => event.path === '/healthz' && event.status === 200));
 
   const tamper = await positivePage.evaluate(async () => {
-    const issued = await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.issueGrant();
+    const issued = await window.RAGENTA_BROWSER_CONNECTIVITY_POC.issueGrant();
     const altered = structuredClone(issued.bootstrap);
     altered.connectionMode = 'p2p-only';
     try {
-      await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.verifyConnectionBootstrapV2(altered, issued.bootstrapPublicKey);
+      await window.RAGENTA_BROWSER_CONNECTIVITY_POC.verifyConnectionBootstrapV2(altered, issued.bootstrapPublicKey);
       return 'accepted';
     } catch (error) { return error.message; }
   });
@@ -406,7 +406,7 @@ try {
   const preAuthPage = await browser.newPage();
   await configurePage(preAuthPage);
   const preAuthState = await preAuthPage.evaluate(async () => {
-    const unauthenticated = await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.connectWithoutBrowserAuth();
+    const unauthenticated = await window.RAGENTA_BROWSER_CONNECTIVITY_POC.connectWithoutBrowserAuth();
     const closed = new Promise((resolve) => unauthenticated.channel.addEventListener('close', () => resolve(true), { once: true }));
     unauthenticated.channel.send(JSON.stringify({ id: 'preauth-health', type: 'http_request', method: 'GET', path: '/healthz', headers: {}, bodyBase64: '' }));
     await closed;
@@ -423,7 +423,7 @@ try {
   await configurePage(wrongKeyPage);
   const wrongKey = await wrongKeyPage.evaluate(async () => {
     try {
-      await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.connectWithWrongKey();
+      await window.RAGENTA_BROWSER_CONNECTIVITY_POC.connectWithWrongKey();
       return 'accepted';
     } catch (error) { return error.message; }
   });

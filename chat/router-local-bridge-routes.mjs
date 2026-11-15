@@ -92,8 +92,8 @@ export async function handleLocalBridgePublicRoutes({
           'Content-Length': String(release.sizeBytes || 0),
           'Content-Disposition': `attachment; filename="${release.filename}"`,
           'Cache-Control': 'public, max-age=300',
-          'X-AgentoC-Helper-Version': release.version,
-          'X-AgentoC-Helper-Sha256': release.sha256,
+          'X-Ragent-Helper-Version': release.version,
+          'X-Ragent-Helper-Sha256': release.sha256,
         });
         createReadStream(release.binaryPath).pipe(res);
         return true;

@@ -6,10 +6,10 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-account-turn-connections-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-account-turn-connections-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 const {
   loadOrCreateInstanceIdentity,
@@ -137,7 +137,7 @@ function request({ actor, deviceId, purpose, instanceId = actor.instanceId }) {
     transactionId: connectionId,
     purpose,
     issuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
   });
   return {
     requestId: connectionId,
@@ -148,7 +148,7 @@ function request({ actor, deviceId, purpose, instanceId = actor.instanceId }) {
     expiresAt,
     instance: publicInstanceIdentity(actor),
     issuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
     signature: proof.signature,
   };
 }

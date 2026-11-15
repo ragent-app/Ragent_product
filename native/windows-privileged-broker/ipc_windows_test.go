@@ -80,7 +80,7 @@ func TestSlowInspectionDoesNotBlockOtherPipeRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix
+	base := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, base+".Health", base+".Request")
 	if err != nil {
 		t.Fatal(err)
@@ -145,7 +145,7 @@ func TestStopCancelsActiveInspection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix
+	base := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, base+".Health", base+".Request")
 	if err != nil {
 		t.Fatal(err)
@@ -540,7 +540,7 @@ func TestAdminPipeKernelACLRejectsNonElevatedLocalClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := `\\.\pipe\AgentoC.PrivilegedBroker.AdminACLTest.` + pipeID
+	name := `\\.\pipe\Ragent.PrivilegedBroker.AdminACLTest.` + pipeID
 	namePointer, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		t.Fatal(err)
@@ -578,7 +578,7 @@ func TestRequestPipeKernelACLRejectsUntrustedLocalProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := `\\.\pipe\AgentoC.PrivilegedBroker.Test.` + pipeID
+	name := `\\.\pipe\Ragent.PrivilegedBroker.Test.` + pipeID
 	namePointer, err := windows.UTF16PtrFromString(name)
 	if err != nil {
 		t.Fatal(err)
@@ -650,8 +650,8 @@ func TestBrokerNamedPipesRoundTripLocallyWithoutSCM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + pipeSuffix + `.Health.v1`
-	requestName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + pipeSuffix + `.Request.v1`
+	healthName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + pipeSuffix + `.Health.v1`
+	requestName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + pipeSuffix + `.Request.v1`
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, healthName, requestName)
 	if err != nil {
 		t.Fatal(err)
@@ -724,8 +724,8 @@ func TestAutoInstallNamedPipeWithoutDeviceEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
-	requestName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
+	healthName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
+	requestName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, healthName, requestName)
 	if err != nil {
 		t.Fatal(err)
@@ -812,8 +812,8 @@ func TestBrokerPipeClientFactsAcceptLocalTestIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthName := `\\.\pipe\AgentoC.PrivilegedBroker.IdentityTest.` + suffix + `.Health.v1`
-	requestName := `\\.\pipe\AgentoC.PrivilegedBroker.IdentityTest.` + suffix + `.Request.v1`
+	healthName := `\\.\pipe\Ragent.PrivilegedBroker.IdentityTest.` + suffix + `.Health.v1`
+	requestName := `\\.\pipe\Ragent.PrivilegedBroker.IdentityTest.` + suffix + `.Request.v1`
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, healthName, requestName)
 	if err != nil {
 		t.Fatal(err)
@@ -857,8 +857,8 @@ func TestBrokerPipeClientFactsAcceptLocalTestIdentity(t *testing.T) {
 }
 
 func TestRequestPipeRejectsLoopbackUNCClient(t *testing.T) {
-	if os.Getenv("AGENTOC_BROKER_REMOTE_PIPE_TEST") != "1" {
-		t.Skip("set AGENTOC_BROKER_REMOTE_PIPE_TEST=1 to exercise the SMB/UNC path")
+	if os.Getenv("RAGENT_BROKER_REMOTE_PIPE_TEST") != "1" {
+		t.Skip("set RAGENT_BROKER_REMOTE_PIPE_TEST=1 to exercise the SMB/UNC path")
 	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
@@ -872,7 +872,7 @@ func TestRequestPipeRejectsLoopbackUNCClient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const prefix = `\\.\pipe\AgentoC.PrivilegedBroker.RemoteTest.`
+	const prefix = `\\.\pipe\Ragent.PrivilegedBroker.RemoteTest.`
 	requestName := prefix + suffix
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, requestName+".Health", requestName)
 	if err != nil {

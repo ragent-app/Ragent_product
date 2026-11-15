@@ -69,7 +69,7 @@ function loadLegacy() {
   };
   vm.runInNewContext(AMBIENT_SHAPE, context);
   vm.runInNewContext(
-    `window.AgentoCTimelineRuntime = {
+    `window.RagentTimelineRuntime = {
       getSnapshot: () => ({
         sessionId: renderedEventState.sessionId,
         items: Array.from({ length: Number(renderedEventState.eventCount) || 0 }, () => null),
@@ -167,13 +167,13 @@ function loadCore() {
     lastCurrentSessionRefreshSessionId: '',
     getTimelineRuntimeSnapshot: null,
   };
-  context.AgentocRefreshPolicyEnvironment = env;
+  context.RagentRefreshPolicyEnvironment = env;
   vm.runInNewContext(
-    'AgentocRefreshPolicyEnvironment.renderedEventState = renderedEventState;',
+    'RagentRefreshPolicyEnvironment.renderedEventState = renderedEventState;',
     context,
   );
   vm.runInNewContext(
-    `AgentocRefreshPolicyEnvironment.getTimelineRuntimeSnapshot = (sessionId) => {
+    `RagentRefreshPolicyEnvironment.getTimelineRuntimeSnapshot = (sessionId) => {
       if (renderedEventState.sessionId !== sessionId) return null;
       return {
         sessionId,
@@ -189,7 +189,7 @@ function loadCore() {
     context,
     { filename: 'transport/refresh-policy.js' },
   );
-  const core = context.AgentocRefreshPolicyCore;
+  const core = context.RagentRefreshPolicyCore;
   return {
     api: {
       normalizeSessionViewportIntent: (v) => core.normalizeSessionViewportIntent(v),

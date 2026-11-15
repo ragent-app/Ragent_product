@@ -83,8 +83,8 @@ func TestRuntimeManifestRequiresExactUntamperedFiles(t *testing.T) {
 }
 
 func TestOptionalStagedRuntimeManifest(t *testing.T) {
-	root := os.Getenv("AGENTOC_TEST_RUNTIME_VENDOR")
-	expected := os.Getenv("AGENTOC_TEST_RUNTIME_MANIFEST_SHA256")
+	root := os.Getenv("RAGENT_TEST_RUNTIME_VENDOR")
+	expected := os.Getenv("RAGENT_TEST_RUNTIME_MANIFEST_SHA256")
 	if root == "" || expected == "" {
 		t.Skip("no isolated staged runtime supplied")
 	}

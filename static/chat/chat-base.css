@@ -297,7 +297,7 @@
  * Material role layer
  *
  * Keep platform/dynamic colors at this boundary. Components should consume
- * the existing AgentoC variables below, while Android Monet/WebView callers
+ * the existing Ragent variables below, while Android Monet/WebView callers
  * can replace the sys-* roles without knowing component selectors.
  */
 :root,

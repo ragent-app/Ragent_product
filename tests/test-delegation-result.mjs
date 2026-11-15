@@ -7,7 +7,7 @@ import {
   resultPacketPrompt,
 } from '../chat/delegation-result.mjs';
 
-const tagged = '<agentoc-result-packet>{"state":"completed","summary":"implemented bounded handoff","changedFiles":["chat/example.mjs"],"tests":[{"name":"unit","status":"passed","evidence":"node test.mjs"}],"acceptanceNotes":["criterion met"]}</agentoc-result-packet>';
+const tagged = '<ragent-result-packet>{"state":"completed","summary":"implemented bounded handoff","changedFiles":["chat/example.mjs"],"tests":[{"name":"unit","status":"passed","evidence":"node test.mjs"}],"acceptanceNotes":["criterion met"]}</ragent-result-packet>';
 assert.equal(extractDelegationResult(tagged).summary, 'implemented bounded handoff');
 
 const packet = buildDelegationResultFromRun({
@@ -30,7 +30,7 @@ assert.equal(projection.total, 2);
 assert.equal(projection.active, 1);
 assert.equal(projection.completed, 1);
 assert.equal(projection.results.length, 1);
-assert.match(resultPacketPrompt({ role: 'reviewer' }), /agentoc-result-packet/);
+assert.match(resultPacketPrompt({ role: 'reviewer' }), /ragent-result-packet/);
 assert.match(resultPacketPrompt({ role: 'reviewer' }), /role is reviewer/);
 
 console.log('test-delegation-result: ok');

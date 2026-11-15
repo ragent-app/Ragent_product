@@ -28,7 +28,7 @@ const target = http.createServer(async (req, res) => {
   res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(payload));
 });
 const signaling = createP2PSignalingServer({ host: '127.0.0.1', port: 0 });
-const source = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+const source = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
 const web = http.createServer((req, res) => {
   if (req.url === '/client.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(source); }
   else res.end('<!doctype html>');
@@ -44,16 +44,16 @@ try {
     prepareHandoff: async () => ({ ...credentials, connectionId: 'new-lease', contract: { turn: { connectionId: 'new-lease' } } }),
     commitHandoff: async () => { commits++; }, releaseHandoff: async () => {},
     runHostAgent: options => runP2PHostAgent({ ...options,
-      ...(process.env.AGENTOC_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.AGENTOC_TEST_P2P_HOST_BINARY } : {}),
+      ...(process.env.RAGENT_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.RAGENT_TEST_P2P_HOST_BINARY } : {}),
       iceServers: [], relayOnly: false }) });
   assert.equal(started.started, true);
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage(); await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const result = await page.evaluate(async ({ signalingUrl, roomId, secret, token }) => {
-    const { AgentoCP2PClient } = await import('/client.js');
+    const { RagentP2PClient } = await import('/client.js');
     const options = { signalingUrl, roomId, secret, iceServers: [], connectTimeoutMs: 10_000, requestTimeoutMs: 4_000 };
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    const old = new AgentoCP2PClient(options); await old.connect();
+    const old = new RagentP2PClient(options); await old.connect();
     const notice = new Promise(resolve => old.socket.addEventListener('message', event => {
       const message = JSON.parse(event.data);
       if (message.envelope?.payload?.type === 'carrier_handoff_requested') resolve(message.envelope.payload.handoffId);
@@ -63,7 +63,7 @@ try {
     const plan = await old.request({ method: 'POST', path: '/handoff/plan', headers, body: JSON.stringify({ handoffId }) });
     old.socket.close(1000, 'handoff');
     const oldBefore = await old.request({ method: 'GET', path: '/health', headers });
-    const next = new AgentoCP2PClient(options), send = next.sendSignal.bind(next);
+    const next = new RagentP2PClient(options), send = next.sendSignal.bind(next);
     next.sendSignal = payload => send(payload.type === 'offer' ? { ...payload, handoffId } : payload);
     await next.connect();
     const probe = await next.request({ method: 'GET', path: '/api/auth/me', headers });

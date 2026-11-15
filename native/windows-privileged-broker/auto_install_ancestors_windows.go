@@ -21,7 +21,7 @@ func installedRuntimePaths(executable string) (product, payload, vendor string, 
 	executable = filepath.Clean(executable)
 	broker := filepath.Dir(executable)
 	product = filepath.Dir(broker)
-	if !strings.EqualFold(filepath.Base(executable), "AgentoC.PrivilegedBroker.exe") || !strings.EqualFold(filepath.Base(broker), "Broker") || product == filepath.Dir(product) {
+	if !strings.EqualFold(filepath.Base(executable), "Ragent.PrivilegedBroker.exe") || !strings.EqualFold(filepath.Base(broker), "Broker") || product == filepath.Dir(product) {
 		return "", "", "", errRuntimeIntegrity
 	}
 	payload = filepath.Join(product, "payload")

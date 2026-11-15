@@ -24,14 +24,14 @@ function makeDir(prefix) {
 
 try {
   // ── new scope: valid cwd ──────────────────────────────────────────────────
-  const root = makeDir('agentoc-sidecar-root-');
+  const root = makeDir('ragent-sidecar-root-');
   const scoped = resolveRunCwd({ executionScope: { cwd: { realPath: root } } });
   assert.equal(scoped.cwd, root, 'new scope should use executionScope.cwd.realPath');
   assert.equal(scoped.legacyExecutionScope, false, 'new scope runs are not legacy');
   assert.equal(scoped.repaired, false, 'a valid scope must not be marked repaired');
 
   // ── new scope: missing / non-directory / inaccessible cwd fails fast ──────
-  const missing = join(tmpdir(), `agentoc-sidecar-missing-${Date.now()}`);
+  const missing = join(tmpdir(), `ragent-sidecar-missing-${Date.now()}`);
   assert.throws(
     () => resolveRunCwd({ executionScope: { cwd: { realPath: missing } } }),
     (error) => error.code === 'EXECUTION_SCOPE_UNAVAILABLE' && error.statusCode === 409,
@@ -65,7 +65,7 @@ try {
   assert.equal(legacy.legacyExecutionScope, true, 'legacy manifests must be flagged legacyExecutionScope=true');
 
   const repaired = resolveRunCwd(
-    { folder: join(tmpdir(), 'agentoc-sidecar-missing-2') },
+    { folder: join(tmpdir(), 'ragent-sidecar-missing-2') },
     {
       resolveLegacy: (folder) => ({
         cwd: '/managed-work-root',

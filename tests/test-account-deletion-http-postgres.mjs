@@ -13,27 +13,27 @@ import { createAccountDeletionService } from '../accounts/account-deletion-servi
 import { createAccountsLogger, createAccountsLoggerOptions } from '../accounts/log.mjs';
 import { GOOGLE_JWKS_URL } from '../lib/google-id-token.mjs';
 
-const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const databaseUrl = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('actual HTTP and isolated PostgreSQL purpose-bound Google deletion assembly', { skip: !databaseUrl }, async t => {
-  const url = new URL(databaseUrl), nonce = process.env.AGENTOC_TEST_RUN_NONCE;
+  const url = new URL(databaseUrl), nonce = process.env.RAGENT_TEST_RUN_NONCE;
   assert.equal(url.protocol, 'postgresql:'); assert.equal(url.hostname, '127.0.0.1');
   assert.equal(url.username, 'qa_deletion'); assert.equal(url.pathname, '/postgres');
   assert(/^[a-f0-9]{32}$/.test(nonce || ''));
   const schema = 'qa_deletion_http_' + randomBytes(10).toString('hex');
   const bootstrap = new Pool({ connectionString: url.href, max: 1, connectionTimeoutMillis: 5000 });
   const pool = new Pool({ connectionString: url.href, max: 4, connectionTimeoutMillis: 5000,
-    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=agentoc-deletion-http-qa` });
+    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=ragent-deletion-http-qa` });
   const cluster = (await bootstrap.query("select current_setting('cluster_name') as name")).rows[0].name;
-  assert.equal(cluster, 'agentoc-deletion-' + nonce);
+  assert.equal(cluster, 'ragent-deletion-' + nonce);
   let owned = false, app;
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-deletion-http-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-deletion-http-'));
   t.after(async () => {
     try { await app?.close(); } finally {
       await pool.end();
       try { if (owned) await bootstrap.query(`drop schema "${schema}" cascade`); }
       finally { await bootstrap.end();
         const target = await realpath(dir);
-        assert.equal(dirname(target), await realpath(tmpdir())); assert(basename(target).startsWith('agentoc-deletion-http-'));
+        assert.equal(dirname(target), await realpath(tmpdir())); assert(basename(target).startsWith('ragent-deletion-http-'));
         await rm(target, { recursive: true, force: true }); }
     }
   });

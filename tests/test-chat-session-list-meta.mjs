@@ -63,7 +63,7 @@ const context = {
       ? { key: 'unread', label: 'new', title: 'Updated since last review' }
       : null;
   },
-  AgentoCSessionStateModel: {
+  RagentSessionStateModel: {
     normalizeSessionActivity(session) {
       const running = session?.activity?.run?.state === 'running';
       return {

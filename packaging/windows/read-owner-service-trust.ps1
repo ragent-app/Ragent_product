@@ -22,10 +22,10 @@ try{
     # write rights. Pin it and each ancestor, never create or repair ACLs here.
     $runtime=Join-Path (Get-OwnerInstanceRoot) 'runtime'
     for($path=$runtime;$path;$path=[IO.Path]::GetDirectoryName($path)){
-      $pins.Add([AgentoCOwnerFilePin]::Directory($path))
+      $pins.Add([RagentOwnerFilePin]::Directory($path))
       Assert-OwnerObjectAcl $path ($admin+@($installation.controlSid)) -Ancestor:($path -ne $runtime) -Pins $pins
     }
-    $helperPath=Join-Path (Get-OwnerProductRoot) 'payload\AgentoC.OwnerBootstrap.exe'
+    $helperPath=Join-Path (Get-OwnerProductRoot) 'payload\Ragent.OwnerBootstrap.exe'
     $helper=Read-OwnerPinnedFile $helperPath $admin $pins 4194304
     try{if($releaseObject.protocolVersion -ne 2){throw 'protocol'};$trust=Get-OwnerReleaseTrust $releaseObject $helper $helperPath}catch{throw 'OSV_RELEASE_MISMATCH'}
     $info=[Diagnostics.ProcessStartInfo]::new()
@@ -46,12 +46,12 @@ try{
       $identity=$output|ConvertFrom-Json
       if($identity.kind -cne $(if($ActivationListener){'identity'}else{'peer-identity'})){throw 'OSV_SERVICE_IDENTITY_DENIED'}
     }finally{$process.Dispose()}
-    if(-not ('AgentoCOwnerSessions' -as [type])){
+    if(-not ('RagentOwnerSessions' -as [type])){
       Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
-public static class AgentoCOwnerSessions {
+public static class RagentOwnerSessions {
  [StructLayout(LayoutKind.Sequential)] struct Session { public int id; public IntPtr name; public int state; }
  [DllImport("wtsapi32.dll",SetLastError=true)] static extern bool WTSEnumerateSessions(IntPtr server,int reserved,int version,out IntPtr sessions,out int count);
  [DllImport("wtsapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WTSQuerySessionInformation(IntPtr server,int session,int kind,out IntPtr buffer,out int size);

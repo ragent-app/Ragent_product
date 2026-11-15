@@ -7,9 +7,9 @@ import dbus
 if os.geteuid() != 0 or len(sys.argv) < 6:
     raise SystemExit('usage: UNIT USER ROOT RUNTIME ABSOLUTE_EXECUTABLE [ARGS...]')
 unit, user, root, runtime, *command = sys.argv[1:]
-if not unit.startswith('agentoc-idmap-single-') or not unit.endswith('.service'):
+if not unit.startswith('ragent-idmap-single-') or not unit.endswith('.service'):
     raise SystemExit('invalid fixture unit')
-if not user.startswith('agentoc-map-') or not root.startswith('/srv/agentoc-idmap-single-') or not runtime.startswith('agentoc-idmap-single-') or '/' in runtime:
+if not user.startswith('ragent-map-') or not root.startswith('/srv/ragent-idmap-single-') or not runtime.startswith('ragent-idmap-single-') or '/' in runtime:
     raise SystemExit('invalid fixture identity or root')
 if not os.path.isabs(command[0]):
     raise SystemExit('executable must be absolute')

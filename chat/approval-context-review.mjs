@@ -48,8 +48,8 @@ export async function reviewApprovalContext({ run, manifest, request, fetchImpl 
       headers = { authorization: `Bearer ${credential.apiKey}`, 'content-type': 'application/json' };
       body = { model, max_tokens: 1024, messages: [{ role: 'system', content: INSTRUCTIONS }, { role: 'user', content: input }] };
     } else return unknown('provider_protocol_unsupported');
-    headers['x-agentoc-request-purpose'] = 'approval-review';
-    const configuredTimeout = Number(process.env.AGENTOC_APPROVAL_REVIEW_TIMEOUT_MS);
+    headers['x-ragent-request-purpose'] = 'approval-review';
+    const configuredTimeout = Number(process.env.RAGENT_APPROVAL_REVIEW_TIMEOUT_MS);
     const timeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 5000
       ? Math.min(configuredTimeout, 45000) : 30000;
     const response = await fetchImpl(endpoint, { method: 'POST', headers, body: JSON.stringify(body),

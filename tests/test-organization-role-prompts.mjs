@@ -17,7 +17,7 @@ assert.equal(organizationRoleForSession({ sessionClass: 'REVIEWER' }), 'REVIEWER
 const rootPrompt = buildOrganizationRolePrompt({ role: 'ROOT' });
 assert.match(rootPrompt, /final synthesis/);
 assert.match(rootPrompt, /Frozen Revision/);
-assert.match(rootPrompt, /agentoc-result-packet/);
+assert.match(rootPrompt, /ragent-result-packet/);
 
 const managerPrompt = buildOrganizationRolePrompt({ role: 'MANAGER' });
 assert.match(managerPrompt, /Runtime-granted subtree/);
@@ -37,7 +37,7 @@ assert.equal(buildOrganizationRolePrompt({ role: 'unknown' }), '');
 
 const fixture = JSON.parse(await readFile(join(process.cwd(), 'tests/fixtures/bounded-result-packet.json'), 'utf8'));
 const packet = normalizeDelegationResult(fixture);
-const marked = `<agentoc-result-packet>${JSON.stringify(packet)}</agentoc-result-packet>`;
+const marked = `<ragent-result-packet>${JSON.stringify(packet)}</ragent-result-packet>`;
 assert.deepEqual(extractDelegationResult(marked), packet);
 
 console.log('test-organization-role-prompts: ok');

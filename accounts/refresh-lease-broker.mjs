@@ -15,7 +15,7 @@ import {
   verifyInstanceProofSignature,
 } from '../lib/instance-proof-protocol.mjs';
 
-export const REFRESH_LEASE_AUDIENCE = 'agentoc-provider-refresh-lease';
+export const REFRESH_LEASE_AUDIENCE = 'ragent-provider-refresh-lease';
 export const REFRESH_LEASE_OPERATIONS = new Set(['acquire', 'heartbeat', 'complete', 'status']);
 export const REFRESH_LEASE_TTL_MS_DEFAULT = 60 * 1000;
 export const REFRESH_LEASE_TTL_MS_MIN = 10 * 1000;

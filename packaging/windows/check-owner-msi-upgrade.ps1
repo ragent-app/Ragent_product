@@ -9,12 +9,12 @@ $upgradeLibraryOnly=$LibraryOnly.IsPresent
 . (Join-Path $PSScriptRoot 'prepare-owner-install-policy.ps1') -LibraryOnly
 $pins=[Collections.Generic.List[IDisposable]]::new();$product=Get-OwnerProductRoot
 function Initialize-OwnerUpgradeTokenReader {
- if('AgentoCOwnerUpgradeTokenReader' -as [type]){return}
+ if('RagentOwnerUpgradeTokenReader' -as [type]){return}
  Add-Type -TypeDefinition @'
 using System;using System.Text;using System.Collections.Generic;using System.Runtime.InteropServices;using System.Security.Principal;
-public sealed class AgentoCOwnerUpgradeTokenFacts {public string userSid;public int integrityRid,sessionId;public bool elevated,enabledAdministrators;public string[] privileges;}
-public sealed class AgentoCOwnerBrokerFacts {public string account,binary;public int state,startType,serviceType;}
-public static class AgentoCOwnerUpgradeTokenReader {
+public sealed class RagentOwnerUpgradeTokenFacts {public string userSid;public int integrityRid,sessionId;public bool elevated,enabledAdministrators;public string[] privileges;}
+public sealed class RagentOwnerBrokerFacts {public string account,binary;public int state,startType,serviceType;}
+public static class RagentOwnerUpgradeTokenReader {
  [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]struct ServiceConfig {public int serviceType,startType,errorControl;public IntPtr binary,group;public int tag;public IntPtr dependencies,account,displayName;}
  [StructLayout(LayoutKind.Sequential)]struct ServiceStatus {public int serviceType,state,controlsAccepted,win32ExitCode,serviceSpecificExitCode,checkPoint,waitHint,processId,flags;}
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr OpenSCManager(string machine,string database,uint access);
@@ -22,11 +22,11 @@ public static class AgentoCOwnerUpgradeTokenReader {
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool CloseServiceHandle(IntPtr handle);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool QueryServiceConfig(IntPtr service,IntPtr buffer,int size,out int needed);
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool QueryServiceStatusEx(IntPtr service,int level,out ServiceStatus status,int size,out int needed);
- public static AgentoCOwnerBrokerFacts ReadBroker(string name){
+ public static RagentOwnerBrokerFacts ReadBroker(string name){
   IntPtr manager=OpenSCManager(null,null,1);Need(manager!=IntPtr.Zero);try{IntPtr service=OpenService(manager,name,5);Need(service!=IntPtr.Zero);try{
    int needed;QueryServiceConfig(service,IntPtr.Zero,0,out needed);Need(needed>0&&needed<=65536);IntPtr buffer=Marshal.AllocHGlobal(needed);try{
     Need(QueryServiceConfig(service,buffer,needed,out needed));var c=(ServiceConfig)Marshal.PtrToStructure(buffer,typeof(ServiceConfig));ServiceStatus s;Need(QueryServiceStatusEx(service,0,out s,Marshal.SizeOf(typeof(ServiceStatus)),out needed));
-    return new AgentoCOwnerBrokerFacts{account=Marshal.PtrToStringUni(c.account),binary=Marshal.PtrToStringUni(c.binary),state=s.state,startType=c.startType,serviceType=c.serviceType};
+    return new RagentOwnerBrokerFacts{account=Marshal.PtrToStringUni(c.account),binary=Marshal.PtrToStringUni(c.binary),state=s.state,startType=c.startType,serviceType=c.serviceType};
    }finally{Marshal.FreeHGlobal(buffer);}
   }finally{CloseServiceHandle(service);}}finally{CloseServiceHandle(manager);}
  }
@@ -37,8 +37,8 @@ public static class AgentoCOwnerUpgradeTokenReader {
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool LookupPrivilegeName(string system,IntPtr luid,StringBuilder name,ref int size);
  static void Need(bool value){if(!value)throw new InvalidOperationException("OUG_TOKEN_QUERY_REFUSED");}
  static IntPtr Info(IntPtr token,int kind){int size;GetTokenInformation(token,kind,IntPtr.Zero,0,out size);Need(size>0&&size<=65536);IntPtr data=Marshal.AllocHGlobal(size);if(!GetTokenInformation(token,kind,data,size,out size)){Marshal.FreeHGlobal(data);throw new InvalidOperationException("OUG_TOKEN_QUERY_REFUSED");}return data;}
- public static AgentoCOwnerUpgradeTokenFacts Read(int pid){IntPtr process=OpenProcess(0x1000,false,pid);Need(process!=IntPtr.Zero);try{IntPtr token;Need(OpenProcessToken(process,8,out token));try{
-  var f=new AgentoCOwnerUpgradeTokenFacts();IntPtr d=Info(token,1);try{f.userSid=new SecurityIdentifier(Marshal.ReadIntPtr(d)).Value;}finally{Marshal.FreeHGlobal(d);}
+ public static RagentOwnerUpgradeTokenFacts Read(int pid){IntPtr process=OpenProcess(0x1000,false,pid);Need(process!=IntPtr.Zero);try{IntPtr token;Need(OpenProcessToken(process,8,out token));try{
+  var f=new RagentOwnerUpgradeTokenFacts();IntPtr d=Info(token,1);try{f.userSid=new SecurityIdentifier(Marshal.ReadIntPtr(d)).Value;}finally{Marshal.FreeHGlobal(d);}
   d=Info(token,25);try{string sid=new SecurityIdentifier(Marshal.ReadIntPtr(d)).Value;f.integrityRid=Int32.Parse(sid.Substring(sid.LastIndexOf('-')+1));}finally{Marshal.FreeHGlobal(d);}
   d=Info(token,12);try{f.sessionId=Marshal.ReadInt32(d);}finally{Marshal.FreeHGlobal(d);}
   d=Info(token,20);try{f.elevated=Marshal.ReadInt32(d)!=0;}finally{Marshal.FreeHGlobal(d);}
@@ -64,7 +64,7 @@ function Assert-UpgradePath([string]$Path,[bool]$Directory,[string]$InstallRoot)
    if($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and -not ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -and $rule.IdentityReference.Value -notin (Get-OwnerAdministrativeSids) -and ([int64]$rule.FileSystemRights -band $mask)){throw 'OUG_SOURCE_WRITABLE_BY_NONADMIN'}
   }
  }
- if($Directory){$pins.Add([AgentoCOwnerFilePin]::Directory($full))}else{$stream=[IO.FileStream]::new($full,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);try{[AgentoCOwnerFilePin]::Verify($stream.SafeFileHandle,$full,$false);$pins.Add($stream)}catch{$stream.Dispose();throw}}
+ if($Directory){$pins.Add([RagentOwnerFilePin]::Directory($full))}else{$stream=[IO.FileStream]::new($full,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read);try{[RagentOwnerFilePin]::Verify($stream.SafeFileHandle,$full,$false);$pins.Add($stream)}catch{$stream.Dispose();throw}}
 }
 function Assert-UpgradeDataFile([string]$Path,[string[]]$Allowed){
  $attributes=[IO.File]::GetAttributes($Path);if(($attributes -band [IO.FileAttributes]::Directory) -or ($attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'OUG_STATE_FILE_INVALID'}
@@ -91,7 +91,7 @@ function Invoke-OwnerUpgradeAdmission {
  foreach($name in @('owner-services.prepare-lock','owner-data.prepare-lock','owner-msi.prepare-lock','owner-msi.upgrade-transaction.json','owner-identity.initialize-lock','owner-activation.prepare-lock','owner-policy.prepare-lock','owner-msi.policy.json','owner-msi.prepared.json')){if(Test-OwnerServicePreparationPresence (Join-Path $product $name)){throw 'OUG_INSTALL_TRANSACTION_PRESENT'}}
  foreach($name in @('owner-policy.install-lock','security\owner-policy.install-lock')){if(Test-OwnerServicePreparationPresence (Join-Path (Get-OwnerInstanceRoot) $name)){throw 'OUG_OWNER_TRANSACTION_PRESENT'}}
  $script:upgradeStage='services';$services=@();foreach($role in @('control','supervisor')){
-  $name=if($role -ceq 'control'){'AgentoC-ControlPlane'}else{'AgentoC-RunnerSupervisor'};$service=Get-CimInstance Win32_Service -Filter ("Name='"+$name+"'")
+  $name=if($role -ceq 'control'){'Ragent-ControlPlane'}else{'Ragent-RunnerSupervisor'};$service=Get-CimInstance Win32_Service -Filter ("Name='"+$name+"'")
   if(-not $service -or $service.StartName -ine ('NT SERVICE\'+$name) -or $service.State -cne 'Running' -or $service.StartMode -cne 'Auto' -or $service.ProcessId -le 0){throw 'OUG_SERVICE_STATE_REFUSED'}
   $instanceRoot=Get-OwnerInstanceRoot
   $config=if($role -ceq 'control'){Join-Path $instanceRoot 'config'}else{Join-Path $instanceRoot 'executor\config'}
@@ -100,8 +100,8 @@ function Invoke-OwnerUpgradeAdmission {
   $exe=[IO.Path]::GetFullPath($Matches.exe);if($services.Count -and $services[0].exe -cne $exe){throw 'OUG_SERVICE_HOST_MISMATCH'}
   Assert-UpgradePath $exe $false ([IO.Path]::GetDirectoryName($exe))
   $sourceRoot=[IO.Path]::GetDirectoryName($exe)
-  foreach($relative in @('payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\owner-bootstrap-release.json','payload\AgentoC.OwnerBootstrap.exe')){Assert-UpgradePath (Join-Path $sourceRoot $relative) $false $sourceRoot}
-  $token=[AgentoCOwnerUpgradeTokenReader]::Read([int]$service.ProcessId)
+  foreach($relative in @('payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\owner-bootstrap-release.json','payload\Ragent.OwnerBootstrap.exe')){Assert-UpgradePath (Join-Path $sourceRoot $relative) $false $sourceRoot}
+  $token=[RagentOwnerUpgradeTokenReader]::Read([int]$service.ProcessId)
   $expectedSid=[Security.Principal.NTAccount]::new('NT SERVICE',$name).Translate([Security.Principal.SecurityIdentifier]).Value
   if($token.userSid -cne $expectedSid -or $token.integrityRid -ne 8192 -or $token.sessionId -ne 0 -or $token.elevated -or $token.enabledAdministrators -or @($token.privileges).Count -ne 1 -or $token.privileges[0] -cne 'SeChangeNotifyPrivilege'){throw 'OUG_SERVICE_TOKEN_REFUSED'}
   $services+=@{name=$name;role=$role;sid=$expectedSid;pid=[int]$service.ProcessId;exe=$exe}
@@ -128,11 +128,11 @@ function Invoke-OwnerUpgradeAdmission {
  $healthObserved=[DateTime]::MinValue;if($health.observedAt -isnot [string] -or -not [DateTime]::TryParseExact($health.observedAt,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$healthObserved)){throw 'OUG_ACTIVE_RECEIPT_INVALID'}
  if(@($marker.PSObject.Properties).Count -ne 5 -or $marker.version -isnot [int] -or $marker.version -ne 1 -or $marker.purpose -cne 'owner-service-activation' -or $marker.instanceId -cne $active.instanceId -or $marker.preparedSha256 -cne $active.preparedSha256 -or $marker.policyReceiptSha256 -cne $active.policyReceiptSha256){throw 'OUG_ACTIVE_RECEIPT_INVALID'}
  $script:upgradeStage='data-layout';$layout=@(Get-OwnerDataLayout $control.sid $executor.sid $policy.ownerSid);$missing=0
- for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
+ for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  foreach($row in $layout){
   $path=if($row.relative){Join-Path $root $row.relative}else{$root}
   if(-not (Test-OwnerServicePreparationPresence $path)){$missing++;continue}
-  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$actual=Get-OwnerPathAcl -Path $path;$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
+  $pins.Add([RagentOwnerFilePin]::Directory($path));$actual=Get-OwnerPathAcl -Path $path;$expected=New-OwnerDataAcl $row.grants $row.traverseOnly
   $actualSddl=Get-OwnerDataAclSddl $actual ([Security.AccessControl.AccessControlSections]::Access);$expectedSddl=Get-OwnerDataAclSddl $expected ([Security.AccessControl.AccessControlSections]::Access)
   $metadataPath=$row.relative -cin @('','instances','instances\owner')
   $legacySddl=if($metadataPath){Get-OwnerDataAclSddl (New-LegacyOwnerMetadataAcl $control.sid $executor.sid) ([Security.AccessControl.AccessControlSections]::Access)}else{$null}
@@ -148,8 +148,8 @@ function Invoke-OwnerUpgradeAdmission {
   $path=if($kind -ceq 'security'){Join-Path $ownerRoot 'security'}else{$policyPath};$acl=Get-OwnerPathAcl -Path $path
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne (New-OwnerPolicySecurity $policy $kind).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)){throw 'OUG_INSTALL_POLICY_ACL_MISMATCH'}
  }
- $script:upgradeStage='broker';$broker=[AgentoCOwnerUpgradeTokenReader]::ReadBroker('AgentoC-PrivilegedBroker')
- $brokerBinary=Join-Path $product 'Broker\AgentoC.PrivilegedBroker.exe'
+ $script:upgradeStage='broker';$broker=[RagentOwnerUpgradeTokenReader]::ReadBroker('Ragent-PrivilegedBroker')
+ $brokerBinary=Join-Path $product 'Broker\Ragent.PrivilegedBroker.exe'
  if(-not $broker -or $broker.account -ine 'LocalSystem' -or $broker.state -ne 4 -or $broker.startType -ne 2 -or $broker.serviceType -ne 16 -or $broker.binary.Trim('"') -ine $brokerBinary){throw 'OUG_BROKER_STATE_REFUSED'}
  Assert-UpgradePath $brokerBinary $false $product
  return @{ok=$true;readOnly=$true;upgradeAdmitted=$true;credentialContentsRead=$false;identityReused=$true;dataMigration='in-place-preserve';services=@($services|ForEach-Object {@{name=$_.name;role=$_.role;tokenVerified=$true}});dataLayoutVerified=$true;brokerServicePresent=$true;authorityIssued=$false}

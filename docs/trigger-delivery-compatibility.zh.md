@@ -17,7 +17,7 @@
 ## 本次变更与检查
 
 - `chat/triggers.mjs`：区分交接、运行与发布结果；记录关联及有限的近期尝试；恢复待处理结果跟踪，并对状态事件的写入失败保守处理。
-- `chat/run-launcher.mjs`、`chat/runner-sidecar.mjs`、`lib/agentoc-http-client.mjs`：保留启动阶段、身份诊断和 MCP 就绪线索。
+- `chat/run-launcher.mjs`、`chat/runner-sidecar.mjs`、`lib/ragent-http-client.mjs`：保留启动阶段、身份诊断和 MCP 就绪线索。
 - `lib/trigger-command.mjs`、`chat/home-projection.mjs`：展示交付状态和近期失败。
 - 静态审查与相关 JavaScript 语法检查已执行。已有 `tests/test-home-projection.mjs` 和 `tests/test-trigger-command.mjs` 通过；这些检查不证明新增交付路径的业务正确性。
 

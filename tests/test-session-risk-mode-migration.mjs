@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-risk-mode-migration-'));
-const configDir = join(home, '.config', 'agentoc');
+const home = mkdtempSync(join(tmpdir(), 'ragent-risk-mode-migration-'));
+const configDir = join(home, '.config', 'ragent');
 mkdirSync(configDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const sessionsPath = join(configDir, 'chat-sessions.json');
 writeFileSync(sessionsPath, JSON.stringify([

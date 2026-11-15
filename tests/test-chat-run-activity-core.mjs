@@ -131,14 +131,14 @@ function loadLegacy({ stubs }) {
   let source = readFileSync(join(repoRoot, 'static/chat/run-activity-ui.js'), 'utf8');
   // The legacy contract object only exports `format`; splice a projection
   // export into the IIFE so parity can reach the internals verbatim.
-  const marker = '  root.AgentoCRunActivity = {';
+  const marker = '  root.RagentRunActivity = {';
   source = source.replace(
     marker,
     `  root.__runActivityProjections = { ${PROJECTION_NAMES.join(', ')} };\n\n${marker}`,
   );
   const context = { console };
   if (stubs) {
-    context.agentocT = fakeT;
+    context.ragentT = fakeT;
   }
   context.globalThis = context;
   vm.runInNewContext(source, context, { filename: 'run-activity-ui.js' });
@@ -147,14 +147,14 @@ function loadLegacy({ stubs }) {
 
 function loadCore({ stubs }) {
   const context = {
-    AgentocRunActivityEnvironment: stubs ? { t: fakeT } : {},
+    RagentRunActivityEnvironment: stubs ? { t: fakeT } : {},
   };
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/core/run-activity.js'), 'utf8'),
     context,
     { filename: 'core/run-activity.js' },
   );
-  return { api: context.AgentocRunActivityCore, label: `core${stubs ? '' : '-fallback'}` };
+  return { api: context.RagentRunActivityCore, label: `core${stubs ? '' : '-fallback'}` };
 }
 
 function normalize(value) {

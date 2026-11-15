@@ -18,7 +18,7 @@ import {
   createRefreshLeaseBroker,
 } from '../accounts/refresh-lease-broker.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-refresh-lease-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-refresh-lease-'));
 const deviceA = await loadOrCreateInstanceIdentity({ filePath: join(root, 'a.json') });
 const deviceB = await loadOrCreateInstanceIdentity({ filePath: join(root, 'b.json') });
 const unboundDevice = await loadOrCreateInstanceIdentity({ filePath: join(root, 'unbound.json') });
@@ -57,7 +57,7 @@ function proofFor(identity, fields = {}) {
     credentialInstanceId: fields.credentialInstanceId ?? IDENTITY.credentialInstanceId,
     ...fields,
     issuedAt,
-    audience: 'agentoc-provider-refresh-lease',
+    audience: 'ragent-provider-refresh-lease',
     instance: publicInstanceIdentity(identity),
   };
   return {

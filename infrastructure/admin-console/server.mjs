@@ -212,18 +212,18 @@ function contentTypeFor(pathname) {
 }
 
 export function createAdminServer({
-  host = process.env.AGENTOC_ADMIN_HOST || '127.0.0.1',
-  port = Number(process.env.AGENTOC_ADMIN_PORT || 7722),
-  expectedOrigin = process.env.AGENTOC_ADMIN_ORIGIN || 'https://ops.agentoncloud.com',
-  socketPath = process.env.AGENTOC_ADMIN_SOCKET || '/run/agentoc-admin/helper.sock',
-  backupDirectory = process.env.AGENTOC_ADMIN_BACKUP_DIR || '/var/lib/agentoc-admin/backups',
+  host = process.env.RAGENT_ADMIN_HOST || '127.0.0.1',
+  port = Number(process.env.RAGENT_ADMIN_PORT || 7722),
+  expectedOrigin = process.env.RAGENT_ADMIN_ORIGIN || 'https://ops.agentoncloud.com',
+  socketPath = process.env.RAGENT_ADMIN_SOCKET || '/run/ragent-admin/helper.sock',
+  backupDirectory = process.env.RAGENT_ADMIN_BACKUP_DIR || '/var/lib/ragent-admin/backups',
   accessVerifier = createAccessVerifier({
-    accessDomain: process.env.AGENTOC_ADMIN_ACCESS_DOMAIN,
-    audience: process.env.AGENTOC_ADMIN_ACCESS_AUD,
-    ownerEmail: process.env.AGENTOC_ADMIN_OWNER_EMAIL,
+    accessDomain: process.env.RAGENT_ADMIN_ACCESS_DOMAIN,
+    audience: process.env.RAGENT_ADMIN_ACCESS_AUD,
+    ownerEmail: process.env.RAGENT_ADMIN_OWNER_EMAIL,
   }),
   helperClient = (request, timeout) => callHelper(socketPath, request, timeout),
-  publicDir = process.env.AGENTOC_ADMIN_PUBLIC_DIR || PUBLIC_DIR,
+  publicDir = process.env.RAGENT_ADMIN_PUBLIC_DIR || PUBLIC_DIR,
 } = {}) {
   const expectedUrl = new URL(expectedOrigin);
 

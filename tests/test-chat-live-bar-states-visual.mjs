@@ -6,7 +6,7 @@
 // at mobile and desktop widths, light and dark themes. Only synthetic labels
 // are used; no session content is captured.
 //
-// Screenshots go to $AGENTOC_VISUAL_OUTPUT_DIR (or a temp dir) and the script
+// Screenshots go to $RAGENT_VISUAL_OUTPUT_DIR (or a temp dir) and the script
 // also asserts that the Live Bar shell stays neutral while its Orb remains
 // distinct by workflow state, so the fixture doubles as a geometry/visual
 // contract check.
@@ -19,8 +19,8 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'agentoc-live-bar-states-visual-'));
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'ragent-live-bar-states-visual-'));
 if (requestedOutputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [

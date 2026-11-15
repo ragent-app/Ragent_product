@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCSessionStatusCore(root) {
+(function attachRagentSessionStatusCore(root) {
   const prioritySpecs = {
     high: {
       key: "high",
@@ -486,5 +486,5 @@
     createReadyStatus,
   };
 
-  root.AgentoCSessionStatusCore = api;
+  root.RagentSessionStatusCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : {});

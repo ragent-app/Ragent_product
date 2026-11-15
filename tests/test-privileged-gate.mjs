@@ -56,7 +56,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
 }
 
 const SENTINEL = (real, { category = 'install', desc = 'test op' } = {}) =>
-  `agentoc-privileged --description "${desc}" --category ${category} -- ${real}`;
+  `ragent-privileged --description "${desc}" --category ${category} -- ${real}`;
 
 // --- readGateCommand: runtime shape extraction ---
 {
@@ -157,7 +157,7 @@ for (const argv of [
   eq('op.cwd carried', d.op.cwd, '/srv/x');
   eq('op.approvalId carried', d.op.approvalId, 'claude:req-1');
   // Wrapper preserved so the resolve slice can rewrite updatedInput.command.
-  check('op.wrapperCommand is the sentinel string', d.op.wrapperCommand.startsWith('agentoc-privileged'));
+  check('op.wrapperCommand is the sentinel string', d.op.wrapperCommand.startsWith('ragent-privileged'));
 }
 
 // --- undeclared sudo => ACCUMULATE (the safety-net signal) ---
@@ -171,10 +171,10 @@ for (const argv of [
 
 // A malformed sentinel may contain additional shell effects; never auto-allow it.
 {
-  const d = decidePrivilegedGate(bidiApproval('agentoc-privileged --category install'), { privilegedMode: true });
+  const d = decidePrivilegedGate(bidiApproval('ragent-privileged --category install'), { privilegedMode: true });
   eq('malformed sentinel requires review', d.decision, PRIVILEGED_GATE_DECISION.PROMPT);
   check('malformed reason surfaced', /malformed sentinel/.test(d.reason));
-  const compound = decidePrivilegedGate(bidiApproval('agentoc-privileged --category install; rm -rf /tmp/fixture'), { privilegedMode: true });
+  const compound = decidePrivilegedGate(bidiApproval('ragent-privileged --category install; rm -rf /tmp/fixture'), { privilegedMode: true });
   eq('malformed sentinel with trailing shell command requires review', compound.decision, PRIVILEGED_GATE_DECISION.PROMPT);
 }
 
@@ -204,9 +204,9 @@ for (const argv of [
 // ==================== decideRiskGate (plan phase 2) ====================
 
 for (const riskMode of ['safe', 'recommended', 'full-auto', 'conservative-auto']) {
-  const malformed = decideRiskGate(bidiApproval('agentoc-privileged --category install; rm -rf /tmp/fixture'), { riskMode });
+  const malformed = decideRiskGate(bidiApproval('ragent-privileged --category install; rm -rf /tmp/fixture'), { riskMode });
   eq(`${riskMode}: malformed sentinel requires review`, malformed.decision, PRIVILEGED_GATE_DECISION.PROMPT);
-  const composite = decideRiskGate(bidiApproval('agentoc-privileged --description test; rm -rf /tmp/fixture -- echo safe'), { riskMode });
+  const composite = decideRiskGate(bidiApproval('ragent-privileged --description test; rm -rf /tmp/fixture -- echo safe'), { riskMode });
   eq(`${riskMode}: sentinel wrapper never auto-allows a benign inner command`, composite.decision, PRIVILEGED_GATE_DECISION.ACCUMULATE);
 }
 
@@ -357,7 +357,7 @@ if (process.platform !== 'win32') {
     providerRequestIdString: 'req-protected-write',
     providerMethod: 'can_use_tool',
     kind: 'permissions',
-    params: { tool_name: 'Write', input: { file_path: '/etc/agentoc/config.json' } },
+    params: { tool_name: 'Write', input: { file_path: '/etc/ragent/config.json' } },
   };
   const d = decideRiskGate(protectedWrite, {
     riskMode: 'recommended',
@@ -365,7 +365,7 @@ if (process.platform !== 'win32') {
     projectRoot: '/srv/x',
     riskContext: {
       platform: 'linux',
-      protectedRoots: ['/etc/agentoc'],
+      protectedRoots: ['/etc/ragent'],
       systemPathRoots: ['/etc', '/var'],
     },
   });
@@ -443,7 +443,7 @@ if (process.platform !== 'win32') {
   eq('op.command is the real command', d.op.command, 'apt-get install nginx');
   eq('op.declaredCategory carried', d.op.declaredCategory, 'install');
   eq('op.description carried', d.op.description, 'test op');
-  check('op.wrapperCommand preserves sentinel', d.op.wrapperCommand.startsWith('agentoc-privileged'));
+  check('op.wrapperCommand preserves sentinel', d.op.wrapperCommand.startsWith('ragent-privileged'));
   // Declared in-scope install takes the install-auto early return in the
   // classifier (risk-classifier.mjs): user-facing tier is safe, no human prompt.
   eq('op.risk.tier safe (install-auto)', d.op.risk.tier, 'safe');

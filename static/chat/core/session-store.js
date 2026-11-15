@@ -1,12 +1,12 @@
 "use strict";
 
-// AgentoCChatStoreCore — pure Stage 1 port of session-store.js: the shell
+// RagentChatStoreCore — pure Stage 1 port of session-store.js: the shell
 // session list reducer + store. No DOM/translation coupling; the legacy
 // façade (static/chat/session-store.js) keeps the global double-mount and
 // consumers until Stage 3+ rewires. Behavior is locked identical by
 // tests/test-chat-session-store-core.mjs (scenario parity).
 
-(function attachAgentoCChatStoreCore(root) {
+(function attachRagentChatStoreCore(root) {
   function normalizeSessionId(value) {
     return typeof value === "string" && value.trim() ? value.trim() : null;
   }
@@ -362,7 +362,7 @@
     };
   }
 
-  root.AgentoCChatStoreCore = {
+  root.RagentChatStoreCore = {
     createState,
     createStore,
     mergeUniqueSessions,

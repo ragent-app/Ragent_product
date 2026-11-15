@@ -1,0 +1,25 @@
+[Unit]
+Description=Ragent P2P metadata-only signaling server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ragent
+Group=ragent
+WorkingDirectory=/opt/ragent/app
+EnvironmentFile=/etc/ragent/ragent.env
+# P2P 信令监听配置（RAGENT_P2P_SIGNAL_HOST/PORT 等）；老包可能没有该文件，`-` 前缀表示可选
+EnvironmentFile=-/etc/ragent/connectivity.env
+ExecStart=/opt/ragent/runtime/node /opt/ragent/app/cli.js signal
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/var/lib/ragent
+
+[Install]
+WantedBy=multi-user.target

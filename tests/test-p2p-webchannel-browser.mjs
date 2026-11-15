@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 浏览器全链路：真实 chat-server（配对路由拉起 host sidecar）+ 本地信令 + Chromium。
-// 页面创建配对邀请 → AgentocP2P.connect 建立 DataChannel → 拦截并 abort 全部 HTTP /api/**
+// 页面创建配对邀请 → RagentP2P.connect 建立 DataChannel → 拦截并 abort 全部 HTTP /api/**
 // 请求后 fetchJsonOrRedirect('/api/sessions') 仍成功 —— 证明 JSON 数据面已切到 P2P 通道。
 import assert from 'assert/strict';
 import { createHmac } from 'crypto';
@@ -25,7 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 const ownerToken = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 // e43264c 起会话键为 HMAC(secret, cookie值) 的 s+hex 摘要；chat-server 需要同名
-// AGENTOC_AUTH_SESSION_SECRET 才能持久化并识别会话。
+// RAGENT_AUTH_SESSION_SECRET 才能持久化并识别会话。
 const sessionSecret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const hashedTestSession = `s${createHmac('sha256', sessionSecret).update('test-session').digest('hex')}`;
 
@@ -68,7 +68,7 @@ function rawRequest(port, method, path, headers = {}) {
 }
 
 function setupTempInstance() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-p2p-webchannel-'));
+  const home = mkdtempSync(join(tmpdir(), 'ragent-p2p-webchannel-'));
   const configDir = join(home, 'config');
   const binDir = join(home, 'bin');
   mkdirSync(configDir, { recursive: true });
@@ -91,22 +91,22 @@ async function startServer({ home, configDir, port, binDir, signalingUrl }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${binDir}:${process.env.PATH}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: sessionSecret,
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
-      AGENTOC_P2P_SIGNALING_URL: signalingUrl,
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: sessionSecret,
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_P2P_SIGNALING_URL: signalingUrl,
     },
     stdio: ['ignore', 'pipe', 'inherit'],
   });
@@ -168,7 +168,7 @@ let browser = null;
       if (message.type() === 'error') console.error('PAGE CONSOLE:', message.text());
     });
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => typeof window.AgentocP2P !== 'undefined' && typeof fetchJsonOrRedirect === 'function', null, { timeout: 15000 });
+    await page.waitForFunction(() => typeof window.RagentP2P !== 'undefined' && typeof fetchJsonOrRedirect === 'function', null, { timeout: 15000 });
 
     // 页面内：创建配对邀请 → P2P 建连 → ready
     const p2pState = await page.evaluate(async () => {
@@ -183,12 +183,12 @@ let browser = null;
       if (!invitation?.p2pRoomId || !invitation?.token || !p2p?.signalingEndpoint) {
         return { ok: false, error: 'missing p2p credentials', status: response.status };
       }
-      await window.AgentocP2P.connect({
+      await window.RagentP2P.connect({
         signalingUrl: p2p.signalingEndpoint,
         roomId: invitation.p2pRoomId,
         secret: invitation.token,
       });
-      return { ok: window.AgentocP2P.ready, status: window.AgentocP2P.status };
+      return { ok: window.RagentP2P.ready, status: window.RagentP2P.status };
     });
     assert.equal(p2pState.ok, true, `P2P should be ready in browser, got ${JSON.stringify(p2pState)}`);
 

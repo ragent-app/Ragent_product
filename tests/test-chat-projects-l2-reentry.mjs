@@ -30,12 +30,12 @@ const STUB_SETUP = `
       setItem: function () {},
     },
   });
-  window.agentocT = function (key) { return key; };
+  window.ragentT = function (key) { return key; };
   window.renderUiIcon = function () { return ""; };
-  window.agentocGetProjects = function () {
+  window.ragentGetProjects = function () {
     return [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
   };
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = function () { return "sessions"; };
   window.sessionSearchQuery = "";
   window.sidebarSearchMode = false;

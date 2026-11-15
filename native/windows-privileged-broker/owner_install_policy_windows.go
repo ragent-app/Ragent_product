@@ -114,7 +114,7 @@ func readInstalledOwnerPolicy() (ownerInstallPolicy, error) {
 	if err != nil || !filepath.IsAbs(programData) {
 		return ownerInstallPolicy{}, errOwnerSessionUnavailable
 	}
-	return readPinnedOwnerPolicy(filepath.Join(programData, "AgentoC", "instances", "owner", "security", "owner-bootstrap-install.json"))
+	return readPinnedOwnerPolicy(filepath.Join(programData, "Ragent", "instances", "owner", "security", "owner-bootstrap-install.json"))
 }
 
 func readPinnedOwnerPolicy(path string) (ownerInstallPolicy, error) {

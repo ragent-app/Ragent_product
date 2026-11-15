@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
 
-const guestInstancesPath = join(homedir(), '.config', 'agentoc', 'guest-instances.json');
+const guestInstancesPath = join(homedir(), '.config', 'ragent', 'guest-instances.json');
 
 let instances;
 try {
@@ -36,7 +36,7 @@ const results = [];
 
 for (const inst of instances) {
   const name = inst.name || inst.id || '(unknown)';
-  const instanceRoot = inst.instanceRoot || inst.root || join(homedir(), '.agentoc', 'instances', name);
+  const instanceRoot = inst.instanceRoot || inst.root || join(homedir(), '.ragent', 'instances', name);
   const port = inst.port;
 
   console.log(`[${name}] backfilling (port=${port}, root=${basename(instanceRoot)})...`);
@@ -49,7 +49,7 @@ for (const inst of instances) {
         cwd: projectRoot,
         env: {
           ...process.env,
-          AGENTOC_INSTANCE_ROOT: instanceRoot,
+          RAGENT_INSTANCE_ROOT: instanceRoot,
           ...(port ? { CHAT_PORT: String(port) } : {}),
         },
         encoding: 'utf8',

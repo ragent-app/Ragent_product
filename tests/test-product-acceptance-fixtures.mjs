@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';import {test,after} from 'node:test';
 import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,unlink,realpath} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join,dirname,resolve} from 'node:path';import {randomUUID} from 'node:crypto';
 import {loadProductCases,prepareProductCases,verifyProductCase,parseFixtureCsv} from './helpers/product-acceptance.mjs';
-const root=await realpath(await mkdtemp(join(tmpdir(),'agentoc-product-oracle-'))),cases=(await loadProductCases()).cases;
+const root=await realpath(await mkdtemp(join(tmpdir(),'ragent-product-oracle-'))),cases=(await loadProductCases()).cases;
 async function reference(id){
  const destination=join(root,randomUUID());await prepareProductCases(destination);const dir=join(destination,id),task=cases.find(c=>c.id===id);
  for(const [path,rule]of Object.entries(task.outputs)){
@@ -13,7 +13,7 @@ async function reference(id){
  }
  return dir;
 }
-after(async()=>{assert.equal(dirname(root),await realpath(tmpdir()));assert(root.includes('agentoc-product-oracle-'));await rm(root,{recursive:true,force:true});});
+after(async()=>{assert.equal(dirname(root),await realpath(tmpdir()));assert(root.includes('ragent-product-oracle-'));await rm(root,{recursive:true,force:true});});
 test('prepare copies inputs and prompts, never expected outputs; occupied roots refuse',async()=>{
  const destination=join(root,randomUUID()),result=await prepareProductCases(destination);assert.equal(result.expectedOutputsExposed,false);assert.equal(result.actualProviderRunVerified,false);
  for(const task of cases){await assert.rejects(readFile(join(destination,task.id,'output/summary.json')),{code:'ENOENT'});assert.equal(await readFile(join(destination,task.id,'PROMPT.txt'),'utf8'),task.prompt+'\n');}

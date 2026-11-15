@@ -80,12 +80,12 @@ const repoRoot = dirname(__dirname);
 
 // ---- integration: runs.mjs caches -----------------------------------------
 
-const tmp = mkdtempSync(join(tmpdir(), 'agentoc-runs-cache-bounds-'));
+const tmp = mkdtempSync(join(tmpdir(), 'ragent-runs-cache-bounds-'));
 // Small byte cap (1MB) + long TTL (1min): byte/entry caps bind during the
 // test, TTL expiry is simulated by back-dating entryCreatedMs (no sleeps).
-process.env.AGENTOC_CONFIG_DIR = tmp;
-process.env.AGENTOC_RUN_ARTIFACT_CACHE_BYTES = String(1024 * 1024);
-process.env.AGENTOC_RUN_ARTIFACT_CACHE_TTL_MS = String(60 * 1000);
+process.env.RAGENT_CONFIG_DIR = tmp;
+process.env.RAGENT_RUN_ARTIFACT_CACHE_BYTES = String(1024 * 1024);
+process.env.RAGENT_RUN_ARTIFACT_CACHE_TTL_MS = String(60 * 1000);
 const {
   createRun,
   getRun,
@@ -185,8 +185,8 @@ try {
       import { mkdtempSync, rmSync } from 'fs';
       import { tmpdir } from 'os';
       import { join } from 'path';
-      const probeTmp = mkdtempSync(join(tmpdir(), 'agentoc-heap-probe-'));
-      process.env.AGENTOC_CONFIG_DIR = probeTmp;
+      const probeTmp = mkdtempSync(join(tmpdir(), 'ragent-heap-probe-'));
+      process.env.RAGENT_CONFIG_DIR = probeTmp;
       const base = new URL('file://' + process.cwd() + '/');
       const runs = await import(new URL('chat/runs.mjs', base).href);
       const registry = await import(new URL('chat/memory-registry.mjs', base).href);

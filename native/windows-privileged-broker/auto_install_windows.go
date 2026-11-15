@@ -90,7 +90,7 @@ func (installer windowsAutoInstaller) Inspect(parent context.Context, packageID,
 	}
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
-	env := append(autoInstallEnvironment(lease.vendor, root, systemDir, tempDir, grant), "AGENTOC_INSTALL_INSPECT=1")
+	env := append(autoInstallEnvironment(lease.vendor, root, systemDir, tempDir, grant), "RAGENT_INSTALL_INSPECT=1")
 	args := []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShellScript(autoInstallModuleScript)}
 	run := installer.inspect
 	if run == nil {
@@ -181,11 +181,11 @@ func autoInstallEnvironment(vendor, root, systemDir, tempDir string, grant autoI
 		"TEMP=" + tempDir, "TMP=" + tempDir,
 		"PSModulePath=" + filepath.Join(vendor, "PowerShell", "Modules"),
 		"POWERSHELL_TELEMETRY_OPTOUT=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1",
-		"AGENTOC_INSTALL_PACKAGE_ID=" + grant.PackageID, "AGENTOC_INSTALL_PACKAGE_VERSION=" + grant.VersionID,
-		"AGENTOC_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1")}
+		"RAGENT_INSTALL_PACKAGE_ID=" + grant.PackageID, "RAGENT_INSTALL_PACKAGE_VERSION=" + grant.VersionID,
+		"RAGENT_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1")}
 	if grant.SelectedInstaller != nil {
 		if selected, err := json.Marshal(grant.SelectedInstaller); err == nil {
-			values = append(values, "AGENTOC_INSTALL_SELECTED="+string(selected))
+			values = append(values, "RAGENT_INSTALL_SELECTED="+string(selected))
 		}
 	}
 	for _, key := range []string{"ProgramData", "ProgramFiles", "ProgramFiles(x86)", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SystemDrive", "PROCESSOR_ARCHITECTURE"} {

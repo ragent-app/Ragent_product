@@ -7,7 +7,7 @@ import { cacheBudget, resolveCacheBudgetBytes } from '../lib/cache-budget.mjs';
 const root = resolve(new URL('..', import.meta.url).pathname);
 const source = (path) => readFileSync(resolve(root, path), 'utf8');
 
-const budgetEnv = { AGENTOC_CACHE_BUDGET_BYTES: String(128 * 1024 * 1024) };
+const budgetEnv = { RAGENT_CACHE_BUDGET_BYTES: String(128 * 1024 * 1024) };
 assert.equal(resolveCacheBudgetBytes(budgetEnv), 128 * 1024 * 1024);
 assert.equal(cacheBudget('status', 1, { env: budgetEnv }), 16 * 1024 * 1024);
 assert.equal(cacheBudget('status', 2, { env: budgetEnv }), 32 * 1024 * 1024);

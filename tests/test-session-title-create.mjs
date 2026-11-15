@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-// The caller provides a fresh isolated AGENTOC_INSTANCE_ROOT on G: before any
+// The caller provides a fresh isolated RAGENT_INSTANCE_ROOT on G: before any
 // config-dependent import. Never use an installed instance for this test.
-const root = process.env.AGENTOC_INSTANCE_ROOT;
-assert.ok(root && root.startsWith('G:\\AgentoC\\tmp\\chat-session-actions-20261028\\'));
+const root = process.env.RAGENT_INSTANCE_ROOT;
+assert.ok(root && root.startsWith('G:\\Ragent\\tmp\\chat-session-actions-20261028\\'));
 const workspace = join(root, 'work');
 await mkdir(workspace, { recursive: true });
 const { createSession, getSession, renameSession } = await import('../chat/session-manager.mjs');

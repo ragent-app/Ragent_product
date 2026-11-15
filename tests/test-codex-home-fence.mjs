@@ -32,7 +32,7 @@ test('legacy home stays fenced if replacement startup fails', async (t) => {
   await assert.rejects(assertCodexHomeNotFenced(legacy), { code: 'CODEX_HOME_RETIRED' });
   await fenceLegacyCodexHome(input); // retry is idempotent
   await assert.rejects(fenceLegacyCodexHome({ ...input, accountId: 'account-b' }), { code: 'CODEX_FENCE_INVALID' });
-  assert.ok(!(await readFile(join(legacy, '.agentoc-codex-home-fence.json'), 'utf8')).includes('account-a'));
+  assert.ok(!(await readFile(join(legacy, '.ragent-codex-home-fence.json'), 'utf8')).includes('account-a'));
   let spawned = false;
   await assert.rejects(ensureCodexAppServerBroker({ socketPath: process.platform === 'win32'
     ? `\\\\.\\pipe\\ragent-fenced-${process.pid}` : join(root, 'broker.sock'),

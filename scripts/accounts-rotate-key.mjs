@@ -18,8 +18,8 @@ function argValue(name, fallback = '') {
 }
 
 const file =
-  argValue('--file', process.env.AGENTOC_ACCOUNTS_SIGNING_KEY_FILE || '') ||
-  join(process.env.AGENTOC_ACCOUNTS_DATA_DIR || '.', 'signing-key.json');
+  argValue('--file', process.env.RAGENT_ACCOUNTS_SIGNING_KEY_FILE || '') ||
+  join(process.env.RAGENT_ACCOUNTS_DATA_DIR || '.', 'signing-key.json');
 
 const ring = await loadOrCreateSigningKeyRing(file);
 const previousKid = ring.primaryKid;

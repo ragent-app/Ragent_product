@@ -1,9 +1,9 @@
 <resources>
     <!-- API 27+ night splash keeps both system-bar icon modes dark-theme safe. -->
-    <style name="Theme.Agentoc.Splash" parent="Theme.SplashScreen">
+    <style name="Theme.Ragent.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_symbol</item>
-        <item name="postSplashScreenTheme">@style/Theme.Agentoc</item>
+        <item name="postSplashScreenTheme">@style/Theme.Ragent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>

@@ -89,7 +89,7 @@ function registerHiddenMarkdownExtensions() {
   });
 }
 
-const POST_INSTALL_NOTIFICATION_STORAGE_KEY = "agentoc.mobileInstall.requestNotifications";
+const POST_INSTALL_NOTIFICATION_STORAGE_KEY = "ragent.mobileInstall.requestNotifications";
 
 function isStandaloneContext() {
   return !!(
@@ -188,7 +188,7 @@ function buildNavigationUrl(state = {}) {
   return `${url.pathname}${url.search}`;
 }
 
-const SESSION_NAVIGATION_STATE_KEY = "agentocSessionNavigation";
+const SESSION_NAVIGATION_STATE_KEY = "ragentSessionNavigation";
 let sessionNavigationGeneration = 0;
 let sessionNavigationTargetId = "";
 
@@ -197,13 +197,13 @@ function beginSessionNavigation(sessionId = "") {
   sessionNavigationGeneration += 1;
   sessionNavigationTargetId = normalizedSessionId;
   if (String(typeof currentSessionId === "string" ? currentSessionId : "").trim() !== normalizedSessionId) {
-    window.AgentoCDecisionSheet?.suspend?.();
+    window.RagentDecisionSheet?.suspend?.();
   }
   // Advance the generation immediately so late events are rejected, but defer
   // clearing the visible decision state until attachSession marks the target
   // as not-yet-attached. That keeps the old sheet from starting a 180ms close
   // animation before the session transition has even begun.
-  window.AgentoCDecisions?.beginSessionContext?.(normalizedSessionId, sessionNavigationGeneration, { resetState: false });
+  window.RagentDecisions?.beginSessionContext?.(normalizedSessionId, sessionNavigationGeneration, { resetState: false });
   return {
     generation: sessionNavigationGeneration,
     sessionId: normalizedSessionId,
@@ -487,8 +487,8 @@ function getActiveSessions({ includeAllProjects = false } = {}) {
       // project, so it must see the full catalog rather than only the
       // currently selected project's sessions.
       if (includeAllProjects) return true;
-      return typeof window.agentocSessionMatchesSelectedWorkspace === "function"
-        ? window.agentocSessionMatchesSelectedWorkspace(session)
+      return typeof window.ragentSessionMatchesSelectedWorkspace === "function"
+        ? window.ragentSessionMatchesSelectedWorkspace(session)
         : true;
     });
 }
@@ -504,8 +504,8 @@ function getArchivedSessions() {
     .filter(shouldShowSessionInPrimaryList)
     .filter(isRootSessionForPrimaryList)
     .filter((session) => (
-      typeof window.agentocSessionMatchesSelectedWorkspace === "function"
-        ? window.agentocSessionMatchesSelectedWorkspace(session)
+      typeof window.ragentSessionMatchesSelectedWorkspace === "function"
+        ? window.ragentSessionMatchesSelectedWorkspace(session)
         : true
     ))
     .slice()
@@ -589,7 +589,7 @@ function navigateHomeFromUi({ historyMode = "push" } = {}) {
 }
 
 function handleSessionNavigationPopState(event) {
-  if (window.AgentoCBackHandler?.wasLastPopstateHandled?.()) return;
+  if (window.RagentBackHandler?.wasLastPopstateHandled?.()) return;
   const state = event?.state;
   if (!state?.[SESSION_NAVIGATION_STATE_KEY]) return;
   if (state.sessionId) {
@@ -686,11 +686,11 @@ function applyNavigationState(rawState, { historyMode = "push" } = {}) {
   });
 }
 
-window.agentocNavigateHome = navigateHomeFromUi;
+window.ragentNavigateHome = navigateHomeFromUi;
 document.getElementById("homeBtn")?.addEventListener("click", () => {
   navigateHomeFromUi();
 });
 initializeSessionNavigationHistory();
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }

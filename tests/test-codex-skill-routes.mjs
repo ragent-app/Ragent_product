@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 
 const root = await mkdtemp(join(tmpdir(), 'ragent-skill-route-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
 const meta = await import('../chat/session-meta-store.mjs');
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 await meta.withSessionsMetaMutation(async (rows, save) => {

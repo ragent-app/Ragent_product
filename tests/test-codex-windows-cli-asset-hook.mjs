@@ -5,9 +5,9 @@ import path from 'node:path';
 import { buildCodexWindowsCliAssetHookDecision, verifyCodexWindowsCliAssetApproval, buildCodexWindowsTriggerHookDecision, verifyCodexWindowsTriggerApproval } from '../chat/codex-windows-cli-asset-hook.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
-const helperPath = process.env.AGENTOC_TEST_CLI_READ_BINARY;
+const helperPath = process.env.RAGENT_TEST_CLI_READ_BINARY;
 if (process.platform !== 'win32' || !helperPath) { console.log('codex-windows-cli-asset-hook: skipped (opt-in Windows fixture)'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-codex-asset-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-codex-asset-'));
 try {
   const workspace = path.join(root, 'workspace'); await mkdir(workspace);
   const file = path.join(root, 'outside.txt'); await writeFile(file, 'fixture');
@@ -16,14 +16,14 @@ try {
     sessionControlReadAvailable: true, sessionControlReadRunId: runId,
     riskContext: { platform: 'win32', trustedWorkspaceRoot: workspace, protectedRoots: [] } };
   const body = JSON.stringify({ localPath: file, originalName: 'outside.txt' });
-  const command = `ragent api POST "/api/sessions/$env:AGENTOC_SESSION_ID/assets" --body '${body}'`;
+  const command = `ragent api POST "/api/sessions/$env:RAGENT_SESSION_ID/assets" --body '${body}'`;
   const event = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'item', cwd: workspace, tool_input: { command } };
   const quote = s => "'" + s.replace(/'/g, "'\\''") + "'";
   for (const riskMode of ['recommended', 'full-auto']) {
     const current = { ...state, riskMode };
     const decision = await buildCodexWindowsCliAssetHookDecision({ event, state: current, runId, helperPath, port });
     assert.equal(decision.hookSpecificOutput?.permissionDecision, 'allow');
-    const unquotedEvent = { ...event, tool_input: { command: command.replace('"/api/sessions/$env:AGENTOC_SESSION_ID/assets"', '/api/sessions/$env:AGENTOC_SESSION_ID/assets') } };
+    const unquotedEvent = { ...event, tool_input: { command: command.replace('"/api/sessions/$env:RAGENT_SESSION_ID/assets"', '/api/sessions/$env:RAGENT_SESSION_ID/assets') } };
     const unquoted = await buildCodexWindowsCliAssetHookDecision({ event: unquotedEvent, state: current, runId, helperPath, port });
     assert.deepEqual(unquoted, decision);
 
@@ -45,7 +45,7 @@ try {
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: current, runId, helperPath, port }), true);
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: { ...triggerApproval, params: { ...triggerApproval.params, turnId: 'other' } }, state: current, runId, helperPath, port }), false);
     assert.equal(await verifyCodexWindowsTriggerApproval({ approval: triggerApproval, state: { ...current, sessionControlReadAvailable: false }, runId, helperPath, port }), false);
-    for (const command of ['ragent trigger --help', 'agentoc trigger list --json']) {
+    for (const command of ['ragent trigger --help', 'ragent trigger list --json']) {
       const read = await buildCodexWindowsTriggerHookDecision({ event: { ...event, tool_input: { command } }, state: current, runId, helperPath, port });
       assert.equal(read.hookSpecificOutput?.permissionDecision, 'allow');
       const wrapper = [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', read.hookSpecificOutput.updatedInput.command].map(quote).join(' ');
@@ -57,7 +57,7 @@ try {
     assert.deepEqual(await buildCodexWindowsTriggerHookDecision({ event: { ...triggerEvent, tool_input: { command: triggerEvent.tool_input.command + ' --session other' } }, state: current, runId, helperPath, port }), {});
   }
   for (const changed of [
-    command.replace('$env:AGENTOC_SESSION_ID', 'other'), command + '; Remove-Item file',
+    command.replace('$env:RAGENT_SESSION_ID', 'other'), command + '; Remove-Item file',
     command.replace('--body', '--body-file'), command.replace('POST', 'DELETE'), command.replace(' api ', '\napi '),
   ]) assert.deepEqual(await buildCodexWindowsCliAssetHookDecision({ event: { ...event, tool_input: { command: changed } }, state, runId, helperPath, port }), {});
   console.log('codex-windows-cli-asset-hook: scoped rewrite and independent approval verification passed');

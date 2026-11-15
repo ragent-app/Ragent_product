@@ -1,3 +1,3 @@
-module agentoc/windows-cli-read-bridge
+module ragent/windows-cli-read-bridge
 
 go 1.26.0

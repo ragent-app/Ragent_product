@@ -66,14 +66,14 @@ function request(port, path, { cookie = null, headers = {} } = {}) {
   });
 }
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-body-endpoint-'));
-const configDir = join(home, '.config', 'agentoc');
+const home = mkdtempSync(join(tmpdir(), 'ragent-body-endpoint-'));
+const configDir = join(home, '.config', 'ragent');
 mkdirSync(configDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
 
 const history = await import('../chat/history.mjs');
 const { createSession } = await import('../chat/session-manager.mjs');
@@ -118,18 +118,18 @@ try {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_RUNNER_UNIT_NAME: '',
-      AGENTOC_RUNNER_UNIT_SCOPE: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_UNIT_NAME: '',
+      RAGENT_RUNNER_UNIT_SCOPE: '',
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-0123456789abcdef0123456789abcdef',
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-0123456789abcdef0123456789abcdef',
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
+      RAGENT_REPLY_SELF_CHECK: 'off',
       PATH: `${join(home, '.local', 'bin')}:${process.env.PATH || ''}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

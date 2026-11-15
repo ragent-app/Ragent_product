@@ -14,7 +14,7 @@ import { mkdtempSync, readFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-native-concurrency-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-native-concurrency-'));
 const configDir = join(root, 'config');
 mkdirSync(configDir, { recursive: true });
 
@@ -94,7 +94,7 @@ try {
     assert.equal(snapshot.model, entry.model, `${runId} resolved wrong model`);
 
     const agentHome = join(prepared.homeDir, entry.agent);
-    const marker = readFileSync(join(agentHome, '.agentoc-provider-id'), 'utf8').trim();
+    const marker = readFileSync(join(agentHome, '.ragent-provider-id'), 'utf8').trim();
     assert.equal(marker, entry.provider, `${runId} home marker drifted`);
 
     if (entry.agent === 'codex') {

@@ -22,12 +22,12 @@ import { fileURLToPath, pathToFileURL } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-body-compress-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-body-compress-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
 
 const history = await import('../chat/history.mjs');
 const { createSession } = await import('../chat/session-manager.mjs');
@@ -37,7 +37,7 @@ const SMALL = 'plain small body 消息';
 const GZIP_MAGIC_TEXT = 'plain text that begins with gzip magic';
 
 function bodiesDir(sessionId) {
-  return join(process.env.AGENTOC_CONFIG_DIR, 'chat-history', sessionId, 'bodies');
+  return join(process.env.RAGENT_CONFIG_DIR, 'chat-history', sessionId, 'bodies');
 }
 
 async function makeSession() {
@@ -60,9 +60,9 @@ function coldReadChild(sid, seq) {
       env: {
         ...process.env,
         HOME: home,
-        AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-        AGENTOC_MEMORY_DIR: process.env.AGENTOC_MEMORY_DIR,
-        AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+        RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+        RAGENT_MEMORY_DIR: process.env.RAGENT_MEMORY_DIR,
+        RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -148,7 +148,7 @@ try {
         process.stdout.write(JSON.stringify({ len: big.length }));
       `;
       const child = spawn(process.execPath, ['--input-type=module', '-e', code, sid], {
-        env: { ...process.env, HOME: home, AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR, AGENTOC_MEMORY_DIR: process.env.AGENTOC_MEMORY_DIR, AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR, AGENTOC_BODY_CODEC: 'zstd' },
+        env: { ...process.env, HOME: home, RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR, RAGENT_MEMORY_DIR: process.env.RAGENT_MEMORY_DIR, RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR, RAGENT_BODY_CODEC: 'zstd' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let err = '';

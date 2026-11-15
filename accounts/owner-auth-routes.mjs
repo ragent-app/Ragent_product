@@ -41,7 +41,7 @@ function jsonResponse(res, statusCode, value, headers = {}) {
 
 function stateCookieName(kind, transactionId) {
   const suffix = createHash('sha256').update(trimString(transactionId)).digest('hex').slice(0, 24);
-  return `agentoc_owner_broker_${kind}_${suffix}`;
+  return `ragent_owner_broker_${kind}_${suffix}`;
 }
 
 function clearPhoneCookies(transactionId) {
@@ -69,7 +69,7 @@ function phoneCsrfCookie(transactionId, phoneState) {
 
 function browserStateFromCookie(req, transactionId) {
   const cookies = parseCookies(req);
-  const raw = cookies.get(stateCookieName('state', transactionId)) || cookies.get('agentoc_owner_broker_state') || '';
+  const raw = cookies.get(stateCookieName('state', transactionId)) || cookies.get('ragent_owner_broker_state') || '';
   const index = raw.indexOf('.');
   if (index < 1) return '';
   try {
@@ -81,7 +81,7 @@ function browserStateFromCookie(req, transactionId) {
 
 function phoneStateFromCookie(req, transactionId) {
   const cookies = parseCookies(req);
-  const raw = cookies.get(stateCookieName('phone_state', transactionId)) || cookies.get('agentoc_owner_broker_phone_state') || '';
+  const raw = cookies.get(stateCookieName('phone_state', transactionId)) || cookies.get('ragent_owner_broker_phone_state') || '';
   const index = raw.indexOf('.');
   if (index < 1) return '';
   try {
@@ -101,7 +101,7 @@ function derivePhoneReplayState(transactionId, phoneTicket) {
   const ticket = trimString(phoneTicket);
   if (!txId || !ticket) return '';
   return createHash('sha256')
-    .update(`agentoc-owner-auth-phone-v1\n${txId}\n${ticket}`)
+    .update(`ragent-owner-auth-phone-v1\n${txId}\n${ticket}`)
     .digest('base64url');
 }
 
@@ -113,15 +113,15 @@ function deriveNativePhoneReplayState(transactionId, browserTicket) {
   const ticket = trimString(browserTicket);
   if (!txId || !ticket) return '';
   return createHash('sha256')
-    .update(`agentoc-owner-auth-native-phone-v1\n${txId}\n${ticket}`)
+    .update(`ragent-owner-auth-native-phone-v1\n${txId}\n${ticket}`)
     .digest('base64url');
 }
 
 function hasValidPhoneCsrf(req, phoneState, publicBaseUrl, transactionId) {
   const cookies = parseCookies(req);
   const csrfCookieValue = trimString(cookies.has(stateCookieName('phone_state', transactionId))
-    ? cookies.get(stateCookieName('phone_csrf', transactionId)) : cookies.get('agentoc_owner_broker_phone_csrf'));
-  const csrfHeader = trimString(req?.headers?.['x-agentoc-csrf']);
+    ? cookies.get(stateCookieName('phone_csrf', transactionId)) : cookies.get('ragent_owner_broker_phone_csrf'));
+  const csrfHeader = trimString(req?.headers?.['x-ragent-csrf']);
   const origin = trimString(req?.headers?.origin);
   try {
     return (
@@ -218,7 +218,7 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
   }
   async function credential(response) {
     try {
-      const result = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-AgentoC-CSRF': csrf}, body: JSON.stringify({idToken: response.credential}) });
+      const result = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-Ragent-CSRF': csrf}, body: JSON.stringify({idToken: response.credential}) });
       const data = await result.json();
       if (!result.ok || !data.completeUrl) throw new Error(credentialErrorMessage(data));
       location.assign(completionUrl || data.completeUrl);
@@ -241,7 +241,7 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
     password.value = '';
     try {
       const result = await fetch(endpoint.replace('/phone-google-credential', '/phone-demo-credential'), {
-        method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-AgentoC-CSRF': csrf}, body});
+        method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-Ragent-CSRF': csrf}, body});
       const data = await result.json();
       if (!result.ok || !data.completeUrl) throw new Error(credentialErrorMessage(data));
       location.assign(completionUrl || data.completeUrl);
@@ -256,7 +256,7 @@ function renderGoogleIdentityPage({ nonce, phoneState, googleWebClientId, creden
     google.accounts.id.initialize({ client_id: ${safeClientId}, nonce: ${safeNonce}, callback: credential, auto_select: false });
     google.accounts.id.renderButton(document.getElementById('google-button'), { theme: 'outline', size: 'large', text: 'continue_with', width: 280 });
   }
-  window.agentocGoogleIdentityReady = initialize;
+  window.ragentGoogleIdentityReady = initialize;
   const googleScript = document.getElementById('google-gsi-client');
   if (googleScript) googleScript.addEventListener('load', initialize, { once: true });
   initialize();
@@ -304,7 +304,7 @@ function renderNativeIdentityPage({ transactionId, nonce, nativeState, googleWeb
   }
   async function credential(response) {
     try {
-      const result = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-AgentoC-CSRF': csrf}, body: JSON.stringify({transactionId, idToken: response.credential}) });
+      const result = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: {'Content-Type':'application/json','X-Ragent-CSRF': csrf}, body: JSON.stringify({transactionId, idToken: response.credential}) });
       const data = await result.json();
       if (!result.ok || !data.ok) throw new Error(credentialErrorMessage(data));
       if (buttonHost) buttonHost.textContent = '';
@@ -319,7 +319,7 @@ function renderNativeIdentityPage({ transactionId, nonce, nativeState, googleWeb
     google.accounts.id.initialize({ client_id: ${safeClientId}, nonce: ${safeNonce}, callback: credential, auto_select: false });
     google.accounts.id.renderButton(buttonHost, { theme: 'outline', size: 'large', text: 'continue_with' });
   }
-  window.agentocGoogleIdentityReady = initialize;
+  window.ragentGoogleIdentityReady = initialize;
   const googleScript = document.getElementById('google-gsi-client');
   if (googleScript) googleScript.addEventListener('load', initialize, { once: true });
   initialize();
@@ -352,7 +352,7 @@ function renderDesktopQrPage({ transactionId, phoneUrl, statusEndpoint, delivery
   const copy = document.getElementById('ownerAuthCopy');
   const details = document.getElementById('ownerAuthDetails');
   const url = document.getElementById('ownerAuthUrl');
-  const storageKey = 'agentoc_owner_auth_delivery_' + tx;
+  const storageKey = 'ragent_owner_auth_delivery_' + tx;
   try { sessionStorage.setItem(storageKey, deliveryGrant); } catch {}
   if (url) url.textContent = phoneUrl;
   if (qr && window.QrCreator && window.QrCreator.render) {
@@ -468,7 +468,7 @@ function renderPhoneCompletionPage({ transactionId, statusEndpoint, styles }) {
   const tx = ${safeTx};
   const endpoint = ${safeStatusEndpoint};
   const status = document.getElementById('ownerAuthCompleteStatus');
-  const grant = (function () { try { return sessionStorage.getItem('agentoc_owner_auth_delivery_' + tx) || ''; } catch { return ''; } }());
+  const grant = (function () { try { return sessionStorage.getItem('ragent_owner_auth_delivery_' + tx) || ''; } catch { return ''; } }());
   if (!grant) return;
   fetch(endpoint, { credentials: 'same-origin', cache: 'no-store' }).then(function (response) {
     return response.json().then(function (data) { return { response: response, data: data }; });

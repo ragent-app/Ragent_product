@@ -12,7 +12,7 @@
 // Fully pure: no environment contract, no platform hooks. Locked against the
 // legacy implementation by tests/test-chat-session-signature-core.mjs.
 
-(function attachAgentocSessionSignatureCore(root) {
+(function attachRagentSessionSignatureCore(root) {
   function buildComparableSessionState(value) {
     if (Array.isArray(value)) {
       return value.map((entry) => buildComparableSessionState(entry));
@@ -55,7 +55,7 @@
     });
   }
 
-  root.AgentocSessionSignatureCore = {
+  root.RagentSessionSignatureCore = {
     buildComparableSessionState,
     getComparableSessionStateSignature,
     getComparableAttachedSessionStateSignature,

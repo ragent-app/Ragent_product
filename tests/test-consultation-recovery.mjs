@@ -14,12 +14,12 @@ import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-// 隔离临时 HOME + AGENTOC_INSTANCE_ROOT + AGENTOC_CONFIG_DIR —— 必须在 import 被测模块之前设置。
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consultation-recovery-'));
+// 隔离临时 HOME + RAGENT_INSTANCE_ROOT + RAGENT_CONFIG_DIR —— 必须在 import 被测模块之前设置。
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consultation-recovery-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/consultation-store.mjs');

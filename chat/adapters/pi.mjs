@@ -130,5 +130,5 @@ export function buildPiArgs({ provider = '', model = '', sessionDir = '', noSess
 }
 
 export function buildPiInput(prompt) {
-  return `${JSON.stringify({ type: 'prompt', id: 'agentoc-initial-prompt', message: text(prompt) })}\n`;
+  return `${JSON.stringify({ type: 'prompt', id: 'ragent-initial-prompt', message: text(prompt) })}\n`;
 }

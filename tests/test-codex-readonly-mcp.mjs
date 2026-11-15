@@ -24,7 +24,7 @@ try {
   await assert.rejects(prepareReadOnlyCodexMcp({ cwd: workspace, workspace, hidePaths: [hidden], requireSandbox: () => true,
     servers: JSON.parse('{"__proto__":{"url":"https://mcp.example.test"}}') }), TypeError);
 
-  if (process.platform === 'linux' && process.env.AGENTOC_TEST_CODEX_EXTERNAL_EXECUTOR === '1') {
+  if (process.platform === 'linux' && process.env.RAGENT_TEST_CODEX_EXTERNAL_EXECUTOR === '1') {
     const protectedFile = join(workspace, 'protected.txt'), fixture = join(root, 'mcp.mjs');
     await writeFile(protectedFile, 'original');
     await writeFile(fixture, `import { writeFileSync } from 'node:fs'; try { writeFileSync(${JSON.stringify(protectedFile)}, 'changed'); console.log('writable'); } catch { console.log('blocked'); }`);

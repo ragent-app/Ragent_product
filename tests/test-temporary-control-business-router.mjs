@@ -8,27 +8,27 @@ import { join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 if (process.argv[2] !== '--worker') {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-control-business-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-control-business-'));
   try {
-    const importHook = process.env.AGENTOC_CONTROL_ROUTER_IMPORT_HOOK;
+    const importHook = process.env.RAGENT_CONTROL_ROUTER_IMPORT_HOOK;
     const child = spawn(process.execPath, [...(importHook ? ['--import', pathToFileURL(resolve(importHook)).href] : []),
       fileURLToPath(import.meta.url), '--worker', root], { windowsHide: true,
-      env: { ...process.env, AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', AGENTOC_INSTANCE_ROOT: root,
-        AGENTOC_CONFIG_DIR: join(root, 'config'), AGENTOC_MEMORY_DIR: join(root, 'memory'),
-        AGENTOC_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'), AGENTOC_WORK_ROOT_DIR: join(root, 'workspace'),
-        AGENTOC_PROVIDER_HOMES_DIR: join(root, 'provider-homes'), AGENTOC_HARNESS_ROOT: join(root, 'harnesses'),
-        AGENTOC_PACKAGED_HARNESS_ROOT: join(root, 'bundled-harnesses'),
-        AGENTOC_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
-        AGENTOC_AUTH_SESSION_SECRET: 'temporary-control-business-test-session-secret',
-        AGENTOC_ACCOUNTS_URL: 'https://accounts.invalid', AGENTOC_TURN_BROKER_URL: '',
-        AGENTOC_WINDOWS_SERVICE_MODE: '0', AGENTOC_TEMPORARY_PAIRING_ENABLED: '1' } });
+      env: { ...process.env, RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1', RAGENT_INSTANCE_ROOT: root,
+        RAGENT_CONFIG_DIR: join(root, 'config'), RAGENT_MEMORY_DIR: join(root, 'memory'),
+        RAGENT_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'), RAGENT_WORK_ROOT_DIR: join(root, 'workspace'),
+        RAGENT_PROVIDER_HOMES_DIR: join(root, 'provider-homes'), RAGENT_HARNESS_ROOT: join(root, 'harnesses'),
+        RAGENT_PACKAGED_HARNESS_ROOT: join(root, 'bundled-harnesses'),
+        RAGENT_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
+        RAGENT_AUTH_SESSION_SECRET: 'temporary-control-business-test-session-secret',
+        RAGENT_ACCOUNTS_URL: 'https://accounts.invalid', RAGENT_TURN_BROKER_URL: '',
+        RAGENT_WINDOWS_SERVICE_MODE: '0', RAGENT_TEMPORARY_PAIRING_ENABLED: '1' } });
     let output = ''; child.stdout.on('data', (value) => { output += value; }); child.stderr.on('data', (value) => { output += value; });
     const timer = setTimeout(() => child.kill(), 60_000);
     const code = await new Promise((done, reject) => { child.on('error', reject); child.on('exit', done); }); clearTimeout(timer);
     assert.equal(code, 0, output); assert.match(output, /business-router-verified/);
     console.log('test-temporary-control-business-router: passed (real signed grant and production business handlers)');
   } finally {
-    assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep) && root.includes('agentoc-control-business-'));
+    assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep) && root.includes('ragent-control-business-'));
     await rm(root, { recursive: true, force: true });
   }
 } else {
@@ -155,7 +155,7 @@ const args = process.argv.slice(2);
 assert.equal(args.length, 6);
 assert.deepEqual([args[0], args[1], args[3], args[4]], ['install', '--prefix', '--no-save', '--package-lock=false']);
 const prefix = args[2];
-assert.equal(resolve(prefix), resolve(process.env.AGENTOC_HARNESS_ROOT, 'qwen-code'));
+assert.equal(resolve(prefix), resolve(process.env.RAGENT_HARNESS_ROOT, 'qwen-code'));
 const packageSpec = args[5];
 assert.ok(['@qwen-code/qwen-code@0.22.2', '@qwen-code/qwen-code@0.22.3'].includes(packageSpec));
 const version = packageSpec.slice(packageSpec.lastIndexOf('@') + 1);
@@ -172,6 +172,6 @@ await appendFile(${JSON.stringify(calls)}, JSON.stringify({ prefix, packageSpec 
     ? `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`
     : `#!/bin/sh\nexec "${process.execPath}" "${script}" "$@"\n`);
   await chmod(command, 0o700);
-  process.env.AGENTOC_NPM_COMMAND = command;
+  process.env.RAGENT_NPM_COMMAND = command;
   return calls;
 }

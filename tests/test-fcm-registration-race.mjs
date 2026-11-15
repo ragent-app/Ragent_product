@@ -3,10 +3,10 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 
-const dir = await mkdtemp(join(tmpdir(), 'agentoc-fcm-registration-'));
+const dir = await mkdtemp(join(tmpdir(), 'ragent-fcm-registration-'));
 const file = join(dir, 'tokens.json');
-const previous = process.env.AGENTOC_FCM_TOKENS_FILE;
-process.env.AGENTOC_FCM_TOKENS_FILE = file;
+const previous = process.env.RAGENT_FCM_TOKENS_FILE;
+process.env.RAGENT_FCM_TOKENS_FILE = file;
 try {
   const { registerFcmToken, unregisterFcmToken, removeRejectedFcmTokens } = await import('../chat/fcm.mjs');
   await registerFcmToken({ token: 'old-a', deviceId: 'phone-a' });
@@ -28,9 +28,9 @@ try {
   assert.ok(!records.some(record => record.deviceId === 'phone-d'));
   console.log('test-fcm-registration-race: 4 assertions passed');
 } finally {
-  if (previous === undefined) delete process.env.AGENTOC_FCM_TOKENS_FILE;
-  else process.env.AGENTOC_FCM_TOKENS_FILE = previous;
+  if (previous === undefined) delete process.env.RAGENT_FCM_TOKENS_FILE;
+  else process.env.RAGENT_FCM_TOKENS_FILE = previous;
   assert.equal(dirname(resolve(dir)), resolve(tmpdir()));
-  assert.ok(basename(dir).startsWith('agentoc-fcm-registration-'));
+  assert.ok(basename(dir).startsWith('ragent-fcm-registration-'));
   await rm(dir, { recursive: true, force: true });
 }

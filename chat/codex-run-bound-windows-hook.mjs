@@ -1,4 +1,4 @@
-import { evaluateCodexWindowsHook } from '../scripts/agentoc-codex-windows-install-hook.mjs';
+import { evaluateCodexWindowsHook } from '../scripts/ragent-codex-windows-install-hook.mjs';
 
 // Hook calls cross a process boundary. Never choose a run based on an event's
 // claimed ID alone: the caller must supply the active sidecar's binding.

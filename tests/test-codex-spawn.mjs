@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Test script: spawns Codex using AgentoC's full-auto risk policy and the
+ * Test script: spawns Codex using Ragent's full-auto risk policy and the
  * provider-native arguments produced by process-runner.mjs, to diagnose if
  * Codex stops mid-execution.
  *

@@ -7,14 +7,14 @@ if (process.platform !== 'win32') {
   console.log('SKIP: native Windows managed OAuth command discovery');
   process.exit(0);
 }
-const root = await mkdtemp(join(tmpdir(), 'agentoc-managed-oauth-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-managed-oauth-'));
 const configDir = join(root, 'config');
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_HARNESS_ROOT = join(root, 'harnesses');
-process.env.AGENTOC_PACKAGED_HARNESS_ROOT = join(root, 'no-bundled-runtime');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_HARNESS_POLICY_URL = 'http://invalid.test';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_HARNESS_ROOT = join(root, 'harnesses');
+process.env.RAGENT_PACKAGED_HARNESS_ROOT = join(root, 'no-bundled-runtime');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_HARNESS_POLICY_URL = 'http://invalid.test';
 process.env.PATH = 'C:\\Windows\\System32;C:\\Windows\\System32\\WindowsPowerShell\\v1.0';
 await mkdir(configDir, { recursive: true });
 const { resolveToolCommandPathAsync } = await import('../lib/tools.mjs');

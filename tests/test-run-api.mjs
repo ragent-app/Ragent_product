@@ -8,12 +8,12 @@ import { parse as parseUrl } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test, after } from 'node:test';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-run-api-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
-await writeFile(join(process.env.AGENTOC_CONFIG_DIR, 'tools.json'), JSON.stringify([
+const root = await mkdtemp(join(tmpdir(), 'ragent-run-api-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
+await writeFile(join(process.env.RAGENT_CONFIG_DIR, 'tools.json'), JSON.stringify([
   { id: 'run-fixture', name: 'Run fixture', command: process.execPath, runtimeFamily: 'codex-json', models: [{ id: 'fixture-model' }] },
 ]));
 const meta = await import('../chat/session-meta-store.mjs');
@@ -50,7 +50,7 @@ async function route(value, suffix = '', options = {}) {
   const path = options.path || `/api/sessions/${value.sessionId}/app-api-runs${suffix}`;
   const url = new URL(path, 'http://localhost');
   const req = new PassThrough(); req.method = options.method || 'GET';
-  req.headers = { 'content-type': 'application/json', 'x-agentoc-app-api-scope': Buffer.from(JSON.stringify(value.scope)).toString('base64url'), ...options.headers };
+  req.headers = { 'content-type': 'application/json', 'x-ragent-app-api-scope': Buffer.from(JSON.stringify(value.scope)).toString('base64url'), ...options.headers };
   const res = new EventEmitter(); res.headers = {}; res.setHeader = (key, val) => { res.headers[key] = val; };
   let checks = 0;
   const done = handleSessionMainRoutes({ req, res, parsedUrl: options.legacyUrl ? parseUrl(path, true) : url, pathname: url.pathname,
@@ -168,7 +168,7 @@ test('query fields, duplicate parameters, malformed encoding and traversal fail 
     `/${run.id}?x=1`, `/${run.id}/events?afterSeq=-1`, `/${run.id}/events?limit=1.5`,
     `/${run.id}/wait?timeoutMs=30001`, `/${run.id}/wait?afterRevision=x`, '/%FF', '/%2E%2E%2Fprivate'])
     assert.equal((await route(v, suffix)).status, 400, suffix);
-  assert.equal((await route(v, `/${run.id}`, { headers: { 'x-agentoc-app-api-scope': undefined } })).status, 400);
+  assert.equal((await route(v, `/${run.id}`, { headers: { 'x-ragent-app-api-scope': undefined } })).status, 400);
   assert.equal((await route(v, `/${run.id}/cancel`, { method: 'GET' })).status, 405);
 });
 test('production legacy URL parsing preserves limits, state cursors and duplicate validation', async () => {

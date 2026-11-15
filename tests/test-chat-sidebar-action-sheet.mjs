@@ -26,7 +26,7 @@ try {
   </body></html>`);
   await page.addStyleTag({ content: css });
   await page.evaluate(({ surfaceSource: surface, overviewSource: overview, projectViewSource: projectView }) => {
-    window.agentocT = (key, vars = {}) => ({
+    window.ragentT = (key, vars = {}) => ({
       'action.close': 'Close',
       'action.back': 'Back',
       'action.cancel': 'Cancel',
@@ -71,8 +71,8 @@ try {
     window.visitorMode = false;
     window.isDesktop = false;
     window.msgInput = document.createElement('textarea');
-    window.AgentoCMotion = { prefersReducedMotion: () => false };
-    window.AgentoCBackHandler = {
+    window.RagentMotion = { prefersReducedMotion: () => false };
+    window.RagentBackHandler = {
       push: () => 'sheet',
       pop: () => {},
     };
@@ -101,7 +101,7 @@ try {
       }
       return { project: { id: 'prj_abcdefabcdef', name: 'Renamed project', pinned: true } };
     };
-    window.agentocEnsureProjectsReady = async () => [{ id: 'prj_abcdefabcdef', name: 'Alpha', rootPath: '/tmp/alpha' }];
+    window.ragentEnsureProjectsReady = async () => [{ id: 'prj_abcdefabcdef', name: 'Alpha', rootPath: '/tmp/alpha' }];
     window.fetchSessionsList = async () => [];
     window.renderProjectsView = () => {};
     window.syncProjectLevelUI = () => {};
@@ -113,13 +113,13 @@ try {
     window.sessionList = document.getElementById('sessionList');
     window.sidebarAgentBtn = document.getElementById('sidebarAgentBtn');
     window.newSessionBtn = document.getElementById('newSessionBtn');
-    window.agentocProjectsReady = Promise.resolve();
-    window.agentocGetProjects = () => [{ id: 'prj_abcdefabcdef', name: 'Alpha', rootPath: '/tmp/alpha' }];
-    window.agentocSessionMatchesSelectedWorkspace = () => false;
-    window.agentocOpenProjectCreateDialog = () => {};
-    window.agentocGetSelectedProjectId = () => '';
-    window.agentocGetSelectedSessionFolder = () => '';
-    window.agentocGetBrowsingProject = () => null;
+    window.ragentProjectsReady = Promise.resolve();
+    window.ragentGetProjects = () => [{ id: 'prj_abcdefabcdef', name: 'Alpha', rootPath: '/tmp/alpha' }];
+    window.ragentSessionMatchesSelectedWorkspace = () => false;
+    window.ragentOpenProjectCreateDialog = () => {};
+    window.ragentGetSelectedProjectId = () => '';
+    window.ragentGetSelectedSessionFolder = () => '';
+    window.ragentGetBrowsingProject = () => null;
     window.createActiveSessionItem = () => document.createElement('div');
     window.sessionStateModel = {
       createEmptyStatus: () => ({}),
@@ -145,7 +145,7 @@ try {
     document.body.appendChild(anchor);
     window.__normalClicks = 0;
     anchor.addEventListener('click', () => { window.__normalClicks += 1; });
-    window.agentocBindSidebarLongPress(anchor, () => window.agentocOpenSidebarActionSheet(
+    window.ragentBindSidebarLongPress(anchor, () => window.ragentOpenSidebarActionSheet(
       'session',
       { id: 's1', name: 'Weekly report' },
       anchor,
@@ -254,7 +254,7 @@ try {
   assert.equal(restoredBackground.anchorInertAttribute, false, 'closing the sheet should remove its temporary inert attribute');
   assert.equal(restoredBackground.anchorAriaHidden, null, 'closing the sheet should restore the background aria state');
 
-  await page.evaluate(() => window.agentocOpenSidebarActionSheet(
+  await page.evaluate(() => window.ragentOpenSidebarActionSheet(
     'session',
     { id: 's3', name: 'Keyboard rename' },
     document.querySelector('#session-anchor'),
@@ -270,7 +270,7 @@ try {
   assert.equal(await page.locator('.sidebar-action-sheet').count(), 0,
     'sheet should close after keyboard rename submission');
 
-  await page.evaluate(() => window.agentocOpenSidebarActionSheet(
+  await page.evaluate(() => window.ragentOpenSidebarActionSheet(
     'session',
     { id: 's4', name: 'Delete me' },
     document.querySelector('#session-anchor'),
@@ -298,7 +298,7 @@ try {
   assert.equal(await page.locator('.sidebar-action-sheet').count(), 0,
     'sheet should close after confirmed session deletion');
 
-  await page.evaluate(() => window.agentocOpenSidebarActionSheet(
+  await page.evaluate(() => window.ragentOpenSidebarActionSheet(
     'session',
     { id: 's5', name: 'Keep me' },
     document.querySelector('#session-anchor'),
@@ -311,7 +311,7 @@ try {
     'cancelling the confirmation must not dispatch deletion');
   await page.locator('.sidebar-action-sheet-close').click();
 
-  await page.evaluate(() => window.agentocOpenSidebarActionSheet(
+  await page.evaluate(() => window.ragentOpenSidebarActionSheet(
     'session',
     { id: 's2', name: 'Closing sheet' },
     document.querySelector('#session-anchor'),
@@ -375,7 +375,7 @@ try {
   assert.equal(await page.locator('.sidebar-action-sheet').count(), 0,
     'desktop non-right-button context menus must not open the action sheet');
 
-  await page.evaluate(() => window.agentocOpenProjectActionSheet(
+  await page.evaluate(() => window.ragentOpenProjectActionSheet(
     { id: 'prj_abcdefabcdef', name: 'Alpha', sessionCount: 2 },
     document.body,
   ));

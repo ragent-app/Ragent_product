@@ -7,7 +7,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
-using AgentoC.ServiceHost;
+using Ragent.ServiceHost;
 
 internal sealed class RunnerSupervisorServiceFixture : ServiceBase {
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]

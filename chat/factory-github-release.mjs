@@ -14,7 +14,7 @@ async function gh(args,{allowMissing=false}={}) {
 async function api(path,{allowMissing=false}={}){const value=await gh(['api',path],{allowMissing});if(value===null)return null;try{return JSON.parse(value);}catch{fail('GitHub returned an invalid response');}}
 export function githubReleaseConfig(policy,tag,artifactPath){
  const config=policy?.factoryGithubRelease,repo=config?.repository,workflow=config?.signerWorkflow,signerDigest=config?.signerDigest;
- if(process.env.AGENTOC_FACTORY_GITHUB_RELEASE_ENABLED!=='1'||typeof repo!=='string'||!/^[-A-Za-z0-9_.]+\/[-A-Za-z0-9_.]+$/.test(repo)||typeof workflow!=='string'||!workflow.startsWith(`${repo}/.github/workflows/`)||!/^[-A-Za-z0-9_./]+\.ya?ml$/.test(workflow)||workflow.includes('..')||!/^[a-f0-9]{40}$/.test(signerDigest||''))fail('GitHub release repository and pinned signer are not configured');
+ if(process.env.RAGENT_FACTORY_GITHUB_RELEASE_ENABLED!=='1'||typeof repo!=='string'||!/^[-A-Za-z0-9_.]+\/[-A-Za-z0-9_.]+$/.test(repo)||typeof workflow!=='string'||!workflow.startsWith(`${repo}/.github/workflows/`)||!/^[-A-Za-z0-9_./]+\.ya?ml$/.test(workflow)||workflow.includes('..')||!/^[a-f0-9]{40}$/.test(signerDigest||''))fail('GitHub release repository and pinned signer are not configured');
  if(typeof tag!=='string'||!/^[-A-Za-z0-9_./]{1,128}$/.test(tag)||tag.startsWith('-')||tag.includes('..')||tag.endsWith('/')||tag.includes('//'))fail('Invalid release tag','FACTORY_INVALID');
  const asset=basename(artifactPath);if(!asset||asset.includes('#')||asset.startsWith('-'))fail('Invalid asset name','FACTORY_INVALID');
  return {repository:repo,signerWorkflow:workflow,signerDigest,tag,asset};

@@ -9,11 +9,11 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-autonomous-org-s25-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-autonomous-org-s25-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/organization-store.mjs');
@@ -188,7 +188,7 @@ const fresh = execFileSync(process.execPath, ['--input-type=module', '--eval', `
 equal(fresh, second.digest, 'fresh process observes the same reconciled projection');
 
 const disabled = execFileSync(process.execPath, ['--input-type=module', '--eval', `
-  delete process.env.AGENTOC_ORG_SCHEMA_ENABLED;
+  delete process.env.RAGENT_ORG_SCHEMA_ENABLED;
   const { reconcileOrganizationsAtStartup } = await import(${JSON.stringify(new URL('../chat/organization-reconciler.mjs', import.meta.url).href)});
   console.log(JSON.stringify(await reconcileOrganizationsAtStartup()));
 `], { env: process.env, encoding: 'utf8' }).trim().split('\n').at(-1);

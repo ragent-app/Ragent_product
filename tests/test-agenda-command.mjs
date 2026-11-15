@@ -17,20 +17,20 @@ function runCli(args, env) {
   });
 }
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-agenda-command-'));
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-agenda-command-'));
+const configDir = join(tempHome, '.config', 'ragent');
 mkdirSync(configDir, { recursive: true });
 
 const env = {
   ...process.env,
-  AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-  AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+  RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+  RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
   HOME: tempHome,
-  AGENTOC_INSTANCE_ROOT: tempHome,
-  AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-  AGENTOC_CONFIG_DIR: configDir,
-  AGENTOC_MEMORY_DIR: join(tempHome, '.agentoc', 'memory'),
-  AGENTOC_PUBLIC_BASE_URL: 'https://trial23.example.com',
+  RAGENT_INSTANCE_ROOT: tempHome,
+  RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+  RAGENT_CONFIG_DIR: configDir,
+  RAGENT_MEMORY_DIR: join(tempHome, '.ragent', 'memory'),
+  RAGENT_PUBLIC_BASE_URL: 'https://trial23.example.com',
 };
 
 try {

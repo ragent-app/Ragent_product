@@ -1,8 +1,16 @@
 #!/bin/sh
 set -eu
 
-SERVICE_USER_FILE=/etc/agentoc/service-user
-AGENTOC_ENV_FILE=/etc/agentoc/agentoc.env
+# Never traverse a redirected state root while repairing ownership or modes.
+for state_path in /var/lib/ragent /var/lib/ragent/config /var/lib/ragent/config/native-provider-runtime /var/lib/ragent-run /var/lib/ragent-run/provider-homes; do
+  if [ -L "$state_path" ]; then
+    echo "Refusing to modify symlinked Ragent state path: $state_path" >&2
+    exit 1
+  fi
+done
+
+SERVICE_USER_FILE=/etc/ragent/service-user
+RAGENT_ENV_FILE=/etc/ragent/ragent.env
 
 trim_service_user() {
   printf '%s' "${1:-}" | tr -d '[:space:]'
@@ -34,47 +42,47 @@ infer_sudo_service_user() {
 }
 
 resolve_service_user() {
-  user="$(trim_service_user "${AGENTOC_SERVICE_USER:-}")"
+  user="$(trim_service_user "${RAGENT_SERVICE_USER:-}")"
   if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
     user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
   fi
   if [ -z "$user" ] && [ ! -f "$SERVICE_USER_FILE" ]; then
     user="$(infer_sudo_service_user)"
   fi
-  [ -n "$user" ] || user=agentoc
+  [ -n "$user" ] || user=ragent
   case "$user" in
     root|'')
-      echo "AgentoC service user must be a non-root local user." >&2
+      echo "Ragent service user must be a non-root local user." >&2
       exit 1
       ;;
     *[!A-Za-z0-9_.@-]*)
-      echo "Invalid AgentoC service user: $user" >&2
+      echo "Invalid Ragent service user: $user" >&2
       exit 1
       ;;
   esac
   user_entry="$(getent passwd "$user" || true)"
   if [ -z "$user_entry" ]; then
-    echo "AgentoC service user does not exist: $user" >&2
+    echo "Ragent service user does not exist: $user" >&2
     exit 1
   fi
   user_uid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $3 }')"
   case "$user_uid" in
     ''|*[!0-9]*)
-      echo "Cannot verify AgentoC service user identity: $user" >&2
+      echo "Cannot verify Ragent service user identity: $user" >&2
       exit 1
       ;;
     *)
       if ! [ "$user_uid" -gt 0 ] 2>/dev/null; then
-        echo "AgentoC service user must be a non-root local user." >&2
+        echo "Ragent service user must be a non-root local user." >&2
         exit 1
       fi
       ;;
   esac
   user_gid="$(printf '%s\n' "$user_entry" | awk -F: '{ print $4 }')"
   case "$user_gid" in
-    ''|*[!0-9]*) echo "Cannot verify AgentoC service user group: $user" >&2; exit 1 ;;
+    ''|*[!0-9]*) echo "Cannot verify Ragent service user group: $user" >&2; exit 1 ;;
     *) if ! [ "$user_gid" -gt 0 ] 2>/dev/null; then
-      echo "AgentoC service user must not use the root group." >&2
+      echo "Ragent service user must not use the root group." >&2
       exit 1
     fi ;;
   esac
@@ -91,7 +99,7 @@ user_home() {
 # systemd SupplementaryGroups= property.
 is_runner_denied_group() {
   case "$1" in
-    adm|agentoc-privileged|audio|cdrom|dialout|disk|docker|floppy|incus-admin|input|kmem|kvm|libvirt|lp|lxd|netdev|plugdev|podman|render|root|shadow|sudo|sys|systemd-journal|tape|tty|uucp|video|wheel)
+    adm|ragent-privileged|audio|cdrom|dialout|disk|docker|floppy|incus-admin|input|kmem|kvm|libvirt|lp|lxd|netdev|plugdev|podman|render|root|shadow|sudo|sys|systemd-journal|tape|tty|uucp|video|wheel)
       return 0
       ;;
     *)
@@ -113,43 +121,43 @@ write_runner_inherited_groups() {
       *) filtered_groups="${filtered_groups:+$filtered_groups }$group" ;;
     esac
   done
-  runner_groups_tmp="/etc/agentoc/runner-groups.$$"
+  runner_groups_tmp="/etc/ragent/runner-groups.$$"
   printf '%s\n' "$filtered_groups" > "$runner_groups_tmp"
   chown root:root "$runner_groups_tmp"
   chmod 0644 "$runner_groups_tmp"
-  mv -f "$runner_groups_tmp" /etc/agentoc/runner-groups
+  mv -f "$runner_groups_tmp" /etc/ragent/runner-groups
 }
 
 # P0-B + P0-C runner/control separation: the runner group has NO access to the
 # control-plane config directory.  The runner-accessible subtrees (run spool +
-# provider homes) live under /var/lib/agentoc-run, so Runs never need to
-# traverse /var/lib/agentoc or /var/lib/agentoc/config — the control core
+# provider homes) live under /var/lib/ragent-run, so Runs never need to
+# traverse /var/lib/ragent or /var/lib/ragent/config — the control core
 # (auth.json, chat-sessions.json, chat-history, ...) is fully opaque to them.
 
 env_file_value() {
   key="$1"
-  [ -r "$AGENTOC_ENV_FILE" ] || return 0
-  sed -n "s/^${key}=//p" "$AGENTOC_ENV_FILE" | tail -n 1 | tr -d '[:space:]'
+  [ -r "$RAGENT_ENV_FILE" ] || return 0
+  sed -n "s/^${key}=//p" "$RAGENT_ENV_FILE" | tail -n 1 | tr -d '[:space:]'
 }
 
 retire_legacy_maintenance_runtime() {
   if [ -d /run/systemd/system ]; then
-    for retired_unit in agentoc-maintenance-control.service agentoc-maintenance-broker.service; do
+    for retired_unit in ragent-maintenance-control.service ragent-maintenance-broker.service; do
       systemctl disable --now "$retired_unit" >/dev/null 2>&1 || true
       systemctl reset-failed "$retired_unit" >/dev/null 2>&1 || true
     done
   fi
-  rm -rf /etc/systemd/system/agentoc-maintenance-control.service.d
-  rm -f /etc/agentoc/maintenance-control.env
-  rm -rf /run/agentoc-maintenance /run/agentoc-maintenance-control
+  rm -rf /etc/systemd/system/ragent-maintenance-control.service.d
+  rm -f /etc/ragent/maintenance-control.env
+  rm -rf /run/ragent-maintenance /run/ragent-maintenance-control
 }
 
 retire_legacy_maintenance_data() {
   legacy_present=0
   for legacy_path in \
-    /var/lib/agentoc/maintenance-control \
-    /var/log/agentoc-maintenance \
-    /var/lib/agentoc/maintenance
+    /var/lib/ragent/maintenance-control \
+    /var/log/ragent-maintenance \
+    /var/lib/ragent/maintenance
   do
     if [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; then
       legacy_present=1
@@ -157,7 +165,7 @@ retire_legacy_maintenance_data() {
   done
   [ "$legacy_present" -eq 1 ] || return 0
 
-  retired_root=/var/lib/agentoc/retired
+  retired_root=/var/lib/ragent/retired
   install -d -m 0700 -o root -g root "$retired_root"
   chown root:root "$retired_root"
   chmod 0700 "$retired_root"
@@ -171,22 +179,22 @@ retire_legacy_maintenance_data() {
   install -d -m 0700 -o root -g root "$retired_destination"
 
   for legacy_path in \
-    /var/lib/agentoc/maintenance-control \
-    /var/log/agentoc-maintenance \
-    /var/lib/agentoc/maintenance
+    /var/lib/ragent/maintenance-control \
+    /var/log/ragent-maintenance \
+    /var/lib/ragent/maintenance
   do
     if [ -e "$legacy_path" ] || [ -L "$legacy_path" ]; then
       mv -- "$legacy_path" "$retired_destination/$(basename "$legacy_path")"
     fi
   done
 
-  case "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" in ragent|agentoc) package_name="${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" ;; *) package_name=ragent ;; esac
+  package_name=ragent
   package_version="$(dpkg-query -W -f='${Version}' "$package_name" 2>/dev/null || printf '%s' unknown)"
   {
-    printf 'AgentoC retired maintenance state\n'
+    printf 'Ragent retired maintenance state\n'
     printf 'Source package version: %s\n' "$package_version"
     printf 'Quarantined at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'Original paths: /var/lib/agentoc/maintenance-control, /var/log/agentoc-maintenance, /var/lib/agentoc/maintenance\n'
+    printf 'Original paths: /var/lib/ragent/maintenance-control, /var/log/ragent-maintenance, /var/lib/ragent/maintenance\n'
     printf 'This directory is retained for manual inspection and is not read by the runtime.\n'
   } > "$retired_destination/README"
   (
@@ -205,8 +213,8 @@ retire_legacy_maintenance_data() {
 # selecting an obsolete sidecar on upgrade.
 retire_legacy_p2p_host_variants() {
   for legacy_path in \
-    /opt/agentoc/app/bin/agentoc-p2p-host-amd64 \
-    /opt/agentoc/app/bin/agentoc-p2p-host-arm64
+    /opt/ragent/app/bin/ragent-p2p-host-amd64 \
+    /opt/ragent/app/bin/ragent-p2p-host-arm64
   do
     rm -f -- "$legacy_path"
   done
@@ -216,9 +224,9 @@ retire_legacy_p2p_host_variants() {
 # version.  Make the new product default effective on such upgrades too, but
 # never override an explicit operator value (including =0).
 ensure_agent_create_default() {
-  [ -f "$AGENTOC_ENV_FILE" ] || return 0
-  if ! grep -q '^AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED=' "$AGENTOC_ENV_FILE"; then
-    printf '\nAGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED=1\n' >> "$AGENTOC_ENV_FILE"
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
+  if ! grep -q '^RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED=' "$RAGENT_ENV_FILE"; then
+    printf '\nRAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED=1\n' >> "$RAGENT_ENV_FILE"
   fi
 }
 
@@ -226,25 +234,25 @@ ensure_agent_create_default() {
 # version.  Migrate the former packaged supervisor socket path, but preserve
 # any explicit operator path (including a custom socket under another root).
 ensure_runner_supervisor_socket_default() {
-  [ -f "$AGENTOC_ENV_FILE" ] || return 0
-  legacy_socket=/var/lib/agentoc/config/runner-supervisor.sock
-  current_socket="$(env_file_value AGENTOC_RUNNER_SUPERVISOR_SOCKET)"
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
+  legacy_socket=/var/lib/ragent/config/runner-supervisor.sock
+  current_socket="$(env_file_value RAGENT_RUNNER_SUPERVISOR_SOCKET)"
   [ "$current_socket" = "$legacy_socket" ] || return 0
-  sed -i "s|^AGENTOC_RUNNER_SUPERVISOR_SOCKET=$legacy_socket$|AGENTOC_RUNNER_SUPERVISOR_SOCKET=/var/lib/agentoc-run/runner-supervisor.sock|" "$AGENTOC_ENV_FILE"
+  sed -i "s|^RAGENT_RUNNER_SUPERVISOR_SOCKET=$legacy_socket$|RAGENT_RUNNER_SUPERVISOR_SOCKET=/var/lib/ragent-run/runner-supervisor.sock|" "$RAGENT_ENV_FILE"
 }
 
 # dpkg preserves an existing conffile when the operator selected the old
 # version. Add the relocated runner-state defaults when upgrading from a
 # package that predates P0-C, but preserve any explicit operator path.
 ensure_runner_state_defaults() {
-  [ -f "$AGENTOC_ENV_FILE" ] || return 0
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
   for key_value in \
-    AGENTOC_RUN_SPOOL_DIR=/var/lib/agentoc-run/results \
-    AGENTOC_PROVIDER_HOMES_DIR=/var/lib/agentoc-run/provider-homes
+    RAGENT_RUN_SPOOL_DIR=/var/lib/ragent-run/results \
+    RAGENT_PROVIDER_HOMES_DIR=/var/lib/ragent-run/provider-homes
   do
     key="${key_value%%=*}"
-    if ! grep -q "^${key}=" "$AGENTOC_ENV_FILE"; then
-      printf '\n%s\n' "$key_value" >> "$AGENTOC_ENV_FILE"
+    if ! grep -q "^${key}=" "$RAGENT_ENV_FILE"; then
+      printf '\n%s\n' "$key_value" >> "$RAGENT_ENV_FILE"
     fi
   done
 }
@@ -253,43 +261,43 @@ ensure_runner_state_defaults() {
 # version. Keep the packaged multi-agent collaboration default effective on
 # upgrades too, but never override an explicit operator value (including =0).
 # The source-level config fallback remains off for isolated development/test
-# processes; packaged services receive these values through agentoc.env.
+# processes; packaged services receive these values through ragent.env.
 ensure_multi_agent_collaboration_defaults() {
-  [ -f "$AGENTOC_ENV_FILE" ] || return 0
+  [ -f "$RAGENT_ENV_FILE" ] || return 0
   for key in \
-    AGENTOC_ORG_SCHEMA_ENABLED \
-    AGENTOC_ORG_SHADOW_PROJECTION \
-    AGENTOC_ORG_SESSION_ADDRESSABILITY_ENABLED \
-    AGENTOC_MANAGED_INPUT_ENFORCEMENT \
-    AGENTOC_MANAGED_WRITER_ENABLED \
-    AGENTOC_REVIEWER_ENABLED \
-    AGENTOC_COLLABORATION_LEADER_ENABLED \
-    AGENTOC_ORG_INTERNAL_ENVELOPE_ENABLED \
-    AGENTOC_ORG_AUTONOMOUS_LEADER_ENABLED \
-    AGENTOC_ORG_AUTONOMOUS_PROVISIONING_ENABLED \
-    AGENTOC_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED \
-    AGENTOC_ORG_HIERARCHICAL_DELEGATION_ENABLED \
-    AGENTOC_ORG_DYNAMIC_REPLAN_ENABLED \
-    AGENTOC_ORG_STALL_GOVERNOR_ENABLED \
-    AGENTOC_ORG_PROJECTION_V1_ENABLED \
-    AGENTOC_ORG_PROJECTION_V2_ENABLED \
-    AGENTOC_ORG_RECOVERY_V1_ENABLED \
-    AGENTOC_CONSULTATION_V1_ENABLED
+    RAGENT_ORG_SCHEMA_ENABLED \
+    RAGENT_ORG_SHADOW_PROJECTION \
+    RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED \
+    RAGENT_MANAGED_INPUT_ENFORCEMENT \
+    RAGENT_MANAGED_WRITER_ENABLED \
+    RAGENT_REVIEWER_ENABLED \
+    RAGENT_COLLABORATION_LEADER_ENABLED \
+    RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED \
+    RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED \
+    RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED \
+    RAGENT_ORG_DYNAMIC_REPLAN_ENABLED \
+    RAGENT_ORG_STALL_GOVERNOR_ENABLED \
+    RAGENT_ORG_PROJECTION_V1_ENABLED \
+    RAGENT_ORG_PROJECTION_V2_ENABLED \
+    RAGENT_ORG_RECOVERY_V1_ENABLED \
+    RAGENT_CONSULTATION_V1_ENABLED
   do
-    if ! grep -q "^${key}=" "$AGENTOC_ENV_FILE"; then
-      printf '\n%s=1\n' "$key" >> "$AGENTOC_ENV_FILE"
+    if ! grep -q "^${key}=" "$RAGENT_ENV_FILE"; then
+      printf '\n%s=1\n' "$key" >> "$RAGENT_ENV_FILE"
     fi
   done
 }
 
 # Accounts is an independently deployed service.  Its state directory lives
-# below the shared /var/lib/agentoc root for compatibility, but must remain
-# owned by agentoc-accounts; a main-package upgrade must not strand the
+# below the shared /var/lib/ragent root for compatibility, but must remain
+# owned by ragent-accounts; a main-package upgrade must not strand the
 # Accounts service by recursively chowning it to the main service user.
 converge_external_accounts_state() {
-  accounts_user=agentoc-accounts
-  accounts_group=agentoc-accounts
-  accounts_root=/var/lib/agentoc/accounts
+  accounts_user=ragent-accounts
+  accounts_group=ragent-accounts
+  accounts_root=/var/lib/ragent/accounts
   if ! getent passwd "$accounts_user" >/dev/null 2>&1 \
     || ! getent group "$accounts_group" >/dev/null 2>&1 \
     || [ ! -d "$accounts_root" ]; then
@@ -298,7 +306,7 @@ converge_external_accounts_state() {
 
   # The shared root is private to the main service.  Grant Accounts only the
   # execute bit needed to reach its own child; never make the root readable.
-  setfacl -m u:"$accounts_user":--x /var/lib/agentoc
+  setfacl -m u:"$accounts_user":--x /var/lib/ragent
   chown "$accounts_user:$accounts_group" "$accounts_root"
   if [ -d "$accounts_root/.config" ]; then
     chown -R "$accounts_user:$accounts_group" "$accounts_root/.config"
@@ -319,10 +327,10 @@ converge_external_accounts_state() {
 # and upgrades all leave the native registry and secret store readable by the
 # configured control-plane user with their intended private modes.
 converge_provider_runtime_access() {
-  config_root=/var/lib/agentoc/config
+  config_root=/var/lib/ragent/config
   provider_runtime_root="$config_root/native-provider-runtime"
-  chown "$service_user:$service_group" /var/lib/agentoc "$config_root"
-  chmod 0750 /var/lib/agentoc "$config_root"
+  chown "$service_user:$service_group" /var/lib/ragent "$config_root"
+  chmod 0750 /var/lib/ragent "$config_root"
 
   if [ -d "$provider_runtime_root" ]; then
     chown -R "$service_user:$service_group" "$provider_runtime_root"
@@ -355,38 +363,38 @@ converge_provider_runtime_access() {
 retire_legacy_maintenance_runtime
 retire_legacy_p2p_host_variants
 
-if ! getent group agentoc >/dev/null 2>&1; then
-  addgroup --system agentoc >/dev/null
+if ! getent group ragent >/dev/null 2>&1; then
+  addgroup --system ragent >/dev/null
 fi
-if ! getent passwd agentoc >/dev/null 2>&1; then
-  adduser --system --ingroup agentoc --home /var/lib/agentoc --no-create-home --disabled-login agentoc >/dev/null
+if ! getent passwd ragent >/dev/null 2>&1; then
+  adduser --system --ingroup ragent --home /var/lib/ragent --no-create-home --disabled-login ragent >/dev/null
 fi
-if ! getent group agentoc-privileged >/dev/null 2>&1; then
-  addgroup --system agentoc-privileged >/dev/null
+if ! getent group ragent-privileged >/dev/null 2>&1; then
+  addgroup --system ragent-privileged >/dev/null
 fi
 # P0-B: dedicated low-privilege runner user/group.  Runner processes (transient
-# units from the lifecycle broker and supervisor sidecars) run as agentoc-runner;
+# units from the lifecycle broker and supervisor sidecars) run as ragent-runner;
 # the control-plane core stays owned by the service user and is never readable
 # by the runner group.
-if ! getent group agentoc-runners >/dev/null 2>&1; then
-  addgroup --system agentoc-runners >/dev/null
+if ! getent group ragent-runners >/dev/null 2>&1; then
+  addgroup --system ragent-runners >/dev/null
 fi
-if ! getent passwd agentoc-runner >/dev/null 2>&1; then
-  adduser --system --ingroup agentoc-runners --home /var/lib/agentoc-run --no-create-home --disabled-login agentoc-runner >/dev/null
+if ! getent passwd ragent-runner >/dev/null 2>&1; then
+  adduser --system --ingroup ragent-runners --home /var/lib/ragent-run --no-create-home --disabled-login ragent-runner >/dev/null
 fi
 
-install -d -m 0755 -o root -g root /etc/agentoc
+install -d -m 0755 -o root -g root /etc/ragent
 
 service_user="$(resolve_service_user)"
 service_group="$(id -gn "$service_user")"
 service_home="$(user_home "$service_user")"
-[ -n "$service_home" ] || service_home=/var/lib/agentoc
-deluser agentoc agentoc-privileged >/dev/null 2>&1 || true
-if [ "$service_user" != agentoc ]; then
-  deluser "$service_user" agentoc-privileged >/dev/null 2>&1 || true
+[ -n "$service_home" ] || service_home=/var/lib/ragent
+deluser ragent ragent-privileged >/dev/null 2>&1 || true
+if [ "$service_user" != ragent ]; then
+  deluser "$service_user" ragent-privileged >/dev/null 2>&1 || true
 fi
 
-if [ -n "${AGENTOC_SERVICE_USER:-}" ] || [ ! -f "$SERVICE_USER_FILE" ]; then
+if [ -n "${RAGENT_SERVICE_USER:-}" ] || [ ! -f "$SERVICE_USER_FILE" ]; then
   printf '%s\n' "$service_user" > "$SERVICE_USER_FILE"
   chmod 0644 "$SERVICE_USER_FILE"
 fi
@@ -397,12 +405,12 @@ fi
 # so its drop-in needs a concrete group list at install/upgrade time.
 write_runner_inherited_groups
 
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc/config
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc/workspace
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc/memory
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/log/agentoc
-install -d -m 0750 -o root -g agentoc-privileged /var/log/agentoc-privileged
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/config
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/workspace
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent/memory
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/log/ragent
+install -d -m 0750 -o root -g ragent-privileged /var/log/ragent-privileged
 # This must happen before any runuser-based auth/config operation below.  A
 # broken existing config directory otherwise makes the postinst exit before
 # reaching the older final ownership convergence block.
@@ -413,20 +421,20 @@ ensure_runner_state_defaults
 ensure_multi_agent_collaboration_defaults
 retire_legacy_maintenance_data
 
-if [ ! -f /var/lib/agentoc/config/auth.json ]; then
+if [ ! -f /var/lib/ragent/config/auth.json ]; then
   # owner 凭据来源（按优先级）：
-  #  1) 安装命令环境变量 AGENTOC_INITIAL_USERNAME / AGENTOC_INITIAL_PASSWORD（无人值守传参）
+  #  1) 安装命令环境变量 RAGENT_INITIAL_USERNAME / RAGENT_INITIAL_PASSWORD（无人值守传参）
   #  2) 交互式终端输入（不回显，两次确认）
   #  3) 随机密码（非交互安装时保存在 root 专用文件中）
-  # 注意：不从 /etc/agentoc/agentoc.env 读密码（该文件 0644，本机任何用户可读）
+  # 注意：不从 /etc/ragent/ragent.env 读密码（该文件 0644，本机任何用户可读）
   RANDOM_PASSWORD=""
-  INITIAL_USERNAME="$(env_file_value AGENTOC_INITIAL_USERNAME)"
-  [ -n "$INITIAL_USERNAME" ] || INITIAL_USERNAME="${AGENTOC_INITIAL_USERNAME:-}"
-  INITIAL_PASSWORD="${AGENTOC_INITIAL_PASSWORD:-}"
-  unset AGENTOC_INITIAL_PASSWORD
+  INITIAL_USERNAME="$(env_file_value RAGENT_INITIAL_USERNAME)"
+  [ -n "$INITIAL_USERNAME" ] || INITIAL_USERNAME="${RAGENT_INITIAL_USERNAME:-}"
+  INITIAL_PASSWORD="${RAGENT_INITIAL_PASSWORD:-}"
+  unset RAGENT_INITIAL_PASSWORD
 
   if [ -z "$INITIAL_PASSWORD" ] && [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
-    echo "设置 AgentoC owner 账号（输入不会回显）" >&2
+    echo "设置 Ragent owner 账号（输入不会回显）" >&2
     while :; do
       if [ -z "$INITIAL_USERNAME" ]; then
         printf "用户名 [owner]: " >&2
@@ -467,52 +475,52 @@ if [ ! -f /var/lib/agentoc/config/auth.json ]; then
   esac
 
   if [ -z "$INITIAL_PASSWORD" ]; then
-    INITIAL_PASSWORD="$( { openssl rand -base64 24 2>/dev/null || /opt/agentoc/runtime/node -e "process.stdout.write(require('crypto').randomBytes(18).toString('base64url'))"; } | tr -d '\n' )"
+    INITIAL_PASSWORD="$( { openssl rand -base64 24 2>/dev/null || /opt/ragent/runtime/node -e "process.stdout.write(require('crypto').randomBytes(18).toString('base64url'))"; } | tr -d '\n' )"
     RANDOM_PASSWORD="1"
   fi
 
   printf '%s\n' "$INITIAL_PASSWORD" | runuser -u "$service_user" -- env \
     HOME="$service_home" \
-    AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
-    AGENTOC_WORK_ROOT_DIR=/var/lib/agentoc/workspace \
-    AGENTOC_MEMORY_DIR=/var/lib/agentoc/memory \
-    AGENTOC_INITIAL_USERNAME="$INITIAL_USERNAME" \
-    /opt/agentoc/runtime/node -e '
+    RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+    RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+    RAGENT_MEMORY_DIR=/var/lib/ragent/memory \
+    RAGENT_INITIAL_USERNAME="$INITIAL_USERNAME" \
+    /opt/ragent/runtime/node -e '
       const { randomBytes, scryptSync } = require("crypto");
       const { mkdirSync, readFileSync, writeFileSync, chmodSync } = require("fs");
-      const username = process.env.AGENTOC_INITIAL_USERNAME || "owner";
+      const username = process.env.RAGENT_INITIAL_USERNAME || "owner";
       const password = readFileSync(0, "utf8").slice(0, -1);
       const salt = randomBytes(16);
       const hash = scryptSync(password, salt, 32, { N: 16384, r: 8, p: 1 });
-      mkdirSync("/var/lib/agentoc/config", { recursive: true });
-      writeFileSync("/var/lib/agentoc/config/auth.json", JSON.stringify({
+      mkdirSync("/var/lib/ragent/config", { recursive: true });
+      writeFileSync("/var/lib/ragent/config/auth.json", JSON.stringify({
         username,
         passwordHash: `scrypt$16384$8$1$${salt.toString("hex")}$${hash.toString("hex")}`,
       }, null, 2));
-      chmodSync("/var/lib/agentoc/config/auth.json", 0o600);
+      chmodSync("/var/lib/ragent/config/auth.json", 0o600);
     '
   if [ "$RANDOM_PASSWORD" = "1" ]; then
     # Package-manager logs may be retained or readable to other users. Keep the
     # generated secret in a root-owned directory instead of printing it there.
-    credentials_tmp="$(mktemp /etc/agentoc/.initial-credentials.XXXXXX)"
+    credentials_tmp="$(mktemp /etc/ragent/.initial-credentials.XXXXXX)"
     chmod 0600 "$credentials_tmp"
     printf 'username: %s\npassword: %s\n' "$INITIAL_USERNAME" "$INITIAL_PASSWORD" > "$credentials_tmp"
-    mv -f "$credentials_tmp" /etc/agentoc/initial-credentials
-    echo 'Initial credentials are in /etc/agentoc/initial-credentials (root only). Remove the file after recording them.' >&2
+    mv -f "$credentials_tmp" /etc/ragent/initial-credentials
+    echo 'Initial credentials are in /etc/ragent/initial-credentials (root only). Remove the file after recording them.' >&2
   fi
   unset INITIAL_PASSWORD typed_p1 typed_p2
 fi
 
 # 静态 access token 已下线（2026-08-05）：升级时清理 auth.json 的 token 字段
-if [ -f /var/lib/agentoc/config/auth.json ]; then
+if [ -f /var/lib/ragent/config/auth.json ]; then
   runuser -u "$service_user" -- env \
     HOME="$service_home" \
-    AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
-    AGENTOC_WORK_ROOT_DIR=/var/lib/agentoc/workspace \
-    AGENTOC_MEMORY_DIR=/var/lib/agentoc/memory \
-    /opt/agentoc/runtime/node -e '
+    RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+    RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+    RAGENT_MEMORY_DIR=/var/lib/ragent/memory \
+    /opt/ragent/runtime/node -e '
       const { readFileSync, writeFileSync } = require("fs");
-      const file = "/var/lib/agentoc/config/auth.json";
+      const file = "/var/lib/ragent/config/auth.json";
       try {
         const auth = JSON.parse(readFileSync(file, "utf8"));
         if (Object.prototype.hasOwnProperty.call(auth, "token")) {
@@ -526,38 +534,38 @@ fi
 # Stop and quarantine any legacy Agentoc-owned worker and state left by an
 # older package before ownership convergence. This is also installed as an
 # ExecStartPre hook, so a normal service restart cannot resurrect the old path.
-if [ -x /usr/lib/agentoc/retire-legacy-cc-switch ]; then
-  /usr/lib/agentoc/retire-legacy-cc-switch || echo "[postinst] legacy Agentoc cc-switch retirement was incomplete" >&2
+if [ -x /usr/lib/ragent/retire-legacy-cc-switch ]; then
+  /usr/lib/ragent/retire-legacy-cc-switch || echo "[postinst] legacy Agentoc cc-switch retirement was incomplete" >&2
 fi
 
-# /var/lib/agentoc/accounts belongs to the separately deployed Accounts
+# /var/lib/ragent/accounts belongs to the separately deployed Accounts
 # service.  Keep it out of the main service's recursive ownership migration.
-chown "$service_user:$service_group" /var/lib/agentoc /var/log/agentoc
-find /var/lib/agentoc -mindepth 1 -maxdepth 1 ! -path /var/lib/agentoc/accounts ! -path /var/lib/agentoc/retired \
+chown "$service_user:$service_group" /var/lib/ragent /var/log/ragent
+find /var/lib/ragent -mindepth 1 -maxdepth 1 ! -path /var/lib/ragent/accounts ! -path /var/lib/ragent/retired \
   -exec chown -R "$service_user:$service_group" {} +
-chown -R root:agentoc-privileged /var/log/agentoc-privileged
-chmod 0600 /var/lib/agentoc/config/auth.json
+chown -R root:ragent-privileged /var/log/ragent-privileged
+chmod 0600 /var/lib/ragent/config/auth.json
 converge_external_accounts_state
 
 # Same-user + P0-C: the control-plane core stays service-user:service-group
-# (0750). The runner state root is /var/lib/agentoc-run and its spool/provider
+# (0750). The runner state root is /var/lib/ragent-run and its spool/provider
 # homes are owned by the same configured service identity, so upgrades do not
-# strand old user-owned data. The units still mask /var/lib/agentoc,
-# /etc/agentoc, control logs, and privileged executor sockets; same UID is not
+# strand old user-owned data. The units still mask /var/lib/ragent,
+# /etc/ragent, control logs, and privileged executor sockets; same UID is not
 # control-plane authorization.
-install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/agentoc-run
-install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/agentoc-run/results
-install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/agentoc-run/provider-homes
+install -d -m 0750 -o "$service_user" -g "$service_group" /var/lib/ragent-run
+install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/ragent-run/results
+install -d -m 2770 -o "$service_user" -g "$service_group" /var/lib/ragent-run/provider-homes
 # Older lifecycle brokers could replace a Run's private status.json as root.
 # Restore only those known status files so existing Runs become readable after
 # upgrade; leave all other runner and provider data untouched.
-find /var/lib/agentoc-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
-  -path '/var/lib/agentoc-run/results/run_*/status.json' \
+find /var/lib/ragent-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+  -path '/var/lib/ragent-run/results/run_*/status.json' \
   -exec chown -h "$service_user:$service_group" {} +
 # The control plane creates Run directories and provider files while detached
 # runners update them, so default ACLs must survive recursive creation.
 if command -v setfacl >/dev/null 2>&1; then
-  for subtree in /var/lib/agentoc-run/results /var/lib/agentoc-run/provider-homes; do
+  for subtree in /var/lib/ragent-run/results /var/lib/ragent-run/provider-homes; do
     setfacl -m g:"$service_group":rwx,m:rwx "$subtree" || true
     setfacl -d -m u::rwx,g::rwx,g:"$service_group":rwx,m::rwx,o::--- "$subtree" || true
   done
@@ -566,11 +574,11 @@ fi
 # CONFIG_DIR into the runner-owned root.  The helper is idempotent and only
 # acts when the env targets differ from the legacy config layout; it is a no-op
 # on fresh installs.
-if [ -x /opt/agentoc/runtime/node ] && [ -f /opt/agentoc/app/scripts/relocate-runner-subtrees.mjs ]; then
-  AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
-  AGENTOC_RUN_SPOOL_DIR=/var/lib/agentoc-run/results \
-  AGENTOC_PROVIDER_HOMES_DIR=/var/lib/agentoc-run/provider-homes \
-    /opt/agentoc/runtime/node /opt/agentoc/app/scripts/relocate-runner-subtrees.mjs \
+if [ -x /opt/ragent/runtime/node ] && [ -f /opt/ragent/app/scripts/relocate-runner-subtrees.mjs ]; then
+  RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+  RAGENT_RUN_SPOOL_DIR=/var/lib/ragent-run/results \
+  RAGENT_PROVIDER_HOMES_DIR=/var/lib/ragent-run/provider-homes \
+    /opt/ragent/runtime/node /opt/ragent/app/scripts/relocate-runner-subtrees.mjs \
       --owner "$service_user" --group "$service_group" >/dev/null 2>&1 || true
 fi
 # Keep the compatibility marker aligned with the active identity. The lifecycle
@@ -578,17 +586,16 @@ fi
 # actual service user prevents older binaries from selecting the wrong UID on
 # upgrade.
 if getent passwd "$service_user" >/dev/null 2>&1; then
-  printf '%s\n' "$service_user" > /etc/agentoc/runner-user
-  chmod 0644 /etc/agentoc/runner-user
+  printf '%s\n' "$service_user" > /etc/ragent/runner-user
+  chmod 0644 /etc/ragent/runner-user
 fi
 
-main_service=agentoc.service
-if [ "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" = ragent ]; then main_service=ragent.service; fi
+main_service=ragent.service
 if [ -d /run/systemd/system ]; then
   # Same-user runner mode: both the chat service and supervisor use the
   # configured service identity. Generate the override instead of relying on
-  # the package fallback (the system account 'agentoc').
-  for unit in "$main_service" agentoc-storage-gc.service; do
+  # the package fallback (the system account 'ragent').
+  for unit in "$main_service" ragent-storage-gc.service; do
     install -d -m 0755 "/etc/systemd/system/$unit.d"
     cat > "/etc/systemd/system/$unit.d/10-service-user.conf" <<EOF
 [Service]
@@ -596,38 +603,40 @@ User=$service_user
 Group=$service_group
 EOF
   done
-  install -d -m 0755 /etc/systemd/system/agentoc-runner-supervisor.service.d
-  cat > /etc/systemd/system/agentoc-runner-supervisor.service.d/10-service-user.conf <<EOF
+  install -d -m 0755 /etc/systemd/system/ragent-runner-supervisor.service.d
+  cat > /etc/systemd/system/ragent-runner-supervisor.service.d/10-service-user.conf <<EOF
 [Service]
 User=$service_user
 Group=$service_group
 EOF
-  runner_groups="$(tr -d '\n' < /etc/agentoc/runner-groups)"
+  runner_groups="$(tr -d '\n' < /etc/ragent/runner-groups)"
   if [ -n "$runner_groups" ]; then
-    cat > /etc/systemd/system/agentoc-runner-supervisor.service.d/20-runner-inherited-groups.conf <<EOF
+    cat > /etc/systemd/system/ragent-runner-supervisor.service.d/20-runner-inherited-groups.conf <<EOF
 [Service]
 SupplementaryGroups=$runner_groups
 EOF
   else
-    rm -f /etc/systemd/system/agentoc-runner-supervisor.service.d/20-runner-inherited-groups.conf
+    rm -f /etc/systemd/system/ragent-runner-supervisor.service.d/20-runner-inherited-groups.conf
   fi
-  install -d -m 0755 /etc/systemd/system/agentoc-runner-supervisor.socket.d
-  cat > /etc/systemd/system/agentoc-runner-supervisor.socket.d/10-service-user.conf <<EOF
+  for socket in ragent-runner-lifecycle.socket ragent-runner-supervisor.socket; do
+    install -d -m 0755 "/etc/systemd/system/$socket.d"
+    cat > "/etc/systemd/system/$socket.d/10-service-user.conf" <<EOF
 [Socket]
 SocketUser=$service_user
 SocketGroup=$service_group
 EOF
+  done
   # 会话 cookie HMAC secret（2026-08-05 安全加固）：root 侧生成、0600，
   # 经 EnvironmentFile 注入服务进程环境（兄弟进程读不到 /proc/<pid>/environ）。
-  if [ ! -s /etc/agentoc/auth-secret ] || ! grep -q '^AGENTOC_AUTH_SESSION_SECRET=' /etc/agentoc/auth-secret; then
-    ( umask 077; { printf 'AGENTOC_AUTH_SESSION_SECRET='; openssl rand -hex 32 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex') + '\n')"; } > /etc/agentoc/auth-secret )
+  if [ ! -s /etc/ragent/auth-secret ] || ! grep -q '^RAGENT_AUTH_SESSION_SECRET=' /etc/ragent/auth-secret; then
+    ( umask 077; { printf 'RAGENT_AUTH_SESSION_SECRET='; openssl rand -hex 32 2>/dev/null || node -e "process.stdout.write(require('crypto').randomBytes(32).toString('hex') + '\n')"; } > /etc/ragent/auth-secret )
   fi
-  chown root:root /etc/agentoc/auth-secret
-  chmod 0600 /etc/agentoc/auth-secret
+  chown root:root /etc/ragent/auth-secret
+  chmod 0600 /etc/ragent/auth-secret
   install -d -m 0755 "/etc/systemd/system/$main_service.d"
   cat > "/etc/systemd/system/$main_service.d/20-auth-secret.conf" <<EOF
 [Service]
-EnvironmentFile=/etc/agentoc/auth-secret
+EnvironmentFile=/etc/ragent/auth-secret
 EOF
 fi
 
@@ -636,23 +645,23 @@ if [ -d /run/systemd/system ]; then
   # The service's ExecStartPre intentionally uses the quick path so a normal
   # restart never walks the complete history tree. Do the recursive ownership
   # and mode convergence once per package configuration instead.
-  AGENTOC_STATE_REPAIR_SERVICE_USER="$service_user" \
-    /usr/lib/agentoc/repair-state-access --full
-  systemctl enable --now agentoc-storage-gc.timer >/dev/null
-  systemctl enable agentoc-privileged-executor.service >/dev/null
-  # Executor 自杀防护：经 agentoc-privileged 通道执行 dpkg 时，本 postinst 位于
-  # agentoc-privileged-executor.service 的 cgroup 内；此处直接 restart 会让
+  RAGENT_STATE_REPAIR_SERVICE_USER="$service_user" \
+    /usr/lib/ragent/repair-state-access --full
+  systemctl enable --now ragent-storage-gc.timer >/dev/null
+  systemctl enable ragent-privileged-executor.service >/dev/null
+  # Executor 自杀防护：经 ragent-privileged 通道执行 dpkg 时，本 postinst 位于
+  # ragent-privileged-executor.service 的 cgroup 内；此处直接 restart 会让
   # systemd 连同 cgroup 一起杀掉正在运行的 dpkg，包永远停在 half-configured。
   # 该场景下改为挂瞬态定时任务，等 dpkg/postinst 退出后再完成重启，语义不变。
-  if grep -q 'agentoc-privileged-executor.service' /proc/self/cgroup 2>/dev/null \
+  if grep -q 'ragent-privileged-executor.service' /proc/self/cgroup 2>/dev/null \
     && command -v systemd-run >/dev/null 2>&1; then
     systemd-run --on-active=15 \
-      --unit="agentoc-executor-deferred-restart-$$" \
+      --unit="ragent-executor-deferred-restart-$$" \
       --property=TimeoutStartSec=10min \
-      /bin/sh -c 'while pgrep -x dpkg >/dev/null 2>&1 || pgrep -f "agentoc\.postinst configure" >/dev/null 2>&1; do sleep 5; done; sleep 2; systemctl restart agentoc-privileged-executor.service' \
+      /bin/sh -c 'while pgrep -x dpkg >/dev/null 2>&1 || pgrep -f "ragent\.postinst configure" >/dev/null 2>&1; do sleep 5; done; sleep 2; systemctl restart ragent-privileged-executor.service' \
       >/dev/null 2>&1 || true
   else
-    systemctl restart agentoc-privileged-executor.service
+    systemctl restart ragent-privileged-executor.service
   fi
   # P2-C: systemd socket activation.  Enable the socket units so the daemons
   # inherit a systemd-owned listening socket that survives restarts.  On an
@@ -661,27 +670,27 @@ if [ -d /run/systemd/system ]; then
   # socket unit, then let the restart below start the daemon with the inherited
   # fd.  Socket activation keeps the listening endpoint stable across daemon
   # restarts while the package applies the unit updates.
-  systemctl enable agentoc-runner-lifecycle.socket >/dev/null
-  systemctl stop agentoc-runner-lifecycle.service >/dev/null 2>&1 || true
-  systemctl restart agentoc-runner-lifecycle.socket
-  systemctl enable agentoc-runner-lifecycle.service >/dev/null
-  systemctl restart agentoc-runner-lifecycle.service
-  systemctl enable agentoc-runner-supervisor.socket >/dev/null
-  systemctl stop agentoc-runner-supervisor.service >/dev/null 2>&1 || true
-  systemctl restart agentoc-runner-supervisor.socket
-  systemctl enable agentoc-runner-supervisor.service >/dev/null
-  systemctl restart agentoc-runner-supervisor.service
+  systemctl enable ragent-runner-lifecycle.socket >/dev/null
+  systemctl stop ragent-runner-lifecycle.service >/dev/null 2>&1 || true
+  systemctl restart ragent-runner-lifecycle.socket
+  systemctl enable ragent-runner-lifecycle.service >/dev/null
+  systemctl restart ragent-runner-lifecycle.service
+  systemctl enable ragent-runner-supervisor.socket >/dev/null
+  systemctl stop ragent-runner-supervisor.service >/dev/null 2>&1 || true
+  systemctl restart ragent-runner-supervisor.socket
+  systemctl enable ragent-runner-supervisor.service >/dev/null
+  systemctl restart ragent-runner-supervisor.service
   systemctl enable "$main_service" >/dev/null
   systemctl restart "$main_service"
 fi
 
 # Services may rewrite managed Codex files during startup.  Apply the final
 # runner-home convergence after all restarts so the installed state is
-# immediately usable by agentoc-runner.
-if [ -d /var/lib/agentoc-run/provider-homes ]; then
-  chown -R "$service_user:$service_group" /var/lib/agentoc-run/provider-homes || true
-  find /var/lib/agentoc-run/provider-homes -type d -exec chmod 2770 {} + 2>/dev/null || true
-  find /var/lib/agentoc-run/provider-homes -type f -exec chmod 0640 {} + 2>/dev/null || true
+# immediately usable by ragent-runner.
+if [ -d /var/lib/ragent-run/provider-homes ]; then
+  chown -R "$service_user:$service_group" /var/lib/ragent-run/provider-homes || true
+  find /var/lib/ragent-run/provider-homes -type d -exec chmod 2770 {} + 2>/dev/null || true
+  find /var/lib/ragent-run/provider-homes -type f -exec chmod 0640 {} + 2>/dev/null || true
 fi
 
 # Service startup may create or rewrite registry files during installation;
@@ -693,8 +702,8 @@ converge_provider_runtime_access
 # nonempty diversion target, including after an interrupted upgrade.
 for tool in codex claude; do
   command_path="/usr/bin/$tool"
-  diverted_path="/usr/lib/agentoc/legacy-global-$tool"
-  marker="/etc/agentoc/.legacy-global-$tool-diversion"
+  diverted_path="/usr/lib/ragent/legacy-global-$tool"
+  marker="/etc/ragent/.legacy-global-$tool-diversion"
   [ -f "$marker" ] || continue
   [ "$(cat "$marker")" = "$diverted_path" ] || continue
   current_diversion="$(dpkg-divert --truename "$command_path")"

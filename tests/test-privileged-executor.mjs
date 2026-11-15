@@ -17,7 +17,7 @@ function check(label, condition) {
 }
 
 async function main() {
-const tmpDir = await mkdtemp(join(tmpdir(), 'agentoc-p3c-test-'));
+const tmpDir = await mkdtemp(join(tmpdir(), 'ragent-p3c-test-'));
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,17 +59,17 @@ async function stopExecutor(handle) {
 async function startExecutor({ socketPath, keysFilePath, auditFile, skipLiveness = true, peerCredHelper = null, forcePeerCred = false, serviceUserFile = null, semanticWindowsEnabled = false }) {
   const env = {
     ...process.env,
-    AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-    AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-    AGENTOC_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST: '1',
-    AGENTOC_PRIVILEGED_EXECUTOR_SOCKET: socketPath,
-    AGENTOC_PRIVILEGED_SIGNING_KEYS_FILE: keysFilePath,
-    AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE: auditFile,
-    ...(skipLiveness ? { AGENTOC_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS: '1' } : {}),
-    ...(peerCredHelper ? { AGENTOC_PRIVILEGED_PEERCRED_HELPER: peerCredHelper } : {}),
-    ...(forcePeerCred ? { AGENTOC_PRIVILEGED_EXECUTOR_FORCE_PEERCRED: '1' } : {}),
-    ...(serviceUserFile ? { AGENTOC_SERVICE_USER_FILE: serviceUserFile } : {}),
-    ...(semanticWindowsEnabled ? { AGENTOC_SEMANTIC_WINDOWS_ADAPTER_ENABLED: '1' } : {}),
+    RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+    RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+    RAGENT_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST: '1',
+    RAGENT_PRIVILEGED_EXECUTOR_SOCKET: socketPath,
+    RAGENT_PRIVILEGED_SIGNING_KEYS_FILE: keysFilePath,
+    RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE: auditFile,
+    ...(skipLiveness ? { RAGENT_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS: '1' } : {}),
+    ...(peerCredHelper ? { RAGENT_PRIVILEGED_PEERCRED_HELPER: peerCredHelper } : {}),
+    ...(forcePeerCred ? { RAGENT_PRIVILEGED_EXECUTOR_FORCE_PEERCRED: '1' } : {}),
+    ...(serviceUserFile ? { RAGENT_SERVICE_USER_FILE: serviceUserFile } : {}),
+    ...(semanticWindowsEnabled ? { RAGENT_SEMANTIC_WINDOWS_ADAPTER_ENABLED: '1' } : {}),
     PATH: process.env.PATH,
   };
   const child = spawn(process.execPath, ['scripts/privileged-executor.mjs', 'serve'], {
@@ -140,7 +140,7 @@ check('executor started', executor.exitCode === null && executor.signalCode === 
 }
 
 {
-  const windowsDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-windows-platform-'));
+  const windowsDir = await mkdtemp(join(tmpdir(), 'ragent-exec-windows-platform-'));
   const windowsSocket = join(windowsDir, 'exec.sock');
   const windowsAudit = join(windowsDir, 'audit.jsonl');
   const windowsExecutor = await startExecutor({
@@ -185,7 +185,7 @@ const token1 = signPrivilegedToken({
   sessionId: 'sess_test',
   runId: 'run_test',
   turnId: 'turn_test',
-  cgroup: 'agentoc-runner-run_test',
+  cgroup: 'ragent-runner-run_test',
   authMode: 'passkey',
   issuedAt: new Date().toISOString(),
   expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -230,7 +230,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'passkey',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -262,7 +262,7 @@ const token1 = signPrivilegedToken({
   // records an opId the new process has never seen, then submit that opId's
   // token. The rebuilt consumed set must reject it (blocks replay across
   // restarts — proposal §2.3 lifecycle).
-  const restartDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-restart-'));
+  const restartDir = await mkdtemp(join(tmpdir(), 'ragent-exec-restart-'));
   const restartSocket = join(restartDir, 'exec.sock');
   const restartAudit = join(restartDir, 'audit.jsonl');
   const restartOpId = 'pop_test_restart_replay';
@@ -276,7 +276,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'passkey',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -314,7 +314,7 @@ const token1 = signPrivilegedToken({
   const command = 'df /tmp';
   const token = signPrivilegedToken({ kid, opId, category: 'privileged_other', command, cwd: '/tmp',
     manifestHash: computeOpManifestHash({ command, category: 'privileged_other', cwd: '/tmp' }),
-    sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'agentoc-runner-run_test',
+    sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'ragent-runner-run_test',
     authMode: 'passkey', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }, keyPair.privateKey, { kid });
   const responses = await Promise.all(Array.from({ length: 8 }, () => requestPrivilegedExecutor(
@@ -326,7 +326,7 @@ const token1 = signPrivilegedToken({
 
 // A truncated ledger cannot be treated as an empty replay history.
 {
-  const brokenDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-broken-audit-'));
+  const brokenDir = await mkdtemp(join(tmpdir(), 'ragent-exec-broken-audit-'));
   try {
     const brokenAudit = join(brokenDir, 'audit.jsonl');
     await writeFile(brokenAudit, '{"event":"command_started"', { mode: 0o600 });
@@ -345,7 +345,7 @@ const token1 = signPrivilegedToken({
 
 // A write failure after startup must prevent the requested operation.
 {
-  const failedDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-audit-failure-'));
+  const failedDir = await mkdtemp(join(tmpdir(), 'ragent-exec-audit-failure-'));
   const failedSocket = join(failedDir, 'exec.sock');
   const failedAudit = join(failedDir, 'audit.jsonl');
   const marker = join(failedDir, 'must-not-exist');
@@ -355,7 +355,7 @@ const token1 = signPrivilegedToken({
     const command = `touch ${marker}`;
     const token = signPrivilegedToken({ kid, opId: 'pop_test_audit_failure', category: 'privileged_other', command, cwd: '/tmp',
       manifestHash: computeOpManifestHash({ command, category: 'privileged_other', cwd: '/tmp' }),
-      sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'agentoc-runner-run_test',
+      sessionId: 'sess_test', runId: 'run_test', turnId: 'turn_test', cgroup: 'ragent-runner-run_test',
       authMode: 'passkey', issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString(),
     }, keyPair.privateKey, { kid });
     const response = await requestPrivilegedExecutor({ action: 'exec', token }, { socketPath: failedSocket, timeoutMs: 10_000 });
@@ -375,7 +375,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'passkey',
     issuedAt: new Date(Date.now() - 120_000).toISOString(),
     expiresAt: new Date(Date.now() - 60_000).toISOString(), // expired 60s ago
@@ -402,7 +402,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'install-auto',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -434,7 +434,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'install-auto',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -461,7 +461,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-WRONG_RUN_ID',  // mismatch with runId
+    cgroup: 'ragent-runner-WRONG_RUN_ID',  // mismatch with runId
     authMode: 'passkey',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -511,7 +511,7 @@ const token1 = signPrivilegedToken({
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'passkey',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -551,9 +551,9 @@ const token1 = signPrivilegedToken({
 
 {
   // Real rejection branch: executor WITHOUT the skip env, submitting a valid
-  // token whose runner unit (agentoc-runner-run_liveness) does not exist on
+  // token whose runner unit (ragent-runner-run_liveness) does not exist on
   // this host — systemctl is-active fails closed.
-  const livenessDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-liveness-'));
+  const livenessDir = await mkdtemp(join(tmpdir(), 'ragent-exec-liveness-'));
   const livenessSocket = join(livenessDir, 'exec.sock');
   const livenessAudit = join(livenessDir, 'audit.jsonl');
   const livenessExecutor = await startExecutor({
@@ -573,7 +573,7 @@ const token1 = signPrivilegedToken({
       sessionId: 'sess_test',
       runId: 'run_liveness',
       turnId: 'turn_test',
-      cgroup: 'agentoc-runner-run_liveness',
+      cgroup: 'ragent-runner-run_liveness',
       authMode: 'passkey',
       issuedAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -615,7 +615,7 @@ function signValidTestToken(opId) {
     sessionId: 'sess_test',
     runId: 'run_peercred',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_peercred',
+    cgroup: 'ragent-runner-run_peercred',
     authMode: 'passkey',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -623,9 +623,9 @@ function signValidTestToken(opId) {
 }
 
 {
-  // Reject branch: fake helper reports a uid that is not the AgentoC service
+  // Reject branch: fake helper reports a uid that is not the Ragent service
   // user — the executor must fail closed before touching the token.
-  const peerDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-peercred-'));
+  const peerDir = await mkdtemp(join(tmpdir(), 'ragent-exec-peercred-'));
   const serviceUserFile = join(peerDir, 'service-user');
   const fixtureServiceUser = process.getuid?.() === 0 ? 'nobody' : userInfo().username;
   await writeFile(serviceUserFile, `${fixtureServiceUser}\n`);
@@ -658,14 +658,14 @@ function signValidTestToken(opId) {
   // Pass branch: fake helper reports the real service-user uid — the request
   // must pass peer verification and reach token validation (which rejects the
   // tampered token), proving the peer layer did NOT deny it. The service-user
-  // file is injected so the test is hermetic (the host's /etc/agentoc/service-user
+  // file is injected so the test is hermetic (the host's /etc/ragent/service-user
   // may name a different account).
-  const peerDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-peercred-ok-'));
+  const peerDir = await mkdtemp(join(tmpdir(), 'ragent-exec-peercred-ok-'));
   const serviceUserFile = join(peerDir, 'service-user');
   const fixtureServiceUser = process.getuid?.() === 0 ? 'nobody' : userInfo().username;
   await writeFile(serviceUserFile, `${fixtureServiceUser}\n`);
-  const agentocUid = Number.parseInt(execFileSync('getent', ['passwd', fixtureServiceUser], { encoding: 'utf8' }).split(':')[2], 10);
-  const helperPath = await writePeerCredHelper(peerDir, agentocUid);
+  const ragentUid = Number.parseInt(execFileSync('getent', ['passwd', fixtureServiceUser], { encoding: 'utf8' }).split(':')[2], 10);
+  const helperPath = await writePeerCredHelper(peerDir, ragentUid);
   const peerSocket = join(peerDir, 'exec.sock');
   const peerAudit = join(peerDir, 'audit.jsonl');
   const peerExecutor = await startExecutor({
@@ -706,14 +706,14 @@ function signValidTestToken(opId) {
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'owner-click',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }, keyPair.privateKey, { kid });
 
   // (a) allowlisted program under owner-click executes end-to-end
-  const victimDir = await mkdtemp(join(tmpdir(), 'agentoc-owner-click-exec-'));
+  const victimDir = await mkdtemp(join(tmpdir(), 'ragent-owner-click-exec-'));
   const rmCommand = `rm -rf ${victimDir}`;
   const execToken = mkOwnerClickToken('pop_owner_click_exec', rmCommand);
   try {
@@ -730,7 +730,7 @@ function signValidTestToken(opId) {
   }
 
   // (b) shell under owner-click is denied and never spawns
-  const shellDir = await mkdtemp(join(tmpdir(), 'agentoc-owner-click-shell-'));
+  const shellDir = await mkdtemp(join(tmpdir(), 'ragent-owner-click-shell-'));
   const shellCommand = `sudo bash -c 'rm -rf ${shellDir}'`;
   const shellToken = mkOwnerClickToken('pop_owner_click_shell', shellCommand);
   try {
@@ -749,7 +749,7 @@ function signValidTestToken(opId) {
   // A first-token allowlist is insufficient while the executor uses /bin/sh -c:
   // a composite command can keep `rm` as its prefix and append an unapproved
   // second operation. The scope gate must reject it before spawn.
-  const compositeDir = await mkdtemp(join(tmpdir(), 'agentoc-owner-click-composite-'));
+  const compositeDir = await mkdtemp(join(tmpdir(), 'ragent-owner-click-composite-'));
   const markerPath = join(compositeDir, 'marker');
   const compositeToken = mkOwnerClickToken(
     'pop_owner_click_composite',
@@ -786,7 +786,7 @@ function signValidTestToken(opId) {
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'install-auto',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -812,7 +812,7 @@ function signValidTestToken(opId) {
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'install-auto',
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -846,7 +846,7 @@ function signValidTestToken(opId) {
     sessionId: 'sess_test',
     runId: 'run_test',
     turnId: 'turn_test',
-    cgroup: 'agentoc-runner-run_test',
+    cgroup: 'ragent-runner-run_test',
     authMode: 'sudo',  // not a known mode — must fail closed, never execute
     issuedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 60_000).toISOString(),

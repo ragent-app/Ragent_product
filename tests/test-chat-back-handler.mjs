@@ -26,17 +26,17 @@ const [handlerSource, runSheetSource, decisionSheetSource, sidebarUiSource, tool
 // ---- Static wiring: every core overlay talks to the manager ----
 assert.match(
   runSheetSource,
-  /window\.AgentoCBackHandler\?\.push\?\.\(\{\s*id: "run-sheet",[\s\S]*?state\.readerOpen[\s\S]*?closeMarkdownPreview\(\)/,
+  /window\.RagentBackHandler\?\.push\?\.\(\{\s*id: "run-sheet",[\s\S]*?state\.readerOpen[\s\S]*?closeMarkdownPreview\(\)/,
   'run sheet should register with reader-first back semantics',
 );
 assert.match(
   runSheetSource,
-  /window\.AgentoCBackHandler\?\.pop\?\.\(backEntryId\);/,
+  /window\.RagentBackHandler\?\.pop\?\.\(backEntryId\);/,
   'run sheet close should unregister',
 );
 assert.match(
   decisionSheetSource,
-  /window\.AgentoCBackHandler\?\.push\?\.\(\{\s*id: "decision-sheet",[\s\S]*?hideSheet\(\)/,
+  /window\.RagentBackHandler\?\.push\?\.\(\{\s*id: "decision-sheet",[\s\S]*?hideSheet\(\)/,
   'decision sheet should register and collapse without deciding on back',
 );
 assert.match(
@@ -87,7 +87,7 @@ const [bootstrapSource, customSelectSource, sessionSurfaceSource, workbenchSourc
   ]);
 assert.match(
   decisionSheetSource,
-  /root\.AgentoCDecisionSheet = Object\.freeze\(\{[^}]*\breopen\b[^}]*\}\);/,
+  /root\.RagentDecisionSheet = Object\.freeze\(\{[^}]*\breopen\b[^}]*\}\);/,
   'the decision sheet should expose a reopen entry point',
 );
 assert.match(
@@ -97,7 +97,7 @@ assert.match(
 );
 assert.match(
   liveStatusSource,
-  /window\.AgentoCDecisions\.getPending\(\)[\s\S]*?window\.AgentoCDecisionSheet\.reopen\(\);/,
+  /window\.RagentDecisions\.getPending\(\)[\s\S]*?window\.RagentDecisionSheet\.reopen\(\);/,
   'the Live Bar should reopen the pending approval sheet',
 );
 assert.match(
@@ -107,7 +107,7 @@ assert.match(
 );
 assert.match(
   decisionSheetSource,
-  /window\.AgentoCMotion\?\.prefersReducedMotion\?\.\(\)[\s\S]*?finishHideSheet\(\);/,
+  /window\.RagentMotion\?\.prefersReducedMotion\?\.\(\)[\s\S]*?finishHideSheet\(\);/,
   'reduced-motion users should skip the collapse animation',
 );
 assert.match(
@@ -208,8 +208,8 @@ async function newHandlerPage() {
   const page = await newHandlerPage();
   const pushed = await page.evaluate(() => {
     const before = history.length;
-    const id = window.AgentoCBackHandler.push({ id: 'layer-a', onBack: () => true });
-    return { id, grew: history.length > before, active: window.AgentoCBackHandler.active() };
+    const id = window.RagentBackHandler.push({ id: 'layer-a', onBack: () => true });
+    return { id, grew: history.length > before, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(pushed, { id: 'layer-a', grew: true, active: true }, 'push should add a history entry and activate');
 
@@ -217,12 +217,12 @@ async function newHandlerPage() {
   const consumedPage = await newHandlerPage();
   const consumed = await consumedPage.evaluate(async () => {
     window.__closed = [];
-    window.AgentoCBackHandler.push({ id: 'layer-b', onBack: () => { window.__closed.push('b'); return true; } });
+    window.RagentBackHandler.push({ id: 'layer-b', onBack: () => { window.__closed.push('b'); return true; } });
     history.back();
     await new Promise((r) => setTimeout(r, 450));
     return {
       closed: window.__closed,
-      active: window.AgentoCBackHandler.active(),
+      active: window.RagentBackHandler.active(),
     };
   });
   assert.deepEqual(consumed, { closed: ['b'], active: false }, 'back should consume the top layer only');
@@ -232,13 +232,13 @@ async function newHandlerPage() {
   const refused = await refusedPage.evaluate(async () => {
     let attempts = 0;
     // onBack returns true = consumed; false = refused (entry restored).
-    window.AgentoCBackHandler.push({ id: 'layer-c', onBack: () => { attempts += 1; return attempts >= 3; } });
+    window.RagentBackHandler.push({ id: 'layer-c', onBack: () => { attempts += 1; return attempts >= 3; } });
     history.back();
     await new Promise((r) => setTimeout(r, 450));
     const afterFirst = attempts;
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return { afterFirst, afterSecond: attempts, active: window.AgentoCBackHandler.active() };
+    return { afterFirst, afterSecond: attempts, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(refused, { afterFirst: 1, afterSecond: 2, active: true }, 'a refused close should retry on the next back');
 
@@ -246,11 +246,11 @@ async function newHandlerPage() {
   const foreignPage = await newHandlerPage();
   const foreign = await foreignPage.evaluate(async () => {
     window.__closed = [];
-    window.AgentoCBackHandler.push({ id: 'layer-d', onBack: () => { window.__closed.push('d'); return true; } });
+    window.RagentBackHandler.push({ id: 'layer-d', onBack: () => { window.__closed.push('d'); return true; } });
     history.pushState({ foreign: true }, '');
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return { closed: window.__closed, active: window.AgentoCBackHandler.active() };
+    return { closed: window.__closed, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(foreign, { closed: ['d'], active: false }, 'an unknown entry should conservatively close the top layer');
 
@@ -258,13 +258,13 @@ async function newHandlerPage() {
   const lifoPage = await newHandlerPage();
   const lifo = await lifoPage.evaluate(async () => {
     window.__closed = [];
-    window.AgentoCBackHandler.push({ id: 'outer', onBack: () => { window.__closed.push('outer'); return true; } });
-    window.AgentoCBackHandler.push({ id: 'inner', onBack: () => { window.__closed.push('inner'); return true; } });
+    window.RagentBackHandler.push({ id: 'outer', onBack: () => { window.__closed.push('outer'); return true; } });
+    window.RagentBackHandler.push({ id: 'inner', onBack: () => { window.__closed.push('inner'); return true; } });
     history.back();
     await new Promise((r) => setTimeout(r, 450));
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return { closed: window.__closed, active: window.AgentoCBackHandler.active() };
+    return { closed: window.__closed, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(lifo, { closed: ['inner', 'outer'], active: false }, 'backs should unwind layers in LIFO order');
 
@@ -272,12 +272,12 @@ async function newHandlerPage() {
   const nonTopPage = await newHandlerPage();
   const nonTop = await nonTopPage.evaluate(async () => {
     window.__closed = [];
-    window.AgentoCBackHandler.push({ id: 'bottom', onBack: () => { window.__closed.push('bottom'); return true; } });
-    window.AgentoCBackHandler.push({ id: 'top', onBack: () => { window.__closed.push('top'); return true; } });
-    window.AgentoCBackHandler.pop('bottom');
+    window.RagentBackHandler.push({ id: 'bottom', onBack: () => { window.__closed.push('bottom'); return true; } });
+    window.RagentBackHandler.push({ id: 'top', onBack: () => { window.__closed.push('top'); return true; } });
+    window.RagentBackHandler.pop('bottom');
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return { closed: window.__closed, active: window.AgentoCBackHandler.active() };
+    return { closed: window.__closed, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(nonTop, { closed: ['top'], active: false }, 'popping a lower layer should not close the top layer');
 
@@ -285,22 +285,22 @@ async function newHandlerPage() {
   const unwindPage = await newHandlerPage();
   const unwind = await unwindPage.evaluate(async () => {
     window.__closed = [];
-    const id = window.AgentoCBackHandler.push({ id: 'solo', onBack: () => { window.__closed.push('solo'); return true; } });
-    window.AgentoCBackHandler.pop(id);
+    const id = window.RagentBackHandler.push({ id: 'solo', onBack: () => { window.__closed.push('solo'); return true; } });
+    window.RagentBackHandler.pop(id);
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return { closed: window.__closed, active: window.AgentoCBackHandler.active() };
+    return { closed: window.__closed, active: window.RagentBackHandler.active() };
   });
   assert.deepEqual(unwind, { closed: [], active: false }, 'after a user close the next back should not re-trigger');
 
   // 8. Empty stack: back does nothing (browser default exit).
   const emptyPage = await newHandlerPage();
   const empty = await emptyPage.evaluate(async () => {
-    window.AgentoCBackHandler.push({ id: 'temp', onBack: () => true });
-    window.AgentoCBackHandler.pop('temp');
+    window.RagentBackHandler.push({ id: 'temp', onBack: () => true });
+    window.RagentBackHandler.pop('temp');
     history.back();
     await new Promise((r) => setTimeout(r, 450));
-    return window.AgentoCBackHandler.active();
+    return window.RagentBackHandler.active();
   });
   assert.equal(empty, false, 'an empty stack should leave the back to the browser');
 
@@ -316,19 +316,19 @@ async function newHandlerPage() {
   const decisionFlow = await decisionPage.evaluate(async () => {
     window.submitRuntimeApprovalDecision = async () => true;
     const sheet = document.getElementById('decisionSheet');
-    window.AgentoCDecisions.noteRequest({ approvalId: 'a1', title: 'Run command?', kind: 'approval', command: 'ls' });
+    window.RagentDecisions.noteRequest({ approvalId: 'a1', title: 'Run command?', kind: 'approval', command: 'ls' });
     const opened = !sheet.hidden;
-    const pendingBefore = !!window.AgentoCDecisions.getPending();
+    const pendingBefore = !!window.RagentDecisions.getPending();
     // Android back: sheet collapses, approval stays pending, no decision.
     history.back();
     await new Promise((r) => setTimeout(r, 450));
     const collapsed = sheet.hidden;
-    const pendingAfter = !!window.AgentoCDecisions.getPending();
+    const pendingAfter = !!window.RagentDecisions.getPending();
     // Live Bar tap: reopen the still-pending approval.
-    window.AgentoCDecisionSheet.reopen();
+    window.RagentDecisionSheet.reopen();
     const reopened = !sheet.hidden;
     // Reopen is idempotent while already visible.
-    window.AgentoCDecisionSheet.reopen();
+    window.RagentDecisionSheet.reopen();
     const idempotent = !sheet.hidden;
     // Reopen mid-collapse: a back while the close animation is in flight
     // must cancel the collapse and re-expand, not get swallowed by the
@@ -336,11 +336,11 @@ async function newHandlerPage() {
     history.back();
     await new Promise((r) => setTimeout(r, 120));
     const closingInFlight = sheet.classList.contains('is-closing');
-    window.AgentoCDecisionSheet.reopen();
+    window.RagentDecisionSheet.reopen();
     const reopenedMidCollapse = !sheet.hidden && !sheet.classList.contains('is-closing');
     // Approval resolved: noteResponse clears the store, the sheet collapses
     // through the same animated path and empties after the animation.
-    window.AgentoCDecisions.noteResponse({ approvalId: 'a1' });
+    window.RagentDecisions.noteResponse({ approvalId: 'a1' });
     await new Promise((r) => setTimeout(r, 120));
     const resolving = sheet.classList.contains('is-closing');
     await new Promise((r) => setTimeout(r, 300));

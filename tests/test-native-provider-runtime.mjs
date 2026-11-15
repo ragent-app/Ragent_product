@@ -15,7 +15,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createServer } from 'node:net';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-native-provider-runtime-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-native-provider-runtime-'));
 
 const {
   createNativeProviderRegistry,
@@ -350,12 +350,12 @@ try {
   assert.ok(configA.includes('https://openrouter.example/api/v1'));
   assert.ok(configB.includes('https://deepseek.example/v1'));
   assert.ok(!configA.includes('deepseek'), 'run A config must not reference run B provider');
-  assert.ok(configA.includes('env_key = "AGENTOC_RUNTIME_API_KEY"'));
+  assert.ok(configA.includes('env_key = "RAGENT_RUNTIME_API_KEY"'));
   assert.ok(configA.includes('cli_auth_credentials_store = true'));
   assert.ok(!configA.includes('cli_auth_credentials_store = "file"'));
   assert.equal(codexA.env.CODEX_HOME, codexA.codexHomeDir);
-  assert.equal(codexA.env.AGENTOC_RUNTIME_API_KEY, 'sk-test-aaaaaaaa');
-  assert.equal(codexB.env.AGENTOC_RUNTIME_API_KEY, 'sk-test-bbbbbb');
+  assert.equal(codexA.env.RAGENT_RUNTIME_API_KEY, 'sk-test-aaaaaaaa');
+  assert.equal(codexB.env.RAGENT_RUNTIME_API_KEY, 'sk-test-bbbbbb');
 
   // OAuth home carries auth.json, no env key.
   const snapshotOfficial = await resolveRuntimeConfig({
@@ -380,7 +380,7 @@ try {
   assert.ok(officialConfig.includes('service_tier = "fast"'));
   const officialAuth = JSON.parse(readFileSync(join(codexOfficial.codexHomeDir, 'auth.json'), 'utf8'));
   assert.equal(officialAuth.tokens.access_token, 'at-1');
-  assert.equal(codexOfficial.env.AGENTOC_RUNTIME_API_KEY, undefined, 'oauth runs must not carry an env api key');
+  assert.equal(codexOfficial.env.RAGENT_RUNTIME_API_KEY, undefined, 'oauth runs must not carry an env api key');
 
   // Adapter auth storage ref flows via snapshot (prepared prepare path injects it).
   const claudeGatewaySnapshot = {
@@ -565,7 +565,7 @@ try {
   assert.equal(clineSettings.lastUsedProvider, 'openai-native');
   assert.equal(clineSettings.providers['openai-native'].settings.model, 'gpt-cline');
   assert.doesNotMatch(readFileSync(join(clineHome, 'settings', 'providers.json'), 'utf8'), /cline-secret/);
-  assert.equal(readFileSync(join(clineHome, '.agentoc-provider.env'), 'utf8').includes('cline-secret'), true);
+  assert.equal(readFileSync(join(clineHome, '.ragent-provider.env'), 'utf8').includes('cline-secret'), true);
 
   const preparedKilo = await prepareNativeRunProviderHome('run_kilo_1', {
     tool: 'kilo-code',
@@ -574,9 +574,9 @@ try {
   assert.equal(preparedKilo.ok, true, preparedKilo.error || preparedKilo.reason);
   const kiloHome = join(preparedKilo.homeDir, 'kilo');
   const kiloConfig = readFileSync(join(kiloHome, 'kilo.jsonc'), 'utf8');
-  assert.match(kiloConfig, /"model": "agentoc\/gpt-kilo"/);
+  assert.match(kiloConfig, /"model": "ragent\/gpt-kilo"/);
   assert.match(kiloConfig, /"npm": "@ai-sdk\/openai-compatible"/);
-  assert.match(kiloConfig, /"env": \[\s*"AGENTOC_PROVIDER_API_KEY"\s*\]/);
+  assert.match(kiloConfig, /"env": \[\s*"RAGENT_PROVIDER_API_KEY"\s*\]/);
   assert.match(kiloConfig, /"baseURL": "https:\/\/kilo\.example\/v1"/);
   assert.match(kiloConfig, /"context": 128000/);
   assert.doesNotMatch(kiloConfig, /"apiKey"/);
@@ -592,7 +592,7 @@ try {
   assert.match(kimiConfig, /default_model = "kimi-test-model"/);
   assert.match(kimiConfig, /base_url = "https:\/\/kimi\.example\/v1"/);
   assert.match(kimiConfig, /api_key = "kimi-secret"/);
-  assert.match(readFileSync(join(kimiHome, '.agentoc-provider.env'), 'utf8'), /kimi-secret/);
+  assert.match(readFileSync(join(kimiHome, '.ragent-provider.env'), 'utf8'), /kimi-secret/);
 
   const homesRoot = join(root, 'provider-homes');
   // Regression: the root lifecycle broker may have created this provider key
@@ -610,7 +610,7 @@ try {
   const lunaMcpBinding = managedCodexMcpAccountBinding({ authType: 'api-key', apiKey: 'sk-luna' });
   const managedMcpHome = managedCodexMcpHome(configDir, 'newapi-luna', lunaMcpBinding);
   mkdirSync(managedMcpHome, { recursive: true });
-  writeFileSync(join(managedMcpHome, '.agentoc-account-binding'), lunaMcpBinding + '\n');
+  writeFileSync(join(managedMcpHome, '.ragent-account-binding'), lunaMcpBinding + '\n');
   writeFileSync(join(managedMcpHome, 'config.toml'), '[mcp_servers.docs]\nurl = "https://example.invalid/mcp"\n');
   await saveCodexSkillPreference(configDir, 'newapi-luna', lunaMcpBinding, join(root, 'skills', 'review', 'SKILL.md'), false);
   const prepared = await prepareNativeRunProviderHome('run_300', {
@@ -665,7 +665,7 @@ try {
   );
   const preparedAuth = JSON.parse(readFileSync(join(preparedHome, 'auth.json'), 'utf8'));
   assert.equal(preparedAuth.OPENAI_API_KEY, 'sk-luna');
-  assert.equal(readFileSync(join(preparedHome, '.agentoc-provider-id'), 'utf8').trim(), 'newapi-luna');
+  assert.equal(readFileSync(join(preparedHome, '.ragent-provider-id'), 'utf8').trim(), 'newapi-luna');
   assert.ok(prepared.snapshot?.configHash, 'native prepare must return the frozen snapshot for provenance');
   const readOnlyPrepared = await prepareNativeRunProviderHome('run_read_only_mcp', {
     tool: 'codex', options: { providerProfile: 'newapi-luna', model: 'luna-model' },
@@ -695,7 +695,7 @@ try {
   assert.match(readFileSync(join(privatePlugins.codexHomeDir, 'config.toml'), 'utf8'), /plugins = false/);
   await writeCodexPluginPreference(configDir, pluginBinding, false);
   const oauthAuthPath = join(oauthCodexHome, 'auth.json');
-  const oauthStatePath = join(oauthCodexHome, '.agentoc-oauth-state.json');
+  const oauthStatePath = join(oauthCodexHome, '.ragent-oauth-state.json');
   const oauthAuth1 = JSON.parse(readFileSync(oauthAuthPath, 'utf8'));
   const oauthState1 = JSON.parse(readFileSync(oauthStatePath, 'utf8'));
   assert.equal(oauthAuth1.tokens.access_token, 'at-1');
@@ -737,7 +737,7 @@ try {
     tokens: { access_token: 'at-new-account', refresh_token: 'rt-new-account', account_id: 'account-other', expiresAt: 3000 } });
   const brokerSocket = codexAppServerBrokerSocketPath(oauthCodexHome);
   const fakeLiveBroker = createServer(socket => socket.once('data', () => {
-    socket.end(JSON.stringify({ type:'agentoc-codex-broker-pong', ready:true }) + '\n');
+    socket.end(JSON.stringify({ type:'ragent-codex-broker-pong', ready:true }) + '\n');
   }));
   await new Promise((resolve, reject) => fakeLiveBroker.once('error', reject).listen(brokerSocket, resolve));
   try {
@@ -761,7 +761,7 @@ try {
   const oauthMcpBinding = managedCodexMcpAccountBinding({ authType: 'oauth', tokens: { account_id: 'account-a' } });
   const oauthMcpHome = managedCodexMcpHome(configDir, 'openai-official-a', oauthMcpBinding);
   mkdirSync(oauthMcpHome, { recursive: true });
-  writeFileSync(join(oauthMcpHome, '.agentoc-account-binding'), oauthMcpBinding + '\n');
+  writeFileSync(join(oauthMcpHome, '.ragent-account-binding'), oauthMcpBinding + '\n');
   const oauthMcpConfig = join(oauthMcpHome, 'config.toml');
   writeFileSync(oauthMcpConfig, '[mcp_servers.example]\nurl = "https://example.invalid/mcp"\n');
   let reloads = 0;
@@ -775,12 +775,12 @@ try {
       let newline;
       while ((newline = input.indexOf('\n')) >= 0) {
         const message = JSON.parse(input.slice(0, newline)); input = input.slice(newline + 1);
-        if (message.type === 'agentoc-codex-broker-ping') socket.write(JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true,
+        if (message.type === 'ragent-codex-broker-ping') socket.write(JSON.stringify({ type: 'ragent-codex-broker-pong', ready: true,
           ...(message.expectedAccountDigest ? { accountMatches: message.expectedAccountDigest === codexBrokerAccountDigest('account-a') } : {}) }) + '\n');
-        else if (message.type === 'agentoc-codex-broker-retire') {
+        else if (message.type === 'ragent-codex-broker-retire') {
           retireAttempts += 1;
           assert.equal(message.expectedAccountDigest, codexBrokerAccountDigest('account-a'));
-          socket.end(JSON.stringify({ type: 'agentoc-codex-broker-retire-result', accepted: allowRetirement }) + '\n');
+          socket.end(JSON.stringify({ type: 'ragent-codex-broker-retire-result', accepted: allowRetirement }) + '\n');
         }
         else if (message.method === 'initialize') socket.write(JSON.stringify({ id: message.id, result: {} }) + '\n');
         else if (message.method === 'config/mcpServer/reload') {
@@ -814,20 +814,20 @@ try {
     await prepareNativeRunProviderHome('reload-retry', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
       { configDir, providerHomesRoot:oauthHomeRoot });
     assert.equal(reloads, 4, 'failed refresh must be retried');
-    const oldApplied = readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim();
+    const oldApplied = readFileSync(join(oauthCodexHome, '.ragent-plugin-applied'), 'utf8').trim();
     await writeCodexPluginPreference(configDir, pluginBinding, true);
     const desiredRevision = (await readCodexPluginPreferenceState(configDir, pluginBinding)).revision;
     const busy = await prepareNativeRunProviderHome('plugin-busy', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
       { configDir, providerHomesRoot:oauthHomeRoot });
     assert.equal(busy.ok, true, 'a busy broker must not block normal work');
     assert.equal(retireAttempts, 1);
-    assert.equal(readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim(), oldApplied);
+    assert.equal(readFileSync(join(oauthCodexHome, '.ragent-plugin-applied'), 'utf8').trim(), oldApplied);
     allowRetirement = true;
     const retried = await prepareNativeRunProviderHome('plugin-retry', { tool:'codex', options:{ providerProfile:'openai-official-a', model:'gpt-5.5' } },
       { configDir, providerHomesRoot:oauthHomeRoot });
     assert.equal(retried.ok, true, retried.error || retried.reason);
     assert.equal(retireAttempts, 2, 'the next run must retry an idle restart');
-    assert.equal(readFileSync(join(oauthCodexHome, '.agentoc-plugin-applied'), 'utf8').trim(), desiredRevision);
+    assert.equal(readFileSync(join(oauthCodexHome, '.ragent-plugin-applied'), 'utf8').trim(), desiredRevision);
     await writeCodexPluginPreference(configDir, pluginBinding, false);
   } finally { await new Promise(resolve => reloadBroker.close(resolve)); }
   await secretStore.writeSecret('cred-oauth', { authType: 'oauth', tokens: {
@@ -854,7 +854,7 @@ try {
       runnerOwnerUid:1001, runnerOwnerGid:1002, previousRunnerOwnerUid:1000,
       chownImpl:async()=>{},
       migrateManagedHomeOwnershipImpl:async (home, identity) => {
-        migrationCall = {home,identity,lockHeld:existsSync(join(home,'..','.agentoc-native-oauth.lock'))};
+        migrationCall = {home,identity,lockHeld:existsSync(join(home,'..','.ragent-native-oauth.lock'))};
       },
     });
     assert.equal(migrated.ok,true, migrated.error || migrated.reason);
@@ -891,7 +891,7 @@ try {
     externalCodexAuthFile,
     externalOAuthOwnership: false,
   });
-  assert.equal(preparedNativeOnly.oauthOwner, 'agentoc');
+  assert.equal(preparedNativeOnly.oauthOwner, 'ragent');
   assert.equal(
     JSON.parse(readFileSync(join(preparedNativeOnly.homeDir, 'codex', 'auth.json'), 'utf8')).tokens.refresh_token,
     'rt-3',
@@ -981,7 +981,7 @@ try {
   assert.equal(implicitSelection.ok, true, implicitSelection.error || implicitSelection.reason);
   assert.equal(implicitSelection.providerId, 'openai-official-a');
   assert.equal(
-    readFileSync(join(implicitSelection.homeDir, 'codex', '.agentoc-provider-id'), 'utf8').trim(),
+    readFileSync(join(implicitSelection.homeDir, 'codex', '.ragent-provider-id'), 'utf8').trim(),
     'openai-official-a',
   );
 
@@ -992,7 +992,7 @@ try {
   }, { configDir, providerHomesRoot: homesRoot, runnerReadable: true });
   assert.notEqual(preparedDeepseek.homeDir, prepared.homeDir);
   assert.equal(
-    readFileSync(join(prepared.homeDir, 'codex', '.agentoc-provider-id'), 'utf8').trim(),
+    readFileSync(join(prepared.homeDir, 'codex', '.ragent-provider-id'), 'utf8').trim(),
     'newapi-luna',
     'preparing another provider must not disturb the first scoped home',
   );

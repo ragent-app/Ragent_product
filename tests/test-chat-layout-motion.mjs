@@ -30,7 +30,7 @@ async function makePage(reducedMotion = "no-preference") {
     </main>
     <script>${motionSource.replace(/<\/script/gi, "<\\/script")}</script>
   `);
-  await page.evaluate(() => window.AgentoCMotion.observeLayout(document.querySelector(".chat-area")));
+  await page.evaluate(() => window.RagentMotion.observeLayout(document.querySelector(".chat-area")));
   return { browser, page };
 }
 

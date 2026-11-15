@@ -54,7 +54,7 @@ state.instanceBindings = [{ ...instance, instancePublicKey: publicKey,
   boundAt: new Date(now).toISOString(), revokedAt: '', publicEndpoint: '', deviceAlias: 'QA computer' }];
 async function inbox() {
   const issuedAt = new Date(now).toISOString();
-  const audience = 'agentoc-account-rendezvous-poll';
+  const audience = 'ragent-account-rendezvous-poll';
   const signature = sign(null, Buffer.from(buildAccountRendezvousPollMessage({
     instanceId: instance.instanceId, requestId: 'inbox', issuedAt, audience,
   })), targetKeys.privateKey).toString('base64url');
@@ -77,7 +77,7 @@ async function offer(suffix) {
     devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce,
     issuedAt: intent.issuedAt,
     deviceSignature: sign('sha256', Buffer.from(buildAccountJoinIntentMessage({
-      ...intent, audience: 'agentoc-account-join',
+      ...intent, audience: 'ragent-account-join',
     })), owner.keys.privateKey).toString('base64') };
   for (const [field, min] of Object.entries({ intentId: 8, requestId: 16, deviceId: 8,
     devicePublicKeyFingerprint: 64, nonce: 16, issuedAt: 20, deviceSignature: 1 })) {
@@ -114,11 +114,11 @@ const completion = { intentId: first.intent.intentId, requestId: 'publication_pc
   nonce: first.intent.nonce, deviceIssuedAt: first.intent.issuedAt,
   device: { deviceId: first.intent.deviceId, devicePublicKeyFingerprint: owner.fingerprint },
   deviceSignature: first.proof.deviceSignature, accountJoinGrant: first.grant.accountJoinGrant,
-  instance, publicEndpoint: '', issuedAt, audience: 'agentoc-account-join',
+  instance, publicEndpoint: '', issuedAt, audience: 'ragent-account-join',
   signature: sign(null, Buffer.from(buildAccountJoinIntentProofMessage({ instanceId: instance.instanceId,
     intentId: first.intent.intentId, deviceId: first.intent.deviceId,
     devicePublicKeyFingerprint: owner.fingerprint, nonce: first.intent.nonce, issuedAt,
-    audience: 'agentoc-account-join', publicEndpoint: '' })), targetKeys.privateKey).toString('base64url') };
+    audience: 'ragent-account-join', publicEndpoint: '' })), targetKeys.privateKey).toString('base64url') };
 await broker.completeAccountJoinIntent(completion);
 const before = structuredClone(state.accountJoinIntents.find(x => x.intentId === first.intent.intentId));
 assert.ok(before.completedAt);

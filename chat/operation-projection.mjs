@@ -7,7 +7,7 @@ const TERMINAL_STATES = new Set(['completed', 'failed', 'declined', 'interrupted
 const RAW_OPERATION_TYPES = new Set(['tool_use', 'tool_result', 'file_change']);
 const MAX_OPERATION_OUTPUT_CHARS = Math.max(
   16 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_OPERATION_OUTPUT_CHARS || String(256 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_OPERATION_OUTPUT_CHARS || String(256 * 1024), 10)
     || 256 * 1024,
 );
 const MAX_FALLBACK_OPERATION_SCAN = 256;

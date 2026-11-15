@@ -9,12 +9,12 @@ const report = {
   supported: true,
   status: 'ready',
   identity: { status: 'loaded', instanceId: 'inst_doctor' },
-  endpoint: { status: 'derived', name: '\\\\.\\pipe\\agentoc-doctor' },
+  endpoint: { status: 'derived', name: '\\\\.\\pipe\\ragent-doctor' },
   services: {
     status: 'ready',
     states: {
-      'AgentoC-RunnerSupervisor': 'Running',
-      'AgentoC-ControlPlane': 'Running',
+      'Ragent-RunnerSupervisor': 'Running',
+      'Ragent-ControlPlane': 'Running',
     },
   },
   tools: {
@@ -32,7 +32,7 @@ const text = formatDoctorText(report);
 assert.match(text, /Ragent doctor: ready \(win32\)/);
 assert.match(text, /endpoint: derived/);
 assert.match(text, /services: ready/);
-assert.match(text, /service\.AgentoC-ControlPlane: Running/);
+assert.match(text, /service\.Ragent-ControlPlane: Running/);
 assert.match(text, /node: ready v24\.12\.0/);
 assert.match(text, /provider\.claude: ready 2\.1\.233/);
 

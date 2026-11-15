@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || "").trim() || mkdtempSync(join(tmpdir(), "agentoc-no-overflow-"));
+const outputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || "").trim() || mkdtempSync(join(tmpdir(), "ragent-no-overflow-"));
 const browser = await chromium.launch({ headless: true });
 
 const css = [

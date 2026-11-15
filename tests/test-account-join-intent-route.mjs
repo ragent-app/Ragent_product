@@ -6,18 +6,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-account-join-route-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-account-join-route-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
-process.env.AGENTOC_PUBLIC_BASE_URL = 'https://instance.example.test';
-process.env.AGENTOC_ACCOUNT_JOIN_ENABLED = '0';
-delete process.env.AGENTOC_INSTANCE_ROOT;
-mkdirSync(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
-writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'unused' }));
-writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ACCOUNTS_ISSUER = 'https://accounts.example.test';
+process.env.RAGENT_PUBLIC_BASE_URL = 'https://instance.example.test';
+process.env.RAGENT_ACCOUNT_JOIN_ENABLED = '0';
+delete process.env.RAGENT_INSTANCE_ROOT;
+mkdirSync(process.env.RAGENT_CONFIG_DIR, { recursive: true });
+writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'unused' }));
+writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
   version: 1,
   instanceId: 'rli_route_test',
   instanceSecret: 'secret',
@@ -126,7 +126,7 @@ try {
     assert.equal(JSON.parse(res.body).code, 'account_join_disabled');
   });
 
-  process.env.AGENTOC_ACCOUNT_JOIN_ENABLED = '1';
+  process.env.RAGENT_ACCOUNT_JOIN_ENABLED = '1';
   res = response();
   await handleDevicePairingPublicRoutes({
     req: request({ devicePublicKey: publicKey, deviceName: 'Pixel route' }),
@@ -164,7 +164,7 @@ try {
     devicePublicKeyFingerprint: created.devicePublicKeyFingerprint,
     nonce: created.nonce,
     issuedAt: created.issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   })), key.privateKey).toString('base64');
   res = response();
   await handleDevicePairingPublicRoutes({
@@ -179,9 +179,9 @@ try {
     assert.equal(completed.bound, true);
     assert.equal(completed.deviceId, created.deviceId);
     assert.match(completed.credential?.token || '', /^rda_[a-f0-9]{64}$/);
-    const state = JSON.parse(readFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
+    const state = JSON.parse(readFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
     assert.equal(state.devices[0].status, 'bound');
-    const binding = JSON.parse(readFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'owner-account-binding.json'), 'utf8'));
+    const binding = JSON.parse(readFileSync(join(process.env.RAGENT_CONFIG_DIR, 'owner-account-binding.json'), 'utf8'));
     assert.equal(binding.accountId, 'acct_google_owner');
     assert.equal(binding.provider, 'account-session');
     assert.equal(state.invitations[0].usedAt.length > 0, true, 'QR must be consumed when the claim binds');
@@ -201,7 +201,7 @@ try {
     const replayed = JSON.parse(res.body);
     assert(replayed.credential.token === completed.credential.token, 'HTTP retry must return the original credential');
     assert(replayed.credential.expiresAt === completed.credential.expiresAt, 'HTTP retry must preserve the original expiry');
-    const state = JSON.parse(readFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
+    const state = JSON.parse(readFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
     assert.equal(state.devices.length, 1);
     assert.equal(state.accountJoinIntents[0].completionRequestId, 'join-route-request-01');
   });
@@ -220,7 +220,7 @@ try {
   });
 
   const replacementKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  const statePath = join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json');
+  const statePath = join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json');
   const stateWithReplacement = JSON.parse(readFileSync(statePath, 'utf8'));
   stateWithReplacement.devices[0].devicePublicKey = replacementKey.publicKey
     .export({ type: 'spki', format: 'pem' }).toString();

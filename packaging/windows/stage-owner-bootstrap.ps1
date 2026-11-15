@@ -7,7 +7,7 @@ $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'read-owner-bootstrap-discovery.ps1') -LibraryOnly
 $qaPayload=[IO.Path]::GetFullPath($PayloadRoot)
 if(-not(Test-Path -LiteralPath $qaPayload -PathType Container)){throw 'Owner helper payload directory required'}
-$qaTarget=Join-Path $qaPayload 'AgentoC.OwnerBootstrap.exe'
+$qaTarget=Join-Path $qaPayload 'Ragent.OwnerBootstrap.exe'
 $qaRelease=Join-Path $qaPayload 'owner-bootstrap-release.json'
 if((Test-Path -LiteralPath $qaTarget) -or (Test-Path -LiteralPath $qaRelease)){throw 'Owner helper staging collision; refusing adoption'}
 if(($SignedHelperPath -eq '') -ne ($PublisherSha256 -eq '') -or ($PublisherSha256 -and $PublisherSha256 -cnotmatch '^[a-f0-9]{64}$')){throw 'Pinned publisher and signed helper must be provided together'}
@@ -15,7 +15,7 @@ $qaSucceeded=$false
 try{
   if($SignedHelperPath){
     $qaInput=[IO.FileStream]::new([IO.Path]::GetFullPath($SignedHelperPath),[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-    try{[AgentoCOwnerFilePin]::Verify($qaInput.SafeFileHandle,[IO.Path]::GetFullPath($SignedHelperPath),$false);Copy-Item -LiteralPath $SignedHelperPath -Destination $qaTarget}finally{$qaInput.Dispose()}
+    try{[RagentOwnerFilePin]::Verify($qaInput.SafeFileHandle,[IO.Path]::GetFullPath($SignedHelperPath),$false);Copy-Item -LiteralPath $SignedHelperPath -Destination $qaTarget}finally{$qaInput.Dispose()}
   }else{
     $qaSource=Join-Path $SourceRoot 'native\windows-owner-bootstrap.cs'
     if($qaTarget.IndexOfAny([char[]]@('"',"`r","`n")) -ge 0 -or $qaSource.IndexOfAny([char[]]@('"',"`r","`n")) -ge 0){throw 'Invalid compiler path'}
@@ -37,10 +37,10 @@ try{
   if($SignedHelperPath){
     $qaSigner=Get-OwnerSigner $qaTarget
     if($qaSigner.status -cne 'Valid' -or $qaSigner.publisherSha256 -cne $PublisherSha256){throw 'Owner helper Authenticode/publisher verification failed'}
-    $qaMetadata=[ordered]@{version=1;protocolVersion=2;helperFile='AgentoC.OwnerBootstrap.exe';helperSha256=$qaDigest;publisherSha256=$PublisherSha256}
+    $qaMetadata=[ordered]@{version=1;protocolVersion=2;helperFile='Ragent.OwnerBootstrap.exe';helperSha256=$qaDigest;publisherSha256=$PublisherSha256}
     [IO.File]::WriteAllText($qaRelease,($qaMetadata|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
   }elseif(-not $DevelopmentOnly){
-    $qaMetadata=[ordered]@{version=2;protocolVersion=2;helperFile='AgentoC.OwnerBootstrap.exe';helperSha256=$qaDigest;trustMode='admin-installed-sha256'}
+    $qaMetadata=[ordered]@{version=2;protocolVersion=2;helperFile='Ragent.OwnerBootstrap.exe';helperSha256=$qaDigest;trustMode='admin-installed-sha256'}
     [IO.File]::WriteAllText($qaRelease,($qaMetadata|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
   }
   $qaSucceeded=$true

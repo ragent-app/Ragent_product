@@ -48,10 +48,10 @@ assert.ok(bridge?.updatedCommand);
 console.log('MSI control-plane submission and replay passed');
 const vector = {version:1,keyId:'key',brokerInstallationId:'broker',policyGeneration:1,requestId:'request',sessionId:'session',runId:'run',turnId:'turn',actionId:'action',nonce:'abcdefghijklmnopqrstuvwx',artifactPath:'G:\\A & B\\测试.msi',artifactSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64),issuedMs:1000,expiresMs:2000};
 assert.equal(hash(msiGrantBytes(vector)),'dfeee1d3ff0b93af8de9c44a4b7d861e8ad8212359f0bcf574b279b2d5ca7bcb');
-const { runWindowsInstallBridge } = await import('../scripts/agentoc-windows-install-bridge.mjs');
+const { runWindowsInstallBridge } = await import('../scripts/ragent-windows-install-bridge.mjs');
 const bodies=[]; let message='';
 await runWindowsInstallBridge({argv:['node','bridge',Buffer.from(JSON.stringify({command:'msiexec /i G:\\work\\test.msi',requestKey:`gate:${'c'.repeat(64)}`})).toString('base64url')],
- env:{AGENTOC_APPROVED_ACTIONS_ENDPOINT:'http://127.0.0.1/api/internal/approved-actions/propose',AGENTOC_APPROVED_ACTIONS_TOKEN:'token',AGENTOC_APPROVED_ACTIONS_SESSION_ID:'session-1',AGENTOC_APPROVED_ACTIONS_RUN_ID:'run-1',AGENTOC_APPROVED_ACTIONS_TURN_ID:'turn-1'},
+ env:{RAGENT_APPROVED_ACTIONS_ENDPOINT:'http://127.0.0.1/api/internal/approved-actions/propose',RAGENT_APPROVED_ACTIONS_TOKEN:'token',RAGENT_APPROVED_ACTIONS_SESSION_ID:'session-1',RAGENT_APPROVED_ACTIONS_RUN_ID:'run-1',RAGENT_APPROVED_ACTIONS_TURN_ID:'turn-1'},
  fetchImpl:async (_url,opts)=>{bodies.push(JSON.parse(opts.body));return bodies.length===1 ? {ok:false,text:async()=>JSON.stringify({code:'MSI_INSTALL_OUTCOME_UNKNOWN'})} : {ok:true,text:async()=>JSON.stringify({kind:'automatic_install',status:'succeeded'})}},writeOutput:value=>{message+=value}});
 assert.equal(bodies.length,2);assert.equal(bodies[1].autoInstallStatusOnly,true);assert.match(message,/completed successfully/);
 console.log('MSI ambiguous submission polls original request');

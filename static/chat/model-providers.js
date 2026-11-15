@@ -77,11 +77,11 @@
   ]);
 
   function translate(key, vars = {}) {
-    return typeof globalScope.agentocT === "function" ? globalScope.agentocT(key, vars) : key;
+    return typeof globalScope.ragentT === "function" ? globalScope.ragentT(key, vars) : key;
   }
 
   function canManage() {
-    return globalScope.__AGENTOC_BOOTSTRAP__?.auth?.role === "owner";
+    return globalScope.__RAGENT_BOOTSTRAP__?.auth?.role === "owner";
   }
 
   function syncSettingsEntryVisibility() {
@@ -90,15 +90,15 @@
   }
 
   function resolveApiPath(path) {
-    return typeof globalScope.agentocResolveProductPath === "function"
-      ? globalScope.agentocResolveProductPath(path)
+    return typeof globalScope.ragentResolveProductPath === "function"
+      ? globalScope.ragentResolveProductPath(path)
       : path;
   }
 
   async function request(path, options = {}) {
     const responseOrPayload = await (typeof globalScope.fetchJsonOrRedirect === "function"
       ? globalScope.fetchJsonOrRedirect(resolveApiPath(path), options)
-      : (globalScope.agentocFetch || globalScope.fetch)(resolveApiPath(path), { credentials: "same-origin", ...options }));
+      : (globalScope.ragentFetch || globalScope.fetch)(resolveApiPath(path), { credentials: "same-origin", ...options }));
     if (!responseOrPayload || typeof responseOrPayload.json !== "function") return responseOrPayload || {};
     const response = responseOrPayload;
     let payload = {};
@@ -491,8 +491,8 @@
   async function copyText(value, copyWindow = globalScope) {
     if (!value) return false;
     try {
-      if (typeof globalScope.agentocDesktop?.writeText === "function") {
-        if (await globalScope.agentocDesktop.writeText(value)) return true;
+      if (typeof globalScope.ragentDesktop?.writeText === "function") {
+        if (await globalScope.ragentDesktop.writeText(value)) return true;
       }
     } catch {}
     if (copyWindow.navigator?.clipboard?.writeText) {
@@ -746,7 +746,7 @@
     backdrop.appendChild(dialog);
     documentRef.body.appendChild(backdrop);
     modal = backdrop;
-    modalFocusScopeDeactivate = globalScope.AgentoCFocusScope?.activate?.(backdrop, {
+    modalFocusScopeDeactivate = globalScope.RagentFocusScope?.activate?.(backdrop, {
       containmentRoot: documentRef.body,
       initialFocus: closeButton,
       restoreFocus: () => modalTrigger,
@@ -927,8 +927,8 @@
 
   function openPage(event) {
     event?.preventDefault?.();
-    if (typeof globalScope.agentocOpenSidebarSubpage === "function") {
-      globalScope.agentocOpenSidebarSubpage("model-providers", openButton);
+    if (typeof globalScope.ragentOpenSidebarSubpage === "function") {
+      globalScope.ragentOpenSidebarSubpage("model-providers", openButton);
     } else if (typeof globalScope.switchTab === "function") {
       globalScope.switchTab("model-providers");
     }
@@ -941,8 +941,8 @@
   if (canManage()) void loadHarnessProtocols();
   openButton.addEventListener("click", openPage);
   addButton.addEventListener("click", openModal);
-  globalScope.addEventListener("agentoc:localechange", () => {
+  globalScope.addEventListener("ragent:localechange", () => {
     renderProviders();
   });
-  globalScope.AgentoCModelProviders = { open: openPage, refresh, closeModal };
+  globalScope.RagentModelProviders = { open: openPage, refresh, closeModal };
 })(window);

@@ -3,9 +3,9 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-native-provider-oauth-login-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-native-provider-oauth-login-'));
 const home = join(root, 'home');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 const binDir = join(root, 'bin');
 const codexEnvFile = join(root, 'codex-env.txt');
 const agyArgsFile = join(root, 'agy-args.txt');
@@ -19,12 +19,12 @@ const originalHome = process.env.HOME;
 const originalAgyHome = process.env.AGY_HOME;
 const originalPath = process.env.PATH;
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 process.env.PATH = `${binDir}:${originalPath || ''}`;
 process.env.AGY_HOME = join(home, 'terminal-agy');
-process.env.AGENTOC_TEST_CODEX_ENV_FILE = codexEnvFile;
-process.env.AGENTOC_TEST_AGY_ARGS_FILE = agyArgsFile;
+process.env.RAGENT_TEST_CODEX_ENV_FILE = codexEnvFile;
+process.env.RAGENT_TEST_AGY_ARGS_FILE = agyArgsFile;
 await mkdir(join(home, 'terminal-agy', '.gemini', 'antigravity-cli'), { recursive: true });
 await writeFile(join(home, 'terminal-agy', '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'terminal-token\n', 'utf8');
 
@@ -37,7 +37,7 @@ async function install(name, body) {
 await install('codex', `
 mkdir -p "$CODEX_HOME"
 printf '%s\\n' "http=$HTTP_PROXY|https=$HTTPS_PROXY|all=$ALL_PROXY|no=$NO_PROXY|lower=$http_proxy|home=$HOME|codex_home=$CODEX_HOME|api_key=\${OPENAI_API_KEY-unset}" > "$CODEX_HOME/env.txt"
-cp "$CODEX_HOME/env.txt" "$AGENTOC_TEST_CODEX_ENV_FILE"
+cp "$CODEX_HOME/env.txt" "$RAGENT_TEST_CODEX_ENV_FILE"
 printf '%s\\n' 'https://auth.openai.com/codex/device' >&2
 printf '%s\\n' 'ABCD-EFGH1' >&2
 printf '%s\\n' '{"tokens":{"access_token":"codex-access","refresh_token":"codex-refresh"}}' > "$CODEX_HOME/auth.json"
@@ -70,7 +70,7 @@ printf '%s\\n' '{"tokens":{"access_token":"codex-access-new","refresh_token":"co
 exit 0
 `);
 await install('agy', `
-printf '%s\\n' "arg1=\$1" "arg2=\${2-}" >> "\$AGENTOC_TEST_AGY_ARGS_FILE"
+printf '%s\\n' "arg1=\$1" "arg2=\${2-}" >> "\$RAGENT_TEST_AGY_ARGS_FILE"
 if [ "\${1-}" != "--print" ] || [ -z "\${2-}" ]; then
   printf '%s\\n' 'AgY OAuth login requires print mode with a non-empty prompt' >&2
   exit 19
@@ -292,7 +292,7 @@ assert.equal(
 assert.equal(
   (await readFile(join(home, 'terminal-agy', '.gemini', 'antigravity-cli', 'antigravity-oauth-token'), 'utf8')).trim(),
   'terminal-token',
-  'terminal AgY HOME must not be touched by AgentoC login',
+  'terminal AgY HOME must not be touched by Ragent login',
 );
 
 const failedRelink = await management.startNativeOAuthLogin({

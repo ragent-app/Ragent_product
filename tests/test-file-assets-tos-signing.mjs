@@ -13,30 +13,30 @@ function importFresh(relativePath) {
   return import(`${href}?test=${Date.now()}-${Math.random().toString(16).slice(2)}`);
 }
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-file-assets-tos-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-file-assets-tos-'));
 const envKeys = [
-  'AGENTOC_INSTANCE_ROOT',
-  'AGENTOC_ASSET_STORAGE_BASE_URL',
-  'AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL',
-  'AGENTOC_ASSET_STORAGE_REGION',
-  'AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID',
-  'AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY',
-  'AGENTOC_ASSET_STORAGE_PRESIGN_TTL_SECONDS',
-  'AGENTOC_ASSET_STORAGE_PROVIDER',
-  'AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED',
+  'RAGENT_INSTANCE_ROOT',
+  'RAGENT_ASSET_STORAGE_BASE_URL',
+  'RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL',
+  'RAGENT_ASSET_STORAGE_REGION',
+  'RAGENT_ASSET_STORAGE_ACCESS_KEY_ID',
+  'RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY',
+  'RAGENT_ASSET_STORAGE_PRESIGN_TTL_SECONDS',
+  'RAGENT_ASSET_STORAGE_PROVIDER',
+  'RAGENT_ASSET_DIRECT_UPLOAD_ENABLED',
 ];
 const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
 
 try {
-  process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-  process.env.AGENTOC_ASSET_STORAGE_BASE_URL = 'https://tos-cn-beijing.volces.com/example-bucket';
-  delete process.env.AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL;
-  process.env.AGENTOC_ASSET_STORAGE_REGION = 'cn-beijing';
-  process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID = 'test-access-key';
-  process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY = 'test-secret-key';
-  process.env.AGENTOC_ASSET_STORAGE_PRESIGN_TTL_SECONDS = '900';
-  delete process.env.AGENTOC_ASSET_STORAGE_PROVIDER;
-  process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '1';
+  process.env.RAGENT_INSTANCE_ROOT = tempHome;
+  process.env.RAGENT_ASSET_STORAGE_BASE_URL = 'https://tos-cn-beijing.volces.com/example-bucket';
+  delete process.env.RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL;
+  process.env.RAGENT_ASSET_STORAGE_REGION = 'cn-beijing';
+  process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID = 'test-access-key';
+  process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY = 'test-secret-key';
+  process.env.RAGENT_ASSET_STORAGE_PRESIGN_TTL_SECONDS = '900';
+  delete process.env.RAGENT_ASSET_STORAGE_PROVIDER;
+  process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '1';
 
   const config = await importFresh('lib/config.mjs');
   assert.equal(config.FILE_ASSET_STORAGE_PROVIDER, 'tos', 'Volcengine endpoints should auto-detect as TOS');

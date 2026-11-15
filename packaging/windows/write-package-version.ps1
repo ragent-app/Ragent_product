@@ -11,8 +11,8 @@ if ($BuildVersion -and $BuildVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|
 if (-not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) { throw 'Payload root must be an existing directory.' }
 $parts = @($Version.Split('.') | ForEach-Object { [int]::Parse($_) })
 $displayVersion = if ($parts[3] -eq 0) { $parts[0..2] -join '.' } else { $parts -join '.' }
-$target = Join-Path $PayloadRoot '.agentoc-package-version'
+$target = Join-Path $PayloadRoot '.ragent-package-version'
 [IO.File]::WriteAllText($target, "$displayVersion`n", [Text.UTF8Encoding]::new($false))
 if ($BuildVersion) {
-    [IO.File]::WriteAllText((Join-Path $PayloadRoot '.agentoc-package-build'), "$BuildVersion`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $PayloadRoot '.ragent-package-build'), "$BuildVersion`n", [Text.UTF8Encoding]::new($false))
 }

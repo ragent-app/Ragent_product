@@ -115,7 +115,7 @@ function createHarness({ sidebarOpen = false, rightSidebarOpen = false, canNavig
         callback();
         return 1;
       },
-      agentocOpenWorkbenchInspectorTab() {
+      ragentOpenWorkbenchInspectorTab() {
         context.openWorkbenchInspectorTabCalls += 1;
         return true;
       },
@@ -123,14 +123,14 @@ function createHarness({ sidebarOpen = false, rightSidebarOpen = false, canNavig
         context.closeRightSidebarCalls += 1;
         return true;
       },
-      agentocCanNavigateBack() {
+      ragentCanNavigateBack() {
         return canNavigateBack;
       },
-      agentocNavigateBack() {
+      ragentNavigateBack() {
         context.navigateBackCalls += 1;
         return true;
       },
-      AgentocProjectView: projectLevel
+      RagentProjectView: projectLevel
         ? {
             canStartEdgeBackSwipe() {
               return true;
@@ -173,7 +173,7 @@ function createHarness({ sidebarOpen = false, rightSidebarOpen = false, canNavig
   };
   context.globalThis = context;
   // Mirror window.* helpers onto the context so bare references resolve too.
-  context.agentocOpenWorkbenchInspectorTab = context.window.agentocOpenWorkbenchInspectorTab;
+  context.ragentOpenWorkbenchInspectorTab = context.window.ragentOpenWorkbenchInspectorTab;
   context.closeRightSidebar = context.window.closeRightSidebar;
   vm.runInNewContext(gesturesSource, context, { filename: 'static/chat/gestures.js' });
   return { context, listeners };

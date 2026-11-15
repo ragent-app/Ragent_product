@@ -7,8 +7,8 @@ import { fileURLToPath } from 'url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || join(tmpdir(), `agentoc-mobile-live-shimmer-${Date.now()}`);
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || join(tmpdir(), `ragent-mobile-live-shimmer-${Date.now()}`);
 mkdirSync(outputDir, { recursive: true });
 const messagesCss = [
   'static/chat/chat-base.css',

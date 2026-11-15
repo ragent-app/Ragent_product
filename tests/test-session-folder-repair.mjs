@@ -6,10 +6,10 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-session-folder-'));
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-session-folder-'));
+const configDir = join(tempHome, '.config', 'ragent');
 const sessionsPath = join(configDir, 'chat-sessions.json');
-const managedWorkRoot = join(tempHome, '.agentoc', 'workspace');
+const managedWorkRoot = join(tempHome, '.ragent', 'workspace');
 const missingLegacyProjectPath = join(tempHome, 'missing-legacy-project');
 const missingLegacyUserPath = join(tempHome, 'missing-legacy-user');
 const inaccessibleLegacyPath = join(tempHome, 'inaccessible-legacy-project');
@@ -34,13 +34,13 @@ writeFileSync(
 );
 
 const previousHome = process.env.HOME;
-const previousConfigDir = process.env.AGENTOC_CONFIG_DIR;
-const previousWorkRootDir = process.env.AGENTOC_WORK_ROOT_DIR;
+const previousConfigDir = process.env.RAGENT_CONFIG_DIR;
+const previousWorkRootDir = process.env.RAGENT_WORK_ROOT_DIR;
 
 try {
   process.env.HOME = tempHome;
-  process.env.AGENTOC_CONFIG_DIR = configDir;
-  process.env.AGENTOC_WORK_ROOT_DIR = managedWorkRoot;
+  process.env.RAGENT_CONFIG_DIR = configDir;
+  process.env.RAGENT_WORK_ROOT_DIR = managedWorkRoot;
 
   const cacheBust = `?t=${Date.now()}`;
   const folderModule = await import(pathToFileURL(join(repoRoot, 'chat', 'session-folder.mjs')).href + cacheBust);
@@ -70,11 +70,11 @@ try {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
 
-  if (previousConfigDir === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousConfigDir;
+  if (previousConfigDir === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousConfigDir;
 
-  if (previousWorkRootDir === undefined) delete process.env.AGENTOC_WORK_ROOT_DIR;
-  else process.env.AGENTOC_WORK_ROOT_DIR = previousWorkRootDir;
+  if (previousWorkRootDir === undefined) delete process.env.RAGENT_WORK_ROOT_DIR;
+  else process.env.RAGENT_WORK_ROOT_DIR = previousWorkRootDir;
 
   rmSync(tempHome, { recursive: true, force: true });
 }

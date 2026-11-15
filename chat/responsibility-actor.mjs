@@ -5,7 +5,7 @@ import { authorizeDeviceBinding } from '../lib/binding-authority-runtime.mjs';
 // Map only authenticated instance-owner credentials to the server's stable
 // principal. Device identity is not itself an account identity.
 export async function resolveResponsibilityActor(req,authSession) {
-  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim();
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim();
   if(!owner) return null;
   if(hasValidInstanceOwnerCredential(req)) return {kind:'user',role:'owner',principalId:owner};
   if(authSession?.role!=='owner'||authSession?.workspaceAccess) return null;

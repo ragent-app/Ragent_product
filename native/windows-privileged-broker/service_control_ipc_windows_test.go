@@ -44,7 +44,7 @@ func TestServiceControlPipeRequiresSignatureAndRunsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix
+	base := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, base+".Health", base+".Request")
 	if err != nil {
 		t.Fatal(err)

@@ -6,11 +6,11 @@ import { dirname, join } from 'node:path';
 export async function secureWindowsCodexBrokerPipe(socketPath, serverPid, {
   platform = process.platform,
   serviceMode = false,
-  executable = join(dirname(process.execPath), '..', 'AgentoC.ServiceHost.exe'),
+  executable = join(dirname(process.execPath), '..', 'Ragent.ServiceHost.exe'),
   spawnImpl = spawn,
 } = {}) {
   if (platform !== 'win32' || !serviceMode) return;
-  const match = /^\\\\\.\\pipe\\(agentoc-codex-[a-f0-9]{32})$/i.exec(String(socketPath || ''));
+  const match = /^\\\\\.\\pipe\\(ragent-codex-[a-f0-9]{32})$/i.exec(String(socketPath || ''));
   if (!match || !Number.isSafeInteger(serverPid) || serverPid <= 0) {
     throw Object.assign(new Error('Invalid Codex broker pipe identity'), { code: 'CODEX_BROKER_PIPE_SECURITY_INVALID' });
   }

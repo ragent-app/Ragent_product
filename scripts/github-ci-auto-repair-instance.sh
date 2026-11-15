@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 ACTION="${1:-install}"
-LABEL="com.agentoc.github-ci-auto-repair"
-CONFIG_DIR="$HOME/.config/agentoc/github-ci-auto-repair"
+LABEL="com.ragent.github-ci-auto-repair"
+CONFIG_DIR="$HOME/.config/ragent/github-ci-auto-repair"
 CONFIG_PATH="$CONFIG_DIR/config.json"
 LAST_RUN_PATH="$CONFIG_DIR/last-run.json"
 LOG_PATH="$CONFIG_DIR/monitor.log"
@@ -23,7 +23,7 @@ ensure_default_config() {
   cat > "$CONFIG_PATH" <<EOF
 {
   "enabled": true,
-  "repo": "Ninglo/agentoc",
+  "repo": "Ninglo/ragent",
   "responsibilityId": "",
   "branches": ["main", "master"],
   "events": ["push"],

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // B 批: DataChannel 确定性故障注入(丢包/高延迟), 通过 sidecar 的 env 钩子:
-//   AGENTOC_P2P_FAULT_DROP_FIRST_N=1  → 第一个请求被丢弃(客户端超时), 后续成功
-//   AGENTOC_P2P_FAULT_DELAY_MS=1500   → 请求成功但响应延迟 >= 1500ms
+//   RAGENT_P2P_FAULT_DROP_FIRST_N=1  → 第一个请求被丢弃(客户端超时), 后续成功
+//   RAGENT_P2P_FAULT_DELAY_MS=1500   → 请求成功但响应延迟 >= 1500ms
 // 这些从客户端视角等价于 DataChannel 包丢失 / 高延迟(请求未答 / 迟到)。
 import assert from 'assert/strict';
 import { access, readFile } from 'fs/promises';
@@ -34,7 +34,7 @@ const resources = [];
 
 function targetServer() {
   const target = http.createServer((request, response) => {
-    response.writeHead(200, { 'content-type': 'application/json', 'x-agentoc-p2p': 'yes' });
+    response.writeHead(200, { 'content-type': 'application/json', 'x-ragent-p2p': 'yes' });
     response.end(JSON.stringify({ method: request.method, url: request.url }));
   });
   return target;
@@ -50,7 +50,7 @@ function check(label, cond, extra = '') {
 const browser = await chromium.launch({ headless: true });
 resources.push(() => browser.close());
 
-const clientSource = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+const clientSource = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
 
 async function runScenario({ faultEnv, script, label }) {
   const prev = {};
@@ -77,13 +77,13 @@ async function runScenario({ faultEnv, script, label }) {
     await host.ready;
 
     const web = http.createServer((request, response) => {
-      if (request.url === '/agentoc-p2p-client.js') {
+      if (request.url === '/ragent-p2p-client.js') {
         response.writeHead(200, { 'content-type': 'text/javascript' });
         response.end(clientSource);
         return;
       }
       response.writeHead(200, { 'content-type': 'text/html' });
-      response.end('<!doctype html><title>AgentoC P2P fault test</title>');
+      response.end('<!doctype html><title>Ragent P2P fault test</title>');
     });
     await listen(web);
     resources.push(() => close(web));
@@ -104,11 +104,11 @@ async function runScenario({ faultEnv, script, label }) {
 try {
   // 1. 丢包: DROP_FIRST_N=1 → 第一请求超时, 第二请求成功。
   const drop = await runScenario({
-    faultEnv: { AGENTOC_P2P_FAULT_DROP_FIRST_N: '1' },
+    faultEnv: { RAGENT_P2P_FAULT_DROP_FIRST_N: '1' },
     label: 'drop',
     script: async ({ signalingUrl: url, roomId: room, secret: roomSecret, deviceToken }) => {
-      const { AgentoCP2PClient } = await import('/agentoc-p2p-client.js');
-      const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 3000 });
+      const { RagentP2PClient } = await import('/ragent-p2p-client.js');
+      const client = new RagentP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 3000 });
       await client.connect();
       let first;
       try {
@@ -133,11 +133,11 @@ try {
 
   // 2. 高延迟: DELAY_MS=1500 → 请求成功但响应延迟 >= 1500ms。
   const slow = await runScenario({
-    faultEnv: { AGENTOC_P2P_FAULT_DELAY_MS: '1500' },
+    faultEnv: { RAGENT_P2P_FAULT_DELAY_MS: '1500' },
     label: 'delay',
     script: async ({ signalingUrl: url, roomId: room, secret: roomSecret, deviceToken }) => {
-      const { AgentoCP2PClient } = await import('/agentoc-p2p-client.js');
-      const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
+      const { RagentP2PClient } = await import('/ragent-p2p-client.js');
+      const client = new RagentP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
       await client.connect();
       const started = performance.now();
       const r = await client.request({ method: 'GET', path: '/probe', headers: { Authorization: `Bearer ${deviceToken}` } });

@@ -60,10 +60,10 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-claude-bidi-sidecar-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const memoryDir = join(home, '.agentoc', 'memory');
-  const workDir = join(home, '.agentoc', 'workspace');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-claude-bidi-sidecar-'));
+  const configDir = join(home, '.config', 'ragent');
+  const memoryDir = join(home, '.ragent', 'memory');
+  const workDir = join(home, '.ragent', 'workspace');
   const localBin = join(home, '.local', 'bin');
   const fakeScript = join(localBin, process.platform === 'win32' ? 'fake-claude-bidi.js' : 'fake-claude-bidi');
   const fakeCommand = process.platform === 'win32' ? join(localBin, 'fake-claude-bidi.cmd') : fakeScript;
@@ -113,7 +113,7 @@ function result(text, extra = {}) {
 }
 function managedMcpServerName() {
   return 'ragent_actions_' + crypto.createHash('sha256')
-    .update(process.env.AGENTOC_RUN_ID || 'run', 'utf8')
+    .update(process.env.RAGENT_RUN_ID || 'run', 'utf8')
     .digest('hex')
     .slice(0, 16);
 }
@@ -205,7 +205,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           tool_name: 'Bash',
           display_name: 'Bash',
           input: {
-            command: 'agentoc-privileged --description "Restart service" --category other -- echo real-command',
+            command: 'ragent-privileged --description "Restart service" --category other -- echo real-command',
             description: 'Restart service',
           },
           description: 'Restart service',
@@ -269,26 +269,26 @@ let stdout = '';
 let stderr = '';
 let supervisorOutput = '';
 const supervisorPipe = process.platform === 'win32'
-  ? `\\\\.\\pipe\\agentoc-test-claude-${randomBytes(12).toString('hex')}` : '';
+  ? `\\\\.\\pipe\\ragent-test-claude-${randomBytes(12).toString('hex')}` : '';
 const childEnv = {
     ...process.env,
     HOME: fixture.home,
     USERPROFILE: fixture.home,
     LOCALAPPDATA: join(fixture.home, 'local-appdata'),
     APPDATA: join(fixture.home, 'roaming-appdata'),
-    ...(process.platform === 'win32' ? { AGENTOC_INSTANCE_ROOT: fixture.home } : {}),
-    AGENTOC_CONFIG_DIR: fixture.configDir,
-    AGENTOC_MEMORY_DIR: fixture.memoryDir,
-    AGENTOC_WORK_ROOT_DIR: fixture.workDir,
-    ...(supervisorPipe ? { AGENTOC_RUN_SPOOL_DIR: join(fixture.home, 'data', 'chat-runs') } : {}),
-    AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
-    AGENTOC_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
-    ...(supervisorPipe ? { AGENTOC_PROVIDER_HOMES_DIR: join(fixture.home, 'provider-homes') } : {}),
-    AGENTOC_AUTH_SESSION_SECRET: 'test-secret-agentoc-sidecar',
+    ...(process.platform === 'win32' ? { RAGENT_INSTANCE_ROOT: fixture.home } : {}),
+    RAGENT_CONFIG_DIR: fixture.configDir,
+    RAGENT_MEMORY_DIR: fixture.memoryDir,
+    RAGENT_WORK_ROOT_DIR: fixture.workDir,
+    ...(supervisorPipe ? { RAGENT_RUN_SPOOL_DIR: join(fixture.home, 'data', 'chat-runs') } : {}),
+    RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+    RAGENT_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
+    ...(supervisorPipe ? { RAGENT_PROVIDER_HOMES_DIR: join(fixture.home, 'provider-homes') } : {}),
+    RAGENT_AUTH_SESSION_SECRET: 'test-secret-ragent-sidecar',
     CHAT_PORT: String(port),
     SECURE_COOKIES: '0',
-    AGENTOC_REPLY_SELF_CHECK: 'off',
-    AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
+    RAGENT_REPLY_SELF_CHECK: 'off',
+    RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
     FAKE_CLAUDE_BIDI_RECORD: fixture.recordPath,
 };
 const supervisor = supervisorPipe ? spawn(process.execPath, ['chat/runner-supervisor-daemon.mjs'], {
@@ -601,7 +601,7 @@ try {
   assert.equal(privilegedBatch.other[0].command, 'echo real-command');
   assert.equal(
     privilegedBatch.other[0].wrapperCommand,
-    'agentoc-privileged --description "Restart service" --category other -- echo real-command',
+    'ragent-privileged --description "Restart service" --category other -- echo real-command',
   );
   const privilegedOpId = privilegedBatch.other[0].opId;
   const privilegedResolveRequestId = 'req-claude-bidi-privileged-resolve';
@@ -647,7 +647,7 @@ try {
   assert.equal(privilegedReply.response.response.updatedInput.command, 'echo real-command');
   assert.notEqual(
     privilegedReply.response.response.updatedInput.command,
-    'agentoc-privileged --description "Restart service" --category other -- echo real-command',
+    'ragent-privileged --description "Restart service" --category other -- echo real-command',
   );
 
   writeFileSync(fixture.recordPath, '', 'utf8');

@@ -17,7 +17,7 @@ import (
 	"golang.org/x/sys/windows/svc/eventlog"
 )
 
-const serviceName = "AgentoC-PrivilegedBroker"
+const serviceName = "Ragent-PrivilegedBroker"
 
 // Startup failures use stable service-specific exit codes so disposable-runner
 // acceptance can identify the failed trust-boundary check without logging
@@ -61,7 +61,7 @@ func brokerIPCRuntimeFailureCode(err error) string {
 }
 
 func reportBrokerIPCRuntimeFailure(err error) {
-	log, openErr := eventlog.Open("AgentoC")
+	log, openErr := eventlog.Open("Ragent")
 	if openErr != nil {
 		return
 	}

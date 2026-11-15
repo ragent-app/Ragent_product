@@ -34,7 +34,7 @@ function eq(label, actual, expected) {
   passed += 1;
 }
 
-const tmpDir = await mkdtemp(join(tmpdir(), 'agentoc-exec-dispatch-'));
+const tmpDir = await mkdtemp(join(tmpdir(), 'ragent-exec-dispatch-'));
 const EXPECTED_SID = 'S-1-5-21-111-222-333-1001';
 const GOOD_FACTS = {
   platform: 'win32',
@@ -47,14 +47,14 @@ const GOOD_FACTS = {
 
 // Environment must be set before the executor module is imported (module-level
 // constants read env at import time).
-process.env.AGENTOC_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST = '1';
-process.env.AGENTOC_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS = '1';
-process.env.AGENTOC_WINDOWS_PEER_SID = EXPECTED_SID;
-process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET = join(tmpDir, 'sock');
-process.env.AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE = join(tmpDir, 'audit.jsonl');
-process.env.AGENTOC_PRIVILEGED_SIGNING_KEYS_FILE = join(tmpDir, 'keys.json');
-process.env.AGENTOC_SERVICE_USER_FILE = join(tmpDir, 'service-user');
-await writeFile(join(tmpDir, 'service-user'), 'agentoc\n');
+process.env.RAGENT_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST = '1';
+process.env.RAGENT_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS = '1';
+process.env.RAGENT_WINDOWS_PEER_SID = EXPECTED_SID;
+process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET = join(tmpDir, 'sock');
+process.env.RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE = join(tmpDir, 'audit.jsonl');
+process.env.RAGENT_PRIVILEGED_SIGNING_KEYS_FILE = join(tmpDir, 'keys.json');
+process.env.RAGENT_SERVICE_USER_FILE = join(tmpDir, 'service-user');
+await writeFile(join(tmpDir, 'service-user'), 'ragent\n');
 
 const keys = generateKeyPairSync('ed25519');
 const kid = 'kid_win_dispatch';

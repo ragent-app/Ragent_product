@@ -6,9 +6,9 @@ import {runDoctorCommand} from '../lib/doctor-command.mjs';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 function fixture(){
   const now=100000,ownerSid='S-1-5-21-1-2-3-1001',controlSid='S-1-5-80-1-2-3-4-5',instanceId=randomUUID();
-  const release={version:1,protocolVersion:1,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)};
+  const release={version:1,protocolVersion:1,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)};
   const installation={version:1,instanceId,controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid,port:7690};
-  const live={version:1,policy:{pipeName:'agentoc-owner-bootstrap-'+'c'.repeat(32),instanceId,requestId:'d'.repeat(32),expiresAtUnixMs:now+20000,controlSid,ownerSid,ownerSessionId:1},
+  const live={version:1,policy:{pipeName:'ragent-owner-bootstrap-'+'c'.repeat(32),instanceId,requestId:'d'.repeat(32),expiresAtUnixMs:now+20000,controlSid,ownerSid,ownerSessionId:1},
     peer:{pid:1234,createdTicks:'134368500000000000',sid:controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false}};
   const observed={version:1,aclVerified:true,signatureStatus:'Valid',helperSha256:release.helperSha256,publisherSha256:release.publisherSha256,ownerSid,ownerSessionId:1};
   const evidence=()=>({...observed,releaseJson:JSON.stringify(release),installationJson:JSON.stringify(installation),liveJson:JSON.stringify({...live,releaseSha256:hash(JSON.stringify(release)),installationSha256:hash(JSON.stringify(installation))})});
@@ -44,7 +44,7 @@ test('unsafe peer metadata and malformed/oversized records are not authenticated
 });
 test('doctor selects read-only Owner diagnostics without forwarding environment path overrides or using runtime diagnostics',async()=>{
   let output='',calls=0;
-  const code=await runDoctorCommand(['--owner-bootstrap','--json'],{platform:'win32',env:{AGENTOC_OWNER_HELPER:'untrusted'},
+  const code=await runDoctorCommand(['--owner-bootstrap','--json'],{platform:'win32',env:{RAGENT_OWNER_HELPER:'untrusted'},
     diagnosticsImpl:async()=>{throw new Error('Wrong path');},ownerBootstrapDiagnosticsImpl:async options=>{calls++;assert.deepEqual(options,{platform:'win32'});return {platform:'win32',status:'failed',scope:'owner-bootstrap',readOnly:true,ownerIpcConnected:false,sessionIssued:false};},writer:value=>output+=value});
   assert.equal(code,2);assert.equal(calls,1);assert.equal(JSON.parse(output).sessionIssued,false);
 });

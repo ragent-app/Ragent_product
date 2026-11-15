@@ -71,7 +71,7 @@ function fabricateSession(root, size) {
 async function main() {
   const { sizes, outRoot } = parseArgs(process.argv);
   for (const size of sizes) {
-    const work = join('/tmp', `agentoc-pack-bench-${process.pid}-${size}`);
+    const work = join('/tmp', `ragent-pack-bench-${process.pid}-${size}`);
     rmSync(work, { recursive: true, force: true });
     const sessionDir = join(work, 'session');
     mkdirSync(sessionDir, { recursive: true });

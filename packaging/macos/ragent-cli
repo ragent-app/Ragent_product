@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ragent CLI shim: run the packaged cli.js with the bundled Node runtime.
+set -euo pipefail
+
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/ragent-env.sh"
+
+ragent_source_instance_env
+ragent_ensure_runtime_shims
+
+exec "$RAGENT_NODE_BIN" "$RAGENT_APP_DIR/cli.js" "$@"

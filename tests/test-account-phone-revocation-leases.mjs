@@ -11,7 +11,7 @@ import { createTurnConnectionId } from '../lib/turn-authorization.mjs';
 
 test('phone revoke atomically releases only its linked leases and removes device associations', async t => {
   let now = Date.parse('2026-10-25T10:00:00.123Z'), failCommit = false, failedAfterLeaseWrite = false;
-  const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+  const databaseUrl = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
   const iso = (offset = 0) => new Date(now + offset).toISOString();
   const accountId = 'acct_phone_revoke', victim = 'adev_phone_victim', controller = 'adev_phone_controller';
   const keys = generateKeyPairSync('ed25519'), publicKey = keys.publicKey.export({ format: 'pem', type: 'spki' }).toString();
@@ -146,7 +146,7 @@ test('phone revoke atomically releases only its linked leases and removes device
     const repeated = await revoke(victim);
     assert.equal(repeated.status, 404);
     const deviceId = 'rdev_linked', connectionId = createTurnConnectionId({ accountId, instanceId: instance.instanceId, deviceId });
-    const fields = { instanceId: instance.instanceId, transactionId: connectionId, purpose: 'turn-reserve', issuedAt: iso(), audience: 'agentoc-owner-auth-device' };
+    const fields = { instanceId: instance.instanceId, transactionId: connectionId, purpose: 'turn-reserve', issuedAt: iso(), audience: 'ragent-owner-auth-device' };
     const reserve = await request('/v1/owner-auth/turn/connections/reserve', '', { ...fields, instance, requestId: connectionId,
       accountId, deviceId, deviceKind: 'phone', connectionId, expiresAt: iso(60000),
       signature: sign(null, Buffer.from(buildOwnerAuthDeviceMessage(fields)), keys.privateKey).toString('base64') });

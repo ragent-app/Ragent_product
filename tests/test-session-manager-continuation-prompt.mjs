@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-continuation-prompt-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-continuation-prompt-'));
 process.env.HOME = tempHome;
 
 const workspace = path.join(tempHome, 'workspace');

@@ -6,11 +6,11 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-label-context-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-label-context-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
-const workDir = join(tempHome, '.agentoc', 'workspace');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
+const workDir = join(tempHome, '.ragent', 'workspace');
 const promptLogPath = join(tempHome, 'label-prompt.log');
 
 mkdirSync(tempBin, { recursive: true });
@@ -22,19 +22,19 @@ writeFileSync(
   join(memoryDir, 'projects.md'),
   `# Scope Router
 
-## AgentoC
+## Ragent
 
 - Type: code repo
-- Path: \`~/code/agentoc/\`
-- Triggers: AgentoC, session rename, sidebar hierarchy, prompt tuning
-- First read: \`~/code/agentoc/AGENTS.md\`
+- Path: \`~/code/ragent/\`
+- Triggers: Ragent, session rename, sidebar hierarchy, prompt tuning
+- First read: \`~/code/ragent/AGENTS.md\`
 
 ## Media Workflow
 
 - Type: recurring non-repo domain
 - Paths: \`~/my_docs/Media/\`, \`~/movies/\`
 - Triggers: media, rough cut, transcript, review
-- First read: \`~/.agentoc/skills/media-review.md\`
+- First read: \`~/.ragent/skills/media-review.md\`
 `,
   'utf8',
 );
@@ -53,7 +53,7 @@ if (hasInlineLabels && process.env.PROMPT_LOG_FILE) {
 }
 
 const text = hasInlineLabels
-  ? 'main task finished\\n<agentoc-session-labels>{"schemaVersion":1,"title":"AgentoC Prompt Tuning","group":"AgentoC","description":"Tune the auto-rename prompt using session history and scope hints."}</agentoc-session-labels>'
+  ? 'main task finished\\n<ragent-session-labels>{"schemaVersion":1,"title":"Ragent Prompt Tuning","group":"Ragent","description":"Tune the auto-rename prompt using session history and scope hints."}</ragent-session-labels>'
   : 'main task finished';
 
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'run-thread' }));
@@ -99,10 +99,10 @@ writeFileSync(
 );
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 process.env.PROMPT_LOG_FILE = promptLogPath;
 
@@ -151,7 +151,7 @@ async function safeRm(target, attempts = 6, delayMs = 120) {
 
 try {
   await createSession(tempHome, 'fake-codex', 'Naming Flow', {
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Refactor session naming and grouping.',
   });
   await createSession(tempHome, 'fake-codex', 'Rough Cut Review', {
@@ -162,7 +162,7 @@ try {
   const target = await createSession(tempHome, 'fake-codex', '');
   await setContextHead(target.id, {
     mode: 'summary',
-    summary: 'This conversation is about AgentoC session grouping, rename prompts, and keeping related work under the same top-level project.',
+    summary: 'This conversation is about Ragent session grouping, rename prompts, and keeping related work under the same top-level project.',
     activeFromSeq: 0,
     compactedThroughSeq: 0,
     updatedAt: new Date().toISOString(),
@@ -179,7 +179,7 @@ try {
     async () => {
       const current = await getSession(target.id);
       return current?.name === 'Prompt Tuning'
-        && current?.group === 'AgentoC'
+        && current?.group === 'Ragent'
         && current?.description === 'Tune the auto-rename prompt using session history and scope hints.';
     },
     'session should apply inline labels from the foreground turn',
@@ -187,7 +187,7 @@ try {
 
   const promptLog = readFileSync(promptLogPath, 'utf8');
   assert.match(promptLog, /Session presentation metadata \(hidden protocol\)/);
-  assert.match(promptLog, /<agentoc-session-labels>/);
+  assert.match(promptLog, /<ragent-session-labels>/);
   assert.match(promptLog, /Make it feel natural and avoid creating a brand new group every time\./);
   assert.equal(
     (promptLog.match(/---PROMPT---/g) || []).length,

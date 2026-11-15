@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const root = await mkdtemp(join(tmpdir(), 'agent-create-ingress-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
-process.env.AGENTOC_PERF_WRITE_DEBOUNCE = 'off';
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
+process.env.RAGENT_PERF_WRITE_DEBOUNCE = 'off';
 
 const {
   createSession,

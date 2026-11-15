@@ -23,7 +23,7 @@ export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
   const review = { review: true, reason: 'directory change target requires owner review' };
   if (Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
       || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)) return review;
-  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i;
+  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent)(?:\/|$)/i;
   if (sensitive.test(to) || words.some(word => sensitive.test(word))) return review;
   const roots = state.riskContext?.protectedRoots;
   if (!Array.isArray(roots)) return review;
@@ -89,7 +89,7 @@ export async function buildClaudePosixRipgrepBridge({ approval, state } = {}) {
   const roots = state.riskContext.protectedRoots.map(root => typeof root === 'string' ? root : root?.path)
     .filter(root => typeof root === 'string' && path.posix.isAbsolute(root));
   const inside = (candidate, root) => { const rel = path.posix.relative(root, candidate); return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); };
-  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc)(?:\/|$)/i;
+  const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent)(?:\/|$)/i;
   for (const requested of parsed.paths) {
     if (requested.startsWith('~')) return review;
     const lexical = path.posix.resolve(cwd, requested); let current = lexical; let actual; const missing = [];

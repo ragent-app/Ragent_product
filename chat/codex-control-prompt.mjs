@@ -67,12 +67,12 @@ export async function runCodexControlPrompt({
     socket.on('end', () => finish(new Error('Codex background broker closed before completion')));
     socket.on('close', () => finish(new Error('Codex background broker disconnected')));
     socket.once('connect', () => write(checkingAccount
-      ? { type:'agentoc-codex-broker-ping', expectedAccountDigest }
+      ? { type:'ragent-codex-broker-ping', expectedAccountDigest }
       : buildCodexAppServerInitializeMessage()));
     const consume = (message, line) => {
       if (settled) return;
       if (checkingAccount) {
-        if (message?.type !== 'agentoc-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
+        if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
           return finish(Object.assign(new Error('The shared Codex broker could not verify the selected account'), { code:'CODEX_CONTROL_ACCOUNT_UNVERIFIED' }));
         }
         checkingAccount = false;

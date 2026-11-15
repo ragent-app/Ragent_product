@@ -8,14 +8,14 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { PassThrough } from 'node:stream';
 
 test('encrypted HTTP relay reaches the actual verified local asset store', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-relay-integration-'));
-  process.env.AGENTOC_INSTANCE_ROOT = root;
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-  process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-  process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example';
-  for (const name of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
-    'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE',
-    'AGENTOC_ASSET_STORAGE_BASE_URL', 'AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID', 'AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[name];
+  const root = await mkdtemp(join(tmpdir(), 'ragent-relay-integration-'));
+  process.env.RAGENT_INSTANCE_ROOT = root;
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+  process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example';
+  for (const name of ['RAGENT_MEMORY_DIR', 'RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR',
+    'RAGENT_WORK_ROOT_DIR', 'RAGENT_PLATFORM_SKILLS_DIR', 'RAGENT_INSTANCE_KEY_FILE',
+    'RAGENT_ASSET_STORAGE_BASE_URL', 'RAGENT_ASSET_STORAGE_ACCESS_KEY_ID', 'RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[name];
   let server;
   const nativeFetch = globalThis.fetch;
   try {
@@ -70,7 +70,7 @@ test('encrypted HTTP relay reaches the actual verified local asset store', async
     }
     const response = await nativeFetch(`${origin}/v1/owner-auth/account/attachment-relay/${ticket.id}/content`, {
       method: 'PUT', headers: { authorization: `Bearer ${ticket.writeToken}`,
-        'content-type': 'application/vnd.agentoc.attachment-relay' }, body: Buffer.concat(frames), signal: AbortSignal.timeout(15_000) });
+        'content-type': 'application/vnd.ragent.attachment-relay' }, body: Buffer.concat(frames), signal: AbortSignal.timeout(15_000) });
     assert.equal(response.status, 204);
     const finalized = await finalizePromise;
     assert.equal(finalized.status, 200);

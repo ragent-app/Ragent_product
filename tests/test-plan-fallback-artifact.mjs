@@ -6,11 +6,11 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-plan-fallback-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-plan-fallback-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
-const workDir = join(tempHome, '.agentoc', 'workspace');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
+const workDir = join(tempHome, '.ragent', 'workspace');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -85,12 +85,12 @@ writeFileSync(
 );
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
-process.env.AGENTOC_REPLY_SELF_CHECK = 'off';
+process.env.RAGENT_REPLY_SELF_CHECK = 'off';
 
 const sessionManager = await import(
   pathToFileURL(join(repoRoot, 'chat', 'session-manager.mjs')).href
@@ -121,7 +121,7 @@ async function waitFor(predicate, description, timeoutMs = 6000) {
 
 try {
   const session = await createSession(tempHome, 'fake-codex', 'Plan Fallback Artifact', {
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Verify plain markdown Plan Mode replies become plan artifacts.',
     internalRole: 'test_plan_fallback',
   });
@@ -154,7 +154,7 @@ try {
 
   const fallbackPlan = history.find((event) =>
     event.type === 'plan'
-    && event.source === 'agentoc-plan-fallback'
+    && event.source === 'ragent-plan-fallback'
     && event.runId === assistantMessage.runId);
   assert.ok(fallbackPlan, 'plan mode markdown replies should create a fallback plan artifact');
   assert.equal(fallbackPlan.sourceMessageSeq, assistantMessage.seq);
@@ -176,7 +176,7 @@ try {
     timeline.some((event) =>
       event.type === 'plan'
       && event.planId === fallbackPlan.planId
-      && event.source === 'agentoc-plan-fallback'),
+      && event.source === 'ragent-plan-fallback'),
     'timeline should expose the fallback plan as a standalone plan event',
   );
 
@@ -197,7 +197,7 @@ try {
   const revisedHistory = await getHistory(session.id);
   const revisedFallbackPlan = revisedHistory.find((event) =>
     event.type === 'plan'
-    && event.source === 'agentoc-plan-fallback'
+    && event.source === 'ragent-plan-fallback'
     && event.runId === reviseOutcome.run.id);
   assert.ok(revisedFallbackPlan, 'plan revise markdown replies should create a new fallback plan artifact');
   assert.equal(
@@ -208,7 +208,7 @@ try {
   assert.ok(
     revisedHistory.some((event) =>
       event.type === 'plan'
-      && event.source === 'agentoc-plan-action'
+      && event.source === 'ragent-plan-action'
       && event.planId === fallbackPlan.planId
       && event.runId === reviseOutcome.run.id
       && event.state === 'superseded'),

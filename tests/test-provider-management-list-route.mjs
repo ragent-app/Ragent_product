@@ -3,18 +3,18 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-provider-list-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-provider-list-'));
 process.env.HOME = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_HARNESS_ROOT = join(root, 'harnesses');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_HARNESS_ROOT = join(root, 'harnesses');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 try {
   const { createNativeProviderRegistry, createSecretStore } = await import('../lib/provider-runtime/index.mjs');
-  const registry = createNativeProviderRegistry({ configDir: process.env.AGENTOC_CONFIG_DIR });
-  const secretStore = createSecretStore({ configDir: process.env.AGENTOC_CONFIG_DIR });
+  const registry = createNativeProviderRegistry({ configDir: process.env.RAGENT_CONFIG_DIR });
+  const secretStore = createSecretStore({ configDir: process.env.RAGENT_CONFIG_DIR });
   const { createNativeApiProvider } = await import('../chat/native-provider-management.mjs');
-  const created = await createNativeApiProvider({ configDir: process.env.AGENTOC_CONFIG_DIR, registry, secretStore,
+  const created = await createNativeApiProvider({ configDir: process.env.RAGENT_CONFIG_DIR, registry, secretStore,
     sourceInstanceId: 'inst_fixture', payload: { agentType: 'claude', displayName: 'Test Claude',
       baseUrl: 'https://example.invalid', apiKey: 'fixture-only', discoverModels: false } });
   const id = created.provider.id;

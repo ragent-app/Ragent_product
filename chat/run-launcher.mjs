@@ -43,7 +43,7 @@ export const DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE = 'runner-supervisor';
 // from legacy supervisor children during a rolling upgrade.
 export const DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE = 'runner-lifecycle';
 const RUNNER_LIFECYCLE_TIMEOUT_MS = Number.parseInt(
-  process.env.AGENTOC_RUNNER_LIFECYCLE_TIMEOUT_MS || '120000',
+  process.env.RAGENT_RUNNER_LIFECYCLE_TIMEOUT_MS || '120000',
   10,
 );
 export const runnerLifecycleTimeoutMs = Number.isFinite(RUNNER_LIFECYCLE_TIMEOUT_MS) && RUNNER_LIFECYCLE_TIMEOUT_MS > 0
@@ -70,7 +70,7 @@ function trimString(value) {
 
 function prependWindowsHarnessBinDirs(environment) {
   if (process.platform !== 'win32') return environment;
-  const harnessRoot = trimString(environment?.AGENTOC_HARNESS_ROOT);
+  const harnessRoot = trimString(environment?.RAGENT_HARNESS_ROOT);
   if (!harnessRoot) return environment;
   const currentPath = trimString(environment?.PATH);
   const entries = [
@@ -294,19 +294,19 @@ export async function prepareDetachedRunnerProvider(runId, {
     startedAt,
   }));
 
-  const providerHomesDir = trimString(environment.AGENTOC_PROVIDER_HOMES_DIR)
+  const providerHomesDir = trimString(environment.RAGENT_PROVIDER_HOMES_DIR)
     || dirname(selection.app === 'codex' ? CODEX_MANAGED_HOME_DIR : CLAUDE_MANAGED_HOME_DIR);
   const { prepareNativeRunProviderHome } = await import('../lib/provider-runtime/run-provider-prepare.mjs');
   let nativeResult = null;
   try {
     nativeResult = await (prepareNativeImpl || prepareNativeRunProviderHome)(runId, manifest, {
-      configDir: trimString(environment.AGENTOC_NATIVE_REGISTRY_DIR)
-        || trimString(environment.AGENTOC_CONFIG_DIR)
+      configDir: trimString(environment.RAGENT_NATIVE_REGISTRY_DIR)
+        || trimString(environment.RAGENT_CONFIG_DIR)
         || CONFIG_DIR,
       providerHomesRoot: providerHomesDir,
-      externalCodexAuthFile: trimString(environment.AGENTOC_EXTERNAL_CODEX_AUTH_FILE)
-        || (trimString(environment.AGENTOC_EXTERNAL_CODEX_HOME)
-          ? join(trimString(environment.AGENTOC_EXTERNAL_CODEX_HOME), 'auth.json')
+      externalCodexAuthFile: trimString(environment.RAGENT_EXTERNAL_CODEX_AUTH_FILE)
+        || (trimString(environment.RAGENT_EXTERNAL_CODEX_HOME)
+          ? join(trimString(environment.RAGENT_EXTERNAL_CODEX_HOME), 'auth.json')
           : join(homedir(), '.codex', 'auth.json')),
       // Codex OAuth is machine-local. Do not let a launcher environment flag
       // opt a Run back into the user's ~/.codex refresh-token chain.
@@ -406,7 +406,7 @@ export async function prepareDetachedRunnerProvider(runId, {
   if (selection.app === 'codex' && nativeResult.oauthAccountId && nativeResult.homeDir) {
     try {
       codexRolloutSources = await resolveCodexRuntimeRolloutSources({
-        configDir: trimString(environment.AGENTOC_NATIVE_REGISTRY_DIR) || trimString(environment.AGENTOC_CONFIG_DIR) || CONFIG_DIR,
+        configDir: trimString(environment.RAGENT_NATIVE_REGISTRY_DIR) || trimString(environment.RAGENT_CONFIG_DIR) || CONFIG_DIR,
         providerHomesRoot: providerHomesDir, homeRoot: nativeResult.homeDir, accountId: nativeResult.oauthAccountId,
       });
     } catch (error) {
@@ -432,25 +432,25 @@ export async function prepareDetachedRunnerProvider(runId, {
     codexRolloutSources,
     environment: {
       ...environment,
-      AGENTOC_PROVIDER_HOMES_DIR: nativeResult.homeDir,
-      AGENTOC_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
+      RAGENT_PROVIDER_HOMES_DIR: nativeResult.homeDir,
+      RAGENT_CODEX_ROLLOUT_SOURCES: JSON.stringify(codexRolloutSources),
       ...(selection.app === 'codex'
-        ? { AGENTOC_CODEX_HOME_DIR: trimString(nativeResult.codexHomeDir) }
+        ? { RAGENT_CODEX_HOME_DIR: trimString(nativeResult.codexHomeDir) }
         : {}),
       ...(selection.app === 'agy'
-        ? { AGENTOC_AGY_HOME_DIR: trimString(nativeResult.agyHomeDir) }
+        ? { RAGENT_AGY_HOME_DIR: trimString(nativeResult.agyHomeDir) }
         : {}),
       ...(nativeResult.providerId
-        ? { AGENTOC_PROVIDER_PROFILE_ID: nativeResult.providerId }
+        ? { RAGENT_PROVIDER_PROFILE_ID: nativeResult.providerId }
         : {}),
       ...(nativeResult.oauthLock?.path && nativeResult.oauthLock?.token
         ? {
-          AGENTOC_NATIVE_OAUTH_LOCK_PATH: nativeResult.oauthLock.path,
-          AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: nativeResult.oauthLock.token,
+          RAGENT_NATIVE_OAUTH_LOCK_PATH: nativeResult.oauthLock.path,
+          RAGENT_NATIVE_OAUTH_LOCK_TOKEN: nativeResult.oauthLock.token,
         }
         : {}),
       ...(selection.app === 'codex' && nativeResult.snapshot?.serviceTier
-        ? { AGENTOC_CODEX_SERVICE_TIER: nativeResult.snapshot.serviceTier }
+        ? { RAGENT_CODEX_SERVICE_TIER: nativeResult.snapshot.serviceTier }
         : {}),
     },
     nativeRuntimeSnapshot: nativeResult.snapshot || null,
@@ -461,7 +461,7 @@ export function buildDetachedRunnerUnitName(runId, { launchAttempt = 0 } = {}) {
   const normalizedAttempt = Number.isSafeInteger(Number(launchAttempt)) && Number(launchAttempt) > 0
     ? Math.floor(Number(launchAttempt))
     : 0;
-  return `agentoc-runner-${sanitizeSystemdUnitFragment(runId)}${normalizedAttempt > 0 ? `-a${normalizedAttempt}` : ''}`;
+  return `ragent-runner-${sanitizeSystemdUnitFragment(runId)}${normalizedAttempt > 0 ? `-a${normalizedAttempt}` : ''}`;
 }
 
 export function detectSystemdManagerScope(cgroupText) {
@@ -493,7 +493,7 @@ export function shouldUseSystemdDetachedRunner({
   scope = getCurrentSystemdManagerScope({ platform }),
 } = {}) {
   return platform === 'linux'
-    && env?.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER !== '1'
+    && env?.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER !== '1'
     && (scope === 'system' || scope === 'user');
 }
 
@@ -504,17 +504,17 @@ export function buildDetachedRunnerEnvironment({
   proxyEnv = {},
 } = {}) {
   const sandboxMode = String(process.env.IS_SANDBOX || '').trim();
-  const projectRoot = process.env.AGENTOC_PROJECT_ROOT || join(__dirname, '..');
+  const projectRoot = process.env.RAGENT_PROJECT_ROOT || join(__dirname, '..');
   // Bounded test-injection channel: integration tests toggle deterministic
   // sidecar behavior (synthetic pre-spawn failure, finalization-metrics throw)
-  // via AGENTOC_TEST_* keys, which the shared allowlist would otherwise strip.
+  // via RAGENT_TEST_* keys, which the shared allowlist would otherwise strip.
   // The strip gate below still removes deny-listed and credential-shaped keys
-  // (e.g. AGENTOC_TEST_TOKEN), so this cannot smuggle config or secrets into a
-  // Run.  In production the control plane never sets AGENTOC_TEST_*, so this
+  // (e.g. RAGENT_TEST_TOKEN), so this cannot smuggle config or secrets into a
+  // Run.  In production the control plane never sets RAGENT_TEST_*, so this
   // is a no-op there.
   const testOverrides = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith('AGENTOC_TEST_') && value !== undefined && value !== null) {
+    if (key.startsWith('RAGENT_TEST_') && value !== undefined && value !== null) {
       testOverrides[key] = value;
     }
   }
@@ -530,24 +530,24 @@ export function buildDetachedRunnerEnvironment({
     // HOME is on the shared allowlist but is always overridden here so it
     // matches the OS user the sidecar will actually run as, never a stale
     // value from the caller's environment.  os.homedir() resolves the home of
-    // the current process — the supervisor daemon runs as agentoc-runner and
+    // the current process — the supervisor daemon runs as ragent-runner and
     // the plain-process fallback runs as the control user — so HOME is correct
     // in both paths.
     HOME: homedir(),
-    AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${CHAT_PORT}`,
-    AGENTOC_PROJECT_ROOT: projectRoot,
+    RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${CHAT_PORT}`,
+    RAGENT_PROJECT_ROOT: projectRoot,
     // Populated only from the verified provider-home registry below, never
     // inherited from the service environment or a user shell snapshot.
-    AGENTOC_CODEX_ROLLOUT_SOURCES: '[]',
+    RAGENT_CODEX_ROLLOUT_SOURCES: '[]',
     // Controlled spool write-back channel: the sidecar writes run results to
     // the control plane's chat-runs directory without being told the
-    // production AGENTOC_CONFIG_DIR.
-    AGENTOC_RUN_SPOOL_DIR: CHAT_RUNS_DIR,
-    AGENTOC_USER_SHELL_ENV_B64: serializeUserShellEnvSnapshot(),
-    AGENTOC_RUNNER_LAUNCH_MODE: launchMode || DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
-    ...(launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE ? { AGENTOC_RUNTIME_MODE: 'proot' } : {}),
-    ...(unitName ? { AGENTOC_RUNNER_UNIT_NAME: unitName } : {}),
-    ...(unitScope ? { AGENTOC_RUNNER_UNIT_SCOPE: unitScope } : {}),
+    // production RAGENT_CONFIG_DIR.
+    RAGENT_RUN_SPOOL_DIR: CHAT_RUNS_DIR,
+    RAGENT_USER_SHELL_ENV_B64: serializeUserShellEnvSnapshot(),
+    RAGENT_RUNNER_LAUNCH_MODE: launchMode || DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
+    ...(launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE ? { RAGENT_RUNTIME_MODE: 'proot' } : {}),
+    ...(unitName ? { RAGENT_RUNNER_UNIT_NAME: unitName } : {}),
+    ...(unitScope ? { RAGENT_RUNNER_UNIT_SCOPE: unitScope } : {}),
     ...(launchMode === PROOT_RUNNER_PROCESS_LAUNCH_MODE ? { IS_SANDBOX: '0' } : (sandboxMode ? {} : { IS_SANDBOX: '1' })),
   }));
   return env;
@@ -558,13 +558,13 @@ function normalizeSupervisorSocketPath(value) {
 }
 
 export function shouldUseRunnerSupervisor({ env = process.env } = {}) {
-  if (env?.AGENTOC_RUNTIME_MODE === 'proot') return false;
-  return !!normalizeSupervisorSocketPath(env?.AGENTOC_RUNNER_SUPERVISOR_SOCKET);
+  if (env?.RAGENT_RUNTIME_MODE === 'proot') return false;
+  return !!normalizeSupervisorSocketPath(env?.RAGENT_RUNNER_SUPERVISOR_SOCKET);
 }
 
 export function shouldUseRunnerLifecycleBroker({ env = process.env } = {}) {
-  if (env?.AGENTOC_RUNTIME_MODE === 'proot') return false;
-  return !!normalizeSupervisorSocketPath(env?.AGENTOC_RUNNER_LIFECYCLE_SOCKET);
+  if (env?.RAGENT_RUNTIME_MODE === 'proot') return false;
+  return !!normalizeSupervisorSocketPath(env?.RAGENT_RUNNER_LIFECYCLE_SOCKET);
 }
 
 export function isWindowsManagedRunnerPlatform(platform = process.platform) {
@@ -572,7 +572,7 @@ export function isWindowsManagedRunnerPlatform(platform = process.platform) {
 }
 
 export async function launchDetachedRunnerViaLifecycleBroker(runId, {
-  socketPath = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET,
+  socketPath = process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET,
   connectImpl = connectSocket,
   launchAttempt = 0,
   issueScopeGrant = null,
@@ -584,7 +584,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
   }
   const guiEnvironment = resolveRunnerGuiEnvironment();
   let scopeGrant = null;
-  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1') {
+  if (process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1') {
     try {
       const issue = issueScopeGrant || (await import('./linux-run-scope-issuance.mjs')).issueLinuxRunScopeGrant;
       scopeGrant = await issue(runId, launchAttempt);
@@ -675,7 +675,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
 // the SCM service host. Its native client verifies the actual pipe server PID
 // against SCM before transmitting the run-bound request or OAuth lock token.
 export function exchangeWindowsSupervisorRequest(request, { timeoutMs = 30000, spawnImpl = spawnProcess,
-  executable = join(dirname(process.execPath), '..', 'AgentoC.ServiceHost.exe') } = {}) {
+  executable = join(dirname(process.execPath), '..', 'Ragent.ServiceHost.exe') } = {}) {
   const encoded = `${JSON.stringify(request)}\n`;
   if (Buffer.byteLength(encoded, 'utf8') > 16384) return Promise.reject(new Error('Runner supervisor request is too large'));
   return new Promise((resolve, reject) => {
@@ -713,9 +713,9 @@ export function exchangeWindowsSupervisorRequest(request, { timeoutMs = 30000, s
 }
 
 export async function launchDetachedRunnerViaSupervisor(runId, {
-  socketPath = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET,
+  socketPath = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET,
   connectImpl = connectSocket,
-  timeoutMs = Number.parseInt(process.env.AGENTOC_RUNNER_SUPERVISOR_TIMEOUT_MS || '30000', 10),
+  timeoutMs = Number.parseInt(process.env.RAGENT_RUNNER_SUPERVISOR_TIMEOUT_MS || '30000', 10),
   prepareProviderImpl = prepareDetachedRunnerProvider,
 } = {}) {
   const normalizedSocketPath = normalizeSupervisorSocketPath(socketPath);
@@ -751,11 +751,11 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
       ...(prepared?.codexRolloutSources?.length ? { codexRolloutSources: prepared.codexRolloutSources } : {}),
       ...(prepared?.oauthLock?.path && prepared?.oauthLock?.token ? { oauthLockPath: prepared.oauthLock.path, oauthLockToken: prepared.oauthLock.token } : {}),
     };
-    const managedWindows = process.platform === 'win32' && process.env.AGENTOC_WINDOWS_SERVICE_MODE === '1'
-      && process.env.AGENTOC_WINDOWS_SERVICE_ROLE === 'control' && connectImpl === connectSocket;
+    const managedWindows = process.platform === 'win32' && process.env.RAGENT_WINDOWS_SERVICE_MODE === '1'
+      && process.env.RAGENT_WINDOWS_SERVICE_ROLE === 'control' && connectImpl === connectSocket;
     let result;
     if (managedWindows) {
-      if (normalizedSocketPath.toLowerCase() !== '\\\\.\\pipe\\agentoc-runner-supervisor-owner') throw new Error('Runner supervisor pipe is not the installed endpoint');
+      if (normalizedSocketPath.toLowerCase() !== '\\\\.\\pipe\\ragent-runner-supervisor-owner') throw new Error('Runner supervisor pipe is not the installed endpoint');
       const response = await exchangeWindowsSupervisorRequest(request, { timeoutMs });
       result = { pid: Number.isInteger(response.pid) && response.pid > 0 ? response.pid : null,
         unitName: null, unitScope: null, supervisorSocket: normalizedSocketPath, launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE };
@@ -905,7 +905,7 @@ export async function launchDetachedRunnerViaSystemd(runId, {
     '--working-directory',
     workingDirectory,
     '--description',
-    `AgentoC detached runner ${runId}`,
+    `Ragent detached runner ${runId}`,
   ];
   appendSystemdEnvironmentArgs(args, env);
   args.push(processExecPath, runnerScriptPath, runId);
@@ -1006,7 +1006,7 @@ export function createDetachedRunnerSpawner({
         // Retrying through another launcher could bypass identity checks or
         // start a second copy while a previous unit is still draining.
         if (['RUNNER_IDENTITY_INVALID', 'RUNNER_UNIT_STATUS_UNAVAILABLE', 'RUNNER_UNIT_DRAINING'].includes(error?.code)) throw error;
-        if (process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED === '1') {
+        if (process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED === '1') {
           if (error?.code !== 'RUNNER_BROKER_UNAVAILABLE') throw error;
           const unavailable = new Error(`Required runner lifecycle broker is unavailable: ${error?.message || String(error)}`);
           unavailable.code = 'RUNNER_BROKER_UNAVAILABLE';
@@ -1024,7 +1024,7 @@ export function createDetachedRunnerSpawner({
             || ['provider-preparation', 'supervisor-rejection'].includes(error?.launchStage)) throw error;
         if (error?.code === 'WINDOWS_EXECUTION_IDENTITY_UNSAFE'
             || error?.code === 'WINDOWS_EXECUTION_IDENTITY_UNAVAILABLE') throw error;
-        if (process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED === '1'
+        if (process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED === '1'
           || isWindowsManagedRunnerPlatform(platform)) {
           if (error?.code && !['ENOENT', 'ECONNREFUSED', 'EPIPE', 'ECONNRESET'].includes(error.code)) throw error;
           const unavailable = new Error(`Required runner supervisor is unavailable: ${error?.message || String(error)}`, { cause: error });
@@ -1043,7 +1043,7 @@ export function createDetachedRunnerSpawner({
       error.launchDefinitelyNotSubmitted = true;
       throw error;
     }
-    if (process.env.AGENTOC_RUNTIME_MODE === 'proot') {
+    if (process.env.RAGENT_RUNTIME_MODE === 'proot') {
       return spawnDetachedRunnerAsProcess(runId, { spawnImpl, launchMode: PROOT_RUNNER_PROCESS_LAUNCH_MODE });
     }
     const scope = getScopeImpl();

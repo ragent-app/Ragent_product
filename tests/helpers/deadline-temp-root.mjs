@@ -3,11 +3,11 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 const expectedPrefixes = new Set([
-  'agentoc-approval-deadline-',
-  'agentoc-session-deadline-',
-  'agentoc-app-deadline-',
-  'agentoc-token-deadline-',
-  'agentoc-run-approval-deadline-',
+  'ragent-approval-deadline-',
+  'ragent-session-deadline-',
+  'ragent-app-deadline-',
+  'ragent-token-deadline-',
+  'ragent-run-approval-deadline-',
 ]);
 
 function samePath(left, right) {

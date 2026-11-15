@@ -7,19 +7,19 @@ if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 	throw 'APB_ADMIN_LOCAL_TEST_REQUIRED'
 }
 $TargetRoot = [IO.Path]::GetFullPath($TargetRoot).TrimEnd('\')
-if ($TargetRoot -cnotmatch '^[A-Za-z]:\\Program Files\\AgentoC\\BrokerQA$') { throw 'APB_LOCAL_TARGET_PATH_REFUSED' }
-$serviceName = 'AgentoC-Broker-QA-Target'
+if ($TargetRoot -cnotmatch '^[A-Za-z]:\\Program Files\\Ragent\\BrokerQA$') { throw 'APB_LOCAL_TARGET_PATH_REFUSED' }
+$serviceName = 'Ragent-Broker-QA-Target'
 if (Get-CimInstance Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop) { throw 'APB_TARGET_SERVICE_MUST_BE_REMOVED_FIRST' }
 if (-not (Test-Path -LiteralPath $TargetRoot -PathType Container)) { throw 'APB_TARGET_ROOT_NOT_FOUND' }
 $children = @(Get-ChildItem -LiteralPath $TargetRoot -Force)
-if ($children.Count -ne 1 -or $children[0].Name -cne 'AgentoC-Broker-QA-Target.exe' -or $children[0].PSIsContainer -or ($children[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+if ($children.Count -ne 1 -or $children[0].Name -cne 'Ragent-Broker-QA-Target.exe' -or $children[0].PSIsContainer -or ($children[0].Attributes -band [IO.FileAttributes]::ReparsePoint)) {
 	throw 'APB_TARGET_CLEANUP_CONTENTS_REFUSED'
 }
 $parent = Split-Path -Parent $TargetRoot
 Remove-Item -LiteralPath $children[0].FullName -Force
 Remove-Item -LiteralPath $TargetRoot -Force
 $parentRemoved = $false
-if ((Split-Path -Leaf $parent) -ceq 'AgentoC' -and (Test-Path -LiteralPath $parent)) {
+if ((Split-Path -Leaf $parent) -ceq 'Ragent' -and (Test-Path -LiteralPath $parent)) {
 	if (@(Get-ChildItem -LiteralPath $parent -Force).Count -eq 0) {
 		Remove-Item -LiteralPath $parent -Force
 		$parentRemoved = $true

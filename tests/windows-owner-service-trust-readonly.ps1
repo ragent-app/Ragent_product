@@ -11,7 +11,7 @@ if(-not $match.Success){throw 'Missing actual WTS query source'}
 Add-Type -TypeDefinition $match.Groups[1].Value
 $result=[ordered]@{pass=$true;actualPowerShellParse=$true;actualWtsCompile=$true;actualOwnerSessionQuery=$false;actualServiceToken=$false;actualSignedHelper=$false}
 if($LiveOwnerSession){
-  $session=[AgentoCOwnerSessions]::Find([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+  $session=[RagentOwnerSessions]::Find([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
   if($session -le 0 -or $session -gt 65535){throw 'Invalid live Owner session'}
   $result.actualOwnerSessionQuery=$true;$result.ownerSessionId=$session
 }

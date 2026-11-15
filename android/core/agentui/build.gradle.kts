@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.agentui"
+    namespace = "com.andysagent.ragent.core.agentui"
     compileSdk = 37
     defaultConfig {
         minSdk = 26

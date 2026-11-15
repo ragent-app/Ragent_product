@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createWindowsRuntimeManifest } from '../scripts/create-windows-runtime-manifest.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-runtime-manifest-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-runtime-manifest-'));
 const vendor = join(root, 'vendor');
 const powershell = join(vendor, 'PowerShell');
 const winget = join(vendor, 'Microsoft.WinGet.Client');

@@ -15,7 +15,7 @@ const BASELINE_SKIP_DIRS = new Set([
   '.local',
   '.npm',
   '.next',
-  '.agentoc',
+  '.ragent',
   '.svn',
   'build',
   'coverage',
@@ -526,10 +526,10 @@ export function createFileChangeStatsTracker(options = {}) {
     return {
       type: 'item.completed',
       item: {
-        id: `agentoc_file_change_stats_${String(runId || 'run')}`,
+        id: `ragent_file_change_stats_${String(runId || 'run')}`,
         type: 'file_change',
         status: 'completed',
-        source: 'agentoc.snapshot-summary',
+        source: 'ragent.snapshot-summary',
         changes,
       },
     };

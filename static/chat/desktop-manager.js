@@ -1,4 +1,4 @@
-(function attachAgentoCDesktopManager(root) {
+(function attachRagentDesktopManager(root) {
   "use strict";
 
   const body = root.document?.body;
@@ -56,7 +56,7 @@
   };
 
   function translate(key, fallback) {
-    const value = root.agentocT?.(key);
+    const value = root.ragentT?.(key);
     return value && value !== key ? value : fallback;
   }
 
@@ -98,7 +98,7 @@
     hideSubpageHeader();
     select(managerName);
     updatePageHeading(managerName);
-    if (managerName === "account") root.AgentoCCrossDevicePanel?.refreshManager?.();
+    if (managerName === "account") root.RagentCrossDevicePanel?.refreshManager?.();
   }
 
   function showPairingPage() {
@@ -138,14 +138,14 @@
       updateStatus.textContent = translate(`desktopManager.updateStatus.${key}`, fallback[key]) + (key === "downloading" && Number.isInteger(state.progress) ? ` ${state.progress}%` : "");
     }
   }
-  root.agentocDesktop?.onUpdateState?.(renderUpdate);
-  root.agentocDesktop?.getUpdateState?.().then(renderUpdate).catch(() => renderUpdate({ status: "error" }));
+  root.ragentDesktop?.onUpdateState?.(renderUpdate);
+  root.ragentDesktop?.getUpdateState?.().then(renderUpdate).catch(() => renderUpdate({ status: "error" }));
   checkButton?.addEventListener("click", async () => {
     renderUpdate({ status: "checking" });
-    try { renderUpdate(await root.agentocDesktop.checkForUpdates()); } catch { renderUpdate({ status: "error" }); }
+    try { renderUpdate(await root.ragentDesktop.checkForUpdates()); } catch { renderUpdate({ status: "error" }); }
   });
   updateButton?.addEventListener("click", async () => {
-    try { if (await root.agentocDesktop.openUpdate()) return; } catch {}
+    try { if (await root.ragentDesktop.openUpdate()) return; } catch {}
     const message = translate("desktopManager.updateStatus.installError", "Update failed. Please retry or download the installer from the website.");
     if (updateStatus) updateStatus.textContent = message;
     if (externalStatus) { externalStatus.textContent = message; externalStatus.hidden = false; }
@@ -158,15 +158,15 @@
   function openPairing() {
     select("pairing");
     updatePageHeading("pairing");
-    root.AgentoCCrossDevicePanel?.open?.({ view: "register" });
+    root.RagentCrossDevicePanel?.open?.({ view: "register" });
   }
 
   doc.querySelector(".desktop-manager-account-group")?.removeAttribute("hidden");
   doc.querySelector(".desktop-manager-devices-group")?.removeAttribute("hidden");
   doc.getElementById("desktopManagerHeader")?.removeAttribute("hidden");
   nav?.removeAttribute("hidden");
-  root.AgentoCDesktopManager = Object.freeze({ showAccount, openPairing });
-  root.agentocDesktop?.onExternalOpenFailed?.(() => {
+  root.RagentDesktopManager = Object.freeze({ showAccount, openPairing });
+  root.ragentDesktop?.onExternalOpenFailed?.(() => {
     if (!externalStatus) return;
     externalStatus.textContent = translate(
       "desktopManager.externalOpenFailed",

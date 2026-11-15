@@ -6,7 +6,7 @@
 //      instance id + marker, free non-production port, TTL kill, cleanup of
 //      only its own resources;
 //   2. cgroup contract: launcher children inherit the CALLER's cgroup and never
-//      join the production units (agentoc.service / agentoc-runner-supervisor
+//      join the production units (ragent.service / ragent-runner-supervisor
 //      membership is never created by the launcher) — the instance marker makes
 //      them distinguishable in proc/cgroup listings;
 //   3. detector: flags chat-server duplicates, journalctl -f, stress drivers,
@@ -137,7 +137,7 @@ async function testLauncherHelp() {
 }
 
 async function testIsolationContract() {
-  const baseDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-contract-'));
+  const baseDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-contract-'));
   const envOut = join(baseDir, 'child-env.json');
   const launcherProc = spawnDetached(process.execPath, [
     launcher, '--base-dir', baseDir, '--ttl', '90', '--json', '--',
@@ -172,23 +172,23 @@ async function testIsolationContract() {
     const childInfo = JSON.parse(readFileSync(envOut, 'utf8'));
     const env = childInfo.env;
 
-    assert.ok(env.AGENTOC_TEST_INSTANCE_ID.startsWith('test-'), 'unique instance id marker');
-    const instanceDir = join(baseDir, env.AGENTOC_TEST_INSTANCE_ID);
-    assert.ok(env.AGENTOC_CONFIG_DIR && env.AGENTOC_CONFIG_DIR.startsWith(instanceDir), 'temp config dir under instance dir');
-    assert.ok(env.AGENTOC_WORK_ROOT_DIR && env.AGENTOC_WORK_ROOT_DIR.startsWith(instanceDir), 'work root under instance dir');
-    assert.ok(env.AGENTOC_MEMORY_DIR && env.AGENTOC_MEMORY_DIR.startsWith(instanceDir), 'memory dir under instance dir');
-    for (const dir of [env.AGENTOC_CONFIG_DIR, env.AGENTOC_WORK_ROOT_DIR, env.AGENTOC_MEMORY_DIR]) {
+    assert.ok(env.RAGENT_TEST_INSTANCE_ID.startsWith('test-'), 'unique instance id marker');
+    const instanceDir = join(baseDir, env.RAGENT_TEST_INSTANCE_ID);
+    assert.ok(env.RAGENT_CONFIG_DIR && env.RAGENT_CONFIG_DIR.startsWith(instanceDir), 'temp config dir under instance dir');
+    assert.ok(env.RAGENT_WORK_ROOT_DIR && env.RAGENT_WORK_ROOT_DIR.startsWith(instanceDir), 'work root under instance dir');
+    assert.ok(env.RAGENT_MEMORY_DIR && env.RAGENT_MEMORY_DIR.startsWith(instanceDir), 'memory dir under instance dir');
+    for (const dir of [env.RAGENT_CONFIG_DIR, env.RAGENT_WORK_ROOT_DIR, env.RAGENT_MEMORY_DIR]) {
       assert.ok(existsSync(dir), `dir exists: ${dir}`);
     }
     const port = Number.parseInt(env.CHAT_PORT, 10);
     assert.ok(Number.isInteger(port) && port > 0 && port !== 7690 && port !== 7699, `non-production port: ${port}`);
-    assert.equal(env.AGENTOC_RUNNER_SUPERVISOR_SOCKET, '', 'supervisor socket neutralised');
-    assert.equal(env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER, '1', 'no systemd detached runners');
-    assert.equal(env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES, '1', 'temp overrides allowed');
-    assert.ok(env.AGENTOC_PUBLIC_BASE_URL.includes(String(port)), 'public base url pinned to temp port');
+    assert.equal(env.RAGENT_RUNNER_SUPERVISOR_SOCKET, '', 'supervisor socket neutralised');
+    assert.equal(env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER, '1', 'no systemd detached runners');
+    assert.equal(env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES, '1', 'temp overrides allowed');
+    assert.ok(env.RAGENT_PUBLIC_BASE_URL.includes(String(port)), 'public base url pinned to temp port');
 
     const marker = JSON.parse(readFileSync(join(instanceDir, 'instance.json'), 'utf8'));
-    assert.equal(marker.id, env.AGENTOC_TEST_INSTANCE_ID);
+    assert.equal(marker.id, env.RAGENT_TEST_INSTANCE_ID);
     assert.ok(Number.isInteger(marker.pid) && marker.pid > 0, 'marker pid recorded');
 
     // cgroup contract: child inherits the CALLER's cgroup; it never joins the
@@ -197,15 +197,15 @@ async function testIsolationContract() {
     const callerCgroup = readProcCgroup(process.pid);
     const childCgroup = readProcCgroup(childPid);
     assert.equal(childCgroup, callerCgroup, 'child cgroup == caller cgroup (no re-parenting)');
-    assert.ok(!childCgroup.includes('agentoc.service'), 'child not in production chat-server unit cgroup');
+    assert.ok(!childCgroup.includes('ragent.service'), 'child not in production chat-server unit cgroup');
     const childEnv = readProcEnv(childPid);
-    assert.ok(childEnv.some((entry) => entry === `AGENTOC_TEST_INSTANCE_ID=${env.AGENTOC_TEST_INSTANCE_ID}`), 'marker visible in /proc environ');
+    assert.ok(childEnv.some((entry) => entry === `RAGENT_TEST_INSTANCE_ID=${env.RAGENT_TEST_INSTANCE_ID}`), 'marker visible in /proc environ');
     assert.ok(childEnv.some((entry) => entry === `CHAT_PORT=${port}`), 'temp port visible in /proc environ');
 
     // Distinguishability: a detector run over a cgroup listing that contains
     // this launcher child flags it as a leaked test instance, not as a
     // supervised runner.
-    const fakeCgroupDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-fakecg-'));
+    const fakeCgroupDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-fakecg-'));
     writeFileSync(join(fakeCgroupDir, 'cgroup.procs'), `${childPid}\n`, 'utf8');
     const det = await runProcess(process.execPath, [detector, '--cgroup-dir', fakeCgroupDir, '--json']);
     assert.equal(det.code, 1, 'detector exits 1 for leaked test instance');
@@ -220,7 +220,7 @@ async function testIsolationContract() {
     const exit = await exitPromise;
     assert.equal(exit.code, 143, `launcher exits 143 after SIGTERM (got ${exit.code})`);
     const status = parseLauncherStatus(launcherStdout);
-    assert.equal(status.instanceId, env.AGENTOC_TEST_INSTANCE_ID);
+    assert.equal(status.instanceId, env.RAGENT_TEST_INSTANCE_ID);
     assert.equal(status.port, port);
     assert.equal(status.cleaned, true);
     assert.ok(!existsSync(instanceDir), 'instance dir cleaned');
@@ -233,7 +233,7 @@ async function testIsolationContract() {
 }
 
 async function testTtlKillsAndCleans() {
-  const baseDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-ttl-'));
+  const baseDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-ttl-'));
   const envOut = join(baseDir, 'child-env.json');
   const started = Date.now();
   const result = await runProcess(process.execPath, [
@@ -249,7 +249,7 @@ async function testTtlKillsAndCleans() {
 }
 
 async function testCleanupOnlyOwnResources() {
-  const baseDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-sentinel-'));
+  const baseDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-sentinel-'));
   const sentinel = join(baseDir, 'keep-me.txt');
   writeFileSync(sentinel, 'sentinel', 'utf8');
   const envOut = join(baseDir, 'child-env.json');
@@ -266,7 +266,7 @@ async function testCleanupOnlyOwnResources() {
 }
 
 async function testDetectorFlagsPollution() {
-  const cgroupDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-cg-'));
+  const cgroupDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-cg-'));
   const spawned = [];
   const keepAlive = "setInterval(()=>{},1000);";
   try {
@@ -279,7 +279,7 @@ async function testDetectorFlagsPollution() {
     const fakeDiag = spawnDetached(process.execPath, ['-e', keepAlive, 'diag-host-v47b.mjs']);
     const fakeSleep = spawnDetached('/bin/sleep', ['60']);
     const fakeTestInstance = spawnDetached(process.execPath, ['-e', keepAlive], {
-      env: { ...process.env, AGENTOC_TEST_INSTANCE_ID: 'test-leak-123' },
+      env: { ...process.env, RAGENT_TEST_INSTANCE_ID: 'test-leak-123' },
     });
     const fakeGeneric = spawnDetached(process.execPath, ['-e', keepAlive]);
     spawned.push(fakeDaemon, fakeSidecar, fakeSidecarNoMarker, fakeChat, fakeJournal,
@@ -322,7 +322,7 @@ async function testDetectorFlagsPollution() {
     assert.equal(JSON.parse(cleanResult.stdout).pollutionCount, 0);
 
     // Inspection error exits 2.
-    const missingDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-missing-'));
+    const missingDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-missing-'));
     const errorResult = await runProcess(process.execPath, [detector, '--cgroup-dir', missingDir, '--json']);
     assert.equal(errorResult.code, 2, `missing cgroup.procs exits 2 (got ${errorResult.code})`);
     rmSync(missingDir, { recursive: true, force: true });
@@ -333,7 +333,7 @@ async function testDetectorFlagsPollution() {
 }
 
 async function testRealChatServerThroughLauncher() {
-  const baseDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-server-'));
+  const baseDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-server-'));
   const launcherProc = spawnDetached(process.execPath, [
     launcher, '--base-dir', baseDir, '--ttl', '120', '--json',
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -367,16 +367,16 @@ async function testRealChatServerThroughLauncher() {
     }, 'chat-server HTTP answer', 60000);
 
     const serverEnv = readProcEnv(serverPid);
-    assert.ok(serverEnv.some((entry) => entry === `AGENTOC_TEST_INSTANCE_ID=${marker.id}`), 'real server carries instance marker');
+    assert.ok(serverEnv.some((entry) => entry === `RAGENT_TEST_INSTANCE_ID=${marker.id}`), 'real server carries instance marker');
     assert.ok(serverEnv.some((entry) => entry === `CHAT_PORT=${marker.port}`), 'real server on temp port');
     const callerCgroup = readProcCgroup(process.pid);
     const serverCgroup = readProcCgroup(serverPid);
     assert.equal(serverCgroup, callerCgroup, 'real server inherits caller cgroup');
-    assert.ok(!serverCgroup.includes('agentoc.service'), 'real test server not in production chat-server cgroup');
+    assert.ok(!serverCgroup.includes('ragent.service'), 'real test server not in production chat-server cgroup');
 
     // The marker makes the real test server distinguishable from the
     // production chat-server (which carries no marker).
-    const fakeCgroupDir = mkdtempSync(join(tmpdir(), 'agentoc-ds02-fakecg2-'));
+    const fakeCgroupDir = mkdtempSync(join(tmpdir(), 'ragent-ds02-fakecg2-'));
     writeFileSync(join(fakeCgroupDir, 'cgroup.procs'), `${serverPid}\n`, 'utf8');
     const det = await runProcess(process.execPath, [detector, '--cgroup-dir', fakeCgroupDir, '--json']);
     assert.equal(det.code, 1);

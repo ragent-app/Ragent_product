@@ -6,7 +6,7 @@ import { buildClaudeWindowsInstallBridge } from '../chat/windows-auto-install-br
 
 const event = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'call-1', tool_input: { command: 'winget install Git.Git' } };
 const channel = { runId: 'run-1', sessionId: 'session-1', turnId: 'turn-1', token: 'fixture', endpoint: 'http://127.0.0.1:12345/api/internal/approved-actions/propose' };
-const nodePath = 'D:\\Program Files\\node.exe', scriptPath = 'E:\\AgentoC\\bridge.mjs';
+const nodePath = 'D:\\Program Files\\node.exe', scriptPath = 'E:\\Ragent\\bridge.mjs';
 let calls = [];
 const preflight = async (request) => { calls.push(request); return true; };
 const options = { event, channel, nodePath, scriptPath, preflight };
@@ -33,7 +33,7 @@ const approval = { providerMethod: 'item/commandExecution/requestApproval', kind
   turnId: state.turnId, itemId: event.tool_use_id, command: wrapped(expected.updatedCommand) } };
 const verify = { approval, state, runId: channel.runId, nodePath, scriptPath, preflight };
 assert.equal(await verifyCodexWindowsInstallBridgeApproval(verify), true);
-const wrappedInstallEvent = { ...event, tool_input: { command: 'agentoc-privileged --category install -- winget install Git.Git' } };
+const wrappedInstallEvent = { ...event, tool_input: { command: 'ragent-privileged --category install -- winget install Git.Git' } };
 calls = [];
 const wrappedDecision = await buildCodexWindowsInstallHookDecision({ ...options, event: wrappedInstallEvent });
 assert.equal(wrappedDecision.hookSpecificOutput?.permissionDecision, 'allow');
@@ -50,7 +50,7 @@ const pinnedState = { ...state, windowsManagedActionBinding: pinnedChannel };
 assert.equal(await verifyCodexWindowsInstallBridgeApproval({ ...verify, state: pinnedState, approval: pinnedApproval }), true);
 assert.equal(await verifyCodexWindowsInstallBridgeApproval({ ...verify, state, approval: pinnedApproval }), false, 'hook cannot choose its own user installation key');
 assert.deepEqual(await buildCodexWindowsInstallHookDecision({ ...options, event: { ...event, tool_input: {
-  command: 'agentoc-privileged --category delete -- winget install Git.Git',
+  command: 'ragent-privileged --category delete -- winget install Git.Git',
 } } }), {});
 for (const change of [
   { approval: { ...approval, params: { ...approval.params, itemId: 'other' } } },

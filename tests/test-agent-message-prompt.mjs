@@ -9,7 +9,7 @@
 // prevents historical perMessage events from leaking into fallback context.
 //
 // Pure unit test: imports the renderer/canonical/continuation modules
-// directly. No spawn-server, never touches live /var/lib/agentoc/config.
+// directly. No spawn-server, never touches live /var/lib/ragent/config.
 import assert from 'assert/strict';
 
 import { buildCanonicalContext } from '../chat/context-canonical.mjs';
@@ -18,8 +18,8 @@ import { prepareSessionContinuationBody } from '../chat/session-continuation.mjs
 import { pickLocalizedText } from '../chat/ui-language.mjs';
 import { normalizePerMessageSystemPrompt } from '../chat/apps.mjs';
 
-delete process.env.AGENTOC_CONTEXT_RENDERER_V2;
-delete process.env.AGENTOC_CONTEXT_RENDERER_SHADOW;
+delete process.env.RAGENT_CONTEXT_RENDERER_V2;
+delete process.env.RAGENT_CONTEXT_RENDERER_SHADOW;
 
 const ZH_PROMPT = '要充分结合前端开发规范，用好 skills';
 const EN_PROMPT = 'Follow the frontend development guidelines and use skills well.';

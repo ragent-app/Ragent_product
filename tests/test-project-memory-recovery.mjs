@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { processProjectMemoryJobs } from '../chat/project-memory-engine.mjs';
 import { createProjectMemoryStore } from '../chat/project-memory-store.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-memory-recovery-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-memory-recovery-'));
 const databasePath = join(root, 'project-memory.sqlite');
 const workspaceRoot = join(root, 'project-memory');
 

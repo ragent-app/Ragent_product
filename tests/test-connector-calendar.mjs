@@ -8,7 +8,7 @@ const resourceWithReminder = buildCalendarEventResource({
   startTime: '2026-04-07T10:27:00+08:00',
   endTime: '2026-04-07T10:37:00+08:00',
   description: 'Verify real calendar reminders.',
-  location: 'AgentoC',
+  location: 'Ragent',
   timezone: 'Asia/Shanghai',
   reminderMinutesBefore: 2,
 });

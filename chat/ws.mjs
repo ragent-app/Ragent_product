@@ -28,10 +28,10 @@ async function sendBuildInfo(ws) {
 }
 
 function envBrowserSignalAuthorizer() {
-  const issuer = String(process.env.AGENTOC_BROWSER_SIGNAL_ISSUER || process.env.AGENTOC_ACCOUNTS_ISSUER || '').trim();
+  const issuer = String(process.env.RAGENT_BROWSER_SIGNAL_ISSUER || process.env.RAGENT_ACCOUNTS_ISSUER || '').trim();
   let rawKeys = null;
   try {
-    rawKeys = JSON.parse(process.env.AGENTOC_BROWSER_SIGNAL_TRUSTED_KEYS_JSON || 'null');
+    rawKeys = JSON.parse(process.env.RAGENT_BROWSER_SIGNAL_TRUSTED_KEYS_JSON || 'null');
   } catch {
     rawKeys = null;
   }
@@ -59,7 +59,7 @@ function localInstanceBrowserSignalAuthorizer() {
   return async ({ token, roomId, instanceId, clientId, connectionId }) => {
     if (!cached) {
       cached = loadInstanceIdentity().then((identity) => identity ? {
-        issuer: String(process.env.AGENTOC_BROWSER_SIGNAL_ISSUER || `instance:${identity.instanceId}`).trim(),
+        issuer: String(process.env.RAGENT_BROWSER_SIGNAL_ISSUER || `instance:${identity.instanceId}`).trim(),
         trustedKeys: new Map([[identity.keyFingerprint, identity.publicKey]]),
         replayStore: createReplayStore(),
       } : { unavailable: true }).catch(() => ({ unavailable: true }));
@@ -80,7 +80,7 @@ function localInstanceBrowserSignalAuthorizer() {
 
 function configuredBrowserSignalAuthorizer() {
   try {
-    if (JSON.parse(process.env.AGENTOC_BROWSER_SIGNAL_TRUSTED_KEYS_JSON || 'null')) {
+    if (JSON.parse(process.env.RAGENT_BROWSER_SIGNAL_TRUSTED_KEYS_JSON || 'null')) {
       return envBrowserSignalAuthorizer();
     }
   } catch {

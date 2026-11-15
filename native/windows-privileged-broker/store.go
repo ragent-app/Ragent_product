@@ -1156,7 +1156,7 @@ func validAuditCode(code string) bool {
 func auditHash(entry auditEntry) string {
 	entry.Hash = ""
 	encoded, _ := json.Marshal(entry)
-	sum := sha256.Sum256(append([]byte("AgentoC Broker Audit v1\x00"), encoded...))
+	sum := sha256.Sum256(append([]byte("Ragent Broker Audit v1\x00"), encoded...))
 	return hex.EncodeToString(sum[:])
 }
 

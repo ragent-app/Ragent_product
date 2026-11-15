@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-external-trigger-refresh-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-external-trigger-refresh-'));
 process.env.HOME = tempHome;
 
 const workspace = join(tempHome, 'workspace');

@@ -70,7 +70,7 @@ assert.deepEqual(quotedChain.chainOperators, [], 'quoted operators are not comma
 const nestedChain = await parseWindowsPowerShellAst('Write-Output (1 && 2)');
 assert.deepEqual(nestedChain.chainOperators, [], 'nested operators are not top-level chains');
 const where = spawnSync('where.exe', ['pwsh.exe'], { encoding: 'utf8', windowsHide: true });
-const pwsh = process.env.AGENTOC_TEST_PWSH || (where.status === 0 ? where.stdout.split(/\r?\n/).find(Boolean) : '');
+const pwsh = process.env.RAGENT_TEST_PWSH || (where.status === 0 ? where.stdout.split(/\r?\n/).find(Boolean) : '');
 if (pwsh && existsSync(pwsh)) {
   const modern = await parseWindowsPowerShellAst('Get-Date; Get-Location', { executable: pwsh });
   assert.match(modern.psVersion, /^7\./);

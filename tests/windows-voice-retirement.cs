@@ -24,7 +24,7 @@ internal static class LegacyVoiceRetirementTest {
   Assert(File.ReadAllText(other)=="personal data"&&File.ReadAllText(changed)=="user modified file","unrelated data changed");
   LegacyVoiceRetirement.Finish(root,root,runtime,true);
   Assert(File.ReadAllText(managed)=="verified product file"&&File.Exists(manifest),"rollback did not restore managed files");
-  Assert(!Directory.Exists(Path.Combine(parent,".agentoc-retired-whisper")),"rollback left a transaction directory");
+  Assert(!Directory.Exists(Path.Combine(parent,".ragent-retired-whisper")),"rollback left a transaction directory");
   LegacyVoiceRetirement.Prepare(root,root,runtime);
   LegacyVoiceRetirement.Finish(root,root,runtime,false);
   Assert(!File.Exists(managed)&&!File.Exists(manifest),"commit did not remove verified files");
@@ -44,7 +44,7 @@ internal static class LegacyVoiceRetirementTest {
   File.WriteAllText(collisionFile,"personal replacement",new UTF8Encoding(false));
   bool refused=false;try{LegacyVoiceRetirement.Finish(collisionRoot,collisionRoot,collisionRuntime,true);}catch(InvalidOperationException){refused=true;}
   Assert(refused&&File.ReadAllText(collisionFile)=="personal replacement","rollback overwrote a new file");
-  Assert(File.ReadAllText(Path.Combine(collisionRoot,".agentoc-retired-whisper","known.bin"))=="verified product file","rollback conflict lost the quarantined file");
+  Assert(File.ReadAllText(Path.Combine(collisionRoot,".ragent-retired-whisper","known.bin"))=="verified product file","rollback conflict lost the quarantined file");
   string hardRoot=Path.Combine(root,"hardlink"),hardRuntime=Path.Combine(hardRoot,"voice-runtime");
   Directory.CreateDirectory(hardRuntime);
   string hardFile=Path.Combine(hardRuntime,"known.bin"),hardAlias=Path.Combine(hardRoot,"personal-link.bin");

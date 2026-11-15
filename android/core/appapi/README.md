@@ -105,7 +105,7 @@ scheduled background job. The private result root remains outside every provider
 
 `ResultDeliveryCache` stages a separate full-digest-verified copy in
 `cache/result-shares/<ticket>/`, with atomic private versioned metadata in
-`noBackupFilesDir/agentoc-result-deliveries`. PENDING is never readable; READY
+`noBackupFilesDir/ragent-result-deliveries`. PENDING is never readable; READY
 requires a valid source output and current local caller/Session grant on every
 open. Tickets expire after one hour by default, within an independent
 256 MiB/64-copy budget. Expiry, revoke and cleanup do not delete the source report.

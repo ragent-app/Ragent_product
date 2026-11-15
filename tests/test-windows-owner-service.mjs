@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {setImmediate as tick} from 'node:timers/promises';
 import {createOwnerServiceLifecycle} from '../lib/windows-owner-service.mjs';
 import {validateOwnerServiceEvidence,validateOwnerServiceContext,validateOwnerActivationServiceEvidence} from '../lib/windows-owner-service-trust.mjs';
-const context={instanceRoot:'C:/ProgramData/AgentoC/instances/owner',instanceId:'00000000-0000-4000-8000-000000000000',port:7690,host:'127.0.0.1'};
+const context={instanceRoot:'C:/ProgramData/Ragent/instances/owner',instanceId:'00000000-0000-4000-8000-000000000000',port:7690,host:'127.0.0.1'};
 const error=code=>Object.assign(Error(code),{code});
 function evidence(now=Date.now()){
   const install={version:1,instanceId:context.instanceId,controlSid:'S-1-5-80-1-2-3-4-5',executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:'S-1-5-21-1-2-3-1001',port:7690};
   return {version:1,aclVerified:true,helperSha256:'a'.repeat(64),signatureStatus:'Valid',publisherSha256:'b'.repeat(64),
-    releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson:JSON.stringify(install),
+    releaseJson:JSON.stringify({version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson:JSON.stringify(install),
     serviceFacts:{pid:100,createdTicks:'134368500000000000',sid:install.controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false},ownerSessionId:1,observedAtUnixMs:now};
 }
 function deferred(){let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});promise.catch(()=>{});return {promise,resolve,reject};}
@@ -39,7 +39,7 @@ test('private service evidence binds signed helper, installation, actual token a
   assert.equal(validateOwnerServiceEvidence({...observed,ownerPeer},context,{clock:()=>now,ownerPeer}).authority.ownerSessionId,1);
   for(const change of [{createdTicks:'134368500000000001'},{sid:'S-1-5-18'},{sessionId:0},{queryOnlyAuthorityVerified:false},{integrityRid:12288},{extra:true}])assert.throws(()=>validateOwnerServiceEvidence({...observed,ownerPeer:{...ownerPeer,...change}},context,{clock:()=>now,ownerPeer}),{code:'OSV_OWNER_PEER_DENIED'});
   const listener=validateOwnerActivationServiceEvidence({...observed,ownerSessionId:0},context,{clock:()=>now});assert.equal(listener.binding.ownerSessionId,0);assert.equal(listener.authority,undefined);assert.equal(listener.binding.expiresAtUnixMs,undefined);assert.throws(()=>validateOwnerServiceEvidence({...observed,ownerSessionId:0},context,{clock:()=>now}));
-  assert.equal(trusted.authority.expiresAtUnixMs,now+30000);assert.equal(trusted.executablePath,'C:/Program Files/AgentoC/payload/AgentoC.OwnerBootstrap.exe');assert.ok(Object.isFrozen(trusted.authority));
+  assert.equal(trusted.authority.expiresAtUnixMs,now+30000);assert.equal(trusted.executablePath,'C:/Program Files/Ragent/payload/Ragent.OwnerBootstrap.exe');assert.ok(Object.isFrozen(trusted.authority));
   for(const change of [{aclVerified:false},{signatureStatus:'NotSigned'},{helperSha256:'c'.repeat(64)},{publisherSha256:'c'.repeat(64)},{observedAtUnixMs:now+1},{observedAtUnixMs:now-30000},{ownerSessionId:0},{ownerSessionId:65536},{installationJson:'\ufeff{}'},{extra:true}])assert.throws(()=>validateOwnerServiceEvidence({...observed,...change},context,{clock:()=>now}));
   for(const change of [{sid:'S-1-5-18'},{sid:'S-1-5-80-6-7-8-9-10'},{sessionId:1},{integrityRid:12288},{elevated:true},{enabledAdministrators:true},{createdTicks:'bad'},{pid:0}])assert.throws(()=>validateOwnerServiceEvidence({...observed,serviceFacts:{...observed.serviceFacts,...change}},context,{clock:()=>now}),{code:'OSV_SERVICE_IDENTITY_DENIED'});
 });

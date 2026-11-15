@@ -1,7 +1,7 @@
 // Served-model → context window tokens.
 //
 // Claude Code's stream-json frames never report the model's context window,
-// so AgentoC's window-relative features (UI context percent, auto-compact
+// so Ragent's window-relative features (UI context percent, auto-compact
 // threshold) have no provider-side number to read.  Gateways serving
 // non-Anthropic models make it worse: the CLI assumes a 200k-class window
 // while e.g. GLM-5.2 actually exposes 1M.  This table keys on the

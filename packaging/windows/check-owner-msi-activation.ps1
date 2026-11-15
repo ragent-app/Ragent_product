@@ -91,7 +91,7 @@ try {
  $actual=@(Get-OwnerDataServices);$control=($actual|Where-Object {$_.role -eq 'control'}).sid;$executor=($actual|Where-Object {$_.role -eq 'supervisor'}).sid
  $stage='layout'
  foreach($row in @(Get-OwnerDataLayout $control $executor $prepared.ownerSid)){
-  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([AgentoCOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'OAC_LAYOUT_MISMATCH'}
  }
  $stage='policy';$policyInput=Read-ActivationJson (Join-Path $root 'security\owner-bootstrap-install.json') $admin;$policy=$policyInput.value
@@ -101,7 +101,7 @@ try {
   $path=if($kind -eq 'file'){Join-Path $root 'security\owner-bootstrap-install.json'}else{Join-Path $root 'security'};$acl=Get-Acl -LiteralPath $path
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or $acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne (New-OwnerPolicySecurity $policy $kind).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)){throw 'OAC_POLICY_ACL_MISMATCH'}
  }
- $stage='signature';$helperPath=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe';$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json'
+ $stage='signature';$helperPath=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe';$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json'
  if(-not(Test-OwnerServicePreparationPresence $helperPath) -or -not(Test-OwnerServicePreparationPresence $releasePath)){throw 'OAC_SIGNED_HELPER_REQUIRED'}
  $release=Read-ActivationJson $releasePath $admin;Assert-OwnerPolicyRelease $release.value;$helper=Read-OwnerPinnedFile $helperPath $admin $pins 4194304
  if((Get-OwnerDigest $release.bytes) -cne $record.releaseSha256 -or (Get-OwnerDigest $helper) -cne $record.helperSha256 -or $release.value.helperSha256 -cne $record.helperSha256 -or $release.value.version -ne $record.version -or $release.value.$trustKey -cne $record.$trustKey){throw 'OAC_PUBLIC_INPUT_HASH_MISMATCH'}
@@ -113,7 +113,7 @@ try {
   foreach($name in @('instance-identity.json','owner-identity.result.json')){
    $path=Join-Path $root ('config\'+$name);if(-not(Test-OwnerServicePreparationPresence $path)){throw 'OAC_EXISTING_IDENTITY_REQUIRED'}
    $stream=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-   try{[AgentoCOwnerFilePin]::Verify($stream.SafeFileHandle,$path,$false);if($stream.Length -lt 2 -or $stream.Length -gt 32768){throw 'OAC_EXISTING_IDENTITY_INVALID'};Assert-OwnerObjectAcl $path ($admin+@($control));$pins.Add($stream)}catch{$stream.Dispose();throw}
+   try{[RagentOwnerFilePin]::Verify($stream.SafeFileHandle,$path,$false);if($stream.Length -lt 2 -or $stream.Length -gt 32768){throw 'OAC_EXISTING_IDENTITY_INVALID'};Assert-OwnerObjectAcl $path ($admin+@($control));$pins.Add($stream)}catch{$stream.Dispose();throw}
   }
   $privateRead=$false
  }else{
@@ -127,8 +127,8 @@ try {
  if($activationAction -ceq 'Activate'){
   $stage='transaction'
   if(@(Get-NetTCPConnection -LocalPort 7690 -State Listen -ErrorAction SilentlyContinue).Count){throw 'OAX_PORT_IN_USE'}
-  $env:AGENTOC_INSTALL_ROOT=$product
-  Add-Type -Path @((Join-Path $PSScriptRoot 'AgentoC.ServiceHost.cs'),(Join-Path $PSScriptRoot 'owner-service-activation-trial.cs'),(Join-Path $PSScriptRoot 'owner-service-activation-transaction.cs')) -ReferencedAssemblies @('System.ServiceProcess.dll','System.Web.Extensions.dll')
+  $env:RAGENT_INSTALL_ROOT=$product
+  Add-Type -Path @((Join-Path $PSScriptRoot 'Ragent.ServiceHost.cs'),(Join-Path $PSScriptRoot 'owner-service-activation-trial.cs'),(Join-Path $PSScriptRoot 'owner-service-activation-transaction.cs')) -ReferencedAssemblies @('System.ServiceProcess.dll','System.Web.Extensions.dll')
   foreach($plan in @(Get-OwnerServicePreparationPlan)){$activationLeases+=@{role=$plan.role;value=[OwnerServiceActivationTrial]::new($plan.name,$plan.command)}}
   $supervisor=($activationLeases|Where-Object {$_.role -ceq 'supervisor'}).value;$controlLease=($activationLeases|Where-Object {$_.role -ceq 'control'}).value
   $transaction=[OwnerServiceActivationTransaction]::new($record.instanceId,$preparedInput.bytes,$recordInput.bytes,$supervisor,$controlLease)

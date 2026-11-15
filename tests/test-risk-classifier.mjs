@@ -11,14 +11,14 @@ function check(label, condition) {
 
 const HOME = '/home/example';
 const PROJ = '/home/example/proj';
-const VAR_WORKSPACE = '/var/lib/agentoc/workspace';
+const VAR_WORKSPACE = '/var/lib/ragent/workspace';
 const VAR_RISK_CONTEXT = {
   schemaVersion: 1,
   platform: 'linux',
   workspaceRoot: VAR_WORKSPACE,
   trustedWorkspaceRoot: VAR_WORKSPACE,
   cwd: VAR_WORKSPACE,
-  protectedRoots: ['/var/lib/agentoc/config'],
+  protectedRoots: ['/var/lib/ragent/config'],
   systemPathRoots: ['/etc', '/usr', '/var'],
 };
 const WIN_CTX = {
@@ -27,7 +27,7 @@ const WIN_CTX = {
   workspaceRoot: 'C:\\work\\project',
   trustedWorkspaceRoot: 'C:\\work\\project',
   cwd: 'C:\\work\\project',
-  protectedRoots: ['C:\\agentoc\\config'],
+  protectedRoots: ['C:\\ragent\\config'],
   systemPathRoots: ['C:\\Windows', 'C:\\Program Files'],
 };
 
@@ -90,24 +90,24 @@ check('python script safe', bash('python3 script.py').tier === RISK_TIER.SAFE);
 check('absolute read-only executable path safe', bash('/bin/grep foo README.md').tier === RISK_TIER.SAFE);
 check('absolute read-only executable reads system path safe', bash('/bin/grep root /etc/passwd').tier === RISK_TIER.SAFE);
 check('absolute shell wrapper reads system path without danger', bash('/usr/bin/bash -lc "grep foo /var/log/syslog"').tier !== RISK_TIER.DANGER);
-check('absolute shell wrapper system-path write danger', bash('/usr/bin/bash -lc "mkdir /etc/agentoc-test"').tier === RISK_TIER.DANGER);
-check('composite cd into system path caution', bash('cd /var/lib/agentoc && echo ready').tier === RISK_TIER.CAUTION);
-check('composite system-path read caution', bash('cd /var/lib/agentoc; ls -la').tier === RISK_TIER.CAUTION);
+check('absolute shell wrapper system-path write danger', bash('/usr/bin/bash -lc "mkdir /etc/ragent-test"').tier === RISK_TIER.DANGER);
+check('composite cd into system path caution', bash('cd /var/lib/ragent && echo ready').tier === RISK_TIER.CAUTION);
+check('composite system-path read caution', bash('cd /var/lib/ragent; ls -la').tier === RISK_TIER.CAUTION);
 check('system-path write in composite remains danger', bash('cd /var && echo x > /etc/hosts').tier === RISK_TIER.DANGER);
-check('system-path mutator in composite remains danger', bash('cd /var && mkdir /etc/agentoc-test').tier === RISK_TIER.DANGER);
+check('system-path mutator in composite remains danger', bash('cd /var && mkdir /etc/ragent-test').tier === RISK_TIER.DANGER);
 check('dev tcp probe is not filesystem danger', bash('echo > /dev/tcp/192.0.2.1/22').tier === RISK_TIER.CAUTION);
 
 // === admission-bound workspace context ===
 check('trusted workspace below /var keeps ordinary mkdir safe',
-  scopedBash('mkdir /var/lib/agentoc/workspace/build').tier === RISK_TIER.SAFE);
+  scopedBash('mkdir /var/lib/ragent/workspace/build').tier === RISK_TIER.SAFE);
 check('trusted workspace below /var records trusted scope',
-  scopedBash('mkdir /var/lib/agentoc/workspace/build').signals.targetScope === 'trusted-workspace');
+  scopedBash('mkdir /var/lib/ragent/workspace/build').signals.targetScope === 'trusted-workspace');
 check('trusted workspace single delete remains safe',
   scopedBash('rm file.txt').tier === RISK_TIER.SAFE);
 check('protected control root remains danger inside /var workspace',
-  scopedBash('mkdir /var/lib/agentoc/config/new').tier === RISK_TIER.DANGER);
+  scopedBash('mkdir /var/lib/ragent/config/new').tier === RISK_TIER.DANGER);
 check('protected control reason is stable',
-  scopedBash('mkdir /var/lib/agentoc/config/new').reasons[0].code === 'protected_control_path');
+  scopedBash('mkdir /var/lib/ragent/config/new').reasons[0].code === 'protected_control_path');
 check('outside path is not rescued by caller projectRoot',
   scopedBash('mkdir /home/example/other', { projectRoot: '/home/example/other' }).tier === RISK_TIER.CAUTION);
 check('outside path scope stays outside workspace',
@@ -128,8 +128,8 @@ check('trusted Edit is marked project member', scopedEdit.signals.projectMember 
 // on Linux.
 check('Windows trusted mkdir is safe', windowsBash('mkdir C:\\work\\project\\build').tier === RISK_TIER.SAFE);
 check('Windows trusted mkdir scope', windowsBash('mkdir C:\\work\\project\\build').signals.targetScope === 'trusted-workspace');
-check('Windows system write is danger', windowsBash('mkdir C:\\Windows\\System32\\agentoc-test').tier === RISK_TIER.DANGER);
-check('Windows protected root is danger', windowsBash('mkdir C:\\agentoc\\config\\new').tier === RISK_TIER.DANGER);
+check('Windows system write is danger', windowsBash('mkdir C:\\Windows\\System32\\ragent-test').tier === RISK_TIER.DANGER);
+check('Windows protected root is danger', windowsBash('mkdir C:\\ragent\\config\\new').tier === RISK_TIER.DANGER);
 const windowsEdit = classifyRisk({
   toolName: 'Edit',
   toolInput: { file_path: 'src\\main.js' },

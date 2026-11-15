@@ -7,7 +7,7 @@
 // 2. Availability gate: linux + opt-in flag + bwrap present -> on; otherwise off.
 // 3. Real bwrap smoke (skipped when bwrap is unavailable): a command run inside
 //    the built sandbox sees a writable workspace + runner home, hidden
-//    /var/lib/agentoc/config, and a read-only /usr.
+//    /var/lib/ragent/config, and a read-only /usr.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +29,7 @@ function haveBwrap() {
 }
 
 async function main() {
-  const root = mkdtempSync(join(tmpdir(), 'agentoc-sandbox-'));
+  const root = mkdtempSync(join(tmpdir(), 'ragent-sandbox-'));
   const emptyDir = join(root, 'empty');
   const ws = join(root, 'workspace');
   const rh = join(root, 'runner-home');
@@ -45,7 +45,7 @@ async function main() {
         args: ['--flag'],
         cwd: ws,
         runnerHome: rh,
-        hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
+        hidePaths: ['/var/lib/ragent/config', '/etc/ragent'],
         mkdtemp: () => emptyDir,
       });
       assert.equal(sb.command, TRUSTED_BWRAP_PATH);
@@ -58,8 +58,8 @@ async function main() {
       assert.ok(a.includes('--unshare-pid') && a.includes('--unshare-ipc') && a.includes('--unshare-uts'), 'namespaces');
       assert.ok(a.includes(ws), 'workspace path bound');
       assert.ok(a.includes(rh), 'runner home bound');
-      assert.equal(a[a.indexOf('/var/lib/agentoc/config') - 1], emptyDir, 'config hidden by empty-dir overlay');
-      assert.equal(a[a.indexOf('/etc/agentoc') - 1], emptyDir, '/etc/agentoc hidden by empty-dir overlay');
+      assert.equal(a[a.indexOf('/var/lib/ragent/config') - 1], emptyDir, 'config hidden by empty-dir overlay');
+      assert.equal(a[a.indexOf('/etc/ragent') - 1], emptyDir, '/etc/ragent hidden by empty-dir overlay');
       assert.equal(a[a.indexOf('--') + 1], '/bin/true', 'command follows the -- separator');
       assert.ok(a.includes('--flag'), 'tool args preserved');
 
@@ -88,17 +88,17 @@ async function main() {
     {
       // The gate checks bwrap presence too; assert flag parsing via a fake env.
       assert.equal(
-        isSandboxAvailable({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' } }),
+        isSandboxAvailable({ platform: 'linux', env: { RAGENT_RUN_SANDBOX: '1' } }),
         haveBwrap(),
         'linux + flag on => available iff bwrap exists',
       );
       assert.equal(
-        isSandboxAvailable({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '0' } }),
+        isSandboxAvailable({ platform: 'linux', env: { RAGENT_RUN_SANDBOX: '0' } }),
         false,
         'flag 0 disables sandbox',
       );
       assert.equal(
-        isSandboxAvailable({ platform: 'darwin', env: { AGENTOC_RUN_SANDBOX: '1' } }),
+        isSandboxAvailable({ platform: 'darwin', env: { RAGENT_RUN_SANDBOX: '1' } }),
         false,
         'non-linux never sandboxes',
       );
@@ -116,13 +116,13 @@ async function main() {
       assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), uid: name === TRUSTED_BWRAP_PATH ? 1000 : 0 }), exec: () => { throw Error('must not execute'); } }), false);
       assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), mode: name === '/usr/bin' ? 0o777 : 0o755 }), exec: () => { throw Error('must not execute'); } }), false);
       assert.equal(isBwrapPresent({ stat: (name) => ({ ...safeStat(name), isSymbolicLink: () => name === TRUSTED_BWRAP_PATH }), exec: () => { throw Error('must not execute'); } }), false);
-      assert.equal(isSandboxRequested({ env: { AGENTOC_RUN_SANDBOX: 'off' } }), false);
+      assert.equal(isSandboxRequested({ env: { RAGENT_RUN_SANDBOX: 'off' } }), false);
       assert.equal(requireSandboxAvailability({ platform: 'darwin', env: {} }), false);
-      assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: { AGENTOC_RUN_SANDBOX: '1' } }),
+      assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: { RAGENT_RUN_SANDBOX: '1' } }),
         (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
-      assert.throws(() => requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => false }),
+      assert.throws(() => requireSandboxAvailability({ platform: 'linux', env: { RAGENT_RUN_SANDBOX: '1' }, bwrapPresent: () => false }),
         (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
-      assert.equal(requireSandboxAvailability({ platform: 'linux', env: { AGENTOC_RUN_SANDBOX: '1' }, bwrapPresent: () => true }), true);
+      assert.equal(requireSandboxAvailability({ platform: 'linux', env: { RAGENT_RUN_SANDBOX: '1' }, bwrapPresent: () => true }), true);
       assert.equal(requireSandboxAvailability({ platform: 'linux', env: {}, required: true, bwrapPresent: () => true }), true);
       assert.throws(() => requireSandboxAvailability({ platform: 'darwin', env: {}, required: true, bwrapPresent: () => true }),
         (error) => error.code === 'RUNNER_SANDBOX_UNAVAILABLE');
@@ -137,13 +137,13 @@ async function main() {
         args: ['-c', [
           `test -w '${ws}' && echo ws-rw || echo ws-ro`,
           `test -w '${rh}' && echo rh-rw || echo rh-ro`,
-          `test -z "$(ls -A /var/lib/agentoc/config 2>/dev/null)" && echo config-hidden || echo config-visible`,
+          `test -z "$(ls -A /var/lib/ragent/config 2>/dev/null)" && echo config-hidden || echo config-visible`,
           `test ! -w /usr && echo usr-ro || echo usr-writable`,
           `cat '${rh}/provider-homes/codex/auth.json'`,
         ].join(';')],
         cwd: ws,
         runnerHome: rh,
-        hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
+        hidePaths: ['/var/lib/ragent/config', '/etc/ragent'],
         mkdtemp: () => emptyDir,
       });
       const result = spawnSync(sb.command, sb.args, { encoding: 'utf8' });

@@ -18,15 +18,15 @@ const FIXTURE_ROOT = join(ROOT, 'tests/fixtures/risk-datasets');
 const MANIFEST_PATH = join(FIXTURE_ROOT, 'manifest.json');
 const CONTEXT = Object.freeze({
   // The maintained boundary fixture predates this checkout path and uses
-  // /srv/agentoc-promoted as its synthetic project root. Keep the benchmark
+  // /srv/ragent-promoted as its synthetic project root. Keep the benchmark
   // path-independent while making that fixture's Edit case meaningful.
-  cwd: '/srv/agentoc-promoted',
-  projectRoot: '/srv/agentoc-promoted',
+  cwd: '/srv/ragent-promoted',
+  projectRoot: '/srv/ragent-promoted',
   home: '/home/example',
   riskContext: Object.freeze({
     schemaVersion: 1,
     platform: process.platform,
-    trustedWorkspaceRoot: '/srv/agentoc-promoted',
+    trustedWorkspaceRoot: '/srv/ragent-promoted',
     protectedRoots: [],
   }),
 });
@@ -145,7 +145,7 @@ function classifyRecord(record) {
   }
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
   const actualReasonCodes = (risk.reasons || []).map((reason) => reason.code);
-  const boundary = record.source === 'agentoc-boundaries';
+  const boundary = record.source === 'ragent-boundaries';
   const failures = [];
   if (record.baseLabel === 'unsafe' && risk.tier === 'safe') failures.push('unsafe_as_safe');
   if (boundary && record.expectedTier && risk.tier !== record.expectedTier) failures.push('boundary_tier_mismatch');
@@ -262,7 +262,7 @@ async function main() {
   const limit = options.mode === 'smoke' ? 100 : Number.POSITIVE_INFINITY;
   const records = [];
   for (const dataset of manifest.datasets || []) {
-    records.push(...await loadDataset(manifest, dataset, { limit: dataset.id === 'agentoc-boundaries' ? Number.POSITIVE_INFINITY : limit }));
+    records.push(...await loadDataset(manifest, dataset, { limit: dataset.id === 'ragent-boundaries' ? Number.POSITIVE_INFINITY : limit }));
   }
   if (options.variants) {
     records.push(...readJsonLines(await readFile(resolve(options.variants), 'utf8'), options.variants));

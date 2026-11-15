@@ -45,9 +45,9 @@ export async function prepareReadOnlyCodexMcp({ servers, cwd, workspace, hidePat
         directories.push(sandbox.emptyDir);
         const separator = sandbox.args.indexOf('--');
         if (separator < 0) throw new Error('Invalid Codex MCP sandbox');
-        const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/agentoc-executor',
-          '--perms', '0700', '--dir', '/tmp/agentoc-executor/codex', '--setenv', 'CODEX_HOME', '/tmp/agentoc-executor/codex',
-          '--setenv', 'AGENTOC_CODEX_HOME_DIR', '/tmp/agentoc-executor/codex',
+        const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/ragent-executor',
+          '--perms', '0700', '--dir', '/tmp/ragent-executor/codex', '--setenv', 'CODEX_HOME', '/tmp/ragent-executor/codex',
+          '--setenv', 'RAGENT_CODEX_HOME_DIR', '/tmp/ragent-executor/codex',
           ...(typeof runnerHome === 'string' && isAbsolute(runnerHome) ? ['--setenv', 'HOME', runnerHome] : []),
           '--setenv', 'TMPDIR', '/tmp', '--setenv', 'TMP', '/tmp', '--setenv', 'TEMP', '/tmp'];
         sandbox.args.splice(separator, 0, '--die-with-parent', ...privateHome);

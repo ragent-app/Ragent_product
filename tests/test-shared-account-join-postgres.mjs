@@ -10,7 +10,7 @@ import { createInstancePublicKeyFingerprint, buildAccountJoinIntentProofMessage,
 import { normalizeDevicePublicKey, createDevicePublicKeyFingerprint, buildAccountJoinIntentMessage } from '../lib/device-auth-protocol.mjs';
 import { inboxWaitFixture } from './fixtures/rendezvous-inbox-wait.mjs';
 
-const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('PostgreSQL shared join keeps owner authority and rejects revoked or replaced grants', { skip: !url }, async t => {
   assert.match(new URL(url).pathname.slice(1), /^qa_rendezvous_[a-f0-9]{24}$/);
   const schema = `qa_shared_${randomBytes(12).toString('hex')}`;
@@ -48,12 +48,12 @@ test('PostgreSQL shared join keeps owner authority and rejects revoked or replac
   const credential = { credential: token }, requestId = 'qa_shared_pg_rendezvous_request_001';
   const { intent } = JSON.parse(JSON.stringify(await fixture.broker.createAccountRendezvous({ requestId, targetInstanceId: instance.instanceId,
     device: { deviceId, publicKey: phoneKey.publicKey, devicePublicKeyFingerprint: fingerprint } }, credential)));
-  const message = buildAccountJoinIntentMessage({ ...intent, audience: 'agentoc-account-join' });
+  const message = buildAccountJoinIntentMessage({ ...intent, audience: 'ragent-account-join' });
   const deviceSignature = sign('sha256', Buffer.from(message), phoneKeys.privateKey).toString('base64');
   const join = await fixture.broker.authorizeAccountJoinIntent({ intentId: intent.intentId,
     requestId: 'qa_shared_pg_authorize_request_001', deviceId, devicePublicKeyFingerprint: fingerprint,
     nonce: intent.nonce, issuedAt: intent.issuedAt, deviceSignature }, credential);
-  const issuedAt = new Date(now).toISOString(), audience = 'agentoc-account-join';
+  const issuedAt = new Date(now).toISOString(), audience = 'ragent-account-join';
   const proof = buildAccountJoinIntentProofMessage({ instanceId: instance.instanceId, intentId: intent.intentId,
     deviceId, devicePublicKeyFingerprint: fingerprint, nonce: intent.nonce, issuedAt, audience, publicEndpoint: '' });
   const completion = { intentId: intent.intentId, requestId: 'qa_shared_pg_completion_request_001', nonce: intent.nonce,

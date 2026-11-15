@@ -4,10 +4,10 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-autonomous-org-s22-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-autonomous-org-s22-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/organization-store.mjs');

@@ -140,10 +140,10 @@ function createDOMContext() {
 
   const window = {
     document,
-    AgentoCI18n: {
+    RagentI18n: {
       t(k) { return k; },
     },
-    AgentoCIcons: {
+    RagentIcons: {
       render(name) { return `<icon-${name}/>`; },
     },
     devicePixelRatio: 1,
@@ -165,8 +165,8 @@ async function runTests() {
   const context = vm.createContext(window);
   vm.runInContext(source, context);
 
-  const orgView = window.AgentocOrganizationView;
-  assert.ok(orgView, 'AgentocOrganizationView is attached to window');
+  const orgView = window.RagentOrganizationView;
+  assert.ok(orgView, 'RagentOrganizationView is attached to window');
 
   // 1. Initial State
   assert.equal(orgView.active, false, 'Organization view should start inactive');

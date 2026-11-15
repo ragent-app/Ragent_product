@@ -57,7 +57,7 @@ function createContext({
       };
     },
     window: {
-      __AGENTOC_BUILD__: inlineAssetVersion ? { assetVersion: inlineAssetVersion } : undefined,
+      __RAGENT_BUILD__: inlineAssetVersion ? { assetVersion: inlineAssetVersion } : undefined,
       location: {
         href: locationHref,
         origin: 'http://127.0.0.1',

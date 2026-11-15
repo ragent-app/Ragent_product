@@ -15,7 +15,7 @@ function connectFixture() {
   const reply = (message) => queueMicrotask(() => { if (!socket.destroyed) socket.emit('data', Buffer.from(`${JSON.stringify(message)}\n`)); });
   socket.write = (raw) => {
     const message = JSON.parse(raw);
-    if (message.type === 'agentoc-codex-broker-ping') reply({ type: 'agentoc-codex-broker-pong', ready: true, accountMatches: acceptedAccount });
+    if (message.type === 'ragent-codex-broker-ping') reply({ type: 'ragent-codex-broker-pong', ready: true, accountMatches: acceptedAccount });
     if (message.method === 'initialize') reply({ id: message.id, result: {} });
     if (message.method === 'mcpServer/oauth/login') {
       loginRequests += 1;

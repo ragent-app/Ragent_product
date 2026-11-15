@@ -3,13 +3,13 @@
 // place so history projections and live push filtering agree.
 
 const CONTROL_BLOCKS = Object.freeze([
-  Object.freeze({ kind: 'organization-proposal', start: '<agentoc-organization-proposal>', end: '</agentoc-organization-proposal>' }),
-  Object.freeze({ kind: 'collaboration-plan', start: '<agentoc-collaboration-plan>', end: '</agentoc-collaboration-plan>' }),
-  Object.freeze({ kind: 'result-packet', start: '<agentoc-result-packet>', end: '</agentoc-result-packet>' }),
-  Object.freeze({ kind: 'session-labels', start: '<agentoc-session-labels>', end: '</agentoc-session-labels>' }),
+  Object.freeze({ kind: 'organization-proposal', start: '<ragent-organization-proposal>', end: '</ragent-organization-proposal>' }),
+  Object.freeze({ kind: 'collaboration-plan', start: '<ragent-collaboration-plan>', end: '</ragent-collaboration-plan>' }),
+  Object.freeze({ kind: 'result-packet', start: '<ragent-result-packet>', end: '</ragent-result-packet>' }),
+  Object.freeze({ kind: 'session-labels', start: '<ragent-session-labels>', end: '</ragent-session-labels>' }),
 ]);
 
-const CONTROL_END_MARKER_RE = /<\/agentoc-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>/gi;
+const CONTROL_END_MARKER_RE = /<\/ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>/gi;
 
 function findNextControlStart(sourceLower, fromIndex = 0) {
   let match = null;

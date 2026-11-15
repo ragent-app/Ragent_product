@@ -4,12 +4,12 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-provider-peer-sync-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-provider-peer-sync-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   loadOrCreateInstanceIdentity,
@@ -22,7 +22,7 @@ const {
 } = await import('../lib/provider-runtime/sync.mjs');
 const { syncProviderSnapshotToPeer } = await import('../lib/provider-runtime/peer-sync.mjs');
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 await writeFile(join(configDir, 'owner-account-binding.json'), JSON.stringify({ accountId: 'acct_peer_test' }));
 const sourceIdentity = await loadOrCreateInstanceIdentity();
 const targetIdentity = await loadOrCreateInstanceIdentity({ filePath: join(home, 'target-identity.json') });
@@ -70,7 +70,7 @@ const result = await syncProviderSnapshotToPeer({
       assert.equal(calls[0].url, 'https://computer.example.test/agentoc/api/provider-sync/handshake');
       const issuedAt = new Date().toISOString();
       const fields = { requestId: request.sourceProof.requestId, targetInstanceId: sourceIdentity.instanceId,
-        issuedAt, audience: 'agentoc-provider-sync', syncKeyFingerprint: targetKey.fingerprint };
+        issuedAt, audience: 'ragent-provider-sync', syncKeyFingerprint: targetKey.fingerprint };
       return new Response(JSON.stringify({
         targetInstanceId: targetIdentity.instanceId,
         targetPublicKey: targetKey.publicKeyPem,

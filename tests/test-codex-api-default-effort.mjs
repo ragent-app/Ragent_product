@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-const home = mkdtempSync(join(tmpdir(), 'agentoc-codex-default-effort-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-codex-default-effort-'));
 const configDir = join(home, 'config');
 mkdirSync(configDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 const originalFetch = globalThis.fetch;
 try {
   const { createNativeProviderRegistry, createSecretStore } = await import('../lib/provider-runtime/index.mjs');

@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-meta-debounce-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-meta-debounce-'));
 const previousHome = process.env.HOME;
 process.env.HOME = home;
 
-const sessionsFile = join(home, '.config', 'agentoc', 'chat-sessions.json');
-mkdirSync(join(home, '.config', 'agentoc'), { recursive: true });
+const sessionsFile = join(home, '.config', 'ragent', 'chat-sessions.json');
+mkdirSync(join(home, '.config', 'ragent'), { recursive: true });
 writeFileSync(sessionsFile, JSON.stringify([
   { id: 'session_meta_debounce', name: 'original', folder: '~' },
 ], null, 2), 'utf8');

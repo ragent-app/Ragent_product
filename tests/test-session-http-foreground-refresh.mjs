@@ -489,7 +489,7 @@ assert.equal(
 firstContext.advanceTime(3000);
 await firstContext.serviceWorkerListeners.get('message')({
   data: {
-    type: 'agentoc:open-session',
+    type: 'ragent:open-session',
     sessionId: 'current-session',
     tab: 'sessions',
   },

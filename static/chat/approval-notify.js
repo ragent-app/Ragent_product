@@ -54,7 +54,7 @@
       : true;
   }
   function t(key, vars) {
-    return typeof root.agentocT === "function" ? root.agentocT(key, vars) : key;
+    return typeof root.ragentT === "function" ? root.ragentT(key, vars) : key;
   }
 
   function isProgressPlan(input = {}) {
@@ -125,7 +125,7 @@
     try {
       const n = new root.Notification(t("notify.title"), {
         body: `${sessionName(session)} — ${detail?.label || t("notify.waiting.approval")}`,
-        tag: `agentoc-approval:${session.id}`,
+        tag: `ragent-approval:${session.id}`,
       });
       n.onclick = () => {
         try {
@@ -229,7 +229,7 @@
   // just transitioned INTO needs-action (was not waiting, or is new) and fires.
   function onSessionsApplied(previousMap, nextSessions) {
     if (!supported() || permission() !== "granted") return;
-    const model = root.AgentoCSessionStateModel;
+    const model = root.RagentSessionStateModel;
     const needsAction = (s) => typeof model?.hasSessionNeedsAction === "function"
       ? model.hasSessionNeedsAction(s)
       : String(s?.workflowState || "").toLowerCase() === "waiting_user";
@@ -249,14 +249,14 @@
   }
 
   function init() {
-    if (root.AgentoCApprovalNotify) return;
-    if (root.AgentoCDecisions && typeof root.AgentoCDecisions.subscribe === "function") {
-      root.AgentoCDecisions.subscribe(onDecisionsSnap);
+    if (root.RagentApprovalNotify) return;
+    if (root.RagentDecisions && typeof root.RagentDecisions.subscribe === "function") {
+      root.RagentDecisions.subscribe(onDecisionsSnap);
     }
-    if (root.AgentoCDecisions && typeof root.AgentoCDecisions.subscribeBatch === "function") {
-      root.AgentoCDecisions.subscribeBatch(onBatchSnap);
+    if (root.RagentDecisions && typeof root.RagentDecisions.subscribeBatch === "function") {
+      root.RagentDecisions.subscribeBatch(onBatchSnap);
     }
-    root.AgentoCApprovalNotify = Object.freeze({
+    root.RagentApprovalNotify = Object.freeze({
       // hot paths
       fire,
       onSessionsApplied,

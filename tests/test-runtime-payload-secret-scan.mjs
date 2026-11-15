@@ -8,7 +8,7 @@ const syntheticKey = `sk-proj-${'Z'.repeat(40)}`;
 assert.ok(secretKinds(`token="${syntheticKey}"`).includes('provider-secret'));
 assert.ok(!secretKinds(`vendor-prefix-${syntheticKey}`).includes('provider-secret'));
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-secret-scan-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-secret-scan-'));
 try {
   // The second stream window begins at the embedded sk- token. Preserve its
   // preceding hyphen so an internal identifier cannot become a standalone key.

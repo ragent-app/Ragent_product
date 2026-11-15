@@ -20,7 +20,7 @@ import {
   requestCloudflareTurnCredentials,
 } from '../infrastructure/turn-broker/turn-credential-broker.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-turn-capability-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-turn-capability-'));
 const now = Date.parse('2026-08-31T12:00:00.000Z');
 const issuer = 'https://ragent.agentoncloud.com';
 const ring = await loadOrCreateSigningKeyRing(join(root, 'turn-signing-key.json'), { clock: () => now });

@@ -135,8 +135,8 @@ function runScenario(impl) {
 
 async function main() {
   const [legacy, core] = [
-    loadImplementation('static/chat/project-overview.js', 'AgentocProjectOverview'),
-    loadImplementation('static/chat/transport/project-overview.js', 'AgentocProjectOverviewCore'),
+    loadImplementation('static/chat/project-overview.js', 'RagentProjectOverview'),
+    loadImplementation('static/chat/transport/project-overview.js', 'RagentProjectOverviewCore'),
   ];
   const [a, b] = [runScenario(legacy), runScenario(core)];
   assert.deepEqual(b, a, `project-overview drift: ${legacy.label} vs ${core.label}`);

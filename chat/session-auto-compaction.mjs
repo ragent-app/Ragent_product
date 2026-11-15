@@ -38,7 +38,7 @@ const CONTEXT_COMPACTOR_SYSTEM_PROMPT = [
 // the context window. Waiting until 100% lets sessions drift to the absolute
 // edge of the window (every late turn runs near the limit and is expensive);
 // triggering at 70% keeps a headroom buffer while the LLM compaction runs. The
-// previous 100% default is restorable via AGENTOC_AUTO_COMPACT_WINDOW_PERCENT=100.
+// previous 100% default is restorable via RAGENT_AUTO_COMPACT_WINDOW_PERCENT=100.
 const DEFAULT_AUTO_COMPACT_CONTEXT_WINDOW_PERCENT = 70;
 
 // P1 (2026-07-31): incremental compaction merges new events into the existing
@@ -56,13 +56,13 @@ const TOOL_TRIM_CONTEXT_WINDOW_PERCENT = 50;
 const EMERGENCY_CLEAR_CONTEXT_WINDOW_PERCENT = 85;
 
 function getConfiguredToolTrimPercent() {
-  const raw = String(process.env.AGENTOC_PROGRESSIVE_TOOL_TRIM_PERCENT || '').trim();
+  const raw = String(process.env.RAGENT_PROGRESSIVE_TOOL_TRIM_PERCENT || '').trim();
   const parsed = parseInt(raw, 10);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : null;
 }
 
 function getConfiguredEmergencyClearPercent() {
-  const raw = String(process.env.AGENTOC_EMERGENCY_CLEAR_PERCENT || '').trim();
+  const raw = String(process.env.RAGENT_EMERGENCY_CLEAR_PERCENT || '').trim();
   const parsed = parseInt(raw, 10);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : null;
 }
@@ -84,13 +84,13 @@ function parsePositiveIntOrInfinity(value) {
 
 // P0: Allow overriding the window-percent trigger at runtime. Accepts 1-100.
 function getConfiguredAutoCompactWindowPercent() {
-  const raw = String(process.env.AGENTOC_AUTO_COMPACT_WINDOW_PERCENT || '').trim();
+  const raw = String(process.env.RAGENT_AUTO_COMPACT_WINDOW_PERCENT || '').trim();
   const parsed = parseInt(raw, 10);
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : null;
 }
 
 function getConfiguredAutoCompactContextTokens() {
-  return parsePositiveIntOrInfinity(process.env.AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS);
+  return parsePositiveIntOrInfinity(process.env.RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS);
 }
 
 function getRunCurrentContextTokens(run) {
@@ -125,13 +125,13 @@ function getAutoCompactContextTokens(run) {
 export function shouldAutoCompactRun(run) {
   // codex app-server manages its own thread context natively via its
   // `remote_compaction_v2` / `auto_compact_token_limit` feature (stable, on by
-  // default). Running AgentoC's separate compaction worker for those runs is
+  // default). Running Ragent's separate compaction worker for those runs is
   // redundant (codex already compacts its thread) and was the OOM-adjacent path
-  // (the worker re-loaded full history). Let codex handle it; AgentoC's
+  // (the worker re-loaded full history). Let codex handle it; Ragent's
   // cross-tool handoff still works via the bounded history branch.
-  // Kill-switch: AGENTOC_CODEX_NATIVE_COMPACT=0|off.
+  // Kill-switch: RAGENT_CODEX_NATIVE_COMPACT=0|off.
   const codexNativeCompact = run?.runtimeFamily === 'codex-app-server-json'
-    && !/^(0|false|no|off)$/i.test(String(process.env.AGENTOC_CODEX_NATIVE_COMPACT ?? 'on').trim());
+    && !/^(0|false|no|off)$/i.test(String(process.env.RAGENT_CODEX_NATIVE_COMPACT ?? 'on').trim());
   if (codexNativeCompact) {
     return false;
   }
@@ -146,7 +146,7 @@ export function getProgressiveCompactionLevel(run) {
   // codex app-server manages its own thread context natively via
   // `remote_compaction_v2` / `auto_compact_token_limit`.
   const codexNativeCompact = run?.runtimeFamily === 'codex-app-server-json'
-    && !/^(0|false|no|off)$/i.test(String(process.env.AGENTOC_CODEX_NATIVE_COMPACT ?? 'on').trim());
+    && !/^(0|false|no|off)$/i.test(String(process.env.RAGENT_CODEX_NATIVE_COMPACT ?? 'on').trim());
   if (codexNativeCompact) {
     return COMPACTION_LEVEL.NONE;
   }
@@ -447,7 +447,7 @@ export function prepareConversationOnlyContinuationBody(events) {
 
 const MAX_COMPACTION_HISTORY_EVENTS = Math.max(
   512,
-  Number.parseInt(process.env.AGENTOC_MAX_COMPACTION_HISTORY_EVENTS || '8192', 10) || 8192,
+  Number.parseInt(process.env.RAGENT_MAX_COMPACTION_HISTORY_EVENTS || '8192', 10) || 8192,
 );
 const MAX_COMPACTION_HEAD_EVENTS = 64;
 const MAX_COMPACTION_BODY_HYDRATIONS = 256;
@@ -707,7 +707,7 @@ export async function queueContextCompaction(sessionId, session, run, { automati
   // Facts are persisted into the task-card memory and injected into the compactor
   // prompt as protected facts the worker must preserve.
   let protectedFacts = [];
-  if (automatic && !/^(0|false|no|off)$/i.test(String(process.env.AGENTOC_PRE_COMPACT_EXTRACTION ?? '1').trim())) {
+  if (automatic && !/^(0|false|no|off)$/i.test(String(process.env.RAGENT_PRE_COMPACT_EXTRACTION ?? '1').trim())) {
     try {
       const lastTurnEvents = await readLastTurnEvents(sessionId, { includeBodies: false });
       const facts = await extractCriticalFacts({ session, lastTurnEvents });

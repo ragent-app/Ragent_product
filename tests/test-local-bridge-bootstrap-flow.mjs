@@ -67,8 +67,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-local-bridge-bootstrap-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-local-bridge-bootstrap-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -126,18 +126,18 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -156,8 +156,8 @@ async function startServer({ home, port }) {
     }
   }, 'server startup');
 
-  child._agentocStdout = () => stdout;
-  child._agentocStderr = () => stderr;
+  child._ragentStdout = () => stdout;
+  child._ragentStderr = () => stderr;
   return child;
 }
 
@@ -182,8 +182,8 @@ function runNodeCliAsync(args, env = {}) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -201,8 +201,8 @@ function runNodeCliAsync(args, env = {}) {
 }
 
 function buildHelperBinary(home) {
-  const binaryPath = join(home, 'agentoc-helper');
-  const build = spawnSync('go', ['build', '-o', binaryPath, './cmd/agentoc-helper'], {
+  const binaryPath = join(home, 'ragent-helper');
+  const build = spawnSync('go', ['build', '-o', binaryPath, './cmd/ragent-helper'], {
     cwd: join(repoRoot, 'local-helper'),
     env: { ...process.env, HOME: home },
     encoding: 'utf8',
@@ -255,7 +255,7 @@ async function main() {
     assert.equal(releaseDownload.status, 200, 'helper release binary should download');
     assert.ok(releaseDownload.buffer.length > 1024 * 1024, 'downloaded helper binary should be non-trivial');
 
-    const helperConfigDir = join(home, '.config', 'AgentoCHelper');
+    const helperConfigDir = join(home, '.config', 'RagentHelper');
     mkdirSync(helperConfigDir, { recursive: true });
     const bootstrapFilePath = join(helperConfigDir, 'bootstrap.json');
     writeFileSync(bootstrapFilePath, JSON.stringify({
@@ -268,8 +268,8 @@ async function main() {
       cwd: repoRoot,
       env: {
         ...process.env,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
         HOME: home,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -312,8 +312,8 @@ async function main() {
     assert.equal(helperStderr.includes('heartbeat failed'), false, 'helper should not fail heartbeats during bootstrap flow');
   } finally {
     if (process.env.DEBUG_LOCAL_BRIDGE_BOOTSTRAP_TEST === '1') {
-      console.error('server stdout:\n', server._agentocStdout?.() || '');
-      console.error('server stderr:\n', server._agentocStderr?.() || '');
+      console.error('server stdout:\n', server._ragentStdout?.() || '');
+      console.error('server stderr:\n', server._ragentStderr?.() || '');
       console.error('helper stdout:\n', helperStdout);
       console.error('helper stderr:\n', helperStderr);
     }

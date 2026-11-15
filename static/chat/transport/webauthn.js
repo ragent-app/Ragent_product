@@ -5,11 +5,11 @@
 // (challenge / user id / credential ids as base64url strings → buffers) and
 // credential serialization (buffers → base64url strings). The availability
 // probe is injected via the environment contract
-// (root.AgentocWebAuthnEnvironment), so this module stays free of browser
+// (root.RagentWebAuthnEnvironment), so this module stays free of browser
 // globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-webauthn-core.mjs.
 
-(function attachAgentocWebAuthnCore(root) {
+(function attachRagentWebAuthnCore(root) {
   // Live environment: reads always go to the injected object (mutations after
   // attach are visible), falling back to the defaults for absent keys. An
   // Object.assign copy would freeze scalar bindings at attach time, which
@@ -20,7 +20,7 @@
     isWebAuthnAvailable: () => false,
   });
   const environment = new Proxy(
-    root.AgentocWebAuthnEnvironment || {},
+    root.RagentWebAuthnEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -101,7 +101,7 @@
     return new Uint8Array(base64UrlToArrayBuffer(value));
   }
 
-  root.AgentocWebAuthnCore = {
+  root.RagentWebAuthnCore = {
     base64UrlToArrayBuffer,
     arrayBufferToBase64Url,
     hydrateWebAuthnPublicKey,

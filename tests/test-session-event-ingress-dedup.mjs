@@ -73,7 +73,7 @@ function createContext() {
     paintGoalChipLive(events) {
       calls.goal.push(events);
     },
-    AgentoCTimelineRuntime: {
+    RagentTimelineRuntime: {
       renderDurableDelta(events, options) {
         calls.durable.push({ events, options });
         return { latestSeq: options?.latestSeq || 0 };
@@ -83,7 +83,7 @@ function createContext() {
         return { latestSeq: 9 };
       },
     },
-    AgentoCAttentionPopup: {
+    RagentAttentionPopup: {
       onRealtimeEvents(sessionId, events) {
         calls.attention.push({ sessionId, events });
       },
@@ -219,7 +219,7 @@ assert.deepEqual(
   'coalescing must preserve tool boundaries',
 );
 
-assert.match(realtimeSource, /AgentoCTimelineRuntime;[\s\S]*renderIncremental/);
+assert.match(realtimeSource, /RagentTimelineRuntime;[\s\S]*renderIncremental/);
 assert.doesNotMatch(realtimeSource, /filterRealtimeSessionEvents|filterRealtimePersistentEvents/);
 assert.doesNotMatch(realtimeSource, /filterUnrenderedPersistentEvents|markWsEventPushApplied|isWsEventPushCaughtUp/);
 assert.doesNotMatch(realtimeSource, /renderEvent\(msg/);

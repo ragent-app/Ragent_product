@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Narrow privileged helper for the owner-only AgentoC control panel."""
+"""Narrow privileged helper for the owner-only Ragent control panel."""
 
 import datetime as dt
 import base64
@@ -30,25 +30,25 @@ except ImportError:  # Local validation tests also run on Windows.
     pwd = None
 
 
-SOCKET_PATH = "/run/agentoc-admin/helper.sock"
-ADMIN_GROUP = "agentoc-admin"
-ADMIN_USER = "agentoc-admin"
+SOCKET_PATH = "/run/ragent-admin/helper.sock"
+ADMIN_GROUP = "ragent-admin"
+ADMIN_USER = "ragent-admin"
 OWNER_EMAIL = "iamandyusuk@gmail.com"
-ACCOUNTS_ENV = pathlib.Path("/etc/agentoc/accounts.env")
-TURN_ENV = pathlib.Path("/etc/agentoc/turn-broker.env")
-FCM_FILE = pathlib.Path("/var/lib/agentoc/accounts/fcm-service-account.json")
-BACKUP_DIR = pathlib.Path("/var/lib/agentoc-admin/backups")
-METRICS_FILE = pathlib.Path("/var/lib/agentoc-admin/metrics.json")
-TRAFFIC_FILE = pathlib.Path("/var/lib/agentoc-admin/traffic.json")
-TURN_ANALYTICS_FILE = pathlib.Path("/etc/agentoc/turn-analytics.json")
-AUDIT_FILE = pathlib.Path("/var/log/agentoc-admin/audit.jsonl")
+ACCOUNTS_ENV = pathlib.Path("/etc/ragent/accounts.env")
+TURN_ENV = pathlib.Path("/etc/ragent/turn-broker.env")
+FCM_FILE = pathlib.Path("/var/lib/ragent/accounts/fcm-service-account.json")
+BACKUP_DIR = pathlib.Path("/var/lib/ragent-admin/backups")
+METRICS_FILE = pathlib.Path("/var/lib/ragent-admin/metrics.json")
+TRAFFIC_FILE = pathlib.Path("/var/lib/ragent-admin/traffic.json")
+TURN_ANALYTICS_FILE = pathlib.Path("/etc/ragent/turn-analytics.json")
+AUDIT_FILE = pathlib.Path("/var/log/ragent-admin/audit.jsonl")
 ACCOUNTS_SERVICE = "ragent-accounts.service"
-DATABASE_CONTAINER = "agentoc-pg"
-DATABASE_NAME = "agentoc_accounts_runtime"
-DATABASE_APP_ROLE = "agentoc_accounts_app"
-DATABASE_ADMIN_ROLE = "agentoc_accounts"
-ACCOUNTS_ROOT = pathlib.Path("/opt/agentoc-accounts/current/app")
-ACCOUNTS_NODE = pathlib.Path("/opt/agentoc-accounts/current/runtime/node")
+DATABASE_CONTAINER = "ragent-pg"
+DATABASE_NAME = "ragent_accounts_runtime"
+DATABASE_APP_ROLE = "ragent_accounts_app"
+DATABASE_ADMIN_ROLE = "ragent_accounts"
+ACCOUNTS_ROOT = pathlib.Path("/opt/ragent-accounts/current/app")
+ACCOUNTS_NODE = pathlib.Path("/opt/ragent-accounts/current/runtime/node")
 ACCOUNTS_HOST_DEFAULT = "127.0.0.1"
 ACCOUNTS_PORT_DEFAULT = 7700
 TURN_HOST_DEFAULT = "127.0.0.1"
@@ -66,13 +66,13 @@ SERVICES = {
     "ragent-tunnel-server": "ragent-tunnel-server.service",
 }
 
-LEGACY_SERVICE_NAMES = {f"ragent-{name}": f"agentoc-{name}" for name in ("accounts", "signaling", "tunnel-server")}
+LEGACY_SERVICE_NAMES = {f"ragent-{name}": f"ragent-{name}" for name in ("accounts", "signaling", "tunnel-server")}
 
 BACKUP_PATTERN = re.compile(r"^accounts-\d{8}T\d{6}Z-[a-f0-9]{8}\.dump$")
 SECRET_FIELDS = {
     "openai-api-key": (ACCOUNTS_ENV, "OPENAI_API_KEY", ACCOUNTS_SERVICE),
-    "turn-shared-secret": (TURN_ENV, "AGENTOC_TURN_SECRET", SERVICES["turn-credential-broker"]),
-    "turn-broker-token": (TURN_ENV, "AGENTOC_TURN_BROKER_TOKEN", SERVICES["turn-credential-broker"]),
+    "turn-shared-secret": (TURN_ENV, "RAGENT_TURN_SECRET", SERVICES["turn-credential-broker"]),
+    "turn-broker-token": (TURN_ENV, "RAGENT_TURN_BROKER_TOKEN", SERVICES["turn-credential-broker"]),
 }
 MIGRATION_VERSION = re.compile(r"^(\d+)_.*\.up\.sql$")
 
@@ -108,7 +108,7 @@ def _turn_analytics(now):
         return {'available': False, 'status': 'unconfigured', 'month': month}
     account = config.get('accountId', '')
     token = config.get('token', '')
-    key = read_env(TURN_ENV).get('AGENTOC_TURN_KEY_NAME', '')
+    key = read_env(TURN_ENV).get('RAGENT_TURN_KEY_NAME', '')
     if not all(isinstance(value, str) for value in (account, key, token)) or not re.fullmatch(r'[a-fA-F0-9]{32}', account) or not re.fullmatch(r'[a-fA-F0-9]{32}', key) or not re.fullmatch(r'[A-Za-z0-9_-]{20,200}', token):
         return {'available': False, 'status': 'unconfigured', 'month': month}
     start = now.strftime('%Y-%m-01')
@@ -495,7 +495,7 @@ def _env_value(path, key, default=""):
 
 
 def _fcm_metadata():
-    configured_path = _env_value(ACCOUNTS_ENV, "AGENTOC_FCM_SERVICE_ACCOUNT_FILE")
+    configured_path = _env_value(ACCOUNTS_ENV, "RAGENT_FCM_SERVICE_ACCOUNT_FILE")
     if configured_path != str(FCM_FILE):
         return {"configured": False, "available": False, "updatedAt": None}
     try:
@@ -517,7 +517,7 @@ def _secret_metadata():
     turn = read_env(TURN_ENV)
     account_mtime = dt.datetime.fromtimestamp(ACCOUNTS_ENV.stat().st_mtime, dt.timezone.utc).isoformat()
     turn_mtime = dt.datetime.fromtimestamp(TURN_ENV.stat().st_mtime, dt.timezone.utc).isoformat()
-    db_url = accounts.get("AGENTOC_ACCOUNTS_DATABASE_URL", "")
+    db_url = accounts.get("RAGENT_ACCOUNTS_DATABASE_URL", "")
     try:
         db_parsed = urllib.parse.urlsplit(db_url)
         db_configured = bool(db_parsed.scheme in ("postgres", "postgresql") and db_parsed.username and db_parsed.password)
@@ -528,12 +528,12 @@ def _secret_metadata():
         "items": [
             {"id": "openai-api-key", "label": "OpenAI 云端语音 API", "category": "语音识别", "configured": bool(accounts.get("OPENAI_API_KEY")), "updatedAt": account_mtime, "canReplace": True},
             {"id": "fcm-service-account", "label": "FCM 服务账号", "category": "推送通知", "configured": fcm["configured"], "available": fcm["available"], "updatedAt": fcm["updatedAt"], "canReplace": fcm["available"]},
-            {"id": "turn-shared-secret", "label": "Cloudflare TURN 共享密钥", "category": "TURN 中继", "configured": bool(turn.get("AGENTOC_TURN_SECRET")), "updatedAt": turn_mtime, "canReplace": True},
-            {"id": "turn-broker-token", "label": "TURN broker 内部令牌", "category": "TURN 中继", "configured": bool(turn.get("AGENTOC_TURN_BROKER_TOKEN")), "active": turn.get("AGENTOC_TURN_BROKER_AUTH_MODE") != "accounts-capability", "updatedAt": turn_mtime, "canReplace": True},
+            {"id": "turn-shared-secret", "label": "Cloudflare TURN 共享密钥", "category": "TURN 中继", "configured": bool(turn.get("RAGENT_TURN_SECRET")), "updatedAt": turn_mtime, "canReplace": True},
+            {"id": "turn-broker-token", "label": "TURN broker 内部令牌", "category": "TURN 中继", "configured": bool(turn.get("RAGENT_TURN_BROKER_TOKEN")), "active": turn.get("RAGENT_TURN_BROKER_AUTH_MODE") != "accounts-capability", "updatedAt": turn_mtime, "canReplace": True},
             {"id": "turn-analytics", "label": "Cloudflare TURN 用量分析", "category": "TURN 中继", "configured": TURN_ANALYTICS_FILE.is_file(), "updatedAt": None, "canReplace": True},
             {"id": "database-password", "label": "Accounts 数据库应用账号", "category": "数据库", "configured": db_configured, "role": DATABASE_APP_ROLE, "updatedAt": account_mtime, "canReplace": db_configured},
         ],
-        "asrEnabled": accounts.get("AGENTOC_ACCOUNTS_ASR_ENABLED") == "1" and bool(accounts.get("OPENAI_API_KEY")),
+        "asrEnabled": accounts.get("RAGENT_ACCOUNTS_ASR_ENABLED") == "1" and bool(accounts.get("OPENAI_API_KEY")),
         "asrSettings": _asr_settings(accounts),
         "fcmAvailable": fcm["available"],
     }
@@ -547,10 +547,10 @@ def _asr_settings(accounts):
         except (TypeError, ValueError):
             return default
     return {
-        "freeMinutes": value("AGENTOC_ACCOUNTS_ASR_FREE_MINUTES", 15, 0, 100000),
-        "plusMinutes": value("AGENTOC_ACCOUNTS_ASR_PLUS_MINUTES", 120, 0, 100000),
-        "proMinutes": value("AGENTOC_ACCOUNTS_ASR_PRO_MINUTES", 600, 0, 100000),
-        "timeoutMs": value("AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS", 30000, 1000, 120000),
+        "freeMinutes": value("RAGENT_ACCOUNTS_ASR_FREE_MINUTES", 15, 0, 100000),
+        "plusMinutes": value("RAGENT_ACCOUNTS_ASR_PLUS_MINUTES", 120, 0, 100000),
+        "proMinutes": value("RAGENT_ACCOUNTS_ASR_PRO_MINUTES", 600, 0, 100000),
+        "timeoutMs": value("RAGENT_ACCOUNTS_ASR_TIMEOUT_MS", 30000, 1000, 120000),
         "model": "gpt-transcribe",
     }
 
@@ -710,10 +710,10 @@ def _readiness_metric(host, port, route):
 def _overview():
     accounts = read_env(ACCOUNTS_ENV)
     turn_env = read_env(TURN_ENV)
-    account_host = accounts.get("AGENTOC_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
+    account_host = accounts.get("RAGENT_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
     account_port = int(accounts.get("PORT", ACCOUNTS_PORT_DEFAULT))
-    turn_host = turn_env.get("AGENTOC_TURN_BROKER_HOST", TURN_HOST_DEFAULT)
-    turn_port = int(turn_env.get("AGENTOC_TURN_BROKER_PORT", TURN_PORT_DEFAULT))
+    turn_host = turn_env.get("RAGENT_TURN_BROKER_HOST", TURN_HOST_DEFAULT)
+    turn_port = int(turn_env.get("RAGENT_TURN_BROKER_PORT", TURN_PORT_DEFAULT))
     services = {
         key: {"label": key.replace("-", " ").title(), **_systemd_status(unit)}
         for key, unit in SERVICES.items()
@@ -740,7 +740,7 @@ def _overview():
     asr = _secret_metadata()
     platform = {
         "caddy": _systemd_status("caddy.service"),
-        "legacyConnectivityGateway": _systemd_status("agentoc-connectivity-gateway.service"),
+        "legacyConnectivityGateway": _systemd_status("ragent-connectivity-gateway.service"),
         "postgres": _docker_container_metrics(),
     }
     metrics = _record_metrics(services, platform)
@@ -796,10 +796,10 @@ def _loopback_http_json(host, port, route):
 def _run_diagnostics(actor):
     accounts = read_env(ACCOUNTS_ENV)
     turn_env = read_env(TURN_ENV)
-    account_host = accounts.get("AGENTOC_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
+    account_host = accounts.get("RAGENT_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
     account_port = accounts.get("PORT", ACCOUNTS_PORT_DEFAULT)
-    turn_host = turn_env.get("AGENTOC_TURN_BROKER_HOST", TURN_HOST_DEFAULT)
-    turn_port = turn_env.get("AGENTOC_TURN_BROKER_PORT", TURN_PORT_DEFAULT)
+    turn_host = turn_env.get("RAGENT_TURN_BROKER_HOST", TURN_HOST_DEFAULT)
+    turn_port = turn_env.get("RAGENT_TURN_BROKER_PORT", TURN_PORT_DEFAULT)
     checks = []
 
     def add_check(check_id, label, action):
@@ -1098,7 +1098,7 @@ def _restore_backup(actor, data):
 
 
 def _drop_to_account_user():
-    account = pwd.getpwnam("agentoc-accounts")
+    account = pwd.getpwnam("ragent-accounts")
     def demote():
         os.setgroups([account.pw_gid])
         os.setgid(account.pw_gid)
@@ -1141,7 +1141,7 @@ def _update_asr(actor, data):
         if "042_account_asr_consent_openai_v3" not in migration["applied"]:
             raise AdminError("ASR_MIGRATION_REQUIRED")
     snapshot = file_snapshot(ACCOUNTS_ENV)
-    write_env_value(ACCOUNTS_ENV, "AGENTOC_ACCOUNTS_ASR_ENABLED", "1" if enabled else "0")
+    write_env_value(ACCOUNTS_ENV, "RAGENT_ACCOUNTS_ASR_ENABLED", "1" if enabled else "0")
     try:
         _service_restart(ACCOUNTS_SERVICE)
     except Exception as exc:
@@ -1161,10 +1161,10 @@ def _update_asr(actor, data):
 
 def _update_asr_settings(actor, data):
     fields = {
-        "freeMinutes": ("AGENTOC_ACCOUNTS_ASR_FREE_MINUTES", 0, 100000),
-        "plusMinutes": ("AGENTOC_ACCOUNTS_ASR_PLUS_MINUTES", 0, 100000),
-        "proMinutes": ("AGENTOC_ACCOUNTS_ASR_PRO_MINUTES", 0, 100000),
-        "timeoutMs": ("AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS", 1000, 120000),
+        "freeMinutes": ("RAGENT_ACCOUNTS_ASR_FREE_MINUTES", 0, 100000),
+        "plusMinutes": ("RAGENT_ACCOUNTS_ASR_PLUS_MINUTES", 0, 100000),
+        "proMinutes": ("RAGENT_ACCOUNTS_ASR_PRO_MINUTES", 0, 100000),
+        "timeoutMs": ("RAGENT_ACCOUNTS_ASR_TIMEOUT_MS", 1000, 120000),
     }
     if set(data) != set(fields):
         raise AdminError("ASR_SETTINGS_INVALID")
@@ -1213,9 +1213,9 @@ def _test_asr_transcription(actor, data):
     except (binascii.Error, ValueError, EOFError, wave.Error):
         raise AdminError("ASR_TEST_AUDIO_INVALID")
     accounts = read_env(ACCOUNTS_ENV)
-    if accounts.get("AGENTOC_ACCOUNTS_ASR_ENABLED") != "1" or not accounts.get("OPENAI_API_KEY"):
+    if accounts.get("RAGENT_ACCOUNTS_ASR_ENABLED") != "1" or not accounts.get("OPENAI_API_KEY"):
         raise AdminError("ASR_TEST_UNAVAILABLE")
-    boundary = "agentoc-asr-" + secrets.token_hex(16)
+    boundary = "ragent-asr-" + secrets.token_hex(16)
     payload = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\ngpt-transcribe\r\n"
                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.wav\"\r\n"
                "Content-Type: audio/wav\r\n\r\n").encode() + audio + f"\r\n--{boundary}--\r\n".encode()
@@ -1299,7 +1299,7 @@ def _set_secret(actor, data):
         _audit(actor, 'secret.rotate', secret_id, 'success')
         return {'id': secret_id, 'configured': True, 'applied': True}
     if secret_id == "fcm-service-account":
-        account = pwd.getpwnam("agentoc-accounts")
+        account = pwd.getpwnam("ragent-accounts")
         snapshot = file_snapshot(FCM_FILE)
         atomic_write(FCM_FILE, value, mode=0o600, owner=account.pw_uid, group=account.pw_gid)
         unit = ACCOUNTS_SERVICE
@@ -1328,7 +1328,7 @@ def _set_secret(actor, data):
 
 def _update_database_url(new_password):
     values = read_env(ACCOUNTS_ENV)
-    original_url = values.get("AGENTOC_ACCOUNTS_DATABASE_URL", "")
+    original_url = values.get("RAGENT_ACCOUNTS_DATABASE_URL", "")
     parsed = urllib.parse.urlsplit(original_url)
     if parsed.scheme not in ("postgres", "postgresql") or not parsed.hostname or not parsed.username or not parsed.password:
         raise AdminError("DATABASE_CONFIG_INVALID")
@@ -1365,10 +1365,10 @@ def _rotate_database_password(actor):
     _, new_url, _ = _update_database_url(new_password)
     try:
         _alter_database_password(username, new_password)
-        write_env_value(ACCOUNTS_ENV, "AGENTOC_ACCOUNTS_DATABASE_URL", new_url)
+        write_env_value(ACCOUNTS_ENV, "RAGENT_ACCOUNTS_DATABASE_URL", new_url)
         _service_restart(ACCOUNTS_SERVICE)
         accounts = read_env(ACCOUNTS_ENV)
-        host = accounts.get("AGENTOC_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
+        host = accounts.get("RAGENT_ACCOUNTS_HOST", ACCOUNTS_HOST_DEFAULT)
         port = int(accounts.get("PORT", ACCOUNTS_PORT_DEFAULT))
         deadline = time.monotonic() + 15
         healthy = False

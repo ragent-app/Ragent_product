@@ -7,11 +7,11 @@
 //    with nowMs() (at most 2 performance.now calls per render frame; frames
 //    that do not render cost zero extra work).
 // 2. recordStreamingRenderMetric (session-http.js) records
-//    kind/renderMs/mode/textLen into the shared __agentocEventRefreshMetrics
+//    kind/renderMs/mode/textLen into the shared __ragentEventRefreshMetrics
 //    store, updates the streaming totals (streamingRenderFrames / TotalMs /
 //    MaxMs / BlockCount / FullCount) and store.last, and shares the existing
 //    samples array + EVENT_REFRESH_METRICS_SAMPLE_LIMIT cap.
-// 3. agentocGetEventRefreshMetrics() deep-copies the store, so the new
+// 3. ragentGetEventRefreshMetrics() deep-copies the store, so the new
 //    streaming fields are exposed automatically.
 // 4. The cross-file call is progressive enhancement: realtime-render.js may
 //    evaluate before session-http.js; pumping before the recorder exists must
@@ -81,7 +81,7 @@ const PREAMBLE_SOURCE = `
     node.dataset.syntheticFinalized = "true";
     return node;
   }
-  window.AgentoCRunActivity = { noteFormalOutput() {}, applyEvent() {} };
+  window.RagentRunActivity = { noteFormalOutput() {}, applyEvent() {} };
   window.renderMarkdownIntoNode = (node, text) => { node.textContent = String(text); };
   window.renderMarkdownFragmentIntoNode = (node, text) => { node.textContent = String(text); return true; };
   window.__streamingMetricsTest = {
@@ -144,7 +144,7 @@ try {
     assert.equal(guarded.text, '# 标题\n\n第二段 **加粗**', 'guarded pumping should still render the full text');
     assert.deepEqual(pageErrors, [], 'pumping before the recorder exists must not throw');
     assert.equal(
-      await page.evaluate(() => typeof window.agentocGetEventRefreshMetrics),
+      await page.evaluate(() => typeof window.ragentGetEventRefreshMetrics),
       'undefined',
       'no metrics surface should exist before session-http.js loads',
     );
@@ -153,8 +153,8 @@ try {
     // The store and surface install lazily on the first recorded sample.
     await page.addScriptTag({ content: sessionHttpSource });
     const beforeBootstrap = await page.evaluate(() => ({
-      hasSurface: typeof window.agentocGetEventRefreshMetrics === 'function',
-      hasStore: typeof window.__agentocEventRefreshMetrics === 'object',
+      hasSurface: typeof window.ragentGetEventRefreshMetrics === 'function',
+      hasStore: typeof window.__ragentEventRefreshMetrics === 'object',
     }));
     assert.deepEqual(
       beforeBootstrap,
@@ -167,9 +167,9 @@ try {
     // other family (no refactor of recordEventRefreshMetric).
     const fresh = await page.evaluate(() => {
       recordEventRefreshMetric({ mode: 'full', outcome: 'applied', renderMode: 'append', renderMs: 3 });
-      const store = window.__agentocEventRefreshMetrics;
+      const store = window.__ragentEventRefreshMetrics;
       return {
-        hasSurface: typeof window.agentocGetEventRefreshMetrics === 'function',
+        hasSurface: typeof window.ragentGetEventRefreshMetrics === 'function',
         totals: store.totals,
         fullFetches: store.totals.fullFetches,
         streamingRenderFrames: store.totals.streamingRenderFrames,
@@ -177,7 +177,7 @@ try {
         lastRenderMode: store.last?.renderMode,
       };
     });
-    assert.equal(fresh.hasSurface, true, 'agentocGetEventRefreshMetrics should exist after the first record');
+    assert.equal(fresh.hasSurface, true, 'ragentGetEventRefreshMetrics should exist after the first record');
     assert.deepEqual(
       fresh.totals,
       {
@@ -204,7 +204,7 @@ try {
     // Now pumping records: plain text renders every frame through the full path.
     const recorded = await page.evaluate(() => {
       const drained = __streamingMetricsTest.drain('普通文本流内容');
-      const store = window.__agentocEventRefreshMetrics;
+      const store = window.__ragentEventRefreshMetrics;
       const streamingSamples = store.samples.filter((sample) => sample.kind === 'streaming-render');
       return {
         frames: drained.frames,
@@ -246,8 +246,8 @@ try {
 
     const result = await page.evaluate(() => {
       const drained = __streamingMetricsTest.drain('# 标题\n\n第二段 **加粗**');
-      const store = window.__agentocEventRefreshMetrics;
-      const snapshot = window.agentocGetEventRefreshMetrics();
+      const store = window.__ragentEventRefreshMetrics;
+      const snapshot = window.ragentGetEventRefreshMetrics();
       const samples = store.samples.map((sample) => ({
         kind: sample.kind,
         renderMs: sample.renderMs,
@@ -301,9 +301,9 @@ try {
       'MaxMs should equal the largest renderMs sample',
     );
     assert.deepEqual(result.last, { kind: 'streaming-render', mode: 'block' }, 'store.last should settle to block rendering');
-    assert.deepEqual(result.snapshotTotals, result.totals, 'agentocGetEventRefreshMetrics should expose the streaming totals');
+    assert.deepEqual(result.snapshotTotals, result.totals, 'ragentGetEventRefreshMetrics should expose the streaming totals');
     assert.equal(result.snapshotSamplesLength, result.samples.length, 'the snapshot should carry the streaming samples');
-    assert.equal(result.snapshotIsDeepCopy, true, 'agentocGetEventRefreshMetrics should deep-copy the store');
+    assert.equal(result.snapshotIsDeepCopy, true, 'ragentGetEventRefreshMetrics should deep-copy the store');
     assert.deepEqual(pageErrors, [], 'the block-stream flow should not raise page errors');
     await page.close();
   }
@@ -318,7 +318,7 @@ try {
 
     const result = await page.evaluate(() => {
       // The store installs lazily on the first recorded sample.
-      const count = () => (window.__agentocEventRefreshMetrics?.samples || []).length;
+      const count = () => (window.__ragentEventRefreshMetrics?.samples || []).length;
       const before = count();
       __streamingMetricsTest.append('`markdown cadence test`');
       __streamingMetricsTest.pumpOnce(); // frame 1: markdown flips on -> render
@@ -366,7 +366,7 @@ try {
         streamingAnimFrame = null;
         frames += 1;
       }
-      const store = window.__agentocEventRefreshMetrics;
+      const store = window.__ragentEventRefreshMetrics;
       return {
         frames,
         samplesLength: store.samples.length,

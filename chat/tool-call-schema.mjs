@@ -1,8 +1,8 @@
 /**
  * Stable ACP v1 ToolCall projection.
  *
- * Only ACP fields are emitted at the top level. AgentoC lifecycle facts live
- * under `_meta.agentoc`; display-only data is built separately by
+ * Only ACP fields are emitted at the top level. Ragent lifecycle facts live
+ * under `_meta.ragent`; display-only data is built separately by
  * tool-call-formatters.mjs. Raw provider input/output never enters this
  * projection.
  */
@@ -84,7 +84,7 @@ export function normalizeToolCallKind(value) {
   }
 }
 
-/** Collapse the richer AgentoC lifecycle to the four stable ACP statuses. */
+/** Collapse the richer Ragent lifecycle to the four stable ACP statuses. */
 export function stableToolCallStatus(lifecycle) {
   const state = trimString(lifecycle).toLowerCase();
   if (['completed', 'success', 'succeeded'].includes(state)) return 'completed';
@@ -154,7 +154,7 @@ function stableContent(operation) {
   return redactSensitiveValue(operation.content);
 }
 
-function agentocMeta(operation) {
+function ragentMeta(operation) {
   const meta = {
     schemaVersion: 1,
     lifecycle: trimString(operation.state) || 'pending',
@@ -164,12 +164,12 @@ function agentocMeta(operation) {
     ...(Number.isFinite(operation.durationMs) ? { durationMs: operation.durationMs } : {}),
     ...(Number.isFinite(operation.exitCode) ? { exitCode: operation.exitCode } : {}),
   };
-  return { agentoc: meta };
+  return { ragent: meta };
 }
 
 /**
  * Build a strict stable ACP v1 ToolCall plus the explicitly namespaced
- * AgentoC metadata extension. Display input/output belongs in a separate
+ * Ragent metadata extension. Display input/output belongs in a separate
  * presentation envelope.
  */
 export function buildCanonicalToolCall(operation = {}) {
@@ -186,6 +186,6 @@ export function buildCanonicalToolCall(operation = {}) {
     status: stableToolCallStatus(operation.state),
     ...(content.length > 0 ? { content } : {}),
     ...(locations.length > 0 ? { locations } : {}),
-    _meta: agentocMeta(operation),
+    _meta: ragentMeta(operation),
   };
 }

@@ -13,13 +13,13 @@ const ui = readFileSync(join(repoRoot, 'static/chat/ui.js'), 'utf8');
 
 assert.match(template, /chat\/chat-live-action\.css/);
 assert.match(template, /chat\/live-action-transition\.js/);
-assert.match(transition, /AgentoCLiveActionTransition = \{ setText, getText \}/);
+assert.match(transition, /RagentLiveActionTransition = \{ setText, getText \}/);
 assert.match(transition, /live-action-transition__stage/);
 assert.match(css, /@keyframes live-action-slide-in/);
 assert.match(css, /@keyframes live-action-slide-out/);
 assert.match(css, /prefers-reduced-motion: reduce/);
-assert.match(liveStatus, /AgentoCLiveActionTransition\?\.setText/);
-assert.match(ui, /AgentoCLiveActionTransition\?\.setText/);
-assert.match(ui, /AgentoCLiveActionTransition\?\.getText/);
+assert.match(liveStatus, /RagentLiveActionTransition\?\.setText/);
+assert.match(ui, /RagentLiveActionTransition\?\.setText/);
+assert.match(ui, /RagentLiveActionTransition\?\.getText/);
 
 console.log('test-chat-live-action-transition: ok');

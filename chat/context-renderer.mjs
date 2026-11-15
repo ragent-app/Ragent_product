@@ -482,8 +482,8 @@ function buildTurnPrompt(context, options = {}) {
 
 function resolveDeveloperInstructionsBase(runtimeFamily) {
   const envName = runtimeFamily === 'copilot-json'
-    ? 'AGENTOC_COPILOT_DEVELOPER_INSTRUCTIONS'
-    : 'AGENTOC_CODEX_DEVELOPER_INSTRUCTIONS';
+    ? 'RAGENT_COPILOT_DEVELOPER_INSTRUCTIONS'
+    : 'RAGENT_CODEX_DEVELOPER_INSTRUCTIONS';
   if (hasOwn(process.env, envName)) {
     return trimString(process.env[envName]);
   }
@@ -559,7 +559,7 @@ function renderClaudeContext(context) {
 
 function shouldUseLegacyRenderer(options = {}) {
   if (options.rendererStrategy === 'legacy') return true;
-  const flag = String(process.env.AGENTOC_CONTEXT_RENDERER_V2 || '').trim().toLowerCase();
+  const flag = String(process.env.RAGENT_CONTEXT_RENDERER_V2 || '').trim().toLowerCase();
   return ['0', 'false', 'off', 'no', 'legacy'].includes(flag);
 }
 
@@ -603,7 +603,7 @@ function renderRuntimeContext(context, options = {}) {
 }
 
 function buildShadowLegacyMetadata(context, renderResult) {
-  const flag = String(process.env.AGENTOC_CONTEXT_RENDERER_SHADOW || '').trim().toLowerCase();
+  const flag = String(process.env.RAGENT_CONTEXT_RENDERER_SHADOW || '').trim().toLowerCase();
   if (!['1', 'true', 'yes', 'on'].includes(flag)) return null;
   const legacy = renderLegacyContext(context);
   return {
@@ -623,7 +623,7 @@ export function renderContextForRuntime(context, options = {}) {
   const shadowLegacy = buildShadowLegacyMetadata(context, renderResult);
   const metadata = buildMetadata(context, renderedContext, renderResult, {
     rendererStrategy: renderResult.rendererStrategy,
-    featureFlag: 'AGENTOC_CONTEXT_RENDERER_V2',
+    featureFlag: 'RAGENT_CONTEXT_RENDERER_V2',
     featureFlagEnabled: !shouldUseLegacyRenderer(options),
     contextBudget: budgetInfo?.budget || null,
     originalCharCounts: budgetInfo?.originalCharCounts || context?.charCounts || {},

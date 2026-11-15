@@ -25,9 +25,9 @@ import { getRun, getRunManifest } from './runs.mjs';
 
 export const COLLABORATION_CAPABILITY_VERSION = 'collaboration-capability/v1';
 export const COLLABORATION_POLICY_VERSION = 'collaboration-policy/v1';
-export const COLLABORATION_CAPABILITY_ENV = 'AGENTOC_COLLABORATION_CAPABILITIES';
+export const COLLABORATION_CAPABILITY_ENV = 'RAGENT_COLLABORATION_CAPABILITIES';
 export const COLLABORATION_CAPABILITY_HEADER = 'authorization';
-export const COLLABORATION_CAPABILITY_USE_NONCE_HEADER = 'x-agentoc-capability-use-nonce';
+export const COLLABORATION_CAPABILITY_USE_NONCE_HEADER = 'x-ragent-capability-use-nonce';
 
 const CAPABILITY_TTL_MS = 15 * 60 * 1000;
 const READ_USAGE_MAX = 128;
@@ -305,7 +305,7 @@ export async function createSessionRunCollaborationCapabilities({
   getAppImpl,
   getSessionImpl,
   now = Date.now(),
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
 } = {}) {
   const app = text(session?.templateId) && typeof getAppImpl === 'function'
     ? await getAppImpl(session.templateId).catch(() => null)
@@ -396,7 +396,7 @@ export function createRunCollaborationCapabilities({
   rootSessionId = '',
   now = Date.now(),
   ttlMs = CAPABILITY_TTL_MS,
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   operations = OPERATIONS,
 } = {}) {
   const normalizedRunId = text(runId);
@@ -483,7 +483,7 @@ function decodeEnvironment(value) {
  * independently testable without starting chat-server.
  */
 export function createCollaborationCapabilityAuthenticator({
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   store = createCollaborationCapabilityUsageStore(),
   getRunImpl = getRun,
   getRunManifestImpl = getRunManifest,

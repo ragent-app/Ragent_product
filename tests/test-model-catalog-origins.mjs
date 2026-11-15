@@ -3,10 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join, relative, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-catalog-origin-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+const root = await mkdtemp(join(tmpdir(), 'ragent-catalog-origin-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 process.env.HOME = root;
 try {
   const { getToolModelCatalogs } = await import('../chat/models.mjs');

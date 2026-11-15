@@ -1,7 +1,7 @@
 "use strict";
 
 (function attachFileTreeView(root) {
-  if (root.AgentoCFileTreeView) return;
+  if (root.RagentFileTreeView) return;
 
   function escapeHtml(value) {
     const el = document.createElement("span");
@@ -10,7 +10,7 @@
   }
 
   function renderIcon(name, className = "") {
-    return root.AgentoCIcons?.render(name, { className }) || "";
+    return root.RagentIcons?.render(name, { className }) || "";
   }
 
   function renderFolderSummary({
@@ -108,7 +108,7 @@
     return `<ul class="workspace-file-tree-list file-tree-folder-list">${renderFolderTreeNode(rootNode, options)}</ul>`;
   }
 
-  root.AgentoCFileTreeView = Object.freeze({
+  root.RagentFileTreeView = Object.freeze({
     escapeHtml,
     normalizeFolderNode,
     renderFolderButton,

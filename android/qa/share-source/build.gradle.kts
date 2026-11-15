@@ -5,7 +5,7 @@ plugins {
 }
 dependencies { implementation(project(":sdk:android")) }
 android {
-    namespace = "com.andysagent.agentoc.sharefixture"
+    namespace = "com.andysagent.ragent.sharefixture"
     compileSdk = 37
     defaultConfig {
         applicationId = "com.agentoncloud.android.sharefixture"

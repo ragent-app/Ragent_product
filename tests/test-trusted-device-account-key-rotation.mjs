@@ -8,12 +8,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-account-key-rotation-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-account-key-rotation-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
-mkdirSync(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
+mkdirSync(process.env.RAGENT_CONFIG_DIR, { recursive: true });
 
 function publicKey() {
   return generateKeyPairSync('ec', { namedCurve: 'prime256v1' })
@@ -27,7 +27,7 @@ const deviceId = 'rdev_account_key_rotation_001';
 const accountId = 'acct_account_key_rotation_001';
 const now = new Date().toISOString();
 
-writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
+writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
   version: 1,
   instanceId: 'rli_account_key_rotation_001',
   instanceSecret: 'account-key-rotation-test-secret',
@@ -95,7 +95,7 @@ function pendingIntent({ intentId, key, deviceName = 'Android after reinstall' }
 }
 
 function state() {
-  return JSON.parse(readFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
+  return JSON.parse(readFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), 'utf8'));
 }
 
 try {
@@ -169,7 +169,7 @@ try {
     lastSeenAt: '2026-01-03T00:00:00.000Z',
     revokedAt: '',
   };
-  writeFileSync(join(process.env.AGENTOC_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
+  writeFileSync(join(process.env.RAGENT_CONFIG_DIR, 'trusted-devices.json'), JSON.stringify({
     ...persisted,
     devices: [retired, replacement],
   }));

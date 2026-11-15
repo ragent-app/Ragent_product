@@ -3,15 +3,15 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { manage, buildPlist } = require("../packaging/macos/agentoc-login.cjs");
-const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentoc-login-test-"));
+const { manage, buildPlist } = require("../packaging/macos/ragent-login.cjs");
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "ragent-login-test-"));
 const home = path.join(root, "home & user");
 const resources = path.join(root, "app & test", "Contents", "Resources");
-const config = path.join(home, ".config", "agentoc");
+const config = path.join(home, ".config", "ragent");
 const uid = process.getuid();
 const args = { home, resources, config, port: "47681", uid };
 const plist = path.join(home, "Library", "LaunchAgents", "cloud.agenton.ragent.plist");
-const oldPlist = path.join(home, "Library", "LaunchAgents", "cloud.agenton.agentoc.plist");
+const oldPlist = path.join(home, "Library", "LaunchAgents", "cloud.agenton.ragent.plist");
 let loaded = false;
 let oldLoaded = false;
 let occupied = false;
@@ -23,7 +23,7 @@ const fail = (status, stderr = "") => ({ ok: false, status, stdout: "", stderr }
 const run = (command, argv) => {
   if (command.endsWith("lsof")) return occupied ? ok("123\n") : fail(1);
   if (argv[0] === "print" && argv[1] === `gui/${uid}`) return ok();
-  if (argv[0] === "print" && argv[1].endsWith("/cloud.agenton.agentoc")) return oldLoaded ? ok(`path = ${foreign ? "/somebody/else.plist" : oldPlist}\n`) : fail(113);
+  if (argv[0] === "print" && argv[1].endsWith("/cloud.agenton.ragent")) return oldLoaded ? ok(`path = ${foreign ? "/somebody/else.plist" : oldPlist}\n`) : fail(113);
   if (argv[0] === "print") return loaded ? ok(`path = ${foreign ? "/somebody/else.plist" : plist}\n`) : fail(113);
   if (argv[0] === "bootstrap" && argv[2] === oldPlist) { oldLoaded = true; return ok(); }
   if (argv[0] === "bootstrap") { if (failNextBootstrap) { failNextBootstrap = false; return fail(5, "fixture failure"); } if (failBootstrap) return fail(5, "fixture failure"); loaded = true; return ok(); }
@@ -35,13 +35,13 @@ const invoke = (action) => manage(action, { ...args, run });
 try {
   fs.mkdirSync(resources, { recursive: true });
   fs.writeFileSync(path.join(resources, "ragent-service"), "fixture");
-  fs.writeFileSync(path.join(resources, "agentoc-service"), "legacy fixture");
+  fs.writeFileSync(path.join(resources, "ragent-service"), "legacy fixture");
   assert.match(buildPlist(args), /app &amp; test/);
   assert.match(buildPlist(args), /<key>CHAT_PORT<\/key><string>47681<\/string>/);
   assert.doesNotMatch(buildPlist({ ...args, port: "7690" }), /<key>CHAT_PORT<\/key>/);
   const instanceRoot = path.join(root, "instance & data");
   const instanceArgs = { ...args, instanceRoot };
-  assert.match(buildPlist(instanceArgs), /<key>AGENTOC_INSTANCE_ROOT<\/key><string>.*instance &amp; data<\/string>/);
+  assert.match(buildPlist(instanceArgs), /<key>RAGENT_INSTANCE_ROOT<\/key><string>.*instance &amp; data<\/string>/);
   assert.throws(() => buildPlist({ ...args, instanceRoot: "relative/path" }), /absolute path/);
   assert.equal(invoke("status"), "disabled");
   assert.equal(invoke("migrate"), "no previous service to migrate");
@@ -84,7 +84,7 @@ try {
   assert.match(invokeInstance("status"), /disable and re-enable/);
   assert.throws(() => invokeInstance("enable"), /instance root/);
   assert.equal(invokeInstance("disable"), "disabled; configuration and logs retained");
-  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.agentoc" }));
+  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.ragent" }));
   oldLoaded = true;
   assert.match(invoke("status"), /previous service name/);
   foreign = true;
@@ -103,20 +103,20 @@ try {
   assert.equal(fs.existsSync(oldPlist), false);
   assert.match(fs.readFileSync(plist, "utf8"), /cloud\.agenton\.ragent/);
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
-  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.agentoc" }));
+  fs.writeFileSync(oldPlist, buildPlist({ ...args, legacyService: true, label: "cloud.agenton.ragent" }));
   assert.equal(invoke("migrate"), "previous service migrated; not loaded");
   assert.equal(loaded, false, "unloaded legacy login item remains unloaded");
   assert.equal(fs.existsSync(oldPlist), false);
   assert.equal(invoke("disable"), "disabled; configuration and logs retained");
   const oldHelperDefinition = buildPlist({ ...args, legacyService: true });
-  fs.unlinkSync(path.join(resources, "agentoc-service"));
+  fs.unlinkSync(path.join(resources, "ragent-service"));
   fs.writeFileSync(plist, oldHelperDefinition);
   loaded = true;
   assert.match(invoke("status"), /disable and re-enable/);
   assert.throws(() => invoke("migrate"), /old helper is unavailable/);
   assert.equal(fs.readFileSync(plist, "utf8"), oldHelperDefinition);
   assert.equal(loaded, true);
-  fs.writeFileSync(path.join(resources, "agentoc-service"), "legacy fixture");
+  fs.writeFileSync(path.join(resources, "ragent-service"), "legacy fixture");
   failNextBootstrap = true;
   assert.throws(() => invoke("migrate"), /fixture failure/);
   assert.equal(fs.readFileSync(plist, "utf8"), oldHelperDefinition);
@@ -133,7 +133,7 @@ try {
   assert.equal(fs.readFileSync(oldPlist, "utf8"), "foreign definition");
   fs.unlinkSync(oldPlist);
   assert.equal(invokeInstance("enable"), "enabled");
-  assert.match(fs.readFileSync(plist, "utf8"), /<key>AGENTOC_INSTANCE_ROOT<\/key>/);
+  assert.match(fs.readFileSync(plist, "utf8"), /<key>RAGENT_INSTANCE_ROOT<\/key>/);
   assert.equal(invokeInstance("disable"), "disabled; configuration and logs retained");
   fs.writeFileSync(plist, "user-owned definition");
   assert.throws(() => invoke("enable"), /not the expected Ragent definition/);

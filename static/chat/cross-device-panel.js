@@ -1,6 +1,6 @@
 // Cross-device workspace. This is the frontend surface for the Google owner
 // binding, L2 device list, and owner-side device registration contract
-// documented in docs/agentoc-cross-device-frontend-handoff-2026-08-09.md.
+// documented in docs/ragent-cross-device-frontend-handoff-2026-08-09.md.
 (function (root) {
   "use strict";
 
@@ -36,7 +36,7 @@
   const DEVICE_HEALTH_TTL_MS = 60000;
 
   function t(key, vars) {
-    return typeof root.agentocT === "function" ? root.agentocT(key, vars) : key;
+    return typeof root.ragentT === "function" ? root.ragentT(key, vars) : key;
   }
 
   function fallback(key, value, vars) {
@@ -48,8 +48,8 @@
   }
 
   function ragentLoginCopy(english, chinese) {
-    const language = typeof root.agentocGetActiveUiLanguage === "function"
-      ? root.agentocGetActiveUiLanguage() : document.documentElement.lang;
+    const language = typeof root.ragentGetActiveUiLanguage === "function"
+      ? root.ragentGetActiveUiLanguage() : document.documentElement.lang;
     return String(language || "").toLowerCase().startsWith("zh") ? chinese : english;
   }
 
@@ -212,8 +212,8 @@
   }
 
   function productPath(path) {
-    return typeof root.agentocResolveProductPath === "function"
-      ? root.agentocResolveProductPath(path)
+    return typeof root.ragentResolveProductPath === "function"
+      ? root.ragentResolveProductPath(path)
       : path;
   }
 
@@ -236,7 +236,7 @@
     activeView = next;
     if (managerMode && next !== "register") {
       if (overlay && !overlay.hidden) close();
-      root.AgentoCDesktopManager?.showAccount?.();
+      root.RagentDesktopManager?.showAccount?.();
       return;
     }
     tabs.forEach((tab) => {
@@ -750,7 +750,7 @@
   }
 
   async function renderTargetRuntimeCard(parent, boundIds = null) {
-    const runtime = root.AgentoCTargetRuntime;
+    const runtime = root.RagentTargetRuntime;
     if (!runtime || !parent) return;
     await runtime.refreshTargets?.().catch(() => null);
     const snapshot = runtime.getSnapshot?.() || { targets: [] };
@@ -928,9 +928,9 @@
       if (!jumpUrl) throw new Error(fallback("crossDevice.switch.failed", "Could not start the switch."));
       showStatus(fallback("crossDevice.switch.redirecting", "Switching… opening the target device."), "info");
       // 丢弃本实例通道凭据后再跳（P1-④）：WS 停连、P2P 备份通道关闭。
-      if (typeof root.AgentocEntrySwitchHandoff?.prepare === "function") {
+      if (typeof root.RagentEntrySwitchHandoff?.prepare === "function") {
         try {
-          root.AgentocEntrySwitchHandoff.prepare();
+          root.RagentEntrySwitchHandoff.prepare();
         } catch {
           // 交接失败不阻塞跳转；页面跳转本身会释放通道。
         }
@@ -947,8 +947,8 @@
 
   async function copyPairingLink(value) {
     try {
-      if (typeof root.agentocDesktop?.writeText === "function") {
-        if (await root.agentocDesktop.writeText(value)) {
+      if (typeof root.ragentDesktop?.writeText === "function") {
+        if (await root.ragentDesktop.writeText(value)) {
           showStatus(fallback("crossDevice.pair.copied", "Pairing link copied. Open it in the Ragent app on the other device."), "success");
           return;
         }
@@ -1222,7 +1222,7 @@
       const expired = state.status === "ACTIVE" ? Number.isFinite(expiresAt) && Date.now() >= expiresAt
         : Date.now() >= claimExpiresAt;
       const revoked = state.status === "REVOKED" || state.status === "EXPIRED";
-      const qrText = JSON.stringify({ kind: "agentoc-temporary-control-v1", version: 1, envelope: state.ticket.envelope, token: state.ticket.token });
+      const qrText = JSON.stringify({ kind: "ragent-temporary-control-v1", version: 1, envelope: state.ticket.envelope, token: state.ticket.token });
       const pairing = make("div", "cross-device-pairing");
       const qr = make("div", "cross-device-pair-qr cross-device-pair-qr-temporary");
       qr.setAttribute("role", "img");
@@ -1289,14 +1289,14 @@
   }
 
   function hydrateIcons(target) {
-    if (typeof root.AgentoCIcons?.hydrate === "function") root.AgentoCIcons.hydrate(target);
+    if (typeof root.RagentIcons?.hydrate === "function") root.RagentIcons.hydrate(target);
   }
 
   function open(options = {}) {
     const requestedView = ["account", "devices", "register"].includes(options.view) ? options.view : "account";
     if (managerMode && requestedView !== "register") {
       if (requestedView === "devices") void renderDevices();
-      root.AgentoCDesktopManager?.showAccount?.();
+      root.RagentDesktopManager?.showAccount?.();
       return true;
     }
     if (!overlay || !sheet) return false;
@@ -1320,14 +1320,14 @@
     // Passing the nested sheet here makes the focus primitive mark the
     // overlay itself inert while isolating body siblings, disabling every
     // control inside the sheet on real browsers.
-    focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(overlay, {
+    focusScopeDeactivate = root.RagentFocusScope?.activate?.(overlay, {
       containmentRoot: document.body,
       initialFocus: () => closeButton || sheet,
       restoreFocus: () => restoreFocus,
       modal: true,
       onEscape: () => close(),
     }) || null;
-    backEntryId = root.AgentoCBackHandler?.push?.({
+    backEntryId = root.RagentBackHandler?.push?.({
       id: "cross-device-workspace",
       onBack: () => { close(); return true; },
     }) || null;
@@ -1339,7 +1339,7 @@
     stopPairingPoll();
     overlay.hidden = true;
     document.body.classList.remove("cross-device-panel-open");
-    if (backEntryId) root.AgentoCBackHandler?.pop?.(backEntryId);
+    if (backEntryId) root.RagentBackHandler?.pop?.(backEntryId);
     backEntryId = null;
     focusScopeDeactivate?.();
     focusScopeDeactivate = null;
@@ -1361,7 +1361,7 @@
     return true;
   }
 
-  root.AgentoCCrossDevicePanel = Object.freeze({
+  root.RagentCrossDevicePanel = Object.freeze({
     open,
     close,
     refresh: () => setActiveView(activeView),

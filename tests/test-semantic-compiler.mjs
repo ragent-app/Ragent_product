@@ -104,16 +104,16 @@ const pkgNoSudo = singleOperation('apt-get install -y build-essential');
 eq('pkg-002 effects', JSON.stringify(pkgNoSudo.effects), JSON.stringify(['process.execute']));
 eq('pkg-002 packages', JSON.stringify(pkgNoSudo.target.packages), JSON.stringify(['build-essential']));
 
-const svc = singleOperation('systemctl restart agentoc.service');
+const svc = singleOperation('systemctl restart ragent.service');
 eq('sys-002 primary', svc.primaryAction, 'service.control');
 eq('sys-002 effects', JSON.stringify(svc.effects), JSON.stringify(['process.execute']));
-eq('sys-002 unit', svc.target.unit, 'agentoc.service');
+eq('sys-002 unit', svc.target.unit, 'ragent.service');
 eq('sys-002 action', svc.target.action, 'restart');
 
-const svcSudo = singleOperation('sudo systemctl restart agentoc.service');
+const svcSudo = singleOperation('sudo systemctl restart ragent.service');
 eq('sys-005 effects', JSON.stringify(svcSudo.effects), JSON.stringify(['privilege.elevate', 'process.execute']));
 
-const svcStatus = singleOperation('systemctl status agentoc.service');
+const svcStatus = singleOperation('systemctl status ragent.service');
 eq('sys-001 effects empty', JSON.stringify(svcStatus.effects), JSON.stringify([]));
 
 // --- 多个 resource mutation → 多个 operation ---
@@ -132,7 +132,7 @@ eq('multi package split', multiPkg.operations.length, 2);
 eq('multi package op0', multiPkg.operations[0].target.packages[0], 'cmake');
 eq('multi package op1', multiPkg.operations[1].target.packages[0], 'git');
 
-const multiChain = compile('rm -rf /workspace/acme/a && systemctl restart agentoc.service');
+const multiChain = compile('rm -rf /workspace/acme/a && systemctl restart ragent.service');
 eq('multi chain split', multiChain.operations.length, 2);
 check('multi chain has fs.delete', multiChain.operations.some((o) => o.primaryAction === 'fs.delete'));
 check('multi chain has service.control', multiChain.operations.some((o) => o.primaryAction === 'service.control'));
@@ -296,7 +296,7 @@ eq('dynamic argv effect enumeration is incomplete', dyn.operations[0].analysis.e
 check('dynamic argv in refusals', dyn.refusals.length === 1);
 
 // refusals 与 operations 的关系：refusals 是 operations 的子集。
-const mixed = compile('rm -rf "$TARGET" && sudo systemctl restart agentoc.service');
+const mixed = compile('rm -rf "$TARGET" && sudo systemctl restart ragent.service');
 check('mixed has refusal', mixed.refusals.length >= 1);
 check('mixed refusals subset', mixed.refusals.every((r) => mixed.operations.includes(r)));
 check('mixed strictness DENY', mixed.strictness === STRICTNESS.DENY);

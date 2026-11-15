@@ -28,7 +28,7 @@ export { DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS } from '../runtime-policy.mjs';
  *   item.completed  — { type, item: ThreadItem }
  *   agent_message_content_delta — { type, item_id, content_index, delta }
  *   error           — { type, message }
- *   agentoc.context_metrics — synthetic line injected by AgentoC sidecar
+ *   ragent.context_metrics — synthetic line injected by Ragent sidecar
  *                               after reading Codex's session JSONL token_count data
  *
  * ThreadItem types:
@@ -72,11 +72,11 @@ export function createCodexAdapter() {
 
         case 'turn.completed':
           // Codex stdout usage is cumulative across the agent loop, so
-          // AgentoC injects a later agentoc.context_metrics line instead.
+          // Ragent injects a later ragent.context_metrics line instead.
           events.push(statusEvent('completed'));
           break;
 
-        case 'agentoc.context_metrics':
+        case 'ragent.context_metrics':
           events.push(usageEvent({
             contextTokens: obj.contextTokens,
             inputTokens: obj.inputTokens,
@@ -282,20 +282,20 @@ function itemIdentityFields(item, kind) {
 /**
  * Optional system instruction prepended to Codex prompts.
  *
- * AgentoC now leaves this empty by default so local project memory and
+ * Ragent now leaves this empty by default so local project memory and
  * session prompts remain the primary steering layer. Operators can still set
- * `AGENTOC_CODEX_SYSTEM_PREFIX` if they want to force an extra prefix.
+ * `RAGENT_CODEX_SYSTEM_PREFIX` if they want to force an extra prefix.
  */
-const CODEX_SYSTEM_PREFIX = process.env.AGENTOC_CODEX_SYSTEM_PREFIX || '';
+const CODEX_SYSTEM_PREFIX = process.env.RAGENT_CODEX_SYSTEM_PREFIX || '';
 /**
  * Optional developer instructions passed through Codex's own supported
  * `developer_instructions` config key. This is stronger than a prompt prefix
  * when the manager needs to shape the agent's default reply style.
  */
-const CODEX_DEVELOPER_INSTRUCTIONS = process.env.AGENTOC_CODEX_DEVELOPER_INSTRUCTIONS || '';
+const CODEX_DEVELOPER_INSTRUCTIONS = process.env.RAGENT_CODEX_DEVELOPER_INSTRUCTIONS || '';
 const HAS_CODEX_DEVELOPER_INSTRUCTIONS_ENV = Object.prototype.hasOwnProperty.call(
   process.env,
-  'AGENTOC_CODEX_DEVELOPER_INSTRUCTIONS',
+  'RAGENT_CODEX_DEVELOPER_INSTRUCTIONS',
 );
 
 function encodeTomlString(value) {

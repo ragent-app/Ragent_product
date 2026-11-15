@@ -286,8 +286,8 @@ function installProbe(context) {
   const pill = elements.get('reconnectIndicator');
   assert.equal(pill.classList.contains('is-visible'), true, 'D: baseline pill is visible with WS down');
 
-  context.window.AgentocP2P = { ready: true };
-  context.syncConnectionRecoveryIndicator('p2p'); // agentoc:p2p-status "ready" handler
+  context.window.RagentP2P = { ready: true };
+  context.syncConnectionRecoveryIndicator('p2p'); // ragent:p2p-status "ready" handler
   assert.equal(pill.classList.contains('is-visible'), false, 'D: p2p ready should dismiss the pill even though WS is closed');
 }
 

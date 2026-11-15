@@ -19,12 +19,12 @@ function loadContext(relPath) {
 }
 
 const coreContext = loadContext('static/chat/core/session-store.js');
-const core = coreContext.AgentoCChatStoreCore;
-assert.ok(core, 'core/session-store.js should attach AgentoCChatStoreCore');
+const core = coreContext.RagentChatStoreCore;
+assert.ok(core, 'core/session-store.js should attach RagentChatStoreCore');
 
 const legacyContext = loadContext('static/chat/session-store.js');
-const legacy = legacyContext.AgentoCChatStore;
-assert.ok(legacy, 'session-store.js should attach AgentoCChatStore');
+const legacy = legacyContext.RagentChatStore;
+assert.ok(legacy, 'session-store.js should attach RagentChatStore');
 
 // -- direct contract assertions ---------------------------------------------
 assert.equal(core.createState({ currentSessionId: '  a1  ' }).currentSessionId, 'a1', 'session id should trim');

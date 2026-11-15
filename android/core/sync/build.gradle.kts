@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.sync"
+    namespace = "com.andysagent.ragent.core.sync"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

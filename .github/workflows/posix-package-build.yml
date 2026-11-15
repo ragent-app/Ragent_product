@@ -45,20 +45,20 @@ jobs:
           set -euo pipefail
           [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
           [[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          export AGENTOC_PACKAGE_VERSION="$RELEASE_VERSION"
-          export AGENTOC_PACKAGE_BUILD_VERSION="$BUILD_VERSION"
+          export RAGENT_PACKAGE_VERSION="$RELEASE_VERSION"
+          export RAGENT_PACKAGE_BUILD_VERSION="$BUILD_VERSION"
           # Release candidates must use the production transport endpoints even
           # when the build environment defines package endpoint overrides.
-          export AGENTOC_PACKAGE_PUBLIC_BASE_URL="https://app.agentoncloud.com"
-          export AGENTOC_PACKAGE_ACCOUNTS_URL="https://ragent.agentoncloud.com/accounts"
-          export AGENTOC_PACKAGE_ACCOUNTS_JWKS_URL="https://ragent.agentoncloud.com/accounts/.well-known/jwks.json"
-          export AGENTOC_PACKAGE_TURN_BROKER_URL="https://ragent.agentoncloud.com/turn"
-          export AGENTOC_PACKAGE_SIGNALING_URL="https://ragent.agentoncloud.com/signal"
-          export AGENTOC_NODE_CACHE_DIR="$RUNNER_TEMP/node-cache"
-          export AGENTOC_DEB_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
-          export AGENTOC_DMG_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
+          export RAGENT_PACKAGE_PUBLIC_BASE_URL="https://app.agentoncloud.com"
+          export RAGENT_PACKAGE_ACCOUNTS_URL="https://ragent.agentoncloud.com/accounts"
+          export RAGENT_PACKAGE_ACCOUNTS_JWKS_URL="https://ragent.agentoncloud.com/accounts/.well-known/jwks.json"
+          export RAGENT_PACKAGE_TURN_BROKER_URL="https://ragent.agentoncloud.com/turn"
+          export RAGENT_PACKAGE_SIGNALING_URL="https://ragent.agentoncloud.com/signal"
+          export RAGENT_NODE_CACHE_DIR="$RUNNER_TEMP/node-cache"
+          export RAGENT_DEB_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
+          export RAGENT_DMG_OUTPUT_DIR="$RUNNER_TEMP/ragent-release"
           export ELECTRON_CACHE="$RUNNER_TEMP/electron-cache"
-          mkdir -p "$AGENTOC_NODE_CACHE_DIR" "$AGENTOC_DEB_OUTPUT_DIR" "$ELECTRON_CACHE"
+          mkdir -p "$RAGENT_NODE_CACHE_DIR" "$RAGENT_DEB_OUTPUT_DIR" "$ELECTRON_CACHE"
           node tests/test-desktop-update.cjs
           node tests/test-runtime-payload-secret-scan.mjs
           node tests/test-frozen-source-guards.mjs
@@ -76,19 +76,19 @@ jobs:
             sudo env "PATH=$PATH" "TMPDIR=$RUNNER_TEMP" node tests/test-linux-run-status-ownership.mjs
             bash scripts/build-deb.sh
             asset="ragent_${RELEASE_VERSION}_amd64.deb"
-            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Package)" = ragent ]
-            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Version)" = "$BUILD_VERSION" ]
-            [ "$(dpkg-deb --field "$AGENTOC_DEB_OUTPUT_DIR/$asset" Architecture)" = amd64 ]
+            [ "$(dpkg-deb --field "$RAGENT_DEB_OUTPUT_DIR/$asset" Package)" = ragent ]
+            [ "$(dpkg-deb --field "$RAGENT_DEB_OUTPUT_DIR/$asset" Version)" = "$BUILD_VERSION" ]
+            [ "$(dpkg-deb --field "$RAGENT_DEB_OUTPUT_DIR/$asset" Architecture)" = amd64 ]
             package_check="$RUNNER_TEMP/ragent-package-check"
-            dpkg-deb --extract "$AGENTOC_DEB_OUTPUT_DIR/$asset" "$package_check"
-            account_env="$package_check/etc/agentoc/account-auth.env"
-            signal_env="$package_check/etc/agentoc/connectivity.env"
-            grep -Fx 'AGENTOC_PUBLIC_BASE_URL=https://app.agentoncloud.com' "$account_env"
-            grep -Fx 'AGENTOC_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts' "$account_env"
-            grep -Fx 'AGENTOC_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json' "$account_env"
-            grep -Fx 'AGENTOC_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn' "$account_env"
-            grep -Fx 'AGENTOC_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal' "$signal_env"
-            (cd "$AGENTOC_DEB_OUTPUT_DIR" && sha256sum "$asset" > SHA256SUMS.txt)
+            dpkg-deb --extract "$RAGENT_DEB_OUTPUT_DIR/$asset" "$package_check"
+            account_env="$package_check/etc/ragent/account-auth.env"
+            signal_env="$package_check/etc/ragent/connectivity.env"
+            grep -Fx 'RAGENT_PUBLIC_BASE_URL=https://app.agentoncloud.com' "$account_env"
+            grep -Fx 'RAGENT_ACCOUNTS_URL=https://ragent.agentoncloud.com/accounts' "$account_env"
+            grep -Fx 'RAGENT_ACCOUNTS_JWKS_URL=https://ragent.agentoncloud.com/accounts/.well-known/jwks.json' "$account_env"
+            grep -Fx 'RAGENT_TURN_BROKER_URL=https://ragent.agentoncloud.com/turn' "$account_env"
+            grep -Fx 'RAGENT_P2P_SIGNALING_URL=https://ragent.agentoncloud.com/signal' "$signal_env"
+            (cd "$RAGENT_DEB_OUTPUT_DIR" && sha256sum "$asset" > SHA256SUMS.txt)
           else
             [ "$(uname -m)" = arm64 ]
             bash tests/test-macos-service-identity.sh
@@ -101,7 +101,7 @@ jobs:
             asset="ragent_${RELEASE_VERSION}-darwin-arm64.dmg"
             mountpoint="$RUNNER_TEMP/ragent-dmg-check"
             mkdir -p "$mountpoint"
-            hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$AGENTOC_DMG_OUTPUT_DIR/$asset"
+            hdiutil attach -readonly -nobrowse -mountpoint "$mountpoint" "$RAGENT_DMG_OUTPUT_DIR/$asset"
             trap 'hdiutil detach "$mountpoint" >/dev/null || true' EXIT
             app="$mountpoint/Ragent.app"
             [ -d "$app" ]
@@ -111,11 +111,11 @@ jobs:
             codesign --verify --deep --strict "$app"
             hdiutil detach "$mountpoint"
             trap - EXIT
-            (cd "$AGENTOC_DMG_OUTPUT_DIR" && shasum -a 256 "$asset" > SHA256SUMS.txt)
+            (cd "$RAGENT_DMG_OUTPUT_DIR" && shasum -a 256 "$asset" > SHA256SUMS.txt)
           fi
-          digest="$(awk '{print $1}' "$AGENTOC_DEB_OUTPUT_DIR/SHA256SUMS.txt")"
+          digest="$(awk '{print $1}' "$RAGENT_DEB_OUTPUT_DIR/SHA256SUMS.txt")"
           commit="$(git rev-parse --verify HEAD)"
-          printf '<!-- ragent-asset-build:%s:%s:%s:sha256:%s -->\n' "$asset" "$BUILD_VERSION" "$commit" "$digest" > "$AGENTOC_DEB_OUTPUT_DIR/BUILDINFO.txt"
+          printf '<!-- ragent-asset-build:%s:%s:%s:sha256:%s -->\n' "$asset" "$BUILD_VERSION" "$commit" "$digest" > "$RAGENT_DEB_OUTPUT_DIR/BUILDINFO.txt"
       - uses: actions/upload-artifact@v4
         with:
           name: ragent-${{ matrix.platform }}-candidate

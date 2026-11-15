@@ -1,0 +1,23 @@
+[Unit]
+Description=Ragent protected Run result broker (opt-in)
+Requires=ragent-peer-result.socket
+After=ragent-peer-result.socket
+
+[Service]
+Type=simple
+User=root
+Group=root
+Sockets=ragent-peer-result.socket
+WorkingDirectory=/opt/ragent/app
+EnvironmentFile=/etc/ragent/ragent.env
+ExecStart=/opt/ragent/runtime/node /opt/ragent/app/scripts/linux-run-peer-result-broker.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX
+UMask=0077

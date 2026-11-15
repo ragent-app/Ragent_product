@@ -13,18 +13,18 @@ function expiryGuard(deadline) {
 }
 
 test('run approval queue rejects expiry during the awaited latest read and before atomic commit', async (t) => {
-  const fixture = await makeDeadlineTempRoot('agentoc-run-approval-deadline-');
+  const fixture = await makeDeadlineTempRoot('ragent-run-approval-deadline-');
   t.after(() => fixture.cleanup());
   const { root } = fixture;
   const overrides = {
-    AGENTOC_INSTANCE_ROOT: root,
-    AGENTOC_CONFIG_DIR: join(root, 'config'),
-    AGENTOC_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
-    AGENTOC_PROVIDER_HOMES_DIR: join(root, 'provider-homes'),
-    AGENTOC_MEMORY_DIR: join(root, 'memory'),
-    AGENTOC_WORK_ROOT_DIR: join(root, 'workspace'),
-    AGENTOC_PLATFORM_SKILLS_DIR: join(root, 'platform', 'skills'),
-    AGENTOC_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
+    RAGENT_INSTANCE_ROOT: root,
+    RAGENT_CONFIG_DIR: join(root, 'config'),
+    RAGENT_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
+    RAGENT_PROVIDER_HOMES_DIR: join(root, 'provider-homes'),
+    RAGENT_MEMORY_DIR: join(root, 'memory'),
+    RAGENT_WORK_ROOT_DIR: join(root, 'workspace'),
+    RAGENT_PLATFORM_SKILLS_DIR: join(root, 'platform', 'skills'),
+    RAGENT_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
   };
   const previousEnv = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
   const originalNow = Date.now;
@@ -81,7 +81,7 @@ test('run approval queue rejects expiry during the awaited latest read and befor
 });
 
 test('Windows retry rechecks expiry before replacing an approval queue file', async (t) => {
-  const fixture = await makeDeadlineTempRoot('agentoc-run-approval-deadline-');
+  const fixture = await makeDeadlineTempRoot('ragent-run-approval-deadline-');
   t.after(() => fixture.cleanup());
   const { root } = fixture;
   const source = join(root, 'next-status.json');

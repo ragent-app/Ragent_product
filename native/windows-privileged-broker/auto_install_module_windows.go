@@ -15,9 +15,9 @@ var windowsRuntimeManifestSHA256 string
 const autoInstallModuleScript = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$id = $env:AGENTOC_INSTALL_PACKAGE_ID
-$version = $env:AGENTOC_INSTALL_PACKAGE_VERSION
-$module = $env:AGENTOC_INSTALL_MODULE
+$id = $env:RAGENT_INSTALL_PACKAGE_ID
+$version = $env:RAGENT_INSTALL_PACKAGE_VERSION
+$module = $env:RAGENT_INSTALL_MODULE
 try { Import-Module -Name $module -Force -ErrorAction Stop } catch { exit 20 }
 try {
   $sources = @(Get-WinGetSource -Name 'winget' -ErrorAction Stop)
@@ -31,7 +31,7 @@ try {
   $matches = @(Find-WinGetPackage -Id $id -Source 'winget' -MatchOption Equals -ErrorAction Stop)
   if ($matches.Count -ne 1 -or $matches[0].Id -cne $id -or $matches[0].Source -ine 'winget' -or
       @($matches[0].AvailableVersions) -cnotcontains $version) { exit 22 }
-  if ($env:AGENTOC_INSTALL_SELECTED -or $env:AGENTOC_INSTALL_INSPECT -eq '1') {
+  if ($env:RAGENT_INSTALL_SELECTED -or $env:RAGENT_INSTALL_INSPECT -eq '1') {
     try {
       $property = $matches[0].GetType().GetProperty('CatalogPackageCOM', [Reflection.BindingFlags]'Instance,NonPublic')
       if (-not $property) { exit 25 }
@@ -51,13 +51,13 @@ try {
       $options.PackageInstallMode = 'Silent'
       $installer = $packageVersion.GetApplicableInstaller($options)
       if (-not $installer -or $packageVersion.Id -cne $id -or $packageVersion.Version -cne $version) { exit 25 }
-      if ($env:AGENTOC_INSTALL_INSPECT -eq '1') {
+      if ($env:RAGENT_INSTALL_INSPECT -eq '1') {
         @{ id = $packageVersion.Id; version = $packageVersion.Version; source = 'winget'; scope = [string]$installer.Scope;
            elevation = [string]$installer.ElevationRequirement; type = [string]$installer.InstallerType; nestedType = [string]$installer.NestedInstallerType;
            architecture = [string]$installer.Architecture; locale = [string]$installer.Locale } | ConvertTo-Json -Compress
         exit 0
       }
-      $expected = $env:AGENTOC_INSTALL_SELECTED | ConvertFrom-Json -ErrorAction Stop
+      $expected = $env:RAGENT_INSTALL_SELECTED | ConvertFrom-Json -ErrorAction Stop
       if (
           $expected.id -cne $id -or $expected.version -cne $version -or $expected.source -cne 'winget' -or
           [string]$installer.Scope -cne $expected.scope -or [string]$installer.ElevationRequirement -cne $expected.elevation -or

@@ -22,7 +22,7 @@ function Get-WinGetSource { param($Name) [pscustomobject]@{ Name='winget'; Type=
 function Find-WinGetPackage { param($Id,$Source,$MatchOption) [pscustomobject]@{ Id=$Id; Source=$Source; AvailableVersions=@('1.2.3') } }
 function Install-WinGetPackage { [CmdletBinding(SupportsShouldProcess)] param($Id,$Version,$Source,$MatchOption,$Mode,$Scope)
   if ($Id -cne 'Vendor.App' -or $Version -cne '1.2.3' -or $Source -cne 'winget' -or $Mode -cne 'Silent') { throw 'bad parameters' }
-  if (($env:AGENTOC_INSTALL_SCOPE -ceq 'user' -and $Scope -cne 'User') -or ($env:AGENTOC_INSTALL_SCOPE -ceq 'default' -and $PSBoundParameters.ContainsKey('Scope'))) { throw 'bad scope' }
+  if (($env:RAGENT_INSTALL_SCOPE -ceq 'user' -and $Scope -cne 'User') -or ($env:RAGENT_INSTALL_SCOPE -ceq 'default' -and $PSBoundParameters.ContainsKey('Scope'))) { throw 'bad scope' }
   [IO.File]::WriteAllText($env:MOCK_MARKER, 'called')
   [pscustomobject]@{ Id=$Id; Source=$Source; Status='Ok'; InstallerErrorCode=0; RebootRequired=$false }
 }
@@ -45,8 +45,8 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 		t.Run(tc.name, func(t *testing.T) {
 			_ = os.Remove(marker)
 			cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", ownerInstallScript)
-			cmd.Env = append(os.Environ(), "AGENTOC_INSTALL_PACKAGE_ID=Vendor.App", "AGENTOC_INSTALL_PACKAGE_VERSION="+tc.version,
-				"AGENTOC_INSTALL_MODULE="+module, "AGENTOC_INSTALL_SCOPE="+tc.scope, "MOCK_URL="+tc.url, "MOCK_MARKER="+marker)
+			cmd.Env = append(os.Environ(), "RAGENT_INSTALL_PACKAGE_ID=Vendor.App", "RAGENT_INSTALL_PACKAGE_VERSION="+tc.version,
+				"RAGENT_INSTALL_MODULE="+module, "RAGENT_INSTALL_SCOPE="+tc.scope, "MOCK_URL="+tc.url, "MOCK_MARKER="+marker)
 			output, err := cmd.CombinedOutput()
 			exit := 0
 			if err != nil {

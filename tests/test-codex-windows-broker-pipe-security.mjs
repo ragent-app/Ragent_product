@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { secureWindowsCodexBrokerPipe } from '../chat/codex-windows-broker-pipe-security.mjs';
 
-const pipe = '\\\\.\\pipe\\agentoc-codex-0123456789abcdef0123456789abcdef';
+const pipe = '\\\\.\\pipe\\ragent-codex-0123456789abcdef0123456789abcdef';
 const options = { platform: 'win32', serviceMode: true, executable: 'host.exe' };
 
 test('only a fixed Codex pipe and positive kernel server PID reach the helper', async () => {
@@ -15,7 +15,7 @@ test('only a fixed Codex pipe and positive kernel server PID reach the helper', 
   await secureWindowsCodexBrokerPipe(pipe, 42, { ...options, spawnImpl(file, args) {
     calls++;
     assert.equal(file, 'host.exe');
-    assert.deepEqual(args, ['--codex-broker-pipe-security', 'agentoc-codex-0123456789abcdef0123456789abcdef', '42']);
+    assert.deepEqual(args, ['--codex-broker-pipe-security', 'ragent-codex-0123456789abcdef0123456789abcdef', '42']);
     const child = new EventEmitter(); queueMicrotask(() => child.emit('exit', 0)); return child;
   } });
   assert.equal(calls, 1);

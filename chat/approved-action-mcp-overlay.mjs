@@ -38,7 +38,7 @@ const RETRYABLE_IO_CODES = new Set([
 let temporaryFileSequence = 0;
 
 function configuredMaxAttempts() {
-  const configured = Number.parseInt(process.env.AGENTOC_MCP_OVERLAY_MAX_ATTEMPTS || '', 10);
+  const configured = Number.parseInt(process.env.RAGENT_MCP_OVERLAY_MAX_ATTEMPTS || '', 10);
   return Number.isInteger(configured)
     ? Math.min(MCP_OVERLAY_MAX_ATTEMPTS, Math.max(1, configured))
     : MCP_OVERLAY_MAX_ATTEMPTS;
@@ -218,31 +218,31 @@ async function preflightManagedMcpOverlay({ family, sourceHome, servers, attempt
 
 // codex app-server does NOT inherit the parent environment when spawning MCP
 // servers: only values declared in the [mcp_servers.X.env] config table (or
-// env_vars passthrough list) reach the child. Every AGENTOC_* binding the
+// env_vars passthrough list) reach the child. Every RAGENT_* binding the
 // approved-actions script reads via process.env must be projected here or the
 // script sees an unbound runtime and tools/list answers [].
 const APPROVED_ACTION_MCP_ENV_KEYS = [
-  'AGENTOC_APPROVED_ACTIONS_ENABLED',
-  'AGENTOC_APPROVED_ACTIONS_ENDPOINT',
-  'AGENTOC_APPROVED_ACTIONS_TOKEN',
-  'AGENTOC_APPROVED_ACTIONS_SESSION_ID',
-  'AGENTOC_APPROVED_ACTIONS_RUN_ID',
-  'AGENTOC_APPROVED_ACTIONS_TURN_ID',
-  'AGENTOC_APPROVED_ACTIONS_CWD',
-  'AGENTOC_APPROVED_ACTIONS_PROJECT_ROOT',
-  'AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED',
+  'RAGENT_APPROVED_ACTIONS_ENABLED',
+  'RAGENT_APPROVED_ACTIONS_ENDPOINT',
+  'RAGENT_APPROVED_ACTIONS_TOKEN',
+  'RAGENT_APPROVED_ACTIONS_SESSION_ID',
+  'RAGENT_APPROVED_ACTIONS_RUN_ID',
+  'RAGENT_APPROVED_ACTIONS_TURN_ID',
+  'RAGENT_APPROVED_ACTIONS_CWD',
+  'RAGENT_APPROVED_ACTIONS_PROJECT_ROOT',
+  'RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED',
 ];
 const BROWSER_MCP_ENV_KEYS = [
-  'AGENTOC_BROWSER_MCP_ENABLED',
-  'AGENTOC_BROWSER_TOKEN',
-  'AGENTOC_BROWSER_CONFIRMATION_ENDPOINT',
-  'AGENTOC_BROWSER_SESSION_ID',
-  'AGENTOC_BROWSER_RUN_ID',
-  'AGENTOC_BROWSER_TURN_ID',
-  'AGENTOC_BROWSER_PROFILE_DIR',
-  'AGENTOC_BROWSER_ARTIFACT_DIR',
-  'AGENTOC_BROWSER_APPROVAL_TIMEOUT_MS',
-  'AGENTOC_BROWSER_HEADLESS',
+  'RAGENT_BROWSER_MCP_ENABLED',
+  'RAGENT_BROWSER_TOKEN',
+  'RAGENT_BROWSER_CONFIRMATION_ENDPOINT',
+  'RAGENT_BROWSER_SESSION_ID',
+  'RAGENT_BROWSER_RUN_ID',
+  'RAGENT_BROWSER_TURN_ID',
+  'RAGENT_BROWSER_PROFILE_DIR',
+  'RAGENT_BROWSER_ARTIFACT_DIR',
+  'RAGENT_BROWSER_APPROVAL_TIMEOUT_MS',
+  'RAGENT_BROWSER_HEADLESS',
 ];
 
 function trimString(value) {
@@ -347,7 +347,7 @@ async function addWindowsCodexShellRules(root, runId, env) {
   }
   const dir = join(root, 'rules');
   await mkdir(dir, { recursive: true });
-  const name = `agentoc-shell-gate-${createHash('sha256').update(String(runId)).digest('hex').slice(0, 16)}.rules`;
+  const name = `ragent-shell-gate-${createHash('sha256').update(String(runId)).digest('hex').slice(0, 16)}.rules`;
   const content = [...paths].map((candidate) => `prefix_rule(pattern=[${JSON.stringify(candidate)}], decision="prompt")`).join('\n') + '\n';
   await writeFile(join(dir, name), content, { flag: 'wx', mode: 0o600 });
 }
@@ -434,7 +434,7 @@ async function prepareCodexOverlay({ root, sourceHome, servers, runId, spawnEnv 
   }
   await copyIfPresent(join(sourceHome, 'models_cache.json'), join(root, 'models_cache.json'));
   await copyIfPresent(join(sourceHome, 'AGENTS.md'), join(root, 'AGENTS.md'));
-  await copyIfPresent(join(sourceHome, '.agentoc-provider-id'), join(root, '.agentoc-provider-id'));
+  await copyIfPresent(join(sourceHome, '.ragent-provider-id'), join(root, '.ragent-provider-id'));
   await copyCodexRules(sourceHome, root);
   if (codexWindowsApprovalGate) await addWindowsCodexShellRules(root, runId, spawnEnv);
   const sourceSessions = join(sourceHome, 'sessions');
@@ -600,7 +600,7 @@ export async function prepareManagedMcpOverlay({
       // managed provider home; do not change the requested sandbox policy.
       root = await mkdtemp(join(
         family === CODEX_RUNTIME ? sourceHome : tmpdir(),
-        'agentoc-approved-action-',
+        'ragent-approved-action-',
       ));
       await chmod(root, 0o700).catch(() => {});
       const result = family === CODEX_RUNTIME

@@ -85,7 +85,7 @@ function uniqueRiskRoots(values, platform) {
  *
  * The roots are instance-local configuration paths, not a broad Linux parent
  * such as `/var`. A workspace below a system directory can therefore be
- * trusted only when this exact Run snapshot binds it, while AgentoC's own
+ * trusted only when this exact Run snapshot binds it, while Ragent's own
  * control roots remain protected by precedence.
  */
 export function buildRunRiskContext(executionScope, { protectedRoots = [], windowsOsPaths = process.platform === 'win32' ? ownerWindowsOsPaths() : null } = {}) {

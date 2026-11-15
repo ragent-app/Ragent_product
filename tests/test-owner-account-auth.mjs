@@ -7,15 +7,15 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-account-auth-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-account-auth-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts-new.example.test';
-process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
-process.env.AGENTOC_PUBLIC_BASE_URL = 'https://instance.example.test';
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts-new.example.test';
+process.env.RAGENT_ACCOUNTS_ISSUER = 'https://accounts.example.test';
+process.env.RAGENT_PUBLIC_BASE_URL = 'https://instance.example.test';
 process.env.SECURE_COOKIES = '0';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   getOwnerAccountBinding,
@@ -137,7 +137,7 @@ async function legacyAccountsFetch(url, options = {}) {
   const body = options.body ? JSON.parse(options.body) : {};
   const target = new URL(url);
   if (/^\/v1\/owner-auth\/devices\/[^/]+/.test(target.pathname)
-    && options.method === 'POST' && body.audience === 'agentoc-owner-auth-device') {
+    && options.method === 'POST' && body.audience === 'ragent-owner-auth-device') {
     return response(400, { code: 'owner_auth_request_invalid' });
   }
   return mockFetch(url, options);
@@ -190,7 +190,7 @@ try {
   await check('实例创建签名 bind 事务并只接受 Accounts 域 authUrl', async () => {
     assert.match(bindStart.transactionId, /^otx_/);
     assert.match(bindStart.authUrl, /^https:\/\/accounts\.example\.test\/owner\/bind\?tx=/);
-    assert.match(bindStart.stateCookie, /^agentoc_owner_account_state=/);
+    assert.match(bindStart.stateCookie, /^ragent_owner_account_state=/);
     assert.match(bindStart.stateCookie, /; Path=\//);
     assert.doesNotMatch(bindStart.stateCookie, /; Path=\/api\/auth\/google\/complete/);
     assert.equal(brokerTransactions.get(bindStart.transactionId).returnUrl, `https://instance.example.test/api/auth/google/complete?tx=${encodeURIComponent(bindStart.transactionId)}`);
@@ -222,7 +222,7 @@ try {
     assert.ok(op);
     assert.equal(op.purpose, 'publish-endpoint');
     assert.equal(op.publicEndpoint, 'https://instance.example.test');
-    assert.equal(op.audience, 'agentoc-owner-auth-device');
+    assert.equal(op.audience, 'ragent-owner-auth-device');
     assert.ok(op.signature);
   });
 
@@ -263,7 +263,7 @@ try {
   const replayStart = await startOwnerAccountAuth({ purpose: 'login', fetchImpl: mockFetch, clock: () => now });
   await check('错误 state cookie 在访问 broker 前被拒绝', async () => {
     await assert.rejects(() => completeOwnerAccountAuth({
-      req: { headers: { cookie: 'agentoc_owner_account_state=wrong.state' } },
+      req: { headers: { cookie: 'ragent_owner_account_state=wrong.state' } },
       transactionId: replayStart.transactionId,
       grant: `grant_${replayStart.transactionId}`,
       fetchImpl: mockFetch,
@@ -288,7 +288,7 @@ try {
   await check('旧 Accounts 服务拒绝新 audience 时回退旧 device proof', async () => {
     assert.equal(legacyDeviceList.devices.length, 1);
     const op = deviceOps.at(-1);
-    assert.equal(op.audience, 'agentoc-owner-auth');
+    assert.equal(op.audience, 'ragent-owner-auth');
     assert.ok(op.returnUrl);
     assert.match(op.returnUrl, /^https:\/\/instance\.example\.test\/api\/auth\/google\/complete\?tx=/);
   });
@@ -303,7 +303,7 @@ try {
     assert.match(op.path, /^\/v1\/owner-auth\/devices\/acct_owner_1$/);
     assert.ok(op.signature);
     assert.ok(op.issuedAt);
-    assert.equal(op.audience, 'agentoc-owner-auth-device');
+    assert.equal(op.audience, 'ragent-owner-auth-device');
     assert.equal(op.returnUrl, undefined);
   });
 

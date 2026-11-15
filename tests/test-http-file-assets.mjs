@@ -77,8 +77,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-file-assets-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-file-assets-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const promptFile = join(home, 'captured-prompt.txt');
   mkdirSync(configDir, { recursive: true });
@@ -115,12 +115,12 @@ function setupTempHome() {
     `#!/usr/bin/env node
 const { appendFileSync, readFileSync } = require('fs');
 const prompt = process.argv[process.argv.length - 1] || '';
-if (process.env.AGENTOC_FAKE_PROMPT_FILE) {
-  appendFileSync(process.env.AGENTOC_FAKE_PROMPT_FILE, prompt + '\\n\\n---PROMPT---\\n\\n', 'utf8');
+if (process.env.RAGENT_FAKE_PROMPT_FILE) {
+  appendFileSync(process.env.RAGENT_FAKE_PROMPT_FILE, prompt + '\\n\\n---PROMPT---\\n\\n', 'utf8');
 }
 let attachmentContent = '';
 try {
-  const attachments = JSON.parse(process.env.AGENTOC_ATTACHMENT_PATHS || '[]');
+  const attachments = JSON.parse(process.env.RAGENT_ATTACHMENT_PATHS || '[]');
   attachmentContent = attachments.map((entry) => readFileSync(entry.path, 'utf8')).join('');
 } catch (error) {
   console.error('fake provider could not open staged attachment:', error.message);
@@ -199,20 +199,20 @@ async function startServer({ home, port, promptFile, storagePort }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_FAKE_PROMPT_FILE: promptFile,
-      AGENTOC_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: 's3',
-      AGENTOC_ASSET_STORAGE_REGION: 'auto',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
-      AGENTOC_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
-      AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED: '1',
+      RAGENT_FAKE_PROMPT_FILE: promptFile,
+      RAGENT_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: 's3',
+      RAGENT_ASSET_STORAGE_REGION: 'auto',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+      RAGENT_ASSET_STORAGE_PRESIGN_TTL_SECONDS: '3600',
+      RAGENT_ASSET_DIRECT_UPLOAD_ENABLED: '1',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -328,7 +328,7 @@ try {
     }, 'runner prompt with localized file asset');
     assert.match(capturedPrompt, new RegExp(`big-video\\.mp4 -> .*chat-runs[/\\\\]${run.id}[/\\\\]inputs[/\\\\]fasset_[a-f0-9]{24}\\.mp4`), 'runner prompt should include the current run input path');
 
-    const cacheDir = join(home, '.config', 'agentoc', 'file-assets-cache');
+    const cacheDir = join(home, '.config', 'ragent', 'file-assets-cache');
     const cachedFiles = existsSync(cacheDir) ? readdirSync(cacheDir) : [];
     assert.equal(cachedFiles.length, 1, 'one localized file should be cached locally');
     const cachedBuffer = readFileSync(join(cacheDir, cachedFiles[0]));

@@ -59,7 +59,7 @@ async function providerDeterminism() {
 }
 
 async function harnessSmoke() {
-  const outDir = mkdtempSync(join(tmpdir(), 'agentoc-bench-out-'));
+  const outDir = mkdtempSync(join(tmpdir(), 'ragent-bench-out-'));
   const run = await runNode([
     HARNESS,
     '--scenario', 'restart-reconcile',

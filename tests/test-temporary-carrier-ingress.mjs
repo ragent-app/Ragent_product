@@ -8,10 +8,10 @@ import { join, resolve, sep } from 'node:path';
 import { WebSocketServer } from 'ws';
 
 test('temporary carrier routes authenticate the original phone and keep Owner upstream closed', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-ingress-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-ingress-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config'); process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-  delete process.env.AGENTOC_INSTANCE_ROOT;
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config'); process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+  delete process.env.RAGENT_INSTANCE_ROOT;
   const { fixture } = await import('./helpers/temporary-turn-fixture.mjs');
   const { TemporarySessionService } = await import('../chat/temporary-session-service.mjs');
   const { TemporaryMessageService } = await import('../chat/temporary-message-service.mjs');
@@ -64,7 +64,7 @@ test('temporary carrier routes authenticate the original phone and keep Owner up
     async function request(path, { method = 'GET', target = phone, body, scope, extraHeaders = {}, dpop } = {}) {
       const json = body && !Buffer.isBuffer(body); const content = body == null ? null : json ? Buffer.from(JSON.stringify(body)) : body;
       const headers = { authorization: `DPoP ${target.accessCredential.access_token}`,
-        dpop: dpop || proof(target, path, method), ...(scope ? { 'x-agentoc-app-api-scope': scopeHeader(scope) } : {}),
+        dpop: dpop || proof(target, path, method), ...(scope ? { 'x-ragent-app-api-scope': scopeHeader(scope) } : {}),
         ...(content ? { 'content-type': json ? 'application/json' : 'application/octet-stream', 'content-length': String(content.length) } : {}),
         ...extraHeaders };
       return new Promise((done, reject) => {
@@ -137,8 +137,8 @@ test('temporary carrier routes authenticate the original phone and keep Owner up
     assert.equal((await request(`${chunkPath}/upload-checkpoint`, { scope })).body.offset, 0);
     assert.equal((await request(`${chunkPath}/upload-checkpoint`, { scope, target: other })).status, 403);
     const firstPart = largeBytes.subarray(0, chunkBytes);
-    const chunkHeaders = { 'x-agentoc-upload-offset': '0', 'x-agentoc-upload-length': String(chunkBytes),
-      'x-agentoc-upload-sha256': sha256(firstPart) };
+    const chunkHeaders = { 'x-ragent-upload-offset': '0', 'x-ragent-upload-length': String(chunkBytes),
+      'x-ragent-upload-sha256': sha256(firstPart) };
     assert.equal((await request(`${chunkPath}/upload`, { method: 'PATCH', scope, body: firstPart,
       extraHeaders: chunkHeaders })).body.offset, chunkBytes);
     assert.equal((await request(`${chunkPath}/upload`, { method: 'PATCH', scope, body: firstPart,
@@ -147,8 +147,8 @@ test('temporary carrier routes authenticate the original phone and keep Owner up
       body: { sizeBytes: largeBytes.length } })).body.code, 'FILE_ASSET_UPLOAD_INCOMPLETE');
     const tail = largeBytes.subarray(chunkBytes);
     const uploaded = await request(`${chunkPath}/upload`, { method: 'PATCH', scope, body: tail,
-      extraHeaders: { 'x-agentoc-upload-offset': String(chunkBytes), 'x-agentoc-upload-length': String(tail.length),
-        'x-agentoc-upload-sha256': sha256(tail) } });
+      extraHeaders: { 'x-ragent-upload-offset': String(chunkBytes), 'x-ragent-upload-length': String(tail.length),
+        'x-ragent-upload-sha256': sha256(tail) } });
     assert.equal(uploaded.status, 200); assert.equal(uploaded.body.status, 'uploaded');
     const chunkReady = await request(`${chunkPath}/finalize`, { method: 'POST', scope,
       body: { sizeBytes: largeBytes.length } });

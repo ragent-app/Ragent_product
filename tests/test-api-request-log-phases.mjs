@@ -5,9 +5,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-api-request-log-'));
-const previousConfigDir = process.env.AGENTOC_CONFIG_DIR;
-process.env.AGENTOC_CONFIG_DIR = root;
+const root = mkdtempSync(join(tmpdir(), 'ragent-api-request-log-'));
+const previousConfigDir = process.env.RAGENT_CONFIG_DIR;
+process.env.RAGENT_CONFIG_DIR = root;
 
 class FakeResponse extends EventEmitter {
   constructor() {
@@ -99,7 +99,7 @@ try {
 
   console.log('test-api-request-log-phases: ok');
 } finally {
-  if (previousConfigDir === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousConfigDir;
+  if (previousConfigDir === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousConfigDir;
   rmSync(root, { recursive: true, force: true });
 }

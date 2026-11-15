@@ -209,7 +209,7 @@ partial class WindowsRunCredentialChannel {
     try{
       Require(args.Length==1&&(args[0]=="server"||args[0]=="client"),"RCC_MODE_INVALID");bool server=args[0]=="server";
       var policy=Parse(ParentLine());Keys(policy,server?new[]{"pipeName","binding","controlSid","executorSid"}:new[]{"pipeName","binding","controlSid","executorSid","peer"});
-      Require(Match(Str(policy,"pipeName"),"^agentoc-run-credential-[a-f0-9]{32}$"),"RCC_POLICY_INVALID");
+      Require(Match(Str(policy,"pipeName"),"^ragent-run-credential-[a-f0-9]{32}$"),"RCC_POLICY_INVALID");
       foreach(string key in new[]{"controlSid","executorSid"})Require(Match(Str(policy,key),"^S-1-5-80-(?:[0-9]+-){4}[0-9]+$"),"RCC_POLICY_INVALID");
       Require(Str(policy,"controlSid")!=Str(policy,"executorSid"),"RCC_POLICY_INVALID");
       var binding=(Dictionary<string,object>)policy["binding"];Binding(binding);

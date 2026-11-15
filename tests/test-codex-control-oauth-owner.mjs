@@ -12,7 +12,7 @@ import { acquireNativeOAuthLock, nativeOAuthLockPath } from '../lib/provider-run
 import { dirname } from 'node:path';
 import { createServer } from 'node:net';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-control-refresh-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-control-refresh-'));
 const configDir = join(root, 'config');
 const homes = join(root, 'owned-provider-homes');
 const registry = createNativeProviderRegistry({ configDir });
@@ -65,7 +65,7 @@ try {
   assert.equal(background.codexAccountId, 'fixture-account');
   await assert.rejects(() => prompt('absent'), { code: 'CODEX_CONTROL_BROKER_REQUIRED' });
   const legacyBroker = createServer(socket => socket.once('data', () => socket.end(
-    JSON.stringify({ type:'agentoc-codex-broker-pong', ready:true }) + '\n',
+    JSON.stringify({ type:'ragent-codex-broker-pong', ready:true }) + '\n',
   )));
   await new Promise((resolve, reject) => legacyBroker.once('error', reject).listen(codexAppServerBrokerSocketPath(home), resolve));
   try { await assert.rejects(() => prompt('legacy'), { code:'CODEX_CONTROL_ACCOUNT_UNVERIFIED' }); }

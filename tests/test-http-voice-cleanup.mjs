@@ -62,8 +62,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-voice-cleanup-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-voice-cleanup-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -109,14 +109,14 @@ async function startServer({ home, localBin, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       USERPROFILE: home,
       APPDATA: join(home, 'AppData', 'Roaming'),
       LOCALAPPDATA: join(home, 'AppData', 'Local'),
-      AGENTOC_CONFIG_DIR: join(home, '.config', 'agentoc'),
-      AGENTOC_AUTH_SESSION_SECRET: 'synthetic-http-voice-cleanup-test-secret',
+      RAGENT_CONFIG_DIR: join(home, '.config', 'ragent'),
+      RAGENT_AUTH_SESSION_SECRET: 'synthetic-http-voice-cleanup-test-secret',
       PATH: `${localBin}${delimiter}${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
@@ -152,7 +152,7 @@ async function stopServer(child) {
   await waitFor(() => child.exitCode !== null || child.signalCode !== null, 'server shutdown');
 }
 
-async function createSession(port, name = 'AgentoC retired voice cleanup session') {
+async function createSession(port, name = 'Ragent retired voice cleanup session') {
   const res = await request(port, 'POST', '/api/sessions', {
     folder: repoRoot,
     tool: 'fake-codex',

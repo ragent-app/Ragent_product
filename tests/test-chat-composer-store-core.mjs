@@ -35,12 +35,12 @@ function loadModule(file) {
 
 function loadLegacy() {
   const context = loadModule('static/chat/composer-store.js');
-  return { api: context.AgentoCComposerStore, label: 'legacy' };
+  return { api: context.RagentComposerStore, label: 'legacy' };
 }
 
 function loadCore() {
   const context = loadModule('static/chat/core/composer-store.js');
-  return { api: context.AgentocComposerStoreCore, label: 'core' };
+  return { api: context.RagentComposerStoreCore, label: 'core' };
 }
 
 // Cross-realm objects compare only at the primitive level; `startedAt` is

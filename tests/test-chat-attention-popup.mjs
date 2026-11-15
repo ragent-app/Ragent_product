@@ -148,8 +148,8 @@ function stubNode(tag) {
 }
 
 const STUB_GLOBAL_KEYS = [
-  'document', 'currentSessionId', 'getChatStoreStateSnapshot', 'agentocT', 'getChatStoreSession',
-  'AgentoCAttentionPopup', 'AgentoCDecisionSheet', 'matchMedia', 'dispatchAction',
+  'document', 'currentSessionId', 'getChatStoreStateSnapshot', 'ragentT', 'getChatStoreSession',
+  'RagentAttentionPopup', 'RagentDecisionSheet', 'matchMedia', 'dispatchAction',
 ];
 const savedGlobals = Object.fromEntries(STUB_GLOBAL_KEYS.map((key) => [key, globalThis[key]]));
 try {
@@ -168,14 +168,14 @@ try {
   doc.getElementById = (id) => ({ sidebarOverlay, closeSidebar }[id] || null);
   globalThis.document = doc;
   globalThis.getChatStoreStateSnapshot = () => ({ currentSessionId: 'current-1' });
-  globalThis.agentocT = (key) => key;
+  globalThis.ragentT = (key) => key;
   globalThis.getChatStoreSession = (id) => ({ id, name: 'test' });
   let desktopMode = false;
   globalThis.matchMedia = () => ({ matches: desktopMode });
 
   eval(source);
 
-  const popup = globalThis.AgentoCAttentionPopup;
+  const popup = globalThis.RagentAttentionPopup;
   assert.ok(popup && typeof popup.onRealtimeEvents === 'function', 'popup API exposed');
   const host = doc.body.children.find((node) => node.id === 'attentionPopupHost');
   assert.ok(host, 'popup host mounted');
@@ -330,7 +330,7 @@ try {
   // A background privileged batch may be stale by the time its action reaches
   // the server. The Decision Sheet returns an explicit terminal result so the
   // popup removes the entire batch, including any untouched category.
-  globalThis.AgentoCDecisionSheet = {
+  globalThis.RagentDecisionSheet = {
     submitPrivilegedBatchCategory: async () => ({ ok: true, alreadyEnded: true }),
   };
   popup._reset();

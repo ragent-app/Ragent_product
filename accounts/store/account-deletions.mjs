@@ -6,7 +6,7 @@ import { createInstancePublicKeyFingerprint, verifyInstanceProofSignature } from
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const ACCOUNT = /^[A-Za-z0-9_-]{1,160}$/;
 const PURPOSE = 'delete-account-and-associated-data';
-const AUDIENCE = 'agentoc-account-deletion';
+const AUDIENCE = 'ragent-account-deletion';
 const sha = value => createHash('sha256').update(value).digest('hex');
 const sameHash = (a, b) => /^[a-f0-9]{64}$/.test(a || '') && /^[a-f0-9]{64}$/.test(b || '')
   && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
@@ -60,7 +60,7 @@ export function buildAccountDeletionAcknowledgment({ jobId, instanceId, issuedAt
   uuid(jobId);
   if (!ACCOUNT.test(instanceId || '') || !Number.isSafeInteger(issuedAt)
     || !['kept', 'deleted', 'requires-owner'].includes(localCopies)) fail('account_deletion_ack_invalid');
-  return ['agentoc-account-deletion-observed-v1', jobId, instanceId, issuedAt, localCopies].join('\n');
+  return ['ragent-account-deletion-observed-v1', jobId, instanceId, issuedAt, localCopies].join('\n');
 }
 
 export function createAccountDeletionRepository({ pool, schema = 'public', verifyDeletionConfirmation, clock = Date.now } = {}) {
@@ -76,7 +76,7 @@ export function createAccountDeletionRepository({ pool, schema = 'public', verif
       await client.query('select set_config($1,$2,true)', ['lock_timeout', '5000ms']);
       await client.query('select set_config($1,$2,true)', ['statement_timeout', '15000ms']);
       // Same lock as the existing Accounts writer and authority finalization.
-      if (!readOnly) await client.query('select pg_advisory_xact_lock(hashtext($1))', ['agentoc_accounts_store_v1']);
+      if (!readOnly) await client.query('select pg_advisory_xact_lock(hashtext($1))', ['ragent_accounts_store_v1']);
       const result = await run(client);
       await client.query('commit');
       return result;

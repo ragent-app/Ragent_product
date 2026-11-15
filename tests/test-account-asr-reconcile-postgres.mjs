@@ -21,11 +21,11 @@ function syntheticWav() {
   return Buffer.concat([header, pcm]);
 }
 
-const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || '';
-assert(databaseUrl, 'Set AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL to an isolated scratch database URL');
+const databaseUrl = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || '';
+assert(databaseUrl, 'Set RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL to an isolated scratch database URL');
 const target = new URL(databaseUrl);
 assert(/(?:test|scratch|qa)/i.test(target.pathname)
-  || process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_ALLOW_SCHEMA === '1',
+  || process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_ALLOW_SCHEMA === '1',
 'Use a database named test/scratch/qa, or explicitly authorize a disposable schema inside a test database');
 const schema = `qa_asr_reconcile_${randomBytes(12).toString('hex')}`;
 assert(/^qa_asr_reconcile_[a-f0-9]{24}$/.test(schema));
@@ -149,10 +149,10 @@ try {
   await service.setConsent({ credential: accountIds[0], action: 'revoke' });
   await assert.rejects(() => service.transcribeAudio(input), { code: 'asr_consent_required' });
   await service.close();
-  if (process.env.AGENTOC_ACCOUNTS_ASR_LIVE_QA === '1') {
+  if (process.env.RAGENT_ACCOUNTS_ASR_LIVE_QA === '1') {
     // Opt in only with synthetic speech and a disposable database. This makes
     // one billable provider request, without persisting the text or API key.
-    const audioPath = process.env.AGENTOC_ACCOUNTS_ASR_LIVE_QA_AUDIO || '';
+    const audioPath = process.env.RAGENT_ACCOUNTS_ASR_LIVE_QA_AUDIO || '';
     assert(audioPath && process.env.OPENAI_API_KEY, 'Live QA requires synthetic audio and provider credentials');
     const spokenAudio = await readFile(audioPath);
     const liveService = createAccountAsrService({

@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-orchestration-routes-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-orchestration-routes-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const store = await import('../chat/orchestration-store.mjs');
 const { handleOrchestrationRoutes } = await import('../chat/router-orchestration-routes.mjs');

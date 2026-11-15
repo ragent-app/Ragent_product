@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-turn-hook-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-turn-hook-'));
 process.env.HOME = tempHome;
 
 const { buildTurnContextHook } = await import('../chat/turn-context-hook.mjs');
@@ -25,14 +25,14 @@ const hook = await buildTurnContextHook({
 
 assert.match(hook, /lightweight external context hook/);
 assert.match(hook, /Stable context entry points:/);
-assert.match(hook, /Bootstrap: ~\/\.agentoc\/memory\/bootstrap\.md/);
-assert.match(hook, /Projects: ~\/\.agentoc\/memory\/projects\.md/);
-assert.match(hook, /Memory writeback targets config: ~\/\.agentoc\/memory\/writeback-targets\.json/);
-assert.match(hook, /Auto user memory: ~\/\.agentoc\/memory\/model-context\/auto-user-memory\.md/);
-assert.match(hook, /Auto system memory: \/opt\/agentoc\/memory\/auto-system-memory\.md/);
+assert.match(hook, /Bootstrap: ~\/\.ragent\/memory\/bootstrap\.md/);
+assert.match(hook, /Projects: ~\/\.ragent\/memory\/projects\.md/);
+assert.match(hook, /Memory writeback targets config: ~\/\.ragent\/memory\/writeback-targets\.json/);
+assert.match(hook, /Auto user memory: ~\/\.ragent\/memory\/model-context\/auto-user-memory\.md/);
+assert.match(hook, /Auto system memory: \/opt\/ragent\/memory\/auto-system-memory\.md/);
 assert.match(hook, /Model-managed writable context root:/);
-assert.match(hook, /~\/\.agentoc\/memory\/model-context/);
-assert.match(hook, /Prefer AgentoC-side execution and the smallest necessary manual checkpoint/);
+assert.match(hook, /~\/\.ragent\/memory\/model-context/);
+assert.match(hook, /Prefer Ragent-side execution and the smallest necessary manual checkpoint/);
 assert.match(hook, /local skill, wrapper, note, or prior pattern already fits/);
 assert.match(hook, /split into child sessions or scratch notes when that reduces noise/);
 assert.match(hook, /did you use the best available path, is the result complete for the user/);

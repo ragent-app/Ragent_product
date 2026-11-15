@@ -67,7 +67,7 @@ eq('path parser keeps identity', parseWindowsPathFacts(pathOutput).identity, pat
 await rejects('path parser rejects malformed output', Promise.resolve().then(() => parseWindowsPathFacts('{"platform":"win32"}')), 'WINDOWS_FACTS_OUTPUT_INVALID');
 await rejects('path parser rejects ambiguous output', Promise.resolve().then(() => parseWindowsPathFacts(`${pathOutput}\n${pathOutput}`)), 'WINDOWS_FACTS_OUTPUT_INVALID');
 if (process.platform === 'win32') {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-runtime-missing-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-runtime-missing-'));
   const missing = path.join(root, 'new-parent', 'new-file.txt');
   const live = createWindowsRuntimeFactsProvider();
   await rejects('native realpath identifies a missing path', live.realpath(missing), 'ENOENT');
@@ -103,8 +103,8 @@ if (process.platform === 'win32') {
   check('native resolver flags the redirected target', redirected.unknowns.includes('target:reparse-point') && redirected.scope.kind === 'outside_project' && redirected.scope.computed === false);
 }
 await rejects('service parser rejects hash mutation', Promise.resolve().then(() => parseWindowsServiceFacts(JSON.stringify({
-  platform: 'win32', manager: 'windows-service', serviceName: 'agentoc', exists: true, definitionHash: 'changed',
-}), 'agentoc')), 'WINDOWS_FACTS_OUTPUT_INVALID');
+  platform: 'win32', manager: 'windows-service', serviceName: 'ragent', exists: true, definitionHash: 'changed',
+}), 'ragent')), 'WINDOWS_FACTS_OUTPUT_INVALID');
 await rejects('ACL parser rejects path mismatch', Promise.resolve().then(() => parseWindowsAclFacts(JSON.stringify({
   platform: 'win32', provider: 'windows-acl', canonicalPath: 'C:\\other', ownerSid: 'S-1-5-18', protected: true, descriptorHash: aclHash,
 }), 'C:\\project\\file.txt')), 'WINDOWS_FACTS_OUTPUT_INVALID');
@@ -119,7 +119,7 @@ const provider = createWindowsRuntimeFactsProvider({
       return { stdout: JSON.stringify({ exists: true, digest: 'a'.repeat(64) }), stderr: '' };
     }
     if (script.includes('Get-CimInstance')) {
-      return { stdout: JSON.stringify({ platform: 'win32', manager: 'windows-service', serviceName: 'agentoc', exists: true, definitionHash: serviceHash }), stderr: '' };
+      return { stdout: JSON.stringify({ platform: 'win32', manager: 'windows-service', serviceName: 'ragent', exists: true, definitionHash: serviceHash }), stderr: '' };
     }
     if (script.includes('Get-Acl')) {
       return { stdout: JSON.stringify({ platform: 'win32', provider: 'windows-acl', canonicalPath: 'C:\\project\\file.txt', ownerSid: 'S-1-5-18', protected: true, descriptorHash: aclHash }), stderr: '' };
@@ -169,11 +169,11 @@ const wingetResolution = await resolveWindowsSemanticContext({
 });
 check('production facts provider resolves an unpinned winget version', wingetResolution.scope.computed && wingetResolution.resourceSnapshot.packages[0].availableVersion === '1.2.3');
 eq('provider parses directory facts', (await provider.readdir('C:\\project'))[0].name, 'file.txt');
-eq('provider parses service facts', (await provider.serviceFacts({ serviceName: 'agentoc' })).definitionHash, serviceHash);
+eq('provider parses service facts', (await provider.serviceFacts({ serviceName: 'ragent' })).definitionHash, serviceHash);
 eq('provider parses ACL facts', (await provider.aclFacts({ canonicalPath: 'C:\\project\\file.txt' })).descriptorHash, aclHash);
 check('provider uses fixed absolute PowerShell', calls.every((call) => call.command === WINDOWS_POWERSHELL_EXECUTABLE));
 check('provider disables shell execution', calls.every((call) => call.options.shell === false));
-check('dynamic path is passed as an environment value', calls.some((call) => call.options.env.AGENTOC_FACTS_PATH === hostilePath));
+check('dynamic path is passed as an environment value', calls.some((call) => call.options.env.RAGENT_FACTS_PATH === hostilePath));
 check('dynamic path never enters PowerShell source', calls.every((call) => !Buffer.from(call.args.at(-1), 'base64').toString('utf16le').includes(hostilePath)));
 check('provider pins no-profile noninteractive mode', calls.every((call) => call.args.includes('-NoProfile') && call.args.includes('-NonInteractive')));
 check('provider forces UTF-8 console output encoding before every script',
@@ -195,7 +195,7 @@ const revalidationProvider = {
     if (value === 'C:\\project') return { identity: 'parent-1', mountId: 'volume-1', reparsePoint: false };
     return { ...pathState };
   },
-  async serviceFacts() { return { platform: 'win32', manager: 'windows-service', serviceName: 'agentoc', exists: true, definitionHash: serviceHash }; },
+  async serviceFacts() { return { platform: 'win32', manager: 'windows-service', serviceName: 'ragent', exists: true, definitionHash: serviceHash }; },
   async aclFacts() { return { platform: 'win32', provider: 'windows-acl', canonicalPath: 'C:\\project\\file.txt', ownerSid: 'S-1-5-18', protected: true, descriptorHash: aclHash }; },
 };
 const pathSnapshot = {
@@ -210,9 +210,9 @@ pathState = { identity: pathIdentity, mountId: 'volume-1', reparsePoint: true };
 check('reparse change fails execution revalidation', !(await revalidateWindowsPathFacts(pathSnapshot, { provider: revalidationProvider })).ok);
 
 pathState = { identity: pathIdentity, mountId: 'volume-1', reparsePoint: false };
-check('unchanged service passes execution revalidation', (await revalidateWindowsServiceFacts({ serviceName: 'agentoc', definitionHash: serviceHash }, { provider: revalidationProvider })).ok);
-const changedServiceProvider = { ...revalidationProvider, async serviceFacts() { return { platform: 'win32', manager: 'windows-service', serviceName: 'agentoc', exists: true, definitionHash: 'c'.repeat(64) }; } };
-check('service definition hash change fails revalidation', !(await revalidateWindowsServiceFacts({ serviceName: 'agentoc', definitionHash: serviceHash }, { provider: changedServiceProvider })).ok);
+check('unchanged service passes execution revalidation', (await revalidateWindowsServiceFacts({ serviceName: 'ragent', definitionHash: serviceHash }, { provider: revalidationProvider })).ok);
+const changedServiceProvider = { ...revalidationProvider, async serviceFacts() { return { platform: 'win32', manager: 'windows-service', serviceName: 'ragent', exists: true, definitionHash: 'c'.repeat(64) }; } };
+check('service definition hash change fails revalidation', !(await revalidateWindowsServiceFacts({ serviceName: 'ragent', definitionHash: serviceHash }, { provider: changedServiceProvider })).ok);
 check('unchanged ACL passes execution revalidation', (await revalidateWindowsAclFacts({ canonicalPath: 'C:\\project\\file.txt', descriptorHash: aclHash, ownerSid: 'S-1-5-18' }, { provider: revalidationProvider })).ok);
 const changedAclProvider = { ...revalidationProvider, async aclFacts() { return { platform: 'win32', provider: 'windows-acl', canonicalPath: 'C:\\project\\file.txt', ownerSid: 'S-1-5-18', protected: true, descriptorHash: 'c'.repeat(64) }; } };
 check('ACL descriptor hash change fails revalidation', !(await revalidateWindowsAclFacts({ canonicalPath: 'C:\\project\\file.txt', descriptorHash: aclHash }, { provider: changedAclProvider })).ok);

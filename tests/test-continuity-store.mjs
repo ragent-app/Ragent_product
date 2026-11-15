@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { createContinuityStore } from '../chat/continuity-store.mjs';
 import { createInitialContinuityState, reduceContinuityEvents } from '../chat/continuity-core.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-continuity-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-continuity-'));
 try {
   const store = createContinuityStore({ historyDir: root });
   const state1 = reduceContinuityEvents('s1', [{ seq: 1, type: 'message', role: 'user', content: 'goal' }]);

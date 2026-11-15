@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCHomeWorkspace(root) {
+(function attachRagentHomeWorkspace(root) {
   const REFRESH_INTERVAL_MS = 30 * 1000;
   const HOME_DATA_CACHE_MAX_AGE_MS = 10 * 1000;
   let refreshTimer = 0;
@@ -12,14 +12,14 @@
   }
 
   function isChinese() {
-    const active = typeof root.agentocGetActiveUiLanguage === "function"
-      ? root.agentocGetActiveUiLanguage()
+    const active = typeof root.ragentGetActiveUiLanguage === "function"
+      ? root.ragentGetActiveUiLanguage()
       : root.navigator?.language;
     return String(active || "").toLowerCase().startsWith("zh");
   }
 
   function translate(key, fallback) {
-    const translated = typeof root.agentocT === "function" ? root.agentocT(key) : "";
+    const translated = typeof root.ragentT === "function" ? root.ragentT(key) : "";
     return translated && translated !== key ? translated : fallback;
   }
 
@@ -125,8 +125,8 @@
   }
 
   function resolvePath(path) {
-    return typeof root.agentocResolveProductPath === "function"
-      ? root.agentocResolveProductPath(path)
+    return typeof root.ragentResolveProductPath === "function"
+      ? root.ragentResolveProductPath(path)
       : path;
   }
 
@@ -138,7 +138,7 @@
       const result = await root.fetchJsonOrRedirect(resolvePath("/api/home"), requestOptions);
       return result && typeof result.json === "function" ? result.json() : result;
     }
-    const response = await (root.agentocFetch || fetch)(resolvePath("/api/home"), {
+    const response = await (root.ragentFetch || fetch)(resolvePath("/api/home"), {
       credentials: "same-origin",
       cache: force ? "no-store" : "default",
       headers: { Accept: "application/json" },
@@ -248,7 +248,7 @@
     deviceLabel.textContent = labels.deviceWorkspace;
     deviceButton.append(deviceIcon, deviceLabel);
     actionBar?.insertBefore(deviceButton, actionBar.querySelector(".home-refresh"));
-    if (root.AgentoCIcons?.hydrate) root.AgentoCIcons.hydrate(workspace);
+    if (root.RagentIcons?.hydrate) root.RagentIcons.hydrate(workspace);
     workspace.querySelectorAll("[data-home-action]").forEach((button) => {
       button.addEventListener("click", () => handleAction(button));
     });
@@ -257,7 +257,7 @@
 
   async function markRead(sessionId) {
     if (!sessionId) return;
-    await (root.agentocFetch || fetch)(resolvePath(`/api/sessions/${encodeURIComponent(sessionId)}`), {
+    await (root.ragentFetch || fetch)(resolvePath(`/api/sessions/${encodeURIComponent(sessionId)}`), {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -277,7 +277,7 @@
 
   function openDeviceWorkspace() {
     try {
-      const opened = root.AgentoCCrossDevicePanel?.open?.({ view: "devices" });
+      const opened = root.RagentCrossDevicePanel?.open?.({ view: "devices" });
       if (opened !== false) return;
     } catch {}
     root.showSystemToast?.(copy().deviceWorkspaceUnavailable, "info");
@@ -315,7 +315,7 @@
           const labels = copy();
           workspace.innerHTML = `<div class="home-unavailable"><span class="home-unavailable-icon" data-icon="refresh" aria-hidden="true"></span><p>${escapeHtml(labels.unavailable)}</p><button type="button" class="home-action home-action--primary" data-home-action="refresh"><span data-icon="refresh" aria-hidden="true"></span><span>${escapeHtml(labels.refresh)}</span></button></div>`;
           workspace.querySelector("[data-home-action]")?.addEventListener("click", () => refresh({ force: true }));
-          if (root.AgentoCIcons?.hydrate) root.AgentoCIcons.hydrate(workspace);
+          if (root.RagentIcons?.hydrate) root.RagentIcons.hydrate(workspace);
         }
       })
       .finally(() => {
@@ -343,7 +343,7 @@
   // WebSocket invalidations use the non-forced path so several rapid events
   // coalesce into one request while the manual refresh button stays explicit.
   root.requestHomeWorkspaceRefresh = () => refresh();
-  root.addEventListener("agentoc:localechange", () => {
+  root.addEventListener("ragent:localechange", () => {
     if (!el("homeWorkspace")?.hidden) {
       renderedOnce = false;
       refresh({ force: true });

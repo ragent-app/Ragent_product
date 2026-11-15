@@ -12,10 +12,10 @@ import { syncBuiltinESMExports } from 'node:module';
 import { test, after } from 'node:test';
 import { SESSION_API_SCOPE_HEADER } from '../chat/session-api-scope-contract.mjs';
 
-const root = process.env.AGENTOC_SCOPED_UPLOAD_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-scoped-upload-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
+const root = process.env.RAGENT_SCOPED_UPLOAD_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-scoped-upload-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
 const bytes = Buffer.from('手机共享附件\na,b\n1,2\n');
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
@@ -27,13 +27,13 @@ const storage = createServer(async (_req, res) => {
   res.end(remoteBytes.subarray(3));
 });
 await new Promise(resolve => storage.listen(0, '127.0.0.1', resolve));
-process.env.AGENTOC_ASSET_STORAGE_BASE_URL = `http://127.0.0.1:${storage.address().port}/bucket`;
-process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture-access';
-process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture-secret';
-process.env.AGENTOC_ASSET_STORAGE_PROVIDER = 's3';
-process.env.AGENTOC_ASSET_STORAGE_REGION = 'fixture';
-process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '0';
-delete process.env.AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL;
+process.env.RAGENT_ASSET_STORAGE_BASE_URL = `http://127.0.0.1:${storage.address().port}/bucket`;
+process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture-access';
+process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture-secret';
+process.env.RAGENT_ASSET_STORAGE_PROVIDER = 's3';
+process.env.RAGENT_ASSET_STORAGE_REGION = 'fixture';
+process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '0';
+delete process.env.RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL;
 const assets = await import('../chat/file-assets.mjs');
 const store = await import('../chat/session-meta-store.mjs');
 const { handleControlRoutes } = await import('../chat/router-control-routes.mjs');
@@ -93,7 +93,7 @@ if (process.argv[2] === 'crash-finalize-server') {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   process.send({ type: 'listening', port: server.address().port });
 } else if (process.argv[2] === 'cold-receipt') {
-  const request = JSON.parse(process.env.AGENTOC_SCOPED_UPLOAD_REQUEST);
+  const request = JSON.parse(process.env.RAGENT_SCOPED_UPLOAD_REQUEST);
   const receipt = await assets.findFileAssetUploadReceipt(request);
   const replay = await assets.createFileAssetUploadIntent(request);
   assert.equal(replay.duplicate, true); assert.equal(replay.upload, null);
@@ -381,7 +381,7 @@ test('cold process recovery reuses the original ready scoped upload without muta
   const ready = await assets.finalizeFileAssetUpload(intent.asset.id, options(scope));
   const before = await readFile(file(intent.asset.id));
   const cold = await promisify(execFile)(process.execPath, [import.meta.filename, 'cold-receipt'], {
-    env: { ...process.env, AGENTOC_SCOPED_UPLOAD_TEST_ROOT: root, AGENTOC_SCOPED_UPLOAD_REQUEST: JSON.stringify(request) }, timeout: 8000,
+    env: { ...process.env, RAGENT_SCOPED_UPLOAD_TEST_ROOT: root, RAGENT_SCOPED_UPLOAD_REQUEST: JSON.stringify(request) }, timeout: 8000,
   });
   const line = cold.stdout.split('\n').find(value => value.startsWith('COLD_RECEIPT='));
   const result = JSON.parse(line.slice('COLD_RECEIPT='.length));
@@ -393,7 +393,7 @@ test('process death after ready publication but before HTTP reply preserves the 
   const scope = await seed(); const requestInput = input(scope); const intent = await assets.createFileAssetUploadIntent(requestInput);
   await assets.ingestFileAssetUpload(intent.asset.id, Readable.from([bytes]), options(scope));
   const child = fork(import.meta.filename, ['crash-finalize-server'], {
-    env: { ...process.env, AGENTOC_SCOPED_UPLOAD_TEST_ROOT: root }, silent: true,
+    env: { ...process.env, RAGENT_SCOPED_UPLOAD_TEST_ROOT: root }, silent: true,
   });
   let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   const messages = []; const listeners = new Map();
@@ -423,7 +423,7 @@ test('process death after ready publication but before HTTP reply preserves the 
     assert.equal(child.kill('SIGKILL'), true); const termination = await exited;
     assert.ok(termination.signal || termination.code !== 0); assert.equal(await outcome, 'disconnected');
     const cold = await promisify(execFile)(process.execPath, [import.meta.filename, 'cold-receipt'], {
-      env: { ...process.env, AGENTOC_SCOPED_UPLOAD_TEST_ROOT: root, AGENTOC_SCOPED_UPLOAD_REQUEST: JSON.stringify(requestInput) }, timeout: 8000,
+      env: { ...process.env, RAGENT_SCOPED_UPLOAD_TEST_ROOT: root, RAGENT_SCOPED_UPLOAD_REQUEST: JSON.stringify(requestInput) }, timeout: 8000,
     });
     const line = cold.stdout.split('\n').find(value => value.startsWith('COLD_RECEIPT='));
     const recovered = JSON.parse(line.slice('COLD_RECEIPT='.length));

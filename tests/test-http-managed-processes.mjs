@@ -55,8 +55,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-managed-processes-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-managed-processes-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -100,11 +100,11 @@ async function startServer({ home, localBin, port }) {
       CHAT_PORT: String(port),
       CHAT_BIND_HOST: '127.0.0.1',
       SECURE_COOKIES: '0',
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_AUTH_SESSION_SECRET: authSessionSecret,
-      AGENTOC_TRIGGER_POLL_MS: '250',
-      AGENTOC_MANAGED_PROCESS_POLL_MS: '250',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_AUTH_SESSION_SECRET: authSessionSecret,
+      RAGENT_TRIGGER_POLL_MS: '250',
+      RAGENT_MANAGED_PROCESS_POLL_MS: '250',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

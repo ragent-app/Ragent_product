@@ -5,10 +5,10 @@ param()
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'owner/private-qa-repository' -or $env:RUNNER_OS -cne 'Windows' -or $env:GITHUB_REF -cnotmatch '^refs/heads/qa/windows-msi-[a-z0-9-]+$'){throw 'MHR_DISPOSABLE_RUNNER_REQUIRED'}
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'MHR_ADMIN_REQUIRED'}
-$product='C:\Program Files\AgentoC';$data='C:\ProgramData\AgentoC';$names=@('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')
+$product='C:\Program Files\Ragent';$data='C:\ProgramData\Ragent';$names=@('Ragent-ControlPlane','Ragent-RunnerSupervisor')
 foreach($name in $names){if(Get-CimInstance Win32_Service -Filter "Name='$name'"){throw 'MHR_EXISTING_SERVICE'}}
 foreach($path in @($product,$data)){if(Test-Path -LiteralPath $path){throw 'MHR_EXISTING_ROOT'}}
-if([Diagnostics.EventLog]::SourceExists('AgentoC')){throw 'MHR_EXISTING_EVENT_SOURCE'}
+if([Diagnostics.EventLog]::SourceExists('Ragent')){throw 'MHR_EXISTING_EVENT_SOURCE'}
 if(-not $env:RUNNER_TEMP){throw 'MHR_TEMP_REQUIRED'}
 $evidence=Join-Path $env:RUNNER_TEMP 'managed-service-runtime';New-Item -ItemType Directory -Path $evidence|Out-Null
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'));$pack=Join-Path $repo 'packaging\windows'
@@ -37,7 +37,7 @@ function Remove-GuestServices {
   foreach($name in $names){
     $s=Get-CimInstance Win32_Service -Filter "Name='$name'"
     if($s){
-      if(-not $s.PathName.StartsWith(('"'+$product+'\AgentoC.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MHR_SERVICE_OWNERSHIP_REFUSED'}
+      if(-not $s.PathName.StartsWith(('"'+$product+'\Ragent.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MHR_SERVICE_OWNERSHIP_REFUSED'}
       if($s.State -ne 'Stopped'){Stop-Service -Name $name -ErrorAction Stop;Wait-Stopped $name}
       $s=$null;& 'C:\Windows\System32\sc.exe' delete $name|Out-Null;if($LASTEXITCODE -ne 0){throw 'MHR_DELETE_FAILED'}
     }
@@ -60,10 +60,10 @@ try{
   }
   $null=[IO.Directory]::CreateDirectory($product,$acl);$productOwned=$true;[IO.File]::WriteAllText((Join-Path $product '.managed-host-qa'),$env:GITHUB_RUN_ID)
   foreach($relative in @('payload','payload\chat')){$null=[IO.Directory]::CreateDirectory((Join-Path $product $relative),$acl)}
-  & (Join-Path $pack 'build-service-host.ps1') -OutputPath (Join-Path $product 'AgentoC.ServiceHost.exe') -DevelopmentOnly
+  & (Join-Path $pack 'build-service-host.ps1') -OutputPath (Join-Path $product 'Ragent.ServiceHost.exe') -DevelopmentOnly
   & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:exe /reference:System.Web.Extensions.dll ('/out:'+(Join-Path $product 'payload\HostTokenProbe.exe')) (Join-Path $repo 'tests\fixtures\windows-service-host-token.cs')
   if($LASTEXITCODE -ne 0){throw 'MHR_TOKEN_PROBE_COMPILE_FAILED'}
-  & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /define:HOST_PROBE /target:exe /main:HostAncestorProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+(Join-Path $product 'payload\AncestorPinProbe.exe')) (Join-Path $pack 'AgentoC.ServiceHost.cs') (Join-Path $repo 'tests\fixtures\windows-ancestor-pin.cs')
+  & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /define:HOST_PROBE /target:exe /main:HostAncestorProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+(Join-Path $product 'payload\AncestorPinProbe.exe')) (Join-Path $pack 'Ragent.ServiceHost.cs') (Join-Path $repo 'tests\fixtures\windows-ancestor-pin.cs')
   if($LASTEXITCODE -ne 0){throw 'MHR_ANCESTOR_PROBE_COMPILE_FAILED'}
   Copy-Item -LiteralPath (Get-Command node.exe).Source -Destination (Join-Path $product 'payload\node.exe')
   foreach($relative in @('payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')){Copy-Item -LiteralPath (Join-Path $repo 'tests\fixtures\windows-service-host-child.mjs') -Destination (Join-Path $product $relative)}
@@ -73,20 +73,20 @@ try{
   Get-ChildItem -LiteralPath $product -File -Recurse|ForEach-Object {
     $fileAcl=[IO.File]::GetAccessControl($_.FullName);$fileAcl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'));[IO.File]::SetAccessControl($_.FullName,$fileAcl)
   }
-  $report.runtimeFiles=@('AgentoC.ServiceHost.exe','payload\node.exe','payload\HostTokenProbe.exe','payload\AncestorPinProbe.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\immutable-probe.txt')|ForEach-Object {
+  $report.runtimeFiles=@('Ragent.ServiceHost.exe','payload\node.exe','payload\HostTokenProbe.exe','payload\AncestorPinProbe.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','payload\immutable-probe.txt')|ForEach-Object {
     $file=Join-Path $product $_;@{path=$_;bytes=(Get-Item -LiteralPath $file).Length;sha256=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()}
   }
-  $report.sourceFiles=@('packaging/windows/AgentoC.ServiceHost.cs','packaging/windows/prepare-owner-service-data.ps1','packaging/windows/prepare-owner-services.ps1','packaging/windows/read-owner-bootstrap-discovery.ps1','tests/windows-managed-service-runtime.ps1','tests/fixtures/windows-service-host-token.cs','tests/fixtures/windows-service-host-child.mjs','tests/fixtures/windows-ancestor-pin.cs','tests/test-windows-ancestor-pin.ps1')|ForEach-Object {
+  $report.sourceFiles=@('packaging/windows/Ragent.ServiceHost.cs','packaging/windows/prepare-owner-service-data.ps1','packaging/windows/prepare-owner-services.ps1','packaging/windows/read-owner-bootstrap-discovery.ps1','tests/windows-managed-service-runtime.ps1','tests/fixtures/windows-service-host-token.cs','tests/fixtures/windows-service-host-child.mjs','tests/fixtures/windows-ancestor-pin.cs','tests/test-windows-ancestor-pin.ps1')|ForEach-Object {
     @{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash.ToLowerInvariant()}
   }
-  [Diagnostics.EventLog]::CreateEventSource('AgentoC','Application');$eventOwned=$true
+  [Diagnostics.EventLog]::CreateEventSource('Ragent','Application');$eventOwned=$true
   . (Join-Path $pack 'prepare-owner-services.ps1') -LibraryOnly
   $supervisorPlan=@(Get-OwnerServicePreparationPlan)|Where-Object {$_.role -eq 'supervisor'}
-  New-Service -Name 'AgentoC-RunnerSupervisor' -BinaryPathName $supervisorPlan.command -StartupType Manual|Out-Null
-  $refused=$false;try{Start-Service 'AgentoC-RunnerSupervisor' -ErrorAction Stop}catch{$refused=$true}
-  Wait-Stopped 'AgentoC-RunnerSupervisor'
+  New-Service -Name 'Ragent-RunnerSupervisor' -BinaryPathName $supervisorPlan.command -StartupType Manual|Out-Null
+  $refused=$false;try{Start-Service 'Ragent-RunnerSupervisor' -ErrorAction Stop}catch{$refused=$true}
+  Wait-Stopped 'Ragent-RunnerSupervisor'
   if(-not $refused -or (Test-Path -LiteralPath $data)){throw 'MHR_SYSTEM_START_NOT_REFUSED_BEFORE_IO'}
-  $event=Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='AgentoC';Id=1004} -MaxEvents 5|Where-Object {$_.Message -match 'SHT_SERVICE_ACCOUNT_REFUSED'}
+  $event=Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='Ragent';Id=1004} -MaxEvents 5|Where-Object {$_.Message -match 'SHT_SERVICE_ACCOUNT_REFUSED'}
   if(-not $event){throw 'MHR_SYSTEM_REFUSAL_NOT_CONFIRMED'}
   $report.checks+='actual-system-service-refused-before-data-io'
   Remove-GuestServices
@@ -94,7 +94,7 @@ try{
   if($prepared.exitCode -ne 0 -or -not $prepared.result.servicesPrepared){throw 'MHR_SERVICES_NOT_PREPARED'}
   $plan=Call-Preparation (Join-Path $pack 'prepare-owner-service-data.ps1');$report.dataPlan=$plan
   if($plan.exitCode -ne 0){
-    $report.parentAclFacts=@('C:\','C:\ProgramData','C:\Program Files\AgentoC','C:\Program Files\AgentoC\payload')|ForEach-Object {
+    $report.parentAclFacts=@('C:\','C:\ProgramData','C:\Program Files\Ragent','C:\Program Files\Ragent\payload')|ForEach-Object {
       $snapshot=[IO.Directory]::GetAccessControl($_)
       @{path=$_;owner=$snapshot.GetOwner([Security.Principal.SecurityIdentifier]).Value;rules=@($snapshot.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])|ForEach-Object {
         @{sid=$_.IdentityReference.Value;mask=[int64]$_.FileSystemRights;inheritance=[int]$_.InheritanceFlags;propagation=[int]$_.PropagationFlags;type=[int]$_.AccessControlType}
@@ -114,10 +114,10 @@ try{
     # actual host must remove it; do not substitute a reduced test launcher.
     & 'C:\Windows\System32\sc.exe' privs $name 'SeChangeNotifyPrivilege/SeImpersonatePrivilege/SeIncreaseWorkingSetPrivilege'|Out-Null
     if($LASTEXITCODE -ne 0){throw 'MHR_QA_INITIAL_PRIVILEGES_FAILED'}
-    New-ItemProperty -Path ('HKLM:\SYSTEM\CurrentControlSet\Services\'+$name) -Name Environment -PropertyType MultiString -Value @('NODE_OPTIONS=--invalid-managed-qa-option','NODE_PATH=SYNTHETIC_PARENT_PATH','OPENAI_API_KEY=SYNTHETIC_PARENT_KEY','AGENTOC_AUTH_SESSION_SECRET=SYNTHETIC_PARENT_SECRET')|Out-Null
+    New-ItemProperty -Path ('HKLM:\SYSTEM\CurrentControlSet\Services\'+$name) -Name Environment -PropertyType MultiString -Value @('NODE_OPTIONS=--invalid-managed-qa-option','NODE_PATH=SYNTHETIC_PARENT_PATH','OPENAI_API_KEY=SYNTHETIC_PARENT_KEY','RAGENT_AUTH_SESSION_SECRET=SYNTHETIC_PARENT_SECRET')|Out-Null
     Set-Service -Name $name -StartupType Manual
   }
-  Start-Service 'AgentoC-ControlPlane'
+  Start-Service 'Ragent-ControlPlane'
   $proofPaths=@((Join-Path $data 'instances\owner\config\runtime-proof.json'),(Join-Path $data 'instances\owner\executor\config\runtime-proof.json'))
   $deadline=[DateTime]::UtcNow.AddSeconds(60)
   while(@($proofPaths|Where-Object {-not (Test-Path -LiteralPath $_)}).Count -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 200}
@@ -151,9 +151,9 @@ finally{
       if(Test-Path -LiteralPath $path){$tail=(Get-Content -LiteralPath $path -Tail 80|Out-String);[IO.File]::WriteAllText((Join-Path $evidence ([IO.Path]::GetFileName($path))),$tail)}
     }
     Remove-GuestServices
-    if($eventOwned){[Diagnostics.EventLog]::DeleteEventSource('AgentoC')}
+    if($eventOwned){[Diagnostics.EventLog]::DeleteEventSource('Ragent')}
     if($productOwned){
-      if([IO.Path]::GetFullPath($product) -cne 'C:\Program Files\AgentoC' -or [IO.File]::ReadAllText((Join-Path $product '.managed-host-qa')) -cne $env:GITHUB_RUN_ID){throw 'MHR_PRODUCT_CLEANUP_OWNERSHIP_REFUSED'}
+      if([IO.Path]::GetFullPath($product) -cne 'C:\Program Files\Ragent' -or [IO.File]::ReadAllText((Join-Path $product '.managed-host-qa')) -cne $env:GITHUB_RUN_ID){throw 'MHR_PRODUCT_CLEANUP_OWNERSHIP_REFUSED'}
       foreach($root in @($product,$data)){
         if(-not(Test-Path -LiteralPath $root)){continue}
         if($root -eq $data -and -not $dataAttempted){throw 'MHR_UNKNOWN_DATA_REFUSED'}

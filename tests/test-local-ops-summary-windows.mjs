@@ -87,7 +87,7 @@ assert.doesNotMatch(String(calls[0].args.at(-1)), /@\{;/);
 const services = await discoverChatServerServices({ platform: 'win32', homeDir: 'C:\\Users\\Alice' });
 assert.deepEqual(services.map(({ name, label, port, kind }) => ({ name, label, port, kind })), [{
   name: 'owner',
-  label: 'AgentoC-ControlPlane',
+  label: 'Ragent-ControlPlane',
   port: 7690,
   kind: 'owner',
 }]);
@@ -97,7 +97,7 @@ const processReport = await collectChatServerProcesses({
   execFileImpl,
   services: [{
     name: 'owner',
-    label: 'AgentoC-ControlPlane',
+    label: 'Ragent-ControlPlane',
     kind: 'owner',
     port: 7690,
   }],

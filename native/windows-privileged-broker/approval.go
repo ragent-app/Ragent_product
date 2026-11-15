@@ -23,10 +23,10 @@ const (
 	maxDeviceSignatureBytes  = 256
 	requestApprovalLifetime  = 2 * time.Minute
 	deviceEnrollmentLifetime = 5 * time.Minute
-	requestApprovalDomain    = "AgentoC Broker Device Decision v1\x00"
-	deviceEnrollmentDomain   = "AgentoC Broker Device Enrollment v1\x00"
-	brokerEnrollmentDomain   = "AgentoC Broker Signed Enrollment Challenge v1\x00"
-	brokerApprovalDomain     = "AgentoC Broker Signed Approval Challenge v1\x00"
+	requestApprovalDomain    = "Ragent Broker Device Decision v1\x00"
+	deviceEnrollmentDomain   = "Ragent Broker Device Enrollment v1\x00"
+	brokerEnrollmentDomain   = "Ragent Broker Signed Enrollment Challenge v1\x00"
+	brokerApprovalDomain     = "Ragent Broker Signed Approval Challenge v1\x00"
 )
 
 var ownerIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:@-]{1,128}$`)
@@ -285,7 +285,7 @@ func encodeEnrollmentCodeInput(challenge brokerEnrollmentChallenge) ([]byte, err
 		!validRequestID(challenge.Nonce) || !challenge.CreatedAt.Equal(challenge.CreatedAt.UTC()) || !challenge.ExpiresAt.Equal(challenge.ExpiresAt.UTC()) {
 		return nil, errEnrollmentInvalid
 	}
-	return encodeSigningFields("AgentoC Broker Enrollment Code v1\x00", challenge.BrokerInstallationID,
+	return encodeSigningFields("Ragent Broker Enrollment Code v1\x00", challenge.BrokerInstallationID,
 		challenge.OwnerID, challenge.DeviceID, challenge.Nonce, challenge.EnrollmentID,
 		challenge.PolicyGeneration, challenge.CreatedAt, challenge.ExpiresAt), nil
 }

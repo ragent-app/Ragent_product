@@ -97,12 +97,12 @@ vm.runInNewContext(
 const container = createElement('section');
 const node = context.renderFileChangeInto(container, {
   changeType: 'edit',
-  filePath: '/Users/example/code/agentoc/chat/router.mjs:910',
+  filePath: '/Users/example/code/ragent/chat/router.mjs:910',
 });
 
 assert.equal(container.children.length, 1, 'file change cards should append exactly one node');
 assert.equal(container.children[0], node, 'renderFileChangeInto should return the appended node');
-assert.match(node.innerHTML, /<span class="file-path">\/Users\/example\/code\/agentoc\/chat\/router\.mjs:910<\/span>/, 'file change cards should render host paths as plain text');
+assert.match(node.innerHTML, /<span class="file-path">\/Users\/example\/code\/ragent\/chat\/router\.mjs:910<\/span>/, 'file change cards should render host paths as plain text');
 assert.doesNotMatch(node.innerHTML, /<a class="file-path"/, 'file change cards should not render host paths as clickable links');
 
 const objectKindNode = context.renderFileChangeInto(createElement('section'), {

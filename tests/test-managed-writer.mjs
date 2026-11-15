@@ -20,12 +20,12 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-managed-writer-'));
-const workRoot = mkdtempSync(join(tmpdir(), 'agentoc-managed-writer-work-'));
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-managed-writer-'));
+const workRoot = mkdtempSync(join(tmpdir(), 'ragent-managed-writer-work-'));
 // Isolate config + work root before importing anything that reads them.
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workRoot;
-delete process.env.AGENTOC_MANAGED_WRITER_ENABLED;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workRoot;
+delete process.env.RAGENT_MANAGED_WRITER_ENABLED;
 
 const {
   createStagingWorkspace,
@@ -95,7 +95,7 @@ function escapeCode(error) {
 }
 
 async function makeWriterFixture() {
-  const root = makeRoot('agentoc-mw-canonical-');
+  const root = makeRoot('ragent-mw-canonical-');
   write(root, 'src/a.txt', 'alpha');
   write(root, 'src/b.txt', 'bravo');
   write(root, 'src/sub/c.txt', 'charlie');

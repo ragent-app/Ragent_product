@@ -6,11 +6,11 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-claude-resume-cwd-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-claude-resume-cwd-'));
 const claudeHome = join(tempHome, 'claude-home');
 const requestedCwd = join(tempHome, 'home', 'andy');
 const transcriptCwd = join(tempHome, 'workspace');
-const projectDir = join(claudeHome, 'projects', '-var-lib-agentoc-workspace');
+const projectDir = join(claudeHome, 'projects', '-var-lib-ragent-workspace');
 const sessionId = 'dbf325d8-d499-457d-be70-2a5fc980d78b';
 
 try {

@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 
-// Privilege classifier for the AgentoC sudo-approval gate (design:
+// Privilege classifier for the Ragent sudo-approval gate (design:
 // notes/current/privileged-approval-design.md). Pure logic, no I/O.
 //
 // A privileged operation is declared by the agent via the `privileged_op`

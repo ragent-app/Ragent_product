@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Standalone admin dashboard for AgentoC guest instances.
+// Standalone admin dashboard for Ragent guest instances.
 // Usage: node scripts/instance-admin.mjs [--port PORT]
 // Default: http://127.0.0.1:7689
 
@@ -32,15 +32,15 @@ const LOGIN_TEMPLATE_PATH = join(PROJECT_ROOT, 'templates', 'admin-login.html');
 const HOME = homedir();
 const LAUNCH_AGENTS_DIR = join(HOME, 'Library', 'LaunchAgents');
 const OWNER_LAUNCH_AGENT_PATH = join(LAUNCH_AGENTS_DIR, 'com.chatserver.claude.plist');
-const OWNER_AUTH_FILE = join(HOME, '.config', 'agentoc', 'auth.json');
-const OWNER_CONFIG_DIR = join(HOME, '.config', 'agentoc');
-const OWNER_MEMORY_DIR = join(HOME, '.agentoc', 'memory');
-const GUEST_DEFAULTS_FILE = join(HOME, '.config', 'agentoc', 'guest-instance-defaults.json');
-const GUEST_REGISTRY_FILE = join(HOME, '.config', 'agentoc', 'guest-instances.json');
-const USER_BINDINGS_FILE = join(HOME, '.config', 'agentoc', 'user-instance-bindings.json');
-const USER_LEDGER_FILE = join(HOME, '.agentoc', 'memory', 'tasks', 'agentoc-user-relationship-ledger.md');
-const USER_EVENT_LOG_FILE = join(HOME, '.agentoc', 'memory', 'tasks', 'agentoc-user-event-log.md');
-const TRIAL_OCCUPANCY_LEDGER_FILE = join(HOME, '.agentoc', 'memory', 'tasks', 'agentoc-trial-user-ledger.md');
+const OWNER_AUTH_FILE = join(HOME, '.config', 'ragent', 'auth.json');
+const OWNER_CONFIG_DIR = join(HOME, '.config', 'ragent');
+const OWNER_MEMORY_DIR = join(HOME, '.ragent', 'memory');
+const GUEST_DEFAULTS_FILE = join(HOME, '.config', 'ragent', 'guest-instance-defaults.json');
+const GUEST_REGISTRY_FILE = join(HOME, '.config', 'ragent', 'guest-instances.json');
+const USER_BINDINGS_FILE = join(HOME, '.config', 'ragent', 'user-instance-bindings.json');
+const USER_LEDGER_FILE = join(HOME, '.ragent', 'memory', 'tasks', 'ragent-user-relationship-ledger.md');
+const USER_EVENT_LOG_FILE = join(HOME, '.ragent', 'memory', 'tasks', 'ragent-user-event-log.md');
+const TRIAL_OCCUPANCY_LEDGER_FILE = join(HOME, '.ragent', 'memory', 'tasks', 'ragent-trial-user-ledger.md');
 const SESSION_COOKIE = 'admin_session';
 const SESSION_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
 const DEFAULT_USAGE_WINDOW_DAYS = 30;
@@ -1421,10 +1421,10 @@ async function buildOwnerInstanceRecord({ includeChecks = false } = {}) {
   const ownerEnv = extractPlistDictStrings(ownerPlistContent, 'EnvironmentVariables');
   const ownerLabel = trimString(extractPlistString(ownerPlistContent, 'Label')) || 'com.chatserver.claude';
   const ownerPort = Number.parseInt(trimString(ownerEnv.CHAT_PORT) || '7690', 10) || 7690;
-  const instanceRoot = trimString(ownerEnv.AGENTOC_INSTANCE_ROOT);
-  const configDir = trimString(ownerEnv.AGENTOC_CONFIG_DIR)
+  const instanceRoot = trimString(ownerEnv.RAGENT_INSTANCE_ROOT);
+  const configDir = trimString(ownerEnv.RAGENT_CONFIG_DIR)
     || (instanceRoot ? join(instanceRoot, 'config') : OWNER_CONFIG_DIR);
-  const memoryDir = trimString(ownerEnv.AGENTOC_MEMORY_DIR)
+  const memoryDir = trimString(ownerEnv.RAGENT_MEMORY_DIR)
     || (instanceRoot ? join(instanceRoot, 'memory') : OWNER_MEMORY_DIR);
   const authFile = join(configDir, 'auth.json');
   const [ownerAuth, rawSessions, authSessions, cloudPublicBaseUrl] = await Promise.all([
@@ -1439,17 +1439,17 @@ async function buildOwnerInstanceRecord({ includeChecks = false } = {}) {
   }
 
   const token = trimString(ownerAuth?.token);
-  const publicBaseUrl = normalizeBaseUrl(ownerEnv.AGENTOC_PUBLIC_BASE_URL) || cloudPublicBaseUrl;
+  const publicBaseUrl = normalizeBaseUrl(ownerEnv.RAGENT_PUBLIC_BASE_URL) || cloudPublicBaseUrl;
   const guestAccessDefaults = await loadInstanceAccessDefaults({
     defaultsFilePath: GUEST_DEFAULTS_FILE,
     env: ownerEnv,
   });
   const bridgeBaseUrl = resolveBridgeBaseUrl({
     instanceName: 'owner',
-    explicitBaseUrl: ownerEnv.AGENTOC_BRIDGE_BASE_URL,
-    bridgeBaseUrlTemplate: ownerEnv.AGENTOC_BRIDGE_BASE_URL_TEMPLATE
+    explicitBaseUrl: ownerEnv.RAGENT_BRIDGE_BASE_URL,
+    bridgeBaseUrlTemplate: ownerEnv.RAGENT_BRIDGE_BASE_URL_TEMPLATE
       || guestAccessDefaults.bridgeBaseUrlTemplate,
-    bridgeRootBaseUrl: ownerEnv.AGENTOC_BRIDGE_ROOT_BASE_URL
+    bridgeRootBaseUrl: ownerEnv.RAGENT_BRIDGE_ROOT_BASE_URL
       || guestAccessDefaults.bridgeRootBaseUrl,
   });
   const localBaseUrl = `http://127.0.0.1:${ownerPort}`;
@@ -1635,7 +1635,7 @@ async function apiInstanceAction(res, name, action) {
         return json(res, { ok: true, action: 'restart-all-chat', requestedName: safe });
       }
     } else {
-      const service = safe === 'owner' ? 'agentoc.service' : `agentoc-guest@${safe}.service`;
+      const service = safe === 'owner' ? 'ragent.service' : `ragent-guest@${safe}.service`;
       await execFileAsync('systemctl', [action, service], { timeout: 30_000 });
     }
     invalidateAdminCaches();
@@ -1659,9 +1659,9 @@ async function apiDelete(res, name) {
     await execFileAsync('launchctl', ['unload', plist], { timeout: 10_000 }).catch(() => {});
     await unlink(plist).catch(() => {});
   } else {
-    const service = `agentoc-guest@${safe}.service`;
+    const service = `ragent-guest@${safe}.service`;
     await execFileAsync('systemctl', ['disable', '--now', service], { timeout: 30_000 }).catch(() => {});
-    await unlink(join('/etc/agentoc/guest-instances', `${safe}.env`)).catch(() => {});
+    await unlink(join('/etc/ragent/guest-instances', `${safe}.env`)).catch(() => {});
   }
 
   try {

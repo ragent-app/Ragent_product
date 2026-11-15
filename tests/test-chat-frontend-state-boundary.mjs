@@ -155,7 +155,7 @@ assertNotContains(
 const composerStoreSource = read('static/chat/composer-store.js');
 assertContains(
   composerStoreSource,
-  'AgentoCComposerStore',
+  'RagentComposerStore',
   'composer-store should define the dedicated composer state slice',
 );
 

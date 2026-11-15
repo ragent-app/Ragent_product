@@ -140,7 +140,7 @@ function createContext() {
       createElement() {
         return makeElement();
       },
-      title: 'AgentoC',
+      title: 'Ragent',
     },
     pendingNavigationState: null,
     activeTab: 'sessions',

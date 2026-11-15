@@ -1,4 +1,4 @@
-// Risk classifier for the unified AgentoC permission model. Pure logic, no I/O.
+// Risk classifier for the unified Ragent permission model. Pure logic, no I/O.
 //
 // Sits ABOVE chat/privileged-classifier.mjs. The privileged classifier answers
 // "which privileged category does this sudo/install/delete op belong to?" for an
@@ -610,7 +610,7 @@ function classifyFileTool(toolName, toolInput, cwd, projectRoot, home, riskConte
  * @param {string} [input.cwd]          Run cwd, used to resolve relative paths.
  * @param {string} [input.projectRoot]  Project root for in-project checks.
  * @param {string} [input.declaredCategory] Privileged category declared via the
- *   `agentoc-privileged` sentinel (the gate parses the sentinel and passes this).
+ *   `ragent-privileged` sentinel (the gate parses the sentinel and passes this).
  * @param {string} [input.home]         $HOME override (defaults to process.env.HOME).
  * @param {object} [input.riskContext]  Frozen admission-time path context.
  * @returns {{tier:string, signals:object, privilegedClassification:object|null}}
@@ -677,7 +677,7 @@ export function classifyRisk(input = {}) {
   if (pc.category === CATEGORY_INSTALL) {
     if (pc.inScope === true) {
       // A sudo prefix does not make an otherwise bounded named-package
-      // install dangerous. The provider shell cannot elevate in AgentoC's
+      // install dangerous. The provider shell cannot elevate in Ragent's
       // service sandbox, so route both `apt install foo` and `sudo apt install
       // foo` through the same signed install-auto executor path. The executor
       // re-checks the structural whitelist; this is not blanket sudo approval.

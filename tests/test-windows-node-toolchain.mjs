@@ -12,7 +12,7 @@ if (process.platform !== 'win32') {
   process.exit(0);
 }
 const exec = promisify(execFile);
-const root = await mkdtemp(join(tmpdir(), 'agentoc-node-toolchain-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-node-toolchain-'));
 try {
 const payload = join(root, 'payload with spaces');
 await mkdir(payload);
@@ -51,13 +51,13 @@ for (const command of ['npm.cmd', 'corepack.cmd']) {
 // Verify an offline install through the bundled npm, not merely --version.
 const packageRoot = join(root, 'local-package');
 await mkdir(packageRoot);
-await writeFile(join(packageRoot, 'package.json'), '{"name":"agentoc-toolchain-smoke","version":"1.0.0"}');
+await writeFile(join(packageRoot, 'package.json'), '{"name":"ragent-toolchain-smoke","version":"1.0.0"}');
 const prefix = join(root, 'managed harness');
 const spec = buildPlatformSpawnSpec(join(payload, 'npm.cmd'), [
   'install', '--prefix', prefix, '--offline', '--no-save', '--package-lock=false', '--ignore-scripts', '--no-audit', packageRoot,
 ], { env });
 await exec(spec.file, spec.args, { ...spec, env, timeout: 30_000, windowsHide: true });
-assert.equal(JSON.parse(await readFile(join(prefix, 'node_modules/agentoc-toolchain-smoke/package.json'), 'utf8')).version, '1.0.0');
+assert.equal(JSON.parse(await readFile(join(prefix, 'node_modules/ragent-toolchain-smoke/package.json'), 'utf8')).version, '1.0.0');
 console.log(`PASS: reproduced ci pruning; bundled npm/corepack run without Node on PATH; offline install works. Fixture: ${root}`);
 } finally {
   await rm(root, { recursive: true, force: true });

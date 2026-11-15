@@ -55,7 +55,7 @@ socket.on('connect', () => {
     return;
   }
   handshakeTimer = setTimeout(failHandshake, 10_000);
-  socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-ping', expectedAccountDigest })}\n`);
+  socket.write(`${JSON.stringify({ type: 'ragent-codex-broker-ping', expectedAccountDigest })}\n`);
 });
 socket.on('error', (error) => {
   clearTimeout(handshakeTimer);
@@ -71,7 +71,7 @@ socket.on('data', (chunk) => {
     if (!verified) {
       let reply;
       try { reply = JSON.parse(line); } catch { failHandshake(); return; }
-      if (reply?.type !== 'agentoc-codex-broker-pong' || reply.ready !== true
+      if (reply?.type !== 'ragent-codex-broker-pong' || reply.ready !== true
           || (expectedAccountDigest && reply.accountMatches !== true)
           || (expectedPolicyDigest && reply.policyDigest !== expectedPolicyDigest)) {
         failHandshake();

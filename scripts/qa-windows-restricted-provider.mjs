@@ -17,15 +17,15 @@ export async function runRestrictedProviderCandidate({harness='codex',cancelBoun
 if (process.platform !== 'win32') throw new Error('Windows candidate QA requires Windows');
 await assertOrdinaryWindowsExecutionIdentity();
 const exec = promisify(execFile), source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const id = randomBytes(16).toString('hex'), profile = `agentoc.restricted.${id}`;
+const id = randomBytes(16).toString('hex'), profile = `ragent.restricted.${id}`;
 const localAppData = runInput?.hostLocalAppData || process.env.LOCALAPPDATA;
-const root = join(localAppData, 'AgentoC', 'restricted-runs', id);
+const root = join(localAppData, 'Ragent', 'restricted-runs', id);
 const evidence = join(source, 'artifacts/showcase/T2-current-20261017/restricted-provider');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const windows = process.env.SystemRoot || 'C:/Windows';
 const binaries = {
-  'node.exe': 'C:/Program Files/AgentoC/payload/node.exe',
-  [harness + '.exe']: harness === 'claude' ? 'C:/ProgramData/AgentoC/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe' : 'C:/ProgramData/AgentoC/harnesses/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe',
+  'node.exe': 'C:/Program Files/Ragent/payload/node.exe',
+  [harness + '.exe']: harness === 'claude' ? 'C:/ProgramData/Ragent/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe' : 'C:/ProgramData/Ragent/harnesses/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe',
 };
 const report = { schemaVersion: 1, caseId: id, root, profile, pass: false,
   startedAt: new Date().toISOString(), sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: source })).stdout.trim(),
@@ -52,7 +52,7 @@ try {
   await mkdir(root, { recursive: true }); await noReparse(root);
   await exec(join(windows, 'System32/icacls.exe'), [root, '/inheritance:r', '/grant:r',
     `*${(await assertOrdinaryWindowsExecutionIdentity()).sid}:(OI)(CI)F`], { windowsHide: true });
-  await save('.agentoc-restricted-run', profile); rootReady = true;
+  await save('.ragent-restricted-run', profile); rootReady = true;
   for (const name of ['runtime', 'workspace', 'control', 'other-grant', 'evidence', 'state']) await mkdir(join(root, name));
   for (const name of ['workspace', 'state']) await exec(join(windows, 'System32/icacls.exe'),
     [join(root, name), '/setintegritylevel', '(OI)(CI)L'], { windowsHide: true });
@@ -84,7 +84,7 @@ fs.writeFileSync(root+'/workspace/probe-write.txt','ok'); checks.workspaceWrite=
 for(const [name,path,write] of [['controlReadDenied','control/secret.txt'],['otherGrantReadDenied','other-grant/secret.txt'],['controlWriteDenied','control/no.txt',true],['runtimeWriteDenied','runtime/no.txt',true],['junctionEscapeDenied','workspace/escape-junction/secret.txt']]) {
  try{if(write)fs.writeFileSync(root+'/'+path,'no');else fs.readFileSync(root+'/'+path);checks[name]=false}catch(e){checks[name]=['EPERM','EACCES'].includes(e.code)}
 }
-checks.noControlEnvironment=!Object.keys(process.env).some(k=>/AGENTOC_CONFIG|OWNER|OAUTH|OPENAI_API_KEY|TOKEN|SECRET/.test(k));
+checks.noControlEnvironment=!Object.keys(process.env).some(k=>/RAGENT_CONFIG|OWNER|OAUTH|OPENAI_API_KEY|TOKEN|SECRET/.test(k));
 await new Promise(done=>{
  const socket=net.createConnection({host:'127.0.0.1',port:${tcpPort}});
  const timer=setTimeout(()=>{checks.loopbackDenied=true;socket.destroy();done()},1800);
@@ -121,10 +121,10 @@ process.exitCode=Object.values(checks).every(Boolean)?0:1;
   report.helperSha256 = hash(await readFile(helper));
   report.compilerSha256 = hash(await readFile(join(windows, 'Microsoft.NET/Framework64/v4.0.30319/csc.exe')));
   report.harnessVersion = JSON.parse(await readFile(harness === 'claude'
-    ? 'C:/ProgramData/AgentoC/harnesses/claude/node_modules/@anthropic-ai/claude-code/package.json'
-    : 'C:/ProgramData/AgentoC/harnesses/codex/node_modules/@openai/codex/package.json', 'utf8')).version;
+    ? 'C:/ProgramData/Ragent/harnesses/claude/node_modules/@anthropic-ai/claude-code/package.json'
+    : 'C:/ProgramData/Ragent/harnesses/codex/node_modules/@openai/codex/package.json', 'utf8')).version;
   await save('evidence/build.log', build.stdout + build.stderr);
-  const configDir = runInput?.configDir || 'C:/ProgramData/AgentoC/instances/owner/config';
+  const configDir = runInput?.configDir || 'C:/ProgramData/Ragent/instances/owner/config';
   const registry = createNativeProviderRegistry({ configDir });
   const providers = await registry.listProviderProfiles();
   const provider = providers.find(p => p.agentType === harness && (!runInput || p.id === runInput.providerProfileId) && p.enabled !== false && p.status === 'ready' && !p.baseUrl?.startsWith('https://chatgpt.com'));
@@ -233,7 +233,7 @@ finally {
   if (rootReady) {
     try {
       await noReparse(root);
-      if ((await readFile(join(root, '.agentoc-restricted-run'), 'utf8')) !== profile) throw new Error('Cleanup marker mismatch');
+      if ((await readFile(join(root, '.ragent-restricted-run'), 'utf8')) !== profile) throw new Error('Cleanup marker mismatch');
       for (const relative of ['control/credential.json', ...copied.map(name => `runtime/${name}`)]) {
         const path = join(root, relative);
         try { await noReparse(path); await unlink(path); report.removed.push(relative); }

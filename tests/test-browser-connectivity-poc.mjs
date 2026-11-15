@@ -27,9 +27,9 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const builtBinaryPath = process.env.AGENTOC_PHASE0_P2P_BINARY ? '' : join(tmpdir(), `agentoc-p2p-host-phase0-${process.pid}`);
-if (builtBinaryPath) execFileSync('go', ['build', '-o', builtBinaryPath, './cmd/agentoc-p2p-host'], { cwd: new URL('../p2p/', import.meta.url), stdio: 'ignore' });
-const binaryPath = process.env.AGENTOC_PHASE0_P2P_BINARY || builtBinaryPath || resolveP2PHostBinary();
+const builtBinaryPath = process.env.RAGENT_PHASE0_P2P_BINARY ? '' : join(tmpdir(), `ragent-p2p-host-phase0-${process.pid}`);
+if (builtBinaryPath) execFileSync('go', ['build', '-o', builtBinaryPath, './cmd/ragent-p2p-host'], { cwd: new URL('../p2p/', import.meta.url), stdio: 'ignore' });
+const binaryPath = process.env.RAGENT_PHASE0_P2P_BINARY || builtBinaryPath || resolveP2PHostBinary();
 await access(binaryPath);
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
@@ -102,19 +102,19 @@ try {
   });
   resources.push(async () => { host.stop(); await host.done; });
   await host.ready;
-  if (typeof host.child.__agentocWindowsJobList === 'function') {
-    const jobPids = await host.child.__agentocWindowsJobList();
+  if (typeof host.child.__ragentWindowsJobList === 'function') {
+    const jobPids = await host.child.__ragentWindowsJobList();
     assert.ok(jobPids?.pids?.map(Number).includes(Number(host.child.pid)), 'native P2P PE must be inside its Windows Job Object');
     console.log(`test-browser-connectivity-poc: Windows Job membership includes host pid ${host.child.pid}`);
   }
 
   const pocHtml = await readFile(new URL('../web-connectivity-poc/index.html', import.meta.url));
   const pocClient = await readFile(new URL('../web-connectivity-poc/client.js', import.meta.url));
-  const p2pClient = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+  const p2pClient = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
   const web = http.createServer((request, response) => {
     if (request.url === '/web-connectivity-poc/index.html') { response.writeHead(200, { 'content-type': 'text/html' }); response.end(pocHtml); return; }
     if (request.url === '/web-connectivity-poc/client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(pocClient); return; }
-    if (request.url === '/static/p2p/agentoc-p2p-client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(p2pClient); return; }
+    if (request.url === '/static/p2p/ragent-p2p-client.js') { response.writeHead(200, { 'content-type': 'text/javascript' }); response.end(p2pClient); return; }
     response.writeHead(404); response.end();
   });
   resources.push(() => close(web));
@@ -219,7 +219,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
   page.on('requestfailed', (request) => pageErrors.push(`${request.url()}: ${request.failure()?.errorText || 'request failed'}`));
   await page.addInitScript(({ grantUrl, instance, account, client, connection }) => {
-    window.AGENTOC_BROWSER_CONNECTIVITY_CONFIG = {
+    window.RAGENT_BROWSER_CONNECTIVITY_CONFIG = {
       grantEndpoint: grantUrl,
       instanceId: instance,
       accountId: account,
@@ -234,19 +234,19 @@ try {
     connection: connectionId,
   });
   await page.goto(`http://127.0.0.1:${webAddress.port}/web-connectivity-poc/index.html`, { waitUntil: 'networkidle' });
-  await page.waitForFunction(() => Boolean(window.AGENTOCA_BROWSER_CONNECTIVITY_POC), { timeout: 5000 }).catch(() => {
+  await page.waitForFunction(() => Boolean(window.RAGENTA_BROWSER_CONNECTIVITY_POC), { timeout: 5000 }).catch(() => {
     throw new Error(`browser PoC module did not load: ${pageErrors.join('; ')}`);
   });
   const result = await page.evaluate(async () => {
-    await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.connect();
-    await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.health();
+    await window.RAGENTA_BROWSER_CONNECTIVITY_POC.connect();
+    await window.RAGENTA_BROWSER_CONNECTIVITY_POC.health();
     return {
       response: document.getElementById('response').textContent,
       turn: document.getElementById('turn').textContent,
       bootstrap: document.getElementById('bootstrap').textContent,
       auth: document.getElementById('auth').textContent,
       state: document.getElementById('connection').textContent,
-      evidence: window.AGENTOCA_BROWSER_CONNECTIVITY_POC.client.turnEvidence || null,
+      evidence: window.RAGENTA_BROWSER_CONNECTIVITY_POC.client.turnEvidence || null,
     };
   });
   assert.equal(result.state, 'Connected');
@@ -255,14 +255,14 @@ try {
   assert.match(result.response, /^200 /);
   assert.equal(result.evidence, null, 'local direct harness must not claim TURN evidence');
   assert.match(result.turn, /Direct harness/);
-  assert.equal(observedRequest.headers['x-agentoc-browser-principal'], 'browser');
-  assert.equal(observedRequest.headers['x-agentoc-browser-permissions'], 'remote.read.health');
+  assert.equal(observedRequest.headers['x-ragent-browser-principal'], 'browser');
+  assert.equal(observedRequest.headers['x-ragent-browser-permissions'], 'remote.read.health');
   const tamperResult = await page.evaluate(async () => {
-    const issued = await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.issueGrant();
+    const issued = await window.RAGENTA_BROWSER_CONNECTIVITY_POC.issueGrant();
     const tampered = structuredClone(issued.bootstrap);
     tampered.connectionMode = 'p2p-only';
     try {
-      await window.AGENTOCA_BROWSER_CONNECTIVITY_POC.verifyConnectionBootstrapV2(tampered, issued.bootstrapPublicKey);
+      await window.RAGENTA_BROWSER_CONNECTIVITY_POC.verifyConnectionBootstrapV2(tampered, issued.bootstrapPublicKey);
       return 'accepted';
     } catch (error) {
       return error.message;

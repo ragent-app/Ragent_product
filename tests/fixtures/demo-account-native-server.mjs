@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { createAccountsServer } from '../../accounts/server.mjs';
 import { createDemoAccountPolicy } from '../../accounts/demo-credentials.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-demo-native-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-demo-native-'));
 const policyFile = join(root, 'policy.json');
 const policy = await createDemoAccountPolicy({ username: 'review-native-fixture',
   password: 'native-fixture-password-not-for-deployment', instanceId: 'inst_demo_native_fixture' });
@@ -24,7 +24,7 @@ async function close() {
   await new Promise(resolve => server.close(resolve));
   assertOwned(); await rm(root, { recursive: true, force: true });
 }
-function assertOwned() { if (!basename(root).startsWith('agentoc-demo-native-')) throw new Error('Unexpected fixture root'); }
+function assertOwned() { if (!basename(root).startsWith('ragent-demo-native-')) throw new Error('Unexpected fixture root'); }
 const timer = setTimeout(() => close(), 600_000);
 process.once('SIGTERM', close); process.once('SIGINT', close);
 await new Promise(resolve => server.listen(18420, '127.0.0.1', resolve));

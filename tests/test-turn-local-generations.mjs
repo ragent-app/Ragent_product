@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-const home = await mkdtemp(join(tmpdir(), 'agentoc-local-turn-generation-'));
-Object.assign(process.env, { HOME: home, AGENTOC_CONFIG_DIR: join(home, 'config'), AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1' });
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const home = await mkdtemp(join(tmpdir(), 'ragent-local-turn-generation-'));
+Object.assign(process.env, { HOME: home, RAGENT_CONFIG_DIR: join(home, 'config'), RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1' });
+delete process.env.RAGENT_INSTANCE_ROOT;
 const leases = await import('../chat/turn-connection-leases.mjs');
 const { createTurnConnectionId } = await import('../lib/turn-authorization.mjs');
 const { createTurnLeaseId } = await import('../lib/turn-lease-identity.mjs');
@@ -47,6 +47,6 @@ try {
   console.log('PASS local TURN mirror: exact IDs, no bulk blank release, immutable expiry, bounded history and durable clock rollback fence');
 } finally {
   const absolute = await realpath(home), parent = await realpath(tmpdir());
-  assert(absolute.startsWith(parent + sep) && absolute.includes('agentoc-local-turn-generation-'));
+  assert(absolute.startsWith(parent + sep) && absolute.includes('ragent-local-turn-generation-'));
   await rm(absolute, { recursive: true, force: true });
 }

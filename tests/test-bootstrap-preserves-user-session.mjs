@@ -5,9 +5,9 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 const root = mkdtempSync(join(tmpdir(), 'ragent-bootstrap-preserve-'));
 process.env.HOME = root;
-process.env.AGENTOC_INSTANCE_ROOT = join(root, 'guest');
-process.env.AGENTOC_CONFIG_DIR = join(root, 'guest', 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'guest', 'memory');
+process.env.RAGENT_INSTANCE_ROOT = join(root, 'guest');
+process.env.RAGENT_CONFIG_DIR = join(root, 'guest', 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'guest', 'memory');
 try {
   const { createSession, getSession } = await import('../chat/session-manager.mjs');
   const { appendEvents, readEventsAfter } = await import('../chat/history.mjs');

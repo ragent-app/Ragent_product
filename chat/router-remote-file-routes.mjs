@@ -18,7 +18,7 @@ export async function handleRemoteFileRoutes({req,res,pathname,authSession,write
       if(authSession?.principalKind!=='target_runtime_gateway'||authSession.targetRuntime!==true) {writeJson(res,403,{error:'Verified target-runtime grant required'});return true;}
       if(req.method==='GET') {writeJson(res,200,await signRemoteFileReceipt(await queryRemoteFile(target[1],target[2],authSession)));return true;}
       if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
-      if(process.env.AGENTOC_REMOTE_FILE_TRANSFER_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FILE_TRANSFER_DISABLED',error:'Remote file transfer is disabled'});return true;}
+      if(process.env.RAGENT_REMOTE_FILE_TRANSFER_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FILE_TRANSFER_DISABLED',error:'Remote file transfer is disabled'});return true;}
       if(!jsonSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
       const raw=await readBody(req,6*1024*1024);let body;try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       writeJson(res,200,await signRemoteFileReceipt(await receiveRemoteFile({...body,grantId:target[1],transferId:target[2]},authSession)));return true;
@@ -27,7 +27,7 @@ export async function handleRemoteFileRoutes({req,res,pathname,authSession,write
     const actor=await resolveResponsibilityActor(req,authSession);if(!actor) {writeJson(res,403,{error:'Verified instance owner required'});return true;}
     if(ownerTransfer?.[3]==='source-status') {if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;} writeJson(res,200,await queryRemoteFileFromSource(ownerTransfer[1],ownerTransfer[2],actor));return true;}
     if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
-    if((config||ownerTransfer)&&process.env.AGENTOC_REMOTE_FILE_TRANSFER_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FILE_TRANSFER_DISABLED',error:'Remote file transfer is disabled'});return true;}
+    if((config||ownerTransfer)&&process.env.RAGENT_REMOTE_FILE_TRANSFER_ENABLED!=='1') {writeJson(res,503,{code:'REMOTE_FILE_TRANSFER_DISABLED',error:'Remote file transfer is disabled'});return true;}
     if(!jsonSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
     const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
     if(config) {if(typeof body?.sessionId!=='string'||!body.sessionId.trim()) {writeJson(res,400,{error:'Session identity is required'});return true;} if(typeof requireSessionAccess!=='function') {writeJson(res,503,{error:'Session authorization is unavailable'});return true;} if(!await requireSessionAccess(res,authSession,body.sessionId)) return true; writeJson(res,200,await configureRemoteFileGrant(body,actor));return true;}

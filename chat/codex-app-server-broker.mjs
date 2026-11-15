@@ -29,15 +29,15 @@ import { MAC_CLEANUP_NOTIFICATION, MAC_CLEANUP_SPOOL_TYPE } from './macos-codex-
 import { createCodexBrokerTurnActivity } from './codex-broker-turn-activity.mjs';
 import { secureWindowsCodexBrokerPipe } from './codex-windows-broker-pipe-security.mjs';
 
-const BROKER_PING = 'agentoc-codex-broker-ping';
-const BROKER_PONG = 'agentoc-codex-broker-pong';
+const BROKER_PING = 'ragent-codex-broker-ping';
+const BROKER_PONG = 'ragent-codex-broker-pong';
 const BROKER_READY_TIMEOUT_MS = 30_000;
 const BROKER_LOCK_WAIT_MS = 15_000;
 const BROKER_INTERNAL_INITIALIZE_ID = -1;
 
 export function codexBrokerAccountDigest(value) {
   const id = typeof value === 'string' ? value.trim() : '';
-  return id ? createHash('sha256').update(`agentoc-codex-account:${id}`).digest('hex') : '';
+  return id ? createHash('sha256').update(`ragent-codex-account:${id}`).digest('hex') : '';
 }
 
 export function codexBrokerPolicyDigest(policy = WORKBENCH_EXECUTION_POLICY) {
@@ -57,7 +57,7 @@ function codexAuthAccountId(tokens) {
 // thread environment. Never derive it from an interrupt request itself.
 export function codexThreadRunTag(message) {
   if (!['thread/start', 'thread/resume'].includes(message?.method)) return '';
-  const value = message?.params?.config?.shell_environment_policy?.set?.AGENTOC_RUN_ID;
+  const value = message?.params?.config?.shell_environment_policy?.set?.RAGENT_RUN_ID;
   return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : '';
 }
 
@@ -112,9 +112,9 @@ export function buildCodexAppServerBrokerSocketPath(codexHomeDir, {
   if (!home) return '';
   const digest = createHash('sha256').update(platform === 'win32' ? home.toLowerCase() : home).digest('hex').slice(0, 32);
   if (platform === 'win32') {
-    return `\\\\.\\pipe\\agentoc-codex-${digest}`;
+    return `\\\\.\\pipe\\ragent-codex-${digest}`;
   }
-  const providerLocalPath = join(home, '.agentoc-codex-app-server.sock');
+  const providerLocalPath = join(home, '.ragent-codex-app-server.sock');
   // Linux sockaddr_un paths are capped at 108 bytes (macOS is lower). Native
   // provider homes include a hashed by-provider segment and can exceed that
   // limit under long config/test roots. Only shorten paths that cannot have a
@@ -125,7 +125,7 @@ export function buildCodexAppServerBrokerSocketPath(codexHomeDir, {
   // to this instance; include the complete home in the digest for isolation.
   const marker = '/by-provider/';
   const markerIndex = home.indexOf(marker);
-  const sharedRoot = markerIndex > 0 ? home.slice(0, markerIndex) : trimString(process.env.AGENTOC_PROVIDER_HOMES_DIR);
+  const sharedRoot = markerIndex > 0 ? home.slice(0, markerIndex) : trimString(process.env.RAGENT_PROVIDER_HOMES_DIR);
   if (platform === 'linux' && isAbsolute(sharedRoot)) {
     const within = relative(sharedRoot, home);
     if (within && !within.startsWith('..') && !isAbsolute(within)) {
@@ -135,10 +135,10 @@ export function buildCodexAppServerBrokerSocketPath(codexHomeDir, {
     }
   }
   const userId = typeof process.getuid === 'function' ? process.getuid() : 'user';
-  const temporaryPath = join(tmpdir(), `agentoc-codex-${userId}-${digest}.sock`);
+  const temporaryPath = join(tmpdir(), `ragent-codex-${userId}-${digest}.sock`);
   return Buffer.byteLength(temporaryPath, 'utf8') <= 100
     ? temporaryPath
-    : join('/tmp', `agentoc-codex-${userId}-${digest}.sock`);
+    : join('/tmp', `ragent-codex-${userId}-${digest}.sock`);
 }
 
 export function codexAppServerBrokerSocketPath(codexHomeDir) {
@@ -147,7 +147,7 @@ export function codexAppServerBrokerSocketPath(codexHomeDir) {
 
 export function codexAppServerBrokerLockPath(codexHomeDir) {
   const home = trimString(codexHomeDir);
-  return home ? join(home, '.agentoc-codex-app-server.lock') : '';
+  return home ? join(home, '.ragent-codex-app-server.lock') : '';
 }
 
 function brokerLockPath(socketPath, explicitLockPath = '') {
@@ -155,7 +155,7 @@ function brokerLockPath(socketPath, explicitLockPath = '') {
   if (explicit) return explicit;
   if (isWindowsNamedPipePath(socketPath)) {
     const digest = createHash('sha256').update(socketPath).digest('hex').slice(0, 32);
-    return join(tmpdir(), `agentoc-codex-broker-${digest}.lock`);
+    return join(tmpdir(), `ragent-codex-broker-${digest}.lock`);
   }
   return `${socketPath}.lock`;
 }
@@ -323,11 +323,11 @@ export async function ensureCodexAppServerBroker({
     await unlink(normalizedSocket).catch(() => {});
     const childEnv = {
       ...toSpawnEnvironment(env),
-      AGENTOC_CODEX_BROKER_SOCKET: normalizedSocket,
-      AGENTOC_CODEX_BROKER_UPSTREAM_FILE: file,
-      AGENTOC_CODEX_BROKER_UPSTREAM_ARGS: JSON.stringify(upstreamArgs),
-      AGENTOC_CODEX_BROKER_UPSTREAM_WINDOWS_VERBATIM: upstreamWindowsVerbatimArguments === true ? '1' : '0',
-      AGENTOC_CODEX_BROKER_UPSTREAM_CWD: trimString(cwd) || process.cwd(),
+      RAGENT_CODEX_BROKER_SOCKET: normalizedSocket,
+      RAGENT_CODEX_BROKER_UPSTREAM_FILE: file,
+      RAGENT_CODEX_BROKER_UPSTREAM_ARGS: JSON.stringify(upstreamArgs),
+      RAGENT_CODEX_BROKER_UPSTREAM_WINDOWS_VERBATIM: upstreamWindowsVerbatimArguments === true ? '1' : '0',
+      RAGENT_CODEX_BROKER_UPSTREAM_CWD: trimString(cwd) || process.cwd(),
     };
     if (assertLaunchBoundary) await assertLaunchBoundary();
     brokerChild = spawnImpl(process.execPath, [scriptPath, '--broker'], {
@@ -360,7 +360,7 @@ function initializeMessage() {
     method: 'initialize',
     id: BROKER_INTERNAL_INITIALIZE_ID,
     params: {
-      clientInfo: { name: 'agentoc-codex-broker', title: 'AgentoC Codex broker', version: '1' },
+      clientInfo: { name: 'ragent-codex-broker', title: 'Ragent Codex broker', version: '1' },
       capabilities: { experimentalApi: true },
     },
   };
@@ -386,13 +386,13 @@ function isRequest(message) {
 }
 
 function runBroker() {
-  const socketPath = normalizeSocketPath(process.env.AGENTOC_CODEX_BROKER_SOCKET || readArg('--socket'));
-  const upstreamFile = trimString(process.env.AGENTOC_CODEX_BROKER_UPSTREAM_FILE);
-  const upstreamCwd = trimString(process.env.AGENTOC_CODEX_BROKER_UPSTREAM_CWD) || process.cwd();
-  const upstreamWindowsVerbatimArguments = process.env.AGENTOC_CODEX_BROKER_UPSTREAM_WINDOWS_VERBATIM === '1';
+  const socketPath = normalizeSocketPath(process.env.RAGENT_CODEX_BROKER_SOCKET || readArg('--socket'));
+  const upstreamFile = trimString(process.env.RAGENT_CODEX_BROKER_UPSTREAM_FILE);
+  const upstreamCwd = trimString(process.env.RAGENT_CODEX_BROKER_UPSTREAM_CWD) || process.cwd();
+  const upstreamWindowsVerbatimArguments = process.env.RAGENT_CODEX_BROKER_UPSTREAM_WINDOWS_VERBATIM === '1';
   let upstreamArgs = [];
   try {
-    upstreamArgs = JSON.parse(process.env.AGENTOC_CODEX_BROKER_UPSTREAM_ARGS || '[]');
+    upstreamArgs = JSON.parse(process.env.RAGENT_CODEX_BROKER_UPSTREAM_ARGS || '[]');
   } catch {}
   if (!socketPath || !upstreamFile || !Array.isArray(upstreamArgs)) {
     console.error('[codex-broker] invalid broker environment');
@@ -581,7 +581,7 @@ function runBroker() {
       return;
     }
     if (serverRequest) {
-      if (message.method === 'agentoc/windowsHook' || message.method === 'agentoc/registerWindowsHook') {
+      if (message.method === 'ragent/windowsHook' || message.method === 'ragent/registerWindowsHook') {
         try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32601, message: 'Reserved broker method' } })}\n`); } catch {}
         return;
       }
@@ -590,7 +590,7 @@ function runBroker() {
         try { upstream?.stdin?.write(`${JSON.stringify({ id: message.id, error: { code: -32000, message: 'No connected owner for this thread' } })}\n`); } catch {}
         return;
       }
-      const clientRequestId = `agentoc-server-${nextRequestId++}`;
+      const clientRequestId = `ragent-server-${nextRequestId++}`;
       pendingServerRequests.set(clientRequestId, { client, upstreamId: message.id });
       if (!sendClient(client, { ...message, id: clientRequestId })) {
         pendingServerRequests.delete(clientRequestId);
@@ -649,7 +649,7 @@ function runBroker() {
       args: upstreamArgs,
       cwd: upstreamCwd,
       env: buildSharedCodexProcessEnvironment(buildWorkbenchCodexEnvironment(process.env), {
-        basePath: process.env.AGENTOC_CODEX_BROKER_BASE_PATH || '',
+        basePath: process.env.RAGENT_CODEX_BROKER_BASE_PATH || '',
       }),
       windowsVerbatimArguments: upstreamWindowsVerbatimArguments,
     });
@@ -699,7 +699,7 @@ function runBroker() {
 
   const handleClientMessage = (client, message) => {
     if (!message || typeof message !== 'object') return;
-    if (message.type === 'agentoc-codex-broker-retire') {
+    if (message.type === 'ragent-codex-broker-retire') {
       const accountMatches = Boolean(accountDigest && message.expectedAccountDigest === accountDigest);
       const idle = accountMatches && upstreamReady && !stopping && clients.size === 1
         && turnActivity.isIdle() && pending.size === 0 && pendingServerRequests.size === 0
@@ -707,14 +707,14 @@ function runBroker() {
         && threadStartQueue.length === 0 && activeThreadRequestId === null
         && pendingHookCalls.size === 0 && (typeof mcpOAuthOwners === 'undefined' || mcpOAuthOwners.size === 0);
       if (!idle) {
-        sendClient(client, { type: 'agentoc-codex-broker-retire-result', accepted: false });
+        sendClient(client, { type: 'ragent-codex-broker-retire-result', accepted: false });
         return;
       }
       // Stop accepting connections in the same event-loop turn as the idle
       // check, so no new request can start before shutdown begins.
       stopping = true;
       server?.close();
-      sendClient(client, { type: 'agentoc-codex-broker-retire-result', accepted: true });
+      sendClient(client, { type: 'ragent-codex-broker-retire-result', accepted: true });
       void shutdown();
       return;
     }
@@ -733,7 +733,7 @@ function runBroker() {
       return;
     }
     if (message.method === 'initialized') return;
-    if (message.method === 'agentoc/registerWindowsHook' && isRequest(message)) {
+    if (message.method === 'ragent/registerWindowsHook' && isRequest(message)) {
       const sourcePath = message.params?.sourcePath;
       const order = message.params?.displayOrder;
       if (typeof sourcePath !== 'string' || !sourcePath || !Number.isSafeInteger(order) || order < 0 || order > 10000) {
@@ -745,7 +745,7 @@ function runBroker() {
       sendClient(client, { id: message.id, result: {} });
       return;
     }
-    if (message.type === 'agentoc-codex-windows-hook') {
+    if (message.type === 'ragent-codex-windows-hook') {
       const event = message.event;
       const deny = (code, diagnostics) => sendClient(client, { error: 'No matching active managed hook', code, ...(diagnostics ? { diagnostics } : {}) });
       const tryClaim = (remaining) => {
@@ -770,11 +770,11 @@ function runBroker() {
           }
           return;
         }
-        const id = `agentoc-hook-${nextRequestId++}`;
+        const id = `ragent-hook-${nextRequestId++}`;
         const timer = setTimeout(() => { pendingHookCalls.delete(id); deny('HOOK_OWNER_TIMEOUT'); }, 60_000);
         timer.unref?.();
         pendingHookCalls.set(id, { owner, client, timer });
-        if (!sendClient(owner, { id, method: 'agentoc/windowsHook', params: { event } })) {
+        if (!sendClient(owner, { id, method: 'ragent/windowsHook', params: { event } })) {
           clearTimeout(timer); pendingHookCalls.delete(id); deny('HOOK_OWNER_DISCONNECTED');
         }
       };
@@ -919,7 +919,7 @@ function runBroker() {
       await chmod(socketPath, 0o660).catch(() => {});
       try {
         await secureWindowsCodexBrokerPipe(socketPath, process.pid, {
-          serviceMode: process.env.AGENTOC_CODEX_BROKER_SERVICE_MODE === '1',
+          serviceMode: process.env.RAGENT_CODEX_BROKER_SERVICE_MODE === '1',
         });
       } catch (error) {
         console.error(`[codex-broker] pipe security failed: ${error?.code || 'unknown'}`);
@@ -945,8 +945,8 @@ function runBroker() {
       stopping = true;
       for (const client of clients) client.end();
       try {
-        if (typeof upstream?.__agentocWindowsTerminate === 'function') {
-          await upstream.__agentocWindowsTerminate(0xC0DE);
+        if (typeof upstream?.__ragentWindowsTerminate === 'function') {
+          await upstream.__ragentWindowsTerminate(0xC0DE);
         } else {
           upstream?.kill?.('SIGTERM');
         }

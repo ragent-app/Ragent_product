@@ -15,8 +15,8 @@ function authorize(db, organizationId, actor, capability) {
   required(actor?.principalId, 'authenticated principal');
   if (actor.kind === 'user' && actor.role === 'owner') return org;
   if (actor.kind === 'service' && actor.role === 'factory_scheduler') {
-    const configuredOwner = String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim();
-    const allowedOrganizations = String(process.env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map(value => value.trim()).filter(Boolean);
+    const configuredOwner = String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID || '').trim();
+    const allowedOrganizations = String(process.env.RAGENT_FACTORY_ORGANIZATIONS || '').split(',').map(value => value.trim()).filter(Boolean);
     if (configuredOwner && actor.principalId === `factory-scheduler:${configuredOwner}` && allowedOrganizations.includes(organizationId)
         && ['factory.read', 'factory.dispatch', 'factory.execution', 'factory.shadow.sync'].includes(capability)) return org;
     throw factoryError('FACTORY_FORBIDDEN', 'Factory service scope is not authorized', 403);

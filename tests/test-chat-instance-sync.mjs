@@ -16,34 +16,34 @@ function runScript(args) {
   });
 }
 
-const sandboxRoot = mkdtempSync(join(tmpdir(), 'agentoc-chat-instance-sync-'));
+const sandboxRoot = mkdtempSync(join(tmpdir(), 'ragent-chat-instance-sync-'));
 const sourceHome = join(sandboxRoot, 'source-home');
 const targetHome = join(sandboxRoot, 'target-home');
 const instanceRoot = join(sandboxRoot, 'instance-root');
 
 try {
-  mkdirSync(join(sourceHome, '.config', 'agentoc'), { recursive: true });
-  writeFileSync(join(sourceHome, '.config', 'agentoc', 'auth.json'), JSON.stringify({ token: 'fresh-token' }, null, 2));
+  mkdirSync(join(sourceHome, '.config', 'ragent'), { recursive: true });
+  writeFileSync(join(sourceHome, '.config', 'ragent', 'auth.json'), JSON.stringify({ token: 'fresh-token' }, null, 2));
 
-  mkdirSync(join(targetHome, '.config', 'agentoc'), { recursive: true });
-  mkdirSync(join(targetHome, '.agentoc', 'memory'), { recursive: true });
-  writeFileSync(join(targetHome, '.config', 'agentoc', 'stale.txt'), 'stale');
-  writeFileSync(join(targetHome, '.agentoc', 'memory', 'stale.md'), 'stale');
+  mkdirSync(join(targetHome, '.config', 'ragent'), { recursive: true });
+  mkdirSync(join(targetHome, '.ragent', 'memory'), { recursive: true });
+  writeFileSync(join(targetHome, '.config', 'ragent', 'stale.txt'), 'stale');
+  writeFileSync(join(targetHome, '.ragent', 'memory', 'stale.md'), 'stale');
 
   const syncResult = runScript(['sync', '--home', targetHome, '--sync-from-home', sourceHome]);
   assert.equal(syncResult.status, 0, `sync should succeed without --port: ${syncResult.stderr}`);
   assert.equal(
-    JSON.parse(readFileSync(join(targetHome, '.config', 'agentoc', 'auth.json'), 'utf8')).token,
+    JSON.parse(readFileSync(join(targetHome, '.config', 'ragent', 'auth.json'), 'utf8')).token,
     'fresh-token',
-    'sync should mirror agentoc config into the target home',
+    'sync should mirror ragent config into the target home',
   );
   assert.equal(
-    existsSync(join(targetHome, '.config', 'agentoc', 'stale.txt')),
+    existsSync(join(targetHome, '.config', 'ragent', 'stale.txt')),
     false,
     'sync should delete stale config files from the target home',
   );
   assert.equal(
-    existsSync(join(targetHome, '.agentoc', 'memory')),
+    existsSync(join(targetHome, '.ragent', 'memory')),
     false,
     'sync should remove mirrored memory when the source home has none',
   );
@@ -58,7 +58,7 @@ try {
   assert.equal(
     JSON.parse(readFileSync(join(instanceRoot, 'config', 'auth.json'), 'utf8')).token,
     'fresh-token',
-    'sync should mirror agentoc config into the instance root config dir',
+    'sync should mirror ragent config into the instance root config dir',
   );
   assert.equal(
     existsSync(join(instanceRoot, 'config', 'stale.txt')),

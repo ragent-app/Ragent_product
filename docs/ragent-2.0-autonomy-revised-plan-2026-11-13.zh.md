@@ -6,7 +6,7 @@
 
 Ragent 2.0 应在已有 Factory Work Graph 上补齐持续责任、事件准入和受限决策，先让现有执行链闭环，再扩展长期自治。当前最大的风险是已有模块之间尚未完整接通；继续按原方案新增 Goal-DAG、Scheduler 和执行状态存储，会增加竞争状态和恢复歧义。
 
-审计基线为 `G:/AgentoC/Ragent_product` 的 `main`，提交 `baf143c3ecfe823e1dadc52f6ea2045e3e1d5c91`。本次阅读了启动、路由、领域存储、调度、执行适配、权限、预算、候选成果、验收、触发器、CI 观察入口、记忆、连接器及客户端接线。结论来自静态调用链和已有文档；没有运行 Harness、操作生产数据库、启动服务或执行测试。
+审计基线为 `G:/Ragent/Ragent_product` 的 `main`，提交 `baf143c3ecfe823e1dadc52f6ea2045e3e1d5c91`。本次阅读了启动、路由、领域存储、调度、执行适配、权限、预算、候选成果、验收、触发器、CI 观察入口、记忆、连接器及客户端接线。结论来自静态调用链和已有文档；没有运行 Harness、操作生产数据库、启动服务或执行测试。
 
 工作区存在并行修改。审计过程中 `factory-checks.mjs`、`factory-execution-adapter.mjs`、`factory-integration.mjs` 继续发生变化，另有未跟踪的 `factory-integration-queue.mjs`。核心缺口以以上固定提交核对；工作区组合验证增量单独标为“开发中”，不能当作已交付能力，也不能在另一条开发线重复实现。本方案不覆盖原有 Factory 文档，不修改运行代码。
 
@@ -205,7 +205,7 @@ Connector SDK 当前主要解决入站消息创建/复用 Session、投递、重
 
 现有检查按改动选择：Trigger 对应 `test-http-triggers.mjs`；旧执行基础对应 `test-collaboration-store.mjs`、`test-collaboration-orchestrator.mjs`；账本对应 `test-orchestration-store.mjs` / `test-orchestration-reconciler.mjs`；组织预算和恢复需核对 S22/S23 等既有场景实际覆盖；权限对应既有 permission-policy、capability-grant 和 execution-boundary 检查。旧 fixture 不符合新行为时，先核对契约变更，不擅改 expected output 让检查变绿。
 
-保持 Factory 默认不准入新工作。现有控制开关检查 `AGENTOC_FACTORY_CONTROL_ENABLED === 'true'`，scheduler 开关检查 `AGENTOC_FACTORY_SCHEDULER_ENABLED === '1'`，组织白名单、owner 授权来源和 Governor 另有前提；这应统一配置解析并在能力页展示拒绝原因。关闭新准入后继续观察已有工作，避免开关关闭导致状态失联。
+保持 Factory 默认不准入新工作。现有控制开关检查 `RAGENT_FACTORY_CONTROL_ENABLED === 'true'`，scheduler 开关检查 `RAGENT_FACTORY_SCHEDULER_ENABLED === '1'`，组织白名单、owner 授权来源和 Governor 另有前提；这应统一配置解析并在能力页展示拒绝原因。关闭新准入后继续观察已有工作，避免开关关闭导致状态失联。
 
 发布先单项目、单组织、单权威实例、经验证的 Harness/平台组合。灰度前记录数据库与产物备份边界；回滚先关新事件准入和新派发，保留读取、取消和对账。已执行外部操作不靠数据库回滚撤销；unknown 保留人工核实。加法迁移不得删除历史 Session、Run、候选或旧责任证据。
 

@@ -7,7 +7,7 @@ function buildHarness({ publishDelegatedResult } = {}) {
     id: 'session-1',
     tool: 'fake-tool',
     autoRenamePending: true,
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Goal completion flow',
     goal: {
       objective: 'Finish the migration',

@@ -15,7 +15,7 @@ execFile[Symbol.for('nodejs.util.promisify.custom')]=async(exe,args,options)=>{
 globalThis.__ownerInspectionAdapter={execFile};
 registerHooks({resolve(specifier,context,next){if(files.includes(context.parentURL)&&specifier==='node:child_process')return {url:'qa:inspection-child',shortCircuit:true};return next(specifier,context);},load(url,context,next){return url==='qa:inspection-child'?{format:'module',source:'export const execFile=globalThis.__ownerInspectionAdapter.execFile;',shortCircuit:true}:next(url,context);}});
 const {inspectInstalledOwnerBootstrap}=await import(files[0]),{inspectInstalledOwnerActivation}=await import(files[1]),{inspectInstalledOwnerActivationService}=await import(files[2]);
-const context={instanceRoot:'C:/ProgramData/AgentoC/instances/owner',instanceId:'inst_'+'a'.repeat(32),host:'127.0.0.1',port:7690};
+const context={instanceRoot:'C:/ProgramData/Ragent/instances/owner',instanceId:'inst_'+'a'.repeat(32),host:'127.0.0.1',port:7690};
 const entries=[['discovery',()=>inspectInstalledOwnerBootstrap(),'OBD_INSPECTION_TIMEOUT'],['activation',()=>inspectInstalledOwnerActivation(),'OBD_INSPECTION_TIMEOUT'],['service',()=>inspectInstalledOwnerActivationService(context),'OSV_INSPECTION_TIMEOUT']];
 for(const [name,call,timeout]of entries){mode='missing';await assert.rejects(call(),{code:'OBD_RELEASE_NOT_INSTALLED'});mode='timeout';await assert.rejects(call(),{code:timeout,message:timeout});}
 mode='abort';const abort=new AbortController();abort.abort();await assert.rejects(inspectInstalledOwnerActivationService(context,{signal:abort.signal}),{code:'OSV_ABORTED'});

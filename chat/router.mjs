@@ -191,8 +191,8 @@ const loginTemplatePath = join(__dirname, '..', 'templates', 'login.html');
 const mobileInstallTemplatePath = join(__dirname, '..', 'templates', 'mobile-install.html');
 const staticDir = join(__dirname, '..', 'static');
 const packageJsonPath = join(__dirname, '..', 'package.json');
-const packageBuildVersionPath = join(__dirname, '..', '.agentoc-package-version');
-const packageSourceCommitPath = join(__dirname, '..', '.agentoc-source-commit');
+const packageBuildVersionPath = join(__dirname, '..', '.ragent-package-version');
+const packageSourceCommitPath = join(__dirname, '..', '.ragent-source-commit');
 const serviceBuildRoots = [
   join(__dirname, '..', 'chat'),
   join(__dirname, '..', 'lib'),
@@ -287,12 +287,12 @@ const staticDirResolved = resolve(staticDir);
 // the asset pipeline and must not share the JSON budget.
 const MESSAGE_JSON_MAX_BYTES = Math.max(
   256 * 1024,
-  Number.parseInt(process.env.AGENTOC_MESSAGE_JSON_MAX_BYTES || String(4 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MESSAGE_JSON_MAX_BYTES || String(4 * 1024 * 1024), 10)
     || 4 * 1024 * 1024,
 );
 const MESSAGE_MULTIPART_MAX_BYTES = Math.max(
   MESSAGE_JSON_MAX_BYTES,
-  Number.parseInt(process.env.AGENTOC_MESSAGE_MULTIPART_MAX_BYTES || String(64 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MESSAGE_MULTIPART_MAX_BYTES || String(64 * 1024 * 1024), 10)
     || 64 * 1024 * 1024,
 );
 const uploadedMediaMimeTypes = {
@@ -717,8 +717,8 @@ function renderPageTemplate(template, nonce, replacements = {}) {
   };
   if (!Object.prototype.hasOwnProperty.call(replacements, 'BOOTSTRAP_SCRIPT_TAGS')) {
     merged.BOOTSTRAP_SCRIPT_TAGS = [
-      `<script nonce="${merged.NONCE}">window.__AGENTOC_BUILD__ = ${merged.BUILD_JSON};</script>`,
-      `<script nonce="${merged.NONCE}">window.__AGENTOC_BOOTSTRAP__ = ${merged.BOOTSTRAP_JSON};</script>`,
+      `<script nonce="${merged.NONCE}">window.__RAGENT_BUILD__ = ${merged.BUILD_JSON};</script>`,
+      `<script nonce="${merged.NONCE}">window.__RAGENT_BOOTSTRAP__ = ${merged.BOOTSTRAP_JSON};</script>`,
     ].join('\n');
   }
   return Object.entries(merged).reduce(
@@ -1183,7 +1183,7 @@ async function resolveStaticAsset(pathname, query = {}) {
 
 function buildHeaders(headers = {}) {
   return {
-    'X-AgentoC-Build': BUILD_INFO.title,
+    'X-Ragent-Build': BUILD_INFO.title,
     ...headers,
   };
 }
@@ -1240,7 +1240,7 @@ function writeCachedResponse(req, res, {
   const headers = {
     'Cache-Control': cacheControl,
     ETag: etag,
-    'X-AgentoC-Build': BUILD_INFO.title,
+    'X-Ragent-Build': BUILD_INFO.title,
     ...extraHeaders,
   };
   if (vary) headers.Vary = vary;
@@ -1484,7 +1484,7 @@ export async function handleRequest(req, res) {
   // Target-runtime requests use an Accounts-signed grant instead of an owner
   // cookie. Reject mixed credentials so the effective principal is explicit.
   let targetRuntimeAuth = null;
-  if (req.headers?.['x-agentoc-target-grant']) {
+  if (req.headers?.['x-ragent-target-grant']) {
     if (req.headers.cookie || req.headers.authorization) {
       writeJson(res, 400, {
         error: 'Target runtime grant cannot be combined with another credential',
@@ -1659,7 +1659,7 @@ export async function handleRequest(req, res) {
   }
 
   // The Google Calendar OAuth callback arrives as a browser redirect from
-  // accounts.google.com without an AgentoC session cookie, so it must be
+  // accounts.google.com without an Ragent session cookie, so it must be
   // handled before requireAuth below. Only the callback path is exposed here;
   // every other connector API route keeps its per-route auth checks.
   if (pathname === '/api/connectors/calendar/google/callback' && req.method === 'GET') {

@@ -32,7 +32,7 @@ test('automatic handoff fences an unused home and routes to the verified running
   const server = createServer((socket) => {
     createInterface({ input: socket }).on('line', (line) => {
       const ping = JSON.parse(line);
-      socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true,
+      socket.write(`${JSON.stringify({ type: 'ragent-codex-broker-pong', ready: true,
         accountMatches: ping.expectedAccountDigest === codexBrokerAccountDigest('account-a') })}\n`);
     });
   });
@@ -44,7 +44,7 @@ test('automatic handoff fences an unused home and routes to the verified running
   t.after(() => new Promise((done) => server.close(done)));
   assert.equal(await routing, canonical);
   await assert.rejects(assertCodexHomeNotFenced(legacy), { code: 'CODEX_HOME_RETIRED' });
-  const fence = await readFile(join(legacy, '.agentoc-codex-home-fence.json'), 'utf8');
+  const fence = await readFile(join(legacy, '.ragent-codex-home-fence.json'), 'utf8');
   assert.ok(!fence.includes('account-a'));
   assert.equal(await coordinateCodexAccountRoute({ ...base, candidateHomeRoot: legacy }), canonical);
 });

@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-spool-delta-'));
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
+const home = mkdtempSync(join(tmpdir(), 'ragent-spool-delta-'));
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
 
 try {
   const {

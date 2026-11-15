@@ -4,9 +4,9 @@ import {join} from 'node:path';
 import {randomBytes,generateKeyPairSync,sign,createHash} from 'node:crypto';
 export async function localControlAuthority(root){
   const config=join(root,'config');await mkdir(config,{recursive:true});
-  Object.assign(process.env,{AGENTOC_INSTANCE_ROOT:root,AGENTOC_CONFIG_DIR:config,AGENTOC_MEMORY_DIR:join(root,'memory'),
-    AGENTOC_RUN_SPOOL_DIR:join(root,'spool'),AGENTOC_WORK_ROOT_DIR:join(root,'work'),AGENTOC_PROVIDER_HOMES_DIR:join(root,'providers'),
-    AGENTOC_HARNESS_ROOT:join(root,'harnesses'),AGENTOC_LOCAL_WEB_AUTH:'0',AGENTOC_WINDOWS_SERVICE_MODE:'1',ProgramData:'C:/ProgramData'});
+  Object.assign(process.env,{RAGENT_INSTANCE_ROOT:root,RAGENT_CONFIG_DIR:config,RAGENT_MEMORY_DIR:join(root,'memory'),
+    RAGENT_RUN_SPOOL_DIR:join(root,'spool'),RAGENT_WORK_ROOT_DIR:join(root,'work'),RAGENT_PROVIDER_HOMES_DIR:join(root,'providers'),
+    RAGENT_HARNESS_ROOT:join(root,'harnesses'),RAGENT_LOCAL_WEB_AUTH:'0',RAGENT_WINDOWS_SERVICE_MODE:'1',ProgramData:'C:/ProgramData'});
   const {loadOrCreateInstanceIdentity}=await import('../../lib/instance-identity.mjs');
   const {TemporaryPairingRegistry}=await import('../../chat/temporary-pairing-registry.mjs');
   const {TemporaryPairingHost}=await import('../../chat/temporary-pairing-host.mjs');

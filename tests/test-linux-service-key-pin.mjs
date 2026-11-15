@@ -5,7 +5,7 @@ import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { enrollLinuxServiceKeyPin, loadLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 
 test('root pin requires authenticated fingerprint, refuses replacement and unsafe files', { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-  const directory = await mkdtemp('/srv/agentoc-pin-test-');
+  const directory = await mkdtemp('/srv/ragent-pin-test-');
   const filename = `${directory}/service-scope-public.json`;
   try {
     const { publicKey } = generateKeyPairSync('ed25519');

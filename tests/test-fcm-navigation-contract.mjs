@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createFcmMessageData } from '../chat/fcm.mjs';
 
-const payload = { sessionId: 'same-session', kind: 'attention', awaitingKey: 'q1', title: 'AgentoC', body: 'Question' };
+const payload = { sessionId: 'same-session', kind: 'attention', awaitingKey: 'q1', title: 'Ragent', body: 'Question' };
 const a = createFcmMessageData({ ...payload, instanceId: 'forged', notificationContractVersion: '99', token: 'secret', autoStart: true }, 'inst_a');
 assert.equal(a.instanceId, 'inst_a');
 assert.equal(a.notificationContractVersion, '1');

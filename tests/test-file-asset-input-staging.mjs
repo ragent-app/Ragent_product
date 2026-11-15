@@ -6,15 +6,15 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const testRoot = mkdtempSync(join(tmpdir(), 'agentoc-file-asset-stage-'));
+const testRoot = mkdtempSync(join(tmpdir(), 'ragent-file-asset-stage-'));
 const home = join(testRoot, 'home');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 mkdirSync(configDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_ASSET_STORAGE_BASE_URL = '';
-process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID = '';
-process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY = '';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_ASSET_STORAGE_BASE_URL = '';
+process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID = '';
+process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY = '';
 
 const { CHAT_FILE_ASSETS_DIR, CHAT_RUNS_DIR, CHAT_IMAGES_DIR } = await import('../lib/config.mjs');
 const { getFileAsset, publishLocalFileAssetFromPath } = await import('../chat/file-assets.mjs');
@@ -163,7 +163,7 @@ await assert.rejects(
 
 const sidecarSource = readFileSync(new URL('../chat/runner-sidecar.mjs', import.meta.url), 'utf8');
 assert.equal(sidecarSource.includes("from './file-assets.mjs'"), false);
-assert.match(sidecarSource, /delete env\.AGENTOC_CONFIG_DIR/);
+assert.match(sidecarSource, /delete env\.RAGENT_CONFIG_DIR/);
 assert.equal(existsSync(join(CHAT_RUNS_DIR, 'run-stage-normal', 'inputs')), true);
 
 console.log('file-asset-input-staging: normal and adversarial checks passed');

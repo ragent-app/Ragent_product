@@ -4,12 +4,12 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-history-index-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-history-index-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
 
 const { appendEvent, appendEvents, readEventBody, readEventsAfter, readEventsPage } = await import('../chat/history.mjs');
 const { getSessionEventsAfter, getSessionTimelinePage } = await import('../chat/session-manager.mjs');
@@ -81,7 +81,7 @@ try {
   const controlMessage = await appendEvent(sessionId, {
     type: 'message',
     role: 'assistant',
-    content: 'Visible <agentoc-result-packet>{"state":"completed"}</agentoc-result-packet> tail',
+    content: 'Visible <ragent-result-packet>{"state":"completed"}</ragent-result-packet> tail',
   });
   const controlMessageBody = await readEventBody(sessionId, controlMessage.seq);
   assert.equal(

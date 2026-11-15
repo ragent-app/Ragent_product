@@ -180,7 +180,7 @@ assert.equal(invocation.capabilities.supportsExternalUsageProjection, false);
 assert.equal(invocation.permissionMode, 'never-read-only');
 assert.equal(invocation.isCodexAppServerFamily, true);
 
-// `full-auto` is an AgentoC risk mode, not a provider CLI flag. The runtime
+// `full-auto` is an Ragent risk mode, not a provider CLI flag. The runtime
 // contract maps it to the selected harness's native permission behavior.
 if (process.platform === 'win32') {
   assert.throws(() => buildRuntimeInvocation('codex-json', 'hello', { riskMode: 'full-auto' }, 'codex-cli'), { code: 'PERMISSION_PROFILE_UNSUPPORTED_RUNTIME' });

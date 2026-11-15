@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-history-strict-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-history-strict-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
 
 const { CHAT_HISTORY_DIR } = await import('../lib/config.mjs');
 const { appendEvent, loadMeta, readEventBody, readEventsPage } = await import('../chat/history.mjs');

@@ -15,9 +15,9 @@ spec.loader.exec_module(driver)
 
 
 class TemporaryPairingQaDriverTest(unittest.TestCase):
-    paths = dict(node_path=r"C:\Program Files\AgentoC\payload\node.exe",
-                 cli_path=r"C:\Program Files\AgentoC\payload\cli.js",
-                 config_dir=r"C:\ProgramData\AgentoC\instances\owner\config")
+    paths = dict(node_path=r"C:\Program Files\Ragent\payload\node.exe",
+                 cli_path=r"C:\Program Files\Ragent\payload\cli.js",
+                 config_dir=r"C:\ProgramData\Ragent\instances\owner\config")
 
     def test_windows_owner_uses_installed_cli_service_context_and_stdin_body(self):
         result = subprocess.CompletedProcess([], 0, b'{"status":"ready"}', b'')
@@ -28,10 +28,10 @@ class TemporaryPairingQaDriverTest(unittest.TestCase):
         self.assertEqual([self.paths["node_path"], self.paths["cli_path"], "api", "POST", driver.API,
                           "--body", "-"], args[0])
         self.assertEqual({"claimTtlMs": 120000}, json.loads(kwargs["input"]))
-        self.assertEqual("1", kwargs["env"]["AGENTOC_WINDOWS_SERVICE_MODE"])
-        self.assertEqual(r"C:\ProgramData\AgentoC\instances\owner", kwargs["env"]["AGENTOC_INSTANCE_ROOT"])
-        self.assertEqual("http://127.0.0.1:7690", kwargs["env"]["AGENTOC_CHAT_BASE_URL"])
-        self.assertEqual("", kwargs["env"]["AGENTOC_RUN_SPOOL_DIR"])
+        self.assertEqual("1", kwargs["env"]["RAGENT_WINDOWS_SERVICE_MODE"])
+        self.assertEqual(r"C:\ProgramData\Ragent\instances\owner", kwargs["env"]["RAGENT_INSTANCE_ROOT"])
+        self.assertEqual("http://127.0.0.1:7690", kwargs["env"]["RAGENT_CHAT_BASE_URL"])
+        self.assertEqual("", kwargs["env"]["RAGENT_RUN_SPOOL_DIR"])
         self.assertNotIn("shell", kwargs)
 
     def test_windows_permission_denial_reports_required_access_without_raw_credentials(self):

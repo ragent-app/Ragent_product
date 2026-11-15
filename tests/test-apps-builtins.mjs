@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-apps-builtins-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-apps-builtins-'));
 const configDir = join(tempHome, 'instance-config');
 const localBin = join(tempHome, 'bin');
 mkdirSync(configDir, { recursive: true });
@@ -31,7 +31,7 @@ writeFileSync(
 );
 process.env.HOME = tempHome;
 process.env.CHAT_PORT = '7692';
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 process.env.PATH = `${localBin}:${process.env.PATH || ''}`;
 
 const appsModule = await import(pathToFileURL(join(repoRoot, 'chat', 'apps.mjs')).href);

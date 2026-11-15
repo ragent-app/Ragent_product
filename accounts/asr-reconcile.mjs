@@ -82,10 +82,10 @@ export async function runAsrReconcileCommand({ argv = [], env = process.env, rep
   let pool;
   try {
     if (!repository) {
-      const databaseUrl = typeof env.AGENTOC_ACCOUNTS_DATABASE_URL === 'string'
-        ? env.AGENTOC_ACCOUNTS_DATABASE_URL.trim() : '';
+      const databaseUrl = typeof env.RAGENT_ACCOUNTS_DATABASE_URL === 'string'
+        ? env.RAGENT_ACCOUNTS_DATABASE_URL.trim() : '';
       if (!databaseUrl) {
-        stderr('asr-reconcile: AGENTOC_ACCOUNTS_DATABASE_URL is missing from the protected environment.');
+        stderr('asr-reconcile: RAGENT_ACCOUNTS_DATABASE_URL is missing from the protected environment.');
         return 2;
       }
       const [pg, storeModule] = await Promise.all([import('pg'), import('./asr-postgres-store.mjs')]);

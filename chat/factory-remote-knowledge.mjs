@@ -61,7 +61,7 @@ function sourceSnapshot(db, sourceBindingId, operationId, principal, sourceInsta
 }
 
 export async function readLiveRemoteKnowledge({sourceBindingId,operationId,nonce},principal) {
-  if (process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1' || !validId(sourceBindingId) || !validId(operationId)
+  if (process.env.RAGENT_REMOTE_FACTORY_ENABLED!=='1' || !validId(sourceBindingId) || !validId(operationId)
       || !/^n_[A-Za-z0-9_-]{30,100}$/.test(nonce || '')) unavailable();
   const identity=await loadOrCreateInstanceIdentity();
   const read=()=>factoryRead(db=>sourceSnapshot(db,sourceBindingId,operationId,principal,identity.instanceId));
@@ -79,7 +79,7 @@ export async function readLiveRemoteKnowledge({sourceBindingId,operationId,nonce
     targetInstanceId:after.targetInstanceId,sourceFactoryBindingId:after.sourceFactoryBindingId,
     workItemId:after.workItemId,contractRevision:after.contractRevision,executionEpoch:after.executionEpoch,
     contractDigest:after.contractDigest,refsDigest:hash(after.refs),facts,issuedAt:new Date().toISOString()};
-  return {envelope,signature:signWithInstanceIdentity(identity,`agentoc-remote-knowledge-v1:${hash(envelope)}`)};
+  return {envelope,signature:signWithInstanceIdentity(identity,`ragent-remote-knowledge-v1:${hash(envelope)}`)};
 }
 
 export async function fetchLiveRemoteKnowledge(remote) {
@@ -106,7 +106,7 @@ export async function fetchLiveRemoteKnowledge(remote) {
       || e.refsDigest!==hash(remote.knowledgeRefs) || !Array.isArray(e.facts)
       || e.facts.length!==remote.knowledgeRefs.length || !Number.isFinite(ts) || Math.abs(Date.now()-ts)>60000) unavailable();
   let valid=false;
-  try { valid=verify(null,Buffer.from(`agentoc-remote-knowledge-v1:${hash(e)}`),createPublicKey(remote.sourcePublicKey),
+  try { valid=verify(null,Buffer.from(`ragent-remote-knowledge-v1:${hash(e)}`),createPublicKey(remote.sourcePublicKey),
     Buffer.from(signed.signature,'base64url')); } catch {}
   if (!valid || Buffer.byteLength(JSON.stringify(e.facts),'utf8')>24000) unavailable();
   return e.facts;

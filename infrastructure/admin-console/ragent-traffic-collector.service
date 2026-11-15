@@ -3,14 +3,14 @@ Description=Ragent monthly network traffic sampler
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 /opt/agentoc-admin/current/traffic-collector.py
+ExecStart=/usr/bin/python3 /opt/ragent-admin/current/traffic-collector.py
 User=root
 Group=root
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/agentoc-admin
+ReadWritePaths=/var/lib/ragent-admin
 PrivateTmp=true
 
 [Install]
-Alias=agentoc-traffic-collector.service
+Alias=ragent-traffic-collector.service

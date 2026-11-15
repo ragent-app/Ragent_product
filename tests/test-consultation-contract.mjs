@@ -16,18 +16,18 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consultation-contract-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consultation-contract-'));
 
 // 隔离临时 HOME / CONFIG_DIR —— 必须在 import 任何被测模块之前设置。
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
-delete process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
+delete process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT;
 
-assert.ok(process.env.AGENTOC_CONFIG_DIR.startsWith(tempHome), 'AGENTOC_CONFIG_DIR 必须隔离到临时目录');
+assert.ok(process.env.RAGENT_CONFIG_DIR.startsWith(tempHome), 'RAGENT_CONFIG_DIR 必须隔离到临时目录');
 
 // ── 记录器 ──────────────────────────────────────────────────────────────────
 const results = [];

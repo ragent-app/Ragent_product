@@ -5,9 +5,9 @@ set -eu
 # ExecStartPre.  It repairs only the main instance roots and known private
 # state files; the separately deployed Accounts tree is intentionally left
 # untouched.
-DATA_ROOT=/var/lib/agentoc
+DATA_ROOT=/var/lib/ragent
 CONFIG_ROOT="$DATA_ROOT/config"
-SERVICE_USER_FILE=/etc/agentoc/service-user
+SERVICE_USER_FILE=/etc/ragent/service-user
 
 # A normal service restart must not walk the complete history tree.  Package
 # upgrades invoke --full once after unpacking, while ExecStartPre uses
@@ -32,23 +32,23 @@ resolve_service_user() {
   # systemd drop-in already runs the service as a different local user. The
   # package lifecycle may pass the just-resolved user explicitly before the
   # daemon-reload becomes visible to systemctl.
-  user="$(trim "${AGENTOC_STATE_REPAIR_SERVICE_USER:-}")"
+  user="$(trim "${RAGENT_STATE_REPAIR_SERVICE_USER:-}")"
   if [ -z "$user" ] && command -v systemctl >/dev/null 2>&1; then
-    user="$(systemctl show -p User --value agentoc.service 2>/dev/null | tr -d '[:space:]' || true)"
+    user="$(systemctl show -p User --value ragent.service 2>/dev/null | tr -d '[:space:]' || true)"
   fi
   if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
     user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
   fi
-  [ -n "$user" ] || user="$(trim "${AGENTOC_SERVICE_USER:-}")"
-  [ -n "$user" ] || user=agentoc
+  [ -n "$user" ] || user="$(trim "${RAGENT_SERVICE_USER:-}")"
+  [ -n "$user" ] || user=ragent
   case "$user" in
     root|''|*[!A-Za-z0-9_.@-]*)
-      echo "Invalid AgentoC service user: $user" >&2
+      echo "Invalid Ragent service user: $user" >&2
       exit 1
       ;;
   esac
   getent passwd "$user" >/dev/null 2>&1 || {
-    echo "AgentoC service user does not exist: $user" >&2
+    echo "Ragent service user does not exist: $user" >&2
     exit 1
   }
   printf '%s\n' "$user"
@@ -88,7 +88,7 @@ verify_directory_access() {
   actual="$(stat -c '%U:%G %a' "$path")"
   expected="$service_user:$service_group 750"
   if [ "$actual" != "$expected" ]; then
-    echo "AgentoC state access repair failed for $path: expected $expected, got $actual" >&2
+    echo "Ragent state access repair failed for $path: expected $expected, got $actual" >&2
     exit 1
   fi
 }

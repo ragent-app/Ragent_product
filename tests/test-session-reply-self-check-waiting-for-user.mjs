@@ -90,7 +90,7 @@ F('permission offer 要我查吗？', '要我查吗？');
 F('permission offer 要我继续吗', '迁移文件已创建。要我继续执行吗？');
 F('permission EN want me to continue', 'I have created the migration. Want me to continue and run it?');
 F('permission EN should I proceed', 'Tests pass. Should I proceed with the deploy?');
-F('smoke probe', 'AGENTOC_CLAUDE_SMOKE_OK');
+F('smoke probe', 'RAGENT_CLAUDE_SMOKE_OK');
 F('asset message', 'Generated files ready to download.');
 F('analysis recommendation (no user q)',
   '建议下一步直接实施 P0 + P1，这两部分就能让设置栏在视觉上明显接近会话栏；图标和动效可以随后补充。');

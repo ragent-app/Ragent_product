@@ -46,7 +46,7 @@ try {
  }else{@(Get-OwnerDataServices)}
  $control=($actual|Where-Object {$_.role -eq 'control'}).sid;$executor=($actual|Where-Object {$_.role -eq 'supervisor'}).sid
  foreach($row in @(Get-OwnerDataLayout $control $executor $prepared.ownerSid)){
-  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([AgentoCOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'ORP_LAYOUT_MISMATCH'}
  }
  $policyInput=Read-PolicyRemovalJson (Join-Path $root 'security\owner-bootstrap-install.json');$policy=$policyInput.value
@@ -60,7 +60,7 @@ try {
  # Public consistency only: ceasing execution does not require granting trust to
  # this helper. No signature/identity authority is issued by removal admission.
  $release=Read-PolicyRemovalJson (Join-Path $product 'payload\owner-bootstrap-release.json');Assert-OwnerPolicyRelease $release.value
- $helper=Read-OwnerPinnedFile (Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe') @(Get-OwnerAdministrativeSids) $pins 4194304
+ $helper=Read-OwnerPinnedFile (Join-Path $product 'payload\Ragent.OwnerBootstrap.exe') @(Get-OwnerAdministrativeSids) $pins 4194304
  if((Get-OwnerDigest $release.bytes) -cne $record.releaseSha256 -or (Get-OwnerDigest $helper) -cne $record.helperSha256 -or $release.value.helperSha256 -cne $record.helperSha256 -or $release.value.version -ne $record.version -or $release.value.$trustKey -cne $record.$trustKey){throw 'ORP_PUBLIC_INPUT_HASH_MISMATCH'}
  if($activeRemoval){Add-Type -Path (Join-Path $PSScriptRoot 'owner-service-activation-trial.cs')}
  foreach($plan in @(Get-OwnerServicePreparationPlan)){if($activeRemoval){if($policyRemoveAction -ceq 'ActiveRemove'){$services.Add([OwnerServiceActivationTrial]::OpenForRemoval($plan.name,$plan.command))}else{$services.Add([OwnerServiceActivationTrial]::OpenForRemovalCheck($plan.name,$plan.command))}}else{$services.Add([ManagedPreparedService]::new($plan.name,$plan.command,$plan.account))}}
@@ -89,7 +89,7 @@ try {
    # removal receipts, owner and retained policy before accepting this path.
    # If the hint cannot be written, the installer asks for the old folder.
    try{
-    $key=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\AgentoC')
+    $key=[Microsoft.Win32.Registry]::LocalMachine.CreateSubKey('SOFTWARE\Ragent')
     if($key){try{$key.SetValue('LastRemovedProductRoot',$product,[Microsoft.Win32.RegistryValueKind]::String)}finally{$key.Dispose()}}
    }catch{}
   }else{foreach($s in $services){$s.Verify()};for($i=$services.Count-1;$i -ge 0;$i--){$services[$i].Remove()}}

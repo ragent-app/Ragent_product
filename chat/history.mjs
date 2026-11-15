@@ -104,51 +104,51 @@ const PREVIEW_LIMITS = {
 // decompression result in the chat process.
 export const MAX_EVENT_RANGE_SPAN = Math.max(
   100,
-  Number.parseInt(process.env.AGENTOC_MAX_EVENT_RANGE_SPAN || '5000', 10) || 5000,
+  Number.parseInt(process.env.RAGENT_MAX_EVENT_RANGE_SPAN || '5000', 10) || 5000,
 );
 const MAX_EVENT_RANGE_RESPONSE_BYTES = Math.max(
   4 * 1024 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_EVENT_RANGE_BYTES || String(32 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_EVENT_RANGE_BYTES || String(32 * 1024 * 1024), 10)
     || 32 * 1024 * 1024,
 );
 const MAX_EVENT_RANGE_BODY_BYTES = Math.max(
   256 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_EVENT_RANGE_BODY_BYTES || String(4 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_EVENT_RANGE_BODY_BYTES || String(4 * 1024 * 1024), 10)
     || 4 * 1024 * 1024,
 );
 const MAX_BODY_READ_BYTES = Math.max(
   1024 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_EVENT_BODY_READ_BYTES || String(64 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_EVENT_BODY_READ_BYTES || String(64 * 1024 * 1024), 10)
     || 64 * 1024 * 1024,
 );
 const MAX_BODY_CACHE_BYTES = Math.max(
   16 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_EVENT_BODY_CACHE_BYTES || String(256 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_EVENT_BODY_CACHE_BYTES || String(256 * 1024), 10)
     || 256 * 1024,
 );
 
 // DS-16: cold-body compression. Bodies at or above COLD_BODY_COMPRESS_MIN_BYTES
-// are stored compressed (bodies/<ref>.txt.gz or .txt.zst per AGENTOC_BODY_CODEC)
+// are stored compressed (bodies/<ref>.txt.gz or .txt.zst per RAGENT_BODY_CODEC)
 // with a sidecar <ref>.txt.meta.json carrying codec, original byte length and
 // sha256 of the original content. readBody decompresses transparently and
 // verifies the hash when meta exists. The HTTP layer is untouched — the body
 // endpoint serves the decompressed value, so ETag/validation/caching are
 // codec-independent ("compression never affects range/checks").
-const BODY_CODEC_ENV = 'AGENTOC_BODY_CODEC';
+const BODY_CODEC_ENV = 'RAGENT_BODY_CODEC';
 const BODY_CODEC = (process.env[BODY_CODEC_ENV] || 'gzip').toLowerCase();
-const BODY_COMPRESS_MIN_BYTES_ENV = 'AGENTOC_BODY_COMPRESS_MIN_BYTES';
+const BODY_COMPRESS_MIN_BYTES_ENV = 'RAGENT_BODY_COMPRESS_MIN_BYTES';
 const COLD_BODY_COMPRESS_MIN_BYTES = Number(process.env[BODY_COMPRESS_MIN_BYTES_ENV]) || 4096;
 const BODY_META_SUFFIX = '.meta.json';
 const BODY_CODEC_SUFFIX = { gzip: '.gz', zstd: '.zst' };
 
-// Perf (AGENTOC_PERF_CACHES=off restores unbounded Maps + JSON clone): these
+// Perf (RAGENT_PERF_CACHES=off restores unbounded Maps + JSON clone): these
 // read-through caches previously retained every event/body/meta ever touched
 // for the life of the process (a 110K-event session alone can hold hundreds of
 // MB of inline bodies), which was the bulk of a ~737MB RSS. BoundedLruMap caps
 // each by entry count and approximate bytes; eviction is always safe because
 // every miss re-reads the file on disk.
-const AGENTOC_PERF_CACHES_ENV = 'AGENTOC_PERF_CACHES';
-const PERF_CACHES_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_CACHES_ENV], { defaultValue: true });
+const RAGENT_PERF_CACHES_ENV = 'RAGENT_PERF_CACHES';
+const PERF_CACHES_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_CACHES_ENV], { defaultValue: true });
 
 function makeLruOrMap(options) {
   return PERF_CACHES_ENABLED ? new BoundedLruMap(options) : new Map();
@@ -187,12 +187,12 @@ const forkHistoryIndexTasks = new Map();
 const cancelledForkHistoryIndexTasks = new Set();
 const FORK_HISTORY_INDEX_DEBOUNCE_MS = Math.max(
   0,
-  Number.parseInt(process.env.AGENTOC_FORK_INDEX_DEBOUNCE_MS || '100', 10) || 100,
+  Number.parseInt(process.env.RAGENT_FORK_INDEX_DEBOUNCE_MS || '100', 10) || 100,
 );
 
 // Memory registry (DS-06): expose every read-through cache to /healthz and the
 // owner-only diagnostics route. The adapter falls back to plain-Map metrics
-// when AGENTOC_PERF_CACHES=off substitutes unbounded Maps.
+// when RAGENT_PERF_CACHES=off substitutes unbounded Maps.
 registerLruOrMap('history.meta', metaCache);
 registerLruOrMap('history.context', contextCache);
 registerLruOrMap('history.forkContext', forkContextCache);
@@ -210,7 +210,7 @@ const historyReadBudget = getAdaptiveConcurrencyBudget('historyIO');
 const historyBackgroundReadBudget = getAdaptiveConcurrencyBudget('historyBackgroundIO');
 const HISTORY_BACKGROUND_ACQUIRE_DEADLINE_MS = Math.max(
   250,
-  Number.parseInt(process.env.AGENTOC_HISTORY_BACKGROUND_DEADLINE_MS || '2000', 10) || 2000,
+  Number.parseInt(process.env.RAGENT_HISTORY_BACKGROUND_DEADLINE_MS || '2000', 10) || 2000,
 );
 // The foreground lane remains bounded and adaptive. The background lane has
 // its own slots and queue, so maintenance/recovery cannot consume all
@@ -219,7 +219,7 @@ const HISTORY_READ_CONCURRENCY = historyReadBudget.effectiveLimit;
 const HISTORY_BACKGROUND_READ_CONCURRENCY = historyBackgroundReadBudget.effectiveLimit;
 const HISTORY_READ_BATCH_SIZE = 256;
 const HISTORY_INTERACTIVE_ACQUIRE_DEADLINE_MS = (() => {
-  const parsed = Number.parseInt(String(process.env.AGENTOC_HISTORY_INTERACTIVE_DEADLINE_MS || '').trim(), 10);
+  const parsed = Number.parseInt(String(process.env.RAGENT_HISTORY_INTERACTIVE_DEADLINE_MS || '').trim(), 10);
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 30_000) : 8_000;
 })();
 // Descending scans (last turn, latest assistant message) expect a small

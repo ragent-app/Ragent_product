@@ -25,7 +25,7 @@ async function call({ method = 'POST', payload = binding, query, address = '127.
   const req = new PassThrough();
   req.method = method;
   req.socket = { remoteAddress: address };
-  req.headers = { 'x-agentoc-windows-broker-token': secret };
+  req.headers = { 'x-ragent-windows-broker-token': secret };
   req.url = `/api/internal/windows-broker/service-restart?${query || new URLSearchParams(payload)}`;
   if (method === 'POST') queueMicrotask(() => req.end(JSON.stringify(payload)));
   const res = { setHeader() {} };
@@ -90,6 +90,6 @@ const sidecarSource = await readFile(resolve('chat/runner-sidecar.mjs'), 'utf8')
 assert.match(routerSource, /handleWindowsBrokerInternalRoutes\(\{/);
 assert.match(managerSource, /authenticatedPrincipalKind === 'owner'[\s\S]*?windowsBrokerToken/);
 assert.match(managerSource, /windowsBrokerChannel \} : \{\}/);
-assert.match(sidecarSource, /agentoc-windows-broker-mcp\.mjs/);
+assert.match(sidecarSource, /ragent-windows-broker-mcp\.mjs/);
 assert.match(sidecarSource, /server\.name === serverNamesByKind\.get\('broker'\)/);
 console.log('Windows Broker Run channel tests passed');

@@ -15,8 +15,8 @@ import { temporaryCanonicalJson } from '../lib/temporary-pairing-broker-protocol
 const fail = (suffix, status = 400) => { throw temporaryPairingError(`temporary_control_broker_${suffix}`, status); };
 const terminal = (record) => record.status === 'REVOKED' || record.status === 'EXPIRED';
 const bindingStamp = (value) => JSON.stringify([value.accountId, value.boundAt, value.instanceKeyFingerprint]);
-const aad = (record) => JSON.stringify(['agentoc-temporary-control-claim-v1', record.instanceId, record.invitationId, record.claim?.requestId || '']);
-const connectionAad = (record) => JSON.stringify(['agentoc-temporary-control-connection-v1', record.instanceId,
+const aad = (record) => JSON.stringify(['ragent-temporary-control-claim-v1', record.instanceId, record.invitationId, record.claim?.requestId || '']);
+const connectionAad = (record) => JSON.stringify(['ragent-temporary-control-connection-v1', record.instanceId,
   record.invitationId, record.claim?.requestId || '', record.connection?.requestId || '']);
 const requestIdPattern = /^rtr_[A-Za-z0-9_-]{24,64}$/;
 const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
@@ -142,7 +142,7 @@ export function createTemporaryControlBroker({ store, cipher, clock = Date.now, 
           const claim = { instanceId: input.instanceId, invitationId: input.invitationId, invitationDigest: input.invitationDigest,
             requestId: input.requestId, devicePublicKey: device.publicKey, deviceKeyFingerprint: device.fingerprint,
             signature: input.signature };
-          value.sealedToken = cipher.seal(input.token, JSON.stringify(['agentoc-temporary-control-claim-v1', value.instanceId, value.invitationId, claim.requestId]));
+          value.sealedToken = cipher.seal(input.token, JSON.stringify(['ragent-temporary-control-claim-v1', value.instanceId, value.invitationId, claim.requestId]));
           value.claim = claim; value.status = 'CLAIMED';
         }
         return projection(value);

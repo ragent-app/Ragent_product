@@ -6,9 +6,9 @@ import { join, resolve, sep } from 'node:path';
 import { createHash, randomBytes, sign } from 'node:crypto';
 
 test('temporary prepared messages retain original device authority through durable admission', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-message-'));
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config'); process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-  delete process.env.AGENTOC_INSTANCE_ROOT;
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-message-'));
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config'); process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+  delete process.env.RAGENT_INSTANCE_ROOT;
   const { fixture } = await import('./helpers/temporary-turn-fixture.mjs');
   const { temporaryDeviceJwk } = await import('../lib/temporary-device-access.mjs');
   const { TemporarySessionService } = await import('../chat/temporary-session-service.mjs');

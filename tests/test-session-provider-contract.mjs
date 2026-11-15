@@ -7,10 +7,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-provider-contract-'));
-const configDir = join(home, '.config', 'agentoc');
-const memoryDir = join(home, '.agentoc', 'memory');
-const workDir = join(home, '.agentoc', 'workspace');
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-provider-contract-'));
+const configDir = join(home, '.config', 'ragent');
+const memoryDir = join(home, '.ragent', 'memory');
+const workDir = join(home, '.ragent', 'workspace');
 const binDir = join(home, '.local', 'bin');
 const fakeCodexPath = join(binDir, 'fake-codex');
 const fakeClaudePath = join(binDir, 'fake-claude');
@@ -101,10 +101,10 @@ writeFileSync(
 );
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
 process.env.PATH = `${binDir}:${process.env.PATH}`;
 process.env.FAKE_CODEX_DELAY_MS = '700';
 process.env.FAKE_CLAUDE_DELAY_MS = '700';

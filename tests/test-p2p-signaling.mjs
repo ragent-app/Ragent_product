@@ -26,7 +26,7 @@ const hostOutput = new PassThrough();
 let hostHelp = '';
 hostOutput.on('data', (chunk) => { hostHelp += chunk; });
 assert.equal(await runP2PHostCommand(['--help'], { stdout: hostOutput }), 0);
-assert.match(hostHelp, /AGENTOC_P2P_ROOM_SECRET/);
+assert.match(hostHelp, /RAGENT_P2P_ROOM_SECRET/);
 
 // 回归：对手方尚未加入（或已离开）时向房间转发 signal 不得抛异常/崩溃。
 // 曾因 `target?.readyState === target.OPEN` 对 undefined 求值 target.OPEN 抛

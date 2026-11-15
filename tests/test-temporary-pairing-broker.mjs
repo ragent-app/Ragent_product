@@ -18,7 +18,7 @@ const initial = 1_800_000_000_000;
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 const rejects = (p, code) => assert.rejects(p, (e) => e.code === code);
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temp-broker-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temp-broker-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let time = initial;
   const clock = () => time;

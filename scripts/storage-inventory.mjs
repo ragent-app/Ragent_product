@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Storage capacity inventory + dry-run reclamation estimate (Phase A of
-// docs/agentoc-storage-capacity-analysis.md).
+// docs/ragent-storage-capacity-analysis.md).
 //
 // Purely read-only. It walks the active config dir and reports:
 //   - top-level disk distribution
@@ -27,7 +27,7 @@ import { createHash } from 'crypto';
 import { readdir, readFile, stat } from 'fs/promises';
 import { basename, join } from 'path';
 
-const DEFAULT_ROOT = '/var/lib/agentoc/config';
+const DEFAULT_ROOT = '/var/lib/ragent/config';
 const SNAPSHOT_DIR_NAME = 'shared-snapshots';
 
 function parseArgs(argv) {
@@ -657,7 +657,7 @@ async function main() {
   // ---- console summary (Chinese, human-readable) ----
   const totalBytes = topLevel.reduce((a, b) => a + b.bytes, 0);
   const mode = options.deepRefs ? 'deep-refs' : 'fast';
-  console.log(`AgentoC 存储容量清单 (${mode} 模式，耗时 ${Date.now() - startMs}ms)`);
+  console.log(`Ragent 存储容量清单 (${mode} 模式，耗时 ${Date.now() - startMs}ms)`);
   console.log(`根目录: ${root}`);
   console.log('--- 顶层分布 ---');
   for (const t of topLevel.slice(0, 12)) {
@@ -710,7 +710,7 @@ async function main() {
   }
   if (options.mdOut) {
     const lines = [];
-    lines.push('# AgentoC 存储容量清单（阶段 A dry-run）');
+    lines.push('# Ragent 存储容量清单（阶段 A dry-run）');
     lines.push('');
     lines.push(`- 生成时间：${report.generatedAt}`);
     lines.push(`- 模式：${report.mode}`);

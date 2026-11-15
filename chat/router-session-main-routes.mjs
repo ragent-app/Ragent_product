@@ -93,12 +93,12 @@ const MAX_ALL_EVENTS_PAGE_LIMIT = 500;
 // use the dedicated body endpoint for an intentionally requested full body.
 const MAX_ALL_EVENTS_RESPONSE_BYTES = Math.max(
   4 * 1024 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_ALL_EVENTS_RESPONSE_BYTES || String(16 * 1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_ALL_EVENTS_RESPONSE_BYTES || String(16 * 1024 * 1024), 10)
     || 16 * 1024 * 1024,
 );
 const MAX_ALL_EVENTS_BODY_BYTES = Math.max(
   256 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_ALL_EVENTS_BODY_BYTES || String(1024 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_ALL_EVENTS_BODY_BYTES || String(1024 * 1024), 10)
     || 1024 * 1024,
 );
 
@@ -418,14 +418,14 @@ export async function handleSessionMainRoutes({
       if (!session) { writeJson(res, 404, { error: 'Session not found' }); return true; }
       const providerId = typeof payload?.providerProfileId === 'string' ? payload.providerProfileId.trim() : '';
       const savedProvider = await resolveCapabilitySessionProvider({ session });
-      if (!['codex', 'codex-cli', 'agentoc-codex-app-server'].includes(session.tool) || !savedProvider || savedProvider !== providerId) {
+      if (!['codex', 'codex-cli', 'ragent-codex-app-server'].includes(session.tool) || !savedProvider || savedProvider !== providerId) {
         writeJson(res, 409, { error: 'The session account changed; refresh the list', code: 'CODEX_SKILL_ACCOUNT_CHANGED' }); return true;
       }
       const project = session.projectId ? await getProject(session.projectId) : null;
       const result = await setCodexSkillPreference({ providerId, cwd: project?.rootPath || process.cwd(), id: payload?.id, enabled: payload?.enabled,
         verifySelection: async () => {
           const current = await getSession(sessionId);
-          return Boolean(current && ['codex', 'codex-cli', 'agentoc-codex-app-server'].includes(current.tool)
+          return Boolean(current && ['codex', 'codex-cli', 'ragent-codex-app-server'].includes(current.tool)
             && await resolveCapabilitySessionProvider({ session: current }) === providerId);
         } });
       writeJson(res, 200, result);
@@ -1146,7 +1146,7 @@ export async function handleSessionMainRoutes({
       // The event body endpoint is a UI detail endpoint.  Large bodies are
       // represented by a bounded preview; callers should never need to pull
       // tens of megabytes just to expand one row.
-      maxBytes: Number.parseInt(process.env.AGENTOC_MAX_EVENT_BODY_RESPONSE_BYTES || String(4 * 1024 * 1024), 10),
+      maxBytes: Number.parseInt(process.env.RAGENT_MAX_EVENT_BODY_RESPONSE_BYTES || String(4 * 1024 * 1024), 10),
       strict: true,
     });
     if (!body) {

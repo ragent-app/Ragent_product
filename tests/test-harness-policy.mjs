@@ -12,7 +12,7 @@ assert.equal(policy.policies.claude.minimumVersion, '2.1.247');
 assert.equal(policy.policies.codex.targetVersion, '0.167.2');
 assert.equal(Object.keys(policy.policies).length, Object.keys(DEFAULT_HARNESS_POLICY).length);
 
-process.env.AGENTOC_HARNESS_POLICY_URL = 'https://policy.example.test';
+process.env.RAGENT_HARNESS_POLICY_URL = 'https://policy.example.test';
 const { clearHarnessPolicyCache, fetchHarnessPolicy } = await import('../lib/harness-policy-client.mjs');
 const stale = await fetchHarnessPolicy({
   force: true,

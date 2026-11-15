@@ -18,7 +18,7 @@ assert.deepEqual(buildKiloArgs('Continue.', {
   resume: 'kilo-session-1',
 }), [
   'run', '--format', 'json', '--auto', '--session', 'kilo-session-1',
-  '--model', 'agentoc/gpt-5', 'Continue.',
+  '--model', 'ragent/gpt-5', 'Continue.',
 ]);
 
 const adapter = createKiloAdapter();

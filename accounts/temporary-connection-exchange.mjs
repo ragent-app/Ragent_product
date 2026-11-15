@@ -6,7 +6,7 @@ import { temporaryConnectionRequestId, verifyTemporaryConnectionRequest,
   verifyTemporaryConnectionDelivery } from '../lib/temporary-connection-delivery.mjs';
 
 const fail = (suffix, status = 409) => { throw temporaryPairingError(`temporary_broker_connection_${suffix}`, status); };
-const aad = (r) => JSON.stringify(['agentoc-temporary-connection-v1', r.instanceId, r.invitationId,
+const aad = (r) => JSON.stringify(['ragent-temporary-connection-v1', r.instanceId, r.invitationId,
   r.claim.requestId, r.connection.request.payload.connectionRequestId]);
 const facts = (r, now) => ({ envelope: r.envelope,
   grant: { ...r.completion.payload.result, devicePublicKey: r.claim.devicePublicKey },

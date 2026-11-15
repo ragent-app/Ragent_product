@@ -5,10 +5,10 @@ import { mkdtemp, mkdir, readFile, rmdir, unlink, writeFile } from 'node:fs/prom
 import os from 'node:os';
 import path from 'node:path';
 
-const executable = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
+const executable = process.env.RAGENT_TEST_SAFE_DELETE_BINARY;
 if (process.platform !== 'win32' || !executable) { console.log('windows-safe-delete-cli: skipped (opt-in Windows fixture)'); process.exit(0); }
 assert.ok(path.isAbsolute(executable));
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-safe-delete-cli-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-safe-delete-cli-'));
 const build = path.join(root, 'build');
 await mkdir(build);
 await writeFile(path.join(build, 'fixture.txt'), 'fixture');
@@ -29,7 +29,7 @@ const cwdRequest = { schemaVersion: 1, workspace: root, target: 'build', targetF
 const result = await exec(executable, ['--request', encode(cwdRequest)], { cwd: alternate, windowsHide: true });
 assert.deepEqual(JSON.parse(result.stdout), { ok: true, deleted: 2 });
 assert.equal(await readFile(path.join(build, 'keep.txt'), 'utf8'), 'keep');
-const outside = await mkdtemp(path.join(os.tmpdir(), 'agentoc-delete-outside-'));
+const outside = await mkdtemp(path.join(os.tmpdir(), 'ragent-delete-outside-'));
 await mkdir(path.join(outside, 'build'));
 await writeFile(path.join(outside, 'build', 'keep.txt'), 'outside');
 await assert.rejects(exec(executable, ['--request', encode(cwdRequest)], { cwd: outside, windowsHide: true }), error => error.code === 1);

@@ -60,8 +60,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-session-patch-grouping-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-session-patch-grouping-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -85,8 +85,8 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
@@ -146,13 +146,13 @@ try {
   assert.equal(invalidEntryModeValue.status, 400, 'unknown entry mode should be rejected');
 
   const patched = await request(port, 'PATCH', `/api/sessions/${sessionId}`, {
-    group: '  AgentoC  ',
+    group: '  Ragent  ',
     description: '  Session-driven orchestration work.  ',
     sidebarOrder: 4,
     entryMode: 'read',
   });
   assert.equal(patched.status, 200, 'session patch should accept group, description, sidebar order, and entry mode');
-  assert.equal(patched.json.session.group, 'AgentoC', 'patch should trim and persist group');
+  assert.equal(patched.json.session.group, 'Ragent', 'patch should trim and persist group');
   assert.equal(
     patched.json.session.description,
     'Session-driven orchestration work.',
@@ -163,7 +163,7 @@ try {
 
   const detail = await request(port, 'GET', `/api/sessions/${sessionId}`);
   assert.equal(detail.status, 200, 'detail route should succeed after patch');
-  assert.equal(detail.json.session.group, 'AgentoC', 'detail route should expose patched group');
+  assert.equal(detail.json.session.group, 'Ragent', 'detail route should expose patched group');
   assert.equal(
     detail.json.session.description,
     'Session-driven orchestration work.',
@@ -176,7 +176,7 @@ try {
   assert.equal(listed.status, 200, 'session list should succeed');
   const listedSession = (listed.json.sessions || []).find((entry) => entry.id === sessionId);
   assert.ok(listedSession, 'session list should include the patched session');
-  assert.equal(listedSession.group, 'AgentoC', 'session list should expose patched group');
+  assert.equal(listedSession.group, 'Ragent', 'session list should expose patched group');
   assert.equal(
     listedSession.description,
     'Session-driven orchestration work.',

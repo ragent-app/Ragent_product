@@ -10,7 +10,7 @@ import { createCredentialMutationLedger } from '../lib/provider-runtime/credenti
 import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.mjs';
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-refresh-conflict-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-refresh-conflict-'));
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 const registry = createNativeProviderRegistry({ configDir });
@@ -22,8 +22,8 @@ async function writeRunHome(runId, tokenFile, sourceToken = 'initial-token') {
   const authFile = join(home, AGY_AUTH_RELATIVE_PATH);
   await mkdir(join(home, '.gemini', 'antigravity-cli'), { recursive: true });
   await writeFile(authFile, tokenFile, 'utf8');
-  await writeFile(join(home, '.agentoc-provider-id'), 'agy-account\n', 'utf8');
-  await writeFile(join(home, '.agentoc-oauth-state.json'), JSON.stringify({
+  await writeFile(join(home, '.ragent-provider-id'), 'agy-account\n', 'utf8');
+  await writeFile(join(home, '.ragent-oauth-state.json'), JSON.stringify({
     version: 1,
     storageRef: 'agy-account-secret',
     sourceFingerprint: agyTokenFingerprint(sourceToken),

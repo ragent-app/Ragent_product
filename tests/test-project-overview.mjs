@@ -15,7 +15,7 @@ const source = readFileSync(join(repoRoot, 'static/chat/project-overview.js'), '
 const sandbox = {};
 vm.createContext(sandbox);
 vm.runInNewContext(source, sandbox, { filename: 'static/chat/project-overview.js' });
-const M = sandbox.AgentocProjectOverview;
+const M = sandbox.RagentProjectOverview;
 
 // Deterministic sort time: sessions carry sortTime directly.
 const getSortTime = (session) => session?.sortTime || 0;
@@ -234,14 +234,14 @@ function previewIds(group) {
   // rootPath surfaces under that project instead of the inbox (mirrors the
   // backend listSessions contract used by unbounded sessions).
   const projects = [
-    project('p1', 'Alpha', '/srv/agentoc-promoted'),
+    project('p1', 'Alpha', '/srv/ragent-promoted'),
     project('p2', 'Beta', '/home/example'),
   ];
   const sessions = [
     session('s1', { projectId: 'p1' }),
-    session('s2', { folder: '/srv/agentoc-promoted', sortTime: 100 }),   // unbounded, p1 root
+    session('s2', { folder: '/srv/ragent-promoted', sortTime: 100 }),   // unbounded, p1 root
     session('s3', { folder: '/home/example', sortTime: 200 }),              // unbounded, p2 root
-    session('s4', { folder: '/var/lib/agentoc/workspace', sortTime: 50 }), // no project root -> inbox
+    session('s4', { folder: '/var/lib/ragent/workspace', sortTime: 50 }), // no project root -> inbox
   ];
   const groups = M.buildProjectOverview({ projects, sessions, getSortTime });
   assert.deepEqual(ids(groups), ['p2', 'p1', '(inbox)'], 'unbounded sessions group under their folder project');

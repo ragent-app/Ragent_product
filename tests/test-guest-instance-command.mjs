@@ -33,13 +33,13 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 const ownerFileAssetEnvironment = {
-  AGENTOC_ASSET_STORAGE_PROVIDER: 'tos',
-  AGENTOC_ASSET_STORAGE_BASE_URL: 'https://assets.example.com',
-  AGENTOC_ASSET_STORAGE_REGION: 'cn-beijing',
-  AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: 'example-access-key',
-  AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'example-secret-key',
-  AGENTOC_ASSET_STORAGE_KEY_PREFIX: 'session-assets',
-  AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED: '0',
+  RAGENT_ASSET_STORAGE_PROVIDER: 'tos',
+  RAGENT_ASSET_STORAGE_BASE_URL: 'https://assets.example.com',
+  RAGENT_ASSET_STORAGE_REGION: 'cn-beijing',
+  RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: 'example-access-key',
+  RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'example-secret-key',
+  RAGENT_ASSET_STORAGE_KEY_PREFIX: 'session-assets',
+  RAGENT_ASSET_DIRECT_UPLOAD_ENABLED: '0',
 };
 
 const baseConfig = `tunnel: claude-code-remote
@@ -47,7 +47,7 @@ credentials-file: /Users/example/.cloudflared/example-tunnel.json
 protocol: http2
 
 ingress:
-  - hostname: agentoc.example.com
+  - hostname: ragent.example.com
     service: http://127.0.0.1:7690
   - hostname: companion.example.com
     service: http://127.0.0.1:7692
@@ -159,8 +159,8 @@ assert.equal(failedProvisioning.status, 'failed');
 assert.match(failedProvisioning.detail, /bad token/);
 
 assert.equal(parseTunnelName(baseConfig), 'claude-code-remote');
-assert.equal(selectPrimaryHostnameForPort(baseConfig, { port: 7690 }), 'agentoc.example.com');
-assert.equal(deriveDomainFromHostname('agentoc.example.com'), 'example.com');
+assert.equal(selectPrimaryHostnameForPort(baseConfig, { port: 7690 }), 'ragent.example.com');
+assert.equal(deriveDomainFromHostname('ragent.example.com'), 'example.com');
 assert.equal(
   deriveGuestHostname(baseConfig, { name: 'trial4' }),
   'trial4.example.com',
@@ -200,18 +200,18 @@ assert.match(newConfig, /^ingress:\n  - hostname: trial5\.example\.com/m, 'shoul
 const plist = buildLaunchAgentPlist({
   label: 'com.chatserver.trial4',
   nodePath: '/usr/local/bin/node',
-  chatServerPath: '/Users/example/code/agentoc/chat-server.mjs',
-  workingDirectory: '/Users/example/code/agentoc',
+  chatServerPath: '/Users/example/code/ragent/chat-server.mjs',
+  workingDirectory: '/Users/example/code/ragent',
   standardOutPath: '/Users/example/Library/Logs/chat-server-trial4.log',
   standardErrorPath: '/Users/example/Library/Logs/chat-server-trial4.error.log',
   environmentVariables: {
     CHAT_PORT: '7699',
-    AGENTOC_INSTANCE_ROOT: '/Users/example/.agentoc/instances/trial4',
+    RAGENT_INSTANCE_ROOT: '/Users/example/.ragent/instances/trial4',
   },
 });
 assert.match(plist, /<string>com\.chatserver\.trial4<\/string>/);
 assert.match(plist, /<key>CHAT_PORT<\/key><string>7699<\/string>/);
-assert.match(plist, /<string>\/Users\/example\/code\/agentoc\/chat-server\.mjs<\/string>/);
+assert.match(plist, /<string>\/Users\/example\/code\/ragent\/chat-server\.mjs<\/string>/);
 
 const formatted = formatGuestInstance({
   name: 'trial16',
@@ -222,9 +222,9 @@ const formatted = formatGuestInstance({
   bridgeAccessUrl: 'https://bridge.example.com/trial16/?token=abc123',
   mailboxAddress: 'rowan+trial16@example.test',
   mailboxRoutingStatus: 'synced',
-  instanceRoot: '/Users/example/.agentoc/instances/trial16',
-  configDir: '/Users/example/.agentoc/instances/trial16/config',
-  memoryDir: '/Users/example/.agentoc/instances/trial16/memory',
+  instanceRoot: '/Users/example/.ragent/instances/trial16',
+  configDir: '/Users/example/.ragent/instances/trial16/config',
+  memoryDir: '/Users/example/.ragent/instances/trial16/memory',
   launchAgentPath: '/Users/example/Library/LaunchAgents/com.chatserver.trial16.plist',
   createdAt: '2026-03-24T00:00:00.000Z',
 }, {
@@ -384,19 +384,19 @@ const mergedSkillsIndex = mergePlatformSkillsIndexContent(`# Skills Index
 
 ## Local Skills
 - File: \`skills/daily-assistant.md\`
-`, `<!-- AGENTOC_PLATFORM_SKILLS:START -->
+`, `<!-- RAGENT_PLATFORM_SKILLS:START -->
 ## Shared Platform Skills
 ### Calendar Write
-- File: \`~/.agentoc/platform/skills/calendar-write.md\`
-<!-- AGENTOC_PLATFORM_SKILLS:END -->`);
+- File: \`~/.ragent/platform/skills/calendar-write.md\`
+<!-- RAGENT_PLATFORM_SKILLS:END -->`);
 assert.match(mergedSkillsIndex, /## Local Skills/);
 assert.match(mergedSkillsIndex, /## Shared Platform Skills/);
 
-const platformSkillSyncHome = mkdtempSync(join(tmpdir(), 'agentoc-platform-skills-'));
+const platformSkillSyncHome = mkdtempSync(join(tmpdir(), 'ragent-platform-skills-'));
 try {
-  const memoryDir = join(platformSkillSyncHome, '.agentoc', 'instances', 'trial23', 'memory');
-  const sourceSkillsDir = join(platformSkillSyncHome, '.agentoc', 'skills');
-  const platformSkillsDir = join(platformSkillSyncHome, '.agentoc', 'platform', 'skills');
+  const memoryDir = join(platformSkillSyncHome, '.ragent', 'instances', 'trial23', 'memory');
+  const sourceSkillsDir = join(platformSkillSyncHome, '.ragent', 'skills');
+  const platformSkillsDir = join(platformSkillSyncHome, '.ragent', 'platform', 'skills');
   mkdirSync(memoryDir, { recursive: true });
   mkdirSync(sourceSkillsDir, { recursive: true });
 
@@ -418,8 +418,8 @@ try {
   const syncedIndex = readFileSync(join(memoryDir, 'skills.md'), 'utf8');
   assert.match(syncedIndex, /## Local Skills/);
   assert.match(syncedIndex, /## Shared Platform Skills/);
-  assert.match(syncedIndex, /~\/\.agentoc\/platform\/skills\/calendar-write\.md/);
-  assert.match(syncedIndex, /~\/\.agentoc\/platform\/skills\/session-debug\.md/);
+  assert.match(syncedIndex, /~\/\.ragent\/platform\/skills\/calendar-write\.md/);
+  assert.match(syncedIndex, /~\/\.ragent\/platform\/skills\/session-debug\.md/);
 
   const secondSync = await syncGuestPlatformSkills(memoryDir, { homeDir: platformSkillSyncHome });
   assert.equal(secondSync.changed, false);
@@ -434,7 +434,7 @@ const ownerRouterTools = [
   {
     id: 'micro-agent',
     name: 'Micro Agent',
-    command: '/Users/example/code/agentoc/scripts/micro-agent-router.mjs',
+    command: '/Users/example/code/ragent/scripts/micro-agent-router.mjs',
     toolProfile: 'micro-agent',
     runtimeFamily: 'claude-stream-json',
     promptMode: 'bare-user',
@@ -464,7 +464,7 @@ assert.deepEqual(
 );
 assert.equal(
   plannedRouterFreshGuest.tools[0].command,
-  '/Users/example/code/agentoc/scripts/micro-agent-router.mjs',
+  '/Users/example/code/ragent/scripts/micro-agent-router.mjs',
   'router command path should be preserved in guest copy',
 );
 assert.equal(
@@ -511,7 +511,7 @@ const plannedRouterStaleGuest = planGuestRuntimeDefaults({
 });
 assert.equal(
   plannedRouterStaleGuest.tools[0].command,
-  '/Users/example/code/agentoc/scripts/micro-agent-router.mjs',
+  '/Users/example/code/ragent/scripts/micro-agent-router.mjs',
   'stale codex-based guest tool should be upgraded to the router command',
 );
 assert.equal(
@@ -530,12 +530,12 @@ assert.deepEqual(
   'stale guest model list should match owner exactly',
 );
 
-const sandboxHome = mkdtempSync(join(tmpdir(), 'agentoc-guest-instance-'));
+const sandboxHome = mkdtempSync(join(tmpdir(), 'ragent-guest-instance-'));
 try {
   const launchAgentsDir = join(sandboxHome, 'Library', 'LaunchAgents');
   const logDir = join(sandboxHome, 'Library', 'Logs');
   const cloudflaredDir = join(sandboxHome, '.cloudflared');
-  const instanceRoot = join(sandboxHome, '.agentoc', 'instances', 'trial');
+  const instanceRoot = join(sandboxHome, '.ragent', 'instances', 'trial');
   mkdirSync(launchAgentsDir, { recursive: true });
   mkdirSync(logDir, { recursive: true });
   mkdirSync(cloudflaredDir, { recursive: true });
@@ -544,8 +544,8 @@ try {
   writeFileSync(join(launchAgentsDir, 'com.chatserver.claude.plist'), buildLaunchAgentPlist({
     label: 'com.chatserver.claude',
     nodePath: '/usr/local/bin/node',
-    chatServerPath: '/Users/example/code/agentoc/chat-server.mjs',
-    workingDirectory: '/Users/example/code/agentoc',
+    chatServerPath: '/Users/example/code/ragent/chat-server.mjs',
+    workingDirectory: '/Users/example/code/ragent',
     standardOutPath: join(logDir, 'chat-server-owner.log'),
     standardErrorPath: join(logDir, 'chat-server-owner.error.log'),
     environmentVariables: {
@@ -562,16 +562,16 @@ try {
   writeFileSync(join(launchAgentsDir, 'com.chatserver.trial.plist'), buildLaunchAgentPlist({
     label: 'com.chatserver.trial',
     nodePath: '/usr/local/bin/node',
-    chatServerPath: '/Users/example/code/agentoc-trial-runtime/chat-server.mjs',
-    workingDirectory: '/Users/example/code/agentoc-trial-runtime',
+    chatServerPath: '/Users/example/code/ragent-trial-runtime/chat-server.mjs',
+    workingDirectory: '/Users/example/code/ragent-trial-runtime',
     standardOutPath: join(logDir, 'chat-server-trial.log'),
     standardErrorPath: join(logDir, 'chat-server-trial.error.log'),
     environmentVariables: {
       CHAT_PORT: '7696',
       HOME: sandboxHome,
       USERPROFILE: sandboxHome,
-      AGENTOC_ENABLE_ACTIVE_RELEASE: '1',
-      AGENTOC_INSTANCE_ROOT: instanceRoot,
+      RAGENT_ENABLE_ACTIVE_RELEASE: '1',
+      RAGENT_INSTANCE_ROOT: instanceRoot,
       SECURE_COOKIES: '1',
     },
   }));
@@ -581,8 +581,8 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: sandboxHome,
       USERPROFILE: sandboxHome,
       ...ownerFileAssetEnvironment,
@@ -594,7 +594,7 @@ try {
   assert.equal(convergeOutput[0].name, 'trial');
   assert.equal(convergeOutput[0].changed, true);
   assert.equal(convergeOutput[0].dryRun, true);
-  assert.equal(convergeOutput[0].previousChatServerPath, '/Users/example/code/agentoc-trial-runtime/chat-server.mjs');
+  assert.equal(convergeOutput[0].previousChatServerPath, '/Users/example/code/ragent-trial-runtime/chat-server.mjs');
   assert.equal(convergeOutput[0].publicBaseUrl, 'https://trial.example.com');
   assert.equal(convergeOutput[0].nextChatServerPath, join(repoRoot, 'chat-server.mjs'));
   assert.equal(convergeOutput[0].nextWorkingDirectory, repoRoot);
@@ -606,12 +606,12 @@ try {
   rmSync(sandboxHome, { recursive: true, force: true });
 }
 
-const syncSandboxHome = mkdtempSync(join(tmpdir(), 'agentoc-guest-instance-sync-'));
+const syncSandboxHome = mkdtempSync(join(tmpdir(), 'ragent-guest-instance-sync-'));
 try {
   const launchAgentsDir = join(syncSandboxHome, 'Library', 'LaunchAgents');
   const logDir = join(syncSandboxHome, 'Library', 'Logs');
-  const ownerConfigDir = join(syncSandboxHome, '.config', 'agentoc');
-  const instanceRoot = join(syncSandboxHome, '.agentoc', 'instances', 'trial');
+  const ownerConfigDir = join(syncSandboxHome, '.config', 'ragent');
+  const instanceRoot = join(syncSandboxHome, '.ragent', 'instances', 'trial');
   mkdirSync(launchAgentsDir, { recursive: true });
   mkdirSync(logDir, { recursive: true });
   mkdirSync(ownerConfigDir, { recursive: true });
@@ -623,8 +623,8 @@ try {
   writeFileSync(join(launchAgentsDir, 'com.chatserver.claude.plist'), buildLaunchAgentPlist({
     label: 'com.chatserver.claude',
     nodePath: '/usr/local/bin/node',
-    chatServerPath: '/Users/example/code/agentoc/chat-server.mjs',
-    workingDirectory: '/Users/example/code/agentoc',
+    chatServerPath: '/Users/example/code/ragent/chat-server.mjs',
+    workingDirectory: '/Users/example/code/ragent',
     standardOutPath: join(logDir, 'chat-server-owner.log'),
     standardErrorPath: join(logDir, 'chat-server-owner.error.log'),
     environmentVariables: {
@@ -640,15 +640,15 @@ try {
   writeFileSync(guestPlistPath, buildLaunchAgentPlist({
     label: 'com.chatserver.trial',
     nodePath: '/usr/local/bin/node',
-    chatServerPath: '/Users/example/code/agentoc-legacy/chat-server.mjs',
-    workingDirectory: '/Users/example/code/agentoc-legacy',
+    chatServerPath: '/Users/example/code/ragent-legacy/chat-server.mjs',
+    workingDirectory: '/Users/example/code/ragent-legacy',
     standardOutPath: join(logDir, 'chat-server-trial.log'),
     standardErrorPath: join(logDir, 'chat-server-trial.error.log'),
     environmentVariables: {
       CHAT_PORT: '7696',
       HOME: syncSandboxHome,
       USERPROFILE: syncSandboxHome,
-      AGENTOC_INSTANCE_ROOT: instanceRoot,
+      RAGENT_INSTANCE_ROOT: instanceRoot,
       SECURE_COOKIES: '1',
     },
   }));
@@ -658,8 +658,8 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: syncSandboxHome,
       USERPROFILE: syncSandboxHome,
       ...ownerFileAssetEnvironment,
@@ -673,20 +673,20 @@ try {
   assert.equal(convergeOutput[0].restarted, false);
 
   const rewrittenGuestPlist = readFileSync(guestPlistPath, 'utf8');
-  assert.match(rewrittenGuestPlist, /<key>AGENTOC_ASSET_STORAGE_PROVIDER<\/key><string>tos<\/string>/);
-  assert.match(rewrittenGuestPlist, /<key>AGENTOC_ASSET_STORAGE_BASE_URL<\/key><string>https:\/\/assets\.example\.com<\/string>/);
-  assert.match(rewrittenGuestPlist, /<key>AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED<\/key><string>0<\/string>/);
-  assert.match(rewrittenGuestPlist, /<key>AGENTOC_SESSION_DISPATCH<\/key><string>on<\/string>/);
-  assert.doesNotMatch(rewrittenGuestPlist, /<key>AGENTOC_BRIDGE_ROOT_BASE_URL<\/key>/);
-  assert.doesNotMatch(rewrittenGuestPlist, /<key>AGENTOC_ENABLE_ACTIVE_RELEASE<\/key>/);
+  assert.match(rewrittenGuestPlist, /<key>RAGENT_ASSET_STORAGE_PROVIDER<\/key><string>tos<\/string>/);
+  assert.match(rewrittenGuestPlist, /<key>RAGENT_ASSET_STORAGE_BASE_URL<\/key><string>https:\/\/assets\.example\.com<\/string>/);
+  assert.match(rewrittenGuestPlist, /<key>RAGENT_ASSET_DIRECT_UPLOAD_ENABLED<\/key><string>0<\/string>/);
+  assert.match(rewrittenGuestPlist, /<key>RAGENT_SESSION_DISPATCH<\/key><string>on<\/string>/);
+  assert.doesNotMatch(rewrittenGuestPlist, /<key>RAGENT_BRIDGE_ROOT_BASE_URL<\/key>/);
+  assert.doesNotMatch(rewrittenGuestPlist, /<key>RAGENT_ENABLE_ACTIVE_RELEASE<\/key>/);
 } finally {
   rmSync(syncSandboxHome, { recursive: true, force: true });
 }
 
-const linksSandboxHome = mkdtempSync(join(tmpdir(), 'agentoc-guest-instance-links-'));
+const linksSandboxHome = mkdtempSync(join(tmpdir(), 'ragent-guest-instance-links-'));
 try {
-  const configDir = join(linksSandboxHome, '.config', 'agentoc');
-  const instanceRoot = join(linksSandboxHome, '.agentoc', 'instances', 'trial24');
+  const configDir = join(linksSandboxHome, '.config', 'ragent');
+  const instanceRoot = join(linksSandboxHome, '.ragent', 'instances', 'trial24');
   const instanceConfigDir = join(instanceRoot, 'config');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(instanceConfigDir, { recursive: true });
@@ -719,13 +719,13 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: linksSandboxHome,
       USERPROFILE: linksSandboxHome,
-      AGENTOC_BRIDGE_BASE_URL: '',
-      AGENTOC_BRIDGE_BASE_URL_TEMPLATE: '',
-      AGENTOC_BRIDGE_ROOT_BASE_URL: '',
+      RAGENT_BRIDGE_BASE_URL: '',
+      RAGENT_BRIDGE_BASE_URL_TEMPLATE: '',
+      RAGENT_BRIDGE_ROOT_BASE_URL: '',
     },
   });
   assert.equal(linksResult.status, 0, linksResult.stderr || linksResult.stdout);
@@ -745,13 +745,13 @@ const singleLinksResult = spawnSync(process.execPath, ['cli.js', 'guest-instance
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: linksSandboxHome,
       USERPROFILE: linksSandboxHome,
-      AGENTOC_BRIDGE_BASE_URL: '',
-      AGENTOC_BRIDGE_BASE_URL_TEMPLATE: '',
-      AGENTOC_BRIDGE_ROOT_BASE_URL: '',
+      RAGENT_BRIDGE_BASE_URL: '',
+      RAGENT_BRIDGE_BASE_URL_TEMPLATE: '',
+      RAGENT_BRIDGE_ROOT_BASE_URL: '',
     },
   });
   assert.equal(singleLinksResult.status, 0, singleLinksResult.stderr || singleLinksResult.stdout);
@@ -763,13 +763,13 @@ const singleLinksResult = spawnSync(process.execPath, ['cli.js', 'guest-instance
   rmSync(linksSandboxHome, { recursive: true, force: true });
 }
 
-const reportSandboxHome = mkdtempSync(join(tmpdir(), 'agentoc-guest-instance-report-'));
+const reportSandboxHome = mkdtempSync(join(tmpdir(), 'ragent-guest-instance-report-'));
 try {
-  const configDir = join(reportSandboxHome, '.config', 'agentoc');
-  const outputDir = join(reportSandboxHome, '.agentoc', 'reports');
-  const trialRoot = join(reportSandboxHome, '.agentoc', 'instances', 'trial24');
-  const intakeRoot = join(reportSandboxHome, '.agentoc', 'instances', 'intake1');
-  const emptyRoot = join(reportSandboxHome, '.agentoc', 'instances', 'trial25');
+  const configDir = join(reportSandboxHome, '.config', 'ragent');
+  const outputDir = join(reportSandboxHome, '.ragent', 'reports');
+  const trialRoot = join(reportSandboxHome, '.ragent', 'instances', 'trial24');
+  const intakeRoot = join(reportSandboxHome, '.ragent', 'instances', 'intake1');
+  const emptyRoot = join(reportSandboxHome, '.ragent', 'instances', 'trial25');
   const trialConfigDir = join(trialRoot, 'config');
   const intakeConfigDir = join(intakeRoot, 'config');
   const emptyConfigDir = join(emptyRoot, 'config');
@@ -929,8 +929,8 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: reportSandboxHome,
       USERPROFILE: reportSandboxHome,
     },
@@ -981,8 +981,8 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: reportSandboxHome,
       USERPROFILE: reportSandboxHome,
     },

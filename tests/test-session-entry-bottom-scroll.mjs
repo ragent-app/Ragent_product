@@ -308,7 +308,7 @@ function createHttpContext({ shareSnapshotMode = false, entryMode = 'resume', ol
     hasMoreBefore: false,
     gapExpectedSeq: null,
   };
-  context.window.AgentoCTimelineRuntime = {
+  context.window.RagentTimelineRuntime = {
     getSnapshot() {
       return timelineSnapshot;
     },
@@ -349,8 +349,8 @@ function createRealtimeContext({ restoredSnapshot = true, hasSessionRecord = tru
     Map,
     Set,
     window: {
-      agentocT: null,
-      AgentoCIcons: null,
+      ragentT: null,
+      RagentIcons: null,
     },
     location: {
       protocol: 'http:',

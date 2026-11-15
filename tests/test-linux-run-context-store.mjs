@@ -11,8 +11,8 @@ import { createRunnerLifecycleServer } from '../scripts/runner-lifecycle-broker.
 import { renewLinuxRunScope } from '../chat/linux-run-scope-lifecycle.mjs';
 
 test('root state binds a signed scope to the live unit and revokes durably',
-  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
-    const root = await mkdtemp('/srv/agentoc-run-state-test-');
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.env.RAGENT_TEST_SYSTEMD_INVOCATION }, async () => {
+    const root = await mkdtemp('/srv/ragent-run-state-test-');
     const directory = `${root}/runs`, pinDirectory = `${root}/pin`;
     let server;
     try {
@@ -27,11 +27,11 @@ test('root state binds a signed scope to the live unit and revokes durably',
         options: { approvedActionChannel: { turnId: run.requestId, token: 'secret-must-not-be-persisted' } } });
       const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: 2, privateKey: keys.privateKey, ttlMs: 60000 });
       const args = { directory, pinDirectory, run, manifest, grant, launchAttempt: 2,
-        runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) };
+        runnerUid: Number(process.env.RAGENT_TEST_SYSTEMD_UID) };
       await assert.rejects(registerLinuxRunContext({ ...args, launchAttempt: 1 }));
       await assert.rejects(registerLinuxRunContext({ ...args, runnerUid: args.runnerUid + 1 }));
       const result = await registerLinuxRunContext(args);
-      assert.equal(result.invocationId, process.env.AGENTOC_TEST_SYSTEMD_INVOCATION);
+      assert.equal(result.invocationId, process.env.RAGENT_TEST_SYSTEMD_INVOCATION);
       await assert.rejects(registerLinuxRunContext(args));
       const loaded = await readLinuxRunContext({ directory, pinDirectory, runId: run.id, launchAttempt: 2 });
       assert.equal(loaded.cwd, '/srv/work');

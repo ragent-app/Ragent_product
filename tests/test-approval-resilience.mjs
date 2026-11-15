@@ -189,7 +189,7 @@ assert.match(
 );
 assert.match(
   projectionSource,
-  /payload\.type !== 'agentoc\.approval_response' \|\| payload\.autoApproved !== true/,
+  /payload\.type !== 'ragent\.approval_response' \|\| payload\.autoApproved !== true/,
   'restarted services must seed the suppression set from spooled autoApproved echoes',
 );
 assert.match(

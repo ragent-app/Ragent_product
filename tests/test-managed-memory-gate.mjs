@@ -4,7 +4,7 @@ import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { isManagedLearningProfileWrite } from '../chat/managed-memory-gate.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-memory-gate-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-memory-gate-'));
 try {
   const dir = join(root, 'model-context');
   mkdirSync(dir);

@@ -10,9 +10,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-usage-fallback-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const instanceRoot = join(home, '.agentoc', 'instances', 'trial24');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-usage-fallback-'));
+  const configDir = join(home, '.config', 'ragent');
+  const instanceRoot = join(home, '.ragent', 'instances', 'trial24');
   const instanceConfigDir = join(instanceRoot, 'config');
   const runDir = join(instanceConfigDir, 'chat-runs', 'run_abc123');
 
@@ -94,8 +94,8 @@ function main() {
         cwd: repoRoot,
         env: {
           ...process.env,
-          AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-          AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+          RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+          RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
           HOME: home,
         },
         encoding: 'utf8',

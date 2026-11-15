@@ -12,8 +12,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-run-admission-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-run-admission-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   createProject,
@@ -53,7 +53,7 @@ function makeManifest(overrides = {}) {
 
 try {
   // ── success path: snapshot + digest attached ──────────────────────────────
-  const rootA = makeDir('agentoc-adm-root-a-');
+  const rootA = makeDir('ragent-adm-root-a-');
   mkdirSync(join(rootA, '.git'), { recursive: true }); // non-git is fine too
   const project = await createProject({ name: 'Admission A', rootPath: rootA });
   const session = makeSession('s1', rootA, project.id);
@@ -127,17 +127,17 @@ try {
     workspaceRoot: { realPath: rootA },
     scopeRoot: { realPath: rootA },
     cwd: { realPath: rootA },
-  }, { protectedRoots: [join(rootA, '.agentoc-control')] });
-  assert.ok(manuallyBuiltRiskContext.protectedRoots.includes(join(rootA, '.agentoc-control')),
+  }, { protectedRoots: [join(rootA, '.ragent-control')] });
+  assert.ok(manuallyBuiltRiskContext.protectedRoots.includes(join(rootA, '.ragent-control')),
     'additional protected roots should be normalized into the risk context');
 
   const windowsRiskContext = buildRunRiskContext({
     platform: 'win32',
-    workspaceRoot: { realPath: 'C:\\agentoc\\workspace' },
-    scopeRoot: { realPath: 'C:\\agentoc\\workspace' },
-    cwd: { realPath: 'C:\\agentoc\\workspace' },
-  }, { protectedRoots: ['C:\\agentoc\\control'] });
-  assert.ok(windowsRiskContext.protectedRoots.includes('C:\\agentoc\\control'),
+    workspaceRoot: { realPath: 'C:\\ragent\\workspace' },
+    scopeRoot: { realPath: 'C:\\ragent\\workspace' },
+    cwd: { realPath: 'C:\\ragent\\workspace' },
+  }, { protectedRoots: ['C:\\ragent\\control'] });
+  assert.ok(windowsRiskContext.protectedRoots.includes('C:\\ragent\\control'),
     'Windows risk roots should use win32 path semantics');
 
   // revision bump changes the digest
@@ -204,7 +204,7 @@ try {
   );
 
   // ── unresolved workspace root -> WORKSPACE_ROOT_UNRESOLVED ────────────────
-  const missingRoot = join(tmpdir(), `agentoc-adm-missing-${Date.now()}`);
+  const missingRoot = join(tmpdir(), `ragent-adm-missing-${Date.now()}`);
   const unresolvedProject = await createProject(
     { name: 'Unresolved', rootPath: missingRoot },
     { validateRoot: false },

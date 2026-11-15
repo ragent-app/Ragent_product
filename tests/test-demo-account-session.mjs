@@ -129,7 +129,7 @@ async function challenge(f, suffix) {
     devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce, issuedAt: intent.issuedAt };
   for (const [field, value] of Object.entries(authorize)) assert.equal(typeof value, 'string', field);
   authorize.deviceSignature = sign('sha256', Buffer.from(buildAccountJoinIntentMessage({ ...authorize, instanceId,
-    audience: 'agentoc-account-join' })), c.key.privateKey).toString('base64url');
+    audience: 'ragent-account-join' })), c.key.privateKey).toString('base64url');
   const grant = await f.broker.authorizeAccountJoinIntent(authorize, { credential: session.credential.token });
   assert.equal(grant.instanceId, instanceId); assert.match(grant.accountJoinGrant, /^rajg_/);
   await assert.rejects(f.broker.createAccountRendezvous({ requestId: 'request_demo_wrong_target', targetInstanceId: 'inst_personal',

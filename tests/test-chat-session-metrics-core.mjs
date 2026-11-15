@@ -6,7 +6,7 @@
 // metrics store. The store lives on the attach root (legacy reached
 // window/globalThis itself; here the module's root IS the store host). Every
 // scenario runs against BOTH implementations and compares the deep snapshot
-// from agentocGetEventRefreshMetrics() after stripping timestamps, so the
+// from ragentGetEventRefreshMetrics() after stripping timestamps, so the
 // port cannot drift from the legacy accumulator shape, totals, sample ring
 // and cap behavior.
 
@@ -74,7 +74,7 @@ function loadLegacy() {
       ensure: () => context.ensureEventRefreshMetricsStore(),
       refresh: (sample) => context.recordEventRefreshMetric(sample),
       streaming: (sample) => context.recordStreamingRenderMetric(sample),
-      snapshot: () => context.window.agentocGetEventRefreshMetrics(),
+      snapshot: () => context.window.ragentGetEventRefreshMetrics(),
     },
     label: 'legacy',
   };
@@ -98,13 +98,13 @@ function loadCore() {
     context,
     { filename: 'transport/session-metrics.js' },
   );
-  const core = context.AgentocSessionMetricsCore;
+  const core = context.RagentSessionMetricsCore;
   return {
     api: {
       ensure: () => core.ensureEventRefreshMetricsStore(),
       refresh: (sample) => core.recordEventRefreshMetric(sample),
       streaming: (sample) => core.recordStreamingRenderMetric(sample),
-      snapshot: () => context.agentocGetEventRefreshMetrics(),
+      snapshot: () => context.ragentGetEventRefreshMetrics(),
     },
     label: 'transport',
   };

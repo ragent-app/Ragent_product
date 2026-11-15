@@ -82,19 +82,19 @@ func TestExecutableUsesInstalledCliWithoutNodeStartupHooks(t *testing.T) {
 	}
 	input.Close()
 	output.Close()
-	script := `console.log(JSON.stringify({args:process.argv.slice(2),hook:process.env.NODE_OPTIONS||'',base:process.env.AGENTOC_CHAT_BASE_URL}))`
+	script := `console.log(JSON.stringify({args:process.argv.slice(2),hook:process.env.NODE_OPTIONS||'',base:process.env.RAGENT_CHAT_BASE_URL}))`
 	if err := os.WriteFile(filepath.Join(root, "cli.js"), []byte(script), 0600); err != nil {
 		t.Fatal(err)
 	}
-	helper := filepath.Join(root, "bin", "agentoc-cli-read-bridge.exe")
+	helper := filepath.Join(root, "bin", "ragent-cli-read-bridge.exe")
 	build := exec.Command("go", "build", "-o", helper, ".")
 	if text, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v: %s", err, text)
 	}
 	cmd := exec.Command(helper, "trigger-list", "http://127.0.0.1:7690", "--json")
 	cmd.Env = []string{"SystemRoot=" + os.Getenv("SystemRoot"), "TEMP=" + os.TempDir(), "TMP=" + os.TempDir(),
-		"AGENTOC_SESSION_ID=s", "AGENTOC_SESSION_CONTROL_TOKEN=token", "AGENTOC_SESSION_CONTROL_RUN_ID=r",
-		"AGENTOC_SESSION_CONTROL_SESSION_ID=s", "AGENTOC_SESSION_CONTROL_TURN_ID=t", "NODE_OPTIONS=--require nonexistent-malicious-module"}
+		"RAGENT_SESSION_ID=s", "RAGENT_SESSION_CONTROL_TOKEN=token", "RAGENT_SESSION_CONTROL_RUN_ID=r",
+		"RAGENT_SESSION_CONTROL_SESSION_ID=s", "RAGENT_SESSION_CONTROL_TURN_ID=t", "NODE_OPTIONS=--require nonexistent-malicious-module"}
 	text, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("helper: %v: %s", err, text)
@@ -158,9 +158,9 @@ func TestExecutableUsesInstalledCliWithoutNodeStartupHooks(t *testing.T) {
 }
 
 func TestChildEnvironmentStripsNodeHooksAndBindsSession(t *testing.T) {
-	input := []string{"SYSTEMROOT=C:\\Windows", "AGENTOC_SESSION_ID=s", "AGENTOC_SESSION_CONTROL_TOKEN=token",
-		"AGENTOC_SESSION_CONTROL_RUN_ID=r", "AGENTOC_SESSION_CONTROL_SESSION_ID=s", "AGENTOC_SESSION_CONTROL_TURN_ID=t",
-		"NODE_OPTIONS=--require evil.js", "NODE_PATH=attacker", "HTTP_PROXY=http://attacker", "AGENTOC_CHAT_BASE_URL=http://attacker", "AGENTOC_WINDOWS_SERVICE_MODE=0"}
+	input := []string{"SYSTEMROOT=C:\\Windows", "RAGENT_SESSION_ID=s", "RAGENT_SESSION_CONTROL_TOKEN=token",
+		"RAGENT_SESSION_CONTROL_RUN_ID=r", "RAGENT_SESSION_CONTROL_SESSION_ID=s", "RAGENT_SESSION_CONTROL_TURN_ID=t",
+		"NODE_OPTIONS=--require evil.js", "NODE_PATH=attacker", "HTTP_PROXY=http://attacker", "RAGENT_CHAT_BASE_URL=http://attacker", "RAGENT_WINDOWS_SERVICE_MODE=0"}
 	result, err := childEnvironment(input, "http://127.0.0.1:7690")
 	if err != nil {
 		t.Fatal(err)
@@ -171,16 +171,16 @@ func TestChildEnvironmentStripsNodeHooksAndBindsSession(t *testing.T) {
 			t.Fatalf("unsafe environment retained: %s", bad)
 		}
 	}
-	if !strings.Contains(joined, "AGENTOC_CHAT_BASE_URL=http://127.0.0.1:7690") {
+	if !strings.Contains(joined, "RAGENT_CHAT_BASE_URL=http://127.0.0.1:7690") {
 		t.Fatal("trusted endpoint missing")
 	}
-	if !strings.Contains(joined, "AGENTOC_WINDOWS_SERVICE_MODE=1") || strings.Contains(joined, "AGENTOC_WINDOWS_SERVICE_MODE=0") {
+	if !strings.Contains(joined, "RAGENT_WINDOWS_SERVICE_MODE=1") || strings.Contains(joined, "RAGENT_WINDOWS_SERVICE_MODE=0") {
 		t.Fatal("managed service mode must be fixed by the helper")
 	}
-	if _, err := childEnvironment(append(input, "agentoc_session_id=other"), "http://127.0.0.1:7690"); err == nil {
+	if _, err := childEnvironment(append(input, "ragent_session_id=other"), "http://127.0.0.1:7690"); err == nil {
 		t.Fatal("duplicate session identity accepted")
 	}
-	input[1] = "AGENTOC_SESSION_ID=other"
+	input[1] = "RAGENT_SESSION_ID=other"
 	if _, err := childEnvironment(input, "http://127.0.0.1:7690"); err == nil {
 		t.Fatal("mismatched session accepted")
 	}

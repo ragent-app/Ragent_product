@@ -7,7 +7,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using Microsoft.Win32.SafeHandles;
-using AgentoC.ServiceHost;
+using Ragent.ServiceHost;
 
 internal static class RunnerSupervisorPipeFixture {
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe, out uint pid);
@@ -28,7 +28,7 @@ internal static class RunnerSupervisorPipeFixture {
     Need(ownerOk && controlOk && networkDeny,"required ACL entry missing");
   }
   public static int Main() {
-    string suffix=Guid.NewGuid().ToString("N"), pub="agentoc-supervisor-qa-"+suffix, backend="agentoc-supervisor-backend-"+Guid.NewGuid().ToString("N");
+    string suffix=Guid.NewGuid().ToString("N"), pub="ragent-supervisor-qa-"+suffix, backend="ragent-supervisor-backend-"+Guid.NewGuid().ToString("N");
     string owner=WindowsIdentity.GetCurrent().User.Value, control="S-1-5-21-1-2-3-1001"; int handled=0; bool failed=false;
     var stop=new ManualResetEvent(false); NamedPipeServerStream pending=null;
     var server=new Thread(()=>{
@@ -56,7 +56,7 @@ internal static class RunnerSupervisorPipeFixture {
           Need(RunnerSupervisorPipe.ClientCore(pub,input,output,pipe=>{throw new InvalidOperationException("spoof");})!=0,"spoof accepted");
         Thread.Sleep(100); Need(handled==before,"unverified client forwarded request"); Need(!failed,"listener failed");
         using(var input=new MemoryStream(Encoding.UTF8.GetBytes("{\"type\":\"health\"}\n"))) using(var output=new MemoryStream())
-          Need(RunnerSupervisorPipe.ClientCore(pub,input,output,pipe=>BrokerPipeServerIdentity.VerifyService(pipe,"AgentoC-RunnerSupervisor"))!=0,"foreign pipe accepted as installed service");
+          Need(RunnerSupervisorPipe.ClientCore(pub,input,output,pipe=>BrokerPipeServerIdentity.VerifyService(pipe,"Ragent-RunnerSupervisor"))!=0,"foreign pipe accepted as installed service");
         Thread.Sleep(100); Need(handled==before,"foreign pipe received request");
         int successful=0; var workers=new Thread[6];
         for(int i=0;i<workers.Length;i++) {
@@ -66,7 +66,7 @@ internal static class RunnerSupervisorPipeFixture {
         }
         foreach(var worker in workers)Need(worker.Join(35000),"concurrent request timed out"); Need(successful==workers.Length,"concurrent forwarding failed");
       }
-      string fakePub="agentoc-supervisor-qa-"+Guid.NewGuid().ToString("N"); int prior=handled;
+      string fakePub="ragent-supervisor-qa-"+Guid.NewGuid().ToString("N"); int prior=handled;
       using(var proxy=new RunnerSupervisorPipe(fakePub,backend,()=>System.Diagnostics.Process.GetCurrentProcess().Id+1,()=>failed=true,owner,control)) {
         proxy.Start(); using(var input=new MemoryStream(Encoding.UTF8.GetBytes("{\"type\":\"health\"}\n"))) using(var output=new MemoryStream())
           Need(RunnerSupervisorPipe.ClientCore(fakePub,input,output,pipe=>{})!=0,"wrong backend PID accepted");

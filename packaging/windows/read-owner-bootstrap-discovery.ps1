@@ -3,8 +3,8 @@
 param([switch]$LibraryOnly,[ValidateSet('cli','browser','activation')][string]$Purpose='cli')
 $ErrorActionPreference='Stop'
 function Get-OwnerProductRoot {
-  $candidate=$env:AGENTOC_INSTALL_ROOT
-  if([string]::IsNullOrWhiteSpace($candidate)){$candidate=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'AgentoC'}
+  $candidate=$env:RAGENT_INSTALL_ROOT
+  if([string]::IsNullOrWhiteSpace($candidate)){$candidate=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'Ragent'}
   if($candidate -notmatch '\A[A-Za-z]:\\'){throw 'OBD_INSTALL_ROOT_INVALID'}
   $full=[IO.Path]::GetFullPath($candidate).TrimEnd('\')
   if($full.Length -le 2){throw 'OBD_INSTALL_ROOT_INVALID'}
@@ -15,16 +15,16 @@ function Get-OwnerProgramDataPath {
   if([string]::IsNullOrWhiteSpace($path) -or $path -notmatch '\A[A-Za-z]:\\'){throw 'OBD_PROGRAMDATA_UNAVAILABLE'}
   return [IO.Path]::GetFullPath($path).TrimEnd('\')
 }
-function Get-OwnerDataRoot { return Join-Path (Get-OwnerProgramDataPath) 'AgentoC' }
+function Get-OwnerDataRoot { return Join-Path (Get-OwnerProgramDataPath) 'Ragent' }
 function Get-OwnerInstanceRoot { return Join-Path (Get-OwnerDataRoot) 'instances\owner' }
-if(-not ('AgentoCOwnerFilePin' -as [type])){
+if(-not ('RagentOwnerFilePin' -as [type])){
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
 using System.Text;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
-public static class AgentoCOwnerFilePin {
+public static class RagentOwnerFilePin {
  [StructLayout(LayoutKind.Sequential)] struct Info {public uint attributes;public System.Runtime.InteropServices.ComTypes.FILETIME created,accessed,written;public uint volume,sizeHigh,sizeLow,links,indexHigh,indexLow;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern SafeFileHandle CreateFile(string p,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetFileInformationByHandle(SafeFileHandle h,out Info i);
@@ -79,7 +79,7 @@ function Assert-OwnerReleaseManifest($Release){
   $protocolVersionIsInteger=$Release.protocolVersion -is [int] -or $Release.protocolVersion -is [long]
   if(@($Release.PSObject.Properties).Count -ne 5 -or @($Release.PSObject.Properties.Name|Where-Object {$_ -cnotin $expected}).Count -or
     -not $versionIsInteger -or $Release.version -notin @(1,2) -or -not $protocolVersionIsInteger -or $Release.protocolVersion -notin @(1,2) -or
-    $Release.helperFile -cne 'AgentoC.OwnerBootstrap.exe' -or $Release.helperSha256 -isnot [string] -or $Release.helperSha256 -cnotmatch '\A[a-f0-9]{64}\z' -or
+    $Release.helperFile -cne 'Ragent.OwnerBootstrap.exe' -or $Release.helperSha256 -isnot [string] -or $Release.helperSha256 -cnotmatch '\A[a-f0-9]{64}\z' -or
     ($Release.version -eq 2 -and ($Release.trustMode -cne 'admin-installed-sha256' -or $Release.protocolVersion -ne 2)) -or
     ($Release.version -eq 1 -and ($Release.publisherSha256 -isnot [string] -or $Release.publisherSha256 -cnotmatch '\A[a-f0-9]{64}\z'))){throw 'OBD_RELEASE_MISMATCH'}
 }
@@ -101,7 +101,7 @@ function Assert-OwnerPreparedRelease([Collections.Generic.List[IDisposable]]$Pin
   # New packaged administrative manifests are valid before first identity
   # initialization. A legacy active signed manifest is never silently adopted.
   if($release.version -ne 2){throw 'OBD_PREPARED_RELEASE_REFUSED'}
-  $helperPath=Join-Path (Get-OwnerProductRoot) 'payload\AgentoC.OwnerBootstrap.exe'
+  $helperPath=Join-Path (Get-OwnerProductRoot) 'payload\Ragent.OwnerBootstrap.exe'
   $helper=Read-OwnerPinnedFile $helperPath $admin $Pins 4194304
   $null=Get-OwnerReleaseTrust $release $helper $helperPath
 }
@@ -132,7 +132,7 @@ function Assert-OwnerObjectAcl([string]$Path,[string[]]$Allowed,[switch]$Ancesto
   if($qaNeedsWitness){
     if($null -eq $Pins){throw 'OBD_ANCESTOR_WITNESS_REQUIRED'}
     $qaProgramData=Get-OwnerProgramDataPath
-    foreach($qaHandle in [AgentoCOwnerFilePin]::NonemptyDirectory($qaProgramData,(Join-Path $qaProgramData 'Microsoft'))){$Pins.Add($qaHandle)}
+    foreach($qaHandle in [RagentOwnerFilePin]::NonemptyDirectory($qaProgramData,(Join-Path $qaProgramData 'Microsoft'))){$Pins.Add($qaHandle)}
   }
 }
 function Test-ExternalProductAncestor([string]$InputPath,[string]$AncestorPath){
@@ -141,7 +141,7 @@ function Test-ExternalProductAncestor([string]$InputPath,[string]$AncestorPath){
   $data=[IO.Path]::GetFullPath((Get-OwnerDataRoot)).TrimEnd('\')
   if($inputFull -ieq $data -or $inputFull.StartsWith($data+'\',[StringComparison]::OrdinalIgnoreCase)){return $false}
   $ancestor=[IO.Path]::GetFullPath($AncestorPath).TrimEnd('\')
-  $inputs=@('payload\owner-bootstrap-release.json','payload\AgentoC.OwnerBootstrap.exe','AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','owner-msi.prepared.json','owner-msi.policy.json','owner-msi.removed.json','owner-msi.prevalidation-lock','owner-msi.prepare-lock','owner-msi.prepared.activated.json','owner-msi.policy.activated.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-activation.committed-lock','owner-msi.upgrade-transaction.json','payload\scripts\initialize-windows-owner-identity.mjs','payload\lib\instance-identity.mjs','payload\lib\instance-proof-protocol.mjs','payload\lib\windows-owner-identity-paths.mjs') | ForEach-Object {[IO.Path]::GetFullPath((Join-Path $product $_))}
+  $inputs=@('payload\owner-bootstrap-release.json','payload\Ragent.OwnerBootstrap.exe','Ragent.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs','owner-msi.prepared.json','owner-msi.policy.json','owner-msi.removed.json','owner-msi.prevalidation-lock','owner-msi.prepare-lock','owner-msi.prepared.activated.json','owner-msi.policy.activated.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-activation.committed-lock','owner-msi.upgrade-transaction.json','payload\scripts\initialize-windows-owner-identity.mjs','payload\lib\instance-identity.mjs','payload\lib\instance-proof-protocol.mjs','payload\lib\windows-owner-identity-paths.mjs') | ForEach-Object {[IO.Path]::GetFullPath((Join-Path $product $_))}
   $leaf=[IO.Path]::GetFileName($inputFull)
   $archive=([IO.Path]::GetDirectoryName($inputFull) -ieq $product) -and $leaf -cmatch '^owner-(?:msi\.(?:prepared\.activated|policy\.activated|activated|activation-health)\.json|activation\.committed-lock)\.previous-[a-f0-9]{32}$'
   return (($inputs -icontains $inputFull) -or $archive) -and $product.StartsWith($ancestor+'\',[StringComparison]::OrdinalIgnoreCase)
@@ -150,11 +150,11 @@ function Read-OwnerPinnedFile([string]$Path,[string[]]$Allowed,[Collections.Gene
   if($null -eq $AncestorAllowed){$AncestorAllowed=$Allowed}
   $qaPath=[IO.Path]::GetFullPath($Path)
   for($qaParent=[IO.Path]::GetDirectoryName($qaPath);$qaParent;$qaParent=[IO.Path]::GetDirectoryName($qaParent)){
-    $qaPin=[AgentoCOwnerFilePin]::Directory($qaParent);$Pins.Add($qaPin)
+    $qaPin=[RagentOwnerFilePin]::Directory($qaParent);$Pins.Add($qaPin)
     if(-not (Test-ExternalProductAncestor $qaPath $qaParent)){Assert-OwnerObjectAcl $qaParent $AncestorAllowed -Ancestor -Pins $Pins}
   }
   $qaFile=[IO.FileStream]::new($qaPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-  $Pins.Add($qaFile);[AgentoCOwnerFilePin]::Verify($qaFile.SafeFileHandle,$qaPath,$false)
+  $Pins.Add($qaFile);[RagentOwnerFilePin]::Verify($qaFile.SafeFileHandle,$qaPath,$false)
   Assert-OwnerObjectAcl $qaPath $Allowed
   if($qaFile.Length -lt 1 -or $qaFile.Length -gt $Maximum){throw 'OBD_FILE_SIZE_INVALID'}
   $qaBytes=[byte[]]::new([int]$qaFile.Length);$qaOffset=0
@@ -192,7 +192,7 @@ function Read-InstalledOwnerBootstrap {
       if(-not(Test-Path -LiteralPath $qaLivePath)){throw 'OBD_ENDPOINT_UNAVAILABLE'}
       $qaLive=Read-OwnerPinnedFile $qaLivePath ($qaAdmin+@($qaInstallObject.controlSid)) $qaPins
     }
-    $qaHelperPath=Join-Path (Get-OwnerProductRoot) 'payload\AgentoC.OwnerBootstrap.exe'
+    $qaHelperPath=Join-Path (Get-OwnerProductRoot) 'payload\Ragent.OwnerBootstrap.exe'
     $qaHelper=Read-OwnerPinnedFile $qaHelperPath $qaAdmin $qaPins 4194304
     $qaReleaseObject=([Text.UTF8Encoding]::new($false,$true)).GetString($qaRelease)|ConvertFrom-Json
     $qaObserved=Get-OwnerReleaseTrust $qaReleaseObject $qaHelper $qaHelperPath

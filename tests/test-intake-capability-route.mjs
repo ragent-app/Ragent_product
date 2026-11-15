@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-intake-capabilities-'));
-process.env.AGENTOC_CONFIG_DIR = root;
+const root = await mkdtemp(join(tmpdir(), 'ragent-intake-capabilities-'));
+process.env.RAGENT_CONFIG_DIR = root;
 try {
   const { handleControlRoutes } = await import('../chat/router-control-routes.mjs');
   const request = async (authSession) => {

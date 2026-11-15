@@ -28,14 +28,14 @@ ingress:
   - service: http_status:404
 `;
 
-const agentocFallbackConfig = `tunnel: claude-code-remote
+const ragentFallbackConfig = `tunnel: claude-code-remote
 credentials-file: /Users/example/.cloudflared/example-tunnel.json
 protocol: http2
 
 ingress:
   - hostname: legacy.example.com
     service: http://127.0.0.1:7690
-  - hostname: agentoc.example.com
+  - hostname: ragent.example.com
     service: http://127.0.0.1:7690
   - service: http_status:404
 `;
@@ -83,12 +83,12 @@ assert.equal(
 );
 
 assert.equal(
-  await selectCloudflaredAccessDomain(agentocFallbackConfig, {
+  await selectCloudflaredAccessDomain(ragentFallbackConfig, {
     hostnameResolves: async () => {
       throw new Error('dns unavailable');
     },
   }),
-  'agentoc.example.com'
+  'ragent.example.com'
 );
 
 console.log('test-cloudflared-config: ok');

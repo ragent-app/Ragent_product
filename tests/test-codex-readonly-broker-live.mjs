@@ -10,12 +10,12 @@ import { buildCodexAppServerThreadMessage, buildCodexAppServerTurnStartMessage }
 import { startReadOnlyCodexExecutor } from '../chat/codex-readonly-executor.mjs';
 import { createCodexReadOnlyEnvironmentSetup } from '../chat/codex-readonly-environment-setup.mjs';
 
-if (process.platform !== 'linux' || process.env.AGENTOC_TEST_CODEX_EXTERNAL_EXECUTOR !== '1') {
+if (process.platform !== 'linux' || process.env.RAGENT_TEST_CODEX_EXTERNAL_EXECUTOR !== '1') {
   console.log('test-codex-readonly-broker-live: skipped (opt-in Linux integration test)');
   process.exit(0);
 }
-const binary = process.env.AGENTOC_TEST_CODEX_BINARY;
-if (!binary?.startsWith('/')) throw new Error('An absolute AGENTOC_TEST_CODEX_BINARY is required');
+const binary = process.env.RAGENT_TEST_CODEX_BINARY;
+if (!binary?.startsWith('/')) throw new Error('An absolute RAGENT_TEST_CODEX_BINARY is required');
 const root = await mkdtemp(join(tmpdir(), 'ragent-codex-broker-'));
 const workspace = join(root, 'workspace'), home = join(root, 'codex'), hidden = join(root, 'hidden');
 await Promise.all([mkdir(workspace), mkdir(home), mkdir(hidden)]);
@@ -109,7 +109,7 @@ try {
   const writableTurn = buildCodexAppServerTurnStartMessage({ threadId: writableThread.thread.id, text: 'writable-fixture' });
   const writableTurnStarted = writableRequest(writableTurn.method, { ...writableTurn.params, approvalPolicy: 'never' });
   const turn = buildCodexAppServerTurnStartMessage({ threadId: thread.thread.id, text: 'fixture', executionEnvironment: selected.executionEnvironment });
-  const unavailable = process.env.AGENTOC_QA_STOP_EXECUTOR === '1';
+  const unavailable = process.env.RAGENT_QA_STOP_EXECUTOR === '1';
   if (unavailable) await executor.stop();
   let outcome;
   try {

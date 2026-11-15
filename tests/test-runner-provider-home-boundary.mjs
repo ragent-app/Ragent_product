@@ -9,15 +9,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const providerHomesDir = await mkdtemp(join(tmpdir(), 'agentoc-runner-provider-home-'));
-const runnerHome = await mkdtemp(join(tmpdir(), 'agentoc-runner-home-'));
+const providerHomesDir = await mkdtemp(join(tmpdir(), 'ragent-runner-provider-home-'));
+const runnerHome = await mkdtemp(join(tmpdir(), 'ragent-runner-home-'));
 const previous = {
   HOME: process.env.HOME,
   CODEX_HOME: process.env.CODEX_HOME,
-  AGENTOC_CODEX_HOME_DIR: process.env.AGENTOC_CODEX_HOME_DIR,
-  AGENTOC_CODEX_HOME_MODE: process.env.AGENTOC_CODEX_HOME_MODE,
-  AGENTOC_RUNNER_LAUNCH_MODE: process.env.AGENTOC_RUNNER_LAUNCH_MODE,
-  AGENTOC_PROVIDER_HOMES_DIR: process.env.AGENTOC_PROVIDER_HOMES_DIR,
+  RAGENT_CODEX_HOME_DIR: process.env.RAGENT_CODEX_HOME_DIR,
+  RAGENT_CODEX_HOME_MODE: process.env.RAGENT_CODEX_HOME_MODE,
+  RAGENT_RUNNER_LAUNCH_MODE: process.env.RAGENT_RUNNER_LAUNCH_MODE,
+  RAGENT_PROVIDER_HOMES_DIR: process.env.RAGENT_PROVIDER_HOMES_DIR,
 };
 
 try {
@@ -28,10 +28,10 @@ try {
   // The explicit managed-home override is a separate compatibility escape
   // hatch. Clear host state so this test exercises provider-home selection
   // from the runner launch mode and provider-homes root.
-  process.env.AGENTOC_CODEX_HOME_DIR = '';
-  process.env.AGENTOC_CODEX_HOME_MODE = 'personal';
-  process.env.AGENTOC_RUNNER_LAUNCH_MODE = 'runner-lifecycle';
-  process.env.AGENTOC_PROVIDER_HOMES_DIR = providerHomesDir;
+  process.env.RAGENT_CODEX_HOME_DIR = '';
+  process.env.RAGENT_CODEX_HOME_MODE = 'personal';
+  process.env.RAGENT_RUNNER_LAUNCH_MODE = 'runner-lifecycle';
+  process.env.RAGENT_PROVIDER_HOMES_DIR = providerHomesDir;
 
   const { resolveRunnerCodexHomeDir } = await import('../lib/runner-env.mjs');
   const { applyManagedRuntimeEnv } = await import('../chat/runtime-policy.mjs');
@@ -55,7 +55,7 @@ try {
   assert.equal(finalEnv.HOME, '/home/example');
   assert.ok(
     (await readFile(join(providerHomesDir, 'codex', 'config.toml'), 'utf8'))
-      .includes('# AgentoC-managed Codex runtime home.'),
+      .includes('# Ragent-managed Codex runtime home.'),
     'managed runner home should be materialized before provider launch',
   );
 

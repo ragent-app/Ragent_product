@@ -5,11 +5,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const previousHome = process.env.HOME;
-const previousWritebackSetting = process.env.AGENTOC_MEMORY_WRITEBACK;
-const previousMinCharsSetting = process.env.AGENTOC_MEMORY_WRITEBACK_MIN_CHARS;
-const previousCooldownSetting = process.env.AGENTOC_MEMORY_WRITEBACK_COOLDOWN_MS;
+const previousWritebackSetting = process.env.RAGENT_MEMORY_WRITEBACK;
+const previousMinCharsSetting = process.env.RAGENT_MEMORY_WRITEBACK_MIN_CHARS;
+const previousCooldownSetting = process.env.RAGENT_MEMORY_WRITEBACK_COOLDOWN_MS;
 
-const tempHome = await mkdtemp(join(tmpdir(), 'agentoc-memory-writeback-'));
+const tempHome = await mkdtemp(join(tmpdir(), 'ragent-memory-writeback-'));
 process.env.HOME = tempHome;
 
 const { maybeRunMemoryWriteback } = await import('../chat/session-memory-writeback.mjs');
@@ -22,7 +22,7 @@ const runPrompt = async (prompt) => {
   return `<hide>{"shouldWrite":true,"learnings":[{"category":"workflow","content":"User prefers compact audit summaries.","layer":"user"}]}</hide>`;
 };
 
-delete process.env.AGENTOC_MEMORY_WRITEBACK;
+delete process.env.RAGENT_MEMORY_WRITEBACK;
 const defaultResult = await maybeRunMemoryWriteback({
   sessionId: 'sess_memory_default',
   session: { name: 'Memory audit', group: 'Testing' },
@@ -33,7 +33,7 @@ const defaultResult = await maybeRunMemoryWriteback({
 });
 assert.deepEqual(defaultResult, { attempted: false, written: false }, 'memory writeback must be opt-in so normal turns never launch a hidden provider');
 
-process.env.AGENTOC_MEMORY_WRITEBACK = 'on';
+process.env.RAGENT_MEMORY_WRITEBACK = 'on';
 const enabledResult = await maybeRunMemoryWriteback({
   sessionId: 'sess_memory_enabled',
   session: { name: 'Memory audit', group: 'Testing' },
@@ -48,22 +48,22 @@ assert.equal(persistedResult.written, true, 'memory writeback should persist lea
 assert.equal(persistedResult.promotedCount, 1, 'memory writeback should promote new learnings into a durable memory file');
 assert.deepEqual(
   persistedResult.promotedFiles,
-  [join(tempHome, '.agentoc', 'memory', 'model-context', 'auto-user-memory.md')],
+  [join(tempHome, '.ragent', 'memory', 'model-context', 'auto-user-memory.md')],
   'memory writeback should report the durable file it updated',
 );
 assert.equal(promptCalls, 1, 'memory writeback should invoke the reviewer prompt only when enabled');
 assert.match(lastPrompt, /Available memory targets:/, 'writeback prompt should now expose candidate memory targets');
-assert.match(lastPrompt, /user_preferences \| user \| ~\/\.agentoc\/memory\/model-context\/preferences\.md/, 'prompt should expose specific user memory targets');
-assert.match(lastPrompt, /user_auto_memory \| user \| ~\/\.agentoc\/memory\/model-context\/auto-user-memory\.md/, 'prompt should keep the auto fallback target');
+assert.match(lastPrompt, /user_preferences \| user \| ~\/\.ragent\/memory\/model-context\/preferences\.md/, 'prompt should expose specific user memory targets');
+assert.match(lastPrompt, /user_auto_memory \| user \| ~\/\.ragent\/memory\/model-context\/auto-user-memory\.md/, 'prompt should keep the auto fallback target');
 
 const auditLog = await readFile(
-  join(tempHome, '.agentoc', 'memory', 'model-context', 'session-learnings', 'learnings.jsonl'),
+  join(tempHome, '.ragent', 'memory', 'model-context', 'session-learnings', 'learnings.jsonl'),
   'utf8',
 );
 assert.match(auditLog, /User prefers compact audit summaries\./);
 
 const userAutoMemory = await readFile(
-  join(tempHome, '.agentoc', 'memory', 'model-context', 'auto-user-memory.md'),
+  join(tempHome, '.ragent', 'memory', 'model-context', 'auto-user-memory.md'),
   'utf8',
 );
 assert.match(userAutoMemory, /# Auto-Promoted User Memory/);
@@ -79,14 +79,14 @@ const duplicateResult = await maybeRunMemoryWriteback({
 });
 assert.equal(duplicateResult.promotedCount, 0, 'duplicate learnings should not be re-appended to the durable memory file');
 
-await mkdir(join(tempHome, '.agentoc', 'memory'), { recursive: true });
+await mkdir(join(tempHome, '.ragent', 'memory'), { recursive: true });
 await writeFile(
-  join(tempHome, '.agentoc', 'memory', 'writeback-targets.json'),
+  join(tempHome, '.ragent', 'memory', 'writeback-targets.json'),
   `${JSON.stringify({
     extraTargets: [
       {
         id: 'custom_identity',
-        path: '~/.agentoc/memory/reference/personal/identity.md',
+        path: '~/.ragent/memory/reference/personal/identity.md',
         layer: 'user',
         description: 'Stable identity and personal background facts.',
         categories: ['environment', 'decision'],
@@ -111,19 +111,19 @@ const routedResult = await maybeRunMemoryWriteback({
 assert.equal(routedResult.promotedCount, 1, 'configured targets should allow routing a learning into a specific user memory file');
 assert.deepEqual(
   routedResult.promotedFiles,
-  [join(tempHome, '.agentoc', 'memory', 'reference', 'personal', 'identity.md')],
+  [join(tempHome, '.ragent', 'memory', 'reference', 'personal', 'identity.md')],
   'configured routing should promote learnings into the requested custom target file',
 );
-assert.match(lastPrompt, /custom_identity \| user \| ~\/\.agentoc\/memory\/reference\/personal\/identity\.md/, 'prompt should expose custom configured memory targets');
+assert.match(lastPrompt, /custom_identity \| user \| ~\/\.ragent\/memory\/reference\/personal\/identity\.md/, 'prompt should expose custom configured memory targets');
 
 const routedMemory = await readFile(
-  join(tempHome, '.agentoc', 'memory', 'reference', 'personal', 'identity.md'),
+  join(tempHome, '.ragent', 'memory', 'reference', 'personal', 'identity.md'),
   'utf8',
 );
 assert.match(routedMemory, /## Auto-Promoted Learnings/, 'custom targets should receive a dedicated auto-promoted learnings section');
 assert.match(routedMemory, /The user maintains a stable personal profile for repeated self-introductions\./);
 
-process.env.AGENTOC_MEMORY_WRITEBACK_MIN_CHARS = '800';
+process.env.RAGENT_MEMORY_WRITEBACK_MIN_CHARS = '800';
 const shortTurnResult = await maybeRunMemoryWriteback({
   sessionId: 'sess_memory_short',
   session: { name: 'Short turn', group: 'Testing' },
@@ -146,8 +146,8 @@ const failedRunResult = await maybeRunMemoryWriteback({
 assert.equal(failedRunResult.attempted, false, 'failed runs should skip the memory reviewer');
 assert.equal(failedRunResult.skipped, 'run_not_completed', 'failed runs should report the skip reason');
 
-process.env.AGENTOC_MEMORY_WRITEBACK_MIN_CHARS = '10';
-process.env.AGENTOC_MEMORY_WRITEBACK_COOLDOWN_MS = '60000';
+process.env.RAGENT_MEMORY_WRITEBACK_MIN_CHARS = '10';
+process.env.RAGENT_MEMORY_WRITEBACK_COOLDOWN_MS = '60000';
 const firstCooldownResult = await maybeRunMemoryWriteback({
   sessionId: 'sess_memory_cooldown',
   session: { name: 'Cooldown session', group: 'Testing' },
@@ -168,7 +168,7 @@ const secondCooldownResult = await maybeRunMemoryWriteback({
 assert.equal(secondCooldownResult.attempted, false, 'second writeback within the cooldown window should skip');
 assert.equal(secondCooldownResult.skipped, 'cooldown', 'cooldown skips should report the reason');
 
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 const explicitOffResult = await maybeRunMemoryWriteback({
   sessionId: 'sess_memory_disabled',
   session: { name: 'Memory audit', group: 'Testing' },
@@ -180,12 +180,12 @@ const explicitOffResult = await maybeRunMemoryWriteback({
 assert.deepEqual(explicitOffResult, { attempted: false, written: false }, 'memory writeback should still respect an explicit off setting');
 assert.equal(promptCalls, 4, 'explicit off should prevent the reviewer prompt from running');
 
-if (previousWritebackSetting === undefined) delete process.env.AGENTOC_MEMORY_WRITEBACK;
-else process.env.AGENTOC_MEMORY_WRITEBACK = previousWritebackSetting;
-if (previousMinCharsSetting === undefined) delete process.env.AGENTOC_MEMORY_WRITEBACK_MIN_CHARS;
-else process.env.AGENTOC_MEMORY_WRITEBACK_MIN_CHARS = previousMinCharsSetting;
-if (previousCooldownSetting === undefined) delete process.env.AGENTOC_MEMORY_WRITEBACK_COOLDOWN_MS;
-else process.env.AGENTOC_MEMORY_WRITEBACK_COOLDOWN_MS = previousCooldownSetting;
+if (previousWritebackSetting === undefined) delete process.env.RAGENT_MEMORY_WRITEBACK;
+else process.env.RAGENT_MEMORY_WRITEBACK = previousWritebackSetting;
+if (previousMinCharsSetting === undefined) delete process.env.RAGENT_MEMORY_WRITEBACK_MIN_CHARS;
+else process.env.RAGENT_MEMORY_WRITEBACK_MIN_CHARS = previousMinCharsSetting;
+if (previousCooldownSetting === undefined) delete process.env.RAGENT_MEMORY_WRITEBACK_COOLDOWN_MS;
+else process.env.RAGENT_MEMORY_WRITEBACK_COOLDOWN_MS = previousCooldownSetting;
 if (previousHome === undefined) delete process.env.HOME;
 else process.env.HOME = previousHome;
 await rm(tempHome, { recursive: true, force: true });

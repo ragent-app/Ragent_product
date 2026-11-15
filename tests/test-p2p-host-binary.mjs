@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 import { resolveP2PHostBinary } from '../lib/p2p-host-binary.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-p2p-host-binary-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-p2p-host-binary-'));
 const bin = join(root, 'bin');
 mkdirSync(bin);
 
@@ -37,8 +37,8 @@ const writePe = (path, machine) => {
   chmodSync(path, 0o755);
 };
 
-const canonical = join(bin, 'agentoc-p2p-host');
-const variant = join(bin, 'agentoc-p2p-host-amd64');
+const canonical = join(bin, 'ragent-p2p-host');
+const variant = join(bin, 'ragent-p2p-host-amd64');
 const renamed = join(bin, 'ragent-p2p-host');
 
 writeElf(canonical, currentMachine);
@@ -51,8 +51,8 @@ assert.equal(resolveP2PHostBinary(root, { platform: 'linux' }), canonical, 'cano
 writeElf(canonical, foreignMachine);
 assert.equal(resolveP2PHostBinary(root, { platform: 'linux' }), variant, 'source checkout falls back to the matching architecture variant');
 
-const windowsCanonical = join(bin, 'agentoc-p2p-host.exe');
-const windowsVariant = join(bin, 'agentoc-p2p-host-amd64.exe');
+const windowsCanonical = join(bin, 'ragent-p2p-host.exe');
+const windowsVariant = join(bin, 'ragent-p2p-host-amd64.exe');
 const windowsRenamed = join(bin, 'ragent-p2p-host.exe');
 writeElf(windowsCanonical, currentMachine);
 writePe(windowsVariant, 0x8664);
@@ -78,7 +78,7 @@ assert.throws(
   'Windows must fail closed when only a foreign-architecture PE remains',
 );
 
-const macVariant = join(bin, 'agentoc-p2p-host-darwin-arm64');
+const macVariant = join(bin, 'ragent-p2p-host-darwin-arm64');
 const mach = Buffer.alloc(32);
 mach.writeUInt32LE(0xfeedfacf, 0);
 mach.writeUInt32LE(0x0100000c, 4);

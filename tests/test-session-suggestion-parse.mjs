@@ -15,7 +15,7 @@ const fenced = parseMergedSuggestionResult([
     taskCard: {
       mode: 'task',
       summary: '整理销售周报，并沉淀一版可复用流程。',
-      objective: '把手工整理交给 AgentoC。',
+      objective: '把手工整理交给 Ragent。',
       nextActions: ['先检查 Excel 结构', '产出最小交付版'],
     },
     workflowState: 'waiting_user',
@@ -31,7 +31,7 @@ const fenced = parseMergedSuggestionResult([
 assert.equal(fenced.ok, true, 'fenced JSON should parse');
 assert.equal(fenced.suggestion.taskCard.mode, 'task');
 // Old task-card aliases (objective / nextActions) must normalize.
-assert.equal(fenced.suggestion.taskCard.goal, '把手工整理交给 AgentoC。');
+assert.equal(fenced.suggestion.taskCard.goal, '把手工整理交给 Ragent。');
 assert.deepEqual(fenced.suggestion.taskCard.nextSteps, ['先检查 Excel 结构', '产出最小交付版']);
 assert.equal(fenced.suggestion.workflowState, 'waiting_user');
 assert.equal(fenced.suggestion.workflowPriority, 'high');

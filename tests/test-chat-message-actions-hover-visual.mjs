@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = '/tmp/agentoc-message-actions-hover-visual';
+const outputDir = '/tmp/ragent-message-actions-hover-visual';
 mkdirSync(outputDir, { recursive: true });
 const styles = [
   'static/chat/chat-base.css',

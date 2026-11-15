@@ -9,7 +9,7 @@ const prepared=JSON.parse(await readFile('artifacts/showcase/T2-current-20261017
 const spec=JSON.parse(await readFile(join(prepared.bundle,'manifest.json'),'utf8'));assert.equal(spec.crossServiceCredentialChannel,true);
 const exe=join(prepared.bundle,'RunCredentialChannel.exe');assert.equal(hash(await readFile(exe)),spec['RunCredentialChannel.exe']);
 const binding={version:1,instanceId:'isolated',leaseId:randomUUID(),runId:'run_'+randomBytes(16).toString('hex'),requestId:'qa',grantId:'rtg_0123456789abcdef',authorityHash:'a'.repeat(64),expiresAtUnixMs:Date.now()+30000};
-const base={pipeName:'agentoc-run-credential-'+randomBytes(16).toString('hex'),binding,controlSid:'S-1-5-80-1-2-3-4-5',executorSid:'S-1-5-80-5-4-3-2-1'};
+const base={pipeName:'ragent-run-credential-'+randomBytes(16).toString('hex'),binding,controlSid:'S-1-5-80-1-2-3-4-5',executorSid:'S-1-5-80-5-4-3-2-1'};
 const report={pass:false,caseId:spec.caseId,checks:[],servicesCreated:false};
 try{for(const [mode,policy,expected] of [
   ['owner.session',base,'RCC_MODE_INVALID'],['server',base,'RCC_LOCAL_IDENTITY_DENIED'],['client',{...base,peer:{}},'RCC_LOCAL_IDENTITY_DENIED'],

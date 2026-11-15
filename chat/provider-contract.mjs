@@ -241,7 +241,7 @@ const PROVIDER_CAPABILITIES = {
     supportsStructuredPlanFallback: true,
     supportsRevise: false,
     supportsExecute: true,
-    // Hermes ACP supports session/load. AgentoC does not yet translate ACP
+    // Hermes ACP supports session/load. Ragent does not yet translate ACP
     // request_permission into the privileged approval response channel, so
     // approval remains explicitly unsupported until that bridge exists.
     supportsResume: true,
@@ -542,7 +542,7 @@ function findPermissionModeByField(capabilities, field, value) {
 }
 
 // Privileged-approval gate (design §13–§14, Path G). Claude Code 2.1.247
-// accepts `default` for an AgentoC-controlled bidirectional gate:
+// accepts `default` for an Ragent-controlled bidirectional gate:
 // gated safe/recommended and full-auto runs enter default so the sidecar can
 // evaluate provider approval requests; full-auto rejects requests that need
 // a human decision, while approval mode can surface them to the owner.
@@ -629,7 +629,7 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
     return mode ? cloneJson(mode) : null;
   }
   if (riskMode === 'full-auto' && trimString(options.interactionMode) !== 'plan') {
-    // Windows autonomous runs must reach the same AgentoC decision gate as
+    // Windows autonomous runs must reach the same Ragent decision gate as
     // approval runs; only the treatment of an ASK differs. Keep unsupported
     // harnesses explicit instead of silently claiming that bypass is gated.
     if ((options.platform || process.platform) === 'win32'

@@ -79,7 +79,7 @@ export async function prepareControlSideNativeProvider({
 
   const safeRoot = resolve(controlRoot);
   const safeHome = resolve(prepared.homeDir);
-  const sharedCodexOAuth = isCodex && prepared.oauthOwner === 'agentoc';
+  const sharedCodexOAuth = isCodex && prepared.oauthOwner === 'ragent';
   const insideControlRoot = safeHome !== safeRoot && !relative(safeRoot, safeHome).startsWith('..');
   return {
     providerId: prepared.providerId,

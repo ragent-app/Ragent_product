@@ -84,7 +84,7 @@ async function startInstaller({ file, directory, appRoot, executable, resultFile
   let command, args;
   if (platform === "win32") { command = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"); args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", copied, ...common]; }
   else if (platform === "darwin") { command = "/bin/bash"; args = [copied, ...common]; }
-  else if (platform === "linux") { command = "/usr/bin/pkexec"; args = ["/bin/bash", "/opt/agentoc/Desktop/resources/app/update-linux.sh", ...common]; }
+  else if (platform === "linux") { command = "/usr/bin/pkexec"; args = ["/bin/bash", "/opt/ragent/Desktop/resources/app/update-linux.sh", ...common]; }
   else throw Error("unsupported-platform");
   const child = spawnImpl(command, args, { detached: platform !== "linux", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   child.stderr.resume();

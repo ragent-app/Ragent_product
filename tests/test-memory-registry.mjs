@@ -216,7 +216,7 @@ async function waitFor(predicate, description, timeoutMs = 20000, intervalMs = 1
     "requestMetrics: apiRequestLog.getApiRequestMetrics()",
     "memoryRegistry.startSampler()",
     "collectCacheMetrics()",
-    "AGENTOC_MEMORY_SAMPLER_INTERVAL_MS', 5_000",
+    "RAGENT_MEMORY_SAMPLER_INTERVAL_MS', 5_000",
     'onSample: persistForensicSnapshot',
   ]) {
     assert.ok(chatServer.includes(needle), `chat-server.mjs wires ${needle}`);
@@ -232,8 +232,8 @@ async function waitFor(predicate, description, timeoutMs = 20000, intervalMs = 1
 // --- 6. Live server boot: /healthz aggregates + diagnostics auth --------------
 
 {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-memory-registry-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-memory-registry-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
   const seededToken = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   writeFileSync(join(configDir, 'auth.json'), JSON.stringify({ token: seededToken }, null, 2), 'utf8');
@@ -252,11 +252,11 @@ async function waitFor(predicate, description, timeoutMs = 20000, intervalMs = 1
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: '',
-      AGENTOC_RUNNER_LIFECYCLE_REQUIRED: '',
-      AGENTOC_AUTH_SESSION_SECRET: authSecret,
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: '',
+      RAGENT_RUNNER_LIFECYCLE_REQUIRED: '',
+      RAGENT_AUTH_SESSION_SECRET: authSecret,
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',

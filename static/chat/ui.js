@@ -1,10 +1,10 @@
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 function resolveUiProductPath(path) {
-  if (typeof window.agentocResolveProductPath === "function") {
-    return window.agentocResolveProductPath(path);
+  if (typeof window.ragentResolveProductPath === "function") {
+    return window.ragentResolveProductPath(path);
   }
   return typeof path === "string" ? path : String(path || "");
 }
@@ -44,10 +44,10 @@ function formatFileChangeTypeLabel(kind) {
 }
 
 function renderUiIcon(name, className = "") {
-  return window.AgentoCIcons?.render(name, { className }) || "";
+  return window.RagentIcons?.render(name, { className }) || "";
 }
 
-const AGENTOC_UI_MAX_DIFF_CELLS = 1_000_000;
+const RAGENT_UI_MAX_DIFF_CELLS = 1_000_000;
 
 const replySelfCheckDrawerByContainer = new WeakMap();
 
@@ -128,7 +128,7 @@ function renderMarkdownFragmentIntoNode(node, visibleSource, { deferEnhance = fa
     node.innerHTML = rendered;
     if (!deferEnhance) {
       enhanceCodeBlocks(node);
-      window.AgentoCMarkdownEnhancements?.enhanceCodeBlocks?.(node);
+      window.RagentMarkdownEnhancements?.enhanceCodeBlocks?.(node);
       enhanceTables(node);
       enhanceRenderedContentLinks(node);
     }
@@ -428,7 +428,7 @@ function isPlanProgressEvent(evt) {
 }
 
 function isPlanActionStateUpdate(evt) {
-  return String(evt?.source || "").trim() === "agentoc-plan-action"
+  return String(evt?.source || "").trim() === "ragent-plan-action"
     && !isPlanProgressEvent(evt);
 }
 
@@ -595,7 +595,7 @@ function createCodexPlanCard(evt, { collapsed } = {}) {
       if (planId && await submitPlanArtifactAction("execute", planId, { button: event.currentTarget })) {
         // The proposal is on its way to execution — close the sheet if this
         // plan was its pending prompt (id-guarded, so unrelated sheets stay).
-        window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId: planApprovalIdFromPlan(planId), sessionId: currentSessionId }, {
+        window.RagentDecisions?.acknowledgeResponse?.({ approvalId: planApprovalIdFromPlan(planId), sessionId: currentSessionId }, {
           approvalId: planApprovalIdFromPlan(planId),
           sessionId: currentSessionId,
         });
@@ -752,7 +752,7 @@ function createPlanApprovalModifyButton(evt, livePrompt, card) {
       full.hidden = true;
       full.addEventListener("click", () => {
         insertPlanPromptIntoComposer(input.value, { interactionMode: "plan", planAction: "revise" });
-        window.AgentoCComposerFullscreen?.open?.();
+        window.RagentComposerFullscreen?.open?.();
       });
       row.appendChild(full);
       editor.appendChild(row);
@@ -843,7 +843,7 @@ function planApprovalIdFromPlan(planId) {
 }
 
 function isSessionConfirmationApproval(evt) {
-  return String(evt?.source || "").trim() === "agentoc-confirmation"
+  return String(evt?.source || "").trim() === "ragent-confirmation"
     || String(evt?.kind || "").trim().toLowerCase() === "confirmation";
 }
 
@@ -981,12 +981,12 @@ async function submitRuntimeApprovalDecision(evt, decision, button, choices, cus
             : {}),
         });
     if (ok) {
-      // A successful HTTP response means AgentoC accepted the decision. The
+      // A successful HTTP response means Ragent accepted the decision. The
       // provider may still need another turn to consume it, so do not keep the
       // interactive sheet blocked while waiting for the later durable
       // approval_response event. The store records a scoped tombstone to stop
       // a delayed replay from reopening this approval.
-      globalThis.AgentoCDecisions?.acknowledgeResponse?.(evt, {
+      globalThis.RagentDecisions?.acknowledgeResponse?.(evt, {
         sessionId,
         runId,
         approvalId,
@@ -1401,8 +1401,8 @@ async function requestMessageFork(node, evt, role, button = null) {
     if (!data?.session?.id) throw new Error(data?.error || "fork failed");
     if (typeof upsertSession === "function") upsertSession(data.session);
     if (typeof renderSessionList === "function") renderSessionList();
-    if (typeof window !== "undefined" && typeof window.agentocOpenSessionReference === "function") {
-      await window.agentocOpenSessionReference(data.session.id, { forceFresh: true });
+    if (typeof window !== "undefined" && typeof window.ragentOpenSessionReference === "function") {
+      await window.ragentOpenSessionReference(data.session.id, { forceFresh: true });
     }
   } catch (error) {
     console.warn("[fork-at] Failed:", error?.message || error);
@@ -1518,7 +1518,7 @@ function showMessageTouchMenu(wrap, evt, role) {
     }
   };
   const eventData = {
-    ...(targetWrap.__agentocMessageEvent || {}),
+    ...(targetWrap.__ragentMessageEvent || {}),
     ...(evt || {}),
   };
   if (!eventData.requestId && targetWrap.dataset?.requestId) {
@@ -1629,10 +1629,10 @@ function showMessageTouchMenu(wrap, evt, role) {
 
 function attachMessageLongPressMenu(wrap, evt, role) {
   if (!wrap || (role !== "user" && role !== "assistant") || typeof wrap.addEventListener !== "function") return;
-  wrap.__agentocMessageEvent = evt || wrap.__agentocMessageEvent || {};
-  wrap.__agentocMessageRole = role || wrap.__agentocMessageRole || "user";
-  if (wrap.__agentocLongPressAttached) return;
-  wrap.__agentocLongPressAttached = true;
+  wrap.__ragentMessageEvent = evt || wrap.__ragentMessageEvent || {};
+  wrap.__ragentMessageRole = role || wrap.__ragentMessageRole || "user";
+  if (wrap.__ragentLongPressAttached) return;
+  wrap.__ragentLongPressAttached = true;
 
   const getBubble = () => (role === "user" ? (wrap.querySelector?.(".msg-user-bubble") || wrap) : wrap);
   let timer = null;
@@ -1664,7 +1664,7 @@ function attachMessageLongPressMenu(wrap, evt, role) {
       if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
         try { navigator.vibrate(12); } catch {}
       }
-      showMessageTouchMenu(wrap, wrap.__agentocMessageEvent || evt, role);
+      showMessageTouchMenu(wrap, wrap.__ragentMessageEvent || evt, role);
     }, MESSAGE_LONG_PRESS_DELAY_MS);
     if (source === "touch") touchGestureActive = true;
     else pointerGestureActive = true;
@@ -1721,7 +1721,7 @@ function attachMessageLongPressMenu(wrap, evt, role) {
     if (!isMessageTouchMode()) return;
     event.preventDefault();
     finishLongPress();
-    showMessageTouchMenu(wrap, wrap.__agentocMessageEvent || evt || {}, role);
+    showMessageTouchMenu(wrap, wrap.__ragentMessageEvent || evt || {}, role);
   });
 }
 
@@ -1730,13 +1730,13 @@ window.attachMessageLongPressMenu = attachMessageLongPressMenu;
 function ensureMessageLongPressBinding(target) {
   if (!target || typeof target.closest !== "function") return null;
   const userWrap = target.closest(".msg-user");
-  if (userWrap && !userWrap.__agentocLongPressAttached) {
-    attachMessageLongPressMenu(userWrap, userWrap.__agentocMessageEvent || {}, "user");
+  if (userWrap && !userWrap.__ragentLongPressAttached) {
+    attachMessageLongPressMenu(userWrap, userWrap.__ragentMessageEvent || {}, "user");
     return userWrap;
   }
   const assistantWrap = target.closest(".msg-assistant");
-  if (assistantWrap && !assistantWrap.__agentocLongPressAttached) {
-    attachMessageLongPressMenu(assistantWrap, assistantWrap.__agentocMessageEvent || {}, "assistant");
+  if (assistantWrap && !assistantWrap.__ragentLongPressAttached) {
+    attachMessageLongPressMenu(assistantWrap, assistantWrap.__ragentMessageEvent || {}, "assistant");
     return assistantWrap;
   }
   return null;
@@ -1847,7 +1847,7 @@ function syncRunMotionState(runState = "") {
       node.classList.add("run-terminal-settle");
       node.dataset.runTerminalState = normalized === "idle" ? "completed" : normalized;
     }
-    window.AgentoCStreamingPresentation?.settleTerminal?.(
+    window.RagentStreamingPresentation?.settleTerminal?.(
       normalized === "idle" ? "completed" : normalized,
     );
     runMotionTerminalTimer = window.setTimeout(() => {
@@ -1860,7 +1860,7 @@ function syncRunMotionState(runState = "") {
   }
 
   if (previous !== normalized) {
-    window.dispatchEvent?.(new CustomEvent("agentoc:run-motion-state", {
+    window.dispatchEvent?.(new CustomEvent("ragent:run-motion-state", {
       detail: { previous, state: normalized },
     }));
   }
@@ -2224,7 +2224,7 @@ function createMessageAttachmentNode(attachment) {
   downloadLink.title = `${downloadLabel}: ${label}`;
   downloadLink.setAttribute("aria-label", downloadLabel);
   downloadLink.download = label;
-  const downloadIcon = (typeof window !== "undefined" && window.AgentoCIcons && typeof window.AgentoCIcons.render === "function") ? window.AgentoCIcons.render("download") : "";
+  const downloadIcon = (typeof window !== "undefined" && window.RagentIcons && typeof window.RagentIcons.render === "function") ? window.RagentIcons.render("download") : "";
   downloadLink.innerHTML = downloadIcon || downloadLabel;
 
   card.appendChild(downloadLink);
@@ -2246,8 +2246,8 @@ function closeMessageImageViewer({ fromBack = false } = {}) {
   document.removeEventListener("keydown", viewer._closeOnEscape, true);
   viewer.remove();
   document.body.classList.remove("message-image-viewer-open");
-  if (!fromBack && backEntryId && window.AgentoCBackHandler?.pop) {
-    window.AgentoCBackHandler.pop(backEntryId);
+  if (!fromBack && backEntryId && window.RagentBackHandler?.pop) {
+    window.RagentBackHandler.pop(backEntryId);
   }
   if (restoreFocus && typeof restoreFocus.focus === "function") {
     restoreFocus.focus({ preventScroll: true });
@@ -2275,7 +2275,7 @@ function openMessageImageViewer({ source, downloadSource, label } = {}) {
   downloadLink.download = label || "image";
   downloadLink.title = `${downloadLabel}: ${label || "image"}`;
   downloadLink.setAttribute("aria-label", `${downloadLabel}: ${label || "image"}`);
-  const downloadIcon = window.AgentoCIcons?.render?.("download") || downloadLabel;
+  const downloadIcon = window.RagentIcons?.render?.("download") || downloadLabel;
   downloadLink.innerHTML = downloadIcon;
 
   const closeButton = document.createElement("button");
@@ -2283,7 +2283,7 @@ function openMessageImageViewer({ source, downloadSource, label } = {}) {
   closeButton.className = "composer-action-btn message-image-viewer__action";
   closeButton.title = typeof t === "function" ? t("action.close") : "Close";
   closeButton.setAttribute("aria-label", closeButton.title);
-  closeButton.innerHTML = window.AgentoCIcons?.render?.("close") || "×";
+  closeButton.innerHTML = window.RagentIcons?.render?.("close") || "×";
   closeButton.addEventListener("click", () => closeMessageImageViewer());
   toolbar.append(downloadLink, closeButton);
 
@@ -2311,7 +2311,7 @@ function openMessageImageViewer({ source, downloadSource, label } = {}) {
   activeMessageImageViewer = viewer;
   document.body.classList.add("message-image-viewer-open");
   document.body.appendChild(viewer);
-  activeMessageImageViewerBackEntryId = window.AgentoCBackHandler?.push?.({
+  activeMessageImageViewerBackEntryId = window.RagentBackHandler?.push?.({
     id: "message-image-viewer",
     onBack: () => {
       closeMessageImageViewer({ fromBack: true });
@@ -2350,8 +2350,8 @@ function createDeliveryImagePreviewNode(attachment) {
   downloadLink.title = `${downloadLabel}: ${label}`;
   downloadLink.setAttribute("aria-label", `${downloadLabel}: ${label}`);
   downloadLink.download = label;
-  const downloadIcon = (typeof window !== "undefined" && window.AgentoCIcons && typeof window.AgentoCIcons.render === "function")
-    ? window.AgentoCIcons.render("download")
+  const downloadIcon = (typeof window !== "undefined" && window.RagentIcons && typeof window.RagentIcons.render === "function")
+    ? window.RagentIcons.render("download")
     : "";
   downloadLink.innerHTML = downloadIcon || downloadLabel;
   tile.appendChild(downloadLink);
@@ -2454,7 +2454,7 @@ function resolveComposerPendingInlineStatus(pendingSend) {
   if (!pendingSend || typeof window === "undefined") {
     return fallback;
   }
-  const model = window.AgentoCSessionStateModel;
+  const model = window.RagentSessionStateModel;
   if (!model || typeof model.getSessionTaskFlowStage !== "function") {
     return fallback;
   }
@@ -2519,7 +2519,7 @@ function adoptCommittedUserMessageIntoEcho(echoNode, committedNode) {
   }
   echoNode.querySelector(".msg-user-bubble")?.classList?.remove("msg-pending");
   if (typeof attachMessageLongPressMenu === "function") {
-    attachMessageLongPressMenu(echoNode, committedNode?.__agentocMessageEvent || {}, "user");
+    attachMessageLongPressMenu(echoNode, committedNode?.__ragentMessageEvent || {}, "user");
   }
   return echoNode;
 }
@@ -3707,13 +3707,13 @@ function renderMessage(evt) {
 
 function clearStreamingSettlementStyles(node) {
   if (!node?.style) return;
-  if (node.__agentocSettleFrame) {
-    window.cancelAnimationFrame?.(node.__agentocSettleFrame);
-    node.__agentocSettleFrame = null;
+  if (node.__ragentSettleFrame) {
+    window.cancelAnimationFrame?.(node.__ragentSettleFrame);
+    node.__ragentSettleFrame = null;
   }
-  if (node.__agentocSettleTimer) {
-    window.clearTimeout(node.__agentocSettleTimer);
-    node.__agentocSettleTimer = null;
+  if (node.__ragentSettleTimer) {
+    window.clearTimeout(node.__ragentSettleTimer);
+    node.__ragentSettleTimer = null;
   }
   node.classList?.remove("stream-settling");
   node.style.removeProperty("opacity");
@@ -3723,7 +3723,7 @@ function clearStreamingSettlementStyles(node) {
 
 const streamingSettlementNodes = new Set();
 
-window.AgentoCMotion?.subscribeReducedMotion?.((reduced) => {
+window.RagentMotion?.subscribeReducedMotion?.((reduced) => {
   if (!reduced) return;
   for (const node of Array.from(streamingSettlementNodes)) {
     clearStreamingSettlementStyles(node);
@@ -3750,15 +3750,15 @@ function animateStreamingMessageSettlement(node) {
   node.style.transform = "translateY(3px)";
   void node.offsetHeight;
 
-  node.__agentocSettleFrame = requestAnimationFrame(() => {
-    node.__agentocSettleFrame = null;
+  node.__ragentSettleFrame = requestAnimationFrame(() => {
+    node.__ragentSettleFrame = null;
     if (node.isConnected === false) return;
     node.style.opacity = "1";
     node.style.transform = "translateY(0)";
   });
 
-  node.__agentocSettleTimer = window.setTimeout(() => {
-    node.__agentocSettleTimer = null;
+  node.__ragentSettleTimer = window.setTimeout(() => {
+    node.__ragentSettleTimer = null;
     clearStreamingSettlementStyles(node);
   }, 320);
 }
@@ -3920,7 +3920,7 @@ function computeLineDiff(oldText, newText) {
 
   const m = oldLines.length;
   const n = newLines.length;
-  if (m * n > AGENTOC_UI_MAX_DIFF_CELLS) return null;
+  if (m * n > RAGENT_UI_MAX_DIFF_CELLS) return null;
   const dp = new Array(m + 1);
   for (let i = 0; i <= m; i++) {
     dp[i] = new Array(n + 1).fill(0);
@@ -4346,7 +4346,7 @@ function normalizeOperationState(value) {
 
 function getOperationLifecycle(evt) {
   return evt?.state
-    || evt?.toolCall?._meta?.agentoc?.lifecycle
+    || evt?.toolCall?._meta?.ragent?.lifecycle
     || evt?.toolCall?.status
     || "uncertain";
 }
@@ -4399,7 +4399,7 @@ function getOperationActivitySummary(evt) {
     detail: presentation.detail || evt?.detail || evt?.command || input.command || input.path || input.query || "",
     ...(presentation.group ? { group: presentation.group } : {}),
   };
-  const formatter = globalThis?.AgentoCRunActivity?.formatOperationActivity;
+  const formatter = globalThis?.RagentRunActivity?.formatOperationActivity;
   if (typeof formatter === "function") {
     const formatted = formatter(activity);
     if (formatted) return formatted;
@@ -4408,7 +4408,7 @@ function getOperationActivitySummary(evt) {
 }
 
 function getOperationElapsedMs(evt, now = Date.now()) {
-  const durationMs = Number(evt?.durationMs ?? evt?.toolCall?._meta?.agentoc?.durationMs);
+  const durationMs = Number(evt?.durationMs ?? evt?.toolCall?._meta?.ragent?.durationMs);
   if (Number.isFinite(durationMs) && durationMs >= 0) return durationMs;
   const startedAt = parseActivityTimestamp(evt?.startedAt || evt?.timestamp);
   const completedAt = parseActivityTimestamp(evt?.completedAt);
@@ -4549,7 +4549,7 @@ function renderOperationNodeContent(node, evt, { expanded = false } = {}) {
     || "",
   ).trim();
   const elapsed = formatActivityElapsed(getOperationElapsedMs(evt));
-  const exitCode = Number(evt?.exitCode ?? evt?.toolCall?._meta?.agentoc?.exitCode);
+  const exitCode = Number(evt?.exitCode ?? evt?.toolCall?._meta?.ragent?.exitCode);
 
   const displayKind = String(evt?.presentation?.kind || evt?.toolCall?.kind || evt?.kind || "other").trim() || "other";
   const activitySummary = getOperationActivitySummary(evt);
@@ -5090,8 +5090,8 @@ function isRunningThinkingBlockEvent(evt) {
 }
 
 function shouldOpenThinkingBlocksFromPreference() {
-  return typeof window.agentocShouldExpandThinkingBlocksByDefault === "function"
-    ? window.agentocShouldExpandThinkingBlocksByDefault()
+  return typeof window.ragentShouldExpandThinkingBlocksByDefault === "function"
+    ? window.ragentShouldExpandThinkingBlocksByDefault()
     : false;
 }
 
@@ -5167,13 +5167,13 @@ function buildMobileLiveActivityLineRow() {
   return row;
 }
 
-function syncMobileLiveActivityLine(presentation = window.AgentoCRunActivity?.getPresentation?.()) {
+function syncMobileLiveActivityLine(presentation = window.RagentRunActivity?.getPresentation?.()) {
   if (!shouldCompactMobileThinking() || !messagesInner) {
     removeMobileLiveActivityLine();
     return;
   }
   const sessionRunState = getMobileLiveRunState();
-  const activityState = String(window.AgentoCRunActivity?.getActivity?.()?.state || presentation?.activity?.state || "").trim().toLowerCase();
+  const activityState = String(window.RagentRunActivity?.getActivity?.()?.state || presentation?.activity?.state || "").trim().toLowerCase();
   const runIsActive = isMobileLiveRunState(sessionRunState) || isMobileLiveRunState(activityState);
   // The session projection is authoritative for lifecycle. A durable refresh
   // can report `idle`/terminal before the ephemeral activity store receives
@@ -5182,8 +5182,8 @@ function syncMobileLiveActivityLine(presentation = window.AgentoCRunActivity?.ge
   // newly started run. Clear the ephemeral store when the canonical run is no
   // longer live, then remove the row in the same turn.
   const terminal = ["idle", "completed", "failed", "cancelled", "canceled"].includes(sessionRunState);
-  if (terminal && activityState && typeof window.AgentoCRunActivity?.reset === "function") {
-    window.AgentoCRunActivity.reset();
+  if (terminal && activityState && typeof window.RagentRunActivity?.reset === "function") {
+    window.RagentRunActivity.reset();
   }
   const activityText = String(presentation?.text || "").trim();
   const text = activityText || (runIsActive ? getMobileLiveActivityFallbackText() : "");
@@ -5206,12 +5206,12 @@ function syncMobileLiveActivityLine(presentation = window.AgentoCRunActivity?.ge
     }
   }
   const label = mobileLiveActivityLine.querySelector(".mobile-live-activity-line__label");
-  const currentLabelText = window.AgentoCLiveActionTransition?.getText
-    ? window.AgentoCLiveActionTransition.getText(label)
+  const currentLabelText = window.RagentLiveActionTransition?.getText
+    ? window.RagentLiveActionTransition.getText(label)
     : (label ? label.textContent : "");
   if (label && currentLabelText !== text) {
-    if (window.AgentoCLiveActionTransition?.setText) {
-      window.AgentoCLiveActionTransition.setText(label, text);
+    if (window.RagentLiveActionTransition?.setText) {
+      window.RagentLiveActionTransition.setText(label, text);
     } else {
       label.textContent = text;
     }
@@ -5236,11 +5236,11 @@ function syncMobileLiveActivityLine(presentation = window.AgentoCRunActivity?.ge
 function hasActiveMobileRunActivity() {
   const runState = getMobileLiveRunState();
   if (runState) return isMobileLiveRunState(runState);
-  const state = String(window.AgentoCRunActivity?.getActivity?.()?.state || "");
+  const state = String(window.RagentRunActivity?.getActivity?.()?.state || "");
   return state !== "" && state !== "idle";
 }
 
-window.AgentoCRunActivity?.subscribe?.(syncMobileLiveActivityLine);
+window.RagentRunActivity?.subscribe?.(syncMobileLiveActivityLine);
 
 function getActiveMobileThinkingGroup() {
   if (!shouldCompactMobileThinking()) return null;
@@ -5258,8 +5258,8 @@ function getActiveMobileThinkingGroup() {
 function loadMobileThinkingGroup(group) {
   if (!group?.body) return;
   for (const child of group.body.children || []) {
-    if (typeof child?.agentocLoadEventBlock === "function") {
-      child.agentocLoadEventBlock();
+    if (typeof child?.ragentLoadEventBlock === "function") {
+      child.ragentLoadEventBlock();
     }
   }
 }
@@ -5317,7 +5317,7 @@ function appendMobileThinkingSegment(group, sessionId, evt) {
   segment.dataset.blockRange = "";
   segment.dataset.blockStartSeq = String(Number.isInteger(evt?.blockStartSeq) ? evt.blockStartSeq : 0);
   segment.dataset.blockEndSeq = String(Number.isInteger(evt?.blockEndSeq) ? evt.blockEndSeq : 0);
-  segment.agentocLoadEventBlock = () => {
+  segment.ragentLoadEventBlock = () => {
     if (parseEventBlockSeq(evt?.blockStartSeq) < 1 || parseEventBlockSeq(evt?.blockEndSeq) < 1) {
       return;
     }
@@ -5325,7 +5325,7 @@ function appendMobileThinkingSegment(group, sessionId, evt) {
   };
   group.body.appendChild(segment);
   if (!group.block.classList.contains("collapsed")) {
-    segment.agentocLoadEventBlock();
+    segment.ragentLoadEventBlock();
   }
   return segment;
 }
@@ -5395,7 +5395,7 @@ function createMobileThinkingSegmentFromBlock(block) {
   segment.dataset.blockEndSeq = String(blockEndSeq);
   segment.dataset.renderedBlockStartSeq = String(parseEventBlockSeq(body?.dataset?.renderedBlockStartSeq));
   segment.dataset.renderedBlockEndSeq = String(parseEventBlockSeq(body?.dataset?.renderedBlockEndSeq));
-  segment.agentocLoadEventBlock = () => {
+  segment.ragentLoadEventBlock = () => {
     const nextStartSeq = parseEventBlockSeq(segment.dataset.blockStartSeq);
     const nextEndSeq = parseEventBlockSeq(segment.dataset.blockEndSeq);
     if (nextStartSeq < 1 || nextEndSeq < 1) return;
@@ -5535,7 +5535,7 @@ function renderThinkingBlockEvent(evt) {
 
   const sessionId = currentSessionId;
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     if (isRunningThinkingBlockEvent(evt) && typeof setRunningEventBlockExpanded === "function") {
       setRunningEventBlockExpanded(sessionId, false);
@@ -5582,7 +5582,7 @@ function renderThinkingBlockEvent(evt) {
 
 function renderToolUse(evt) {
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5604,7 +5604,7 @@ function renderToolUse(evt) {
 
 function renderToolResult(evt) {
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5620,7 +5620,7 @@ function renderToolResult(evt) {
 
 function renderFileChange(evt) {
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5632,7 +5632,7 @@ function renderFileChange(evt) {
 function renderOperation(evt) {
   if (inThinkingBlock) finalizeThinkingBlock();
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5641,7 +5641,7 @@ function renderOperation(evt) {
 
 function renderReasoning(evt) {
   if (shouldCompactMobileThinking()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5653,7 +5653,7 @@ function renderPlanEvent(evt) {
   if (inThinkingBlock) {
     finalizeThinkingBlock();
   }
-  window.AgentoCRunActivity?.noteProgressPlan?.(evt);
+  window.RagentRunActivity?.noteProgressPlan?.(evt);
   renderPlanEventInto(messagesInner, evt);
 }
 
@@ -5765,7 +5765,7 @@ function renderStatusMsg(evt) {
     return;
   }
   if (shouldCompactMobileThinking() && hasActiveMobileRunActivity()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5793,7 +5793,7 @@ function renderContextBarrier(evt) {
     finalizeThinkingBlock();
   }
   if (shouldCompactMobileThinking() && hasActiveMobileRunActivity()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }
@@ -5863,7 +5863,7 @@ function renderContextOperation(evt) {
     finalizeThinkingBlock();
   }
   if (shouldCompactMobileThinking() && hasActiveMobileRunActivity()) {
-    window.AgentoCRunActivity?.applyEvent?.(evt);
+    window.RagentRunActivity?.applyEvent?.(evt);
     syncMobileLiveActivityLine();
     return;
   }

@@ -13,7 +13,7 @@ import {
   buildAgyRuntimeLaunchSpec,
 } from '../lib/agy-runtime.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-conversation-parallel-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-conversation-parallel-'));
 const logPath = join(root, 'events.log');
 const fakeScript = `
 import { appendFile } from 'node:fs/promises';
@@ -29,7 +29,7 @@ async function runConversation(conversation, home) {
     ...process.env,
     AGY_TEST_CONVERSATION: conversation,
     AGY_TEST_LOG: logPath,
-    AGENTOC_AGY_PRIVATE_KEYRING: '1',
+    RAGENT_AGY_PRIVATE_KEYRING: '1',
   }, { homeDir: home });
   const spec = buildAgyRuntimeLaunchSpec({
     command: process.execPath,

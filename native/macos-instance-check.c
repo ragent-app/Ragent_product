@@ -43,16 +43,16 @@ int main(int argc, char **argv) {
     size_t len = strnlen(p, (size_t)(limit - p));
     if (len == (size_t)(limit - p)) goto done;
     if (strncmp(p, "HOME=", 5) == 0) { if (home) goto done; home = p + 5; }
-    if (strncmp(p, "AGENTOC_CONFIG_DIR=", 19) == 0) { if (config) goto done; config = p + 19; }
-    if (strncmp(p, "AGENTOC_INSTANCE_ROOT=", 22) == 0) { if (instance) goto done; instance = p + 22; }
+    if (strncmp(p, "RAGENT_CONFIG_DIR=", 19) == 0) { if (config) goto done; config = p + 19; }
+    if (strncmp(p, "RAGENT_INSTANCE_ROOT=", 22) == 0) { if (instance) goto done; instance = p + 22; }
     p += len + 1;
   }
   if (!home || strcmp(home, argv[2]) != 0) { result = 1; goto done; }
   if (!config || !*config) {
-    size_t length = strlen(home) + sizeof("/.config/agentoc");
+    size_t length = strlen(home) + sizeof("/.config/ragent");
     char *default_config = malloc(length);
     if (!default_config) goto done;
-    snprintf(default_config, length, "%s/.config/agentoc", home);
+    snprintf(default_config, length, "%s/.config/ragent", home);
     int matches = strcmp(default_config, argv[3]) == 0;
     free(default_config);
     if (!matches) { result = 1; goto done; }

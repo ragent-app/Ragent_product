@@ -5,9 +5,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const instanceRoot = await mkdtemp(join(tmpdir(), 'agentoc-restart-interlock-'));
-process.env.AGENTOC_CONFIG_DIR = join(instanceRoot, 'config');
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
+const instanceRoot = await mkdtemp(join(tmpdir(), 'ragent-restart-interlock-'));
+process.env.RAGENT_CONFIG_DIR = join(instanceRoot, 'config');
+delete process.env.RAGENT_RUN_SPOOL_DIR;
 
 const {
   RESTART_DRAIN_FILE,
@@ -29,14 +29,14 @@ assert.equal(isSystemdRunnerLaunchMode('legacy-systemd-transient-service'), fals
 assert.equal(isSystemdRunnerLaunchMode('runner-lifecycle'), true);
 assert.equal(isSystemdRunnerLaunchMode('runner-supervisor'), false);
 assert.equal(isIndependentControlGroup(
-  '/agentoc.slice/agentoc-runners.slice/agentoc-runner-run_123.service',
-  '/system.slice/agentoc.service',
+  '/ragent.slice/ragent-runners.slice/ragent-runner-run_123.service',
+  '/system.slice/ragent.service',
 ), true);
-assert.equal(isIndependentControlGroup('/system.slice/agentoc.service', '/system.slice/agentoc.service'), false);
-assert.equal(isIndependentControlGroup('/system.slice/agentoc.service/main', '/system.slice/agentoc.service'), false);
-assert.equal(isIndependentControlGroup('', '/system.slice/agentoc.service'), false);
+assert.equal(isIndependentControlGroup('/system.slice/ragent.service', '/system.slice/ragent.service'), false);
+assert.equal(isIndependentControlGroup('/system.slice/ragent.service/main', '/system.slice/ragent.service'), false);
+assert.equal(isIndependentControlGroup('', '/system.slice/ragent.service'), false);
 
-const runsDir = join(process.env.AGENTOC_CONFIG_DIR, 'chat-runs');
+const runsDir = join(process.env.RAGENT_CONFIG_DIR, 'chat-runs');
 
 async function writeRun(id, run) {
   const directory = join(runsDir, id);
@@ -85,14 +85,14 @@ try {
     if (args.includes('is-active')) return { stdout: '' };
     const unitName = args.at(-1);
     return {
-      stdout: unitName === 'agentoc-runner-run_safe123.service'
-        ? '/agentoc.slice/agentoc-runners.slice/agentoc-runner-run_safe123.service\n'
-        : '/system.slice/agentoc.service\n',
+      stdout: unitName === 'ragent-runner-run_safe123.service'
+        ? '/ragent.slice/ragent-runners.slice/ragent-runner-run_safe123.service\n'
+        : '/system.slice/ragent.service\n',
     };
   };
   const safeAssessment = await assessRunUpgradeSafety({
     runnerLaunchMode: 'runner-lifecycle',
-    runnerUnitName: 'agentoc-runner-run_safe123.service',
+    runnerUnitName: 'ragent-runner-run_safe123.service',
     runnerUnitScope: 'system',
   }, { execFileImpl: fakeSystemctl });
   assert.equal(safeAssessment.safe, true);
@@ -149,7 +149,7 @@ try {
   });
   const upgradeAllowed = await beginUpgradeDrain({
     execFileImpl: fakeSystemctl,
-    chatUnitName: 'agentoc.service',
+    chatUnitName: 'ragent.service',
   });
   assert.equal(upgradeAllowed.ok, false, 'the legacy runner must still block an upgrade');
   assert.equal(upgradeAllowed.blockingRuns[0].reason, 'runner_not_systemd_managed');

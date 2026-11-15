@@ -4,15 +4,15 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-provider-model-capabilities-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-provider-model-capabilities-'));
 const configDir = join(home, 'config');
 mkdirSync(configDir, { recursive: true });
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_HARNESS_ROOT = join(home, 'harnesses');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_HARNESS_ROOT = join(home, 'harnesses');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 if (process.platform === 'win32') process.env.USERPROFILE = home;
-const claudeBin = join(process.env.AGENTOC_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
+const claudeBin = join(process.env.RAGENT_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
 mkdirSync(claudeBin, { recursive: true });
 const fakeClaude = join(claudeBin, process.platform === 'win32' ? 'claude.cmd' : 'claude');
 writeFileSync(fakeClaude, process.platform === 'win32' ? '@echo off\r\necho 2.1.310\r\n' : '#!/bin/sh\necho 2.1.310\n');

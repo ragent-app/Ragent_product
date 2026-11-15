@@ -8,7 +8,7 @@ function goJSON(value) {
   return JSON.stringify(value).replace(/[<>&\u2028\u2029]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 }
 export function msiGrantBytes(grant) {
-  return Buffer.concat([Buffer.from('AgentoC Windows MSI install v1\0'), Buffer.from(goJSON(grant))]);
+  return Buffer.concat([Buffer.from('Ragent Windows MSI install v1\0'), Buffer.from(goJSON(grant))]);
 }
 
 export async function submitOrResumeWindowsMSIInstall({ client, prepared, riskMode, kid, privateKey, assertActive, preflight = false } = {}) {

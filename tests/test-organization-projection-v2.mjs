@@ -4,12 +4,12 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-projection-v2-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-projection-v2-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_PROJECTION_V1_ENABLED = '1';
-process.env.AGENTOC_ORG_PROJECTION_V2_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_PROJECTION_V1_ENABLED = '1';
+process.env.RAGENT_ORG_PROJECTION_V2_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/organization-store.mjs');

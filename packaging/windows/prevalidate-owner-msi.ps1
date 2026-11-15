@@ -26,11 +26,11 @@ try{
  }
  foreach($plan in $plans){$leases.Add([OwnerServiceActivationTrial]::OpenForRemoval($plan.name,$plan.command))}
  foreach($lease in $leases){$lease.VerifyRemoval();if($lease.LastServiceState -ne 4){throw 'OPV_SERVICE_STATE_CHANGED'}}
- $bytes=[Text.UTF8Encoding]::new($false).GetBytes("agentoc-msi-prevalidation-v1`n")
+ $bytes=[Text.UTF8Encoding]::new($false).GetBytes("ragent-msi-prevalidation-v1`n")
  $stream=[IO.FileStream]::new($marker,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
  try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
  $actual=Read-OwnerPinnedFile $marker @(Get-OwnerAdministrativeSids) $pins 1024
- if([Text.UTF8Encoding]::new($false,$true).GetString($actual) -cne "agentoc-msi-prevalidation-v1`n"){throw 'OPV_MARKER_INVALID'}
+ if([Text.UTF8Encoding]::new($false,$true).GetString($actual) -cne "ragent-msi-prevalidation-v1`n"){throw 'OPV_MARKER_INVALID'}
  # Control Plane depends on Runner Supervisor; stop it first.
  for($i=$leases.Count-1;$i -ge 0;$i--){$leases[$i].QuiesceForRemoval()}
  @{ok=$true;quiesced=$true}|ConvertTo-Json -Compress

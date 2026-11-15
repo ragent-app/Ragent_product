@@ -18,17 +18,17 @@ try {
     <div id="inputArea"><div id="liveBar"></div></div>
   </body></html>`, { waitUntil: 'load' });
   await page.evaluate(() => {
-    window.agentocT = (key) => key;
-    window.AgentoCLayout = { requestPass() {}, syncChatBottomOverlaySpacing() {}, observeOverlay() {} };
-    window.AgentoCBackHandler = { push() {}, pop() {} };
-    window.AgentoCMotion = { prefersReducedMotion: () => true };
+    window.ragentT = (key) => key;
+    window.RagentLayout = { requestPass() {}, syncChatBottomOverlaySpacing() {}, observeOverlay() {} };
+    window.RagentBackHandler = { push() {}, pop() {} };
+    window.RagentMotion = { prefersReducedMotion: () => true };
     let batchSubscriber = null;
     let batchState = null;
     window.__emitBatch = (evt, resolved = []) => {
       batchState = { evt, resolved: [...resolved] };
       batchSubscriber?.({ pending: true, evt, resolved: new Set(resolved) });
     };
-    window.AgentoCDecisions = {
+    window.RagentDecisions = {
       subscribe(callback) { callback({ pending: false, evt: null }); return () => {}; },
       subscribeBatch(callback) {
         batchSubscriber = callback;

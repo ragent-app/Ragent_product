@@ -3,7 +3,7 @@ import { captureMacCodexIdentity, cleanupMacCodexRun, codexThreadRunTag } from '
 
 const request = (method, tag) => ({
   method,
-  params: { config: { shell_environment_policy: { set: { AGENTOC_RUN_ID: tag } } } },
+  params: { config: { shell_environment_policy: { set: { RAGENT_RUN_ID: tag } } } },
 });
 assert.equal(codexThreadRunTag(request('thread/start', 'run-123')), 'run-123');
 assert.equal(codexThreadRunTag(request('thread/resume', 'run_456')), 'run_456');

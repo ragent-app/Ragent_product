@@ -35,8 +35,8 @@ if($ExperimentalMajorUpgrade -and ($MsiUpgradeLane -ne 'major' -or -not $fullOwn
 $useEarlyQuiescence=$fullOwnerActivation -and $MsiUpgradeLane -eq 'major'
 if($InjectPostActivationFailure -and -not $fullOwnerActivation){throw 'MSI_ROLLBACK_INJECTION_REQUIRES_ACTIVATION_LANE'}
 if($InjectPostRemovalFailure -and -not $fullOwnerActivation){throw 'MSI_REMOVAL_ROLLBACK_INJECTION_REQUIRES_ACTIVATION_LANE'}
-if (-not (Get-Command wix.exe -ErrorAction SilentlyContinue)) { throw 'Pinned WiX 7 wix.exe is required to build the AgentoC MSI.' }
-if (-not (Test-Path (Join-Path $SourceRoot 'chat-server.mjs'))) { throw 'SourceRoot must contain the AgentoC application tree.' }
+if (-not (Get-Command wix.exe -ErrorAction SilentlyContinue)) { throw 'Pinned WiX 7 wix.exe is required to build the Ragent MSI.' }
+if (-not (Test-Path (Join-Path $SourceRoot 'chat-server.mjs'))) { throw 'SourceRoot must contain the Ragent application tree.' }
 if (-not (Test-Path (Join-Path $SourceRoot 'desktop\package.json'))) { throw 'SourceRoot must include the pinned desktop Electron project.' }
 if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'Version must be a four-part numeric application version.' }
 $applicationVersionParts=@($Version.Split('.')|ForEach-Object {[int]::Parse($_)})
@@ -67,7 +67,7 @@ $qrcodeTerminalSha256 = '3a6260c4e0d80bd527a3f930e90ea2348c03646621f25aa0bd960ee
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $buildInputRoot = $SourceRoot
 $frozenRevision = ''
-$staging = Join-Path ([IO.Path]::GetTempPath()) ('agentoc-msi-' + [guid]::NewGuid().ToString('N'))
+$staging = Join-Path ([IO.Path]::GetTempPath()) ('ragent-msi-' + [guid]::NewGuid().ToString('N'))
 function Assert-BuildFreeSpace([string]$Phase) {
     if ($MinimumFreeBytes -eq 0) { return }
     foreach ($root in @([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($staging)), [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($OutputPath))) | Select-Object -Unique) {
@@ -112,8 +112,8 @@ try {
     $includeMingwUiRuntime = '0'
     if (-not $ManagedOwnerPreparation) {
         $installerUiRoot = Join-Path $staging ('installer-ui-' + [guid]::NewGuid().ToString('N'))
-        & (Join-Path $scriptRoot 'build-agentoc-installer-ui.ps1') -OutputDirectory $installerUiRoot -BrandAssetDirectory $brandRoot
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $installerUiRoot 'AgentoC.MsiEmbeddedUI.dll') -PathType Leaf)) {
+        & (Join-Path $scriptRoot 'build-ragent-installer-ui.ps1') -OutputDirectory $installerUiRoot -BrandAssetDirectory $brandRoot
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $installerUiRoot 'Ragent.MsiEmbeddedUI.dll') -PathType Leaf)) {
             throw 'The custom MSI embedded UI could not be built.'
         }
         $uiMetadata = Get-Content -LiteralPath (Join-Path $installerUiRoot 'installer-ui-build.json') -Raw | ConvertFrom-Json
@@ -127,11 +127,11 @@ try {
     }
     & $node.Source (Join-Path $payloadRoot 'scripts\verify-windows-approval-payload.mjs') $payloadRoot
     if ($LASTEXITCODE -ne 0) { throw 'Windows approval payload inputs are incomplete.' }
-    & (Join-Path $payloadRoot 'packaging\windows\build-safe-delete.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-safe-delete.exe')
+    & (Join-Path $payloadRoot 'packaging\windows\build-safe-delete.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\ragent-safe-delete.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows safe deletion helper could not be built.' }
-    & (Join-Path $payloadRoot 'packaging\windows\build-safe-search.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-safe-search.exe')
+    & (Join-Path $payloadRoot 'packaging\windows\build-safe-search.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\ragent-safe-search.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows safe search helper could not be built.' }
-    & (Join-Path $payloadRoot 'packaging\windows\build-cli-read-bridge.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\agentoc-cli-read-bridge.exe')
+    & (Join-Path $payloadRoot 'packaging\windows\build-cli-read-bridge.ps1') -SourceRoot $payloadRoot -OutputPath (Join-Path $payloadRoot 'bin\ragent-cli-read-bridge.exe')
     if ($LASTEXITCODE -ne 0) { throw 'Windows read-only CLI bridge could not be built.' }
     Assert-BuildFreeSpace 'after runtime staging'
     # Keep the host's displayed build version aligned with the actual package.
@@ -203,10 +203,10 @@ try {
     # package intentionally does not carry qrcode-terminal in package.json;
     # Debian stages this same pinned tarball, so Windows must use the same
     # version and digest instead of depending on a user's global npm install.
-    $qrcodeCacheRoot = if ($env:AGENTOC_WINDOWS_PACKAGE_CACHE) {
-        $env:AGENTOC_WINDOWS_PACKAGE_CACHE
+    $qrcodeCacheRoot = if ($env:RAGENT_WINDOWS_PACKAGE_CACHE) {
+        $env:RAGENT_WINDOWS_PACKAGE_CACHE
     } else {
-        Join-Path ([IO.Path]::GetTempPath()) 'agentoc-package-cache'
+        Join-Path ([IO.Path]::GetTempPath()) 'ragent-package-cache'
     }
     New-Item -ItemType Directory -Force $qrcodeCacheRoot | Out-Null
     $qrcodeTarball = Join-Path $qrcodeCacheRoot ('qrcode-terminal-' + $qrcodeTerminalVersion + '.tgz')
@@ -244,8 +244,8 @@ try {
         throw 'Windows P2P host staging failed.'
     }
     foreach ($legacyP2pName in @(
-        'agentoc-p2p-host', 'agentoc-p2p-host.exe', 'agentoc-p2p-host-amd64', 'agentoc-p2p-host-arm64',
-        'agentoc-p2p-host-amd64.exe', 'agentoc-p2p-host-arm64.exe'
+        'ragent-p2p-host', 'ragent-p2p-host.exe', 'ragent-p2p-host-amd64', 'ragent-p2p-host-arm64',
+        'ragent-p2p-host-amd64.exe', 'ragent-p2p-host-arm64.exe'
     )) {
         $legacyP2pPath = Join-Path $stagedP2pBin $legacyP2pName
         if (Test-Path -LiteralPath $legacyP2pPath) { Remove-Item -LiteralPath $legacyP2pPath -Force }
@@ -312,11 +312,11 @@ try {
     # Compile the service host from the same frozen staged source, never reuse
     # an untracked developer executable from SourceRoot.
     $installScriptRoot = Join-Path $payloadRoot 'packaging\windows'
-    $hostSource = Join-Path $staging 'service-host\AgentoC.ServiceHost.exe'
-    & (Join-Path $installScriptRoot 'build-service-host.ps1') -OutputPath $hostSource -SourcePath (Join-Path $installScriptRoot 'AgentoC.ServiceHost.cs') -RuntimePayloadRoot $payloadRoot
+    $hostSource = Join-Path $staging 'service-host\Ragent.ServiceHost.exe'
+    & (Join-Path $installScriptRoot 'build-service-host.ps1') -OutputPath $hostSource -SourcePath (Join-Path $installScriptRoot 'Ragent.ServiceHost.cs') -RuntimePayloadRoot $payloadRoot
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $hostSource)) { throw 'Frozen service host compilation failed.' }
     $brokerBuildRoot = Join-Path $staging 'privileged-broker'
-    $brokerSource = Join-Path $brokerBuildRoot 'AgentoC.PrivilegedBroker.exe'
+    $brokerSource = Join-Path $brokerBuildRoot 'Ragent.PrivilegedBroker.exe'
     if ($fullOwnerActivation) {
         # Compile the broker from the same verified, frozen payload as the
         # service host; the live checkout can change after staging completes.
@@ -324,7 +324,7 @@ try {
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $brokerSource -PathType Leaf)) { throw 'Windows Privileged Broker build failed.' }
         $brokerSha256 = (Get-FileHash -LiteralPath $brokerSource -Algorithm SHA256).Hash.ToLowerInvariant()
         $brokerManifest = [ordered]@{ schemaVersion = 1; productVersion = $Version; sha256 = $brokerSha256 } | ConvertTo-Json -Compress
-        [IO.File]::WriteAllText((Join-Path $brokerBuildRoot 'AgentoC.PrivilegedBroker.manifest.json'), $brokerManifest, [Text.UTF8Encoding]::new($false))
+        [IO.File]::WriteAllText((Join-Path $brokerBuildRoot 'Ragent.PrivilegedBroker.manifest.json'), $brokerManifest, [Text.UTF8Encoding]::new($false))
     }
     $payloadWxs = Join-Path $staging 'payload.wxs'
     $payloadDir = Join-Path $staging 'payload'
@@ -353,8 +353,8 @@ try {
     }
     $serviceHostDir = Split-Path -Parent $hostSource
     if($ManagedOwnerPreparation -or $fullOwnerActivation){
-        & (Join-Path $installScriptRoot 'build-managed-owner-msi-bridge.ps1') -OutputPath (Join-Path $staging 'AgentoC.ManagedOwnerMsiBridge.exe')
-        $managedWxs = if($fullOwnerActivation){Join-Path $installScriptRoot 'AgentoC.ActivatedOwner.wxs'}else{Join-Path $installScriptRoot 'AgentoC.ManagedOwner.wxs'}
+        & (Join-Path $installScriptRoot 'build-managed-owner-msi-bridge.ps1') -OutputPath (Join-Path $staging 'Ragent.ManagedOwnerMsiBridge.exe')
+        $managedWxs = if($fullOwnerActivation){Join-Path $installScriptRoot 'Ragent.ActivatedOwner.wxs'}else{Join-Path $installScriptRoot 'Ragent.ManagedOwner.wxs'}
         $wixSources = @($managedWxs, $payloadWxs)
         $wixArguments = @('--acceptEula','wix7','build','-arch','x64') + $wixSources + @('-d',"ProductVersion=$Version",'-d',"DisplayVersion=$displayVersion",'-d',"MsiProductVersion=$MsiProductVersion",'-d',"ProductCode=$ProductCode",'-d',"MsiUpgradeLane=$MsiUpgradeLane",'-d',"MsiUpgradeStrategy=$msiUpgradeStrategy",'-d',"SourceDir=$payloadDir",'-bindpath',"ServiceHost=$serviceHostDir",'-bindpath',"ManagedBridge=$staging",'-bindpath',"BrandAsset=$brandRoot",'-ext','WixToolset.UI.wixext/7.0.0','-ext','WixToolset.Util.wixext/7.0.0','-o',$OutputPath)
         if($fullOwnerActivation){
@@ -375,8 +375,8 @@ try {
         }
         & wix.exe @wixArguments
     }else{
-        & (Join-Path $installScriptRoot 'build-legacy-owner-install-guard.ps1') -OutputPath (Join-Path $staging 'AgentoC.LegacyOwnerInstallGuard.exe')
-        & wix.exe --acceptEula wix7 build -arch x64 (Join-Path $installScriptRoot 'AgentoC.wxs') $payloadWxs -d "ProductVersion=$Version" -d "MsiProductVersion=$MsiProductVersion" -d "SourceDir=$payloadDir" -d "IncludeMingwUiRuntime=$includeMingwUiRuntime" -bindpath "ServiceHost=$serviceHostDir" -bindpath "InstallScript=$installScriptRoot" -bindpath "OwnerInstallGuard=$staging" -bindpath "BrandAsset=$brandRoot" -bindpath "InstallUi=$installerUiRoot" -ext 'WixToolset.UI.wixext/7.0.0' -ext 'WixToolset.Util.wixext/7.0.0' -o $OutputPath
+        & (Join-Path $installScriptRoot 'build-legacy-owner-install-guard.ps1') -OutputPath (Join-Path $staging 'Ragent.LegacyOwnerInstallGuard.exe')
+        & wix.exe --acceptEula wix7 build -arch x64 (Join-Path $installScriptRoot 'Ragent.wxs') $payloadWxs -d "ProductVersion=$Version" -d "MsiProductVersion=$MsiProductVersion" -d "SourceDir=$payloadDir" -d "IncludeMingwUiRuntime=$includeMingwUiRuntime" -bindpath "ServiceHost=$serviceHostDir" -bindpath "InstallScript=$installScriptRoot" -bindpath "OwnerInstallGuard=$staging" -bindpath "BrandAsset=$brandRoot" -bindpath "InstallUi=$installerUiRoot" -ext 'WixToolset.UI.wixext/7.0.0' -ext 'WixToolset.Util.wixext/7.0.0' -o $OutputPath
     }
     if ($LASTEXITCODE -ne 0) { throw 'WiX MSI build failed.' }
     if($useEarlyQuiescence){
@@ -443,7 +443,7 @@ try {
         }
     }
     if ($CommittedTree) {
-        $sourceCommit = (Get-Content -LiteralPath (Join-Path $payloadRoot '.agentoc-source-commit') -Raw).Trim()
+        $sourceCommit = (Get-Content -LiteralPath (Join-Path $payloadRoot '.ragent-source-commit') -Raw).Trim()
         if ($sourceCommit -cne $frozenRevision -or $sourceCommit -cnotmatch '^(?:[a-f0-9]{40}|[a-f0-9]{64})$') { throw 'MSI_RELEASE_SOURCE_IDENTITY_INVALID' }
         $record = [ordered]@{ schemaVersion = 1; publicVersion = $displayVersion; buildVersion = $MsiProductVersion;
             sourceCommit = $sourceCommit; msiSha256 = (Get-FileHash -LiteralPath $OutputPath -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -453,7 +453,7 @@ try {
     $stagingFull = [IO.Path]::GetFullPath($staging)
     $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
     if (-not $stagingFull.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or
-        [IO.Path]::GetFileName($stagingFull) -notmatch '^agentoc-msi-[0-9a-f]{32}$') {
+        [IO.Path]::GetFileName($stagingFull) -notmatch '^ragent-msi-[0-9a-f]{32}$') {
         throw 'Refusing cleanup outside the owned MSI staging directory.'
     }
     if (Test-Path -LiteralPath $stagingFull) {

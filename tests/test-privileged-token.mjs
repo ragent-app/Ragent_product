@@ -55,7 +55,7 @@ const otherKey = generatePrivilegedSigningKeyPair();
 function mintToken(overrides = {}) {
   const command = overrides.command ?? 'apt-get install nginx';
   const category = overrides.category ?? CATEGORY_INSTALL;
-  const cwd = overrides.cwd ?? '/srv/agentoc-promoted';
+  const cwd = overrides.cwd ?? '/srv/ragent-promoted';
   const runId = overrides.runId ?? 'run_abc';
   const manifestHash = overrides.manifestHash ?? computeOpManifestHash({ command, category, cwd });
   const cgroup = overrides.cgroup ?? buildPrivilegedCgroupFromRunId(runId);
@@ -164,7 +164,7 @@ check('manifest missing hash fails', verifyPrivilegedTokenManifest({ command: 'a
 
 // --- cgroup mismatch (§3.3 step 6), isolated by re-signing ---
 const cgStale = signPrivilegedToken(
-  { ...token, cgroup: 'agentoc-runner-run_NOTABC' },
+  { ...token, cgroup: 'ragent-runner-run_NOTABC' },
   key.privateKey,
 );
 check('cgroup-mismatch sig valid', verifyPrivilegedTokenSignature(cgStale, key.publicKey) === true);
@@ -180,9 +180,9 @@ const noCgroup = signPrivilegedToken({ ...token, cgroup: '' }, key.privateKey);
 check('no cgroup fails closed', verifyPrivilegedTokenCgroup(noCgroup) === false);
 
 // --- buildPrivilegedCgroupFromRunId (must mirror run-launcher unit naming) ---
-eq('cgroup derived', buildPrivilegedCgroupFromRunId('run_abc'), 'agentoc-runner-run_abc');
-eq('cgroup sanitizes specials', buildPrivilegedCgroupFromRunId('run a/b'), 'agentoc-runner-run_a_b');
-eq('cgroup empty fallback', buildPrivilegedCgroupFromRunId(''), 'agentoc-runner-unknown');
+eq('cgroup derived', buildPrivilegedCgroupFromRunId('run_abc'), 'ragent-runner-run_abc');
+eq('cgroup sanitizes specials', buildPrivilegedCgroupFromRunId('run a/b'), 'ragent-runner-run_a_b');
+eq('cgroup empty fallback', buildPrivilegedCgroupFromRunId(''), 'ragent-runner-unknown');
 
 // --- verifyPrivilegedToken returns the FIRST failing check (ordering) ---
 const allBroken = { ...token, sig: 'x', command: 'different', cgroup: 'wrong' };
@@ -219,9 +219,9 @@ check('empty command scope false', verifyPrivilegedInstallScope({ command: '' })
 
 // --- passkey-mode executable allowlist (design §5.6, plan phase 4) ---
 // Concrete, bounded programs on the allowlist -> executor consents to root.
-check('rm allowed', verifyPrivilegedPasskeyScope({ command: 'rm -rf /var/cache/agentoc-stale' }) === true);
+check('rm allowed', verifyPrivilegedPasskeyScope({ command: 'rm -rf /var/cache/ragent-stale' }) === true);
 check('systemctl allowed', verifyPrivilegedPasskeyScope({ command: 'systemctl restart nginx' }) === true);
-check('chown allowed', verifyPrivilegedPasskeyScope({ command: 'chown -R app:app /srv/agentoc-promoted' }) === true);
+check('chown allowed', verifyPrivilegedPasskeyScope({ command: 'chown -R app:app /srv/ragent-promoted' }) === true);
 check('sudo-stripped program checked', verifyPrivilegedPasskeyScope({ command: 'sudo rm -rf /tmp/x' }) === true);
 // Arbitrary-code launchers and anything off the list fail closed, even with a
 // valid passkey — `sudo bash ...` / `sudo su` must never reach the root executor.
@@ -237,7 +237,7 @@ check('empty command scope false', verifyPrivilegedPasskeyScope({ command: '' })
 // The owner-click policy drops only the passkey PROOF, never the executable
 // gate: `sudo bash -c ...` must stay DENIED when the owner approves with a
 // click alone. Regression for the 88604cb2 review finding.
-check('owner-click rm allowed', verifyPrivilegedExecutableScope({ command: 'rm -rf /var/cache/agentoc-stale', authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK }) === true);
+check('owner-click rm allowed', verifyPrivilegedExecutableScope({ command: 'rm -rf /var/cache/ragent-stale', authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK }) === true);
 check('owner-click sudo bash denied', verifyPrivilegedExecutableScope({ command: 'sudo bash -c "rm -rf /tmp/x"', authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK }) === false);
 check('owner-click sh -c denied', verifyPrivilegedExecutableScope({ command: 'sudo sh -c "echo x > /etc/y"', authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK }) === false);
 check('owner-click python denied', verifyPrivilegedExecutableScope({ command: 'sudo python3 -c "import shutil; shutil.rmtree(\'/x\')"', authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK }) === false);
@@ -280,8 +280,8 @@ check('case-sensitive mode rejected', isKnownPrivilegedAuthMode('Passkey') === f
 
   const missingModeToken = signPrivilegedToken({
     v: PRIVILEGED_TOKEN_VERSION, kid: 'pkx_testkey', opId: 'pop_1',
-    category: CATEGORY_INSTALL, command: 'apt-get install nginx', cwd: '/srv/agentoc-promoted',
-    manifestHash: computeOpManifestHash({ command: 'apt-get install nginx', category: CATEGORY_INSTALL, cwd: '/srv/agentoc-promoted' }),
+    category: CATEGORY_INSTALL, command: 'apt-get install nginx', cwd: '/srv/ragent-promoted',
+    manifestHash: computeOpManifestHash({ command: 'apt-get install nginx', category: CATEGORY_INSTALL, cwd: '/srv/ragent-promoted' }),
     sessionId: 'sess_1', runId: 'run_abc', turnId: 'turn_1',
     cgroup: buildPrivilegedCgroupFromRunId('run_abc'),
     issuedAt: ISSUED_AT, expiresAt: EXPIRES_AT,
@@ -292,7 +292,7 @@ check('case-sensitive mode rejected', isKnownPrivilegedAuthMode('Passkey') === f
   // owner-click mode with an allowlisted program is a fully valid token.
   const ownerClickToken = mintToken({
     authMode: PRIVILEGED_TOKEN_AUTH_MODE_OWNER_CLICK,
-    command: 'rm -rf /var/cache/agentoc-stale',
+    command: 'rm -rf /var/cache/ragent-stale',
     category: CATEGORY_OTHER,
   });
   const ownerClickResult = verifyPrivilegedToken(ownerClickToken, { publicKey: key.publicKey, now: NOW });

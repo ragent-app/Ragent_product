@@ -13,7 +13,7 @@ const KEYS = ['Id', 'LoadState', 'ActiveState', 'SubState', 'MainPID', 'Invocati
 export function linuxRunUnitName(runId, launchAttempt) {
   if (typeof runId !== 'string' || !RUN_ID.test(runId) || !Number.isSafeInteger(launchAttempt) ||
       launchAttempt < 0 || launchAttempt > 10000) throw new Error('Invalid Run unit identity');
-  return `agentoc-runner-${runId}${launchAttempt ? `-a${launchAttempt}` : ''}.service`;
+  return `ragent-runner-${runId}${launchAttempt ? `-a${launchAttempt}` : ''}.service`;
 }
 
 export function matchesLinuxRunUnitState(output, { runId, launchAttempt, invocationId } = {}) {
@@ -33,7 +33,7 @@ export function matchesLinuxRunUnitState(output, { runId, launchAttempt, invocat
     return KEYS.every((key) => Object.hasOwn(values, key)) && values.Id === unit &&
       values.LoadState === 'loaded' && values.ActiveState === 'active' && values.SubState === 'running' &&
       /^[1-9][0-9]*$/.test(values.MainPID) && Number.isSafeInteger(Number(values.MainPID)) &&
-      values.InvocationID === invocationId && values.ControlGroup === `/agentoc.slice/agentoc-runners.slice/${unit}`;
+      values.InvocationID === invocationId && values.ControlGroup === `/ragent.slice/ragent-runners.slice/${unit}`;
   } catch { return false; }
 }
 

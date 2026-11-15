@@ -19,7 +19,7 @@ const renderNowSource = runSheetSource.slice(renderNowStart, renderPlanStart);
 
 assert.match(
   renderNowSource,
-  /AgentoCRunActivity\?\.getPresentation\?\.\(\)\?\.text/,
+  /RagentRunActivity\?\.getPresentation\?\.\(\)\?\.text/,
   'Run Sheet current status should consume the canonical live summary',
 );
 assert.doesNotMatch(
@@ -39,7 +39,7 @@ assert.doesNotMatch(
 );
 assert.match(
   runSheetSource,
-  /AgentoCRunActivity\?\.subscribe/,
+  /RagentRunActivity\?\.subscribe/,
   'an open Run Sheet should subscribe to summary updates',
 );
 assert.match(
@@ -128,7 +128,7 @@ assert.match(
 );
 assert.doesNotMatch(
   runSheetSource,
-  /AgentoCWorkbench|fetchAllSessionEvents/,
+  /RagentWorkbench|fetchAllSessionEvents/,
   'Run Sheet must not retain the desktop audit model or raw all-events dependency',
 );
 
@@ -399,13 +399,13 @@ assert.match(
 );
 assert.doesNotMatch(
   runSheetSource,
-  /fetchAllSessionEvents|AgentoCWorkbench/,
+  /fetchAllSessionEvents|RagentWorkbench/,
   'Run Sheet model building should not call full-events or audit-model code',
 );
 
 const renderEventStart = realtimeSource.indexOf('function renderEvent(');
 const switchStart = realtimeSource.indexOf('switch (evt.type)', renderEventStart);
-const formalOutputStart = realtimeSource.indexOf('AgentoCRunActivity?.noteFormalOutput', renderEventStart);
+const formalOutputStart = realtimeSource.indexOf('RagentRunActivity?.noteFormalOutput', renderEventStart);
 assert.ok(renderEventStart >= 0, 'realtime renderer should expose its event rendering function');
 assert.ok(formalOutputStart > renderEventStart && formalOutputStart < switchStart);
 assert.match(
@@ -425,7 +425,7 @@ assert.match(
 );
 assert.match(
   liveStatusSource,
-  /AgentoCRunActivity\?\.getLivePresentation\?\.\(\)/,
+  /RagentRunActivity\?\.getLivePresentation\?\.\(\)/,
   'Live Bar should prefer unfinished execution progress when available',
 );
 
@@ -457,12 +457,12 @@ assert.match(
 );
 assert.match(
   runSheetSource,
-  /AgentoCIcons\?\.render\?\.\("chevron-right"/,
+  /RagentIcons\?\.render\?\.\("chevron-right"/,
   'the plan details chevron should render the right-pointing icon when collapsed',
 );
 assert.match(
   runSheetSource,
-  /AgentoCIcons\?\.render\?\.\("chevron-down"/,
+  /RagentIcons\?\.render\?\.\("chevron-down"/,
   'the plan details chevron should render the down-pointing icon when expanded',
 );
 assert.match(
@@ -472,7 +472,7 @@ assert.match(
 );
 assert.match(
   runSheetSource,
-  /readerFocusScopeDeactivate = root\.AgentoCFocusScope\?\.activate\?\.\(dom\.reader,\s*\{[\s\S]*?containmentRoot:\s*dom\.reader,[\s\S]*?modal:\s*false,/,
+  /readerFocusScopeDeactivate = root\.RagentFocusScope\?\.activate\?\.\(dom\.reader,\s*\{[\s\S]*?containmentRoot:\s*dom\.reader,[\s\S]*?modal:\s*false,/,
   'reader focus scope should use containmentRoot dom.reader and modal false to avoid making runsheet inert',
 );
 

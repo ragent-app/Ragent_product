@@ -6,7 +6,7 @@
 
 ## 1. 基线与证据等级
 
-- 工作区：`G:/AgentoC/Ragent_product`；分支 `main`；核查 HEAD `3628b2ef5f5627fe2118bda40691150c8d1da74f`。
+- 工作区：`G:/Ragent/Ragent_product`；分支 `main`；核查 HEAD `3628b2ef5f5627fe2118bda40691150c8d1da74f`。
 - 已检查根目录 AGENTS.md；在仓库中检索未发现更深层 AGENTS.md。本次不运行构建或应用，也不修改业务源码。
 - 工作树存在并行改动，包括 `chat-server.mjs`、`chat/provider-contract.mjs`、`chat/run-launcher.mjs`、`chat/run-execution-boundary.mjs`、`lib/config.mjs`、Android 网络/工作台等；其他未提交文件也保留原样。
 - S：直接阅读实现，可支持实现形态判断。I：从相邻调用链得出的风险或缺口，需要实施前进一步确认。V：真实运行验证，本次无此类证据。
@@ -109,13 +109,13 @@ Packet 有不可变 digest、Run 来源和证据缺失时的状态归一化；ph
 
 ### E14 — 开关与真实能力不同层（S）
 
-代码：[config.mjs](../../lib/config.mjs)、[organization-runtime-capabilities.mjs](../../chat/organization-runtime-capabilities.mjs)、[Deb 环境配置](../../packaging/deb/agentoc.env)。
+代码：[config.mjs](../../lib/config.mjs)、[organization-runtime-capabilities.mjs](../../chat/organization-runtime-capabilities.mjs)、[Deb 环境配置](../../packaging/deb/ragent.env)。
 
 原始开关多数默认 false；`organizationFeatureEnabled` 对部分未显式配置的能力采用兼容启用逻辑；Deb 环境显式打开一组开关。Proposal / provisioning 等又依赖原始开关组合。实际有效能力需要具体实例读取及调用链核查，本次未读生产配置，也未修改开关。
 
 ### E15 — 已有 Web / Android 与接口差异（S / I）
 
-代码：[Web organization-view.js](../../static/chat/organization-view.js)、[组织 API](../../chat/router-organization-routes.mjs)、[Android OrganizationApi.kt](../../android/feature/organization/src/main/kotlin/com/andysagent/agentoc/feature/organization/data/OrganizationApi.kt)、[Android DTO](../../android/feature/organization/src/main/kotlin/com/andysagent/agentoc/feature/organization/data/OrganizationDtos.kt)。
+代码：[Web organization-view.js](../../static/chat/organization-view.js)、[组织 API](../../chat/router-organization-routes.mjs)、[Android OrganizationApi.kt](../../android/feature/organization/src/main/kotlin/com/andysagent/ragent/feature/organization/data/OrganizationApi.kt)、[Android DTO](../../android/feature/organization/src/main/kotlin/com/andysagent/ragent/feature/organization/data/OrganizationDtos.kt)。
 
 Web 解包 `payload.projection`。服务端 GET 返回 `{ projection }`；所读 Android RealOrganizationApi 直接把 response.body 解码成 OrganizationProjectionDto，DTO 要求顶层 organizationId。所读 OkHttp 传输保存 JSON 原文，未在该处看到解包。属于明确的静态契约不一致，实际使用路径与真机现象仍待确认。
 

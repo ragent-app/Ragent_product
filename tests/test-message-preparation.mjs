@@ -11,11 +11,11 @@ import { fork, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test, after } from 'node:test';
 
-const root = process.env.AGENTOC_MESSAGE_PREPARATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-message-preparation-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '0';
+const root = process.env.RAGENT_MESSAGE_PREPARATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-message-preparation-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '0';
 const store = await import('../chat/session-meta-store.mjs');
 const api = await import('../chat/message-preparation-store.mjs');
 const messageExecution = await import('../chat/message-execution-context.mjs');
@@ -63,7 +63,7 @@ async function route(method, path, { scope, payload, raw, headers = {}, auth = {
 const preparationPath = scope => `/api/sessions/${encodeURIComponent(scope.sessionId)}/app-api-message-preparations`;
 
 if (process.argv[2] === 'cold-read') {
-  const input = JSON.parse(process.env.AGENTOC_MESSAGE_PREPARATION_INPUT);
+  const input = JSON.parse(process.env.RAGENT_MESSAGE_PREPARATION_INPUT);
   const receipt = await api.readSessionApiMessagePreparation(input.scope.sessionId, input.request.requestId, input.scope);
   const replay = await api.prepareSessionApiMessage(input.scope.sessionId, input.scope, input.request);
   const acceptance = await getMessageSubmissionReceipt(input.scope.sessionId, input.request.requestId);
@@ -415,7 +415,7 @@ test('cold process reads the same preparation and original acceptance remains un
   const scope = await seed(); const input = request(); const prepared = await api.prepareSessionApiMessage(scope.sessionId, scope, input);
   const before = await readFile(CHAT_SESSIONS_FILE);
   const result = await promisify(execFile)(process.execPath, [import.meta.filename, 'cold-read'], {
-    env: { ...process.env, AGENTOC_MESSAGE_PREPARATION_TEST_ROOT: root, AGENTOC_MESSAGE_PREPARATION_INPUT: JSON.stringify({ scope, request: input }) }, timeout: 12000,
+    env: { ...process.env, RAGENT_MESSAGE_PREPARATION_TEST_ROOT: root, RAGENT_MESSAGE_PREPARATION_INPUT: JSON.stringify({ scope, request: input }) }, timeout: 12000,
   });
   const line = result.stdout.split('\n').find(value => value.startsWith('COLD_PREPARATION='));
   const cold = JSON.parse(line.slice('COLD_PREPARATION='.length));
@@ -425,7 +425,7 @@ test('cold process reads the same preparation and original acceptance remains un
 
 test('actual HTTP child killed after durable preparation before reply recovers without a Run', { timeout: 20000 }, async () => {
   const scope = await seed(); const input = request();
-  const child = fork(import.meta.filename, ['crash-server'], { env: { ...process.env, AGENTOC_MESSAGE_PREPARATION_TEST_ROOT: root }, silent: true });
+  const child = fork(import.meta.filename, ['crash-server'], { env: { ...process.env, RAGENT_MESSAGE_PREPARATION_TEST_ROOT: root }, silent: true });
   let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   const messages = []; const listeners = new Map();
   child.on('message', value => { messages.push(value); listeners.get(value.type)?.(value); });
@@ -451,7 +451,7 @@ test('actual HTTP child killed after durable preparation before reply recovers w
     assert.equal(child.kill('SIGKILL'), true); const terminal = await exited; assert.ok(terminal.signal || terminal.code !== 0);
     assert.equal(await outcome, 'disconnected');
     const result = await promisify(execFile)(process.execPath, [import.meta.filename, 'cold-read'], {
-      env: { ...process.env, AGENTOC_MESSAGE_PREPARATION_TEST_ROOT: root, AGENTOC_MESSAGE_PREPARATION_INPUT: JSON.stringify({ scope, request: input }) }, timeout: 12000,
+      env: { ...process.env, RAGENT_MESSAGE_PREPARATION_TEST_ROOT: root, RAGENT_MESSAGE_PREPARATION_INPUT: JSON.stringify({ scope, request: input }) }, timeout: 12000,
     });
     const line = result.stdout.split('\n').find(value => value.startsWith('COLD_PREPARATION=')); const cold = JSON.parse(line.slice('COLD_PREPARATION='.length));
     assert.equal(cold.receipt.preparationId, committed.preparation.preparationId); assert.equal(cold.acceptance.runId, null);

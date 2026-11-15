@@ -150,7 +150,7 @@ export async function confirmRevokedLinuxRunStopped({ directory, runId, launchAt
           values.MainPID !== '0' || values.ControlPID !== '0') unavailable();
       if (values.LoadState === 'loaded' && values.InvocationID !== identity.invocationId) unavailable();
       if (values.LoadState === 'not-found' && values.ActiveState !== 'inactive') unavailable();
-      const expectedGroup = `/agentoc.slice/agentoc-runners.slice/${unitName}`;
+      const expectedGroup = `/ragent.slice/ragent-runners.slice/${unitName}`;
       if (values.ControlGroup && values.ControlGroup !== expectedGroup) unavailable();
       return stdout;
     };
@@ -158,7 +158,7 @@ export async function confirmRevokedLinuxRunStopped({ directory, runId, launchAt
     // cgroup.events reports descendants too; unlike cgroup.procs it cannot
     // miss a child cgroup. The filesystem itself must be kernel cgroup v2.
     if ((await statfs('/sys/fs/cgroup', { bigint: true })).type !== 0x63677270n) unavailable();
-    const eventsPath = `/sys/fs/cgroup/agentoc.slice/agentoc-runners.slice/${unitName}/cgroup.events`;
+    const eventsPath = `/sys/fs/cgroup/ragent.slice/ragent-runners.slice/${unitName}/cgroup.events`;
     let events;
     try { events = await readFile(eventsPath, 'utf8'); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }

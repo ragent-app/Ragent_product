@@ -43,15 +43,15 @@ async function resolveHandoffOwner(req,authSession) {
   if(authSession?.role!=='owner' || authSession.workspaceAccess || authSession.targetRuntime || authSession.temporaryControlAdapter
       || ['target_runtime_gateway','run_capability','temporary_device','provisional_device'].includes(authSession.principalKind)) return null;
   if(authSession.principalKind==='owner' && authSession.authMethod==='proot_local') {
-    const bearer=req?._bearerAuthSession,owner=text(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID);
+    const bearer=req?._bearerAuthSession,owner=text(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID);
     if(!owner || bearer?.role!=='owner' || bearer.principalKind!=='owner' || bearer.authMethod!=='proot_local' || !await authenticateProotRequest(req)) return null;
     return {kind:'user',role:'owner',principalId:owner};
   }
   if(['local_web','proot_cli'].includes(authSession.authMethod)) {
-    const owner=text(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID);
+    const owner=text(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID);
     // Local-web auto-auth applies only to HTML, never /api/ paths; requiring
     // the actual API request ensures getAuthSession rechecks the cookie.
-    if(!owner || !String(req?.url||'').startsWith('/api/') || req?._bearerAuthSession || authSession.principalKind || authSession.scope || req?.headers?.['x-agentoc-target-grant']) return null;
+    if(!owner || !String(req?.url||'').startsWith('/api/') || req?._bearerAuthSession || authSession.principalKind || authSession.scope || req?.headers?.['x-ragent-target-grant']) return null;
     const current=getAuthSession(req);
     if(current?.role!=='owner' || current.authMethod!==authSession.authMethod || current.principalKind || current.scope || current.workspaceAccess || current.targetRuntime) return null;
     return {kind:'user',role:'owner',principalId:owner};
@@ -68,7 +68,7 @@ function mutationSourceAllowed(req) {
   try {
     const parsed = new URL(origin);
     if (parsed.username || parsed.password || parsed.origin !== origin || !['http:', 'https:'].includes(parsed.protocol)) return false;
-    const trustedOrigins = text(process.env.AGENTOC_FACTORY_TRUSTED_ORIGINS).split(',').map(text).filter(Boolean);
+    const trustedOrigins = text(process.env.RAGENT_FACTORY_TRUSTED_ORIGINS).split(',').map(text).filter(Boolean);
     if (trustedOrigins.some(value => {
       try {
         const allowed = new URL(value);
@@ -169,7 +169,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   try {
     if(ownerReport) {
       if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
       if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
@@ -184,13 +184,13 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       }
       if(req.method!=='POST'||ownerProposal[2]) {writeJson(res,405,{error:'Method not allowed'});return true;}
       if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
-      if(ownerProposal[1]==='commit'&&process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
+      if(ownerProposal[1]==='commit'&&process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
       const raw=await readBody(req,65536), body=JSON.parse(raw || '{}');
       writeJson(res,200,await (ownerProposal[1]==='preview'?previewOwnerOrganization(body,actor):commitOwnerOrganization(body,actor)));return true;
     }
     if(scopedRevision) {
       if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
-      if(scopedRevision[3]==='commit'&&process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
+      if(scopedRevision[3]==='commit'&&process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
       const actor=await resolveResponsibilityActor(req,authSession);if(!actor) {writeJson(res,403,{error:'Verified instance owner required'});return true;}
       const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       const input={...body,organizationId:decodeURIComponent(scopedRevision[1]),goalId:decodeURIComponent(scopedRevision[2])};
@@ -209,8 +209,8 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if(req.method==='GET' && consultationId && !consultation[4]) { writeJson(res,200,await getFactoryConsultation({organizationId,workItemId,consultationId},actor)); return true; }
       if(req.method!=='POST' || (consultationId && !['reconcile','resume'].includes(consultation[4]))) { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if(!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
-      if(consultationId) { if(consultation[4]==='resume' && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; } const action=consultation[4]==='resume'?resumeFactoryConsultation:reconcileFactoryConsultation; writeJson(res,200,await action({organizationId,workItemId,consultationId},actor)); return true; }
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(consultationId) { if(consultation[4]==='resume' && process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; } const action=consultation[4]==='resume'?resumeFactoryConsultation:reconcileFactoryConsultation; writeJson(res,200,await action({organizationId,workItemId,consultationId},actor)); return true; }
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
       const {expertNodeId,expectedVersion,question,deadline,budget,commandId,idempotencyKey}=body;
       writeJson(res,200,await startFactoryConsultation({organizationId,workItemId,expertNodeId,expectedVersion,question,deadline,budget,commandId,idempotencyKey},actor)); return true;
@@ -220,7 +220,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const organizationId=decodeURIComponent(nodeGrantRevision[1]), nodeId=decodeURIComponent(nodeGrantRevision[2]);
       if(req.method==='GET') { writeJson(res,200,await getOrganizationNodeGrantRevision(organizationId,nodeId,actor)); return true; }
       if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       if(!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
       const {commandId,expectedOrganizationVersion,expectedRevision,expectedBindingGeneration,capabilities}=body;
@@ -230,7 +230,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       if(req.method==='GET') { writeJson(res,200,await getFactoryConcurrencyPolicy(decodeURIComponent(factoryPolicy[1]),actor)); return true; }
       if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       if(!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
       const {commandId,expectedVersion,factoryMaxConcurrent}=body;
@@ -241,7 +241,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const organizationId=decodeURIComponent(blockerOwner[1]), workItemId=decodeURIComponent(blockerOwner[2]);
       if (req.method==='GET' && !blockerOwner[3]) { writeJson(res,200,await listFactoryBlockerProposals(organizationId,workItemId,actor)); return true; }
       if (req.method!=='POST' || !blockerOwner[3]) { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled'}); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,16384), body=JSON.parse(raw || '{}');
       const {action,expectedProposalVersion,expectedWorkVersion,commandId,idempotencyKey}=body;
@@ -249,7 +249,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     }
     if (taskKnowledge) {
       if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       if(!mutationSourceAllowed(req)) { writeJson(res,403,{code:'FACTORY_SOURCE_DENIED',error:'Request source or content type is not allowed'}); return true; }
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
@@ -268,7 +268,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const input={organizationId:decodeURIComponent(releaseReconcile[1]),operationId:decodeURIComponent(releaseReconcile[2])};
       if (releaseReconcile[3]==='resume') {
-        if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+        if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
         const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
         writeJson(res,200,await resumeFactoryGithubRelease({...input,idempotencyKey:body?.idempotencyKey},actor)); return true;
       }
@@ -281,7 +281,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (shadowReconciliation && !shadowReconciliation[2] && req.method==='GET') { writeJson(res,200,await listFactoryShadowReconciliation(organizationId,{},actor)); return true; }
       if (req.method!=='POST' || steerReceipt || (shadowReconciliation && !shadowReconciliation[2])) { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
-      if ((steer || (retirement && retirement[2]==='execute')) && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if ((steer || (retirement && retirement[2]==='execute')) && process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       if (steer) { const {commandId,expectedVersion,executionEpoch,bindingGeneration,text:message}=body || {}; writeJson(res,200,await submitFactorySteer({organizationId,workItemId:decodeURIComponent(steer[2]),commandId,expectedVersion,executionEpoch,bindingGeneration,text:message},actor)); return true; }
       if (shadowReconciliation) { writeJson(res,200,await reconcileFactoryShadow({organizationId,cursor:body?.cursor,limit:body?.limit},actor)); return true; }
@@ -300,7 +300,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     if (goalRevision) {
       if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
-      if (goalRevision[3]==='commit' && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if (goalRevision[3]==='commit' && process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       const raw=await readBody(req,65536); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const input={...body,organizationId:decodeURIComponent(goalRevision[1]),goalId:decodeURIComponent(goalRevision[2])};
@@ -319,7 +319,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const action=integrationQueue[2];
-      if (!['refresh','reconcile-check'].includes(action) && process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (!['refresh','reconcile-check'].includes(action) && process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
       const organizationId=decodeURIComponent(integrationQueue[1]),actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       const raw=await readBody(req,32*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       if (!body || typeof body!=='object' || Array.isArray(body)) { writeJson(res,400,{error:'Request must be an object'}); return true; }
@@ -376,7 +376,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const url=new URL(req.url || pathname,'http://localhost'), options={cursor:text(url.searchParams.get('cursor')),limit:Number(url.searchParams.get('limit') || 50)};
       if (req.method==='GET' && !shadow[3]) { writeJson(res,200,shadow[2]==='readiness' ? await getFactoryRolloutReadiness(organizationId,actor) : await listFactoryShadow(organizationId,options,actor)); return true; }
       if (req.method!=='POST' || shadow[2]!=='shadow' || shadow[3]!=='sync') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,8192); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       writeJson(res,200,await syncFactoryShadow({organizationId,cursor:text(body.cursor),limit:body.limit},actor)); return true;
@@ -389,7 +389,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (req.method==='GET' && team && !team[2]) { const value=new URL(req.url || pathname,'http://localhost').searchParams.get('relationVersion'); if(value!==null && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))) { writeJson(res,400,{error:'Invalid relationship version'}); return true; } writeJson(res,200,await getTeamConfiguration(organizationId,actor,value===null?{}:{atRelationVersion:Number(value)})); return true; }
       if (req.method==='GET' && handoffRead) { writeJson(res,200,await getFactoryTaskHandoff(organizationId,decodeURIComponent(handoffRead[2]),actor)); return true; }
       if (req.method!=='POST' || handoffRead || (team && !team[2])) { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,32*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       if (!body || typeof body!=='object' || Array.isArray(body)) { writeJson(res,400,{error:'Request must be an object'}); return true; }
@@ -404,7 +404,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       await listFactoryWorkItems(organizationId,{limit:1},actor);
       if (req.method==='GET' && release[2]==='operations' && release[3]) { writeJson(res,200,await getFactoryReleaseOperation(organizationId,decodeURIComponent(release[3]),actor)); return true; }
       if (req.method!=='POST' || release[3] || release[2]==='operations') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,32*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       const input={...body,organizationId};
@@ -418,7 +418,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       await listFactoryWorkItems(organizationId,{limit:1},actor);
       if (req.method !== 'POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res,403,{error:'Request source or content type is not allowed'}); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED !== 'true' && !nodeRebind[4]) { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true' && !nodeRebind[4]) { writeJson(res,503,{error:'Factory control is disabled',code:'FACTORY_CONTROL_DISABLED'}); return true; }
       if (nodeRebind[4]) { writeJson(res,200,await cancelNodeRebind({organizationId,nodeId,commandId:decodeURIComponent(nodeRebind[3])})); return true; }
       const raw=await readBody(req,16*1024); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       const commandId=text(body.commandId), expectedGeneration=body.expectedGeneration;
@@ -457,7 +457,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       if (req.method === 'GET' && !lifecycle[2]) { writeJson(res, 200, await getOrganizationLifecycleInfo(organizationId)); return true; }
       if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res, 403, { error: 'Request source or content type is not allowed' }); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED !== 'true' && lifecycle[3] !== 'cancel') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true' && lifecycle[3] !== 'cancel') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
       const raw = await readBody(req, 16 * 1024); let body;
       try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
       if (!lifecycle[2]) {
@@ -470,7 +470,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     }
     if (acceptance) {
       if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED !== 'true') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res, 403, { code: 'FACTORY_SOURCE_DENIED', error: 'Request source or content type is not allowed' }); return true; }
       const raw = await readBody(req, 32 * 1024);
       let body; try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
@@ -483,7 +483,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       await listFactoryWorkItems(organizationId,{limit:1},actor);
       if(req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }
-      if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') { writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'}); return true; }
       if(!mutationSourceAllowed(req)) { writeJson(res,403,{code:'FACTORY_SOURCE_DENIED',error:'Request source or content type is not allowed'}); return true; }
       const raw=await readBody(req,16384); let body; try { body=JSON.parse(raw || '{}'); } catch { writeJson(res,400,{error:'Invalid JSON body'}); return true; }
       writeJson(res,200,await escalateOverdueTeamMessage({organizationId,recipientNodeId:nodeId,messageId:decodeURIComponent(escalateMessage[3]),idempotencyKey:body?.idempotencyKey},actor)); return true;
@@ -494,7 +494,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       await listFactoryWorkItems(organizationId, { limit: 1 }, actor);
       if (req.method === 'GET') { writeJson(res, 200, { messages: await listTeamMessages(organizationId,nodeId), asOf: new Date().toISOString(), schemaVersion: 1 }); return true; }
       if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED !== 'true') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true') { writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true; }
       if (!mutationSourceAllowed(req)) { writeJson(res, 403, { code: 'FACTORY_SOURCE_DENIED', error: 'Request source or content type is not allowed' }); return true; }
       const raw = await readBody(req, 16 * 1024);
       let body;
@@ -514,7 +514,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       await listFactoryWorkItems(organizationId, { limit: 1 }, actor);
       const { getFactoryRuntimeStatus } = await import('./factory-runtime.mjs');
       const runtimeStatus = getFactoryRuntimeStatus(organizationId);
-      result = { schemaVersion: 1, asOf: new Date().toISOString(), controlEnabled: process.env.AGENTOC_FACTORY_CONTROL_ENABLED === 'true', observationEnabled: true, pauseCancelAvailable: true, ...runtimeStatus, executionReadiness: 'not_verified' };
+      result = { schemaVersion: 1, asOf: new Date().toISOString(), controlEnabled: process.env.RAGENT_FACTORY_CONTROL_ENABLED === 'true', observationEnabled: true, pauseCancelAvailable: true, ...runtimeStatus, executionReadiness: 'not_verified' };
     }
     else if (req.method === 'GET' && resource === 'work-items') result = id ? await getFactoryWorkItem(organizationId, id, actor, {includeReport:true}) : await listFactoryWorkItems(organizationId, options, actor);
     else if (req.method === 'GET' && resource === 'goals' && !id) result = await listFactoryGoals(organizationId, options, actor);
@@ -527,7 +527,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
       if (!body || typeof body !== 'object' || Array.isArray(body)) { writeJson(res, 400, { error: 'Command must be an object' }); return true; }
       if (body.organizationId && body.organizationId !== organizationId) { writeJson(res, 400, { error: 'Organization scope mismatch' }); return true; }
-      if (process.env.AGENTOC_FACTORY_CONTROL_ENABLED !== 'true' && !(resource === 'commands' && ['RequestPause', 'RequestCancel'].includes(body.type)) && !(resource === 'workflow' && id === 'preview')) {
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true' && !(resource === 'commands' && ['RequestPause', 'RequestCancel'].includes(body.type)) && !(resource === 'workflow' && id === 'preview')) {
         writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' }); return true;
       }
       if (resource === 'workflow' && id === 'preview') {

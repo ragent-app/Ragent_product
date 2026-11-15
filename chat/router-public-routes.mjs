@@ -280,11 +280,11 @@ if (pathname === '/api/build-info' && req.method === 'GET') {
     cacheControl: 'no-store, max-age=0, must-revalidate',
     vary: '',
     headers: {
-      'X-AgentoC-Runtime-Mode': pageBuildInfo.runtimeMode,
-      'X-AgentoC-Release-Id': pageBuildInfo.releaseId || '',
-      'X-AgentoC-Asset-Version': pageBuildInfo.assetVersion,
-      'X-AgentoC-Service-Build': pageBuildInfo.serviceTitle,
-      'X-AgentoC-Frontend-Build': pageBuildInfo.frontendTitle,
+      'X-Ragent-Runtime-Mode': pageBuildInfo.runtimeMode,
+      'X-Ragent-Release-Id': pageBuildInfo.releaseId || '',
+      'X-Ragent-Asset-Version': pageBuildInfo.assetVersion,
+      'X-Ragent-Service-Build': pageBuildInfo.serviceTitle,
+      'X-Ragent-Frontend-Build': pageBuildInfo.frontendTitle,
     },
   });
   return true;

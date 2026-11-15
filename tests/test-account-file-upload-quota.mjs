@@ -9,10 +9,10 @@ import { createDemoAccountAuth, createDemoAccountPolicy } from '../accounts/demo
 import { createAccountEntitlementResolver } from '../accounts/turn-lease-policy.mjs';
 import { issueInstanceAccessGrant, revokeInstanceAccessGrant } from '../accounts/instance-access-grants.mjs';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-account-file-quota-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-account-file-quota-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 let now = Date.parse('2026-11-08T00:00:00.000Z');
 const accountId = 'acct_file_quota_test';
 const identity = await loadOrCreateInstanceIdentity({ filePath: join(home, 'instance.json') });
@@ -36,7 +36,7 @@ const broker = createOwnerAuthBroker({ store, clock: () => now,
 const digest = (char) => char.repeat(64);
 function request(operation, requestId, sizeBytes, sha256 = digest('a'), actor = identity, quotaBatchId = requestId, owner = accountId) {
   const fields = { accountId: owner, operation, requestId, quotaBatchId, sizeBytes, sha256, issuedAt: new Date(now).toISOString(),
-    audience: 'agentoc-account-file-upload' };
+    audience: 'ragent-account-file-upload' };
   const proof = signAccountFileUploadQuotaProof(actor, fields);
   return { ...fields, instance: publicInstanceIdentity(actor), signature: proof.signature };
 }
@@ -134,7 +134,7 @@ try {
   const sharedRequest = (operation, grantId = grant.grantId) => {
     const fields = { accountId: policy.accountId, operation, requestId: 'shared-large', quotaBatchId: 'shared-batch',
       sizeBytes: largeSize, sha256: digest('c'), issuedAt: new Date(now).toISOString(),
-      audience: 'agentoc-account-file-upload', grantId };
+      audience: 'ragent-account-file-upload', grantId };
     return { ...fields, instance: publicInstanceIdentity(identity), signature: signAccountFileUploadQuotaProof(identity, fields).signature };
   };
   assert.equal((await testBroker.getAccountFileUploadPolicy(sharedRequest('policy'))).limits.unlimited, true);

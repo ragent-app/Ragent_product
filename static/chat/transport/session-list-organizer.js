@@ -16,12 +16,12 @@
 //     embedding the payload as XML-ish input.
 //
 // Session display-name resolution and the active-session list are injected
-// via the environment contract (root.AgentocSessionListOrganizerEnvironment)
+// via the environment contract (root.RagentSessionListOrganizerEnvironment)
 // together with the live editor-context scalars, so this module stays free
 // of browser globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-session-list-organizer-core.mjs.
 
-(function attachAgentocSessionListOrganizerCore(root) {
+(function attachRagentSessionListOrganizerCore(root) {
   // Live environment: reads always go to the injected object (mutations after
   // attach are visible), falling back to the defaults for absent keys. An
   // Object.assign copy would freeze scalar bindings at attach time, which
@@ -37,7 +37,7 @@
     thinkingEnabled: false,
   });
   const environment = new Proxy(
-    root.AgentocSessionListOrganizerEnvironment || {},
+    root.RagentSessionListOrganizerEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -109,7 +109,7 @@
     ].join("\n");
   }
 
-  root.AgentocSessionListOrganizerCore = {
+  root.RagentSessionListOrganizerCore = {
     clipSessionListOrganizerText,
     buildSessionListOrganizerSessionMetadata,
     buildSessionListOrganizerPayload,

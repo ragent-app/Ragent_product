@@ -10,10 +10,10 @@ import { buildLaunchAgentPlist } from '../lib/guest-instance.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const sandboxHome = join(tmpdir(), `agentoc-owner-normalize-${Date.now()}`);
+const sandboxHome = join(tmpdir(), `ragent-owner-normalize-${Date.now()}`);
 
-mkdirSync(join(sandboxHome, '.config', 'agentoc'), { recursive: true });
-mkdirSync(join(sandboxHome, '.agentoc', 'memory'), { recursive: true });
+mkdirSync(join(sandboxHome, '.config', 'ragent'), { recursive: true });
+mkdirSync(join(sandboxHome, '.ragent', 'memory'), { recursive: true });
 mkdirSync(join(sandboxHome, 'Library', 'LaunchAgents'), { recursive: true });
 mkdirSync(join(sandboxHome, 'Library', 'Logs'), { recursive: true });
 
@@ -21,7 +21,7 @@ const plistPath = join(sandboxHome, 'Library', 'LaunchAgents', 'com.chatserver.c
 writeFileSync(plistPath, buildLaunchAgentPlist({
   label: 'com.chatserver.claude',
   nodePath: '/usr/local/bin/node',
-  chatServerPath: '/Users/example/code/agentoc/chat-server.mjs',
+  chatServerPath: '/Users/example/code/ragent/chat-server.mjs',
   workingDirectory: sandboxHome,
   standardOutPath: join(sandboxHome, 'Library', 'Logs', 'chat-server.log'),
   standardErrorPath: join(sandboxHome, 'Library', 'Logs', 'chat-server.error.log'),
@@ -37,14 +37,14 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: sandboxHome,
     },
   });
   assert.equal(dryRun.status, 0, dryRun.stderr || dryRun.stdout);
   const dryRunOutput = JSON.parse(dryRun.stdout);
-  assert.equal(dryRunOutput.ownerInstanceRoot, join(sandboxHome, '.agentoc', 'instances', 'owner'));
+  assert.equal(dryRunOutput.ownerInstanceRoot, join(sandboxHome, '.ragent', 'instances', 'owner'));
   assert.equal(dryRunOutput.aliases.length, 2);
   assert.equal(dryRunOutput.aliases.every((entry) => entry.changed === true), true);
   assert.equal(dryRunOutput.plistChanged, true);
@@ -54,8 +54,8 @@ try {
     encoding: 'utf8',
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: sandboxHome,
     },
   });
@@ -63,16 +63,16 @@ try {
   const applyOutput = JSON.parse(apply.stdout);
   assert.equal(applyOutput.restarted, false);
 
-  const ownerRoot = join(sandboxHome, '.agentoc', 'instances', 'owner');
-  assert.equal(realpathSync(join(ownerRoot, 'config')), realpathSync(join(sandboxHome, '.config', 'agentoc')));
-  assert.equal(realpathSync(join(ownerRoot, 'memory')), realpathSync(join(sandboxHome, '.agentoc', 'memory')));
+  const ownerRoot = join(sandboxHome, '.ragent', 'instances', 'owner');
+  assert.equal(realpathSync(join(ownerRoot, 'config')), realpathSync(join(sandboxHome, '.config', 'ragent')));
+  assert.equal(realpathSync(join(ownerRoot, 'memory')), realpathSync(join(sandboxHome, '.ragent', 'memory')));
 
   const rewrittenPlist = readFileSync(plistPath, 'utf8');
-  assert.match(rewrittenPlist, /<key>AGENTOC_INSTANCE_ROOT<\/key><string>.*\.agentoc\/instances\/owner<\/string>/);
+  assert.match(rewrittenPlist, /<key>RAGENT_INSTANCE_ROOT<\/key><string>.*\.ragent\/instances\/owner<\/string>/);
   assert.match(rewrittenPlist, /<key>CHAT_PORT<\/key><string>7690<\/string>/);
   assert.match(rewrittenPlist, /<key>HOME<\/key><string>/);
-  assert.match(rewrittenPlist, /<key>AGENTOC_SESSION_DISPATCH<\/key><string>on<\/string>/);
-  assert.match(rewrittenPlist, /<key>AGENTOC_USER_SHELL_ENV_B64<\/key><string>/);
+  assert.match(rewrittenPlist, /<key>RAGENT_SESSION_DISPATCH<\/key><string>on<\/string>/);
+  assert.match(rewrittenPlist, /<key>RAGENT_USER_SHELL_ENV_B64<\/key><string>/);
 } finally {
   rmSync(sandboxHome, { recursive: true, force: true });
 }

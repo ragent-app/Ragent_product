@@ -8,7 +8,7 @@ const managerStyles = await readFile(new URL('../static/chat/desktop-manager.css
 const panelStyles = await readFile(new URL('../static/chat/cross-device-panel.css', import.meta.url), 'utf8');
 const ragentIcon = await readFile(new URL('../static/ragent-login-mark.svg', import.meta.url), 'utf8');
 const googleIcon = await readFile(new URL('../static/google-login-mark.svg', import.meta.url), 'utf8');
-const browser = await chromium.launch({ headless: true, ...(process.env.AGENTOC_TEST_BROWSER_CHANNEL ? { channel: process.env.AGENTOC_TEST_BROWSER_CHANNEL } : {}) });
+const browser = await chromium.launch({ headless: true, ...(process.env.RAGENT_TEST_BROWSER_CHANNEL ? { channel: process.env.RAGENT_TEST_BROWSER_CHANNEL } : {}) });
 try {
   const page = await browser.newPage();
   await page.route('http://localhost/ragent-login-mark.svg', (route) => route.fulfill({ contentType: 'image/svg+xml', body: ragentIcon }));
@@ -22,8 +22,8 @@ try {
   await page.addStyleTag({ content: panelStyles });
   await page.addStyleTag({ content: managerStyles });
   await page.evaluate(() => {
-    window.agentocT = (key) => key;
-    window.agentocResolveProductPath = (path) => `http://localhost${path}`;
+    window.ragentT = (key) => key;
+    window.ragentResolveProductPath = (path) => `http://localhost${path}`;
     window.__bound = false;
     window.__demoStatus = 'unconfigured';
     window.__opened = [];
@@ -31,7 +31,7 @@ try {
     window.fetchJsonOrRedirect = async (path) => {
       if (path === '/api/auth/google/status') return { enabled: true, bound: window.__bound, mode: 'accounts', capabilities: { accountJoin: true } };
       if (path === '/api/auth/demo/status') return { status: window.__demoStatus };
-      if (path === '/api/device-pairing/invitations') return { invitation: { id: 'inv_fixture', shortCode: '123456', accountHandoff: window.__bound, pairingUri: 'agentoc://pair?v=3&i=fixture&t=fixture', expiresAt: new Date(Date.now() + 120000).toISOString() } };
+      if (path === '/api/device-pairing/invitations') return { invitation: { id: 'inv_fixture', shortCode: '123456', accountHandoff: window.__bound, pairingUri: 'ragent://pair?v=3&i=fixture&t=fixture', expiresAt: new Date(Date.now() + 120000).toISOString() } };
       if (path === '/api/device-pairing/account-invitations/inv_fixture') return { status: 'PENDING' };
       if (path === '/api/auth/google/devices') return { devices: [] };
       throw new Error(`Unexpected request ${path}`);
@@ -39,7 +39,7 @@ try {
   });
   await page.addScriptTag({ content: qrSource });
   await page.addScriptTag({ content: source });
-  await page.evaluate(() => window.AgentoCCrossDevicePanel.refreshManager());
+  await page.evaluate(() => window.RagentCrossDevicePanel.refreshManager());
   await page.locator('.desktop-manager-claim-qr canvas').waitFor();
   const order = await page.evaluate(() => {
     const qr = document.querySelector('.desktop-manager-claim-qr');
@@ -52,10 +52,10 @@ try {
   assert.equal(await demoButton.locator('img.desktop-manager-provider-mark').getAttribute('src'), 'http://localhost/ragent-login-mark.svg');
   assert.equal(await demoButton.isEnabled(), false);
   if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-unconfigured.png`, fullPage: true });
-  await page.evaluate(() => { window.__demoStatus = 'unavailable'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.evaluate(() => { window.__demoStatus = 'unavailable'; window.RagentCrossDevicePanel.refreshManager(); });
   await page.getByText('Ragent sign-in is currently unavailable.').waitFor();
   assert.equal(await demoButton.isEnabled(), false);
-  await page.evaluate(() => { window.__demoStatus = 'configured'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.evaluate(() => { window.__demoStatus = 'configured'; window.RagentCrossDevicePanel.refreshManager(); });
   await demoButton.waitFor({ state: 'visible' });
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some((button) => button.textContent === 'Sign in with Ragent' && !button.disabled));
   const sizes = await page.locator('.desktop-manager-provider-action').evaluateAll((buttons) => buttons.map((button) => button.getBoundingClientRect().height));
@@ -64,21 +64,21 @@ try {
   if (process.env.RAGENT_QA_SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.RAGENT_QA_SCREENSHOT_DIR}/demo-configured.png`, fullPage: true });
   await page.getByRole('button', { name: 'Sign in with Ragent' }).click();
   assert.match((await page.evaluate(() => window.__opened))[0], /\/api\/auth\/google\/bind\/redirect\?flow=demo$/);
-  await page.evaluate(() => { window.agentocGetActiveUiLanguage = () => 'zh-CN'; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.evaluate(() => { window.ragentGetActiveUiLanguage = () => 'zh-CN'; window.RagentCrossDevicePanel.refreshManager(); });
   await page.getByRole('button', { name: 'Ragent登录' }).waitFor();
-  await page.evaluate(() => { window.agentocGetActiveUiLanguage = () => 'en'; window.AgentoCCrossDevicePanel.refreshManager(); });
-  await page.evaluate(() => { window.__bound = true; window.AgentoCCrossDevicePanel.refreshManager(); });
+  await page.evaluate(() => { window.ragentGetActiveUiLanguage = () => 'en'; window.RagentCrossDevicePanel.refreshManager(); });
+  await page.evaluate(() => { window.__bound = true; window.RagentCrossDevicePanel.refreshManager(); });
   await page.getByText('Account connected', { exact: true }).waitFor();
   assert.equal(await page.locator('.desktop-manager-claim-qr').count(), 0);
   assert.equal(await page.locator('[data-desktop-manager-tab="pairing"]').isVisible(), true);
-  await page.evaluate(() => window.AgentoCCrossDevicePanel.open({ view: 'register' }));
+  await page.evaluate(() => window.RagentCrossDevicePanel.open({ view: 'register' }));
   await page.getByRole('button', { name: 'Create pairing code' }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'Temporary · no sign-in' }).count(), 0, 'bound accounts hide temporary pairing');
   assert.equal(await page.getByRole('button', { name: 'Trusted · Google sign-in' }).count(), 1);
   await page.getByRole('button', { name: 'Create pairing code' }).click();
   await page.locator('.cross-device-pair-qr canvas').waitFor();
   assert.equal(await page.getByText('Scanning this code automatically authorizes your phone for this account. Only share it with your own phone.').count(), 1);
-  await page.evaluate(() => { window.AgentoCCrossDevicePanel.close(); window.__bound = false; window.AgentoCCrossDevicePanel.open({ view: 'register' }); });
+  await page.evaluate(() => { window.RagentCrossDevicePanel.close(); window.__bound = false; window.RagentCrossDevicePanel.open({ view: 'register' }); });
   await page.getByRole('button', { name: 'Temporary · no sign-in' }).waitFor();
   assert.equal(await page.getByText('Switch work computer').count(), 0);
   console.log('Desktop account claim QR, login order, and bound state passed');

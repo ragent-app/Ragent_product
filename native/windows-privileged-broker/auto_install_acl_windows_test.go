@@ -38,8 +38,8 @@ func TestRuntimeDirectoryAclRejectsUntrustedMutations(t *testing.T) {
 }
 
 func TestOptionalRuntimeDirectoryACLFixtures(t *testing.T) {
-	trusted := os.Getenv("AGENTOC_TEST_ACL_TRUSTED")
-	writable := os.Getenv("AGENTOC_TEST_ACL_WRITABLE")
+	trusted := os.Getenv("RAGENT_TEST_ACL_TRUSTED")
+	writable := os.Getenv("RAGENT_TEST_ACL_WRITABLE")
 	if trusted == "" || writable == "" {
 		t.Skip("no isolated Windows ACL fixtures supplied")
 	}

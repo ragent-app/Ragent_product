@@ -7,7 +7,7 @@ import os
 import pathlib
 import tempfile
 
-ROOT = pathlib.Path('/var/lib/agentoc-admin')
+ROOT = pathlib.Path('/var/lib/ragent-admin')
 STATE = ROOT / 'traffic.json'
 
 

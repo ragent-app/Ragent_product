@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-workflow-strategy-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-workflow-strategy-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });

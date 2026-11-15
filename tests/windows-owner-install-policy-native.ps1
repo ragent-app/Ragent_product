@@ -6,7 +6,7 @@ $tokens=$null;$errors=$null;$null=[Management.Automation.Language.Parser]::Parse
 if($errors.Count){throw 'Policy installer syntax failure'}
 . $source -LibraryOnly
 $base=[IO.Path]::GetFullPath($EvidenceRoot)
-if($base -like 'C:\ProgramData\AgentoC*' -or $base -like 'C:\Program Files\AgentoC*' -or -not [IO.Directory]::Exists($base)){throw 'Isolated evidence root required'}
+if($base -like 'C:\ProgramData\Ragent*' -or $base -like 'C:\Program Files\Ragent*' -or -not [IO.Directory]::Exists($base)){throw 'Isolated evidence root required'}
 $user=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $admins=@($user,'S-1-5-32-544','S-1-5-18')
 $baseAcl=[Security.AccessControl.DirectorySecurity]::new();$baseAcl.SetAccessRuleProtection($true,$false);$baseAcl.SetOwner([Security.Principal.SecurityIdentifier]::new($user))
@@ -98,6 +98,6 @@ try{Check 'actual-reader-refuses-hardlinked-policy' (Refuses {Read-OwnerPinnedFi
 finally{for($index=$readPins.Count-1;$index -ge 0;$index--){$readPins[$index].Dispose()}}
 $malformed=$policy|ConvertTo-Json -Compress|ConvertFrom-Json;$malformed.port='7690'
 Check 'actual-private-parser-rejects-string-port' (Refuses {Assert-OwnerInstallPolicy $malformed} 'OIP_POLICY_INVALID')
-$release=[pscustomobject]@{version='1';protocolVersion=2;helperFile='AgentoC.OwnerBootstrap.exe';helperSha256=('a'*64);publisherSha256=('b'*64)}
+$release=[pscustomobject]@{version='1';protocolVersion=2;helperFile='Ragent.OwnerBootstrap.exe';helperSha256=('a'*64);publisherSha256=('b'*64)}
 Check 'actual-release-parser-rejects-string-version' (Refuses {Assert-OwnerPolicyRelease $release} 'OIP_SIGNED_RELEASE_REQUIRED')
 @{pass=$true;checks=@($checks);evidenceRoot=$base;level='actual NTFS publication and QA-root ACLs with current-user QA administrative authority and synthetic service/Owner SIDs';ancestorAclOutsideQaRootSubstituted=$true;actualAdministratorOwner=$false;effectiveServiceAccessTested=$false;productionChanged=$false;servicesActivated=$false;syntheticEvidenceRetained=$true}|ConvertTo-Json -Depth 5 -Compress

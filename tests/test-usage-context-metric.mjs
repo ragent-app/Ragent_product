@@ -6,11 +6,11 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-usage-context-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-usage-context-'));
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.CODEX_HOME = join(tempHome, '.config', 'agentoc', 'provider-runtime-homes', 'codex');
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.CODEX_HOME = join(tempHome, '.config', 'ragent', 'provider-runtime-homes', 'codex');
 
 const { createClaudeAdapter } = await import(
   pathToFileURL(join(repoRoot, 'chat', 'adapters', 'claude.mjs')).href
@@ -142,7 +142,7 @@ try {
   const managedCodexSessionDir = join(
     tempHome,
     '.config',
-    'agentoc',
+    'ragent',
     'provider-runtime-homes',
     'codex',
     'sessions',
@@ -236,7 +236,7 @@ try {
   const codexUsageEvents = codex.parseLine(JSON.stringify(buildCodexContextMetricsPayload(codexMetrics)));
   const codexUsage = codexUsageEvents.find((event) => event.type === 'usage');
 
-  assert.ok(codexUsage, 'Codex adapter should emit a usage event from AgentoC-injected context metrics');
+  assert.ok(codexUsage, 'Codex adapter should emit a usage event from Ragent-injected context metrics');
   assert.equal(codexUsage.contextTokens, 12326, 'Codex usage should use the latest current context size');
   assert.equal(codexUsage.inputTokens, 48317, 'Codex usage should preserve raw turn input for diagnostics');
   assert.equal(codexUsage.cachedInputTokens, 37632, 'Codex usage should preserve cached input tokens');

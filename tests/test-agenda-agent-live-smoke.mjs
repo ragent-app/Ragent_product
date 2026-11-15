@@ -62,10 +62,10 @@ try {
 
   const allEvents = loadSessionEvents(sessionId, { filter: 'all' }).events || [];
   const extracted = extractAgendaEventIdFromEvents(allEvents, title);
-  assert.ok(extracted.toolUse, 'smoke run should invoke bash with agentoc agenda add');
+  assert.ok(extracted.toolUse, 'smoke run should invoke bash with ragent agenda add');
   assert.ok(
-    /agentoc agenda add --title/.test(trimString(extracted.toolUse.toolInput)),
-    'smoke run should use the fixed agentoc agenda command',
+    /ragent agenda add --title/.test(trimString(extracted.toolUse.toolInput)),
+    'smoke run should use the fixed ragent agenda command',
   );
   assert.ok(
     !/cli\.js agenda add/.test(trimString(extracted.toolUse.toolInput)),
@@ -81,7 +81,7 @@ try {
   assert.ok(eventId, 'smoke run should produce a concrete agenda event id');
 
   const event = getAgendaEvent(eventId);
-  assert.ok(event, 'created agenda event should be readable through agentoc agenda get');
+  assert.ok(event, 'created agenda event should be readable through ragent agenda get');
   assert.equal(trimString(event.summary || event.title), title, 'agenda event title should match the requested title');
   assert.equal(trimString(event.startTime), expectedStartUtc, 'agenda event start time should match the requested absolute time');
 

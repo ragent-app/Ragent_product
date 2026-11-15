@@ -17,9 +17,9 @@ import { createSerialTaskQueue, writeJsonAtomic, writeTextAtomic } from './fs-ut
 const DEFAULT_LEASE_MS = 30 * 60_000;
 const DEFAULT_RETRY_MS = 5 * 60_000;
 const DEFAULT_RETRY_REMAINING = 3;
-const LEASE_ENV = 'AGENTOC_PROJECT_MEMORY_LEASE_MS';
-const RETRY_ENV = 'AGENTOC_PROJECT_MEMORY_RETRY_MS';
-const RETRIES_ENV = 'AGENTOC_PROJECT_MEMORY_RETRIES';
+const LEASE_ENV = 'RAGENT_PROJECT_MEMORY_LEASE_MS';
+const RETRY_ENV = 'RAGENT_PROJECT_MEMORY_RETRY_MS';
+const RETRIES_ENV = 'RAGENT_PROJECT_MEMORY_RETRIES';
 
 function positiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   const parsed = Number.parseInt(String(value ?? '').trim(), 10);

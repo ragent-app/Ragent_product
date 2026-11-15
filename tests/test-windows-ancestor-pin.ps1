@@ -14,11 +14,11 @@ try {
  . (Join-Path $repo 'packaging\windows\read-owner-bootstrap-discovery.ps1') -LibraryOnly
  Add-Type -Path (Join-Path $repo 'tests\fixtures\windows-ancestor-pin.cs') -ReferencedAssemblies System.Web.Extensions
  $psRoot=Join-Path $root 'powershell';$null=New-Item -ItemType Directory -Path $psRoot
- $guard=[Func[string,string,Microsoft.Win32.SafeHandles.SafeFileHandle[]]]{param($p,$c) return ,[AgentoCOwnerFilePin]::NonemptyDirectory($p,$c)}
- $single=[Func[string,Microsoft.Win32.SafeHandles.SafeFileHandle]]{param($p) return [AgentoCOwnerFilePin]::Directory($p)}
+ $guard=[Func[string,string,Microsoft.Win32.SafeHandles.SafeFileHandle[]]]{param($p,$c) return ,[RagentOwnerFilePin]::NonemptyDirectory($p,$c)}
+ $single=[Func[string,Microsoft.Win32.SafeHandles.SafeFileHandle]]{param($p) return [RagentOwnerFilePin]::Directory($p)}
  $report.powershell=([AncestorMutationProbe]::Run($psRoot,$guard,$single)|ConvertFrom-Json)
  $exe=Join-Path $root 'host-probe.exe'
- & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /define:HOST_PROBE /target:exe /main:HostAncestorProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+$exe) (Join-Path $repo 'packaging\windows\AgentoC.ServiceHost.cs') (Join-Path $repo 'tests\fixtures\windows-ancestor-pin.cs') *> (Join-Path $EvidenceRoot 'build.log')
+ & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /define:HOST_PROBE /target:exe /main:HostAncestorProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+$exe) (Join-Path $repo 'packaging\windows\Ragent.ServiceHost.cs') (Join-Path $repo 'tests\fixtures\windows-ancestor-pin.cs') *> (Join-Path $EvidenceRoot 'build.log')
  if($LASTEXITCODE -ne 0){throw 'ANCESTOR_HOST_COMPILE_FAILED'}
  $hostRoot=Join-Path $root 'host';$null=New-Item -ItemType Directory -Path $hostRoot
  $text=& $exe $hostRoot 2> (Join-Path $EvidenceRoot 'host-error.log')

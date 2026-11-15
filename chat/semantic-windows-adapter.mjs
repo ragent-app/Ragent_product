@@ -32,11 +32,11 @@ export const SEMANTIC_ADAPTER_MSI_INSTALL_V1 = 'windows-msi-install/v1';
 // enforced at the point of use: revalidation and dispatch execFile the path,
 // and a missing/non-executable binary fails closed.
 export const WINGET_EXECUTABLE = resolveConfiguredExecutable(
-  'AGENTOC_WINGET_EXECUTABLE',
+  'RAGENT_WINGET_EXECUTABLE',
   SYSTEM_ROOT ? path.win32.join(SYSTEM_ROOT, 'System32', 'winget.exe') : '',
 );
 export const MSIEXEC_EXECUTABLE = resolveConfiguredExecutable(
-  'AGENTOC_MSIEXEC_EXECUTABLE',
+  'RAGENT_MSIEXEC_EXECUTABLE',
   SYSTEM_ROOT ? path.win32.join(SYSTEM_ROOT, 'System32', 'msiexec.exe') : '',
 );
 
@@ -92,7 +92,7 @@ async function verifiedSourceForExecutable(executable, execFile) {
 }
 
 async function resolveTrustedWingetExecutable(execFile, resolveExecutable) {
-  const resolver = resolveExecutable || (process.env.AGENTOC_WINGET_EXECUTABLE
+  const resolver = resolveExecutable || (process.env.RAGENT_WINGET_EXECUTABLE
     ? async () => WINGET_EXECUTABLE
     : () => discoverWindowsWinget({ execFile }));
   const executable = await resolver();

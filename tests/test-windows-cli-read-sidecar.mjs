@@ -4,14 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 if (process.platform !== 'win32') { console.log('windows-cli-read-sidecar: skipped (requires Windows)'); process.exit(0); }
-const helper = process.env.AGENTOC_TEST_CLI_READ_BINARY;
+const helper = process.env.RAGENT_TEST_CLI_READ_BINARY;
 if (!path.isAbsolute(helper || '')) throw new Error('absolute CLI read helper path required');
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-cli-read-sidecar-'));
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-cli-read-sidecar-'));
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
 try {
   const { createRun, getRun, readRunSpoolRecords } = await import('../chat/runs.mjs');
   const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
@@ -23,11 +23,11 @@ try {
       riskContext: { platform: 'win32', trustedWorkspaceRoot: root },
       pendingApprovals: new Map(), autoApprovedMcpRequestIds: new Set() };
     const cases = [
-      ['agentoc trigger list --json 2>&1 | Out-String', 'trigger-list', true],
-      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --json | Out-String', 'trigger-list', true],
-      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --session $env:AGENTOC_SESSION_ID --json | Out-String', 'trigger-list', true],
-      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --source-session $env:AGENTOC_SESSION_ID --json | Out-String', 'trigger-list', true],
-      ['node "$env:AGENTOC_PROJECT_ROOT/cli.js" trigger list --help | Out-String', 'trigger-help', false],
+      ['ragent trigger list --json 2>&1 | Out-String', 'trigger-list', true],
+      ['node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list --json | Out-String', 'trigger-list', true],
+      ['node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list --session $env:RAGENT_SESSION_ID --json | Out-String', 'trigger-list', true],
+      ['node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list --source-session $env:RAGENT_SESSION_ID --json | Out-String', 'trigger-list', true],
+      ['node "$env:RAGENT_PROJECT_ROOT/cli.js" trigger list --help | Out-String', 'trigger-help', false],
     ];
     for (const [index, [command, action, json]] of cases.entries()) {
       const request = { type: 'control_request', request_id: `fixture-${riskMode}-${index}`, request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command } } };
@@ -45,6 +45,6 @@ try {
   }
   console.log('windows-cli-read-sidecar: Claude approvals rewritten and audited for both modes');
 } finally {
-  if (path.dirname(path.resolve(root)).toLowerCase() !== path.resolve(os.tmpdir()).toLowerCase() || !path.basename(root).startsWith('agentoc-cli-read-sidecar-')) throw new Error('unsafe fixture cleanup');
+  if (path.dirname(path.resolve(root)).toLowerCase() !== path.resolve(os.tmpdir()).toLowerCase() || !path.basename(root).startsWith('ragent-cli-read-sidecar-')) throw new Error('unsafe fixture cleanup');
   await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

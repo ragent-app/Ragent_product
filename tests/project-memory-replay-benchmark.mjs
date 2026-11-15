@@ -42,7 +42,7 @@ const sessions = [
   },
 ];
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-memory-replay-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-memory-replay-'));
 const store = createProjectMemoryStore({
   databasePath: join(root, 'project-memory.sqlite'),
   workspaceRoot: join(root, 'project-memory'),
@@ -112,7 +112,7 @@ try {
     const recent = byStatement('notification cleanup');
     const returned = byStatement('Return to');
     const sections = {
-      Identity: [{ text: 'AgentoC replay project.', candidateIds: [] }],
+      Identity: [{ text: 'Ragent replay project.', candidateIds: [] }],
       Architecture: architecture ? [{ text: architecture.statement, candidateIds: [architecture.id] }] : [],
       'Current State': currentWorkspace
         ? [{ text: 'Workspace B is the current execution root.', candidateIds: [currentWorkspace.id] }]
@@ -152,7 +152,7 @@ try {
   const withoutFreshDelta = summaryOnlyContext(beforeConsolidation);
   const withFreshDelta = await buildProjectMemoryContext(
     { projectId: 'prj_replay' },
-    { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'summary' } },
+    { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'summary' } },
   );
   const concatenatedSummaries = sessions.slice(0, 2).map((session) => session.statement).join('\n');
   const currentTask = sessions.at(-1).statement;
@@ -205,7 +205,7 @@ try {
   }
   const projectMemory = await buildProjectMemoryContext(
     { projectId: 'prj_replay' },
-    { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'summary' } },
+    { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'summary' } },
   );
   assert.match(projectMemory, /Workspace B is current/, projectMemory);
   assert.match(projectMemory, /provider-independent/, projectMemory);

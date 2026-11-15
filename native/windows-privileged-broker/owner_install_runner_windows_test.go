@@ -52,7 +52,7 @@ func TestOwnerInstallRunner(t *testing.T) {
 						t.Fatal("unexpected invocation")
 					}
 					joined := strings.Join(env, "\n")
-					if strings.Contains(joined, `D:\untrusted`) || !strings.Contains(joined, "AGENTOC_INSTALL_PACKAGE_ID=Vendor.App") || !strings.Contains(joined, "AGENTOC_INSTALL_PACKAGE_VERSION=1.2.3") {
+					if strings.Contains(joined, `D:\untrusted`) || !strings.Contains(joined, "RAGENT_INSTALL_PACKAGE_ID=Vendor.App") || !strings.Contains(joined, "RAGENT_INSTALL_PACKAGE_VERSION=1.2.3") {
 						t.Fatal("unexpected environment")
 					}
 					if tc.runError {

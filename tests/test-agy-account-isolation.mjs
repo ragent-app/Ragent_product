@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // test-agy-account-isolation.mjs
-// 验收：AgentoC 在 UI 登录新 AgY 账号时，不修改终端用户的 ~/.gemini
+// 验收：Ragent 在 UI 登录新 AgY 账号时，不修改终端用户的 ~/.gemini
 //
 // 覆盖：
 // 1. 准备 Run HOME 不写入 process.env.HOME 下的 .gemini
@@ -19,7 +19,7 @@ import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.m
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 import { prepareNativeRunProviderHome } from '../lib/provider-runtime/run-provider-prepare.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-account-isolation-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-account-isolation-'));
 
 // 模拟宿主 HOME（终端用户的家目录）
 const hostHome = join(root, 'host-home');
@@ -27,13 +27,13 @@ const hostGeminiAuthFile = join(hostHome, AGY_AUTH_RELATIVE_PATH);
 await mkdir(join(hostHome, '.gemini', 'antigravity-cli'), { recursive: true });
 await writeFile(hostGeminiAuthFile, 'terminal-user-token\n', 'utf8');
 
-// AgentoC 受管区域（独立于宿主 HOME）
+// Ragent 受管区域（独立于宿主 HOME）
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 const controlHome = join(root, 'agy-control');
 const controlAuthFile = join(controlHome, AGY_AUTH_RELATIVE_PATH);
 await mkdir(join(controlHome, '.gemini', 'antigravity-cli'), { recursive: true });
-await writeFile(controlAuthFile, 'agentoc-managed-token\n', 'utf8');
+await writeFile(controlAuthFile, 'ragent-managed-token\n', 'utf8');
 
 try {
   // ── Case 1: prepareAgyRunHome 把 token 复制到受管 Run HOME，不触及宿主 HOME
@@ -52,7 +52,7 @@ try {
 
   // Run HOME 中的 token 是受管的，不是宿主的
   const runToken = (await readFile(prepared.authFile, 'utf8')).trim();
-  assert.equal(runToken, 'agentoc-managed-token', 'Run HOME token must come from the managed control home');
+  assert.equal(runToken, 'ragent-managed-token', 'Run HOME token must come from the managed control home');
 
   // ── Case 2: buildAgyRuntimeEnv 覆盖 HOME 为受管 HOME，DBUS/keyring 被隔离
   const hostBus = 'unix:path=/run/host-dbus-session';
@@ -82,7 +82,7 @@ try {
 
   await secretStore.writeSecret('agy-isolated-secret', {
     authType: 'oauth',
-    tokens: { tokenFile: 'agentoc-new-account-token\n' },
+    tokens: { tokenFile: 'ragent-new-account-token\n' },
   });
   await registry.upsertAuthProfile({
     id: 'agy-isolated-auth',
@@ -123,8 +123,8 @@ try {
   const nativeRunToken = (await readFile(
     join(nativeResult.agyHomeDir, AGY_AUTH_RELATIVE_PATH), 'utf8',
   )).trim();
-  assert.equal(nativeRunToken, 'agentoc-new-account-token',
-    'Run HOME must carry the AgentoC-managed new account token');
+  assert.equal(nativeRunToken, 'ragent-new-account-token',
+    'Run HOME must carry the Ragent-managed new account token');
 
   // ── Case 4: 两个账号的 Run HOME 各自独立，彼此不交叉
   assert.notEqual(runHome, nativeResult.agyHomeDir, 'two different accounts must have distinct Run homes');

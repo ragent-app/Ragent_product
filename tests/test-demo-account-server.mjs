@@ -13,7 +13,7 @@ import { createAccountsLogger } from '../accounts/log.mjs';
 import { createPostgresStoreFromUrl } from '../accounts/store/postgres.mjs';
 import { buildAccountSessionMessage, createDevicePublicKeyFingerprint } from '../lib/device-auth-protocol.mjs';
 
-const dir = await mkdtemp(join(tmpdir(), 'agentoc-demo-server-'));
+const dir = await mkdtemp(join(tmpdir(), 'ragent-demo-server-'));
 const password = 'fixture-only-password-32-characters';
 let log = '';
 createAccountsLogger({ stream: new Writable({ write(chunk, encoding, done) { log += chunk; done(); } }) })
@@ -106,12 +106,12 @@ async function run(store) {
 let pg;
 try {
   await run();
-  const url = process.env.AGENTOC_DEMO_TEST_DATABASE_URL;
+  const url = process.env.RAGENT_DEMO_TEST_DATABASE_URL;
   if (url) {
     const parsed = new URL(url);
-    assert.ok(parsed.hostname === 'agentoc-demo-review-pg-20261026'
+    assert.ok(parsed.hostname === 'ragent-demo-review-pg-20261026'
       || (parsed.hostname === '127.0.0.1' && parsed.port === '18422'));
-    assert.equal(parsed.pathname, '/agentoc_demo_fixture');
+    assert.equal(parsed.pathname, '/ragent_demo_fixture');
     pg = createPostgresStoreFromUrl(url);
     for (const name of (await readdir(new URL('../accounts/migrations/', import.meta.url))).filter(n => n.endsWith('.up.sql')).sort()) {
       await pg.pool.query(await readFile(new URL(`../accounts/migrations/${name}`, import.meta.url), 'utf8'));
@@ -120,6 +120,6 @@ try {
   }
 } finally {
   await pg?.close();
-  assert.ok(basename(dir).startsWith('agentoc-demo-server-'));
+  assert.ok(basename(dir).startsWith('ragent-demo-server-'));
   await rm(dir, { recursive: true, force: true });
 }

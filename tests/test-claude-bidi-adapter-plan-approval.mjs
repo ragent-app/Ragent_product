@@ -98,12 +98,12 @@ assert.equal(powershellEvents[0].kind, 'command');
 assert.equal(powershellEvents[0].command, 'Remove-Item D:\\\\Protected -Recurse');
 
 // Sidecar auto-approvals must never surface as user-facing approvals. The
-// sidecar echoes its synthetic agentoc.approval_response (autoApproved: true)
+// sidecar echoes its synthetic ragent.approval_response (autoApproved: true)
 // into the stream BEFORE the control_request it answers; the adapter tracks
 // the id so the later request frame is suppressed too (no card, no push).
 const autoApprovalAdapter = createClaudeBidiAdapter();
 const autoAckEvents = autoApprovalAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'claude:auto-allowed-1',
   decision: 'approved',
   status: 'approved',
@@ -120,7 +120,7 @@ const suppressedRequestEvents = autoApprovalAdapter.parseLine(JSON.stringify({
     subtype: 'can_use_tool',
     tool_name: 'Write',
     display_name: 'Write',
-    input: { file_path: '/srv/agentoc-promoted/x.txt' },
+    input: { file_path: '/srv/ragent-promoted/x.txt' },
     tool_use_id: 'tool-auto-1',
   },
 }));
@@ -128,7 +128,7 @@ assert.equal(suppressedRequestEvents.length, 0, 'control_request for an auto-app
 
 const autoDenialAdapter = createClaudeBidiAdapter();
 assert.equal(autoDenialAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response', approvalId: 'claude:auto-denied-1',
+  type: 'ragent.approval_response', approvalId: 'claude:auto-denied-1',
   decision: 'denied', status: 'denied', providerRequestId: 'auto-denied-1',
   providerMethod: 'can_use_tool', autoDenied: true,
 })).length, 0);
@@ -160,15 +160,15 @@ assert.equal(heldEvents[0].status, 'pending');
 // provider request frame so the user never sees a duplicate card.
 const managedMcpAdapter = createClaudeBidiAdapter();
 const managedMcpAckEvents = managedMcpAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'claude:managed-mcp-1',
   decision: 'approved',
   status: 'approved',
   providerRequestId: 'managed-mcp-1',
   providerMethod: 'can_use_tool',
   autoApproved: true,
-  mcpServerName: 'agentoc_actions_fixture',
-  mcpToolName: 'agentoc_create_agent',
+  mcpServerName: 'ragent_actions_fixture',
+  mcpToolName: 'ragent_create_agent',
 }));
 assert.equal(managedMcpAckEvents.length, 0);
 const managedMcpRequestEvents = managedMcpAdapter.parseLine(JSON.stringify({
@@ -176,7 +176,7 @@ const managedMcpRequestEvents = managedMcpAdapter.parseLine(JSON.stringify({
   request_id: 'managed-mcp-1',
   request: {
     subtype: 'can_use_tool',
-    tool_name: 'mcp__agentoc_actions_fixture__agentoc_create_agent',
+    tool_name: 'mcp__ragent_actions_fixture__ragent_create_agent',
     input: {},
     tool_use_id: 'tool-managed-mcp-1',
   },
@@ -186,7 +186,7 @@ assert.equal(managedMcpRequestEvents.length, 0);
 // A real provider ack (no autoApproved flag) still emits its response event —
 // only sidecar-synthesized auto-approvals are suppressed.
 const realAckEvents = heldAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'claude:held-1',
   decision: 'approved',
   status: 'approved',

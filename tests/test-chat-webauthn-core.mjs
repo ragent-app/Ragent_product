@@ -97,7 +97,7 @@ function loadCore({ webAuthnAvailable }) {
     Error,
     Uint8Array,
     ArrayBuffer,
-    AgentocWebAuthnEnvironment: {
+    RagentWebAuthnEnvironment: {
       atob,
       btoa,
       isWebAuthnAvailable: () => webAuthnAvailable,
@@ -108,7 +108,7 @@ function loadCore({ webAuthnAvailable }) {
     context,
     { filename: 'transport/webauthn.js' },
   );
-  const core = context.AgentocWebAuthnCore;
+  const core = context.RagentWebAuthnCore;
   return {
     api: {
       base64UrlToArrayBuffer: (v) => core.base64UrlToArrayBuffer(v),
@@ -211,7 +211,7 @@ async function runScenario(api) {
 
 // urlBase64ToUint8Array lives in session-http-helpers.js on the legacy side,
 // so it is compared against the helpers realm separately (the core side
-// exports it from AgentocWebAuthnCore).
+// exports it from RagentWebAuthnCore).
 async function runUrlBase64Scenario(api) {
   // Undersized inputs (e.g. "a" → "a===") make atob throw on both sides;
   // capture that consistently instead of failing the vector collection.

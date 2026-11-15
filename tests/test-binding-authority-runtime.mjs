@@ -12,13 +12,13 @@ import { handleOwnerAuthRoutes } from '../accounts/owner-auth-routes.mjs';
 import { createBindingAuthorityCarrierLifecycle } from '../chat/binding-authority-carriers.mjs';
 import { listenFetchLoopback } from './helpers/listen-fetch-loopback.mjs';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-binding-authority-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-binding-authority-'));
 const config = join(home, 'config'), accountId = 'acct_runtime_authority', deviceId = 'rdev_runtime_authority';
-Object.assign(process.env, { HOME: home, AGENTOC_CONFIG_DIR: config, AGENTOC_WORK_ROOT_DIR: join(home, 'work'),
-  AGENTOC_MEMORY_DIR: join(home, 'memory'), AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-  AGENTOC_ACCOUNTS_URL: 'https://authority.fixture.invalid/accounts', AGENTOC_ACCOUNTS_ISSUER: 'https://authority.fixture.invalid/accounts',
-  AGENTOC_AUTH_SESSION_SECRET: 'synthetic-binding-authority-session-secret', SECURE_COOKIES: '0' });
-delete process.env.AGENTOC_INSTANCE_ROOT;
+Object.assign(process.env, { HOME: home, RAGENT_CONFIG_DIR: config, RAGENT_WORK_ROOT_DIR: join(home, 'work'),
+  RAGENT_MEMORY_DIR: join(home, 'memory'), RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+  RAGENT_ACCOUNTS_URL: 'https://authority.fixture.invalid/accounts', RAGENT_ACCOUNTS_ISSUER: 'https://authority.fixture.invalid/accounts',
+  RAGENT_AUTH_SESSION_SECRET: 'synthetic-binding-authority-session-secret', SECURE_COOKIES: '0' });
+delete process.env.RAGENT_INSTANCE_ROOT;
 await mkdir(config, { recursive: true });
 await writeFile(join(config, 'auth.json'), JSON.stringify({ username: 'fixture', passwordHash: 'not-used' }));
 await writeFile(join(config, 'owner-account-binding.json'), JSON.stringify({ accountId, provider: 'google', boundAt: new Date().toISOString() }));
@@ -35,7 +35,7 @@ const trusted = await import('../chat/trusted-devices.mjs'), runtime = await imp
 const { handleDeviceAuthPublicRoutes } = await import('../chat/router-device-auth-routes.mjs');
 const { handleDevicePairingOwnerRoutes } = await import('../chat/router-device-pairing-routes.mjs');
 let revision = '7', revokedAt = '', blockedRead = null, enteredRead;
-const postgresFixture = process.env.AGENTOC_TEST_BINDING_RUNTIME_POSTGRES === '1'
+const postgresFixture = process.env.RAGENT_TEST_BINDING_RUNTIME_POSTGRES === '1'
   ? await (await import('./helpers/postgres-binding-authority-fixture.mjs')).createPostgresBindingAuthorityFixture({ identity, accountId })
   : null;
 const signAssertion = claims => {
@@ -43,7 +43,7 @@ const signAssertion = claims => {
     Buffer.from(JSON.stringify(claims)).toString('base64url')].join('.');
   return payload + '.' + sign(null, Buffer.from(payload), accountsKeys.privateKey).toString('base64url');
 };
-const broker = createOwnerAuthBroker({ issuer: process.env.AGENTOC_ACCOUNTS_ISSUER,
+const broker = createOwnerAuthBroker({ issuer: process.env.RAGENT_ACCOUNTS_ISSUER,
   store: { mutate: () => { throw Error('Status must not mutate'); }, readInstanceAuthority: async instanceId => {
     assert.equal(instanceId, identity.instanceId); enteredRead?.(); if (blockedRead) await blockedRead;
     if (postgresFixture) return postgresFixture.store.readInstanceAuthority(instanceId);
@@ -57,7 +57,7 @@ const accountsServer = createServer(async (req, res) => {
   }
   try {
     if (!await handleOwnerAuthRoutes({ req, res, pathname: req.url, broker,
-      publicBaseUrl: process.env.AGENTOC_ACCOUNTS_URL, googleWebClientId: '' })) { res.writeHead(404); res.end('{}'); }
+      publicBaseUrl: process.env.RAGENT_ACCOUNTS_URL, googleWebClientId: '' })) { res.writeHead(404); res.end('{}'); }
   } catch { if (!res.headersSent) res.writeHead(500); res.end('{}'); }
 });
 await listenFetchLoopback(accountsServer);
@@ -169,8 +169,8 @@ try {
   const googleCookie = await auth.issueSession({ role: 'owner', authMethod: 'google_accounts', accountId, bindingAuthorityRevision: '7' });
   const localCookie = await auth.issueSession({ role: 'owner', authMethod: 'local_web' });
   const oldInvitation = await trusted.createTrustedDeviceInvitation({ accountHandoffAccountId: accountId });
-  const remote = await connect({ authorization: 'Bearer ' + token, 'x-agentoc-tunnel': 'fixture' });
-  const browser = await connect({ cookie: 'session_token=' + googleCookie, 'x-agentoc-tunnel': 'fixture' });
+  const remote = await connect({ authorization: 'Bearer ' + token, 'x-ragent-tunnel': 'fixture' });
+  const browser = await connect({ cookie: 'session_token=' + googleCookie, 'x-ragent-tunnel': 'fixture' });
   const local = await connect({ cookie: 'session_token=' + localCookie });
   assert.equal((await request({ authorization: 'Bearer ' + token })).status, 200);
   assert.equal((await startHost()).started, true); assert.equal(registry.p2pHostCount(), 1);
@@ -193,7 +193,7 @@ try {
   assert.equal(registry.p2pHostCount(), 0); assert.equal(agents[0].stops, 1);
   assert.equal(local.readyState, WebSocket.OPEN);
   assert.equal((await request({ authorization: 'Bearer ' + token })).status, 401);
-  assert.equal((await request({ cookie: 'session_token=' + googleCookie, 'x-agentoc-tunnel': 'fixture' })).status, 401);
+  assert.equal((await request({ cookie: 'session_token=' + googleCookie, 'x-ragent-tunnel': 'fixture' })).status, 401);
   assert.equal((await request({ cookie: 'session_token=' + localCookie })).status, 200);
   assert.equal((await request({ accept: 'text/html' }, '/local')).status, 200);
   assert.equal(await handshake.consumeDeviceHandshakeToken(entryToken.token), null);
@@ -278,6 +278,6 @@ try {
   await postgresFixture?.close();
   (await import('../chat/router.mjs')).stopFrontendBuildWatchers();
   const absolute = await realpath(home), base = await realpath(tmpdir());
-  assert(absolute.startsWith(base + sep) && absolute.includes('agentoc-binding-authority-'));
+  assert(absolute.startsWith(base + sep) && absolute.includes('ragent-binding-authority-'));
   await rm(absolute, { recursive: true, force: true });
 }

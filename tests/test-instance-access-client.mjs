@@ -11,9 +11,9 @@ process.env.HOME = root;
 process.env.USERPROFILE = root;
 process.env.LOCALAPPDATA = join(root, 'local');
 process.env.APPDATA = join(root, 'roaming');
-process.env.AGENTOC_INSTANCE_ROOT = join(root, 'instance');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.fixture.invalid';
+process.env.RAGENT_INSTANCE_ROOT = join(root, 'instance');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.fixture.invalid';
 const config = await import('../lib/config.mjs');
 const { OWNER_ACCOUNT_BINDING_FILE, manageOwnerInstanceAccess } = await import('../lib/owner-account-auth.mjs');
 

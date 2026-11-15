@@ -128,13 +128,13 @@ function loadCore() {
     selectedPermissionMode: null,
     thinkingEnabled: false,
   };
-  context.AgentocSessionListOrganizerEnvironment = env;
+  context.RagentSessionListOrganizerEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/session-list-organizer.js'), 'utf8'),
     context,
     { filename: 'transport/session-list-organizer.js' },
   );
-  const core = context.AgentocSessionListOrganizerCore;
+  const core = context.RagentSessionListOrganizerCore;
   return {
     api: {
       clip: (v, maxChars) => core.clipSessionListOrganizerText(v, maxChars),

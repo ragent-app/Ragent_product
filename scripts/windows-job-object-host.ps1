@@ -13,7 +13,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-public static class AgentocJob {
+public static class RagentJob {
   [StructLayout(LayoutKind.Sequential)]
   public struct SecurityAttributes {
     public int Length;
@@ -335,11 +335,11 @@ public static class AgentocJob {
 }
 '@
 
-$job = [AgentocJob]::Create()
+$job = [RagentJob]::Create()
 $process = $null
 $closeRequested = $false
 $controllerDisconnected = $false
-$preserveOnControllerExit = $PreserveOnControllerExit -or $env:AGENTOC_WINDOWS_JOB_PRESERVE_ON_CONTROLLER_EOF -eq '1'
+$preserveOnControllerExit = $PreserveOnControllerExit -or $env:RAGENT_WINDOWS_JOB_PRESERVE_ON_CONTROLLER_EOF -eq '1'
 $pipeServer = $null
 $pipeReader = $null
 $pipeWriter = $null
@@ -357,9 +357,9 @@ if (-not [string]::IsNullOrWhiteSpace($PipeName)) {
   $pipeWriter = [IO.StreamWriter]::new($pipeServer, $utf8, 65536, $true)
   $pipeWriter.AutoFlush = $true
   $inputReader = $pipeReader
-  [AgentocJob]::Output = $pipeWriter
+  [RagentJob]::Output = $pipeWriter
 }
-[AgentocJob]::EmitJson(([ordered]@{
+[RagentJob]::EmitJson(([ordered]@{
   ok = $true
   ready = $true
   preserveOnControllerExit = [bool]$preserveOnControllerExit
@@ -382,7 +382,7 @@ try {
           $envBlock = if ($null -eq $request.env) { $null } else { ($envEntries -join ([char]0)) + ([char]0) + ([char]0) }
           $args = @($request.args | ForEach-Object { [string]$_ })
           $stdio = $request.stdio
-          $process = [AgentocJob]::CreateProcess(
+          $process = [RagentJob]::CreateProcess(
             $job,
             [string]$request.file,
             $args,
@@ -394,40 +394,40 @@ try {
             ($null -eq $stdio -or [bool]$stdio.stderr)
           )
           $response = [ordered]@{ id = $id; ok = $true; created = $true; pid = [uint32]$process.ProcessId }
-          [AgentocJob]::EmitJson(($response | ConvertTo-Json -Compress))
+          [RagentJob]::EmitJson(($response | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'start-readers') {
-          [AgentocJob]::StartReaders($process)
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; started = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::StartReaders($process)
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; started = $true } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'assign') {
-          [AgentocJob]::Assign($job, [uint32]$request.pid)
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; assigned = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::Assign($job, [uint32]$request.pid)
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; assigned = $true } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'stdin') {
-          [AgentocJob]::WriteStdin($process, [Convert]::FromBase64String([string]$request.data))
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; written = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::WriteStdin($process, [Convert]::FromBase64String([string]$request.data))
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; written = $true } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'stdin-close') {
-          [AgentocJob]::CloseStdin($process)
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; closed = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::CloseStdin($process)
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; closed = $true } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'list') {
-          $pids=[AgentocJob]::List($job)
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; pids = @($pids) } | ConvertTo-Json -Compress))
+          $pids=[RagentJob]::List($job)
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; pids = @($pids) } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'terminate') {
-          [AgentocJob]::TerminateJobObject($job, [uint32]$request.code) | Out-Null
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; terminated = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::TerminateJobObject($job, [uint32]$request.code) | Out-Null
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; terminated = $true } | ConvertTo-Json -Compress))
         }
         elseif ($request.type -eq 'close') {
-          [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $true; closed = $true } | ConvertTo-Json -Compress))
+          [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $true; closed = $true } | ConvertTo-Json -Compress))
           $closeRequested = $true
           break
         }
         else { throw 'unsupported job command' }
       } catch {
-        [AgentocJob]::EmitJson(([ordered]@{ id = $id; ok = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress))
+        [RagentJob]::EmitJson(([ordered]@{ id = $id; ok = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress))
       }
     }
     $controllerDisconnected = -not $closeRequested
@@ -441,19 +441,19 @@ try {
   # alive until its child exits. This preserves the managed-process restart
   # contract; the finally block then closes the Job and prevents a host leak.
   if ($controllerDisconnected -and $preserveOnControllerExit -and $null -ne $process) {
-    [AgentocJob]::WaitForProcess($process)
+    [RagentJob]::WaitForProcess($process)
   }
 } finally {
   # Do not rely on KILL_ON_JOB_CLOSE alone for an unexpected controller EOF.
   # The explicit termination also makes the controller-crash path observable
   # and closes descendants before this host releases its only Job handle.
   if ($null -ne $process -and ($closeRequested -or -not $preserveOnControllerExit)) {
-    [AgentocJob]::TerminateJobObject($job, 0xC0DE) | Out-Null
+    [RagentJob]::TerminateJobObject($job, 0xC0DE) | Out-Null
   }
-  [AgentocJob]::CloseProcess($process)
-  [AgentocJob]::Output = $null
+  [RagentJob]::CloseProcess($process)
+  [RagentJob]::Output = $null
   if ($pipeReader) { $pipeReader.Dispose() }
   if ($pipeWriter) { $pipeWriter.Dispose() }
   if ($pipeServer) { $pipeServer.Dispose() }
-  [AgentocJob]::CloseHandle($job) | Out-Null
+  [RagentJob]::CloseHandle($job) | Out-Null
 }

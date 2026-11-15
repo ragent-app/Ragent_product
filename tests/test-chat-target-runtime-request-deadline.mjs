@@ -19,10 +19,10 @@ try {
   const page = await browser.newPage();
   await page.setContent('<!doctype html><html><body></body></html>');
   await page.evaluate((source) => {
-    window.agentocResolveProductPath = (url) => new URL(url, 'http://127.0.0.1/').toString();
+    window.ragentResolveProductPath = (url) => new URL(url, 'http://127.0.0.1/').toString();
     window.jsonResponseCache = new Map();
     // The helper floors the deadline at 5s; keep each timeout case short.
-    window.AGENTOC_HTTP_REQUEST_TIMEOUT_MS = '1200';
+    window.RAGENT_HTTP_REQUEST_TIMEOUT_MS = '1200';
     window.__delegatedCalls = [];
     const responseLike = (data) => ({
       status: 200,
@@ -32,7 +32,7 @@ try {
       headers: { get: (name) => String(name).toLowerCase() === 'content-type' ? 'application/json' : '' },
       json: async () => data,
     });
-    window.AgentoCTargetRuntime = {
+    window.RagentTargetRuntime = {
       isRuntimePath: (url) => String(url).startsWith('/api/'),
       routeRequest: ({ url, options }) => {
         const call = { url, signal: options?.signal || null, signalAbortedAfterAbort: null };

@@ -7,8 +7,8 @@ set -eu
 
 SERVICE_USER="${1:-pinggu}"
 SERVICE_GROUP=$(getent group "$SERVICE_USER" | cut -d: -f1)
-RUNNER_SERVICE="agentoc-runner-supervisor"
-RUNNER_SOCKET="agentoc-runner-supervisor.socket"
+RUNNER_SERVICE="ragent-runner-supervisor"
+RUNNER_SOCKET="ragent-runner-supervisor.socket"
 DROPIN_DIR="/etc/systemd/system/${RUNNER_SERVICE}.service.d"
 
 # Verify service user exists
@@ -24,10 +24,10 @@ if ! getent group "$SERVICE_GROUP" >/dev/null 2>&1; then
 fi
 
 # Create service user binding for future restarts
-mkdir -p /etc/agentoc
-printf '%s\n' "$SERVICE_USER" > /etc/agentoc/service-user
-chmod 644 /etc/agentoc/service-user
-chown root:root /etc/agentoc/service-user
+mkdir -p /etc/ragent
+printf '%s\n' "$SERVICE_USER" > /etc/ragent/service-user
+chmod 644 /etc/ragent/service-user
+chown root:root /etc/ragent/service-user
 
 # Ensure drop-in directory exists
 mkdir -p "$DROPIN_DIR"
@@ -45,11 +45,11 @@ EOF
 chmod 644 "${DROPIN_DIR}/30-same-user.conf"
 
 # Update lifecycle broker environment
-if [ -f /etc/agentoc/agentoc.env ]; then
-    if ! grep -q '^AGENTOC_RUNNER_USER=' /etc/agentoc/agentoc.env; then
-        printf '\nAGENTOC_RUNNER_USER=%s\n' "$SERVICE_USER" >> /etc/agentoc/agentoc.env
+if [ -f /etc/ragent/ragent.env ]; then
+    if ! grep -q '^RAGENT_RUNNER_USER=' /etc/ragent/ragent.env; then
+        printf '\nRAGENT_RUNNER_USER=%s\n' "$SERVICE_USER" >> /etc/ragent/ragent.env
     else
-        sed -i "s/^AGENTOC_RUNNER_USER=.*/AGENTOC_RUNNER_USER=$SERVICE_USER/" /etc/agentoc/agentoc.env
+        sed -i "s/^RAGENT_RUNNER_USER=.*/RAGENT_RUNNER_USER=$SERVICE_USER/" /etc/ragent/ragent.env
     fi
 fi
 

@@ -215,7 +215,7 @@ context.state.events = [
     trigger: 'delegation',
     targetSessionId: 'child-1',
     targetSessionName: 'Child workflow',
-    targetSessionFolder: '/tmp/agentoc-child',
+    targetSessionFolder: '/tmp/ragent-child',
     reason: 'Handle the focused child task.',
     seq: 12,
   },
@@ -224,7 +224,7 @@ const delegatedModel = context.buildInspectorModel();
 assert.equal(delegatedModel.activity.length, 1, 'delegated session events should render as audit activity');
 assert.equal(delegatedModel.activity[0].type, 'session', 'delegated session activity should be typed as a session reference');
 assert.equal(delegatedModel.activity[0].sessionId, 'child-1', 'delegated session activity should keep the child session id');
-assert.equal(delegatedModel.activity[0].folder, '/tmp/agentoc-child', 'delegated session activity should keep the child workspace folder');
+assert.equal(delegatedModel.activity[0].folder, '/tmp/ragent-child', 'delegated session activity should keep the child workspace folder');
 
 const normalizedStats = context.getFileChangeStats({ additions: 3, deletions: 1 });
 assert.equal(normalizedStats.added, 3, 'file change stats should normalize common addition field names');
@@ -442,7 +442,7 @@ context.state.events = [
     attachments: [
       {
         filename: '90b1a89ac7703d6c3bd6f56f.pdf',
-        savedPath: '/srv/agentoc-promoted-data/config/images/90b1a89ac7703d6c3bd6f56f.pdf',
+        savedPath: '/srv/ragent-promoted-data/config/images/90b1a89ac7703d6c3bd6f56f.pdf',
         originalName: 'uploaded-notes.pdf',
         mimeType: 'application/pdf',
         sizeBytes: 4096,

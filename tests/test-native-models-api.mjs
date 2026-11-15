@@ -6,10 +6,10 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-native-models-api-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-native-models-api-'));
 const configDir = join(root, 'config');
 process.env.HOME = root;
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const originalFetch = globalThis.fetch;
 const calls = [];

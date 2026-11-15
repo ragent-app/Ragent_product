@@ -10,7 +10,7 @@ descriptor open across exec lets the Node main process write the datagrams
 itself, so the unit can run with NotifyAccess=main.
 
 Usage: notify-exec <command> [args...]
-Exports AGENTOC_NOTIFY_FD=<fd> when the socket was connected; the Node side
+Exports RAGENT_NOTIFY_FD=<fd> when the socket was connected; the Node side
 (lib/systemd-notify.mjs) picks it up and falls back to the CLI otherwise.
 """
 
@@ -48,9 +48,9 @@ def main(argv):
     env = dict(os.environ)
     fd = connect_notify_socket(env)
     if fd is None:
-        env.pop("AGENTOC_NOTIFY_FD", None)
+        env.pop("RAGENT_NOTIFY_FD", None)
     else:
-        env["AGENTOC_NOTIFY_FD"] = str(fd)
+        env["RAGENT_NOTIFY_FD"] = str(fd)
     os.execvpe(argv[1], argv[1:], env)
 
 

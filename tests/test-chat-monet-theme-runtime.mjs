@@ -22,7 +22,7 @@ const context = {
 };
 vm.runInNewContext(source, context, { filename: "static/chat/monet-theme-contract.js" });
 
-const contract = context.window.AgentoCMonetThemeContract;
+const contract = context.window.RagentMonetThemeContract;
 assert.equal(contract.version, 1, "Monet contract version should be explicit");
 
 function createRoot() {

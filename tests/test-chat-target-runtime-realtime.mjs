@@ -5,7 +5,7 @@ import { chromium } from '@playwright/test';
 
 const source = await readFile(new URL('../static/chat/realtime.js', import.meta.url), 'utf8');
 assert.match(source, /TARGET_RUNTIME_REMOTE_POLL_INTERVAL_MS = 3_000/);
-assert.match(source, /window\.addEventListener\("agentoc:target-selected", syncTargetRuntimeRealtime\)/);
+assert.match(source, /window\.addEventListener\("ragent:target-selected", syncTargetRuntimeRealtime\)/);
 assert.match(source, /closeLocalRealtimeSocket\(\)/);
 
 const browser = await chromium.launch({ headless: true });
@@ -23,7 +23,7 @@ try {
       refreshCalls += 1;
       return Promise.resolve();
     };
-    window.AgentocP2P = { close: () => { p2pCloseCalls += 1; } };
+    window.RagentP2P = { close: () => { p2pCloseCalls += 1; } };
     window.WebSocket = class FakeWebSocket {
       constructor() {
         this.readyState = 0;
@@ -33,7 +33,7 @@ try {
       close() { this.readyState = 3; }
     };
     let remote = true;
-    window.AgentoCTargetRuntime = {
+    window.RagentTargetRuntime = {
       getLocalTargetId: () => 'local',
       getActiveTarget: () => ({ targetId: remote ? 'remote-a' : 'local' }),
       readSummaryEvents: () => {
@@ -42,12 +42,12 @@ try {
       },
     };
 
-    window.dispatchEvent(new CustomEvent('agentoc:target-selected'));
+    window.dispatchEvent(new CustomEvent('ragent:target-selected'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     const remoteResult = { refreshCalls, summaryCalls, p2pCloseCalls, sockets: sockets.length };
 
     remote = false;
-    window.dispatchEvent(new CustomEvent('agentoc:target-selected'));
+    window.dispatchEvent(new CustomEvent('ragent:target-selected'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     return {
       remoteResult,

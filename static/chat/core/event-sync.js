@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCEventSyncCore(root) {
+(function attachRagentEventSyncCore(root) {
   function getEventStartSeq(event) {
     if (Number.isInteger(event?.startSeq) && event.startSeq > 0) return event.startSeq;
     if (Number.isInteger(event?.blockStartSeq) && event.blockStartSeq > 0) return event.blockStartSeq;
@@ -136,5 +136,5 @@
     deduplicateRealtimeEvents,
   };
 
-  root.AgentoCEventSyncCore = api;
+  root.RagentEventSyncCore = api;
 })(typeof globalThis !== "undefined" ? globalThis : {});

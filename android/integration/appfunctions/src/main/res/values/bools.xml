@@ -1,3 +1,3 @@
 <resources>
-    <bool name="agentoc_appfunctions_enabled">false</bool>
+    <bool name="ragent_appfunctions_enabled">false</bool>
 </resources>

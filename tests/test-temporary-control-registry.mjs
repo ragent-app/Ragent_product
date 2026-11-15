@@ -12,7 +12,7 @@ const initial = 1_800_000_000_000;
 const freshId = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-control-registry-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-control-registry-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let now = initial;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

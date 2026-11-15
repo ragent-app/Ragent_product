@@ -14,8 +14,8 @@ const resolve = overrides => resolveOwnerWindowsOsPaths({ platform: 'win32',
   ...overrides });
 const paths = resolve();
 assert.deepEqual(paths, { windows, programData, programFiles, programFilesX86, powershell: `${windows}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` });
-assert.deepEqual(ownerLayoutForOs(paths), { instanceRoot: 'E:/Shared Data/AgentoC/instances/owner', root: 'F:/Applications/AgentoC' });
-assert.deepEqual(ownerLayoutForOs(paths, 'G:\\Installed App'), { instanceRoot: 'E:/Shared Data/AgentoC/instances/owner', root: 'G:/Installed App' });
+assert.deepEqual(ownerLayoutForOs(paths), { instanceRoot: 'E:/Shared Data/Ragent/instances/owner', root: 'F:/Applications/Ragent' });
+assert.deepEqual(ownerLayoutForOs(paths, 'G:\\Installed App'), { instanceRoot: 'E:/Shared Data/Ragent/instances/owner', root: 'G:/Installed App' });
 assert.deepEqual(ownerLayoutForOs(null), { instanceRoot: '', root: '' });
 assert.equal(ownerInstallRootFromModule('G:\\Installed App\\payload\\lib\\windows-owner-discovery.mjs'), 'G:\\Installed App');
 for (const invalid of ['G:\\source\\lib\\windows-owner-discovery.mjs', 'G:\\payload\\lib\\windows-owner-discovery.mjs', String.raw`\\server\app\payload\lib\windows-owner-discovery.mjs`, 'relative\\payload\\lib\\windows-owner-discovery.mjs']) {

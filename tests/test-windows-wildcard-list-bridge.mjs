@@ -6,11 +6,11 @@ import path from 'node:path';
 import { buildWindowsWildcardNameBridge, buildCodexWindowsWildcardNameHookDecision, verifyCodexWindowsWildcardNameApproval } from '../chat/windows-wildcard-list-bridge.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
-if (process.platform !== 'win32' || !process.env.AGENTOC_QA_SAFE_SEARCH_HELPER) {
+if (process.platform !== 'win32' || !process.env.RAGENT_QA_SAFE_SEARCH_HELPER) {
   console.log('windows-wildcard-list-bridge: skipped (requires Windows helper fixture)');
   process.exit(0);
 }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-list-bridge-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-list-bridge-'));
 const workspace = path.join(root, 'workspace');
 const outside = path.join(root, 'outside');
 const target = path.join(root, 'outside-link-target');
@@ -21,7 +21,7 @@ await writeFile(path.join(outside, '项目.md'), 'fixture');
 await mkdir(path.join(outside, 'folder.md'));
 await writeFile(path.join(outside, 'other.txt'), 'fixture');
 await writeFile(path.join(target, 'not-followed.md'), 'fixture');
-const helperPath = process.env.AGENTOC_QA_SAFE_SEARCH_HELPER;
+const helperPath = process.env.RAGENT_QA_SAFE_SEARCH_HELPER;
 const q = value => `'${String(value).replaceAll("'", "''")}'`;
 const shellQuote = value => `'${String(value).replaceAll("'", `'"'"'`)}'`;
 const shell = resolveWindowsSystemPaths().powershell;

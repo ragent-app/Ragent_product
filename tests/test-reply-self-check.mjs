@@ -6,11 +6,11 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-reply-self-check-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-reply-self-check-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
-const workDir = join(tempHome, '.agentoc', 'workspace');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
+const workDir = join(tempHome, '.ragent', 'workspace');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -245,12 +245,12 @@ writeFileSync(
 );
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
-process.env.AGENTOC_WORKFLOW_STATE_SUGGESTIONS = 'on';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_WORKFLOW_STATE_SUGGESTIONS = 'on';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 
 const sessionManager = await import(
@@ -272,7 +272,7 @@ const {
 // mode. The fake-codex runtime never triggers the separate goal-chase loop.
 async function createChasingSession(name, description, objective = 'Reply Self Check goal', createOptions = {}) {
   const created = await createSession(tempHome, 'fake-codex', name, {
-    group: 'AgentoC',
+    group: 'Ragent',
     description,
     ...createOptions,
   });

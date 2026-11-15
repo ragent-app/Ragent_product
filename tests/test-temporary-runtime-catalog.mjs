@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 test('temporary runtime catalog reports only runnable public tools and safe status', async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-runtimes-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-runtimes-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const { createTemporaryRuntimeCatalog } = await import('../lib/temporary-runtime-catalog.mjs');
   const providers = [

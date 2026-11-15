@@ -16,7 +16,7 @@ function parseTimestampMs(value) {
 }
 
 export function resolveRunHeartbeatStaleMs(environment = process.env) {
-  return finitePositiveNumber(environment?.AGENTOC_RUN_HEARTBEAT_STALE_MS)
+  return finitePositiveNumber(environment?.RAGENT_RUN_HEARTBEAT_STALE_MS)
     || DEFAULT_RUN_HEARTBEAT_STALE_MS;
 }
 

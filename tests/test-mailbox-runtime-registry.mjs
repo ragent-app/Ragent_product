@@ -6,13 +6,13 @@ import { join } from 'path';
 
 import { findMailboxRuntimeByName, loadMailboxRuntimeRegistry } from '../lib/mailbox-runtime-registry.mjs';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-mailbox-runtime-registry-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-mailbox-runtime-registry-'));
 
 try {
   const cloudflaredDir = join(tempHome, '.cloudflared');
   const launchAgentsDir = join(tempHome, 'Library', 'LaunchAgents');
-  const configDir = join(tempHome, '.config', 'agentoc');
-  const instancesRoot = join(tempHome, '.agentoc', 'instances');
+  const configDir = join(tempHome, '.config', 'ragent');
+  const instancesRoot = join(tempHome, '.ragent', 'instances');
 
   mkdirSync(cloudflaredDir, { recursive: true });
   mkdirSync(launchAgentsDir, { recursive: true });
@@ -46,7 +46,7 @@ try {
     <dict>
       <key>CHAT_PORT</key>
       <string>7696</string>
-      <key>AGENTOC_INSTANCE_ROOT</key>
+      <key>RAGENT_INSTANCE_ROOT</key>
       <string>${trialInstanceRoot}</string>
     </dict>
     <key>StandardOutPath</key>
@@ -62,7 +62,7 @@ try {
       name: 'intake1',
       localBaseUrl: 'http://127.0.0.1:7703',
       publicBaseUrl: 'https://intake1.example.com',
-      authFile: join(tempHome, '.agentoc', 'instances', 'intake1', 'config', 'auth.json'),
+      authFile: join(tempHome, '.ragent', 'instances', 'intake1', 'config', 'auth.json'),
     },
   ], null, 2));
 

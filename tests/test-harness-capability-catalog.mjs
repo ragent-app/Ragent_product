@@ -8,7 +8,7 @@ const fixtureRoot = tmpdir();
 await mkdir(fixtureRoot, { recursive: true });
 const root = await mkdtemp(join(fixtureRoot, 'harness-capability-catalog-'));
 const configRoot = join(root, 'config');
-process.env.AGENTOC_CONFIG_DIR = configRoot;
+process.env.RAGENT_CONFIG_DIR = configRoot;
 const { listHarnessCapabilities, resolveHarnessCapabilityInstructions } =
   await import('../chat/harness-capability-catalog.mjs');
 const { CODEX_MANAGED_HOME_DIR } = await import('../lib/config.mjs');
@@ -36,7 +36,7 @@ try {
   await put(join(claudeHome, '.claude.json'), JSON.stringify({
     mcpServers: {
       userDocs: { url: 'https://example.invalid', env: { SECRET: 'never-return-this-either' } },
-      agentoc: { command: 'node', args: ['agentoc-mcp-server.mjs'] },
+      ragent: { command: 'node', args: ['ragent-mcp-server.mjs'] },
     },
   }));
   await put(join(claudeHome, 'settings.json'), JSON.stringify({ enabledPlugins: { 'review-tools@market': true } }));
@@ -79,13 +79,13 @@ try {
   assert.equal(claudeByTitle.get('review-tools:audit')?.invocationText, '/review-tools:audit ');
   assert.equal(claudeByTitle.get('projectDb')?.kind, 'mcp');
   assert.equal(claudeByTitle.get('userDocs')?.kind, 'mcp');
-  assert.equal(claudeByTitle.get('agentoc')?.source, 'agentoc');
+  assert.equal(claudeByTitle.get('ragent')?.source, 'ragent');
   assert.equal(claudeByTitle.get('pluginSearch')?.source, 'claude-plugin');
-  assert.equal(claudeByTitle.get('calendar-write')?.source, 'agentoc');
+  assert.equal(claudeByTitle.get('calendar-write')?.source, 'ragent');
   assert.ok(!JSON.stringify(claude).includes('never-return-this'));
   assert.ok(!JSON.stringify(claude).includes(claudeHome));
   const selectedInstructions = await resolveHarnessCapabilityInstructions({
-    ids: [claudeByTitle.get('calendar-write').id, claudeByTitle.get('agentoc').id],
+    ids: [claudeByTitle.get('calendar-write').id, claudeByTitle.get('ragent').id],
     session: { tool: 'claude' },
     cwd: project,
     claudeConfigDir: claudeHome,
@@ -93,10 +93,10 @@ try {
     listCodexCapabilities: async () => ({}),
   });
   assert.match(selectedInstructions, /Add an event to the calendar/);
-  assert.match(selectedInstructions, /already configured agentoc MCP server/);
+  assert.match(selectedInstructions, /already configured ragent MCP server/);
   await assert.rejects(
     resolveHarnessCapabilityInstructions({
-      ids: ['agentoc:skill:stale'], session: { tool: 'claude' }, cwd: project,
+      ids: ['ragent:skill:stale'], session: { tool: 'claude' }, cwd: project,
       claudeConfigDir: claudeHome, platformSkillsDir: platformSkills,
       listCodexCapabilities: async () => ({}),
     }),

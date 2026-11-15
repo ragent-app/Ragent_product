@@ -6,7 +6,7 @@ export const RELAY_RECORD_BYTES = 256 * 1024;
 const TAG_BYTES = 16;
 const NONCE_BYTES = 12;
 const HEADER_BYTES = 8 + NONCE_BYTES;
-const DOMAIN = Buffer.from('agentoc-asset-relay-v1\0', 'ascii');
+const DOMAIN = Buffer.from('ragent-asset-relay-v1\0', 'ascii');
 
 function recordParameters(key, transferId, totalBytes, index) {
   if (!Buffer.isBuffer(key) || key.length !== 32) throw new Error('Invalid relay key');

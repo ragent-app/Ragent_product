@@ -3,7 +3,7 @@ import { initializeFreshInstanceIdentity } from '../lib/instance-identity.mjs';
 import { ownerIdentityPathForService } from '../lib/windows-owner-identity-paths.mjs';
 const identityPath = ownerIdentityPathForService();
 if (process.platform !== 'win32' || process.argv.length !== 2 ||
-    process.env.AGENTOC_WINDOWS_SERVICE_ROLE !== 'control' ||
+    process.env.RAGENT_WINDOWS_SERVICE_ROLE !== 'control' ||
     !identityPath) {
   console.error('IID_FIXED_SERVICE_CONTEXT_REQUIRED'); process.exitCode = 1;
 } else {

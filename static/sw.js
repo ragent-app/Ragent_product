@@ -26,7 +26,7 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type !== 'agentoc:clear-caches') return;
+  if (event.data?.type !== 'ragent:clear-caches') return;
   event.waitUntil(clearLegacyCaches());
 });
 
@@ -55,7 +55,7 @@ self.addEventListener('push', (event) => {
         body: data.body || 'Task completed',
         icon: resolveScopeUrl('icon.svg'),
         badge: resolveScopeUrl('notification-badge.png'),
-        tag: responsibilityId && responsibilityEventId ? `responsibility-${responsibilityEventId}` : 'agentoc-done',
+        tag: responsibilityId && responsibilityEventId ? `responsibility-${responsibilityEventId}` : 'ragent-done',
         renotify: true,
         data: target,
       });
@@ -76,7 +76,7 @@ self.addEventListener('notificationclick', (event) => {
       const client = clientList[0];
       if (client) {
         client.postMessage({
-          type: 'agentoc:open-session',
+          type: 'ragent:open-session',
           sessionId: target.sessionId,
           tab: target.tab,
           url: target.url,

@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { Readable } from 'node:stream';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-handoff-bootstrap-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-handoff-bootstrap-'));
 const config = join(home, 'config');
-Object.assign(process.env, { AGENTOC_CONFIG_DIR: config, AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-  AGENTOC_ACCOUNTS_URL: 'https://handoff.fixture.invalid/accounts', AGENTOC_TURN_BROKER_URL: 'https://handoff.fixture.invalid/turn',
-  AGENTOC_P2P_SIGNALING_URL: 'https://handoff.fixture.invalid/signal' });
-delete process.env.AGENTOC_INSTANCE_ROOT;
+Object.assign(process.env, { RAGENT_CONFIG_DIR: config, RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+  RAGENT_ACCOUNTS_URL: 'https://handoff.fixture.invalid/accounts', RAGENT_TURN_BROKER_URL: 'https://handoff.fixture.invalid/turn',
+  RAGENT_P2P_SIGNALING_URL: 'https://handoff.fixture.invalid/signal' });
+delete process.env.RAGENT_INSTANCE_ROOT;
 await mkdir(config);
 const accountId = 'acct_handoff_fixture', deviceId = 'rdev_handoff_fixture';
 const key = generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString();
@@ -108,6 +108,6 @@ try {
 } finally {
   globalThis.fetch = oldFetch;
   const root = await realpath(home), parent = await realpath(tmpdir());
-  assert(root.startsWith(parent + sep) && root.includes('agentoc-handoff-bootstrap-'));
+  assert(root.startsWith(parent + sep) && root.includes('ragent-handoff-bootstrap-'));
   await rm(root, { recursive: true, force: true });
 }

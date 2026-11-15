@@ -10,7 +10,7 @@ export function matchesLinuxRunPeerCgroup(content, { runId, launchAttempt } = {}
     if (typeof content !== 'string' || content.length > 65536) return false;
     const unit = linuxRunUnitName(runId, launchAttempt);
     const entries = content.split('\n').filter(Boolean);
-    return entries.length === 1 && entries[0] === `0::/agentoc.slice/agentoc-runners.slice/${unit}`;
+    return entries.length === 1 && entries[0] === `0::/ragent.slice/ragent-runners.slice/${unit}`;
   } catch { return false; }
 }
 

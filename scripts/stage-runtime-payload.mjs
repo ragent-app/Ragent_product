@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 const manifestPath = new URL('../packaging/runtime-payload.json', import.meta.url);
 const windowsBuildInputs = [
   'android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png',
-  'static/desktop/agentoc-android-logo.png',
+  'static/desktop/ragent-android-logo.png',
   'static/icon-512.png',
   ...['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs'].map(name => `desktop/${name}`),
 ];
@@ -80,8 +80,9 @@ export function selectedBy(profile, name) {
   return (profile.files.includes(name) || profile.prefixes.some((prefix) => name.startsWith(prefix)))
     && !profile.exclude.some((excluded) => name === excluded || (excluded.endsWith('/') && name.startsWith(excluded)));
 }
-export async function stageRuntimePayload({ source, destination, profile: profileName, manifest = manifestPath, sourceMode = 'checkout', windowsBuildDestination }) {
-  if (!['checkout', 'git-objects'].includes(sourceMode)) throw new Error('Unknown runtime source mode');
+export async function stageRuntimePayload({ source, destination, profile: profileName, manifest = manifestPath, sourceMode = 'checkout', windowsBuildDestination, snapshotSha256 }) {
+  if (!['checkout', 'git-objects', 'dev-snapshot'].includes(sourceMode)) throw new Error('Unknown runtime source mode');
+  if (sourceMode === 'dev-snapshot' && (profileName !== 'accounts' || !/^[a-f0-9]{64}$/.test(snapshotSha256 || ''))) throw new Error('Accounts development snapshot requires its SHA-256');
   if (windowsBuildDestination && (sourceMode !== 'git-objects' || profileName !== 'desktop')) {
     throw new Error('Windows build inputs require committed desktop staging');
   }
@@ -89,11 +90,11 @@ export async function stageRuntimePayload({ source, destination, profile: profil
   destination = resolve(destination);
   const git = async (...args) => (await exec('git', ['--no-optional-locks', ...args],
     { cwd: source, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024, windowsHide: true })).stdout;
-  const head = (await git('rev-parse', 'HEAD')).trim();
+  const head = sourceMode === 'dev-snapshot' ? null : (await git('rev-parse', 'HEAD')).trim();
   if (sourceMode === 'checkout' && await git('status', '--porcelain=v1', '--untracked-files=all')) {
     throw new Error('Runtime payload requires a clean checkout; preserve local work and build from a frozen checkout');
   }
-  const tree = new Map((await git('ls-tree', '-r', '-z', head)).split('\0').filter(Boolean).map((entry) => {
+  const tree = sourceMode === 'dev-snapshot' ? new Map() : new Map((await git('ls-tree', '-r', '-z', head)).split('\0').filter(Boolean).map((entry) => {
     const tab = entry.indexOf('\t');
     const [mode, type, oid] = entry.slice(0, tab).split(' ');
     return [entry.slice(tab + 1), { mode, type, oid }];
@@ -104,10 +105,22 @@ export async function stageRuntimePayload({ source, destination, profile: profil
     if (reader && (!manifestObject || manifestObject.type !== 'blob' || !['100644', '100755'].includes(manifestObject.mode))) {
       throw new Error('Committed runtime manifest is missing');
     }
-    const manifestBytes = reader ? await reader.read(manifestObject.oid) : await readFile(manifest);
+    const manifestBytes = reader ? await reader.read(manifestObject.oid) : await readFile(sourceMode === 'dev-snapshot' ? join(source, 'packaging/runtime-payload.json') : manifest);
     const spec = JSON.parse(manifestBytes.toString('utf8'));
     const profile = spec.profiles[profileName];
     if (spec.schemaVersion !== 1 || !profile) throw new Error('Unknown runtime payload profile');
+    if (sourceMode === 'dev-snapshot') {
+      async function collect(dir, prefix = '') {
+        for (const entry of await readdir(dir, { withFileTypes: true })) {
+          const name = safeName(prefix + entry.name);
+          if (entry.isSymbolicLink()) throw new Error(`Snapshot symlink rejected: ${name}`);
+          if (entry.isDirectory()) await collect(join(dir, entry.name), `${name}/`);
+          else if (entry.isFile()) tree.set(name, { mode: '100644', type: 'blob' });
+          else throw new Error(`Snapshot entry is not a regular file: ${name}`);
+        }
+      }
+      await collect(source);
+    }
     const tracked = [...tree.keys()];
     const selected = tracked.filter((name) => selectedBy(profile, name));
     for (const required of profile.required) {
@@ -150,7 +163,7 @@ export async function stageRuntimePayload({ source, destination, profile: profil
       // status alone can miss assume-unchanged/skip-worktree edits. Verify actual
       // bytes against the frozen commit, allowing Git's ordinary CRLF checkout.
       const normalized = bytes.includes(0) ? bytes : Buffer.from(bytes.toString('utf8').replaceAll('\r\n', '\n'));
-      if (blobOid(bytes) !== committed.oid && blobOid(normalized) !== committed.oid) {
+      if (sourceMode !== 'dev-snapshot' && blobOid(bytes) !== committed.oid && blobOid(normalized) !== committed.oid) {
         throw new Error(`Runtime input differs from frozen commit: ${name}`);
       }
       const target = join(destination, targetName);
@@ -186,15 +199,15 @@ export async function stageRuntimePayload({ source, destination, profile: profil
       }
       await writeFile(join(buildRoot, 'windows-build-inputs-manifest.json'), `${JSON.stringify({ schemaVersion: 1, sourceRevision: head, files: buildFiles }, null, 2)}\n`, { flag: 'wx' });
     }
-    if ((await git('rev-parse', 'HEAD')).trim() !== head
+    if ((sourceMode !== 'dev-snapshot' && (await git('rev-parse', 'HEAD')).trim() !== head)
       || (sourceMode === 'checkout' && await git('status', '--porcelain=v1', '--untracked-files=all'))) {
       throw new Error('Source changed while staging; discard this candidate');
     }
     const scan = await scanRuntimePayload(destination);
     if (!scan.ok) throw new Error(`Runtime payload secret/state check failed: ${JSON.stringify(scan.findings)}`);
-    const result = { schemaVersion: 1, profile: profileName, sourceMode, sourceRevision: head,
+    const result = { schemaVersion: 1, profile: profileName, sourceMode, sourceRevision: head, ...(sourceMode === 'dev-snapshot' ? { snapshotSha256 } : {}),
       allowlistSha256: createHash('sha256').update(manifestBytes).digest('hex'), files };
-    await writeFile(join(destination, '.agentoc-source-commit'), `${head}\n`, { flag: 'wx' });
+    if (head) await writeFile(join(destination, '.ragent-source-commit'), `${head}\n`, { flag: 'wx' });
     await writeFile(join(destination, 'runtime-payload-manifest.json'), `${JSON.stringify(result, null, 2)}\n`, { flag: 'wx' });
     if (reader) await reader.close();
     return result;
@@ -214,6 +227,7 @@ async function main() {
     else if (key === '--destination') options.destination = value;
     else if (key === '--profile') options.profile = value;
     else if (key === '--source-mode') options.sourceMode = value;
+    else if (key === '--snapshot-sha256') options.snapshotSha256 = value;
     else if (key === '--windows-build-destination') options.windowsBuildDestination = value;
     else throw new Error(`Unknown option: ${key}`);
   }

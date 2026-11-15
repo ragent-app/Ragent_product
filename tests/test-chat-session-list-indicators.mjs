@@ -29,7 +29,7 @@ const context = { console };
 context.globalThis = context;
 context.window = {
   // t() falls back to the raw key when no translator is installed.
-  agentocT: undefined,
+  ragentT: undefined,
 };
 context.document = {
   // esc() only needs createElement + innerHTML.
@@ -42,10 +42,10 @@ context.messageTimeFormatter = new Intl.DateTimeFormat();
 // Load the real state model first so hasSessionNeedsAction / unread use the
 // production timestamp semantics (lastAssistantMessageAt vs review stamp).
 vm.runInNewContext(modelSource, context, { filename: 'session-state-model.js' });
-const stateModel = context.AgentoCSessionStateModel;
+const stateModel = context.RagentSessionStateModel;
 assert.ok(stateModel, 'session state model should attach to the global scope');
-context.AgentoCSessionStateModel = stateModel;
-context.window.AgentoCSessionStateModel = stateModel;
+context.RagentSessionStateModel = stateModel;
+context.window.RagentSessionStateModel = stateModel;
 
 // Minimal stand-ins for the surface-ui dependencies the model does not own.
 context.getSessionStatusSummary = (session) => ({

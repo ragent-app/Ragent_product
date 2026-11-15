@@ -1,7 +1,7 @@
 # Real temporary Node processes + compiled shipped coordinator/metadata lease.
 # No SCM/UAC/installed roots, Provider or network; coordinator layout is a fixture.
 [CmdletBinding()]
-param([string]$NodePath='G:\AgentoC\agentoc-v0.3.12-main\artifacts\showcase\T2-current-20261017\service-identities\bundle-c62e7d1319543507823ed7728b247518\node.exe')
+param([string]$NodePath='G:\Ragent\ragent-v0.3.12-main\artifacts\showcase\T2-current-20261017\service-identities\bundle-c62e7d1319543507823ed7728b247518\node.exe')
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 $qaSource=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $qaBase=Join-Path $qaSource 'artifacts\owned-child-recovery';$null=New-Item -ItemType Directory -Path $qaBase -Force
@@ -15,7 +15,7 @@ $qaProbe=Join-Path $qaRoot 'OwnedChildRecoveryProbe.exe';$qaScript=Join-Path $qa
 $qaReportFile=Join-Path $qaBase ('report-'+$qaId+'.json');$qaReport=$null
 try{
  if((Get-FileHash -LiteralPath $NodePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne '2ffe3acc0458fdde999f50d11809bbe7c9b7ef204dcf17094e325d26ace101d8'){throw 'QA_NODE_BYTES_REQUIRED'}
- & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:exe /main:OwnedChildRecoveryProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+$qaProbe) (Join-Path $qaSource 'packaging\windows\AgentoC.ServiceHost.cs') (Join-Path $qaSource 'tests\fixtures\windows-owned-child-recovery.cs')
+ & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:exe /main:OwnedChildRecoveryProbe /r:System.ServiceProcess.dll /r:System.Web.Extensions.dll /r:System.Security.dll ('/out:'+$qaProbe) (Join-Path $qaSource 'packaging\windows\Ragent.ServiceHost.cs') (Join-Path $qaSource 'tests\fixtures\windows-owned-child-recovery.cs')
  if($LASTEXITCODE -ne 0){throw 'QA_COMPILE_FAILED'}
  $qaProbeHash=(Get-FileHash -LiteralPath $qaProbe -Algorithm SHA256).Hash.ToLowerInvariant()
  & $qaProbe $qaRoot $NodePath $qaScript $qaReportFile
@@ -24,7 +24,7 @@ try{
  $qaReport|Add-Member -NotePropertyName executedAt -NotePropertyValue (Get-Date).ToUniversalTime().ToString('o')
  $qaReport|Add-Member -NotePropertyName probeSha256 -NotePropertyValue $qaProbeHash
  $qaReport|Add-Member -NotePropertyName nodeSha256 -NotePropertyValue (Get-FileHash -LiteralPath $NodePath -Algorithm SHA256).Hash.ToLowerInvariant()
- $qaReport|Add-Member -NotePropertyName sourceFiles -NotePropertyValue @(@('packaging/windows/AgentoC.ServiceHost.cs','lib/instance-runtime.mjs','lib/instance-ownership.mjs','tests/fixtures/windows-owned-child-recovery.cs','tests/fixtures/windows-owned-child-marker.mjs','tests/fixtures/windows-owned-child-before-marker.mjs','tests/test-windows-owned-child-recovery.ps1')|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $qaSource $_) -Algorithm SHA256).Hash.ToLowerInvariant()}})
+ $qaReport|Add-Member -NotePropertyName sourceFiles -NotePropertyValue @(@('packaging/windows/Ragent.ServiceHost.cs','lib/instance-runtime.mjs','lib/instance-ownership.mjs','tests/fixtures/windows-owned-child-recovery.cs','tests/fixtures/windows-owned-child-marker.mjs','tests/fixtures/windows-owned-child-before-marker.mjs','tests/test-windows-owned-child-recovery.ps1')|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $qaSource $_) -Algorithm SHA256).Hash.ToLowerInvariant()}})
  if($qaExit -ne 0 -or -not $qaReport.pass){throw 'QA_RECOVERY_FAILED'}
 }finally{
  # Only this marked canonical private fixture, with no reparse/remaining child.

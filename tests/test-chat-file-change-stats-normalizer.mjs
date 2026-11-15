@@ -271,7 +271,7 @@ const terminalCodexFileChange = terminalCodexEvents.find((event) => event.type =
 assert.equal(terminalCodexFileChange?.added, 2, 'Codex adapter should render terminal summary stats as file changes');
 assert.equal(terminalCodexFileChange?.preview?.[1]?.newLine, 3, 'Codex adapter should render terminal summary preview line numbers');
 
-const baselineRoot = mkdtempSync(join(tmpdir(), 'agentoc-file-change-baseline-'));
+const baselineRoot = mkdtempSync(join(tmpdir(), 'ragent-file-change-baseline-'));
 try {
   const srcDir = join(baselineRoot, 'src');
   mkdirSync(srcDir, { recursive: true });

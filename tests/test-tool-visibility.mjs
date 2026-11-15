@@ -7,9 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-tool-visibility-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-tool-visibility-'));
 const fakeBin = join(tempHome, '.local', 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(fakeBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -20,7 +20,7 @@ for (const command of ['public-helper', 'private-helper']) {
   chmodSync(path, 0o755);
 }
 
-// Built-in Harness availability is intentionally restricted to AgentoC's own
+// Built-in Harness availability is intentionally restricted to Ragent's own
 // installation root. Supply a synthetic internal Claude instead of depending
 // on a developer's PATH or a real installation.
 const harnessRoot = join(tempHome, 'harnesses');
@@ -54,10 +54,10 @@ writeFileSync(
   'utf8',
 );
 
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_HARNESS_ROOT = harnessRoot;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_HARNESS_ROOT = harnessRoot;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 if (process.platform === 'win32') process.env.USERPROFILE = tempHome;
 process.env.PATH = `${fakeBin}${delimiter}${process.env.PATH || ''}`;
 

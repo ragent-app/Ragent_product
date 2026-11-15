@@ -8,8 +8,8 @@ const require = createRequire(import.meta.url);
 const playwright = (() => {
   try { return require('@playwright/test'); }
   catch (error) {
-    if (error.code !== 'MODULE_NOT_FOUND' || !process.env.AGENTOC_TEST_MODULE_ROOT) throw error;
-    return createRequire(resolve(process.env.AGENTOC_TEST_MODULE_ROOT, 'package.json'))('@playwright/test');
+    if (error.code !== 'MODULE_NOT_FOUND' || !process.env.RAGENT_TEST_MODULE_ROOT) throw error;
+    return createRequire(resolve(process.env.RAGENT_TEST_MODULE_ROOT, 'package.json'))('@playwright/test');
   }
 })();
 const assets = new Map(await Promise.all([
@@ -20,7 +20,7 @@ const html = `<!doctype html><html><head><link rel="stylesheet" href="/static/ch
 <button id="modelProvidersOpenBtn">open</button><button id="modelProvidersAddBtn">add</button>
 <button id="background-action" onclick="window.backgroundExecutions++">background action</button>
 <div id="modelProvidersList"></div><div id="modelProvidersStatus"></div>
-<script>window.backgroundExecutions=0;window.__AGENTOC_BOOTSTRAP__={auth:{role:'owner'}};</script>
+<script>window.backgroundExecutions=0;window.__RAGENT_BOOTSTRAP__={auth:{role:'owner'}};</script>
 <script src="/static/chat/focus-scope.js"></script><script src="/static/chat/model-providers.js"></script></body></html>`;
 const server = createServer((req, res) => {
   const asset = assets.get(req.url);
@@ -61,8 +61,8 @@ try {
   });
   const page = await context.newPage();
   await page.goto(origin);
-  await page.waitForFunction(() => !!window.AgentoCModelProviders && !!window.AgentoCFocusScope);
-  await page.evaluate(() => window.AgentoCModelProviders.refresh());
+  await page.waitForFunction(() => !!window.RagentModelProviders && !!window.RagentFocusScope);
+  await page.evaluate(() => window.RagentModelProviders.refresh());
   const dialog = page.locator('.model-provider-modal');
   const add = page.locator('#modelProvidersAddBtn');
   const focusedInDialog = () => page.evaluate(() => !!document.activeElement.closest('.model-provider-modal'));

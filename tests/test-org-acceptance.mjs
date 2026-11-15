@@ -37,21 +37,21 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 // Isolate config + session storage before importing anything that reads them.
 // The main process is the shipped baseline: every org flag off.
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-acceptance-'));
-const probeHome = mkdtempSync(join(tmpdir(), 'agentoc-acceptance-probe-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-acceptance-'));
+const probeHome = mkdtempSync(join(tmpdir(), 'ragent-acceptance-probe-'));
 process.env.HOME = tempHome;
 for (const key of [
-  'AGENTOC_CONFIG_DIR',
-  'AGENTOC_INSTANCE_ROOT',
-  'AGENTOC_WORK_ROOT_DIR',
-  'AGENTOC_MEMORY_DIR',
-  'AGENTOC_RUN_SPOOL_DIR',
-  'AGENTOC_ORG_SCHEMA_ENABLED',
-  'AGENTOC_ORG_SHADOW_PROJECTION',
-  'AGENTOC_MANAGED_INPUT_ENFORCEMENT',
-  'AGENTOC_MANAGED_WRITER_ENABLED',
-  'AGENTOC_REVIEWER_ENABLED',
-  'AGENTOC_ORG_PROJECTION_V2_ENABLED',
+  'RAGENT_CONFIG_DIR',
+  'RAGENT_INSTANCE_ROOT',
+  'RAGENT_WORK_ROOT_DIR',
+  'RAGENT_MEMORY_DIR',
+  'RAGENT_RUN_SPOOL_DIR',
+  'RAGENT_ORG_SCHEMA_ENABLED',
+  'RAGENT_ORG_SHADOW_PROJECTION',
+  'RAGENT_MANAGED_INPUT_ENFORCEMENT',
+  'RAGENT_MANAGED_WRITER_ENABLED',
+  'RAGENT_REVIEWER_ENABLED',
+  'RAGENT_ORG_PROJECTION_V2_ENABLED',
 ]) delete process.env[key];
 
 const workspace = join(tempHome, 'workspace');
@@ -106,17 +106,17 @@ const orgStoreUrl = new URL('../chat/organization-store.mjs', import.meta.url).h
 const runtimeAdapterUrl = new URL('../chat/runtime-adapter.mjs', import.meta.url).href;
 
 const ALL_FLAG_KEYS = [
-  'AGENTOC_ORG_SCHEMA_ENABLED',
-  'AGENTOC_ORG_SHADOW_PROJECTION',
-  'AGENTOC_MANAGED_INPUT_ENFORCEMENT',
-  'AGENTOC_MANAGED_WRITER_ENABLED',
-  'AGENTOC_REVIEWER_ENABLED',
-  'AGENTOC_ORG_PROJECTION_V2_ENABLED',
+  'RAGENT_ORG_SCHEMA_ENABLED',
+  'RAGENT_ORG_SHADOW_PROJECTION',
+  'RAGENT_MANAGED_INPUT_ENFORCEMENT',
+  'RAGENT_MANAGED_WRITER_ENABLED',
+  'RAGENT_REVIEWER_ENABLED',
+  'RAGENT_ORG_PROJECTION_V2_ENABLED',
 ];
 
 function childEnv(overrides = {}) {
   const env = { ...process.env, HOME: probeHome };
-  for (const key of [...ALL_FLAG_KEYS, 'AGENTOC_CONFIG_DIR', 'AGENTOC_INSTANCE_ROOT']) {
+  for (const key of [...ALL_FLAG_KEYS, 'RAGENT_CONFIG_DIR', 'RAGENT_INSTANCE_ROOT']) {
     delete env[key];
   }
   for (const [key, value] of Object.entries(overrides)) {
@@ -166,12 +166,12 @@ function testFlagWiring() {
 
   // Each flag flips on independently; the others stay off.
   const pairs = [
-    ['AGENTOC_ORG_SCHEMA_ENABLED', 'ORG_SCHEMA_ENABLED'],
-    ['AGENTOC_ORG_SHADOW_PROJECTION', 'ORG_SHADOW_PROJECTION'],
-    ['AGENTOC_MANAGED_INPUT_ENFORCEMENT', 'MANAGED_INPUT_ENFORCEMENT'],
-    ['AGENTOC_MANAGED_WRITER_ENABLED', 'MANAGED_WRITER_ENABLED'],
-    ['AGENTOC_REVIEWER_ENABLED', 'REVIEWER_ENABLED'],
-    ['AGENTOC_ORG_PROJECTION_V2_ENABLED', 'ORG_PROJECTION_V2_ENABLED'],
+    ['RAGENT_ORG_SCHEMA_ENABLED', 'ORG_SCHEMA_ENABLED'],
+    ['RAGENT_ORG_SHADOW_PROJECTION', 'ORG_SHADOW_PROJECTION'],
+    ['RAGENT_MANAGED_INPUT_ENFORCEMENT', 'MANAGED_INPUT_ENFORCEMENT'],
+    ['RAGENT_MANAGED_WRITER_ENABLED', 'MANAGED_WRITER_ENABLED'],
+    ['RAGENT_REVIEWER_ENABLED', 'REVIEWER_ENABLED'],
+    ['RAGENT_ORG_PROJECTION_V2_ENABLED', 'ORG_PROJECTION_V2_ENABLED'],
   ];
   for (const [envKey, name] of pairs) {
     const on = JSON.parse(runProbe(FLAGS_SCRIPT, { [envKey]: '1' }).split('\n').filter((line) => line.startsWith('FLAGS=')).pop().slice('FLAGS='.length));
@@ -393,7 +393,7 @@ async function testGatePhaseCas() {
 
 // [10]/[11] symlink/junction + staging diff escapes.
 async function testStagingAndSymlinkEscape() {
-  const root = mkdtempSync(join(tmpdir(), 'agentoc-accept-writer-'));
+  const root = mkdtempSync(join(tmpdir(), 'ragent-accept-writer-'));
   mkdirSync(join(root, 'src'), { recursive: true });
   writeFileSync(join(root, 'src/a.txt'), 'alpha');
 
@@ -409,7 +409,7 @@ async function testStagingAndSymlinkEscape() {
   await discardStaging(stagingDir);
 
   // [10] a '..' symlink inside staging escaping writablePaths.
-  const rootB = mkdtempSync(join(tmpdir(), 'agentoc-accept-writer-b-'));
+  const rootB = mkdtempSync(join(tmpdir(), 'ragent-accept-writer-b-'));
   mkdirSync(join(rootB, 'src'), { recursive: true });
   writeFileSync(join(rootB, 'src/a.txt'), 'alpha');
   const { stagingDir: stagingB } = await createStagingWorkspace(rootB, ['src']);
@@ -599,7 +599,7 @@ function probeManagedInputBypass() {
     if (!parseManagedInputBypassRoute('/api/sessions/x/delegate')) throw new Error('delegate route not mapped');
     console.log('MIOK');
   `;
-  const out = runProbe(script, { AGENTOC_MANAGED_INPUT_ENFORCEMENT: '1' });
+  const out = runProbe(script, { RAGENT_MANAGED_INPUT_ENFORCEMENT: '1' });
   a.ok(out.includes('MIOK'), 'managed-input rejection matrix passes with the flag on');
 
   // Flag off: the gate is a no-op (legacy behavior unchanged).
@@ -645,7 +645,7 @@ function probeOrgCommandIdempotencyAndCas() {
     if (!frozenRejected) throw new Error('frozen revision is not immutable');
     console.log('OROK');
   `;
-  const out = runProbe(script, { AGENTOC_ORG_SCHEMA_ENABLED: '1' });
+  const out = runProbe(script, { RAGENT_ORG_SCHEMA_ENABLED: '1' });
   a.ok(out.includes('OROK'), 'org-command idempotency + CAS + freeze pass with the flag on');
 
   // Flag off: commands unavailable (gray-rollout default).
@@ -674,7 +674,7 @@ function probeShadowProjection() {
     const shadow = await projectOrganizationShadow(org.id);
     console.log('SHADOW=' + JSON.stringify(shadow));
   `;
-  const on = runProbe(script, { AGENTOC_ORG_SHADOW_PROJECTION: '1' });
+  const on = runProbe(script, { RAGENT_ORG_SHADOW_PROJECTION: '1' });
   const line = on.split('\n').filter((entry) => entry.startsWith('SHADOW=')).pop();
   a.ok(line, 'shadow projection probe produced a line with the flag on');
   const shadow = JSON.parse(line.slice('SHADOW='.length));
@@ -707,7 +707,7 @@ function probeReviewerCertification() {
     const cap = resolveRuntimeReadOnlyCapability({ runnerId: REVIEWER_RUNTIME_ID });
     console.log('REV=' + JSON.stringify({ supportsReadOnlyFilesystem: cap.supportsReadOnlyFilesystem, enforcement: cap.enforcement }));
   `;
-  const on = JSON.parse(runProbe(script, { AGENTOC_REVIEWER_ENABLED: '1' }).split('\n').filter((l) => l.startsWith('REV=')).pop().slice('REV='.length));
+  const on = JSON.parse(runProbe(script, { RAGENT_REVIEWER_ENABLED: '1' }).split('\n').filter((l) => l.startsWith('REV=')).pop().slice('REV='.length));
   a.equal(on.supportsReadOnlyFilesystem, true, 'REVIEWER_RUNTIME_ID is certified when REVIEWER_ENABLED is on');
   a.equal(on.enforcement, 'sandbox', 'the certified reviewer runtime enforces a sandbox');
 

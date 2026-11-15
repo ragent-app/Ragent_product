@@ -4,15 +4,15 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-provider-guidance-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-provider-guidance-'));
 const previous = {
-  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_INSTANCE_ROOT: process.env.RAGENT_INSTANCE_ROOT,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, '.agentoc', 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, '.ragent', 'workspace');
 
 try {
   const { createProviderPreparationError } = await import('../chat/run-launcher.mjs');
@@ -25,7 +25,7 @@ try {
   });
   assert.equal(unconfigured.providerPreparation.causeCode, 'native-provider-not-selected');
   assert.match(unconfigured.message, /No Codex provider is configured on this computer/);
-  assert.match(unconfigured.message, /AgentoC Settings > Providers/);
+  assert.match(unconfigured.message, /Ragent Settings > Providers/);
   assert.doesNotMatch(unconfigured.message, /private config path|credential must never be shown/i);
   assert.equal(unconfigured.code, 'PROVIDER_HOME_PREPARE_FAILED');
 

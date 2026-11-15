@@ -8,20 +8,20 @@ import { Readable } from 'stream';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-google-owner-account-router-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-google-owner-account-router-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
-process.env.AGENTOC_PUBLIC_BASE_URL = 'https://instance.example.test';
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'test-auth-session-secret';
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ACCOUNTS_ISSUER = 'https://accounts.example.test';
+process.env.RAGENT_PUBLIC_BASE_URL = 'https://instance.example.test';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'test-auth-session-secret';
 // Exercise the legacy callback route explicitly. Default bind is instance_poll.
-process.env.AGENTOC_OWNER_AUTH_DELIVERY_MODE = 'browser_callback';
+process.env.RAGENT_OWNER_AUTH_DELIVERY_MODE = 'browser_callback';
 process.env.SECURE_COOKIES = '0';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+delete process.env.RAGENT_INSTANCE_ROOT;
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 mkdirSync(configDir, { recursive: true });
 writeFileSync(join(configDir, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'not-used' }));
 
@@ -166,7 +166,7 @@ try {
     assert.equal(bindStartRes.statusCode, 200);
     assert.equal(bindStart.mode, 'accounts');
     assert.match(bindStart.authUrl, /^https:\/\/accounts\.example\.test\/owner\/google\?tx=/);
-    assert.match(bindCookie, /^agentoc_owner_account_state=/);
+    assert.match(bindCookie, /^ragent_owner_account_state=/);
     assert.equal(started.get(bindStart.transactionId).alias, 'Pinggu computer');
     const transactions = JSON.parse(readFileSync(join(configDir, 'owner-account-transactions.json'), 'utf8'));
     assert.ok(transactions.entries[bindStart.transactionId], JSON.stringify({ transactions, transactionId: bindStart.transactionId }));

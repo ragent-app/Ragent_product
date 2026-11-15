@@ -7,7 +7,7 @@
 
   const PROJECTS_LEVEL = "projects";
   const PROJECT_SESSIONS_LEVEL = "project-sessions";
-  const PROJECT_VIEW_STATE_STORAGE_KEY = "agentoc.projectViewState";
+  const PROJECT_VIEW_STATE_STORAGE_KEY = "ragent.projectViewState";
 
   let sidebarViewLevel = PROJECTS_LEVEL;
   let browsingProjectId = "";
@@ -39,7 +39,7 @@
   let edgeBackSwipeSettleFrame = null;
 
   function t(key, vars) {
-    return window.agentocT ? window.agentocT(key, vars) : key;
+    return window.ragentT ? window.ragentT(key, vars) : key;
   }
 
   function renderUiIcon(name, className = "") {
@@ -80,7 +80,7 @@
   // L3 project); a small chip next to the project name makes the level
   // scannable without reading every row.
   function getMatchLevelLabel(matchLevel) {
-    const overview = root.AgentocProjectOverview;
+    const overview = root.RagentProjectOverview;
     if (!overview) return "";
     if (matchLevel === overview.MATCH_LEVEL_PROJECT_AND_SESSION) return t("sidebar.projects.matchProjectAndSession");
     if (matchLevel === overview.MATCH_LEVEL_SESSION) return t("sidebar.projects.matchSession");
@@ -128,7 +128,7 @@
   }
 
   function getProjectCatalog() {
-    return typeof window.agentocGetProjects === "function" ? window.agentocGetProjects() : [];
+    return typeof window.ragentGetProjects === "function" ? window.ragentGetProjects() : [];
   }
 
   function readStoredProjectViewState() {
@@ -293,9 +293,9 @@
     // The match-level chip is meaningful for screen readers too.
     head.setAttribute("aria-label", levelLabel ? `${displayName} · ${levelLabel}` : displayName);
     head.addEventListener("click", () => enterProjectSessions(group, head));
-    if (!group.inbox && typeof window.agentocBindSidebarLongPress === "function") {
-      window.agentocBindSidebarLongPress(head, () => {
-        window.agentocOpenProjectActionSheet?.({
+    if (!group.inbox && typeof window.ragentBindSidebarLongPress === "function") {
+      window.ragentBindSidebarLongPress(head, () => {
+        window.ragentOpenProjectActionSheet?.({
           ...(group.project || {}),
           sessionCount: group.sessionCount,
         }, head);
@@ -331,7 +331,7 @@
     const searchQuery = typeof sessionSearchQuery === "string" ? sessionSearchQuery.trim() : "";
     const projects = getProjectCatalog();
     const sessions = getOverviewSourceSessions();
-    const overview = root.AgentocProjectOverview;
+    const overview = root.RagentProjectOverview;
     const limit = getProjectPreviewLimit();
     const groups = searchQuery
       ? (overview?.searchProjectView?.({ projects, sessions, limit, getSortTime: getProjectSortTime, query: searchQuery, compare: getProjectSortCompare(), isRunning: isSessionRunning }) || [])
@@ -370,7 +370,7 @@
     }
     sessionList.innerHTML = "";
     sessionList.style.paddingTop = "";
-    const overview = root.AgentocProjectOverview;
+    const overview = root.RagentProjectOverview;
     const sessions = overview?.sessionsOfProject
       ? overview.sessionsOfProject({
           sessions: getOverviewSourceSessions(),
@@ -760,7 +760,7 @@
     }, 240);
   }
 
-  window.AgentoCMotion?.subscribeReducedMotion?.((reduced) => {
+  window.RagentMotion?.subscribeReducedMotion?.((reduced) => {
     if (!reduced) return;
     clearLevelTransitionVisuals();
     syncProjectLevelUI();
@@ -809,7 +809,7 @@
   function restoreStoredProjectSessionsView() {
     const stored = readStoredProjectViewState();
     if (!stored) return false;
-    const overview = root.AgentocProjectOverview;
+    const overview = root.RagentProjectOverview;
     const groups = overview?.buildProjectOverview?.({
       projects: getProjectCatalog(),
       sessions: getOverviewSourceSessions(),
@@ -842,8 +842,8 @@
   // First render once the project catalog resolves; the sessions refresh
   // chain keeps both levels in sync afterwards.
   function initProjectView() {
-    if (typeof window.agentocProjectsReady?.then === "function") {
-      window.agentocProjectsReady
+    if (typeof window.ragentProjectsReady?.then === "function") {
+      window.ragentProjectsReady
         .catch(() => null)
         .then(() => {
           renderProjectsView({ force: true });
@@ -857,7 +857,7 @@
     }
   }
 
-  root.AgentocProjectView = {
+  root.RagentProjectView = {
     getSidebarViewLevel,
     getBrowsingProjectId,
     getBrowsingProject,
@@ -885,7 +885,7 @@
   // keeps stale counts until a manual re-render.
   root.getSidebarViewLevel = getSidebarViewLevel;
   root.getBrowsingProjectId = getBrowsingProjectId;
-  root.agentocGetBrowsingProject = getBrowsingProject;
+  root.ragentGetBrowsingProject = getBrowsingProject;
   root.renderProjectsView = renderProjectsView;
   root.refreshProjectsView = refreshProjectsView;
   root.renderProjectSessionList = renderProjectSessionList;

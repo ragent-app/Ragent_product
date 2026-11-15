@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	stateBrokerDirectory = "AgentoC-PrivilegedBroker"
+	stateBrokerDirectory = "Ragent-PrivilegedBroker"
 	stateFileName        = "state.json"
 )
 

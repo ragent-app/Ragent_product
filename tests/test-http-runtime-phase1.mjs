@@ -62,8 +62,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-phase1-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-phase1-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -132,25 +132,25 @@ setTimeout(() => {
 }
 
 async function startServer({ home, port, delayMs = 700, envOverrides = {} }) {
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_RUNNER_UNIT_NAME: "",
-      AGENTOC_RUNNER_UNIT_SCOPE: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_UNIT_NAME: "",
+      RAGENT_RUNNER_UNIT_SCOPE: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-0123456789abcdef0123456789abcdef',
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-0123456789abcdef0123456789abcdef',
       SECURE_COOKIES: '0',
       FAKE_CODEX_DELAY_MS: String(delayMs),
-      AGENTOC_REPLY_SELF_CHECK: 'off',
+      RAGENT_REPLY_SELF_CHECK: 'off',
       PATH: `${localBin}:${process.env.PATH || ''}`,
       ...envOverrides,
     },
@@ -191,11 +191,11 @@ function runNodeCli(args, env = {}) {
       cwd: repoRoot,
       env: {
         ...process.env,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-        AGENTOC_RUNNER_LAUNCH_MODE: "",
-        AGENTOC_RUNNER_UNIT_NAME: "",
-        AGENTOC_RUNNER_UNIT_SCOPE: "",
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+        RAGENT_RUNNER_LAUNCH_MODE: "",
+        RAGENT_RUNNER_UNIT_NAME: "",
+        RAGENT_RUNNER_UNIT_SCOPE: "",
         ...env,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -303,7 +303,7 @@ async function waitForRunState(port, runId, expectedState) {
 
 function readRunManifest(home, runId) {
   return JSON.parse(
-    readFileSync(join(home, '.config', 'agentoc', 'chat-runs', runId, 'manifest.json'), 'utf8'),
+    readFileSync(join(home, '.config', 'ragent', 'chat-runs', runId, 'manifest.json'), 'utf8'),
   );
 }
 
@@ -1035,15 +1035,15 @@ async function phase14SessionSpawnCli() {
       ['cli.js', 'session-spawn', '--task', 'Return a focused child-session result.', '--wait', '--json'],
       {
         HOME: home,
-        AGENTOC_INSTANCE_ROOT: '',
-        AGENTOC_CONFIG_DIR: configDir,
-        AGENTOC_SESSION_ID: session.id,
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+        RAGENT_INSTANCE_ROOT: '',
+        RAGENT_CONFIG_DIR: configDir,
+        RAGENT_SESSION_ID: session.id,
+        RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
       },
     );
     assert.equal(cli.code, 0, `session-spawn CLI should exit cleanly: ${cli.stderr}`);
     const payload = JSON.parse(cli.stdout);
-    assert.equal(payload.sourceSessionId, session.id, 'CLI should default to AGENTOC_SESSION_ID');
+    assert.equal(payload.sourceSessionId, session.id, 'CLI should default to RAGENT_SESSION_ID');
     assert.equal(payload.task, 'Return a focused child-session result.', 'CLI should echo the delegated task');
     assert.equal(typeof payload.sessionId, 'string', 'CLI should return the child session id');
     assert.equal(typeof payload.runId, 'string', 'CLI should return the child run id');
@@ -1082,10 +1082,10 @@ async function phase14bSessionSpawnCliInternalFinalOnly() {
       ['cli.js', 'session-spawn', '--task', 'Return a focused child-session result.', '--internal', '--final-only', '--json'],
       {
         HOME: home,
-        AGENTOC_INSTANCE_ROOT: '',
-        AGENTOC_CONFIG_DIR: configDir,
-        AGENTOC_SESSION_ID: session.id,
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+        RAGENT_INSTANCE_ROOT: '',
+        RAGENT_CONFIG_DIR: configDir,
+        RAGENT_SESSION_ID: session.id,
+        RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
       },
     );
     assert.equal(cli.code, 0, `internal final-only session-spawn CLI should exit cleanly: ${cli.stderr}`);
@@ -1372,7 +1372,7 @@ async function phase17SidecarPreSpawnFailurePersistsRootCause() {
     home,
     port,
     envOverrides: {
-      AGENTOC_TEST_RUNNER_SIDECAR_FAIL_BEFORE_TOOL_SPAWN: '1',
+      RAGENT_TEST_RUNNER_SIDECAR_FAIL_BEFORE_TOOL_SPAWN: '1',
     },
   });
   try {
@@ -1413,7 +1413,7 @@ async function phase18FinalizationMetricsFailureDoesNotMaskSuccess() {
     home,
     port,
     envOverrides: {
-      AGENTOC_TEST_THROW_ON_FINALIZATION_METRICS: '1',
+      RAGENT_TEST_THROW_ON_FINALIZATION_METRICS: '1',
     },
   });
   try {
@@ -1500,14 +1500,14 @@ async function phase19RunAgentTemplateOverride() {
 }
 
 // Codex MCP server management: /api/codex/mcp-servers wraps `codex mcp`
-// against a redirectable codex HOME (AGENTOC_CODEX_HOME) so the real
+// against a redirectable codex HOME (RAGENT_CODEX_HOME) so the real
 // ~/.codex is never touched.
 async function phase20CodexMcpManagement() {
   const { home, configDir } = setupTempHome();
   const port = randomPort();
   const codexHome = join(home, '.codex-test');
   mkdirSync(codexHome, { recursive: true });
-  const server = await startServer({ home, port, envOverrides: { AGENTOC_CODEX_HOME: codexHome } });
+  const server = await startServer({ home, port, envOverrides: { RAGENT_CODEX_HOME: codexHome } });
   try {
     await createSession(port, { name: 'CodexMcp', group: 'Tests', description: 'Codex MCP management' });
 
@@ -1562,7 +1562,7 @@ async function phase21ClaudeMcpManagement() {
   const port = randomPort();
   const claudeConfigDir = join(home, 'claude-config');
   mkdirSync(claudeConfigDir, { recursive: true });
-  const server = await startServer({ home, port, envOverrides: { AGENTOC_CLAUDE_CONFIG_DIR: claudeConfigDir } });
+  const server = await startServer({ home, port, envOverrides: { RAGENT_CLAUDE_CONFIG_DIR: claudeConfigDir } });
   try {
     await createSession(port, { name: 'ClaudeMcp', group: 'Tests', description: 'Claude Code MCP management' });
 

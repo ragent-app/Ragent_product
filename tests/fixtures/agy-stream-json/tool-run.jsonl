@@ -1,4 +1,4 @@
-{"event":"init","conversation_id":"fixture-agy-conversation","init":{"cwd":"/tmp/agentoc-fixture","tools":["run_command","call_mcp_tool"]}}
+{"event":"init","conversation_id":"fixture-agy-conversation","init":{"cwd":"/tmp/ragent-fixture","tools":["run_command","call_mcp_tool"]}}
 {"event":"step_update","step_update":{"conversation_id":"fixture-agy-conversation","step_index":0,"state":"DONE","step_type":"user_input"}}
 {"event":"step_update","step_update":{"conversation_id":"fixture-agy-conversation","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"parameters":{"CommandLine":"echo AGY_FIXTURE_OK"}}}}
 {"event":"step_update","step_update":{"conversation_id":"fixture-agy-conversation","step_index":1,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"parameters":{"CommandLine":"echo AGY_FIXTURE_OK"},"output":"AGY_FIXTURE_OK\r\n"}}}

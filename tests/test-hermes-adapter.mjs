@@ -68,15 +68,15 @@ assert.equal(toolResult[0].type, 'tool_result');
 assert.equal(toolResult[0].output, 'ok');
 assert.equal(toolResult[0].exitCode, 0);
 
-const started = parse({ id: 'agentoc-session-new', result: { sessionId: 'hermes-session-1' } });
+const started = parse({ id: 'ragent-session-new', result: { sessionId: 'hermes-session-1' } });
 assert.equal(started[0].type, 'status');
 assert.equal(started[0].content, 'ACP session started');
 assert.equal(started[0].providerSessionId, 'hermes-session-1');
 
-const resumed = parse({ id: 'agentoc-session-load', result: { sessionId: 'hermes-session-1' } });
+const resumed = parse({ id: 'ragent-session-load', result: { sessionId: 'hermes-session-1' } });
 assert.equal(resumed[0].content, 'ACP session resumed');
 
-const completed = parse({ id: 'agentoc-prompt', result: {} });
+const completed = parse({ id: 'ragent-prompt', result: {} });
 assert.equal(completed[0].content, 'completed');
 assert.equal(completed[0].runState, 'completed');
 

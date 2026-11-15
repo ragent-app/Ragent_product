@@ -12,7 +12,7 @@ for (const command of ['cat x; rm -rf /', 'cat "$(rm x)"', 'cat $HOME/a', 'cat x
   assert.equal(parseLiteralBashWords(command), null, command);
 }
 if (process.platform === 'win32') {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-bash-policy-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-bash-policy-'));
   const workspace = path.join(root, 'workspace');
   await mkdir(path.join(workspace, 'secret', '.ssh'), { recursive: true });
   await mkdir(path.join(workspace, 'ordinary'), { recursive: true });
@@ -73,13 +73,13 @@ if (process.platform === 'win32') {
   }
   assert.equal((await inspect('if true; then rm -f ordinary-link; fi')).decision,
     (await inspect('rm -f ordinary-link')).decision, 'the wrapper must preserve existing hardlink deletion policy');
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
     await mkdir(path.join(workspace, 'transient'));
     await writeFile(path.join(workspace, 'transient', 'readme.txt'), 'fixture');
     const transition = await analyzeWindowsBash('cd transient && cat readme.txt || echo changed > marker.txt', { ...context, allowCwdRewrite: true });
     assert.equal(decideWindowsPowerShellActions(transition).decision, 'allow');
     await rename(path.join(workspace, 'transient'), path.join(workspace, 'moved-transient'));
-    const result = spawnSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', transition.rewrittenCommand], { cwd: workspace, windowsHide: true });
+    const result = spawnSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', transition.rewrittenCommand], { cwd: workspace, windowsHide: true });
     assert.notEqual(result.status, 0);
     await assert.rejects(access(path.join(workspace, 'marker.txt')), { code: 'ENOENT' });
   }
@@ -173,8 +173,8 @@ if (process.platform === 'win32') {
     assert.equal((await decideWindowsApproval(request(`cat '${file}' | sed -n '1w owned'`), state)).decision, 'prompt');
     assert.equal((await decideWindowsApproval(request(`cat '${file}' | bash -c 'rm -rf /'`), state)).decision, 'prompt');
   }
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const bash = process.env.AGENTOC_TEST_BASH_BINARY;
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const bash = process.env.RAGENT_TEST_BASH_BINARY;
     const numbered = execFileSync(bash, ['--noprofile', '--norc', '-c', `cat -n '${file}'`], { cwd: workspace, encoding: 'utf8', windowsHide: true });
     assert.match(numbered, /\b1\s+fixture/);
     const listing = execFileSync(bash, ['--noprofile', '--norc', '-c', `ls -1 '${bashPath(workspace)}'`], { cwd: workspace, encoding: 'utf8', windowsHide: true });

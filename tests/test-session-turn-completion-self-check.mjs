@@ -52,8 +52,8 @@ function buildHelpers({
   return { calls, helpers };
 }
 
-const previousSetting = process.env.AGENTOC_REPLY_SELF_CHECK;
-process.env.AGENTOC_REPLY_SELF_CHECK = 'all';
+const previousSetting = process.env.RAGENT_REPLY_SELF_CHECK;
+process.env.RAGENT_REPLY_SELF_CHECK = 'all';
 
 try {
   // Reply self-check only runs in goal-chasing sessions; the fixture session
@@ -180,8 +180,8 @@ try {
   console.log('test-session-turn-completion-self-check: ok');
 } finally {
   if (previousSetting === undefined) {
-    delete process.env.AGENTOC_REPLY_SELF_CHECK;
+    delete process.env.RAGENT_REPLY_SELF_CHECK;
   } else {
-    process.env.AGENTOC_REPLY_SELF_CHECK = previousSetting;
+    process.env.RAGENT_REPLY_SELF_CHECK = previousSetting;
   }
 }

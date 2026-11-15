@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-early-grouping-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-early-grouping-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -21,7 +21,7 @@ const prompt = process.argv[process.argv.length - 1] || '';
 const hasInlineLabels = prompt.includes('Session presentation metadata (hidden protocol)');
 const delayMs = 220;
 const text = hasInlineLabels
-  ? 'main task finished\\n<agentoc-session-labels>{"schemaVersion":1,"title":"AgentoC Should Stay Hidden","group":"AgentoC","description":"Classify the feature work without renaming its explicit title."}</agentoc-session-labels>'
+  ? 'main task finished\\n<ragent-session-labels>{"schemaVersion":1,"title":"Ragent Should Stay Hidden","group":"Ragent","description":"Classify the feature work without renaming its explicit title."}</ragent-session-labels>'
   : 'main task finished';
 
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'run-thread' }));
@@ -126,7 +126,7 @@ await waitFor(
 await waitFor(
   async () => {
     const current = await getSession(session.id);
-    return current?.group === 'AgentoC'
+    return current?.group === 'Ragent'
       && current?.description === 'Classify the feature work without renaming its explicit title.';
   },
   'foreground completion should apply grouping metadata',
@@ -135,7 +135,7 @@ await waitFor(
 const finished = await getSession(session.id);
 assert.equal(finished?.name, 'Precise Feature Task', 'existing titles should stay unchanged during grouping-only labeling');
 assert.equal(finished?.autoRenamePending, false, 'grouping-only labeling should not reopen auto-rename');
-assert.equal(finished?.group, 'AgentoC', 'finished session should keep the early AI grouping');
+assert.equal(finished?.group, 'Ragent', 'finished session should keep the early AI grouping');
 assert.equal(
   finished?.description,
   'Classify the feature work without renaming its explicit title.',

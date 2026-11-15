@@ -92,22 +92,22 @@ assert.equal(
   'display formatting should strip hidden UI blocks before rendering visible text',
 );
 assert.equal(
-  context.formatDecodedDisplayText('Visible\n<agentoc-collaboration-plan>{"schemaVersion":1}</agentoc-collaboration-plan>\nTail'),
+  context.formatDecodedDisplayText('Visible\n<ragent-collaboration-plan>{"schemaVersion":1}</ragent-collaboration-plan>\nTail'),
   'Visible\n\nTail',
   'display formatting should strip Runtime collaboration envelopes',
 );
 assert.equal(
-  context.formatDecodedDisplayText('Visible <agentoc-collab'),
+  context.formatDecodedDisplayText('Visible <ragent-collab'),
   'Visible',
   'display formatting should hide a partial Runtime marker at a stream boundary',
 );
 assert.equal(
-  context.formatDecodedDisplayText('Final answer\n<agentoc-session-labels>{"title":"Hidden"}</agentoc-session-labels>'),
+  context.formatDecodedDisplayText('Final answer\n<ragent-session-labels>{"title":"Hidden"}</ragent-session-labels>'),
   'Final answer',
   'display formatting should strip inline session labels after stream completion',
 );
 assert.equal(
-  context.formatDecodedDisplayText('Final answer <agentoc-session-la'),
+  context.formatDecodedDisplayText('Final answer <ragent-session-la'),
   'Final answer',
   'display formatting should buffer a partial session-label marker instead of flashing it',
 );

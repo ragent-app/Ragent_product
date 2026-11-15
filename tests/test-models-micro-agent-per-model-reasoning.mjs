@@ -7,9 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-models-micro-agent-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-models-micro-agent-'));
 const fakeBin = join(tempHome, '.local', 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(fakeBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });

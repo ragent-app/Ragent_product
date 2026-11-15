@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-external-claude-oauth-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-external-claude-oauth-'));
 const configDir = join(root, 'config');
 const credentialsFile = join(root, 'claude', '.credentials.json');
 mkdirSync(join(root, 'claude'), { recursive: true });
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_EXTERNAL_CLAUDE_CREDENTIALS_FILE = credentialsFile;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_EXTERNAL_CLAUDE_CREDENTIALS_FILE = credentialsFile;
 
 const { runExternalClaudeOAuthCommand } = await import('../lib/external-claude-oauth-command.mjs');
 
@@ -48,7 +48,7 @@ try {
     'takeover', '--account', initial.external.ownershipKey, '--json',
   ], { stdout: takeoverOut }), 0);
   const takeover = JSON.parse(takeoverOut.text());
-  assert.equal(takeover.ownership.records.find((row) => row.accountId === initial.external.ownershipKey).status, 'agentoc-owned');
+  assert.equal(takeover.ownership.records.find((row) => row.accountId === initial.external.ownershipKey).status, 'ragent-owned');
 
   await assert.rejects(
     () => runExternalClaudeOAuthCommand(['takeover', '--account', switched.ownership.currentExternalAccountId], { stdout: capture() }),

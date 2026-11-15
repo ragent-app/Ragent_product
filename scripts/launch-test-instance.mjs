@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // DS-02: safe test instance launcher.
 //
-// Launches a fully isolated AgentoC instance for tests / stress runs / diagnostics:
-//   - fresh AGENTOC_CONFIG_DIR, AGENTOC_WORK_ROOT_DIR, AGENTOC_MEMORY_DIR
-//   - unique instance id + instance marker (AGENTOC_TEST_INSTANCE_ID env, instance.json file)
+// Launches a fully isolated Ragent instance for tests / stress runs / diagnostics:
+//   - fresh RAGENT_CONFIG_DIR, RAGENT_WORK_ROOT_DIR, RAGENT_MEMORY_DIR
+//   - unique instance id + instance marker (RAGENT_TEST_INSTANCE_ID env, instance.json file)
 //   - free temporary port (never 7690/7699 production ports)
 //   - hard TTL with SIGTERM -> SIGKILL escalation (like timeout(1))
 //   - on exit, removes ONLY the resources this instance created
@@ -19,7 +19,7 @@
 // Options:
 //   --port <n|auto>   fixed port or auto (default: auto, free port 40000-49999)
 //   --ttl <seconds>   hard lifetime; 0 = no TTL (default: 600)
-//   --base-dir <dir>  parent dir for instances (default: $AGENTOC_TEST_INSTANCE_BASE_DIR
+//   --base-dir <dir>  parent dir for instances (default: $RAGENT_TEST_INSTANCE_BASE_DIR
 //                     or private temporary agct-<uid>; short /private/tmp path on macOS)
 //   --instance-id <id> override generated id (/^[a-zA-Z0-9_-]{1,64}$/)
 //   --grace <ms>      SIGTERM -> SIGKILL grace period (default: 3000)
@@ -171,21 +171,21 @@ export function buildChildEnvironment(instance, inherited = process.env) {
   // Never inherit instance-scoped overrides from the caller (they belong to
   // whatever production/test instance the caller runs in).
   for (const key of Object.keys(env)) {
-    if (/^(AGENTOC_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|GEMINI_|CLAUDE_|CODEX_)/i.test(key)
+    if (/^(RAGENT_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|GEMINI_|CLAUDE_|CODEX_)/i.test(key)
       || /^(GOOGLE_APPLICATION_CREDENTIALS(?:_JSON)?|GOOGLE_API_KEY|DEEPSEEK_API_KEY|QWEN_API_KEY)$/i.test(key)) {
       delete env[key];
     }
   }
-  env.AGENTOC_INSTANCE_ROOT = instance.instanceDir;
-  env.AGENTOC_CONFIG_DIR = instance.configDir;
-  env.AGENTOC_WORK_ROOT_DIR = instance.workRootDir;
-  env.AGENTOC_MEMORY_DIR = instance.memoryDir;
-  env.AGENTOC_RUN_SPOOL_DIR = instance.spoolDir;
-  env.AGENTOC_PROVIDER_HOMES_DIR = instance.providerHomesDir;
-  env.AGENTOC_HARNESS_ROOT = join(instance.instanceDir, 'harnesses');
-  env.AGENTOC_PLATFORM_SKILLS_DIR = join(instance.instanceDir, 'platform-skills');
-  env.AGENTOC_SHARED_TOOLS_DIR = join(instance.instanceDir, 'shared-tools');
-  env.AGENTOC_SOURCE_PROJECT_ROOT = repoRoot;
+  env.RAGENT_INSTANCE_ROOT = instance.instanceDir;
+  env.RAGENT_CONFIG_DIR = instance.configDir;
+  env.RAGENT_WORK_ROOT_DIR = instance.workRootDir;
+  env.RAGENT_MEMORY_DIR = instance.memoryDir;
+  env.RAGENT_RUN_SPOOL_DIR = instance.spoolDir;
+  env.RAGENT_PROVIDER_HOMES_DIR = instance.providerHomesDir;
+  env.RAGENT_HARNESS_ROOT = join(instance.instanceDir, 'harnesses');
+  env.RAGENT_PLATFORM_SKILLS_DIR = join(instance.instanceDir, 'platform-skills');
+  env.RAGENT_SHARED_TOOLS_DIR = join(instance.instanceDir, 'shared-tools');
+  env.RAGENT_SOURCE_PROJECT_ROOT = repoRoot;
   // Only the child sees this throwaway profile, never the operator's profile.
   env.HOME = join(instance.instanceDir, 'home');
   env.USERPROFILE = env.HOME;
@@ -193,32 +193,32 @@ export function buildChildEnvironment(instance, inherited = process.env) {
   env.LOCALAPPDATA = join(env.HOME, 'AppData', 'Local');
   env.CHAT_PORT = String(instance.port);
   env.CHAT_BIND_HOST = '127.0.0.1';
-  env.AGENTOC_TEST_INSTANCE_ID = instance.id;
-  env.AGENTOC_TEST_INSTANCE_TTL_SECONDS = String(instance.ttlSeconds);
+  env.RAGENT_TEST_INSTANCE_ID = instance.id;
+  env.RAGENT_TEST_INSTANCE_TTL_SECONDS = String(instance.ttlSeconds);
   // Let the server apply temp-dir overrides even when the caller HOME itself
-  // looks like a temp agentoc home.
-  env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  // looks like a temp ragent home.
+  env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
   // Test instances must never reach the production runner supervisor or spawn
   // systemd transient units.
-  env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-  env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = '';
-  env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '';
-  env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = '';
-  env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = '';
-  env.AGENTOC_RUNNER_LAUNCH_MODE = 'detached-process';
-  env.AGENTOC_RUNNER_UNIT_NAME = '';
-  env.AGENTOC_RUNNER_UNIT_SCOPE = '';
+  env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+  env.RAGENT_RUNNER_SUPERVISOR_SOCKET = '';
+  env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '';
+  env.RAGENT_RUNNER_LIFECYCLE_SOCKET = '';
+  env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = '';
+  env.RAGENT_RUNNER_LAUNCH_MODE = 'detached-process';
+  env.RAGENT_RUNNER_UNIT_NAME = '';
+  env.RAGENT_RUNNER_UNIT_SCOPE = '';
   // Keep the instance inside the local loopback and away from external ingress /
   // tunnel discovery (no production signaling contact, no cloudflared probing).
-  env.AGENTOC_PUBLIC_BASE_URL = `http://127.0.0.1:${instance.port}`;
-  env.AGENTOC_P2P_SIGNALING_URL = 'http://127.0.0.1:9';
-  env.AGENTOC_ACCOUNTS_URL = 'http://127.0.0.1:9/accounts';
-  env.AGENTOC_ACCOUNTS_JWKS_URL = 'http://127.0.0.1:9/accounts/.well-known/jwks.json';
-  env.AGENTOC_ACCOUNTS_ISSUER = 'http://127.0.0.1:9';
-  env.AGENTOC_TURN_BROKER_URL = 'http://127.0.0.1:9/turn';
-  env.AGENTOC_HARNESS_POLICY_URL = 'http://127.0.0.1:9/accounts';
-  env.AGENTOC_ENABLE_SHARED_STARTUP_DEFAULTS = '0';
-  env.AGENTOC_AUTH_SESSION_SECRET = randomBytes(32).toString('hex');
+  env.RAGENT_PUBLIC_BASE_URL = `http://127.0.0.1:${instance.port}`;
+  env.RAGENT_P2P_SIGNALING_URL = 'http://127.0.0.1:9';
+  env.RAGENT_ACCOUNTS_URL = 'http://127.0.0.1:9/accounts';
+  env.RAGENT_ACCOUNTS_JWKS_URL = 'http://127.0.0.1:9/accounts/.well-known/jwks.json';
+  env.RAGENT_ACCOUNTS_ISSUER = 'http://127.0.0.1:9';
+  env.RAGENT_TURN_BROKER_URL = 'http://127.0.0.1:9/turn';
+  env.RAGENT_HARNESS_POLICY_URL = 'http://127.0.0.1:9/accounts';
+  env.RAGENT_ENABLE_SHARED_STARTUP_DEFAULTS = '0';
+  env.RAGENT_AUTH_SESSION_SECRET = randomBytes(32).toString('hex');
   env.SECURE_COOKIES = '0';
   env.IS_SANDBOX = '1';
   return env;
@@ -249,7 +249,7 @@ async function main() {
   if (options.help) {
     process.stdout.write(`Usage: node scripts/launch-test-instance.mjs [options] [--] [command args...]
 
-Launches an isolated AgentoC test instance with independent config dir, work
+Launches an isolated Ragent test instance with independent config dir, work
 root, memory dir, port, instance id, marker, TTL, and cleanup of only its own
 temporary resources. Never touches production state.
 
@@ -274,8 +274,8 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
 
   const requestedBaseDir = options.baseDir
     ? resolve(options.baseDir)
-    : (trimString(process.env.AGENTOC_TEST_INSTANCE_BASE_DIR)
-        ? resolve(trimString(process.env.AGENTOC_TEST_INSTANCE_BASE_DIR))
+    : (trimString(process.env.RAGENT_TEST_INSTANCE_BASE_DIR)
+        ? resolve(trimString(process.env.RAGENT_TEST_INSTANCE_BASE_DIR))
         : join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(),
           `agct-${process.getuid?.() ?? 'user'}`));
 
@@ -294,7 +294,7 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
   const configDir = join(instanceDir, 'config');
   // macOS sockaddr_un has a 104-byte path field. Its default per-user TMPDIR
   // is already long, so fail before boot rather than report an opaque EINVAL.
-  const socketBytes = Buffer.byteLength(join(configDir, 'agentoc-cli.sock'));
+  const socketBytes = Buffer.byteLength(join(configDir, 'ragent-cli.sock'));
   if (process.platform !== 'win32' && socketBytes >= (process.platform === 'darwin' ? 104 : 108)) {
     throw new Error('Test CLI socket path is too long; use a shorter --base-dir or --instance-id');
   }
@@ -324,7 +324,7 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
     ttlSeconds,
     graceMs,
     createdAt: new Date().toISOString(),
-    markerEnv: 'AGENTOC_TEST_INSTANCE_ID',
+    markerEnv: 'RAGENT_TEST_INSTANCE_ID',
     markerFile: 'instance.json',
     seededOwnerPassword: true,
     ownerNonce: randomBytes(24).toString('hex'),
@@ -368,7 +368,7 @@ Exit codes: child exit code; 124 = TTL expiry; 130/143 = signal; 1 = launcher er
   let stdioIncomplete = false;
   const tailLimit = 64 * 1024;
   const redact = (value) => String(value).split(seededOwnerPassword).join('[REDACTED_TEST_PASSWORD]')
-    .split(env.AGENTOC_AUTH_SESSION_SECRET).join('[REDACTED_TEST_SECRET]');
+    .split(env.RAGENT_AUTH_SESSION_SECRET).join('[REDACTED_TEST_SECRET]');
 
   const cleanup = async () => {
     const facts = await lstat(instanceDir);

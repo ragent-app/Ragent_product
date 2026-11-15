@@ -188,7 +188,7 @@ test('v2 deadline fences new attempts without shortening or preventing cancellat
 });
 
 test('v2 HTTP cancellation overtakes an authenticated but delayed reservation', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-relay-race-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-relay-race-'));
   let app, release;
   const gate = new Promise(resolve => { release = resolve; });
   let arrived;
@@ -228,7 +228,7 @@ test('v2 HTTP cancellation overtakes an authenticated but delayed reservation', 
 });
 
 test('opt-in Accounts routes stream data with separately scoped bearer capabilities', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-relay-test-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-relay-test-'));
   let app;
   try {
     app = await startAccountsServer({ host: '127.0.0.1', port: 0, logger: { level: 'silent' },
@@ -245,7 +245,7 @@ test('opt-in Accounts routes stream data with separately scoped bearer capabilit
     const base = `http://127.0.0.1:${app.server.address().port}/v1/owner-auth/account/attachment-relay/${ticket.id}/content`;
     const read = fetch(base, { headers: { authorization: `Bearer ${ticket.readToken}` } });
     const write = fetch(base, { method: 'PUT', headers: { authorization: `Bearer ${ticket.writeToken}`,
-      'content-type': 'application/vnd.agentoc.attachment-relay' }, body: data });
+      'content-type': 'application/vnd.ragent.attachment-relay' }, body: data });
     const [received, sent] = await Promise.all([read, write]);
     assert.equal(received.status, 200); assert.equal(sent.status, 204);
     assert.deepEqual(Buffer.from(await received.arrayBuffer()), data);
@@ -298,7 +298,7 @@ test('opt-in Accounts routes stream data with separately scoped bearer capabilit
     const encrypted = encryptRelayRecord({ key, transferId, totalBytes: plaintext.length, index: 0, plaintext });
     const sending = fetch(`${origin}/v1/owner-auth/account/attachment-relay/${live.id}/content`, {
       method: 'PUT', headers: { authorization: `Bearer ${live.writeToken}`,
-        'content-type': 'application/vnd.agentoc.attachment-relay' }, body: encrypted });
+        'content-type': 'application/vnd.ragent.attachment-relay' }, body: encrypted });
     assert.deepEqual(await collect(await receiving), plaintext);
     assert.equal((await sending).status, 204);
     assert.equal((await app.fastify.inject({ method: 'POST', url: v2Path,

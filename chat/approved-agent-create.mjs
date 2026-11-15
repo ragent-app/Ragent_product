@@ -118,7 +118,7 @@ function normalizePerMessageSystemPrompt(value) {
 }
 
 export function isAgentCreateApprovedActionEnabled(env = process.env) {
-  return trimString(env?.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED) === '1';
+  return trimString(env?.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED) === '1';
 }
 
 export function isAgentCreateApprovedAction(value) {

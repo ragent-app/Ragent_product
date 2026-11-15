@@ -12,23 +12,23 @@ const {
   buildContinuationPlannerPrompt,
 } = await import('../chat/session-dispatch-prompt.mjs');
 
-const previousDispatchSetting = process.env.AGENTOC_SESSION_DISPATCH;
+const previousDispatchSetting = process.env.RAGENT_SESSION_DISPATCH;
 
-delete process.env.AGENTOC_SESSION_DISPATCH;
+delete process.env.RAGENT_SESSION_DISPATCH;
 assert.equal(
   shouldRunDispatch({ id: 'session-1' }, {}),
   true,
   'continuation planning should default to enabled when the env var is unset',
 );
 
-process.env.AGENTOC_SESSION_DISPATCH = 'off';
+process.env.RAGENT_SESSION_DISPATCH = 'off';
 assert.equal(
   shouldRunDispatch({ id: 'session-1' }, {}),
   false,
   'continuation planning should still honor an explicit off setting',
 );
 
-process.env.AGENTOC_SESSION_DISPATCH = 'on';
+process.env.RAGENT_SESSION_DISPATCH = 'on';
 
 assert.equal(
   shouldRunDispatch({ id: 'session-1' }, {
@@ -388,7 +388,7 @@ assert.ok(
   'fork children should receive the prepared full parent context',
 );
 
-if (previousDispatchSetting === undefined) delete process.env.AGENTOC_SESSION_DISPATCH;
-else process.env.AGENTOC_SESSION_DISPATCH = previousDispatchSetting;
+if (previousDispatchSetting === undefined) delete process.env.RAGENT_SESSION_DISPATCH;
+else process.env.RAGENT_SESSION_DISPATCH = previousDispatchSetting;
 
 console.log('test-session-dispatch: ok');

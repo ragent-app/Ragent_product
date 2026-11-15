@@ -13,7 +13,7 @@
 // Locked against the legacy implementation by
 // tests/test-chat-ws-push-suppress-core.mjs.
 
-(function attachAgentocWsPushSuppressCore(root) {
+(function attachRagentWsPushSuppressCore(root) {
   const WS_EVENT_PUSH_SUPPRESS_MS = 600;
 
   // Live environment: reads always go to the injected object (mutations after
@@ -24,7 +24,7 @@
     renderedEventState: {},
   });
   const environment = new Proxy(
-    root.AgentocWsPushSuppressEnvironment || {},
+    root.RagentWsPushSuppressEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -74,7 +74,7 @@
     return lastWsEventPushLatestSeq >= (Number.isInteger(environment.renderedEventState?.latestSeq) ? environment.renderedEventState.latestSeq : 0);
   }
 
-  root.AgentocWsPushSuppressCore = {
+  root.RagentWsPushSuppressCore = {
     markWsEventPushApplied,
     isWsEventPushCaughtUp,
     WS_EVENT_PUSH_SUPPRESS_MS,

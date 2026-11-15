@@ -14,12 +14,12 @@ import { loadOrCreateInstanceIdentity, signWithInstanceIdentity } from '../lib/i
 import { buildTemporaryControlClaimMessage, temporaryControlInvitationDigest } from '../lib/temporary-control-protocol.mjs';
 import { buildTemporaryControlBrokerMessage } from '../lib/temporary-control-broker-protocol.mjs';
 
-const url = process.env.AGENTOC_PAIRING_PG_URL;
-if (!url) throw new Error('AGENTOC_PAIRING_PG_URL is required for the isolated schema test');
+const url = process.env.RAGENT_PAIRING_PG_URL;
+if (!url) throw new Error('RAGENT_PAIRING_PG_URL is required for the isolated schema test');
 const schema = `qa_account_pairing_${randomBytes(10).toString('hex')}`;
 assert.match(schema, /^qa_account_pairing_[a-f0-9]{20}$/);
 const pool = new Pool({ connectionString: url, max: 2 });
-const controlRoot = await mkdtemp(join(tmpdir(), 'agentoc-pg-anonymous-control-'));
+const controlRoot = await mkdtemp(join(tmpdir(), 'ragent-pg-anonymous-control-'));
 let created = false;
 let scopedPool;
 try {

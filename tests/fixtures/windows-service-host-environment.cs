@@ -6,15 +6,15 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
-using AgentoC.ServiceHost;
+using Ragent.ServiceHost;
 
 static class ServiceHostEnvironmentProbe {
   static void Need(bool condition,string name){if(!condition)throw new InvalidOperationException(name);}
   static readonly JavaScriptSerializer Json=new JavaScriptSerializer();
-  static readonly string[] Secrets={"AGENTOC_AUTH_SESSION_SECRET","agentoc_auth_session_secret","AGENTOC_FIREBASE_ADMIN_JSON","GOOGLE_APPLICATION_CREDENTIALS","ANTHROPIC_API_KEY","OPENAI_API_KEY","CODEX_HOME","CLAUDE_CONFIG_DIR","NODE_OPTIONS","NODE_PATH","HTTP_PROXY","AGENTOC_NATIVE_REGISTRY_DIR","AGENTOC_SECRET_NOT_YET_KNOWN"};
+  static readonly string[] Secrets={"RAGENT_AUTH_SESSION_SECRET","ragent_auth_session_secret","RAGENT_FIREBASE_ADMIN_JSON","GOOGLE_APPLICATION_CREDENTIALS","ANTHROPIC_API_KEY","OPENAI_API_KEY","CODEX_HOME","CLAUDE_CONFIG_DIR","NODE_OPTIONS","NODE_PATH","HTTP_PROXY","RAGENT_NATIVE_REGISTRY_DIR","RAGENT_SECRET_NOT_YET_KNOWN"};
   static ProcessStartInfo Info(string root,string node,string script,string role){
     string config=Path.Combine(root,"config");Directory.CreateDirectory(config);
-    return new AgentoCService("AgentoC-EnvironmentQA",role,node,script,root,config).BuildChildStartInfo();
+    return new RagentService("Ragent-EnvironmentQA",role,node,script,root,config).BuildChildStartInfo();
   }
   public static int Main(string[] args){
     var result=new Dictionary<string,object>{{"pass",false},{"serviceCreated",false},{"productionTouched",false}};var checks=new List<string>();
@@ -22,15 +22,15 @@ static class ServiceHostEnvironmentProbe {
       Need(args.Length==5,"fixture arguments");string root=args[0],node=args[1],probe=args[2],supervisor=args[3],controlProbe=args[4];
       foreach(string name in Secrets)Environment.SetEnvironmentVariable(name,name=="HTTP_PROXY"?"http://user:SYNTHETIC@127.0.0.1:8911":"SYNTHETIC-DO-NOT-INHERIT");
       foreach(string name in new[]{"HTTPS_PROXY","ALL_PROXY","NO_PROXY"})Environment.SetEnvironmentVariable(name,null);
-      Environment.SetEnvironmentVariable("AGENTOC_RUN_SPOOL_DIR","SYNTHETIC-WRONG-SPOOL");
+      Environment.SetEnvironmentVariable("RAGENT_RUN_SPOOL_DIR","SYNTHETIC-WRONG-SPOOL");
       foreach(string mode in new[]{"malformed","missing","directory"}){
         string home=Path.Combine(root,mode),config=Path.Combine(home,"config"),secret=Path.Combine(config,"auth-session-secret");Directory.CreateDirectory(config);
         if(mode=="malformed")File.WriteAllText(secret,"SYNTHETIC-INVALID-SECRET");
         if(mode=="directory")Directory.CreateDirectory(secret);
         var info=Info(home,node,probe,"supervisor");
         foreach(string name in Secrets)Need(!info.EnvironmentVariables.ContainsKey(name),"supervisor inherited forbidden variable");
-        Need(info.EnvironmentVariables["AGENTOC_RUN_SPOOL_DIR"]==Path.Combine(home,"data","chat-runs"),"scoped spool");
-        Need(info.EnvironmentVariables["AGENTOC_PROVIDER_HOMES_DIR"]==Path.Combine(home,"provider-homes"),"scoped homes");
+        Need(info.EnvironmentVariables["RAGENT_RUN_SPOOL_DIR"]==Path.Combine(home,"data","chat-runs"),"scoped spool");
+        Need(info.EnvironmentVariables["RAGENT_PROVIDER_HOMES_DIR"]==Path.Combine(home,"provider-homes"),"scoped homes");
         using(var child=Process.Start(info)){
           var output=child.StandardOutput.ReadToEndAsync();var error=child.StandardError.ReadToEndAsync();
           try{Need(child.WaitForExit(15000),"probe timeout");
@@ -51,7 +51,7 @@ static class ServiceHostEnvironmentProbe {
       Environment.SetEnvironmentVariable("HTTP_PROXY","http://127.0.0.1:8911/private?SYNTHETIC=secret#private");
       Need(Info(Path.Combine(root,"proxy"),node,probe,"supervisor").EnvironmentVariables["HTTP_PROXY"]=="http://127.0.0.1:8911/","public proxy changed or URL baggage copied");
       Environment.SetEnvironmentVariable("HTTP_PROXY",null);checks.Add("public-proxy-preserved-credentials-and-url-baggage-refused");
-      const string featureFlag="AGENTOC_TEMPORARY_PAIRING_ENABLED";
+      const string featureFlag="RAGENT_TEMPORARY_PAIRING_ENABLED";
       string featureRoot=Path.Combine(root,"temporary-feature");
       foreach(string value in new[]{"0","true","01","1 ","SYNTHETIC",null}){
         Environment.SetEnvironmentVariable(featureFlag,value);
@@ -61,9 +61,9 @@ static class ServiceHostEnvironmentProbe {
       Need(!Info(featureRoot,node,probe,"supervisor").EnvironmentVariables.ContainsKey(featureFlag),"supervisor inherited temporary feature");
       var enabledControl=Info(featureRoot,node,controlProbe,"control");
       Need(enabledControl.EnvironmentVariables[featureFlag]=="1","control lost explicit temporary feature");
-      var initializer=new AgentoCService("AgentoC-EnvironmentQA","control",node,probe,featureRoot,Path.Combine(featureRoot,"config"));
-      var initialInfo=(ProcessStartInfo)typeof(AgentoCService).GetMethod("BuildChildStartInfoCore",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(initializer,new object[]{true});
-      Need(!initialInfo.EnvironmentVariables.ContainsKey(featureFlag)&&!initialInfo.EnvironmentVariables.ContainsKey("AGENTOC_AUTH_SESSION_SECRET"),"identity initializer inherited feature or auth secret");
+      var initializer=new RagentService("Ragent-EnvironmentQA","control",node,probe,featureRoot,Path.Combine(featureRoot,"config"));
+      var initialInfo=(ProcessStartInfo)typeof(RagentService).GetMethod("BuildChildStartInfoCore",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(initializer,new object[]{true});
+      Need(!initialInfo.EnvironmentVariables.ContainsKey(featureFlag)&&!initialInfo.EnvironmentVariables.ContainsKey("RAGENT_AUTH_SESSION_SECRET"),"identity initializer inherited feature or auth secret");
       using(var child=Process.Start(enabledControl)){
         var output=child.StandardOutput.ReadToEndAsync();var error=child.StandardError.ReadToEndAsync();
         try{Need(child.WaitForExit(15000),"control feature probe timeout");
@@ -76,9 +76,9 @@ static class ServiceHostEnvironmentProbe {
       string controlRoot=Path.Combine(root,"control"),controlConfig=Path.Combine(controlRoot,"config");Directory.CreateDirectory(controlConfig);
       string controlSecret=Path.Combine(controlConfig,"auth-session-secret");
       var first=Info(controlRoot,node,probe,"control");string persisted=File.ReadAllText(controlSecret);
-      foreach(string name in Secrets)if(!String.Equals(name,"AGENTOC_AUTH_SESSION_SECRET",StringComparison.OrdinalIgnoreCase))Need(!first.EnvironmentVariables.ContainsKey(name),"control inherited foreign parent secret or Node hook");
-      Need(persisted.Length==64&&first.EnvironmentVariables["AGENTOC_AUTH_SESSION_SECRET"]==persisted,"control owns creation");
-      var second=Info(controlRoot,node,probe,"control");Need(second.EnvironmentVariables["AGENTOC_AUTH_SESSION_SECRET"]==persisted,"control rotated existing secret");
+      foreach(string name in Secrets)if(!String.Equals(name,"RAGENT_AUTH_SESSION_SECRET",StringComparison.OrdinalIgnoreCase))Need(!first.EnvironmentVariables.ContainsKey(name),"control inherited foreign parent secret or Node hook");
+      Need(persisted.Length==64&&first.EnvironmentVariables["RAGENT_AUTH_SESSION_SECRET"]==persisted,"control owns creation");
+      var second=Info(controlRoot,node,probe,"control");Need(second.EnvironmentVariables["RAGENT_AUTH_SESSION_SECRET"]==persisted,"control rotated existing secret");
       checks.Add("control-create-and-reuse-persisted-secret");
       File.WriteAllText(controlSecret,"INVALID");bool denied=false;
       try{Info(controlRoot,node,probe,"control");}catch(InvalidOperationException){denied=true;}
@@ -87,8 +87,8 @@ static class ServiceHostEnvironmentProbe {
       // Start the real supervisor entry with a unique QA pipe. It never binds
       // the installed owner endpoint or receives a Run/Provider request.
       string daemonRoot=Path.Combine(root,"daemon");var daemon=Info(daemonRoot,node,supervisor,"supervisor");
-      daemon.EnvironmentVariables["AGENTOC_RUNNER_SUPERVISOR_SOCKET"]="\\\\.\\pipe\\agentoc-service-env-"+Guid.NewGuid().ToString("N");
-      string stop=daemon.EnvironmentVariables["AGENTOC_WINDOWS_SERVICE_STOP_FILE"];
+      daemon.EnvironmentVariables["RAGENT_RUNNER_SUPERVISOR_SOCKET"]="\\\\.\\pipe\\ragent-service-env-"+Guid.NewGuid().ToString("N");
+      string stop=daemon.EnvironmentVariables["RAGENT_WINDOWS_SERVICE_STOP_FILE"];
       Directory.CreateDirectory(Path.GetDirectoryName(stop));var ready=new ManualResetEvent(false);
       using(var child=new Process{StartInfo=daemon}){
         child.OutputDataReceived+=(_,line)=>{if(line.Data!=null&&line.Data.Contains("[runner-supervisor] listening"))ready.Set();};

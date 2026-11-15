@@ -30,9 +30,9 @@ test('handoff refuses ambiguous credentials and unverifiable history', async (t)
   await assert.rejects(verifyCodexHandoffCredentials(args), { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });
   const prior = { account_id: 'account-a', refresh_token: 'refresh-b' };
   const sourceFingerprint = createHash('sha256').update(JSON.stringify(prior)).digest('hex').slice(0, 16);
-  await writeFile(join(canonicalHomeRoot, 'codex', '.agentoc-oauth-state.json'), JSON.stringify({ sourceFingerprint }));
+  await writeFile(join(canonicalHomeRoot, 'codex', '.ragent-oauth-state.json'), JSON.stringify({ sourceFingerprint }));
   assert.deepEqual(await verifyCodexHandoffCredentials({ ...args, selectedTokens: prior }), { retainLegacySource: true });
-  await writeFile(join(canonicalHomeRoot, 'codex', '.agentoc-oauth-state.json'), JSON.stringify({ sourceRefreshFingerprint: codexRefreshFingerprint(prior) }));
+  await writeFile(join(canonicalHomeRoot, 'codex', '.ragent-oauth-state.json'), JSON.stringify({ sourceRefreshFingerprint: codexRefreshFingerprint(prior) }));
   await verifySelectedCodexCredential({ ...args, selectedTokens: { ...prior, access_token: 'different-metadata' } });
   await assert.rejects(verifySelectedCodexCredential({ ...args, selectedTokens: { account_id: 'account-a', refresh_token: 'different-login' } }),
     { code: 'CODEX_HANDOFF_CREDENTIALS_DIVERGED' });

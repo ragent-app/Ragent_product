@@ -53,7 +53,7 @@ export async function exchangeRunPipe({exe,identity,sessionId,instanceId,lease,t
   const frame=grant.frame(text),binding={...grant.binding,capability:frame.capability};
   const server=endpoint(exe,'server'); let client;
   const deadline=Math.min(lease.expiresAtUnixMs,Date.now()+timeoutMs);
-  const pipeName='agentoc-run-candidate-'+randomBytes(16).toString('hex');
+  const pipeName='ragent-run-candidate-'+randomBytes(16).toString('hex');
   const policy={pipeName,expiresAtUnixMs:deadline,binding,localSid:identity.sid,localSessionId:sessionId,
     peerSid:fault==='client-sid'?'S-1-5-21-1-2-3-1001':identity.sid,
     peerSessionId:fault==='client-session'?sessionId+1:sessionId};
@@ -127,7 +127,7 @@ export async function probeRawRunPipe({exe,identity,sessionId,lease,fault}) {
   const grant=createRestrictedRunIpcGrant({instanceId:'raw-wire-qa',lease});
   const frame=grant.frame('Synthetic input');
   const server=endpoint(exe,'server');let socket;
-  const pipeName='agentoc-run-candidate-'+randomBytes(16).toString('hex');
+  const pipeName='ragent-run-candidate-'+randomBytes(16).toString('hex');
   try {
     const {stdout}=await promisify(execFile)(join(process.env.SystemRoot||'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),
       ['-NoLogo','-NoProfile','-NonInteractive','-Command',`(Get-Process -Id ${process.pid}).StartTime.ToUniversalTime().ToFileTimeUtc().ToString()`],

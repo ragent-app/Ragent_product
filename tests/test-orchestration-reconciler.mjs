@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-orchestration-reconciler-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-orchestration-reconciler-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const store = await import('../chat/orchestration-store.mjs');
 const reconciler = await import('../chat/orchestration-reconciler.mjs');

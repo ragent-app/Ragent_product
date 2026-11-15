@@ -37,7 +37,7 @@ function createFakeChild() {
 {
   const calls = [];
   const child = createFakeChild();
-  const rendered = await renderQr('agentoc://pair?value=1', 'qrcode-terminal', {
+  const rendered = await renderQr('ragent://pair?value=1', 'qrcode-terminal', {
     resolveCommand: async (command) => {
       check('pair QR resolves the requested command', command === 'qrcode-terminal');
       return 'C:\\tools\\qrcode-terminal.cmd';
@@ -55,7 +55,7 @@ function createFakeChild() {
   });
 
   check('pair QR returns renderer stdout', rendered === 'QR-OUTPUT\n');
-  check('pair QR sends the URI through stdin', child.input === 'agentoc://pair?value=1\n');
+  check('pair QR sends the URI through stdin', child.input === 'ragent://pair?value=1\n');
   check('pair QR uses cmd.exe for a Windows .cmd shim', calls[0]?.file === 'C:\\Windows\\System32\\cmd.exe');
   check('pair QR preserves the fixed cmd wrapper argv', JSON.stringify(calls[0]?.args) === JSON.stringify([
     '/d', '/s', '/c', '""C:\\tools\\qrcode-terminal.cmd""',
@@ -75,7 +75,7 @@ function createFakeChild() {
 }
 
 if (process.platform !== 'win32') {
-  const tempRoot = mkdtempSync(join(tmpdir(), 'agentoc-pair-command-'));
+  const tempRoot = mkdtempSync(join(tmpdir(), 'ragent-pair-command-'));
   const command = join(tempRoot, 'qrcode-terminal');
   writeFileSync(command, `#!/usr/bin/env node
 let input = '';
@@ -85,8 +85,8 @@ process.stdin.on('end', () => process.stdout.write('REAL:' + input.trim() + '\\n
 `);
   chmodSync(command, 0o755);
   try {
-    const rendered = await renderQr('agentoc://pair?real=1', command);
-    check('pair QR invokes a real POSIX renderer', rendered === 'REAL:agentoc://pair?real=1\n');
+    const rendered = await renderQr('ragent://pair?real=1', command);
+    check('pair QR invokes a real POSIX renderer', rendered === 'REAL:ragent://pair?real=1\n');
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

@@ -8,7 +8,7 @@ import { runGithubCiAutoRepair } from './github-ci-auto-repair.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
-const DEFAULT_CONFIG_DIR = join(homedir(), '.config', 'agentoc', 'github-ci-auto-repair');
+const DEFAULT_CONFIG_DIR = join(homedir(), '.config', 'ragent', 'github-ci-auto-repair');
 const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, 'config.json');
 const DEFAULT_LAST_RUN_PATH = join(DEFAULT_CONFIG_DIR, 'last-run.json');
 const DEFAULT_LOCK_DIR = join(DEFAULT_CONFIG_DIR, 'run.lock');

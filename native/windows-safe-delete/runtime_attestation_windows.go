@@ -34,7 +34,7 @@ func RuntimeAttestationMessage(a RuntimeAttestation) ([]byte, error) {
 		return nil, ErrExecutableIdentity
 	}
 	var b bytes.Buffer
-	b.WriteString("AgentoC Windows runtime attestation v1\x00")
+	b.WriteString("Ragent Windows runtime attestation v1\x00")
 	for _, value := range []string{a.InstanceID, strings.ToLower(a.Root)} {
 		_ = binary.Write(&b, binary.BigEndian, uint32(len(value)))
 		b.WriteString(value)

@@ -43,7 +43,7 @@ func ownerInstallGrantBytes(grant ownerInstallGrant) ([]byte, error) {
 	if err != nil {
 		return nil, errOwnerSessionUnavailable
 	}
-	return append([]byte("AgentoC Windows owner auto install v1\x00"), data...), nil
+	return append([]byte("Ragent Windows owner auto install v1\x00"), data...), nil
 }
 
 func verifyOwnerInstallGrant(grant ownerInstallGrant, signature string, publicKey ed25519.PublicKey,

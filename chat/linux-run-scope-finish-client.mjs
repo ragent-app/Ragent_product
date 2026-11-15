@@ -2,7 +2,7 @@ import { CHAT_PORT } from '../lib/config.mjs';
 import { LINUX_RUN_SCOPE_FINISH_PATH } from './linux-run-scope-finish-path.mjs';
 
 export async function notifyLinuxRunScopeFinished(run, manifest, {
-  base = process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`,
+  base = process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`,
 } = {}) {
   try {
     const url = new URL(base);

@@ -490,7 +490,7 @@ function fileAssetUploadContract(maximumBytes = MAX_STABLE_UPLOAD_BYTES) {
   return { version: 1, maximumBytes, requestIdMaximumLength: 200,
     sha256Required: true, readonlyReceiptLookup: true,
     resumableUpload: RESUMABLE_UPLOAD_CONTRACT,
-    ...(process.env.AGENTOC_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured
+    ...(process.env.RAGENT_ASSET_RELAY_ENABLED !== '0' && getOwnerAccountBrokerStatus().configured
       ? { encryptedRelay: { version: 1, recordBytes: 256 * 1024, finalizeWaitsForRelay: true } } : {}),
     scopeConditionVersion: 1, scopeContractPath: '/api/session-scope-contract' };
 }
@@ -1466,7 +1466,7 @@ export async function handleControlRoutes({
 
   if (fileAssetRoute?.action === 'relay' && ['POST', 'GET', 'DELETE'].includes(req.method)) {
     res.setHeader?.('Cache-Control', 'private, no-store');
-    if (process.env.AGENTOC_ASSET_RELAY_ENABLED === '0') { req.resume?.(); writeJson(res, 404, { code: 'RESOURCE_NOT_FOUND' }); return true; }
+    if (process.env.RAGENT_ASSET_RELAY_ENABLED === '0') { req.resume?.(); writeJson(res, 404, { code: 'RESOURCE_NOT_FOUND' }); return true; }
     if (authSession?.role !== 'owner' || isRunCapability(authSession) ||
         (authSession.principalKind && !['owner', 'trusted_device'].includes(authSession.principalKind))) {
       req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true;

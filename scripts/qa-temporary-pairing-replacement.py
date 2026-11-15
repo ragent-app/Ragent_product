@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Camera-free live pairing and Sharesheet checks against installed AgentoC.
+"""Camera-free live pairing and Sharesheet checks against installed Ragent.
 
 Use SSH for macOS or --windows-local for the installed Windows service. SSH
 requires paramiko and a trusted host key. Live tests require an explicit adb
@@ -18,20 +18,20 @@ import sys
 import threading
 import time
 
-CLI = "/Applications/AgentoC.app/Contents/Resources/agentoc-cli"
+CLI = "/Applications/Ragent.app/Contents/Resources/ragent-cli"
 API = "/api/device-pairing/temporary/invitations"
 TEST = (
-    "com.andysagent.agentoc.TemporaryPairingLiveTicketTest"
+    "com.andysagent.ragent.TemporaryPairingLiveTicketTest"
     "#replacesSameInstanceClaimOnlyAfterPendingOperationIsCleared"
 )
 SHARE_TEST = (
-    "com.andysagent.agentoc.TemporaryPairingLiveTicketTest"
+    "com.andysagent.ragent.TemporaryPairingLiveTicketTest"
     "#claimsTicketConnectsRunsNoOpAndReadsExactResult"
 )
 RUNNER = "com.agentoncloud.android.test/androidx.test.runner.AndroidJUnitRunner"
 STAGED = (
-    "/data/local/tmp/agentoc-temporary-pairing-ticket.json",
-    "/data/local/tmp/agentoc-temporary-pairing-replacement-ticket.json",
+    "/data/local/tmp/ragent-temporary-pairing-ticket.json",
+    "/data/local/tmp/ragent-temporary-pairing-replacement-ticket.json",
 )
 ADB = "adb"
 
@@ -40,15 +40,15 @@ def windows_owner_json(method, path, body=None, *, node_path, cli_path, config_d
     """Use the installed service's supported CLI, retaining its named-pipe ACL."""
     env = os.environ.copy()
     env.update({
-        "AGENTOC_WINDOWS_SERVICE_MODE": "1",
-        "AGENTOC_CONFIG_DIR": config_dir,
-        "AGENTOC_INSTANCE_ROOT": ntpath.dirname(config_dir),
+        "RAGENT_WINDOWS_SERVICE_MODE": "1",
+        "RAGENT_CONFIG_DIR": config_dir,
+        "RAGENT_INSTANCE_ROOT": ntpath.dirname(config_dir),
         "CHAT_BIND_HOST": "127.0.0.1",
         "CHAT_PORT": "7690",
-        "AGENTOC_CHAT_BASE_URL": "http://127.0.0.1:7690",
+        "RAGENT_CHAT_BASE_URL": "http://127.0.0.1:7690",
     })
-    for key in ("AGENTOC_RUN_SPOOL_DIR", "AGENTOC_PROVIDER_HOMES_DIR", "AGENTOC_MEMORY_DIR",
-                "AGENTOC_WORK_ROOT_DIR", "AGENTOC_PLATFORM_SKILLS_DIR", "AGENTOC_INSTANCE_KEY_FILE"):
+    for key in ("RAGENT_RUN_SPOOL_DIR", "RAGENT_PROVIDER_HOMES_DIR", "RAGENT_MEMORY_DIR",
+                "RAGENT_WORK_ROOT_DIR", "RAGENT_PLATFORM_SKILLS_DIR", "RAGENT_INSTANCE_KEY_FILE"):
         env[key] = ""
     argv = [node_path, cli_path, "api", method, path]
     payload = None
@@ -131,11 +131,11 @@ def main(argv=None):
     destination.add_argument("--host", help="macOS SSH host")
     destination.add_argument("--windows-local", action="store_true", help="Use installed Windows service Owner CLI")
     parser.add_argument("--user", help="macOS SSH user")
-    payload = ntpath.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "AgentoC", "payload")
+    payload = ntpath.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "Ragent", "payload")
     parser.add_argument("--windows-node", default=ntpath.join(payload, "node.exe"))
     parser.add_argument("--windows-cli", default=ntpath.join(payload, "cli.js"))
     parser.add_argument("--windows-config", default=ntpath.join(
-        os.environ.get("ProgramData", r"C:\ProgramData"), "AgentoC", "instances", "owner", "config"))
+        os.environ.get("ProgramData", r"C:\ProgramData"), "Ragent", "instances", "owner", "config"))
     parser.add_argument("--serial")
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--mode", choices=("replacement", "share", "files"), default="replacement")

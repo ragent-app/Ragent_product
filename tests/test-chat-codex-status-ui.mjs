@@ -103,12 +103,12 @@ const context = {
     createElement: makeElement,
   },
   window: {
-    AgentoCIcons: {
+    RagentIcons: {
       render(name, options = {}) {
         return `<svg class="rl-icon ${options.className || ''}" data-name="${name}"></svg>`;
       },
     },
-    agentocT(key, vars = {}) {
+    ragentT(key, vars = {}) {
       if (key === 'workbench.editing') return 'Editing';
       if (key === 'workbench.editingStats') {
         return `${vars.added} lines added, ${vars.removed} lines removed`;
@@ -169,7 +169,7 @@ assert.equal(
 
 const fileChangeSummary = context.summarizeFileChangeEditingEvent({
   type: 'file_change',
-  filePath: '/srv/agentoc-promoted/static/chat/ui.js',
+  filePath: '/srv/ragent-promoted/static/chat/ui.js',
   changeType: 'modified',
 });
 assert.ok(fileChangeSummary, 'file changes should be usable as editing signals');
@@ -205,7 +205,7 @@ thinkingHeader.appendChild(thinkingChevron);
 thinkingBlock.appendChild(thinkingHeader);
 assert.equal(
   context.applyEditingSummaryToThinkingBlock(thinkingBlock, {
-    filePath: '/srv/agentoc-promoted/static/chat/ui.js',
+    filePath: '/srv/ragent-promoted/static/chat/ui.js',
     fileName: 'ui.js',
     totalAdded: 2,
     totalRemoved: 1,
@@ -232,7 +232,7 @@ const row = context.renderFileEditInlineStatusInto(makeElement('div'), {
   id: 'edit_1',
   toolName: 'Edit',
   toolInput: JSON.stringify({
-    file_path: '/srv/agentoc-promoted/static/chat/ui.js',
+    file_path: '/srv/ragent-promoted/static/chat/ui.js',
     old_string: 'one\ntwo\nthree',
     new_string: 'one\nTWO\nfour',
   }),
@@ -249,7 +249,7 @@ const notebookRow = context.renderFileEditInlineStatusInto(makeElement('div'), {
   id: 'notebook_1',
   toolName: 'NotebookEdit',
   toolInput: JSON.stringify({
-    notebook_path: '/srv/agentoc-promoted-data/workspace/report.ipynb',
+    notebook_path: '/srv/ragent-promoted-data/workspace/report.ipynb',
     edit_mode: 'insert',
     new_source: 'print("done")',
   }),

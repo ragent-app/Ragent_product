@@ -42,7 +42,7 @@ eq('force push', codeForReason('git push --force/--delete'), RISK_REASON_CODES.G
 eq('composite', codeForReason('composite command (partly analyzed)'), RISK_REASON_CODES.COMPOSITE_UNANALYZED);
 eq('sensitive read', codeForReason('read sensitive system file'), RISK_REASON_CODES.SENSITIVE_SYSTEM_READ);
 eq('ordinary', codeForReason('ordinary command'), RISK_REASON_CODES.ORDINARY_COMMAND);
-for (const brand of ['AgentoC', 'Ragent']) {
+for (const brand of ['Ragent', 'Ragent']) {
   eq(`${brand} protected write`, codeForReason(`targets ${brand} control-plane path`), RISK_REASON_CODES.PROTECTED_CONTROL_PATH);
   eq(`${brand} protected read`, codeForReason(`reads ${brand} control-plane path`), RISK_REASON_CODES.PROTECTED_CONTROL_READ);
 }
@@ -66,20 +66,20 @@ eq('platform none for empty', platformFor('   '), 'none');
 // after those two decisions.
 const linuxScope = {
   platform: 'linux',
-  trustedWorkspaceRoot: '/var/lib/agentoc/workspace',
-  protectedRoots: ['/var/lib/agentoc/workspace/.agentoc-control'],
+  trustedWorkspaceRoot: '/var/lib/ragent/workspace',
+  protectedRoots: ['/var/lib/ragent/workspace/.ragent-control'],
   systemPathRoots: ['/etc', '/var'],
 };
 eq('protected outranks trusted workspace', classifyRiskTargetScope(
-  '/var/lib/agentoc/workspace/.agentoc-control/events/1.json',
+  '/var/lib/ragent/workspace/.ragent-control/events/1.json',
   { riskContext: linuxScope },
 ), RISK_TARGET_SCOPE.PROTECTED_CONTROL);
 eq('trusted workspace outranks generic system root', classifyRiskTargetScope(
-  '/var/lib/agentoc/workspace/src/index.js',
+  '/var/lib/ragent/workspace/src/index.js',
   { riskContext: linuxScope },
 ), RISK_TARGET_SCOPE.TRUSTED_WORKSPACE);
 eq('system root remains system outside workspace', classifyRiskTargetScope(
-  '/var/log/agentoc.log',
+  '/var/log/ragent.log',
   { riskContext: linuxScope },
 ), RISK_TARGET_SCOPE.SYSTEM);
 eq('unbound path remains outside workspace', classifyRiskTargetScope(
@@ -90,11 +90,11 @@ eq('unbound path remains outside workspace', classifyRiskTargetScope(
 const winScope = {
   platform: 'win32',
   trustedWorkspaceRoot: 'C:\\work\\project',
-  protectedRoots: ['C:\\work\\project\\.agentoc-control'],
+  protectedRoots: ['C:\\work\\project\\.ragent-control'],
   systemPathRoots: ['C:\\Windows', 'C:\\Program Files'],
 };
 eq('Windows protected precedence', classifyRiskTargetScope(
-  'C:\\work\\project\\.agentoc-control\\runs',
+  'C:\\work\\project\\.ragent-control\\runs',
   { riskContext: winScope },
 ), RISK_TARGET_SCOPE.PROTECTED_CONTROL);
 eq('Windows trusted workspace', classifyRiskTargetScope(
@@ -102,7 +102,7 @@ eq('Windows trusted workspace', classifyRiskTargetScope(
   { riskContext: winScope },
 ), RISK_TARGET_SCOPE.TRUSTED_WORKSPACE);
 eq('Windows protected descendant with two leading dots', classifyRiskTargetScope(
-  'C:\\work\\project\\.agentoc-control\\..metadata\\secret',
+  'C:\\work\\project\\.ragent-control\\..metadata\\secret',
   { riskContext: winScope },
 ), RISK_TARGET_SCOPE.PROTECTED_CONTROL);
 eq('Windows workspace descendant with two leading dots', classifyRiskTargetScope(
@@ -115,7 +115,7 @@ eq('Windows sibling with common prefix remains outside', classifyRiskTargetScope
 ), RISK_TARGET_SCOPE.OUTSIDE_WORKSPACE);
 const dotContext = { ...winScope, cwd: 'C:\\work\\project' };
 eq('protected Edit remains dangerous below two-dot directory', classifyRisk({
-  toolName: 'Edit', toolInput: { file_path: 'C:\\work\\project\\.agentoc-control\\..metadata\\secret' },
+  toolName: 'Edit', toolInput: { file_path: 'C:\\work\\project\\.ragent-control\\..metadata\\secret' },
   cwd: dotContext.cwd, projectRoot: dotContext.trustedWorkspaceRoot, riskContext: dotContext,
 }).tier, 'danger');
 check('command parser recognizes two-dot workspace directory', parseCommandFacts(
@@ -123,7 +123,7 @@ check('command parser recognizes two-dot workspace directory', parseCommandFacts
   { cwd: dotContext.cwd, projectRoot: dotContext.trustedWorkspaceRoot, riskContext: dotContext },
 ).targetScopes.includes('inside-project'));
 eq('POSIX protected descendant with two leading dots', classifyRiskTargetScope(
-  '/var/lib/agentoc/workspace/.agentoc-control/..metadata/secret',
+  '/var/lib/ragent/workspace/.ragent-control/..metadata/secret',
   { riskContext: linuxScope },
 ), RISK_TARGET_SCOPE.PROTECTED_CONTROL);
 eq('Windows system root', classifyRiskTargetScope(

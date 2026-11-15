@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
 const root = process.cwd();
-const dir = await mkdtemp(join(tmpdir(), 'agentoc-accounts-entrypoint-'));
+const dir = await mkdtemp(join(tmpdir(), 'ragent-accounts-entrypoint-'));
 const entry = join(dir, 'server.mjs');
 await symlink(join(root, 'accounts/server.mjs'), entry);
 
@@ -14,10 +14,10 @@ const child = spawn(process.execPath, [entry], {
   cwd: root,
   env: {
     ...process.env,
-    AGENTOC_ACCOUNTS_DATA_DIR: dir,
-    AGENTOC_ACCOUNTS_SIGNING_KEY_FILE: join(dir, 'signing-key.json'),
-    AGENTOC_ACCOUNTS_PUBLIC_BASE_URL: 'http://127.0.0.1:0',
-    AGENTOC_ACCOUNTS_HOST: '127.0.0.1',
+    RAGENT_ACCOUNTS_DATA_DIR: dir,
+    RAGENT_ACCOUNTS_SIGNING_KEY_FILE: join(dir, 'signing-key.json'),
+    RAGENT_ACCOUNTS_PUBLIC_BASE_URL: 'http://127.0.0.1:0',
+    RAGENT_ACCOUNTS_HOST: '127.0.0.1',
     PORT: '0',
   },
   stdio: ['ignore', 'pipe', 'pipe'],

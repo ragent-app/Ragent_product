@@ -209,7 +209,7 @@ function evaluateCorpusCase(entry) {
     case 'phase2a-firewall-private': {
       const op = operation({ ...baseEntry, primaryAction: entry.action, effects: ['network.listen'], target: { kind: 'firewall_rule', platform: 'win32' } });
       const facts = factsFor(op, {
-        resource: { program: 'AgentoC.exe', direction: 'inbound' },
+        resource: { program: 'Ragent.exe', direction: 'inbound' },
         selection: { protocol: 'tcp', port: 8080, profiles: ['private'] },
       });
       return evaluateWithProof({
@@ -223,7 +223,7 @@ function evaluateCorpusCase(entry) {
     case 'phase2a-firewall-public-expansion': {
       const op = operation({ ...baseEntry, primaryAction: entry.action, effects: ['network.listen'], target: { kind: 'firewall_rule', platform: 'win32' } });
       const narrowFacts = factsFor(op, {
-        resource: { program: 'AgentoC.exe', direction: 'inbound' },
+        resource: { program: 'Ragent.exe', direction: 'inbound' },
         selection: { protocol: 'tcp', port: 8080, profiles: ['private'] },
       });
       const broadFacts = factsFor(op, {
@@ -408,7 +408,7 @@ eq('grant mode mismatch is not silently reused', evaluateWithProof({
 
 // Constraint sets are monotonic: actual facts may be richer, never broader.
 check('constraint object rejects unpinned actual facts', !valueSatisfiesConstraint(
-  { profiles: ['private'], protocol: 'tcp', port: 8080, program: 'AgentoC.exe', extraFact: true },
+  { profiles: ['private'], protocol: 'tcp', port: 8080, program: 'Ragent.exe', extraFact: true },
   { profiles: ['private'], protocol: 'tcp', port: 8080 },
 ));
 check('public profile expansion does not match', !valueSatisfiesConstraint(
@@ -622,7 +622,7 @@ const protectedDelete = operation({
       computed: true,
       matched: true,
       workspaceRecommended: false,
-      boundary: 'agentoc-service',
+      boundary: 'ragent-service',
     },
   },
 });
@@ -665,7 +665,7 @@ const firewallFacts = buildPermissionFacts({
     containsSensitiveMaterial: false,
     containsGitMetadata: false,
   },
-  resource: { program: 'AgentoC.exe', direction: 'inbound' },
+  resource: { program: 'Ragent.exe', direction: 'inbound' },
   selection: { protocol: 'tcp', port: 8080, profiles: ['private'] },
   resourceSnapshotIdentity: 'firewall-snapshot-1',
   effectEnumerationProof: 'effects-proof',
@@ -682,7 +682,7 @@ const firewallGrant = createCapabilityGrant({
     impact: { reversible: firewall.impact.reversible, containsSensitiveMaterial: false, containsGitMetadata: false },
     target: firewall.target,
     targetFlags: { recursive: false, force: false, exact: false },
-    resource: { program: 'AgentoC.exe', direction: 'inbound' },
+    resource: { program: 'Ragent.exe', direction: 'inbound' },
     selection: { protocol: 'tcp', port: 8080, profiles: ['private'] },
     effects: { subset: ['network.listen'] },
   },

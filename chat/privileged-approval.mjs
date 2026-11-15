@@ -7,7 +7,7 @@ import {
   privilegedBatchResponseEvent,
 } from './privileged-ops.mjs';
 
-// Approval state machine for the AgentoC sudo-approval gate (design:
+// Approval state machine for the Ragent sudo-approval gate (design:
 // notes/current/privileged-approval-design.md). Sits on top of the pure batch
 // model in privileged-ops.mjs and emits the privileged_batch_request /
 // privileged_batch_response events defined in §6.
@@ -320,7 +320,7 @@ export async function surfacePrivilegedBatchRequest(batch, privilegedMode, store
 
 // ---------------------------------------------------------------------------
 // Privileged-shim result writeback (design docs/privileged-shim-channel-
-// 2026-09-03.md). The runner sidecar serves the real `agentoc-privileged`
+// 2026-09-03.md). The runner sidecar serves the real `ragent-privileged`
 // command: it writes `privilegedShimPending` alongside `privilegedBatchPending`.
 // The command returns as soon as the batch is accepted; the server writes the
 // final `privilegedShimResult` asynchronously after approval or execution.

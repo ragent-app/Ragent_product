@@ -50,7 +50,7 @@ await page.evaluate(() => {
     const menu = document.getElementById('composerAddMenu');
     menu.hidden = open !== true;
   };
-  window.agentocGetSelectedToolDefinition = () => ({
+  window.ragentGetSelectedToolDefinition = () => ({
     id: 'codex',
     runtimeFamily: 'codex-app-server-json',
   });
@@ -102,7 +102,7 @@ assert.equal(
 );
 
 await page.evaluate(() => {
-  window.agentocGetSelectedToolDefinition = () => ({
+  window.ragentGetSelectedToolDefinition = () => ({
     id: 'claude-bidi',
     name: 'Claude Code',
     runtimeFamily: 'claude-stream-json',
@@ -121,7 +121,7 @@ assert.equal(
 );
 
 await page.evaluate(() => {
-  window.agentocGetSelectedToolDefinition = () => ({
+  window.ragentGetSelectedToolDefinition = () => ({
     id: 'codex',
     runtimeFamily: 'codex-app-server-json',
   });

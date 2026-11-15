@@ -6,9 +6,9 @@ import { basename, dirname, join, resolve } from 'node:path';
 
 const root = await mkdtemp(join(tmpdir(), 'ragent-retired-connectors-'));
 process.env.HOME = root;
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
 
 try {
   const { registerConnectorSurface, getConnectorSurface } = await import('../lib/connector-surface-registry.mjs');

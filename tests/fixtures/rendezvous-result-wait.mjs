@@ -46,7 +46,7 @@ export function rendezvousWaitFixture({ clock = Date.now, lifetimeMs = 60_000, c
     },
   };
   function completion(result = { fixture: 'ready' }) {
-    const issuedAt = new Date(clock()).toISOString(), audience = 'agentoc-account-rendezvous-poll';
+    const issuedAt = new Date(clock()).toISOString(), audience = 'ragent-account-rendezvous-poll';
     return { instance, issuedAt, audience, requestId, result,
       signature: sign(null, Buffer.from(buildAccountRendezvousPollMessage({ instanceId: instance.instanceId,
         issuedAt, audience, requestId })), hostKeys.privateKey).toString('base64url') };

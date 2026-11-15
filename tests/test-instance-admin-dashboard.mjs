@@ -57,13 +57,13 @@ function request(port, path, options = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-instance-admin-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-instance-admin-'));
+  const configDir = join(home, '.config', 'ragent');
   const launchAgentsDir = join(home, 'Library', 'LaunchAgents');
-  const memoryTasksDir = join(home, '.agentoc', 'memory', 'tasks');
-  const trialRoot = join(home, '.agentoc', 'instances', 'trial24');
+  const memoryTasksDir = join(home, '.ragent', 'memory', 'tasks');
+  const trialRoot = join(home, '.ragent', 'instances', 'trial24');
   const trialConfigDir = join(trialRoot, 'config');
-  const intakeRoot = join(home, '.agentoc', 'instances', 'intake1');
+  const intakeRoot = join(home, '.ragent', 'instances', 'intake1');
   const intakeConfigDir = join(intakeRoot, 'config');
 
   mkdirSync(configDir, { recursive: true });
@@ -87,7 +87,7 @@ function setupTempHome() {
   <key>EnvironmentVariables</key>
   <dict>
     <key>CHAT_PORT</key><string>7690</string>
-    <key>AGENTOC_CONFIG_DIR</key><string>${configDir}</string>
+    <key>RAGENT_CONFIG_DIR</key><string>${configDir}</string>
   </dict>
 </dict>
 </plist>
@@ -143,7 +143,7 @@ function setupTempHome() {
     'utf8',
   );
   writeFileSync(
-    join(memoryTasksDir, 'agentoc-user-relationship-ledger.md'),
+    join(memoryTasksDir, 'ragent-user-relationship-ledger.md'),
     [
       '# User Relationship Ledger',
       '',
@@ -172,7 +172,7 @@ function setupTempHome() {
     'utf8',
   );
   writeFileSync(
-    join(memoryTasksDir, 'agentoc-user-event-log.md'),
+    join(memoryTasksDir, 'ragent-user-event-log.md'),
     [
       '# Event Log',
       '',
@@ -189,9 +189,9 @@ function setupTempHome() {
     'utf8',
   );
   writeFileSync(
-    join(memoryTasksDir, 'agentoc-trial-user-ledger.md'),
+    join(memoryTasksDir, 'ragent-trial-user-ledger.md'),
     [
-      '# AgentoC trial instance occupancy ledger',
+      '# Ragent trial instance occupancy ledger',
       '',
       '## Active assignments',
       '',
@@ -367,8 +367,8 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       INSTANCE_ADMIN_HOST: '127.0.0.1',
     },
@@ -426,7 +426,7 @@ async function main() {
 
     const pageRes = await request(port, '/');
     assert.equal(pageRes.status, 200, pageRes.text);
-    assert.match(pageRes.text, /AgentoC Admin/, 'admin root page should render the dashboard shell');
+    assert.match(pageRes.text, /Ragent Admin/, 'admin root page should render the dashboard shell');
 
     const billingPageRes = await request(port, '/?view=billing');
     assert.equal(billingPageRes.status, 200, billingPageRes.text);

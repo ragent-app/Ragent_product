@@ -30,7 +30,7 @@ try {
     trigger.focus();
     panel.hidden = false;
     const parentEscapes = [];
-    const deactivateParent = window.AgentoCFocusScope.activate(panel, {
+    const deactivateParent = window.RagentFocusScope.activate(panel, {
       containmentRoot: document.body,
       initialFocus: document.getElementById("first"),
       restoreFocus: trigger,
@@ -58,7 +58,7 @@ try {
 
     reader.hidden = false;
     const readerEscapes = [];
-    const deactivateReader = window.AgentoCFocusScope.activate(reader, {
+    const deactivateReader = window.RagentFocusScope.activate(reader, {
       containmentRoot: panel,
       initialFocus: document.getElementById("readerClose"),
       restoreFocus: document.getElementById("second"),

@@ -17,14 +17,14 @@ printf '%s\n' "$@" > "$QA_RECORD"
 EOF
 chmod 0755 "$bundle/runtime/node" "$bundle/runtime/codex" "$bundle/runtime/claude" "$bundle/app/bin/claude"
 export QA_RECORD="$test_dir/record"
-source "$root/packaging/macos/agentoc-env.sh"
-unset AGENTOC_PACKAGED_HARNESS_ROOT
-AGENTOC_RESOURCES_DIR="$bundle"
-agentoc_ensure_runtime_shims
-[ "$AGENTOC_PACKAGED_HARNESS_ROOT" = "$bundle/runtime" ]
+source "$root/packaging/macos/ragent-env.sh"
+unset RAGENT_PACKAGED_HARNESS_ROOT
+RAGENT_RESOURCES_DIR="$bundle"
+ragent_ensure_runtime_shims
+[ "$RAGENT_PACKAGED_HARNESS_ROOT" = "$bundle/runtime" ]
 case ":$PATH:" in *":$bundle:"*) ;; *) echo 'packaged CLI resources are missing from PATH' >&2; exit 1 ;; esac
 # Resolve both commands in a detached-process environment, not just in the
-# launcher's shell. macOS has no /opt/agentoc/runtime fallback.
+# launcher's shell. macOS has no /opt/ragent/runtime fallback.
 export QA_BUNDLE="$bundle" QA_ROOT="$root" QA_HOME="$test_dir/detached-home"
 mkdir -p "$QA_HOME"
 node --input-type=module <<'EOF'
@@ -35,8 +35,8 @@ const root = process.env.QA_ROOT;
 const { pickRunnerEnvAllowlist } = await import(pathToFileURL(`${root}/lib/runner-env.mjs`));
 const env = pickRunnerEnvAllowlist({
   PATH: process.env.PATH, HOME: process.env.QA_HOME,
-  AGENTOC_HARNESS_ROOT: `${process.env.QA_HOME}/managed`,
-  AGENTOC_PACKAGED_HARNESS_ROOT: `${process.env.QA_BUNDLE}/runtime`,
+  RAGENT_HARNESS_ROOT: `${process.env.QA_HOME}/managed`,
+  RAGENT_PACKAGED_HARNESS_ROOT: `${process.env.QA_BUNDLE}/runtime`,
 });
 const moduleUrl = pathToFileURL(`${root}/lib/harness-paths.mjs`).href;
 const script = `const m = await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify(await Promise.all(['codex','claude'].map(x=>m.resolveInternalHarnessCommandPath(x)))))`;

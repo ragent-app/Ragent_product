@@ -9,7 +9,7 @@ import {
   listAgyAccountLocks,
 } from '../lib/provider-runtime/agy-account-lock.mjs';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-agy-lock-'));
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-agy-lock-'));
 try {
   const first = await acquireAgyAccountLock({ configDir, providerId: 'agy-a', runId: 'run-a' });
   assert.equal(first.ok, true);

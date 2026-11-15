@@ -1,10 +1,10 @@
 <resources>
-    <!-- Night variant of Theme.Agentoc.Splash: resource configs replace wholesale, so
+    <!-- Night variant of Theme.Ragent.Splash: resource configs replace wholesale, so
          the splash items are restated with dark-appropriate bar-icon appearance. -->
-    <style name="Theme.Agentoc.Splash" parent="Theme.SplashScreen">
+    <style name="Theme.Ragent.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_symbol</item>
-        <item name="postSplashScreenTheme">@style/Theme.Agentoc</item>
+        <item name="postSplashScreenTheme">@style/Theme.Ragent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

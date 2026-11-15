@@ -29,7 +29,7 @@ function extractPlanTitleFromMarkdown(markdown) {
 export function createClaudeBidiAdapter() {
   const base = createClaudeAdapter();
   // Approval ids that the runner sidecar already answered automatically.
-  // The sidecar echoes its synthetic agentoc.approval_response
+  // The sidecar echoes its synthetic ragent.approval_response
   // into the stream BEFORE the control_request it answers, so a request frame
   // for a known id is never a live user-facing approval. Suppressing it keeps
   // automatically allowed and denied tools out of the
@@ -40,7 +40,7 @@ export function createClaudeBidiAdapter() {
     let intermediateResult = false;
     try {
       const parsed = JSON.parse(line);
-      if (parsed?.type === 'agentoc.approval_response') {
+      if (parsed?.type === 'ragent.approval_response') {
         if ((parsed.autoApproved === true || parsed.autoDenied === true)
           && typeof parsed.approvalId === 'string' && parsed.approvalId) {
           autoApprovedIds.add(parsed.approvalId);
@@ -96,7 +96,7 @@ export function createClaudeBidiAdapter() {
           ...(isQuestion ? { questions: Array.isArray(params.input?.questions) ? params.input.questions : [] } : {}),
         })].filter(Boolean);
       }
-      intermediateResult = parsed?.type === 'result' && parsed?.agentoc_intermediate === true;
+      intermediateResult = parsed?.type === 'result' && parsed?.ragent_intermediate === true;
     } catch {}
     const events = base.parseLine(line);
     if (!Array.isArray(events) || events.length === 0) return events;

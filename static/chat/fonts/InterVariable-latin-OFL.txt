@@ -6,6 +6,6 @@ This Font Software is licensed under the SIL Open Font License, Version 1.1.
 The complete license text is available at:
 https://scripts.sil.org/OFL
 
-The font file is redistributed with AgentoC under the terms of the SIL Open
+The font file is redistributed with Ragent under the terms of the SIL Open
 Font License, Version 1.1. The original font source and license are available
 at https://github.com/rsms/inter.

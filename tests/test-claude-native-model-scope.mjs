@@ -10,14 +10,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-claude-native-scope-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-claude-native-scope-'));
 process.env.HOME = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
 
 try {
   // 1. /api/models (claude) enumerates registry profiles per provider.
   const { createNativeProviderRegistry, createSecretStore } = await import('../lib/provider-runtime/index.mjs');
-  const configDir = process.env.AGENTOC_CONFIG_DIR;
+  const configDir = process.env.RAGENT_CONFIG_DIR;
   mkdirSync(join(configDir, 'native-provider-runtime'), { recursive: true });
   const registry = createNativeProviderRegistry({ configDir });
   const secretStore = createSecretStore({ configDir });

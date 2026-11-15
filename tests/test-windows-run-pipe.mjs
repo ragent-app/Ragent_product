@@ -14,7 +14,7 @@ const {stdout}=await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/
   ['-NoLogo','-NoProfile','-NonInteractive','-Command','[Diagnostics.Process]::GetCurrentProcess().SessionId'],{windowsHide:true,timeout:10000});
 const sessionId=Number(stdout.trim()); assert.ok(Number.isInteger(sessionId));
 const caseId=randomBytes(16).toString('hex');
-const root=await mkdtemp(join(tmpdir(),'agentoc-run-pipe-'));
+const root=await mkdtemp(join(tmpdir(),'ragent-run-pipe-'));
 const evidence=resolve('artifacts/showcase/T2-current-20261017/restricted-ipc');
 const sources=['chat/restricted-run-ipc.mjs','native/windows-run-pipe-candidate.cs','tests/helpers/windows-run-pipe-fixture.mjs','tests/test-windows-run-pipe.mjs'];
 const sourceFiles=await Promise.all(sources.map(async path=>({path,sha256:createHash('sha256').update(await readFile(path)).digest('hex')})));
@@ -30,7 +30,7 @@ try {
   report.helperSha256=createHash('sha256').update(await readFile(exe)).digest('hex');
   const forbidden=endpoint(exe,'server');
   try{
-    forbidden.send({pipeName:'agentoc-run-candidate-'+randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+10000,
+    forbidden.send({pipeName:'ragent-run-candidate-'+randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+10000,
       localSid:identity.sid,localSessionId:sessionId,peerSid:'S-1-5-80-1-2-3-4-5',peerSessionId:0,permitVirtualPeerQuery:true});
     const event=await forbidden.next();assert.equal(event.kind,'error');assert.equal(event.code,'IPC_QUERY_POLICY_INVALID');
     report.tests.push({name:'interactive-caller-cannot-enable-virtual-peer-query',pass:true,code:event.code});
@@ -79,7 +79,7 @@ try {
 finally {
   report.completedAt=new Date().toISOString();await writeFile(join(evidence,'case-'+caseId+'.json'),JSON.stringify(report,null,2));
   const actual=await realpath(root),parent=await realpath(tmpdir());
-  assert.equal(dirname(actual).toLowerCase(),parent.toLowerCase());assert.ok(basename(actual).startsWith('agentoc-run-pipe-'));
+  assert.equal(dirname(actual).toLowerCase(),parent.toLowerCase());assert.ok(basename(actual).startsWith('ragent-run-pipe-'));
   await rm(actual,{recursive:true,force:true});
   console.log('Evidence: '+join(evidence,'case-'+caseId+'.json'));
 }

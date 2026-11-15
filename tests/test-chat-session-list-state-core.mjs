@@ -150,13 +150,13 @@ function loadCore() {
     getLocalSessionReviewedAt: null,
     getSessionReviewBaselineAt: null,
   };
-  context.AgentocSessionListStateEnvironment = env;
+  context.RagentSessionListStateEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/session-list-state.js'), 'utf8'),
     context,
     { filename: 'transport/session-list-state.js' },
   );
-  const core = context.AgentocSessionListStateCore;
+  const core = context.RagentSessionListStateCore;
   let ambient = {};
   let currentSessionId = '';
   env.getCurrentSessionId = () => currentSessionId;

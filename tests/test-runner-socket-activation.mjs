@@ -151,7 +151,7 @@ assert.equal(
   'names present without expectedName cannot be claimed safely',
 );
 
-const providerHomesRoot = '/var/lib/agentoc-run/provider-homes';
+const providerHomesRoot = '/var/lib/ragent-run/provider-homes';
 const scopedProviderHomes = join(providerHomesRoot, 'by-provider', '0123456789abcdef0123456789abcdef');
 assert.equal(
   validateScopedProviderHomesDir(scopedProviderHomes, { providerHomesRoot }),
@@ -179,7 +179,7 @@ assert.throws(
 // ── 2) supervisor inherits a listening fd ───────────────────────────────────
 
 {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentoc-p2c-supervisor-'));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'ragent-p2c-supervisor-'));
   const socketPath = join(temporaryDirectory, 'supervisor.sock');
   const { fd, child } = await createListeningFd(socketPath);
   await new Promise((resolve) => child.once('exit', resolve));
@@ -229,7 +229,7 @@ assert.throws(
 // ── 3) lifecycle broker inherits a listening fd ─────────────────────────────
 
 {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentoc-p2c-lifecycle-'));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'ragent-p2c-lifecycle-'));
   const socketPath = join(temporaryDirectory, 'lifecycle.sock');
   const { fd, child } = await createListeningFd(socketPath);
   await new Promise((resolve) => child.once('exit', resolve));
@@ -239,12 +239,12 @@ assert.throws(
   const broker = await createRunnerLifecycleServer({
     socketPath,
     inheritFd: { fd },
-    serviceUser: 'agentoc-runner',
-    serviceGroup: 'agentoc-runners',
+    serviceUser: 'ragent-runner',
+    serviceGroup: 'ragent-runners',
     launchRunner: async (runId, options) => {
       launchedRunId = runId;
       launchedOptions = options;
-      return { pid: 43210, unitName: `agentoc-runner-${runId}` };
+      return { pid: 43210, unitName: `ragent-runner-${runId}` };
     },
   });
   try {
@@ -265,9 +265,9 @@ assert.throws(
     assert.equal(launched.pid, 43210);
     assert.equal(launchedRunId, 'run_p2c_life_456');
     assert.deepEqual(launchedOptions, {
-      serviceUser: 'agentoc-runner',
-      serviceGroup: 'agentoc-runners',
-      controlUser: 'agentoc',
+      serviceUser: 'ragent-runner',
+      serviceGroup: 'ragent-runners',
+      controlUser: 'ragent',
       guiEnvironment: {
         DISPLAY: ':1',
         XAUTHORITY: '/run/user/1000/gdm/Xauthority',
@@ -285,45 +285,45 @@ assert.throws(
 // ── 4) shipped unit wiring ──────────────────────────────────────────────────
 
 const supervisorSocketUnit = await readFile(
-  join(REPO_ROOT, 'packaging/deb/agentoc-runner-supervisor.socket'),
+  join(REPO_ROOT, 'packaging/deb/ragent-runner-supervisor.socket'),
   'utf8',
 );
-assert.match(supervisorSocketUnit, /^ListenStream=\/var\/lib\/agentoc-run\/runner-supervisor\.sock$/m);
-assert.match(supervisorSocketUnit, /^SocketUser=agentoc$/m);
-assert.match(supervisorSocketUnit, /^SocketGroup=agentoc$/m);
+assert.match(supervisorSocketUnit, /^ListenStream=\/var\/lib\/ragent-run\/runner-supervisor\.sock$/m);
+assert.match(supervisorSocketUnit, /^SocketUser=ragent$/m);
+assert.match(supervisorSocketUnit, /^SocketGroup=ragent$/m);
 assert.match(supervisorSocketUnit, /^SocketMode=0660$/m);
-assert.match(supervisorSocketUnit, /^Service=agentoc-runner-supervisor\.service$/m);
+assert.match(supervisorSocketUnit, /^Service=ragent-runner-supervisor\.service$/m);
 assert.match(supervisorSocketUnit, /^WantedBy=sockets\.target$/m);
 
 const lifecycleSocketUnit = await readFile(
-  join(REPO_ROOT, 'packaging/deb/agentoc-runner-lifecycle.socket'),
+  join(REPO_ROOT, 'packaging/deb/ragent-runner-lifecycle.socket'),
   'utf8',
 );
-assert.match(lifecycleSocketUnit, /^ListenStream=\/var\/lib\/agentoc\/config\/runner-lifecycle\.sock$/m);
-assert.match(lifecycleSocketUnit, /^SocketUser=agentoc$/m);
-assert.match(lifecycleSocketUnit, /^SocketGroup=agentoc$/m);
+assert.match(lifecycleSocketUnit, /^ListenStream=\/var\/lib\/ragent\/config\/runner-lifecycle\.sock$/m);
+assert.match(lifecycleSocketUnit, /^SocketUser=ragent$/m);
+assert.match(lifecycleSocketUnit, /^SocketGroup=ragent$/m);
 assert.match(lifecycleSocketUnit, /^SocketMode=0660$/m);
-assert.match(lifecycleSocketUnit, /^Service=agentoc-runner-lifecycle\.service$/m);
+assert.match(lifecycleSocketUnit, /^Service=ragent-runner-lifecycle\.service$/m);
 assert.match(lifecycleSocketUnit, /^WantedBy=sockets\.target$/m);
 
 const supervisorService = await readFile(
-  join(REPO_ROOT, 'packaging/deb/agentoc-runner-supervisor.service'),
+  join(REPO_ROOT, 'packaging/deb/ragent-runner-supervisor.service'),
   'utf8',
 );
-assert.match(supervisorService, /^Sockets=agentoc-runner-supervisor\.socket$/m);
+assert.match(supervisorService, /^Sockets=ragent-runner-supervisor\.socket$/m);
 
 const lifecycleService = await readFile(
-  join(REPO_ROOT, 'packaging/deb/agentoc-runner-lifecycle.service'),
+  join(REPO_ROOT, 'packaging/deb/ragent-runner-lifecycle.service'),
   'utf8',
 );
-assert.match(lifecycleService, /^Sockets=agentoc-runner-lifecycle\.socket$/m);
+assert.match(lifecycleService, /^Sockets=ragent-runner-lifecycle\.socket$/m);
 
 const postinst = await readFile(join(REPO_ROOT, 'packaging/deb/postinst'), 'utf8');
-assert.match(postinst, /systemctl enable agentoc-runner-lifecycle\.socket/);
-assert.match(postinst, /systemctl enable agentoc-runner-supervisor\.socket/);
+assert.match(postinst, /systemctl enable ragent-runner-lifecycle\.socket/);
+assert.match(postinst, /systemctl enable ragent-runner-supervisor\.socket/);
 
 const buildDeb = await readFile(join(REPO_ROOT, 'scripts/build-deb.sh'), 'utf8');
-assert.match(buildDeb, /agentoc-runner-lifecycle\.socket/);
-assert.match(buildDeb, /agentoc-runner-supervisor\.socket/);
+assert.match(buildDeb, /ragent-runner-lifecycle\.socket/);
+assert.match(buildDeb, /ragent-runner-supervisor\.socket/);
 
 console.log('test-runner-socket-activation: PASS');

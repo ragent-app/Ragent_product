@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-models-native-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-models-native-'));
 const configDir = join(tempHome, 'config');
 const nativeRuntimeDir = join(configDir, 'native-provider-runtime');
 const secretsDir = join(nativeRuntimeDir, 'secrets');
@@ -30,7 +30,7 @@ if (process.argv.includes('--version')) {
 
 let providerId = '';
 try {
-  providerId = readFileSync(join(process.env.CODEX_HOME || '', '.agentoc-provider-id'), 'utf8').trim();
+  providerId = readFileSync(join(process.env.CODEX_HOME || '', '.ragent-provider-id'), 'utf8').trim();
 } catch {}
 
 const effort = (...levels) => levels.map((reasoningEffort) => ({ reasoningEffort }));
@@ -179,12 +179,12 @@ globalThis.fetch = async (url) => {
 };
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_HARNESS_ROOT = join(tempHome, 'harnesses');
-const originalPackagedHarnessRoot = process.env.AGENTOC_PACKAGED_HARNESS_ROOT;
-process.env.AGENTOC_PACKAGED_HARNESS_ROOT = binDir;
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_HARNESS_ROOT = join(tempHome, 'harnesses');
+const originalPackagedHarnessRoot = process.env.RAGENT_PACKAGED_HARNESS_ROOT;
+process.env.RAGENT_PACKAGED_HARNESS_ROOT = binDir;
 const originalPath = process.env.PATH;
 const originalRecoveryFile = process.env.FIXTURE_MODEL_RECOVERY_FILE;
 const originalNow = Date.now;
@@ -302,8 +302,8 @@ try {
   if (originalRecoveryFile === undefined) delete process.env.FIXTURE_MODEL_RECOVERY_FILE;
   else process.env.FIXTURE_MODEL_RECOVERY_FILE = originalRecoveryFile;
   process.env.PATH = originalPath;
-  if (originalPackagedHarnessRoot === undefined) delete process.env.AGENTOC_PACKAGED_HARNESS_ROOT;
-  else process.env.AGENTOC_PACKAGED_HARNESS_ROOT = originalPackagedHarnessRoot;
+  if (originalPackagedHarnessRoot === undefined) delete process.env.RAGENT_PACKAGED_HARNESS_ROOT;
+  else process.env.RAGENT_PACKAGED_HARNESS_ROOT = originalPackagedHarnessRoot;
   await new Promise((resolve) => setTimeout(resolve, 150));
   rmSync(tempHome, { recursive: true, force: true });
 }

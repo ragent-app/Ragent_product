@@ -20,7 +20,7 @@ vm.runInNewContext(source, context, {
   filename: 'session-store.js',
 });
 
-const storeModel = context.AgentoCChatStore;
+const storeModel = context.RagentChatStore;
 
 assert.ok(storeModel, 'chat session store should attach to the global scope');
 

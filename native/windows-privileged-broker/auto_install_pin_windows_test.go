@@ -81,8 +81,8 @@ func TestRuntimePinsPreventWritesAndRejectHardlinks(t *testing.T) {
 }
 
 func TestOptionalStagedRuntimePins(t *testing.T) {
-	root := os.Getenv("AGENTOC_TEST_RUNTIME_VENDOR")
-	digest := os.Getenv("AGENTOC_TEST_RUNTIME_MANIFEST_SHA256")
+	root := os.Getenv("RAGENT_TEST_RUNTIME_VENDOR")
+	digest := os.Getenv("RAGENT_TEST_RUNTIME_MANIFEST_SHA256")
 	if root == "" || digest == "" {
 		t.Skip("no isolated staged runtime supplied")
 	}
@@ -102,8 +102,8 @@ func TestOptionalStagedRuntimePins(t *testing.T) {
 		t.Fatalf("pinned runtime failed to start: %v %s", err, output)
 	}
 	module := filepath.Join(root, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1")
-	cmd = exec.Command(filepath.Join(root, "PowerShell", "pwsh.exe"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Import-Module -Name $env:AGENTOC_TEST_MODULE -Force -ErrorAction Stop; if (Get-Command Find-WinGetPackage -ErrorAction Stop) { [Console]::Write('module-ready') }")
-	cmd.Env = append(os.Environ(), "AGENTOC_TEST_MODULE="+module)
+	cmd = exec.Command(filepath.Join(root, "PowerShell", "pwsh.exe"), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "Import-Module -Name $env:RAGENT_TEST_MODULE -Force -ErrorAction Stop; if (Get-Command Find-WinGetPackage -ErrorAction Stop) { [Console]::Write('module-ready') }")
+	cmd.Env = append(os.Environ(), "RAGENT_TEST_MODULE="+module)
 	output, err = cmd.CombinedOutput()
 	if err != nil || string(output) != "module-ready" {
 		t.Fatalf("pinned module failed to load: %v %s", err, output)

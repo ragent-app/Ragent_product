@@ -23,21 +23,21 @@ const strategyFixtureBoundary = async () => {};
 
 // This unit suite exercises legacy supervisor fallback explicitly.  Production
 // shells may export the new lifecycle broker socket, so isolate it here.
-const previousLifecycleSocket = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-const previousLifecycleRequired = process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
-delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+const previousLifecycleSocket = process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+const previousLifecycleRequired = process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
+delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+delete process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
 
 function testSupervisorSocket(directory) {
   return process.platform === 'win32'
-    ? `\\\\.\\pipe\\agentoc-supervisor-test-${process.pid}-${randomBytes(8).toString('hex')}`
+    ? `\\\\.\\pipe\\ragent-supervisor-test-${process.pid}-${randomBytes(8).toString('hex')}`
     : join(directory, 'runner.sock');
 }
 
-assert.equal(buildDetachedRunnerUnitName('run_abc/123'), 'agentoc-runner-run_abc_123');
-assert.equal(detectSystemdManagerScope('0::/system.slice/agentoc.service\n'), 'system');
+assert.equal(buildDetachedRunnerUnitName('run_abc/123'), 'ragent-runner-run_abc_123');
+assert.equal(detectSystemdManagerScope('0::/system.slice/ragent.service\n'), 'system');
 assert.equal(
-  detectSystemdManagerScope('0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentoc-chat.service\n'),
+  detectSystemdManagerScope('0::/user.slice/user-1000.slice/user@1000.service/app.slice/ragent-chat.service\n'),
   'user',
 );
 assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
@@ -46,9 +46,9 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   const calls = [];
   const result = await launchDetachedRunnerViaSystemd('run_demo/123', {
     scope: 'system',
-    workingDirectory: '/opt/agentoc',
+    workingDirectory: '/opt/ragent',
     processExecPath: '/usr/bin/node',
-    runnerScriptPath: '/opt/agentoc/chat/runner-sidecar.mjs',
+    runnerScriptPath: '/opt/ragent/chat/runner-sidecar.mjs',
     execFileImpl: async (command, args) => {
       calls.push({ command, args });
       if (command === 'systemd-run') {
@@ -62,7 +62,7 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   });
 
   assert.equal(result.pid, 43210);
-  assert.equal(result.unitName, 'agentoc-runner-run_demo_123');
+  assert.equal(result.unitName, 'ragent-runner-run_demo_123');
   assert.equal(result.unitScope, 'system');
   assert.equal(result.launchMode, DETACHED_RUNNER_SYSTEMD_LAUNCH_MODE);
   assert.equal(calls[0].command, 'systemd-run');
@@ -72,17 +72,17 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
     '--no-block',
     '--service-type=exec',
     '--unit',
-    'agentoc-runner-run_demo_123',
+    'ragent-runner-run_demo_123',
     '--working-directory',
   ]);
-  assert.ok(calls[0].args.includes('AGENTOC_RUNNER_UNIT_NAME=agentoc-runner-run_demo_123'));
-  assert.ok(calls[0].args.includes(`AGENTOC_RUNNER_LAUNCH_MODE=${DETACHED_RUNNER_SYSTEMD_LAUNCH_MODE}`));
+  assert.ok(calls[0].args.includes('RAGENT_RUNNER_UNIT_NAME=ragent-runner-run_demo_123'));
+  assert.ok(calls[0].args.includes(`RAGENT_RUNNER_LAUNCH_MODE=${DETACHED_RUNNER_SYSTEMD_LAUNCH_MODE}`));
   assert.equal(calls[1].command, 'systemctl');
-  assert.deepEqual(calls[1].args, ['show', '--property=MainPID', '--value', 'agentoc-runner-run_demo_123']);
+  assert.deepEqual(calls[1].args, ['show', '--property=MainPID', '--value', 'ragent-runner-run_demo_123']);
 }
 
 {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentoc-runner-supervisor-'));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'ragent-runner-supervisor-'));
   const socketPath = testSupervisorSocket(temporaryDirectory);
   let launchedRunId = '';
   const supervisor = await createRunnerSupervisorServer({
@@ -105,11 +105,11 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
 }
 
 {
-  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'agentoc-runner-supervisor-lock-'));
+  const temporaryDirectory = await mkdtemp(join(tmpdir(), 'ragent-runner-supervisor-lock-'));
   const socketPath = testSupervisorSocket(temporaryDirectory);
   const providerHomesRoot = join(temporaryDirectory, 'provider-homes');
   const providerHome = join(providerHomesRoot, 'by-provider', 'a'.repeat(32));
-  const oauthLockPath = join(providerHome, '.agentoc-native-oauth.lock');
+  const oauthLockPath = join(providerHome, '.ragent-native-oauth.lock');
   let launchOptions = null;
   const supervisor = await createRunnerSupervisorServer({
     socketPath,
@@ -170,7 +170,7 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
 
   await spawnSupervisedRunner('run_windows_supervisor_lock', {
     assertExecutionBoundaryImpl: strategyFixtureBoundary,
-    oauthLockPath: '/var/lib/agentoc-run/provider-homes/.agentoc-native-oauth.lock',
+    oauthLockPath: '/var/lib/ragent-run/provider-homes/.ragent-native-oauth.lock',
     oauthLockToken: 'test-oauth-lock-token',
     spawnImpl: (command, args, options) => {
       spawnInvocation = { command, args, options };
@@ -178,38 +178,38 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
     },
   });
   assert.equal(
-    spawnInvocation.options.env.AGENTOC_NATIVE_OAUTH_LOCK_PATH,
-    '/var/lib/agentoc-run/provider-homes/.agentoc-native-oauth.lock',
+    spawnInvocation.options.env.RAGENT_NATIVE_OAUTH_LOCK_PATH,
+    '/var/lib/ragent-run/provider-homes/.ragent-native-oauth.lock',
     'supervisor must pass the native OAuth lock path to the sidecar',
   );
   assert.equal(
-    spawnInvocation.options.env.AGENTOC_NATIVE_OAUTH_LOCK_TOKEN,
+    spawnInvocation.options.env.RAGENT_NATIVE_OAUTH_LOCK_TOKEN,
     'test-oauth-lock-token',
     'supervisor must pass the native OAuth lock token to the sidecar',
   );
 }
 
 {
-  const previousSocket = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  const previousRequired = process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = join(tmpdir(), `missing-agentoc-supervisor-${process.pid}.sock`);
-  process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = '1';
+  const previousSocket = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  const previousRequired = process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = join(tmpdir(), `missing-ragent-supervisor-${process.pid}.sock`);
+  process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = '1';
   const spawner = createDetachedRunnerSpawner({ getScopeImpl: () => null, assertExecutionBoundaryImpl: strategyFixtureBoundary });
   await assert.rejects(
     () => spawner('run_required_supervisor'),
     /Required runner supervisor is unavailable/,
   );
-  if (previousSocket === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = previousSocket;
-  if (previousRequired === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
+  if (previousSocket === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = previousSocket;
+  if (previousRequired === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
 }
 
 {
-  const previousSocket = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  const previousRequired = process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
+  const previousSocket = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  const previousRequired = process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
   const spawner = createDetachedRunnerSpawner({
     assertExecutionBoundaryImpl: strategyFixtureBoundary,
     platform: 'win32',
@@ -220,17 +220,17 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
     () => spawner('run_windows_requires_supervisor'),
     /Windows managed runner requires an available runner lifecycle or supervisor broker/,
   );
-  if (previousSocket === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = previousSocket;
-  if (previousRequired === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
+  if (previousSocket === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = previousSocket;
+  if (previousRequired === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
 }
 
 {
-  const previousSocket = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  const previousRequired = process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = join(tmpdir(), `missing-agentoc-windows-supervisor-${process.pid}.sock`);
-  delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
+  const previousSocket = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  const previousRequired = process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = join(tmpdir(), `missing-ragent-windows-supervisor-${process.pid}.sock`);
+  delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
   const spawner = createDetachedRunnerSpawner({
     assertExecutionBoundaryImpl: strategyFixtureBoundary,
     platform: 'win32',
@@ -241,10 +241,10 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
     () => spawner('run_windows_supervisor_unavailable'),
     /Required runner supervisor is unavailable/,
   );
-  if (previousSocket === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = previousSocket;
-  if (previousRequired === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
+  if (previousSocket === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = previousSocket;
+  if (previousRequired === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = previousRequired;
 }
 
 {
@@ -252,11 +252,11 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   let unrefCalled = false;
   const previousSandbox = process.env.IS_SANDBOX;
   const discoveryRuns = [];
-  const previousSupervisorSocket = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  const previousSupervisorRequired = process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
+  const previousSupervisorSocket = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  const previousSupervisorRequired = process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
   process.env.IS_SANDBOX = '';
-  delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
+  delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
   const spawner = createDetachedRunnerSpawner({
     assertExecutionBoundaryImpl: strategyFixtureBoundary,
     platform: 'linux',
@@ -292,7 +292,7 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   assert.equal(spawnInvocation.options.detached, true);
   assert.equal(spawnInvocation.options.stdio, 'ignore');
   assert.equal(
-    spawnInvocation.options.env.AGENTOC_RUNNER_LAUNCH_MODE,
+    spawnInvocation.options.env.RAGENT_RUNNER_LAUNCH_MODE,
     DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
   );
   assert.equal(spawnInvocation.options.env.IS_SANDBOX, '1');
@@ -302,14 +302,14 @@ assert.equal(detectSystemdManagerScope('0::/init.scope\n'), null);
   await spawner('run_fallback_disabled');
   assert.equal(spawnInvocation.options.env.IS_SANDBOX, '0');
   process.env.IS_SANDBOX = previousSandbox;
-  if (previousSupervisorSocket === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = previousSupervisorSocket;
-  if (previousSupervisorRequired === undefined) delete process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED;
-  else process.env.AGENTOC_RUNNER_SUPERVISOR_REQUIRED = previousSupervisorRequired;
+  if (previousSupervisorSocket === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = previousSupervisorSocket;
+  if (previousSupervisorRequired === undefined) delete process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED;
+  else process.env.RAGENT_RUNNER_SUPERVISOR_REQUIRED = previousSupervisorRequired;
 }
 
-if (previousLifecycleSocket === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-else process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = previousLifecycleSocket;
-if (previousLifecycleRequired === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
-else process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = previousLifecycleRequired;
+if (previousLifecycleSocket === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+else process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = previousLifecycleSocket;
+if (previousLifecycleRequired === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
+else process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = previousLifecycleRequired;
 console.log('test-runner-supervisor: ok');

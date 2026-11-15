@@ -8,7 +8,7 @@
 // implementations produce identical results (locked by
 // tests/test-chat-product-paths-core.mjs).
 
-(function attachAgentoCProductPathsCore(root) {
+(function attachRagentProductPathsCore(root) {
   const FALLBACK_ORIGIN = "https://agentoc.invalid";
 
   const TERMINAL_MARKERS = Object.freeze([
@@ -165,7 +165,7 @@
   // session-http.js's getWorkspaceFilteredSessionListUrl: the session-list API
   // URL scoped to the selected project (or, falling back, the selected / default
   // folder). The workspace selectors are injected env functions mirroring the
-  // legacy global agentocGet* hooks.
+  // legacy global ragentGet* hooks.
   function getWorkspaceFilteredSessionListUrl(baseUrl, env = {}) {
     const projectId = typeof env.getSelectedProjectId === "function" ? env.getSelectedProjectId() : "";
     const normalizedProjectId = typeof projectId === "string" ? projectId.trim() : "";
@@ -182,7 +182,7 @@
     return `${baseUrl}${separator}folder=${encodeURIComponent(normalizedFolder)}`;
   }
 
-  root.AgentoCProductPathsCore = {
+  root.RagentProductPathsCore = {
     splitPathSegments,
     joinPathSegments,
     inferProductBasePath,

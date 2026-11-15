@@ -5,12 +5,12 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.feature.workbench"
+    namespace = "com.andysagent.ragent.feature.workbench"
     compileSdk = 37
     defaultConfig {
         minSdk = 26
-        testApplicationId = providers.gradleProperty("agentocWorkbenchTestApplicationId")
-            .orElse("com.andysagent.agentoc.feature.workbench.test").get()
+        testApplicationId = providers.gradleProperty("ragentWorkbenchTestApplicationId")
+            .orElse("com.andysagent.ragent.feature.workbench.test").get()
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {

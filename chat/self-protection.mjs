@@ -1,8 +1,8 @@
 /**
- * Server-owned AgentoC self-protection facts.
+ * Server-owned Ragent self-protection facts.
  *
  * This module only classifies already-canonical resolver paths. It does not
- * accept a caller/LLM claim about what is or is not AgentoC. The platform
+ * accept a caller/LLM claim about what is or is not Ragent. The platform
  * resolver is responsible for canonicalizing the target and the protected
  * roots before calling this helper.
  */
@@ -38,20 +38,20 @@ function isWithin(root, candidate, platform) {
     && !paths.isAbsolute(relative));
 }
 
-export function deriveAgentoCSelfProtectionRoots({ platform = process.platform } = {}) {
-  const sourceRoot = trim(process.env.AGENTOC_SOURCE_PROJECT_ROOT)
+export function deriveRagentSelfProtectionRoots({ platform = process.platform } = {}) {
+  const sourceRoot = trim(process.env.RAGENT_SOURCE_PROJECT_ROOT)
     || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const configRoot = trim(process.env.AGENTOC_CONFIG_DIR)
-    || path.join(homedir(), '.config', 'agentoc');
+  const configRoot = trim(process.env.RAGENT_CONFIG_DIR)
+    || path.join(homedir(), '.config', 'ragent');
   const roots = [
-    { label: 'agentoc-source', path: sourceRoot },
-    { label: 'agentoc-config', path: configRoot },
+    { label: 'ragent-source', path: sourceRoot },
+    { label: 'ragent-config', path: configRoot },
   ];
   if (platform === 'linux') {
     roots.push(
-      { label: 'agentoc-systemd', path: '/etc/systemd/system/agentoc.service' },
-      { label: 'agentoc-systemd-runner', path: '/etc/systemd/system/agentoc-runner-supervisor.service' },
-      { label: 'agentoc-systemd-lifecycle', path: '/etc/systemd/system/agentoc-runner-lifecycle.service' },
+      { label: 'ragent-systemd', path: '/etc/systemd/system/ragent.service' },
+      { label: 'ragent-systemd-runner', path: '/etc/systemd/system/ragent-runner-supervisor.service' },
+      { label: 'ragent-systemd-lifecycle', path: '/etc/systemd/system/ragent-runner-lifecycle.service' },
     );
   }
   return roots;
@@ -75,7 +75,7 @@ export function computeSelfProtectionFacts({
     .filter(Boolean);
   const roots = (Array.isArray(protectedRoots) ? protectedRoots : [])
     .map((entry) => ({
-      label: trim(entry?.label) || 'agentoc-service',
+      label: trim(entry?.label) || 'ragent-service',
       path: normalize(entry?.path, platform),
       available: entry?.available !== false,
     }))
@@ -89,7 +89,7 @@ export function computeSelfProtectionFacts({
     computed,
     matched,
     workspaceRecommended,
-    boundary: matched ? 'agentoc-service' : 'none',
+    boundary: matched ? 'ragent-service' : 'none',
   };
 }
 

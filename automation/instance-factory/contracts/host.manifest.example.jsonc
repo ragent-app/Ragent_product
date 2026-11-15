@@ -3,14 +3,14 @@
   "schemaVersion": 1,
   "host": {
     "provider": "digitalocean",
-    "hostname": "agentoc-sfo3-01",
+    "hostname": "ragent-sfo3-01",
     "region": "sfo3",
     "size": "s-2vcpu-4gb",
     "image": "ubuntu-24-04-x64",
-    "tags": ["agentoc", "owner"],
+    "tags": ["ragent", "owner"],
     "sshKeys": ["replace-with-digitalocean-ssh-key-fingerprint-or-id"],
     "repoGitUrl": "https://github.com/ragent-app/Ragent_product.git",
-    "repoCheckoutPath": "/opt/agentoc",
+    "repoCheckoutPath": "/opt/ragent",
     "sshUser": "root"
   },
   "network": {
@@ -27,13 +27,13 @@
     }
   },
   "systemd": {
-    "ownerUnit": "agentoc",
-    "logDir": "/var/log/agentoc"
+    "ownerUnit": "ragent",
+    "logDir": "/var/log/ragent"
   },
   "connectors": {
     "calendar": {
-      "googleCredentialsFile": "/etc/agentoc/google-calendar-credentials.json",
-      "googleTokenFile": "/etc/agentoc/google-calendar-token.json"
+      "googleCredentialsFile": "/etc/ragent/google-calendar-credentials.json",
+      "googleTokenFile": "/etc/ragent/google-calendar-token.json"
     }
   }
 }

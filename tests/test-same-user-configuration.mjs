@@ -10,7 +10,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-const TEST_USER = process.env.AGENTOC_TEST_USER || 'pinggu';
+const TEST_USER = process.env.RAGENT_TEST_USER || 'pinggu';
 
 function exec(cmd) {
   try {
@@ -23,7 +23,7 @@ function exec(cmd) {
 async function testServiceUserFile() {
   console.log('Testing service user file...');
 
-  const serviceUserPath = '/etc/agentoc/service-user';
+  const serviceUserPath = '/etc/ragent/service-user';
   if (!existsSync(serviceUserPath)) {
     console.log('  ⚠️  Service user file does not exist (expected before migration)');
     return false;
@@ -42,7 +42,7 @@ async function testServiceUserFile() {
 async function testSystemdDropin() {
   console.log('Testing systemd drop-in configuration...');
 
-  const dropinPath = '/etc/systemd/system/agentoc-runner-supervisor.service.d/30-same-user.conf';
+  const dropinPath = '/etc/systemd/system/ragent-runner-supervisor.service.d/30-same-user.conf';
   if (!existsSync(dropinPath)) {
     console.log('  ⚠️  Same-user drop-in does not exist (expected before migration)');
     return false;
@@ -61,13 +61,13 @@ async function testSystemdDropin() {
 async function testCurrentServiceIdentity() {
   console.log('Testing current service identity...');
 
-  const status = exec('systemctl status agentoc-runner-supervisor.service --no-pager');
+  const status = exec('systemctl status ragent-runner-supervisor.service --no-pager');
   if (!status) {
     console.log('  ⚠️  Service not running');
     return false;
   }
 
-  const mainPid = exec('systemctl show agentoc-runner-supervisor.service --property=MainPid --value');
+  const mainPid = exec('systemctl show ragent-runner-supervisor.service --property=MainPid --value');
   if (!mainPid || mainPid === '0') {
     console.log('  ⚠️  Service has no main PID');
     return false;
@@ -86,7 +86,7 @@ async function testCurrentServiceIdentity() {
 async function testSecurityBoundaries() {
   console.log('Testing security boundaries...');
 
-  const status = exec('systemctl show agentoc-runner-supervisor.service --property=NoNewPrivileges --value');
+  const status = exec('systemctl show ragent-runner-supervisor.service --property=NoNewPrivileges --value');
   if (status !== 'false') {
     console.log('  ❌ Runner NoNewPrivileges must be disabled for privileged approval');
     return false;
@@ -94,13 +94,13 @@ async function testSecurityBoundaries() {
 
   console.log('  ✓ Runner NoNewPrivileges is disabled; elevation stays executor-bound');
 
-  const restrictAddr = exec('systemctl show agentoc-runner-supervisor.service --property=RestrictAddressFamilies --value');
+  const restrictAddr = exec('systemctl show ragent-runner-supervisor.service --property=RestrictAddressFamilies --value');
   if (restrictAddr && restrictAddr !== '') {
     console.log('  ✓ Address families are restricted');
   }
 
-  const inaccessiblePaths = exec('systemctl show agentoc-runner-supervisor.service --property=InaccessiblePaths --value');
-  if (inaccessiblePaths && inaccessiblePaths.includes('/etc/agentoc')) {
+  const inaccessiblePaths = exec('systemctl show ragent-runner-supervisor.service --property=InaccessiblePaths --value');
+  if (inaccessiblePaths && inaccessiblePaths.includes('/etc/ragent')) {
     console.log('  ✓ Control plane paths are inaccessible');
   }
 
@@ -110,7 +110,7 @@ async function testSecurityBoundaries() {
 async function testWorktreeAccess() {
   console.log('Testing worktree access...');
 
-  const testDir = `/home/${TEST_USER}/.config/agentoc-test`;
+  const testDir = `/home/${TEST_USER}/.config/ragent-test`;
   try {
     exec(`mkdir -p ${testDir}`);
     exec(`touch ${testDir}/test-file.txt`);

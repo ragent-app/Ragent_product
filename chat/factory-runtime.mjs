@@ -12,9 +12,9 @@ export function getFactoryRuntimeStatus(organizationId) {
 // supplied by a Work Contract or a client request. Disabled means no new
 // claims; graph reads and existing Run reconciliation remain available.
 export function createFactoryRuntime({ env = process.env, onError = (error) => console.error('[factory]', error?.message || String(error)) } = {}) {
-  const enabled = env.AGENTOC_FACTORY_SCHEDULER_ENABLED === '1';
-  const organizationIds = [...new Set(String(env.AGENTOC_FACTORY_ORGANIZATIONS || '').split(',').map((id) => id.trim()).filter(Boolean))];
-  const ownerId = String(env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID || '').trim();
+  const enabled = env.RAGENT_FACTORY_SCHEDULER_ENABLED === '1';
+  const organizationIds = [...new Set(String(env.RAGENT_FACTORY_ORGANIZATIONS || '').split(',').map((id) => id.trim()).filter(Boolean))];
+  const ownerId = String(env.RAGENT_FACTORY_SCHEDULER_OWNER_ID || '').trim();
   const schedulers = [];
   let running = false;
   async function start() {
@@ -39,7 +39,7 @@ export function createFactoryRuntime({ env = process.env, onError = (error) => c
     try {
       for (const organizationId of organizationIds) {
         const adapter = createFactoryExecutionAdapter({ organizationId, actor });
-        const observe = env.AGENTOC_FACTORY_SHADOW_SYNC_ENABLED === '1'
+        const observe = env.RAGENT_FACTORY_SHADOW_SYNC_ENABLED === '1'
           ? async () => (await import('./factory-shadow.mjs')).syncFactoryShadow({ organizationId, limit: 50, persistCursor: true }, actor)
           : null;
         const scheduler = createFactoryScheduler({ organizationId, actor, adapter, observe, admissionEnabled: enabled, onError });

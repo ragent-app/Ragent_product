@@ -10,15 +10,15 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-scoped-history-body-budget-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-scoped-history-body-budget-'));
 const previousHome = process.env.HOME;
-const previousConfig = process.env.AGENTOC_CONFIG_DIR;
-const previousMemory = process.env.AGENTOC_MEMORY_DIR;
-const previousWorkRoot = process.env.AGENTOC_WORK_ROOT_DIR;
+const previousConfig = process.env.RAGENT_CONFIG_DIR;
+const previousMemory = process.env.RAGENT_MEMORY_DIR;
+const previousWorkRoot = process.env.RAGENT_WORK_ROOT_DIR;
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(tempHome, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'workspace');
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(tempHome, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'workspace');
 
 try {
   const sessionManager = await import(pathToFileURL(resolve(repoRoot, '..', 'chat', 'session-manager.mjs')).href);
@@ -50,11 +50,11 @@ try {
 } finally {
   if (previousHome === undefined) delete process.env.HOME;
   else process.env.HOME = previousHome;
-  if (previousConfig === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousConfig;
-  if (previousMemory === undefined) delete process.env.AGENTOC_MEMORY_DIR;
-  else process.env.AGENTOC_MEMORY_DIR = previousMemory;
-  if (previousWorkRoot === undefined) delete process.env.AGENTOC_WORK_ROOT_DIR;
-  else process.env.AGENTOC_WORK_ROOT_DIR = previousWorkRoot;
+  if (previousConfig === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousConfig;
+  if (previousMemory === undefined) delete process.env.RAGENT_MEMORY_DIR;
+  else process.env.RAGENT_MEMORY_DIR = previousMemory;
+  if (previousWorkRoot === undefined) delete process.env.RAGENT_WORK_ROOT_DIR;
+  else process.env.RAGENT_WORK_ROOT_DIR = previousWorkRoot;
   rmSync(tempHome, { recursive: true, force: true });
 }

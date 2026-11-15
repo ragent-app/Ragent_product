@@ -7,23 +7,23 @@ import { grantRunnerFileAccess, isTrustedSetfacl, resolveRunFilePeerUid } from '
 import { writeJsonAtomic, writeTextAtomic } from '../chat/fs-utils.mjs';
 
 if (process.platform !== 'linux') { console.log('Linux ACL check skipped on non-Linux'); process.exit(0); }
-const root = await mkdtemp(join(tmpdir(), 'agentoc-run-acl-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-run-acl-'));
 const path = join(root, 'input');
 try {
   const directory = { uid:1001, isDirectory:()=>true, isSymbolicLink:()=>false };
-  assert.equal(await resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_DISTINCT_IDENTITY:'1' },
+  assert.equal(await resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_DISTINCT_IDENTITY:'1' },
     currentUid:1002, statImpl:async()=>directory }), 1001);
-  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_DISTINCT_IDENTITY:'1' },
+  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_DISTINCT_IDENTITY:'1' },
     currentUid:1001, statImpl:async()=>directory }), { code:'RUNNER_FILE_ACCESS_INVALID' });
-  assert.equal(await resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'runner' },
+  assert.equal(await resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_SAME_USER:'0', RAGENT_RUNNER_USER:'runner' },
     currentUid:1001, execFileImpl:async()=>({stdout:'runner:x:1002:1002::/tmp:/bin/false\n'}) }), 1002);
-  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'root' },
+  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_SAME_USER:'0', RAGENT_RUNNER_USER:'root' },
     currentUid:1001, execFileImpl:async()=>({stdout:'root:x:0:0::/root:/bin/bash\n'}) }), { code:'RUNNER_FILE_ACCESS_INVALID' });
-  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER:'alias' },
+  await assert.rejects(() => resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_SAME_USER:'0', RAGENT_RUNNER_USER:'alias' },
     currentUid:1001, execFileImpl:async()=>({stdout:'alias:x:1001:1001::/tmp:/bin/false\n'}) }), { code:'RUNNER_FILE_ACCESS_INVALID' });
   const rootOwned = (entry) => ({ uid: 0, mode: 0o755, isSymbolicLink: () => false,
-    isDirectory: () => entry !== '/etc/agentoc/runner-user', isFile: () => entry === '/etc/agentoc/runner-user' });
-  assert.equal(await resolveRunFilePeerUid(root, { environment:{ AGENTOC_RUNNER_SAME_USER:'0' }, currentUid:1001,
+    isDirectory: () => entry !== '/etc/ragent/runner-user', isFile: () => entry === '/etc/ragent/runner-user' });
+  assert.equal(await resolveRunFilePeerUid(root, { environment:{ RAGENT_RUNNER_SAME_USER:'0' }, currentUid:1001,
     statImpl:async entry => rootOwned(entry), readFileImpl:async () => 'control\n',
     execFileImpl:async (_command, args) => ({stdout: `${args[1]}:x:${args[1] === 'control' ? 1001 : 1002}:1002::/tmp:/bin/false\n`}) }), 1002);
   const handle = await open(path, 'wx+', 0o600);

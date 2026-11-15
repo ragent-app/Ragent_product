@@ -102,7 +102,7 @@ static class RestrictedProviderWorker {
         string caller=WindowsIdentity.GetCurrent().User.Value;
         // Only open the fixed, admin-created QA station for this case/round.
         // No change to SCM's inherited station or any interactive WinSta0.
-        string stationName="AgentoC-QA-"+(string)ServiceManifest["caseId"]+"-r"+Convert.ToInt32(ServiceManifest["ipcRound"]);
+        string stationName="Ragent-QA-"+(string)ServiceManifest["caseId"]+"-r"+Convert.ToInt32(ServiceManifest["ipcRound"]);
         station=OpenWindowStationW(stationName,false,0x6002b);Check(station!=IntPtr.Zero,"Open fixed QA private service station");
         uint kind=4,size;GetUserObjectSecurity(station,ref kind,null,0,out size);
         if(size==0||size>65536)throw new InvalidOperationException("PRIVATE_STATION_DACL_UNAVAILABLE");
@@ -191,7 +191,7 @@ static class RestrictedProviderWorker {
   }
   static string VerifyRoot(string root,string profile,bool service) {
     root=Path.GetFullPath(root).TrimEnd('\\');
-    string parent=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AgentoC","restricted-runs")+"\\";
+    string parent=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Ragent","restricted-runs")+"\\";
     bool allowed=root.StartsWith(parent,StringComparison.OrdinalIgnoreCase);
     if(service){
       var caller=WindowsIdentity.GetCurrent().User.Value;
@@ -204,21 +204,21 @@ static class RestrictedProviderWorker {
       // This candidate uses the same fixed C: installation as Installed().
       // Shell folder lookup can be empty in the deliberately minimal service
       // child environment; it must not select or widen the trusted QA root.
-      allowed=String.Equals(Path.GetDirectoryName(qa),@"C:\ProgramData\AgentoCIdentityQA",StringComparison.OrdinalIgnoreCase);
+      allowed=String.Equals(Path.GetDirectoryName(qa),@"C:\ProgramData\RagentIdentityQA",StringComparison.OrdinalIgnoreCase);
       if(!allowed)throw new InvalidOperationException("SERVICE_ROOT_INVALID:parent");
       if(!allowed)throw new InvalidOperationException("SERVICE_ROOT_INVALID");ProtectedQaObject(qa,true);
-      ProtectedQaObject(Path.Combine(qa,"manifest.json"),false);ProtectedQaObject(Path.Combine(qa,".agentoc-identity-qa"),false);
+      ProtectedQaObject(Path.Combine(qa,"manifest.json"),false);ProtectedQaObject(Path.Combine(qa,".ragent-identity-qa"),false);
       var qaSpec=Json.Deserialize<Dictionary<string,object>>(File.ReadAllText(Path.Combine(qa,"manifest.json")));
       if(!qaSpec.ContainsKey("crossServiceProvider")||!(bool)qaSpec["crossServiceProvider"]||(string)qaSpec["executorSid"]!=caller
         ||"case-"+(string)qaSpec["caseId"]!=Path.GetFileName(qa)
-        ||File.ReadAllText(Path.Combine(qa,".agentoc-identity-qa")).Trim()!=Path.GetFileName(qa))throw new InvalidOperationException("SERVICE_ROOT_BINDING_INVALID");
+        ||File.ReadAllText(Path.Combine(qa,".ragent-identity-qa")).Trim()!=Path.GetFileName(qa))throw new InvalidOperationException("SERVICE_ROOT_BINDING_INVALID");
       ServiceManifest=qaSpec;
     }
     if(!allowed || !Regex.IsMatch(Path.GetFileName(root),"^[a-f0-9]{32}$")
-        || !Regex.IsMatch(profile,"^agentoc[.]restricted[.][a-f0-9]{32}$")) throw new InvalidOperationException("Not an owned probe root/profile");
+        || !Regex.IsMatch(profile,"^ragent[.]restricted[.][a-f0-9]{32}$")) throw new InvalidOperationException("Not an owned probe root/profile");
     NoReparse(root);
-    string marker=Path.Combine(root,".agentoc-restricted-run"); NoReparse(marker);
-    if(profile!="agentoc.restricted."+Path.GetFileName(root) || File.ReadAllText(marker).Trim()!=profile) throw new InvalidOperationException("Probe marker mismatch");
+    string marker=Path.Combine(root,".ragent-restricted-run"); NoReparse(marker);
+    if(profile!="ragent.restricted."+Path.GetFileName(root) || File.ReadAllText(marker).Trim()!=profile) throw new InvalidOperationException("Probe marker mismatch");
     var owner=(SecurityIdentifier)Directory.GetAccessControl(root).GetOwner(typeof(SecurityIdentifier));
     if(owner.Value!=WindowsIdentity.GetCurrent().User.Value) throw new InvalidOperationException("Probe root owner mismatch");
     return root;
@@ -273,7 +273,7 @@ static class RestrictedProviderWorker {
       string windows=Environment.GetFolderPath(Environment.SpecialFolder.Windows),work=Path.Combine(root,"workspace");
       string state=Path.Combine(root,"state");
       var vars=new SortedDictionary<string,string>(StringComparer.OrdinalIgnoreCase) {
-        {"AGENTOC_PROBE_HANDLE",canaryHandle.ToInt64().ToString()},{"AGENTOC_PROBE_HANDLE_ID",canaryIdentity.Key()},
+        {"RAGENT_PROBE_HANDLE",canaryHandle.ToInt64().ToString()},{"RAGENT_PROBE_HANDLE_ID",canaryIdentity.Key()},
         {"CODEX_HOME",state},{"HOME",state},{"USERPROFILE",state},{"LOCALAPPDATA",state},{"APPDATA",state},
         {"PATH",runtime.TrimEnd('\\')+";"+Path.Combine(windows,"System32")},{"PATHEXT",".EXE;.COM"},
         {"SystemRoot",windows},{"WINDIR",windows},{"TEMP",state},{"TMP",state},
@@ -370,12 +370,12 @@ static class RestrictedProviderWorker {
   }
   static string Installed(string name) {
     if(name=="node.exe") {
-      string root=Environment.GetEnvironmentVariable("AGENTOC_INSTALL_ROOT");
-      if(String.IsNullOrWhiteSpace(root))root=@"C:\Program Files\AgentoC";
+      string root=Environment.GetEnvironmentVariable("RAGENT_INSTALL_ROOT");
+      if(String.IsNullOrWhiteSpace(root))root=@"C:\Program Files\Ragent";
       return Path.Combine(root,"payload","node.exe");
     }
-    if(name=="codex.exe") return "C:/ProgramData/AgentoC/harnesses/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe";
-    if(name=="claude.exe") return "C:/ProgramData/AgentoC/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe";
+    if(name=="codex.exe") return "C:/ProgramData/Ragent/harnesses/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe";
+    if(name=="claude.exe") return "C:/ProgramData/Ragent/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe";
     throw new InvalidOperationException("Unknown internal runtime");
   }
   public static int Main(string[] args) {
@@ -434,7 +434,7 @@ static class RestrictedProviderWorker {
       foreach(string file in new[]{"runtime\\provider.json","runtime\\probe.mjs","control\\launch.json","control\\prompt.txt"})
         locks.Add(new FileStream(Path.Combine(root,file),FileMode.Open,FileAccess.Read,FileShare.Read));
       report["launchHash"]=Digest(specPath); report["runId"]=Spec["runId"]; report["grantId"]=Spec["grantId"]; report["requestId"]=Spec["requestId"]; report["authorityHash"]=Spec["authorityHash"];
-      int hr=CreateAppContainerProfile(profile,"AgentoC candidate restricted Provider","Private disposable candidate worker",IntPtr.Zero,0,out sid);
+      int hr=CreateAppContainerProfile(profile,"Ragent candidate restricted Provider","Private disposable candidate worker",IntPtr.Zero,0,out sid);
       if(hr!=0) Marshal.ThrowExceptionForHR(hr); created=true;
       var package=new SecurityIdentifier(sid); report["packageSid"]=package.Value;
       if(service){privateDesktop=new PrivateServiceDesktop(profile,package);report["serviceDesktop"]=privateDesktop.Facts;}

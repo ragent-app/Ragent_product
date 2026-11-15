@@ -23,6 +23,6 @@ if($LASTEXITCODE -ne 0){throw 'Native guard test failed'}
 $guardNative|Set-Content -LiteralPath (Join-Path $guardRoot 'native.json') -Encoding UTF8
 $guardReport=$guardNative|ConvertFrom-Json
 if(-not $guardReport.pass -or $guardReport.checks.Count -ne 56){throw 'Native guard case count mismatch'}
-& (Join-Path $PSScriptRoot '..\packaging\windows\build-legacy-owner-install-guard.ps1') -OutputPath (Join-Path $guardRoot 'AgentoC.LegacyOwnerInstallGuard.exe')
-if(-not(Test-Path -LiteralPath (Join-Path $guardRoot 'AgentoC.LegacyOwnerInstallGuard.exe'))){throw 'Native product guard missing'}
+& (Join-Path $PSScriptRoot '..\packaging\windows\build-legacy-owner-install-guard.ps1') -OutputPath (Join-Path $guardRoot 'Ragent.LegacyOwnerInstallGuard.exe')
+if(-not(Test-Path -LiteralPath (Join-Path $guardRoot 'Ragent.LegacyOwnerInstallGuard.exe'))){throw 'Native product guard missing'}
 @{pass=$true;nativeChecks=$guardReport.checks.Count;productionMutation=$false;fixturesRetained=$true}|ConvertTo-Json -Compress

@@ -1,5 +1,5 @@
 /**
- * organization-view.js — AgentoC Organization View v1 (AI Organization Radar)
+ * organization-view.js — Ragent Organization View v1 (AI Organization Radar)
  *
  * Implements the mobile & desktop real-time AI Organization Radar UI:
  * - Direct projection of Backend Organization Projection v2
@@ -15,8 +15,8 @@
 (function attachOrganizationView(root) {
   // Localization helper
   function tr(key, params) {
-    if (typeof root.AgentoCI18n?.t === "function") {
-      return root.AgentoCI18n.t(key, params);
+    if (typeof root.RagentI18n?.t === "function") {
+      return root.RagentI18n.t(key, params);
     }
     return key;
   }
@@ -570,9 +570,9 @@
     }
   }
 
-  // --- 5. AgentoCOrganizationViewManager Main Controller ---
+  // --- 5. RagentOrganizationViewManager Main Controller ---
 
-  class AgentoCOrganizationViewManager {
+  class RagentOrganizationViewManager {
     constructor() {
       this.sessionId = null;
       this.projection = null;
@@ -644,10 +644,10 @@
           <div class="org-radar-top-actions">
             <button type="button" class="org-icon-btn" id="orgFactoryWorkBtn" title="Work items">Tasks</button>
             <button type="button" class="org-icon-btn" id="orgRadarResetBtn" title="${tr("organization.resetView")}" aria-label="${tr("organization.resetView")}">
-              ${root.AgentoCIcons?.render?.("refresh") || "↺"}
+              ${root.RagentIcons?.render?.("refresh") || "↺"}
             </button>
             <button type="button" class="org-icon-btn" id="orgRadarCloseBtn" title="${tr("organization.timeline")}" aria-label="${tr("organization.timeline")}">
-              ${root.AgentoCIcons?.render?.("close") || "✕"}
+              ${root.RagentIcons?.render?.("close") || "✕"}
             </button>
           </div>
         </div>
@@ -764,7 +764,7 @@
       const add = (parent, tag, value) => { const el = document.createElement(tag); el.textContent = value; parent.appendChild(el); return el; };
       const button = (parent, label, action) => { const el = add(parent, 'button', label); el.type = 'button'; el.className = 'org-btn org-btn--secondary'; el.addEventListener('click', action); return el; };
       const base = `/api/organizations/${encodeURIComponent(organizationId)}/factory`;
-      const fetcher = root.agentocFetch || fetch;
+      const fetcher = root.ragentFetch || fetch;
       const request = async (path, options = {}) => {
         const response = await fetcher(base + path, { credentials: 'same-origin', cache: 'no-store', ...options });
         const body = await response.json();
@@ -951,7 +951,7 @@
           try {
             const catalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`);
             const planner = (catalog.providers || []).find(p => p.id === 'generic-planner' && p.version === 1 && p.available === true);
-            const plannerTemplate = planner?.templates?.find(t => t.id === 'agentoc-responsibility-planner' && t.version === 1);
+            const plannerTemplate = planner?.templates?.find(t => t.id === 'ragent-responsibility-planner' && t.version === 1);
             const reportDescriptor = (catalog.planCatalogDescriptors || []).find(d => d.capability === 'project-report' && d.available === true);
             if (planner?.digest && plannerTemplate?.digest && reportDescriptor?.templateDigest) button(content, 'Review planner authorization', async () => {
               const includeReport = root.confirm('Include the project-report capability in this planner catalog?');
@@ -1002,7 +1002,7 @@
               submitCommand('', {policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
             });
             const ci = (catalog.providers || []).find(p => p.id === 'github-ci' && p.version === 1 && p.available === true);
-            const ciTemplate = ci?.templates?.find(t => t.id === 'agentoc-reviewed-change' && t.version === 3);
+            const ciTemplate = ci?.templates?.find(t => t.id === 'ragent-reviewed-change' && t.version === 3);
             if (ciTemplate?.digest) button(content, 'Review GitHub CI authorization', () => {
               const repository = root.prompt('Repository owner/name'); if (!repository) return;
               const targetBranch = root.prompt('Target branch'); if (!targetBranch) return;
@@ -1029,7 +1029,7 @@
               submitCommand('', {policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
             });
             const provider = (catalog.providers || []).find(p => p.id === 'project-report' && p.version === 1 && p.available === true);
-            const template = provider?.templates?.find(t => t.id === 'agentoc-project-report' && t.version === 1);
+            const template = provider?.templates?.find(t => t.id === 'ragent-project-report' && t.version === 1);
             if (provider?.digest && template?.digest) button(content, 'Review project report authorization', () => {
               const nodeId = root.prompt('Authorized report node ID'); if (!nodeId) return;
               const generation = Number(root.prompt('Current node binding generation')); if (!Number.isSafeInteger(generation) || generation < 1) return;
@@ -1653,7 +1653,7 @@
         if (this.projectionEtag && !force) {
           headers["If-None-Match"] = this.projectionEtag;
         }
-        const fetcher = root.agentocFetch || fetch;
+        const fetcher = root.ragentFetch || fetch;
         const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/projection?version=2`, {
           credentials: "same-origin",
           cache: "no-store",
@@ -2230,7 +2230,7 @@
       screen.innerHTML = `
         <div class="org-detail-top-bar">
           <button type="button" class="org-icon-btn" id="orgDetailBackBtn" aria-label="${tr("organization.backToRadar")}">
-            ${root.AgentoCIcons?.render?.("chevron-left") || "←"}
+            ${root.RagentIcons?.render?.("chevron-left") || "←"}
           </button>
           <div class="org-detail-title">${displayName}</div>
         </div>
@@ -2267,7 +2267,7 @@
                       .map(
                         (f) => `
                     <div class="org-file-item">
-                      ${root.AgentoCIcons?.render?.("file") || "📄"}
+                      ${root.RagentIcons?.render?.("file") || "📄"}
                       <span>${f}</span>
                     </div>`
                       )
@@ -2325,7 +2325,7 @@
       const task = document.createElement('input'); task.placeholder = 'Work item ID (optional)'; task.setAttribute('aria-label', 'Work item ID'); screen.appendChild(task);
       const receipt = add('p', 'Messages are queued for the node; delivery does not mean a reply.');
       const path = `/api/organizations/${encodeURIComponent(organizationId)}/factory/nodes/${encodeURIComponent(node.id)}/messages`;
-      const fetcher = root.agentocFetch || fetch;
+      const fetcher = root.ragentFetch || fetch;
       const request = async (options, target = path) => { const res = await fetcher(target, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
       const refresh = async () => {
         try { const data = await request(); list.replaceChildren(); for (const message of data.messages) { const p = document.createElement('p'); p.textContent = `${message.createdAt} · ${message.deliveryState === 'delivered' ? 'Delivered to Run' : message.deliveryState} · ${message.requestState || 'information'} · ${message.body}${message.reply ? ` · Reply: ${message.reply.body}` : ''}${message.escalation ? ` · Escalation: ${message.escalation.deliveryState}` : ''}`; list.appendChild(p);
@@ -2357,8 +2357,8 @@
 
   // --- 6. Global Export & Auto Initialization ---
 
-  const manager = new AgentoCOrganizationViewManager();
-  root.AgentocOrganizationView = manager;
+  const manager = new RagentOrganizationViewManager();
+  root.RagentOrganizationView = manager;
 
   // Intercept WebSocket organization_invalidated if handler already attached
   const existingInvalidationHandler = root.handleOrganizationInvalidation;

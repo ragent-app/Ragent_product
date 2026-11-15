@@ -24,7 +24,7 @@ withSeq(events, {
       kind: 'decision',
       id: 'decision-canonical-state',
       value: {
-        statement: 'Keep one AgentoC canonical state and use provider runtimes only as carriers.',
+        statement: 'Keep one Ragent canonical state and use provider runtimes only as carriers.',
         reason: 'A second planner would split ownership and make cross-provider recovery ambiguous.',
         alternativesConsidered: ['Create a provider-owned task database', 'Copy the full transcript into every provider'],
         rejectedAlternatives: ['Create a provider-owned task database'],
@@ -49,7 +49,7 @@ withSeq(events, {
         failure: 'The summary omitted the decision rationale and stale workspace state.',
         rootCause: 'No structured fact envelope or provenance was preserved.',
         result: 'Rejected as insufficient for semantic resume.',
-        environment: 'AgentoC CE-0 audit fixture',
+        environment: 'Ragent CE-0 audit fixture',
         version: '2026-09-01',
         retryCondition: 'Retry only after the canonical bundle carries provenance and freshness.',
       },

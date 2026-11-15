@@ -165,7 +165,7 @@ context.globalThis = context;
 // below extracts selected functions, so provide the same immutable value on
 // the sandbox for the extracted bounded-index helper.
 context.MAX_OPERATION_RENDER_INDEX_ENTRIES = 4096;
-context.agentocT = (key, vars = {}) => {
+context.ragentT = (key, vars = {}) => {
   const value = translations[key];
   const text = typeof value === 'function' ? value(vars) : (value || key);
   return String(text).replace(/\{(\w+)\}/g, (match, name) => (

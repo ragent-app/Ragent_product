@@ -12,7 +12,7 @@ import {
   mergeAccountSyncRecords,
 } from '../lib/provider-runtime/sync.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-account-sync-records-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-account-sync-records-'));
 const sourceIdentity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'source-identity.json') });
 const targetIdentity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'target-identity.json') });
 const sourceKey = await createProviderSyncKeyStore({ configDir: join(root, 'source-config') }).getKeyPair();

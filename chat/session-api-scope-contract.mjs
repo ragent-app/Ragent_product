@@ -1,6 +1,6 @@
 import { sessionApiError, sessionApiIdentifier, sessionApiProject } from './session-api-mutation-contract.mjs';
 
-export const SESSION_API_SCOPE_HEADER = 'x-agentoc-app-api-scope';
+export const SESSION_API_SCOPE_HEADER = 'x-ragent-app-api-scope';
 export const SESSION_API_SCOPE_HEADER_BYTES = 4096;
 const revision = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 

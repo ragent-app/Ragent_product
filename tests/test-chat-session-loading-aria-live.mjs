@@ -302,7 +302,7 @@ assert.ok(live1, 'a visually-hidden live region should be created when the skele
 assert.equal(live1.className, 'sr-only', 'the live region should use the sr-only utility class');
 assert.equal(live1.getAttribute('role'), 'status', 'the live region should be a status region');
 assert.equal(live1.getAttribute('aria-live'), 'polite', 'the live region should be polite');
-assert.equal(live1.textContent, 'Loading session…', 'loading announcement should use the fallback text when agentocT is absent');
+assert.equal(live1.textContent, 'Loading session…', 'loading announcement should use the fallback text when ragentT is absent');
 
 // 2) A second show is idempotent: no duplicate announcement.
 c1.showSessionLoadingSkeleton();
@@ -352,16 +352,16 @@ assert.equal(live4.textContent, 'Loading session…', 'delayed skeleton should a
 c4.hideSessionLoadingSkeleton();
 assert.equal(live4.textContent, 'Session loaded', 'delayed skeleton should announce completion when hidden');
 
-// 8) i18n path: window.agentocT provides localized strings.
+// 8) i18n path: window.ragentT provides localized strings.
 const c5 = createContext({ shareSnapshotMode: false });
-c5.window.agentocT = (key) => ({
+c5.window.ragentT = (key) => ({
   'status.loadingSession': '正在加载会话…',
   'status.sessionLoaded': '会话已加载',
 }[key] || key);
 vm.runInNewContext(sessionHttpSource, c5, { filename: 'static/chat/session-http.js' });
 c5.showSessionLoadingSkeleton();
-assert.equal(findLiveRegion(c5).textContent, '正在加载会话…', 'loading announcement should use the agentocT value when present');
+assert.equal(findLiveRegion(c5).textContent, '正在加载会话…', 'loading announcement should use the ragentT value when present');
 c5.hideSessionLoadingSkeleton();
-assert.equal(findLiveRegion(c5).textContent, '会话已加载', 'loaded announcement should use the agentocT value when present');
+assert.equal(findLiveRegion(c5).textContent, '会话已加载', 'loaded announcement should use the ragentT value when present');
 
 console.log('test-chat-session-loading-aria-live: ok');

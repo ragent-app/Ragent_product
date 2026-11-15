@@ -5,7 +5,7 @@
 // points must fail closed, and the pure PATH/PATHEXT / spawn-spec machinery is
 // exercised with real fixture files.  Nothing here pretends to be Windows live
 // evidence — the real asus traces live in
-// /var/lib/agentoc/workspace/windows-a0-evidence/p0-2-*.output.txt.
+// /var/lib/ragent/workspace/windows-a0-evidence/p0-2-*.output.txt.
 
 import assert from 'node:assert/strict';
 import { accessSync, constants as fsConstants, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -134,12 +134,12 @@ eq('encodePowerShellCommand is UTF-16LE base64 round-trip', decoded, 'Write-Outp
 // PATH/PATHEXT resolution with real fixture files
 // ---------------------------------------------------------------------------
 
-const fixtureDir = mkdtempSync(path.join(tmpdir(), 'agentoc-exe-res-'));
+const fixtureDir = mkdtempSync(path.join(tmpdir(), 'ragent-exe-res-'));
 const binDir = path.join(fixtureDir, 'bin');
 const spacedDir = path.join(fixtureDir, 'dir with space');
 // The resolver models Windows CreateProcess/PATH semantics with path.win32.
 // Map Windows-shaped fixture paths to real Linux files for the off-win32 test.
-const windowsFixtureRoot = 'C:\\agentoc\\fixture';
+const windowsFixtureRoot = 'C:\\ragent\\fixture';
 const windowsBinDir = path.win32.join(windowsFixtureRoot, 'bin');
 const windowsSpacedDir = path.win32.join(windowsFixtureRoot, 'dir with space');
 mkdirSync(binDir, { recursive: true });

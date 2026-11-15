@@ -19,7 +19,7 @@ export function resolveAccountAsrLimits(plan, env = process.env) {
     monthlyLimitMs: Number.MAX_SAFE_INTEGER, monthlyLimitMinutes: Math.floor(Number.MAX_SAFE_INTEGER / 60_000),
   };
   const key = normalized === 'plus' || normalized === 'pro' ? normalized : 'free';
-  const minutes = positiveMinutes(env[`AGENTOC_ACCOUNTS_ASR_${key.toUpperCase()}_MINUTES`], DEFAULT_MINUTES[key]);
+  const minutes = positiveMinutes(env[`RAGENT_ACCOUNTS_ASR_${key.toUpperCase()}_MINUTES`], DEFAULT_MINUTES[key]);
   return {
     plan: key,
     policyVersion: ACCOUNT_ASR_POLICY_VERSION,

@@ -16,14 +16,14 @@ function eq(label, actual, expected) {
 const HOME = '/home/example';
 const PROJ = '/home/example/proj';
 const CTX = { cwd: PROJ, projectRoot: PROJ, home: HOME };
-const VAR_WORKSPACE = '/var/lib/agentoc/workspace';
+const VAR_WORKSPACE = '/var/lib/ragent/workspace';
 const VAR_RISK_CONTEXT = {
   schemaVersion: 1,
   platform: 'linux',
   workspaceRoot: VAR_WORKSPACE,
   trustedWorkspaceRoot: VAR_WORKSPACE,
   cwd: VAR_WORKSPACE,
-  protectedRoots: ['/var/lib/agentoc/config'],
+  protectedRoots: ['/var/lib/ragent/config'],
   systemPathRoots: ['/etc', '/usr', '/var'],
 };
 const WIN_CTX = {
@@ -32,7 +32,7 @@ const WIN_CTX = {
   workspaceRoot: 'C:\\work\\project',
   trustedWorkspaceRoot: 'C:\\work\\project',
   cwd: 'C:\\work\\project',
-  protectedRoots: ['C:\\agentoc\\config'],
+  protectedRoots: ['C:\\ragent\\config'],
   systemPathRoots: ['C:\\Windows', 'C:\\Program Files'],
 };
 
@@ -129,13 +129,13 @@ check('rm project file', facts('rm file.txt').targetScopes.includes('inside-proj
 eq('rm project file count', facts('rm file.txt').fileCountEstimate, 'one');
 
 // === frozen risk context boundaries ===
-f = scopedFacts('mkdir /var/lib/agentoc/workspace/build');
+f = scopedFacts('mkdir /var/lib/ragent/workspace/build');
 check('trusted /var workspace is inside project', f.targetScopes.includes('inside-project'));
 check('trusted /var workspace is not system', f.systemPath === '' && f.systemPathScope === 'outside-workspace');
 check('trusted mkdir exposes trusted target scope', f.targetPathScopes.includes('trusted-workspace'));
 f = scopedFacts('rm file.txt');
 check('relative delete resolves inside trusted workspace', f.targetScopes.includes('inside-project'));
-f = scopedFacts('rm -rf /var/lib/agentoc/config/chat-runs');
+f = scopedFacts('rm -rf /var/lib/ragent/config/chat-runs');
 check('protected control root outranks trusted /var workspace', f.targetScopes.includes('system'));
 eq('protected control scope fact', f.systemPathScope, 'protected-control');
 f = scopedFacts('rm -rf /home/example/other', { projectRoot: '/home/example/other' });
@@ -152,7 +152,7 @@ f = parseCommandFacts('mkdir C:\\work\\project\\build', {
 });
 check('Windows trusted absolute path is inside project', f.targetScopes.includes('inside-project'));
 check('Windows trusted path is not system', f.systemPath === '');
-f = parseCommandFacts('mkdir C:\\Windows\\System32\\agentoc-test', {
+f = parseCommandFacts('mkdir C:\\Windows\\System32\\ragent-test', {
   cwd: WIN_CTX.cwd,
   projectRoot: WIN_CTX.trustedWorkspaceRoot,
   home: 'C:\\Users\\andy',
@@ -160,7 +160,7 @@ f = parseCommandFacts('mkdir C:\\Windows\\System32\\agentoc-test', {
 });
 check('Windows system path is detected', f.targetScopes.includes('system'));
 eq('Windows system scope fact', f.systemPathScope, 'system');
-f = parseCommandFacts('rm C:\\agentoc\\config\\chat.json', {
+f = parseCommandFacts('rm C:\\ragent\\config\\chat.json', {
   cwd: WIN_CTX.cwd,
   projectRoot: WIN_CTX.trustedWorkspaceRoot,
   home: 'C:\\Users\\andy',

@@ -24,7 +24,7 @@ function message(e) {
   return JSON.stringify(['ragent-local-account-link-v1',1,e.instanceId,e.linkId,e.deviceId,e.accountId,e.action,e.eventId,e.expectedGeneration,e.issuedAt,e.expiresAt]);
 }
 export async function handleProotAccountLinkRequest(req,res,{onChange=async()=>{}}={}) {
-  if (process.env.AGENTOC_RUNTIME_MODE !== 'proot' || !['/api/local/account-link','/api/local/account-link/logout'].includes(req.url)) return false;
+  if (process.env.RAGENT_RUNTIME_MODE !== 'proot' || !['/api/local/account-link','/api/local/account-link/logout'].includes(req.url)) return false;
   const send=(status,value)=>{res.writeHead(status,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify(value));};
   if (!(await authenticateProotRequest(req))) { send(401,{code:'account_link_unauthorized'}); return true; }
   try {

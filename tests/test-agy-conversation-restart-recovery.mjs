@@ -13,7 +13,7 @@ import { prepareNativeRunProviderHome } from '../lib/provider-runtime/run-provid
 import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.mjs';
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-conversation-restart-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-conversation-restart-'));
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 const registry = createNativeProviderRegistry({ configDir });

@@ -1,7 +1,7 @@
-// AgentoC adapter for the vendored Vditor Markdown editor.
+// Ragent adapter for the vendored Vditor Markdown editor.
 //
 // Vditor owns the editable Markdown surface, selection/IME handling, paste,
-// and undo/redo. AgentoC keeps the existing hidden textarea as the integration
+// and undo/redo. Ragent keeps the existing hidden textarea as the integration
 // value so the send, draft, session, and attachment paths remain unchanged.
 (function initMarkdownComposerEditor() {
   "use strict";
@@ -587,7 +587,7 @@
     };
     instance.contentTheme = contentThemeForEditorTheme(instance.theme);
     mounted.set(textarea, instance);
-    editor.dataset.agentocEditor = "vditor";
+    editor.dataset.ragentEditor = "vditor";
 
     function syncMarkdown(markdown) {
       const value = String(markdown ?? "");
@@ -845,7 +845,7 @@
         }
         document.addEventListener("selectionchange", handleSelectionChange);
         warmMarkdownWorkerWhenIdle();
-        editor.dispatchEvent(new CustomEvent("agentoc-markdown-editor-ready", { bubbles: true }));
+        editor.dispatchEvent(new CustomEvent("ragent-markdown-editor-ready", { bubbles: true }));
       },
       input(value) {
         if (!instance.composing) scheduleMarkdownSync(value);
@@ -960,7 +960,7 @@
     return mounted.get(textarea) || mount(textarea, editor);
   }
 
-  window.AgentoCMarkdownComposer = Object.freeze({
+  window.RagentMarkdownComposer = Object.freeze({
     mount: mountComposer,
     getEditor: (textarea) => mounted.get(textarea)?.editor || null,
     getEditable: (textarea) => editableElement(mounted.get(textarea)?.vditor),

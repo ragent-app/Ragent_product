@@ -6,10 +6,10 @@ import { join } from 'path';
 import { spawnSync } from 'child_process';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-agent-mail-command-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-agent-mail-command-'));
 process.env.HOME = tempHome;
 
-const mailboxRoot = join(tempHome, '.config', 'agentoc', 'agent-mailbox');
+const mailboxRoot = join(tempHome, '.config', 'ragent', 'agent-mailbox');
 
 const { initializeMailbox, loadOutboundConfig, saveOutboundConfig } = await import('../lib/agent-mailbox.mjs');
 const { runAgentMailCommand } = await import('../lib/agent-mail-command.mjs');
@@ -192,8 +192,8 @@ try {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: tempHome,
     },
     encoding: 'utf8',

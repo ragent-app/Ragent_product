@@ -11,7 +11,7 @@ import {
 } from '../lib/instance-runtime.mjs';
 import { loadInstanceIdentity, loadOrCreateInstanceIdentity } from '../lib/instance-identity.mjs';
 
-const instanceRoot = 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner';
+const instanceRoot = 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner';
 const identityFile = `${instanceRoot}\\config\\instance-identity.json`;
 const ownershipFile = `${instanceRoot}\\runtime\\instance-ownership.json`;
 const identity = { instanceId: 'inst_abc123' };
@@ -38,7 +38,7 @@ const runtime = await bootstrapInstanceRuntime({
 
 assert.equal(runtime.platform, 'win32');
 assert.equal(runtime.instanceId, identity.instanceId);
-assert.match(runtime.endpointName, /^\\\\\.\\pipe\\agentoc-[0-9a-f-]+$/);
+assert.match(runtime.endpointName, /^\\\\\.\\pipe\\ragent-[0-9a-f-]+$/);
 assert.equal(ownerCalls.length, 1);
 assert.equal(ownerCalls[0].filePath, ownershipFile);
 assert.equal(ownerCalls[0].instanceId, identity.instanceId);
@@ -65,12 +65,12 @@ assert.equal(endpoint, runtime.endpointName);
 
 const unix = await bootstrapInstanceRuntime({
   platform: 'linux',
-  cliSocketPath: '/tmp/agentoc-cli.sock',
+  cliSocketPath: '/tmp/ragent-cli.sock',
 });
-assert.equal(unix.endpointName, '/tmp/agentoc-cli.sock');
+assert.equal(unix.endpointName, '/tmp/ragent-cli.sock');
 assert.deepEqual(await unix.release(), { ok: true, skipped: true });
 
-const readOnlyRoot = await mkdtemp(join(tmpdir(), 'agentoc-instance-identity-readonly-'));
+const readOnlyRoot = await mkdtemp(join(tmpdir(), 'ragent-instance-identity-readonly-'));
 try {
   const readOnlyFile = join(readOnlyRoot, 'identity.json');
   assert.equal(await loadInstanceIdentity({ filePath: readOnlyFile }), null);

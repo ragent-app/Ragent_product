@@ -14,7 +14,7 @@ const PUSH_NETWORK_FAILURE_THRESHOLD = Number.parseInt(process.env.PUSH_NETWORK_
 const PUSH_NETWORK_BACKOFF_MS = Number.parseInt(process.env.PUSH_NETWORK_BACKOFF_MS || `${30 * 60 * 1000}`, 10);
 const PUSH_SEND_CONCURRENCY = Math.max(
   1,
-  Math.min(32, Number.parseInt(process.env.AGENTOC_PUSH_SEND_CONCURRENCY || '8', 10) || 8),
+  Math.min(32, Number.parseInt(process.env.RAGENT_PUSH_SEND_CONCURRENCY || '8', 10) || 8),
 );
 const runSubscriptionMutation = createSerialTaskQueue();
 const pushTransportEnv = buildToolProcessEnv();
@@ -31,7 +31,7 @@ function firstNonEmpty(...values) {
 export function resolvePushSendOptions(env = pushTransportEnv) {
   const options = { timeout: PUSH_TIMEOUT_MS };
   const proxy = firstNonEmpty(
-    env?.AGENTOC_PUSH_PROXY,
+    env?.RAGENT_PUSH_PROXY,
     env?.HTTPS_PROXY,
     env?.https_proxy,
     env?.HTTP_PROXY,
@@ -60,7 +60,7 @@ async function init() {
   if (!initPromise) {
     initPromise = (async () => {
       const keys = await loadOrGenerateKeys();
-      webpush.setVapidDetails('mailto:agentoc@localhost', keys.publicKey, keys.privateKey);
+      webpush.setVapidDetails('mailto:ragent@localhost', keys.publicKey, keys.privateKey);
       ready = true;
     })();
   }

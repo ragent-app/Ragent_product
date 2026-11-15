@@ -136,9 +136,9 @@ export function createTurnCredentialBrokerHandler({
   // without exposing or copying its values.
   secret,
   keyName,
-  authMode = process.env.AGENTOC_TURN_BROKER_AUTH_MODE,
-  accountsJwksUrl = process.env.AGENTOC_TURN_BROKER_JWKS_URL || process.env.AGENTOC_ACCOUNTS_JWKS_URL,
-  accountsIssuer = process.env.AGENTOC_ACCOUNTS_ISSUER,
+  authMode = process.env.RAGENT_TURN_BROKER_AUTH_MODE,
+  accountsJwksUrl = process.env.RAGENT_TURN_BROKER_JWKS_URL || process.env.RAGENT_ACCOUNTS_JWKS_URL,
+  accountsIssuer = process.env.RAGENT_ACCOUNTS_ISSUER,
   jwks = null,
   fetchImpl = globalThis.fetch,
   jwksCacheTtlMs = 5 * 60 * 1000,
@@ -375,17 +375,17 @@ export function createTurnCredentialBrokerHandler({
 }
 
 export function startTurnCredentialBroker(options = {}) {
-  const host = trimString(options.host || process.env.AGENTOC_TURN_BROKER_HOST) || '127.0.0.1';
-  const port = Number(options.port || process.env.AGENTOC_TURN_BROKER_PORT || 7710);
+  const host = trimString(options.host || process.env.RAGENT_TURN_BROKER_HOST) || '127.0.0.1';
+  const port = Number(options.port || process.env.RAGENT_TURN_BROKER_PORT || 7710);
   const handler = createTurnCredentialBrokerHandler({
-    brokerToken: options.brokerToken || process.env.AGENTOC_TURN_BROKER_TOKEN,
-    turnKeyId: options.turnKeyId || process.env.AGENTOC_CLOUDFLARE_TURN_KEY_ID,
-    apiToken: options.apiToken || process.env.AGENTOC_CLOUDFLARE_TURN_API_TOKEN,
-    secret: options.secret || process.env.AGENTOC_TURN_SECRET,
-    keyName: options.keyName || process.env.AGENTOC_TURN_KEY_NAME,
-    authMode: options.authMode || process.env.AGENTOC_TURN_BROKER_AUTH_MODE,
-    accountsJwksUrl: options.accountsJwksUrl || process.env.AGENTOC_TURN_BROKER_JWKS_URL || process.env.AGENTOC_ACCOUNTS_JWKS_URL,
-    accountsIssuer: options.accountsIssuer || process.env.AGENTOC_ACCOUNTS_ISSUER,
+    brokerToken: options.brokerToken || process.env.RAGENT_TURN_BROKER_TOKEN,
+    turnKeyId: options.turnKeyId || process.env.RAGENT_CLOUDFLARE_TURN_KEY_ID,
+    apiToken: options.apiToken || process.env.RAGENT_CLOUDFLARE_TURN_API_TOKEN,
+    secret: options.secret || process.env.RAGENT_TURN_SECRET,
+    keyName: options.keyName || process.env.RAGENT_TURN_KEY_NAME,
+    authMode: options.authMode || process.env.RAGENT_TURN_BROKER_AUTH_MODE,
+    accountsJwksUrl: options.accountsJwksUrl || process.env.RAGENT_TURN_BROKER_JWKS_URL || process.env.RAGENT_ACCOUNTS_JWKS_URL,
+    accountsIssuer: options.accountsIssuer || process.env.RAGENT_ACCOUNTS_ISSUER,
     fetchImpl: options.fetchImpl,
     clock: options.clock,
     issueTurnCredentials: options.issueTurnCredentials,

@@ -150,7 +150,7 @@ const claudeRun = {
   assert.equal(isProviderNativeChildFrame(childFrame, ['claude-parent-child']), true);
   assert.equal(isProviderNativeChildFrame(claudeRecords[0].json, ['claude-parent-child']), true);
   assert.deepEqual(
-    createClaudeAdapter().parseLine(JSON.stringify({ ...childFrame, agentoc_intermediate: true })),
+    createClaudeAdapter().parseLine(JSON.stringify({ ...childFrame, ragent_intermediate: true })),
     [],
     'child assistant frame must not enter the parent assistant stream',
   );
@@ -312,7 +312,7 @@ const codexRecords = await fixture('codex/native-delegations.jsonl');
   assert.equal(completed.decision, 'complete');
   assert.equal(run.state, 'completed');
   assert.equal(resultFile.exitCode, 0);
-  assert.ok(spool.some((record) => record.json?.type === 'agentoc.delegation_event'));
+  assert.ok(spool.some((record) => record.json?.type === 'ragent.delegation_event'));
 }
 
 // Terminal replay uses the full spool stream without materializing ordinary

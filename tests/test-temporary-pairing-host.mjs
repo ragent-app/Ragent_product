@@ -22,7 +22,7 @@ const initial = 1_800_000_000_000;
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temp-host-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temp-host-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let time = initial;
   const clock = () => time;
@@ -207,7 +207,7 @@ test('even a PC-signed token cannot widen the original invitation or change acce
   const f = await connected(t); const parts = f.credential.access_token.split('.');
   const original = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
   for (const change of [{ scope: original.scope + ' owner' }, { sessionScope: 'all-sessions' }, { exp: original.exp + 1 },
-    { sub: id('rdev') }, { requestId: id('rtr') }, { cnf: { jkt: 'wrong' } }, { aud: 'agentoc-owner' }]) {
+    { sub: id('rdev') }, { requestId: id('rtr') }, { cnf: { jkt: 'wrong' } }, { aud: 'ragent-owner' }]) {
     const claims = { ...original, ...change };
     const input = `${parts[0]}.${Buffer.from(JSON.stringify(claims)).toString('base64url')}`;
     const token = `${input}.${sign(null, Buffer.from(input), f.identity.privateKey).toString('base64url')}`;

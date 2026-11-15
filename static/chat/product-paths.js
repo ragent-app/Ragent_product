@@ -1,4 +1,4 @@
-(function attachAgentoCProductPathHelpers(globalScope) {
+(function attachRagentProductPathHelpers(globalScope) {
   const FALLBACK_ORIGIN = "https://agentoc.invalid";
   const TERMINAL_MARKERS = Object.freeze([
     Object.freeze(["m", "install"]),
@@ -183,8 +183,8 @@
     return `${resolvedUrl.pathname}${resolvedUrl.search}${resolvedUrl.hash}`;
   }
 
-  globalScope.agentocGetProductBasePath = getProductBasePath;
-  globalScope.agentocGetProductBaseUrl = getProductBaseUrl;
-  globalScope.agentocResolveProductUrl = resolveProductUrl;
-  globalScope.agentocResolveProductPath = resolveProductPath;
+  globalScope.ragentGetProductBasePath = getProductBasePath;
+  globalScope.ragentGetProductBaseUrl = getProductBaseUrl;
+  globalScope.ragentResolveProductUrl = resolveProductUrl;
+  globalScope.ragentResolveProductPath = resolveProductPath;
 })(typeof window === "object" ? window : globalThis);

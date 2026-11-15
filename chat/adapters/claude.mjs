@@ -232,7 +232,7 @@ export function createClaudeAdapter() {
       // Provider-native child frames are retained as raw spool evidence and
       // consumed by the delegation runtime, but must never become parent
       // assistant/tool history.
-      if (obj.agentoc_intermediate === true) return [];
+      if (obj.ragent_intermediate === true) return [];
 
       if (typeof obj.session_id === 'string' && obj.session_id.trim()) {
         providerSessionId = obj.session_id.trim();

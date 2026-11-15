@@ -244,9 +244,9 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
     : (typeof permissionPolicy?.id === 'string' ? permissionPolicy.id : '');
   let adapter;
   let args;
-  const effectiveServiceTier = typeof process.env.AGENTOC_CODEX_SERVICE_TIER === 'string'
-    && process.env.AGENTOC_CODEX_SERVICE_TIER.trim()
-    ? process.env.AGENTOC_CODEX_SERVICE_TIER.trim()
+  const effectiveServiceTier = typeof process.env.RAGENT_CODEX_SERVICE_TIER === 'string'
+    && process.env.RAGENT_CODEX_SERVICE_TIER.trim()
+    ? process.env.RAGENT_CODEX_SERVICE_TIER.trim()
     : options.serviceTier;
 
   if (normalizedRuntimeFamily === 'claude-stream-json') {
@@ -315,7 +315,7 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
   } else if (normalizedRuntimeFamily === PI_RUNTIME_FAMILY) {
     adapter = createPiAdapter();
     args = buildPiArgs({
-      provider: options.piProvider || (process.env.AGENTOC_PROVIDER_PROTOCOL === 'anthropic-messages' ? 'anthropic' : 'openai'),
+      provider: options.piProvider || (process.env.RAGENT_PROVIDER_PROTOCOL === 'anthropic-messages' ? 'anthropic' : 'openai'),
       model: options.model,
       sessionDir: options.piSessionDir,
       noSession: options.piNoSession,
@@ -423,7 +423,7 @@ export async function createToolInvocation(toolId, prompt, options = {}) {
   const tool = await getToolDefinitionAsync(toolId);
   // The control plane resolves the tool definition (its config dir may differ
   // from the runner's — the hardened runner env never inherits
-  // AGENTOC_CONFIG_DIR/HOME), so it can hand the resolved command through the
+  // RAGENT_CONFIG_DIR/HOME), so it can hand the resolved command through the
   // run manifest.  Prefer the local registry first; the manifest override
   // only kicks in for tools the runner sidecar cannot see in its own config.
   const manifestCommand = typeof options.toolCommand === 'string' && options.toolCommand.trim()

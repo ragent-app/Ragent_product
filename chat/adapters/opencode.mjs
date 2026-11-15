@@ -81,7 +81,7 @@ export function buildOpenCodeArgs(prompt, { model = '', riskMode = '' } = {}) {
   const args = ['run', '--format', 'json'];
   if (riskMode === 'full-auto') args.push('--auto');
   const selectedModel = typeof model === 'string' ? model.trim().split('@')[0] : '';
-  if (selectedModel) args.push('--model', `agentoc/${selectedModel}`);
+  if (selectedModel) args.push('--model', `ragent/${selectedModel}`);
   args.push(task);
   return args;
 }

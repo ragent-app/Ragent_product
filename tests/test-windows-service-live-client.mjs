@@ -14,7 +14,7 @@ import { runP2PHostAgent } from '../lib/p2p-host-agent.mjs';
 import { createP2PRoomId } from '../lib/p2p-signal-protocol.mjs';
 import { createP2PSignaling } from '../p2p/signaling-server.mjs';
 
-const fixtureDir = process.env.AGENTOC_BROKER_LIVE_CLIENT_DIR;
+const fixtureDir = process.env.RAGENT_BROKER_LIVE_CLIENT_DIR;
 if (process.platform !== 'win32' || !fixtureDir) {
   console.log('windows-service-live-client: skipped (opt-in Windows live broker fixture)');
   process.exit(0);
@@ -34,7 +34,7 @@ async function waitForFixture() {
   throw new Error('Live broker fixture did not become ready');
 }
 let succeeded = false;
-const phonePort = Number(process.env.AGENTOC_BROKER_PHONE_TEST_PORT || 0);
+const phonePort = Number(process.env.RAGENT_BROKER_PHONE_TEST_PORT || 0);
 let phoneServer, phoneReview, phoneDecision, resolvePhoneDecision, phoneClient, phoneSignature;
 let p2pHost, p2pSignaling;
 let phonePublicKey;
@@ -95,10 +95,10 @@ try {
         } else res.writeHead(404).end();
       })().catch(() => res.writeHead(400).end()); });
     });
-    const p2pSecret = process.env.AGENTOC_BROKER_P2P_SECRET || '';
+    const p2pSecret = process.env.RAGENT_BROKER_P2P_SECRET || '';
     if (p2pSecret) {
       assert.match(p2pSecret, /^rpi_[a-f0-9]{48}$/);
-      assert.ok(path.isAbsolute(process.env.AGENTOC_BROKER_P2P_BINARY || ''));
+      assert.ok(path.isAbsolute(process.env.RAGENT_BROKER_P2P_BINARY || ''));
       p2pSignaling = createP2PSignaling();
       phoneServer.on('upgrade', (req, socket, head) => {
         if (new URL(req.url, 'http://127.0.0.1').pathname === '/signal') p2pSignaling.handleUpgrade(req, socket, head);
@@ -107,18 +107,18 @@ try {
     }
     await new Promise((resolve, reject) => { phoneServer.once('error', reject); phoneServer.listen(phonePort, '127.0.0.1', resolve); });
     if (p2pSecret) {
-      const stunUrl = process.env.AGENTOC_BROKER_P2P_STUN || '';
+      const stunUrl = process.env.RAGENT_BROKER_P2P_STUN || '';
       if (stunUrl && !stunUrl.startsWith('stun:')) throw new Error('Invalid fixture STUN URL');
       p2pHost = await runP2PHostAgent({ signalingUrl: `http://127.0.0.1:${phonePort}`,
         roomId: createP2PRoomId(p2pSecret), secret: p2pSecret, expiresAt: new Date(Date.now() + 240_000).toISOString(),
-        binaryPath: process.env.AGENTOC_BROKER_P2P_BINARY, localBaseUrl: `http://127.0.0.1:${phonePort}`,
+        binaryPath: process.env.RAGENT_BROKER_P2P_BINARY, localBaseUrl: `http://127.0.0.1:${phonePort}`,
         iceServers: stunUrl ? [{ urls: stunUrl }] : [] });
       await p2pHost.ready;
     }
     await writeFile(path.join(dir, 'phone-server-ready.json'), JSON.stringify({ port: phonePort }), { flag: 'wx' });
   }
   const fixture = await waitForFixture();
-  assert.match(fixture.pipe, /^\\\\\.\\pipe\\AgentoC\.PrivilegedBroker\.LocalTest\.[a-f0-9]+\.Request$/);
+  assert.match(fixture.pipe, /^\\\\\.\\pipe\\Ragent\.PrivilegedBroker\.LocalTest\.[a-f0-9]+\.Request$/);
   const fixtureGrant = fixture.proposal?.serviceControl;
   assert.ok(fixtureGrant && fixture.approval?.requestId === fixtureGrant.requestId);
   // The production ServiceHost bridge supplies an impersonation-capable pipe
@@ -127,13 +127,13 @@ try {
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const pipeName = fixture.pipe.slice('\\\\.\\pipe\\'.length);
   const healthPipeName = fixture.healthPipe?.slice('\\\\.\\pipe\\'.length);
-  if (healthPipeName) assert.match(healthPipeName, /^AgentoC\.PrivilegedBroker\.LocalTest\.[a-f0-9]+\.Health$/);
+  if (healthPipeName) assert.match(healthPipeName, /^Ragent\.PrivilegedBroker\.LocalTest\.[a-f0-9]+\.Health$/);
   const exchangeScript = `
     $ErrorActionPreference='Stop'
-    $p=[IO.Pipes.NamedPipeClientStream]::new('.', $env:AGENTOC_QA_PIPE, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+    $p=[IO.Pipes.NamedPipeClientStream]::new('.', $env:RAGENT_QA_PIPE, [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
     try {
       $p.Connect(5000)
-      $body=[Convert]::FromBase64String($env:AGENTOC_QA_REQUEST)
+      $body=[Convert]::FromBase64String($env:RAGENT_QA_REQUEST)
       $header=[BitConverter]::GetBytes([uint32]$body.Length)
       $p.Write($header,0,4); $p.Write($body,0,$body.Length); $p.Flush()
       $header=[byte[]]::new(4); $offset=0
@@ -147,7 +147,7 @@ try {
   const client = createWindowsPrivilegedBrokerClient({ platform: 'win32', pipeExchange: async ({ pipe, request }) =>
     JSON.parse(execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', exchangeScript], {
       encoding: 'utf8', timeout: 10_000, windowsHide: true,
-      env: { ...process.env, AGENTOC_QA_PIPE: pipe === 'health' ? healthPipeName : pipeName, AGENTOC_QA_REQUEST: Buffer.from(JSON.stringify(request)).toString('base64') },
+      env: { ...process.env, RAGENT_QA_PIPE: pipe === 'health' ? healthPipeName : pipeName, RAGENT_QA_REQUEST: Buffer.from(JSON.stringify(request)).toString('base64') },
     })) });
   phoneClient = client;
   if (phonePort) {

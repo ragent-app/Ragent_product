@@ -8,7 +8,7 @@ import {ownerDiscoveryDescriptor,createOwnerDiscoveryController,createOwnerDisco
 import {validateOwnerDiscoveryEvidence} from '../lib/windows-owner-discovery.mjs';
 const hex=()=>randomBytes(32).toString('hex');
 function fixture(purpose='browser'){
-  const policy={protocolVersion:2,purpose,pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:randomUUID(),requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1};
+  const policy={protocolVersion:2,purpose,pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:randomUUID(),requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:'S-1-5-80-1-2-3-4-5',ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1};
   const facts={sid:policy.ownerSid,sessionId:1,pid:1234,createdTicks:'134368500000000000',integrityRid:8192,elevated:false,enabledAdministrators:false,queryOnlyAuthorityVerified:true};
   const frame={version:2,operation:'owner.'+purpose,instanceId:policy.instanceId,requestId:policy.requestId,expiresAtUnixMs:policy.expiresAtUnixMs,challenge:randomBytes(32).toString('base64url'),launchNonce:hex()};
   return {policy,event:{kind:'request',facts,frame}};
@@ -49,14 +49,14 @@ test('revocation while cookie issuer is pending suppresses and revokes a late se
   const launch={url:http.origin+'/local-bootstrap#'+new URLSearchParams({ticket,nonce,instance:http.instanceId})},pending=http.send(launch);await ready;await http.component.revokeTicket(ticket);const cookie=hex();finish(cookie);const response=await pending;assert.equal(response.status,410);assert.equal(response.headers['set-cookie'],undefined);assert.equal(revoked,cookie);
 });
 test('discovery binds release protocol generation to endpoint purpose without storing launcher nonce',()=>{
-  const f=fixture(),release={version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)},installation={version:1,instanceId:f.policy.instanceId,controlSid:f.policy.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:f.policy.ownerSid,port:7690};
+  const f=fixture(),release={version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)},installation={version:1,instanceId:f.policy.instanceId,controlSid:f.policy.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:f.policy.ownerSid,port:7690};
   const peer={pid:123,createdTicks:'134368500000000000',sid:f.policy.controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false};const releaseJson=JSON.stringify(release),installationJson=JSON.stringify(installation),descriptor=ownerDiscoveryDescriptor({releaseJson,installationJson,policy:f.policy,peer});
   const observed={version:1,aclVerified:true,signatureStatus:'Valid',helperSha256:release.helperSha256,publisherSha256:release.publisherSha256,ownerSid:f.policy.ownerSid,ownerSessionId:1,releaseJson,installationJson,liveJson:JSON.stringify(descriptor)};
   assert.equal(validateOwnerDiscoveryEvidence(observed).policy.purpose,'browser');assert.equal(descriptor.policy.launchNonce,undefined);
   assert.throws(()=>ownerDiscoveryDescriptor({releaseJson:JSON.stringify({...release,protocolVersion:1}),installationJson,policy:f.policy,peer}),{code:'OBP_DESCRIPTOR_INVALID'});
 });
 test('browser publication gates its distinct issuer without exposing a session callback',async t=>{
-  const f=fixture(),http=await bootstrapFixture(t,{instanceId:f.policy.instanceId}),releaseJson=JSON.stringify({version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson=JSON.stringify({version:1,instanceId:f.policy.instanceId,controlSid:f.policy.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:f.policy.ownerSid,port:7690});
+  const f=fixture(),http=await bootstrapFixture(t,{instanceId:f.policy.instanceId}),releaseJson=JSON.stringify({version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),installationJson=JSON.stringify({version:1,instanceId:f.policy.instanceId,controlSid:f.policy.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',ownerSid:f.policy.ownerSid,port:7690});
   let options,finish;const completion=new Promise(done=>{finish=done;}),peer={pid:4321,createdTicks:'134368500000000000',sid:f.policy.controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false};
   const controller=await createOwnerDiscoveryController({releaseJson,installationJson,store:createOwnerDiscoveryFileStore({filePath:http.root+'/live.json'}),
     issueBrowserTicket:async(_,binding)=>http.component.issueTicket(binding),revokeBrowserTicket:ticket=>http.component.revokeTicket(ticket),confirmBrowserTicket:ticket=>http.component.confirmTicket(ticket),

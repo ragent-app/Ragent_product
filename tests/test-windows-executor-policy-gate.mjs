@@ -308,7 +308,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   const auto = createWindowsAutoInstallAuthorization({ prepared: { binding, projection: { decisions: [packageDecision] } }, riskMode, kid, privateKey: keys.privateKey, now: NOW });
   const nativeGrant = createWindowsBrokerAutoInstallGrant({ authorization: auto, requestId: 'native-1', actionId: 'action-1', kid, privateKey: keys.privateKey, brokerInstallationId: 'broker-1', policyGeneration: 1, now: NOW });
   assert.equal(nativeGrant.grant.installScope, 'machine');
-  const wire = Buffer.concat([Buffer.from('AgentoC Windows auto install v1\0'), Buffer.from(JSON.stringify(nativeGrant.grant))]);
+  const wire = Buffer.concat([Buffer.from('Ragent Windows auto install v1\0'), Buffer.from(JSON.stringify(nativeGrant.grant))]);
   check(`${riskMode} native grant signature covers the exact package`, verify(null, wire, keys.publicKey, Buffer.from(nativeGrant.signature, 'base64url')));
   assert.equal(nativeGrant.grant.packageId, 'Git.Git');
   assert.equal(nativeGrant.grant.packageVersion, '2.0');
@@ -317,7 +317,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
     async health() { return { type: 'health', autoInstallReady: true, autoInstallKeyId: kid, installationId: 'broker-1', policyGeneration: 1 }; },
     async executeAutoInstall({ grant, signature }) {
       submissions++;
-      const payload = Buffer.concat([Buffer.from('AgentoC Windows auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
+      const payload = Buffer.concat([Buffer.from('Ragent Windows auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
       assert(verify(null, payload, keys.publicKey, Buffer.from(signature, 'base64url')));
       return { type: 'result', requestId: grant.requestId, status: 'executing' };
     },

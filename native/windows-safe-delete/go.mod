@@ -1,4 +1,4 @@
-module agentoc/windows-safe-delete
+module ragent/windows-safe-delete
 
 go 1.26.0
 

@@ -14,13 +14,13 @@ try {
   const page = await browser.newPage();
   await page.setContent('<!doctype html><html><body></body></html>');
   await page.evaluate((source) => {
-    window.agentocResolveProductPath = (url) => new URL(url, 'http://127.0.0.1/').toString();
+    window.ragentResolveProductPath = (url) => new URL(url, 'http://127.0.0.1/').toString();
     window.__p2pResponses = [];
     window.__httpRequests = [];
     window.jsonResponseCache = new Map();
-    window.AGENTOC_P2P_REQUEST_TIMEOUT_MS = 250;
-    window.AGENTOC_P2P_FAILURE_COOLDOWN_MS = 1000;
-    window.AgentocP2P = {
+    window.RAGENT_P2P_REQUEST_TIMEOUT_MS = 250;
+    window.RAGENT_P2P_FAILURE_COOLDOWN_MS = 1000;
+    window.RagentP2P = {
       ready: true,
       tryRequest: async (url, method) => {
         window.__p2pResponses.push({ url, method });
@@ -59,7 +59,7 @@ try {
   assert.equal(await page.evaluate(() => window.__httpRequests[0].options.method), 'DELETE');
 
   await page.evaluate(() => {
-    window.AgentocP2P.tryRequest = async () => new Promise(() => {});
+    window.RagentP2P.tryRequest = async () => new Promise(() => {});
     window.__p2pResponses.length = 0;
     window.__httpRequests.length = 0;
   });
@@ -85,7 +85,7 @@ try {
   await page.waitForTimeout(1_050);
 
   await page.evaluate(() => {
-    window.AgentocP2P.tryRequest = async () => window.__nextP2PResponse;
+    window.RagentP2P.tryRequest = async () => window.__nextP2PResponse;
     window.__nextP2PResponse = {
       status: 401,
       ok: false,

@@ -89,7 +89,7 @@ export function createWindowsBrokerAutoInstallGrant({ authorization, requestId, 
     nonce: randomBytes(24).toString('base64url'), packageId: input.packages[0], packageVersion: input.resolvedVersions[0],
     source: 'winget', installScope: 'machine', ...(selectedInstaller ? { selectedInstaller } : {}), issuedMs: now, expiresMs: expires,
   };
-  const payload = Buffer.concat([Buffer.from('AgentoC Windows auto install v1\0', 'utf8'), Buffer.from(JSON.stringify(grant), 'utf8')]);
+  const payload = Buffer.concat([Buffer.from('Ragent Windows auto install v1\0', 'utf8'), Buffer.from(JSON.stringify(grant), 'utf8')]);
   return { grant, signature: sign(null, payload, privateKey).toString('base64url') };
 }
 

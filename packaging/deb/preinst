@@ -1,64 +1,15 @@
 #!/bin/sh
 set -eu
 
-# A renamed Debian package must take over every legacy-owned file. Otherwise
-# dpkg keeps both packages installed, and a later old-package removal can stop
-# the new service or remove its files. The packager embeds the exact staged
-# payload path list below this script; reject unknown/older layouts safely.
-legacy_requires_full_drain=0
-if [ "${DPKG_MAINTSCRIPT_PACKAGE:-}" = ragent ] && [ "${1:-}" = install ]; then
-  legacy_status="$(dpkg-query -W -f='${db:Status-Status}' agentoc 2>/dev/null || true)"
-  case "$legacy_status" in
-    installed)
-      # Older agentoc prerm scripts stop the entire runner slice during a
-      # rename. Do not use the upgrade drain that permits independent Runs
-      # unless the installed script actually has the rename-specific guard.
-      legacy_prerm=/var/lib/dpkg/info/agentoc.prerm
-      if [ ! -f "$legacy_prerm" ] || [ -L "$legacy_prerm" ] ||
-        ! grep -Fq 'rename_migration=0' "$legacy_prerm" ||
-        ! grep -Fq 'if [ "$rename_migration" -ne 1 ]; then stop_unit agentoc-runners.slice; fi' "$legacy_prerm"; then
-        legacy_requires_full_drain=1
-      fi
-      manifest="$(mktemp "${TMPDIR:-/tmp}/ragent-package-manifest.XXXXXXXX")"
-      legacy_files="$(mktemp "${TMPDIR:-/tmp}/ragent-legacy-files.XXXXXXXX")"
-      trap 'rm -f -- "$manifest" "$legacy_files"' EXIT HUP INT TERM
-      if ! awk '/^# RAGENT_PAYLOAD_MANIFEST_BEGIN$/ {if (seen) exit 1; seen=1; capture=1; next}
-        /^# RAGENT_PAYLOAD_MANIFEST_END$/ {if (!capture) exit 1; capture=0; finished=1; exit}
-        capture {print} END {if (!seen || !finished) exit 1}' "$0" > "$manifest" \
-        || [ ! -s "$manifest" ] || [ ! -f /var/lib/dpkg/info/agentoc.list ] \
-        || [ -L /var/lib/dpkg/info/agentoc.list ] || ! cat /var/lib/dpkg/info/agentoc.list > "$legacy_files"; then
-        echo 'Cannot verify the legacy package file inventory; refusing migration.' >&2
-        exit 1
-      fi
-      if ! while IFS= read -r legacy_file; do
-        [ -n "$legacy_file" ] || continue
-        # On merged-/usr systems these are distribution-owned directory
-        # aliases even when the package records them as directories. They are
-        # not package-owned payload symlinks and need not be replaced.
-        case "$legacy_file" in
-          /bin|/sbin|/lib|/lib64)
-            if [ -L "$legacy_file" ] && [ "$(readlink "$legacy_file")" = "usr/${legacy_file#/}" ]; then continue; fi ;;
-        esac
-        if [ -d "$legacy_file" ] && [ ! -L "$legacy_file" ]; then continue; fi
-        printf '%s\n' "$legacy_file"
-      done < "$legacy_files" | awk 'NR == FNR {payload[$0]=1; next}
-        !($0 in payload) {print "Legacy package owns a file absent from the Ragent package: " $0 > "/dev/stderr"; missing=1}
-        END {exit missing ? 1 : 0}' "$manifest" -; then
-        echo 'Upgrade the legacy package to the migration-ready release before retrying.' >&2
-        exit 1
-      fi
-      rm -f -- "$manifest" "$legacy_files"
-      trap - EXIT HUP INT TERM
-      # The remaining checks below are also required when dpkg calls this
-      # new package's preinst as 'install' during a package-name migration.
-      set -- upgrade
-      ;;
-    ''|not-installed) ;;
-    *) echo "Legacy package is in state $legacy_status; repair or remove it before migrating." >&2; exit 1 ;;
-  esac
-fi
+# Never traverse a redirected state root while repairing ownership or modes.
+for state_path in /var/lib/ragent /var/lib/ragent/config /var/lib/ragent/config/native-provider-runtime /var/lib/ragent-run /var/lib/ragent-run/provider-homes; do
+  if [ -L "$state_path" ]; then
+    echo "Refusing to modify symlinked Ragent state path: $state_path" >&2
+    exit 1
+  fi
+done
 
-SERVICE_USER_FILE=/etc/agentoc/service-user
+SERVICE_USER_FILE=/etc/ragent/service-user
 
 trim_service_user() {
   printf '%s' "${1:-}" | tr -d '[:space:]'
@@ -67,18 +18,18 @@ trim_service_user() {
 resolve_restart_check_user() {
   user=""
   if [ -d /run/systemd/system ]; then
-    user="$(systemctl show -p User --value agentoc.service 2>/dev/null | tr -d '[:space:]' || true)"
+    user="$(systemctl show -p User --value ragent.service 2>/dev/null | tr -d '[:space:]' || true)"
   fi
-  [ -n "$user" ] || user="$(trim_service_user "${AGENTOC_SERVICE_USER:-}")"
+  [ -n "$user" ] || user="$(trim_service_user "${RAGENT_SERVICE_USER:-}")"
   if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
     user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
   fi
-  [ -n "$user" ] || user=agentoc
+  [ -n "$user" ] || user=ragent
   case "$user" in
-    root|''|*[!A-Za-z0-9_.@-]*) user=agentoc ;;
+    root|''|*[!A-Za-z0-9_.@-]*) user=ragent ;;
   esac
   if ! getent passwd "$user" >/dev/null 2>&1; then
-    user=agentoc
+    user=ragent
   fi
   printf '%s\n' "$user"
 }
@@ -91,11 +42,11 @@ resolve_restart_check_user() {
 repair_provider_runtime_access() {
   repair_user="$1"
   repair_group="$2"
-  config_root=/var/lib/agentoc/config
+  config_root=/var/lib/ragent/config
   [ -d "$config_root" ] || return 0
 
-  chown "$repair_user:$repair_group" /var/lib/agentoc "$config_root"
-  chmod 0750 /var/lib/agentoc "$config_root"
+  chown "$repair_user:$repair_group" /var/lib/ragent "$config_root"
+  chmod 0750 /var/lib/ragent "$config_root"
 
   if [ -d "$config_root/native-provider-runtime" ]; then
     chown -R "$repair_user:$repair_group" "$config_root/native-provider-runtime"
@@ -126,56 +77,49 @@ repair_provider_runtime_access() {
 }
 
 if [ "${1:-}" = upgrade ] \
-  && [ "${AGENTOC_FORCE_UPGRADE_WITH_ACTIVE_RUNS:-0}" != 1 ] \
-  && [ -x /opt/agentoc/runtime/node ] \
-  && [ -f /opt/agentoc/app/cli.js ]; then
+  && [ "${RAGENT_FORCE_UPGRADE_WITH_ACTIVE_RUNS:-0}" != 1 ] \
+  && [ -x /opt/ragent/runtime/node ] \
+  && [ -f /opt/ragent/app/cli.js ]; then
   service_user="$(resolve_restart_check_user)"
   service_group="$(id -gn "$service_user")"
   repair_provider_runtime_access "$service_user" "$service_group"
   # Restore the files affected by older root lifecycle brokers before the
   # unprivileged upgrade safety check attempts to read them.
-  if [ -d /var/lib/agentoc-run/results ]; then
-    find /var/lib/agentoc-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
-      -path '/var/lib/agentoc-run/results/run_*/status.json' \
+  if [ -d /var/lib/ragent-run/results ]; then
+    find /var/lib/ragent-run/results -mindepth 2 -maxdepth 2 -type f -uid 0 \
+      -path '/var/lib/ragent-run/results/run_*/status.json' \
       -exec chown -h "$service_user:$service_group" {} +
   fi
   service_home="$(getent passwd "$service_user" | awk -F: '{ print $6 }' || true)"
-  [ -n "$service_home" ] || service_home=/var/lib/agentoc
+  [ -n "$service_home" ] || service_home=/var/lib/ragent
   run_spool_dir=""
-  if [ -r /etc/agentoc/agentoc.env ]; then
-    run_spool_dir="$(sed -n 's/^AGENTOC_RUN_SPOOL_DIR=//p' /etc/agentoc/agentoc.env | tail -n 1 | tr -d '[:space:]')"
+  if [ -r /etc/ragent/ragent.env ]; then
+    run_spool_dir="$(sed -n 's/^RAGENT_RUN_SPOOL_DIR=//p' /etc/ragent/ragent.env | tail -n 1 | tr -d '[:space:]')"
   fi
   run_node_as_service() {
     if [ -n "$run_spool_dir" ]; then
       runuser -u "$service_user" -- env \
         HOME="$service_home" \
-        AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
-        AGENTOC_WORK_ROOT_DIR=/var/lib/agentoc/workspace \
-        AGENTOC_RUN_SPOOL_DIR="$run_spool_dir" \
-        /opt/agentoc/runtime/node "$@"
+        RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+        RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+        RAGENT_RUN_SPOOL_DIR="$run_spool_dir" \
+        /opt/ragent/runtime/node "$@"
     else
       runuser -u "$service_user" -- env \
         HOME="$service_home" \
-        AGENTOC_CONFIG_DIR=/var/lib/agentoc/config \
-        AGENTOC_WORK_ROOT_DIR=/var/lib/agentoc/workspace \
-        /opt/agentoc/runtime/node "$@"
+        RAGENT_CONFIG_DIR=/var/lib/ragent/config \
+        RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace \
+        /opt/ragent/runtime/node "$@"
     fi
   }
 
   run_upgrade_prepare() {
-    if [ "$legacy_requires_full_drain" -eq 1 ]; then
-      # The older prerm stops all Runs, even independently managed ones.
-      # restart-check creates an admission drain before checking that none
-      # remain; unlike upgrade-prepare it does not exclude the current Run.
-      run_node_as_service /opt/agentoc/app/cli.js restart-check --json
+    if [ -n "${RAGENT_RESTART_EXCLUDE_SESSION:-}" ]; then
+      run_node_as_service /opt/ragent/app/cli.js upgrade-prepare --json \
+        --exclude-session "$RAGENT_RESTART_EXCLUDE_SESSION"
       return
     fi
-    if [ -n "${AGENTOC_RESTART_EXCLUDE_SESSION:-}" ]; then
-      run_node_as_service /opt/agentoc/app/cli.js upgrade-prepare --json \
-        --exclude-session "$AGENTOC_RESTART_EXCLUDE_SESSION"
-      return
-    fi
-    run_node_as_service /opt/agentoc/app/cli.js upgrade-prepare --json
+    run_node_as_service /opt/ragent/app/cli.js upgrade-prepare --json
   }
 
   # The first package containing upgrade-prepare is evaluated by an older
@@ -183,7 +127,7 @@ if [ "${1:-}" = upgrade ] \
   # to force it: this fallback is dependency-free and mirrors the new command's
   # runner/cgroup proof until the new CLI has been unpacked.
   run_legacy_upgrade_prepare() {
-    run_node_as_service - "$run_spool_dir" /var/lib/agentoc/config "${AGENTOC_RESTART_EXCLUDE_SESSION:-}" <<'NODE'
+    run_node_as_service - "$run_spool_dir" /var/lib/ragent/config "${RAGENT_RESTART_EXCLUDE_SESSION:-}" <<'NODE'
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -240,13 +184,13 @@ for (const entry of entries) {
     blockingRuns.push(fail(id, 'runner_not_systemd_managed'));
     continue;
   }
-  const unitName = String(run.runnerUnitName || `agentoc-runner-${id}`).trim();
-  if (!/^agentoc-runner-[A-Za-z0-9:_.@-]+$/.test(unitName)) {
+  const unitName = String(run.runnerUnitName || `ragent-runner-${id}`).trim();
+  if (!/^ragent-runner-[A-Za-z0-9:_.@-]+$/.test(unitName)) {
     blockingRuns.push(fail(id, 'runner_unit_invalid'));
     continue;
   }
   const scope = run.runnerUnitScope === 'user' ? 'user' : 'system';
-  const chatUnit = scope === 'user' ? 'agentoc-chat.service' : 'agentoc.service';
+  const chatUnit = scope === 'user' ? 'ragent-chat.service' : 'ragent.service';
   try {
     systemctl(scope, ['is-active', '--quiet', unitName]);
     const runnerGroup = systemctl(scope, ['show', '--property=ControlGroup', '--value', unitName]);
@@ -297,7 +241,7 @@ NODE
         ;;
       *)
         printf '%s\n' "$upgrade_output" >&2
-        echo "AgentoC upgrade paused because active Runs are not proven restart-safe." >&2
+        echo "Ragent upgrade paused because active Runs are not proven restart-safe." >&2
         echo "Wait for unsafe Runs to finish or repair the runner isolation baseline." >&2
         exit 1
         ;;
@@ -305,7 +249,7 @@ NODE
   fi
   if [ "$upgrade_status" -ne 0 ]; then
     printf '%s\n' "$upgrade_output" >&2
-    echo "AgentoC upgrade paused because active Runs are not proven restart-safe." >&2
+    echo "Ragent upgrade paused because active Runs are not proven restart-safe." >&2
     echo "Wait for unsafe Runs to finish or repair the runner isolation baseline." >&2
     exit 1
   fi
@@ -318,9 +262,9 @@ fi
 if [ "${1:-}" = upgrade ]; then
   for tool in codex claude; do
     command_path="/usr/bin/$tool"
-    diverted_path="/usr/lib/agentoc/legacy-global-$tool"
+    diverted_path="/usr/lib/ragent/legacy-global-$tool"
     if [ ! -e "$command_path" ] && [ ! -L "$command_path" ]; then continue; fi
-    if [ -L "$command_path" ] && [ "$(readlink "$command_path")" = "/opt/agentoc/runtime/$tool" ]; then continue; fi
+    if [ -L "$command_path" ] && [ "$(readlink "$command_path")" = "/opt/ragent/runtime/$tool" ]; then continue; fi
     current_diversion="$(dpkg-divert --truename "$command_path")"
     # A pre-existing diversion already protects the original path. Never
     # change a diversion owned by another package or administrator.
@@ -329,9 +273,10 @@ if [ "${1:-}" = upgrade ]; then
       echo "Cannot safely preserve $command_path: $diverted_path already exists" >&2
       exit 1
     fi
+    install -d -m 0755 /etc/ragent
     # Root-owned marker lets postinst distinguish our temporary diversion
     # from an administrator's independent one, including after interruption.
-    ( umask 077; printf '%s\n' "$diverted_path" > "/etc/agentoc/.legacy-global-$tool-diversion" )
+    ( umask 077; printf '%s\n' "$diverted_path" > "/etc/ragent/.legacy-global-$tool-diversion" )
     dpkg-divert --local --no-rename --add --divert "$diverted_path" "$command_path"
   done
 fi

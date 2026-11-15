@@ -6,7 +6,7 @@
 // vision) AND asserts geometry the author CAN read as text.
 //
 // Run standalone:  node tests/test-chat-decision-sheet-visual.mjs
-// (PNGs + manifest land in /var/lib/agentoc/workspace/decision-sheet-visual/<stamp>)
+// (PNGs + manifest land in /var/lib/ragent/workspace/decision-sheet-visual/<stamp>)
 import assert from 'assert/strict';
 import { mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
@@ -30,8 +30,8 @@ const cssFiles = [
 const styles = cssFiles.map((p) => readFileSync(join(repoRoot, p), 'utf8')).join('\n');
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || join('/var/lib/agentoc/workspace/decision-sheet-visual', stamp);
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || join('/var/lib/ragent/workspace/decision-sheet-visual', stamp);
 mkdirSync(outputDir, { recursive: true });
 
 // --- DOM fragments that mirror decision-sheet.js renderSheet() output --------
@@ -148,7 +148,7 @@ const variants = {
       title: 'Clean the temporary build output and rebuild the project',
       scopeRows: [
         ['Command', 'rm -rf /tmp/build-cache && npm run build', true],
-        ['Directory', '/srv/agentoc-promoted', false],
+        ['Directory', '/srv/ragent-promoted', false],
       ],
       actions: `${actionBtn('Approve', 'approve', { primary: true })}
         ${actionBtn('Deny', 'deny')}`,
@@ -162,7 +162,7 @@ const variants = {
       notify: true,
       scopeRows: [
         ['Command', 'rm -rf /tmp/build-cache && npm run build', true],
-        ['Directory', '/srv/agentoc-promoted', false],
+        ['Directory', '/srv/ragent-promoted', false],
       ],
       actions: `${actionBtn('Approve', 'approve', { primary: true })}
         ${actionBtn('Deny', 'deny')}`,
@@ -176,7 +176,7 @@ const variants = {
       risk: { tier: 'high', label: 'High risk' },
       scopeRows: [
         ['Permissions', 'Network · 3 writes · 12 reads', false],
-        ['Grant root', '/srv/agentoc-promoted', false],
+        ['Grant root', '/srv/ragent-promoted', false],
       ],
       actions: `${actionBtn('Approve', 'approve', { primary: true })}
         ${actionBtn('Deny', 'deny')}`,

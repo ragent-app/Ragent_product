@@ -51,9 +51,9 @@ try {
     const target = document.getElementById("target");
     let opened = 0;
     let closed = 0;
-    window.AgentoCMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
-    window.AgentoCMotion.setPresence(target, false, { onAfterClose: () => { closed += 1; } });
-    window.AgentoCMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
+    window.RagentMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
+    window.RagentMotion.setPresence(target, false, { onAfterClose: () => { closed += 1; } });
+    window.RagentMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
     window.__flushFrames();
     await new Promise((resolve) => setTimeout(resolve, 0));
     const openedState = {
@@ -64,8 +64,8 @@ try {
       closed,
     };
 
-    window.AgentoCMotion.setPresence(target, false, { duration: 80, onAfterClose: () => { closed += 1; } });
-    window.AgentoCMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
+    window.RagentMotion.setPresence(target, false, { duration: 80, onAfterClose: () => { closed += 1; } });
+    window.RagentMotion.setPresence(target, true, { onAfterOpen: () => { opened += 1; } });
     window.__flushFrames();
     await new Promise((resolve) => setTimeout(resolve, 100));
     const staleTimerState = {
@@ -77,7 +77,7 @@ try {
       cancelledFrames: window.__cancelledFrames.length,
     };
 
-    window.AgentoCMotion.setPresence(target, false, { duration: 500, onAfterClose: () => { closed += 1; } });
+    window.RagentMotion.setPresence(target, false, { duration: 500, onAfterClose: () => { closed += 1; } });
     window.__motionQuery.dispatch(true);
     const reducedState = {
       hidden: target.hidden,

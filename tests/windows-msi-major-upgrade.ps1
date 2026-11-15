@@ -6,9 +6,9 @@ $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'MJU_ADMIN_REQUIRED'}
 if(-not (Get-Command wix.exe -ErrorAction SilentlyContinue)){throw 'MJU_WIX_REQUIRED'}
 $parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
-if(-not $parent.StartsWith('G:\AgentoC\',[StringComparison]::OrdinalIgnoreCase)){throw 'MJU_TEMP_OUTSIDE_G'}
-$id=[Guid]::NewGuid().ToString('N');$root=Join-Path $parent ('agentoc-major-qa-'+$id)
-$install=Join-Path $root 'installed';$service='AgentoC-MajorQa-'+$id.Substring(0,12)
+if(-not $parent.StartsWith('G:\Ragent\',[StringComparison]::OrdinalIgnoreCase)){throw 'MJU_TEMP_OUTSIDE_G'}
+$id=[Guid]::NewGuid().ToString('N');$root=Join-Path $parent ('ragent-major-qa-'+$id)
+$install=Join-Path $root 'installed';$service='Ragent-MajorQa-'+$id.Substring(0,12)
 $oldProduct=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$newProduct=[Guid]::NewGuid().ToString('B').ToUpperInvariant()
 $upgrade=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$component=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$contentComponent=[Guid]::NewGuid().ToString('B').ToUpperInvariant()
 $report=[ordered]@{pass=$false;test='major upgrade, service SID restoration and rollback of isolated service';service=$service;oldProduct=$oldProduct;newProduct=$newProduct;failedUpgradeExit=$null;oldRestored=$false;serviceSidRestored=$false;successfulUpgradeExit=$null;newInstalled=$false;cleanupConfirmed=$false}
@@ -49,9 +49,9 @@ public static class QaRestore {public static int Main(){try{
   $fault=if($isUpgrade){'<Binary Id="Failure" SourceFile="'+$failExe+'" /><Binary Id="Guard" SourceFile="'+$guardExe+'" /><Binary Id="Restore" SourceFile="'+$restoreExe+'" /><CustomAction Id="QaGuard" BinaryRef="Guard" ExeCommand="" Execute="deferred" Impersonate="no" Return="check" /><CustomAction Id="QaRestore" BinaryRef="Restore" ExeCommand="" Execute="rollback" Impersonate="no" Return="ignore" /><CustomAction Id="QaInjectedFailure" BinaryRef="Failure" ExeCommand="" Execute="deferred" Impersonate="no" Return="check" /><InstallExecuteSequence><Custom Action="QaGuard" After="InstallInitialize" Condition="WIX_UPGRADE_DETECTED" /><Custom Action="QaRestore" After="QaGuard" Condition="WIX_UPGRADE_DETECTED" /><InstallExecute After="QaRestore" Condition="WIX_UPGRADE_DETECTED" /><Custom Action="QaInjectedFailure" After="StartServices" Condition="QA_FAIL_UPDATE = 1" /></InstallExecuteSequence>'}else{''}
   $xml=@"
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
- <Package Name="AgentoC Major Upgrade QA $id" Manufacturer="AgentoC QA" Version="$version" ProductCode="$product" UpgradeCode="$upgrade" Scope="perMachine">
+ <Package Name="Ragent Major Upgrade QA $id" Manufacturer="Ragent QA" Version="$version" ProductCode="$product" UpgradeCode="$upgrade" Scope="perMachine">
   $major<MediaTemplate EmbedCab="yes" />
-  <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="AgentoC-MajorQa-$id">
+  <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Ragent-MajorQa-$id">
    <Component Id="QaService" Guid="$component"><File Id="QaServiceFile" Source="$serviceExe" KeyPath="yes" /><ServiceInstall Id="QaServiceInstall" Name="$service" DisplayName="$service" Type="ownProcess" Start="demand" Account="LocalSystem" ErrorControl="normal" /><ServiceControl Id="QaServiceControl" Name="$service" Start="install" Stop="both" Remove="uninstall" Wait="yes" /></Component>
    <Component Id="QaContent" Guid="$contentComponent"><File Id="QaContentFile" Name="payload.txt" Source="$content" KeyPath="yes" /></Component>
   </Directory></StandardDirectory>

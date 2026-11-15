@@ -6,11 +6,11 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-account-policy-route-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-account-policy-route-'));
 const configDir = join(root, 'config');
 process.env.HOME = root;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = configDir;
+delete process.env.RAGENT_INSTANCE_ROOT;
 await mkdir(configDir, { recursive: true });
 await writeFile(join(configDir, 'auth.json'), JSON.stringify({
   username: 'testowner',

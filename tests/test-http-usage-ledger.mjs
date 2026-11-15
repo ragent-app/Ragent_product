@@ -63,8 +63,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-usage-ledger-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-usage-ledger-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -134,13 +134,13 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       CHAT_BIND_HOST: '127.0.0.1',
       SECURE_COOKIES: '0',
-      AGENTOC_AUTH_SESSION_SECRET: authSessionSecret,
+      RAGENT_AUTH_SESSION_SECRET: authSessionSecret,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

@@ -44,7 +44,7 @@ import { readdir, stat, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { archiveTerminalSpools, formatBytes, verifyArchivedSpool } from '../chat/run-spool-archive.mjs';
 
-const DEFAULT_ROOT = '/var/lib/agentoc/config';
+const DEFAULT_ROOT = '/var/lib/ragent/config';
 
 function parseArgs(argv) {
   const out = {

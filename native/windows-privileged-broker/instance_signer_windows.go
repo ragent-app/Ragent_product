@@ -60,11 +60,11 @@ func readInstalledInstanceSigner() (string, string, error) {
 	if err != nil || !filepath.IsAbs(programData) {
 		return "", "", errAutoInstallGrant
 	}
-	control, _, _, err := windows.LookupSID("", `NT SERVICE\AgentoC-ControlPlane`)
+	control, _, _, err := windows.LookupSID("", `NT SERVICE\Ragent-ControlPlane`)
 	if err != nil {
 		return "", "", errAutoInstallGrant
 	}
-	config := filepath.Join(programData, "AgentoC", "instances", "owner", "config")
+	config := filepath.Join(programData, "Ragent", "instances", "owner", "config")
 	return readPinnedInstanceSigner(config, control, verifyRuntimeAncestor)
 }
 

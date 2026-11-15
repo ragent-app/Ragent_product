@@ -61,8 +61,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-multi-agent-acceptance-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-multi-agent-acceptance-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -124,7 +124,7 @@ function setupTempHome() {
 setTimeout(() => {
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'root-thread' }));
   console.log(JSON.stringify({ type: 'turn.started' }));
-  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: ${JSON.stringify(`Plan accepted by the model.\n<agentoc-collaboration-plan>${planText}</agentoc-collaboration-plan>`)} } }));
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: ${JSON.stringify(`Plan accepted by the model.\n<ragent-collaboration-plan>${planText}</ragent-collaboration-plan>`)} } }));
   console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 }, 60);
 `, 'utf8');
@@ -132,7 +132,7 @@ setTimeout(() => {
 setTimeout(() => {
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'worker-thread' }));
   console.log(JSON.stringify({ type: 'turn.started' }));
-  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '<agentoc-result-packet>{"state":"completed","summary":"Bounded evidence returned.","changedFiles":[],"tests":["fake acceptance"],"risks":[],"blockers":[],"acceptanceNotes":["criterion satisfied"],"unresolvedItems":[]}</agentoc-result-packet>' } }));
+  console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: '<ragent-result-packet>{"state":"completed","summary":"Bounded evidence returned.","changedFiles":[],"tests":["fake acceptance"],"risks":[],"blockers":[],"acceptanceNotes":["criterion satisfied"],"unresolvedItems":[]}</ragent-result-packet>' } }));
   console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, output_tokens: 1 } }));
 }, 700);
 `, 'utf8');
@@ -150,15 +150,15 @@ async function startServer({ home, configDir, port }) {
       ...process.env,
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_COLLABORATION_LEADER_ENABLED: '1',
-      AGENTOC_REVIEWER_ENABLED: '0',
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_COLLABORATION_LEADER_ENABLED: '1',
+      RAGENT_REVIEWER_ENABLED: '0',
       SECURE_COOKIES: '0',
-      AGENTOC_AUTH_SESSION_SECRET: 'acceptance-secret',
+      RAGENT_AUTH_SESSION_SECRET: 'acceptance-secret',
       PATH: `${join(home, '.local', 'bin')}:${process.env.PATH || ''}`,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

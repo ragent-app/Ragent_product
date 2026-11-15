@@ -26,7 +26,7 @@
 // Fully pure: no environment contract, no platform hooks. Locked against the
 // legacy implementation by tests/test-chat-approval-gate-core.mjs.
 
-(function attachAgentocApprovalGateCore(root) {
+(function attachRagentApprovalGateCore(root) {
   const TERMINAL_APPROVAL_STATUSES = new Set(
     ["approved", "denied", "declined", "cancelled", "canceled"],
   );
@@ -160,7 +160,7 @@
     return null;
   }
 
-  root.AgentocApprovalGateCore = {
+  root.RagentApprovalGateCore = {
     resolvePendingApprovalEvent,
     isPlanProgressEventLike,
     isApprovalAlreadyEndedError,

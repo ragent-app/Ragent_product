@@ -1,6 +1,6 @@
 "use strict";
 
-// AgentoCDecisionsCore — pure Stage 1 port of decisions-store.js: a tiny
+// RagentDecisionsCore — pure Stage 1 port of decisions-store.js: a tiny
 // pub/sub store for the active session's pending runtime approval. The store
 // has no UI dependencies; the Decision Sheet VIEW (decision-sheet.js)
 // subscribes in the legacy façade. Subscribe calls back immediately with the
@@ -276,7 +276,7 @@
     notify();
   }
 
-  // HTTP 200/202 means the owner decision was accepted by AgentoC, not that
+  // HTTP 200/202 means the owner decision was accepted by Ragent, not that
   // the provider has finished applying it. Clear the interactive surface now
   // and retain a bounded tombstone so a delayed approval_request replay cannot
   // reopen the sheet before the authoritative approval_response arrives.
@@ -540,7 +540,7 @@
     return () => actionSubscribers.delete(subscriber);
   }
 
-  root.AgentoCDecisionsCore = Object.freeze({
+  root.RagentDecisionsCore = Object.freeze({
     subscribe,
     subscribeBatch,
     noteRequest,

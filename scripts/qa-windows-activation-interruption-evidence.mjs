@@ -14,7 +14,7 @@ for(const k of ['pass','adapterSubstituted','syntheticPolicyReceipt','testOnlyQu
 for(const k of ['publicPositiveSignedAcceptance','productHealthTested','businessActivated','authorityIssued','servicesStarted','powerLossTested'])assert.equal(a[k],false,k);
 assert.deepEqual(a.cases.map(c=>c.phase),['prepared','committed']);
 const names=['owner-msi.prepared.json','owner-msi.policy.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-msi.prepared.activated.json','owner-msi.policy.activated.json','owner-activation.prepare-lock','owner-activation.committed-lock'];
-const roles=['supervisor','control'],services=['AgentoC-RunnerSupervisor','AgentoC-ControlPlane'];
+const roles=['supervisor','control'],services=['Ragent-RunnerSupervisor','Ragent-ControlPlane'];
 for(const c of a.cases){
  const committed=c.phase==='committed';assert.ok(Number.isSafeInteger(c.pid)&&c.pid>0);assert.ok(Number.isFinite(Date.parse(c.startedAt)));
  const ready=JSON.parse(await readFile(join(root,'interruption-'+c.phase+'-ready.json')));assert.deepEqual(c.ready,ready);assert.deepEqual(ready,{phase:c.phase,pid:c.pid,begun:true,configurationCommitted:committed,servicesStarted:false});
@@ -24,7 +24,7 @@ for(const c of a.cases){
  for(const [i,f] of c.before.entries()){assert.deepEqual(Object.keys(f).sort(),['name','exists','sha256'].sort());assert.equal(f.exists,present[i]);if(f.exists)assert.match(f.sha256,/^[a-f0-9]{64}$/);else assert.equal(f.sha256,'');}
  assert.equal(c.before[committed?4:0].sha256,x.committedMetadata[2].sha256);assert.equal(c.before[committed?5:1].sha256,x.committedMetadata[3].sha256);assert.equal(c.before[committed?7:6].sha256,x.precommitMetadata[4].sha256);
  assert.deepEqual(c.afterServices,c.beforeServices);assert.equal(c.beforeServices.length,2);
- for(const [i,s] of c.beforeServices.entries())assert.deepEqual(s,{role:roles[i],command:'"C:\\Program Files\\AgentoC\\ActivationTrialProbe.exe" '+roles[i],account:'NT SERVICE\\'+services[i],mode:'Auto',state:'Stopped',pid:0});
+ for(const [i,s] of c.beforeServices.entries())assert.deepEqual(s,{role:roles[i],command:'"C:\\Program Files\\Ragent\\ActivationTrialProbe.exe" '+roles[i],account:'NT SERVICE\\'+services[i],mode:'Auto',state:'Stopped',pid:0});
  if(!committed){assert.equal(c.nativeGateCode,'OBD_INSTALL_INCOMPLETE');assert.equal(c.hostGateCode,'SHT_INSTALLATION_INCOMPLETE');assert.equal(c.activeReceipt,undefined);}
  else{
   assert.equal(c.nativeGateCode,undefined);assert.equal(c.hostGateCode,undefined);const b=await readFile(join(root,'interruption-committed-active.json')),active=JSON.parse(b);assert.equal(hash(b),c.before[2].sha256);assert.deepEqual(c.activeReceipt,active);

@@ -61,7 +61,7 @@ await mkdir(assetsRoot, { recursive: true });
 for (const name of ['main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html']) {
   await cp(join(desktopRoot, name), join(appRoot, name));
 }
-await cp(join(repositoryRoot, 'static', 'desktop', 'agentoc-android-logo.png'), join(assetsRoot, 'agentoc-android-logo.png'));
+await cp(join(repositoryRoot, 'static', 'desktop', 'ragent-android-logo.png'), join(assetsRoot, 'ragent-android-logo.png'));
 await cp(join(repositoryRoot, 'static', 'icon-512.png'), join(assetsRoot, 'ragent-icon.png'));
 await writeFile(join(appRoot, 'package.json'), `${JSON.stringify({
   name: 'ragent-desktop-manager',
@@ -71,7 +71,7 @@ await writeFile(join(appRoot, 'package.json'), `${JSON.stringify({
 }, null, 2)}\n`, 'utf8');
 
 await rcedit(brandedExe, {
-  icon: join(brandRoot, 'agentoc.ico'),
+  icon: join(brandRoot, 'ragent.ico'),
   'requested-execution-level': 'asInvoker',
   'file-version': version,
   'product-version': version,

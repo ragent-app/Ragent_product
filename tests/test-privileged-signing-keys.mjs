@@ -7,15 +7,15 @@ import { join } from 'path';
 import { chmod, mkdtemp, rm, stat } from 'fs/promises';
 
 // The modules under test read config.mjs's CONFIG_DIR (env-resolved at import
-// time), so AGENTOC_CONFIG_DIR must point at a throwaway dir BEFORE they are
+// time), so RAGENT_CONFIG_DIR must point at a throwaway dir BEFORE they are
 // loaded — otherwise the install-auto quota gate records into a real config
 // dir (hit live once: 8 quota units landed in a provider-runtime home).
-const envHome = await mkdtemp(join(tmpdir(), 'agentoc-p3d-home-'));
-process.env.AGENTOC_CONFIG_DIR = join(envHome, 'agentoc-config');
+const envHome = await mkdtemp(join(tmpdir(), 'ragent-p3d-home-'));
+process.env.RAGENT_CONFIG_DIR = join(envHome, 'ragent-config');
 // This suite mints many install-auto tokens; the default 5/1h quota would
 // reject the later cases. The env knobs exist exactly for this.
-process.env.AGENTOC_INSTALL_AUTO_QUOTA_MAX = '100';
-process.env.AGENTOC_INSTALL_AUTO_QUOTA_WINDOW_MS = '3600000';
+process.env.RAGENT_INSTALL_AUTO_QUOTA_MAX = '100';
+process.env.RAGENT_INSTALL_AUTO_QUOTA_WINDOW_MS = '3600000';
 const {
   executePrivilegedOp,
   executePrivilegedOpAsEvent,
@@ -55,7 +55,7 @@ function makeFakeServer(socketPath, handler) {
   });
 }
 
-const tmpDir = await mkdtemp(join(tmpdir(), 'agentoc-p3d-test-'));
+const tmpDir = await mkdtemp(join(tmpdir(), 'ragent-p3d-test-'));
 const keysFile = join(tmpDir, 'privileged-signing-keys.json');
 
 // =============================================================================

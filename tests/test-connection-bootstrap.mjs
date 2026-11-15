@@ -42,7 +42,7 @@ import { createTurnCredentialBrokerHandler } from '../infrastructure/turn-broker
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
-const schema = JSON.parse(readFileSync(join(repoRoot, 'docs/agentoc-android-core-contract.schema.json'), 'utf8'));
+const schema = JSON.parse(readFileSync(join(repoRoot, 'docs/ragent-android-core-contract.schema.json'), 'utf8'));
 const ajv = new Ajv({ strict: false, allErrors: true });
 addFormats(ajv);
 ajv.addSchema(schema);
@@ -120,25 +120,25 @@ async function startServer({ home, configDir, binDir, port, extraEnv = {} }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
       HOME: home,
       PATH: `${binDir}:${process.env.PATH}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_AUTH_SESSION_SECRET: sessionSecret,
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
-      AGENTOC_TURN_BROKER_URL: '',
-      AGENTOC_TURN_BROKER_TOKEN: '',
-      AGENTOC_TURN_BROKER_AUTH_MODE: 'static',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_AUTH_SESSION_SECRET: sessionSecret,
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_TURN_BROKER_URL: '',
+      RAGENT_TURN_BROKER_TOKEN: '',
+      RAGENT_TURN_BROKER_AUTH_MODE: 'static',
       ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -371,7 +371,7 @@ await test('TURN authorization is account and quota bound', async () => {
   assert.equal(computerEndpoint.activeComputers, 2);
 });
 
-const noTurnInstance = setupTempInstance('agentoc-bootstrap-no-turn-');
+const noTurnInstance = setupTempInstance('ragent-bootstrap-no-turn-');
 const noTurnPort = randomPort();
 let noTurnServer = null;
 try {
@@ -389,7 +389,7 @@ try {
   rmSync(noTurnInstance.home, { recursive: true, force: true });
 }
 
-const instance = setupTempInstance('agentoc-bootstrap-turn-');
+const instance = setupTempInstance('ragent-bootstrap-turn-');
 const port = randomPort();
 let server = null;
 let brokerServer = null;
@@ -411,8 +411,8 @@ try {
     ...instance,
     port,
     extraEnv: {
-      AGENTOC_TURN_BROKER_URL: `http://127.0.0.1:${brokerPort}`,
-      AGENTOC_TURN_BROKER_TOKEN: 'broker-test-token',
+      RAGENT_TURN_BROKER_URL: `http://127.0.0.1:${brokerPort}`,
+      RAGENT_TURN_BROKER_TOKEN: 'broker-test-token',
     },
   });
   const device = await enrollDevice(port, instance.configDir);

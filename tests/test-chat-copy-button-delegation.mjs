@@ -24,7 +24,7 @@ const FIXTURE_HTML = `<!doctype html>
   <div id="messages"><div id="messagesInner"></div></div>
   <script>
     // App stubs: i18n + icon rendering used by setCopyButtonState.
-    window.agentocT = (key) => key;
+    window.ragentT = (key) => key;
     window.renderRealtimeIcon = (name) => '<svg data-icon="' + name + '"></svg>';
 
     // Delegation guard spy: counts document-level click listener registrations

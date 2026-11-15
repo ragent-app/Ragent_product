@@ -11,7 +11,7 @@ const styles = [
   'static/chat/chat-responsive.css',
 ].map((path) => readFileSync(join(repoRoot, path), 'utf8')).join('\n');
 const icons = readFileSync(join(repoRoot, 'static/chat/icons.js'), 'utf8');
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || '';
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || '';
 if (outputDir) mkdirSync(outputDir, { recursive: true });
 
 const fixture = `<!doctype html>
@@ -19,8 +19,8 @@ const fixture = `<!doctype html>
 <body><div class="app-shell"><div class="header">
   <button class="header-btn header-btn--sessions" id="menuBtn" type="button" aria-label="Sessions"><span class="header-btn-icon" data-icon="menu"></span></button>
   <button class="header-btn header-btn--home" id="homeBtn" type="button" aria-label="Home"><span class="header-btn-icon" data-icon="home"></span></button>
-  <div class="header-title-block"><h1>AgentoC Chat</h1></div>
-</div></div><script>${icons}\nwindow.AgentoCIcons.hydrate(document);</script></body></html>`;
+  <div class="header-title-block"><h1>Ragent Chat</h1></div>
+</div></div><script>${icons}\nwindow.RagentIcons.hydrate(document);</script></body></html>`;
 
 const browser = await chromium.launch({ headless: true });
 try {

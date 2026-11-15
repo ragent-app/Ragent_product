@@ -1,7 +1,7 @@
 // Broker-only notification. The broker filters the same method from the
 // upstream provider, so a provider cannot claim that cleanup was attempted.
-export const MAC_CLEANUP_NOTIFICATION = 'agentoc/macosRunCleanup';
-export const MAC_CLEANUP_SPOOL_TYPE = 'agentoc.macos_cancellation_cleanup';
+export const MAC_CLEANUP_NOTIFICATION = 'ragent/macosRunCleanup';
+export const MAC_CLEANUP_SPOOL_TYPE = 'ragent.macos_cancellation_cleanup';
 export const MAC_CLEANUP_WARNING = 'Cancellation was requested, but macOS could not confirm task process cleanup. A task process may still be running.';
 
 export function readMacCleanupNotification(message, { threadId, runId } = {}) {

@@ -12,12 +12,12 @@ function argValue(name, fallback = '') {
   return index >= 0 ? process.argv[index + 1] || fallback : fallback;
 }
 
-const url = argValue('--url', process.env.AGENTOC_ACCOUNTS_DATABASE_URL || '');
+const url = argValue('--url', process.env.RAGENT_ACCOUNTS_DATABASE_URL || '');
 const dir = argValue('--dir', new URL('../accounts/migrations', import.meta.url).pathname);
 const direction = process.argv.includes('--down') ? 'down' : 'up';
 
 if (!url) {
-  console.error('accounts-migrate: missing DATABASE URL (--url or AGENTOC_ACCOUNTS_DATABASE_URL)');
+  console.error('accounts-migrate: missing DATABASE URL (--url or RAGENT_ACCOUNTS_DATABASE_URL)');
   process.exit(2);
 }
 

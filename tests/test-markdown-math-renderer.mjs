@@ -54,9 +54,9 @@ const prepared = context.prepareMarkdownMath([
 assert.equal(prepared.tokens.length, 2, 'math preprocessor should ignore code spans and fenced code blocks');
 assert.equal(prepared.tokens[0].display, false, 'single-dollar math should be inline');
 assert.equal(prepared.tokens[1].display, true, 'double-dollar math should be display math');
-assert.match(prepared.markdown, /AGENTOC_MATH_TOKEN_0/, 'preprocessed Markdown should contain inline math token');
-assert.match(prepared.markdown, /AGENTOC_MATH_TOKEN_1/, 'preprocessed Markdown should contain display math token');
-assert.doesNotMatch(prepared.markdown, /not_math_either[\s\S]*AGENTOC_MATH_TOKEN_/, 'fenced code math markers should not be tokenized');
+assert.match(prepared.markdown, /RAGENT_MATH_TOKEN_0/, 'preprocessed Markdown should contain inline math token');
+assert.match(prepared.markdown, /RAGENT_MATH_TOKEN_1/, 'preprocessed Markdown should contain display math token');
+assert.doesNotMatch(prepared.markdown, /not_math_either[\s\S]*RAGENT_MATH_TOKEN_/, 'fenced code math markers should not be tokenized');
 
 const mathMl = context.renderTexMathToMathMl('\\frac{a_i}{b^2} + \\sqrt{x}');
 assert.match(mathMl, /<mfrac>/, 'TeX parser should render fractions as MathML');

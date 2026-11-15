@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Golden screenshot diff gate for the AgentoC Android client.
+"""Golden screenshot diff gate for the Ragent Android client.
 
 Compares candidate captures against the committed baselines in app/screenshots/
 and fails (exit 1) if any image's pixel difference exceeds the threshold.

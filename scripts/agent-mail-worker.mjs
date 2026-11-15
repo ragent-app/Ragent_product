@@ -24,7 +24,7 @@ import {
 import { resolveExternalRuntimeSelection } from '../lib/external-runtime-selection.mjs';
 import { loadUiRuntimeSelection } from '../lib/runtime-selection.mjs';
 
-const DEFAULT_OWNER_CONFIG_DIR = join(homedir(), '.config', 'agentoc');
+const DEFAULT_OWNER_CONFIG_DIR = join(homedir(), '.config', 'ragent');
 const DEFAULT_GUEST_REGISTRY_FILE = join(DEFAULT_OWNER_CONFIG_DIR, 'guest-instances.json');
 
 function parseArgs(argv) {
@@ -169,7 +169,7 @@ function sameBaseUrl(leftValue, rightValue) {
 
 async function loadGuestRegistry() {
   return (await loadMailboxRuntimeRegistry({
-    registryFile: process.env.AGENTOC_GUEST_REGISTRY_FILE || DEFAULT_GUEST_REGISTRY_FILE,
+    registryFile: process.env.RAGENT_GUEST_REGISTRY_FILE || DEFAULT_GUEST_REGISTRY_FILE,
   })).map((record) => ({
     ...record,
     authFile: normalizeAuthFile(record?.authFile),
@@ -259,7 +259,7 @@ async function requestJson(baseUrl, path, { method = 'GET', cookie, body } = {})
   return { response, json, text };
 }
 
-function createAgentoCRuntime(baseUrl, { authFile = '' } = {}) {
+function createRagentRuntime(baseUrl, { authFile = '' } = {}) {
   const normalizedAuthFile = normalizeAuthFile(authFile);
   return {
     baseUrl: normalizeBaseUrl(baseUrl),
@@ -288,7 +288,7 @@ async function ensureAuthCookie(runtime, forceRefresh = false) {
   return runtime.authCookie;
 }
 
-async function requestAgentoC(runtime, path, options = {}) {
+async function requestRagent(runtime, path, options = {}) {
   const request = typeof runtime.requestJson === 'function' ? runtime.requestJson : requestJson;
   const cookie = await ensureAuthCookie(runtime, false);
   let result = await request(runtime.baseUrl, path, { ...options, cookie });
@@ -467,7 +467,7 @@ async function submitApprovedItem(item, rootDir, automation, runtime) {
   const runtimeTarget = await resolveRuntimeTarget(item, automation, runtime?.baseUrl || automation.chatBaseUrl);
   const effectiveRuntime = runtimeMatchesTarget(runtime, runtimeTarget)
     ? runtime
-    : createAgentoCRuntime(runtimeTarget.baseUrl, { authFile: runtimeTarget.authFile });
+    : createRagentRuntime(runtimeTarget.baseUrl, { authFile: runtimeTarget.authFile });
   const targetSelectionFile = runtimeTarget.configDir
     ? join(runtimeTarget.configDir, 'ui-runtime-selection.json')
     : undefined;
@@ -491,7 +491,7 @@ async function submitApprovedItem(item, rootDir, automation, runtime) {
     sessionPayload.completionTargets = [await buildCompletionTarget(item, rootDir, requestId)];
   }
 
-  const createResult = await requestAgentoC(effectiveRuntime, '/api/sessions', {
+  const createResult = await requestRagent(effectiveRuntime, '/api/sessions', {
     method: 'POST',
     body: sessionPayload,
   });
@@ -531,7 +531,7 @@ async function submitApprovedItem(item, rootDir, automation, runtime) {
     messagePayload.effort = runtimeSelection.effort;
   }
 
-  const submitResult = await requestAgentoC(effectiveRuntime, `/api/sessions/${session.id}/messages`, {
+  const submitResult = await requestRagent(effectiveRuntime, `/api/sessions/${session.id}/messages`, {
     method: 'POST',
     body: messagePayload,
   });
@@ -576,7 +576,7 @@ async function submitApprovedItem(item, rootDir, automation, runtime) {
   };
 }
 
-async function runSweep({ rootDir, baseUrl, runtime = createAgentoCRuntime(baseUrl) }) {
+async function runSweep({ rootDir, baseUrl, runtime = createRagentRuntime(baseUrl) }) {
   const automation = await loadMailboxAutomation(rootDir);
   const deliveryMode = normalizeDeliveryMode(automation.deliveryMode);
   if (automation.enabled === false) {
@@ -618,7 +618,7 @@ async function runSweep({ rootDir, baseUrl, runtime = createAgentoCRuntime(baseU
     const failureSummary = failures.map((f) => f.itemId).join(', ');
     const notificationMessage = `邮件处理失败 (${failures.length} 封): ${failures[0].error.slice(0, 200)}`;
     try {
-      await requestAgentoC(runtime, '/api/notifications', {
+      await requestRagent(runtime, '/api/notifications', {
         method: 'POST',
         body: { message: notificationMessage, level: 'error' },
       });
@@ -653,7 +653,7 @@ async function main() {
   const authFile = optionValue(options, 'auth-file', automation.authFile);
   const intervalMs = Math.max(1000, parseInt(optionValue(options, 'interval-ms', '5000'), 10) || 5000);
   const once = optionValue(options, 'once', false) === true;
-  const runtime = createAgentoCRuntime(baseUrl, { authFile });
+  const runtime = createRagentRuntime(baseUrl, { authFile });
 
   if (once) {
     console.log(JSON.stringify(await runSweep({ rootDir, baseUrl, runtime }), null, 2));
@@ -681,9 +681,9 @@ async function main() {
 }
 
 export {
-  createAgentoCRuntime,
+  createRagentRuntime,
   ensureAuthCookie,
-  requestAgentoC,
+  requestRagent,
   runSweep,
 };
 

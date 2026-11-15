@@ -22,7 +22,7 @@ if (process.platform === 'win32') {
     "& 'C:\\Windows\\System32\\sc.exe' start fixture", 'sc.exe start $env:SERVICE_NAME',
     'New-NetFirewallRule -DisplayName fixture -WhatIf', 'Disable-NetFirewallRule -DisplayName fixture -WhatIf',
     'Set-NetFirewallProfile -Enabled True -WhatIf', 'Add-MpPreference -ExclusionPath fixture -WhatIf',
-    "reg.exe add 'HKLM\\Software\\AgentoCFixture' /v Fixture /d 1", "reg delete 'HKEY_LOCAL_MACHINE\\Software\\Fixture' /v Value",
+    "reg.exe add 'HKLM\\Software\\RagentFixture' /v Fixture /d 1", "reg delete 'HKEY_LOCAL_MACHINE\\Software\\Fixture' /v Value",
     "reg.exe copy 'HKCU\\Software\\Fixture' 'HKLM\\Software\\Fixture'",
     "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\Fixture' -Name Value -Value 1",
     "New-Item 'Registry::HKEY_LOCAL_MACHINE\\Software\\Fixture' -WhatIf"]) {
@@ -74,31 +74,31 @@ if (process.platform === 'win32') {
   assert.match(managed.hookSpecificOutput.permissionDecisionReason, /Start-Service or Stop-Service/);
   assert.match((await buildCodexWindowsElevationGuidance({ event })).hookSpecificOutput.permissionDecisionReason, /unavailable/);
   assert.deepEqual(await buildCodexWindowsElevationGuidance({ event: { ...event, hook_event_name: 'PostToolUse' }, channel }), {});
-  const hook = spawnSync(process.execPath, ['scripts/agentoc-codex-windows-install-hook.mjs'], { input: JSON.stringify(event), encoding: 'utf8',
-    env: { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: channel.endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: channel.token,
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, AGENTOC_APPROVED_ACTIONS_RUN_ID: channel.runId,
-      AGENTOC_APPROVED_ACTIONS_TURN_ID: channel.turnId, AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT: '' } });
+  const hook = spawnSync(process.execPath, ['scripts/ragent-codex-windows-install-hook.mjs'], { input: JSON.stringify(event), encoding: 'utf8',
+    env: { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: channel.endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: channel.token,
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, RAGENT_APPROVED_ACTIONS_RUN_ID: channel.runId,
+      RAGENT_APPROVED_ACTIONS_TURN_ID: channel.turnId, RAGENT_WINDOWS_SAFE_DELETE_CONTEXT: '' } });
   assert.equal(hook.status, 0, hook.stderr);
   assert.match(JSON.parse(hook.stdout).hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
-  const disabledEnv = { ...process.env, AGENTOC_WINDOWS_INSTALL_BRIDGE_DISABLED: '1', AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT: '',
-    AGENTOC_APPROVED_ACTIONS_ENDPOINT: channel.endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: channel.token,
-    AGENTOC_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, AGENTOC_APPROVED_ACTIONS_RUN_ID: channel.runId,
-    AGENTOC_APPROVED_ACTIONS_TURN_ID: channel.turnId };
-  const disabledInstall = spawnSync(process.execPath, ['scripts/agentoc-codex-windows-install-hook.mjs'],
+  const disabledEnv = { ...process.env, RAGENT_WINDOWS_INSTALL_BRIDGE_DISABLED: '1', RAGENT_WINDOWS_SAFE_DELETE_CONTEXT: '',
+    RAGENT_APPROVED_ACTIONS_ENDPOINT: channel.endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: channel.token,
+    RAGENT_APPROVED_ACTIONS_SESSION_ID: channel.sessionId, RAGENT_APPROVED_ACTIONS_RUN_ID: channel.runId,
+    RAGENT_APPROVED_ACTIONS_TURN_ID: channel.turnId };
+  const disabledInstall = spawnSync(process.execPath, ['scripts/ragent-codex-windows-install-hook.mjs'],
     { input: JSON.stringify({ ...event, tool_input: { command: 'winget install Git.Git' } }), encoding: 'utf8', env: disabledEnv });
   assert.equal(disabledInstall.status, 0, disabledInstall.stderr);
   assert.deepEqual(JSON.parse(disabledInstall.stdout), {});
-  const disabledElevation = spawnSync(process.execPath, ['scripts/agentoc-codex-windows-install-hook.mjs'],
+  const disabledElevation = spawnSync(process.execPath, ['scripts/ragent-codex-windows-install-hook.mjs'],
     { input: JSON.stringify(event), encoding: 'utf8', env: disabledEnv });
   assert.match(JSON.parse(disabledElevation.stdout).hookSpecificOutput.permissionDecisionReason, /ragent_request_actions/);
 
-  const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-elevation-guidance-test-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-elevation-guidance-test-'));
   try {
     const workspace = path.join(root, 'workspace');
     await mkdir(workspace, { recursive: true });
-    Object.assign(process.env, { AGENTOC_INSTANCE_ROOT: root, AGENTOC_CONFIG_DIR: path.join(root, 'config'),
-      AGENTOC_WORK_ROOT_DIR: workspace, AGENTOC_MEMORY_DIR: path.join(root, 'memory'),
-      AGENTOC_PROVIDER_HOMES_DIR: path.join(root, 'provider-homes'), AGENTOC_RUN_SPOOL_DIR: path.join(root, 'runs') });
+    Object.assign(process.env, { RAGENT_INSTANCE_ROOT: root, RAGENT_CONFIG_DIR: path.join(root, 'config'),
+      RAGENT_WORK_ROOT_DIR: workspace, RAGENT_MEMORY_DIR: path.join(root, 'memory'),
+      RAGENT_PROVIDER_HOMES_DIR: path.join(root, 'provider-homes'), RAGENT_RUN_SPOOL_DIR: path.join(root, 'runs') });
     const { createRun } = await import('../chat/runs.mjs');
     const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
     const run = await createRun({ status: { sessionId: 'session', requestId: 'request', state: 'accepted', tool: 'claude' },
@@ -113,11 +113,11 @@ if (process.platform === 'win32') {
     assert.match(sent[0].response.response.message, /ragent_request_actions/);
     assert.equal(state.pendingApprovals.size, 0);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-admin',
-      request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'New-LocalUser -Name agentoc-fixture -WhatIf' } } }, proc);
+      request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'New-LocalUser -Name ragent-fixture -WhatIf' } } }, proc);
     assert.equal(sent[1].response.response.behavior, 'deny');
     assert.match(sent[1].response.response.message, /ragent_request_actions/);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-service',
-      request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'sc.exe start agentoc-fixture' } } }, proc);
+      request: { subtype: 'can_use_tool', tool_name: 'PowerShell', input: { command: 'sc.exe start ragent-fixture' } } }, proc);
     assert.equal(sent[2].response.response.behavior, 'deny');
     assert.match(sent[2].response.response.message, /Start-Service or Stop-Service/);
     await trackClaudeBidiApprovalRequest(run.id, state, { type: 'control_request', request_id: 'direct-firewall',

@@ -14,13 +14,13 @@ const architectures = new Set(['X86', 'Arm', 'X64', 'Neutral', 'Arm64', 'Unknown
 const defaultExecFile = promisify(execFileCallback);
 
 // This fixed program takes only data in environment variables. The caller must
-// supply a runtime and module from the protected AgentoC installation; this
+// supply a runtime and module from the protected Ragent installation; this
 // function cannot establish that trust or attest the identity of its process.
 const SELECTED_INSTALLER_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-Import-Module -Name $env:AGENTOC_FACTS_MODULE -ErrorAction Stop
+Import-Module -Name $env:RAGENT_FACTS_MODULE -ErrorAction Stop
 $sources = @(Get-WinGetSource -Name 'winget' -ErrorAction Stop)
 if ($sources.Count -ne 1) { throw 'Source unavailable' }
 $source = $sources[0]
@@ -29,8 +29,8 @@ if ($source.Name -cne 'winget' -or $source.Type -cne 'Microsoft.PreIndexed.Packa
     [string]$source.TrustLevel -ine 'Trusted' -or $uri.Scheme -cne 'https' -or
     ($uri.Host -ine 'winget.microsoft.com' -and -not $uri.Host.EndsWith('.winget.microsoft.com', [StringComparison]::OrdinalIgnoreCase)) -or
     $uri.UserInfo -or (-not $uri.IsDefaultPort)) { throw 'Source unverified' }
-$matches = @(Find-WinGetPackage -Id $env:AGENTOC_FACTS_PACKAGE -Source 'winget' -MatchOption Equals -ErrorAction Stop)
-if ($matches.Count -ne 1 -or $matches[0].Id -cne $env:AGENTOC_FACTS_PACKAGE -or $matches[0].Source -ine 'winget') { throw 'Exact package unavailable' }
+$matches = @(Find-WinGetPackage -Id $env:RAGENT_FACTS_PACKAGE -Source 'winget' -MatchOption Equals -ErrorAction Stop)
+if ($matches.Count -ne 1 -or $matches[0].Id -cne $env:RAGENT_FACTS_PACKAGE -or $matches[0].Source -ine 'winget') { throw 'Exact package unavailable' }
 $property = $matches[0].GetType().GetProperty('CatalogPackageCOM', [Reflection.BindingFlags]'Instance,NonPublic')
 if (-not $property) { throw 'Catalog metadata unavailable' }
 $catalog = $property.GetValue($matches[0])
@@ -41,14 +41,14 @@ if (-not $versions -or $versions.Count -gt 10000) { throw 'Package versions unav
 $selected = $null
 for ($index = 0; $index -lt $versions.Count; $index++) {
   $candidate = $versions[$index]
-  if ($candidate.Version -ceq $env:AGENTOC_FACTS_VERSION) {
+  if ($candidate.Version -ceq $env:RAGENT_FACTS_VERSION) {
     if ($selected) { throw 'Package version is ambiguous' }
     $selected = $candidate
   }
 }
 if (-not $selected) { throw 'Exact package version unavailable' }
 $version = $catalog.GetPackageVersionInfo($selected)
-if (-not $version -or $version.Id -cne $env:AGENTOC_FACTS_PACKAGE -or $version.Version -cne $env:AGENTOC_FACTS_VERSION) { throw 'Package version mismatch' }
+if (-not $version -or $version.Id -cne $env:RAGENT_FACTS_PACKAGE -or $version.Version -cne $env:RAGENT_FACTS_VERSION) { throw 'Package version mismatch' }
 $optionsType = $property.PropertyType.Assembly.GetType('Microsoft.Management.Deployment.InstallOptions', $true)
 $options = [Activator]::CreateInstance($optionsType)
 $installer = $version.GetApplicableInstaller($options)
@@ -63,7 +63,7 @@ export async function queryWindowsSelectedInstallerFacts({ packageId, packageVer
   for (const key of ['SystemRoot', 'WINDIR', 'PATH', 'USERPROFILE', 'LOCALAPPDATA', 'APPDATA', 'TEMP', 'TMP', 'TMPDIR', 'ProgramFiles', 'ProgramW6432', 'ProgramData', 'SystemDrive', 'PROCESSOR_ARCHITECTURE', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']) {
     if (typeof env[key] === 'string') childEnv[key] = env[key];
   }
-  Object.assign(childEnv, { AGENTOC_FACTS_MODULE: path.win32.normalize(module), AGENTOC_FACTS_PACKAGE: packageId, AGENTOC_FACTS_VERSION: packageVersion,
+  Object.assign(childEnv, { RAGENT_FACTS_MODULE: path.win32.normalize(module), RAGENT_FACTS_PACKAGE: packageId, RAGENT_FACTS_VERSION: packageVersion,
     POWERSHELL_TELEMETRY_OPTOUT: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1' });
   try {
     const result = await execFile(path.win32.normalize(runtime), ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(SELECTED_INSTALLER_SCRIPT, 'utf16le').toString('base64')],

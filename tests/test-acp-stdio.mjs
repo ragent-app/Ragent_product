@@ -5,16 +5,16 @@ import { buildAcpStartInput, buildAcpSessionInput, isAcpInitializeAccepted, buil
 const start = buildAcpStartInput({ cwd: '/workspace' }).trim().split('\n').map(JSON.parse);
 assert.equal(start[0].method, 'initialize');
 assert.equal(start.length, 1, 'session/new must wait for initialize response');
-assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'agentoc-initialize', result: { protocolVersion: 1 } }), true);
-assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'agentoc-initialize', result: { protocolVersion: 2 } }), false);
-assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'agentoc-initialize', error: { message: 'auth' } }), false);
+assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'ragent-initialize', result: { protocolVersion: 1 } }), true);
+assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'ragent-initialize', result: { protocolVersion: 2 } }), false);
+assert.equal(isAcpInitializeAccepted({ jsonrpc: '2.0', id: 'ragent-initialize', error: { message: 'auth' } }), false);
 const browserServer = {
-  name: 'agentoc-browser',
+  name: 'ragent-browser',
   command: process.execPath,
-  args: ['/repo/scripts/agentoc-browser-mcp-server.mjs'],
+  args: ['/repo/scripts/ragent-browser-mcp-server.mjs'],
   env: {
-    AGENTOC_BROWSER_MCP_ENABLED: '1',
-    AGENTOC_BROWSER_RUN_ID: 'run-fixture',
+    RAGENT_BROWSER_MCP_ENABLED: '1',
+    RAGENT_BROWSER_RUN_ID: 'run-fixture',
   },
 };
 const startWithBrowser = buildAcpSessionInput({ cwd: '/workspace', mcpServers: [browserServer] })
@@ -23,7 +23,7 @@ assert.equal(startWithBrowser[0].method, 'session/new');
 assert.deepEqual(startWithBrowser[0].params.mcpServers, [browserServer]);
 const resumed = buildAcpSessionInput({ cwd: '/workspace', resumeSessionId: 's-existing' })
   .trim().split('\n').map(JSON.parse);
-assert.equal(resumed[0].id, 'agentoc-session-load');
+assert.equal(resumed[0].id, 'ragent-session-load');
 assert.equal(resumed[0].method, 'session/load');
 assert.equal(resumed[0].params.sessionId, 's-existing');
 assert.equal(acpSessionIdFromResponse({ result: { sessionId: 's-1' } }), 's-1');
@@ -43,10 +43,10 @@ assert.equal(buildAcpModeSwitchInput('s-1', 'yolo', kimiModes), null);
 assert.deepEqual(acpAvailableModesFromResponse({ result: { configOptions: [
   { id: 'mode', options: [{ value: 'yolo' }] },
 ] } }), [{ value: 'yolo' }]);
-assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'agentoc-set-mode', result: {} }), true);
-assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'agentoc-set-mode', error: { message: 'denied' } }), false);
+assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'ragent-set-mode', result: {} }), true);
+assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'ragent-set-mode', error: { message: 'denied' } }), false);
 assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'other', result: {} }), false);
-assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'agentoc-set-mode', result: null }), false);
+assert.equal(isAcpModeSwitchAccepted({ jsonrpc: '2.0', id: 'ragent-set-mode', result: null }), false);
 const permissionRequest = {
   jsonrpc: '2.0', id: 5, method: 'session/request_permission',
   params: { sessionId: 's-1', options: [
@@ -68,7 +68,7 @@ assert.deepEqual(JSON.parse(noReject.line).result.outcome, { outcome: 'cancelled
 assert.equal(noReject.cancelled, true);
 assert.equal(buildAcpUnattendedPermissionDenial({ ...permissionRequest, id: null }, 's-1'), null);
 assert.equal(
-  parseAcpEvent(JSON.stringify({ jsonrpc: '2.0', id: 'agentoc-session-load', result: {} }), { provider: 'hermes' })[0].content,
+  parseAcpEvent(JSON.stringify({ jsonrpc: '2.0', id: 'ragent-session-load', result: {} }), { provider: 'hermes' })[0].content,
   'ACP session resumed',
 );
 assert.equal(parseAcpEvent('{bad json').length, 0);

@@ -10,20 +10,20 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-approval-sweep-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-approval-sweep-'));
 const instanceRoot = join(home, 'instance');
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_INSTANCE_ROOT: process.env.RAGENT_INSTANCE_ROOT,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
-process.env.AGENTOC_CONFIG_DIR = join(instanceRoot, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_INSTANCE_ROOT = instanceRoot;
+process.env.RAGENT_CONFIG_DIR = join(instanceRoot, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 function restoreEnv() {
   for (const [key, value] of Object.entries(previousEnv)) {

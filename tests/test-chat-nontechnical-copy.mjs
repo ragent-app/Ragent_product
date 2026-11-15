@@ -25,7 +25,7 @@ assert.doesNotMatch(templateSource, /Built with AI/);
 assert.doesNotMatch(templateSource, /Optional system prompt for this app/);
 assert.doesNotMatch(templateSource, /Advanced provider code/);
 assert.doesNotMatch(templateSource, /Copy base prompt/);
-assert.doesNotMatch(templateSource, /open a new session in the AgentoC repo/);
+assert.doesNotMatch(templateSource, /open a new session in the Ragent repo/);
 
 assert.match(i18nSource, /"settings\.language\.optionAuto": "Follow browser"/);
 assert.match(i18nSource, /"settings\.theme\.optionSystem": "Follow system"/);
@@ -49,7 +49,7 @@ assert.doesNotMatch(i18nSource, /"settings\.language\.note": "Auto follows the c
 assert.doesNotMatch(i18nSource, /"settings\.thinkingBlocks\.note": "Choose how thinking blocks open in this browser\."/);
 assert.doesNotMatch(i18nSource, /"settings\.language\.note": "默认会跟随当前浏览器语言。你也可以在这里为当前浏览器强制切换/);
 assert.doesNotMatch(i18nSource, /"settings\.thinkingBlocks\.note": "控制 thinking block 在这个浏览器里是展开还是折叠。"/);
-assert.doesNotMatch(i18nSource, /AgentoC repo/);
-assert.doesNotMatch(i18nSource, /AgentoC 仓库里新开一个会话/);
+assert.doesNotMatch(i18nSource, /Ragent repo/);
+assert.doesNotMatch(i18nSource, /Ragent 仓库里新开一个会话/);
 
 console.log('test-chat-nontechnical-copy: ok');

@@ -34,10 +34,10 @@ test('shared TURN leases use member quota and an exact revocable grant', async (
       const requestId = createTurnOperationRequestId({ purpose, protocolVersion: 2, accountId: member,
         grantId: actualGrant, instanceId: identity.instanceId, deviceId, deviceKind: 'phone', connectionId: leaseId,
         expiresAt: purpose === 'turn-reserve' ? expiresAt : '', reason: '' });
-      const proof = signOwnerAuthDeviceProof(identity, { transactionId: requestId, purpose, issuedAt, audience: 'agentoc-owner-auth-device' });
+      const proof = signOwnerAuthDeviceProof(identity, { transactionId: requestId, purpose, issuedAt, audience: 'ragent-owner-auth-device' });
       return { requestId, protocolVersion: 2, accountId: member, grantId: actualGrant, deviceId, deviceKind: 'phone',
         connectionId: leaseId, ...(purpose === 'turn-reserve' ? { expiresAt } : {}), instance: publicInstanceIdentity(identity),
-        issuedAt, audience: 'agentoc-owner-auth-device', signature: proof.signature };
+        issuedAt, audience: 'ragent-owner-auth-device', signature: proof.signature };
     };
     const reserved = await broker.reserveTurnConnection(makeRequest('turn-reserve'));
     assert.equal(reserved.lease.accountId, member);
@@ -46,7 +46,7 @@ test('shared TURN leases use member quota and an exact revocable grant', async (
     await assert.rejects(broker.reserveTurnConnection(forged), { code: 'turn_connection_proof_mismatch' });
     const revoke = { instance: publicInstanceIdentity(identity), ownerAccountId: owner, accountId: member,
       operation: 'revoke', grantId: grant.grantId, requestId: 'revoke_request_00000001', issuedAt,
-      audience: 'agentoc-instance-access-grant' };
+      audience: 'ragent-instance-access-grant' };
     revoke.signature = signWithInstanceIdentity(identity, buildInstanceAccessGrantMessage({ ...revoke,
       instanceId: identity.instanceId, keyFingerprint: identity.keyFingerprint }));
     assert.equal((await broker.manageInstanceAccessGrant(revoke)).releasedConnections, 1);

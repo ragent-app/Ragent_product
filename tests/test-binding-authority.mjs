@@ -35,7 +35,7 @@ await listenFetchLoopback(server);
 base = `http://127.0.0.1:${server.address().port}/accounts`;
 function request(overrides = {}) {
   const fields = { instanceId: instance.instanceId, keyFingerprint: fingerprint, accountId, requestId: 'authority_request',
-    nonce: randomBytes(32).toString('base64url'), issuedAt: new Date(now).toISOString(), audience: 'agentoc-binding-authority', ...overrides };
+    nonce: randomBytes(32).toString('base64url'), issuedAt: new Date(now).toISOString(), audience: 'ragent-binding-authority', ...overrides };
   return { ...fields, instance,
     signature: sign(null, Buffer.from(buildBindingAuthorityProofMessage(fields)), keys.privateKey).toString('base64url') };
 }

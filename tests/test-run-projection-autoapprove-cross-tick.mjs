@@ -12,22 +12,22 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-autoapprove-cross-tick-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-autoapprove-cross-tick-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_INSTANCE_ROOT: process.env.AGENTOC_INSTANCE_ROOT,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_MEMORY_DIR: process.env.AGENTOC_MEMORY_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
-  AGENTOC_PROVIDER_HOMES_DIR: process.env.AGENTOC_PROVIDER_HOMES_DIR,
+  RAGENT_INSTANCE_ROOT: process.env.RAGENT_INSTANCE_ROOT,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_MEMORY_DIR: process.env.RAGENT_MEMORY_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
+  RAGENT_PROVIDER_HOMES_DIR: process.env.RAGENT_PROVIDER_HOMES_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = join(home, 'instance');
-process.env.AGENTOC_CONFIG_DIR = join(home, 'instance', 'config');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'instance', 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'instance', 'workspace');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = join(home, 'instance', 'provider-homes');
+process.env.RAGENT_INSTANCE_ROOT = join(home, 'instance');
+process.env.RAGENT_CONFIG_DIR = join(home, 'instance', 'config');
+process.env.RAGENT_MEMORY_DIR = join(home, 'instance', 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'instance', 'workspace');
+process.env.RAGENT_PROVIDER_HOMES_DIR = join(home, 'instance', 'provider-homes');
 
 function restoreEnv() {
   for (const [key, value] of Object.entries(previousEnv)) {
@@ -92,7 +92,7 @@ try {
   });
 
   const echo = {
-    type: 'agentoc.approval_response',
+    type: 'ragent.approval_response',
     approvalId: 'claude:cross-tick-1',
     decision: 'approved',
     status: 'approved',
@@ -276,7 +276,7 @@ try {
     },
   });
   const codexEcho = {
-    type: 'agentoc.approval_response',
+    type: 'ragent.approval_response',
     approvalId: 'item/commandExecution/requestApproval:42',
     provider: 'codex',
     decision: 'approved',

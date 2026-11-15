@@ -6,7 +6,7 @@ export { LINUX_RUN_SCOPE_FINISH_PATH } from './linux-run-scope-finish-path.mjs';
 
 // A runner can only invalidate its own bound scope. It cannot create or
 // extend authority, choose a signing key, or replace the Run context.
-export async function finishLinuxRunScope(input, { enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1',
+export async function finishLinuxRunScope(input, { enabled = process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1',
   platform = process.platform } = {}) {
   const keys = ['runId', 'sessionId', 'turnId', 'launchAttempt', 'token'];
   if (!enabled || platform !== 'linux' || !input || typeof input !== 'object' || Array.isArray(input) ||

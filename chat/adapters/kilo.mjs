@@ -134,7 +134,7 @@ export function buildKiloArgs(prompt, {
   if (riskMode !== 'conservative-auto') args.push('--auto');
   if (clean(resume)) args.push('--session', clean(resume));
   const selectedModel = clean(model).split('@')[0];
-  if (selectedModel) args.push('--model', `agentoc/${selectedModel}`);
+  if (selectedModel) args.push('--model', `ragent/${selectedModel}`);
   args.push(task);
   return args;
 }

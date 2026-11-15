@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.datastore"
+    namespace = "com.andysagent.ragent.core.datastore"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

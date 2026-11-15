@@ -19,11 +19,11 @@ class AppApiWireTest {
         assertEquals(operation, AppApiWire.decode<PublicOperation>(encoded))
     }
     @Test fun optionalSessionArgumentsDoNotChangeOldInvocationEncoding() {
-        val old = LegacyInvocation("agentoc.targets.list", page = PageFilter())
+        val old = LegacyInvocation("ragent.targets.list", page = PageFilter())
         val encoded = AppApiWire.encode(PublicInvocation(old.capabilityId, page = old.page))
         assertEquals(AppApiWire.encode(old), encoded)
         assertEquals(old, AppApiWire.decode<LegacyInvocation>(encoded))
-        val new = PublicInvocation("agentoc.sessions.search", session = PublicSessionRequest("pc", query = "中文"))
+        val new = PublicInvocation("ragent.sessions.search", session = PublicSessionRequest("pc", query = "中文"))
         assertEquals(new, AppApiWire.decode<PublicInvocation>(AppApiWire.encode(new)))
         assertFails { AppApiWire.decode<LegacyInvocation>(AppApiWire.encode(new)) }
     }
@@ -34,9 +34,9 @@ class AppApiWireTest {
     }
     @Test fun mutationArgumentsRoundTripAndAbsentFieldKeepsPreviousSessionEncoding() {
         val args = PublicSessionMutationRequest("op", "pc", "session", PublicSessionMutationKind.SET_ARCHIVED, flag = true)
-        val invocation = PublicInvocation("agentoc.sessions.prepareMutation", sessionMutation = args)
+        val invocation = PublicInvocation("ragent.sessions.prepareMutation", sessionMutation = args)
         assertEquals(invocation, AppApiWire.decode<PublicInvocation>(AppApiWire.encode(invocation)))
-        val oldSession = PublicInvocation("agentoc.sessions.get", session = PublicSessionRequest("pc", "session"))
+        val oldSession = PublicInvocation("ragent.sessions.get", session = PublicSessionRequest("pc", "session"))
         assertFalse(AppApiWire.encode(oldSession).contains("sessionMutation"))
         assertFails { AppApiWire.decode<PublicSessionMutationRequest>(AppApiWire.encode(args).dropLast(1) + ",\"callerBinding\":\"owner\"}") }
     }

@@ -367,7 +367,7 @@ async function acquireLock(dir, lockPath, timeoutMs = LOCK_ACQUIRE_TIMEOUT_MS) {
       }
       if (Date.now() >= deadline) {
         const err = new Error('timed out acquiring capability grant lock');
-        err.code = 'AGENTOC_GRANT_LOCK_TIMEOUT';
+        err.code = 'RAGENT_GRANT_LOCK_TIMEOUT';
         throw err;
       }
       await sleep(LOCK_RETRY_MIN_MS + Math.floor(Math.random() * (LOCK_RETRY_MAX_MS - LOCK_RETRY_MIN_MS + 1)));

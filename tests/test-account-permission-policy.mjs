@@ -4,13 +4,13 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-account-policy-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-account-policy-'));
 const home = join(root, 'home');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 await mkdir(configDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 const policyFile = join(configDir, 'ui-account-policy.json');
 const {

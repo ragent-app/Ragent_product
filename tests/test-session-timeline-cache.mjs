@@ -6,13 +6,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-timeline-cache-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-timeline-cache-'));
 const previousHome = process.env.HOME;
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(tempHome, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'work');
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_MEMORY_DIR = join(tempHome, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'work');
 
 try {
   const sessionManager = await import(pathToFileURL(join(repoRoot, 'chat', 'session-manager.mjs')).href);

@@ -14,16 +14,16 @@ import { existsSync, mkdtempSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-run-spool-archive-sched-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-run-spool-archive-sched-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_WORK_ROOT_DIR: process.env.AGENTOC_WORK_ROOT_DIR,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_WORK_ROOT_DIR: process.env.RAGENT_WORK_ROOT_DIR,
 };
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, '.agentoc', 'workspace');
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, '.ragent', 'workspace');
 
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -42,7 +42,7 @@ try {
 
   const now = Date.now();
   const HOUR = 3600 * 1000;
-  const configDir = process.env.AGENTOC_CONFIG_DIR;
+  const configDir = process.env.RAGENT_CONFIG_DIR;
   const stateFile = join(configDir, 'run-spool-archive-state.json');
 
   const mkRun = async ({ state, completedAt, lines = 8 }) => {
@@ -92,16 +92,16 @@ try {
   __resetRunArchiveSchedulerForTest();
 
   // 4a. disabled switch short-circuits.
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED = '0';
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_ENABLED = '0';
   let r = await processRunArchiveDueNow();
   assert.equal(r.ran, false, 'disabled scheduler must not run');
   assert.equal(r.reason, 'disabled', 'disabled reason');
-  delete process.env.AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED;
+  delete process.env.RAGENT_RUN_SPOOL_ARCHIVE_ENABLED;
 
   // 4b. no state file -> due -> runs + writes durable state.
   assert.equal(existsSync(stateFile), false, 'no state file before first tick');
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_AGE_MS = '0'; // age gate off so the fresh run is also a candidate
-  process.env.AGENTOC_RUN_SPOOL_ARCHIVE_MIN_BYTES = '0';
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_AGE_MS = '0'; // age gate off so the fresh run is also a candidate
+  process.env.RAGENT_RUN_SPOOL_ARCHIVE_MIN_BYTES = '0';
   r = await processRunArchiveDueNow();
   assert.equal(r.ran, true, 'first tick (no state) must run');
   assert.equal(existsSync(stateFile), true, 'durable state file written');

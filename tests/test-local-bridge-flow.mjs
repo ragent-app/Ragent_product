@@ -67,8 +67,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-local-bridge-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-local-bridge-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -123,18 +123,18 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -175,8 +175,8 @@ function runNodeCliAsync(args, env = {}) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -202,7 +202,7 @@ function buildDeviceHeaders(token, extra = {}) {
 }
 
 function mutateLocalBridgeState(home, mutator) {
-  const statePath = join(home, '.config', 'agentoc', 'chat-local-bridge.json');
+  const statePath = join(home, '.config', 'ragent', 'chat-local-bridge.json');
   const state = JSON.parse(readFileSync(statePath, 'utf8'));
   mutator(state);
   writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');

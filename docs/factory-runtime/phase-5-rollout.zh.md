@@ -41,7 +41,7 @@
 
 停新准入或进入一致性检查点，确认活动写入与待决外部操作；通过可信备份方式保存 collaborations.sqlite、project-workflow.db、runtime-coordination.db 及必要 Run/产物清单。SQLite WAL 不能只复制主文件而忽略未 checkpoint 的内容。
 
-记录 schema version、数据身份、事件水位和候选引用。备份不复制无关历史大资产，不泄露账号凭据；所有本地快照位于 G:/AgentoC。
+记录 schema version、数据身份、事件水位和候选引用。备份不复制无关历史大资产，不泄露账号凭据；所有本地快照位于 G:/Ragent。
 
 迁移只新增兼容字段/表，不原地把全部旧任务改为 Factory 完成状态。先导入历史关联和只读 shadow，列出缺失契约/证据/根会话的记录。缺数据项保持历史/待确认，不补造验收结论。
 

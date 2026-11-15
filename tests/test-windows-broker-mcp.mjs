@@ -7,20 +7,20 @@ const received = [];
 const server = createServer(async (req, res) => {
   let body = '';
   for await (const chunk of req) body += chunk;
-  received.push({ method: req.method, path: req.url, token: req.headers['x-agentoc-windows-broker-token'], body });
+  received.push({ method: req.method, path: req.url, token: req.headers['x-ragent-windows-broker-token'], body });
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ type: 'result', status: req.method === 'POST' ? 'awaiting_device' : 'succeeded', requestId: 'run-qa' }));
 });
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
-const child = spawn(process.execPath, ['scripts/agentoc-windows-broker-mcp.mjs'], {
+const child = spawn(process.execPath, ['scripts/ragent-windows-broker-mcp.mjs'], {
   cwd: new URL('..', import.meta.url).pathname.replace(/^\/(?=[A-Za-z]:)/, ''),
   env: { ...process.env,
-    AGENTOC_WINDOWS_BROKER_ENDPOINT: `http://127.0.0.1:${server.address().port}/api/internal/windows-broker/service-restart`,
-    AGENTOC_WINDOWS_BROKER_TOKEN: 'test-token',
-    AGENTOC_WINDOWS_BROKER_SESSION_ID: 'session-1',
-    AGENTOC_WINDOWS_BROKER_RUN_ID: 'run-1',
-    AGENTOC_WINDOWS_BROKER_TURN_ID: 'turn-1',
+    RAGENT_WINDOWS_BROKER_ENDPOINT: `http://127.0.0.1:${server.address().port}/api/internal/windows-broker/service-restart`,
+    RAGENT_WINDOWS_BROKER_TOKEN: 'test-token',
+    RAGENT_WINDOWS_BROKER_SESSION_ID: 'session-1',
+    RAGENT_WINDOWS_BROKER_RUN_ID: 'run-1',
+    RAGENT_WINDOWS_BROKER_TURN_ID: 'turn-1',
   },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
@@ -54,7 +54,7 @@ try {
   const bad = await rpc('tools/call', { name: 'ragent_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
   assert.equal(bad.result.isError, true);
   assert.equal(received.length, 0);
-  const oldBad = await rpc('tools/call', { name: 'agentoc_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
+  const oldBad = await rpc('tools/call', { name: 'ragent_restart_qa_service', arguments: { requestKey: 'same', command: 'whoami' } });
   assert.equal(oldBad.result.isError, true);
   assert.equal(received.length, 0);
   const proposal = await rpc('tools/call', { name: 'ragent_restart_qa_service', arguments: { requestKey: 'same' } });

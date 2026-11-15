@@ -1,6 +1,6 @@
 // ---- Message rendering ----
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 // ---- Typewriter streaming state ----
@@ -782,7 +782,7 @@ function finishSyntheticAssistantMessage() {
   return true;
 }
 
-window.AgentoCStreamingPresentation = Object.freeze({
+window.RagentStreamingPresentation = Object.freeze({
   startSyntheticAssistantMessageInNode,
   finishSyntheticAssistantMessage,
   decorateStreamingMessageNode,
@@ -1103,7 +1103,7 @@ function clearMessages({ preserveRunningBlockExpanded = false, preserveContent =
   syncScrollToBottomFab();
   resetRenderedEventState();
   if (!preserveContent) {
-    window.AgentoCTimelineRuntime?.reset?.(typeof currentSessionId === "string" ? currentSessionId : "");
+    window.RagentTimelineRuntime?.reset?.(typeof currentSessionId === "string" ? currentSessionId : "");
   }
   if (typeof nextRunningBlockExpanded === "boolean") {
     renderedEventState.runningBlockExpanded = nextRunningBlockExpanded;
@@ -1169,7 +1169,7 @@ function showEmpty() {
   // the empty session here makes that successful state look unrendered and
   // forces the next refresh to start over. Only the true no-session home state
   // should reset the projector identity.
-  if (!currentSessionId) window.AgentoCTimelineRuntime?.reset?.("");
+  if (!currentSessionId) window.RagentTimelineRuntime?.reset?.("");
   // A refresh can temporarily have no projected timeline rows while a
   // session is still attached (for example when leaving and re-entering a
   // recently opened session). The home workspace is only valid for the true
@@ -1514,9 +1514,9 @@ function renderEvent(
       || evt?.type === "attachment_delivery"
       || evt?.type === "plan"
     ) {
-      window.AgentoCRunActivity?.noteFormalOutput?.(evt);
+      window.RagentRunActivity?.noteFormalOutput?.(evt);
     } else {
-      window.AgentoCRunActivity?.applyEvent?.(evt);
+      window.RagentRunActivity?.applyEvent?.(evt);
     }
   }
 
@@ -1620,9 +1620,9 @@ function renderEvent(
             )
           ) {
             const sheetEvent = buildPlanApprovalRequestEvent(evt);
-            if (sheetEvent) window.AgentoCDecisions?.noteRequest(sheetEvent);
+            if (sheetEvent) window.RagentDecisions?.noteRequest(sheetEvent);
           } else if (isPlanSheetDismissState(evt)) {
-            window.AgentoCDecisions?.noteResponse({ approvalId: planApprovalId });
+            window.RagentDecisions?.noteResponse({ approvalId: planApprovalId });
           }
         }
       }
@@ -1655,7 +1655,7 @@ function renderEvent(
           || String(evt?.approvalId || "") === approvalRequestLiveId
         )
       ) {
-        window.AgentoCDecisions?.noteRequest(evt);
+        window.RagentDecisions?.noteRequest(evt);
       }
       break;
     case "approval_response":
@@ -1665,7 +1665,7 @@ function renderEvent(
       updatePlanApprovalCardOnResponse(evt);
       // A historical response (scroll-up replay) is an audit record — rendering
       // the summary line is enough; it must not clear a currently pending sheet.
-      if (!historyPrepend) window.AgentoCDecisions?.noteResponse(evt);
+      if (!historyPrepend) window.RagentDecisions?.noteResponse(evt);
       break;
     case "privileged_batch_request":
       // Danger-tier ops surface as one batch approval (other/delete groups).
@@ -1679,7 +1679,7 @@ function renderEvent(
           || String(evt?.batchId || "") === approvalRequestLiveId
         )
       ) {
-        window.AgentoCDecisions?.notePrivilegedBatch(evt);
+        window.RagentDecisions?.notePrivilegedBatch(evt);
       }
       break;
     case "privileged_batch_response":
@@ -1687,7 +1687,7 @@ function renderEvent(
       // Historical responses are audit records only (same gate as
       // approval_response above).
       rendered = true;
-      if (!historyPrepend) window.AgentoCDecisions?.notePrivilegedBatchResponse(evt);
+      if (!historyPrepend) window.RagentDecisions?.notePrivilegedBatchResponse(evt);
       break;
     case "approved_action_batch_request":
       rendered = true;
@@ -1698,16 +1698,16 @@ function renderEvent(
           || String(evt?.batchId || "") === approvalRequestLiveId
         )
       ) {
-        window.AgentoCDecisions?.noteApprovedAction?.(evt);
+        window.RagentDecisions?.noteApprovedAction?.(evt);
       }
       break;
     case "approved_action_state":
       rendered = true;
-      if (!historyPrepend) window.AgentoCDecisions?.noteApprovedActionState?.(evt);
+      if (!historyPrepend) window.RagentDecisions?.noteApprovedActionState?.(evt);
       break;
     case "approved_action_batch_response":
       rendered = true;
-      if (!historyPrepend) window.AgentoCDecisions?.noteApprovedActionResolution?.(evt);
+      if (!historyPrepend) window.RagentDecisions?.noteApprovedActionResolution?.(evt);
       break;
     case "tool_use":
       rendered = true;
@@ -1736,9 +1736,9 @@ function renderEvent(
         const statusText = String(evt?.content || "").trim().toLowerCase();
         const terminalStatus = statusText === "cancelled" || statusText.startsWith("error:");
         const statusRunId = String(evt?.runId || "").trim();
-        const pendingApproval = window.AgentoCDecisions?.getPending?.();
-        const pendingBatch = window.AgentoCDecisions?.getPendingBatch?.();
-        const pendingAction = window.AgentoCDecisions?.getPendingAction?.();
+        const pendingApproval = window.RagentDecisions?.getPending?.();
+        const pendingBatch = window.RagentDecisions?.getPendingBatch?.();
+        const pendingAction = window.RagentDecisions?.getPendingAction?.();
         const pendingDecisions = [pendingApproval, pendingBatch, pendingAction].filter(Boolean);
         const pendingRunIds = pendingDecisions
           .map((decision) => decision?.runId)
@@ -1757,7 +1757,7 @@ function renderEvent(
           ),
         );
         if (terminalStatus && !protectsLiveApproval) {
-          window.AgentoCDecisions?.reset?.();
+          window.RagentDecisions?.reset?.();
         }
       }
       renderStatusMsg(evt);
@@ -1924,8 +1924,8 @@ function codeBlockLanguageLabel(code) {
   const raw = languageClass
     ? languageClass.replace(/^(?:language|lang)-/i, "")
     : "";
-  if (window.AgentoCMarkdownEnhancements?.codeLanguageLabel) {
-    return window.AgentoCMarkdownEnhancements.codeLanguageLabel(raw);
+  if (window.RagentMarkdownEnhancements?.codeLanguageLabel) {
+    return window.RagentMarkdownEnhancements.codeLanguageLabel(raw);
   }
   const normalized = raw.trim().toLowerCase();
   const aliases = {
@@ -2087,12 +2087,12 @@ function getThinkingBody() {
 
 function eventCacheScope() {
   const authEpoch = typeof window !== "undefined"
-    && typeof window.agentocAuthEpoch === "string"
-    && window.agentocAuthEpoch
-    ? window.agentocAuthEpoch
+    && typeof window.ragentAuthEpoch === "string"
+    && window.ragentAuthEpoch
+    ? window.ragentAuthEpoch
     : "anonymous";
   const targetId = typeof window !== "undefined"
-    ? (window.AgentoCTargetRuntime?.getActiveTarget?.()?.targetId || "local")
+    ? (window.RagentTargetRuntime?.getActiveTarget?.()?.targetId || "local")
     : "local";
   return `${authEpoch}:${targetId}`;
 }
@@ -2177,12 +2177,12 @@ function clearSessionEventBlockCaches(sessionId) {
 }
 
 if (typeof window !== "undefined") {
-  window.agentocClearSessionEventCaches = clearSessionEventCaches;
-  window.agentocClearSessionEventBlockCaches = clearSessionEventBlockCaches;
+  window.ragentClearSessionEventCaches = clearSessionEventCaches;
+  window.ragentClearSessionEventBlockCaches = clearSessionEventBlockCaches;
   // A session change normally keeps immutable body data cached, but its lazy
   // hydration work is no longer useful.  Expose cancellation separately from
   // cache invalidation so returning to a long session remains fast.
-  window.agentocCancelSessionEventBodyFetches = cancelSessionEventBodyFetches;
+  window.ragentCancelSessionEventBodyFetches = cancelSessionEventBodyFetches;
 }
 
 async function fetchEventBlock(sessionId, startSeq, endSeq) {
@@ -2347,13 +2347,13 @@ function stripHiddenDisplayBlocks(text) {
   let visible = String(text || "")
     .replace(/<private>[\s\S]*?<\/private>/gi, "")
     .replace(/<hide>[\s\S]*?<\/hide>/gi, "")
-    .replace(/<agentoc-(organization-proposal|collaboration-plan|result-packet|session-labels)\b[^>]*>[\s\S]*?(?:<\/agentoc-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>|$)/gi, "")
-    .replace(/<\/agentoc-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>/gi, "");
+    .replace(/<ragent-(organization-proposal|collaboration-plan|result-packet|session-labels)\b[^>]*>[\s\S]*?(?:<\/ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>|$)/gi, "")
+    .replace(/<\/ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>/gi, "");
   const markers = [
-    "<agentoc-organization-proposal>",
-    "<agentoc-collaboration-plan>",
-    "<agentoc-result-packet>",
-    "<agentoc-session-labels>",
+    "<ragent-organization-proposal>",
+    "<ragent-collaboration-plan>",
+    "<ragent-result-packet>",
+    "<ragent-session-labels>",
   ];
   const lower = visible.toLowerCase();
   let suffixLength = 0;

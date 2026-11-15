@@ -96,7 +96,7 @@ assert.equal(verifyCollaborationCapabilityToken(dispatch.token, {
   now,
 }), null, 'forged signatures must fail closed');
 
-const usageDir = await mkdtemp(join(tmpdir(), 'agentoc-collaboration-capability-'));
+const usageDir = await mkdtemp(join(tmpdir(), 'ragent-collaboration-capability-'));
 const store = openCapabilityGrantStore({ dir: usageDir });
 manifest.options.collaborationCapabilities = set.capabilities;
 const authenticate = createCollaborationCapabilityAuthenticator({
@@ -113,7 +113,7 @@ function request(pathname, token, nonce, method = 'POST') {
     url: pathname,
     headers: {
       authorization: `Bearer ${token}`,
-      'x-agentoc-capability-use-nonce': nonce,
+      'x-ragent-capability-use-nonce': nonce,
     },
   };
 }

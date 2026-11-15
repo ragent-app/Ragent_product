@@ -8,13 +8,13 @@ import { createRunnerSupervisorServer, spawnSupervisedRunner } from '../chat/run
 import { buildDetachedRunnerEnvironment, launchDetachedRunnerViaSupervisor } from '../chat/run-launcher.mjs';
 
 test('runner does not inherit untrusted rollout source paths', () => {
-  const previous = process.env.AGENTOC_CODEX_ROLLOUT_SOURCES;
+  const previous = process.env.RAGENT_CODEX_ROLLOUT_SOURCES;
   try {
-    process.env.AGENTOC_CODEX_ROLLOUT_SOURCES = '["untrusted"]';
-    assert.equal(buildDetachedRunnerEnvironment({}).AGENTOC_CODEX_ROLLOUT_SOURCES, '[]');
+    process.env.RAGENT_CODEX_ROLLOUT_SOURCES = '["untrusted"]';
+    assert.equal(buildDetachedRunnerEnvironment({}).RAGENT_CODEX_ROLLOUT_SOURCES, '[]');
   } finally {
-    if (previous === undefined) delete process.env.AGENTOC_CODEX_ROLLOUT_SOURCES;
-    else process.env.AGENTOC_CODEX_ROLLOUT_SOURCES = previous;
+    if (previous === undefined) delete process.env.RAGENT_CODEX_ROLLOUT_SOURCES;
+    else process.env.RAGENT_CODEX_ROLLOUT_SOURCES = previous;
   }
 });
 
@@ -43,6 +43,6 @@ test('supervisor forwards only scoped legacy Codex homes', async (t) => {
     resolveRunnerProxyEnvironmentImpl: async () => ({}),
     spawnImpl: (_command, _args, options) => { childEnv = options.env; return { pid: 12345, unref() {} }; },
   });
-  assert.deepEqual(JSON.parse(childEnv.AGENTOC_CODEX_ROLLOUT_SOURCES), [legacy]);
+  assert.deepEqual(JSON.parse(childEnv.RAGENT_CODEX_ROLLOUT_SOURCES), [legacy]);
   await assert.rejects(launchDetachedRunnerViaSupervisor('run_sources_87654321', { socketPath, prepareProviderImpl: prepare([join(root, 'outside')]) }), /Invalid scoped Provider homes directory/);
 });

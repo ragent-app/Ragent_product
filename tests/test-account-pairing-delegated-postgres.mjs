@@ -13,15 +13,15 @@ import { buildAccountSessionMessage, buildDesktopAccountSessionAuthorization,
   createDevicePublicKeyFingerprint } from '../lib/device-auth-protocol.mjs';
 import { createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
 
-const databaseUrl = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
-const ownedData = process.env.AGENTOC_TEST_OWNED_CLUSTER_DATA;
+const databaseUrl = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const ownedData = process.env.RAGENT_TEST_OWNED_CLUSTER_DATA;
 assert(databaseUrl && ownedData, 'An explicitly owned cluster is required');
 assert.equal(new URL(databaseUrl).hostname, '127.0.0.1');
 const schema = `qa_delegated_qr_${randomBytes(12).toString('hex')}`;
 assert.match(schema, /^qa_delegated_qr_[a-f0-9]{24}$/);
 const bootstrap = new Pool({ connectionString: databaseUrl, max: 1, connectionTimeoutMillis: 5000 });
 const pools = [];
-const root = await mkdtemp(join(tmpdir(), 'agentoc-delegated-qr-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-delegated-qr-'));
 let owned = false, server, app, failApprovedInsert = false, injectedAfterSqlInsert = false;
 let now = Date.now();
 const cipherKeys = { activeKeyId: 'isolated-qr', keys: { 'isolated-qr': randomBytes(32).toString('base64') } };
@@ -37,8 +37,8 @@ function store() {
       assert(!/\bpublic\s*\./i.test(sql));
       if (/pg_advisory/.test(sql)) {
         assert.equal(sql, 'select pg_advisory_xact_lock(hashtext($1))');
-        assert.deepEqual(values, ['agentoc_accounts_store_v1']);
-        return client.query(sql, [`agentoc_accounts_store_v1:${schema}`]);
+        assert.deepEqual(values, ['ragent_accounts_store_v1']);
+        return client.query(sql, [`ragent_accounts_store_v1:${schema}`]);
       }
       const result = await client.query(sql, values);
       if (failApprovedInsert && /^insert into account_pairing_exchanges\b/.test(sql) && values.includes('APPROVED')) {
@@ -164,6 +164,6 @@ try {
   if (owned) { assert.match(schema, /^qa_delegated_qr_[a-f0-9]{24}$/); await bootstrap.query(`drop schema "${schema}" cascade`); }
   await bootstrap.end();
   const absolute = await realpath(root), parent = await realpath(tmpdir());
-  assert(absolute.startsWith(parent + sep) && absolute.includes('agentoc-delegated-qr-'));
+  assert(absolute.startsWith(parent + sep) && absolute.includes('ragent-delegated-qr-'));
   await rm(absolute, { recursive: true, force: true });
 }

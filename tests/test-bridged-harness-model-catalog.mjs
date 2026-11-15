@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-bridged-catalog-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-bridged-catalog-'));
 try {
   const configDir = join(root, 'config');
   const runtimeDir = join(configDir, 'native-provider-runtime');
@@ -31,7 +31,7 @@ try {
   await writeFile(join(runtimeDir, 'secrets', 'secret-openai.json'), JSON.stringify({ authType: 'api-key', apiKey: 'sk-test-openai' }));
   await writeFile(join(runtimeDir, 'secrets', 'secret-anthropic.json'), JSON.stringify({ authType: 'api-key', apiKey: 'sk-test-anthropic' }));
 
-  process.env.AGENTOC_CONFIG_DIR = configDir;
+  process.env.RAGENT_CONFIG_DIR = configDir;
   process.env.HOME = root;
   const { getModelsForTool, getToolModelCatalog } = await import('../chat/models.mjs');
   const openCode = await getModelsForTool('opencode');

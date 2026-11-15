@@ -3,8 +3,8 @@ import { evaluateRunBoundCodexWindowsHook } from '../chat/codex-run-bound-window
 
 const event = { session_id: 'thread-a', turn_id: 'turn-a', hook_event_name: 'PreToolUse', tool_name: 'Bash',
   tool_use_id: 'call-a', tool_input: { command: 'runas /user:admin cmd.exe' } };
-const env = { AGENTOC_APPROVED_ACTIONS_ENDPOINT: 'http://127.0.0.1:9', AGENTOC_APPROVED_ACTIONS_TOKEN: 'token-a',
-  AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-a', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-a', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'request-a' };
+const env = { RAGENT_APPROVED_ACTIONS_ENDPOINT: 'http://127.0.0.1:9', RAGENT_APPROVED_ACTIONS_TOKEN: 'token-a',
+  RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-a', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-a', RAGENT_APPROVED_ACTIONS_TURN_ID: 'request-a' };
 const binding = { active: true, threadId: 'thread-a', turnId: 'turn-a', env };
 const other = { ...binding, threadId: 'thread-b', turnId: 'turn-b', env: {} };
 const [first, second] = await Promise.all([

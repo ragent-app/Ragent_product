@@ -2,7 +2,7 @@
 // P0-C migration helper: relocate the runner-accessible subtrees (the run
 // spool root and the provider runtime homes) out of the control CONFIG_DIR to
 // the env-targeted runner-owned root.  Once both live outside config, the
-// runner group's config traverse ACL can be removed and /var/lib/agentoc/config
+// runner group's config traverse ACL can be removed and /var/lib/ragent/config
 // becomes fully opaque to Runs.
 //
 // Relocation happens only when ALL of these hold:
@@ -17,8 +17,8 @@
 // Usage:
 //   node scripts/relocate-runner-subtrees.mjs [--dry-run] [--owner <user>]
 //        [--group <group>]
-// Env: AGENTOC_CONFIG_DIR (legacy base), AGENTOC_RUN_SPOOL_DIR (target spool),
-//      AGENTOC_PROVIDER_HOMES_DIR (target provider homes).
+// Env: RAGENT_CONFIG_DIR (legacy base), RAGENT_RUN_SPOOL_DIR (target spool),
+//      RAGENT_PROVIDER_HOMES_DIR (target provider homes).
 
 import { chmod, chown, lstat, mkdir, readdir, rename, rm, rmdir, stat } from 'fs/promises';
 import { homedir } from 'os';
@@ -152,12 +152,12 @@ export async function relocateSubtree(pair, {
  */
 export function resolveSubtreePairs({ env, configDir }) {
   const pairs = [];
-  const spoolTarget = resolve(env.AGENTOC_RUN_SPOOL_DIR || '');
+  const spoolTarget = resolve(env.RAGENT_RUN_SPOOL_DIR || '');
   const legacySpool = join(configDir, LEGACY_SPOOL);
   if (spoolTarget && spoolTarget !== resolve(legacySpool)) {
     pairs.push({ kind: 'spool', legacy: legacySpool, target: spoolTarget });
   }
-  const providerTarget = resolve(env.AGENTOC_PROVIDER_HOMES_DIR || '');
+  const providerTarget = resolve(env.RAGENT_PROVIDER_HOMES_DIR || '');
   const legacyProvider = join(configDir, LEGACY_PROVIDER_HOMES);
   if (providerTarget && providerTarget !== resolve(legacyProvider)) {
     pairs.push({ kind: 'providerHomes', legacy: legacyProvider, target: providerTarget });
@@ -167,7 +167,7 @@ export function resolveSubtreePairs({ env, configDir }) {
 
 async function main(argv = process.argv.slice(2), {
   env = process.env,
-  configDir = env.AGENTOC_CONFIG_DIR || join(homedir(), '.config', 'agentoc'),
+  configDir = env.RAGENT_CONFIG_DIR || join(homedir(), '.config', 'ragent'),
   log = (line) => console.log(line),
 } = {}) {
   const dryRun = argv.includes('--dry-run');

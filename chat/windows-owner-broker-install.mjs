@@ -24,7 +24,7 @@ export function createWindowsOwnerBrokerGrant({ prepared, riskMode, kid, private
     instanceId: identity.instanceId, ownerSid: identity.ownerSid, requestId, sessionId: binding.sessionId, runId: binding.runId,
     turnId: binding.turnId, actionId, nonce: randomBytes(24).toString('base64url'), packageId: input.packages[0],
     packageVersion: input.resolvedVersions[0], source: 'winget', installScope: input.requestedInstallScope || 'default', issuedMs: now, expiresMs };
-  const bytes = Buffer.concat([Buffer.from('AgentoC Windows owner auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
+  const bytes = Buffer.concat([Buffer.from('Ragent Windows owner auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
   return { grant, signature: sign(null, bytes, privateKey).toString('base64url') };
 }
 

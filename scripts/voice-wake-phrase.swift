@@ -305,15 +305,15 @@ func installSignalHandlers(onSignal: @escaping () -> Void) -> [DispatchSourceSig
     return [sigintSource, sigtermSource]
 }
 
-var phrase = envString("AGENTOC_VOICE_WAKE_WORD")
+var phrase = envString("RAGENT_VOICE_WAKE_WORD")
 var localeId = "en-US"
 var cooldownMs = 3000
 var restartDelayMs = 1200
 var onDevice = true
 var allowServerFallback = true
-var connectorId = envString("AGENTOC_VOICE_CONNECTOR_ID")
-var roomName = envString("AGENTOC_VOICE_ROOM_NAME")
-var ackSoundPath = envString("AGENTOC_VOICE_WAKE_ACK_SOUND_PATH")
+var connectorId = envString("RAGENT_VOICE_CONNECTOR_ID")
+var roomName = envString("RAGENT_VOICE_ROOM_NAME")
+var ackSoundPath = envString("RAGENT_VOICE_WAKE_ACK_SOUND_PATH")
 var testTrigger = false
 
 var index = 1

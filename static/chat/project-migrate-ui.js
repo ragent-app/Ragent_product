@@ -12,7 +12,7 @@
   let focusScopeDeactivate = null;
 
   function t(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function escapeHtml(value) {
@@ -54,7 +54,7 @@
         <footer class="project-migrate-dialog__actions"><button type="button" class="project-migrate-cancel" data-migrate-close></button><button type="button" class="project-migrate-run-all"></button><button type="button" class="project-migrate-save"></button></footer>
       </section>`;
     document.body.appendChild(dialog);
-    root.AgentoCIcons?.hydrate?.(dialog);
+    root.RagentIcons?.hydrate?.(dialog);
     dialog.querySelectorAll("[data-migrate-close]").forEach((node) => node.addEventListener("click", close));
     dialog.querySelector(".project-migrate-choose")?.addEventListener("click", openPicker);
     dialog.querySelector(".project-migrate-add-mapping")?.addEventListener("click", () => {
@@ -81,7 +81,7 @@
         <input type="text" data-mapping-target autocomplete="off" aria-label="${escapeHtml(t("sidebar.project.targetPath"))}" value="${escapeHtml(target)}" placeholder="${escapeHtml(t("sidebar.project.targetPath"))}">
         <button type="button" data-remove-mapping data-icon="close" aria-label="${escapeHtml(t("action.close"))}"></button>
       </div>`).join("") : `<div class="project-migrate-no-mappings">${escapeHtml(t("sidebar.project.noMappings"))}</div>`;
-    root.AgentoCIcons?.hydrate?.(mount);
+    root.RagentIcons?.hydrate?.(mount);
     mount.querySelectorAll("[data-remove-mapping]").forEach((button) => button.addEventListener("click", () => {
       const row = button.closest(".project-migrate-mapping-row");
       const index = Number(row?.dataset.index);
@@ -137,7 +137,7 @@
       const pickerMount = document.createElement("div");
       pickerMount.className = "project-migrate-picker";
       targetRow.parentElement.appendChild(pickerMount);
-      picker = root.AgentoCFolderTreePicker?.create?.({
+      picker = root.RagentFolderTreePicker?.create?.({
         container: pickerMount,
         startPath: dialog.querySelector("#projectMigrateTarget").textContent || activeProject?.rootPath || "~",
         onChange: ({ path }) => updateTarget(path),
@@ -154,7 +154,7 @@
     const save = dialog.querySelector(".project-migrate-save");
     save.disabled = true;
     try {
-      const response = await (window.agentocFetch || fetch)(`/api/projects/${encodeURIComponent(activeProject.id)}`, {
+      const response = await (window.ragentFetch || fetch)(`/api/projects/${encodeURIComponent(activeProject.id)}`, {
         method: "PATCH", credentials: "same-origin", cache: "no-store",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ migrateTargetPath: target, migrateRenames: renames }),
@@ -164,7 +164,7 @@
       activeProject = payload;
       updateTarget(activeProject.migrateTargetPath || "");
       showResult(t("sidebar.project.migrationSaved"), false);
-      await root.agentocEnsureProjectsReady?.({ force: true });
+      await root.ragentEnsureProjectsReady?.({ force: true });
       if (closeAfter) close();
       return true;
     } catch (error) {
@@ -187,14 +187,14 @@
     run.disabled = true;
     run.textContent = t("sidebar.project.migrateNow");
     try {
-      const response = await (window.agentocFetch || fetch)("/api/projects/migrate", { method: "POST", credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
+      const response = await (window.ragentFetch || fetch)("/api/projects/migrate", { method: "POST", credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } });
       const payload = await response.json().catch(() => null);
       if (!response.ok) throw new Error(payload?.error || t("sidebar.project.migrationFailed"));
       const migrated = Array.isArray(payload?.migrated) ? payload.migrated : [];
       const failed = Array.isArray(payload?.failed) ? payload.failed : [];
       const lines = [t("sidebar.project.migrationDone"), ...migrated.map((item) => `✓ ${item.name || item.id} → ${item.rootPath}`), ...failed.map((item) => `! ${item.name || item.id}: ${item.error || item.code || t("sidebar.project.migrationFailed")}`)];
       showResult(lines.join("\n"), failed.length > 0);
-      await root.agentocEnsureProjectsReady?.({ force: true });
+      await root.ragentEnsureProjectsReady?.({ force: true });
     } catch (error) { showResult(error?.message || t("sidebar.project.migrationFailed"), true); }
     finally { run.disabled = false; run.textContent = t("sidebar.project.migrateAll"); }
   }
@@ -209,7 +209,7 @@
     renderMappings();
     view.hidden = false;
     trigger = document.activeElement;
-    focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(view.querySelector(".project-migrate-dialog__sheet"), { containmentRoot: document.body, initialFocus: view.querySelector(".project-migrate-save"), restoreFocus: () => trigger, modal: true, onEscape: close }) || null;
+    focusScopeDeactivate = root.RagentFocusScope?.activate?.(view.querySelector(".project-migrate-dialog__sheet"), { containmentRoot: document.body, initialFocus: view.querySelector(".project-migrate-save"), restoreFocus: () => trigger, modal: true, onEscape: close }) || null;
     return true;
   }
 
@@ -223,9 +223,9 @@
     trigger?.focus?.({ preventScroll: true });
   }
 
-  root.AgentoCProjectMigration = Object.freeze({ open, close });
+  root.RagentProjectMigration = Object.freeze({ open, close });
   document.getElementById("sidebarProjectSettingsBtn")?.addEventListener("click", () => {
-    const project = root.agentocGetBrowsingProject?.();
+    const project = root.ragentGetBrowsingProject?.();
     if (project) open(project);
   });
 })(typeof globalThis !== "undefined" ? globalThis : window);

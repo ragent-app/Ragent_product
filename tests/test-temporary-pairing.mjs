@@ -29,7 +29,7 @@ function claimFor(ticket, key = phone(), patch = {}) {
   return claim;
 }
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-pairing-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-pairing-'));
   t.after(async () => {
     assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep));
     await rm(root, { recursive: true, force: true });

@@ -8,7 +8,7 @@ const messages = { 'decisionSheet.operation.delete':'delete', 'decisionSheet.ope
 const tr = (key, vars = {}) => (messages[key] || key).replace(/\{(\w+)\}/g, (_, k) => vars[k] || '');
 const root = {};
 vm.runInNewContext(source, { window: root });
-const present = (value) => root.agentocApprovalExplanation(value, tr);
+const present = (value) => root.ragentApprovalExplanation(value, tr);
 const original = { operation:'delete', targets:['/tmp/example'], conditional:true, partial:true,
   riskCode:'composite_unanalyzed', summary:'包含 3 步操作', reason:'old reason', providerConflict:true };
 const shown = present(original);

@@ -128,12 +128,12 @@ function stubSetup(isDesktop) {
       setItem: function () {},
     },
   });
-  window.agentocT = function (key) { return key; };
+  window.ragentT = function (key) { return key; };
   window.renderUiIcon = function () { return ""; };
   window.isDesktop = ${isDesktop};
   window.switchTab = function () {};
   // The real sidebar-ui.js fetches the project catalog at load and publishes
-  // its own agentocProjectsReady, which project-view-ui.js awaits before
+  // its own ragentProjectsReady, which project-view-ui.js awaits before
   // rendering the L1 rows — so the stub must succeed with a real project.
   window.fetch = async function (url) {
     if (String(url).includes("/api/projects")) {
@@ -153,7 +153,7 @@ function stubSetup(isDesktop) {
     }
     return { ok: false, json: async () => ({}) };
   };
-  window.AgentoCCrossDevicePanel = {
+  window.RagentCrossDevicePanel = {
     open: function (options) {
       window.__openedCrossDeviceView = options?.view || "";
       window.__crossDeviceTriggerId = document.activeElement?.id || "";
@@ -161,10 +161,10 @@ function stubSetup(isDesktop) {
     },
   };
   window.fetchSessionsList = async function () { return []; };
-  window.agentocGetProjects = function () {
+  window.ragentGetProjects = function () {
     return [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
   };
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = function () { return "sessions"; };
   window.sessionSearchQuery = "";
   window.getFilteredActiveSessions = function () {
@@ -194,7 +194,7 @@ const SETTLE_MS = 900;
 
 function levelSnapshot(page) {
   return page.evaluate(() => ({
-    level: window.AgentocProjectView.getSidebarViewLevel(),
+    level: window.RagentProjectView.getSidebarViewLevel(),
     headerHidden: document.getElementById("sidebarProjectHeader").hidden,
     headerTitle: document.getElementById("sidebarProjectTitle").textContent,
     projectsHidden: document.getElementById("projectsView").hidden,

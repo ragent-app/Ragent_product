@@ -82,7 +82,7 @@
   }
 
   async function resolveAssetVersion() {
-    const bootstrapVersion = normalizeAssetVersion(window.__AGENTOC_BUILD__?.assetVersion);
+    const bootstrapVersion = normalizeAssetVersion(window.__RAGENT_BUILD__?.assetVersion);
     if (bootstrapVersion) return bootstrapVersion;
 
     const currentScriptSrc = document.currentScript?.src || "";

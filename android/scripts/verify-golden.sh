@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Golden screenshot diff gate for the AgentoC Android client.
+# Golden screenshot diff gate for the Ragent Android client.
 #
 # Renders the Workbench states on a connected emulator (debug APK + androidTest),
 # pulls the captures, and diffs them against the committed baselines in
@@ -30,7 +30,7 @@ echo "==> installing on ${DEVICE}"
 echo "==> capturing golden states"
 "$ADB" -s "$DEVICE" shell rm -rf /sdcard/Android/data/${PKG}/files/screenshots
 "$ADB" -s "$DEVICE" shell am instrument -w \
-  -e class com.andysagent.agentoc.WorkbenchScreenshotBaselineTest \
+  -e class com.andysagent.ragent.WorkbenchScreenshotBaselineTest \
   com.agentoncloud.android.test/androidx.test.runner.AndroidJUnitRunner >/dev/null
 
 echo "==> pulling captures"

@@ -10,14 +10,14 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-handshake-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-handshake-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'work');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'work');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 mkdirSync(configDir, { recursive: true });
 writeFileSync(join(configDir, 'auth.json'), JSON.stringify({
   username: 'testowner',
@@ -69,7 +69,7 @@ function makeBodyReq(body, extraHeaders = {}) {
   const chunk = Buffer.from(JSON.stringify(body));
   return {
     method: 'POST',
-    headers: { host: 'agentoc.example.test', ...extraHeaders },
+    headers: { host: 'ragent.example.test', ...extraHeaders },
     on(event, handler) {
       if (event === 'data') queueMicrotask(() => handler(chunk));
       if (event === 'end') queueMicrotask(() => handler());
@@ -159,7 +159,7 @@ for (const [method, pathname] of [
 ]) {
   const res = makeRes();
   const handled = await handleDeviceHandshakeRoutes({
-    req: { method, headers: { host: 'agentoc.example.test' } },
+    req: { method, headers: { host: 'ragent.example.test' } },
     res, pathname, writeJson,
   });
   check(`${pathname} 已移除`, handled === false);

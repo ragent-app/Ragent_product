@@ -74,7 +74,7 @@ function buildContext({ currentSessionId, sessions, projectedSession = null }) {
     document,
     Date: { now: () => fakeNow, parse: (value) => RealDate.parse(value) },
     window: {
-      AgentoCRunActivity: {
+      RagentRunActivity: {
         subscribe(subscriber) {
           activitySubscribers.add(subscriber);
           subscriber();

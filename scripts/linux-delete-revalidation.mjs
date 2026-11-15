@@ -9,14 +9,14 @@ import { buildSemanticCapabilitySelection } from '../chat/semantic-capability.mj
 import { canonicalSemanticJson, computeSemanticManifestHash } from '../chat/semantic-operation.mjs';
 import { resolveSemanticContext } from '../chat/semantic-resolver.mjs';
 import { evaluateSemanticOperation } from '../chat/semantic-policy.mjs';
-import { deriveAgentoCSelfProtectionRoots } from '../chat/self-protection.mjs';
+import { deriveRagentSelfProtectionRoots } from '../chat/self-protection.mjs';
 import { bindLinuxDeleteObservation } from '../chat/linux-delete-observation.mjs';
 import { canonicalLinuxTargetContext, verifyLinuxTargetAttestation } from '../chat/linux-target-attestation.mjs';
 import { inspectAndAttestLinuxTarget } from './linux-target-inspection.mjs';
 
 const FIXED_PROTECTED_ROOTS = Object.freeze([
-  '/opt/agentoc', '/etc/agentoc', '/var/lib/agentoc', '/var/log/agentoc',
-  '/run/agentoc', '/var/lib/agentoc-privileged-target', '/var/log/agentoc-privileged',
+  '/opt/ragent', '/etc/ragent', '/var/lib/ragent', '/var/log/ragent',
+  '/run/ragent', '/var/lib/ragent-privileged-target', '/var/log/ragent-privileged',
 ]);
 
 function absolute(value) {
@@ -60,7 +60,7 @@ export async function revalidateLinuxDeleteSelection({
     if (typeof observedAt !== 'string' || !Number.isFinite(Date.parse(observedAt)) ||
         new Date(observedAt).toISOString() !== observedAt) return invalid();
     const protectedRoots = [
-      ...deriveAgentoCSelfProtectionRoots({ platform: 'linux' }),
+      ...deriveRagentSelfProtectionRoots({ platform: 'linux' }),
       ...FIXED_PROTECTED_ROOTS.map((root) => ({ label: 'system', path: root })),
       ...additionalRoots,
     ];

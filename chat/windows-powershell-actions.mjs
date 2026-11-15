@@ -7,7 +7,7 @@ import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-rea
 const win = path.win32;
 export const RIPGREP_SENSITIVE_EXCLUSIONS = Object.freeze([
   '!**/.env', '!**/.env.*', '!**/ntuser.dat*',
-  ...['.git', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.agentoc', 'System Volume Information', '$Recycle.Bin']
+  ...['.git', '.ssh', '.gnupg', '.aws', '.azure', '.kube', '.ragent', 'System Volume Information', '$Recycle.Bin']
     .flatMap(name => [`!**/${name}`, `!**/${name}/**`]),
   ...['Credentials', 'Protect'].flatMap(name => [`!**/AppData/Local/Microsoft/${name}/**`, `!**/AppData/Roaming/Microsoft/${name}/**`]),
   '!**/Windows/System32/config/**', '!**/Windows/System32/Microsoft/Protect/**',
@@ -109,9 +109,9 @@ const MKDIR_PARAMS = new Set(['path', 'force']);
 const MKDIR_SWITCHES = new Set(['force']);
 const RENAME_PARAMS = new Set(['path', 'literalpath', 'newname', 'force', 'passthru']);
 const RENAME_SWITCHES = new Set(['force', 'passthru']);
-const SENSITIVE_COMPONENT = /^(?:\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.agentoc|\.env(?:\..*)?|system volume information|\$recycle\.bin)$/i;
+const SENSITIVE_COMPONENT = /^(?:\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent|\.env(?:\..*)?|system volume information|\$recycle\.bin)$/i;
 // Credential stores are sensitive for every Windows profile, not just the
-// account running AgentoC. Match the Windows profile structure while leaving
+// account running Ragent. Match the Windows profile structure while leaving
 // unrelated AppData paths and ordinary files outside a workspace usable.
 const WINDOWS_PROFILE_SENSITIVE = /(?:^|\\)(?:ntuser\.dat(?:\.log\d*)?|appdata\\(?:local|roaming)\\microsoft\\(?:credentials|protect))(?:\\|$)/i;
 const WINDOWS_SYSTEM_SENSITIVE = /(?:^|\\)windows\\system32\\(?:config|microsoft\\protect)(?:\\|$)/i;

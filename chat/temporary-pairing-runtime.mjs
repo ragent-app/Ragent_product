@@ -8,7 +8,7 @@ import { TemporaryConnectionService } from './temporary-connection-service.mjs';
 
 let hostPromise;
 export async function getTemporaryPairingHost() {
-  if (process.env.AGENTOC_TEMPORARY_PAIRING_ENABLED !== '1') throw temporaryPairingError('temporary_host_disabled', 503);
+  if (process.env.RAGENT_TEMPORARY_PAIRING_ENABLED !== '1') throw temporaryPairingError('temporary_host_disabled', 503);
   if (!hostPromise) {
     hostPromise = (async () => {
       const { CONFIG_DIR, ACCOUNTS_URL, TURN_BROKER_URL, P2P_SIGNALING_URL } = await import('../lib/config.mjs');

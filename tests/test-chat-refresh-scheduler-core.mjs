@@ -71,7 +71,7 @@ function loadCore(isTabHidden, nowMs = null) {
     Date,
     Error,
     URLSearchParams,
-    AgentocRefreshSchedulerEnvironment: {
+    RagentRefreshSchedulerEnvironment: {
       isTabHidden: () => isTabHidden === true,
       ...(typeof nowMs === 'function' ? { nowMs } : {}),
     },
@@ -81,7 +81,7 @@ function loadCore(isTabHidden, nowMs = null) {
     context,
     { filename: 'transport/refresh-scheduler.js' },
   );
-  const core = context.AgentocRefreshSchedulerCore;
+  const core = context.RagentRefreshSchedulerCore;
   return {
     api: {
       ensureRefreshSchedulerMetricsStore: () => core.ensureRefreshSchedulerMetricsStore(),

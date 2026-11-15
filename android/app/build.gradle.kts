@@ -12,23 +12,23 @@ import java.security.MessageDigest
 
 // Contributors can build locally without the production Firebase project and
 // the owner's debug key. This opt-in is restricted to debug builds.
-val openSourceBuild = providers.gradleProperty("agentocOpenSourceBuild").orNull == "true"
+val openSourceBuild = providers.gradleProperty("ragentOpenSourceBuild").orNull == "true"
 if (!openSourceBuild) {
     apply(plugin = "com.google.gms.google-services")
 }
 
 // Release signing key (gitignored keystore.properties). Absent -> release stays unsigned.
 val keystorePropertiesFile = rootProject.file(
-    providers.gradleProperty("agentocReleaseKeystorePropertiesPath").orNull ?: "keystore.properties",
+    providers.gradleProperty("ragentReleaseKeystorePropertiesPath").orNull ?: "keystore.properties",
 )
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.isFile) load(keystorePropertiesFile.inputStream())
 }
 val releaseStorePath = keystoreProperties.getProperty("storeFile")?.takeIf(String::isNotBlank)
 val releaseStoreFile = releaseStorePath?.let { file(it) }
-val releaseStorePassword = providers.environmentVariable("AGENTOC_RELEASE_STORE_PASSWORD").orNull
+val releaseStorePassword = providers.environmentVariable("RAGENT_RELEASE_STORE_PASSWORD").orNull
     ?: keystoreProperties.getProperty("storePassword")
-val releaseKeyPassword = providers.environmentVariable("AGENTOC_RELEASE_KEY_PASSWORD").orNull
+val releaseKeyPassword = providers.environmentVariable("RAGENT_RELEASE_KEY_PASSWORD").orNull
     ?: keystoreProperties.getProperty("keyPassword")
 val hasReleaseKeystore = keystorePropertiesFile.isFile &&
     releaseStoreFile?.isFile == true &&
@@ -37,11 +37,11 @@ val hasReleaseKeystore = keystorePropertiesFile.isFile &&
 if (!hasReleaseKeystore) {
     logger.warn("Release signing configuration is incomplete or its keystore is missing; building an unsigned release APK.")
 }
-val playVersionCode = providers.gradleProperty("agentocVersionCode").orNull?.let {
-    requireNotNull(it.toIntOrNull()) { "agentocVersionCode must be an integer" }
-        .also { code -> require(code in 1..2_100_000_000) { "agentocVersionCode is out of range" } }
+val playVersionCode = providers.gradleProperty("ragentVersionCode").orNull?.let {
+    requireNotNull(it.toIntOrNull()) { "ragentVersionCode must be an integer" }
+        .also { code -> require(code in 1..2_100_000_000) { "ragentVersionCode is out of range" } }
 }
-val playVersionName = providers.gradleProperty("agentocVersionName").orNull
+val playVersionName = providers.gradleProperty("ragentVersionName").orNull
 val expectedDebugSigningSha256 = "258e3d0c7ad1bf68b5f519ad0c4258e3d42a38b93def21fe943c82bf85e1250c"
 
 // A Play bundle must never silently become an unsigned or debug-signed upload.
@@ -49,7 +49,7 @@ val verifyPlayReleaseInputs = tasks.register("verifyPlayReleaseInputs") {
     doLast {
         check(hasReleaseKeystore) { "Play bundle requires a complete release keystore configuration" }
         check(playVersionCode != null && playVersionCode != 99999 && !playVersionName.isNullOrBlank()) {
-            "Play bundle requires explicit agentocVersionCode and agentocVersionName"
+            "Play bundle requires explicit ragentVersionCode and ragentVersionName"
         }
         val store = KeyStore.getInstance(releaseStoreFile!!, releaseStorePassword!!.toCharArray())
         val certificate = checkNotNull(store.getCertificate(keystoreProperties.getProperty("keyAlias"))) {
@@ -67,7 +67,7 @@ val verifyPlayReleaseInputs = tasks.register("verifyPlayReleaseInputs") {
 tasks.configureEach {
     if (name == "bundleRelease" || name == "signReleaseBundle") dependsOn(verifyPlayReleaseInputs)
     if (openSourceBuild && (name.contains("Release", ignoreCase = true))) {
-        doFirst { error("agentocOpenSourceBuild is restricted to local debug builds") }
+        doFirst { error("ragentOpenSourceBuild is restricted to local debug builds") }
     }
 }
 
@@ -78,13 +78,13 @@ tasks.configureEach {
 // An explicit path lets isolated worktrees reuse the established key without
 // making another keystore copy. The same fingerprint check applies below.
 val debugStoreFile = rootProject.file(
-    providers.gradleProperty("agentocDebugKeystorePath").orNull ?: "debug.keystore",
+    providers.gradleProperty("ragentDebugKeystorePath").orNull ?: "debug.keystore",
 )
 val debugStorePassword = "android"
 val debugKeyAlias = "androiddebugkey"
 fun verifiedDebugStore(): java.io.File {
     check(debugStoreFile.isFile) {
-        "Missing established debug keystore. Restore android/debug.keystore or set -PagentocDebugKeystorePath to the original key registered in Google Cloud; do not generate a replacement."
+        "Missing established debug keystore. Restore android/debug.keystore or set -PragentDebugKeystorePath to the original key registered in Google Cloud; do not generate a replacement."
     }
     val keyStore = KeyStore.getInstance("JKS")
     debugStoreFile.inputStream().use { keyStore.load(it, debugStorePassword.toCharArray()) }
@@ -100,7 +100,7 @@ fun verifiedDebugStore(): java.io.File {
 }
 
 android {
-    namespace = "com.andysagent.agentoc"
+    namespace = "com.andysagent.ragent"
     compileSdk = 37
     experimentalProperties["android.experimental.enableScreenshotTest"] = true
     sourceSets.getByName("main").assets.srcDir(rootProject.file("../shared"))
@@ -148,9 +148,9 @@ android {
                 // A source build must not silently send test traffic to the
                 // hosted production account service or use its OAuth client.
                 resValue("string", "accounts_directory_base_url",
-                    providers.gradleProperty("agentocAccountsUrl").orElse("https://example.invalid/accounts").get())
+                    providers.gradleProperty("ragentAccountsUrl").orElse("https://example.invalid/accounts").get())
                 resValue("string", "google_server_client_id",
-                    providers.gradleProperty("agentocGoogleServerClientId").orElse("invalid.apps.googleusercontent.com").get())
+                    providers.gradleProperty("ragentGoogleServerClientId").orElse("invalid.apps.googleusercontent.com").get())
             }
         }
         getByName("release") {

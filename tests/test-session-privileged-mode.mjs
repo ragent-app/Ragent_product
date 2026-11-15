@@ -10,10 +10,10 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-privileged-mode-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-privileged-mode-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
 
 const workspace = join(home, 'workspace');
 mkdirSync(workspace, { recursive: true });
@@ -65,7 +65,7 @@ try {
     'privilegedMode OFF must reproduce the normal provider default');
 
   // Claude bidi maps the retired `default` gate to Claude Code's supported
-  // `default` mode, so a privileged session cannot silently bypass AgentoC's
+  // `default` mode, so a privileged session cannot silently bypass Ragent's
   // danger-operation approval path.
   await updateSessionRuntimePreferences(created.id, { privilegedMode: true });
   const onSession = await getSession(created.id);

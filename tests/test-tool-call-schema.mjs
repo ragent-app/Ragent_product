@@ -47,8 +47,8 @@ assert.deepEqual(Object.keys(toolCall).sort(), [
 assert.equal(toolCall.toolCallId, 'operation:run:danger');
 assert.equal(toolCall.kind, 'execute');
 assert.equal(toolCall.status, 'pending', 'approval wait must not invent a stable status');
-assert.equal(toolCall._meta.agentoc.lifecycle, 'waiting_approval');
-assert.equal(toolCall._meta.agentoc.approval.approvalId, 'approval-1');
+assert.equal(toolCall._meta.ragent.lifecycle, 'waiting_approval');
+assert.equal(toolCall._meta.ragent.approval.approvalId, 'approval-1');
 for (const forbidden of ['input', 'output', 'extension', 'rawInput', 'rawOutput', 'name']) {
   assert.equal(forbidden in toolCall, false, `${forbidden} must not masquerade as stable ACP v1`);
 }

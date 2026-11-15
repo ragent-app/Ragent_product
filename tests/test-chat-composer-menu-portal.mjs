@@ -80,7 +80,7 @@ try {
     return cases.map(([menuId, triggerId, align]) => {
       const menu = document.getElementById(menuId);
       const trigger = document.getElementById(triggerId);
-      window.AgentoCComposerMenuPortal.sync(menu, trigger, true, { align });
+      window.RagentComposerMenuPortal.sync(menu, trigger, true, { align });
       menu.hidden = false;
       menu.classList.add('is-open');
       const style = getComputedStyle(menu);

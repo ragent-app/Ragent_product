@@ -29,7 +29,7 @@ func TestPrepareWindowsMSIInstallRejectsUnsigned(t *testing.T) {
 }
 
 func TestPrepareWindowsMSIInstallSignedFixture(t *testing.T) {
-	source, publisher := os.Getenv("AGENTOC_TEST_SIGNED_MSI"), os.Getenv("AGENTOC_TEST_SIGNED_MSI_PUBLISHER_SHA256")
+	source, publisher := os.Getenv("RAGENT_TEST_SIGNED_MSI"), os.Getenv("RAGENT_TEST_SIGNED_MSI_PUBLISHER_SHA256")
 	if source == "" || publisher == "" {
 		t.Skip("signed MSI fixture not configured")
 	}

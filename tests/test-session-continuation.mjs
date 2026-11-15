@@ -23,24 +23,24 @@ const attachmentBody = prepareSessionContinuationBody([
     images: [{
       filename: 'abc123.csv',
       originalName: 'report.csv',
-      savedPath: '/tmp/agentoc/report-abc123.csv',
+      savedPath: '/tmp/ragent/report-abc123.csv',
       mimeType: 'text/csv',
     }],
   },
 ]);
-assert.match(attachmentBody, /\[Attached files: report\.csv -> \/tmp\/agentoc\/report-abc123\.csv\]/);
+assert.match(attachmentBody, /\[Attached files: report\.csv -> \/tmp\/ragent\/report-abc123\.csv\]/);
 
 const fileChangeBody = prepareSessionContinuationBody([
   {
     type: 'file_change',
-    filePath: '/tmp/agentoc/chat/session-continuation.mjs',
+    filePath: '/tmp/ragent/chat/session-continuation.mjs',
     changeType: {
       type: 'update',
       move_path: null,
     },
   },
 ]);
-assert.match(fileChangeBody, /\[File change: update\] \/tmp\/agentoc\/chat\/session-continuation\.mjs/);
+assert.match(fileChangeBody, /\[File change: update\] \/tmp\/ragent\/chat\/session-continuation\.mjs/);
 
 const planBody = prepareSessionContinuationBody([
   {

@@ -67,7 +67,7 @@
   }
 
   function tr(key, vars) {
-    return typeof root.agentocT === "function" ? root.agentocT(key, vars) : key;
+    return typeof root.ragentT === "function" ? root.ragentT(key, vars) : key;
   }
 
   function el(tag, className, text) {
@@ -154,13 +154,13 @@
       const all = ops.length ? ops : actions;
       if (all.length !== 1) return tr("attention.danger.title");
       const op = all[0];
-      const explained = typeof root.agentocApprovalExplanation === "function"
-        ? root.agentocApprovalExplanation(op?.explanation, tr) : op?.explanation;
+      const explained = typeof root.ragentApprovalExplanation === "function"
+        ? root.ragentApprovalExplanation(op?.explanation, tr) : op?.explanation;
       if (explained?.operation && explained?.summary) return compactPlainText(explained.summary, 92);
       return compactText(op?.description || op?.summary || op?.reason || event?.reason, 92) || tr("attention.danger.title");
     }
-    const explained = typeof root.agentocApprovalExplanation === "function"
-      ? root.agentocApprovalExplanation(event?.explanation, tr) : event?.explanation;
+    const explained = typeof root.ragentApprovalExplanation === "function"
+      ? root.ragentApprovalExplanation(event?.explanation, tr) : event?.explanation;
     if (kind !== "question" && explained?.operation && explained?.summary) return compactPlainText(explained.summary, 92);
     const question = Array.isArray(event?.questions) ? event.questions[0] : event;
     const human = kind === "question"
@@ -721,7 +721,7 @@
   }
 
   function hasUnread(session) {
-    if (typeof root.AgentoCSessionStateModel?.hasSessionUnreadUpdate === "function") return root.AgentoCSessionStateModel.hasSessionUnreadUpdate(session);
+    if (typeof root.RagentSessionStateModel?.hasSessionUnreadUpdate === "function") return root.RagentSessionStateModel.hasSessionUnreadUpdate(session);
     return Boolean(session?.unread || session?.unreadAt || session?.lastEventAt);
   }
 
@@ -796,7 +796,7 @@
     label.setAttribute("dir", "auto");
     const chevron = el("span", "oneui-notification__disclosure");
     chevron.setAttribute("aria-hidden", "true");
-    chevron.innerHTML = root.AgentoCIcons?.render?.("chevron-right", {
+    chevron.innerHTML = root.RagentIcons?.render?.("chevron-right", {
       className: "oneui-notification__disclosure-icon",
     }) || "";
     row.append(label, chevron);
@@ -880,7 +880,7 @@
     const event = item.event || {};
     const unavailable = event.executorUnavailableReasonCode === "macos_administrator_unavailable";
     if (unavailable) {
-      const zh = String(root.agentocGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
+      const zh = String(root.ragentGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
       parent.appendChild(el("p", "oneui-notification__batch-unavailable", zh
         ? "此 Mac 暂不支持托管管理员执行，无法批准执行；你可以拒绝该请求。"
         : "Managed administrator execution is not available on this Mac. You can decline this request."));
@@ -917,8 +917,8 @@
         check.dataset.category = category;
         check.addEventListener("change", () => syncBatchNotificationState(section));
         label.appendChild(check);
-        const explained = typeof root.agentocApprovalExplanation === "function"
-          ? root.agentocApprovalExplanation(operation?.explanation, tr) : operation?.explanation;
+        const explained = typeof root.ragentApprovalExplanation === "function"
+          ? root.ragentApprovalExplanation(operation?.explanation, tr) : operation?.explanation;
         label.appendChild(el("span", "oneui-notification__code", (explained?.operation && explained?.summary) || operation?.description || operation?.command || ""));
         section.appendChild(label);
         if (operation?.description && operation.description !== explained?.summary) appendDetail(section, tr("decisionSheet.providerDescription"), operation.description);
@@ -976,8 +976,8 @@
       check.value = String(action?.actionId || "");
       check.dataset.approvedActionId = check.value;
       check.addEventListener("change", () => syncApprovedActionNotificationState(check.closest(".oneui-notification")));
-      const explained = typeof root.agentocApprovalExplanation === "function"
-        ? root.agentocApprovalExplanation(action?.explanation, tr) : action?.explanation;
+      const explained = typeof root.ragentApprovalExplanation === "function"
+        ? root.ragentApprovalExplanation(action?.explanation, tr) : action?.explanation;
       label.append(check, el("span", "oneui-notification__code", (explained?.operation && explained?.summary) || action?.description || action?.summary || action?.command || ""));
       section.appendChild(label);
       if (action?.description && action.description !== explained?.summary) appendDetail(section, tr("decisionSheet.providerDescription"), action.description);
@@ -997,8 +997,8 @@
     const event = item.event || {};
     const details = el("div", "oneui-notification__details");
     const reason = String(event.reason || event.bodyMarkdown || event.description || "").trim();
-    const explained = typeof root.agentocApprovalExplanation === "function"
-      ? root.agentocApprovalExplanation(event.explanation, tr) : event.explanation;
+    const explained = typeof root.ragentApprovalExplanation === "function"
+      ? root.ragentApprovalExplanation(event.explanation, tr) : event.explanation;
     if (item.kind === "plan") appendDetail(details, tr("attention.detail.proposed"), reason);
     else {
       if (explained?.operation && explained.summary && explained.summary !== item.title) appendDetail(details, tr("decisionSheet.explanation.summary"), explained.summary);
@@ -1028,15 +1028,15 @@
       const event = item.event || {};
       if (item.type === "privileged_batch_request") {
         const ids = Array.from(card?.querySelectorAll(`input[data-category="${category}"]:checked`) || []).map((node) => node.value).filter(Boolean);
-        const result = await root.AgentoCDecisionSheet?.submitPrivilegedBatchCategory?.(event, category, decision, ids);
+        const result = await root.RagentDecisionSheet?.submitPrivilegedBatchCategory?.(event, category, decision, ids);
         ok = result === true || result?.ok === true;
         alreadyEnded = result?.alreadyEnded === true;
       } else if (item.type === "approved_action_batch_request") {
         const ids = decision === "deny"
           ? []
           : Array.from(card?.querySelectorAll("input[data-approved-action-id]:checked") || []).map((node) => node.value).filter(Boolean);
-        ok = typeof root.AgentoCDecisionSheet?.submitApprovedActionDecision === "function"
-          && await root.AgentoCDecisionSheet.submitApprovedActionDecision(event, button, decision === "deny" ? "deny" : "approve", ids);
+        ok = typeof root.RagentDecisionSheet?.submitApprovedActionDecision === "function"
+          && await root.RagentDecisionSheet.submitApprovedActionDecision(event, button, decision === "deny" ? "deny" : "approve", ids);
       } else if (item.kind === "plan") {
         const planId = String(event?.planEventRef?.planId || event?.planId || "");
         ok = typeof root.dispatchAction === "function" && await root.dispatchAction({ action: "plan_action", sessionId: item.sessionId, planId, planAction: "execute", requestId: `oneui-${Date.now()}` });
@@ -1170,7 +1170,7 @@
       // belongs beside the first option, not in the title.
       const disclosure = el("span", "oneui-notification__disclosure");
       disclosure.setAttribute("aria-hidden", "true");
-      disclosure.innerHTML = root.AgentoCIcons?.render?.("chevron-right", {
+      disclosure.innerHTML = root.RagentIcons?.render?.("chevron-right", {
         className: "oneui-notification__disclosure-icon",
       }) || "";
       summary.appendChild(disclosure);
@@ -1179,7 +1179,7 @@
     close.type = "button";
     close.setAttribute("aria-label", tr("attention.action.dismiss"));
     close.title = tr("attention.action.dismiss");
-    close.innerHTML = root.AgentoCIcons?.render?.("close", {
+    close.innerHTML = root.RagentIcons?.render?.("close", {
       className: "oneui-notification__close-icon",
     }) || "";
     close.addEventListener("click", (event) => {
@@ -1189,7 +1189,7 @@
     });
     summary.appendChild(close);
     header.appendChild(summary);
-    if (item.type === "approval_request" && item.kind !== "question" && !(typeof root.agentocApprovalExplanation === "function" && root.agentocApprovalExplanation(item.event?.explanation, tr)?.operation) && item.event?.reason && meaningfulText(item.event.reason)) {
+    if (item.type === "approval_request" && item.kind !== "question" && !(typeof root.ragentApprovalExplanation === "function" && root.ragentApprovalExplanation(item.event?.explanation, tr)?.operation) && item.event?.reason && meaningfulText(item.event.reason)) {
       header.appendChild(el("div", "oneui-notification__detail-label", tr("decisionSheet.providerDescription")));
     }
     const sessionName = compactText(item.session?.name || item.session?.title, 72);
@@ -1281,7 +1281,7 @@
   }
 
   ensureHost();
-  root.AgentoCAttentionPopup = Object.freeze({
+  root.RagentAttentionPopup = Object.freeze({
     onRealtimeEvents,
     onSessionsApplied,
     _reset() {

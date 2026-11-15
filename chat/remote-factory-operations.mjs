@@ -74,21 +74,21 @@ function verifyPrincipal(principal, bindingId, operation) {
 }
 export async function signRemoteFactoryDelegation(canonical) {
   const identity=await loadOrCreateInstanceIdentity();
-  return { sourceInstanceId:identity.instanceId, signature:signWithInstanceIdentity(identity, `agentoc-remote-factory-v1:${hash(canonical)}`) };
+  return { sourceInstanceId:identity.instanceId, signature:signWithInstanceIdentity(identity, `ragent-remote-factory-v1:${hash(canonical)}`) };
 }
 export async function signRemoteFactoryReceipt(receiptValue) {
   const identity=await loadOrCreateInstanceIdentity();
   const payload={targetInstanceId:identity.instanceId,receipt:receiptValue};
-  return { ...payload, signature:signWithInstanceIdentity(identity, `agentoc-remote-receipt-v1:${hash(payload)}`) };
+  return { ...payload, signature:signWithInstanceIdentity(identity, `ragent-remote-receipt-v1:${hash(payload)}`) };
 }
 export async function signRemoteFactoryCandidate(envelope) {
   const identity=await loadOrCreateInstanceIdentity();
   if (!envelope || envelope.targetInstanceId!==identity.instanceId || Buffer.byteLength(JSON.stringify(envelope),'utf8')>4*1024*1024) throw factoryError('REMOTE_INVALID','Candidate envelope is invalid or too large',400);
-  return { envelope, signature:signWithInstanceIdentity(identity, `agentoc-remote-candidate-v1:${hash(envelope)}`) };
+  return { envelope, signature:signWithInstanceIdentity(identity, `ragent-remote-candidate-v1:${hash(envelope)}`) };
 }
 export async function signRemoteFactoryCancellation(cancellation) {
   const identity=await loadOrCreateInstanceIdentity();
-  return signWithInstanceIdentity(identity, `agentoc-remote-cancel-v1:${hash(cancellation)}`);
+  return signWithInstanceIdentity(identity, `ragent-remote-cancel-v1:${hash(cancellation)}`);
 }
 // Called by target admission inside its transaction. The stored signature, not
 // a caller-provided actor or isolation claim, is the source delegation proof.
@@ -110,7 +110,7 @@ export function verifyRemoteFactoryAdmission(db, { binding: proposedBinding, ope
   const payloadDigest=hash(canonical);
   if (payloadDigest!==saved.payload_digest || hash(operation)!==payloadDigest || !JSON.parse(row.scope_json).includes(canonical.contractDigest)
       || !text(payload.sourceReservationId) || !Number.isFinite(payload.reservedCost) || payload.reservedCost<=0 || payload.reservedCost>row.budget_limit) throw factoryError('REMOTE_FORBIDDEN','Remote operation changed',403);
-  let signed=false; try { signed=verify(null,Buffer.from(`agentoc-remote-factory-v1:${payloadDigest}`),createPublicKey(row.source_public_key),Buffer.from(saved.source_signature,'base64url')); } catch {}
+  let signed=false; try { signed=verify(null,Buffer.from(`ragent-remote-factory-v1:${payloadDigest}`),createPublicKey(row.source_public_key),Buffer.from(saved.source_signature,'base64url')); } catch {}
   if (!signed) throw factoryError('REMOTE_FORBIDDEN','Source delegation signature invalid',403);
   return { binding:binding(row), operation:canonical };
 }
@@ -147,7 +147,7 @@ export async function acceptRemoteFactoryOperation(input, principal, { admit } =
     if (!row || !row.enabled || Date.parse(row.expires_at)<=Date.now() || row.version!==input.bindingVersion || row.source_instance_id!==principal.sourceInstanceId
         || row.target_instance_id!==principal.targetInstanceId || !JSON.parse(row.scope_json).includes(contractDigest)
         || payload.reservedCost>row.budget_limit) throw factoryError('REMOTE_FORBIDDEN','Binding or scope changed',403);
-    let signed=false; try { signed=verify(null,Buffer.from(`agentoc-remote-factory-v1:${payloadDigest}`),createPublicKey(row.source_public_key),Buffer.from(text(input.signature),'base64url')); } catch {}
+    let signed=false; try { signed=verify(null,Buffer.from(`ragent-remote-factory-v1:${payloadDigest}`),createPublicKey(row.source_public_key),Buffer.from(text(input.signature),'base64url')); } catch {}
     if (!signed) throw factoryError('REMOTE_FORBIDDEN','Source delegation signature invalid',403);
     const old=db.prepare('SELECT * FROM remote_factory_operations WHERE binding_id=? AND operation_id=?').get(bindingId,operationId);
     if (old) {if (old.payload_digest!==payloadDigest) throw factoryError('REMOTE_CONFLICT','Operation identity reused',409); return {existing:receipt(old)};}
@@ -176,7 +176,7 @@ export function verifyRemoteFactoryCancellation(db,input,principal) {
   const cancellation={bindingId,operationId,cancelId,contractRevision:input.contractRevision,executionEpoch:input.executionEpoch};
   schema(db);const b=db.prepare('SELECT * FROM remote_factory_bindings WHERE id=?').get(bindingId),o=db.prepare('SELECT * FROM remote_factory_operations WHERE binding_id=? AND operation_id=?').get(bindingId,operationId);
   if(!b||!o||b.target_instance_id!==principal.targetInstanceId||o.source_instance_id!==principal.sourceInstanceId||o.contract_revision!==input.contractRevision||o.execution_epoch!==input.executionEpoch) throw factoryError('REMOTE_FORBIDDEN','Cancellation scope mismatch',403);
-  let valid=false;try {valid=verify(null,Buffer.from(`agentoc-remote-cancel-v1:${hash(cancellation)}`),createPublicKey(o.source_public_key),Buffer.from(text(input.signature),'base64url'));} catch {}
+  let valid=false;try {valid=verify(null,Buffer.from(`ragent-remote-cancel-v1:${hash(cancellation)}`),createPublicKey(o.source_public_key),Buffer.from(text(input.signature),'base64url'));} catch {}
   if(!valid) throw factoryError('REMOTE_FORBIDDEN','Cancellation signature invalid',403);
   return cancellation;
 }

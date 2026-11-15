@@ -22,10 +22,10 @@ export async function serviceOwnerPurpose(root,role,spec){
       const instance=join(root,'state/control','owner-auth-r'+round),config=join(instance,'config');await mkdir(config,{recursive:true});
       const signingKey=randomBytes(32).toString('hex');signingFile=join(config,'auth-session-secret');await writeFile(signingFile,signingKey,{flag:'wx'});
       await writeFile(join(config,'auth.json'),JSON.stringify({username:'isolated-owner-v2-qa',passwordHash:'SYNTHETIC-NO-PASSWORD-LOGIN'}));
-      Object.assign(process.env,{AGENTOC_WINDOWS_SERVICE_MODE:'1',AGENTOC_INSTANCE_ROOT:instance,AGENTOC_CONFIG_DIR:config,
-        AGENTOC_RUN_SPOOL_DIR:join(instance,'data/chat-runs'),AGENTOC_PROVIDER_HOMES_DIR:join(instance,'provider-homes'),
-        AGENTOC_MEMORY_DIR:join(instance,'memory'),AGENTOC_WORK_ROOT_DIR:join(instance,'workspace'),AGENTOC_AUTH_SESSION_SECRET:signingKey,
-        AGENTOC_LOCAL_WEB_AUTH:'0',ProgramData:'C:/ProgramData'});
+      Object.assign(process.env,{RAGENT_WINDOWS_SERVICE_MODE:'1',RAGENT_INSTANCE_ROOT:instance,RAGENT_CONFIG_DIR:config,
+        RAGENT_RUN_SPOOL_DIR:join(instance,'data/chat-runs'),RAGENT_PROVIDER_HOMES_DIR:join(instance,'provider-homes'),
+        RAGENT_MEMORY_DIR:join(instance,'memory'),RAGENT_WORK_ROOT_DIR:join(instance,'workspace'),RAGENT_AUTH_SESSION_SECRET:signingKey,
+        RAGENT_LOCAL_WEB_AUTH:'0',ProgramData:'C:/ProgramData'});
       auth=await import('../../lib/auth.mjs');
       async function issue(method){const token=await auth.issueSession({role:'owner',authMethod:method});
         current[method==='local_bootstrap'?'cookieIssues':'cliIssues']++;current.token=token;
@@ -41,20 +41,20 @@ export async function serviceOwnerPurpose(root,role,spec){
       const origin='http://127.0.0.1:'+server.address().port,claimDir=join(config,'bootstrap-claims');await mkdir(claimDir);
       broker=createLocalUiBootstrap({instanceId:spec.ownerInstanceId,origin,claimStore:createLocalUiBootstrapClaimStore({directory:claimDir}),
         issueOwnerSession:()=>issue('local_bootstrap'),revokeOwnerSession:revoke,setCookie:token=>'session_token='+token+'; HttpOnly; SameSite=Strict; Path=/'});
-      const releaseJson=JSON.stringify({version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:spec['OwnerBootstrap.exe'],publisherSha256:'a'.repeat(64)});
+      const releaseJson=JSON.stringify({version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:spec['OwnerBootstrap.exe'],publisherSha256:'a'.repeat(64)});
       const installationJson=JSON.stringify({version:1,instanceId:spec.ownerInstanceId,controlSid:spec.controlSid,executorSid:spec.executorSid,ownerSid:spec.requestorSid,port:7690});
       const publicationPath=join(config,'owner-bootstrap-live.json');
       for(const scenario of ownerPurposeScenarios){
         current={cliIssues:0,ticketIssues:0,cookieIssues:0,revocations:0,confirmations:0,validHttp:0,token:''};
         const purpose=scenario.startsWith('cli-')?'cli':'browser',positive=ownerPurposePositive.has(scenario),delivery=ownerPurposeDeliveryFailure.has(scenario);
-        const policy={protocolVersion:2,purpose,pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,
+        const policy={protocolVersion:2,purpose,pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:spec.ownerInstanceId,
           requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid:spec.controlSid,ownerSid:spec.requestorSid,ownerSessionId:spec.ownerSessionId};
         controller=await createOwnerDiscoveryController({releaseJson,installationJson,store:createOwnerDiscoveryFileStore({filePath:publicationPath}),executablePath:join(root,'runtime/OwnerBootstrap.exe'),
           issueOwnerSession:facts=>{current.ownerPeer=facts;return issue('native_cli');},revokeOwnerSession:revoke,
           issueBrowserTicket:async(facts,binding)=>{assert.equal(facts.sid,spec.requestorSid);assert.equal(facts.sessionId,spec.ownerSessionId);current.ownerPeer=facts;current.ticketIssues++;return broker.issueTicket(binding);},
           revokeBrowserTicket:ticket=>broker.revokeTicket(ticket),confirmBrowserTicket:ticket=>{broker.confirmTicket(ticket);current.confirmations++;}});
         let active=await controller.start(policy),retired=null;
-        if(scenario==='browser-success'){retired={policy:active.descriptor.policy,peer:active.ready.facts};active=await controller.refresh({...policy,pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')});}
+        if(scenario==='browser-success'){retired={policy:active.descriptor.policy,peer:active.ready.facts};active=await controller.refresh({...policy,pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex')});}
         assert.deepEqual(JSON.parse(await readFile(publicationPath,'utf8')),active.descriptor);
         for(const key of ['protectedDacl','firstInstance','rejectRemote'])assert.equal(active.ready[key],true);
         const completion=active.completion.then(value=>({value}),error=>({error:error.code||error.name}));
@@ -87,6 +87,6 @@ export async function serviceOwnerPurpose(root,role,spec){
     report.pass=true;
   }catch(error){report.error=error.code||error.name;}
   finally{if(controller)await controller.close();broker?.close();if(server)await new Promise(done=>server.close(done));
-    if(auth)auth.closeAuthSessionStore();if(signingFile){await unlink(signingFile).catch(error=>{if(error.code!=='ENOENT')throw error;});report.signingFileRemoved=true;delete process.env.AGENTOC_AUTH_SESSION_SECRET;}}
+    if(auth)auth.closeAuthSessionStore();if(signingFile){await unlink(signingFile).catch(error=>{if(error.code!=='ENOENT')throw error;});report.signingFileRemoved=true;delete process.env.RAGENT_AUTH_SESSION_SECRET;}}
   return report;
 }

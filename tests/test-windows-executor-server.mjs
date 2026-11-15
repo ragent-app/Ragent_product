@@ -60,10 +60,10 @@ function makeClient({ onWrite }) {
 
 // ── invocation boundary ────────────────────────────────────────────────────────
 
-const inv = buildWindowsExecutorServerInvocation({ pipeName: 'agentoc-exec-test' });
+const inv = buildWindowsExecutorServerInvocation({ pipeName: 'ragent-exec-test' });
 eq('server uses the absolute system PowerShell', inv.file, WINDOWS_EXECUTOR_POWERSHELL);
 check('server args are fixed prefix + one encoded command', inv.args.length === 5 && inv.args[4].length > 0);
-eq('server carries the pipe name as an env value', inv.env.AGENTOC_EXECUTOR_PIPE, 'agentoc-exec-test');
+eq('server carries the pipe name as an env value', inv.env.RAGENT_EXECUTOR_PIPE, 'ragent-exec-test');
 check('server env is allowlisted', inv.env.LANG === 'C' && inv.env.PATH.includes('System32'));
 check('server script embeds the native interop', inv.args[4].length > 1000);
 
@@ -104,7 +104,7 @@ let stdinWrites = [];
 happyChild.stdin.write = (data) => { relayOrder.push('stdin-verdict'); stdinWrites.push(data); };
 
 const happy = await runWindowsExecutorRequest({
-  pipeName: 'agentoc-exec-happy',
+  pipeName: 'ragent-exec-happy',
   request: 'ping',
   expectedSid: GOOD_FACTS.sid,
   spawn: () => happyChild,
@@ -122,7 +122,7 @@ const denyClient = makeClient({
 });
 const denyChild = makeChild({ stdoutLine: JSON.stringify({ ok: true, facts: GOOD_FACTS, request: 'ping', clientPid: 4242 }) });
 const deny = await runWindowsExecutorRequest({
-  pipeName: 'agentoc-exec-deny',
+  pipeName: 'ragent-exec-deny',
   request: 'ping',
   expectedSid: 'S-1-5-21-999-999-999-999',
   spawn: () => denyChild,
@@ -137,7 +137,7 @@ const badChild = makeChild({
 });
 await assert.rejects(
   () => runWindowsExecutorRequest({
-    pipeName: 'agentoc-exec-bad',
+    pipeName: 'ragent-exec-bad',
     request: 'ping',
     expectedSid: GOOD_FACTS.sid,
     spawn: () => badChild,
@@ -160,7 +160,7 @@ await assert.rejects(
 const malformedChild = makeChild({ stdoutLine: 'not-json at all' });
 await assert.rejects(
   () => runWindowsExecutorRequest({
-    pipeName: 'agentoc-exec-malformed',
+    pipeName: 'ragent-exec-malformed',
     request: 'ping',
     expectedSid: GOOD_FACTS.sid,
     spawn: () => malformedChild,

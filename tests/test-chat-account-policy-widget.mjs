@@ -20,8 +20,8 @@ for (const id of ['accountPolicySettingsSection', 'accountPolicyOpenBtn', 'accou
 
 const widget = await readFile(join(repoRoot, 'static', 'chat', 'account-policy.js'), 'utf8');
 assert.match(widget, /api\/account-policy/, 'widget should talk to the account policy endpoint');
-assert.match(widget, /AgentoCAccountPolicy/, 'widget should expose its Settings controller');
-assert.match(widget, /agentocOpenSidebarSubpage\("account-policy"/, 'widget should open as a Settings subpage');
+assert.match(widget, /RagentAccountPolicy/, 'widget should expose its Settings controller');
+assert.match(widget, /ragentOpenSidebarSubpage\("account-policy"/, 'widget should open as a Settings subpage');
 assert.doesNotMatch(widget, /sidebarPrimaryNav|popover|style\.cssText|🛡️/, 'widget must not inject a sidebar control or inline-styled popover');
 
 for (const marker of ['"full-auto"', '"approval"', '"conservative-auto"', 'permissionPolicy']) {

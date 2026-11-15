@@ -12,10 +12,10 @@ import { promisify } from 'node:util';
 import { test, after } from 'node:test';
 import { parseSessionApiScope, readSessionApiScopeHeader, SESSION_API_SCOPE_HEADER } from '../chat/session-api-scope-contract.mjs';
 
-const root = process.env.AGENTOC_SCOPE_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-session-scope-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
+const root = process.env.RAGENT_SCOPE_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-session-scope-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
 const store = await import('../chat/session-meta-store.mjs');
 const runs = await import('../chat/runs.mjs');
 const { CHAT_SESSIONS_FILE, CHAT_RUNS_DIR } = await import('../lib/config.mjs');
@@ -387,7 +387,7 @@ test('process death after conditional Run effect but before HTTP reply survives 
   const scope = await seed(); const run = await newRun(); await patch({ activeRunId: run.id });
   const file = fileURLToPath(import.meta.url);
   const child = fork(file, ['cancel-crash-server'], {
-    env: { ...process.env, AGENTOC_SCOPE_TEST_ROOT: root }, silent: true,
+    env: { ...process.env, RAGENT_SCOPE_TEST_ROOT: root }, silent: true,
   });
   let childOutput = '';
   child.stdout.on('data', bytes => { childOutput += bytes; });
@@ -425,7 +425,7 @@ test('process death after conditional Run effect but before HTTP reply survives 
     assert.ok(termination.signal || termination.code !== 0);
     assert.equal(await outcome, 'disconnected');
     const cold = await promisify(execFile)(process.execPath, [file, 'cold-read-cancel', run.id], {
-      env: { ...process.env, AGENTOC_SCOPE_TEST_ROOT: root }, timeout: 8000,
+      env: { ...process.env, RAGENT_SCOPE_TEST_ROOT: root }, timeout: 8000,
     });
     const line = cold.stdout.split('\n').find(value => value.startsWith('COLD_RUN='));
     const actual = JSON.parse(line.slice('COLD_RUN='.length));

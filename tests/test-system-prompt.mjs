@@ -3,13 +3,13 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-system-prompt-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-system-prompt-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_MEMORY_DIR = path.join(tempHome, 'instance-data', 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(tempHome, 'instance-data', 'workspace');
-process.env.AGENTOC_PUBLIC_BASE_URL = 'https://trial23.example.com';
-process.env.AGENTOC_PLATFORM_SKILLS_DIR = path.join(tempHome, '.agentoc', 'platform', 'skills');
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_MEMORY_DIR = path.join(tempHome, 'instance-data', 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(tempHome, 'instance-data', 'workspace');
+process.env.RAGENT_PUBLIC_BASE_URL = 'https://trial23.example.com';
+process.env.RAGENT_PLATFORM_SKILLS_DIR = path.join(tempHome, '.ragent', 'platform', 'skills');
 
 const { buildSystemContext } = await import('../chat/system-prompt.mjs');
 const { extractAssistantArtifactBlockReferences } = await import('../chat/session-result-files.mjs');
@@ -19,8 +19,8 @@ const contextWithoutSharedDefaults = await buildSystemContext({
   sessionId: 'session-test-123',
   includeSharedStartupDefaults: false,
 });
-const expectedWorkRoot = process.platform === 'win32' ? process.env.AGENTOC_WORK_ROOT_DIR : '~/instance-data/workspace';
-const expectedMemoryRoot = process.platform === 'win32' ? process.env.AGENTOC_MEMORY_DIR : '~/instance-data/memory';
+const expectedWorkRoot = process.platform === 'win32' ? process.env.RAGENT_WORK_ROOT_DIR : '~/instance-data/workspace';
+const expectedMemoryRoot = process.platform === 'win32' ? process.env.RAGENT_MEMORY_DIR : '~/instance-data/memory';
 
 
 assert.match(context, /Seed Layer — Editable Default Constitution/);
@@ -165,7 +165,7 @@ assert.match(context, /statusOnly=true/);
 assert.match(context, /exit code `78` means pending/);
 assert.ok(context.includes(expectedMemoryRoot));
 assert.ok(context.includes(expectedWorkRoot));
-assert.doesNotMatch(context, /~\/\.agentoc\/memory\//);
+assert.doesNotMatch(context, /~\/\.ragent\/memory\//);
 assert.match(context, /Agent Self-Management/);
 assert.match(context, /flexible control surface, not a brittle scenario router/);
 assert.match(context, /reusable capability, skill, wrapper, note, or prior session pattern/);

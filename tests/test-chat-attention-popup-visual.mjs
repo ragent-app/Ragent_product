@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 
 const repoRoot = resolve(new URL('..', import.meta.url).pathname);
-const outputDir = resolve(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '/var/lib/agentoc/workspace/visual-ui-reviews/attention-popup');
+const outputDir = resolve(process.env.RAGENT_VISUAL_OUTPUT_DIR || '/var/lib/ragent/workspace/visual-ui-reviews/attention-popup');
 mkdirSync(outputDir, { recursive: true });
 
 const fs = await import('node:fs/promises');
@@ -30,7 +30,7 @@ function fixtureHtml() {
       <button id="attention-trigger" type="button" style="position:fixed;left:-10000px;">Open notification</button>
       <script>
         window.currentSessionId = 'foreground';
-        window.agentocT = (key) => ({
+        window.ragentT = (key) => ({
           'attention.session': '会话',
           'attention.permission.title': '权限需要审批',
           'attention.detail.proposed': '提议',
@@ -88,7 +88,7 @@ try {
     await page.locator('#attention-trigger').focus();
     await page.evaluate((selectedTheme) => {
       document.documentElement.dataset.theme = selectedTheme;
-      window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+      window.RagentAttentionPopup.onRealtimeEvents('background', [{
         type: 'approval_request',
         approvalId: `fixture-${selectedTheme}`,
         kind: 'permission',
@@ -164,8 +164,8 @@ try {
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'attention-trigger', `${label}: notification dismissal restores focus`);
 
     await page.evaluate(() => {
-      window.AgentoCAttentionPopup._reset();
-      window.AgentoCAttentionPopup.onSessionsApplied(
+      window.RagentAttentionPopup._reset();
+      window.RagentAttentionPopup.onSessionsApplied(
         new Map([['background', { id: 'background', activity: { run: { state: 'running' } } }]]),
         [{ id: 'background', activity: { run: { state: 'completed' } }, unreadAt: '2026-08-08T00:00:00Z', workflowState: 'done' }],
       );
@@ -187,8 +187,8 @@ try {
     await completion.screenshot({ path: `${outputDir}/oneui-${viewport.name}-${theme}-completion.png` });
 
     await page.evaluate(() => {
-      window.AgentoCAttentionPopup._reset();
-      window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+      window.RagentAttentionPopup._reset();
+      window.RagentAttentionPopup.onRealtimeEvents('background', [{
         type: 'privileged_batch_request',
         batchId: `batch-${document.documentElement.dataset.theme}`,
         other: [{ opId: 'protected-1', description: '读取项目归档索引' }],
@@ -205,7 +205,7 @@ try {
     assert.equal(await batch.locator('.oneui-notification__batch-actions .oneui-notification__action').count(), 4, `${label}: expanded danger batch exposes two category-specific decision pairs`);
     await batch.screenshot({ path: `${outputDir}/oneui-${viewport.name}-${theme}-batch-detailed.png` });
     await page.evaluate(() => {
-      window.AgentoCDecisionSheet = {
+      window.RagentDecisionSheet = {
         submitPrivilegedBatchCategory: async () => true,
       };
     });
@@ -214,8 +214,8 @@ try {
     assert.equal(await batch.locator('.oneui-notification__batch[data-category="other"] .oneui-notification__batch-actions').count(), 0, `${label}: a resolved category no longer repeats its decision pair`);
     assert.equal(await batch.locator('.oneui-notification__batch-footer-group[data-category="delete"] .oneui-notification__batch-actions').count(), 1, `${label}: remaining category stays actionable after the first batch decision`);
     await page.evaluate(() => {
-      window.AgentoCAttentionPopup._reset();
-      window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+      window.RagentAttentionPopup._reset();
+      window.RagentAttentionPopup.onRealtimeEvents('background', [{
         type: 'approval_request',
         approvalId: `question-${document.documentElement.dataset.theme}`,
         kind: 'question',

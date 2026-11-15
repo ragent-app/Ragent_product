@@ -98,7 +98,7 @@
         const check = document.createElement("span");
         check.className = "composer-add-panel-check";
         check.setAttribute("aria-hidden", "true");
-        if (window.AgentoCIcons?.render) check.innerHTML = window.AgentoCIcons.render("check");
+        if (window.RagentIcons?.render) check.innerHTML = window.RagentIcons.render("check");
         state.appendChild(check);
       } else {
         const ring = document.createElement("span");
@@ -135,12 +135,12 @@
     requestAnimationFrame(() => backdrop?.classList.add("is-visible"));
     panel.hidden = false;
     panel.classList.remove("is-closing");
-    if (window.AgentoCMotion?.setPresence) {
-      window.AgentoCMotion.setPresence(panel, true, { duration: 220 });
+    if (window.RagentMotion?.setPresence) {
+      window.RagentMotion.setPresence(panel, true, { duration: 220 });
     } else {
       panel.classList.add("is-open");
     }
-    focusScopeDeactivate = window.AgentoCFocusScope?.activate?.(panel, {
+    focusScopeDeactivate = window.RagentFocusScope?.activate?.(panel, {
       containmentRoot: document.body,
       initialFocus: () => listEl?.querySelector("button:not(:disabled)") || manageBtn,
       restoreFocus: () => (focusBeforeOpen && focusBeforeOpen.isConnected !== false)
@@ -149,16 +149,16 @@
       modal: true,
       onEscape: () => closePanel(),
     }) || null;
-    backEntryId = (window.AgentoCBackHandler && typeof window.AgentoCBackHandler.push === "function")
-      ? window.AgentoCBackHandler.push({ id: "composer-agent-panel", onBack: () => { closePanel(); return true; } })
+    backEntryId = (window.RagentBackHandler && typeof window.RagentBackHandler.push === "function")
+      ? window.RagentBackHandler.push({ id: "composer-agent-panel", onBack: () => { closePanel(); return true; } })
       : null;
   }
 
   function hide() {
     if (!panel) return;
     trigger?.setAttribute("aria-expanded", "false");
-    if (backEntryId && window.AgentoCBackHandler && typeof window.AgentoCBackHandler.pop === "function") {
-      window.AgentoCBackHandler.pop(backEntryId);
+    if (backEntryId && window.RagentBackHandler && typeof window.RagentBackHandler.pop === "function") {
+      window.RagentBackHandler.pop(backEntryId);
       backEntryId = null;
     }
     const hadFocusScope = Boolean(focusScopeDeactivate);
@@ -166,8 +166,8 @@
       focusScopeDeactivate();
       focusScopeDeactivate = null;
     }
-    if (window.AgentoCMotion?.setPresence) {
-      window.AgentoCMotion.setPresence(panel, false, { duration: 180 });
+    if (window.RagentMotion?.setPresence) {
+      window.RagentMotion.setPresence(panel, false, { duration: 180 });
     } else {
       panel.classList.remove("is-open");
       panel.classList.add("is-closing");
@@ -291,8 +291,8 @@
     if (panelOpen) return;
     if (!panel) ready();
     if (!panel) return;
-    if (typeof window.AgentoCConnectorPanel?.close === "function") {
-      window.AgentoCConnectorPanel.close();
+    if (typeof window.RagentConnectorPanel?.close === "function") {
+      window.RagentConnectorPanel.close();
     }
     loadGeneration += 1;
     const generation = loadGeneration;
@@ -377,7 +377,7 @@
     ready();
   }
 
-  window.AgentoCAgentPanel = Object.freeze({
+  window.RagentAgentPanel = Object.freeze({
     open: openPanel,
     close: closePanel,
     isOpen: () => panelOpen,

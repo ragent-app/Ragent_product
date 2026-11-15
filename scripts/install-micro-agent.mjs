@@ -34,11 +34,11 @@ Options:
   --provider <id>          Runtime provider: hybrid | codex (default: ${MICRO_AGENT_DEFAULT_PROVIDER})
   --model <id>             Codex / GPT model id (default: detected from ~/.codex/config.toml, else ${MICRO_AGENT_DEFAULT_MODEL})
   --command <cmd>          Command used to launch the runtime in codex mode (default: ${MICRO_AGENT_DEFAULT_CODEX_COMMAND})
-  --tool-id <id>           AgentoC tool id (default: ${MICRO_AGENT_DEFAULT_TOOL_ID})
-  --tool-name <name>       AgentoC tool label (default: ${MICRO_AGENT_DEFAULT_TOOL_NAME})
+  --tool-id <id>           Ragent tool id (default: ${MICRO_AGENT_DEFAULT_TOOL_ID})
+  --tool-name <name>       Ragent tool label (default: ${MICRO_AGENT_DEFAULT_TOOL_NAME})
   -h, --help               Show this help
 
-By default this installer registers a hybrid Micro Agent preset in ~/.config/agentoc/tools.json.
+By default this installer registers a hybrid Micro Agent preset in ~/.config/ragent/tools.json.
 `);
   process.exit(exitCode);
 }

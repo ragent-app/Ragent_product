@@ -58,8 +58,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-planning-accept-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-planning-accept-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -110,21 +110,21 @@ setTimeout(() => {
 }
 
 async function startServer({ home, port }) {
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   let stdout = '';
   let stderr = '';
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_SESSION_DISPATCH: 'on',
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_SESSION_DISPATCH: 'on',
       SECURE_COOKIES: '0',
       PATH: `${join(home, '.local', 'bin')}:${process.env.PATH || ''}`,
     },

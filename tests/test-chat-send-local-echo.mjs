@@ -159,7 +159,7 @@ function createHarness() {
   const context = {
     console,
     window: {},
-    agentocT(key) {
+    ragentT(key) {
       return key === 'message.sendStatus.sending' ? 'sending' : key;
     },
     document: {
@@ -220,7 +220,7 @@ function createHarness() {
     applyFinishedTurnCollapseState() {},
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput() {},
     applyEvent() {},
   };

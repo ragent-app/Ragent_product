@@ -17,7 +17,7 @@ export function windowsServiceControlSigningBytes(grant) {
       grant.issuedMs < 1 || grant.expiresMs <= grant.issuedMs || grant.expiresMs - grant.issuedMs > 600_000) {
     throw Object.assign(new Error('Invalid Windows service control grant'), { code: 'SERVICE_CONTROL_GRANT_INVALID' });
   }
-  const parts = [Buffer.from('AgentoC Windows service control v1\0', 'utf8')];
+  const parts = [Buffer.from('Ragent Windows service control v1\0', 'utf8')];
   const num = value => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64BE(BigInt(value)); parts.push(bytes); };
   const string = value => { const bytes = Buffer.from(value, 'utf8'); const size = Buffer.alloc(4); size.writeUInt32BE(bytes.length); parts.push(size, bytes); };
   num(grant.version); string(grant.keyId); string(grant.brokerInstallationId); num(grant.policyGeneration);
@@ -27,13 +27,13 @@ export function windowsServiceControlSigningBytes(grant) {
 }
 
 export function windowsServiceOwnerSigningBytes(grant) {
-  return Buffer.concat([Buffer.from('AgentoC Windows service owner approval v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
+  return Buffer.concat([Buffer.from('Ragent Windows service owner approval v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
 }
 
 export function windowsServiceOwnerDenialSigningBytes(grant) {
-  return Buffer.concat([Buffer.from('AgentoC Windows service owner denial v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
+  return Buffer.concat([Buffer.from('Ragent Windows service owner denial v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
 }
 
 export function windowsServiceReviewSigningBytes(grant) {
-  return Buffer.concat([Buffer.from('AgentoC Windows service review v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
+  return Buffer.concat([Buffer.from('Ragent Windows service review v1\0', 'utf8'), windowsServiceControlSigningBytes(grant)]);
 }

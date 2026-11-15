@@ -31,16 +31,16 @@ import { mkdirSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-// 隔离临时 HOME + AGENTOC_CONFIG_DIR —— 必须在 import 被测模块之前设置。
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consultation-acceptance-'));
+// 隔离临时 HOME + RAGENT_CONFIG_DIR —— 必须在 import 被测模块之前设置。
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consultation-acceptance-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_CONSULTATION_V1_ENABLED = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
-delete process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_CONSULTATION_V1_ENABLED = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
+delete process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT;
 
 const { handleConsultationRoutes } = await import('../chat/router-consultation-routes.mjs');
 const store = await import('../chat/consultation-store.mjs');
@@ -156,7 +156,7 @@ async function main() {
   await store.initializeConsultationStore();
 
   // 一个共享项目承载所有专家 Run(每个专家一个 terminal run)。
-  const projectRoot = mkdtempSync(join(tmpdir(), 'agentoc-consult-acceptance-proj-'));
+  const projectRoot = mkdtempSync(join(tmpdir(), 'ragent-consult-acceptance-proj-'));
   createdDirs.push(projectRoot);
   mkdirSync(projectRoot, { recursive: true });
   const project = await createProject({ name: 'consult-acceptance', rootPath: projectRoot });

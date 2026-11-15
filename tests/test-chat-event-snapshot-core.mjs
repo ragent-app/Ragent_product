@@ -60,7 +60,7 @@ function loadCore() {
   };
   vm.runInNewContext(RENDERED_EVENT_STATE_SHAPE, context);
   const renderedStateAccessor = context.__getRendered;
-  context.AgentocEventSnapshotEnvironment = {
+  context.RagentEventSnapshotEnvironment = {
     getCurrentSessionId: () => context.__getCurrent(),
     renderedEventState: null,
     hasRenderedEmptyState: true,
@@ -70,7 +70,7 @@ function loadCore() {
   // The environment holds a live reference to the same state object the
   // setter script mutates, so every scenario observes current ambient state.
   vm.runInNewContext(
-    'AgentocEventSnapshotEnvironment.renderedEventState = renderedEventState;',
+    'RagentEventSnapshotEnvironment.renderedEventState = renderedEventState;',
     context,
   );
   vm.runInNewContext(
@@ -78,7 +78,7 @@ function loadCore() {
     context,
     { filename: 'transport/event-snapshot.js' },
   );
-  const core = context.AgentocEventSnapshotCore;
+  const core = context.RagentEventSnapshotCore;
   return {
     api: {
       buildSessionVisibleEventsPageUrl: (id, o) => core.buildSessionVisibleEventsPageUrl(id, o),

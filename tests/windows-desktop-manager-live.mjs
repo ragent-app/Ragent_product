@@ -31,7 +31,7 @@ const waitForEndpoint = async (url, child, timeoutMs = 90000) => {
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
-  throw new Error('Timed out waiting for the installed AgentoC manager window');
+  throw new Error('Timed out waiting for the installed Ragent manager window');
 };
 const waitForExit = async (child, timeoutMs = 20000) => {
   if (child.exitCode !== null) return child.exitCode;
@@ -49,7 +49,7 @@ let browser;
 let page;
 try {
   const port = await getPort();
-  const profileArgs = process.env.AGENTOC_DESKTOP_TEST_USER_DATA ? [`--user-data-dir=${process.env.AGENTOC_DESKTOP_TEST_USER_DATA}`] : [];
+  const profileArgs = process.env.RAGENT_DESKTOP_TEST_USER_DATA ? [`--user-data-dir=${process.env.RAGENT_DESKTOP_TEST_USER_DATA}`] : [];
   appProcess = spawn(executable, [`--remote-debugging-port=${port}`, '--remote-allow-origins=*', ...profileArgs], {
     windowsHide: false,
     detached: mode === 'keep-open',
@@ -71,9 +71,9 @@ try {
     }
     assert.ok(page, 'The service-unavailable window did not show its wait screen');
     await page.waitForSelector('#retry', { timeout: 10000 });
-    assert.match(await page.locator('#serviceState').innerText(), /Waiting for the local AgentoC service/i);
+    assert.match(await page.locator('#serviceState').innerText(), /Waiting for the local Ragent service/i);
     await page.locator('#retry').click();
-    assert.match(await page.locator('#serviceState').innerText(), /Waiting for the local AgentoC service/i);
+    assert.match(await page.locator('#serviceState').innerText(), /Waiting for the local Ragent service/i);
     record('service-not-ready wait screen and manual retry');
     await writeFile(`${reportPath}.waiting`, `${JSON.stringify({ readyForServiceRestart: true, checks: report.checks }, null, 2)}\n`, 'utf8');
   }
@@ -86,7 +86,7 @@ try {
     if (page) break;
     await new Promise((resolve) => setTimeout(resolve, 300));
   }
-  assert.ok(page, 'The desktop window never connected to the local AgentoC service');
+  assert.ok(page, 'The desktop window never connected to the local Ragent service');
   await page.waitForSelector('#desktopManagerNav:not([hidden])', { timeout: 30000 });
   const managerUrl = new URL(page.url());
   assert.equal(managerUrl.origin, 'http://127.0.0.1:7690');
@@ -98,7 +98,7 @@ try {
   assert.equal(await page.locator('#desktopManagerNav [data-desktop-manager-tab]').count(), 5);
   await page.locator('[data-desktop-manager-tab="about"]').click();
   await page.waitForFunction(() => document.querySelector('#desktopManagerCurrentVersion')?.textContent.trim() !== '—', null, { timeout: 30000 });
-  assert.equal((await page.locator('#desktopManagerCurrentVersion').innerText()).trim(), (await readFile(resolve(dirname(executable), '..', '.agentoc-package-version'), 'utf8')).trim());
+  assert.equal((await page.locator('#desktopManagerCurrentVersion').innerText()).trim(), (await readFile(resolve(dirname(executable), '..', '.ragent-package-version'), 'utf8')).trim());
   assert.equal(await page.locator('#desktopManagerAboutPanel').isVisible(), true);
   record('public version and About page');
   const healthz = await fetch('http://127.0.0.1:7690/healthz');

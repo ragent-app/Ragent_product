@@ -10,7 +10,7 @@ import {
   recordTargetRuntimeSnapshotDetailed,
 } from '../lib/target-runtime-state.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-target-runtime-state-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-target-runtime-state-'));
 const filePath = join(root, 'target-runtime-state.json');
 const firstNow = Date.parse('2026-09-03T00:00:00.000Z');
 

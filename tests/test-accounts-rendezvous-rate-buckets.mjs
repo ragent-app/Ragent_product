@@ -6,7 +6,7 @@ import test from 'node:test';
 import { startAccountsServer } from '../accounts/server.mjs';
 
 test('inbox polling cannot consume the account control request budget', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-rate-buckets-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-rate-buckets-'));
   let app;
   try {
     app = await startAccountsServer({ dataFile: join(dir, 'accounts.json'), signingKeyFile: join(dir, 'signing-key.json'),
@@ -28,7 +28,7 @@ test('inbox polling cannot consume the account control request budget', async ()
 });
 
 test('account control requests cannot consume the inbox polling budget', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-rate-buckets-reverse-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-rate-buckets-reverse-'));
   let app;
   try {
     app = await startAccountsServer({ dataFile: join(dir, 'accounts.json'), signingKeyFile: join(dir, 'signing-key.json'),
@@ -50,7 +50,7 @@ test('account control requests cannot consume the inbox polling budget', async (
 });
 
 test('binding authority refresh has a bounded budget independent of account control and inbox', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-authority-rate-buckets-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-authority-rate-buckets-'));
   let app;
   try {
     app = await startAccountsServer({ dataFile: join(dir, 'accounts.json'), signingKeyFile: join(dir, 'signing-key.json'),
@@ -75,7 +75,7 @@ test('binding authority refresh has a bounded budget independent of account cont
 });
 
 test('authority refresh has its own configurable capacity while remaining bounded', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'agentoc-authority-capacity-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ragent-authority-capacity-'));
   let app;
   try {
     app = await startAccountsServer({ dataFile: join(dir, 'accounts.json'), signingKeyFile: join(dir, 'signing-key.json'),

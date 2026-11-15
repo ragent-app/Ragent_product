@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // DS-12 prototype CLI: offline pack / unpack / verify for the segmented
-// history index (docs/agentoc-history-segmented-index-design.md).
+// history index (docs/ragent-history-segmented-index-design.md).
 //
 //   node scripts/history-segment-pack.mjs pack <sessionDir> --out DIR [--events-per-segment N]
 //   node scripts/history-segment-pack.mjs unpack <segmentsDir> --out DIR

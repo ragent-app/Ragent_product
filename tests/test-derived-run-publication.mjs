@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-derived-run-publication-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-derived-run-publication-'));
 process.env.HOME = home;
 
 const {

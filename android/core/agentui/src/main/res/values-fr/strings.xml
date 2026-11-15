@@ -85,7 +85,7 @@
     <string name="agentui_slash_kind_plugin">Plugins</string>
     <string name="agentui_slash_source_codex">Codex</string>
     <string name="agentui_slash_source_claude">Claude Code</string>
-    <string name="agentui_slash_source_agentoc">AgentoC</string>
+    <string name="agentui_slash_source_ragent">Ragent</string>
     <string name="agentui_slash_source_plugin">Plugin</string>
     <string name="agentui_slash_remove_selected">Retirer %1$s</string>
 </resources>

@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-welcome-task-card-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-welcome-task-card-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -105,7 +105,7 @@ async function waitFor(predicate, description, timeoutMs = 4000) {
 
 const session = await createSession(tempHome, 'fake-codex', 'Welcome Intake', {
   starterPreset: WELCOME_STARTER_PRESET,
-  group: 'AgentoC',
+  group: 'Ragent',
   description: 'Welcome app intake state should keep a hidden task card.',
 });
 

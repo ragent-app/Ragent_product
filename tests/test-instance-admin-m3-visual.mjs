@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { chromium } from "@playwright/test";
 
 const repoRoot = process.cwd();
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || "/var/lib/agentoc/workspace/visual-ui-reviews/instance-admin-m3";
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || "/var/lib/ragent/workspace/visual-ui-reviews/instance-admin-m3";
 await mkdir(outputDir, { recursive: true });
 
 const [m3Pages, template] = await Promise.all([
@@ -17,7 +17,7 @@ const inlineCss = [...template.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].ma
 const body = `
   <a class="skip-link" href="#content">Skip to content</a>
   <header class="topbar"><div class="topbar-inner">
-    <div class="brand-block"><p class="eyebrow">user workbench</p><div class="brand-row"><h1>AgentoC Admin</h1><span class="cache-pill">Ready</span></div></div>
+    <div class="brand-block"><p class="eyebrow">user workbench</p><div class="brand-row"><h1>Ragent Admin</h1><span class="cache-pill">Ready</span></div></div>
     <div class="topbar-tools"><nav class="view-nav" aria-label="Admin views">
       <a class="view-link is-active" href="#pending">待处理 <span class="nav-count">3</span></a>
       <a class="view-link" href="#users">用户 <span class="nav-count">12</span></a>

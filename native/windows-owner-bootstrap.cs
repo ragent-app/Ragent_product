@@ -186,7 +186,7 @@ partial class WindowsOwnerBootstrap {
     if(v2){allowed.Add("protocolVersion");allowed.Add("purpose");Require(Str(policy,"purpose")=="browser"||Str(policy,"purpose")=="cli","OBC_PURPOSE_DENIED");}
     if(!server){allowed.Add("peer");if(v2){allowed.Add("launchNonce");Require(Match(Str(policy,"launchNonce"),"^[a-f0-9]{64}$"),"OBC_LAUNCH_NONCE_INVALID");}}
     Require(policy.Count==allowed.Count,"OBC_POLICY_INVALID");foreach(string key in policy.Keys)Require(allowed.Contains(key),"OBC_POLICY_INVALID");
-    Require(Match(Str(policy,"pipeName"),"^agentoc-owner-bootstrap-[a-f0-9]{32}$")&&Match(Str(policy,"instanceId"),@"\A(?:[a-f0-9-]{36}|inst_[a-f0-9]{32})\z")
+    Require(Match(Str(policy,"pipeName"),"^ragent-owner-bootstrap-[a-f0-9]{32}$")&&Match(Str(policy,"instanceId"),@"\A(?:[a-f0-9-]{36}|inst_[a-f0-9]{32})\z")
       &&Match(Str(policy,"requestId"),"^[a-f0-9]{32}$"),"OBC_POLICY_INVALID");
     Require(Match(Str(policy,"controlSid"),"^S-1-5-80-(?:[0-9]+-){4}[0-9]+$")&&Match(Str(policy,"ownerSid"),"^S-1-5-21-(?:[0-9]+-){3}[0-9]+$")
       &&Num(policy,"ownerSessionId")>0&&Num(policy,"ownerSessionId")<=65535,"OBC_POLICY_INVALID");
@@ -311,7 +311,7 @@ partial class WindowsOwnerBootstrap {
     // each authenticated request has its own immutable maximum 30s deadline.
     watchdog.Change(65000,Timeout.Infinite);
     PermitPeerQuery(Str(policy,server?"ownerSid":"controlSid"));Emit(new{kind="identity",facts=self});
-    string name="agentoc-owner-activation-"+Str(policy,"instanceId");
+    string name="ragent-owner-activation-"+Str(policy,"instanceId");
     if(server){using(var pipe=Server(name,Str(policy,"controlSid"),Str(policy,"ownerSid"))){
       Emit(new{kind="ready"});var connect=pipe.BeginWaitForConnection(null,null);
       bool completed=connect.AsyncWaitHandle.WaitOne(30000);

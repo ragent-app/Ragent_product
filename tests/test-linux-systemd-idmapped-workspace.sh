@@ -3,15 +3,15 @@
 # fixture; the helper is not an installed or production privilege boundary.
 set -euo pipefail
 test "$(id -u)" = 0
-owner=${AGENTOC_TEST_OWNER_USER:-pinggu}
+owner=${RAGENT_TEST_OWNER_USER:-pinggu}
 owner_uid=$(id -u "$owner") owner_gid=$(id -g "$owner")
-root=$(mktemp -d /srv/agentoc-systemd-idmap-XXXXXXXX)
-case "$root" in /srv/agentoc-systemd-idmap-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
+root=$(mktemp -d /srv/ragent-systemd-idmap-XXXXXXXX)
+case "$root" in /srv/ragent-systemd-idmap-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
 suffix=${root##*-}
-user_a="agentoc-map-${suffix}-a" user_b="agentoc-map-${suffix}-b"
-unit_a="agentoc-map-${suffix}-a.service" unit_b="agentoc-map-${suffix}-b.service"
-unit_run="agentoc-map-${suffix}-task.service"
-unit_reuse="agentoc-map-${suffix}-reuse.service"
+user_a="ragent-map-${suffix}-a" user_b="ragent-map-${suffix}-b"
+unit_a="ragent-map-${suffix}-a.service" unit_b="ragent-map-${suffix}-b.service"
+unit_run="ragent-map-${suffix}-task.service"
+unit_reuse="ragent-map-${suffix}-reuse.service"
 started_a=0 started_b=0 started_run=0 started_reuse=0
 cleanup() {
   if test "$started_run" = 1 && ! systemctl stop "$unit_run" >/dev/null 2>&1; then

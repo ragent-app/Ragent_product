@@ -15,7 +15,7 @@ vm.runInNewContext(
   { filename: 'timeline-projector.js' },
 );
 
-const { TimelineProjector } = context.AgentoCTimelineProjector;
+const { TimelineProjector } = context.RagentTimelineProjector;
 const projector = new TimelineProjector({ sessionId: 'timeline-a' });
 
 let snapshot = projector.replace([

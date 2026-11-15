@@ -38,7 +38,7 @@ function loadLegacy({ cssSupports }) {
     context,
     { filename: 'monet-theme-contract.js' },
   );
-  const legacy = context.window.AgentoCMonetThemeContract;
+  const legacy = context.window.RagentMonetThemeContract;
   return {
     api: {
       roleBindings: legacy.roleBindings,
@@ -52,7 +52,7 @@ function loadLegacy({ cssSupports }) {
 
 function loadCore({ cssSupports }) {
   const context = {
-    AgentocMonetThemeContractEnvironment: {
+    RagentMonetThemeContractEnvironment: {
       cssSupports: cssSupports || null,
     },
   };
@@ -61,7 +61,7 @@ function loadCore({ cssSupports }) {
     context,
     { filename: 'transport/monet-theme-contract.js' },
   );
-  const core = context.AgentocMonetThemeContractCore;
+  const core = context.RagentMonetThemeContractCore;
   return {
     api: {
       roleBindings: core.roleBindings,

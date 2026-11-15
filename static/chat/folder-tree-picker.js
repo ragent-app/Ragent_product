@@ -12,15 +12,15 @@
  */
 
 (function attachFolderPicker(root) {
-  if (root.AgentoCFolderTreePicker) return;
+  if (root.RagentFolderTreePicker) return;
 
   function t(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function resolveRequestPath(path) {
-    if (typeof root.agentocResolveProductPath === "function") {
-      return root.agentocResolveProductPath(path);
+    if (typeof root.ragentResolveProductPath === "function") {
+      return root.ragentResolveProductPath(path);
     }
     return String(path || "");
   }
@@ -39,7 +39,7 @@
 
   async function fetchFolderChildren(path) {
     const url = resolveRequestPath(`/api/browse?path=${encodeURIComponent(normalizePath(path))}&mode=directories`);
-    const response = await (root.agentocFetch || fetch)(url, {
+    const response = await (root.ragentFetch || fetch)(url, {
       credentials: "same-origin",
       cache: "no-store",
       headers: { Accept: "application/json" },
@@ -55,7 +55,7 @@
   }
 
   async function createFolder(path, name) {
-    const response = await (root.agentocFetch || fetch)(resolveRequestPath("/api/browse/mkdir"), {
+    const response = await (root.ragentFetch || fetch)(resolveRequestPath("/api/browse/mkdir"), {
       method: "POST",
       credentials: "same-origin",
       cache: "no-store",
@@ -74,7 +74,7 @@
 
   function create({ container, startPath = "~", onChange = null } = {}) {
     if (!container) return null;
-    const treeView = root.AgentoCFileTreeView; // only used for escapeHtml
+    const treeView = root.RagentFileTreeView; // only used for escapeHtml
     const state = {
       currentPath: normalizePath(startPath),
       selectedPath: normalizePath(startPath),
@@ -195,7 +195,7 @@
           </form>` : ""}
           <div class="folder-tree-picker-tree">${listHtml}</div>
         </div>`;
-      root.AgentoCIcons?.hydrate?.(container);
+      root.RagentIcons?.hydrate?.(container);
       container.querySelector(".folder-tree-picker-up")?.addEventListener("click", goUp);
       container.querySelector("[data-create-toggle]")?.addEventListener("click", () => {
         state.createOpen = !state.createOpen;
@@ -266,7 +266,7 @@
     };
   }
 
-  root.AgentoCFolderTreePicker = Object.freeze({
+  root.RagentFolderTreePicker = Object.freeze({
     create,
   });
 })(window);

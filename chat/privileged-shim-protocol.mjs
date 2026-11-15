@@ -1,4 +1,4 @@
-// Protocol + policy for the real `agentoc-privileged` shim command (design
+// Protocol + policy for the real `ragent-privileged` shim command (design
 // docs/privileged-shim-channel-2026-09-03.md).
 //
 // The privileged sentinel (`chat/privileged-sentinel.mjs`) was historically
@@ -10,7 +10,7 @@
 // started from.
 //
 // This module defines the provider-independent fallback: the runner sidecar
-// installs a real `agentoc-privileged` launcher on the Run's PATH. When the
+// installs a real `ragent-privileged` launcher on the Run's PATH. When the
 // sentinel reaches a shell, the launcher connects to a per-Run unix socket
 // served by the sidecar, and the sidecar routes the op through the SAME
 // batch → owner approval → privileged-executor pipeline the gate path uses.
@@ -20,10 +20,10 @@
 export const PRIVILEGED_SHIM_PROTOCOL_VERSION = 1;
 
 // Env names used by the per-Run sidecar and its provider-facing launcher.
-export const PRIVILEGED_SHIM_SOCKET_ENV = 'AGENTOC_PRIVILEGED_SHIM_SOCKET';
-export const PRIVILEGED_SHIM_TIMEOUT_ENV = 'AGENTOC_PRIVILEGED_SHIM_TIMEOUT_MS';
+export const PRIVILEGED_SHIM_SOCKET_ENV = 'RAGENT_PRIVILEGED_SHIM_SOCKET';
+export const PRIVILEGED_SHIM_TIMEOUT_ENV = 'RAGENT_PRIVILEGED_SHIM_TIMEOUT_MS';
 export const PRIVILEGED_SHIM_BIN_NAME = 'ragent-privileged';
-export const LEGACY_PRIVILEGED_SHIM_BIN_NAME = 'agentoc-privileged';
+export const LEGACY_PRIVILEGED_SHIM_BIN_NAME = 'ragent-privileged';
 
 // Owner approval is a human checkpoint on a phone; mirror the gate path's
 // unbounded waiting_user posture with a generous ceiling instead of a chatty

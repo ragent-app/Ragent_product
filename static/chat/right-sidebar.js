@@ -1,7 +1,7 @@
 "use strict";
 
 (function attachRightSidebar(root) {
-  const SIDEBAR_WIDTH_STORAGE_KEY = "agentoc.rightSidebarWidth";
+  const SIDEBAR_WIDTH_STORAGE_KEY = "ragent.rightSidebarWidth";
   const DESKTOP_QUERY = "(min-width: 1180px)";
   const MOBILE_QUERY = "(max-width: 767px)";
   const MIN_SIDEBAR_WIDTH = 360;
@@ -17,7 +17,7 @@
   function syncBackEntry() {
     if (state.open) {
       if (backEntryId) return;
-      backEntryId = window.AgentoCBackHandler?.push?.({
+      backEntryId = window.RagentBackHandler?.push?.({
         id: "right-sidebar",
         onBack: () => {
           if (state.view === "files" || state.view === "organization") {
@@ -29,7 +29,7 @@
         },
       }) || null;
     } else if (backEntryId) {
-      window.AgentoCBackHandler?.pop?.(backEntryId);
+      window.RagentBackHandler?.pop?.(backEntryId);
       backEntryId = null;
     }
   }
@@ -67,7 +67,7 @@
   };
 
   function t(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function canUseSidebar() {
@@ -123,7 +123,7 @@
       focusBeforeOpen = document.activeElement;
       dom.panel.setAttribute("role", "dialog");
       dom.panel.setAttribute("aria-labelledby", "rightSidebarTitle");
-      focusScopeDeactivate = root.AgentoCFocusScope?.activate?.(dom.panel, {
+      focusScopeDeactivate = root.RagentFocusScope?.activate?.(dom.panel, {
         containmentRoot: document.body,
         initialFocus: () => {
           if (dom.closeButton && !dom.closeButton.hidden) return dom.closeButton;
@@ -361,10 +361,10 @@
       dom.organizationNodes.querySelectorAll("[data-organization-session-id]").forEach((button) => {
         button.addEventListener("click", () => {
           const id = String(button.dataset.organizationSessionId || "").trim();
-          if (id && typeof root.agentocOpenSessionReference === "function") root.agentocOpenSessionReference(id);
+          if (id && typeof root.ragentOpenSessionReference === "function") root.ragentOpenSessionReference(id);
         });
       });
-      root.AgentoCIcons?.hydrate?.(dom.organizationNodes);
+      root.RagentIcons?.hydrate?.(dom.organizationNodes);
     }
     const blockers = Array.isArray(projection.blockers) ? projection.blockers : [];
     if (dom.organizationBlockers) {
@@ -384,7 +384,7 @@
     try {
       const headers = { Accept: "application/json" };
       if (state.organizationEtag && !force) headers["If-None-Match"] = state.organizationEtag;
-      const response = await (window.agentocFetch || fetch)(`/api/sessions/${encodeURIComponent(session.id)}/organization/projection`, {
+      const response = await (window.ragentFetch || fetch)(`/api/sessions/${encodeURIComponent(session.id)}/organization/projection`, {
         credentials: "same-origin", cache: "no-store", headers,
       });
       if (response.status === 304) {
@@ -539,12 +539,12 @@
       syncView();
       syncModalFocusScope();
     });
-    root.addEventListener?.("agentoc:workspacechange", handleWorkspaceChange);
+    root.addEventListener?.("ragent:workspacechange", handleWorkspaceChange);
     const store = typeof getChatStore === "function" ? getChatStore() : null;
     store?.subscribe?.(() => {
       syncOrganizationEntry();
     });
-    root.AgentoCIcons?.hydrate?.(dom.panel);
+    root.RagentIcons?.hydrate?.(dom.panel);
   }
 
   root.openRightSidebar = openHome;

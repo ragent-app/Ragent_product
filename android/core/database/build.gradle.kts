@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.database"
+    namespace = "com.andysagent.ragent.core.database"
     compileSdk = 37
     defaultConfig {
         minSdk = 26

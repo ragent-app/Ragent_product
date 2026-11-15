@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * AgY Provider Integration Test for AgentoC
+ * AgY Provider Integration Test for Ragent
  *
- * This script tests the AgY CLI integration with AgentoC:
+ * This script tests the AgY CLI integration with Ragent:
  * 1. Checks if AgY CLI is available
  * 2. Tests basic AgY commands (models, agents, version)
  * 3. Tests AgY prompt execution

@@ -7,7 +7,7 @@ import { createPostgresStore } from '../accounts/store/postgres.mjs';
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { buildAccountRendezvousPollMessage, createInstancePublicKeyFingerprint } from '../lib/instance-proof-protocol.mjs';
 
-const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 test('scoped publication matches transactional authority in an owned PostgreSQL database', { skip: !url }, async t => {
   const database = new URL(url).pathname.slice(1);
   assert.match(database, /^qa_rendezvous_[a-f0-9]{24}$/);
@@ -37,7 +37,7 @@ test('scoped publication matches transactional authority in an owned PostgreSQL 
     return createPostgresStore({ schema, enableScopedRendezvousResult: true, pool: { connect: async () => {
       const client = await pool.connect();
       return { release: () => client.release(), async query(sql, values = []) {
-        if (sql.includes('pg_advisory_xact_lock')) values = [`agentoc_accounts_store_v1:${schema}`];
+        if (sql.includes('pg_advisory_xact_lock')) values = [`ragent_accounts_store_v1:${schema}`];
         const result = await client.query(sql, values);
         if (injectFailure && sql.startsWith('update account_join_intents')) throw new Error('injected update failure');
         return result;
@@ -47,7 +47,7 @@ test('scoped publication matches transactional authority in an owned PostgreSQL 
   const a = store(), b = store(), now = Date.now(), issuedAt = new Date(now).toISOString();
   const host = generateKeyPairSync('ed25519'), publicKey = host.publicKey.export({ type: 'spki', format: 'pem' }).toString();
   const instance = { instanceId: 'inst_result_qa', publicKey, keyFingerprint: createInstancePublicKeyFingerprint(publicKey) };
-  const requestId = 'result_qa_request_0001', audience = 'agentoc-account-rendezvous-poll';
+  const requestId = 'result_qa_request_0001', audience = 'ragent-account-rendezvous-poll';
   await a.mutate(draft => {
     draft.accountJoinIntents.push({ intentId: 'rji_result_qa', instanceId: instance.instanceId, instance,
       deviceId: 'adev_result_qa', devicePublicKey: 'fixture', devicePublicKeyFingerprint: 'fixture', nonceHash: 'fixture',

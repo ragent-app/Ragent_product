@@ -109,8 +109,8 @@ export function planEventModeFields(event, { interactionMode = '', planAction = 
     : (
         normalizedInteractionMode === 'plan'
         || normalizedPlanAction === 'revise'
-        || source === 'agentoc-plan-fallback'
-        || source === 'agentoc-plan-action'
+        || source === 'ragent-plan-fallback'
+        || source === 'ragent-plan-action'
           ? 'proposal'
           : 'progress'
       ));

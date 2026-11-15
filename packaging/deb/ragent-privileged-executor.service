@@ -1,0 +1,27 @@
+[Unit]
+Description=Ragent privileged executor
+After=local-fs.target
+Before=ragent.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/ragent/app
+EnvironmentFile=/etc/ragent/ragent.env
+ExecStart=/opt/ragent/runtime/node /opt/ragent/app/scripts/privileged-executor.mjs serve
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+# The executor is intentionally root because it is the narrow command-execution
+# boundary for signed one-shot privileged tokens.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectHome=false
+LockPersonality=true
+RestrictRealtime=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

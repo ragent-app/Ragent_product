@@ -1,5 +1,5 @@
 // Small shared focus-scope primitive for mobile panels and dialogs.
-(function attachAgentoCFocusScope(root) {
+(function attachRagentFocusScope(root) {
   "use strict";
 
   const documentRef = root.document;
@@ -191,5 +191,5 @@
     };
   }
 
-  root.AgentoCFocusScope = Object.freeze({ activate });
+  root.RagentFocusScope = Object.freeze({ activate });
 })(window);

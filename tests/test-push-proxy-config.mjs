@@ -8,7 +8,7 @@ assert.equal(defaultOptions.timeout, 5000, 'push send should default to a bounde
 assert.equal('proxy' in defaultOptions, false, 'push send should not force a proxy when none is configured');
 
 const explicitProxy = resolvePushSendOptions({
-  AGENTOC_PUSH_PROXY: 'http://127.0.0.1:7890',
+  RAGENT_PUSH_PROXY: 'http://127.0.0.1:7890',
   https_proxy: 'http://127.0.0.1:9999',
 });
 assert.equal(explicitProxy.proxy, 'http://127.0.0.1:7890', 'explicit push proxy should win over generic proxy envs');

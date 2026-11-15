@@ -5,11 +5,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-history-scan-'));
-const previousConfigDir = process.env.AGENTOC_CONFIG_DIR;
-const previousSpoolDir = process.env.AGENTOC_RUN_SPOOL_DIR;
-process.env.AGENTOC_CONFIG_DIR = root;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
+const root = mkdtempSync(join(tmpdir(), 'ragent-history-scan-'));
+const previousConfigDir = process.env.RAGENT_CONFIG_DIR;
+const previousSpoolDir = process.env.RAGENT_RUN_SPOOL_DIR;
+process.env.RAGENT_CONFIG_DIR = root;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
 
 try {
   const { CHAT_HISTORY_DIR } = await import('../lib/config.mjs');
@@ -54,9 +54,9 @@ try {
 
   console.log('test-history-uncached-scan: ok');
 } finally {
-  if (previousConfigDir === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-  else process.env.AGENTOC_CONFIG_DIR = previousConfigDir;
-  if (previousSpoolDir === undefined) delete process.env.AGENTOC_RUN_SPOOL_DIR;
-  else process.env.AGENTOC_RUN_SPOOL_DIR = previousSpoolDir;
+  if (previousConfigDir === undefined) delete process.env.RAGENT_CONFIG_DIR;
+  else process.env.RAGENT_CONFIG_DIR = previousConfigDir;
+  if (previousSpoolDir === undefined) delete process.env.RAGENT_RUN_SPOOL_DIR;
+  else process.env.RAGENT_RUN_SPOOL_DIR = previousSpoolDir;
   rmSync(root, { recursive: true, force: true });
 }

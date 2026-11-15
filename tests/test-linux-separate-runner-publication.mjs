@@ -1,5 +1,5 @@
 // Integration test for durable publication across two real Linux identities.
-// Run as root on an isolated QA host with ubuntu and agentoc-runner accounts.
+// Run as root on an isolated QA host with ubuntu and ragent-runner accounts.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmod, chown, mkdtemp, mkdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
@@ -33,32 +33,32 @@ const getent = name => {
   const fields = execFileSync('/usr/bin/getent', ['passwd', name], {encoding:'utf8'}).trim().split(':');
   return {uid:Number(fields[2]),gid:Number(fields[3])};
 };
-const owner = getent(process.env.AGENTOC_TEST_OWNER_USER || 'ubuntu');
-const runner = getent('agentoc-runner');
+const owner = getent(process.env.RAGENT_TEST_OWNER_USER || 'ubuntu');
+const runner = getent('ragent-runner');
 if (!Number.isSafeInteger(owner.uid) || owner.uid <= 0 || owner.uid === runner.uid) throw new Error('A distinct unprivileged test owner is required');
-const base = await mkdtemp('/tmp/agentoc-scoped-acl-');
-const systemConfig = await mkdtemp('/srv/agentoc-runner-config-');
+const base = await mkdtemp('/tmp/ragent-scoped-acl-');
+const systemConfig = await mkdtemp('/srv/ragent-runner-config-');
 const spool = join(base, 'spool');
 try {
   const staleRunnerFile = join(systemConfig, 'runner-user');
   await chmod(systemConfig, 0o755);
-  await writeFile(staleRunnerFile, `${process.env.AGENTOC_TEST_OWNER_USER || 'ubuntu'}\n`, { mode: 0o644 });
+  await writeFile(staleRunnerFile, `${process.env.RAGENT_TEST_OWNER_USER || 'ubuntu'}\n`, { mode: 0o644 });
   await chown(base, owner.uid, owner.gid);
   await chmod(base, 0o711);
   await mkdir(spool, {mode:0o770});
   await chown(spool, owner.uid, owner.gid);
   execFileSync('/usr/bin/setfacl', ['-m', `u:${runner.uid}:rwx,d:u:${runner.uid}:rwx`, spool]);
-  const common = { ...process.env, AGENTOC_INSTANCE_ROOT:base, AGENTOC_CONFIG_DIR:join(base,'config'),
-    AGENTOC_RUN_SPOOL_DIR:spool, AGENTOC_MEMORY_DIR:join(base,'memory'),
-    AGENTOC_AUTH_SESSION_SECRET:'qa-fixture-only-secret', PATH:'/opt/agentoc/runtime:/usr/bin:/bin' };
-  delete common.AGENTOC_RUNNER_SAME_USER;
-  delete common.AGENTOC_RUNNER_USER;
-  delete common.AGENTOC_RUNNER_DISTINCT_IDENTITY;
+  const common = { ...process.env, RAGENT_INSTANCE_ROOT:base, RAGENT_CONFIG_DIR:join(base,'config'),
+    RAGENT_RUN_SPOOL_DIR:spool, RAGENT_MEMORY_DIR:join(base,'memory'),
+    RAGENT_AUTH_SESSION_SECRET:'qa-fixture-only-secret', PATH:'/opt/ragent/runtime:/usr/bin:/bin' };
+  delete common.RAGENT_RUNNER_SAME_USER;
+  delete common.RAGENT_RUNNER_USER;
+  delete common.RAGENT_RUNNER_DISTINCT_IDENTITY;
   const runAs = (identity, phase, environment) => execFileSync('/usr/bin/setpriv', [
     '--reuid', String(identity.uid), '--regid', String(identity.gid), '--clear-groups', '--',
     process.execPath, new URL(import.meta.url).pathname, phase,
   ], { env:{...common,...environment}, encoding:'utf8', stdio:['ignore','pipe','pipe'] });
-  runAs(owner, 'create', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER_FILE:staleRunnerFile });
+  runAs(owner, 'create', { RAGENT_RUNNER_SAME_USER:'0', RAGENT_RUNNER_USER_FILE:staleRunnerFile });
   const dir = join(spool, 'run_scopedaclfixture');
   const acl = execFileSync('/usr/bin/getfacl', ['-cpn', join(dir,'status.json')], {encoding:'utf8'});
   assert.match(acl, new RegExp(`^user:${runner.uid}:r--$`, 'm'));
@@ -89,8 +89,8 @@ try {
   assert.equal(testAs(runner, '-r', join(dir,'status.json')), 0);
   assert.equal(testAs(runner, '-r', join(dir,'session-control.cap')), 0);
   assert.notEqual(testAs(runner, '-w', join(dir,'session-control.cap')), 0);
-  runAs(runner, 'runner', { AGENTOC_RUNNER_DISTINCT_IDENTITY:'1' });
-  runAs(owner, 'control', { AGENTOC_RUNNER_SAME_USER:'0', AGENTOC_RUNNER_USER_FILE:staleRunnerFile });
+  runAs(runner, 'runner', { RAGENT_RUNNER_DISTINCT_IDENTITY:'1' });
+  runAs(owner, 'control', { RAGENT_RUNNER_SAME_USER:'0', RAGENT_RUNNER_USER_FILE:staleRunnerFile });
   assert.equal(JSON.parse(await readFile(join(dir,'status.json'), 'utf8')).state, 'completed');
   // Even if another account can traverse the fixture directories, the files
   // must not grant it access through an inherited group or the other class.

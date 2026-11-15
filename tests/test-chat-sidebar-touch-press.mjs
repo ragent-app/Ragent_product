@@ -93,8 +93,8 @@ await page.evaluate(() => {
   const selected = makeRow('Open session', { active: true });
   window.__rows = { plain, selected };
   window.__opened = 0;
-  window.agentocBindSidebarLongPress(plain, () => { window.__opened += 1; });
-  window.agentocBindSidebarLongPress(selected, () => { window.__opened += 1; });
+  window.ragentBindSidebarLongPress(plain, () => { window.__opened += 1; });
+  window.ragentBindSidebarLongPress(selected, () => { window.__opened += 1; });
 });
 
 const stateOf = (row) => page.evaluate((key) => {
@@ -193,7 +193,7 @@ await touchPage.evaluate((source) => {
 }, bindSource);
 const panGuard = await touchPage.evaluate(() => {
   const row = document.getElementById('row');
-  window.agentocBindSidebarLongPress(row, () => {});
+  window.ragentBindSidebarLongPress(row, () => {});
   row.dispatchEvent(new PointerEvent('pointerdown', {
     bubbles: true, button: 0, pointerType: 'touch', clientX: 20, clientY: 20,
   }));
@@ -232,7 +232,7 @@ await touchPage.evaluate((source) => {
 const armedHold = await touchPage.evaluate(async () => {
   const row = document.getElementById('row');
   let opened = 0;
-  window.agentocBindSidebarLongPress(row, () => { opened += 1; });
+  window.ragentBindSidebarLongPress(row, () => { opened += 1; });
   row.dispatchEvent(new PointerEvent('pointerdown', {
     bubbles: true, button: 0, pointerType: 'touch', clientX: 20, clientY: 20,
   }));

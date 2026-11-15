@@ -295,9 +295,9 @@ switch (command) {
   }
 
   case 'api': {
-    const { runAgentoCApiCommand } = await import(modulePath('lib/agentoc-api-command.mjs'));
+    const { runRagentApiCommand } = await import(modulePath('lib/ragent-api-command.mjs'));
     try {
-      process.exitCode = await runAgentoCApiCommand(args);
+      process.exitCode = await runRagentApiCommand(args);
     } catch (error) {
       console.error(error.message || String(error));
       // Let HTTP/stdio handles finish closing. Forced exit with active fetch
@@ -462,7 +462,7 @@ switch (command) {
   }
 
   case 'consult': {
-    const { createAgentoCHttpClient } = await import(modulePath('lib/agentoc-http-client.mjs'));
+    const { createRagentHttpClient } = await import(modulePath('lib/ragent-http-client.mjs'));
 
     function consultText(value) {
       return typeof value === 'string' ? value.trim() : '';
@@ -540,7 +540,7 @@ Options:
     }
 
     try {
-      const client = createAgentoCHttpClient({ baseUrl: options.baseUrl });
+      const client = createRagentHttpClient({ baseUrl: options.baseUrl });
       let path = '';
       let method = 'GET';
       let body;

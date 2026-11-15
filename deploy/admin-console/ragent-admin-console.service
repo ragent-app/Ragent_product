@@ -6,17 +6,17 @@ Requires=ragent-admin-helper.service
 
 [Service]
 Type=simple
-User=agentoc-admin
-Group=agentoc-admin
-SupplementaryGroups=agentoc-admin
-EnvironmentFile=/etc/agentoc/admin-console.env
-Environment=AGENTOC_ADMIN_HOST=127.0.0.1
-Environment=AGENTOC_ADMIN_PORT=7722
-Environment=AGENTOC_ADMIN_SOCKET=/run/agentoc-admin/helper.sock
-Environment=AGENTOC_ADMIN_BACKUP_DIR=/var/lib/agentoc-admin/backups
-Environment=AGENTOC_ADMIN_PUBLIC_DIR=/opt/agentoc-admin/current/public
-WorkingDirectory=/opt/agentoc-admin/current
-ExecStart=/opt/agentoc-accounts/current/runtime/node /opt/agentoc-admin/current/server.mjs
+User=ragent-admin
+Group=ragent-admin
+SupplementaryGroups=ragent-admin
+EnvironmentFile=/etc/ragent/admin-console.env
+Environment=RAGENT_ADMIN_HOST=127.0.0.1
+Environment=RAGENT_ADMIN_PORT=7722
+Environment=RAGENT_ADMIN_SOCKET=/run/ragent-admin/helper.sock
+Environment=RAGENT_ADMIN_BACKUP_DIR=/var/lib/ragent-admin/backups
+Environment=RAGENT_ADMIN_PUBLIC_DIR=/opt/ragent-admin/current/public
+WorkingDirectory=/opt/ragent-admin/current
+ExecStart=/opt/ragent-accounts/current/runtime/node /opt/ragent-admin/current/server.mjs
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=15
@@ -34,10 +34,10 @@ ProtectProc=invisible
 LockPersonality=true
 SystemCallArchitectures=native
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
-ReadOnlyPaths=/opt/agentoc-admin/current /var/lib/agentoc-admin/backups
-ReadWritePaths=/run/agentoc-admin
+ReadOnlyPaths=/opt/ragent-admin/current /var/lib/ragent-admin/backups
+ReadWritePaths=/run/ragent-admin
 
 [Install]
 WantedBy=multi-user.target
 # Transitional alias for an existing installation.
-Alias=agentoc-admin-console.service
+Alias=ragent-admin-console.service

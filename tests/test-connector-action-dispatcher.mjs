@@ -6,14 +6,14 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-connector-dispatcher-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-connector-dispatcher-'));
 process.env.HOME = tempHome;
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_PUBLIC_BASE_URL;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_PUBLIC_BASE_URL;
 
 const workspace = join(tempHome, 'workspace');
-const mailboxRoot = join(tempHome, '.config', 'agentoc', 'agent-mailbox');
+const mailboxRoot = join(tempHome, '.config', 'ragent', 'agent-mailbox');
 const fakeCalendarTokenPath = join(tempHome, 'google-calendar-token.json');
 mkdirSync(workspace, { recursive: true });
 writeFileSync(fakeCalendarTokenPath, JSON.stringify({ access_token: 'test-token' }), 'utf8');

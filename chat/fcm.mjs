@@ -5,10 +5,10 @@ import { CONFIG_DIR } from '../lib/config.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
 import { loadInstanceIdentity } from '../lib/instance-identity.mjs';
 
-const TOKEN_FILE = process.env.AGENTOC_FCM_TOKENS_FILE || `${CONFIG_DIR}/fcm-tokens.json`;
+const TOKEN_FILE = process.env.RAGENT_FCM_TOKENS_FILE || `${CONFIG_DIR}/fcm-tokens.json`;
 const FCM_SEND_CONCURRENCY = Math.max(
   1,
-  Math.min(32, Number.parseInt(process.env.AGENTOC_FCM_SEND_CONCURRENCY || '8', 10) || 8),
+  Math.min(32, Number.parseInt(process.env.RAGENT_FCM_SEND_CONCURRENCY || '8', 10) || 8),
 );
 const mutationQueue = createSerialTaskQueue();
 let accessToken = null;
@@ -24,7 +24,7 @@ async function serviceAccount() {
       return null;
     }
   };
-  const file = String(process.env.AGENTOC_FCM_SERVICE_ACCOUNT_FILE || '').trim();
+  const file = String(process.env.RAGENT_FCM_SERVICE_ACCOUNT_FILE || '').trim();
   if (file) {
     try {
       const value = parse(await readFile(file, 'utf8'));
@@ -33,7 +33,7 @@ async function serviceAccount() {
       // Fall through to the legacy environment-based configuration.
     }
   }
-  const configured = process.env.AGENTOC_FCM_SERVICE_ACCOUNT_JSON
+  const configured = process.env.RAGENT_FCM_SERVICE_ACCOUNT_JSON
     || process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
     || '';
   return parse(configured);

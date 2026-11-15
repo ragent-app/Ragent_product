@@ -19,18 +19,18 @@ function loadContext(relPath) {
 }
 
 const coreContext = loadContext('static/chat/core/product-paths.js');
-const core = coreContext.AgentoCProductPathsCore;
-assert.ok(core, 'core/product-paths.js should attach AgentoCProductPathsCore');
+const core = coreContext.RagentProductPathsCore;
+assert.ok(core, 'core/product-paths.js should attach RagentProductPathsCore');
 
 const legacyContext = loadContext('static/chat/product-paths.js');
-for (const verb of ['agentocGetProductBasePath', 'agentocGetProductBaseUrl', 'agentocResolveProductUrl', 'agentocResolveProductPath']) {
+for (const verb of ['ragentGetProductBasePath', 'ragentGetProductBaseUrl', 'ragentResolveProductUrl', 'ragentResolveProductPath']) {
   assert.ok(typeof legacyContext[verb] === 'function', `product-paths.js should attach ${verb}`);
 }
 const legacyModule = {
-  getProductBasePath: () => legacyContext.agentocGetProductBasePath(),
-  getProductBaseUrl: () => legacyContext.agentocGetProductBaseUrl(),
-  resolveProductUrl: (value) => legacyContext.agentocResolveProductUrl(value),
-  resolveProductPath: (value) => legacyContext.agentocResolveProductPath(value),
+  getProductBasePath: () => legacyContext.ragentGetProductBasePath(),
+  getProductBaseUrl: () => legacyContext.ragentGetProductBaseUrl(),
+  resolveProductUrl: (value) => legacyContext.ragentResolveProductUrl(value),
+  resolveProductPath: (value) => legacyContext.ragentResolveProductPath(value),
 };
 
 // -- pure path math ----------------------------------------------------------
@@ -119,7 +119,7 @@ assert.equal(core.getProductBaseUrl(fallbackEnv), legacyModule.getProductBaseUrl
 
 // -- session sidebar / workspace-filtered list URLs (Stage 2 increments) -----
 // Direct units: sidebar URL is pure; the workspace URL takes env selector
-// functions mirroring the legacy window.agentocGet* hooks.
+// functions mirroring the legacy window.ragentGet* hooks.
 assert.equal(core.getSessionSidebarUrl('s1'), '/api/sessions/s1?view=sidebar');
 assert.equal(core.getSessionSidebarUrl('a b/c'), '/api/sessions/a%20b%2Fc?view=sidebar');
 assert.equal(core.getWorkspaceFilteredSessionListUrl('/api/sessions'), '/api/sessions');
@@ -157,7 +157,7 @@ assert.equal(
 );
 
 // Parity: the legacy functions live in session-http-helpers.js (sidebar URL)
-// and session-http.js (workspace URL, reading window.agentocGet* hooks).
+// and session-http.js (workspace URL, reading window.ragentGet* hooks).
 function loadLegacyUrls() {
   const context = {
     console,
@@ -191,9 +191,9 @@ function loadLegacyUrls() {
   let projectId = '';
   let selectedFolder = '';
   let defaultFolder = '';
-  context.window.agentocGetSelectedProjectId = () => projectId;
-  context.window.agentocGetSelectedSessionFolder = () => selectedFolder;
-  context.window.agentocGetDefaultSessionFolder = () => defaultFolder;
+  context.window.ragentGetSelectedProjectId = () => projectId;
+  context.window.ragentGetSelectedSessionFolder = () => selectedFolder;
+  context.window.ragentGetDefaultSessionFolder = () => defaultFolder;
   return {
     getSessionSidebarUrl: (id) => context.getSessionSidebarUrl(id),
     getWorkspaceFilteredSessionListUrl: (url) => context.getWorkspaceFilteredSessionListUrl(url),

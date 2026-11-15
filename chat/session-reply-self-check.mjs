@@ -286,7 +286,7 @@ export async function loadReplySelfCheckTurnContext(sessionId, runId, { loadSess
     .map((event) => typeof event.content === 'string' ? event.content.trim() : '')
     .filter(Boolean);
   const latestRawAssistantText = rawAssistantParts.at(-1) || '';
-  const assistantControlText = /<agentoc-(?:organization-proposal|collaboration-plan|result-packet|session-labels)\b/i.test(latestRawAssistantText)
+  const assistantControlText = /<ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)\b/i.test(latestRawAssistantText)
     ? latestRawAssistantText
     : rawAssistantParts.join('\n\n');
   const assistantTurnText = buildReplySelfCheckDisplayedAssistantTurn(turnHistory)

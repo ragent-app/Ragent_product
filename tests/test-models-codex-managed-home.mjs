@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-models-codex-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-models-codex-'));
 const configDir = join(tempHome, 'config');
 const managedCodexHome = join(configDir, 'provider-runtime-homes', 'codex');
 
@@ -15,7 +15,7 @@ mkdirSync(managedCodexHome, { recursive: true });
 writeFileSync(join(managedCodexHome, 'config.toml'), 'model = "gpt-managed"\n', 'utf8');
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { getModelsForTool, readPreferredCodexModelFromConfig } = await import(pathToFileURL(join(repoRoot, 'chat', 'models.mjs')).href);
 

@@ -7,8 +7,8 @@ const fs = require("node:fs/promises");
 const updateCheck = require("./update-check.cjs");
 const autoUpdate = require("./auto-update.cjs");
 
-const portArg = process.platform === "darwin" ? process.argv.find((value) => value.startsWith("--agentoc-service-port=")) : "";
-const configuredPort = portArg ? portArg.slice("--agentoc-service-port=".length) : process.env.AGENTOC_DESKTOP_PORT || "7690";
+const portArg = process.platform === "darwin" ? process.argv.find((value) => value.startsWith("--ragent-service-port=")) : "";
+const configuredPort = portArg ? portArg.slice("--ragent-service-port=".length) : process.env.RAGENT_DESKTOP_PORT || "7690";
 if (!/^[0-9]{1,5}$/.test(configuredPort) || Number(configuredPort) < 1 || Number(configuredPort) > 65535) {
   throw new Error("Invalid desktop service port");
 }
@@ -19,7 +19,7 @@ const AUTH_HOSTS = new Set([
   "accounts.google.com",
   "auth.openai.com",
   "ragent.agentoncloud.com",
-  "agentoc.andyscodexagent.cyou",
+  "ragent.andyscodexagent.cyou",
 ]);
 
 let mainWindow = null;
@@ -68,10 +68,10 @@ function createTray() {
 
 async function queryUpdate() {
   const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
-  let currentVersion = (await fs.readFile(path.join(metadataDir, ".agentoc-package-version"), "utf8")).trim();
+  let currentVersion = (await fs.readFile(path.join(metadataDir, ".ragent-package-version"), "utf8")).trim();
   if (process.platform !== "win32") currentVersion = currentVersion.split("+")[0];
-  const currentCommit = await fs.readFile(path.join(metadataDir, ".agentoc-source-commit"), "utf8").catch(() => "");
-  const currentBuild = await fs.readFile(path.join(metadataDir, ".agentoc-package-build"), "utf8").catch(() => "");
+  const currentCommit = await fs.readFile(path.join(metadataDir, ".ragent-source-commit"), "utf8").catch(() => "");
+  const currentBuild = await fs.readFile(path.join(metadataDir, ".ragent-package-build"), "utf8").catch(() => "");
   return updateCheck.check(currentVersion, undefined, { currentCommit, currentBuild });
 }
 
@@ -150,7 +150,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    app.setAppUserModelId("com.agentoc.desktop-manager");
+    app.setAppUserModelId("com.ragent.desktop-manager");
     createMainWindow();
     createTray();
     void refreshUpdate();
@@ -242,7 +242,7 @@ function guardWebContents(webContents, { isMain = false } = {}) {
 
 function createMainWindow() {
   const appRoot = app.getAppPath();
-  const icon = nativeImage.createFromPath(path.join(appRoot, "assets", "agentoc-android-logo.png"));
+  const icon = nativeImage.createFromPath(path.join(appRoot, "assets", "ragent-android-logo.png"));
   mainWindow = new BrowserWindow({
     title: "Ragent",
     width: 1180,

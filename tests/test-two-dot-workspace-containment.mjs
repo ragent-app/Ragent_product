@@ -3,19 +3,19 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const root = await mkdtemp(path.join(tmpdir(), 'agentoc-two-dot-scope-'));
+const root = await mkdtemp(path.join(tmpdir(), 'ragent-two-dot-scope-'));
 const workspace = path.join(root, 'workspace');
 const outside = path.join(root, 'workspace-sibling');
 const folder = path.join(workspace, '..notes');
 await mkdir(folder, { recursive: true });
 await mkdir(outside);
 await writeFile(path.join(folder, 'file.txt'), 'fixture');
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'runs');
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'runs');
 const { resolveContainedScope, scopeContainsPath } = await import('../chat/execution-scope.mjs');
 const { createStagingWorkspace, discardStaging } = await import('../chat/managed-writer.mjs');
 

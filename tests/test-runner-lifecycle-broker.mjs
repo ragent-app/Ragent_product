@@ -22,7 +22,7 @@ import {
   launchDetachedRunnerViaLifecycleBroker,
 } from '../chat/run-launcher.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-runner-lifecycle-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-runner-lifecycle-'));
 const socketPath = join(root, 'lifecycle.sock');
 const launches = [];
 const server = await createRunnerLifecycleServer({
@@ -35,7 +35,7 @@ const server = await createRunnerLifecycleServer({
     launches.push({ runId, options });
     return {
       pid: 43210,
-      unitName: `agentoc-runner-${runId}`,
+      unitName: `ragent-runner-${runId}`,
       unitScope: 'system',
       launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
     };
@@ -51,11 +51,11 @@ try {
     socketPath: refusalSocket, serviceUser: 'svc', serviceGroup: 'svc', controlUser: 'example',
     chownImpl: async () => {}, launchRunner: async () => { throw Object.assign(new Error('refused'), { code: refusalCode }); },
   });
-  const oldLifecycleSocket = process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-  const oldLifecycleRequired = process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+  const oldLifecycleSocket = process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+  const oldLifecycleRequired = process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
   try {
-    process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = refusalSocket;
-    delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
+    process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = refusalSocket;
+    delete process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
     const spawner = createDetachedRunnerSpawner({
       assertExecutionBoundaryImpl: async () => {}, getScopeImpl: () => null,
       spawnImpl: () => { throw new Error('unsafe fallback reached'); },
@@ -65,42 +65,42 @@ try {
       await assert.rejects(() => spawner('run_refused123'), error => error.code === code);
     }
   } finally {
-    if (oldLifecycleSocket === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-    else process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = oldLifecycleSocket;
-    if (oldLifecycleRequired === undefined) delete process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED;
-    else process.env.AGENTOC_RUNNER_LIFECYCLE_REQUIRED = oldLifecycleRequired;
+    if (oldLifecycleSocket === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+    else process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = oldLifecycleSocket;
+    if (oldLifecycleRequired === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED;
+    else process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = oldLifecycleRequired;
     await refusalServer.close();
   }
   const args = buildLifecycleSystemdArgs('run_abc12345', {
-    projectRoot: '/opt/agentoc/app',
-    runnerEntry: '/opt/agentoc/app/chat/runner-sidecar.mjs',
-    processExecPath: '/opt/agentoc/runtime/node',
+    projectRoot: '/opt/ragent/app',
+    runnerEntry: '/opt/ragent/app/chat/runner-sidecar.mjs',
+    processExecPath: '/opt/ragent/runtime/node',
     serviceUser: 'example',
     serviceGroup: 'example',
-    inheritedGroups: ['example', 'sudo', 'docker', 'agentoc-privileged'],
+    inheritedGroups: ['example', 'sudo', 'docker', 'ragent-privileged'],
     environment: {
-      AGENTOC_CONFIG_DIR: '/var/lib/agentoc/config',
-      AGENTOC_INSTANCE_ROOT: '/var/lib/agentoc',
-      AGENTOC_MEMORY_DIR: '/var/lib/agentoc/memory',
-      AGENTOC_WORK_ROOT_DIR: '/var/lib/agentoc/workspace',
-      AGENTOC_PUBLIC_BASE_URL: 'https://example.com',
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: '/var/lib/agentoc/config/runner-lifecycle.sock',
+      RAGENT_CONFIG_DIR: '/var/lib/ragent/config',
+      RAGENT_INSTANCE_ROOT: '/var/lib/ragent',
+      RAGENT_MEMORY_DIR: '/var/lib/ragent/memory',
+      RAGENT_WORK_ROOT_DIR: '/var/lib/ragent/workspace',
+      RAGENT_PUBLIC_BASE_URL: 'https://example.com',
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: '/var/lib/ragent/config/runner-lifecycle.sock',
       MY_SERVICE_TOKEN: 's3cret',
       PATH: '/bin',
       LANG: 'C.UTF-8',
-      AGENTOC_PROJECT_ROOT: '/opt/agentoc/app',
+      RAGENT_PROJECT_ROOT: '/opt/ragent/app',
       HOME: '/home/example',
-      AGENTOC_RUN_SPOOL_DIR: '/var/lib/agentoc/config/chat-runs',
-      AGENTOC_NATIVE_OAUTH_LOCK_PATH: '/var/lib/agentoc/provider-homes/by-provider/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/.agentoc-native-oauth.lock',
-      AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: 'test-oauth-lock-token',
+      RAGENT_RUN_SPOOL_DIR: '/var/lib/ragent/config/chat-runs',
+      RAGENT_NATIVE_OAUTH_LOCK_PATH: '/var/lib/ragent/provider-homes/by-provider/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/.ragent-native-oauth.lock',
+      RAGENT_NATIVE_OAUTH_LOCK_TOKEN: 'test-oauth-lock-token',
       DISPLAY: ':1',
       XAUTHORITY: '/run/user/1000/gdm/Xauthority',
       XDG_RUNTIME_DIR: '/run/user/1000',
-      AGENTOC_RUNNER_ACCESS_DIR: '/srv/custom-access-state',
+      RAGENT_RUNNER_ACCESS_DIR: '/srv/custom-access-state',
     },
   });
   assert.ok(args.includes('--slice'));
-  assert.ok(args.includes('agentoc-runners.slice'));
+  assert.ok(args.includes('ragent-runners.slice'));
   assert.ok(args.includes('--property'));
   assert.ok(args.includes('KillMode=control-group'));
   assert.ok(args.includes(`MemoryHigh=${4 * 1024 * 1024 * 1024}`));
@@ -109,18 +109,18 @@ try {
   assert.ok(args.includes('CPUWeight=100'));
   assert.ok(args.includes('User=example'));
   assert.ok(args.includes('SupplementaryGroups=example'));
-  assert.ok(args.some((value) => value.startsWith('InaccessiblePaths=/etc/agentoc ')));
-  // The config directory itself is masked, never its /var/lib/agentoc parent:
+  assert.ok(args.some((value) => value.startsWith('InaccessiblePaths=/etc/ragent ')));
+  // The config directory itself is masked, never its /var/lib/ragent parent:
   // masking the parent made the shared work root workspace unreachable inside
   // the transient unit namespace.
   const inaccessible = args.find((value) => value.startsWith('InaccessiblePaths='));
-  assert.ok(inaccessible.includes('/var/lib/agentoc/config'), 'the config directory itself is masked');
-  assert.equal(inaccessible.includes('/var/lib/agentoc /var/log'), false, 'the /var/lib/agentoc parent must stay reachable');
+  assert.ok(inaccessible.includes('/var/lib/ragent/config'), 'the config directory itself is masked');
+  assert.equal(inaccessible.includes('/var/lib/ragent /var/log'), false, 'the /var/lib/ragent parent must stay reachable');
   assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('sudo')), false, 'sudo must never reach the transient unit');
   assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('docker')), false, 'docker must never reach the transient unit');
-  assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('agentoc-privileged')), false, 'privileged executor group must never reach the transient unit');
+  assert.equal(args.some((value) => value.startsWith('SupplementaryGroups=') && value.includes('ragent-privileged')), false, 'privileged executor group must never reach the transient unit');
   assert.ok(args.includes('NoNewPrivileges=false'), 'provider Runs must not inherit NoNewPrivileges');
-  assert.ok(args.includes('AGENTOC_RUNNER_ACCESS_DIR=/srv/custom-access-state'), 'cleanup must use the configured state store');
+  assert.ok(args.includes('RAGENT_RUNNER_ACCESS_DIR=/srv/custom-access-state'), 'cleanup must use the configured state store');
   assert.equal(args.includes('NoNewPrivileges=true'), false, 'provider Runs must not set NoNewPrivileges=true');
   const protectedArgs = buildLifecycleSystemdArgs('run_abc12345', { scopeProtection: true });
   assert.ok(protectedArgs.includes('NoNewPrivileges=true'), 'privileged scope cannot gain OS privileges');
@@ -167,35 +167,35 @@ try {
   assert.ok(setenvValues.includes('XAUTHORITY=/run/user/1000/gdm/Xauthority'), 'XAUTHORITY is explicitly passed to the runner');
   assert.ok(setenvValues.includes('XDG_RUNTIME_DIR=/run/user/1000'), 'XDG_RUNTIME_DIR is explicitly passed to the runner');
   assert.ok(
-    setenvValues.includes('AGENTOC_RUN_SPOOL_DIR=/var/lib/agentoc/config/chat-runs'),
+    setenvValues.includes('RAGENT_RUN_SPOOL_DIR=/var/lib/ragent/config/chat-runs'),
     'the controlled spool channel must be passed to the runner',
   );
   assert.ok(
-    setenvValues.includes('AGENTOC_NATIVE_OAUTH_LOCK_PATH=/var/lib/agentoc/provider-homes/by-provider/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/.agentoc-native-oauth.lock'),
+    setenvValues.includes('RAGENT_NATIVE_OAUTH_LOCK_PATH=/var/lib/ragent/provider-homes/by-provider/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/.ragent-native-oauth.lock'),
     'the native OAuth lock path must be passed to the runner',
   );
   assert.ok(
-    setenvValues.includes('AGENTOC_NATIVE_OAUTH_LOCK_TOKEN=test-oauth-lock-token'),
+    setenvValues.includes('RAGENT_NATIVE_OAUTH_LOCK_TOKEN=test-oauth-lock-token'),
     'the native OAuth lock handoff token must be passed to the runner',
   );
   assert.ok(
-    setenvValues.every((value) => !value.startsWith('AGENTOC_CONFIG_DIR=')),
-    'AGENTOC_CONFIG_DIR must never be passed to a Run',
+    setenvValues.every((value) => !value.startsWith('RAGENT_CONFIG_DIR=')),
+    'RAGENT_CONFIG_DIR must never be passed to a Run',
   );
   assert.ok(
-    setenvValues.every((value) => !value.startsWith('AGENTOC_INSTANCE_ROOT=')),
-    'AGENTOC_INSTANCE_ROOT must never be passed to a Run',
+    setenvValues.every((value) => !value.startsWith('RAGENT_INSTANCE_ROOT=')),
+    'RAGENT_INSTANCE_ROOT must never be passed to a Run',
   );
   assert.ok(
-    setenvValues.every((value) => !value.startsWith('AGENTOC_MEMORY_DIR=')),
-    'AGENTOC_MEMORY_DIR must never be passed to a Run',
+    setenvValues.every((value) => !value.startsWith('RAGENT_MEMORY_DIR=')),
+    'RAGENT_MEMORY_DIR must never be passed to a Run',
   );
   assert.ok(
-    setenvValues.every((value) => !value.startsWith('AGENTOC_WORK_ROOT_DIR=')),
-    'production AGENTOC_WORK_ROOT_DIR must never be passed to a Run',
+    setenvValues.every((value) => !value.startsWith('RAGENT_WORK_ROOT_DIR=')),
+    'production RAGENT_WORK_ROOT_DIR must never be passed to a Run',
   );
   assert.ok(
-    setenvValues.every((value) => !value.startsWith('AGENTOC_RUNNER_LIFECYCLE_SOCKET=')),
+    setenvValues.every((value) => !value.startsWith('RAGENT_RUNNER_LIFECYCLE_SOCKET=')),
     'runner lifecycle socket must never be passed to a Run',
   );
   assert.ok(
@@ -207,7 +207,7 @@ try {
     socketPath,
   });
   assert.equal(launched.launchMode, DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE);
-  assert.equal(launched.unitName, 'agentoc-runner-run_abc12345');
+  assert.equal(launched.unitName, 'ragent-runner-run_abc12345');
   assert.equal(launches[0].runId, 'run_abc12345');
   assert.equal(launches[0].options.serviceUser, 'svc');
   assert.equal(launches[0].options.serviceGroup, 'svc');
@@ -245,18 +245,18 @@ try {
   });
 
   const ownershipCalls = [];
-  const resolveOptions = { file: '/runner', controlUserFile: '/control', environment: { AGENTOC_RUNNER_SAME_USER: '0' },
-    readFileImpl: async () => 'control\n', getentImpl: async () => ({ stdout: 'agentoc-runner:x:1234:1234::/tmp:/bin/false\n' }) };
-  assert.equal(await resolveRunnerUser(resolveOptions), 'agentoc-runner');
-  await assert.rejects(resolveRunnerUser({ ...resolveOptions, environment: { ...resolveOptions.environment, AGENTOC_RUNNER_USER: 'control' } }),
+  const resolveOptions = { file: '/runner', controlUserFile: '/control', environment: { RAGENT_RUNNER_SAME_USER: '0' },
+    readFileImpl: async () => 'control\n', getentImpl: async () => ({ stdout: 'ragent-runner:x:1234:1234::/tmp:/bin/false\n' }) };
+  assert.equal(await resolveRunnerUser(resolveOptions), 'ragent-runner');
+  await assert.rejects(resolveRunnerUser({ ...resolveOptions, environment: { ...resolveOptions.environment, RAGENT_RUNNER_USER: 'control' } }),
     { code: 'RUNNER_IDENTITY_INVALID' });
   await assert.rejects(resolveRunnerUser({ ...resolveOptions, getentImpl: async () => { throw new Error('missing'); } }),
     { code: 'RUNNER_IDENTITY_INVALID' });
   assert.deepEqual(
-    await resolveRunnerOwnership('agentoc-runner', 'agentoc-runners', {
+    await resolveRunnerOwnership('ragent-runner', 'ragent-runners', {
       getentImpl: async (command, args) => {
         ownershipCalls.push({ command, args });
-        return { stdout: args[0] === 'passwd' ? 'agentoc-runner:x:1234:1234::/var/lib/agentoc-run:/usr/sbin/nologin\n' : 'agentoc-runners:x:2345:\n' };
+        return { stdout: args[0] === 'passwd' ? 'ragent-runner:x:1234:1234::/var/lib/ragent-run:/usr/sbin/nologin\n' : 'ragent-runners:x:2345:\n' };
       },
     }),
     { uid: 1234, gid: 2345 },
@@ -266,7 +266,7 @@ try {
   const dropCalls = [];
   const dropOptions = {
     serviceUser: 'svc', serviceGroup: 'svc', serviceHome: '/home/svc', controlUser: 'svc',
-    environment: { AGENTOC_RUNNER_DROP_GROUPS: '1' },
+    environment: { RAGENT_RUNNER_DROP_GROUPS: '1' },
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }),
     isTrustedSetprivImpl: () => true,
     resolveRestrictedGroupsImpl: async () => new Set([0, 27]),
@@ -282,24 +282,24 @@ try {
   assert.ok(dropArgs.includes('/usr/bin/setpriv'));
   assert.ok(dropArgs.includes('--reuid'));
   assert.ok(!dropArgs.some(arg => arg.startsWith('SupplementaryGroups=')));
-  assert.ok(dropArgs.includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=0'));
+  assert.ok(dropArgs.includes('RAGENT_RUNNER_DISTINCT_IDENTITY=0'));
   dropCalls.length = 0;
   await launchLifecycleRunner('run_autodropfixture', { ...dropOptions,
-    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'1' },
+    environment:{ RAGENT_RUNNER_DROP_GROUPS:'auto', RAGENT_RUNNER_SAME_USER:'1' },
   });
   assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args.includes('/usr/bin/setpriv'));
   dropCalls.length = 0;
   await assert.rejects(launchLifecycleRunner('run_aliasedfixture', { ...dropOptions,
-    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    environment:{ RAGENT_RUNNER_DROP_GROUPS:'auto', RAGENT_RUNNER_SAME_USER:'0' },
     verifyRunnerSystemGroupsImpl:async () => {},
   }), { code: 'RUNNER_IDENTITY_INVALID' });
   await assert.rejects(launchLifecycleRunner('run_aliasreuse', { ...dropOptions,
-    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    environment:{ RAGENT_RUNNER_DROP_GROUPS:'auto', RAGENT_RUNNER_SAME_USER:'0' },
     verifyRunnerSystemGroupsImpl:async () => {},
     readUnitStateImpl:async () => ({loadState:'loaded', activeState:'active', pid:4321, user:'svc'}),
   }), { code: 'RUNNER_IDENTITY_INVALID' });
   await launchLifecycleRunner('run_autodedicated', { ...dropOptions, controlUser:'control',
-    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'auto', AGENTOC_RUNNER_SAME_USER:'0' },
+    environment:{ RAGENT_RUNNER_DROP_GROUPS:'auto', RAGENT_RUNNER_SAME_USER:'0' },
     resolveRunnerOwnershipImpl:async user => ({ uid:user === 'control' ? 1235 : 1234, gid:1234 }),
     grantExistingRunnerFilesImpl:async () => {},
     verifyRunnerSystemGroupsImpl:async () => {},
@@ -310,10 +310,10 @@ try {
   dropCalls.length = 0;
   await launchLifecycleRunner('run_distinctfixture', { ...dropOptions, controlUser:'control' });
   assert.ok(dropCalls.find(item => item.command === '/usr/bin/systemd-run').args
-    .includes('AGENTOC_RUNNER_DISTINCT_IDENTITY=1'));
+    .includes('RAGENT_RUNNER_DISTINCT_IDENTITY=1'));
   let migratedInputs = false;
   await launchLifecycleRunner('run_legacyfixture', { ...dropOptions, controlUser:'control',
-    environment:{ AGENTOC_RUNNER_DROP_GROUPS:'1', AGENTOC_RUNNER_SAME_USER:'0' },
+    environment:{ RAGENT_RUNNER_DROP_GROUPS:'1', RAGENT_RUNNER_SAME_USER:'0' },
     resolveRunnerOwnershipImpl:async user => ({ uid:user === 'control' ? 1235 : 1234, gid:1234 }),
     grantExistingRunnerFilesImpl:async (path, identities) => {
       migratedInputs = path.endsWith('/run_legacyfixture') && identities.controlUid === 1235 && identities.runnerUid === 1234;
@@ -330,7 +330,7 @@ try {
 
   const groupsFixture = (ids) => async (command, args) => {
     if (command === '/usr/bin/id') return { stdout: ids };
-    const known = { root: 0, sudo: 27, docker: 998, 'agentoc-privileged': 997 };
+    const known = { root: 0, sudo: 27, docker: 998, 'ragent-privileged': 997 };
     if (Object.hasOwn(known, args[1])) return { stdout: `${args[1]}:x:${known[args[1]]}:\n` };
     throw Object.assign(new Error('not found'), { code: 2 });
   };
@@ -349,7 +349,7 @@ try {
     execFileImpl: async () => { throw new Error('NSS unavailable'); },
   }), error => error.code === 'RUNNER_IDENTITY_INVALID');
 
-  await assert.rejects(() => readLifecycleSystemdUnitState('agentoc-runner-example', {
+  await assert.rejects(() => readLifecycleSystemdUnitState('ragent-runner-example', {
     execFileImpl: async () => { throw new Error('systemd unavailable'); },
   }), error => error.code === 'RUNNER_UNIT_STATUS_UNAVAILABLE');
   await assert.rejects(() => launchLifecycleRunner('run_unknownstate', {
@@ -378,11 +378,11 @@ try {
   // group, schedules a root ExecStopPost revoke, and gives the recursive ACL
   // cleanup headroom.
   const workspaceArgs = buildLifecycleSystemdArgs('run_abc12345', {
-    projectRoot: '/opt/agentoc/app',
-    runnerEntry: '/opt/agentoc/app/chat/runner-sidecar.mjs',
-    processExecPath: '/opt/agentoc/runtime/node',
-    serviceUser: 'agentoc-runner',
-    serviceGroup: 'agentoc-runners',
+    projectRoot: '/opt/ragent/app',
+    runnerEntry: '/opt/ragent/app/chat/runner-sidecar.mjs',
+    processExecPath: '/opt/ragent/runtime/node',
+    serviceUser: 'ragent-runner',
+    serviceGroup: 'ragent-runners',
     workspaceAccessGroup: 'aor-0123456789abcdef',
     runCwd: '/home/example',
     isCodexRun: true,
@@ -403,23 +403,23 @@ try {
     'ExecStopPost schedules the root revoke for the exact run',
   );
   assert.ok(
-    workspaceArgs.some((value) => value.startsWith('ExecStopPost=+') && value.includes('"/opt/agentoc/runtime/node"')),
+    workspaceArgs.some((value) => value.startsWith('ExecStopPost=+') && value.includes('"/opt/ragent/runtime/node"')),
     'the node runtime path is quoted for systemd argv parsing',
   );
 
   const externalOAuthWorkspaceArgs = buildLifecycleSystemdArgs('run_abc12345', {
-    projectRoot: '/opt/agentoc/app',
-    runnerEntry: '/opt/agentoc/app/chat/runner-sidecar.mjs',
-    processExecPath: '/opt/agentoc/runtime/node',
-    serviceUser: 'agentoc-runner',
-    serviceGroup: 'agentoc-runners',
+    projectRoot: '/opt/ragent/app',
+    runnerEntry: '/opt/ragent/app/chat/runner-sidecar.mjs',
+    processExecPath: '/opt/ragent/runtime/node',
+    serviceUser: 'ragent-runner',
+    serviceGroup: 'ragent-runners',
     runCwd: '/home/example',
     isCodexRun: true,
     environment: {
       PATH: '/bin',
       HOME: '/home/runner',
       LANG: 'C.UTF-8',
-      AGENTOC_CODEX_HOME_DIR: '/home/example/.codex',
+      RAGENT_CODEX_HOME_DIR: '/home/example/.codex',
     },
   });
   assert.equal(
@@ -461,7 +461,7 @@ try {
     controlUser: 'owner',
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
-    environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
+    environment: { RAGENT_RUNNER_INHERITED_GROUPS: 'owner sudo docker ragent-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' }, workspaceRoot: { realPath: '/srv/work' } },
     }),
@@ -485,7 +485,7 @@ try {
     controlUser: 'owner',
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
-    environment: { AGENTOC_RUNNER_INHERITED_GROUPS: 'owner sudo docker agentoc-privileged' },
+    environment: { RAGENT_RUNNER_INHERITED_GROUPS: 'owner sudo docker ragent-privileged' },
     readManifestImpl: async () => ({
       executionScope: { cwd: { realPath: '/srv/work/app' } },
     }),
@@ -511,9 +511,9 @@ try {
     serviceHome: '/home/svc',
     controlUser: 'owner',
     environment: {
-      AGENTOC_PROVIDER_HOMES_DIR: agyProviderHomesRoot,
-      AGENTOC_RUN_SPOOL_DIR: join(root, 'run-results'),
-      AGENTOC_RUNNER_INHERITED_GROUPS: 'owner',
+      RAGENT_PROVIDER_HOMES_DIR: agyProviderHomesRoot,
+      RAGENT_RUN_SPOOL_DIR: join(root, 'run-results'),
+      RAGENT_RUNNER_INHERITED_GROUPS: 'owner',
     },
     resolveRunnerOwnershipImpl: async () => ({ uid: 1234, gid: 1234 }), verifyRunnerSystemGroupsImpl: async () => {},
     readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
@@ -616,7 +616,7 @@ try {
   });
   assert.equal(reused.reused, true);
   assert.equal(reused.pid, 45678);
-  assert.equal(reused.unitName, 'agentoc-runner-run_reuse12345-a1');
+  assert.equal(reused.unitName, 'ragent-runner-run_reuse12345-a1');
   assert.equal(reused.launchAttempt, 1);
   for (const user of ['root', '']) {
     await assert.rejects(() => launchLifecycleRunner('run_reusebad', {

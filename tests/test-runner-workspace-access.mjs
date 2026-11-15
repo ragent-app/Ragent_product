@@ -15,7 +15,7 @@ import {
   validateWorkspaceScope,
 } from '../scripts/runner-workspace-access.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-runner-access-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-runner-access-'));
 const workspace = join(root, 'workspace');
 const sub = join(workspace, 'sub');
 await mkdir(sub, { recursive: true });
@@ -72,12 +72,12 @@ try {
   // Protected control-plane subtrees must never receive a temporary group ACL.
   const fakeStats = async () => ({ isDirectory: () => true });
   for (const protectedPath of [
-    '/var/lib/agentoc/config',
-    '/var/lib/agentoc/memory',
-    '/var/lib/agentoc/retired',
-    '/opt/agentoc/app',
-    '/etc/agentoc',
-    '/var/log/agentoc',
+    '/var/lib/ragent/config',
+    '/var/lib/ragent/memory',
+    '/var/lib/ragent/retired',
+    '/opt/ragent/app',
+    '/etc/ragent',
+    '/var/log/ragent',
   ]) {
     await assert.rejects(
       () => validateWorkspaceScope({
@@ -95,7 +95,7 @@ try {
     '/home/example/.ssh/project',
     '/home/example/.gnupg',
     '/home/example/.aws',
-    '/home/example/.config/agentoc',
+    '/home/example/.config/ragent',
     '/home/example/.config/claude',
   ]) {
     await assert.rejects(
@@ -121,7 +121,7 @@ try {
   await assert.rejects(
     () => validateWorkspaceScope({
       cwd: '/tmp/escapes',
-      workspaceRoot: '/var/lib/agentoc/workspace',
+      workspaceRoot: '/var/lib/ragent/workspace',
       realpathImpl: async (p) => p,
       statImpl: fakeStats,
     }),

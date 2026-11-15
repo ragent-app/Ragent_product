@@ -145,7 +145,7 @@ function Test-SafeContextExpansion($node) {
   if (-not $outputExpression -and -not $outputCommand) { return $false }
   foreach ($part in @($node.NestedExpressions)) {
     if ($part -isnot [System.Management.Automation.Language.VariableExpressionAst] -or $part.Splatted -or
-        [string]$part.VariablePath.UserPath -inotmatch '^env:(?:AGENTOC|RAGENT)_(?:CHAT_BASE_URL|PROJECT_ROOT|SESSION_ID)$') { return $false }
+        [string]$part.VariablePath.UserPath -inotmatch '^env:(?:RAGENT|RAGENT)_(?:CHAT_BASE_URL|PROJECT_ROOT|SESSION_ID)$') { return $false }
   }
   return $true
 }

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="Ragent Legacy SYSTEM Preview (not for distribution)" Manufacturer="Ragent" Version="$(var.MsiProductVersion)" UpgradeCode="2D1D9C6B-5BA7-4C70-9A7A-7E7A55E3A001" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer Ragent version is already installed." AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="RagentIcon" SourceFile="!(bindpath.BrandAsset)\ragent.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RagentIcon" />
+    <Property Id="RAGENT_INSTALLFOLDER" Secure="yes" />
+    <Property Id="RAGENT_LAUNCH" Secure="yes" />
+    <CustomAction Id="SetSelectedInstallFolder" Directory="INSTALLFOLDER" Value="[RAGENT_INSTALLFOLDER]" />
+    <CustomAction Id="SetRagentLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" />
+    <CustomAction Id="LaunchRagent" BinaryRef="Wix4UtilCA_X64" DllEntry="WixUnelevatedShellExec" Execute="immediate" Return="ignore" />
+    <util:CloseApplication Id="CloseRagentManager" Target="Ragent.exe" CloseMessage="yes" PromptToContinue="yes" Description="Ragent is still open. Close it to continue setup or removal." Timeout="15" />
+    <UI>
+      <EmbeddedUI Id="RagentMsiEmbeddedUI" SourceFile="!(bindpath.InstallUi)\Ragent.MsiEmbeddedUI.dll" SupportBasicUI="yes">
+        <EmbeddedUIResource Id="RagentEmbeddedLogo" Name="ragent-android-logo.png" SourceFile="!(bindpath.InstallUi)\ragent-android-logo.png" />
+        <EmbeddedUIResource Id="RagentEmbeddedIcon" Name="ragent.ico" SourceFile="!(bindpath.InstallUi)\ragent.ico" />
+        <?if $(var.IncludeMingwUiRuntime) = 1 ?>
+          <EmbeddedUIResource Id="RagentMingwThreadRuntime" Name="libwinpthread-1.dll" SourceFile="!(bindpath.InstallUi)\libwinpthread-1.dll" />
+        <?endif ?>
+      </EmbeddedUI>
+    </UI>
+    <Binary Id="LegacyOwnerInstallGuard" SourceFile="!(bindpath.OwnerInstallGuard)\Ragent.LegacyOwnerInstallGuard.exe" />
+    <CustomAction Id="CheckLegacyOwnerInstallation" BinaryRef="LegacyOwnerInstallGuard" ExeCommand="" Execute="immediate" Return="check" />
+    <InstallExecuteSequence>
+      <!-- Unconditional: install, repair, upgrade, remove and silent execution. -->
+      <Custom Action="SetSelectedInstallFolder" After="CostFinalize" Condition="RAGENT_INSTALLFOLDER AND NOT (REMOVE = &quot;ALL&quot;)" />
+      <Custom Action="CheckLegacyOwnerInstallation" Before="InstallValidate" />
+      <Custom Action="SetRagentLaunchTarget" After="InstallFinalize" Condition="RAGENT_LAUNCH = &quot;1&quot; AND NOT Installed" />
+      <Custom Action="LaunchRagent" After="SetRagentLaunchTarget" Condition="RAGENT_LAUNCH = &quot;1&quot; AND NOT Installed" />
+    </InstallExecuteSequence>
+    <Feature Id="Main" Title="Ragent" Level="1">
+      <ComponentRef Id="ServiceHostComponent" />
+      <ComponentGroupRef Id="PayloadGroup" />
+      <ComponentRef Id="InstallScriptComponent" />
+      <ComponentRef Id="LegacyOwnerGuardScriptComponent" />
+      <ComponentRef Id="LegacyOwnerGuardSourceComponent" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </Feature>
+  </Package>
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Ragent" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Ragent" />
+    </StandardDirectory>
+    <Component Id="StartMenuShortcutComponent" Directory="ApplicationProgramsFolder" Guid="*">
+      <Shortcut Id="RagentStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\Ragent.exe" WorkingDirectory="INSTALLFOLDER" Icon="RagentIcon" IconIndex="0" Advertise="no" />
+      <RemoveFolder Id="RemoveRagentProgramMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Ragent\DesktopManager" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="ServiceHostComponent" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="ServiceHost" Source="!(bindpath.ServiceHost)\Ragent.ServiceHost.exe" KeyPath="yes" />
+      <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\Ragent">
+        <RegistryValue Name="EventMessageFile" Type="string" Value="[System64Folder]EventCreate.exe" />
+        <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
+      </RegistryKey>
+      <ServiceInstall Id="ControlPlaneService" Name="Ragent-ControlPlane" DisplayName="Ragent Control Plane" Type="ownProcess" Start="auto" ErrorControl="normal" Arguments="--role control --config-dir &quot;[CommonAppDataFolder]Ragent\instances\owner\config&quot; --instance-root &quot;[CommonAppDataFolder]Ragent\instances\owner&quot;">
+        <ServiceDependency Id="Ragent-RunnerSupervisor" />
+      </ServiceInstall>
+      <ServiceInstall Id="RunnerSupervisorService" Name="Ragent-RunnerSupervisor" DisplayName="Ragent Runner Supervisor" Type="ownProcess" Start="auto" ErrorControl="normal" Arguments="--role supervisor --config-dir &quot;[CommonAppDataFolder]Ragent\instances\owner\executor\config&quot; --instance-root &quot;[CommonAppDataFolder]Ragent\instances\owner&quot;" />
+      <ServiceControl Id="RunnerSupervisorServiceControl" Name="Ragent-RunnerSupervisor" Start="install" Stop="both" Remove="uninstall" />
+      <ServiceControl Id="ControlPlaneServiceControl" Name="Ragent-ControlPlane" Start="install" Stop="both" Remove="uninstall" />
+    </Component>
+    <Component Id="InstallScriptComponent" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="InstallScript" Source="!(bindpath.InstallScript)\install-ragent.ps1" KeyPath="yes" />
+    </Component>
+    <Component Id="LegacyOwnerGuardScriptComponent" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="LegacyOwnerGuardScript" Source="!(bindpath.InstallScript)\assert-legacy-owner-install.ps1" KeyPath="yes" />
+    </Component>
+    <Component Id="LegacyOwnerGuardSourceComponent" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="LegacyOwnerGuardSource" Source="!(bindpath.InstallScript)\legacy-owner-install-guard.cs" KeyPath="yes" />
+    </Component>
+  </Fragment>
+</Wix>

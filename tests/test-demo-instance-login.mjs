@@ -16,7 +16,7 @@ for(let i=0;i<2;i++){
  const key=generateKeyPairSync('ed25519');const publicKey=key.publicKey.export({type:'spki',format:'pem'}).toString();
  const instance={instanceId:'inst_password_fixture_'+i,algorithm:'ed25519',publicKey,keyFingerprint:createInstancePublicKeyFingerprint(publicKey)};
  const transactionId='tx_password_fixture_'+i,returnUrl='https://instance.example.test/api/auth/google/complete?tx='+transactionId;
- const proof={instance,transactionId,purpose:'bind',returnUrl,issuedAt:new Date().toISOString(),audience:'agentoc-owner-auth'};
+ const proof={instance,transactionId,purpose:'bind',returnUrl,issuedAt:new Date().toISOString(),audience:'ragent-owner-auth'};
  proof.signature=sign(null,Buffer.from(buildInstanceProofMessage({...proof,instanceId:instance.instanceId})),key.privateKey).toString('base64url');
  const started=await broker.start(proof);
  const {desktopState}=deriveDesktopReplayValues({transactionId,bootstrap:started.bootstrap});const phoneState='phone_fixture_state_'+i;
@@ -44,7 +44,7 @@ assert.doesNotThrow(()=>restricted.assertAccount(state,policy.accountId));
  const instance={instanceId:'inst_existing_owner_fixture',algorithm:'ed25519',publicKey,keyFingerprint:createInstancePublicKeyFingerprint(publicKey)};
  const transactionId='tx_existing_owner_fixture',returnUrl='https://instance.example.test/api/auth/google/complete?tx='+transactionId;
  state.instanceBindings.push({instanceId:instance.instanceId,accountId:'acct_google_existing',provider:'google'});
- const proof={instance,transactionId,purpose:'bind',returnUrl,issuedAt:new Date().toISOString(),audience:'agentoc-owner-auth'};
+ const proof={instance,transactionId,purpose:'bind',returnUrl,issuedAt:new Date().toISOString(),audience:'ragent-owner-auth'};
  proof.signature=sign(null,Buffer.from(buildInstanceProofMessage({...proof,instanceId:instance.instanceId})),key.privateKey).toString('base64url');
  const started=await broker.start(proof);
  const {desktopState}=deriveDesktopReplayValues({transactionId,bootstrap:started.bootstrap});

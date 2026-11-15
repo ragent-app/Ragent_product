@@ -56,7 +56,7 @@ export async function serviceProviderProbe(root, role, spec) {
       assert.equal(preflight.pass, true);
       const request = await get(peer, prefix + 'policy.json');
       const receiver = validate(request), binding = receiver.binding;
-      const nativePolicy = { pipeName: 'agentoc-run-candidate-' + randomBytes(16).toString('hex'),
+      const nativePolicy = { pipeName: 'ragent-run-candidate-' + randomBytes(16).toString('hex'),
         expiresAtUnixMs: binding.expiresAtUnixMs, binding: { ...binding, capability: request.policy.capability },
         localSid: spec.executorSid, localSessionId: 0, peerSid: spec.controlSid, peerSessionId: 0, permitVirtualPeerQuery: true };
       bridge = endpoint(join(root, 'runtime/RunPipeCandidate.exe'), 'server', { timeoutMs: 110000 });

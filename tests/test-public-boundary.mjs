@@ -23,7 +23,7 @@ const paths = [
   'notes/private.md',
   'service/credentials.p12',
   'android/app/build/outputs/app.apk',
-  'bin/agentoc-p2p-host-amd64',
+  'bin/ragent-p2p-host-amd64',
   'bin/ragent-p2p-host',
   '.env.production',
   'turn-broker-signing-key.json',

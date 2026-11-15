@@ -32,7 +32,7 @@ func TestServiceSIDVerificationAcceptsPrimaryToken(t *testing.T) {
 }
 
 func TestInstalledBrokerServerIdentity(t *testing.T) {
-	if os.Getenv("AGENTOC_TEST_INSTALLED_BROKER_IDENTITY") != "1" {
+	if os.Getenv("RAGENT_TEST_INSTALLED_BROKER_IDENTITY") != "1" {
 		t.Skip("requires the local installed broker and an elevated test process")
 	}
 	name, err := windows.UTF16PtrFromString(adminPipeName)

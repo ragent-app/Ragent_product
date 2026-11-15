@@ -8,12 +8,12 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const testedRoot = process.env.AGENTOC_ACCOUNTS_TEST_RELEASE_ROOT || repoRoot;
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-auth-routes-'));
+const testedRoot = process.env.RAGENT_ACCOUNTS_TEST_RELEASE_ROOT || repoRoot;
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-auth-routes-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const { createOwnerAuthBroker } = await import(pathToFileURL(join(testedRoot, 'accounts', 'owner-auth-broker.mjs')).href);
 const { handleOwnerAuthRoutes } = await import(pathToFileURL(join(testedRoot, 'accounts', 'owner-auth-routes.mjs')).href);
@@ -78,12 +78,12 @@ function request(port, method, path, body, headers = {}) {
 function transactionProof({ transactionId, returnUrl, purpose = 'bind' }) {
   const issuedAt = new Date().toISOString();
   const signature = signInstanceProof(identity, {
-    transactionId, purpose, returnUrl, issuedAt, audience: 'agentoc-owner-auth',
+    transactionId, purpose, returnUrl, issuedAt, audience: 'ragent-owner-auth',
   });
   return {
     transactionId, purpose, returnUrl,
     instance: publicInstanceIdentity(identity),
-    issuedAt, audience: 'agentoc-owner-auth', signature: signature.signature,
+    issuedAt, audience: 'ragent-owner-auth', signature: signature.signature,
   };
 }
 
@@ -129,8 +129,8 @@ try {
     && page.headers['cache-control']?.includes('no-store')
     && page.headers['x-frame-options'] === 'DENY'
     && !page.text.includes(started.json.bootstrap || 'not-returned'));
-  check('电脑页有独立 state cookie、二维码和显式手机链接按钮', /^agentoc_owner_broker_state_[a-f0-9]{24}=/.test(desktopCookie)
-    && /^agentoc_owner_broker_csrf_[a-f0-9]{24}=/.test(desktopCsrfCookie)
+  check('电脑页有独立 state cookie、二维码和显式手机链接按钮', /^ragent_owner_broker_state_[a-f0-9]{24}=/.test(desktopCookie)
+    && /^ragent_owner_broker_csrf_[a-f0-9]{24}=/.test(desktopCsrfCookie)
     && page.text.includes('手机就在此页？直接继续登录')
     && page.text.includes('QrCreator'));
 
@@ -155,14 +155,14 @@ try {
     [...page.headers['set-cookie'], ...phonePage.headers['set-cookie']].every((cookie) =>
       cookie.includes('Max-Age=900') && cookie.includes('Secure') && cookie.includes('SameSite=Lax')));
   check('手机链接打开受控 GIS 页面并设置独立 phone state', phonePage.status === 200
-    && /^agentoc_owner_broker_phone_state_[a-f0-9]{24}=/.test(phoneCookie)
-    && /^agentoc_owner_broker_phone_csrf_[a-f0-9]{24}=/.test(phoneCsrfCookie)
+    && /^ragent_owner_broker_phone_state_[a-f0-9]{24}=/.test(phoneCookie)
+    && /^ragent_owner_broker_phone_csrf_[a-f0-9]{24}=/.test(phoneCsrfCookie)
     && phonePage.text.includes('google-web-client-id.apps.googleusercontent.com')
     && phonePage.text.includes('id="google-gsi-client"')
     && phonePage.text.indexOf('id="google-gsi-client"') < phonePage.text.indexOf('addEventListener(\'load\', initialize')
     && phonePage.text.includes("addEventListener('load', initialize")
     && phonePage.text.includes('  initialize();')
-    && !phonePage.text.includes('onload="window.agentocGoogleIdentityReady'));
+    && !phonePage.text.includes('onload="window.ragentGoogleIdentityReady'));
   check('GIS 失败页保留稳定 Accounts 拒绝码', phonePage.text.includes('owner_auth_account_invalid')
     && phonePage.text.includes('owner_auth_csrf_invalid')
     && phonePage.text.includes('credentialErrorMessage'));
@@ -200,7 +200,7 @@ try {
     {
       cookie: `${phoneCookie}; ${phoneCsrfCookie}`,
       origin: `http://127.0.0.1:${port}`,
-      'x-agentoc-csrf': phoneCsrfCookie.split('=').slice(1).join('='),
+      'x-ragent-csrf': phoneCsrfCookie.split('=').slice(1).join('='),
     },
   );
   check('手机完成 GIS credential 后不返回 grant，只显示完成页', credential.status === 200
@@ -237,14 +237,14 @@ try {
     transactionId: 'op_route_identity_1',
     purpose: 'publish-identity',
     issuedAt: identityIssuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
   });
   const identityPublished = await request(port, 'POST', '/accounts/v1/owner-auth/devices/acct_owner_1/identity', {
     transactionId: 'op_route_identity_1',
     purpose: 'publish-identity',
     instance: publicInstanceIdentity(identity),
     issuedAt: identityIssuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
     signature: identityProof.signature,
   });
   check('实例身份发布路由不要求公网 endpoint', identityPublished.status === 200
@@ -287,11 +287,11 @@ try {
   const pollStartProof = (() => {
     const issuedAt = new Date().toISOString();
     const signature = signInstanceProof(identity, {
-      transactionId: pollTx, purpose: 'bind', returnUrl: '', issuedAt, audience: 'agentoc-owner-auth-poll',
+      transactionId: pollTx, purpose: 'bind', returnUrl: '', issuedAt, audience: 'ragent-owner-auth-poll',
     });
     return {
       transactionId: pollTx, purpose: 'bind', deliveryMode: 'instance_poll',
-      instance: publicInstanceIdentity(identity), issuedAt, audience: 'agentoc-owner-auth-poll',
+      instance: publicInstanceIdentity(identity), issuedAt, audience: 'ragent-owner-auth-poll',
       signature: signature.signature,
     };
   })();
@@ -317,7 +317,7 @@ try {
   }, {
     cookie: `${pollPhoneCookie}; ${pollPhoneCsrf}`,
     origin: `http://127.0.0.1:${port}`,
-    'x-agentoc-csrf': pollPhoneCsrf.split('=').slice(1).join('='),
+    'x-ragent-csrf': pollPhoneCsrf.split('=').slice(1).join('='),
   });
   check('poll 模式手机仍可完成 GIS credential', pollCredential.status === 200 && !pollCredential.text.includes('google-id-token'));
 
@@ -339,7 +339,7 @@ try {
     return {
       requestId, purpose: 'bind', deliveryMode: 'instance_poll',
       instance: publicInstanceIdentity(identity), issuedAt,
-      audience: 'agentoc-owner-auth-poll', signature: signature.signature,
+      audience: 'ragent-owner-auth-poll', signature: signature.signature,
     };
   }
   const pollRedeemed = await request(port, 'POST', pollRedeemPath, pollProof());
@@ -360,7 +360,7 @@ try {
     return {
       requestId: 'opll_cb_1', purpose: 'bind', deliveryMode: 'instance_poll',
       instance: publicInstanceIdentity(identity), issuedAt,
-      audience: 'agentoc-owner-auth-poll', signature: signature.signature,
+      audience: 'ragent-owner-auth-poll', signature: signature.signature,
     };
   })());
   check('callback 事务访问 instance-redeem 被 delivery mode 拒绝', callbackBlocked.status === 409
@@ -377,7 +377,7 @@ try {
       transactionId: connectionId,
       purpose,
       issuedAt,
-      audience: 'agentoc-owner-auth-device',
+      audience: 'ragent-owner-auth-device',
     });
     return {
       requestId: connectionId,
@@ -387,7 +387,7 @@ try {
       connectionId,
       instance: publicInstanceIdentity(identity),
       issuedAt,
-      audience: 'agentoc-owner-auth-device',
+      audience: 'ragent-owner-auth-device',
       signature: signature.signature,
     };
   }
@@ -411,7 +411,7 @@ try {
   function fileQuotaProof(operation, requestId, quotaBatchId, sizeBytes, sha256) {
     const issuedAt = new Date().toISOString();
     const fields = { accountId: 'acct_owner_1', operation, requestId, quotaBatchId, sizeBytes, sha256,
-      issuedAt, audience: 'agentoc-account-file-upload' };
+      issuedAt, audience: 'ragent-account-file-upload' };
     const signature = signAccountFileUploadQuotaProof(identity, fields);
     return { ...fields, instance: publicInstanceIdentity(identity), signature: signature.signature };
   }

@@ -1,6 +1,6 @@
-{"type":"system","subtype":"init","cwd":"/home/example/agentoc-dev","session_id":"sess-ordinary-1","tools":["Task","Bash","Read"]}
+{"type":"system","subtype":"init","cwd":"/home/example/ragent-dev","session_id":"sess-ordinary-1","tools":["Task","Bash","Read"]}
 {"type":"assistant","timestamp":2001,"message":{"content":[{"type":"tool_use","id":"call_bash_ordinary","name":"Bash","input":{"command":"pwd && git branch --show-current","description":"Confirm delegated session worktree"}}]}}
-{"type":"user","timestamp":2002,"message":{"content":[{"type":"tool_result","tool_use_id":"call_bash_ordinary","content":"/home/example/agentoc-dev\nmain"}]}}
-{"type":"assistant","timestamp":2003,"message":{"content":[{"type":"tool_use","id":"call_read_ordinary","name":"Read","input":{"file_path":"/home/example/agentoc-dev/README.md"}}]}}
+{"type":"user","timestamp":2002,"message":{"content":[{"type":"tool_result","tool_use_id":"call_bash_ordinary","content":"/home/example/ragent-dev\nmain"}]}}
+{"type":"assistant","timestamp":2003,"message":{"content":[{"type":"tool_use","id":"call_read_ordinary","name":"Read","input":{"file_path":"/home/example/ragent-dev/README.md"}}]}}
 {"type":"user","timestamp":2004,"message":{"content":[{"type":"tool_result","tool_use_id":"call_read_ordinary","is_error":true,"content":"File not found"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"ordinary tool roundtrip completed without delegation"}

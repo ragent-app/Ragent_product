@@ -9,7 +9,7 @@ import { ensureLinuxRunCancelIntentStore, hasLinuxRunCancelIntent } from './linu
 import { persistLinuxRunControlBinding } from './linux-run-control-binding.mjs';
 
 export async function issueLinuxRunScopeGrant(runId, launchAttempt, {
-  enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1', platform = process.platform,
+  enabled = process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1', platform = process.platform,
   readBoundary = assertRunLaunchBoundary, loadKeys = loadOrCreatePrivilegedSigningKeys,
   getKey = getActivePrivilegedSigningKey, ensureIntentStore = ensureLinuxRunCancelIntentStore,
   hasIntent = hasLinuxRunCancelIntent, persistBinding = persistLinuxRunControlBinding, resultChannel = 'legacy',

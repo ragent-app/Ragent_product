@@ -38,7 +38,7 @@ export function createCopilotAdapter() {
           events.push(statusEvent('completed'));
           break;
 
-        case 'agentoc.context_metrics':
+        case 'ragent.context_metrics':
           events.push(usageEvent({
             contextTokens: obj.contextTokens,
             inputTokens: obj.inputTokens,
@@ -231,11 +231,11 @@ function itemIdentityFields(item, kind) {
     : { providerToolUseId: providerItemId };
 }
 
-const COPILOT_SYSTEM_PREFIX = process.env.AGENTOC_COPILOT_SYSTEM_PREFIX || '';
-const COPILOT_DEVELOPER_INSTRUCTIONS = process.env.AGENTOC_COPILOT_DEVELOPER_INSTRUCTIONS || '';
+const COPILOT_SYSTEM_PREFIX = process.env.RAGENT_COPILOT_SYSTEM_PREFIX || '';
+const COPILOT_DEVELOPER_INSTRUCTIONS = process.env.RAGENT_COPILOT_DEVELOPER_INSTRUCTIONS || '';
 const HAS_COPILOT_DEVELOPER_INSTRUCTIONS_ENV = Object.prototype.hasOwnProperty.call(
   process.env,
-  'AGENTOC_COPILOT_DEVELOPER_INSTRUCTIONS',
+  'RAGENT_COPILOT_DEVELOPER_INSTRUCTIONS',
 );
 
 function resolveCopilotDeveloperInstructions(options = {}) {

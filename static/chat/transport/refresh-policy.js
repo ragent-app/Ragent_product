@@ -7,11 +7,11 @@
 // the legacy file reads from its shared scope (load state, navigation state,
 // current session id, refresh timestamps, archive-section expansion) are
 // injected via the environment contract
-// (root.AgentocRefreshPolicyEnvironment), so this module stays free of
+// (root.RagentRefreshPolicyEnvironment), so this module stays free of
 // browser globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-refresh-policy-core.mjs.
 
-(function attachAgentocRefreshPolicyCore(root) {
+(function attachRagentRefreshPolicyCore(root) {
   const FOREGROUND_SESSION_LIST_STALE_MS = 15000;
   const FOREGROUND_IDLE_SESSION_STALE_MS = 15000;
 
@@ -39,7 +39,7 @@
     getTimelineRuntimeSnapshot: null,
   });
   const environment = new Proxy(
-    root.AgentocRefreshPolicyEnvironment || {},
+    root.RagentRefreshPolicyEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -152,7 +152,7 @@
     return isRefreshStale(environment.lastCurrentSessionRefreshAt, FOREGROUND_IDLE_SESSION_STALE_MS);
   }
 
-  root.AgentocRefreshPolicyCore = {
+  root.RagentRefreshPolicyCore = {
     normalizeSessionViewportIntent,
     mergeSessionRefreshOptions,
     isRefreshStale,

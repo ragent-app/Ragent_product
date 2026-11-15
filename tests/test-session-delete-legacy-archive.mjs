@@ -4,11 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const home = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-delete-legacy-'));
+const home = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-delete-legacy-'));
 process.env.HOME = home;
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
 
-const configDir = path.join(home, '.config', 'agentoc');
+const configDir = path.join(home, '.config', 'ragent');
 const sessionId = 'session_legacy_archived';
 const runId = 'run_legacy_archived';
 const now = new Date().toISOString();

@@ -12,16 +12,16 @@ function Get-OwnerServicePreparationPlan {
   # contains whitespace. Match its SCM representation exactly: an unquoted
   # executable without whitespace is unambiguous, while one with whitespace
   # must remain quoted.
-  $executable=Join-Path $product 'AgentoC.ServiceHost.exe'
+  $executable=Join-Path $product 'Ragent.ServiceHost.exe'
   $serviceBinary=if($executable -match '\s'){'"'+$executable+'"'}else{$executable}
   $programData=[Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)
   if(-not $programData -or -not [IO.Path]::IsPathRooted($programData)){throw 'OSP_PROGRAMDATA_UNAVAILABLE'}
-  $instanceRoot=Join-Path $programData 'AgentoC\instances\owner'
+  $instanceRoot=Join-Path $programData 'Ragent\instances\owner'
   foreach($role in @('supervisor','control')){
-    $name=if($role -eq 'control'){'AgentoC-ControlPlane'}else{'AgentoC-RunnerSupervisor'}
+    $name=if($role -eq 'control'){'Ragent-ControlPlane'}else{'Ragent-RunnerSupervisor'}
     $config=if($role -eq 'control'){Join-Path $instanceRoot 'config'}else{Join-Path $instanceRoot 'executor\config'}
     [pscustomobject]@{name=$name;account=('NT SERVICE\'+$name);startMode='Disabled';role=$role;
-      dependencies=@($(if($role -eq 'control'){'AgentoC-RunnerSupervisor'}));
+      dependencies=@($(if($role -eq 'control'){'Ragent-RunnerSupervisor'}));
       command=('{0} --role {1} --config-dir "{2}" --instance-root "{3}"' -f $serviceBinary,$role,$config,$instanceRoot)}
   }
 }
@@ -51,32 +51,32 @@ function Assert-OwnerServicePreparationFresh([switch]$OwnLock) {
 
 function Open-OwnerServicePreparationInputs([Collections.Generic.List[IDisposable]]$Pins){
   $allowed=@(Get-OwnerAdministrativeSids)
-  foreach($relative in @('AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')){
+  foreach($relative in @('Ragent.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')){
     $path=Join-Path $product $relative
     for($parent=[IO.Path]::GetDirectoryName($path);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){
-      $Pins.Add([AgentoCOwnerFilePin]::Directory($parent));if(-not (Test-ExternalProductAncestor $path $parent)){Assert-OwnerObjectAcl $parent $allowed -Ancestor -Pins $Pins}
+      $Pins.Add([RagentOwnerFilePin]::Directory($parent));if(-not (Test-ExternalProductAncestor $path $parent)){Assert-OwnerObjectAcl $parent $allowed -Ancestor -Pins $Pins}
     }
     $file=[IO.FileStream]::new($path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
-    $Pins.Add($file);[AgentoCOwnerFilePin]::Verify($file.SafeFileHandle,$path,$false);Assert-OwnerObjectAcl $path $allowed
+    $Pins.Add($file);[RagentOwnerFilePin]::Verify($file.SafeFileHandle,$path,$false);Assert-OwnerObjectAcl $path $allowed
     if($file.Length -lt 1 -or $file.Length -gt 157286400){throw 'OSP_INPUT_SIZE_INVALID'}
   }
 }
 
 function Initialize-OwnerServiceRegistrationType {
-  if('AgentoCOwnerServiceRegistration' -as [type]){return}
+  if('RagentOwnerServiceRegistration' -as [type]){return}
   Add-Type -TypeDefinition @'
 using System;using System.Runtime.InteropServices;using System.ComponentModel;
 // Handles have no SERVICE_START permission. Rollback uses the exact created
 // kernel objects, never a later name lookup that could adopt another service.
-public sealed class AgentoCOwnerServiceRegistration:IDisposable {
+public sealed class RagentOwnerServiceRegistration:IDisposable {
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr OpenSCManager(string machine,string database,uint access);
  [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern IntPtr CreateService(IntPtr manager,string name,string display,uint access,uint type,uint start,uint error,string command,string group,IntPtr tag,string dependencies,string account,string password);
  [DllImport("advapi32.dll",EntryPoint="ChangeServiceConfig2W",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool ChangeServiceConfig2(IntPtr service,uint level,IntPtr info);
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool DeleteService(IntPtr service);
  [DllImport("advapi32.dll")]static extern bool CloseServiceHandle(IntPtr handle);
  IntPtr service;bool removed;
- public AgentoCOwnerServiceRegistration(string name,string command,string dependency) {
-  if(name!="AgentoC-ControlPlane"&&name!="AgentoC-RunnerSupervisor")throw new InvalidOperationException("OSP_SERVICE_NAME_REFUSED");
+ public RagentOwnerServiceRegistration(string name,string command,string dependency) {
+  if(name!="Ragent-ControlPlane"&&name!="Ragent-RunnerSupervisor")throw new InvalidOperationException("OSP_SERVICE_NAME_REFUSED");
   var manager=OpenSCManager(null,null,2);if(manager==IntPtr.Zero)throw new InvalidOperationException("OSP_SCM_CREATE_DENIED");
   try{service=CreateService(manager,name,name,0x10007,0x10,4,1,command,null,IntPtr.Zero,dependency==null?null:dependency+"\0\0","NT SERVICE\\"+name,null);
    if(service==IntPtr.Zero)throw new InvalidOperationException("OSP_SERVICE_CREATE_FAILED");
@@ -112,10 +112,10 @@ if(-not $ownerServicesLibraryOnly){
     $lock.Write($bytes,0,$bytes.Length);$lock.Flush($true)
     Assert-OwnerServicePreparationFresh -OwnLock
     Initialize-OwnerServiceRegistrationType
-    $created=[Collections.Generic.List[AgentoCOwnerServiceRegistration]]::new()
+    $created=[Collections.Generic.List[RagentOwnerServiceRegistration]]::new()
     foreach($row in $plan){
-      $dependency=if($row.role -eq 'control'){'AgentoC-RunnerSupervisor'}else{$null}
-      $registration=[AgentoCOwnerServiceRegistration]::new($row.name,$row.command,$dependency)
+      $dependency=if($row.role -eq 'control'){'Ragent-RunnerSupervisor'}else{$null}
+      $registration=[RagentOwnerServiceRegistration]::new($row.name,$row.command,$dependency)
       $created.Add($registration);$registration.RestrictPrivileges()
     }
     foreach($row in $plan){

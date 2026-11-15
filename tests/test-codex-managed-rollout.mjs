@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, isAbsolute } from 'node:path';
 import { findManagedCodexRollout } from '../chat/codex-managed-rollout.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-rollout-test-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-rollout-test-'));
 const id = '01a1cd82-5bcf-7e81-829a-336311e43ce4';
 const name = `rollout-2026-11-12T10-00-00-${id}.jsonl`;
 const sessions = join(root, 'sessions', '2026', '11', '12');

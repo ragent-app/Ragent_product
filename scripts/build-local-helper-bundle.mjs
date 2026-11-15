@@ -23,7 +23,7 @@ function printHelp() {
 Options:
   --session <id>           Required Ragent session id
   --server-url <url>       Public base URL to embed into bootstrap
-  --output <path>          Output zip path (default: /tmp/agentoc-helper-mac-<session>.zip)
+  --output <path>          Output zip path (default: /tmp/ragent-helper-mac-<session>.zip)
   --help                   Show this help
 `);
 }
@@ -75,8 +75,8 @@ function buildStarterScript() {
   return `#!/bin/bash
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_DIR="$HOME/Library/Application Support/AgentoCHelper"
-LOG_DIR="$HOME/Library/Logs/AgentoCHelper"
+CONFIG_DIR="$HOME/Library/Application Support/RagentHelper"
+LOG_DIR="$HOME/Library/Logs/RagentHelper"
 PID_FILE="$CONFIG_DIR/helper.pid"
 BOOTSTRAP_SRC="$SELF_DIR/bootstrap.json"
 BIN_DIR="$CONFIG_DIR/bin"
@@ -90,8 +90,8 @@ if [[ -f "$PID_FILE" ]]; then
 fi
 ARCH="$(uname -m)"
 case "$ARCH" in
-  arm64) BUNDLE_BIN="$SELF_DIR/agentoc-helper-darwin-arm64"; MANAGED_BIN="$BIN_DIR/agentoc-helper-darwin-arm64" ;;
-  x86_64) BUNDLE_BIN="$SELF_DIR/agentoc-helper-darwin-amd64"; MANAGED_BIN="$BIN_DIR/agentoc-helper-darwin-amd64" ;;
+  arm64) BUNDLE_BIN="$SELF_DIR/ragent-helper-darwin-arm64"; MANAGED_BIN="$BIN_DIR/ragent-helper-darwin-arm64" ;;
+  x86_64) BUNDLE_BIN="$SELF_DIR/ragent-helper-darwin-amd64"; MANAGED_BIN="$BIN_DIR/ragent-helper-darwin-amd64" ;;
   *) echo "Unsupported Mac architecture: $ARCH"; exit 1 ;;
 esac
 mkdir -p "$BIN_DIR"
@@ -116,7 +116,7 @@ exit 0
 function buildStopScript() {
   return `#!/bin/bash
 set -euo pipefail
-CONFIG_DIR="$HOME/Library/Application Support/AgentoCHelper"
+CONFIG_DIR="$HOME/Library/Application Support/RagentHelper"
 PID_FILE="$CONFIG_DIR/helper.pid"
 if [[ -f "$PID_FILE" ]]; then
   PID="$(cat "$PID_FILE" 2>/dev/null || true)"
@@ -138,7 +138,7 @@ ${serverUrl}
 
 Recommended:
 1. Unzip this folder on your Mac.
-2. Double-click "Start AgentoC Helper.command".
+2. Double-click "Start Ragent Helper.command".
 3. If macOS blocks it the first time, right-click it and choose Open once.
 4. Return to the same Ragent session and continue there.
 
@@ -147,7 +147,7 @@ What happens after the first launch:
 - Future launches keep using the managed copy instead of the download folder.
 - The helper can later fetch newer binaries from Ragent without asking you to re-download the app manually.
 
-To stop the helper later, run "Stop AgentoC Helper.command".
+To stop the helper later, run "Stop Ragent Helper.command".
 `;
 }
 
@@ -167,7 +167,7 @@ async function main() {
   }
 
   const bootstrap = await createSessionLocalBridgeBootstrap(options.sessionId);
-  const bundleDir = resolve('/tmp', `agentoc-helper-mac-${options.sessionId}`);
+  const bundleDir = resolve('/tmp', `ragent-helper-mac-${options.sessionId}`);
   const outputPath = resolve(options.outputPath || join('/tmp', `${basename(bundleDir)}.zip`));
   const localHelperDir = join(repoRoot, 'local-helper');
 
@@ -175,11 +175,11 @@ async function main() {
   await rm(outputPath, { force: true });
   await mkdir(bundleDir, { recursive: true });
 
-  await execFileAsync('go', ['build', '-o', join(bundleDir, 'agentoc-helper-darwin-arm64'), './cmd/agentoc-helper'], {
+  await execFileAsync('go', ['build', '-o', join(bundleDir, 'ragent-helper-darwin-arm64'), './cmd/ragent-helper'], {
     cwd: localHelperDir,
     env: { ...process.env, CGO_ENABLED: '0', GOOS: 'darwin', GOARCH: 'arm64' },
   });
-  await execFileAsync('go', ['build', '-o', join(bundleDir, 'agentoc-helper-darwin-amd64'), './cmd/agentoc-helper'], {
+  await execFileAsync('go', ['build', '-o', join(bundleDir, 'ragent-helper-darwin-amd64'), './cmd/ragent-helper'], {
     cwd: localHelperDir,
     env: { ...process.env, CGO_ENABLED: '0', GOOS: 'darwin', GOARCH: 'amd64' },
   });
@@ -188,11 +188,11 @@ async function main() {
     serverUrl,
     token: bootstrap.token,
   }, null, 2), 'utf8');
-  await writeFile(join(bundleDir, 'Start AgentoC Helper.command'), buildStarterScript(), 'utf8');
-  await writeFile(join(bundleDir, 'Stop AgentoC Helper.command'), buildStopScript(), 'utf8');
+  await writeFile(join(bundleDir, 'Start Ragent Helper.command'), buildStarterScript(), 'utf8');
+  await writeFile(join(bundleDir, 'Stop Ragent Helper.command'), buildStopScript(), 'utf8');
   await writeFile(join(bundleDir, 'README.txt'), buildReadme(serverUrl), 'utf8');
-  await chmod(join(bundleDir, 'Start AgentoC Helper.command'), 0o755);
-  await chmod(join(bundleDir, 'Stop AgentoC Helper.command'), 0o755);
+  await chmod(join(bundleDir, 'Start Ragent Helper.command'), 0o755);
+  await chmod(join(bundleDir, 'Stop Ragent Helper.command'), 0o755);
 
   await execFileAsync('zip', ['-qry', outputPath, basename(bundleDir)], {
     cwd: dirname(bundleDir),

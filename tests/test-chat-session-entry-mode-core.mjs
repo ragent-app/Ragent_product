@@ -85,13 +85,13 @@ function loadCore() {
     isShareSnapshotMode: false,
     getClientSessionRecord: null,
   };
-  context.AgentocSessionEntryModeEnvironment = env;
+  context.RagentSessionEntryModeEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/session-entry-mode.js'), 'utf8'),
     context,
     { filename: 'transport/session-entry-mode.js' },
   );
-  const core = context.AgentocSessionEntryModeCore;
+  const core = context.RagentSessionEntryModeCore;
   let records = [];
   env.getClientSessionRecord = (id) => records.find((record) => record?.id === id) || null;
   return {

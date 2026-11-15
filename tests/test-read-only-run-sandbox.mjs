@@ -7,7 +7,7 @@ import { computeExecutionScopeDigest } from '../chat/execution-scope.mjs';
 import { readOnlyWorkspaceForRun } from '../chat/read-only-run-sandbox.mjs';
 import { buildSandboxedSpawn, isBwrapPresent } from '../lib/runner-sandbox.mjs';
 
-const root = mkdtempSync(join(realpathSync(tmpdir()), 'agentoc-readonly-run-'));
+const root = mkdtempSync(join(realpathSync(tmpdir()), 'ragent-readonly-run-'));
 try {
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');

@@ -14,8 +14,8 @@ const css = await Promise.all([
   'static/chat/chat-glass.css',
 ].map((path) => readFile(join(repoRoot, path), 'utf8')));
 
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || '/var/lib/agentoc/workspace/visual-ui-reviews/2026-08-08T-delivery-image-preview';
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || '/var/lib/ragent/workspace/visual-ui-reviews/2026-08-08T-delivery-image-preview';
 await mkdir(outputDir, { recursive: true });
 
 const imageA = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 240"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="#5b7cfa"/><stop offset="1" stop-color="#b56df2"/></linearGradient></defs><rect width="360" height="240" fill="url(#g)"/><circle cx="270" cy="70" r="48" fill="#fff" fill-opacity=".28"/></svg>').toString('base64')}`;

@@ -8,7 +8,7 @@ import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } f
 
 const approval = { approvalId: 'approval-1', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: 'winget install Git.Git' } } };
 const state = { riskMode: 'full-auto', riskContextValid: true, windowsManagedActionChannel: true };
-const options = { approval, state, runId: 'run-1', nodePath: "D:\\Program Files\\node.exe", scriptPath: "D:\\AgentoC\\O'Brien\\bridge.mjs" };
+const options = { approval, state, runId: 'run-1', nodePath: "D:\\Program Files\\node.exe", scriptPath: "D:\\Ragent\\O'Brien\\bridge.mjs" };
 const bridge = buildClaudeWindowsInstallBridge(options);
 const channel = { endpoint: 'http://127.0.0.1:12345/api/internal/approved-actions/propose', token: 'test',
   sessionId: 'session', runId: 'run-1', turnId: 'turn' };
@@ -28,7 +28,7 @@ for (const endpoint of ['http://localhost:12345/api/internal/approved-actions/pr
 assert.equal(preflightCalls, 1);
 assert.equal(await checkWindowsInstallBridgeReadiness({ channel, command: approval.params.input.command, requestKey: bridge.requestKey,
   fetchImpl: async () => { throw new Error('unavailable'); } }), false);
-assert.match(bridge.updatedCommand, /^& 'D:\\Program Files\\node\.exe' 'D:\\AgentoC\\O''Brien\\bridge\.mjs' '[A-Za-z0-9_-]+'$/);
+assert.match(bridge.updatedCommand, /^& 'D:\\Program Files\\node\.exe' 'D:\\Ragent\\O''Brien\\bridge\.mjs' '[A-Za-z0-9_-]+'$/);
 assert.equal(buildClaudeWindowsInstallBridge({ ...options, state: { ...state, riskMode: 'conservative-auto' } }), null);
 assert.equal(buildClaudeWindowsInstallBridge({ ...options, approval: { ...approval, params: { ...approval.params, input: { command: 'winget install Git.Git; Remove-Item x' } } } }), null);
 const userCommand = 'winget install Git.Git --scope user';
@@ -57,11 +57,11 @@ for (const riskMode of ['recommended', 'full-auto']) {
   }
 }
 for (const command of [
-  'agentoc-privileged --unknown flag -- winget install Git.Git',
-  'agentoc-privileged --category delete -- winget install Git.Git',
-  'agentoc-privileged --description "$(whoami)" -- winget install Git.Git',
-  'agentoc-privileged --description ok -- winget install Git.Git; Remove-Item x',
-  'agentoc-privileged; echo x -- winget install Git.Git',
+  'ragent-privileged --unknown flag -- winget install Git.Git',
+  'ragent-privileged --category delete -- winget install Git.Git',
+  'ragent-privileged --description "$(whoami)" -- winget install Git.Git',
+  'ragent-privileged --description ok -- winget install Git.Git; Remove-Item x',
+  'ragent-privileged; echo x -- winget install Git.Git',
 ]) assert.equal(buildClaudeWindowsInstallBridge({ ...options,
   approval: { ...approval, params: { ...approval.params, input: { command } } } }), null);
 
@@ -79,24 +79,24 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const endpoint = `http://127.0.0.1:${server.address().port}/api/internal/approved-actions/propose`;
 const encoded = Buffer.from(JSON.stringify({ command: approval.params.input.command, requestKey: bridge.requestKey })).toString('base64url');
 try {
-  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)), encoded], {
-    env: { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-1', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-1', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
+  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)), encoded], {
+    env: { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-1', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-1', RAGENT_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
   });
   assert.match(result.stdout, /completed successfully/);
   assert.equal(received.length, 2);
   assert.deepEqual(received[1].payload, { ...received[0].payload, autoInstallStatusOnly: true });
   assert.equal(received[0].payload.requestKey, bridge.requestKey);
-  assert.equal(received[0].headers['x-agentoc-approved-action-token'], 'fixture-token');
-  const bashPath = process.env.AGENTOC_TEST_BASH_BINARY;
+  assert.equal(received[0].headers['x-ragent-approved-action-token'], 'fixture-token');
+  const bashPath = process.env.RAGENT_TEST_BASH_BINARY;
   if (process.platform === 'win32' && bashPath) {
     const wrapped = buildClaudeWindowsInstallBridge({ ...options, nodePath: process.execPath,
-      scriptPath: fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)),
+      scriptPath: fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)),
       approval: { ...approval, params: { ...approval.params, tool_name: 'Bash', input: {
-        command: 'agentoc-privileged --category install -- winget install Git.Git',
+        command: 'ragent-privileged --category install -- winget install Git.Git',
       } } } });
-    const env = { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-1', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-1', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'turn-1' };
+    const env = { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-1', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-1', RAGENT_APPROVED_ACTIONS_TURN_ID: 'turn-1' };
     delete env.BASH_ENV; delete env.ENV; delete env.SHELLOPTS;
     const result = await promisify(execFile)(bashPath, ['--noprofile', '--norc', '-c', wrapped.updatedCommand], { env, windowsHide: true });
     assert.match(result.stdout, /completed successfully/);
@@ -118,9 +118,9 @@ const recoveryServer = createServer((req, res) => {
 await new Promise((resolve) => recoveryServer.listen(0, '127.0.0.1', resolve));
 try {
   const endpoint = `http://127.0.0.1:${recoveryServer.address().port}/api/internal/approved-actions/propose`;
-  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)), encoded], {
-    env: { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-1', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-1', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
+  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)), encoded], {
+    env: { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-1', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-1', RAGENT_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
   });
   assert.match(result.stdout, /completed successfully/);
   assert.equal(recoveryRequests.length, 2);
@@ -146,9 +146,9 @@ const ambiguousServer = createServer((req, res) => {
 await new Promise((resolve) => ambiguousServer.listen(0, '127.0.0.1', resolve));
 try {
   const endpoint = `http://127.0.0.1:${ambiguousServer.address().port}/api/internal/approved-actions/propose`;
-  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)), encoded], {
-    env: { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-1', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-1', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
+  const result = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)), encoded], {
+    env: { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-1', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-1', RAGENT_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
   });
   assert.match(result.stdout, /completed successfully/);
   assert.equal(ambiguousRequests.length, 2);
@@ -171,9 +171,9 @@ await new Promise((resolve) => invalidServer.listen(0, '127.0.0.1', resolve));
 try {
   const endpoint = `http://127.0.0.1:${invalidServer.address().port}/api/internal/approved-actions/propose`;
   const userEncoded = Buffer.from(JSON.stringify({ command: approval.params.input.command, requestKey: bridge.requestKey, windowsUserInstallIdentity: invalidPin })).toString('base64url');
-  await assert.rejects(promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)), userEncoded], {
-    env: { ...process.env, AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-      AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'session-1', AGENTOC_APPROVED_ACTIONS_RUN_ID: 'run-1', AGENTOC_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
+  await assert.rejects(promisify(execFile)(process.execPath, [fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)), userEncoded], {
+    env: { ...process.env, RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+      RAGENT_APPROVED_ACTIONS_SESSION_ID: 'session-1', RAGENT_APPROVED_ACTIONS_RUN_ID: 'run-1', RAGENT_APPROVED_ACTIONS_TURN_ID: 'turn-1' },
   }), (error) => String(error.stderr).includes(process.platform === 'win32' ? 'USER_INSTALL_CAPABILITY_INVALID' : 'USER_INSTALL_CONFIGURATION_INVALID'));
   assert.equal(invalidRequests, 1, 'invalid authorization must not reach claim or execution');
 } finally { await new Promise((resolve) => invalidServer.close(resolve)); }

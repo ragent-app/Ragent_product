@@ -20,7 +20,7 @@
   const state = { value: null, pending: false };
 
   function isZh() {
-    const language = String(root.agentocGetActiveUiLanguage?.() || "").toLowerCase();
+    const language = String(root.ragentGetActiveUiLanguage?.() || "").toLowerCase();
     return language.startsWith("zh");
   }
 
@@ -59,7 +59,7 @@
   }
 
   function canManage() {
-    return root.__AGENTOC_BOOTSTRAP__?.auth?.role === "owner";
+    return root.__RAGENT_BOOTSTRAP__?.auth?.role === "owner";
   }
 
   function setStatus(message = "", tone = "") {
@@ -70,7 +70,7 @@
   }
 
   function hydrateIcons(node) {
-    root.AgentoCIcons?.hydrate?.(node);
+    root.RagentIcons?.hydrate?.(node);
   }
 
   function render() {
@@ -158,8 +158,8 @@
 
   function open(event) {
     event?.preventDefault?.();
-    if (typeof root.agentocOpenSidebarSubpage === "function") {
-      root.agentocOpenSidebarSubpage("account-policy", elements.open);
+    if (typeof root.ragentOpenSidebarSubpage === "function") {
+      root.ragentOpenSidebarSubpage("account-policy", elements.open);
     } else if (typeof root.switchTab === "function") {
       root.switchTab("account-policy");
     }
@@ -168,8 +168,8 @@
 
   if (!elements.open || !elements.options || !elements.panel) return;
   elements.open.addEventListener("click", open);
-  root.addEventListener("agentoc:localechange", render);
-  root.AgentoCAccountPolicy = Object.freeze({ open, refresh });
+  root.addEventListener("ragent:localechange", render);
+  root.RagentAccountPolicy = Object.freeze({ open, refresh });
   hydrateIcons(elements.section);
   void refresh();
 })(window);

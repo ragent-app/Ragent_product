@@ -18,8 +18,8 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'agentoc-scroll-fab-visual-'));
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'ragent-scroll-fab-visual-'));
 if (requestedOutputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [
@@ -77,7 +77,7 @@ function fixtureHtml({ liveBar = false, liveBarCapsule = false, queued = false }
     <div class="messages" id="messages">
       <div class="messages-inner" id="messagesInner">
         <div class="empty-state" id="emptyState">
-          <h2>AgentoC Chat</h2>
+          <h2>Ragent Chat</h2>
           <p>Select or create a session from the sidebar.</p>
         </div>
       </div>

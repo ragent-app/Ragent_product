@@ -21,7 +21,7 @@ const identityModule = await import(
   pathToFileURL(join(root, 'lib/instance-identity.mjs')).href
 );
 
-const dir = await mkdtemp(join(tmpdir(), 'agentoc-lease-http-'));
+const dir = await mkdtemp(join(tmpdir(), 'ragent-lease-http-'));
 
 // 生成两个设备 identity（+ 越权测试用设备）
 const deviceA = await identityModule.loadOrCreateInstanceIdentity({
@@ -131,7 +131,7 @@ function makeProof(device, fields = {}) {
     credentialInstanceId: CRED.credentialInstanceId,
     ...fields,
     issuedAt,
-    audience: 'agentoc-provider-refresh-lease',
+    audience: 'ragent-provider-refresh-lease',
     instance: identityModule.publicInstanceIdentity(device),
   };
   return {

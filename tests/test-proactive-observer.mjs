@@ -11,7 +11,7 @@ const repoRoot = process.cwd()
 const {
   DEFAULT_SYSTEM_PROMPT,
   buildEpisodeExternalTriggerId,
-  buildAgentoCMessage,
+  buildRagentMessage,
   buildSessionName,
   createRuntimeContext,
   loadConfig,
@@ -19,7 +19,7 @@ const {
   processArrivalEvent,
 } = await import(pathToFileURL(join(repoRoot, 'scripts', 'proactive-observer.mjs')).href)
 
-const tempConfigDir = await mkdtemp(join(tmpdir(), 'agentoc-observer-config-'))
+const tempConfigDir = await mkdtemp(join(tmpdir(), 'ragent-observer-config-'))
 const tempConfigPath = join(tempConfigDir, 'config.json')
 
 await writeFile(tempConfigPath, `${JSON.stringify({
@@ -46,7 +46,7 @@ assert.equal(loadedConfig.appId, 'observer-home')
 assert.equal(loadedConfig.triggers[0].id, 'home-arrival')
 assert.equal(loadedConfig.systemPrompt, '')
 assert.match(DEFAULT_SYSTEM_PROMPT, /Keep connector-specific overrides minimal/i)
-await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') }), 'utf8')
+await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'Ragent') }), 'utf8')
 assert.equal((await loadConfig(tempConfigPath)).systemPrompt, '', 'old shipped defaults must not become custom prompts')
 
 const manualArrival = normalizeObserverEvent({
@@ -73,7 +73,7 @@ assert.equal(
 )
 assert.match(buildSessionName(trigger, '2026-03-16T18:00:00.000Z'), /^Home Arrival · /)
 
-const renderedPrompt = buildAgentoCMessage(loadedConfig, trigger, episode, {
+const renderedPrompt = buildRagentMessage(loadedConfig, trigger, episode, {
   type: 'arrival',
   source: 'vision',
   detectedAt: '2026-03-16T18:00:00.000Z',

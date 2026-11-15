@@ -96,11 +96,11 @@ const context = {
   },
   window: {
     open() {},
-    AgentoCBackHandler: {
+    RagentBackHandler: {
       push() { return 'image-viewer'; },
       pop() {},
     },
-    AgentoCIcons: {
+    RagentIcons: {
       render(name) {
         return `<svg data-icon="${name}"></svg>`;
       },

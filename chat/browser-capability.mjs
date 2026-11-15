@@ -1,5 +1,5 @@
 /**
- * Run-scoped capability for the AgentoC-managed browser MCP.
+ * Run-scoped capability for the Ragent-managed browser MCP.
  *
  * The manifest carries only the binding and a token hash.  The detached
  * runner reads the bearer token from a 0600 file next to the Run, then passes

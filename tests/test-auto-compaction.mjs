@@ -6,11 +6,11 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-auto-compact-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-auto-compact-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
-const workDir = join(tempHome, '.agentoc', 'workspace');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
+const workDir = join(tempHome, '.ragent', 'workspace');
 const codexSessionsDir = join(tempHome, '.codex', 'sessions', '2026', '03', '10');
 const compactionWorkerText = JSON.stringify(
   '<summary>Carry forward only the compacted continuation summary.</summary>\n\n'
@@ -130,12 +130,12 @@ writeCodexMetrics('overflow-thread', 80, 100);
 writeCodexMetrics('exact-thread', 70, 100);
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_WORK_ROOT_DIR = workDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
-delete process.env.AGENTOC_CURRENT_CONTEXT_COMPACT_TOKENS;
+delete process.env.RAGENT_CURRENT_CONTEXT_COMPACT_TOKENS;
 
 const sessionManager = await import(
   pathToFileURL(join(repoRoot, 'chat', 'session-manager.mjs')).href
@@ -193,7 +193,7 @@ async function waitFor(predicate, description, timeoutMs = 20000) {
 
 try {
   const overflowSession = await createSession(tempHome, 'fake-codex', 'Overflow Fallback', {
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Verify fallback compaction triggers above the 70% window threshold.',
   });
 
@@ -269,7 +269,7 @@ try {
   );
 
   const exactSession = await createSession(tempHome, 'fake-codex', 'At Threshold', {
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Verify context usage exactly at the 70% threshold does not auto-compact.',
   });
 

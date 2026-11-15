@@ -5,14 +5,14 @@ param([string]$EvidencePath='')
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'SMM_ADMIN_REQUIRED'}
 if(-not (Get-Command wix.exe -ErrorAction SilentlyContinue)){throw 'SMM_WIX_REQUIRED'}
-$id=[Guid]::NewGuid().ToString('N');$service='AgentoC-MsiMinorQa-'+$id.Substring(0,12)
-$root=Join-Path ([IO.Path]::GetTempPath()) ('agentoc-msi-minor-upgrade-'+$id)
+$id=[Guid]::NewGuid().ToString('N');$service='Ragent-MsiMinorQa-'+$id.Substring(0,12)
+$root=Join-Path ([IO.Path]::GetTempPath()) ('ragent-msi-minor-upgrade-'+$id)
 $tempRoot=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
-if(-not $tempRoot.StartsWith('G:\AgentoC\',[StringComparison]::OrdinalIgnoreCase)){throw 'SMM_TEMP_OUTSIDE_G'}
+if(-not $tempRoot.StartsWith('G:\Ragent\',[StringComparison]::OrdinalIgnoreCase)){throw 'SMM_TEMP_OUTSIDE_G'}
 $install=Join-Path $root 'installed'
 $productCode=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$upgradeCode=[Guid]::NewGuid().ToString('B').ToUpperInvariant()
 $serviceComponent=[Guid]::NewGuid().ToString('B').ToUpperInvariant();$contentComponent=[Guid]::NewGuid().ToString('B').ToUpperInvariant()
-$report=[ordered]@{pass=$false;test='same-ProductCode in-place MSI minor upgrade with running-service rollback';serviceName=$service;productCode=$productCode;upgradeCode=$upgradeCode;serviceComponent=$serviceComponent;contentComponent=$contentComponent;v1ExitCode=$null;injectedFailureExitCode=$null;v2ExitCode=$null;rollbackRestoredRunningService=$false;uninstallActionDidNotRun=$false;productVersionAfterUpgrade=$null;serviceStartModeAfterUpgrade=$null;serviceStateAfterUpgrade=$null;contentAfterUpgrade=$null;cleanupConfirmed=$false;productionAgentoCServicesTouched=$false}
+$report=[ordered]@{pass=$false;test='same-ProductCode in-place MSI minor upgrade with running-service rollback';serviceName=$service;productCode=$productCode;upgradeCode=$upgradeCode;serviceComponent=$serviceComponent;contentComponent=$contentComponent;v1ExitCode=$null;injectedFailureExitCode=$null;v2ExitCode=$null;rollbackRestoredRunningService=$false;uninstallActionDidNotRun=$false;productVersionAfterUpgrade=$null;serviceStartModeAfterUpgrade=$null;serviceStateAfterUpgrade=$null;contentAfterUpgrade=$null;cleanupConfirmed=$false;productionRagentServicesTouched=$false}
 if(Test-Path -LiteralPath $install){throw 'SMM_INSTALL_ROOT_EXISTS'}
 if(Get-CimInstance Win32_Service -Filter ("Name='"+$service+"'")){throw 'SMM_SERVICE_EXISTS'}
 $null=New-Item -ItemType Directory -Path $root
@@ -36,10 +36,10 @@ function New-QaMsi([string]$Version,[string]$Label,[string]$Start,[string]$Outpu
  $xml=@"
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Package Name="AgentoC MSI minor upgrade QA" Manufacturer="AgentoC QA" Version="$Version" ProductCode="$productCode" UpgradeCode="$upgradeCode" Scope="perMachine">
+  <Package Name="Ragent MSI minor upgrade QA" Manufacturer="Ragent QA" Version="$Version" ProductCode="$productCode" UpgradeCode="$upgradeCode" Scope="perMachine">
     <MediaTemplate EmbedCab="yes" />
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="AgentoC-MsiMinorQa-$id">
+      <Directory Id="INSTALLFOLDER" Name="Ragent-MsiMinorQa-$id">
         <Component Id="QaService" Guid="$serviceComponent">
           <File Id="QaServiceBinary" Source="!(bindpath.Qa)\QaService.exe" KeyPath="yes" />
           <ServiceInstall Id="QaServiceInstall" Name="$service" DisplayName="$service" Type="ownProcess" Start="$Start" Account="LocalSystem" ErrorControl="normal" />
@@ -104,7 +104,7 @@ finally{
   $report.cleanupConfirmed=$true
  }catch{$report.cleanupError=$_.Exception.GetBaseException().Message;$report.pass=$false}
  if($EvidencePath){[IO.File]::WriteAllText([IO.Path]::GetFullPath($EvidencePath),($report|ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))}
- if(Test-Path -LiteralPath $root){$full=[IO.Path]::GetFullPath($root);$parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\');if([IO.Path]::GetDirectoryName($full) -cne $parent -or [IO.Path]::GetFileName($full) -cne ('agentoc-msi-minor-upgrade-'+$id) -or ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SMM_QA_CLEANUP_ROOT_REFUSED'};foreach($item in @(Get-ChildItem -LiteralPath $full -Force -Recurse)){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'SMM_QA_CLEANUP_REPARSE_REFUSED'}};Remove-Item -LiteralPath $full -Recurse -Force}
+ if(Test-Path -LiteralPath $root){$full=[IO.Path]::GetFullPath($root);$parent=[IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\');if([IO.Path]::GetDirectoryName($full) -cne $parent -or [IO.Path]::GetFileName($full) -cne ('ragent-msi-minor-upgrade-'+$id) -or ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SMM_QA_CLEANUP_ROOT_REFUSED'};foreach($item in @(Get-ChildItem -LiteralPath $full -Force -Recurse)){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'SMM_QA_CLEANUP_REPARSE_REFUSED'}};Remove-Item -LiteralPath $full -Recurse -Force}
 }
 $report|ConvertTo-Json -Depth 6 -Compress
 if(-not $report.pass){exit 1}

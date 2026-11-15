@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-chat-task-card-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-chat-task-card-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -117,7 +117,7 @@ async function waitFor(predicate, description, timeoutMs = 8000) {
 
 try {
   const chatSession = await createSession(tempHome, 'fake-codex', 'Chat Learning', {
-    group: 'AgentoC',
+    group: 'Ragent',
     description: 'Generic chat sessions should accumulate reusable patterns after the turn closes.',
   });
 

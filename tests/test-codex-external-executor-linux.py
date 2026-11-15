@@ -1,11 +1,11 @@
 import hashlib, http.server, json, os, pathlib, queue, secrets, shutil, socket, subprocess, sys, tempfile, threading, time
 
-if sys.platform != 'linux' or os.environ.get('AGENTOC_TEST_CODEX_EXTERNAL_EXECUTOR') != '1':
+if sys.platform != 'linux' or os.environ.get('RAGENT_TEST_CODEX_EXTERNAL_EXECUTOR') != '1':
     print('test-codex-external-executor-linux: skipped (opt-in Linux integration test)')
     sys.exit(0)
-codex = os.environ.get('AGENTOC_TEST_CODEX_BINARY', '')
+codex = os.environ.get('RAGENT_TEST_CODEX_BINARY', '')
 if not os.path.isabs(codex) or not os.path.isfile(codex):
-    raise RuntimeError('AGENTOC_TEST_CODEX_BINARY must be an absolute Codex executable')
+    raise RuntimeError('RAGENT_TEST_CODEX_BINARY must be an absolute Codex executable')
 root = pathlib.Path(tempfile.mkdtemp(prefix='ragent-codex-exec-'))
 home = root / 'app-home'; home.mkdir(exist_ok=True)
 workspace = root / 'workspace'; workspace.mkdir(exist_ok=True)

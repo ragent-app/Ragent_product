@@ -9,7 +9,7 @@ import { withLinuxRunOperationLock } from '../scripts/linux-run-operation-lock.m
 
 test('revocation waits for an inherited helper lock even if its parent dies',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0, timeout: 15000 }, async () => {
-    const directory = await mkdtemp('/srv/agentoc-operation-lock-');
+    const directory = await mkdtemp('/srv/ragent-operation-lock-');
     const runId = 'run_lockfixture1', launchAttempt = 2;
     const moduleUrl = new URL('../scripts/linux-run-operation-lock.mjs', import.meta.url).href;
     const script = `import {withLinuxRunOperationLock} from ${JSON.stringify(moduleUrl)};

@@ -16,7 +16,7 @@ while [[ $# -gt 0 ]]; do
   if [[ $1 == --destination ]]; then destination=$2; shift 2; else shift; fi
 done
 [[ -n $destination ]]
-printf '%s\n' "$QA_STAGED_REVISION" > "$destination/.agentoc-source-commit"
+printf '%s\n' "$QA_STAGED_REVISION" > "$destination/.ragent-source-commit"
 EOF
 cat > "$work/bin/npm" <<'EOF'
 #!/bin/sh

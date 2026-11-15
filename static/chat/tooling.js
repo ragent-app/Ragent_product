@@ -1,6 +1,6 @@
 // ---- Thinking toggle / effort select ----
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 let runtimeSelectionSyncPromise = Promise.resolve();
@@ -350,7 +350,7 @@ function syncComposerRuntimeSpeedUi(canUseRuntimeMenu = null) {
   composerRuntimeSpeedPanel.hidden = !panelOpen;
   composerRuntimeSpeedPanel.classList.toggle("has-speed-choice", hasSpeedChoice);
   composerRuntimeSpeedPanel.classList.toggle("has-effort-range", hasEffortChoice);
-  window.AgentoCComposerMenuPortal?.sync(
+  window.RagentComposerMenuPortal?.sync(
     composerRuntimeSpeedPanel,
     composerRuntimeSpeedBtn,
     panelOpen,
@@ -969,14 +969,14 @@ function syncComposerPermissionUi() {
     composerRuntimePermissionLabel.textContent = permissionLabel;
   }
   if (hasPermissionButton) {
-    window.AgentoCComposerMenuPortal?.sync(
+    window.RagentComposerMenuPortal?.sync(
       composerPermissionMenu,
       composerPermissionBtn,
       composerPermissionMenuOpen,
       { align: "right" },
     );
-    if (window.AgentoCMotion?.setPresence) {
-      window.AgentoCMotion.setPresence(composerPermissionMenu, composerPermissionMenuOpen, {
+    if (window.RagentMotion?.setPresence) {
+      window.RagentMotion.setPresence(composerPermissionMenu, composerPermissionMenuOpen, {
         duration: 160,
       });
     } else {
@@ -1295,8 +1295,8 @@ async function selectComposerRuntimeProvider(providerProfile) {
   }
   void (async () => {
     try {
-      if (typeof window.agentocRefreshModelCatalogForTool === "function") {
-        await window.agentocRefreshModelCatalogForTool(selectedTool, {
+      if (typeof window.ragentRefreshModelCatalogForTool === "function") {
+        await window.ragentRefreshModelCatalogForTool(selectedTool, {
           preserveCurrentSelection: false,
         });
       } else {
@@ -1351,14 +1351,14 @@ function syncComposerRuntimeUi() {
 
   composerRuntimeBtn.disabled = !canUseRuntimeMenu;
   composerRuntimeBtn.setAttribute("aria-expanded", composerRuntimeMenuOpen ? "true" : "false");
-  window.AgentoCComposerMenuPortal?.sync(
+  window.RagentComposerMenuPortal?.sync(
     composerRuntimeMenu,
     composerRuntimeBtn,
     composerRuntimeMenuOpen,
     { align: "right" },
   );
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(composerRuntimeMenu, composerRuntimeMenuOpen, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(composerRuntimeMenu, composerRuntimeMenuOpen, {
       duration: 160,
     });
   } else {
@@ -1433,7 +1433,7 @@ function syncComposerRuntimeUi() {
 
 function syncComposerRuntimeMenuBackEntry(open) {
   if (open) {
-    composerRuntimeMenuBackEntryId = window.AgentoCBackHandler?.push?.({
+    composerRuntimeMenuBackEntryId = window.RagentBackHandler?.push?.({
       id: "composer-runtime-menu",
       onBack: () => {
         setComposerRuntimeMenuOpen(false);
@@ -1441,14 +1441,14 @@ function syncComposerRuntimeMenuBackEntry(open) {
       },
     }) || null;
   } else if (composerRuntimeMenuBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(composerRuntimeMenuBackEntryId);
+    window.RagentBackHandler?.pop?.(composerRuntimeMenuBackEntryId);
     composerRuntimeMenuBackEntryId = null;
   }
 }
 
 function syncComposerPermissionMenuBackEntry(open) {
   if (open) {
-    composerPermissionMenuBackEntryId = window.AgentoCBackHandler?.push?.({
+    composerPermissionMenuBackEntryId = window.RagentBackHandler?.push?.({
       id: "composer-permission-menu",
       onBack: () => {
         setComposerPermissionMenuOpen(false);
@@ -1456,7 +1456,7 @@ function syncComposerPermissionMenuBackEntry(open) {
       },
     }) || null;
   } else if (composerPermissionMenuBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(composerPermissionMenuBackEntryId);
+    window.RagentBackHandler?.pop?.(composerPermissionMenuBackEntryId);
     composerPermissionMenuBackEntryId = null;
   }
 }
@@ -1479,7 +1479,7 @@ function setComposerRuntimeMenuOpen(open, { view = null } = {}) {
 }
 // Exposed so the fullscreen composer can collapse a leftover runtime menu when
 // it closes (the trigger is re-parented and must not leave a floating menu).
-window.AgentoCComposerRuntimeMenu = Object.freeze({
+window.RagentComposerRuntimeMenu = Object.freeze({
   close: () => setComposerRuntimeMenuOpen(false),
 });
 
@@ -1696,7 +1696,7 @@ function restoreComposerInteractionMode(session) {
   syncComposerModeUi();
 }
 
-window.agentocSyncComposerModeUi = syncComposerModeUi;
+window.ragentSyncComposerModeUi = syncComposerModeUi;
 
 function getAttachedSessionToolPreferences(toolId = selectedTool) {
   const session = getCurrentSession();
@@ -2045,7 +2045,7 @@ function getSelectedToolDefinition(toolId = selectedTool) {
 // Keep capability-aware frontend surfaces decoupled from this module's
 // top-level state. Goal mode is Codex-specific, so its UI can use the same
 // runtime definition that drives the Composer picker without matching labels.
-window.agentocGetSelectedToolDefinition = getSelectedToolDefinition;
+window.ragentGetSelectedToolDefinition = getSelectedToolDefinition;
 
 function parseModelLines(raw) {
   return String(raw || "")
@@ -2144,7 +2144,7 @@ function buildProviderBasePrompt() {
     `- Models:`,
     modelLines,
     ``,
-    `Work in the Ragent repo root (usually \`~/code/agentoc\`; adjust if your checkout lives elsewhere).`,
+    `Work in the Ragent repo root (usually \`~/code/ragent\`; adjust if your checkout lives elsewhere).`,
     `Read \`AGENTS.md\` (legacy \`CLAUDE.md\` is only a compatibility shim) and \`notes/directional/provider-architecture.md\` first.`,
     ``,
     `Please:`,
@@ -2252,7 +2252,7 @@ function restoreHeaderActionButtonAccessibility(button) {
 
 function getToolingLabel(key, vars) {
   if (typeof t === "function") return t(key, vars);
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 function resetHeaderActionButton(button) {
@@ -2346,14 +2346,14 @@ function openAddToolModal() {
   setAddToolStatus("");
   syncAddToolModal();
   addToolModalTrigger = document.activeElement;
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(addToolModal, true, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(addToolModal, true, {
       duration: 180,
     });
   } else {
     addToolModal.hidden = false;
   }
-  addToolModalFocusScopeDeactivate = window.AgentoCFocusScope?.activate?.(addToolModal, {
+  addToolModalFocusScopeDeactivate = window.RagentFocusScope?.activate?.(addToolModal, {
     containmentRoot: document.body,
     initialFocus: addToolNameInput,
     restoreFocus: () => (addToolModalTrigger && addToolModalTrigger.isConnected !== false)
@@ -2364,7 +2364,7 @@ function openAddToolModal() {
   }) || null;
   addToolNameInput.focus();
   addToolNameInput.select();
-  addToolModalBackEntryId = window.AgentoCBackHandler?.push?.({
+  addToolModalBackEntryId = window.RagentBackHandler?.push?.({
     id: "add-tool-modal",
     onBack: () => {
       closeAddToolModal();
@@ -2376,15 +2376,15 @@ function openAddToolModal() {
 function closeAddToolModal() {
   if (!addToolModal) return;
   if (addToolModalBackEntryId) {
-    window.AgentoCBackHandler?.pop?.(addToolModalBackEntryId);
+    window.RagentBackHandler?.pop?.(addToolModalBackEntryId);
     addToolModalBackEntryId = null;
   }
   if (addToolModalFocusScopeDeactivate) {
     addToolModalFocusScopeDeactivate();
     addToolModalFocusScopeDeactivate = null;
   }
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(addToolModal, false, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(addToolModal, false, {
       duration: 150,
     });
     return;
@@ -2713,8 +2713,8 @@ async function refreshModelCatalogForToolConfigChange(
   }
 }
 
-window.agentocRefreshModelCatalogForTool = refreshModelCatalogForToolConfigChange;
-window.agentocRefreshClaudeModelCatalog = function refreshClaudeModelCatalog(options = {}) {
+window.ragentRefreshModelCatalogForTool = refreshModelCatalogForToolConfigChange;
+window.ragentRefreshClaudeModelCatalog = function refreshClaudeModelCatalog(options = {}) {
   return refreshModelCatalogForToolConfigChange("claude-bidi", options);
 };
 
@@ -2806,7 +2806,7 @@ async function loadInlineTools({ skipModelLoad = false } = {}) {
   }
 }
 
-window.agentocRefreshRuntimeCatalog = async function refreshRuntimeCatalog({ clearCurrentSelection = false } = {}) {
+window.ragentRefreshRuntimeCatalog = async function refreshRuntimeCatalog({ clearCurrentSelection = false } = {}) {
   if (!canChangeRuntimeSelectionFromUi()) return false;
   await loadInlineTools({ skipModelLoad: true });
   await loadModelsForCurrentTool({
@@ -2980,11 +2980,11 @@ if (typeof document !== "undefined") {
   }, true);
 }
 
-window.addEventListener("agentoc:preferred-agent-change", () => {
+window.addEventListener("ragent:preferred-agent-change", () => {
   void refreshInlineAgentPicker();
 });
 
-window.addEventListener("agentoc:localechange", () => {
+window.addEventListener("ragent:localechange", () => {
   void refreshInlineAgentPicker();
   syncComposerModeUi();
 });

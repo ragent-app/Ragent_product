@@ -2,12 +2,12 @@
 # Rename an enabled live systemd service without restarting it. Existing unit
 # content and drop-ins stay authoritative; the old name remains an alias.
 set -Eeuo pipefail
-usage() { echo 'Usage: migrate-systemd-unit-name.sh [--user] <agentoc-*.service> <ragent-*.service> [health-url]' >&2; exit 2; }
+usage() { echo 'Usage: migrate-systemd-unit-name.sh [--user] <ragent-*.service> <ragent-*.service> [health-url]' >&2; exit 2; }
 mode=system
 if [[ ${1:-} == --user ]]; then mode=user; shift; fi
 [[ $# -ge 2 && $# -le 3 ]] || usage
 old=$1; new=$2; health_url=${3:-}
-[[ $old =~ ^agentoc-[a-z0-9][a-z0-9-]*\.service$ && $new == "ragent-${old#agentoc-}" ]] || usage
+[[ $old =~ ^ragent-[a-z0-9][a-z0-9-]*\.service$ && $new == "ragent-${old#ragent-}" ]] || usage
 ctl=(systemctl)
 if [[ $mode == user ]]; then
   ctl+=(--user)

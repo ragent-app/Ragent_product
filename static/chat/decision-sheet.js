@@ -10,7 +10,7 @@
 // can scroll the conversation to review context while deciding. It persists
 // until the user explicitly approves/denies (or the approval resolves).
 //
-// Data comes from window.AgentoCDecisions (decisions-store.js), fed by
+// Data comes from window.RagentDecisions (decisions-store.js), fed by
 // realtime-render.js. The actual decision dispatch reuses the existing
 // submitRuntimeApprovalDecision() so behavior stays identical to the card.
 (function attachDecisionSheet(root) {
@@ -51,8 +51,8 @@
   let keydownBound = false;
 
   function requestSheetLayout(reason = "decision-sheet") {
-    root.AgentoCLayout?.requestPass?.(reason);
-    root.AgentoCLayout?.syncChatBottomOverlaySpacing?.(reason);
+    root.RagentLayout?.requestPass?.(reason);
+    root.RagentLayout?.syncChatBottomOverlaySpacing?.(reason);
   }
 
   function rememberReturnFocus() {
@@ -89,7 +89,7 @@
   }
 
   function tr(key, vars) {
-    if (typeof root.agentocT === "function") return root.agentocT(key, vars);
+    if (typeof root.ragentT === "function") return root.ragentT(key, vars);
     return key;
   }
 
@@ -115,7 +115,7 @@
   }
 
   function dismissPrivilegedBatchFromUi(batch) {
-    root.AgentoCDecisions?.dismissPrivilegedBatch?.(batch, {
+    root.RagentDecisions?.dismissPrivilegedBatch?.(batch, {
       sessionId: String(batch?.sessionId || currentSessionId || "").trim(),
       runId: String(batch?.runId || "").trim(),
       batchId: String(batch?.batchId || "").trim(),
@@ -123,7 +123,7 @@
   }
 
   function dismissApprovedActionFromUi(evt) {
-    root.AgentoCDecisions?.dismissApprovedAction?.(evt, {
+    root.RagentDecisions?.dismissApprovedAction?.(evt, {
       sessionId: String(evt?.sessionId || currentSessionId || "").trim(),
       runId: String(evt?.runId || "").trim(),
       batchId: String(evt?.batchId || "").trim(),
@@ -131,8 +131,8 @@
   }
 
   function renderIcon(name, className) {
-    if (typeof root.AgentoCIcons?.render !== "function") return "";
-    return root.AgentoCIcons.render(name, { className });
+    if (typeof root.RagentIcons?.render !== "function") return "";
+    return root.RagentIcons.render(name, { className });
   }
 
   // ---- risk-level interface (reserved hook) --------------------------------
@@ -220,8 +220,8 @@
   // 共享渲染：批量 op（op.explanation）与普通审批（evt.explanation）同款。
   // 人话先行，技术细节（targetPaths/sudo/...）随后。
   function displayApprovalExplanation(explanation) {
-    return typeof root.agentocApprovalExplanation === "function"
-      ? root.agentocApprovalExplanation(explanation, tr) : explanation;
+    return typeof root.ragentApprovalExplanation === "function"
+      ? root.ragentApprovalExplanation(explanation, tr) : explanation;
   }
 
   function appendExplanation(explanation, container, skipSummary = false) {
@@ -338,9 +338,9 @@
 
   // ③ WebAuthn flow: challenge -> navigator.credentials.get() -> proof.
   async function obtainWebAuthnProof(category, checkedOpIds, batchOverride = null) {
-    const batch = batchOverride || root.AgentoCDecisions?.getPendingBatch?.();
+    const batch = batchOverride || root.RagentDecisions?.getPendingBatch?.();
     if (!batch) throw new Error(tr("decisionSheet.privileged.error.noBatch"));
-    const challengeRes = await (window.agentocFetch || fetch)(batchEndpoint(batch.runId, batch.batchId, category, "/webauthn-challenge"), {
+    const challengeRes = await (window.ragentFetch || fetch)(batchEndpoint(batch.runId, batch.batchId, category, "/webauthn-challenge"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ checkedOpIds }),
@@ -385,9 +385,9 @@
   }
 
   async function submitBatchCategory(category, { checkedOpIds = [], webauthnProof, batchOverride = null } = {}) {
-    const batch = batchOverride || root.AgentoCDecisions?.getPendingBatch?.();
+    const batch = batchOverride || root.RagentDecisions?.getPendingBatch?.();
     if (!batch) throw new Error(tr("decisionSheet.privileged.error.noBatch"));
-    const res = await (window.agentocFetch || fetch)(batchEndpoint(batch.runId, batch.batchId, category), {
+    const res = await (window.ragentFetch || fetch)(batchEndpoint(batch.runId, batch.batchId, category), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -414,7 +414,7 @@
     const responseEvent = payload?.responseEvent && typeof payload.responseEvent === "object"
       ? payload.responseEvent
       : { type: "privileged_batch_response", batchId: batch.batchId, runId: batch.runId, category };
-    root.AgentoCDecisions?.notePrivilegedBatchResponse?.(responseEvent, {
+    root.RagentDecisions?.notePrivilegedBatchResponse?.(responseEvent, {
       sessionId: String(batch?.sessionId || currentSessionId || "").trim(),
       runId: String(batch?.runId || responseEvent?.runId || "").trim(),
     });
@@ -433,7 +433,7 @@
   async function approveBatchCategory(category, button) {
     if (button) button.setAttribute("aria-busy", "true");
     const checkedOpIds = collectCheckedOpIds(category);
-    const batch = root.AgentoCDecisions?.getPendingBatch?.();
+    const batch = root.RagentDecisions?.getPendingBatch?.();
     let ok = false;
     let errorMessage = "";
     try {
@@ -463,7 +463,7 @@
   // denying is not a privileged action).
   async function denyBatchCategory(category, button) {
     if (button) button.setAttribute("aria-busy", "true");
-    const batch = root.AgentoCDecisions?.getPendingBatch?.();
+    const batch = root.RagentDecisions?.getPendingBatch?.();
     let ok = false;
     try {
       ok = await submitBatchCategory(category, { checkedOpIds: [] });
@@ -611,7 +611,7 @@
       approve.dataset.batchDecision = "approve";
       approve.dataset.category = category;
       approve.dataset.approvalDecision = "approve";
-      approve.appendChild(el("span", "oneui-notification__action-label", tr(batchPasskeyRequired(root.AgentoCDecisions?.getPendingBatch?.())
+      approve.appendChild(el("span", "oneui-notification__action-label", tr(batchPasskeyRequired(root.RagentDecisions?.getPendingBatch?.())
         ? "decisionSheet.privileged.action.approve"
         : "decisionSheet.approvedAction.approve")));
       approve.addEventListener("click", () => {
@@ -686,7 +686,7 @@
     const details = el("div", "oneui-notification__details decision-sheet__details");
     const body = el("div", "decision-sheet__batch");
     if (evt?.executorUnavailableReasonCode === "macos_administrator_unavailable") {
-      const zh = String(root.agentocGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
+      const zh = String(root.ragentGetActiveUiLanguage?.() || "").toLowerCase().startsWith("zh");
       body.appendChild(el("p", "decision-sheet__batch-unavailable", zh
         ? "此 Mac 暂不支持托管管理员执行，无法批准执行；你可以拒绝该请求。"
         : "Managed administrator execution is not available on this Mac. You can decline this request."));
@@ -708,7 +708,7 @@
     hostEl.hidden = false;
     setSheetExpanded(keepExpanded);
     requestSheetLayout("decision-sheet-open");
-    window.AgentoCBackHandler?.push?.({
+    window.RagentBackHandler?.push?.({
       id: "decision-sheet",
       onBack: () => {
         if (typeof collapseToIsland === "function") {
@@ -741,7 +741,7 @@
   function injectDOM() {
     let el = doc.getElementById(SHEET_ID);
     if (el) {
-      root.AgentoCLayout?.observeOverlay?.(el);
+      root.RagentLayout?.observeOverlay?.(el);
       return el;
     }
     // Direct child of the composer area (position:relative, z-index:3). The sheet
@@ -763,7 +763,7 @@
     el.tabIndex = -1;
     el.hidden = true;
     host.appendChild(el);
-    root.AgentoCLayout?.observeOverlay?.(el);
+    root.RagentLayout?.observeOverlay?.(el);
     return el;
   }
 
@@ -775,7 +775,7 @@
     let el = doc.getElementById(ISLAND_ID);
     if (el) {
       islandEl = el;
-      root.AgentoCLayout?.observeOverlay?.(el);
+      root.RagentLayout?.observeOverlay?.(el);
       return el;
     }
     const stack = doc.querySelector(".input-stack") || doc.getElementById("inputArea") || doc.body;
@@ -830,7 +830,7 @@
     }
 
     islandEl = el;
-    root.AgentoCLayout?.observeOverlay?.(el);
+    root.RagentLayout?.observeOverlay?.(el);
     return el;
   }
 
@@ -897,7 +897,7 @@
     }
     el.hidden = false;
     el.classList.remove("is-exiting");
-    if (animated && !window.AgentoCMotion?.prefersReducedMotion?.()) {
+    if (animated && !window.RagentMotion?.prefersReducedMotion?.()) {
       el.classList.add("is-entering");
       islandEnterTimer = setTimeout(() => {
         islandEnterTimer = null;
@@ -912,7 +912,7 @@
 
   function hideIsland({ immediate = false, animated = true, keepPending = false } = {}) {
     if (!keepPending) {
-      window.AgentoCBackHandler?.pop?.("decision-island");
+      window.RagentBackHandler?.pop?.("decision-island");
     }
     if (islandEnterTimer) {
       clearTimeout(islandEnterTimer);
@@ -923,7 +923,7 @@
       islandExitTimer = null;
     }
     if (!islandEl || islandEl.hidden) return;
-    const isReduced = immediate || window.AgentoCMotion?.prefersReducedMotion?.();
+    const isReduced = immediate || window.RagentMotion?.prefersReducedMotion?.();
     if (isReduced || !animated) {
       islandEl.classList.remove("visible", "is-entering", "is-exiting");
       islandEl.hidden = true;
@@ -943,7 +943,7 @@
 
   function collapseToIsland() {
     if (!hostEl || hostEl.hidden) return;
-    const isReduced = window.AgentoCMotion?.prefersReducedMotion?.();
+    const isReduced = window.RagentMotion?.prefersReducedMotion?.();
 
     if (collapseIslandTimer) {
       clearTimeout(collapseIslandTimer);
@@ -953,8 +953,8 @@
     ensureIslandDOM();
     updateIslandContent(currentDecisionInfo);
 
-    window.AgentoCBackHandler?.pop?.("decision-sheet");
-    window.AgentoCBackHandler?.push?.({
+    window.RagentBackHandler?.pop?.("decision-sheet");
+    window.RagentBackHandler?.push?.({
       id: "decision-island",
       onBack: () => {
         hideIsland();
@@ -993,7 +993,7 @@
       collapseIslandTimer = null;
     }
     if (hostEl && hostEl.hidden) rememberReturnFocus();
-    const isReduced = window.AgentoCMotion?.prefersReducedMotion?.();
+    const isReduced = window.RagentMotion?.prefersReducedMotion?.();
     hideIsland({ immediate: isReduced, animated: !isReduced, keepPending: true });
 
     if (!hostEl || hostEl.childElementCount === 0) {
@@ -1003,8 +1003,8 @@
       hostEl.hidden = false;
       hostEl.dataset.state = "open";
       requestSheetLayout("decision-sheet-open");
-      window.AgentoCBackHandler?.pop?.("decision-island");
-      window.AgentoCBackHandler?.push?.({
+      window.RagentBackHandler?.pop?.("decision-island");
+      window.RagentBackHandler?.push?.({
         id: "decision-sheet",
         onBack: () => {
           if (typeof collapseToIsland === "function") {
@@ -1312,7 +1312,7 @@
       if (typeof root.insertPlanPromptIntoComposer === "function") {
         root.insertPlanPromptIntoComposer(input.value, { interactionMode: "plan", planAction: "revise" });
       }
-      root.AgentoCComposerFullscreen?.open?.();
+      root.RagentComposerFullscreen?.open?.();
     });
     row.appendChild(full);
     editor.appendChild(row);
@@ -1330,7 +1330,7 @@
       let ok = false;
       if (planId && typeof root.submitPlanArtifactAction === "function") {
         ok = await root.submitPlanArtifactAction("revise", planId, { text, button: send });
-        if (ok && evt?.approvalId) root.AgentoCDecisions?.noteResponse({ approvalId: evt.approvalId });
+        if (ok && evt?.approvalId) root.RagentDecisions?.noteResponse({ approvalId: evt.approvalId });
       } else if (typeof root.submitRuntimeApprovalDecision === "function") {
         // ExitPlanMode has no plan artifact id. Deny the current gate, then
         // send the user's revision through the normal plan-mode composer.
@@ -1412,12 +1412,12 @@
           ok = typeof root.submitPlanArtifactAction === "function"
             ? await root.submitPlanArtifactAction("execute", planId, { button })
             : false;
-          if (ok && approvalId) root.AgentoCDecisions?.noteResponse({ approvalId });
+          if (ok && approvalId) root.RagentDecisions?.noteResponse({ approvalId });
         } else {
           // Deny on a proposal: dismiss the sheet; the plan stays pending and
           // can still be executed/revised from its in-stream card.
           ok = true;
-          if (approvalId) root.AgentoCDecisions?.noteResponse({ approvalId });
+          if (approvalId) root.RagentDecisions?.noteResponse({ approvalId });
         }
       } else {
         ok = typeof root.submitRuntimeApprovalDecision === "function"
@@ -1431,7 +1431,7 @@
       buttons.forEach((b) => { b.disabled = false; });
       if (button) button.removeAttribute("aria-busy");
     } else if (decision === "approve") {
-      window.AgentoCHaptics?.approval?.();
+      window.RagentHaptics?.approval?.();
     }
     // On ok: leave disabled; the pending approval resolves -> noteResponse -> hide.
   }
@@ -1449,7 +1449,7 @@
   }
 
   async function obtainApprovedActionProof(evt, selectedActionIds) {
-    const response = await (window.agentocFetch || fetch)(approvedActionEndpoint(evt, "/webauthn-challenge"), {
+    const response = await (window.ragentFetch || fetch)(approvedActionEndpoint(evt, "/webauthn-challenge"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selectedActionIds }),
@@ -1502,7 +1502,7 @@
       const webauthnProof = selectedHost.length > 0
         ? await obtainApprovedActionProof(evt, selectedHost)
         : null;
-      const response = await (window.agentocFetch || fetch)(approvedActionEndpoint(evt, "/resolve"), {
+      const response = await (window.ragentFetch || fetch)(approvedActionEndpoint(evt, "/resolve"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1524,7 +1524,7 @@
         throw error;
       }
       const payload = typeof response.json === "function" ? await response.json().catch(() => ({})) : {};
-      root.AgentoCDecisions?.noteApprovedActionResolution?.({
+      root.RagentDecisions?.noteApprovedActionResolution?.({
         type: "approved_action_batch_response",
         batchId: evt?.batchId,
         runId: evt?.runId,
@@ -1682,7 +1682,7 @@
     hostEl.hidden = false;
     setSheetExpanded(keepExpanded);
     requestSheetLayout("decision-sheet-approved-action-open");
-    window.AgentoCBackHandler?.push?.({
+    window.RagentBackHandler?.push?.({
       id: "decision-sheet",
       onBack: () => {
         if (typeof collapseToIsland === "function") {
@@ -1819,7 +1819,7 @@
     // Android back button: collapse the approval surface without making a
     // decision — the pending approval stays pending in the store and will
     // surface again on the next state change.
-    window.AgentoCBackHandler?.push?.({
+    window.RagentBackHandler?.push?.({
       id: "decision-sheet",
       onBack: () => {
         if (typeof collapseToIsland === "function") {
@@ -1887,11 +1887,11 @@
       }
       return;
     }
-    window.AgentoCBackHandler?.pop?.("decision-sheet");
+    window.RagentBackHandler?.pop?.("decision-sheet");
     // Collapse animation for every path — resolved approvals and
     // back-button collapses alike (reduced-motion users skip straight to
     // the finish).
-    if (immediate || window.AgentoCMotion?.prefersReducedMotion?.()) {
+    if (immediate || window.RagentMotion?.prefersReducedMotion?.()) {
       finishHideSheet();
       return;
     }
@@ -1981,17 +1981,17 @@
       hostEl.classList.remove("is-closing", "is-collapsing-to-island");
     }
     hideIsland({ immediate: true, keepPending: true });
-    const pendingAction = root.AgentoCDecisions?.getPendingAction?.();
+    const pendingAction = root.RagentDecisions?.getPendingAction?.();
     if (pendingAction) {
       renderApprovedActionSheet(pendingAction);
       return;
     }
-    const batchState = root.AgentoCDecisions?.getBatchState?.();
+    const batchState = root.RagentDecisions?.getBatchState?.();
     if (batchState?.evt) {
       renderBatchSheet(batchState.evt, batchState.resolved || new Set());
       return;
     }
-    const pending = root.AgentoCDecisions?.getPending?.();
+    const pending = root.RagentDecisions?.getPending?.();
     if (pending) renderSheet(pending);
   }
 
@@ -2001,17 +2001,17 @@
   // exactly once, without replaying the close/open animation race.
   function resume() {
     if (isSessionTransitioning()) return;
-    const pendingAction = root.AgentoCDecisions?.getPendingAction?.();
+    const pendingAction = root.RagentDecisions?.getPendingAction?.();
     if (pendingAction) {
       onAction({ pending: true, evt: pendingAction });
       return;
     }
-    const batchState = root.AgentoCDecisions?.getBatchState?.();
+    const batchState = root.RagentDecisions?.getBatchState?.();
     if (batchState?.evt) {
       onBatch({ pending: true, evt: batchState.evt, resolved: batchState.resolved || new Set() });
       return;
     }
-    const pending = root.AgentoCDecisions?.getPending?.();
+    const pending = root.RagentDecisions?.getPending?.();
     onDecisions(pending ? { pending: true, evt: pending } : { pending: false, evt: null });
   }
 
@@ -2023,7 +2023,7 @@
     ensureStylesheet();
     bindKeyboardDismissal();
     hostEl = injectDOM();
-    root.AgentoCDecisionSheet = Object.freeze({
+    root.RagentDecisionSheet = Object.freeze({
       reopen,
       resume,
       suspend,
@@ -2033,14 +2033,14 @@
       submitPrivilegedBatchCategory,
       submitApprovedActionDecision,
     });
-    if (root.AgentoCDecisions && typeof root.AgentoCDecisions.subscribe === "function") {
-      unsub = root.AgentoCDecisions.subscribe(onDecisions);
+    if (root.RagentDecisions && typeof root.RagentDecisions.subscribe === "function") {
+      unsub = root.RagentDecisions.subscribe(onDecisions);
     }
-    if (root.AgentoCDecisions && typeof root.AgentoCDecisions.subscribeBatch === "function") {
-      unsubBatch = root.AgentoCDecisions.subscribeBatch(onBatch);
+    if (root.RagentDecisions && typeof root.RagentDecisions.subscribeBatch === "function") {
+      unsubBatch = root.RagentDecisions.subscribeBatch(onBatch);
     }
-    if (root.AgentoCDecisions && typeof root.AgentoCDecisions.subscribeAction === "function") {
-      unsubAction = root.AgentoCDecisions.subscribeAction(onAction);
+    if (root.RagentDecisions && typeof root.RagentDecisions.subscribeAction === "function") {
+      unsubAction = root.RagentDecisions.subscribeAction(onAction);
     }
   }
 

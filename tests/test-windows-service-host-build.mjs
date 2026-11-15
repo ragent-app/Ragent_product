@@ -10,10 +10,10 @@ import {join,dirname,resolve,sep,basename} from 'node:path';
 import {stageRuntimePayload} from '../scripts/stage-runtime-payload.mjs';
 const exec=promisify(execFile),ps='C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
 const repo=resolve('.'),builder=join(repo,'packaging/windows/build-service-host.ps1');
-const root=await mkdtemp(join(tmpdir(),'agentoc-host-build-')),evidence=join(repo,'artifacts/service-host-build',randomUUID());
+const root=await mkdtemp(join(tmpdir(),'ragent-host-build-')),evidence=join(repo,'artifacts/service-host-build',randomUUID());
 await mkdir(evidence,{recursive:true});
 const hash=b=>createHash('sha256').update(b).digest('hex'),checks=[];
-const files=['packaging/windows/AgentoC.ServiceHost.cs','lib/instance-runtime.mjs','lib/instance-ownership.mjs','packaging/runtime-payload.json'];
+const files=['packaging/windows/Ragent.ServiceHost.cs','lib/instance-runtime.mjs','lib/instance-ownership.mjs','packaging/runtime-payload.json'];
 const source=join(root,'source'),staged=join(root,'staged');
 const git=async(...args)=>(await exec('git',args,{cwd:source,windowsHide:true,encoding:'utf8'})).stdout;
 const run=async(file,args)=>(await exec(file,args,{windowsHide:true,encoding:'utf8',timeout:45000,maxBuffer:131072})).stdout;
@@ -52,7 +52,7 @@ try{
  const dev=join(root,'out','Development.exe');await build(null,dev,['-DevelopmentOnly']);await assert.rejects(run(dev,['--build-info']),e=>e.code===1&&JSON.parse(e.stdout).code==='SHT_BUILD_INFO_UNAVAILABLE');checks.push({name:'explicit-development-build-has-no-product-provenance',pass:true});
  await negative('different-source-path',async()=>['-SourcePath',join(source,files[0])],'SHB_SOURCE_PATH_MISMATCH');
  await negative('development-product-mode-conflict',async()=>['-DevelopmentOnly'],'SHB_BUILD_MODE_CONFLICT');
- await negative('wrong-stamp',async stage=>writeFile(join(stage,'.agentoc-source-commit'),'0'.repeat(40)+'\n'),'SHB_RUNTIME_METADATA_INVALID');
+ await negative('wrong-stamp',async stage=>writeFile(join(stage,'.ragent-source-commit'),'0'.repeat(40)+'\n'),'SHB_RUNTIME_METADATA_INVALID');
  await negative('wrong-profile',async stage=>{const m=await manifest(stage);m.profile='accounts';await putManifest(stage,m);},'SHB_RUNTIME_METADATA_INVALID');
  await negative('wrong-schema',async stage=>{const m=await manifest(stage);m.schemaVersion='1';await putManifest(stage,m);},'SHB_RUNTIME_METADATA_INVALID');
  await negative('powershell-7-string-schema',async stage=>{const m=await manifest(stage);m.schemaVersion='1';await putManifest(stage,m);},'SHB_RUNTIME_METADATA_INVALID',{shell:'pwsh.exe'});
@@ -67,11 +67,11 @@ try{
  const alias=join(root,'junction');await symlink(staged,alias,'junction');try{await assert.rejects(build(alias,join(root,'out','junction.exe')),e=>e.code===1&&/SHB_INPUT_IDENTITY_REFUSED/.test(e.stderr));checks.push({name:'junction-root-refused',refused:true});}finally{await unlink(alias);}
  assert.equal((await readdir(join(root,'out'))).some(n=>n.startsWith('service-host-build-')),false,'temporary resource files leaked');
  await writeFile(join(evidence,'build-info.json'),JSON.stringify(info,null,2)+'\n');
- report={pass:true,sourceCommit:(await exec('git',['rev-parse','HEAD'],{cwd:repo,windowsHide:true,encoding:'utf8'})).stdout.trim(),fixtureSourceCommit:stageManifest.sourceRevision,actualCompiler:true,fullRuntimePayload:false,actualScm:false,msiBuilt:false,installedProductChanged:false,authorityIssued:false,sourceFiles:await Promise.all(['packaging/windows/AgentoC.ServiceHost.cs','packaging/windows/build-service-host.ps1','packaging/windows/build-msi.ps1','lib/instance-runtime.mjs','lib/instance-ownership.mjs','tests/test-windows-service-host-build.mjs'].map(async path=>({path,sha256:hash(await readFile(join(repo,path)))}))),hostSha256:hash(await readFile(output)),checks};pass=true;
+ report={pass:true,sourceCommit:(await exec('git',['rev-parse','HEAD'],{cwd:repo,windowsHide:true,encoding:'utf8'})).stdout.trim(),fixtureSourceCommit:stageManifest.sourceRevision,actualCompiler:true,fullRuntimePayload:false,actualScm:false,msiBuilt:false,installedProductChanged:false,authorityIssued:false,sourceFiles:await Promise.all(['packaging/windows/Ragent.ServiceHost.cs','packaging/windows/build-service-host.ps1','packaging/windows/build-msi.ps1','lib/instance-runtime.mjs','lib/instance-ownership.mjs','tests/test-windows-service-host-build.mjs'].map(async path=>({path,sha256:hash(await readFile(join(repo,path)))}))),hostSha256:hash(await readFile(output)),checks};pass=true;
 }catch(error){report={pass:false,error:error.stack,checks,actualScm:false,installedProductChanged:false};throw error;}
 finally{
  const resolvedRoot=resolve(root),resolvedTemp=resolve(tmpdir());
- if(!resolvedRoot.toLowerCase().startsWith((resolvedTemp+sep).toLowerCase())||!basename(resolvedRoot).startsWith('agentoc-host-build-'))throw new Error('Fixture cleanup target escaped its marked temp root');
+ if(!resolvedRoot.toLowerCase().startsWith((resolvedTemp+sep).toLowerCase())||!basename(resolvedRoot).startsWith('ragent-host-build-'))throw new Error('Fixture cleanup target escaped its marked temp root');
  await rm(resolvedRoot,{recursive:true,force:true});
  if(report){report.cleanupConfirmed=true;await writeFile(join(evidence,'report.json'),JSON.stringify(report,null,2)+'\n');}
  console.log(JSON.stringify({pass,checks:checks.length,report:join(evidence,'report.json')}));

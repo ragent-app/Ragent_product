@@ -1,6 +1,6 @@
 # Real SCM smoke test. Default mode requires a fresh, disposable GitHub-hosted Windows runner.
 # -LocalHost is an explicit owner-authorized test mode; it preserves the existing
-# AgentoC install root and owns only the new Broker child plus Broker state root.
+# Ragent install root and owns only the new Broker child plus Broker state root.
 [CmdletBinding()]
 param([switch]$LocalHost,[string]$LocalReportPath)
 $ErrorActionPreference = 'Stop'
@@ -20,15 +20,15 @@ if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 	throw 'APB_ADMIN_RUNNER_REQUIRED'
 }
 
-$name = 'AgentoC-PrivilegedBroker'
-$probeService = 'AgentoC-ControlPlane'
-$runnerProbeService = 'AgentoC-RunnerSupervisor'
-$product = 'C:\Program Files\AgentoC'
+$name = 'Ragent-PrivilegedBroker'
+$probeService = 'Ragent-ControlPlane'
+$runnerProbeService = 'Ragent-RunnerSupervisor'
+$product = 'C:\Program Files\Ragent'
 $brokerRoot = Join-Path $product 'Broker'
-$binary = Join-Path $brokerRoot 'AgentoC.PrivilegedBroker.exe'
-$probeBinary = Join-Path $brokerRoot 'AgentoC.BrokerPipeProbe.exe'
-$runnerProbeBinary = Join-Path $brokerRoot 'AgentoC.RunnerPipeProbe.exe'
-$stateRoot = Join-Path $env:ProgramData 'AgentoC-PrivilegedBroker'
+$binary = Join-Path $brokerRoot 'Ragent.PrivilegedBroker.exe'
+$probeBinary = Join-Path $brokerRoot 'Ragent.BrokerPipeProbe.exe'
+$runnerProbeBinary = Join-Path $brokerRoot 'Ragent.RunnerPipeProbe.exe'
+$stateRoot = Join-Path $env:ProgramData 'Ragent-PrivilegedBroker'
 $statePath = Join-Path $stateRoot 'state.json'
 $brokerSid = $null
 $expectedStateDacl = $null
@@ -94,7 +94,7 @@ function Assert-NoBroadWrite([string]$Path) {
 }
 
 function Send-BrokerHealthMessage([hashtable]$Request) {
-    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'AgentoC.PrivilegedBroker.Health.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'Ragent.PrivilegedBroker.Health.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
     try {
         $pipe.Connect(5000)
         $payload = [Text.Encoding]::UTF8.GetBytes(($Request | ConvertTo-Json -Compress -Depth 4))
@@ -124,7 +124,7 @@ function Send-BrokerHealthMessage([hashtable]$Request) {
 }
 
 function Assert-AdminCannotOpenRequestPipe {
-    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'AgentoC.PrivilegedBroker.Request.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+    $pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'Ragent.PrivilegedBroker.Request.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
     try {
         try {
             $pipe.Connect(2000)
@@ -148,7 +148,7 @@ try {
     foreach ($path in @($product,$brokerRoot,$binary)) { Assert-NoBroadWrite $path }
     $report.checks += 'administrator-owned-protected-binary-and-ancestors'
 
-    New-Service -Name $name -BinaryPathName ('"' + $binary + '"') -StartupType Manual -DisplayName 'AgentoC Privileged Broker QA' | Out-Null
+    New-Service -Name $name -BinaryPathName ('"' + $binary + '"') -StartupType Manual -DisplayName 'Ragent Privileged Broker QA' | Out-Null
     $registered = $true
     & sc.exe sidtype $name unrestricted | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_SIDTYPE_FAILED' }
@@ -161,7 +161,7 @@ try {
     & (Join-Path $repo 'native\windows-privileged-broker\build-test-pipe-client.ps1') -OutputPath $runnerProbeBinary -ServiceName $runnerProbeService | Out-Null
     foreach ($path in @($probeBinary,$runnerProbeBinary)) { Assert-NoBroadWrite $path }
     $probeBinaryArg = '"' + $probeBinary + '"'
-    & sc.exe create $probeService 'binPath=' $probeBinaryArg 'obj=' "NT SERVICE\$probeService" 'start=' 'demand' 'DisplayName=' 'AgentoC Broker pipe probe' | Out-Null
+    & sc.exe create $probeService 'binPath=' $probeBinaryArg 'obj=' "NT SERVICE\$probeService" 'start=' 'demand' 'DisplayName=' 'Ragent Broker pipe probe' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_PROBE_SERVICE_CREATE_FAILED' }
     $probeRegistered = $true
     & sc.exe sidtype $probeService unrestricted | Out-Null
@@ -169,7 +169,7 @@ try {
     & sc.exe privs $probeService SeChangeNotifyPrivilege | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_PROBE_PRIVILEGES_FAILED' }
     $runnerProbeBinaryArg = '"' + $runnerProbeBinary + '"'
-    & sc.exe create $runnerProbeService 'binPath=' $runnerProbeBinaryArg 'obj=' "NT SERVICE\$runnerProbeService" 'start=' 'demand' 'DisplayName=' 'AgentoC Broker supervisor pipe probe' | Out-Null
+    & sc.exe create $runnerProbeService 'binPath=' $runnerProbeBinaryArg 'obj=' "NT SERVICE\$runnerProbeService" 'start=' 'demand' 'DisplayName=' 'Ragent Broker supervisor pipe probe' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_RUNNER_PROBE_SERVICE_CREATE_FAILED' }
     $runnerProbeRegistered = $true
     & sc.exe sidtype $runnerProbeService unrestricted | Out-Null
@@ -220,7 +220,7 @@ try {
     if ($health.type -cne 'health' -or $health.code -cne 'BROKER_DISABLED' -or $health.executionEnabled -ne $false -or -not $health.installationId) {
         throw 'APB_QA_HEALTH_PIPE_REFUSED'
     }
-    $readOnly = Send-BrokerHealthMessage @{version=2;type='propose';requestId='qa-request';sessionId='qa-session';runId='qa-run';turnId='qa-turn';actionId='qa-action';operation='service.restart';targetId='AgentoC-Broker-QA-Target'}
+    $readOnly = Send-BrokerHealthMessage @{version=2;type='propose';requestId='qa-request';sessionId='qa-session';runId='qa-run';turnId='qa-turn';actionId='qa-action';operation='service.restart';targetId='Ragent-Broker-QA-Target'}
     if ($readOnly.code -cne 'HEALTH_PIPE_READ_ONLY') { throw 'APB_QA_HEALTH_PIPE_MUTATION_ALLOWED' }
     Assert-AdminCannotOpenRequestPipe
     & sc.exe start $runnerProbeService | Out-Null
@@ -390,7 +390,7 @@ try {
             Remove-Item -LiteralPath $ownedPath -Recurse -Force
         }
         if ($stateOwned) {
-            if ([IO.Path]::GetFullPath($stateRoot).TrimEnd('\') -cne [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'AgentoC-PrivilegedBroker')).TrimEnd('\')) { throw 'APB_QA_STATE_PATH_REFUSED' }
+            if ([IO.Path]::GetFullPath($stateRoot).TrimEnd('\') -cne [IO.Path]::GetFullPath((Join-Path $env:ProgramData 'Ragent-PrivilegedBroker')).TrimEnd('\')) { throw 'APB_QA_STATE_PATH_REFUSED' }
             $stateChildren = @(Get-ChildItem -LiteralPath $stateRoot -Force)
             if ($stateChildren.Count -gt 1 -or ($stateChildren | Where-Object { $_.Name -cne 'state.json' -or $_.PSIsContainer -or ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) }).Count) { throw 'APB_QA_STATE_CONTENTS_REFUSED' }
             if (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath -Force }

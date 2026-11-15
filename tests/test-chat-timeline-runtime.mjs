@@ -28,7 +28,7 @@ try {
     window.reconcileComposerPendingSendWithEvent = () => {};
     window.decisionCalls = [];
     window.decisionResetCalls = 0;
-    window.AgentoCDecisions = {
+    window.RagentDecisions = {
       noteRequest: (event) => window.decisionCalls.push(['approval', event.approvalId || '']),
       notePrivilegedBatch: (event) => window.decisionCalls.push(['batch', event.batchId]),
       noteApprovedActionState: (event) => window.decisionCalls.push(['action', event.actionId]),
@@ -66,7 +66,7 @@ try {
   await page.addScriptTag({ content: readFileSync(join(repoRoot, 'static/chat/timeline-runtime.js'), 'utf8') });
 
   const result = await page.evaluate(() => {
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     runtime.renderBatch([
       { id: 'u1', seq: 1, type: 'message', role: 'user', timelineEntityId: 'message:user:req', content: 'Inspect' },
       { id: 'a1', seq: 2, type: 'message', role: 'assistant', runId: 'run-1', timelineEntityId: 'message:assistant:before', content: 'Checking.' },
@@ -138,10 +138,10 @@ try {
   // the approval event is applied again.
   await page.evaluate(() => {
     const before = window.decisionResetCalls;
-    window.AgentoCDecisions.getPending = () => ({ approvalId: 'race-approval', runId: 'live-run' });
-    window.AgentoCDecisions.getPendingBatch = () => null;
-    window.AgentoCDecisions.getPendingAction = () => null;
-    window.AgentoCTimelineRuntime.renderBatch([
+    window.RagentDecisions.getPending = () => ({ approvalId: 'race-approval', runId: 'live-run' });
+    window.RagentDecisions.getPendingBatch = () => null;
+    window.RagentDecisions.getPendingAction = () => null;
+    window.RagentTimelineRuntime.renderBatch([
       { id: 'race-approval', seq: 14, type: 'approval_request', approvalId: 'race-approval', runId: 'live-run', status: 'pending' },
       { id: 'race-old-status', seq: 15, type: 'status', runId: 'old-run', content: 'error: stale run' },
     ], { sessionId: 'timeline-runtime', runState: 'idle', latestSeq: 15 });
@@ -171,7 +171,7 @@ try {
   // settled DOM must read in server sequence order with the streamed answer
   // below its own run activity and no duplicated stream fragment left over.
   const streamOrder = await page.evaluate(() => {
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     const sessionId = 'timeline-stream-order';
     runtime.reset(sessionId);
     const render = (events, options = {}) => runtime.renderBatch(events, { sessionId, ...options });
@@ -204,7 +204,7 @@ try {
   ], 'streamed output must settle into server chronology with no duplicate fragments');
 
   const cachedSwitch = await page.evaluate(() => {
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     runtime.reset('cache-a');
     runtime.renderBatch([
       { seq: 1, type: 'message', role: 'user', content: 'cached A' },
@@ -227,7 +227,7 @@ try {
 
   const durableWsDelta = await page.evaluate(() => {
     window.currentSessionId = 'timeline-durable-ws';
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     runtime.reset('timeline-durable-ws');
     runtime.renderDurableDelta([
       { id: 'ws-durable-user', seq: 21, type: 'message', role: 'user', content: 'WS durable user message' },
@@ -245,9 +245,9 @@ try {
 
   const coalescedStream = await page.evaluate(async () => {
     window.currentSessionId = 'timeline-coalesced-ws';
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     runtime.reset('timeline-coalesced-ws');
-    const before = window.agentocGetTimelineRuntimeMetrics().commits;
+    const before = window.ragentGetTimelineRuntimeMetrics().commits;
     for (const text of ['one ', 'two ', 'three']) {
       runtime.renderIncremental([{ type: 'text_delta', role: 'assistant', runId: 'coalesced-run', text }], {
         sessionId: 'timeline-coalesced-ws', runState: 'running', source: 'ws',
@@ -255,7 +255,7 @@ try {
     }
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     return {
-      commits: window.agentocGetTimelineRuntimeMetrics().commits - before,
+      commits: window.ragentGetTimelineRuntimeMetrics().commits - before,
       text: [...messagesInner.children].map((node) => node.textContent),
     };
   });

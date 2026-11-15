@@ -5,13 +5,13 @@ import { readdir, readFile } from 'node:fs/promises';
 import { Pool } from 'pg';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
-const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
 assert(url, 'Set the explicit isolated-schema test database URL');
-const modulePath = process.env.AGENTOC_TEST_STORE_MODULE || resolve('accounts/store/postgres.mjs');
+const modulePath = process.env.RAGENT_TEST_STORE_MODULE || resolve('accounts/store/postgres.mjs');
 const { createPostgresStore } = await import(pathToFileURL(resolve(modulePath)));
-const secondFactory = process.env.AGENTOC_TEST_SECOND_STORE_MODULE
-  ? (await import(pathToFileURL(resolve(process.env.AGENTOC_TEST_SECOND_STORE_MODULE)))).createPostgresStore : createPostgresStore;
-const intentCount = Number(process.env.AGENTOC_TEST_INTENT_COUNT || 1);
+const secondFactory = process.env.RAGENT_TEST_SECOND_STORE_MODULE
+  ? (await import(pathToFileURL(resolve(process.env.RAGENT_TEST_SECOND_STORE_MODULE)))).createPostgresStore : createPostgresStore;
+const intentCount = Number(process.env.RAGENT_TEST_INTENT_COUNT || 1);
 assert(Number.isInteger(intentCount) && intentCount >= 1 && intentCount <= 10_000);
 const schema = `qa_conn_batch_${randomBytes(12).toString('hex')}`;
 assert(/^qa_conn_batch_[a-f0-9]{24}$/.test(schema));
@@ -20,7 +20,7 @@ const pools = []; let owned = false; let mutations = 0, inserts = 0;
 let intentInsertedRows = 0, intentDeletedRows = 0;
 function store(factory = createPostgresStore) {
   const pool = new Pool({ connectionString: url, max: 1, connectionTimeoutMillis: 5000,
-    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=agentoc-connectivity-qa` });
+    options: `-c search_path=${schema} -c statement_timeout=15000 -c application_name=ragent-connectivity-qa` });
   pools.push(pool);
   return factory({ pool: { connect: async () => {
     const client = await pool.connect();
@@ -30,10 +30,10 @@ function store(factory = createPostgresStore) {
       assert(!/\bpublic\s*\./i.test(sql), 'Fixture cannot access public tables');
       if (/pg_advisory/.test(sql)) {
         assert.equal(sql, 'select pg_advisory_xact_lock(hashtext($1))');
-        assert.deepEqual(values, ['agentoc_accounts_store_v1']);
+        assert.deepEqual(values, ['ragent_accounts_store_v1']);
         // Preserve actual advisory serialization between the two test stores,
         // using an isolated lock key so QA cannot queue the running service.
-        return client.query(sql, [`agentoc_accounts_store_v1:${schema}`]);
+        return client.query(sql, [`ragent_accounts_store_v1:${schema}`]);
       }
       if (/^\s*(insert|delete|update)\b/i.test(sql)) mutations++;
       if (/^\s*insert\b/i.test(sql)) inserts++;
@@ -82,7 +82,7 @@ try {
     draft.accountSyncCatalog.push({ accountId, scope: 'provider', key: 'counter', version: { count: 0 }, sourceInstanceId: 'inst_batch', updatedAt: now });
   });
   const seedMs = performance.now() - start, seedInsertQueries = inserts - beforeInserts;
-  if (process.env.AGENTOC_EXPECT_BATCHED_WRITES !== '0') assert(seedInsertQueries < 20 + Math.ceil(intentCount / 100), 'Rows must use bounded batches');
+  if (process.env.RAGENT_EXPECT_BATCHED_WRITES !== '0') assert(seedInsertQueries < 20 + Math.ceil(intentCount / 100), 'Rows must use bounded batches');
   else assert(seedInsertQueries >= 300, 'Baseline must actually perform the former per-row writes');
   const snapshot = await a.mutate((draft) => structuredClone(draft));
   assert.equal(snapshot.accountDevices.length, 300);
@@ -99,8 +99,8 @@ try {
   assert(linkedAfterDelta.every(deviceId => deviceId === primary), 'An unchanged intent must retain its phone FK');
   const deltaMs = performance.now() - deltaStart;
   const deltaRows = { inserted: intentInsertedRows - beforeDelta.inserts, deleted: intentDeletedRows - beforeDelta.deletes };
-  if (process.env.AGENTOC_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(deltaRows, { inserted: 1, deleted: 0 });
-  else if (process.env.AGENTOC_EXPECT_INTENT_DELTAS === '0') assert.deepEqual(deltaRows, { inserted: intentCount, deleted: intentCount });
+  if (process.env.RAGENT_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(deltaRows, { inserted: 1, deleted: 0 });
+  else if (process.env.RAGENT_EXPECT_INTENT_DELTAS === '0') assert.deepEqual(deltaRows, { inserted: intentCount, deleted: intentCount });
   assert.equal(await b.mutate(draft => draft.accountJoinIntents.length), intentCount);
   // A later grant FK failure must roll back the earlier intent delta itself.
   await assert.rejects(a.mutate(draft => {
@@ -112,7 +112,7 @@ try {
   if (intentCount > 1) {
     const beforeDelete = { inserts: intentInsertedRows, deletes: intentDeletedRows };
     await a.mutate(draft => { draft.accountJoinIntents = draft.accountJoinIntents.filter(intent => intent.intentId !== `rji_batch_${intentCount - 1}`); });
-    if (process.env.AGENTOC_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(
+    if (process.env.RAGENT_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(
       { inserted: intentInsertedRows - beforeDelete.inserts, deleted: intentDeletedRows - beforeDelete.deletes }, { inserted: 0, deleted: 1 });
     assert.equal(await b.mutate(draft => draft.accountJoinIntents.length), intentCount - 1);
   }
@@ -132,8 +132,8 @@ try {
   assert((await b.mutate(draft => draft.accountJoinIntents.map(intent => intent.accountDeviceId)))
     .every(deviceId => deviceId === primary), 'Catalog writes must preserve all phone links');
   let computerRevocation = null;
-  if (process.env.AGENTOC_TEST_REVOKE_HELPER) {
-    const {releaseRevokedInstanceTurnConnections} = await import(pathToFileURL(resolve(process.env.AGENTOC_TEST_REVOKE_HELPER)));
+  if (process.env.RAGENT_TEST_REVOKE_HELPER) {
+    const {releaseRevokedInstanceTurnConnections} = await import(pathToFileURL(resolve(process.env.RAGENT_TEST_REVOKE_HELPER)));
     const revokedInstance = 'inst_batch_revoke', revokeMs = Date.now();
     await a.mutate(draft => {
       draft.accounts.push({accountId:'acct_batch_foreign',provider:'google',providerSubject:'batch-foreign',createdAt:now});
@@ -175,8 +175,8 @@ try {
     computerRevocation={released:2,foreignKeyRollback:true,serializedMixedWriterPreserved:true,phoneLinksPreserved:true,repeatedWrites:0};
   }
   let resultRetention = null;
-  if (process.env.AGENTOC_TEST_RETENTION_HELPER) {
-    const {pruneExpiredRendezvousResults} = await import(pathToFileURL(resolve(process.env.AGENTOC_TEST_RETENTION_HELPER)));
+  if (process.env.RAGENT_TEST_RETENTION_HELPER) {
+    const {pruneExpiredRendezvousResults} = await import(pathToFileURL(resolve(process.env.RAGENT_TEST_RETENTION_HELPER)));
     const expired = new Date(Date.now() - 1_000).toISOString();
     await a.mutate(draft => { for (const intent of draft.accountJoinIntents) {
       intent.expiresAt = expired;
@@ -195,7 +195,7 @@ try {
     measuredAt = performance.now();
     assert.equal(await a.mutate(draft => pruneExpiredRendezvousResults(draft.accountJoinIntents, Date.now())), retained.length);
     const pruneMs = Math.round(performance.now() - measuredAt);
-    if (process.env.AGENTOC_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(
+    if (process.env.RAGENT_EXPECT_INTENT_DELTAS === '1') assert.deepEqual(
       {inserted:intentInsertedRows-beforePrune.inserts,deleted:intentDeletedRows-beforePrune.deletes},
       {inserted:retained.length,deleted:0});
     // The old serialized writer must see the new nulls rather than resurrect

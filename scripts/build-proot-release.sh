@@ -30,7 +30,7 @@ mkdir -p "$STAGE/app" "$STAGE/runtime"
 # checkout. Its manifest must come from stage-proot-snapshot.mjs.
 if [ -n "${RAGENT_PROOT_SNAPSHOT:-}" ]; then
   [ -f "$RAGENT_PROOT_SNAPSHOT/proot-source-manifest.json" ] || { echo 'Snapshot manifest missing' >&2; exit 1; }
-  node -e 'const fs=require("fs"),path=require("path"),crypto=require("crypto"),root=process.argv[1],dest=process.argv[2],manifest=fs.readFileSync(path.join(root,"proot-source-manifest.json")),m=JSON.parse(manifest); for(const f of m.files){if(!/^[A-Za-z0-9_.@+/-]+$/.test(f.path)||f.path.split("/").some(x=>!x||x==="."||x==="..")||![420,493].includes(f.mode))throw Error("Invalid snapshot entry");let p=path.join(root,f.path),b=fs.readFileSync(p),target=path.join(dest,f.path);if(crypto.createHash("sha256").update(b).digest("hex")!==f.sha256)throw Error("Snapshot hash mismatch: "+f.path);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,b,{flag:"wx",mode:f.mode})}fs.writeFileSync(path.join(dest,"proot-source-manifest.json"),manifest);fs.writeFileSync(path.join(dest,".agentoc-source-commit"),m.sourceRevision+"\n")' "$RAGENT_PROOT_SNAPSHOT" "$STAGE/app"
+  node -e 'const fs=require("fs"),path=require("path"),crypto=require("crypto"),root=process.argv[1],dest=process.argv[2],manifest=fs.readFileSync(path.join(root,"proot-source-manifest.json")),m=JSON.parse(manifest); for(const f of m.files){if(!/^[A-Za-z0-9_.@+/-]+$/.test(f.path)||f.path.split("/").some(x=>!x||x==="."||x==="..")||![420,493].includes(f.mode))throw Error("Invalid snapshot entry");let p=path.join(root,f.path),b=fs.readFileSync(p),target=path.join(dest,f.path);if(crypto.createHash("sha256").update(b).digest("hex")!==f.sha256)throw Error("Snapshot hash mismatch: "+f.path);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,b,{flag:"wx",mode:f.mode})}fs.writeFileSync(path.join(dest,"proot-source-manifest.json"),manifest);fs.writeFileSync(path.join(dest,".ragent-source-commit"),m.sourceRevision+"\n")' "$RAGENT_PROOT_SNAPSHOT" "$STAGE/app"
 else
   node "$ROOT/scripts/stage-proot-snapshot.mjs" "$ROOT" "$STAGE/app" "${RAGENT_PROOT_SOURCE_MODE:-checkout}"
 fi
@@ -48,7 +48,7 @@ fi
 [ "$(bash "$ROOT/scripts/build-proot-p2p-host.sh" fingerprint "$STAGE/app/p2p")" = "$(cat "$P2P_ARTIFACT.source-sha256")" ] || { echo 'P2P host was built from different source' >&2; exit 1; }
 [ "$(sha256sum "$P2P_ARTIFACT" | cut -d' ' -f1)" = "$(cat "$P2P_ARTIFACT.sha256")" ] || { echo 'P2P host checksum mismatch' >&2; exit 1; }
 install -m 0755 "$P2P_ARTIFACT" "$STAGE/app/bin/ragent-p2p-host"
-install -m 0644 "$P2P_ARTIFACT.go-version" "$STAGE/app/.agentoc-p2p-host-go-version"
+install -m 0644 "$P2P_ARTIFACT.go-version" "$STAGE/app/.ragent-p2p-host-go-version"
 HOST_BINARY="$STAGE/app/bin/ragent-p2p-host"
 [ "$(od -An -tx1 -N6 "$HOST_BINARY" | tr -d ' \n')" = 7f454c460201 ] && \
   [ "$(od -An -tx1 -j18 -N2 "$HOST_BINARY" | tr -d ' \n')" = b700 ] || { echo 'P2P host is not a Linux ARM64 ELF' >&2; exit 1; }
@@ -59,7 +59,7 @@ if [ "${RAGENT_PROOT_OFFLINE:-0}" = 1 ]; then NPM_NETWORK=(--offline); fi
 # Any executable native dependency must be Linux ARM64, never a Windows PE.
 node -e 'const fs=require("fs"),path=require("path"); function walk(d){for(const x of fs.readdirSync(d,{withFileTypes:true})){let p=path.join(d,x.name);if(x.isDirectory())walk(p);else if(x.isFile()){let fd=fs.openSync(p,"r"),b=Buffer.alloc(20),n=fs.readSync(fd,b,0,20,0);fs.closeSync(fd);if(/\.(exe|dll)$/i.test(p)||(n>=2&&b[0]===77&&b[1]===90))throw Error("Windows executable in dependencies: "+p);if(n>=20&&b[0]===127&&b.toString("ascii",1,4)==="ELF"&&(b[5]!==1||b.readUInt16LE(18)!==183))throw Error("Non-ARM64 ELF in dependencies: "+p);if(/\.node$/i.test(p)&&!(n>=20&&b[0]===127&&b.toString("ascii",1,4)==="ELF"))throw Error("Non-ELF native addon: "+p)}}}walk(process.argv[1])' "$STAGE/app/node_modules"
 rm "$STAGE/app/package-lock.json"
-printf '%s\n' "$VERSION" > "$STAGE/app/.agentoc-package-version"
+printf '%s\n' "$VERSION" > "$STAGE/app/.ragent-package-version"
 TARBALL="$NODE_DIST.tar.xz"
 BASE="https://nodejs.org/dist/$NODE_VERSION"
 [ -f "$RAGENT_PROOT_CACHE_DIR/$TARBALL" ] || { [ "${RAGENT_PROOT_OFFLINE:-0}" != 1 ] || { echo 'Offline Node archive missing' >&2; exit 1; }; curl -fsSL --retry 3 "$BASE/$TARBALL" -o "$RAGENT_PROOT_CACHE_DIR/$TARBALL"; }
@@ -109,8 +109,8 @@ cat > "$STAGE/runtime/claude" <<'EOF'
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 exec "$root/vendor/claude/claude" "$@"
 EOF
-cp "$STAGE/runtime/codex" "$STAGE/runtime/agentoc-codex-app-server"
-chmod 0755 "$STAGE/runtime/codex" "$STAGE/runtime/agentoc-codex-app-server" "$STAGE/runtime/claude"
+cp "$STAGE/runtime/codex" "$STAGE/runtime/ragent-codex-app-server"
+chmod 0755 "$STAGE/runtime/codex" "$STAGE/runtime/ragent-codex-app-server" "$STAGE/runtime/claude"
 printf 'codex=0.167.2\nclaude=2.1.310\n' > "$STAGE/runtime/provider-versions"
 install -m 0755 "$ROOT/packaging/proot/ragent" "$STAGE/ragent"
 install -m 0755 "$ROOT/packaging/proot/install.sh" "$STAGE/install.sh"

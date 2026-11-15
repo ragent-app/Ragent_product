@@ -6,13 +6,13 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-events-capabilities-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-events-capabilities-'));
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(tempHome, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(tempHome, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(tempHome, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(tempHome, 'workspace');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const sessionManager = await import(
   pathToFileURL(join(repoRoot, 'chat', 'session-manager.mjs')).href
@@ -100,7 +100,7 @@ try {
   // overwrite an existing field. Uses a fresh session so no eventCache entry
   // shadows the on-disk content.
   const legacySessionId = 'c'.repeat(32);
-  const legacyDir = join(tempHome, '.config', 'agentoc', 'chat-history', legacySessionId);
+  const legacyDir = join(tempHome, '.config', 'ragent', 'chat-history', legacySessionId);
   mkdirSync(join(legacyDir, 'events'), { recursive: true });
   writeFileSync(join(legacyDir, 'meta.json'), JSON.stringify({
     latestSeq: 1,

@@ -82,11 +82,11 @@ function applySessionListState(nextSessions, {
   // the cold-start load (hadLoadedSessions) so a page open with several waiting
   // sessions does not fire a burst; dedup + transition check guard every later
   // refresh.
-  if (hadLoadedSessions && typeof window.AgentoCApprovalNotify?.onSessionsApplied === "function") {
-    try { window.AgentoCApprovalNotify.onSessionsApplied(previousMap, activeSessions); } catch {}
+  if (hadLoadedSessions && typeof window.RagentApprovalNotify?.onSessionsApplied === "function") {
+    try { window.RagentApprovalNotify.onSessionsApplied(previousMap, activeSessions); } catch {}
   }
-  if (hadLoadedSessions && typeof window.AgentoCAttentionPopup?.onSessionsApplied === "function") {
-    try { window.AgentoCAttentionPopup.onSessionsApplied(previousMap, activeSessions); } catch {}
+  if (hadLoadedSessions && typeof window.RagentAttentionPopup?.onSessionsApplied === "function") {
+    try { window.RagentAttentionPopup.onSessionsApplied(previousMap, activeSessions); } catch {}
   }
   if (previousCurrentSessionId && !currentSessionId) {
     if (typeof resetAttachedSessionRenderState === "function") {

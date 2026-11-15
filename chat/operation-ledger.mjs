@@ -18,7 +18,7 @@
  * Error classification (DS-03/DS-04 contract): auth, timeout, transport,
  * input, provider_exit, unsupported, rate_limit, unknown.
  *
- * Storage: AGENTOC_OPERATION_LEDGER_DIR override, default
+ * Storage: RAGENT_OPERATION_LEDGER_DIR override, default
  * <usage-ledger>/operations/YYYY-MM-DD.jsonl. The directory is created
  * lazily on first write, so the module works without an explicit init in
  * tests and small tools.
@@ -70,7 +70,7 @@ function trimString(value) {
 }
 
 export function resolveOperationLedgerDir(value = '') {
-  return trimString(value) || process.env.AGENTOC_OPERATION_LEDGER_DIR || join(USAGE_LEDGER_DIR, 'operations');
+  return trimString(value) || process.env.RAGENT_OPERATION_LEDGER_DIR || join(USAGE_LEDGER_DIR, 'operations');
 }
 
 function formatDateKey(date = new Date()) {

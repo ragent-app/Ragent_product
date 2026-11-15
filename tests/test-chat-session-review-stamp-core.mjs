@@ -96,7 +96,7 @@ function loadCore() {
     context,
     { filename: 'transport/session-review-stamp.js' },
   );
-  const core = context.AgentocSessionReviewStampCore;
+  const core = context.RagentSessionReviewStampCore;
   return {
     api: {
       normalizeSessionReviewStamp: (v) => core.normalizeSessionReviewStamp(v),

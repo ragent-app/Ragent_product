@@ -69,7 +69,7 @@ if (!reader) for (const file of files) {
   if (createHash('sha256').update(current).digest('hex') !== file.sha256) throw new Error(`Source changed during staging: ${file.path}`);
 }
 await writeFile(join(output, 'proot-source-manifest.json'), `${JSON.stringify({ schemaVersion: 1, sourceRevision: head, sourceMode, workingTreeDirty: dirty, files }, null, 2)}\n`, { flag: 'wx' });
-await writeFile(join(output, '.agentoc-source-commit'), `${head}\n`, { flag: 'wx' });
+await writeFile(join(output, '.ragent-source-commit'), `${head}\n`, { flag: 'wx' });
 if (reader) await reader.close();
 } catch (error) {
   reader?.abort();

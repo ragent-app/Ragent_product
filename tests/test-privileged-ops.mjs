@@ -35,10 +35,10 @@ const opWithGate = buildPrivilegedOp({
   command: 'systemctl restart nginx',
   declaredCategory: 'other',
   approvalId: 'claude:req-1',
-  wrapperCommand: 'agentoc-privileged -- systemctl restart nginx',
+  wrapperCommand: 'ragent-privileged -- systemctl restart nginx',
 });
 eq('op approvalId preserved', opWithGate.approvalId, 'claude:req-1');
-eq('op wrapperCommand preserved', opWithGate.wrapperCommand, 'agentoc-privileged -- systemctl restart nginx');
+eq('op wrapperCommand preserved', opWithGate.wrapperCommand, 'ragent-privileged -- systemctl restart nginx');
 check('description defaults to command', buildPrivilegedOp({ command: 'systemctl restart nginx' }).description === 'systemctl restart nginx');
 assert.throws(() => buildPrivilegedOp({}), { code: 'COMMAND_REQUIRED' });
 
@@ -59,7 +59,7 @@ const batch = buildPrivilegedBatch({
       command: 'systemctl restart nginx',
       declaredCategory: 'other',
       approvalId: 'claude:req-systemctl',
-      wrapperCommand: 'agentoc-privileged -- systemctl restart nginx',
+      wrapperCommand: 'ragent-privileged -- systemctl restart nginx',
     },                                                                           // other
     { command: 'rm -rf /var/log/x', declaredCategory: 'delete' },                 // delete
   ],
@@ -118,7 +118,7 @@ check('request event role system', reqEvent.role === 'system');
 check('request summarizes other', reqEvent.other.length === 2);
 check('request summarizes delete', reqEvent.delete.length === 1);
 check('request preserves approvalId', reqEvent.other.some((entry) => entry.approvalId === 'claude:req-systemctl'));
-check('request preserves wrapperCommand', reqEvent.other.some((entry) => entry.wrapperCommand === 'agentoc-privileged -- systemctl restart nginx'));
+check('request preserves wrapperCommand', reqEvent.other.some((entry) => entry.wrapperCommand === 'ragent-privileged -- systemctl restart nginx'));
 check('request event null on no batch', privilegedBatchRequestEvent({}) === null);
 
 // --- Phase 5: risk threaded from the gate onto the batch event top level ---

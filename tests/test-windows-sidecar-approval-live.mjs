@@ -9,7 +9,7 @@ if (process.platform !== 'win32') {
   console.log('windows-sidecar-approval-live: skipped (requires Windows)');
   process.exit(0);
 }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-approval-sidecar-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-approval-sidecar-'));
 const workspace = path.join(root, 'instance', 'workspace');
 await mkdir(workspace, { recursive: true });
 await writeFile(path.join(workspace, 'readme.txt'), 'fixture');
@@ -23,12 +23,12 @@ const bashPath = (name) => {
   const absolute = path.join(workspace, name);
   return `'/${absolute[0].toLowerCase()}${absolute.slice(2).replaceAll('\\', '/').replace(/'/g, `'"'"'`)}'`;
 };
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
 
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { configureWindowsClaudeWorkingDirectory, observeCodexAppServerItem, trackCodexAppServerApprovalRequest, trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
@@ -97,8 +97,8 @@ for (const mode of ['recommended', 'full-auto']) {
   assert.equal(response?.behavior, 'allow', `${mode} should transparently disable implicit ripgrep configuration`);
   assert.match(response.updatedInput?.command || '', /^rg --no-config /);
   assert.equal(response.updatedInput.description, 'search fixture');
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const result = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const result = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
       cwd: rgWorkspace, encoding: 'utf8', windowsHide: true, env: { ...process.env, RIPGREP_CONFIG_PATH: rgConfig },
     });
     assert.match(result, /ordinary\.txt/);
@@ -106,8 +106,8 @@ for (const mode of ['recommended', 'full-auto']) {
   }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-sensitive-${mode}`, `rg --files -g '*' ${rgBashPath}`), proc);
   assert.equal(sent[1]?.response?.response?.behavior, 'allow');
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const selected = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent[1].response.response.updatedInput.command], { cwd: rgWorkspace, encoding: 'utf8', windowsHide: true });
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const selected = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent[1].response.response.updatedInput.command], { cwd: rgWorkspace, encoding: 'utf8', windowsHide: true });
     assert.match(selected, /ordinary\.txt/); assert.doesNotMatch(selected, /\.env/i);
   }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-existing-config-${mode}`, `rg --no-config --files ${rgBashPath}`), proc);
@@ -127,8 +127,8 @@ for (const mode of ['recommended', 'full-auto']) {
     assert.equal(response?.behavior, 'allow', `${mode}: ${command} should not ask or deny`);
     assert.equal(response.updatedInput?.description, 'read fixture');
     assert.match(response.updatedInput?.command || '', /\/proc\/self\/cwd -ef/);
-    if (process.env.AGENTOC_TEST_BASH_BINARY) {
-      const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
+    if (process.env.RAGENT_TEST_BASH_BINARY) {
+      const output = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', response.updatedInput.command], {
         cwd: workspace, encoding: 'utf8', windowsHide: true,
       });
       assert.match(output, command.startsWith('rg ') || command.startsWith('ls ') ? /readme\.txt/ : /fixture/);
@@ -138,8 +138,8 @@ for (const mode of ['recommended', 'full-auto']) {
   const outsideSearchResponse = sent[ordinaryCommands.length]?.response?.response;
   assert.equal(outsideSearchResponse?.behavior, 'allow', `${mode}: search after moving outside the workspace should auto-allow`);
   assert.match(outsideSearchResponse.updatedInput?.command || '', /rg --no-config/);
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideSearchResponse.updatedInput.command], {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideSearchResponse.updatedInput.command], {
       cwd: workspace, encoding: 'utf8', windowsHide: true,
     });
     assert.match(output, /ordinary\.txt/);
@@ -150,24 +150,24 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-write-${mode}`, `echo safe > created-${mode}.txt`), proc);
   const write = sent[ordinaryCommands.length]?.response?.response;
   assert.equal(write?.behavior, 'allow', `${mode}: ordinary workspace write should not ask or deny`);
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', write.updatedInput.command], {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', write.updatedInput.command], {
       cwd: workspace, encoding: 'utf8', windowsHide: true,
     });
   }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-outside-write-${mode}`, `echo safe > ../outside-created-${mode}.txt`), proc);
   const outsideWrite = sent[ordinaryCommands.length + 1]?.response?.response;
   assert.equal(outsideWrite?.behavior, 'allow', `${mode}: ordinary outside-workspace write should not ask or deny`);
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideWrite.updatedInput.command], {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideWrite.updatedInput.command], {
       cwd: workspace, encoding: 'utf8', windowsHide: true,
     });
   } else await writeFile(path.join(workspace, '..', `outside-created-${mode}.txt`), 'safe');
   await trackClaudeBidiApprovalRequest(run.id, state, request(`relative-outside-delete-${mode}`, `rm ../outside-created-${mode}.txt`), proc);
   const outsideDelete = sent[ordinaryCommands.length + 2]?.response?.response;
   assert.equal(outsideDelete?.behavior, 'allow', `${mode}: ordinary outside-workspace file deletion should not ask or deny`);
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideDelete.updatedInput.command], {
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', outsideDelete.updatedInput.command], {
       cwd: workspace, encoding: 'utf8', windowsHide: true,
     });
   }
@@ -194,16 +194,16 @@ for (const mode of ['recommended', 'full-auto']) {
   else assert.equal(sent.at(-1)?.response?.response?.behavior, 'deny');
   await trackClaudeBidiApprovalRequest(run.id, state, request(`rg-outside-${mode}`, 'rg --files ../outside-search'), proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
     assert.match(output, /ordinary\.txt/);
     assert.doesNotMatch(output, /\.env/);
   }
   await trackClaudeBidiApprovalRequest(run.id, state, request(`cd-outside-${mode}`, 'cd .. && cat outside-visible.txt'), proc);
   assert.equal(sent.at(-1)?.response?.response?.behavior, 'allow');
   assert.match(sent.at(-1)?.response?.response?.updatedInput?.command || '', /builtin cd --/);
-  if (process.env.AGENTOC_TEST_BASH_BINARY) {
-    const output = execFileSync(process.env.AGENTOC_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
+  if (process.env.RAGENT_TEST_BASH_BINARY) {
+    const output = execFileSync(process.env.RAGENT_TEST_BASH_BINARY, ['--noprofile', '--norc', '-c', sent.at(-1).response.response.updatedInput.command], { cwd: workspace, encoding: 'utf8', windowsHide: true });
     assert.match(output, /ordinary outside fixture/);
   }
 }
@@ -319,7 +319,7 @@ const preflightServer = createServer((req, res) => {
   let body = '';
   req.on('data', (part) => { body += part; });
   req.on('end', () => {
-    assert.equal(req.headers['x-agentoc-approved-action-token'], 'test-token');
+    assert.equal(req.headers['x-ragent-approved-action-token'], 'test-token');
     const payload = JSON.parse(body);
     assert.equal(payload.autoInstallPreflight, true);
     preflightCommands.push(payload.actions[0].command);
@@ -331,8 +331,8 @@ await new Promise((resolve) => preflightServer.listen(0, '127.0.0.1', resolve));
 for (const mode of ['recommended', 'full-auto']) {
   const { run, state, sent, proc } = await fixture(mode);
   state.mcpRequired = true;
-  state.mcpAutoApproveServerNames = new Set(['agentoc_actions']);
-  const params = { serverName: 'agentoc_actions', threadId: 'thread', turnId: 'turn', mode: 'form' };
+  state.mcpAutoApproveServerNames = new Set(['ragent_actions']);
+  const params = { serverName: 'ragent_actions', threadId: 'thread', turnId: 'turn', mode: 'form' };
   await trackCodexAppServerApprovalRequest(run.id, state, { id: 'managed-tool', method: 'mcpServer/elicitation/request', params: {
     ...params, _meta: { codex_approval_kind: 'mcp_tool_call' }, requestedSchema: { type: 'object', properties: {} },
   } }, proc);
@@ -411,7 +411,7 @@ for (const mode of ['recommended', 'full-auto']) {
   await trackClaudeBidiApprovalRequest(run.id, state, request, proc);
   assert.equal(sent[0]?.response?.response?.behavior, 'allow');
   const rewritten = sent[0]?.response?.response?.updatedInput?.command;
-  assert.match(rewritten, /agentoc-windows-install-bridge\.mjs/);
+  assert.match(rewritten, /ragent-windows-install-bridge\.mjs/);
   assert.doesNotMatch(rewritten, /winget install Git\.Git/);
 }
 for (const mode of ['recommended', 'full-auto']) {
@@ -422,12 +422,12 @@ for (const mode of ['recommended', 'full-auto']) {
       token: 'test-token', sessionId: `session-${mode}`, runId: run.id, turnId: `req-${mode}` };
     const request = { type: 'control_request', request_id: `wrapped-${toolName}`, request: {
       subtype: 'can_use_tool', tool_name: toolName, input: {
-        command: 'agentoc-privileged --description "Install Git" --category install -- winget install Git.Git',
+        command: 'ragent-privileged --description "Install Git" --category install -- winget install Git.Git',
       },
     } };
     await trackClaudeBidiApprovalRequest(run.id, state, request, proc);
     assert.equal(sent[0]?.response?.response?.behavior, 'allow');
-    assert.match(sent[0].response.response.updatedInput.command, /agentoc-windows-install-bridge\.mjs/);
+    assert.match(sent[0].response.response.updatedInput.command, /ragent-windows-install-bridge\.mjs/);
     assert.equal(preflightCommands.at(-1), 'winget install Git.Git', 'preflight must inspect the exact unwrapped installation');
   }
 }
@@ -461,7 +461,7 @@ for (const mode of ['recommended', 'full-auto']) {
   state.windowsManagedActionBinding = { endpoint: `http://127.0.0.1:${preflightServer.address().port}/api/internal/approved-actions/propose`,
     token: 'test-token', sessionId: `session-${mode}`, runId: run.id, turnId: `req-${mode}` };
   const request = { type: 'control_request', request_id: 'unavailable-wrapped-install', request: {
-    subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'agentoc-privileged --category install -- winget install Git.Git' },
+    subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ragent-privileged --category install -- winget install Git.Git' },
   } };
   await trackClaudeBidiApprovalRequest(run.id, state, request, proc);
   if (mode === 'recommended') {
@@ -506,5 +506,5 @@ console.log('windows-sidecar-approval-live: Claude and Codex sidecar decisions p
 const actualRoot = await realpath(root);
 const actualParent = await realpath(os.tmpdir());
 assert.equal(path.dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-assert.ok(path.basename(actualRoot).startsWith('agentoc-approval-sidecar-'));
+assert.ok(path.basename(actualRoot).startsWith('ragent-approval-sidecar-'));
 await rm(actualRoot, { recursive: true, force: true });

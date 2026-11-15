@@ -11,7 +11,7 @@ const bootstrap = readFileSync(join(repoRoot, 'static/chat/bootstrap.js'), 'utf8
 const ui = readFileSync(join(repoRoot, 'static/chat/ui.js'), 'utf8');
 
 assert.doesNotMatch(template, /thinkingBlockDisplaySelect/, 'thinking-detail display preference should be removed from Settings');
-assert.doesNotMatch(bootstrap, /agentoc\.thinkingBlockDisplay|localStorage\.setItem\([^\n]*thinking/i, 'thinking-detail preferences should no longer be persisted');
+assert.doesNotMatch(bootstrap, /ragent\.thinkingBlockDisplay|localStorage\.setItem\([^\n]*thinking/i, 'thinking-detail preferences should no longer be persisted');
 assert.match(bootstrap, /function getThinkingBlockDisplayExpandedState\(\)\s*\{\s*return false;/, 'thinking details should remain collapsed');
 assert.match(ui, /function shouldCompactMobileThinking\(\)\s*\{\s*return true;/, 'desktop and mobile should share the compact run-activity presentation');
 

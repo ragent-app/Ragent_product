@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
-const root = mkdtempSync(join(tmpdir(), 'agentoc-frozen-guards-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-frozen-guards-'));
 const bare = join(root, 'source.git');
 const bootstrap = join(root, 'bootstrap');
 const fakeBin = join(root, 'bin');
@@ -64,11 +64,11 @@ try {
   const common = {
     ...env,
     PATH: `${fakeBin}:${process.env.PATH}`,
-    AGENTOC_SOURCE_GIT_DIR: bare,
-    AGENTOC_SOURCE_COMMIT: commit,
-    AGENTOC_DMG_OUTPUT_DIR: join(root, 'out'),
-    AGENTOC_DEB_OUTPUT_DIR: join(root, 'out'),
-    AGENTOC_PACKAGE_VERSION: '0.0.1',
+    RAGENT_SOURCE_GIT_DIR: bare,
+    RAGENT_SOURCE_COMMIT: commit,
+    RAGENT_DMG_OUTPUT_DIR: join(root, 'out'),
+    RAGENT_DEB_OUTPUT_DIR: join(root, 'out'),
+    RAGENT_PACKAGE_VERSION: '0.0.1',
   };
   function build(script, override = {}) {
     return spawnSync('bash', [join(bootstrap, 'scripts', script)], {
@@ -76,7 +76,7 @@ try {
     });
   }
   for (const script of ['build-deb.sh', 'build-dmg.sh']) {
-    const wrongCommit = build(script, { AGENTOC_SOURCE_COMMIT: '0'.repeat(commit.length) });
+    const wrongCommit = build(script, { RAGENT_SOURCE_COMMIT: '0'.repeat(commit.length) });
     assert.notEqual(wrongCommit.status, 0);
     assert.match(wrongCommit.stderr, /requires the expected full commit ID/);
   }
@@ -86,9 +86,9 @@ try {
     assert.notEqual(modifiedBootstrap.status, 0);
     assert.match(modifiedBootstrap.stderr, /bootstrap differs from the specified commit/);
   }
-  const markerOnly = build('build-deb.sh', { AGENTOC_SOURCE_GIT_DIR: '', AGENTOC_SOURCE_COMMIT: '' });
+  const markerOnly = build('build-deb.sh', { RAGENT_SOURCE_GIT_DIR: '', RAGENT_SOURCE_COMMIT: '' });
   assert.notEqual(markerOnly.status, 0);
-  assert.match(markerOnly.stderr, /source archive requires AGENTOC_SOURCE_GIT_DIR/);
+  assert.match(markerOnly.stderr, /source archive requires RAGENT_SOURCE_GIT_DIR/);
   console.log('frozen source guard checks passed');
 } finally {
   rmSync(root, { recursive: true, force: true });

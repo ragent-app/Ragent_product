@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-session-grouping-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-session-grouping-'));
 
 process.env.HOME = tempHome;
 
@@ -31,12 +31,12 @@ assert.equal(unnamed.group, undefined, 'new unnamed sessions should not invent a
 assert.equal(unnamed.description, undefined, 'new unnamed sessions should not invent a description yet');
 
 const seeded = await createSession(baseFolder, 'codex', 'Initial title', {
-  group: '  AgentoC  ',
+  group: '  Ragent  ',
   description: '  Build sidebar grouping for AI sessions.  ',
 });
 
 let loaded = await getSession(seeded.id);
-assert.equal(loaded.group, 'AgentoC', 'session group should be trimmed and persisted');
+assert.equal(loaded.group, 'Ragent', 'session group should be trimmed and persisted');
 assert.equal(
   loaded.description,
   'Build sidebar grouping for AI sessions.',
@@ -45,7 +45,7 @@ assert.equal(
 
 let renamed = await renameSession(seeded.id, 'Better title');
 assert.equal(renamed.name, 'Better title', 'manual rename should update the title');
-assert.equal(renamed.group, 'AgentoC', 'manual rename should preserve group metadata');
+assert.equal(renamed.group, 'Ragent', 'manual rename should preserve group metadata');
 assert.equal(
   renamed.description,
   'Build sidebar grouping for AI sessions.',

@@ -1,10 +1,10 @@
 // ---- WebSocket ----
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 function renderRealtimeIcon(name, className = "") {
-  return window.AgentoCIcons?.render(name, { className }) || "";
+  return window.RagentIcons?.render(name, { className }) || "";
 }
 
 function resolveWsUrl(path) {
@@ -32,7 +32,7 @@ let targetRuntimePollingTimer = null;
 let targetRuntimePollingGeneration = 0;
 
 function targetRuntimeGlobal() {
-  return typeof window === "object" ? window.AgentoCTargetRuntime : null;
+  return typeof window === "object" ? window.RagentTargetRuntime : null;
 }
 
 function isRemoteTargetActive() {
@@ -88,8 +88,8 @@ function closeLocalRealtimeSocket() {
 function syncTargetRuntimeRealtime() {
   if (isRemoteTargetActive()) {
     closeLocalRealtimeSocket();
-    if (typeof window === "object" && typeof window.AgentocP2P?.close === "function") {
-      try { window.AgentocP2P.close(); } catch {}
+    if (typeof window === "object" && typeof window.RagentP2P?.close === "function") {
+      try { window.RagentP2P.close(); } catch {}
     }
     startTargetRuntimePolling();
     return;
@@ -324,9 +324,9 @@ function syncRealtimeNetworkConnection() {
 // WS 断线重连失败时自动尝试 P2P 第二通道（仅当本会话已配对并持有凭据）。
 function maybeActivateP2P() {
   if (typeof entrySwitchHandoff !== "undefined" && entrySwitchHandoff) return;
-  if (typeof window.AgentocP2P === "undefined" || !window.AgentocP2P.hasCredentials) return;
-  if (window.AgentocP2P.ready || window.AgentocP2P.status === "connecting") return;
-  window.AgentocP2P.connect().catch(() => {});
+  if (typeof window.RagentP2P === "undefined" || !window.RagentP2P.hasCredentials) return;
+  if (window.RagentP2P.ready || window.RagentP2P.status === "connecting") return;
+  window.RagentP2P.connect().catch(() => {});
 }
 
 // 入口切换交接（P1-④）：浏览器即将跳到另一实例。显式丢弃本实例的通道凭据——
@@ -344,9 +344,9 @@ function prepareEntrySwitchHandoff() {
     socket.close();
   }
   ws = null;
-  if (typeof window.AgentocP2P?.close === "function") {
+  if (typeof window.RagentP2P?.close === "function") {
     try {
-      window.AgentocP2P.close();
+      window.RagentP2P.close();
     } catch {
       // 交接路径上不再有可恢复动作；关闭失败不阻塞跳转。
     }
@@ -355,11 +355,11 @@ function prepareEntrySwitchHandoff() {
 
 // 供 cross-device-panel 在跳转前调用；显式挂到 window，避免依赖脚本加载顺序。
 if (typeof window === "object") {
-  window.AgentocEntrySwitchHandoff = { prepare: prepareEntrySwitchHandoff };
+  window.RagentEntrySwitchHandoff = { prepare: prepareEntrySwitchHandoff };
 }
 
 if (typeof window === "object" && typeof window.addEventListener === "function") {
-  window.addEventListener("agentoc:p2p-status", (event) => {
+  window.addEventListener("ragent:p2p-status", (event) => {
     const status = event?.detail?.status;
     if (status === "ready") {
       updateStatus("p2p", getCurrentSession());
@@ -373,8 +373,8 @@ if (typeof window === "object" && typeof window.addEventListener === "function")
 
   window.addEventListener("online", syncRealtimeNetworkConnection);
   window.addEventListener("offline", syncRealtimeNetworkConnection);
-  window.addEventListener("agentoc:target-selected", syncTargetRuntimeRealtime);
-  window.addEventListener("agentoc:target-change", syncTargetRuntimeRealtime);
+  window.addEventListener("ragent:target-selected", syncTargetRuntimeRealtime);
+  window.addEventListener("ragent:target-change", syncTargetRuntimeRealtime);
 }
 
 function base64UrlToArrayBuffer(value) {
@@ -550,10 +550,10 @@ async function dispatchAction(msg) {
       case "create": {
         const createPayload = {
           folder: msg.folder
-            || (typeof window.agentocGetSelectedSessionFolder === "function"
-              ? window.agentocGetSelectedSessionFolder()
-              : (typeof window.agentocGetDefaultSessionFolder === "function"
-                ? window.agentocGetDefaultSessionFolder()
+            || (typeof window.ragentGetSelectedSessionFolder === "function"
+              ? window.ragentGetSelectedSessionFolder()
+              : (typeof window.ragentGetDefaultSessionFolder === "function"
+                ? window.ragentGetDefaultSessionFolder()
                 : "~")),
           tool: msg.tool,
           name: msg.name || "",
@@ -571,8 +571,8 @@ async function dispatchAction(msg) {
           ...(typeof msg.model === "string" && msg.model.trim()
             ? { model: msg.model.trim() }
             : {}),
-          ...(typeof window.AgentoCI18n?.getActiveUiLanguage === "function"
-            ? { uiLanguage: window.AgentoCI18n.getActiveUiLanguage() || "" }
+          ...(typeof window.RagentI18n?.getActiveUiLanguage === "function"
+            ? { uiLanguage: window.RagentI18n.getActiveUiLanguage() || "" }
             : {}),
         };
         if (Object.prototype.hasOwnProperty.call(msg, "starterPreset")) {
@@ -936,8 +936,8 @@ async function dispatchAction(msg) {
             // ended or the provider resolved it). Treat it as resolved:
             // dismiss the sheet, mark any in-stream plan card, resync — the
             // red error toast would only confuse ("actually it ended").
-            window.AgentoCDecisions?.noteResponse({ approvalId });
-            window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId, runId, sessionId: originSessionId }, {
+            window.RagentDecisions?.noteResponse({ approvalId });
+            window.RagentDecisions?.acknowledgeResponse?.({ approvalId, runId, sessionId: originSessionId }, {
               approvalId,
               runId,
               sessionId: originSessionId,
@@ -963,7 +963,7 @@ async function dispatchAction(msg) {
             applyAttachedSessionState(session.id, session);
           }
         }
-        window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId, runId, sessionId: originSessionId }, {
+        window.RagentDecisions?.acknowledgeResponse?.({ approvalId, runId, sessionId: originSessionId }, {
           approvalId,
           runId,
           sessionId: originSessionId,
@@ -993,8 +993,8 @@ async function dispatchAction(msg) {
           // Same "already over" treatment as runtime_approval: the confirmation
           // no longer exists — dismiss and resync instead of failing.
           if (isApprovalAlreadyEndedError(error)) {
-            window.AgentoCDecisions?.noteResponse({ approvalId });
-            window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
+            window.RagentDecisions?.noteResponse({ approvalId });
+            window.RagentDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
               approvalId,
               sessionId,
             });
@@ -1016,7 +1016,7 @@ async function dispatchAction(msg) {
         // The confirmation endpoint has accepted the owner decision. Clear the
         // interactive surface before any best-effort session refresh so a slow
         // refresh cannot leave a disabled approval popup on screen.
-        window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
+        window.RagentDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
           approvalId,
           sessionId,
           decision,
@@ -1079,7 +1079,7 @@ async function dispatchAction(msg) {
       if (planId) {
         const approvalId = `plan:${planId}`;
         const sessionId = String(msg?.sessionId || currentSessionId || "").trim();
-        window.AgentoCDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
+        window.RagentDecisions?.acknowledgeResponse?.({ approvalId, sessionId }, {
           approvalId,
           sessionId,
         });
@@ -1214,7 +1214,7 @@ function getCurrentSession() {
 function handleWsMessage(msg) {
   switch (msg.type) {
     case "build_info":
-      void window.AgentoCBuild?.applyBuildInfo?.(msg.buildInfo);
+      void window.RagentBuild?.applyBuildInfo?.(msg.buildInfo);
       break;
 
     case "sessions_invalidated":
@@ -1226,8 +1226,8 @@ function handleWsMessage(msg) {
       break;
 
     case "projects_invalidated":
-      if (typeof window.agentocEnsureProjectsReady === "function") {
-        window.agentocEnsureProjectsReady({ force: true }).catch(() => {});
+      if (typeof window.ragentEnsureProjectsReady === "function") {
+        window.ragentEnsureProjectsReady({ force: true }).catch(() => {});
       }
       fetchSessionsList({ forceFresh: true }).catch(() => {});
       break;
@@ -1240,7 +1240,7 @@ function handleWsMessage(msg) {
 
     case "target_runtime_summary_invalidated": {
       const targetId = String(msg.targetId || "").trim();
-      const targetRuntime = window.AgentoCTargetRuntime;
+      const targetRuntime = window.RagentTargetRuntime;
       if (!targetId || !targetRuntime) break;
       Promise.resolve(
         targetRuntime.readSummaryEvents?.(targetId, {
@@ -1257,9 +1257,9 @@ function handleWsMessage(msg) {
     }
 
     case "harnesses_invalidated":
-      void window.AgentoCHarnesses?.refresh?.({ quiet: true });
-      void window.AgentoCModelProviders?.refresh?.({ refreshHarnesses: true });
-      void window.agentocRefreshRuntimeCatalog?.({
+      void window.RagentHarnesses?.refresh?.({ quiet: true });
+      void window.RagentModelProviders?.refresh?.({ refreshHarnesses: true });
+      void window.ragentRefreshRuntimeCatalog?.({
         clearCurrentSelection: msg.harness?.installed === false,
       });
       break;
@@ -1272,7 +1272,7 @@ function handleWsMessage(msg) {
       }
       if (msg.sessionId === currentSessionId) {
         const latestSeq = Number.isInteger(msg.latestSeq) ? msg.latestSeq : 0;
-        const projectedLatestSeq = Number(window.AgentoCTimelineRuntime?.getSnapshot?.()?.latestSeq) || 0;
+        const projectedLatestSeq = Number(window.RagentTimelineRuntime?.getSnapshot?.()?.latestSeq) || 0;
         if (msg.eventsPushed === true && latestSeq > 0 && projectedLatestSeq >= latestSeq) {
           scheduleEventPushReconcile(msg.sessionId);
           break;
@@ -1284,7 +1284,7 @@ function handleWsMessage(msg) {
       break;
 
     case "session_events": {
-      window.AgentoCAttentionPopup?.onRealtimeEvents?.(msg.sessionId, msg.events);
+      window.RagentAttentionPopup?.onRealtimeEvents?.(msg.sessionId, msg.events);
       if (!msg.sessionId || msg.sessionId !== currentSessionId) break;
       if (!Array.isArray(msg.events) || msg.events.length === 0) break;
       const minScrollTop = Number(messagesEl.scrollTop) || 0;
@@ -1301,7 +1301,7 @@ function handleWsMessage(msg) {
           || type === "reasoning"
           || (type === "message" && String(event?.role || "").toLowerCase() === "assistant");
       });
-      const timelineRuntime = window.AgentoCTimelineRuntime;
+      const timelineRuntime = window.RagentTimelineRuntime;
       const durableEvents = msg.events.filter((event) => (
         Number.isInteger(event?.seq)
         || Number.isInteger(event?.startSeq)
@@ -1380,8 +1380,8 @@ function isConnectionRecoveryTransportUp() {
     && !!ws
     && ws.readyState === WebSocket.OPEN;
   const p2pReady = typeof window !== "undefined"
-    && typeof window.AgentocP2P !== "undefined"
-    && window.AgentocP2P.ready === true;
+    && typeof window.RagentP2P !== "undefined"
+    && window.RagentP2P.ready === true;
   return wsOpen || p2pReady;
 }
 
@@ -1491,7 +1491,7 @@ function updateStatus(connState, session = getCurrentSession()) {
     syncComposerEditResendButton();
   }
   // P2P 第二通道标记：body dataset 供样式/调试；'p2p' 复用 connected 的启用逻辑。
-  document.body.dataset.agentocTransport = connState === "p2p" ? "p2p" : "";
+  document.body.dataset.ragentTransport = connState === "p2p" ? "p2p" : "";
   if (typeof shareSnapshotMode !== "undefined" && shareSnapshotMode) {
     msgInput.disabled = true;
     msgInput.readOnly = true;

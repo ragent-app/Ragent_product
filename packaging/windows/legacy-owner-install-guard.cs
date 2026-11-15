@@ -5,10 +5,10 @@ using System.IO;
 using System.Management;
 using System.Collections.Generic;
 
-public static partial class AgentoCLegacyOwnerInstallGuard {
-    static readonly string Product = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "AgentoC");
-    static readonly string Instance = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"AgentoC\instances\owner");
-    static readonly string[] Services = { "AgentoC-ControlPlane", "AgentoC-RunnerSupervisor" };
+public static partial class RagentLegacyOwnerInstallGuard {
+    static readonly string Product = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Ragent");
+    static readonly string Instance = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), @"Ragent\instances\owner");
+    static readonly string[] Services = { "Ragent-ControlPlane", "Ragent-RunnerSupervisor" };
     static void Refuse(string code) { throw new InvalidOperationException(code); }
 
     // GetAttributes distinguishes absence from access/IO failures and includes
@@ -31,7 +31,7 @@ public static partial class AgentoCLegacyOwnerInstallGuard {
     static IEnumerable<KeyValuePair<string,string>> Accounts() {
         var options = new EnumerationOptions { Timeout = TimeSpan.FromSeconds(5), ReturnImmediately = false };
         using (var search = new ManagementObjectSearcher(new ManagementScope(@"\\.\root\cimv2"),
-            new ObjectQuery("SELECT Name,StartName FROM Win32_Service WHERE Name='AgentoC-ControlPlane' OR Name='AgentoC-RunnerSupervisor'"), options))
+            new ObjectQuery("SELECT Name,StartName FROM Win32_Service WHERE Name='Ragent-ControlPlane' OR Name='Ragent-RunnerSupervisor'"), options))
         using (var rows = search.Get()) {
             foreach (ManagementObject row in rows) {
                 using (row) yield return new KeyValuePair<string,string>(row["Name"] as string, row["StartName"] as string);
@@ -79,8 +79,8 @@ public static partial class AgentoCLegacyOwnerInstallGuard {
         Guarded(() => {
             // The old script used environment-selected roots; do not inspect C:
             // and subsequently mutate an alternate tree chosen by its caller.
-            if (!String.Equals(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"AgentoC"),Product,StringComparison.OrdinalIgnoreCase) ||
-                !String.Equals(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),@"AgentoC\instances\owner"),Instance,StringComparison.OrdinalIgnoreCase))
+            if (!String.Equals(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"Ragent"),Product,StringComparison.OrdinalIgnoreCase) ||
+                !String.Equals(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),@"Ragent\instances\owner"),Instance,StringComparison.OrdinalIgnoreCase))
                 Refuse("OLG_ROOT_UNSUPPORTED");
             Inspect(Product,Instance,packageRoot,Present,Accounts);
         });

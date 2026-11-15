@@ -174,7 +174,7 @@ function createHarness() {
     msgInput: { value: '' },
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput() {},
     applyEvent() {},
   };

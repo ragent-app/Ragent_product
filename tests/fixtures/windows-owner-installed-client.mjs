@@ -9,13 +9,13 @@ const actualPlatform=process.platform;
 // Windows JS branch. All OS inspection and helper IO below are substituted.
 if(actualPlatform!=='win32')Object.defineProperty(process,'platform',{value:'win32'});
 const adapter=new URL('../../lib/windows-owner-bootstrap.mjs',import.meta.url).href;
-const helper='C:/Program Files/AgentoC/payload/AgentoC.OwnerBootstrap.exe',bytes=Buffer.from('SYNTHETIC HELPER'),hash=createHash('sha256').update(bytes).digest('hex');
+const helper='C:/Program Files/Ragent/payload/Ragent.OwnerBootstrap.exe',bytes=Buffer.from('SYNTHETIC HELPER'),hash=createHash('sha256').update(bytes).digest('hex');
 const calls=[],policies=[];
 const peer={pid:1234,createdTicks:'134368500000000000',sid:'S-1-5-80-1-2-3-4-5',sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false};
 globalThis.__ownerInstalledQa={
   async inspect(options){calls.push(options);assert.deepEqual(Object.keys(options),['purpose']);assert.ok(['cli','browser'].includes(options.purpose));return {
     baseUrl:'http://127.0.0.1:7690',instanceId:'00000000-0000-4000-8000-000000000000',executablePath:helper,executableSha256:hash,
-    policy:{protocolVersion:2,purpose:options.purpose,pipeName:'agentoc-owner-bootstrap-'+'a'.repeat(32),instanceId:'00000000-0000-4000-8000-000000000000',
+    policy:{protocolVersion:2,purpose:options.purpose,pipeName:'ragent-owner-bootstrap-'+'a'.repeat(32),instanceId:'00000000-0000-4000-8000-000000000000',
       requestId:'b'.repeat(32),expiresAtUnixMs:Date.now()+20000,controlSid:peer.sid,ownerSid:'S-1-5-21-1-2-3-1001',ownerSessionId:1,peer}};},
   async lstat(path){assert.equal(path,helper);return {isFile:()=>true,isSymbolicLink:()=>false,nlink:1};},
   async readFile(path){assert.equal(path,helper);return bytes;},

@@ -5,16 +5,16 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import os from 'node:os';
 import path from 'node:path';
 
-const helperPath = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
+const helperPath = process.env.RAGENT_TEST_SAFE_DELETE_BINARY;
 if (process.platform !== 'win32' || !helperPath) { console.log('windows-safe-delete-bridge: skipped (opt-in Windows fixture)'); process.exit(0); }
 assert.ok(path.isAbsolute(helperPath));
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-delete-bridge-'));
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-delete-bridge-'));
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const { buildWindowsSafeDeleteBridge } = await import('../chat/windows-safe-delete-bridge.mjs');
@@ -96,7 +96,7 @@ for (const mode of ['recommended', 'full-auto', 'conservative-auto']) {
   assert.deepEqual(JSON.parse(stdout), { ok: true, deleted: 2 });
   await assert.rejects(readFile(path.join(workspace, 'build', 'fixture.txt')), { code: 'ENOENT' });
   assert.equal((await getRun(run.id)).appServerPendingApprovals?.length || 0, 0);
-  const bash = process.env.AGENTOC_TEST_BASH_BINARY;
+  const bash = process.env.RAGENT_TEST_BASH_BINARY;
   if (bash) {
     assert.ok(path.isAbsolute(bash));
     const bashDir = path.join(workspace, 'bash-build');
@@ -200,6 +200,6 @@ console.log('windows-safe-delete-bridge: Claude responses and native helper pass
   const actualRoot = await realpath(root);
   const actualParent = await realpath(os.tmpdir());
   assert.equal(path.dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-  assert.ok(path.basename(actualRoot).startsWith('agentoc-delete-bridge-'));
+  assert.ok(path.basename(actualRoot).startsWith('ragent-delete-bridge-'));
   await rm(actualRoot, { recursive: true, force: true });
 }

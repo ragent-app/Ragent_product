@@ -107,13 +107,13 @@ function loadCore() {
     getLocalSessionReviewedAt: null,
     getSessionReviewBaselineAt: null,
   };
-  context.AgentocSessionRecordEnvironment = env;
+  context.RagentSessionRecordEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/session-record.js'), 'utf8'),
     context,
     { filename: 'transport/session-record.js' },
   );
-  const core = context.AgentocSessionRecordCore;
+  const core = context.RagentSessionRecordCore;
   return {
     api: {
       normalizeSessionRecord: (session, previous) => core.normalizeSessionRecord(session, previous),

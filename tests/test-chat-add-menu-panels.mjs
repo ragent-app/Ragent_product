@@ -131,12 +131,12 @@ for (const key of [
 }
 
 // --- 3. agent-panel.js wiring ---
-assert.match(agentPanelSource, /window\.AgentoCAgentPanel = Object\.freeze\(\{\s*open: openPanel,\s*close: closePanel,\s*isOpen: \(\) => panelOpen,\s*\}\)/, 'agent panel should export open/close/isOpen');
+assert.match(agentPanelSource, /window\.RagentAgentPanel = Object\.freeze\(\{\s*open: openPanel,\s*close: closePanel,\s*isOpen: \(\) => panelOpen,\s*\}\)/, 'agent panel should export open/close/isOpen');
 assert.match(agentPanelSource, /refreshInlineAgentPicker\(\{ force: true \}\)/, 'agent panel should reuse the existing inlineAgentSelect fill pipeline');
 assert.match(agentPanelSource, /dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\)/, 'agent selection should go through the existing inlineAgentSelect change handler');
 assert.match(agentPanelSource, /option\.value !== "__plan"/, 'agent panel should not duplicate the plan-mode entry (menus own it)');
 assert.match(agentPanelSource, /option\.value !== "__plan" && String\(option\.textContent/, 'agent panel should keep the default empty-value Agent option selectable');
-assert.match(agentPanelSource, /AgentoCBackHandler/, 'agent panel should register a back-handler entry (mobile close)');
+assert.match(agentPanelSource, /RagentBackHandler/, 'agent panel should register a back-handler entry (mobile close)');
 assert.match(agentPanelSource, /event\.key === "Escape"/, 'agent panel should close on Escape');
 assert.match(agentPanelSource, /!panel\.contains\(event\.target\)/, 'agent panel should close on outside click');
 assert.match(agentPanelSource, /!trigger\?\.contains\(event\.target\)/, 'agent panel should stay open for the trigger click that opened it');
@@ -145,19 +145,19 @@ assert.match(agentPanelSource, /composer-add-panel-handle-zone/, 'agent panel sh
 assert.match(agentPanelSource, /deltaY >= 120/, 'agent panel should use a deliberate downward dismiss threshold');
 assert.match(agentPanelSource, /document\.addEventListener\("pointerdown", \(event\) =>/, 'agent sheet should close from a mobile outside pointerdown');
 assert.match(agentPanelSource, /settings\.apps\.ownerOnly/, 'agent panel should degrade for non-owner sessions');
-assert.match(agentPanelSource, /AgentoCIcons(?:\?\.|\.)render\("check"\)/, 'agent selection should use the shared SVG icon system');
+assert.match(agentPanelSource, /RagentIcons(?:\?\.|\.)render\("check"\)/, 'agent selection should use the shared SVG icon system');
 assert.match(agentPanelSource, /composer-agent-list-item/, 'agent choices should use the Material list-item structure');
 assert.match(agentPanelSource, /composer-agent-row-copy/, 'agent choices should expose supporting text beside the title');
 assert.match(agentPanelSource, /compose\.agent\.customDetail/, 'custom agents should carry a supporting description');
 assert.match(agentPanelSource, /compose\.agent\.selected/, 'the selected agent should expose an explicit trailing state');
 assert.match(agentPanelSource, /focusFirstItem/, 'agent panel should move keyboard focus into the opened panel');
-assert.match(agentPanelSource, /AgentoCMotion\?\.setPresence/, 'agent panel should use the shared motion lifecycle');
+assert.match(agentPanelSource, /RagentMotion\?\.setPresence/, 'agent panel should use the shared motion lifecycle');
 assert.match(agentPanelSource, /document\.body\.appendChild\(panel\)/, 'agent panel should escape composer stacking contexts');
 assert.match(agentPanelSource, /composer-add-panel--agent/, 'agent sheet should carry its focused visual variant');
 
 // --- 3b. runtime Provider/model picker wiring ---
 assert.doesNotMatch(sidebarSource, /composerProviderMenuItem/, 'the add-menu handler should not retain a Provider trigger');
-assert.doesNotMatch(sessionHttpSource, /AgentoCProviderPanel/, 'session attachment should not sync a standalone Provider panel');
+assert.doesNotMatch(sessionHttpSource, /RagentProviderPanel/, 'session attachment should not sync a standalone Provider panel');
 assert.match(toolingSource, /function getComposerRuntimeProviderApp/, 'runtime picker should identify tools with Provider selection');
 assert.match(toolingSource, /function loadComposerRuntimeProviders/, 'runtime picker should load the native Provider registry');
 assert.match(toolingSource, /native-providers\?tool=/, 'runtime picker should request only providers compatible with the selected Harness');
@@ -177,7 +177,7 @@ assert.match(toolingSource, /isClaude = toolId === "claude" \|\| toolId === "cla
 assert.match(toolingSource, /currentToolReasoningKind === "enum"[\s\S]*?effortSelect\.style\.display = "none"/, 'model picker should keep effort state out of the model list');
 
 // --- 4. connector-panel.js wiring ---
-assert.match(connectorPanelSource, /window\.AgentoCConnectorPanel = Object\.freeze\(\{\s*open: openPanel,\s*close: closePanel,\s*isOpen: \(\) => panelOpen,\s*\}\)/, 'connector panel should export open/close/isOpen');
+assert.match(connectorPanelSource, /window\.RagentConnectorPanel = Object\.freeze\(\{\s*open: openPanel,\s*close: closePanel,\s*isOpen: \(\) => panelOpen,\s*\}\)/, 'connector panel should export open/close/isOpen');
 assert.match(connectorPanelSource, /fetchConnectorSurfaces\(\)/, 'connector panel should reuse the settings connector surfaces fetch');
 assert.match(connectorPanelSource, /connectorSurfacesCache/, 'connector panel should read the shared surfaces cache');
 assert.match(connectorPanelSource, /capabilityState === "ready"/, 'connector panel should classify ready vs needs-action');
@@ -186,8 +186,8 @@ assert.match(connectorPanelSource, /settings\.connectors\.needsAction/, 'connect
 assert.match(connectorPanelSource, /settings\.connectors\.ownerOnly/, 'connector panel should degrade for non-owner sessions');
 assert.match(connectorPanelSource, /switchTab\("settings"\)/, 'connector panel should route authorization into Settings');
 assert.match(connectorPanelSource, /createElement\(ready \? "div" : "button"\)/, 'connected connector rows should be status rows, not disabled actions');
-assert.match(connectorPanelSource, /AgentoCIcons(?:\?\.|\.)render\("chevron-right"\)/, 'actionable connector rows should use the shared SVG icon system');
-assert.match(connectorPanelSource, /AgentoCMotion\?\.setPresence/, 'connector panel should use the shared motion lifecycle');
+assert.match(connectorPanelSource, /RagentIcons(?:\?\.|\.)render\("chevron-right"\)/, 'actionable connector rows should use the shared SVG icon system');
+assert.match(connectorPanelSource, /RagentMotion\?\.setPresence/, 'connector panel should use the shared motion lifecycle');
 assert.match(connectorPanelSource, /!trigger\?\.contains\(event\.target\)/, 'connector panel should stay open for the trigger click that opened it');
 assert.match(connectorPanelSource, /panel\?\.addEventListener\("click", \(event\) => event\.stopPropagation\(\)\)/, 'connector panel should stop inside clicks from reaching page-level dismissers');
 assert.match(connectorPanelSource, /composer-add-panel-handle-zone/, 'connector panel should expose a draggable mobile sheet handle');
@@ -199,7 +199,7 @@ assert.match(connectorPanelSource, /composer-add-panel--connector/, 'connector s
 // --- 4b. connector-panel.js in-panel authorize view ---
 assert.match(connectorPanelSource, /function openAuthorizeView\(surface\)/, 'connector panel should render an in-panel authorize view');
 assert.match(connectorPanelSource, /function resolveSurfaceUrl\(entryUrl\)/, 'connector panel should resolve surface entry urls like settings-ui');
-assert.match(connectorPanelSource, /window\.agentocResolveProductUrl/, 'surface resolution should honor the product-url resolver hook');
+assert.match(connectorPanelSource, /window\.ragentResolveProductUrl/, 'surface resolution should honor the product-url resolver hook');
 assert.match(connectorPanelSource, /surface\?\.allowEmbed === true/, 'only embeddable surfaces should open the in-panel authorize view');
 assert.match(connectorPanelSource, /"composer-add-panel-frame"/, 'the authorize view should embed the surface in an iframe');
 assert.match(connectorPanelSource, /"composer-add-panel-back"/, 'the authorize view should carry a back-to-list button');
@@ -275,11 +275,11 @@ assert.match(composeSource, /if \(pickerAgentId\) msg\.agentId = pickerAgentId;/
 
 // --- 5. sidebar-ui menu-item handlers: open the inline panels, fallback to sidebar ---
 const agentsHandler = sidebarSource.slice(sidebarSource.indexOf('composerAgentsMenuItem?.addEventListener'), sidebarSource.indexOf('composerConnectorsMenuItem?.addEventListener'));
-assert.match(agentsHandler, /window\.AgentoCAgentPanel\?\.open/, 'Agents and apps item should open the inline agent panel');
+assert.match(agentsHandler, /window\.RagentAgentPanel\?\.open/, 'Agents and apps item should open the inline agent panel');
 assert.match(agentsHandler, /switchTab === "function"\) switchTab\("agents"\)/, 'Agents and apps item should keep the sidebar fallback');
 
 const connectorsHandler = sidebarSource.slice(sidebarSource.indexOf('composerConnectorsMenuItem?.addEventListener'), sidebarSource.indexOf('composerPlanChip?.addEventListener'));
-assert.match(connectorsHandler, /window\.AgentoCConnectorPanel\?\.open/, 'Connectors item should open the inline connector panel');
+assert.match(connectorsHandler, /window\.RagentConnectorPanel\?\.open/, 'Connectors item should open the inline connector panel');
 assert.match(connectorsHandler, /switchTab === "function"\) switchTab\("settings"\)/, 'Connectors item should keep the sidebar fallback');
 
 // --- 6. CSS: panel surface mirrors the add-menu popover contract ---

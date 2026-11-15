@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.model"
+    namespace = "com.andysagent.ragent.core.model"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

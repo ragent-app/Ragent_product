@@ -13,16 +13,16 @@ import (
 // Opt-in read-only contract test against a staged Microsoft module. It does
 // not run an installer, change package sources, or modify user software.
 func TestOwnerInstallScriptLiveInspection(t *testing.T) {
-	pwsh, module := os.Getenv("AGENTOC_QA_PWSH"), os.Getenv("AGENTOC_QA_WINGET_MODULE")
-	id, version := os.Getenv("AGENTOC_QA_PACKAGE_ID"), os.Getenv("AGENTOC_QA_PACKAGE_VERSION")
+	pwsh, module := os.Getenv("RAGENT_QA_PWSH"), os.Getenv("RAGENT_QA_WINGET_MODULE")
+	id, version := os.Getenv("RAGENT_QA_PACKAGE_ID"), os.Getenv("RAGENT_QA_PACKAGE_VERSION")
 	if pwsh == "" || module == "" || id == "" || version == "" {
 		t.Skip("staged runtime, package ID and version required")
 	}
 	for _, scope := range []string{"default", "user"} {
 		t.Run(scope, func(t *testing.T) {
 			cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(ownerInstallScript))
-			cmd.Env = append(os.Environ(), "AGENTOC_INSTALL_PACKAGE_ID="+id, "AGENTOC_INSTALL_PACKAGE_VERSION="+version,
-				"AGENTOC_INSTALL_MODULE="+module, "AGENTOC_INSTALL_SCOPE="+scope, "AGENTOC_INSTALL_INSPECT=1")
+			cmd.Env = append(os.Environ(), "RAGENT_INSTALL_PACKAGE_ID="+id, "RAGENT_INSTALL_PACKAGE_VERSION="+version,
+				"RAGENT_INSTALL_MODULE="+module, "RAGENT_INSTALL_SCOPE="+scope, "RAGENT_INSTALL_INSPECT=1")
 			output, err := cmd.Output()
 			if err != nil {
 				t.Fatalf("inspection failed: %v", err)
@@ -42,8 +42,8 @@ func TestOwnerInstallScriptLiveInspection(t *testing.T) {
 // Uses real catalog observations but replaces installation with a marker-only
 // module, so even a failed assertion cannot install software on the host.
 func TestOwnerInstallSelectionRevalidatedWithLiveCatalog(t *testing.T) {
-	pwsh, realModule := os.Getenv("AGENTOC_QA_PWSH"), os.Getenv("AGENTOC_QA_WINGET_MODULE")
-	id, version := os.Getenv("AGENTOC_QA_PACKAGE_ID"), os.Getenv("AGENTOC_QA_PACKAGE_VERSION")
+	pwsh, realModule := os.Getenv("RAGENT_QA_PWSH"), os.Getenv("RAGENT_QA_WINGET_MODULE")
+	id, version := os.Getenv("RAGENT_QA_PACKAGE_ID"), os.Getenv("RAGENT_QA_PACKAGE_VERSION")
 	if pwsh == "" || realModule == "" || id == "" || version == "" {
 		t.Skip("staged runtime, package ID and version required")
 	}
@@ -62,10 +62,10 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 	if err := os.WriteFile(module, []byte(stub), 0600); err != nil {
 		t.Fatal(err)
 	}
-	base := append(os.Environ(), "REAL_MODULE="+realModule, "MOCK_MARKER="+marker, "AGENTOC_INSTALL_MODULE="+module,
-		"AGENTOC_INSTALL_PACKAGE_ID="+id, "AGENTOC_INSTALL_PACKAGE_VERSION="+version, "AGENTOC_INSTALL_SCOPE=user")
+	base := append(os.Environ(), "REAL_MODULE="+realModule, "MOCK_MARKER="+marker, "RAGENT_INSTALL_MODULE="+module,
+		"RAGENT_INSTALL_PACKAGE_ID="+id, "RAGENT_INSTALL_PACKAGE_VERSION="+version, "RAGENT_INSTALL_SCOPE=user")
 	inspect := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(ownerInstallScript))
-	inspect.Env = append(append([]string{}, base...), "AGENTOC_INSTALL_INSPECT=1")
+	inspect.Env = append(append([]string{}, base...), "RAGENT_INSTALL_INSPECT=1")
 	data, err := inspect.Output()
 	if err != nil {
 		t.Fatalf("inspection failed: %v", err)
@@ -87,7 +87,7 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 			t.Fatal(err)
 		}
 		cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(ownerInstallScript))
-		cmd.Env = append(append([]string{}, base...), "AGENTOC_INSTALL_SELECTED="+string(encoded))
+		cmd.Env = append(append([]string{}, base...), "RAGENT_INSTALL_SELECTED="+string(encoded))
 		err = cmd.Run()
 		if changed {
 			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 25 {

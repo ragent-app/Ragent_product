@@ -267,7 +267,7 @@ export async function createAccountsServer({
     clock,
   });
   const asrKey = text(openAiApiKey ?? process.env.OPENAI_API_KEY);
-  const asrEnabled = (asrEnabledOverride ?? process.env.AGENTOC_ACCOUNTS_ASR_ENABLED === '1') && Boolean(asrKey);
+  const asrEnabled = (asrEnabledOverride ?? process.env.RAGENT_ACCOUNTS_ASR_ENABLED === '1') && Boolean(asrKey);
   let asrService = injectedAsrService || null;
   let asrStatus = asrService ? (asrService.enabled ? 'ready' : 'disabled') : 'unconfigured';
   if (!asrService && typeof stateStore.accountAsrContext === 'function') {
@@ -276,7 +276,7 @@ export async function createAccountsServer({
       apiKey: asrKey,
       fetchImpl,
       modelId: ACCOUNT_ASR_MODEL,
-      timeoutMs: Number(asrTimeoutMs ?? process.env.AGENTOC_ACCOUNTS_ASR_TIMEOUT_MS) || 30_000,
+      timeoutMs: Number(asrTimeoutMs ?? process.env.RAGENT_ACCOUNTS_ASR_TIMEOUT_MS) || 30_000,
     }) : undefined);
     asrService = createAccountAsrService({ authenticateAccount: broker.authenticateAccountAsr,
       repository, transcribe, enabled: asrEnabled, env: process.env, clock, audit });
@@ -398,19 +398,19 @@ function optionsNativeVerifier(fetchImpl, clock) {
 }
 
 // 限流上限解析：options.rateLimit 显式配置优先，其次是环境变量，最后是默认值。
-// 独立导出便于契约测试，也方便部署侧只通过 /etc/agentoc/accounts.env 调整。
+// 独立导出便于契约测试，也方便部署侧只通过 /etc/ragent/accounts.env 调整。
 export function resolveAccountsRateLimits({ options = {}, env = process.env } = {}) {
   const positiveInt = (value) => {
     const parsed = Number(value);
     return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null;
   };
   return {
-    getMax: options.max ?? positiveInt(env.AGENTOC_ACCOUNTS_RATE_LIMIT_GET_MAX) ?? 60,
-    postMax: options.postMax ?? positiveInt(env.AGENTOC_ACCOUNTS_RATE_LIMIT_POST_MAX) ?? 60,
+    getMax: options.max ?? positiveInt(env.RAGENT_ACCOUNTS_RATE_LIMIT_GET_MAX) ?? 60,
+    postMax: options.postMax ?? positiveInt(env.RAGENT_ACCOUNTS_RATE_LIMIT_POST_MAX) ?? 60,
     // One instance refreshes its signed proof every 10 seconds. Allow a
     // shared NAT substantially more than ten instances without letting
     // unauthenticated requests run unbounded.
-    authorityMax: options.authorityMax ?? positiveInt(env.AGENTOC_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX) ?? 600,
+    authorityMax: options.authorityMax ?? positiveInt(env.RAGENT_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX) ?? 600,
   };
 }
 
@@ -429,39 +429,39 @@ export function accountsInstanceSyncRateBucket(url, body, basePath = '') {
 }
 
 export async function startAccountsServer(options = {}) {
-  const databaseUrl = options.databaseUrl || process.env.AGENTOC_ACCOUNTS_DATABASE_URL || '';
-  const auditLogger = createAccountsLogger({ level: process.env.AGENTOC_ACCOUNTS_LOG_LEVEL || 'info' });
+  const databaseUrl = options.databaseUrl || process.env.RAGENT_ACCOUNTS_DATABASE_URL || '';
+  const auditLogger = createAccountsLogger({ level: process.env.RAGENT_ACCOUNTS_LOG_LEVEL || 'info' });
   const serverOptions = {
     dataFile:
       options.dataFile ||
-      process.env.AGENTOC_ACCOUNTS_DATA_FILE ||
-      join(process.env.AGENTOC_ACCOUNTS_DATA_DIR || '.', 'accounts.json'),
+      process.env.RAGENT_ACCOUNTS_DATA_FILE ||
+      join(process.env.RAGENT_ACCOUNTS_DATA_DIR || '.', 'accounts.json'),
     publicBaseUrl:
-      options.publicBaseUrl || process.env.AGENTOC_ACCOUNTS_PUBLIC_BASE_URL || 'https://accounts.agentoc.example',
-    googleWebClientId: options.googleWebClientId || process.env.AGENTOC_GOOGLE_WEB_CLIENT_ID || '',
+      options.publicBaseUrl || process.env.RAGENT_ACCOUNTS_PUBLIC_BASE_URL || 'https://accounts.ragent.example',
+    googleWebClientId: options.googleWebClientId || process.env.RAGENT_GOOGLE_WEB_CLIENT_ID || '',
     signingKeyFile:
       options.signingKeyFile ||
-      process.env.AGENTOC_ACCOUNTS_SIGNING_KEY_FILE ||
-      join(process.env.AGENTOC_ACCOUNTS_DATA_DIR || '.', 'signing-key.json'),
+      process.env.RAGENT_ACCOUNTS_SIGNING_KEY_FILE ||
+      join(process.env.RAGENT_ACCOUNTS_DATA_DIR || '.', 'signing-key.json'),
     turnBrokerSigningKeyFile:
       options.turnBrokerSigningKeyFile ||
-      process.env.AGENTOC_ACCOUNTS_TURN_BROKER_SIGNING_KEY_FILE ||
-      join(process.env.AGENTOC_ACCOUNTS_DATA_DIR || '.', 'turn-broker-signing-key.json'),
+      process.env.RAGENT_ACCOUNTS_TURN_BROKER_SIGNING_KEY_FILE ||
+      join(process.env.RAGENT_ACCOUNTS_DATA_DIR || '.', 'turn-broker-signing-key.json'),
     harnessPolicyFile:
       options.harnessPolicyFile ||
-      process.env.AGENTOC_HARNESS_POLICY_FILE ||
-      join(process.env.AGENTOC_ACCOUNTS_DATA_DIR || '.', 'harness-policy.json'),
-    temporaryPairingKeyFile: options.temporaryPairingKeyFile || process.env.AGENTOC_TEMPORARY_PAIRING_KEY_FILE || '',
-    demoAccountPolicyFile: options.demoAccountPolicyFile || process.env.AGENTOC_DEMO_ACCOUNT_POLICY_FILE || '',
-    contentReportFile: options.contentReportFile || process.env.AGENTOC_ACCOUNTS_CONTENT_REPORT_FILE || '',
-    accountDeletionEnabled: process.env.AGENTOC_ACCOUNTS_ACCOUNT_DELETION_ENABLED === '1',
+      process.env.RAGENT_HARNESS_POLICY_FILE ||
+      join(process.env.RAGENT_ACCOUNTS_DATA_DIR || '.', 'harness-policy.json'),
+    temporaryPairingKeyFile: options.temporaryPairingKeyFile || process.env.RAGENT_TEMPORARY_PAIRING_KEY_FILE || '',
+    demoAccountPolicyFile: options.demoAccountPolicyFile || process.env.RAGENT_DEMO_ACCOUNT_POLICY_FILE || '',
+    contentReportFile: options.contentReportFile || process.env.RAGENT_ACCOUNTS_CONTENT_REPORT_FILE || '',
+    accountDeletionEnabled: process.env.RAGENT_ACCOUNTS_ACCOUNT_DELETION_ENABLED === '1',
     audit: (fields) => auditLogger.info(fields),
     ...options,
     store: options.store || (databaseUrl ? createPostgresStoreFromUrl(databaseUrl, {
       enableScopedRendezvousResult: options.enableScopedRendezvousResult ??
-        (process.env.AGENTOC_ACCOUNTS_SCOPED_RENDEZVOUS_RESULT === '1'),
+        (process.env.RAGENT_ACCOUNTS_SCOPED_RENDEZVOUS_RESULT === '1'),
       enableScopedRendezvousCreation: options.enableScopedRendezvousCreation ??
-        (process.env.AGENTOC_ACCOUNTS_SCOPED_RENDEZVOUS_CREATION === '1'),
+        (process.env.RAGENT_ACCOUNTS_SCOPED_RENDEZVOUS_CREATION === '1'),
     }) : undefined),
   };
   // A configured legacy policy takes precedence. Otherwise create exactly one
@@ -489,7 +489,7 @@ export async function startAccountsServer(options = {}) {
   // Disabled until the mobile and instance clients negotiate this capability.
   // The relay itself has no disk spool and never receives an encryption key.
   const attachmentRelay = (options.attachmentRelayEnabled ??
-    process.env.AGENTOC_ACCOUNTS_ATTACHMENT_RELAY_ENABLED === '1') ? createAttachmentRelay() : null;
+    process.env.RAGENT_ACCOUNTS_ATTACHMENT_RELAY_ENABLED === '1') ? createAttachmentRelay() : null;
   fastify.addHook('preClose', async () => { app.broker.closeRendezvousInboxWaiters(); });
   fastify.addHook('preClose', async () => { attachmentRelay?.close(); });
   fastify.addHook('onClose', async () => {
@@ -556,7 +556,7 @@ export async function startAccountsServer(options = {}) {
   if (attachmentRelay) {
     // Keep the body as a stream. The relay applies its own reservation-bound
     // byte limit and pipeline backpressure; it must never be buffered by Fastify.
-    fastify.addContentTypeParser('application/vnd.agentoc.attachment-relay',
+    fastify.addContentTypeParser('application/vnd.ragent.attachment-relay',
       (_request, payload, done) => done(null, payload));
     const bearer = request => /^Bearer\s+([A-Za-z0-9_-]+)$/i.exec(request.headers.authorization || '')?.[1] || '';
     for (const path of asrPath('/v1/owner-auth/account/attachment-relay/reservations')) {
@@ -636,7 +636,7 @@ export async function startAccountsServer(options = {}) {
       fastify.put(path, { bodyLimit: 64 * 1024 * 1024,
         config: { rateLimit: { max: 24, timeWindow: '1 minute' } } }, async (request, reply) => {
         if (!/^[a-f0-9]{32}$/.test(request.params.id) ||
-            request.headers['content-type'] !== 'application/vnd.agentoc.attachment-relay') {
+            request.headers['content-type'] !== 'application/vnd.ragent.attachment-relay') {
           return reply.code(400).send({ code: 'attachment_relay_invalid' });
         }
         reply.hijack();
@@ -785,7 +785,7 @@ export async function startAccountsServer(options = {}) {
   fastify.addHook('preClose', async () => { app.broker.closeRendezvousResultWaiters(); });
 
   const port = Number(options.port ?? process.env.PORT ?? 7700);
-  const host = options.host || process.env.AGENTOC_ACCOUNTS_HOST || '127.0.0.1';
+  const host = options.host || process.env.RAGENT_ACCOUNTS_HOST || '127.0.0.1';
   await fastify.listen({ port, host });
   app.accountDeletion?.startWorker();
   return {
@@ -807,7 +807,7 @@ const isMainModule = process.argv[1]
 if (isMainModule) {
   const instance = await startAccountsServer();
   console.log(
-    `Accounts owner-auth server listening on ${process.env.AGENTOC_ACCOUNTS_HOST || '127.0.0.1'}:${process.env.PORT || 7700}`,
+    `Accounts owner-auth server listening on ${process.env.RAGENT_ACCOUNTS_HOST || '127.0.0.1'}:${process.env.PORT || 7700}`,
   );
   const shutdown = async (signal) => {
     console.log(`accounts: received ${signal}, shutting down`);

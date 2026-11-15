@@ -7,18 +7,18 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-agent-mail-reply-'));
-const mailboxRoot = join(tempHome, '.config', 'agentoc', 'agent-mailbox');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-agent-mail-reply-'));
+const mailboxRoot = join(tempHome, '.config', 'ragent', 'agent-mailbox');
 const workspace = join(tempHome, 'workspace');
-const configDir = join(tempHome, '.config', 'agentoc');
-const memoryDir = join(tempHome, '.agentoc', 'memory');
+const configDir = join(tempHome, '.config', 'ragent');
+const memoryDir = join(tempHome, '.ragent', 'memory');
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 
 mkdirSync(configDir, { recursive: true });
 mkdirSync(memoryDir, { recursive: true });

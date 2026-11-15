@@ -28,7 +28,7 @@ function trimString(value) {
 // Deployments may disable the broker explicitly, but absence of the variable
 // must not force every new device back into scan-only pairing.
 function accountJoinEnabled() {
-  return process.env.AGENTOC_ACCOUNT_JOIN_ENABLED !== '0';
+  return process.env.RAGENT_ACCOUNT_JOIN_ENABLED !== '0';
 }
 
 async function readJsonBody(req) {

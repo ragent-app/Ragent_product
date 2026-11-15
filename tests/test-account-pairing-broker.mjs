@@ -45,7 +45,7 @@ const serviceOptions = { identity: { instanceId, publicKey: pcKey,
   createInvitation: async (options) => {
     localInvitation = { id: invitationId, tokenHash: accountPairingHash(token), accountHandoffAccountId: options.accountHandoffAccountId,
       expiresAt: new Date(now + 120_000).toISOString() };
-    return { ...localInvitation, pairingUri: 'agentoc://pair?v=3&t=example' };
+    return { ...localInvitation, pairingUri: 'ragent://pair?v=3&t=example' };
   },
   getInvitation: async () => localInvitation,
   listPendingInvitations: async () => [localInvitation],

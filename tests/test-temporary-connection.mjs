@@ -153,7 +153,7 @@ test('activation starts one relay-only host with the closed temporary policy and
   for (const req of [
     { method: 'GET', url: '/api/sessions', headers: { authorization: `Bearer rda_${'a'.repeat(64)}` } },
     { method: 'POST', url: '/api/auth/google/token', headers: {} },
-    { method: 'GET', url: '/healthz', headers: { 'x-agentoc-browser-principal': 'browser' } },
+    { method: 'GET', url: '/healthz', headers: { 'x-ragent-browser-principal': 'browser' } },
     { method: 'POST', url: '/api/sessions', headers: { authorization: `DPoP ${phone.accessCredential.access_token}` } },
   ]) assert.equal(policy.decide(req).reason, 'temporary_business_not_ready');
   await f.host.revoke(phone.claim.invitationId);
@@ -210,7 +210,7 @@ test('actual host loopback proxy denies temporary requests before the upstream s
     await agent.ready;
     for (const path of ['/api/sessions', '/api/device-auth/challenges', '/api/auth/google/token']) {
       const response = await fetch(`${agent.gatewayUrl}${path}`, { method: 'POST',
-        headers: { authorization: `Bearer rda_${'a'.repeat(64)}`, 'x-agentoc-browser-principal': 'browser' } });
+        headers: { authorization: `Bearer rda_${'a'.repeat(64)}`, 'x-ragent-browser-principal': 'browser' } });
       assert.equal(response.status, 403); await response.text();
     }
     assert.equal(forwarded, 0);

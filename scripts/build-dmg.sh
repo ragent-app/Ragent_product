@@ -7,19 +7,19 @@ set -euo pipefail
 # never depends on a system Node, npm, or Go at install time.
 #
 # Env overrides:
-#   AGENTOC_DMG_OUTPUT_DIR    output directory (default: <repo>/release)
-#   AGENTOC_PACKAGE_VERSION   manual version override
-#   AGENTOC_NODE_VERSION      bundled Node version (default: v24.12.0)
-#   AGENTOC_NODE_CACHE_DIR    Node tarball cache (default: ~/.cache/agentoc-build)
-#   AGENTOC_NPM_REGISTRY      npm registry (default: https://registry.npmjs.org)
-#   AGENTOC_CODEX_VERSION     codex version (default: adapter catalog target)
-#   AGENTOC_CLAUDE_VERSION    claude code version (default: adapter catalog target)
-#   AGENTOC_P2P_HOST_BINARY   prebuilt darwin sidecar (requires SHA-256 below)
-#   AGENTOC_P2P_HOST_SHA256   expected lowercase SHA-256 for the prebuilt sidecar
-#   AGENTOC_MAC_SIGN_IDENTITY Developer ID Application signing identity
-#   AGENTOC_MAC_NOTARY_PROFILE notarytool keychain profile (submits to Apple)
-#   AGENTOC_SOURCE_GIT_DIR    bare Git object store for a frozen source build
-#   AGENTOC_SOURCE_COMMIT     expected full commit ID (required with the above)
+#   RAGENT_DMG_OUTPUT_DIR    output directory (default: <repo>/release)
+#   RAGENT_PACKAGE_VERSION   manual version override
+#   RAGENT_NODE_VERSION      bundled Node version (default: v24.12.0)
+#   RAGENT_NODE_CACHE_DIR    Node tarball cache (default: ~/.cache/ragent-build)
+#   RAGENT_NPM_REGISTRY      npm registry (default: https://registry.npmjs.org)
+#   RAGENT_CODEX_VERSION     codex version (default: adapter catalog target)
+#   RAGENT_CLAUDE_VERSION    claude code version (default: adapter catalog target)
+#   RAGENT_P2P_HOST_BINARY   prebuilt darwin sidecar (requires SHA-256 below)
+#   RAGENT_P2P_HOST_SHA256   expected lowercase SHA-256 for the prebuilt sidecar
+#   RAGENT_MAC_SIGN_IDENTITY Developer ID Application signing identity
+#   RAGENT_MAC_NOTARY_PROFILE notarytool keychain profile (submits to Apple)
+#   RAGENT_SOURCE_GIT_DIR    bare Git object store for a frozen source build
+#   RAGENT_SOURCE_COMMIT     expected full commit ID (required with the above)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -50,26 +50,26 @@ case "$ARCH" in
     ;;
 esac
 
-OUTPUT_DIR="${AGENTOC_DMG_OUTPUT_DIR:-$ROOT/release}"
-NODE_VERSION="${AGENTOC_NODE_VERSION:-v24.12.0}"
+OUTPUT_DIR="${RAGENT_DMG_OUTPUT_DIR:-$ROOT/release}"
+NODE_VERSION="${RAGENT_NODE_VERSION:-v24.12.0}"
 [[ "$NODE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
   echo 'Bundled Node version requires its matching third-party license notice.' >&2
   exit 1
 }
-NODE_CACHE_DIR="${AGENTOC_NODE_CACHE_DIR:-$HOME/.cache/agentoc-build/node}"
-NPM_REGISTRY="${AGENTOC_NPM_REGISTRY:-https://registry.npmjs.org}"
-SIGN_IDENTITY="${AGENTOC_MAC_SIGN_IDENTITY:-}"
-NOTARY_PROFILE="${AGENTOC_MAC_NOTARY_PROFILE:-}"
+NODE_CACHE_DIR="${RAGENT_NODE_CACHE_DIR:-$HOME/.cache/ragent-build/node}"
+NPM_REGISTRY="${RAGENT_NPM_REGISTRY:-https://registry.npmjs.org}"
+SIGN_IDENTITY="${RAGENT_MAC_SIGN_IDENTITY:-}"
+NOTARY_PROFILE="${RAGENT_MAC_NOTARY_PROFILE:-}"
 if [ -n "$NOTARY_PROFILE" ]; then
   [ -n "$SIGN_IDENTITY" ] || { echo 'Notarization requires a Developer ID signing identity.' >&2; exit 1; }
   [[ "$NOTARY_PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo 'Invalid notarytool keychain profile name.' >&2; exit 1; }
 fi
 
-WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentoc-dmg.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ragent-dmg.XXXXXX")"
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
-SOURCE_GIT_DIR="${AGENTOC_SOURCE_GIT_DIR:-}"
+SOURCE_GIT_DIR="${RAGENT_SOURCE_GIT_DIR:-}"
 if [ -n "$SOURCE_GIT_DIR" ]; then
   SOURCE_GIT_DIR="$(cd "$SOURCE_GIT_DIR" && pwd -P)"
   export GIT_NO_REPLACE_OBJECTS=1 GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
@@ -77,13 +77,13 @@ if [ -n "$SOURCE_GIT_DIR" ]; then
     [ ! -e "$SOURCE_GIT_DIR/objects/info/http-alternates" ] || {
       echo 'Frozen source Git directory must not use alternate object stores.' >&2; exit 1;
     }
-  [ -n "${AGENTOC_DMG_OUTPUT_DIR:-}" ] || {
+  [ -n "${RAGENT_DMG_OUTPUT_DIR:-}" ] || {
     echo 'Frozen source builds require an explicit output directory.' >&2; exit 1;
   }
   [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --is-bare-repository)" = true ] || {
     echo 'Frozen source Git directory must be bare.' >&2; exit 1;
   }
-  SOURCE_COMMIT="${AGENTOC_SOURCE_COMMIT:-}"
+  SOURCE_COMMIT="${RAGENT_SOURCE_COMMIT:-}"
   [[ "$SOURCE_COMMIT" =~ ^([a-f0-9]{40}|[a-f0-9]{64})$ ]] &&
     [ "$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" = "$SOURCE_COMMIT" ] || {
       echo 'Frozen source requires the expected full commit ID at bare HEAD.' >&2; exit 1;
@@ -99,7 +99,7 @@ if [ -n "$SOURCE_GIT_DIR" ]; then
   node "$ROOT/scripts/stage-runtime-payload.mjs" --source "$SOURCE_GIT_DIR" \
     --destination "$WORK_DIR/frozen-source" --profile desktop --source-mode git-objects
   ROOT="$WORK_DIR/frozen-source"
-  [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+  [ "$(cat "$ROOT/.ragent-source-commit")" = "$SOURCE_COMMIT" ] || {
     echo 'Frozen source staging returned a different commit.' >&2; exit 1;
   }
   [ -s "$ROOT/third_party_licenses/node/${NODE_VERSION}-LICENSE.txt" ] || {
@@ -127,7 +127,7 @@ assert_source_unchanged() {
   if [ -n "$SOURCE_GIT_DIR" ]; then
     current="$(git -C "$SOURCE_GIT_DIR" rev-parse --verify HEAD)" || exit 1
     [ "$current" = "$SOURCE_COMMIT" ] &&
-      [ "$(cat "$ROOT/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] &&
+      [ "$(cat "$ROOT/.ragent-source-commit")" = "$SOURCE_COMMIT" ] &&
       [ "$(shasum -a 256 "$ROOT/runtime-payload-manifest.json" | awk '{print $1}')" = "$FROZEN_MANIFEST_SHA" ] || {
         echo 'Frozen source identity changed during macOS packaging.' >&2; exit 1;
       }
@@ -147,7 +147,7 @@ function walk(dir, prefix = '') {
     if (st.isSymbolicLink()) throw new Error(`Frozen source contains a symlink: ${rel}`);
     if (st.isDirectory()) { walk(file, rel); continue; }
     if (!st.isFile()) throw new Error(`Frozen source contains a non-file: ${rel}`);
-    if (!prefix && ['.agentoc-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
+    if (!prefix && ['.ragent-source-commit', 'runtime-payload-manifest.json'].includes(name)) continue;
     if (!expected.has(rel) || createHash('sha256').update(readFileSync(file)).digest('hex') !== expected.get(rel)) {
       throw new Error(`Frozen source changed: ${rel}`);
     }
@@ -169,13 +169,13 @@ NODE
       echo 'Source changed during macOS packaging; refusing to publish the candidate.' >&2; exit 1;
     }
 }
-if [ -n "${AGENTOC_PACKAGE_VERSION:-}" ]; then
-  VERSION="$AGENTOC_PACKAGE_VERSION"
+if [ -n "${RAGENT_PACKAGE_VERSION:-}" ]; then
+  VERSION="$RAGENT_PACKAGE_VERSION"
 else
   VERSION="$PKG_VERSION+main.$SOURCE_SHORT.$(date +%Y%m%d%H%M)"
 fi
 BUNDLE_VERSION="${VERSION%%+*}"
-BUILD_VERSION="${AGENTOC_PACKAGE_BUILD_VERSION:-$BUNDLE_VERSION}"
+BUILD_VERSION="${RAGENT_PACKAGE_BUILD_VERSION:-$BUNDLE_VERSION}"
 [[ "$BUILD_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
   echo 'Internal build version must have three numeric components.' >&2; exit 1
 }
@@ -241,11 +241,11 @@ download_npm_package() {
 CODEX_ADAPTER_TARGET_VERSION="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.CODEX_HARNESS_VERSION_CONTRACT.targetVersion))' \
   "$ROOT/lib/harness-version-catalog.mjs")"
-CODEX_VERSION="$(resolve_npm_version '@openai/codex' "${AGENTOC_CODEX_VERSION:-$CODEX_ADAPTER_TARGET_VERSION}")"
+CODEX_VERSION="$(resolve_npm_version '@openai/codex' "${RAGENT_CODEX_VERSION:-$CODEX_ADAPTER_TARGET_VERSION}")"
 CLAUDE_ADAPTER_TARGET_VERSION="$(node --input-type=module -e \
   'import(process.argv[1]).then((m) => process.stdout.write(m.HARNESS_VERSION_CONTRACTS.claude.targetVersion))' \
   "$ROOT/lib/harness-version-catalog.mjs")"
-CLAUDE_VERSION="$(resolve_npm_version '@anthropic-ai/claude-code' "${AGENTOC_CLAUDE_VERSION:-$CLAUDE_ADAPTER_TARGET_VERSION}")"
+CLAUDE_VERSION="$(resolve_npm_version '@anthropic-ai/claude-code' "${RAGENT_CLAUDE_VERSION:-$CLAUDE_ADAPTER_TARGET_VERSION}")"
 case "$CODEX_VERSION" in
   *[!0-9.]*|'') echo "Invalid Codex version from registry: '$CODEX_VERSION'" >&2; exit 1 ;;
 esac
@@ -284,12 +284,12 @@ else
   node "$ROOT/scripts/stage-runtime-payload.mjs" \
     --source "$ROOT" --destination "$APP_DIR" --profile desktop
 fi
-[ "$(cat "$APP_DIR/.agentoc-source-commit")" = "$SOURCE_COMMIT" ] || {
+[ "$(cat "$APP_DIR/.ragent-source-commit")" = "$SOURCE_COMMIT" ] || {
   echo 'Staged source does not match the requested commit.' >&2; exit 1;
 }
 # Keep the explicit version so frontend asset URLs change per packaged build.
-printf '%s\n' "$VERSION" > "$APP_DIR/.agentoc-package-version"
-printf '%s\n' "$BUILD_VERSION" > "$APP_DIR/.agentoc-package-build"
+printf '%s\n' "$VERSION" > "$APP_DIR/.ragent-package-version"
+printf '%s\n' "$BUILD_VERSION" > "$APP_DIR/.ragent-package-build"
 # The vendored Codex launcher is assembled from verified downloads below.
 rm -rf "$APP_DIR/vendor"
 
@@ -321,7 +321,7 @@ mkdir -p "$MANAGER_APP/assets"
 for name in main.cjs preload.cjs update-check.cjs auto-update.cjs update-linux.sh update-macos.sh update-windows.ps1 wait.html; do
   install -m 0644 "$ROOT/desktop/$name" "$MANAGER_APP/$name"
 done
-install -m 0644 "$ROOT/static/desktop/agentoc-android-logo.png" "$MANAGER_APP/assets/agentoc-android-logo.png"
+install -m 0644 "$ROOT/static/desktop/ragent-android-logo.png" "$MANAGER_APP/assets/ragent-android-logo.png"
 install -m 0644 "$ROOT/static/icon-512.png" "$MANAGER_APP/assets/ragent-icon.png"
 install -m 0644 "$ROOT/static/desktop/ragent-trayTemplate.png" "$MANAGER_APP/assets/ragent-trayTemplate.png"
 install -m 0644 "$ROOT/static/desktop/ragent-trayTemplate@2x.png" "$MANAGER_APP/assets/ragent-trayTemplate@2x.png"
@@ -360,19 +360,19 @@ install -m 0755 "$ROOT/packaging/macos/runtime-codex" "$CONTENTS/Resources/runti
 install -m 0755 "$ROOT/packaging/macos/runtime-claude" "$CONTENTS/Resources/runtime/claude"
 
 # ── 4. P2P host sidecar (darwin Mach-O) ──────────────────────────────────────
-if [ -n "${AGENTOC_P2P_HOST_BINARY:-}" ]; then
-  P2P_HOST_BINARY="$AGENTOC_P2P_HOST_BINARY"
-  P2P_EXPECTED_SHA="${AGENTOC_P2P_HOST_SHA256:-}"
-  [[ "$P2P_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Prebuilt P2P host requires AGENTOC_P2P_HOST_SHA256.' >&2; exit 1; }
+if [ -n "${RAGENT_P2P_HOST_BINARY:-}" ]; then
+  P2P_HOST_BINARY="$RAGENT_P2P_HOST_BINARY"
+  P2P_EXPECTED_SHA="${RAGENT_P2P_HOST_SHA256:-}"
+  [[ "$P2P_EXPECTED_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Prebuilt P2P host requires RAGENT_P2P_HOST_SHA256.' >&2; exit 1; }
   [ -f "$P2P_HOST_BINARY" ] || { echo 'Prebuilt P2P host is missing.' >&2; exit 1; }
   [ "$(shasum -a 256 "$P2P_HOST_BINARY" | awk '{print $1}')" = "$P2P_EXPECTED_SHA" ] || { echo 'Prebuilt P2P host checksum mismatch.' >&2; exit 1; }
 else
   command -v go >/dev/null 2>&1 || {
-    echo "Go toolchain is required to build the P2P host sidecar (or set AGENTOC_P2P_HOST_BINARY)" >&2
+    echo "Go toolchain is required to build the P2P host sidecar (or set RAGENT_P2P_HOST_BINARY)" >&2
     exit 1
   }
-  P2P_HOST_BINARY="$WORK_DIR/agentoc-p2p-host"
-  (cd "$ROOT/p2p" && GOOS=darwin GOARCH="$P2P_GOARCH" CGO_ENABLED=0 go build -trimpath -o "$P2P_HOST_BINARY" ./cmd/agentoc-p2p-host)
+  P2P_HOST_BINARY="$WORK_DIR/ragent-p2p-host"
+  (cd "$ROOT/p2p" && GOOS=darwin GOARCH="$P2P_GOARCH" CGO_ENABLED=0 go build -trimpath -o "$P2P_HOST_BINARY" ./cmd/ragent-p2p-host)
 fi
 [ -f "$P2P_HOST_BINARY" ] || { echo "Missing P2P host sidecar: $P2P_HOST_BINARY" >&2; exit 1; }
 P2P_MACHO_MAGIC="$(head -c 4 "$P2P_HOST_BINARY" | od -An -tx1 | tr -d ' \n')"
@@ -382,9 +382,9 @@ case "$P2P_MACHO_MAGIC" in
 esac
 lipo -verify_arch "$ARCH" "$P2P_HOST_BINARY"
 mkdir -p "$APP_DIR/bin"
-rm -f "$APP_DIR/bin/agentoc-p2p-host-amd64" "$APP_DIR/bin/agentoc-p2p-host-arm64"
-rm -f "$APP_DIR/bin/agentoc-p2p-host-darwin-arm64" "$APP_DIR/bin/agentoc-p2p-host-darwin-x64"
-rm -f "$APP_DIR/bin/agentoc-p2p-host" "$APP_DIR/bin/agentoc-p2p-host.exe"
+rm -f "$APP_DIR/bin/ragent-p2p-host-amd64" "$APP_DIR/bin/ragent-p2p-host-arm64"
+rm -f "$APP_DIR/bin/ragent-p2p-host-darwin-arm64" "$APP_DIR/bin/ragent-p2p-host-darwin-x64"
+rm -f "$APP_DIR/bin/ragent-p2p-host" "$APP_DIR/bin/ragent-p2p-host.exe"
 install -m 0755 "$P2P_HOST_BINARY" "$APP_DIR/bin/ragent-p2p-host"
 P2P_BINARY_SHA="$(shasum -a 256 "$APP_DIR/bin/ragent-p2p-host" | awk '{print $1}')"
 
@@ -440,13 +440,13 @@ printf 'claude_sha256=%s\n' "$CLAUDE_BINARY_SHA" >> "$CONTENTS/Resources/runtime
 # ── 7. App bundle metadata + launchers ───────────────────────────────────────
 sed "s/{{VERSION}}/$BUNDLE_VERSION/g" "$ROOT/packaging/macos/Info.plist" > "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_VERSION" "$CONTENTS/Info.plist"
-install -m 0755 "$ROOT/packaging/macos/AgentoC" "$CONTENTS/MacOS/Ragent"
-install -m 0755 "$ROOT/packaging/macos/agentoc-service" "$CONTENTS/Resources/ragent-service"
-install -m 0755 "$ROOT/packaging/macos/agentoc-stop" "$CONTENTS/Resources/ragent-stop"
-install -m 0755 "$ROOT/packaging/macos/agentoc-cli" "$CONTENTS/Resources/ragent"
-install -m 0755 "$ROOT/packaging/macos/agentoc-login" "$CONTENTS/Resources/ragent-login"
-install -m 0644 "$ROOT/packaging/macos/agentoc-login.cjs" "$CONTENTS/Resources/ragent-login.cjs"
-install -m 0644 "$ROOT/packaging/macos/agentoc-env.sh" "$CONTENTS/Resources/ragent-env.sh"
+install -m 0755 "$ROOT/packaging/macos/Ragent" "$CONTENTS/MacOS/Ragent"
+install -m 0755 "$ROOT/packaging/macos/ragent-service" "$CONTENTS/Resources/ragent-service"
+install -m 0755 "$ROOT/packaging/macos/ragent-stop" "$CONTENTS/Resources/ragent-stop"
+install -m 0755 "$ROOT/packaging/macos/ragent-cli" "$CONTENTS/Resources/ragent"
+install -m 0755 "$ROOT/packaging/macos/ragent-login" "$CONTENTS/Resources/ragent-login"
+install -m 0644 "$ROOT/packaging/macos/ragent-login.cjs" "$CONTENTS/Resources/ragent-login.cjs"
+install -m 0644 "$ROOT/packaging/macos/ragent-env.sh" "$CONTENTS/Resources/ragent-env.sh"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$CONTENTS/Resources/README.txt"
 install -m 0644 "$ROOT/packaging/macos/README.txt" "$STAGE/README.txt"
 ln -s /Applications "$STAGE/Applications"

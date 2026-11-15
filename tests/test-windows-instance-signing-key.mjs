@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadWindowsAutoInstallPublicIdentity, loadWindowsAutoInstallSigningKey } from '../chat/windows-managed-auto-install.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-instance-signer-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-instance-signer-'));
 const path = join(root, 'identity.json');
 try {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');

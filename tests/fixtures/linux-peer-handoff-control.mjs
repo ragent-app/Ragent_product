@@ -4,10 +4,10 @@ import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createInterface } from 'node:readline';
 
-const root = process.env.AGENTOC_TEST_ROOT;
-const runnerUid = Number(process.env.AGENTOC_TEST_RUNNER_UID);
-const realSidecar = process.env.AGENTOC_TEST_REAL_SIDECAR === '1';
-const cancellation = process.env.AGENTOC_TEST_CANCEL_HANDOFF === '1';
+const root = process.env.RAGENT_TEST_ROOT;
+const runnerUid = Number(process.env.RAGENT_TEST_RUNNER_UID);
+const realSidecar = process.env.RAGENT_TEST_REAL_SIDECAR === '1';
+const cancellation = process.env.RAGENT_TEST_CANCEL_HANDOFF === '1';
 const runId = cancellation ? 'run_peercancelfixture1' : realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
 const sessionId = 's1', requestId = 't1';
 const { createRun, getRunAcceptanceEvidence, getRunManifest, getRunResult, clearRunResult, requestRunCancel } = await import('../../chat/runs.mjs');

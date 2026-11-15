@@ -116,14 +116,14 @@ const managedMcpApproval = readClaudeBidiManagedMcpRequest({
   request_id: 'managed-mcp-1',
   request: {
     subtype: 'can_use_tool',
-    tool_name: 'mcp__agentoc_actions_0123456789abcdef__agentoc_create_agent',
+    tool_name: 'mcp__ragent_actions_0123456789abcdef__ragent_create_agent',
     input: { agent: { name: 'Workflow helper' } },
   },
 });
 assert.equal(isClaudeBidiMcpToolName(managedMcpApproval.params.tool_name), true);
-assert.equal(managedMcpApproval.mcpServerName, 'agentoc_actions_0123456789abcdef');
-assert.equal(managedMcpApproval.mcpToolName, 'agentoc_create_agent');
-const renamedManagedMcpApproval = readClaudeBidiManagedMcpRequest({ type: 'control_request', request_id: 'renamed', request: { subtype: 'can_use_tool', tool_name: 'mcp__agentoc_actions_0123456789abcdef__ragent_create_agent', input: {} } });
+assert.equal(managedMcpApproval.mcpServerName, 'ragent_actions_0123456789abcdef');
+assert.equal(managedMcpApproval.mcpToolName, 'ragent_create_agent');
+const renamedManagedMcpApproval = readClaudeBidiManagedMcpRequest({ type: 'control_request', request_id: 'renamed', request: { subtype: 'can_use_tool', tool_name: 'mcp__ragent_actions_0123456789abcdef__ragent_create_agent', input: {} } });
 assert.equal(renamedManagedMcpApproval?.mcpToolName, 'ragent_create_agent');
 assert.deepEqual(
   buildClaudeBidiManagedMcpResponse(managedMcpApproval),
@@ -141,12 +141,12 @@ const foreignManagedMcp = readClaudeBidiManagedMcpRequest({
     request_id: 'foreign-mcp-1',
     request: {
       subtype: 'can_use_tool',
-      tool_name: 'mcp__foreign_server__agentoc_create_agent',
+      tool_name: 'mcp__foreign_server__ragent_create_agent',
       input: {},
     },
   });
 assert.equal(foreignManagedMcp.mcpServerName, 'foreign_server');
-assert.equal(foreignManagedMcp.mcpToolName, 'agentoc_create_agent');
+assert.equal(foreignManagedMcp.mcpToolName, 'ragent_create_agent');
 // === AskUserQuestion forward + return path regression ===
 const askUserQuestions = [
   {

@@ -40,7 +40,7 @@ assert.deepEqual(
 );
 assert.deepEqual(buildShellArgs('/bin/bash', 'printf hello', 'linux'), ['-lc', 'printf hello']);
 
-const fixtureDir = mkdtempSync(join(tmpdir(), 'agentoc-doubao-platform-'));
+const fixtureDir = mkdtempSync(join(tmpdir(), 'ragent-doubao-platform-'));
 try {
   const fakeExecutable = join(fixtureDir, 'fake-agent');
   writeFileSync(

@@ -2,7 +2,7 @@
 // Stage 1 parity guard: the extracted core/session-status.js must stay
 // semantically identical to the live façade static/chat/session-state-model.js
 // until Stage 3+ rewires consumers to the core. Both IIFEs load in Node; the
-// legacy module falls back to its bundled English strings when agentocT is
+// legacy module falls back to its bundled English strings when ragentT is
 // absent, which is exactly what core/ carries as labelRaw/titleRaw, so every
 // projection is directly comparable.
 import assert from 'assert/strict';
@@ -21,8 +21,8 @@ function loadIife(relPath, globalName) {
   return context[globalName];
 }
 
-const legacy = loadIife('static/chat/session-state-model.js', 'AgentoCSessionStateModel');
-const core = loadIife('static/chat/core/session-status.js', 'AgentoCSessionStatusCore');
+const legacy = loadIife('static/chat/session-state-model.js', 'RagentSessionStateModel');
+const core = loadIife('static/chat/core/session-status.js', 'RagentSessionStatusCore');
 
 // Shared raw projection surface: both implementations must agree field for
 // field (no label mapping involved).

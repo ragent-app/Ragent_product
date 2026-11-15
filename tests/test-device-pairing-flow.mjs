@@ -14,7 +14,7 @@ const ownerCookie = 'session_token=test-session';
 const ownerToken = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const sessionSecret = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 // 测试进程也会 import auth.mjs（loadAuthSessions 在模块加载时执行），先注入 secret 避免噪音警告
-process.env.AGENTOC_AUTH_SESSION_SECRET = sessionSecret;
+process.env.RAGENT_AUTH_SESSION_SECRET = sessionSecret;
 // e43264c 起会话键为 HMAC(secret, cookie值) 的 s+hex 摘要，不再接受明文 cookie 键
 const hashedOwnerSession = `s${createHmac('sha256', sessionSecret).update('test-session').digest('hex')}`;
 const hashedVisitorSession = `s${createHmac('sha256', sessionSecret).update('visitor-session').digest('hex')}`;
@@ -72,7 +72,7 @@ function request(port, method, path, body = null, headers = {}) {
 }
 
 async function setupTempInstance() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-device-pairing-'));
+  const home = mkdtempSync(join(tmpdir(), 'ragent-device-pairing-'));
   const configDir = join(home, 'config');
   const binDir = join(home, 'bin');
   mkdirSync(configDir, { recursive: true });
@@ -102,22 +102,22 @@ async function startServer({ home, configDir, port, binDir }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${binDir}:${process.env.PATH}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_AUTH_SESSION_SECRET: sessionSecret,
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_AUTH_SESSION_SECRET: sessionSecret,
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -173,7 +173,7 @@ try {
   const invitation = created.json?.invitation;
   assert.match(invitation?.token || '', /^rpi_[A-Za-z0-9_-]{32}$/);
   assert.match(invitation?.shortCode || '', /^[A-F0-9]{8}$/);
-  assert.match(invitation?.pairingUri || '', /^agentoc:\/\/pair\?/);
+  assert.match(invitation?.pairingUri || '', /^ragent:\/\/pair\?/);
   assert.ok(invitation.pairingUri.includes(encodeURIComponent(invitation.token)));
   const pairingUri = new URL(invitation.pairingUri);
   assert.equal(pairingUri.searchParams.get('i'), invitation.instanceId, 'v3 QR uses compact instance field');

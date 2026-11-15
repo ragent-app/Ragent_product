@@ -30,7 +30,7 @@ import {
 } from './semantic-operation.mjs';
 import { resolveWindowsSemanticContext } from './semantic-resolver-windows.mjs';
 import { inspectMacosPackagePreview } from './macos-package-preview.mjs';
-import { computeSelfProtectionFacts, deriveAgentoCSelfProtectionRoots } from './self-protection.mjs';
+import { computeSelfProtectionFacts, deriveRagentSelfProtectionRoots } from './self-protection.mjs';
 
 export const RESOLVER_PLATFORM = 'linux';
 export const RESOLVER_SUPPORTED_PLATFORMS = Object.freeze(['linux', 'win32']);
@@ -707,7 +707,7 @@ async function resolveFilesystemTarget(target, caller, options, provider) {
   };
   const selfProtection = computeSelfProtectionFacts({
     canonicalPaths: resolvedPaths.map((entry) => entry.canonical),
-    protectedRoots: options.selfProtectionRoots || deriveAgentoCSelfProtectionRoots({ platform: 'linux' }),
+    protectedRoots: options.selfProtectionRoots || deriveRagentSelfProtectionRoots({ platform: 'linux' }),
     workspaceRoot: trusted.workspaceRoot || trusted.projectRoot || '',
     platform: 'linux',
   });

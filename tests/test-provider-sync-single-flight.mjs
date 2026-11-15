@@ -9,17 +9,17 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-provider-sync-single-flight-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-provider-sync-single-flight-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const { createCredentialMutationLedger, createNativeProviderRegistry, createProviderSyncLedger, createSecretStore } = await import('../lib/provider-runtime/index.mjs');
 const { syncAccountSyncFromAccountPeers } = await import('../lib/provider-runtime/peer-sync.mjs');
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 await writeFile(join(configDir, 'owner-account-binding.json'), JSON.stringify({ accountId: 'acct_single_flight' }));
 const context = {
   registry: createNativeProviderRegistry({ configDir }),

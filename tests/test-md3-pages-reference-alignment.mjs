@@ -11,7 +11,7 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const css = await readFile(join(repoRoot, 'static/m3-pages.css'), 'utf8');
 const markup = `<!doctype html><html><head><style>${css}</style></head><body>
   <main class="shell">
-    <section class="card"><h1>AgentoC</h1><button class="btn">Continue</button></section>
+    <section class="card"><h1>Ragent</h1><button class="btn">Continue</button></section>
     <section class="panel page-panel"><label>Search<input class="search-field" /></label><button class="btn-subtle">Filter</button></section>
   </main>
 </body></html>`;

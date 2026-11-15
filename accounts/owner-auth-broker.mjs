@@ -59,7 +59,7 @@ import { createRendezvousResultWaiters, rendezvousResultWaitMs, waitForRendezvou
 // several minutes. The one-use login transaction has its own preparation window.
 export const OWNER_AUTH_TRANSACTION_TTL_MS = 15 * 60 * 1000;
 export const OWNER_AUTH_PROOF_SKEW_MS = 2 * 60 * 1000;
-export const OWNER_AUTH_POLL_AUDIENCE = 'agentoc-owner-auth-poll';
+export const OWNER_AUTH_POLL_AUDIENCE = 'ragent-owner-auth-poll';
 export const OWNER_AUTH_POLL_ASSERTION_TTL_MS = 60 * 1000;
 export const OWNER_AUTH_POLL_RETRY_AFTER_MS = 2000;
 export const ACCOUNT_SESSION_CHALLENGE_TTL_MS = 15 * 60 * 1000;
@@ -213,7 +213,7 @@ function normalizeAccountFileUploadQuotaInput(input, operation, clock) {
     || sizeBytes <= 0 || !/^[a-f0-9]{64}$/.test(sha256)
     || !issuedMs || !isProtocolField(issuedAt, { min: 20, max: 64 })
     || (grantId && !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId))
-    || trimString(input?.audience) !== 'agentoc-account-file-upload') {
+    || trimString(input?.audience) !== 'ragent-account-file-upload') {
     throw createError('account_file_upload_request_invalid', 'Invalid account file upload quota request.', 400);
   }
   if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
@@ -243,7 +243,7 @@ export function deriveDesktopReplayValues({ transactionId, bootstrap, deliveryMo
   const secret = trimString(bootstrap);
   if (!txId || !secret) return { desktopState: '', phoneTicket: '', deliveryGrant: '' };
   const derive = (kind, prefix) => `${prefix}_${createHash('sha256')
-    .update(`agentoc-owner-auth-desktop-v2\n${kind}\n${txId}\n${secret}`)
+    .update(`ragent-owner-auth-desktop-v2\n${kind}\n${txId}\n${secret}`)
     .digest('base64url')}`;
   return {
     desktopState: derive('desktop-state', 'state'),
@@ -269,7 +269,7 @@ function normalizeDeliveryMode(value) {
   return DELIVERY_MODES.has(mode) ? mode : '';
 }
 
-const NATIVE_OWNER_AUTH_AUDIENCE = 'agentoc-owner-auth-native';
+const NATIVE_OWNER_AUTH_AUDIENCE = 'ragent-owner-auth-native';
 const NATIVE_OWNER_AUTH_PROOF_SKEW_MS = 2 * 60 * 1000;
 
 function normalizeReturnUrl(value, { allowInsecure = false } = {}) {
@@ -692,7 +692,7 @@ function validateNativeInstance(input, { requestId, purpose, deviceId, deviceAli
   const audience = trimString(input?.audience);
   if (!instanceId || !publicKey || !keyFingerprint || !requestId || !deviceId
     || !/^[a-f0-9]{64}$/.test(devicePublicKeyFingerprint) || !issuedMs
-    || audience !== (rollback ? 'agentoc-owner-auth-native-rollback' : NATIVE_OWNER_AUTH_AUDIENCE)) {
+    || audience !== (rollback ? 'ragent-owner-auth-native-rollback' : NATIVE_OWNER_AUTH_AUDIENCE)) {
     throw createError('owner_auth_native_request_invalid', 'Invalid native owner authentication request.', 400);
   }
   if (Math.abs(clock() - issuedMs) > NATIVE_OWNER_AUTH_PROOF_SKEW_MS) {
@@ -740,7 +740,7 @@ function validateAccountJoinInstance(input, { intentId, deviceId, devicePublicKe
     || !isProtocolField(intentId, { min: 8, max: 128 }) || !isProtocolField(deviceId, { min: 8, max: 160 })
     || !/^[a-f0-9]{64}$/.test(devicePublicKeyFingerprint) || !trimString(nonce) || !issuedMs
     || !isProtocolField(nonce, { min: 16, max: 256 }) || !isProtocolField(issuedAt, { min: 20, max: 64 })
-    || audience !== 'agentoc-account-join' || (requestedPublicEndpoint && !publicEndpoint)) {
+    || audience !== 'ragent-account-join' || (requestedPublicEndpoint && !publicEndpoint)) {
     throw createError('owner_auth_native_request_invalid', 'Invalid account join intent proof.', 400);
   }
   if (Math.abs(clock() - issuedMs) > NATIVE_OWNER_AUTH_PROOF_SKEW_MS) {
@@ -796,7 +796,7 @@ function validateInstance(input, { transactionId, purpose, returnUrl, clock, aud
     purpose,
     returnUrl,
     issuedAt,
-    audience: audience || trimString(input?.audience) || 'agentoc-owner-auth',
+    audience: audience || trimString(input?.audience) || 'ragent-owner-auth',
   });
   if (!verifyInstanceProofSignature({ publicKey, message, signature: input?.signature })) {
     throw createError('owner_auth_proof_invalid', 'Invalid instance proof.', 401);
@@ -817,7 +817,7 @@ function validateDeviceOpInstance(input, { transactionId, purpose, clock }) {
   const endpointMatchesCanonical = requestedPublicEndpoint === publicEndpoint;
   if (!instanceId || !publicKey || !keyFingerprint || !trimString(transactionId)
     || !['devices', 'history', 'unbind', 'publish-endpoint', 'publish-identity', 'turn-reserve', 'turn-release', 'turn-handoff-commit'].includes(purpose)
-    || !issuedMs || audience !== 'agentoc-owner-auth-device') {
+    || !issuedMs || audience !== 'ragent-owner-auth-device') {
     throw createError('owner_auth_request_invalid', 'Invalid device management request.', 400);
   }
   if (purpose === 'publish-endpoint' && (!requestedPublicEndpoint || !endpointMatchesCanonical)) {
@@ -859,7 +859,7 @@ function validateProviderSyncPeer(input, { requestId, targetInstanceId, clock })
   const syncKeyFingerprint = trimString(input?.syncKeyFingerprint);
   if (!instanceId || !publicKey || !keyFingerprint || !requestId || proofRequestId !== requestId
     || !targetInstanceId || proofTargetInstanceId !== targetInstanceId || !issuedMs
-    || audience !== 'agentoc-provider-sync' || (syncKeyFingerprint && !/^[a-f0-9]{64}$/.test(syncKeyFingerprint))) {
+    || audience !== 'ragent-provider-sync' || (syncKeyFingerprint && !/^[a-f0-9]{64}$/.test(syncKeyFingerprint))) {
     throw createError('provider_sync_auth_invalid', 'Invalid provider sync peer proof.', 400);
   }
   if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
@@ -897,7 +897,7 @@ function validateAccountSyncCatalogPublisher(input, { accountId, clock }) {
   const proofRequestId = trimString(input?.sourceProof?.requestId);
   const proofTargetInstanceId = trimString(input?.sourceProof?.targetInstanceId);
   if (!instanceId || !publicKey || !keyFingerprint || !requestId || proofRequestId !== requestId
-    || proofTargetInstanceId !== targetInstanceId || !issuedMs || audience !== 'agentoc-account-sync-catalog') {
+    || proofTargetInstanceId !== targetInstanceId || !issuedMs || audience !== 'ragent-account-sync-catalog') {
     throw createError('account_sync_auth_invalid', 'Invalid account sync catalog proof.', 400);
   }
   if (Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
@@ -985,7 +985,7 @@ export function createOwnerAuthBroker({
   signTurnBrokerCapability,
   clock = () => Date.now(),
   allowInsecureReturnUrl = false,
-  issuer = 'agentoc-accounts',
+  issuer = 'ragent-accounts',
   audit = () => {},
   rendezvousResultWaiters = createRendezvousResultWaiters(),
 } = {}) {
@@ -1012,7 +1012,7 @@ export function createOwnerAuthBroker({
 
   function authorityCompletion(kind, operationId, { instance, accountId, sourceNonce, deviceId = '', deviceFingerprint = '' }) {
     return { kind, operationId, instanceId: instance.instanceId, accountId, keyFingerprint: instance.keyFingerprint,
-      sourceDigest: hashSecret(JSON.stringify(['agentoc-binding-completion-v1', kind, operationId,
+      sourceDigest: hashSecret(JSON.stringify(['ragent-binding-completion-v1', kind, operationId,
         instance.instanceId, instance.keyFingerprint, accountId, sourceNonce, deviceId, deviceFingerprint])) };
   }
 
@@ -1092,7 +1092,7 @@ export function createOwnerAuthBroker({
     if (Math.abs(clock() - Date.parse(issuedAt)) > OWNER_AUTH_PROOF_SKEW_MS)
       throw createError('owner_auth_proof_expired', 'Workspace authority proof expired.', 401);
     const nowSeconds = Math.floor(clock() / 1000);
-    const claims = { iss: trimString(issuer) || 'agentoc-accounts', aud: instanceId, sub: accountId,
+    const claims = { iss: trimString(issuer) || 'ragent-accounts', aud: instanceId, sub: accountId,
       purpose: 'workspace_authority', tx: requestId, nonce, ownerAccountId, workspaceGrantId: grantId,
       instanceKeyFingerprint: keyFingerprint, bindingAuthorityRevision: revision,
       workspaceAuthorityState: active ? 'active' : 'inactive', authorityProtocol: 1, iat: nowSeconds, exp: nowSeconds + 30 };
@@ -1110,7 +1110,7 @@ export function createOwnerAuthBroker({
     if (![instanceId, accountId, requestId].every(value => isProtocolField(value, { min: 1, max: 160 }))
       || !isProtocolField(nonce, { min: 24, max: 128 }) || !/^[A-Za-z0-9_-]+$/.test(nonce)
       || !isProtocolField(issuedAt, { min: 20, max: 64 }) || !Number.isFinite(Date.parse(issuedAt))
-      || audience !== 'agentoc-binding-authority' || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !publicKey || publicKey.length > 4096) {
+      || audience !== 'ragent-binding-authority' || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !publicKey || publicKey.length > 4096) {
       throw createError('owner_auth_authority_request_invalid', 'Invalid binding authority request.', 400);
     }
     const nowSeconds = Math.floor(clock() / 1000);
@@ -1140,7 +1140,7 @@ export function createOwnerAuthBroker({
       : binding.accountId !== accountId || binding.instanceKeyFingerprint !== keyFingerprint ? 'mismatch'
         : binding.revokedAt ? 'revoked' : 'active';
     const expiresAt = new Date((nowSeconds + 30) * 1000).toISOString();
-    const claims = { iss: trimString(issuer) || 'agentoc-accounts', aud: instanceId, sub: accountId,
+    const claims = { iss: trimString(issuer) || 'ragent-accounts', aud: instanceId, sub: accountId,
       purpose: 'binding_authority', tx: requestId, nonce, instanceKeyFingerprint: keyFingerprint,
       bindingAuthorityRevision: revision, bindingAuthorityState: state, authorityProtocol: 1,
       jti: makeId('authority'), iat: nowSeconds, exp: nowSeconds + 30 };
@@ -1442,7 +1442,7 @@ export function createOwnerAuthBroker({
       record.redeemedAt = nowIso(clock);
       const nowSeconds = Math.floor(clock() / 1000);
       const claims = {
-        iss: trimString(issuer) || 'agentoc-accounts',
+        iss: trimString(issuer) || 'ragent-accounts',
         aud: record.instance.instanceId,
         sub: record.accountId,
         provider: (draft.accounts || []).find(account => account.accountId === record.accountId)?.provider || 'google',
@@ -1496,7 +1496,7 @@ export function createOwnerAuthBroker({
       const nowSeconds = Math.floor(clock() / 1000);
       const expiresAt = new Date((nowSeconds + Math.floor(OWNER_AUTH_POLL_ASSERTION_TTL_MS / 1000)) * 1000).toISOString();
       const claims = {
-        iss: trimString(issuer) || 'agentoc-accounts',
+        iss: trimString(issuer) || 'ragent-accounts',
         aud: record.instance.instanceId,
         sub: record.accountId,
         provider: (draft.accounts || []).find(account => account.accountId === record.accountId)?.provider || 'google',
@@ -1628,7 +1628,7 @@ export function createOwnerAuthBroker({
         });
       }
       const claims = {
-        iss: trimString(issuer) || 'agentoc-accounts',
+        iss: trimString(issuer) || 'ragent-accounts',
         aud: instance.instanceId,
         sub: accountId,
         ...entitlementClaims(draft, accountId, clock(), 'phone', resolveEntitlement),
@@ -2308,7 +2308,7 @@ export function createOwnerAuthBroker({
     const issuedAt = trimString(input?.issuedAt);
     const audience = trimString(input?.audience);
     const issuedMs = Date.parse(issuedAt);
-    if (!instanceId || !requestId || !issuedMs || audience !== 'agentoc-account-rendezvous-poll'
+    if (!instanceId || !requestId || !issuedMs || audience !== 'ragent-account-rendezvous-poll'
       || instanceId !== intent.instanceId || requestId !== intent.rendezvousRequestId
       || !trimString(instance.publicKey)
       || instance.keyFingerprint !== intent.instance.keyFingerprint
@@ -2346,7 +2346,7 @@ export function createOwnerAuthBroker({
     if (!isProtocolField(instanceId, { min: 8, max: 160 }) || !trimString(instance.publicKey) || !issuedMs
       || createInstancePublicKeyFingerprint(instance.publicKey) !== instance.keyFingerprint
       || trimString(input?.requestId) !== 'inbox'
-      || trimString(input?.audience) !== 'agentoc-account-rendezvous-poll'
+      || trimString(input?.audience) !== 'ragent-account-rendezvous-poll'
       || Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
       throw createError('owner_auth_rendezvous_proof_invalid', 'Invalid account rendezvous inbox proof.', 401);
     }
@@ -2596,7 +2596,7 @@ export function createOwnerAuthBroker({
         algorithm: authenticated.normalizedKey.algorithm,
         message: buildAccountJoinIntentMessage({
           instanceId: intent.instanceId, intentId, deviceId, devicePublicKeyFingerprint,
-          nonce, issuedAt, audience: 'agentoc-account-join',
+          nonce, issuedAt, audience: 'ragent-account-join',
         }),
         signature: input.deviceSignature,
       })) {
@@ -2711,7 +2711,7 @@ export function createOwnerAuthBroker({
           devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint,
           nonce,
           issuedAt: deviceIssuedAt,
-          audience: 'agentoc-account-join',
+          audience: 'ragent-account-join',
         }),
         signature: input?.deviceSignature,
       })) {
@@ -2865,7 +2865,7 @@ export function createOwnerAuthBroker({
       }
       const nowSeconds = Math.floor(clock() / 1000);
       const claims = {
-        iss: trimString(issuer) || 'agentoc-accounts',
+        iss: trimString(issuer) || 'ragent-accounts',
         aud: intent.instanceId,
         sub: intent.accountId,
         ...entitlementClaims(draft, intent.accountId, clock(), 'phone', resolveEntitlement),
@@ -2909,7 +2909,7 @@ export function createOwnerAuthBroker({
     const deviceId = trimString(device.deviceId);
     const deviceAlias = normalizeDeviceAlias(device.alias);
     const durableAuthority = typeof store.mutateWithAuthority === 'function' || typeof store.readInstanceAuthority === 'function';
-    const rollbackProof = durableAuthority || input?.audience === 'agentoc-owner-auth-native-rollback';
+    const rollbackProof = durableAuthority || input?.audience === 'ragent-owner-auth-native-rollback';
     const instance = validateNativeInstance(input, {
       requestId,
       purpose: 'native',
@@ -3230,7 +3230,7 @@ export function createOwnerAuthBroker({
       || !/^[a-f0-9]{64}$/.test(keyFingerprint) || !publicKey || publicKey.length > 4096
       || !['issue', 'revoke'].includes(operation) || !/^[A-Za-z0-9_-]{16,128}$/.test(requestId)
       || (operation === 'issue' ? Boolean(grantId) : !/^iag_[A-Za-z0-9_-]{16,128}$/.test(grantId))
-      || audience !== 'agentoc-instance-access-grant' || !isProtocolField(issuedAt, { min: 20, max: 64 })
+      || audience !== 'ragent-instance-access-grant' || !isProtocolField(issuedAt, { min: 20, max: 64 })
       || !Number.isFinite(issuedMs) || Math.abs(clock() - issuedMs) > OWNER_AUTH_PROOF_SKEW_MS) {
       throw createError('instance_access_proof_invalid', 'Invalid instance access authorization proof.', 400);
     }

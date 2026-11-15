@@ -16,7 +16,7 @@ import {
   updateNativeProvider,
 } from '../chat/native-provider-management.mjs';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-native-provider-management-'));
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-native-provider-management-'));
 const context = {
   configDir,
   registry: createNativeProviderRegistry({ configDir }),

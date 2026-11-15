@@ -16,12 +16,12 @@ import { gzipSync } from 'zlib';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-spool-reclaim-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-spool-reclaim-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   appendRunSpoolRecord,
@@ -210,7 +210,7 @@ try {
     const gzId = nextRunId();
     fabricateRun(gzId, { spoolLines: [JSON.stringify({ stream: 'stdout', line: 'compressed raw' })], gzip: true });
 
-    const { totals, runs } = await scanAllRunSpools({ root: join(home, '.config', 'agentoc') });
+    const { totals, runs } = await scanAllRunSpools({ root: join(home, '.config', 'ragent') });
     assert.equal(totals.runsScanned, 8, 'all sections contribute their runs');
     const plainRun = runs.find((r) => r.runId === plainId);
     const gzRun = runs.find((r) => r.runId === gzId);

@@ -7,8 +7,8 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = join(new URL('.', import.meta.url).pathname, '..');
-const home = mkdtempSync(join(tmpdir(), 'agentoc-managed-process-lock-'));
-const configDir = join(home, '.config', 'agentoc');
+const home = mkdtempSync(join(tmpdir(), 'ragent-managed-process-lock-'));
+const configDir = join(home, '.config', 'ragent');
 mkdirSync(configDir, { recursive: true });
 const processId = 'mp_000000000000000000000001';
 const processDir = join(configDir, 'managed-processes', processId);
@@ -39,8 +39,8 @@ const moduleUrl = pathToFileURL(join(repoRoot, 'chat/managed-processes.mjs')).hr
 const childEnv = {
   ...process.env,
   HOME: home,
-  AGENTOC_CONFIG_DIR: configDir,
-  AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+  RAGENT_CONFIG_DIR: configDir,
+  RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
 };
 
 function runChild(source) {

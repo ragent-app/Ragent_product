@@ -13,10 +13,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { DatabaseSync } from 'node:sqlite';
 
-// 隔离临时 HOME + AGENTOC_CONFIG_DIR —— 必须在 import 任何被测模块之前设置。
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-collab-task-contract-'));
+// 隔离临时 HOME + RAGENT_CONFIG_DIR —— 必须在 import 任何被测模块之前设置。
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-collab-task-contract-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
 
 const store = await import('../chat/collaboration-store.mjs');
 const { compileCollaborationPlan, CONSULTATION_READONLY_VIOLATION } = await import('../chat/collaboration-plan.mjs');

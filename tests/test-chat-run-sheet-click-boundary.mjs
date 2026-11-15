@@ -36,7 +36,7 @@ try {
   await page.addScriptTag({
     content: `
       window.tr = (key) => key;
-      window.agentocFetch = async (url) => ({
+      window.ragentFetch = async (url) => ({
         ok: true,
         text: async () => "# Sample Markdown Document\\n\\nContent here.",
         json: async () => ({
@@ -48,8 +48,8 @@ try {
           ]
         }),
       });
-      window.fetch = window.agentocFetch;
-      window.AgentoCSessionStateModel = {
+      window.fetch = window.ragentFetch;
+      window.RagentSessionStateModel = {
         getSessionVisualStatus: () => ({ kind: "completed", label: "Completed" })
       };
       window.currentSessionId = "test-session";

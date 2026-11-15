@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Integration tests for the real `agentoc-privileged` channel
+// Integration tests for the real `ragent-privileged` channel
 // (design docs/privileged-shim-channel-2026-09-03.md): listener + launcher +
 // client process over a live per-Run unix socket, with the run store and risk
 // classifier injected. Server-side writeback updaters are covered purely.
@@ -56,11 +56,11 @@ function createStore() {
 }
 
 function spawnClient(args, socketPath, { cwd = PROJECT_ROOT } = {}) {
-  const env = { ...process.env, AGENTOC_RUN_ID: RUN_ID };
+  const env = { ...process.env, RAGENT_RUN_ID: RUN_ID };
   if (socketPath === null) {
-    delete env.AGENTOC_PRIVILEGED_SHIM_SOCKET;
+    delete env.RAGENT_PRIVILEGED_SHIM_SOCKET;
   } else if (socketPath) {
-    env.AGENTOC_PRIVILEGED_SHIM_SOCKET = socketPath;
+    env.RAGENT_PRIVILEGED_SHIM_SOCKET = socketPath;
   }
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLIENT_ENTRY, ...args], { env, cwd });
@@ -94,7 +94,7 @@ const sentinelArgs = [
 
 // Long home and instance paths must not exceed the OS unix-socket limit.
 if (process.platform !== 'win32') {
-  const root = mkdtempSync(join(tmpdir(), 'agentoc-shim-long-'));
+  const root = mkdtempSync(join(tmpdir(), 'ragent-shim-long-'));
   const resultsDir = join(root, 'x'.repeat(110));
   mkdirSync(resultsDir);
   const store = createStore();
@@ -122,7 +122,7 @@ if (process.platform !== 'win32') {
         try {
           const result = await new Promise((resolve) => {
             const child = spawn(sandbox.command, sandbox.args, { cwd: PROJECT_ROOT,
-              env: { ...process.env, AGENTOC_RUN_ID: RUN_ID, AGENTOC_PRIVILEGED_SHIM_SOCKET: channel.socketPath },
+              env: { ...process.env, RAGENT_RUN_ID: RUN_ID, RAGENT_PRIVILEGED_SHIM_SOCKET: channel.socketPath },
               stdio: 'ignore' });
             const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
             child.once('error', () => { clearTimeout(timer); resolve(null); });
@@ -141,7 +141,7 @@ if (process.platform !== 'win32') {
 
 // --- happy path: danger op → accepted immediately → owner result is durable ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-e2e-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-e2e-'));
   const store = createStore();
   const channel = await startPrivilegedShimChannel({
     runId: RUN_ID,
@@ -155,9 +155,9 @@ if (process.platform !== 'win32') {
   });
   try {
     check('launcher installed', existsSync(channel.binPath));
-    check('legacy launcher retained', existsSync(join(channel.binDir, 'agentoc-privileged')));
+    check('legacy launcher retained', existsSync(join(channel.binDir, 'ragent-privileged')));
     if (process.platform !== 'win32') {
-      for (const executable of [channel.binPath, join(channel.binDir, 'agentoc-privileged')]) {
+      for (const executable of [channel.binPath, join(channel.binDir, 'ragent-privileged')]) {
         const help = spawnSync(executable, ['--help'], { encoding: 'utf8' });
         check('launcher runs help', help.status === 0 && help.stdout.includes('ragent-privileged'));
       }
@@ -217,7 +217,7 @@ if (process.platform !== 'win32') {
 
 // --- safe command refused without touching the approval pipeline ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-safe-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-safe-'));
   const store = createStore();
   const channel = await startPrivilegedShimChannel({
     runId: RUN_ID,
@@ -242,7 +242,7 @@ if (process.platform !== 'win32') {
 
 // --- busy: an existing gate batch is never clobbered ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-busy-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-busy-'));
   const store = createStore();
   store.state.record.privilegedBatchPending = { batchId: 'pbatch_existing', other: [] };
   const channel = await startPrivilegedShimChannel({
@@ -267,7 +267,7 @@ if (process.platform !== 'win32') {
 
 // --- owner denial ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-deny-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-deny-'));
   const store = createStore();
   const channel = await startPrivilegedShimChannel({
     runId: RUN_ID,
@@ -303,7 +303,7 @@ if (process.platform !== 'win32') {
 
 // --- routing disabled → explicit decline, not a timeout ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-decline-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-decline-'));
   const store = createStore();
   const channel = await startPrivilegedShimChannel({
     runId: RUN_ID,
@@ -339,7 +339,7 @@ if (process.platform !== 'win32') {
 
 // --- timeout is handled by the background watcher after the client exits ---
 {
-  const resultsDir = mkdtempSync(join(tmpdir(), 'agentoc-shim-timeout-'));
+  const resultsDir = mkdtempSync(join(tmpdir(), 'ragent-shim-timeout-'));
   const store = createStore();
   const channel = await startPrivilegedShimChannel({
     runId: RUN_ID,
@@ -369,10 +369,10 @@ if (process.platform !== 'win32') {
 {
   const missing = await spawnClient(sentinelArgs, null);
   check('missing socket env exits CHANNEL', missing.code === PRIVILEGED_SHIM_EXIT.CHANNEL_UNAVAILABLE);
-  check('missing env message names the env var', missing.stderr.includes('AGENTOC_PRIVILEGED_SHIM_SOCKET'));
+  check('missing env message names the env var', missing.stderr.includes('RAGENT_PRIVILEGED_SHIM_SOCKET'));
   check('missing env message explains the sidecar', missing.stderr.includes('sidecar'));
 
-  const stale = await spawnClient(sentinelArgs, join(tmpdir(), 'agentoc-shim-no-such.sock'));
+  const stale = await spawnClient(sentinelArgs, join(tmpdir(), 'ragent-shim-no-such.sock'));
   check('dead socket exits CHANNEL', stale.code === PRIVILEGED_SHIM_EXIT.CHANNEL_UNAVAILABLE);
   check('dead socket message mentions ENOENT condition', stale.stderr.includes('socket'));
 }

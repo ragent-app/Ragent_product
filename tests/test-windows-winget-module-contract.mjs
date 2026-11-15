@@ -5,15 +5,15 @@ import { promisify } from 'node:util';
 // Read the packaged Microsoft module's metadata only: no source queries,
 // package downloads, or installation. The caller supplies an existing staged
 // module and PowerShell 7 executable so no runtime is downloaded by this test.
-const modulePath = process.env.AGENTOC_QA_WINGET_MODULE;
-const powershell = process.env.AGENTOC_QA_PWSH;
+const modulePath = process.env.RAGENT_QA_WINGET_MODULE;
+const powershell = process.env.RAGENT_QA_PWSH;
 if (!modulePath || !powershell) {
   console.log('windows-winget-module-contract: skipped (staged module and PowerShell 7 not supplied)');
   process.exit(0);
 }
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
-Import-Module -Name $env:AGENTOC_QA_WINGET_MODULE -ErrorAction Stop
+Import-Module -Name $env:RAGENT_QA_WINGET_MODULE -ErrorAction Stop
 $install = Get-Command Install-WinGetPackage -ErrorAction Stop
 $find = Get-Command Find-WinGetPackage -ErrorAction Stop
 $source = Get-Command Get-WinGetSource -ErrorAction Stop
@@ -27,7 +27,7 @@ $versionInfo = $deployment.GetType('Microsoft.Management.Deployment.PackageVersi
 $installerInfo = $deployment.GetType('Microsoft.Management.Deployment.PackageInstallerInfo', $true)
 $installOptions = $deployment.GetType('Microsoft.Management.Deployment.InstallOptions', $true)
 $liveSource = $null
-if ($env:AGENTOC_QA_WINGET_READ_SOURCE -eq '1') {
+if ($env:RAGENT_QA_WINGET_READ_SOURCE -eq '1') {
   $candidates = @(Get-WinGetSource -Name winget -ErrorAction Stop)
   if ($candidates.Count -ne 1) { throw 'Expected one winget source' }
   $liveSource = @{ name = $candidates[0].Name; type = $candidates[0].Type; argument = $candidates[0].Argument; trust = $candidates[0].TrustLevel }
@@ -65,7 +65,7 @@ assert.equal(contract.availableVersionsType, 'System.String[]');
 assert.ok(contract.versionInfoMethods.includes('GetApplicableInstaller'));
 for (const name of ['Scope', 'ElevationRequirement', 'InstallerType', 'Architecture']) assert.ok(contract.installerProperties.includes(name), `missing installer metadata ${name}`);
 assert.ok(contract.installOptionsConstructors > 0);
-if (process.env.AGENTOC_QA_WINGET_READ_SOURCE === '1') {
+if (process.env.RAGENT_QA_WINGET_READ_SOURCE === '1') {
   assert.equal(contract.liveSource.name, 'winget');
   assert.equal(contract.liveSource.type, 'Microsoft.PreIndexed.Package');
   assert.equal(contract.liveSource.trust.toLowerCase(), 'trusted');

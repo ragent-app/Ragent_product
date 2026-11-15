@@ -46,12 +46,12 @@ assert.match(
 );
 assert.match(
   moduleSource,
-  /window\.AgentoCBackHandler\?\.push\?\.\(\{[\s\S]*?id: "composer-fullscreen",[\s\S]*?onBack:/,
+  /window\.RagentBackHandler\?\.push\?\.\(\{[\s\S]*?id: "composer-fullscreen",[\s\S]*?onBack:/,
   'opening the composer should register with the shared back handler',
 );
 assert.match(
   moduleSource,
-  /window\.AgentoCBackHandler\?\.pop\?\.\(backEntryId\);/,
+  /window\.RagentBackHandler\?\.pop\?\.\(backEntryId\);/,
   'a user-initiated close should unregister from the shared back handler',
 );
 assert.match(
@@ -71,7 +71,7 @@ assert.match(
 );
 assert.match(
   composeSource,
-  /window\.AgentoCComposerFullscreen\?\.sync\?\.\(\);/,
+  /window\.RagentComposerFullscreen\?\.sync\?\.\(\);/,
   'auto-resize should re-evaluate the expand affordance',
 );
 assert.match(
@@ -164,12 +164,12 @@ assert.match(
 );
 assert.match(
   sidebarUiSource,
-  /window\.AgentoCComposerAddMenu = Object\.freeze\(\{ close: closeComposerAddMenu \}\);/,
+  /window\.RagentComposerAddMenu = Object\.freeze\(\{ close: closeComposerAddMenu \}\);/,
   'the add menu should expose a closer for the fullscreen collapse path',
 );
 assert.match(
   toolingSource,
-  /window\.AgentoCComposerRuntimeMenu = Object\.freeze\(\{[\s\S]*?close: \(\) => setComposerRuntimeMenuOpen\(false\),[\s\S]*?\}\);/,
+  /window\.RagentComposerRuntimeMenu = Object\.freeze\(\{[\s\S]*?close: \(\) => setComposerRuntimeMenuOpen\(false\),[\s\S]*?\}\);/,
   'the runtime menu should expose a closer for the fullscreen collapse path',
 );
 
@@ -216,7 +216,7 @@ try {
       </div>
     </div>
     <script>
-      window.AgentoCMotion = {
+      window.RagentMotion = {
         setPresence: (el, open, opts) => {
           el.hidden = !open;
           el.classList.toggle('is-open', open);
@@ -230,15 +230,15 @@ try {
         const maxH = parseFloat(getComputedStyle(msgInput).maxHeight) || Infinity;
         const newH = Math.min(msgInput.scrollHeight, maxH);
         msgInput.style.height = newH + 'px';
-        window.AgentoCComposerFullscreen?.sync?.();
+        window.RagentComposerFullscreen?.sync?.();
       });
       document.getElementById('sendBtn').addEventListener('click', () => {
         window.__sentText = document.getElementById('msgInput').value;
         document.getElementById('msgInput').value = '';
       });
       window.__menuCloses = { add: 0, runtime: 0 };
-      window.AgentoCComposerAddMenu = { close: () => { window.__menuCloses.add++; } };
-      window.AgentoCComposerRuntimeMenu = { close: () => { window.__menuCloses.runtime++; } };
+      window.RagentComposerAddMenu = { close: () => { window.__menuCloses.add++; } };
+      window.RagentComposerRuntimeMenu = { close: () => { window.__menuCloses.runtime++; } };
     </script>
   </body></html>`);
   await page.addScriptTag({ content: backHandlerSource });
@@ -263,7 +263,7 @@ try {
   // 2. Open: value copied, layer visible, input focused.
   await page.evaluate(() => {
     document.getElementById('msgInput').value = 'draft from main composer';
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
   });
   const opened = await page.evaluate(() => ({
     visible: !document.getElementById('composerFullscreen').hidden,
@@ -303,7 +303,7 @@ try {
   await page.evaluate(() => {
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('msgInput').value = 'second draft';
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
     document.getElementById('composerFullscreenInput').value = 'sent full-screen';
     document.getElementById('composerFullscreenSendBtn').click();
   });
@@ -324,7 +324,7 @@ try {
   // 6. Disabled sendBtn: collapse keeps the draft instead of sending.
   await page.evaluate(() => {
     document.getElementById('msgInput').value = 'keep me';
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
     document.getElementById('composerFullscreenInput').value = 'keep me';
     window.__sentText = undefined;
   });
@@ -348,7 +348,7 @@ try {
 
   // 7. Escape collapses.
   await page.evaluate(() => {
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
   });
   const escCollapsed = await page.evaluate(async () => {
     document.getElementById('composerFullscreenInput').dispatchEvent(
@@ -363,7 +363,7 @@ try {
   //    the layer, handing the draft back (WeChat-style first-back).
   await page.evaluate(() => {
     document.getElementById('msgInput').value = 'back draft';
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
     document.getElementById('composerFullscreenInput').value = 'typed before back';
   });
   await page.goBack();
@@ -383,7 +383,7 @@ try {
   //    must not re-trigger anything (layer stays closed, no errors).
   await page.evaluate(() => {
     document.getElementById('msgInput').value = 'after unwind';
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
   });
   await page.evaluate(() => {
     document.getElementById('composerFullscreenCloseBtn').click();
@@ -408,7 +408,7 @@ try {
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('msgInput').value = 'controls test';
     window.__menuCloses = { add: 0, runtime: 0 };
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
   });
   const adopted = await page.evaluate(() => {
     const left = document.getElementById('composerFullscreenActionsLeft');

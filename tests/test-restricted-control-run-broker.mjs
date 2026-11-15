@@ -9,7 +9,7 @@ import {createRestrictedControlRunBroker,createControlRunClaims} from '../chat/r
 
 const sid='S-1-5-80-1-2-3-4-5';
 async function fixture(t){
-  const parent=await realpath(tmpdir()),root=await mkdtemp(join(parent,'agentoc-control-broker-'));t.after(async()=>{
+  const parent=await realpath(tmpdir()),root=await mkdtemp(join(parent,'ragent-control-broker-'));t.after(async()=>{
     const actual=await realpath(root);assert.equal(dirname(actual).toLowerCase(),parent.toLowerCase());assert.equal(actual.toLowerCase(),resolve(root).toLowerCase());
     await rm(actual,{recursive:true,force:true});});
   const claimsDir=join(root,'claims');await mkdir(claimsDir);

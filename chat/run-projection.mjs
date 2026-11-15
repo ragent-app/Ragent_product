@@ -273,7 +273,7 @@ export function createRunProjectionService({
     for (const approvalId of normalized) {
       try {
         adapter?.parseLine?.(JSON.stringify({
-          type: 'agentoc.approval_response',
+          type: 'ragent.approval_response',
           autoApproved: true,
           approvalId,
         }));
@@ -417,7 +417,7 @@ export function createRunProjectionService({
       if (!payload) {
         try { payload = JSON.parse(line); } catch { parseFailures += 1; }
       }
-      if (payload?.type === 'agentoc.approval_response'
+      if (payload?.type === 'ragent.approval_response'
         && (payload.autoApproved === true || payload.autoDenied === true)
         && typeof payload.approvalId === 'string'
         && payload.approvalId.trim()) {
@@ -436,7 +436,7 @@ export function createRunProjectionService({
           const provider = approvalRequestInfo.provider;
           incrementApprovalMetric('received', { runId, provider, risk: approvalRisk });
           incrementApprovalMetric('requestsSeen', { runId, provider, risk: approvalRisk });
-        } else if (payload.type === 'agentoc.approval_response') {
+        } else if (payload.type === 'ragent.approval_response') {
           const provider = providerForApprovalPayload(payload);
           const risk = approvalRiskForPayload(payload, run);
           if (payload.autoApproved === true) {
@@ -466,7 +466,7 @@ export function createRunProjectionService({
           }
           const isSpawnFrame = mapped.events.some((event) => event.kind === 'spawned');
           if (!isSpawnFrame && isProviderNativeChildFrame(raw, childSessionIds)) {
-            adapterLine = JSON.stringify({ ...raw, agentoc_intermediate: true });
+            adapterLine = JSON.stringify({ ...raw, ragent_intermediate: true });
           }
         }
       }
@@ -788,7 +788,7 @@ export function createRunProjectionService({
           if (record?.stream !== 'stdout') return;
           const payload = record?.json;
           if (!payload || typeof payload !== 'object') return;
-          if (payload.type !== 'agentoc.approval_response' || payload.autoApproved !== true) return;
+          if (payload.type !== 'ragent.approval_response' || payload.autoApproved !== true) return;
           if (typeof payload.approvalId === 'string' && payload.approvalId.trim()) {
             seedApprovalSuppression(invocation.adapter, [payload.approvalId]);
           }

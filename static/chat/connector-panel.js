@@ -112,8 +112,8 @@
   function resolveSurfaceUrl(entryUrl) {
     const normalized = typeof entryUrl === "string" ? entryUrl.trim() : "";
     if (!normalized) return "";
-    if (typeof window.agentocResolveProductUrl === "function") {
-      return window.agentocResolveProductUrl(normalized);
+    if (typeof window.ragentResolveProductUrl === "function") {
+      return window.ragentResolveProductUrl(normalized);
     }
     return new URL(normalized, window.location.origin).toString();
   }
@@ -185,7 +185,7 @@
   async function fetchCodexMcpServers() {
     codexMcpLoadFailed = false;
     codexMcpErrorCode = "";
-    const isCodex = typeof selectedTool === "undefined" || ["codex", "codex-cli", "agentoc-codex-app-server"].includes(selectedTool);
+    const isCodex = typeof selectedTool === "undefined" || ["codex", "codex-cli", "ragent-codex-app-server"].includes(selectedTool);
     codexMcpProvider = isCodex && typeof getComposerRuntimeSelectedProvider === "function"
       ? trimString(getComposerRuntimeSelectedProvider("codex")) : "";
     if (!codexMcpProvider) { codexMcpServers = []; return; }
@@ -194,7 +194,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
-        : await (window.agentocFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("MCP list failed"); return response.json(); });
+        : await (window.ragentFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("MCP list failed"); return response.json(); });
       if (codexMcpProvider === requestedProvider) codexMcpServers = Array.isArray(data?.servers) ? data.servers.filter((s) => s && typeof s === "object") : [];
     } catch (error) {
       if (codexMcpProvider === requestedProvider) {
@@ -216,7 +216,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
-        : await (window.agentocFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("Capability list failed"); return response.json(); });
+        : await (window.ragentFetch || fetch)(endpoint).then((response) => { if (!response.ok) throw new Error("Capability list failed"); return response.json(); });
       if (session !== currentSessionId || provider !== codexMcpProvider || trimString(data?.providerProfileId) !== provider
         || (typeof getComposerRuntimeSelectedProvider === "function" && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
       codexCapabilities = (Array.isArray(data?.items) ? data.items : []).filter((item) => item?.source === "codex" && ["skill", "app"].includes(item?.kind));
@@ -233,7 +233,7 @@
     try {
       const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/plugin-preference`;
       const data = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, { cacheMaxAgeMs: 0 })
-        : await (window.agentocFetch || fetch)(endpoint).then((r) => { if (!r.ok) throw new Error("Plugin preference unavailable"); return r.json(); });
+        : await (window.ragentFetch || fetch)(endpoint).then((r) => { if (!r.ok) throw new Error("Plugin preference unavailable"); return r.json(); });
       if (provider === codexMcpProvider && (typeof getComposerRuntimeSelectedProvider !== "function"
         || trimString(getComposerRuntimeSelectedProvider("codex")) === provider) && typeof data?.desiredEnabled === "boolean") codexPluginPreference = data.desiredEnabled;
     } catch { /* Older hosts and unsupported accounts do not offer this control. */ }
@@ -247,7 +247,7 @@
       const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/capability-sync`;
       const options = refreshNow ? { method: "POST" } : { cacheMaxAgeMs: 0 };
       const data = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, options)
-        : await (window.agentocFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Sync unavailable"); return r.json(); });
+        : await (window.ragentFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Sync unavailable"); return r.json(); });
       if (generation === codexSyncGeneration && provider === codexMcpProvider && (typeof getComposerRuntimeSelectedProvider !== "function"
         || trimString(getComposerRuntimeSelectedProvider("codex")) === provider)) {
         codexSyncState = data?.sync || null;
@@ -265,7 +265,7 @@
     const options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }) };
     try {
       if (typeof fetchJsonOrRedirect === "function") await fetchJsonOrRedirect(endpoint, options);
-      else { const r = await (window.agentocFetch || fetch)(endpoint, options); if (!r.ok) throw new Error("Sync policy failed"); }
+      else { const r = await (window.ragentFetch || fetch)(endpoint, options); if (!r.ok) throw new Error("Sync policy failed"); }
       if (generation !== codexSyncGeneration || provider !== codexMcpProvider || (typeof getComposerRuntimeSelectedProvider === "function"
         && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
       codexSyncMode = mode;
@@ -282,7 +282,7 @@
     const options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) };
     try {
       const result = typeof fetchJsonOrRedirect === "function" ? await fetchJsonOrRedirect(endpoint, options)
-        : await (window.agentocFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Plugin setting failed"); return r.json(); });
+        : await (window.ragentFetch || fetch)(endpoint, options).then((r) => { if (!r.ok) throw new Error("Plugin setting failed"); return r.json(); });
       if (provider !== codexMcpProvider || (typeof getComposerRuntimeSelectedProvider === "function"
         && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
       codexPluginPreference = enabled;
@@ -303,7 +303,7 @@
     try {
       if (typeof fetchJsonOrRedirect === "function") await fetchJsonOrRedirect(endpoint, options);
       else {
-        const response = await (window.agentocFetch || fetch)(endpoint, options);
+        const response = await (window.ragentFetch || fetch)(endpoint, options);
         if (!response.ok) throw new Error("Skill update failed");
       }
       if (session !== currentSessionId || provider !== codexMcpProvider) return;
@@ -418,7 +418,7 @@
       if (typeof fetchJsonOrRedirect === "function") {
         await fetchJsonOrRedirect(endpoint, { method: "DELETE" });
       } else {
-        await (window.agentocFetch || fetch)(endpoint, { method: "DELETE" });
+        await (window.ragentFetch || fetch)(endpoint, { method: "DELETE" });
       }
     } catch {
       // Keep the list as-is on failure; the row stays removable.
@@ -431,7 +431,7 @@
     const provider = codexMcpProvider;
     if (!provider || !serverName || (typeof getComposerRuntimeSelectedProvider === "function"
       && trimString(getComposerRuntimeSelectedProvider("codex")) !== provider)) return;
-    const runtime = window.AgentoCTargetRuntime;
+    const runtime = window.RagentTargetRuntime;
     const activeTarget = runtime?.getActiveTarget?.();
     const localTargetId = runtime?.getLocalTargetId?.();
     const localBrowser = ["localhost", "127.0.0.1", "::1", "[::1]"].includes(window.location.hostname)
@@ -441,7 +441,7 @@
     const endpoint = `/api/providers/${encodeURIComponent(provider)}/codex/mcp-servers/${encodeURIComponent(serverName)}/oauth`;
     const fetchData = async (url, options = {}) => {
       if (typeof fetchJsonOrRedirect === "function") return fetchJsonOrRedirect(url, options);
-      const response = await (window.agentocFetch || fetch)(url, options);
+      const response = await (window.ragentFetch || fetch)(url, options);
       if (!response.ok) throw new Error("Authorization failed");
       return response.json();
     };
@@ -528,7 +528,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           })
-        : await (window.agentocFetch || fetch)(endpoint, {
+        : await (window.ragentFetch || fetch)(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -763,7 +763,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/claude/mcp-servers", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/claude/mcp-servers").then((response) => response.json());
+        : await (window.ragentFetch || fetch)("/api/claude/mcp-servers").then((response) => response.json());
       claudeMcpServers = Array.isArray(data?.servers) ? data.servers.filter((s) => s && typeof s === "object") : [];
     } catch {
       claudeMcpLoadFailed = true;
@@ -777,7 +777,7 @@
     calendarGoogleStatus = null;
     const read = (url) => typeof fetchJsonOrRedirect === "function"
       ? fetchJsonOrRedirect(url, { cacheMaxAgeMs: 10_000 })
-      : (window.agentocFetch || fetch)(url).then((response) => response.json());
+      : (window.ragentFetch || fetch)(url).then((response) => response.json());
     const [feedResult, googleResult, ownerResult] = await Promise.all([
       read("/api/connectors/calendar/feed")
         .then((data) => ({ ok: true, data }))
@@ -800,7 +800,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/connectors/gmail/status", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/connectors/gmail/status").then((response) => response.json());
+        : await (window.ragentFetch || fetch)("/api/connectors/gmail/status").then((response) => response.json());
       gmailStatus = data && typeof data === "object" ? data : null;
     } catch {
       gmailLoadFailed = true;
@@ -813,7 +813,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/connectors/drive/status", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/connectors/drive/status").then((response) => response.json());
+        : await (window.ragentFetch || fetch)("/api/connectors/drive/status").then((response) => response.json());
       driveStatus = data && typeof data === "object" ? data : null;
     } catch {
       driveLoadFailed = true;
@@ -826,7 +826,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/connectors/github/status", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/connectors/github/status").then((response) => response.json());
+        : await (window.ragentFetch || fetch)("/api/connectors/github/status").then((response) => response.json());
       githubStatus = data && typeof data === "object" ? data : null;
     } catch {
       githubLoadFailed = true;
@@ -839,7 +839,7 @@
     try {
       const data = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/connectors/mail/status", { cacheMaxAgeMs: 10_000 })
-        : await (window.agentocFetch || fetch)("/api/connectors/mail/status").then((response) => response.json());
+        : await (window.ragentFetch || fetch)("/api/connectors/mail/status").then((response) => response.json());
       mailStatus = data && typeof data === "object" ? data : null;
     } catch {
       mailLoadFailed = true;
@@ -858,7 +858,7 @@
     try {
       const response = typeof fetchJsonOrRedirect === "function"
         ? await fetchJsonOrRedirect("/api/connectors/calendar/google/authorize", { method: "POST" })
-        : await (window.agentocFetch || fetch)("/api/connectors/calendar/google/authorize", { method: "POST" });
+        : await (window.ragentFetch || fetch)("/api/connectors/calendar/google/authorize", { method: "POST" });
       let data = null;
       if (typeof response?.json === "function") {
         data = await response.json().catch(() => null);
@@ -897,8 +897,8 @@
       button.setAttribute("aria-busy", "true");
     }
     try {
-      const bindPath = typeof window.agentocResolveProductPath === "function"
-        ? window.agentocResolveProductPath("/api/auth/google/bind/redirect")
+      const bindPath = typeof window.ragentResolveProductPath === "function"
+        ? window.ragentResolveProductPath("/api/auth/google/bind/redirect")
         : "/api/auth/google/bind/redirect";
       const bindUrl = new URL(bindPath, window.location.href);
       window.open(bindUrl.toString(), "_blank", "noopener");
@@ -1028,7 +1028,7 @@
       if (typeof fetchJsonOrRedirect === "function") {
         await fetchJsonOrRedirect(`/api/claude/mcp-servers/${encodeURIComponent(serverName)}`, { method: "DELETE" });
       } else {
-        await (window.agentocFetch || fetch)(`/api/claude/mcp-servers/${encodeURIComponent(serverName)}`, { method: "DELETE" });
+        await (window.ragentFetch || fetch)(`/api/claude/mcp-servers/${encodeURIComponent(serverName)}`, { method: "DELETE" });
       }
     } catch {
       // Keep the list as-is on failure; the row stays removable.
@@ -1055,7 +1055,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           })
-        : await (window.agentocFetch || fetch)("/api/claude/mcp-servers", {
+        : await (window.ragentFetch || fetch)("/api/claude/mcp-servers", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
@@ -1390,7 +1390,7 @@
       try {
         const response = typeof fetchJsonOrRedirect === "function"
           ? await fetchJsonOrRedirect("/api/connectors/github/authorize", { method: "POST" })
-          : await (window.agentocFetch || fetch)("/api/connectors/github/authorize", { method: "POST" });
+          : await (window.ragentFetch || fetch)("/api/connectors/github/authorize", { method: "POST" });
         let data = null;
         if (typeof response?.json === "function") {
           data = await response.json().catch(() => null);
@@ -1433,7 +1433,7 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ appId, clientId, clientSecret, privateKey }),
           })
-        : await (window.agentocFetch || fetch)("/api/connectors/github/configure", {
+        : await (window.ragentFetch || fetch)("/api/connectors/github/configure", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ appId, clientId, clientSecret, privateKey }),
@@ -1598,7 +1598,7 @@
                   if (typeof fetchJsonOrRedirect === "function") {
                     await fetchJsonOrRedirect("/api/connectors/github/disconnect", { method: "POST" });
                   } else {
-                    await (window.agentocFetch || fetch)("/api/connectors/github/disconnect", { method: "POST" });
+                    await (window.ragentFetch || fetch)("/api/connectors/github/disconnect", { method: "POST" });
                   }
                 } catch {
                   // Refresh below restores the current server truth.
@@ -1740,11 +1740,11 @@
       ? i18n("settings.connectors.connected", "Connected")
       : i18n("settings.connectors.needsAction", "Needs action");
     row.appendChild(pill);
-    if (!ready && window.AgentoCIcons?.render) {
+    if (!ready && window.RagentIcons?.render) {
       const arrow = document.createElement("span");
       arrow.className = "composer-add-panel-arrow";
       arrow.setAttribute("aria-hidden", "true");
-      arrow.innerHTML = window.AgentoCIcons.render("chevron-right");
+      arrow.innerHTML = window.RagentIcons.render("chevron-right");
       row.appendChild(arrow);
     }
     if (!ready) {
@@ -1870,12 +1870,12 @@
     requestAnimationFrame(() => backdrop?.classList.add("is-visible"));
     panel.hidden = false;
     panel.classList.remove("is-closing");
-    if (window.AgentoCMotion?.setPresence) {
-      window.AgentoCMotion.setPresence(panel, true, { duration: 220 });
+    if (window.RagentMotion?.setPresence) {
+      window.RagentMotion.setPresence(panel, true, { duration: 220 });
     } else {
       panel.classList.add("is-open");
     }
-    focusScopeDeactivate = window.AgentoCFocusScope?.activate?.(panel, {
+    focusScopeDeactivate = window.RagentFocusScope?.activate?.(panel, {
       containmentRoot: document.body,
       initialFocus: () => listEl?.querySelector("button:not(:disabled)") || manageBtn,
       restoreFocus: () => (focusBeforeOpen && focusBeforeOpen.isConnected !== false)
@@ -1884,16 +1884,16 @@
       modal: true,
       onEscape: () => closePanel(),
     }) || null;
-    backEntryId = (window.AgentoCBackHandler && typeof window.AgentoCBackHandler.push === "function")
-      ? window.AgentoCBackHandler.push({ id: "composer-connector-panel", onBack: () => { closePanel(); return true; } })
+    backEntryId = (window.RagentBackHandler && typeof window.RagentBackHandler.push === "function")
+      ? window.RagentBackHandler.push({ id: "composer-connector-panel", onBack: () => { closePanel(); return true; } })
       : null;
   }
 
   function hide() {
     if (!panel) return;
     trigger?.setAttribute("aria-expanded", "false");
-    if (backEntryId && window.AgentoCBackHandler && typeof window.AgentoCBackHandler.pop === "function") {
-      window.AgentoCBackHandler.pop(backEntryId);
+    if (backEntryId && window.RagentBackHandler && typeof window.RagentBackHandler.pop === "function") {
+      window.RagentBackHandler.pop(backEntryId);
       backEntryId = null;
     }
     const hadFocusScope = Boolean(focusScopeDeactivate);
@@ -1901,8 +1901,8 @@
       focusScopeDeactivate();
       focusScopeDeactivate = null;
     }
-    if (window.AgentoCMotion?.setPresence) {
-      window.AgentoCMotion.setPresence(panel, false, { duration: 180 });
+    if (window.RagentMotion?.setPresence) {
+      window.RagentMotion.setPresence(panel, false, { duration: 180 });
     } else {
       panel.classList.remove("is-open");
       panel.classList.add("is-closing");
@@ -2026,8 +2026,8 @@
     if (panelOpen) return;
     if (!panel) ready();
     if (!panel) return;
-    if (typeof window.AgentoCAgentPanel?.close === "function") {
-      window.AgentoCAgentPanel.close();
+    if (typeof window.RagentAgentPanel?.close === "function") {
+      window.RagentAgentPanel.close();
     }
     loadGeneration += 1;
     const generation = loadGeneration;
@@ -2111,7 +2111,7 @@
     ready();
   }
 
-  window.AgentoCConnectorPanel = Object.freeze({
+  window.RagentConnectorPanel = Object.freeze({
     open: openPanel,
     close: closePanel,
     isOpen: () => panelOpen,

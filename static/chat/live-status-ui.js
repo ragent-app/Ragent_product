@@ -92,7 +92,7 @@ function stopLiveBarOrbAnimation() {
   liveBarOrbAnimationStartedAt = null;
 }
 
-window.AgentoCMotion?.subscribeReducedMotion?.((reduced) => {
+window.RagentMotion?.subscribeReducedMotion?.((reduced) => {
   if (!reduced) return;
   const activeOrb = liveBarOrbAnimationOrb;
   stopLiveBarOrbAnimation();
@@ -199,7 +199,7 @@ function expandLiveBarFromCapsule(el) {
   if (!liveBarCapsule) return;
   setLiveBarCapsuleMotion(el, "expanding");
   clearLiveBarCapsule(el);
-  const model = window.AgentoCSessionStateModel;
+  const model = window.RagentSessionStateModel;
   const status = (model && typeof model.getSessionVisualStatus === "function")
     ? model.getSessionVisualStatus(liveBarSession || {}, {})
     : null;
@@ -217,8 +217,8 @@ function renderLiveBarStatusContent(el, status) {
   elapsed.setAttribute("aria-hidden", "true");
   el.append(label, elapsed);
   const text = status?.label || "";
-  if (window.AgentoCLiveActionTransition?.setText) {
-    window.AgentoCLiveActionTransition.setText(label, text);
+  if (window.RagentLiveActionTransition?.setText) {
+    window.RagentLiveActionTransition.setText(label, text);
   } else {
     label.textContent = text;
   }
@@ -228,8 +228,8 @@ function updateLiveBarStatusLabel(el, status) {
   const label = el?.querySelector?.(".live-bar__label");
   if (!label) return false;
   const text = status?.label || "";
-  if (window.AgentoCLiveActionTransition?.setText) {
-    window.AgentoCLiveActionTransition.setText(label, text);
+  if (window.RagentLiveActionTransition?.setText) {
+    window.RagentLiveActionTransition.setText(label, text);
   } else {
     label.textContent = text;
   }
@@ -237,8 +237,8 @@ function updateLiveBarStatusLabel(el, status) {
 }
 
 function getLiveBarDisplayStatus(status) {
-  const livePresentation = window.AgentoCRunActivity?.getLivePresentation?.();
-  const actionPresentation = window.AgentoCRunActivity?.getPresentation?.();
+  const livePresentation = window.RagentRunActivity?.getLivePresentation?.();
+  const actionPresentation = window.RagentRunActivity?.getPresentation?.();
   const liveRunId = String(liveBarSession?.activity?.run?.runId || "").trim();
   const progressRunId = String(livePresentation?.progress?.runId || "").trim();
   const progressMatchesRun = !!livePresentation?.progress
@@ -287,10 +287,10 @@ function isLiveBarPersistent() {
 
 // Prefer a concrete pending user action over the generic session status.
 // When the current session has a live pending approval/question (fed by
-// AgentoCDecisions), map it to the specific waiting subtype (plan / danger /
+// RagentDecisions), map it to the specific waiting subtype (plan / danger /
 // approval / answer). Otherwise fall back to the session visual status.
 function resolveLiveBarDisplayStatus(session, baseStatus) {
-  const model = window.AgentoCSessionStateModel;
+  const model = window.RagentSessionStateModel;
   const pending = liveBarPendingApproval && getLiveBarSessionKey(session)
     ? liveBarPendingApproval
     : null;
@@ -352,7 +352,7 @@ function renderLiveBarElapsed() {
   const el = document.getElementById("liveBar");
   const elapsedEl = el?.querySelector?.(".live-bar__elapsed");
   if (!el || el.hidden || !elapsedEl || !liveBarSession) return;
-  const model = window.AgentoCSessionStateModel;
+  const model = window.RagentSessionStateModel;
   const status = model?.getSessionVisualStatus?.(liveBarSession, {});
   const startedAt = getLiveBarStartedAt(liveBarSession, status);
   elapsedEl.hidden = startedAt <= 0;
@@ -365,7 +365,7 @@ function scheduleLiveBarTimer() {
   stopLiveBarTimer();
   const el = document.getElementById("liveBar");
   if (document.hidden || !liveBarSession || !el || el.hidden) return;
-  const status = window.AgentoCSessionStateModel?.getSessionVisualStatus?.(liveBarSession, {});
+  const status = window.RagentSessionStateModel?.getSessionVisualStatus?.(liveBarSession, {});
   if (getLiveBarStartedAt(liveBarSession, status) <= 0) return;
   liveBarTimer = setInterval(renderLiveBarElapsed, 1000);
 }
@@ -527,7 +527,7 @@ function syncLiveBarOrbAnimation(el, status) {
   if (liveBarOrbAnimationFrame) return;
   const tick = (timeMs) => {
     liveBarOrbAnimationFrame = null;
-    const model = window.AgentoCSessionStateModel;
+    const model = window.RagentSessionStateModel;
     const currentStatus = model?.getSessionVisualStatus?.(liveBarSession || {}, {}) || status;
     if (!shouldAnimateLiveBarOrb(el, currentStatus)) {
       renderLiveBarOrb(orb);
@@ -578,11 +578,11 @@ function openLiveBarDetails() {
   }
   // Fallback compatibility when run-sheet is not loaded:
   if (
-    typeof window.AgentoCDecisionSheet?.reopen === "function"
-    && typeof window.AgentoCDecisions?.getPending === "function"
-    && window.AgentoCDecisions.getPending()
+    typeof window.RagentDecisionSheet?.reopen === "function"
+    && typeof window.RagentDecisions?.getPending === "function"
+    && window.RagentDecisions.getPending()
   ) {
-    window.AgentoCDecisionSheet.reopen();
+    window.RagentDecisionSheet.reopen();
   }
 }
 
@@ -644,7 +644,7 @@ function updateLiveBar(session) {
   if (!el) return;
   bindLiveBarClick(el);
   liveBarSession = session || null;
-  const model = window.AgentoCSessionStateModel;
+  const model = window.RagentSessionStateModel;
   if (!model || typeof model.getSessionVisualStatus !== "function") {
     clearLiveBarAutoHideTimer();
     clearLiveBarAnimationTimer();
@@ -741,24 +741,24 @@ function updateLiveBar(session) {
 document.addEventListener("visibilitychange", () => {
   syncLiveBarMotionState();
   const el = document.getElementById("liveBar");
-  const status = window.AgentoCSessionStateModel?.getSessionVisualStatus?.(liveBarSession || {}, {});
+  const status = window.RagentSessionStateModel?.getSessionVisualStatus?.(liveBarSession || {}, {});
   syncLiveBarOrbAnimation(el, status);
   renderLiveBarElapsed();
   scheduleLiveBarTimer();
 });
 
-window.AgentoCRunActivity?.subscribe?.(() => {
+window.RagentRunActivity?.subscribe?.(() => {
   if (liveBarSession) updateLiveBar(liveBarSession);
 });
 
 // Keep the Live Bar in sync with the live pending approval / question for the
-// current session (fed by AgentoCDecisions). When an approval lands, the bar
+// current session (fed by RagentDecisions). When an approval lands, the bar
 // re-renders into the concrete waiting subtype; when it resolves or the
 // session switches (reset() notifies), it returns to the persistent status.
 // Phase 5: a pending privileged batch (danger ops) counts as the pending
 // approval too — and wins over a regular one (the sheet shows the same).
 (function bindLiveBarDecisions() {
-  const store = window.AgentoCDecisions;
+  const store = window.RagentDecisions;
   if (!store || typeof store.subscribe !== "function") return;
   function refreshLiveBarPending() {
     const batch = typeof store.getPendingBatch === "function"

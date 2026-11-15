@@ -54,5 +54,5 @@
       summary, reason, saferAlternative: saferKey ? tr(`decisionSheet.operationSafer.${saferKey}`) : (explanation.riskCode ? "" : explanation.saferAlternative) };
   }
 
-  root.agentocApprovalExplanation = displayApprovalExplanation;
+  root.ragentApprovalExplanation = displayApprovalExplanation;
 })(window);

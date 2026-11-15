@@ -32,7 +32,7 @@ case "${1:-}" in
       export TMP="$task_tmp" TEMP="$task_tmp" TMPDIR="$task_tmp"
       if [ "${RAGENT_PROOT_OFFLINE:-0}" = 1 ]; then export GOPROXY=off; fi
       go version > "$output.go-version"
-      go build -mod=readonly -buildvcs=false -trimpath -o "$go_output" ./cmd/agentoc-p2p-host
+      go build -mod=readonly -buildvcs=false -trimpath -o "$go_output" ./cmd/ragent-p2p-host
     )
     [ "$(fingerprint "$source_dir")" = "$before" ] || { echo 'P2P source changed during build' >&2; exit 1; }
     [ "$(od -An -tx1 -N6 "$output" | tr -d ' \n')" = 7f454c460201 ] && \

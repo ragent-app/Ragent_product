@@ -71,7 +71,7 @@ func TestRuntimeManifestChecksCompleteUnicodeTree(t *testing.T) {
 // This opt-in test only reads an existing Git runtime. A manifest computed
 // from the same tree is a compatibility fixture, not a trust attestation.
 func TestOptionalInstalledGitRuntimeManifest(t *testing.T) {
-	root := os.Getenv("AGENTOC_QA_GIT_BIN")
+	root := os.Getenv("RAGENT_QA_GIT_BIN")
 	if root == "" {
 		t.Skip("no installed Git runtime supplied")
 	}

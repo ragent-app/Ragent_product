@@ -4,8 +4,8 @@
   // ---- Configuration ----
   const FLUSH_INTERVAL_MS = 30000;
   const MAX_QUEUE_SIZE = 100;
-  const STORAGE_KEY_CID = "agentoc.analytics.cid";
-  const STORAGE_KEY_QUEUE = "agentoc.analytics.queue";
+  const STORAGE_KEY_CID = "ragent.analytics.cid";
+  const STORAGE_KEY_QUEUE = "ragent.analytics.queue";
   const ENDPOINT = "/api/analytics/events";
 
   // ---- Client identity ----
@@ -35,8 +35,8 @@
   let flushing = false;
 
   function resolveEndpointUrl() {
-    if (typeof window.agentocResolveProductUrl === "function") {
-      return window.agentocResolveProductUrl(ENDPOINT);
+    if (typeof window.ragentResolveProductUrl === "function") {
+      return window.ragentResolveProductUrl(ENDPOINT);
     }
     return ENDPOINT;
   }
@@ -216,7 +216,7 @@
   window.addEventListener("beforeunload", onPageUnload);
 
   // ---- Expose global API ----
-  window.AgentoCAnalytics = {
+  window.RagentAnalytics = {
     track: track,
     trackEnv: trackEnv,
     trackLifecycle: trackLifecycle,

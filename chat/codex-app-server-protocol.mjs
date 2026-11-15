@@ -64,12 +64,12 @@ export function isCodexAppServerRagentApprovalGateEnabled({ riskMode, permission
     || ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(selectedRiskMode);
 }
 
-function buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate) {
+function buildCodexAppServerApprovalPolicyParams(permissionPolicy, ragentApprovalGate) {
   // Explicit untrusted is retired in Codex 0.149 and is derived from project trust.
-  if (permissionPolicy.approvalPolicy === 'untrusted' && agentocApprovalGate !== true) {
+  if (permissionPolicy.approvalPolicy === 'untrusted' && ragentApprovalGate !== true) {
     throw new Error('Codex untrusted permission mode requires a Run-scoped project trust gate');
   }
-  if (agentocApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted') return {};
+  if (ragentApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted') return {};
   return { approvalPolicy: permissionPolicy.approvalPolicy || 'never' };
 }
 
@@ -119,7 +119,7 @@ export function buildCodexAppServerThreadOptions({
   developerInstructions,
   interactionMode,
   permissionMode,
-  agentocApprovalGate,
+  ragentApprovalGate,
   threadMcpConfig,
   threadShellEnvironment,
   providerReadOnly = false,
@@ -134,19 +134,19 @@ export function buildCodexAppServerThreadOptions({
     throw new TypeError('Codex named permission configuration requires a named profile');
   }
   const projectRoot = typeof cwd === 'string' ? cwd.trim() : '';
-  const scopedProjectTrust = agentocApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted' && projectRoot
+  const scopedProjectTrust = ragentApprovalGate === true && permissionPolicy.approvalPolicy === 'untrusted' && projectRoot
     && (isAbsolute(projectRoot) || win32.isAbsolute(projectRoot))
     ? { projects: { [projectRoot]: { trust_level: 'untrusted' } } }
     : {};
   return {
     ...(typeof model === 'string' && model.trim() ? { model: model.trim() } : {}),
     ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
-    ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
-    ...(agentocApprovalGate === true || providerReadOnly ? { approvalsReviewer: 'user' } : {}),
+    ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, ragentApprovalGate),
+    ...(ragentApprovalGate === true || providerReadOnly ? { approvalsReviewer: 'user' } : {}),
     ...(namedProfile ? { permissions: namedProfile } : { sandbox: permissionPolicy.sandbox || 'danger-full-access' }),
     config: { ...buildCodexAppServerConfig(interactionMode), ...(providerReadOnly || factorySingleAgent ? { features: {
       ...(providerReadOnly ? { apps: false } : {}), ...(factorySingleAgent ? { multi_agent: false, multi_agent_v2: false } : {}),
-    } } : {}), ...(factorySingleAgent ? { agents: { enabled: false } } : {}), ...(agentocApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
+    } } : {}), ...(factorySingleAgent ? { agents: { enabled: false } } : {}), ...(ragentApprovalGate === true ? { allow_login_shell: false } : {}), ...scopedProjectTrust,
       ...(namedPermissionConfig ? { [`permissions.${namedProfile}`]: namedPermissionConfig } : {}),
       ...(threadMcpConfig?.mcp_servers && Object.keys(threadMcpConfig.mcp_servers).length
         ? { mcp_servers: threadMcpConfig.mcp_servers } : {}),
@@ -163,7 +163,7 @@ export function buildCodexAppServerInitializeMessage() {
     id: CODEX_APP_SERVER_REQUEST_IDS.initialize,
     params: {
       clientInfo: {
-        name: 'agentoc',
+        name: 'ragent',
         title: 'Ragent',
         version: '0.3.2',
       },
@@ -263,7 +263,7 @@ export function buildCodexAppServerThreadForkMessage({
       threadId: sourceThreadId,
       ...(rolloutPath ? { path: validatedRolloutPath(rolloutPath) } : {}),
       excludeTurns: true,
-      threadSource: 'agentoc',
+      threadSource: 'ragent',
       ...buildCodexAppServerThreadOptions(options),
     },
   };
@@ -327,7 +327,7 @@ export function buildCodexAppServerTurnStartMessage({
   reasoningEffort,
   interactionMode,
   permissionMode,
-  agentocApprovalGate,
+  ragentApprovalGate,
   namedPermissionProfile,
   executionEnvironment,
 } = {}) {
@@ -345,8 +345,8 @@ export function buildCodexAppServerTurnStartMessage({
         : {}),
       input: buildCodexAppServerInput(text),
       ...(typeof cwd === 'string' && cwd.trim() ? { cwd: cwd.trim() } : {}),
-      ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, agentocApprovalGate),
-      ...(agentocApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
+      ...buildCodexAppServerApprovalPolicyParams(permissionPolicy, ragentApprovalGate),
+      ...(ragentApprovalGate === true ? { approvalsReviewer: 'user' } : {}),
       // A thread-local profile is inherited by turn/start. Selecting its
       // name again makes Codex 0.150 reload global configuration, where the
       // dynamically defined thread profile does not exist.
@@ -461,7 +461,7 @@ function hasOwn(value, key) {
 function readMcpToolInventory(tools) {
   // MCP tool inventory may be returned as either:
   // 1. Array format: [{ name, inputSchema, ... }, ...] (Codex)
-  // 2. Object format: { 'toolName': { name, inputSchema, ... }, ... } (AgentoC MCP server)
+  // 2. Object format: { 'toolName': { name, inputSchema, ... }, ... } (Ragent MCP server)
   if (!tools || typeof tools !== 'object') {
     return {
       schemaAvailable: false,

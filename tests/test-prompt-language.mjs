@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-const root=await fs.mkdtemp(path.join(os.tmpdir(),'agentoc-prompt-language-'));
-Object.assign(process.env,{HOME:root,AGENTOC_INSTANCE_ROOT:root,AGENTOC_MEMORY_DIR:path.join(root,'memory'),AGENTOC_WORK_ROOT_DIR:path.join(root,'workspace'),AGENTOC_PLATFORM_SKILLS_DIR:path.join(root,'skills')});
+const root=await fs.mkdtemp(path.join(os.tmpdir(),'ragent-prompt-language-'));
+Object.assign(process.env,{HOME:root,RAGENT_INSTANCE_ROOT:root,RAGENT_MEMORY_DIR:path.join(root,'memory'),RAGENT_WORK_ROOT_DIR:path.join(root,'workspace'),RAGENT_PLATFORM_SKILLS_DIR:path.join(root,'skills')});
 try {
  const {buildSystemContext}=await import('../chat/system-prompt.mjs');
  const context=await buildSystemContext({sessionId:'english-language-acceptance'});

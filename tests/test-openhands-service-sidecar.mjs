@@ -14,10 +14,10 @@ const spawned = await spawnOpenHandsServiceProcess({
   command: 'agent-canvas',
   args: ['--backend-only', '--port', '41234'],
   cwd: '/tmp/work',
-  env: { AGENTOC_TEST: '1' },
+  env: { RAGENT_TEST: '1' },
   resolveCommandPathImpl: async (command) => {
     assert.equal(command, 'agent-canvas');
-    return '/opt/agentoc/harnesses/agent-canvas';
+    return '/opt/ragent/harnesses/agent-canvas';
   },
   spawnManagedImpl: async (spec, options) => {
     spawnCalls.push({ spec, options });
@@ -28,10 +28,10 @@ assert.equal(spawned, injectedChild);
 assert.deepEqual(spawnCalls, [{
   spec: {
     ...(process.platform === 'win32' ? { kind: 'unknown' } : {}),
-    file: '/opt/agentoc/harnesses/agent-canvas',
+    file: '/opt/ragent/harnesses/agent-canvas',
     args: ['--backend-only', '--port', '41234'],
     cwd: '/tmp/work',
-    env: { AGENTOC_TEST: '1' },
+    env: { RAGENT_TEST: '1' },
     shell: false,
   },
   options: {
@@ -43,14 +43,14 @@ assert.deepEqual(spawnCalls, [{
 const customSpawnCalls = [];
 await spawnOpenHandsServiceProcess({
   command: 'agent-canvas',
-  resolveCommandPathImpl: async () => '/opt/agentoc/harnesses/agent-canvas',
+  resolveCommandPathImpl: async () => '/opt/ragent/harnesses/agent-canvas',
   spawnImpl: (file, args, options) => {
     customSpawnCalls.push({ file, args, options });
     return injectedChild;
   },
 });
 assert.deepEqual(customSpawnCalls[0], {
-  file: '/opt/agentoc/harnesses/agent-canvas',
+  file: '/opt/ragent/harnesses/agent-canvas',
   args: [],
   options: {
     stdio: ['ignore', 'ignore', 'ignore'],
@@ -133,10 +133,10 @@ const idleResult = await runOpenHandsServiceSidecar({
 });
 assert.match(idleResult.event?.content || '', /idle timeout/);
 
-const providerHomes = await mkdtemp(join(tmpdir(), 'agentoc-openhands-provider-'));
+const providerHomes = await mkdtemp(join(tmpdir(), 'ragent-openhands-provider-'));
 await mkdir(join(providerHomes, 'openhands'), { recursive: true });
-await writeFile(join(providerHomes, 'openhands', '.agentoc-provider.env'), 'AGENTOC_PROVIDER_MODEL="bridge-model"\nAGENTOC_PROVIDER_BASE_URL="https://provider.test/v1"\nAGENTOC_PROVIDER_API_KEY="bridge-key"\n');
-await writeFile(join(providerHomes, 'openhands', '.agentoc-openhands.env'), 'LLM_MODEL="bridge-model"\nLLM_BASE_URL="https://provider.test/v1"\nLLM_API_KEY="bridge-key"\n');
+await writeFile(join(providerHomes, 'openhands', '.ragent-provider.env'), 'RAGENT_PROVIDER_MODEL="bridge-model"\nRAGENT_PROVIDER_BASE_URL="https://provider.test/v1"\nRAGENT_PROVIDER_API_KEY="bridge-key"\n');
+await writeFile(join(providerHomes, 'openhands', '.ragent-openhands.env'), 'LLM_MODEL="bridge-model"\nLLM_BASE_URL="https://provider.test/v1"\nLLM_API_KEY="bridge-key"\n');
 let bridgedAgent;
 const bridgedClient = {
   async request(path) { assert.equal(path, '/server_info'); return { version: '1.42.1' }; },
@@ -152,7 +152,7 @@ const bridgedRun = runOpenHandsServiceSidecar({
   manifest: { options: { runtimeFamily: 'openhands-agent-server', openhandsService: { host: 'http://openhands.test' } } },
   prompt: 'bridge it',
   cwd: '/tmp',
-  environment: { AGENTOC_PROVIDER_HOMES_DIR: providerHomes },
+  environment: { RAGENT_PROVIDER_HOMES_DIR: providerHomes },
   append: async (record) => { if (record.type === 'openhands.conversation.created') throw new Error('stop after payload'); },
   readRun: async () => ({ cancelRequested: false }),
   updateRun: async () => {},

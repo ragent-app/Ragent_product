@@ -18,13 +18,13 @@ assert.equal(
 );
 
 assert.deepEqual(parseCloudflareTrace(`fl=abc123
-h=agentoc.example.com
+h=ragent.example.com
 ip=1.2.3.4
 colo=LAX
 loc=CN
 `), {
   fl: 'abc123',
-  h: 'agentoc.example.com',
+  h: 'ragent.example.com',
   ip: '1.2.3.4',
   colo: 'LAX',
   loc: 'CN',

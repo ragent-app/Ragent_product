@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// GitHub App connector tests. Uses a throwaway AGENTOC_CONFIG_DIR so the
+// GitHub App connector tests. Uses a throwaway RAGENT_CONFIG_DIR so the
 // 0600 config/token files never touch the real instance, and a mock fetch
 // for the OAuth exchange and API calls — no real GitHub requests.
 import assert from 'assert/strict';
@@ -7,8 +7,8 @@ import { mkdtempSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempConfigDir = mkdtempSync(join(tmpdir(), 'agentoc-github-test-'));
-process.env.AGENTOC_CONFIG_DIR = tempConfigDir;
+const tempConfigDir = mkdtempSync(join(tmpdir(), 'ragent-github-test-'));
+process.env.RAGENT_CONFIG_DIR = tempConfigDir;
 
 const {
   buildGitHubAuthorizeUrl,

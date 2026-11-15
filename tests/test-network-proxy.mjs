@@ -41,7 +41,7 @@ assert.deepEqual(
 );
 
 const discovered = await discoverLocalProxy({
-  environment: { AGENTOC_PROXY_PORTS: '9000,9001' },
+  environment: { RAGENT_PROXY_PORTS: '9000,9001' },
   readListeningPortsImpl: async () => [9000, 9001],
   probeHttpImpl: async (port) => port === 9001,
   probeSocksImpl: async () => false,

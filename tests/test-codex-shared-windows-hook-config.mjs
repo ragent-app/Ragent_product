@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { buildSharedCodexWindowsHook } from '../chat/codex-shared-windows-hook.mjs';
 
-const socketPath = '\\\\.\\pipe\\agentoc-codex-fixture';
+const socketPath = '\\\\.\\pipe\\ragent-codex-fixture';
 const hook = buildSharedCodexWindowsHook({ socketPath, nodePath: "G:\\Apps O'Brien\\node.exe", scriptPath: 'G:\\Ragent\\hook.mjs', systemDrive: 'C:' });
 assert.equal(hook.sourcePath, 'C:\\<session-flags>\\config.toml');
 assert.equal(hook.source, 'sessionFlags');

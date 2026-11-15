@@ -62,8 +62,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-file-assets-offload-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-file-assets-offload-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const promptFile = join(home, 'captured-prompt.txt');
   mkdirSync(configDir, { recursive: true });
@@ -100,8 +100,8 @@ function setupTempHome() {
     `#!/usr/bin/env node
 const { appendFileSync } = require('fs');
 const prompt = process.argv[process.argv.length - 1] || '';
-if (process.env.AGENTOC_FAKE_PROMPT_FILE) {
-  appendFileSync(process.env.AGENTOC_FAKE_PROMPT_FILE, prompt + '\\n\\n---PROMPT---\\n\\n', 'utf8');
+if (process.env.RAGENT_FAKE_PROMPT_FILE) {
+  appendFileSync(process.env.RAGENT_FAKE_PROMPT_FILE, prompt + '\\n\\n---PROMPT---\\n\\n', 'utf8');
 }
 setTimeout(() => {
   console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-file-asset-offload-test' }));
@@ -189,21 +189,21 @@ async function startServer({ home, configDir, port, promptFile, storagePort }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
       SECURE_COOKIES: '0',
-      AGENTOC_FAKE_PROMPT_FILE: promptFile,
-      AGENTOC_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
-      AGENTOC_ASSET_STORAGE_PROVIDER: 'tos',
-      AGENTOC_ASSET_STORAGE_REGION: 'auto',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
-      AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED: '0',
+      RAGENT_FAKE_PROMPT_FILE: promptFile,
+      RAGENT_ASSET_STORAGE_BASE_URL: `http://127.0.0.1:${storagePort}/bucket`,
+      RAGENT_ASSET_STORAGE_PROVIDER: 'tos',
+      RAGENT_ASSET_STORAGE_REGION: 'auto',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: 'test-access-key',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'test-secret-key',
+      RAGENT_ASSET_DIRECT_UPLOAD_ENABLED: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

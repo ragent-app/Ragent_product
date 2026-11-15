@@ -9,8 +9,8 @@ import {
   FORK_HISTORY_INDEX_INTERVAL,
 } from '../chat/fork-history-index.mjs';
 
-const tempDir = await mkdtemp(join(tmpdir(), 'agentoc-fork-perf-'));
-process.env.AGENTOC_CONFIG_DIR = tempDir;
+const tempDir = await mkdtemp(join(tmpdir(), 'ragent-fork-perf-'));
+process.env.RAGENT_CONFIG_DIR = tempDir;
 
 try {
   const totalEvents = 2048;

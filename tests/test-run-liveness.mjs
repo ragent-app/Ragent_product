@@ -11,7 +11,7 @@ const staleHeartbeat = new Date(nowMs - DEFAULT_RUN_HEARTBEAT_STALE_MS - 1).toIS
 const freshHeartbeat = new Date(nowMs - 1000).toISOString();
 
 assert.equal(resolveRunHeartbeatStaleMs({}), DEFAULT_RUN_HEARTBEAT_STALE_MS);
-assert.equal(resolveRunHeartbeatStaleMs({ AGENTOC_RUN_HEARTBEAT_STALE_MS: '120000' }), 120000);
+assert.equal(resolveRunHeartbeatStaleMs({ RAGENT_RUN_HEARTBEAT_STALE_MS: '120000' }), 120000);
 assert.equal(getRunHeartbeatAgeMs({ runnerHeartbeatAt: staleHeartbeat }, nowMs), DEFAULT_RUN_HEARTBEAT_STALE_MS + 1);
 assert.equal(shouldMarkRunStalled({ state: 'running', runnerHeartbeatAt: staleHeartbeat }, { nowMs }), true);
 assert.equal(shouldMarkRunStalled({ state: 'running', runnerHeartbeatAt: freshHeartbeat }, { nowMs }), false);

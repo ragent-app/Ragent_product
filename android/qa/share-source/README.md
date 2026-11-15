@@ -4,7 +4,7 @@
 Build this standalone QA application with the repository's Android Gradle wrapper
 and the configured Android SDK. Install it together with the current Ragent app
 and instrumentation APK on the explicitly selected test serial. Run
-com.andysagent.agentoc.CaptureFileShareActivityTest, then the existing share/graph
+com.andysagent.ragent.CaptureFileShareActivityTest, then the existing share/graph
 regressions. Use only the fixture's synthetic material; intake must not create a
 submission operation or send work to a real PC. Preserve paired-target configuration.
 ```

@@ -270,7 +270,7 @@
     return (sessions || []).filter((session) => getSessionProjectKey(session, projects) === key);
   }
 
-  root.AgentocProjectOverview = {
+  root.RagentProjectOverview = {
     buildProjectOverview,
     searchProjectView,
     sessionsOfProject,

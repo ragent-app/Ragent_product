@@ -88,7 +88,7 @@ export function resolveRuntimeReadOnlyCapability({
   // This is a conditional provider capability. The sidecar must validate the
   // actual shared-broker thread response and tool inventory before any turn.
   if (['win32', 'linux'].includes(platform) && trimString(toolId) === 'codex'
-      && process.env.AGENTOC_CODEX_PROVIDER_READONLY === '1') {
+      && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1') {
     return { runtimeId: 'codex_shared_provider_readonly', supportsReadOnlyFilesystem: true,
       enforcement: 'provider-negotiated', note: 'requires verified shared app-server thread before turn' };
   }

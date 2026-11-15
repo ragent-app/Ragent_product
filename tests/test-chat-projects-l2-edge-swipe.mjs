@@ -39,10 +39,10 @@ const shell = `
 
 const setup = `
   Object.defineProperty(window, "localStorage", { configurable: true, value: { getItem() { return null; }, setItem() {} } });
-  window.agentocT = (key) => key;
+  window.ragentT = (key) => key;
   window.renderUiIcon = () => "";
-  window.agentocGetProjects = () => [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentGetProjects = () => [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = () => "sessions";
   window.sessionSearchQuery = "";
   window.sidebarSearchMode = false;
@@ -76,7 +76,7 @@ try {
 
   const cancelled = await page.evaluate(async () => {
     document.querySelector('.sidebar-project-head').click();
-    const api = window.AgentocProjectView;
+    const api = window.RagentProjectView;
     const began = api.beginEdgeBackSwipe();
     api.updateEdgeBackSwipe(88);
     const during = {
@@ -121,7 +121,7 @@ try {
   assert.doesNotMatch(cancelled.surfaceClasses.join(' '), /sidebar-edge-back-swipe/, 'cancelled drag should clear gesture classes');
 
   const committed = await page.evaluate(async () => {
-    const api = window.AgentocProjectView;
+    const api = window.RagentProjectView;
     api.beginEdgeBackSwipe();
     api.updateEdgeBackSwipe(130);
     api.settleEdgeBackSwipe(true);

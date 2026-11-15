@@ -289,7 +289,7 @@ function createHarness() {
     inputArea: { classList: { toggle() {}, contains() { return false; } } },
     pendingNavigationState: {},
     normalizeSidebarTab: (tab) => tab,
-    ACTIVE_SIDEBAR_TAB_STORAGE_KEY: 'agentoc_active_tab',
+    ACTIVE_SIDEBAR_TAB_STORAGE_KEY: 'ragent_active_tab',
     localStorage: {
       getItem: (key) => (storage.has(key) ? storage.get(key) : null),
       setItem: (key, value) => storage.set(key, String(value)),
@@ -313,7 +313,7 @@ function createHarness() {
     return null;
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput() {},
     applyEvent() {},
   };

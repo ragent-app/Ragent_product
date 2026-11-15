@@ -40,9 +40,9 @@ export function buildCodexAppServerProjectTrustArgs(cwd) {
   return ['-c', `projects={${JSON.stringify(projectRoot)}={trust_level="untrusted"}}`];
 }
 
-export function buildCodexAppServerArgs({ cwd, agentocApprovalGate = false, permissionMode = '' } = {}) {
+export function buildCodexAppServerArgs({ cwd, ragentApprovalGate = false, permissionMode = '' } = {}) {
   const args = ['app-server', '--stdio'];
-  if (agentocApprovalGate === true && typeof permissionMode === 'string' && (permissionMode === 'untrusted' || permissionMode.startsWith('untrusted-'))) args.push(...buildCodexAppServerProjectTrustArgs(cwd));
+  if (ragentApprovalGate === true && typeof permissionMode === 'string' && (permissionMode === 'untrusted' || permissionMode.startsWith('untrusted-'))) args.push(...buildCodexAppServerProjectTrustArgs(cwd));
   return args;
 }
 
@@ -59,7 +59,7 @@ export function createCodexAppServerAdapter() {
   // delta without collapsing legitimate repeated characters.
   const textDeltaOrdinalByItemId = new Map();
   // Approval ids that the runner sidecar already answered automatically.
-  // The sidecar echoes its synthetic agentoc.approval_response
+  // The sidecar echoes its synthetic ragent.approval_response
   // into the stream BEFORE the requestApproval it answers, so a request frame
   // for a known id is never a live user-facing approval. Suppressing it keeps
   // automatically allowed and denied tools out of the
@@ -107,14 +107,14 @@ export function createCodexAppServerAdapter() {
 function parseAppServerMessage(message, state = {}) {
   if (!message || typeof message !== 'object') return [];
   // The sidecar persists provider-native delegated-thread frames for raw
-  // diagnostics, but they are not lifecycle events for the parent AgentoC
+  // diagnostics, but they are not lifecycle events for the parent Ragent
   // Run. In particular, a child `turn/completed` must not synthesize parent
   // Run completion while the parent turn is still active.
-  if (message.agentoc_intermediate === true) return [];
+  if (message.ragent_intermediate === true) return [];
   if (message.type === MAC_CLEANUP_SPOOL_TYPE && message.status === 'unconfirmed') {
     return [messageEvent('system', MAC_CLEANUP_WARNING, undefined, { code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED' })];
   }
-  if (message.type === 'agentoc.approval_response') {
+  if (message.type === 'ragent.approval_response') {
     if ((message.autoApproved === true || message.autoDenied === true)
       && typeof message.approvalId === 'string' && message.approvalId) {
       // Sidecar automatic decision: suppress the answered request frame so

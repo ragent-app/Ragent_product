@@ -6,7 +6,7 @@ import { join, resolve, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createAccountsServer } from '../accounts/server.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-account-pairing-http-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-account-pairing-http-'));
 try {
   for (const enabled of [false, true]) {
     const app = await createAccountsServer({ dataFile: join(root, `state-${enabled}.json`),

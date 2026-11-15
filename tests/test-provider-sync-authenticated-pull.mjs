@@ -5,10 +5,10 @@ import { join } from 'node:path';
 
 const home = await mkdtemp(join(tmpdir(), 'ragent-authenticated-pull-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 const { loadOrCreateInstanceIdentity, publicInstanceIdentity, signProviderSyncPeerProof } = await import('../lib/instance-identity.mjs');
 const { createOwnerAuthBroker } = await import('../accounts/owner-auth-broker.mjs');
 const { encryptAccountSyncEnvelope, providerSyncKeyFingerprint } = await import('../lib/provider-runtime/sync.mjs');
@@ -34,7 +34,7 @@ const request = { sourceEndpoint: 'https://peer.example.test', sourceInstanceId:
     await broker.authorizeProviderSync({ sourceProof: body.sourceProof, requestId: body.sourceProof.requestId, targetInstanceId: peer.instanceId });
     const issuedAt = new Date().toISOString();
     const fields = { requestId: body.sourceProof.requestId, targetInstanceId: local.instanceId, issuedAt,
-      audience: 'agentoc-provider-sync', syncKeyFingerprint: body.sourceProof.syncKeyFingerprint };
+      audience: 'ragent-provider-sync', syncKeyFingerprint: body.sourceProof.syncKeyFingerprint };
     const targetProof = { ...fields, instance: publicInstanceIdentity(peer), signature: signProviderSyncPeerProof(peer, fields).signature };
     const snapshot = { accountId: 'acct_sync_test', sourceInstanceId: peer.instanceId, records: [{ scope: 'provider', key: 'provider-test',
       version: request.wants[0].version, provider: { id: 'provider-test', agentType: 'codex', protocol: 'openai-responses', baseUrl: 'https://provider.example.test', authProfileId: 'auth-test' },

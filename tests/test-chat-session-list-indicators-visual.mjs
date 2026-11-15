@@ -13,8 +13,8 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'agentoc-session-list-indicators-visual-'));
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || mkdtempSync(join(tmpdir(), 'ragent-session-list-indicators-visual-'));
 if (requestedOutputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [

@@ -22,8 +22,8 @@ const queryOptions = { platform: 'win32', runtime: 'D:\\runtime\\pwsh.exe', modu
   execFile: async (_runtime, args, options) => {
     calls++;
     assert.ok(Buffer.from(args.at(-1), 'base64').toString('utf16le').includes('GetApplicableInstaller'));
-    assert.equal(options.env.AGENTOC_FACTS_PACKAGE, expected.packageId);
-    assert.equal(options.env.AGENTOC_FACTS_VERSION, expected.packageVersion);
+    assert.equal(options.env.RAGENT_FACTS_PACKAGE, expected.packageId);
+    assert.equal(options.env.RAGENT_FACTS_VERSION, expected.packageVersion);
     assert.equal(options.env.DOTNET_STARTUP_HOOKS, undefined);
     return { stdout: JSON.stringify(base) };
   } };

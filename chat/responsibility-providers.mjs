@@ -26,7 +26,7 @@ export function validateProjectReportPolicy(policy,projectId) {
   const provider=responsibilityProvider(policy), resource=policy?.resource;
   if(!['project-report','generic-planner'].includes(provider.id) || !resource || resource.projectId!==projectId || resource.readScope!=='entire_project' || !['deny','inherit_existing_permissions'].includes(resource.networkPolicy) || Object.keys(resource).sort().join(',')!=='networkPolicy,projectId,readScope') throw error('Explicit project read and network scope are required');
   if(resource.networkPolicy==='inherit_existing_permissions' && policy.networkPermissionConfirmed!==true) throw error('Existing network and tool permissions require explicit confirmation');
-  const planner=provider.id==='generic-planner', template=planner?'agentoc-responsibility-planner':'agentoc-project-report', key=planner?'planning':'report';
+  const planner=provider.id==='generic-planner', template=planner?'ragent-responsibility-planner':'ragent-project-report', key=planner?'planning':'report';
   if(policy.templateId!==template||policy.templateVersion!==1||typeof policy.templateDigest!=='string'||!policy.templateDigest || !policy.dailyBudget) throw error('Authorized template and daily budget are required');
   const bindings=policy.nodeBindings;
   if(!bindings || Object.keys(bindings).join(',')!==key || typeof bindings[key]?.nodeId!=='string' || !bindings[key].nodeId || !Number.isSafeInteger(bindings[key].bindingGeneration) || bindings[key].bindingGeneration<1) throw error('Authorized node binding is required');

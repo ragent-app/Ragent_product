@@ -12,16 +12,16 @@ import { fileURLToPath } from 'url';
 // flag on for the command tests; the "flag off -> unavailable" path is probed
 // in a child process.
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-compiler-'));
-const probeHome = mkdtempSync(join(tmpdir(), 'agentoc-org-probe-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-compiler-'));
+const probeHome = mkdtempSync(join(tmpdir(), 'ragent-org-probe-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
-delete process.env.AGENTOC_ORG_SHADOW_PROJECTION;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
+delete process.env.RAGENT_ORG_SHADOW_PROJECTION;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
 
 const workspace = join(tempHome, 'workspace');
 mkdirSync(workspace, { recursive: true });
@@ -53,13 +53,13 @@ const a = new Proxy(assert, {
 function childEnv(home, overrides = {}) {
   const env = { ...process.env, HOME: home };
   for (const key of [
-    'AGENTOC_CONFIG_DIR',
-    'AGENTOC_INSTANCE_ROOT',
-    'AGENTOC_WORK_ROOT_DIR',
-    'AGENTOC_MEMORY_DIR',
-    'AGENTOC_RUN_SPOOL_DIR',
-    'AGENTOC_ORG_SCHEMA_ENABLED',
-    'AGENTOC_ORG_SHADOW_PROJECTION',
+    'RAGENT_CONFIG_DIR',
+    'RAGENT_INSTANCE_ROOT',
+    'RAGENT_WORK_ROOT_DIR',
+    'RAGENT_MEMORY_DIR',
+    'RAGENT_RUN_SPOOL_DIR',
+    'RAGENT_ORG_SCHEMA_ENABLED',
+    'RAGENT_ORG_SHADOW_PROJECTION',
   ]) {
     delete env[key];
   }

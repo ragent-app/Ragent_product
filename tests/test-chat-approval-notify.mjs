@@ -42,17 +42,17 @@ function makeSandbox({ permission = 'default', visible = true, currentSessionId 
     currentSessionId,
     document: { visibilityState: visible ? 'visible' : 'hidden', hidden: !visible },
     Notification,
-    agentocT: (k) => k,
+    ragentT: (k) => k,
     shouldEnableOwnerPushFeatures: () => true,
     getCurrentSession: () => ({ id: currentSessionId, name: 'Current', folder: 'a/b' }),
     applyNavigationState: () => {},
     queueForegroundRefresh: async () => {},
     setupPushNotifications: () => { pushBootstrapped += 1; },
-    AgentoCDecisions: {
+    RagentDecisions: {
       subscribe(fn) { decisionsSubscriber = fn; return () => { decisionsSubscriber = null; }; },
       subscribeBatch(fn) { batchSubscriber = fn; return () => { batchSubscriber = null; }; },
     },
-    AgentoCSessionStateModel: {
+    RagentSessionStateModel: {
       hasSessionNeedsAction: (s) => String(s?.workflowState || '').toLowerCase() === 'waiting_user',
     },
     _notifs: notifs,
@@ -66,14 +66,14 @@ function makeSandbox({ permission = 'default', visible = true, currentSessionId 
 
 function load(sandbox) {
   vm.runInContext(source, sandbox);
-  return sandbox.AgentoCApprovalNotify;
+  return sandbox.RagentApprovalNotify;
 }
 
 // ---------------------------------------------------------------------------
 // 1. API surface
 // ---------------------------------------------------------------------------
 const api0 = load(makeSandbox());
-assert.ok(api0, 'AgentoCApprovalNotify attached to the global');
+assert.ok(api0, 'RagentApprovalNotify attached to the global');
 for (const name of ['fire', 'onSessionsApplied', 'requestPermissionFromGesture',
   'enableAffordanceShouldShow', 'dismissEnable', 'resetEnableDismissal',
   'describeWaiting', 'shouldFire', 'dedupKey', '_reset', '_notifiedCount']) {
@@ -119,7 +119,7 @@ api._reset();
 const bg = { id: 'bg1', name: 'Background', workflowStateChangedAt: 't1' };
 assert.equal(api.fire(bg, { label: 'x', stamp: 't1' }), true, 'background approval fires');
 assert.equal(sb._notifs.length, 1, 'one notification created');
-assert.equal(sb._notifs[0].opts.tag, 'agentoc-approval:bg1', 'tag is per-session');
+assert.equal(sb._notifs[0].opts.tag, 'ragent-approval:bg1', 'tag is per-session');
 assert.equal(api.fire(bg, { label: 'x', stamp: 't1' }), false, 'same stamp is deduped');
 assert.equal(sb._notifs.length, 1, 'dedup did not create a second notification');
 assert.equal(api.fire({ id: 'cur', name: 'Current' }, { stamp: 'a1' }), false,
@@ -147,7 +147,7 @@ const next = [
 ];
 apiL.onSessionsApplied(prev, next);
 assert.equal(sbL._notifs.length, 1, 'a background session turning needs-action fires');
-assert.equal(sbL._notifs[0].opts.tag, 'agentoc-approval:bg1', 'fired for the background session');
+assert.equal(sbL._notifs[0].opts.tag, 'ragent-approval:bg1', 'fired for the background session');
 // Re-apply with bg1 already waiting -> not a new transition.
 apiL.onSessionsApplied(new Map([['bg1', next[0]]]), next);
 assert.equal(sbL._notifs.length, 1, 'an already-waiting session does not re-fire');
@@ -219,7 +219,7 @@ const batchSub = sbB._getBatchSubscriber();
 assert.ok(typeof batchSub === 'function', 'module subscribed to the decisions batch channel');
 batchSub({ pending: true, evt: { batchId: 'b1', risk: 'danger', other: [{ opId: 'o1' }], delete: [] } });
 assert.equal(sbB._notifs.length, 1, 'pending danger batch fires a notification while hidden');
-assert.equal(sbB._notifs[0].opts.tag, 'agentoc-approval:cur', 'batch notification tags the session');
+assert.equal(sbB._notifs[0].opts.tag, 'ragent-approval:cur', 'batch notification tags the session');
 // Resolved batch snapshot never fires.
 const notifCountBefore = sbB._notifs.length;
 batchSub({ pending: false, evt: null });

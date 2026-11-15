@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { createProjectMemoryStore, readProjectMemoryJobOptions } from '../chat/project-memory-store.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-memory-store-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-memory-store-'));
 const store = createProjectMemoryStore({
   databasePath: join(root, 'project-memory.sqlite'),
   workspaceRoot: join(root, 'project-memory'),
@@ -29,9 +29,9 @@ async function stage(runId, sourceDigest, statement, start, end) {
 
 try {
   assert.deepEqual(readProjectMemoryJobOptions({
-    AGENTOC_PROJECT_MEMORY_LEASE_MS: '1000',
-    AGENTOC_PROJECT_MEMORY_RETRY_MS: '2000',
-    AGENTOC_PROJECT_MEMORY_RETRIES: '4',
+    RAGENT_PROJECT_MEMORY_LEASE_MS: '1000',
+    RAGENT_PROJECT_MEMORY_RETRY_MS: '2000',
+    RAGENT_PROJECT_MEMORY_RETRIES: '4',
   }), { leaseMs: 1000, retryMs: 2000, retryRemaining: 4 });
 
   const legacyDatabasePath = join(root, 'legacy-project-memory.sqlite');

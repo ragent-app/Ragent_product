@@ -1,0 +1,26 @@
+[Unit]
+Description=Ragent bounded storage inventory and retention pass
+After=local-fs.target
+ConditionPathIsDirectory=/var/lib/ragent/config
+ConditionPathIsDirectory=/var/lib/ragent/workspace
+
+[Service]
+Type=oneshot
+# postinst overrides this fallback with the configured non-root service user.
+User=ragent
+Group=ragent
+WorkingDirectory=/opt/ragent/app
+EnvironmentFile=/etc/ragent/ragent.env
+ExecStart=/opt/ragent/runtime/node /opt/ragent/app/scripts/storage-inventory-gc.mjs --apply --json --scheduled
+Nice=19
+IOSchedulingClass=idle
+IOSchedulingPriority=7
+CPUWeight=1
+IOWeight=1
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/var/lib/ragent/config /var/lib/ragent/workspace
+TimeoutStartSec=30min

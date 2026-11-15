@@ -489,13 +489,13 @@ const svcFixture = makeFixture({
   }),
 });
 const svc = await resolveSemanticContext({
-  target: { kind: 'systemd_unit', unit: 'agentoc.service', action: 'restart' },
+  target: { kind: 'systemd_unit', unit: 'ragent.service', action: 'restart' },
   caller,
   options: opts(svcFixture),
 });
 eq('service scope computed', svc.scope.computed, true);
 eq('service scope kind', svc.scope.kind, 'system');
-eq('service unit', svc.scope.unit, 'agentoc.service');
+eq('service unit', svc.scope.unit, 'ragent.service');
 eq('service definitionHash', svc.scope.definitionHash, 'sha256:unit-hash');
 eq('service impact items', svc.impact.estimatedItems, 1);
 

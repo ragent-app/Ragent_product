@@ -10,7 +10,7 @@ const source = await readFile(new URL('../static/chat/model-providers.js', impor
 const html = `<div id="modelProvidersSettingsSection"></div><div id="modelProvidersPanel"></div>
 <button id="modelProvidersOpenBtn">open</button><button id="modelProvidersAddBtn">add</button>
 <div id="modelProvidersList"></div><div id="modelProvidersStatus"></div>
-<script>window.__AGENTOC_BOOTSTRAP__={auth:{role:'owner'}};</script><script src="/providers.js"></script>`;
+<script>window.__RAGENT_BOOTSTRAP__={auth:{role:'owner'}};</script><script src="/providers.js"></script>`;
 const server = http.createServer((req, res) => {
   res.setHeader('Content-Type', req.url === '/providers.js' ? 'application/javascript' : 'text/html');
   res.end(req.url === '/providers.js' ? source : html);
@@ -61,7 +61,7 @@ try {
       };
     }, { mode });
     await page.goto(origin);
-    await page.waitForFunction(() => !!window.AgentoCModelProviders);
+    await page.waitForFunction(() => !!window.RagentModelProviders);
     await page.click('#modelProvidersAddBtn');
     await page.click('.modal-btn.primary');
     if (mode === 'start-failed') {

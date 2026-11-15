@@ -21,7 +21,7 @@ import { createProviderSyncLedger } from '../lib/provider-runtime/sync-ledger.mj
 import { applyProviderSyncRecords, listNativeProviderProfiles } from '../chat/native-provider-management.mjs';
 import { buildProviderSyncEndpointUrl } from '../lib/provider-runtime/peer-sync.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-provider-sync-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-provider-sync-'));
 const sourceDir = join(root, 'source');
 const targetDir = join(root, 'target');
 const sourceKeys = createProviderSyncKeyStore({ configDir: sourceDir });

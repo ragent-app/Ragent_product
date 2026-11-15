@@ -107,7 +107,7 @@ assert.throws(() => inspectAccountAsrWav(wav(21_000)), { code: 'asr_audio_too_lo
 const wrongRate = wav(); wrongRate.writeUInt32LE(8_000, 24);
 assert.throws(() => inspectAccountAsrWav(wrongRate), { code: 'asr_audio_format_unsupported' });
 assert.equal(ACCOUNT_ASR_MAX_AUDIO_BYTES, 1024 * 1024);
-assert.equal(resolveAccountAsrLimits('free', { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '2' }).monthlyLimitMs, 120_000);
+assert.equal(resolveAccountAsrLimits('free', { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '2' }).monthlyLimitMs, 120_000);
 assert.equal(resolveAccountAsrLimits('test').unlimited, true);
 assert.equal(resolveAccountAsrLimits('free').unlimited, undefined);
 assert.equal(estimateAccountAsrCostMicroUsd(1000), 75);
@@ -270,7 +270,7 @@ const priorConsentService = createAccountAsrService({
   repository: priorConsentRepository,
   transcribe: async () => { priorConsentProviderCalls += 1; return { text: 'must not run' }; },
   enabled: true,
-  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  env: { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '1' },
   clock: () => Date.UTC(2026, 10, 10),
 });
 await assert.rejects(() => priorConsentService.transcribeAudio({ credential,
@@ -285,7 +285,7 @@ const elevenLabsConsentService = createAccountAsrService({
   repository: elevenLabsConsentRepository,
   transcribe: async () => { elevenLabsConsentProviderCalls += 1; return { text: 'must not run' }; },
   enabled: true,
-  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  env: { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '1' },
   clock: () => Date.UTC(2026, 10, 10),
 });
 await assert.rejects(() => elevenLabsConsentService.transcribeAudio({ credential,
@@ -301,7 +301,7 @@ const asrService = createAccountAsrService({
     providerCalls += 1; providerRequestId = suppliedRequestId; return { text: '测试语音', languageCode: 'zh' };
   },
   enabled: true,
-  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  env: { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '1' },
   clock: () => Date.UTC(2026, 10, 10),
   audit: (event) => auditEvents.push(event),
 });
@@ -359,14 +359,14 @@ await unknownRepository.setConsent({ accountId: 'acct_unknown', deviceId: 'adev'
 let uncertainCalls = 0;
 const uncertainService = createAccountAsrService({ authenticateAccount: async () => ({ accountId: 'acct_unknown', deviceId: 'adev', plan: 'free' }),
   repository: unknownRepository, transcribe: async () => { uncertainCalls += 1; throw Object.assign(new Error('timeout'), { code: 'asr_provider_outcome_unknown', statusCode: 503 }); },
-  enabled: true, env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' }, clock: () => Date.UTC(2026, 10, 10) });
+  enabled: true, env: { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '1' }, clock: () => Date.UTC(2026, 10, 10) });
 const unknownId = '4d3c482d-558e-4e03-9ca5-5a65e58662e4';
 await assert.rejects(() => uncertainService.transcribeAudio({ credential, requestId: unknownId, audio }), { code: 'asr_provider_outcome_unknown' });
 await assert.rejects(() => uncertainService.transcribeAudio({ credential, requestId: unknownId, audio }), { code: 'asr_request_outcome_unknown' });
 assert.equal(uncertainCalls, 1, 'uncertain provider outcomes must not be automatically retried');
 assert.equal((await uncertainService.getUsage({ credential })).reservedMs, 1000, 'uncertain usage remains reserved');
 
-const tempDir = mkdtempSync(join(tmpdir(), 'agentoc-account-asr-'));
+const tempDir = mkdtempSync(join(tmpdir(), 'ragent-account-asr-'));
 const makeHttpRequest = (port, { method, path, headers = {}, body } = {}) => new Promise((resolve, reject) => {
   const request = http.request({ hostname: '127.0.0.1', port, method, path, headers: {
     ...(body ? { 'content-length': body.length } : {}), ...headers,
@@ -395,7 +395,7 @@ const injectedService = createAccountAsrService({
     return { text: '真实 HTTP 音频', languageCode: 'zh' };
   },
   enabled: true,
-  env: { AGENTOC_ACCOUNTS_ASR_FREE_MINUTES: '1' },
+  env: { RAGENT_ACCOUNTS_ASR_FREE_MINUTES: '1' },
   clock: () => Date.UTC(2026, 10, 10),
 });
 
@@ -473,7 +473,7 @@ try {
   rmSync(tempDir, { recursive: true, force: true });
 }
 
-const readinessTempDir = mkdtempSync(join(tmpdir(), 'agentoc-account-asr-readiness-'));
+const readinessTempDir = mkdtempSync(join(tmpdir(), 'ragent-account-asr-readiness-'));
 const unavailableSchemaServer = await startAccountsServer({ host: '127.0.0.1', port: 0, logger: { level: 'silent' },
   dataFile: join(readinessTempDir, 'accounts.json'), signingKeyFile: join(readinessTempDir, 'signing-key.json'),
   turnBrokerSigningKeyFile: join(readinessTempDir, 'turn-key.json'), publicBaseUrl: 'http://127.0.0.1:0/accounts',

@@ -9,12 +9,12 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-ai-circuit-breaker-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-ai-circuit-breaker-'));
 const ledgerDir = join(tempHome, 'operations');
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = tempHome;
-process.env.AGENTOC_OPERATION_LEDGER_DIR = ledgerDir;
+process.env.RAGENT_CONFIG_DIR = tempHome;
+process.env.RAGENT_OPERATION_LEDGER_DIR = ledgerDir;
 mkdirSync(ledgerDir, { recursive: true });
 
 const { createAiCircuitBreaker, createBackoffRetrier } = await import(
@@ -193,10 +193,10 @@ try {
     assert.equal(defaults.timeoutBackoffBaseMs, 2_000);
     assert.equal(defaults.timeoutBackoffCapMs, 30_000);
     const custom = readAiCircuitBreakerOptions({
-      AGENTOC_BACKGROUND_AI_AUTH_COOLDOWN_MS: '1000',
-      AGENTOC_BACKGROUND_AI_TIMEOUT_MAX_ATTEMPTS: '5',
-      AGENTOC_BACKGROUND_AI_OBSERVE_DEDUPE_MS: '0',
-      AGENTOC_BACKGROUND_AI_AUTH_TRIP_COUNT: 'garbage',
+      RAGENT_BACKGROUND_AI_AUTH_COOLDOWN_MS: '1000',
+      RAGENT_BACKGROUND_AI_TIMEOUT_MAX_ATTEMPTS: '5',
+      RAGENT_BACKGROUND_AI_OBSERVE_DEDUPE_MS: '0',
+      RAGENT_BACKGROUND_AI_AUTH_TRIP_COUNT: 'garbage',
     });
     assert.equal(custom.authCooldownMs, 1000);
     assert.equal(custom.timeoutMaxAttempts, 5);

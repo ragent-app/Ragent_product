@@ -87,8 +87,8 @@ export async function repairProviderLedgers({ configDir, runtimeRoot, backupDir,
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2); const value = name => args[args.indexOf(name) + 1];
   const configDir = resolve(value('--config-dir'));
-  process.env.AGENTOC_CONFIG_DIR = configDir;
-  process.env.AGENTOC_INSTANCE_ROOT = dirname(configDir);
+  process.env.RAGENT_CONFIG_DIR = configDir;
+  process.env.RAGENT_INSTANCE_ROOT = dirname(configDir);
   const expectedFiles = JSON.parse(await readFile(value('--expected-manifest'), 'utf8'));
   const report = await repairProviderLedgers({ configDir, runtimeRoot: resolve(value('--runtime-root')), backupDir: resolve(value('--backup-dir')), expectedFiles, apply: args.includes('--apply') });
   console.log(JSON.stringify(report, null, 2));

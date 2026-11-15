@@ -4,6 +4,6 @@
 // transport already owns its content type and does not need session-specific
 // privilege headers.
 
-(function attachAgentocSendHeadersCore(root) {
-  root.AgentocSendHeadersCore = Object.freeze({});
+(function attachRagentSendHeadersCore(root) {
+  root.RagentSendHeadersCore = Object.freeze({});
 })(typeof globalThis !== "undefined" ? globalThis : {});

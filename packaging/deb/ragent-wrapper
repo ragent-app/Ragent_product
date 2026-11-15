@@ -1,0 +1,82 @@
+#!/bin/sh
+set -eu
+
+SERVICE_USER_FILE=/etc/ragent/service-user
+
+trim_service_user() {
+  printf '%s' "${1:-}" | tr -d '[:space:]'
+}
+
+resolve_service_user() {
+  user="$(trim_service_user "${RAGENT_SERVICE_USER:-}")"
+  if [ -z "$user" ] && [ -r "$SERVICE_USER_FILE" ]; then
+    user="$(sed -n '1p' "$SERVICE_USER_FILE" | tr -d '[:space:]')"
+  fi
+  [ -n "$user" ] || user=ragent
+  case "$user" in
+    root|''|*[!A-Za-z0-9_.@-]*)
+      echo "Invalid Ragent service user: $user" >&2
+      exit 1
+      ;;
+  esac
+  getent passwd "$user" >/dev/null 2>&1 || {
+    echo "Ragent service user does not exist: $user" >&2
+    exit 1
+  }
+  printf '%s\n' "$user"
+}
+
+service_user="$(resolve_service_user)"
+service_home="$(getent passwd "$service_user" | awk -F: '{ print $6 }' || true)"
+[ -n "$service_home" ] || service_home=/var/lib/ragent
+
+export HOME="$service_home"
+export RAGENT_CONFIG_DIR=/var/lib/ragent/config
+export RAGENT_WORK_ROOT_DIR=/var/lib/ragent/workspace
+export RAGENT_CHAT_BASE_URL=http://127.0.0.1:7690
+export PATH=/opt/ragent/runtime:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+if [ -r /etc/ragent/connectivity.env ]; then
+  set -a
+  . /etc/ragent/connectivity.env
+  set +a
+fi
+
+# A detached Run publishes artifacts with a short-lived, session-bound
+# capability. It must not enter the owner CLI's administrator hand-off: that
+# would both require an unrelated local auth agent and risk dropping the
+# capability environment. The HTTP boundary performs the actual authorization.
+if [ -n "${RAGENT_SESSION_CONTROL_TOKEN:-}" ] \
+  && [ -n "${RAGENT_SESSION_CONTROL_RUN_ID:-}" ] \
+  && [ -n "${RAGENT_SESSION_CONTROL_SESSION_ID:-}" ] \
+  && [ -n "${RAGENT_SESSION_CONTROL_TURN_ID:-}" ]; then
+  exec /opt/ragent/runtime/node /opt/ragent/app/cli.js "$@"
+fi
+
+if [ "$(id -un)" = "$service_user" ]; then
+  exec /opt/ragent/runtime/node /opt/ragent/app/cli.js "$@"
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  exec runuser -u "$service_user" -- env HOME="$HOME" /opt/ragent/runtime/node /opt/ragent/app/cli.js "$@"
+fi
+
+if command -v pkexec >/dev/null 2>&1; then
+  # pkexec can exist but be unusable in containers or nosuid mounts. Only
+  # fall through to sudo for launcher failures; preserve a real CLI exit code.
+  set +e
+  pkexec /usr/lib/ragent/run-as-service-user "$@"
+  pkexec_status=$?
+  set -e
+  case "$pkexec_status" in
+    126|127) : ;;
+    *) exit "$pkexec_status" ;;
+  esac
+fi
+
+if command -v sudo >/dev/null 2>&1; then
+  exec sudo /usr/lib/ragent/run-as-service-user "$@"
+fi
+
+echo "Ragent pairing requires local administrator authorization." >&2
+exit 1

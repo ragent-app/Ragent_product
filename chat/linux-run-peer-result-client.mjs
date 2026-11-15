@@ -38,7 +38,7 @@ async function serverPeer(socket, helper) {
       !Number.isSafeInteger(peer.pid) || peer.pid <= 1) throw unavailable();
 }
 
-async function requestProtectedResult(request, { socketPath, peerHelper = '/usr/lib/agentoc/privileged-peercred', timeoutMs = 15000 } = {}) {
+async function requestProtectedResult(request, { socketPath, peerHelper = '/usr/lib/ragent/privileged-peercred', timeoutMs = 15000 } = {}) {
   if (process.platform !== 'linux' || !absolute(socketPath) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 60000 ||
       typeof request.runId !== 'string' || !/^run_[A-Za-z0-9_-]{8,128}$/.test(request.runId) ||
       !Number.isSafeInteger(request.launchAttempt) || request.launchAttempt < 0 || request.launchAttempt > 10000) throw unavailable();

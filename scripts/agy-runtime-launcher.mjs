@@ -16,10 +16,10 @@ import {
 } from '../lib/agy-runtime.mjs';
 import { buildPlatformSpawnSpec } from '../lib/executable-resolution.mjs';
 
-const PRIVATE_BUS_ADDRESS = 'unix:path=/agentoc-agy-private-bus';
+const PRIVATE_BUS_ADDRESS = 'unix:path=/ragent-agy-private-bus';
 const KEYRING_SCRIPT = String.raw`
 set -u
-control_dir="$AGENTOC_AGY_KEYRING_CONTROL_DIR"
+control_dir="$RAGENT_AGY_KEYRING_CONTROL_DIR"
 keyring_pid=""
 cleanup() {
   if [ -n "$keyring_pid" ]; then
@@ -27,10 +27,10 @@ cleanup() {
     wait "$keyring_pid" 2>/dev/null || true
   fi
 }
-if [ -n "\${AGENTOC_AGY_KEYRING_DAEMON:-}" ]; then
+if [ -n "\${RAGENT_AGY_KEYRING_DAEMON:-}" ]; then
   mkdir -p "$control_dir"
   chmod 700 "$control_dir"
-  "$AGENTOC_AGY_KEYRING_DAEMON" --foreground --components=secrets --control-directory="$control_dir" >/dev/null 2>&1 &
+  "$RAGENT_AGY_KEYRING_DAEMON" --foreground --components=secrets --control-directory="$control_dir" >/dev/null 2>&1 &
   keyring_pid=$!
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     [ -S "$control_dir/control" ] && break
@@ -100,7 +100,7 @@ async function main() {
     homeDir: resolveAgyHome({ environment: process.env }),
   });
   const cwd = process.cwd();
-  if (process.platform !== 'linux' || env.AGENTOC_AGY_PRIVATE_KEYRING !== '1') {
+  if (process.platform !== 'linux' || env.RAGENT_AGY_PRIVATE_KEYRING !== '1') {
     process.exitCode = await runDirect(command, rawArgs, env, cwd);
     return;
   }
@@ -120,21 +120,21 @@ async function main() {
   }
 
   const daemon = await resolveAgySupportCommand('gnome-keyring-daemon');
-  const keyringRoot = await mkdtemp(join(tmpdir(), 'agentoc-agy-keyring-'));
+  const keyringRoot = await mkdtemp(join(tmpdir(), 'ragent-agy-keyring-'));
   const controlDir = join(keyringRoot, 'control');
   await mkdir(controlDir, { recursive: true, mode: 0o700 });
   await chmod(controlDir, 0o700).catch(() => {});
   const sessionEnv = {
     ...env,
-    AGENTOC_AGY_KEYRING_CONTROL_DIR: controlDir,
-    AGENTOC_AGY_KEYRING_DAEMON: daemon || '',
+    RAGENT_AGY_KEYRING_CONTROL_DIR: controlDir,
+    RAGENT_AGY_KEYRING_DAEMON: daemon || '',
   };
   const child = spawn(dbusRunSession, [
     '--',
     '/bin/sh',
     '-c',
     KEYRING_SCRIPT,
-    'agentoc-agy-runtime',
+    'ragent-agy-runtime',
     command,
     ...rawArgs,
   ], { env: sessionEnv, cwd, stdio: 'inherit', shell: false });

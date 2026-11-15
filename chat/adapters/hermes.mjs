@@ -5,7 +5,7 @@ import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
 export const HERMES_RUNTIME_FAMILY = 'hermes-acp';
 
 // Hermes' supported automation boundary is its official ACP server.  Keep the
-// adapter deliberately thin: ACP owns message/tool framing while AgentoC owns
+// adapter deliberately thin: ACP owns message/tool framing while Ragent owns
 // the durable Run, provider home, cancellation and approval policy.
 export function createHermesAdapter() {
   const parser = createAcpEventParser({ provider: 'hermes', runtimeFamily: HERMES_RUNTIME_FAMILY });

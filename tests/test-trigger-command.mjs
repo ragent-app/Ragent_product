@@ -4,14 +4,14 @@ import http from 'http';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempRoot = mkdtempSync(join(tmpdir(), 'agentoc-trigger-command-'));
+const tempRoot = mkdtempSync(join(tmpdir(), 'ragent-trigger-command-'));
 const homeDir = join(tempRoot, 'home');
-mkdirSync(join(homeDir, '.config', 'agentoc'), { recursive: true });
-writeFileSync(join(homeDir, '.config', 'agentoc', 'auth.json'), `${JSON.stringify({ token: 'owner-token' })}\n`, 'utf8');
+mkdirSync(join(homeDir, '.config', 'ragent'), { recursive: true });
+writeFileSync(join(homeDir, '.config', 'ragent', 'auth.json'), `${JSON.stringify({ token: 'owner-token' })}\n`, 'utf8');
 process.env.HOME = homeDir;
 process.env.LOCALAPPDATA = join(tempRoot, 'local-app-data');
-process.env.AGENTOC_CONFIG_DIR = join(homeDir, '.config', 'agentoc');
-process.env.AGENTOC_SESSION_ID = 'sess-legacy';
+process.env.RAGENT_CONFIG_DIR = join(homeDir, '.config', 'ragent');
+process.env.RAGENT_SESSION_ID = 'sess-legacy';
 process.env.RAGENT_SESSION_ID = 'sess-current';
 
 const requests = [];
@@ -22,7 +22,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (url.pathname === '/' && url.searchParams.get('token') === 'owner-token') {
     res.writeHead(302, {
-      'Set-Cookie': 'agentoc_session=owner; Path=/',
+      'Set-Cookie': 'ragent_session=owner; Path=/',
       Location: '/app',
     });
     res.end();
@@ -30,7 +30,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const cookie = req.headers.cookie || '';
-  if (!cookie.includes('agentoc_session=owner')) {
+  if (!cookie.includes('ragent_session=owner')) {
     res.writeHead(403, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'forbidden' }));
     return;
@@ -130,7 +130,7 @@ assert(address && typeof address === 'object');
 const baseUrl = `http://127.0.0.1:${address.port}`;
 
 process.env.RAGENT_CHAT_BASE_URL = baseUrl;
-process.env.AGENTOC_CHAT_BASE_URL = 'http://127.0.0.1:1';
+process.env.RAGENT_CHAT_BASE_URL = 'http://127.0.0.1:1';
 
 const { runTriggerCommand } = await import('../lib/trigger-command.mjs');
 

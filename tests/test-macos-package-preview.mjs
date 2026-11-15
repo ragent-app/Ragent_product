@@ -7,7 +7,7 @@ import { inspectMacosPackagePreview, MACOS_PACKAGE_PREVIEW_MAX_BYTES } from '../
 import { prepareSemanticApproval } from '../chat/semantic-approval.mjs';
 import { resolveSemanticContext } from '../chat/semantic-resolver.mjs';
 
-const root = await mkdtemp(join(await realpath(tmpdir()), 'agentoc-macos-pkg-preview-'));
+const root = await mkdtemp(join(await realpath(tmpdir()), 'ragent-macos-pkg-preview-'));
 try {
   const projectRoot = join(root, 'project');
   await mkdir(projectRoot);

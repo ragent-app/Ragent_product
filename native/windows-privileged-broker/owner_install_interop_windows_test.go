@@ -22,7 +22,7 @@ func TestOwnerGrantNodeGoInterop(t *testing.T) {
 	}
 	cmd := exec.Command("node", filepath.Join(root, "tests", "test-windows-owner-broker-grant.mjs"))
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "AGENTOC_QA_OWNER_GRANT_INTEROP=1")
+	cmd.Env = append(os.Environ(), "RAGENT_QA_OWNER_GRANT_INTEROP=1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Node grant fixture failed: %v: %s", err, output)

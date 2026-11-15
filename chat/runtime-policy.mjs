@@ -23,12 +23,12 @@ export const MANAGER_RUNTIME_BOUNDARY_SECTION = (await readPromptAsset('runtime/
 export const DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS = await readInlinePromptAsset('runtime/codex-developer-instructions.txt');
 
 const DEFAULT_CODEX_HOME_MODE = 'managed';
-const MANAGED_CODEX_CONFIG_MARKER = '# AgentoC-managed Codex runtime home.';
+const MANAGED_CODEX_CONFIG_MARKER = '# Ragent-managed Codex runtime home.';
 const MANAGED_CODEX_HOME_NOTES = [
   MANAGED_CODEX_CONFIG_MARKER,
   '# Keep this intentionally minimal.',
-  '# AgentoC injects workflow, memory policy, and reply-style steering per run.',
-  '# Plugins stay off here because AgentoC does not rely on the Codex plugin',
+  '# Ragent injects workflow, memory policy, and reply-style steering per run.',
+  '# Plugins stay off here because Ragent does not rely on the Codex plugin',
   '# marketplace, and startup syncs can trigger extra ChatGPT-side auth/challenge',
   '# traffic in proxied environments.',
   '',
@@ -50,7 +50,7 @@ const MANAGED_CODEX_HOME_NOTES = [
   'plugins = false',
   '# The unified exec path can leave Codex waiting on an internal exec-server',
   '# child during the next turn, producing repeated reconnect retries before',
-  '# any model output appears. AgentoC already owns process isolation and',
+  '# any model output appears. Ragent already owns process isolation and',
   '# command execution at the outer runtime layer, so keep this path disabled.',
   'unified_exec = false',
   '',
@@ -80,7 +80,7 @@ function externalCodexOAuthOwnershipEnabled() {
 }
 
 function resolveExternalCodexHomeDir() {
-  const configured = trimString(process.env.AGENTOC_EXTERNAL_CODEX_HOME);
+  const configured = trimString(process.env.RAGENT_EXTERNAL_CODEX_HOME);
   return configured || PERSONAL_CODEX_HOME;
 }
 
@@ -326,7 +326,7 @@ export async function applyManagedRuntimeEnv(toolId, baseEnv = {}, options = {})
       env.CLINE_PROVIDER_SETTINGS_PATH = join(harnessHomeDir, 'settings', 'providers.json');
     }
     if (harnessId === 'kilo') env.KILO_CONFIG = join(harnessHomeDir, 'kilo.jsonc');
-    const dotenv = await readFile(join(harnessHomeDir, '.agentoc-provider.env'), 'utf8').catch(() => '');
+    const dotenv = await readFile(join(harnessHomeDir, '.ragent-provider.env'), 'utf8').catch(() => '');
     for (const line of dotenv.split(/\r?\n/)) {
       const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
       if (!match) continue;
@@ -334,7 +334,7 @@ export async function applyManagedRuntimeEnv(toolId, baseEnv = {}, options = {})
     }
     if (harnessId === 'opencode') env.OPENCODE_CONFIG = join(harnessHomeDir, 'opencode.json');
     if (harnessId === 'openhands') {
-      const openhandsEnv = await readFile(join(harnessHomeDir, '.agentoc-openhands.env'), 'utf8').catch(() => '');
+      const openhandsEnv = await readFile(join(harnessHomeDir, '.ragent-openhands.env'), 'utf8').catch(() => '');
       for (const line of openhandsEnv.split(/\r?\n/)) {
         const match = line.match(/^([A-Z][A-Z0-9_]*)=(.*)$/);
         if (!match) continue;
@@ -346,7 +346,7 @@ export async function applyManagedRuntimeEnv(toolId, baseEnv = {}, options = {})
     return env;
   }
 
-  const mode = normalizeCodexHomeMode(options.codexHomeMode || process.env.AGENTOC_CODEX_HOME_MODE);
+  const mode = normalizeCodexHomeMode(options.codexHomeMode || process.env.RAGENT_CODEX_HOME_MODE);
   if (mode === 'personal') {
     return env;
   }

@@ -2,7 +2,7 @@ import { win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function buildSharedCodexWindowsHook({ socketPath, nodePath = process.execPath,
-  scriptPath = fileURLToPath(new URL('../scripts/agentoc-codex-shared-hook.mjs', import.meta.url)),
+  scriptPath = fileURLToPath(new URL('../scripts/ragent-codex-shared-hook.mjs', import.meta.url)),
   systemDrive = process.env.SystemDrive || 'C:' } = {}) {
   if (!win32.isAbsolute(nodePath || '') || !win32.isAbsolute(scriptPath || '')
       || !/^\\\\\.\\pipe\\[^\r\n\0]+$/i.test(socketPath || '') || !/^[a-z]:$/i.test(systemDrive)) {

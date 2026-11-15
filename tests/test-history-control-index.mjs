@@ -4,13 +4,13 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-control-index-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-control-index-'));
 const instanceRoot = join(home, 'instance');
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
-process.env.AGENTOC_CONFIG_DIR = join(instanceRoot, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(instanceRoot, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
+process.env.RAGENT_INSTANCE_ROOT = instanceRoot;
+process.env.RAGENT_CONFIG_DIR = join(instanceRoot, 'config');
+process.env.RAGENT_MEMORY_DIR = join(instanceRoot, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(instanceRoot, 'workspace');
 
 const history = await import('../chat/history.mjs');
 const { createRun } = await import('../chat/runs.mjs');
@@ -53,7 +53,7 @@ try {
       kind: 'command', params: { command: 'echo ok' },
     },
     {
-      type: 'approval_request', source: 'agentoc-confirmation', approvalId: sessionApprovalId,
+      type: 'approval_request', source: 'ragent-confirmation', approvalId: sessionApprovalId,
       kind: 'confirmation', title: 'Indexed session confirmation', status: 'pending',
     },
     {
@@ -82,7 +82,7 @@ try {
   });
   assert.equal(await history.findRuntimeApprovalRequest(sessionId, runId, approvalId), null);
 
-  const indexPath = join(process.env.AGENTOC_CONFIG_DIR, 'chat-history', sessionId, 'event-lookup-index.json');
+  const indexPath = join(process.env.RAGENT_CONFIG_DIR, 'chat-history', sessionId, 'event-lookup-index.json');
   const index = JSON.parse(readFileSync(indexPath, 'utf8'));
   assert.equal(index.complete, true);
   assert.ok(Object.keys(index.entries).some((key) => key.startsWith('privileged-batch:')));

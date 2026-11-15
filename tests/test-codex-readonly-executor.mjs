@@ -9,11 +9,11 @@ import { startReadOnlyCodexExecutor } from '../chat/codex-readonly-executor.mjs'
 await assert.rejects(startReadOnlyCodexExecutor({ command: '/bin/true', cwd: '/workspace', workspace: '/workspace', hidePaths: ['/workspace'] }), TypeError);
 await assert.rejects(startReadOnlyCodexExecutor({ command: 'relative', cwd: '/workspace', workspace: '/workspace', hidePaths: ['/secret'] }), TypeError);
 
-if (process.platform !== 'linux' || process.env.AGENTOC_TEST_CODEX_EXTERNAL_EXECUTOR !== '1') {
+if (process.platform !== 'linux' || process.env.RAGENT_TEST_CODEX_EXTERNAL_EXECUTOR !== '1') {
   console.log('test-codex-readonly-executor: unit checks passed; Linux integration skipped');
 } else {
-  const command = process.env.AGENTOC_TEST_CODEX_BINARY;
-  if (!command?.startsWith('/')) throw new Error('An absolute AGENTOC_TEST_CODEX_BINARY is required');
+  const command = process.env.RAGENT_TEST_CODEX_BINARY;
+  if (!command?.startsWith('/')) throw new Error('An absolute RAGENT_TEST_CODEX_BINARY is required');
   const root = await mkdtemp(join(tmpdir(), 'ragent-codex-executor-'));
   const workspace = join(root, 'workspace'), hidden = join(root, 'hidden');
   await mkdir(workspace); await mkdir(hidden);

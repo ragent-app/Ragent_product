@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Import config-bound modules only after selecting an isolated Project catalog.
-const root = await mkdtemp(join(tmpdir(), 'agentoc-bootstrap-integration-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
+const root = await mkdtemp(join(tmpdir(), 'ragent-bootstrap-integration-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
 try {
   const [{ createProjectBootstrap }, { listProjectRecords }] = await Promise.all([
     import('../chat/project-bootstrap.mjs'), import('../chat/projects.mjs'),

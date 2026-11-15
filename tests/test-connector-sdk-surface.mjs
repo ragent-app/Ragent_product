@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-connector-surface-'))
-const configDir = join(home, '.config', 'agentoc')
+const home = mkdtempSync(join(tmpdir(), 'ragent-connector-surface-'))
+const configDir = join(home, '.config', 'ragent')
 process.env.HOME = home
-process.env.AGENTOC_CONFIG_DIR = configDir
+process.env.RAGENT_CONFIG_DIR = configDir
 
 const {
   getConnectorSurfaceNonce,
@@ -80,8 +80,8 @@ try {
 
   const mountHeaders = {
     'x-forwarded-prefix': '/connectors/demo',
-    'x-agentoc-connector-mount': '/connectors/demo',
-    'x-agentoc-csp-nonce': 'nonce-test-123',
+    'x-ragent-connector-mount': '/connectors/demo',
+    'x-ragent-csp-nonce': 'nonce-test-123',
   }
 
   const descriptorRes = await fetch(`${server.baseUrl}/surface`, { headers: mountHeaders })

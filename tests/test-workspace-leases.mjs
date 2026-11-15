@@ -16,8 +16,8 @@ import { DatabaseSync } from 'node:sqlite';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-workspace-leases-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-workspace-leases-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   acquireWorkspaceLease,
@@ -172,7 +172,7 @@ try {
   ok(activeNow.some((lease) => lease.leaseId === read2.leaseId), 'second read lease shows up as active');
 
   // same realpath, different workspaceId/projectId -> same lockKey conflict
-  const sharedRoot = makeDir('agentoc-lease-shared-root-');
+  const sharedRoot = makeDir('ragent-lease-shared-root-');
   const project1 = await createProject({ name: 'Lease P1', rootPath: sharedRoot });
   const project2 = await createProject({ name: 'Lease P2', rootPath: sharedRoot });
   const sharedWorkspace = await ensureWorkspaceForRoot(sharedRoot);
@@ -407,11 +407,11 @@ try {
       const mod = await import(${JSON.stringify(moduleUrl)});
       try {
         const lease = await mod.acquireWorkspaceLease({
-          lockKey: process.env.AGENTOC_TEST_LOCK_KEY,
+          lockKey: process.env.RAGENT_TEST_LOCK_KEY,
           mode: 'write',
           workspaceId: 'ws_race',
           projectId: 'prj_race',
-          runId: process.env.AGENTOC_TEST_RUN_ID,
+          runId: process.env.RAGENT_TEST_RUN_ID,
         });
         if (lease && lease.leaseId) { console.log('OK'); process.exit(0); }
         console.log('UNEXPECTED_RESULT'); process.exit(3);
@@ -428,9 +428,9 @@ try {
         cwd: repoRoot,
         env: {
           ...process.env,
-          AGENTOC_CONFIG_DIR: configDir,
-          AGENTOC_TEST_LOCK_KEY: 'sha256:cross-process-race',
-          AGENTOC_TEST_RUN_ID: runId,
+          RAGENT_CONFIG_DIR: configDir,
+          RAGENT_TEST_LOCK_KEY: 'sha256:cross-process-race',
+          RAGENT_TEST_RUN_ID: runId,
         },
       });
       let stdout = '';
@@ -453,7 +453,7 @@ try {
   // ── legacy synthetic leases ───────────────────────────────────────────────
   beginSection('legacy-synthetic');
 
-  const legacyRoot = makeDir('agentoc-lease-legacy-root-');
+  const legacyRoot = makeDir('ragent-lease-legacy-root-');
   const activeRunId = 'run_legacy_active';
   const terminalRunId = 'run_legacy_terminal';
   const activeDir = join(configDir, 'chat-runs', activeRunId);

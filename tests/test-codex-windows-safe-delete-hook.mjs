@@ -5,9 +5,9 @@ import path from 'node:path';
 import { buildCodexWindowsSafeDeleteHookDecision, verifyCodexWindowsSafeDeleteApproval } from '../chat/codex-windows-safe-delete-hook.mjs';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
-const helperPath = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
+const helperPath = process.env.RAGENT_TEST_SAFE_DELETE_BINARY;
 if (process.platform !== 'win32' || !helperPath) { console.log('codex-windows-safe-delete-hook: skipped (opt-in Windows fixture)'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-codex-delete-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-codex-delete-'));
 const alternate = path.join(root, 'alternate'), target = path.join(root, 'build');
 await mkdir(alternate); await mkdir(target); await writeFile(path.join(target, 'file'), 'fixture');
 const runId = 'fixture-run', itemId = 'item-1';

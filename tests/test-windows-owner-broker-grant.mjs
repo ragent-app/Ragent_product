@@ -22,7 +22,7 @@ const keys = generateKeyPairSync('ed25519');
 for (const riskMode of ['recommended', 'full-auto']) {
   const prepared = await prepare('winget install Vendor.App --scope user');
   const { grant, signature } = createWindowsOwnerBrokerGrant({ prepared, riskMode, kid, privateKey: keys.privateKey, health, identity });
-  const bytes = Buffer.concat([Buffer.from('AgentoC Windows owner auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
+  const bytes = Buffer.concat([Buffer.from('Ragent Windows owner auto install v1\0'), Buffer.from(JSON.stringify(grant))]);
   assert.equal(verify(null, bytes, keys.publicKey, Buffer.from(signature, 'base64url')), true);
   assert.equal(grant.ownerSid, identity.ownerSid);
   assert.equal(grant.installScope, 'user');
@@ -57,7 +57,7 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal(sends, 1);
 }
 console.log('windows-owner-broker-grant: signed binding and scope checks passed');
-if (process.env.AGENTOC_QA_OWNER_GRANT_INTEROP === '1') {
+if (process.env.RAGENT_QA_OWNER_GRANT_INTEROP === '1') {
   const signed = createWindowsOwnerBrokerGrant({ prepared, riskMode: 'recommended', kid, privateKey: keys.privateKey, health, identity });
   process.stdout.write(`OWNER_GRANT_FIXTURE=${JSON.stringify({ ...signed, publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).toString('base64url') })}\n`);
 }

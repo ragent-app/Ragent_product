@@ -4,11 +4,11 @@ import { tmpdir, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 
-const temp = await mkdtemp(join(tmpdir(), 'agentoc-folder-picker-'));
-process.env.AGENTOC_CONFIG_DIR = join(temp, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
-await writeFile(join(process.env.AGENTOC_CONFIG_DIR, 'auth.json'), JSON.stringify({
+const temp = await mkdtemp(join(tmpdir(), 'ragent-folder-picker-'));
+process.env.RAGENT_CONFIG_DIR = join(temp, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
+await writeFile(join(process.env.RAGENT_CONFIG_DIR, 'auth.json'), JSON.stringify({
   username: 'testowner', passwordHash: 'not-a-real-hash',
 }));
 const { handleControlRoutes } = await import('../chat/router-control-routes.mjs');
@@ -36,9 +36,9 @@ try {
   assert.equal(created.body.path, join(temp, 'new-folder'));
   assert.equal((await call('/api/browse/mkdir', 'POST', { path: temp, name: 'new-folder' })).statusCode, 409);
   assert.equal((await call('/api/browse/mkdir', 'POST', { path: temp, name: '../escape' })).statusCode, 400);
-  if (process.env.AGENTOC_TEST_READONLY_PARENT) {
+  if (process.env.RAGENT_TEST_READONLY_PARENT) {
     const denied = await call('/api/browse/mkdir', 'POST', {
-      path: process.env.AGENTOC_TEST_READONLY_PARENT, name: 'agentoc-folder-picker-readonly-probe',
+      path: process.env.RAGENT_TEST_READONLY_PARENT, name: 'ragent-folder-picker-readonly-probe',
     });
     assert.equal(denied.statusCode, 403);
     assert.match(denied.body.error, /read-only|cannot create/i);

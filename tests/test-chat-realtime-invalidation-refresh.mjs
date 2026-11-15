@@ -154,7 +154,7 @@ function assertJsonEqual(actual, expected, message) {
       scrollTop: 0,
       clientHeight: 100,
     },
-    AgentoCTimelineRuntime: {
+    RagentTimelineRuntime: {
       renderIncremental(events, options) {
         projected.push({ events, options });
         return { latestSeq: 9 };

@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 
 HELPER_PATH = pathlib.Path(__file__).resolve().parents[1] / "infrastructure" / "admin-console" / "helper.py"
-SPEC = importlib.util.spec_from_file_location("agentoc_admin_helper", HELPER_PATH)
+SPEC = importlib.util.spec_from_file_location("ragent_admin_helper", HELPER_PATH)
 HELPER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HELPER)
 
@@ -20,7 +20,7 @@ SPEC.loader.exec_module(HELPER)
 class AdminHelperValidationTests(unittest.TestCase):
     def test_service_restart_uses_canonical_unit_and_accepts_cached_old_name(self):
         with patch.object(HELPER, "_service_restart", return_value={"active": True, "since": "now"}) as restart, patch.object(HELPER, "_audit"):
-            for supplied in ("ragent-accounts", "agentoc-accounts"):
+            for supplied in ("ragent-accounts", "ragent-accounts"):
                 result = HELPER._restart_service("owner", {"service": supplied})
                 self.assertEqual(result["service"], "ragent-accounts")
                 restart.assert_called_with("ragent-accounts.service")
@@ -37,7 +37,7 @@ class AdminHelperValidationTests(unittest.TestCase):
                                               {'sum': {'ingressBytes': 10, 'egressBytes': 15}}]}]}}}).encode())
         connection = SimpleNamespace(request=lambda *args, **kwargs: None, getresponse=lambda: response, close=lambda: None)
         with patch.object(HELPER.pathlib.Path, 'read_text', return_value=HELPER.json.dumps(config)), \
-             patch.object(HELPER, 'read_env', return_value={'AGENTOC_TURN_KEY_NAME': 'b' * 32}), \
+             patch.object(HELPER, 'read_env', return_value={'RAGENT_TURN_KEY_NAME': 'b' * 32}), \
              patch.object(HELPER.http.client, 'HTTPSConnection', return_value=connection):
             result = HELPER._turn_analytics(HELPER.dt.datetime(2026, 11, 12, tzinfo=HELPER.dt.timezone.utc))
         self.assertTrue(result['available'])
@@ -49,7 +49,7 @@ class AdminHelperValidationTests(unittest.TestCase):
         response = SimpleNamespace(status=200, read=lambda _limit: b'{"errors":[{"message":"permission denied"}]}')
         connection = SimpleNamespace(request=lambda *args, **kwargs: None, getresponse=lambda: response, close=lambda: None)
         with patch.object(HELPER.pathlib.Path, 'read_text', return_value=HELPER.json.dumps(config)), \
-             patch.object(HELPER, 'read_env', return_value={'AGENTOC_TURN_KEY_NAME': 'b' * 32}), \
+             patch.object(HELPER, 'read_env', return_value={'RAGENT_TURN_KEY_NAME': 'b' * 32}), \
              patch.object(HELPER.http.client, 'HTTPSConnection', return_value=connection):
             result = HELPER._turn_analytics(HELPER.dt.datetime(2026, 11, 12, tzinfo=HELPER.dt.timezone.utc))
         self.assertEqual(result['status'], 'query_failed')
@@ -77,7 +77,7 @@ class AdminHelperValidationTests(unittest.TestCase):
             def close(self): pass
         original_timer = signal.setitimer
         def short_timer(which, seconds, *args): return original_timer(which, 0.1 if seconds else 0, *args)
-        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "test", "AGENTOC_ACCOUNTS_ASR_ENABLED": "1"}), \
+        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "test", "RAGENT_ACCOUNTS_ASR_ENABLED": "1"}), \
              patch.object(HELPER.http.client, "HTTPSConnection", return_value=Slow()), \
              patch.object(HELPER, "_audit"), patch.object(signal, "setitimer", side_effect=short_timer):
             start = time.monotonic()
@@ -87,11 +87,11 @@ class AdminHelperValidationTests(unittest.TestCase):
             self.assertLess(time.monotonic()-start, 2)
 
     def test_asr_settings_are_validated_and_reverted_if_restart_fails(self):
-        folder = pathlib.Path("G:/AgentoC/.tmp/admin-console")
+        folder = pathlib.Path("G:/Ragent/.tmp/admin-console")
         folder.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=folder) as directory:
             env_file = pathlib.Path(directory) / "accounts.env"
-            original = "OPENAI_API_KEY=private-key\nAGENTOC_ACCOUNTS_ASR_FREE_MINUTES=15\n"
+            original = "OPENAI_API_KEY=private-key\nRAGENT_ACCOUNTS_ASR_FREE_MINUTES=15\n"
             env_file.write_text(original, encoding="utf-8")
             values = {"freeMinutes": 0, "plusMinutes": 100, "proMinutes": 500, "timeoutMs": 30000}
             def write(path, content, **_kwargs): pathlib.Path(path).write_text(content, encoding="utf-8")
@@ -123,7 +123,7 @@ class AdminHelperValidationTests(unittest.TestCase):
                 return SimpleNamespace(status=200, read=lambda _limit: b'{"text":"hello"}')
             def close(self): pass
         connection = Connection()
-        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "private-key", "AGENTOC_ACCOUNTS_ASR_ENABLED": "1"}), \
+        with patch.object(HELPER, "read_env", return_value={"OPENAI_API_KEY": "private-key", "RAGENT_ACCOUNTS_ASR_ENABLED": "1"}), \
              patch.object(HELPER.http.client, "HTTPSConnection", return_value=connection) as connect, \
              patch.object(HELPER, "_audit") as audit:
             with self.assertRaises(HELPER.AdminError):
@@ -147,8 +147,8 @@ class AdminHelperValidationTests(unittest.TestCase):
         source = "PORT=7700\n# keep this\nOPENAI_API_KEY=old-value\n"
         updated = HELPER.replace_env_value_text(source, "OPENAI_API_KEY", "new-value")
         self.assertEqual(updated, "PORT=7700\n# keep this\nOPENAI_API_KEY=new-value\n")
-        added = HELPER.replace_env_value_text(source, "AGENTOC_ACCOUNTS_ASR_ENABLED", "0")
-        self.assertTrue(added.endswith("AGENTOC_ACCOUNTS_ASR_ENABLED=0\n"))
+        added = HELPER.replace_env_value_text(source, "RAGENT_ACCOUNTS_ASR_ENABLED", "0")
+        self.assertTrue(added.endswith("RAGENT_ACCOUNTS_ASR_ENABLED=0\n"))
 
     def test_env_replace_rejects_line_injection_and_duplicate_target(self):
         with self.assertRaises(HELPER.AdminError):
@@ -175,7 +175,7 @@ class AdminHelperValidationTests(unittest.TestCase):
             ),
         )
         with patch.object(HELPER, "_run", return_value=result):
-            status = HELPER._systemd_status("agentoc-connectivity-gateway.service")
+            status = HELPER._systemd_status("ragent-connectivity-gateway.service")
         self.assertTrue(status["active"])
         self.assertEqual(status["pid"], 1234)
         self.assertIsNone(status["fragmentPath"])
@@ -203,8 +203,8 @@ class AdminHelperValidationTests(unittest.TestCase):
 
     def test_diagnostics_are_read_only_and_mark_real_delivery_checks_skipped(self):
         env = {
-            "AGENTOC_ACCOUNTS_HOST": "127.0.0.1", "PORT": "7700",
-            "AGENTOC_TURN_BROKER_HOST": "127.0.0.1", "AGENTOC_TURN_BROKER_PORT": "7710",
+            "RAGENT_ACCOUNTS_HOST": "127.0.0.1", "PORT": "7700",
+            "RAGENT_TURN_BROKER_HOST": "127.0.0.1", "RAGENT_TURN_BROKER_PORT": "7710",
         }
 
         def fake_http(_host, _port, route):
@@ -240,7 +240,7 @@ class AdminHelperValidationTests(unittest.TestCase):
         self.assertEqual(error.exception.code, "LOCAL_ENDPOINT_NOT_ALLOWED")
 
     def test_metrics_history_is_bounded_and_calculates_process_cpu_delta(self):
-        metrics_directory = pathlib.Path("G:/AgentoC/.tmp/admin-console")
+        metrics_directory = pathlib.Path("G:/Ragent/.tmp/admin-console")
         metrics_directory.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=metrics_directory) as directory:
             metrics_file = pathlib.Path(directory) / "metrics.json"
@@ -248,7 +248,7 @@ class AdminHelperValidationTests(unittest.TestCase):
             def write_metrics(path, content, **_kwargs):
                 pathlib.Path(path).write_text(content, encoding="utf-8")
 
-            first_services = {"agentoc-accounts": {"memoryBytes": 1024, "cpuUsageNs": 1_000_000_000, "tasks": 3, "restartCount": 0}}
+            first_services = {"ragent-accounts": {"memoryBytes": 1024, "cpuUsageNs": 1_000_000_000, "tasks": 3, "restartCount": 0}}
             second_services = {"ragent-accounts": {"memoryBytes": 2048, "cpuUsageNs": 3_000_000_000, "tasks": 4, "restartCount": 0}}
             with (
                 patch.object(HELPER, "METRICS_FILE", metrics_file),

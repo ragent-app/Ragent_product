@@ -92,7 +92,7 @@ function writeProxyResponse(res, response, body, revision) {
     'X-Content-Type-Options': 'nosniff',
     ...(response.headers.get('etag') ? { ETag: response.headers.get('etag') } : {}),
     ...(response.headers.get('retry-after') ? { 'Retry-After': response.headers.get('retry-after') } : {}),
-    ...(revision !== undefined && revision !== null ? { 'X-AgentoC-Target-Revision': String(revision) } : {}),
+    ...(revision !== undefined && revision !== null ? { 'X-Ragent-Target-Revision': String(revision) } : {}),
   };
   res.writeHead(response.status, headers);
   res.end(body);
@@ -142,8 +142,8 @@ export async function proxyToTarget({ targetId, requestId, idempotencyKey, metho
         Accept: text(headers?.accept, 256) || 'application/json',
         ...(text(headers?.['content-type'], 256) ? { 'Content-Type': text(headers['content-type'], 256) } : {}),
         ...(text(headers?.['if-none-match'], 512) ? { 'If-None-Match': text(headers['if-none-match'], 512) } : {}),
-        'X-AgentoC-Target-Grant': authorization.grant,
-        'X-AgentoC-Target-Source': text(authorization?.claims?.sourceInstanceId, 160),
+        'X-Ragent-Target-Grant': authorization.grant,
+        'X-Ragent-Target-Source': text(authorization?.claims?.sourceInstanceId, 160),
       },
       ...(body !== undefined && body !== null && method !== 'GET' ? { body } : {}),
     });
@@ -287,7 +287,7 @@ export async function handleTargetRuntimeGatewayRoutes({
         fetchImpl,
         authorizeImpl,
       });
-      writeProxyResponse(res, response, body, response.headers.get('x-agentoc-target-revision'));
+      writeProxyResponse(res, response, body, response.headers.get('x-ragent-target-revision'));
     } catch (error) {
       writeJson(res, error.statusCode || 503, {
         error: error.message || 'Target runtime is unavailable.',
@@ -335,7 +335,7 @@ export async function handleTargetRuntimeGatewayRoutes({
         fetchImpl,
         authorizeImpl,
       });
-      writeProxyResponse(res, response, body, response.headers.get('x-agentoc-target-revision'));
+      writeProxyResponse(res, response, body, response.headers.get('x-ragent-target-revision'));
     } catch (error) {
       writeJson(res, error.statusCode || 503, {
         error: error.message || 'Target runtime summary events are unavailable',
@@ -384,7 +384,7 @@ export async function handleTargetRuntimeGatewayRoutes({
         fetchImpl,
         authorizeImpl,
       });
-      writeProxyResponse(res, response, responseBody, response.headers.get('x-agentoc-target-revision'));
+      writeProxyResponse(res, response, responseBody, response.headers.get('x-ragent-target-revision'));
     } catch (error) {
       writeJson(res, error.statusCode || 503, {
         error: error.message || 'Target runtime request failed.',

@@ -29,9 +29,9 @@ function readPositiveBytes(value, fallback) {
 
 export function resolveRunnerCapacityLimits(environment = process.env) {
   return {
-    maxConcurrentRuns: readPositiveInt(environment?.AGENTOC_RUN_CAPACITY_MAX_CONCURRENT, DEFAULTS.maxConcurrentRuns),
-    maxMemoryBytes: readPositiveBytes(environment?.AGENTOC_RUN_CAPACITY_MAX_MEMORY_BYTES, DEFAULTS.maxMemoryBytes),
-    maxTasks: readPositiveInt(environment?.AGENTOC_RUN_CAPACITY_MAX_TASKS, DEFAULTS.maxTasks),
+    maxConcurrentRuns: readPositiveInt(environment?.RAGENT_RUN_CAPACITY_MAX_CONCURRENT, DEFAULTS.maxConcurrentRuns),
+    maxMemoryBytes: readPositiveBytes(environment?.RAGENT_RUN_CAPACITY_MAX_MEMORY_BYTES, DEFAULTS.maxMemoryBytes),
+    maxTasks: readPositiveInt(environment?.RAGENT_RUN_CAPACITY_MAX_TASKS, DEFAULTS.maxTasks),
   };
 }
 
@@ -43,13 +43,13 @@ function parseCgroupNumber(value) {
 }
 
 function runnerUnitName(value) {
-  return /^agentoc-runner-run_[A-Za-z0-9_-]+\.service$/.test(value);
+  return /^ragent-runner-run_[A-Za-z0-9_-]+\.service$/.test(value);
 }
 
 export async function readLinuxRunnerFleetSnapshot({
   roots = [
-    '/sys/fs/cgroup/agentoc.slice/agentoc-runners.slice',
-    '/sys/fs/cgroup/agentoc-runners.slice',
+    '/sys/fs/cgroup/ragent.slice/ragent-runners.slice',
+    '/sys/fs/cgroup/ragent-runners.slice',
   ],
   readFileImpl = readFile,
   readdirImpl = readdir,
@@ -87,7 +87,7 @@ export async function checkRunnerCapacity({
   environment = process.env,
   readSnapshot = null,
 } = {}) {
-  if (String(environment?.AGENTOC_RUN_CAPACITY_GUARD || 'on').trim().toLowerCase() === 'off') {
+  if (String(environment?.RAGENT_RUN_CAPACITY_GUARD || 'on').trim().toLowerCase() === 'off') {
     return { accepted: true, reasons: [], limits: resolveRunnerCapacityLimits(environment), snapshot: null, bypassed: true };
   }
   const snapshot = typeof readSnapshot === 'function'

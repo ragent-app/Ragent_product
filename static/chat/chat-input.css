@@ -381,7 +381,7 @@ body.composer-fullscreen-open .messages::-webkit-scrollbar {
 }
 
 /* Vditor supplies the editable Markdown engine. Keep its WYSIWYG surface
-   visually inside AgentoC's composer shell; the library's toolbar, border,
+   visually inside Ragent's composer shell; the library's toolbar, border,
    panel background, and default editor chrome are intentionally removed. */
 .composer-markdown-editor.vditor,
 .composer-markdown-editor .vditor,

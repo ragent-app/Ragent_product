@@ -7,8 +7,8 @@
 // turn that list into transcript DOM: one item id owns one root node, and a
 // revision updates that root in place.
 
-(function attachAgentoCTimelineRuntime(root) {
-  const Projector = root.AgentoCTimelineProjector?.TimelineProjector;
+(function attachRagentTimelineRuntime(root) {
+  const Projector = root.RagentTimelineProjector?.TimelineProjector;
   let projector = null;
   let activeSessionId = "";
   const MAX_CACHED_PROJECTORS = 8;
@@ -65,8 +65,8 @@
     }));
   }
 
-  if (typeof root.agentocGetTimelineRuntimeMetrics !== "function") {
-    root.agentocGetTimelineRuntimeMetrics = timelineMetricsSnapshot;
+  if (typeof root.ragentGetTimelineRuntimeMetrics !== "function") {
+    root.ragentGetTimelineRuntimeMetrics = timelineMetricsSnapshot;
   }
 
   function currentSession() {
@@ -111,7 +111,7 @@
     itemNodes.clear();
     syntheticItemIds.clear();
     if (removeDetached) removeDetachedTranscriptNodes(container);
-    root.AgentoCStreamingPresentation?.cancel?.();
+    root.RagentStreamingPresentation?.cancel?.();
   }
 
   function rememberProjector(sessionId, state) {
@@ -139,8 +139,8 @@
       discardPendingIncrementalCommit(activeSessionId);
       if (projector && activeSessionId) rememberProjector(activeSessionId, projector);
       clearItemNodes({ removeDetached: Boolean(projector && activeSessionId !== normalized) });
-      root.agentocClearSessionEventBlockCaches?.(activeSessionId);
-      if (activeSessionId) root.agentocCancelSessionEventBodyFetches?.(activeSessionId);
+      root.ragentClearSessionEventBlockCaches?.(activeSessionId);
+      if (activeSessionId) root.ragentCancelSessionEventBodyFetches?.(activeSessionId);
       activeSessionId = normalized;
       projector = takeCachedProjector(normalized)
         || (Projector ? new Projector({ sessionId: normalized }) : null);
@@ -151,7 +151,7 @@
 
   function reset(sessionId = "") {
     discardPendingIncrementalCommit();
-    root.agentocClearSessionEventCaches?.(activeSessionId);
+    root.ragentClearSessionEventCaches?.(activeSessionId);
     projectorCache.delete(activeSessionId);
     projectorCache.delete(normalizeSessionId(sessionId));
     clearItemNodes();
@@ -172,8 +172,8 @@
     if (activeSessionId !== normalized) {
       if (projector && activeSessionId) rememberProjector(activeSessionId, projector);
       clearItemNodes({ removeDetached: Boolean(projector && activeSessionId !== normalized) });
-      root.agentocClearSessionEventBlockCaches?.(activeSessionId);
-      if (activeSessionId) root.agentocCancelSessionEventBodyFetches?.(activeSessionId);
+      root.ragentClearSessionEventBlockCaches?.(activeSessionId);
+      if (activeSessionId) root.ragentCancelSessionEventBodyFetches?.(activeSessionId);
       activeSessionId = normalized;
     }
     projector = cached;
@@ -462,8 +462,8 @@
     }
     if (isAssistantMessageItem(item, event)
       && item.completed !== true
-      && typeof root.AgentoCStreamingPresentation?.decorateStreamingMessageNode === "function") {
-      root.AgentoCStreamingPresentation.decorateStreamingMessageNode(target);
+      && typeof root.RagentStreamingPresentation?.decorateStreamingMessageNode === "function") {
+      root.RagentStreamingPresentation.decorateStreamingMessageNode(target);
     }
     if (item.kind === "operation") updateOperationIndexes(event, target);
     if (!existing) itemNodes.set(item.id, target);
@@ -544,7 +544,7 @@
 
   function startSyntheticPresentation(item, event, node) {
     if (!node || syntheticItemIds.has(item.id)) return false;
-    const presentation = root.AgentoCStreamingPresentation;
+    const presentation = root.RagentStreamingPresentation;
     if (typeof presentation?.startSyntheticAssistantMessageInNode !== "function") return false;
     const started = presentation.startSyntheticAssistantMessageInNode(node, event, {
       onComplete: (completedNode) => {
@@ -843,9 +843,9 @@
     // re-open the sheet and visibly flash. Only a terminal status belonging to
     // the pending decision's own run may clear it.
     const pendingDecisionSnapshot = () => {
-      const pending = root.AgentoCDecisions?.getPending?.();
-      const pendingBatch = root.AgentoCDecisions?.getPendingBatch?.();
-      const pendingAction = root.AgentoCDecisions?.getPendingAction?.();
+      const pending = root.RagentDecisions?.getPending?.();
+      const pendingBatch = root.RagentDecisions?.getPendingBatch?.();
+      const pendingAction = root.RagentDecisions?.getPendingAction?.();
       const decisions = [pending, pendingBatch, pendingAction].filter(Boolean);
       const runIds = new Set(decisions
         .map((event) => String(event?.runId || "").trim())
@@ -863,7 +863,7 @@
         // Usage is metadata, not a transcript item. Preserve its context
         // update even though the projector intentionally omits its row.
         root.renderUsageInto?.(null, event, { updateContext: true });
-        root.AgentoCRunActivity?.applyEvent?.(event);
+        root.RagentRunActivity?.applyEvent?.(event);
         continue;
       }
       if (
@@ -872,9 +872,9 @@
         || type === "attachment_delivery"
         || type === "plan"
       ) {
-        root.AgentoCRunActivity?.noteFormalOutput?.(event);
+        root.RagentRunActivity?.noteFormalOutput?.(event);
       } else {
-        root.AgentoCRunActivity?.applyEvent?.(event);
+        root.RagentRunActivity?.applyEvent?.(event);
       }
 
       const liveId = renderOptions.approvalRequestLiveId;
@@ -883,20 +883,20 @@
         || (decisionEventId && decisionEventId === String(liveId).trim());
       if (type === "approval_request") {
         if (decisionEventMatchesLive && !regularApprovalIsShadowed(event)) {
-          root.AgentoCDecisions?.noteRequest?.(event, { sessionId });
+          root.RagentDecisions?.noteRequest?.(event, { sessionId });
         }
       } else if (type === "approval_response") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.noteResponse?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.noteResponse?.(event, { sessionId });
       } else if (type === "privileged_batch_request") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.notePrivilegedBatch?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.notePrivilegedBatch?.(event, { sessionId });
       } else if (type === "privileged_batch_response") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.notePrivilegedBatchResponse?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.notePrivilegedBatchResponse?.(event, { sessionId });
       } else if (type === "approved_action_batch_request") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.noteApprovedAction?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.noteApprovedAction?.(event, { sessionId });
       } else if (type === "approved_action_state") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.noteApprovedActionState?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.noteApprovedActionState?.(event, { sessionId });
       } else if (type === "approved_action_batch_response") {
-        if (decisionEventMatchesLive) root.AgentoCDecisions?.noteApprovedActionResolution?.(event, { sessionId });
+        if (decisionEventMatchesLive) root.RagentDecisions?.noteApprovedActionResolution?.(event, { sessionId });
       } else if (type === "run_regenerate") {
         root.foldAssistantRepliesIntoVersionRail?.(event?.parentRequestId || "");
         if (event?.editResend === true) {
@@ -914,9 +914,9 @@
         if (planApprovalId && String(event?.state || "").trim().toLowerCase() === "awaiting_decision"
           && (liveId == null || planApprovalId === String(liveId))) {
           const sheetEvent = root.buildPlanApprovalRequestEvent?.(event);
-          if (sheetEvent) root.AgentoCDecisions?.noteRequest?.(sheetEvent, { sessionId });
+          if (sheetEvent) root.RagentDecisions?.noteRequest?.(sheetEvent, { sessionId });
         } else if (planApprovalId && root.isPlanSheetDismissState?.(event)) {
-          root.AgentoCDecisions?.noteResponse?.({ approvalId: planApprovalId }, { sessionId });
+          root.RagentDecisions?.noteResponse?.({ approvalId: planApprovalId }, { sessionId });
         }
       } else if (type === "status") {
         const statusText = String(event?.content || "").trim().toLowerCase();
@@ -939,7 +939,7 @@
         || pending.runIds.size === 0
         || !pending.runIds.has(statusRunId)
       );
-      if (!protectsLiveDecision) root.AgentoCDecisions?.reset?.();
+      if (!protectsLiveDecision) root.RagentDecisions?.reset?.();
     }
   }
 
@@ -1077,7 +1077,7 @@
     return snapshot;
   }
 
-  root.AgentoCTimelineRuntime = Object.freeze({
+  root.RagentTimelineRuntime = Object.freeze({
     reset,
     restoreCachedSession,
     renderBatch,

@@ -15,16 +15,16 @@ const result = spawnSync('node', ['scripts/install-micro-agent.mjs', '--tool-id'
   cwd: repoRoot,
   env: {
     ...process.env,
-    AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-    AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-    AGENTOC_CONFIG_DIR: "",
+    RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+    RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+    RAGENT_CONFIG_DIR: "",
     HOME: homeDir,
   },
   encoding: 'utf8',
 });
 
 assert.equal(result.status, 0, result.stderr || result.stdout);
-const toolsPath = join(homeDir, '.config', 'agentoc', 'tools.json');
+const toolsPath = join(homeDir, '.config', 'ragent', 'tools.json');
 const tools = JSON.parse(readFileSync(toolsPath, 'utf8'));
 const record = tools.find((tool) => tool.id === 'micro-agent-test');
 

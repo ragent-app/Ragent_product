@@ -38,7 +38,7 @@ jobs:
       - name: Start isolated source instance
         shell: bash
         run: |
-          node scripts/launch-test-instance.mjs --port 45678 --ttl 60 > "$RUNNER_TEMP/agentoc-smoke.log" 2>&1 &
+          node scripts/launch-test-instance.mjs --port 45678 --ttl 60 > "$RUNNER_TEMP/ragent-smoke.log" 2>&1 &
           launcher_pid=$!
           trap 'kill "$launcher_pid" 2>/dev/null || true; wait "$launcher_pid" 2>/dev/null || true' EXIT
           ready=0
@@ -47,6 +47,6 @@ jobs:
             if ! kill -0 "$launcher_pid" 2>/dev/null; then break; fi
             sleep 1
           done
-          if [ "$ready" -ne 1 ]; then cat "$RUNNER_TEMP/agentoc-smoke.log"; exit 1; fi
+          if [ "$ready" -ne 1 ]; then cat "$RUNNER_TEMP/ragent-smoke.log"; exit 1; fi
           curl --fail --silent http://127.0.0.1:45678/ > /dev/null
           curl --fail --silent http://127.0.0.1:45678/chat/bootstrap.js > /dev/null

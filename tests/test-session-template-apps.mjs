@@ -4,17 +4,17 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-template-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-template-'));
 const workspace = join(home, 'workspace');
-const configDir = join(home, '.config', 'agentoc');
-const memoryDir = join(home, '.agentoc', 'memory');
+const configDir = join(home, '.config', 'ragent');
+const memoryDir = join(home, '.ragent', 'memory');
 
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = memoryDir;
-process.env.AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
-process.env.AGENTOC_MEMORY_WRITEBACK = 'off';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = memoryDir;
+process.env.RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER = '1';
+process.env.RAGENT_MEMORY_WRITEBACK = 'off';
 
 mkdirSync(configDir, { recursive: true });
 mkdirSync(memoryDir, { recursive: true });

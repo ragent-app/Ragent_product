@@ -7,8 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-source-context-'));
-const configDir = join(home, '.config', 'agentoc');
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-source-context-'));
+const configDir = join(home, '.config', 'ragent');
 const binDir = join(home, '.local', 'bin');
 const fakeCodexPath = join(binDir, 'fake-codex');
 

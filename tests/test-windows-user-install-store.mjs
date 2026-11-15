@@ -6,13 +6,13 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateKeyPairSync } from 'node:crypto';
 
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-user-install-store-'));
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-user-install-store-'));
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { createWindowsUserInstallStore } = await import('../chat/windows-user-install-store.mjs');
 const { bindWindowsRunExecutionIdentity } = await import('../chat/windows-run-identity.mjs');
@@ -53,10 +53,10 @@ try {
     manifest: { sessionId: 'fixture-concurrent', folder: root, tool: 'fixture', prompt: 'fixture', options: {} } });
   const concurrentBinding = { sessionId: 'fixture-concurrent', runId: concurrentRun.id, turnId: 'turn-2', requestKey: 'gate:concurrent' };
   const moduleUrl = new URL('../chat/windows-user-install-store.mjs', import.meta.url).href;
-  const script = `const {createWindowsUserInstallStore}=await import(process.env.AGENTOC_QA_MODULE); const binding=JSON.parse(process.env.AGENTOC_QA_BINDING); const result=await createWindowsUserInstallStore().claim({binding,nonce:process.env.AGENTOC_QA_NONCE,operationFingerprint:'c'.repeat(64)}); process.stdout.write(JSON.stringify(result));`;
+  const script = `const {createWindowsUserInstallStore}=await import(process.env.RAGENT_QA_MODULE); const binding=JSON.parse(process.env.RAGENT_QA_BINDING); const result=await createWindowsUserInstallStore().claim({binding,nonce:process.env.RAGENT_QA_NONCE,operationFingerprint:'c'.repeat(64)}); process.stdout.write(JSON.stringify(result));`;
   const spawned = await Promise.all(Array.from({ length: 4 }, async (_, index) => {
     const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { windowsHide: true,
-      env: { ...process.env, AGENTOC_QA_MODULE: moduleUrl, AGENTOC_QA_BINDING: JSON.stringify(concurrentBinding), AGENTOC_QA_NONCE: `worker-${index}` } });
+      env: { ...process.env, RAGENT_QA_MODULE: moduleUrl, RAGENT_QA_BINDING: JSON.stringify(concurrentBinding), RAGENT_QA_NONCE: `worker-${index}` } });
     return JSON.parse(stdout);
   }));
   assert.equal(spawned.filter((result) => result.claimed).length, 1, 'only one process may claim the operation');
@@ -77,16 +77,16 @@ try {
   const receipt = path.join(root, 'mock-install-receipt');
   const executorUrl = new URL('../chat/windows-user-install-executor.mjs', import.meta.url).href;
   const executionScript = `const {appendFile}=await import('node:fs/promises'); const {createPublicKey}=await import('node:crypto');
-    const {createWindowsUserInstallStore}=await import(process.env.AGENTOC_QA_MODULE); const {executeWindowsUserInstall}=await import(process.env.AGENTOC_QA_EXECUTOR);
-    const store=createWindowsUserInstallStore(); const binding=JSON.parse(process.env.AGENTOC_QA_BINDING); const capability=JSON.parse(process.env.AGENTOC_QA_CAP);
-    const result=await executeWindowsUserInstall({capability,binding,riskMode:'recommended',publicKey:createPublicKey(process.env.AGENTOC_QA_PUBLIC),cwd:'D:\\project',expectedOwnerSid:'S-1-5-21-1-2-3-4',platform:'win32'},
+    const {createWindowsUserInstallStore}=await import(process.env.RAGENT_QA_MODULE); const {executeWindowsUserInstall}=await import(process.env.RAGENT_QA_EXECUTOR);
+    const store=createWindowsUserInstallStore(); const binding=JSON.parse(process.env.RAGENT_QA_BINDING); const capability=JSON.parse(process.env.RAGENT_QA_CAP);
+    const result=await executeWindowsUserInstall({capability,binding,riskMode:'recommended',publicKey:createPublicKey(process.env.RAGENT_QA_PUBLIC),cwd:'D:\\project',expectedOwnerSid:'S-1-5-21-1-2-3-4',platform:'win32'},
     {claim:store.claim,finish:store.finish,assertIdentity:async()=>({sid:'S-1-5-21-1-2-3-4'}),assertActive:async()=>{},
     revalidate:async()=>({ok:true,invocation:{executable:'D:\\fixture\\winget.exe',argv:['install'],cwd:'D:\\project'}}),
-    execFile:async()=>{await appendFile(process.env.AGENTOC_QA_RECEIPT,'install\\n');await new Promise(r=>setTimeout(r,200));return {stdout:'fixture'};}});process.stdout.write(JSON.stringify(result));`;
+    execFile:async()=>{await appendFile(process.env.RAGENT_QA_RECEIPT,'install\\n');await new Promise(r=>setTimeout(r,200));return {stdout:'fixture'};}});process.stdout.write(JSON.stringify(result));`;
   const executed = await Promise.all(Array.from({ length: 4 }, async () => {
     const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', executionScript], { windowsHide: true,
-      env: { ...process.env, AGENTOC_QA_MODULE: moduleUrl, AGENTOC_QA_EXECUTOR: executorUrl, AGENTOC_QA_BINDING: JSON.stringify(executionBinding),
-        AGENTOC_QA_CAP: JSON.stringify(capability), AGENTOC_QA_PUBLIC: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(), AGENTOC_QA_RECEIPT: receipt } });
+      env: { ...process.env, RAGENT_QA_MODULE: moduleUrl, RAGENT_QA_EXECUTOR: executorUrl, RAGENT_QA_BINDING: JSON.stringify(executionBinding),
+        RAGENT_QA_CAP: JSON.stringify(capability), RAGENT_QA_PUBLIC: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(), RAGENT_QA_RECEIPT: receipt } });
     return JSON.parse(stdout);
   }));
   assert.equal(executed.filter((result) => !result.duplicate && result.status === 'succeeded').length, 1);
@@ -98,12 +98,12 @@ try {
   const crashDecision = evaluateSemanticOperation(crashOperation, resolution);
   const crashCapability = createWindowsUserInstallAuthorization({ prepared: { binding: crashBinding, projection: { decisions: [crashDecision] } },
     riskMode: 'recommended', kid: 'fixture-key', privateKey: keys.privateKey, expectedExecutionSid: 'S-1-5-21-1-2-3-4' });
-  const crashScript = executionScript.replace("await appendFile(process.env.AGENTOC_QA_RECEIPT,'install\\n');await new Promise(r=>setTimeout(r,200));return {stdout:'fixture'};",
+  const crashScript = executionScript.replace("await appendFile(process.env.RAGENT_QA_RECEIPT,'install\\n');await new Promise(r=>setTimeout(r,200));return {stdout:'fixture'};",
     "process.stdout.write('STARTED\\n');setInterval(()=>{},1000);await new Promise(()=>{});return {stdout:'fixture'};");
   assert.notEqual(crashScript, executionScript);
   const child = spawn(process.execPath, ['--input-type=module', '-e', crashScript], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, AGENTOC_QA_MODULE: moduleUrl, AGENTOC_QA_EXECUTOR: executorUrl, AGENTOC_QA_BINDING: JSON.stringify(crashBinding),
-      AGENTOC_QA_CAP: JSON.stringify(crashCapability), AGENTOC_QA_PUBLIC: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(), AGENTOC_QA_RECEIPT: receipt } });
+    env: { ...process.env, RAGENT_QA_MODULE: moduleUrl, RAGENT_QA_EXECUTOR: executorUrl, RAGENT_QA_BINDING: JSON.stringify(crashBinding),
+      RAGENT_QA_CAP: JSON.stringify(crashCapability), RAGENT_QA_PUBLIC: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(), RAGENT_QA_RECEIPT: receipt } });
   try {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('mock installation did not start')), 15000);
@@ -125,6 +125,6 @@ try {
   const actualRoot = await realpath(root);
   const actualParent = await realpath(os.tmpdir());
   assert.equal(path.dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-  assert.ok(path.basename(actualRoot).startsWith('agentoc-user-install-store-'));
+  assert.ok(path.basename(actualRoot).startsWith('ragent-user-install-store-'));
   await rm(actualRoot, { recursive: true, force: true });
 }

@@ -1,6 +1,6 @@
 // Stable contract for externally hosted agent harnesses.
 //
-// This describes the boundary between AgentoC's durable control plane and a
+// This describes the boundary between Ragent's durable control plane and a
 // provider-specific agent loop. It intentionally does not prescribe a wire
 // protocol: JSON-RPC, JSONL, ACP, HTTP+SSE, and a local SDK can all implement
 // this contract through an adapter.

@@ -11,8 +11,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-workflow-api-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-workflow-api-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { handleProjectWorkflowRoutes } = await import('../chat/router-project-workflow-routes.mjs');
 const { createProject } = await import('../chat/projects.mjs');
@@ -79,7 +79,7 @@ function makeBodyReq(body) {
   const chunk = Buffer.from(JSON.stringify(body));
   return {
     method: 'POST',
-    headers: { host: 'a.agentoc.test' },
+    headers: { host: 'a.ragent.test' },
     on(event, handler) {
       if (event === 'data') queueMicrotask(() => handler(chunk));
       if (event === 'end') queueMicrotask(() => handler());
@@ -92,7 +92,7 @@ function makeBodyReq(body) {
 function makeGetReq() {
   return {
     method: 'GET',
-    headers: { host: 'a.agentoc.test' },
+    headers: { host: 'a.ragent.test' },
     on() { return this; },
     destroy() {},
   };
@@ -149,7 +149,7 @@ const nonOwner = { role: 'user' };
 
 let runCounter = 0;
 async function makeProject(name) {
-  const root = makeRoot('agentoc-api-root-');
+  const root = makeRoot('ragent-api-root-');
   mkdirSync(root, { recursive: true });
   return createProject({ name, rootPath: root });
 }

@@ -40,14 +40,14 @@ function encodeWindowsCommand(script) {
 export const WINDOWS_EXECUTOR_SERVER_SCRIPT = String.raw`
 ${WINDOWS_PIPE_PEER_NATIVE_HELPER}
 
-$pipeName = $env:AGENTOC_EXECUTOR_PIPE
+$pipeName = $env:RAGENT_EXECUTOR_PIPE
 $server = New-Object System.IO.Pipes.NamedPipeServerStream($pipeName, [System.IO.Pipes.PipeDirection]::InOut, 1, [System.IO.Pipes.PipeTransmissionMode]::Byte, [System.IO.Pipes.PipeOptions]::None)
 try {
   if (-not $server.WaitForConnectionAsync().Wait(20000)) { throw 'executor connection timed out' }
-  $clientPid = [AgentocPipePeer]::ClientPid($server.SafePipeHandle.DangerousGetHandle())
-  $clientSid = [AgentocPipePeer]::ResolveProcessSid($clientPid)
-  $clientIntegrity = [AgentocPipePeer]::ResolveProcessIntegrity($clientPid)
-  $serverSid = [AgentocPipePeer]::CurrentProcessSid()
+  $clientPid = [RagentPipePeer]::ClientPid($server.SafePipeHandle.DangerousGetHandle())
+  $clientSid = [RagentPipePeer]::ResolveProcessSid($clientPid)
+  $clientIntegrity = [RagentPipePeer]::ResolveProcessIntegrity($clientPid)
+  $serverSid = [RagentPipePeer]::CurrentProcessSid()
   $facts = @{
     platform = 'win32'
     transport = 'named-pipe'
@@ -84,7 +84,7 @@ export function buildWindowsExecutorServerInvocation({
     file: powershellExecutable,
     args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encodeWindowsCommand(script)],
     cwd,
-    env: { ...env, AGENTOC_EXECUTOR_PIPE: pipeName },
+    env: { ...env, RAGENT_EXECUTOR_PIPE: pipeName },
   };
 }
 
@@ -293,9 +293,9 @@ export async function runWindowsExecutorRequest({
       facts,
       clientPid: serverMessage.clientPid,
       serverPid: Number.isInteger(child?.pid) ? child.pid : null,
-      windowsJobObjectManaged: child?.__agentocWindowsManaged === true,
-      windowsJobObjectCreation: typeof child?.__agentocWindowsJobObjectCreation === 'string'
-        ? child.__agentocWindowsJobObjectCreation
+      windowsJobObjectManaged: child?.__ragentWindowsManaged === true,
+      windowsJobObjectCreation: typeof child?.__ragentWindowsJobObjectCreation === 'string'
+        ? child.__ragentWindowsJobObjectCreation
         : '',
     };
   } finally {

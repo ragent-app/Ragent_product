@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const visualOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || "").trim();
+const visualOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || "").trim();
 if (visualOutputDir) await mkdir(visualOutputDir, { recursive: true });
 const [baseCss, inputCss, responsiveCss, glassCss, fontFile, vditorJs, vditorCss, luteJs, iconsJs, localeJs, lightTheme, darkTheme, adapterJs, workerSource, fullscreenJs, sidebarUiSource, composeSource] = await Promise.all([
   readFile(join(repoRoot, "static/chat/chat-base.css"), "utf8"),
@@ -56,7 +56,7 @@ assert.match(
 );
 assert.match(
   composeSource,
-  /window\.AgentoCMarkdownComposer\?\.flush\?\.\(msgInput\);/,
+  /window\.RagentMarkdownComposer\?\.flush\?\.\(msgInput\);/,
   "sending immediately after a large paste must flush the pending editor update",
 );
 assert.match(
@@ -172,18 +172,18 @@ async function waitForValue(predicate, description) {
 try {
   await page.goto(`http://127.0.0.1:${server.address().port}/test.html`);
   await waitForValue(
-    () => Boolean(window.AgentoCMarkdownComposer?.getVditor?.(document.getElementById("msgInput"))?.vditor?.wysiwyg?.element),
+    () => Boolean(window.RagentMarkdownComposer?.getVditor?.(document.getElementById("msgInput"))?.vditor?.wysiwyg?.element),
     "Vditor WYSIWYG mount",
   );
   await waitForValue(
-    () => Boolean(window.AgentoCMarkdownComposer?.getVditor?.(document.getElementById("composerFullscreenInput"))?.vditor?.wysiwyg?.element),
+    () => Boolean(window.RagentMarkdownComposer?.getVditor?.(document.getElementById("composerFullscreenInput"))?.vditor?.wysiwyg?.element),
     "full-screen Vditor WYSIWYG mount",
   );
 
   const mounted = await page.evaluate(async () => {
     const textarea = document.getElementById("msgInput");
     const editor = document.getElementById("composerEditor");
-    const instance = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const instance = window.RagentMarkdownComposer.getVditor(textarea);
     textarea.disabled = false;
     await new Promise((resolve) => setTimeout(resolve, 30));
     return {
@@ -209,7 +209,7 @@ try {
     rootOverflowY: getComputedStyle(node.closest(".composer-markdown-editor")).overflowY,
     rootBorder: getComputedStyle(node.parentElement.parentElement.parentElement).border,
   }));
-  assert.equal(shellStyles.padding, "0px", "Vditor's default editor padding must not change the AgentoC composer shell");
+  assert.equal(shellStyles.padding, "0px", "Vditor's default editor padding must not change the Ragent composer shell");
   // Single scroll container: the shell root owns the growth cap and the
   // scrollbar; the editable document must never open a second nested track.
   // Both axes must be visible because Vditor's generic
@@ -296,7 +296,7 @@ try {
   // Image pastes must become attachments, never inline base64 embeds.
   // Vditor's own paste handler runs on the editable surface, calls
   // stopPropagation() first, and — with no upload backend configured —
-  // inserts the pasted image as a base64 <img> in the draft. AgentoC routes
+  // inserts the pasted image as a base64 <img> in the draft. Ragent routes
   // file transfers in the capture phase on each editor shell, which runs
   // before Vditor's listeners. First prove the vendor fallback still exists
   // (the failure mode being defended against), then prove capture wins.
@@ -412,7 +412,7 @@ try {
   // has already cleared it.
   await page.evaluate(() => {
     const textarea = document.getElementById("msgInput");
-    const instance = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const instance = window.RagentMarkdownComposer.getVditor(textarea);
     textarea.value = "stale **send**";
     const staleInput = instance.vditor.options.input;
     textarea.value = "";
@@ -424,7 +424,7 @@ try {
 
   await page.evaluate(() => {
     document.getElementById("msgInput").value = "Full-screen **bold**";
-    window.AgentoCComposerFullscreen.open();
+    window.RagentComposerFullscreen.open();
   });
   await page.waitForTimeout(100);
   assert.equal(await page.locator("#composerFullscreenEditor strong").textContent(), "bold");
@@ -438,14 +438,14 @@ try {
     rootBorder: getComputedStyle(node.parentElement.parentElement.parentElement).border,
     toolbarDisplay: getComputedStyle(node.closest(".vditor")?.querySelector(".vditor-toolbar")).display,
   }));
-  assert.equal(fullscreenShellStyles.padding, "0px", "full-screen Vditor must use the AgentoC editor shell padding");
+  assert.equal(fullscreenShellStyles.padding, "0px", "full-screen Vditor must use the Ragent editor shell padding");
   assert.equal(fullscreenShellStyles.overflowX, "visible", "full-screen editable content must not scroll horizontally on its own");
   assert.equal(fullscreenShellStyles.overflowY, "visible", "full-screen editable content must not open a second vertical track");
   assert.equal(fullscreenShellStyles.maxHeight, "none", "full-screen editable content must grow into the shell scroll range");
   assert.equal(fullscreenShellStyles.rootOverflowY, "auto", "the full-screen shell must own the vertical scroll");
   assert.match(fullscreenShellStyles.rootBorder, /0px/, "full-screen Vditor must not retain its default border");
   assert.equal(fullscreenShellStyles.toolbarDisplay, "none", "full-screen Vditor must not expose its own toolbar");
-  await page.evaluate(() => window.AgentoCComposerFullscreen.close());
+  await page.evaluate(() => window.RagentComposerFullscreen.close());
   assert.equal(await page.locator("#msgInput").inputValue(), "Full-screen **bold**", "closing full-screen editing must return Markdown to the main composer");
 
   const disabled = await page.evaluate(async () => {
@@ -558,7 +558,7 @@ try {
   // The adapter's shell sync must clamp externally requested heights to the
   // cap so a stale or natural document height cannot overflow the shell.
   await page.evaluate(() => {
-    window.AgentoCMarkdownComposer.setHeight(document.getElementById("msgInput"), 10000);
+    window.RagentMarkdownComposer.setHeight(document.getElementById("msgInput"), 10000);
   });
   const clampedState = await editor.evaluate((node) => {
     const root = node.closest(".composer-markdown-editor");
@@ -590,7 +590,7 @@ try {
   // must recover the single composer scroll container in either direction.
   const caretVisibility = await page.evaluate(async () => {
     const textarea = document.getElementById("msgInput");
-    const instance = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const instance = window.RagentMarkdownComposer.getVditor(textarea);
     const editable = instance.vditor.wysiwyg.element;
     const root = document.getElementById("composerEditor");
     textarea.value = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join("\n");
@@ -821,7 +821,7 @@ try {
     "long Markdown paste should still render Markdown emphasis",
   );
   assert.equal(
-    await page.evaluate(() => window.AgentoCMarkdownComposer
+    await page.evaluate(() => window.RagentMarkdownComposer
       .getVditor(document.getElementById("msgInput"))
       .getValue()
       .includes("paste-fast-path-marker")),
@@ -839,7 +839,7 @@ try {
   // main thread.
   const pendingPasteClearState = await page.evaluate((text) => {
     const textarea = document.getElementById("msgInput");
-    const editor = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const editor = window.RagentMarkdownComposer.getVditor(textarea);
     const editable = document.querySelector("#composerEditor .vditor-wysiwyg > pre");
     textarea.value = "";
     const range = document.createRange();
@@ -953,7 +953,7 @@ try {
       cancelable: true,
       clipboardData: data,
     }));
-    return window.AgentoCMarkdownComposer.flush(textarea);
+    return window.RagentMarkdownComposer.flush(textarea);
   }, existingDraftPasteText);
   assert.equal(flushResult, true, "a pending large paste should flush synchronously for an immediate send");
   await waitForValue(
@@ -982,7 +982,7 @@ try {
   ].join("\n");
   await page.evaluate(() => {
     const textarea = document.getElementById("msgInput");
-    const editor = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const editor = window.RagentMarkdownComposer.getVditor(textarea);
     textarea.value = "worker prefix";
     window.__originalInsertMd = editor.insertMD.bind(editor);
     window.__insertMdCalledForWorkerPaste = false;
@@ -1016,7 +1016,7 @@ try {
   );
   const workerExistingDraftPasteState = await page.evaluate(() => {
     const textarea = document.getElementById("msgInput");
-    const editor = window.AgentoCMarkdownComposer.getVditor(textarea);
+    const editor = window.RagentMarkdownComposer.getVditor(textarea);
     editor.insertMD = window.__originalInsertMd;
     delete window.__originalInsertMd;
     return {
@@ -1258,7 +1258,7 @@ try {
     const textarea = document.getElementById("msgInput");
     const editable = document.querySelector("#composerEditor .vditor-wysiwyg > pre");
     textarea.value = "";
-    window.AgentoCMarkdownComposer.refresh(textarea);
+    window.RagentMarkdownComposer.refresh(textarea);
     await new Promise((resolve) => setTimeout(resolve, 80));
     editable.focus();
   });

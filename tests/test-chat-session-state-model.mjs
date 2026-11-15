@@ -20,7 +20,7 @@ vm.runInNewContext(source, context, {
   filename: 'session-state-model.js',
 });
 
-const model = context.AgentoCSessionStateModel;
+const model = context.RagentSessionStateModel;
 
 assert.ok(model, 'session state model should attach to the global scope');
 
@@ -126,7 +126,7 @@ const slowCheckingStage = model.getSessionTaskFlowStage(slowCheckingSession, {
 assert.equal(slowCheckingStage.key, 'checking');
 assert.equal(
   slowCheckingStage.label,
-  'Still confirming the route; AgentoC will continue here if routing times out.',
+  'Still confirming the route; Ragent will continue here if routing times out.',
 );
 
 const compactingSession = makeSession({

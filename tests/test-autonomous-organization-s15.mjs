@@ -4,11 +4,11 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-autonomous-org-s15-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-autonomous-org-s15-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT = '1';
-process.env.AGENTOC_ORG_SESSION_ADDRESSABILITY_ENABLED = '1';
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT = '1';
+process.env.RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED = '1';
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
 
 const workspace = join(tempHome, 'workspace');
 mkdirSync(workspace, { recursive: true });

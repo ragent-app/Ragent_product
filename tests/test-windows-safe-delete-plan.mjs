@@ -5,7 +5,7 @@ import path from 'node:path';
 import { planWindowsSafeDelete, planWindowsBashSafeDelete } from '../chat/windows-safe-delete-plan.mjs';
 
 if (process.platform !== 'win32') { console.log('windows-safe-delete-plan: skipped off Windows'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-safe-delete-plan-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-safe-delete-plan-'));
 await mkdir(path.join(root, 'build', 'nested'), { recursive: true });
 await writeFile(path.join(root, 'build', 'nested', 'file.txt'), 'fixture');
 await mkdir(path.join(root, 'danger', '.ssh'), { recursive: true });

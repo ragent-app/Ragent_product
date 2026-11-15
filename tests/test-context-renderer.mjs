@@ -9,8 +9,8 @@ import {
   shouldIncludeSessionTemplateInstructions,
 } from '../chat/context-renderer.mjs';
 
-delete process.env.AGENTOC_CONTEXT_RENDERER_V2;
-delete process.env.AGENTOC_CONTEXT_RENDERER_SHADOW;
+delete process.env.RAGENT_CONTEXT_RENDERER_V2;
+delete process.env.RAGENT_CONTEXT_RENDERER_SHADOW;
 
 const freshContext = buildCanonicalContext({
   runtimeFamily: 'codex-json',

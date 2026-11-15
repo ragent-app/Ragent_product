@@ -10,7 +10,7 @@ const voicePrompt = buildSourceRuntimePrompt({ sourceId: 'voice' });
 assert.doesNotMatch(voicePrompt, /Siri\/Shortcuts connector/, 'voice source id should keep the existing voice prompt');
 for (const sourceId of ['voice', 'shortcut', 'email', 'observer', 'github']) {
   const prompt = buildSourceRuntimePrompt({ sourceId });
-  assert.doesNotMatch(prompt, /AgentoC|user's own machine/i);
+  assert.doesNotMatch(prompt, /Ragent|user's own machine/i);
 }
 
 for (const sourceId of ['wechat', 'weixin', 'feishu', 'lark']) {

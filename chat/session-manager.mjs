@@ -534,15 +534,15 @@ const REPLY_SELF_CHECK_DEFAULT_REASON = 'the latest reply left avoidable unfinis
 const FOLLOW_UP_FLUSH_DELAY_MS = 1500;
 const MAX_RECENT_FOLLOW_UP_REQUEST_IDS = 100;
 const STARTUP_RECOVERY_BATCH_SIZE = (() => {
-  const parsed = Number.parseInt(String(process.env.AGENTOC_STARTUP_RECOVERY_BATCH_SIZE || '').trim(), 10);
+  const parsed = Number.parseInt(String(process.env.RAGENT_STARTUP_RECOVERY_BATCH_SIZE || '').trim(), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 8;
 })();
-// Perf (AGENTOC_PERF_OBSERVER=off restores the old behavior): the fs.watch on
+// Perf (RAGENT_PERF_OBSERVER=off restores the old behavior): the fs.watch on
 // the run dir is the live fast path for spool appends; the poller is only a
 // backstop for missed watch events (inotify overflow), so 1s is plenty and
 // cuts idle-run observer churn ~4x.
-const AGENTOC_PERF_OBSERVER_ENV = 'AGENTOC_PERF_OBSERVER';
-const PERF_OBSERVER_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_OBSERVER_ENV], { defaultValue: true });
+const RAGENT_PERF_OBSERVER_ENV = 'RAGENT_PERF_OBSERVER';
+const PERF_OBSERVER_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_OBSERVER_ENV], { defaultValue: true });
 const OBSERVED_RUN_POLL_INTERVAL_MS = PERF_OBSERVER_ENABLED ? 1000 : 250;
 const DETACHED_RUN_RESULT_SYNTHESIS_GRACE_MS = 1500;
 const DETACHED_RUN_LAUNCH_GRACE_MS = 30_000;
@@ -2247,7 +2247,7 @@ async function appendPlanArtifactStateEvent(sessionId, artifact, {
     bodyMarkdown: artifact.bodyMarkdown,
     items: artifact.items,
     state,
-    source: 'agentoc-plan-action',
+    source: 'ragent-plan-action',
     revision: artifact.revision,
     providerThreadId: artifact.providerThreadId,
     providerTurnId: artifact.providerTurnId,
@@ -2286,7 +2286,7 @@ function shouldCreatePlanFallbackArtifact(run, manifest, history = []) {
   return !history.some((event) =>
     event?.type === 'plan'
     && trimString(event.runId) === runId
-    && trimString(event.source) !== 'agentoc-plan-action'
+    && trimString(event.source) !== 'ragent-plan-action'
     && trimString(event.bodyMarkdown || event.bodyPreview));
 }
 
@@ -2324,7 +2324,7 @@ async function maybeAppendPlanFallbackArtifact(sessionId, run, manifest) {
     title: getPlanFallbackTitle(bodyMarkdown) || undefined,
     bodyMarkdown,
     state: 'awaiting_decision',
-    source: 'agentoc-plan-fallback',
+    source: 'ragent-plan-fallback',
     interactionMode: 'plan',
     planIntent: 'proposal',
     previousPlanId,
@@ -2883,8 +2883,8 @@ function touchSessionRuntimeState(sessionId) {
 
 const SESSION_RUNTIME_SWEEP_INTERVAL_MS = 60_000;
 const SESSION_RUNTIME_IDLE_TTL_MS = 15 * 60_000;
-const SESSION_RUNTIME_TTL_ENV = 'AGENTOC_SESSION_RUNTIME_TTL_MS';
-const SESSION_RUNTIME_SWEEP_INTERVAL_ENV = 'AGENTOC_SESSION_RUNTIME_SWEEP_MS';
+const SESSION_RUNTIME_TTL_ENV = 'RAGENT_SESSION_RUNTIME_TTL_MS';
+const SESSION_RUNTIME_SWEEP_INTERVAL_ENV = 'RAGENT_SESSION_RUNTIME_SWEEP_MS';
 
 function resolveSessionRuntimeTtlMs() {
   const parsed = Number.parseInt(process.env[SESSION_RUNTIME_TTL_ENV] || '', 10);
@@ -3196,7 +3196,7 @@ async function buildSessionTimelineEvents(sessionId, options = {}) {
   return enrichRunCapabilities(await enrichPlanEventIntents(events));
 }
 
-// Perf (AGENTOC_PERF_TIMELINE_CACHE=off): the frontend refetches the visible
+// Perf (RAGENT_PERF_TIMELINE_CACHE=off): the frontend refetches the visible
 // timeline (events / event-delta endpoints) on every session invalidation,
 // and each request used to rebuild the whole transcript (with bodies) plus
 // the display transform plus the run-activity projection. The bundle is now
@@ -3212,8 +3212,8 @@ async function buildSessionTimelineEvents(sessionId, options = {}) {
 // drag tool_result/reasoning bodies into the heap of sessions whose display
 // projection looks small. The skip decision therefore estimates exactly what
 // the memo retains (displayEvents + runActivity), not a few display fields.
-const AGENTOC_PERF_TIMELINE_CACHE_ENV = 'AGENTOC_PERF_TIMELINE_CACHE';
-const PERF_TIMELINE_CACHE_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_TIMELINE_CACHE_ENV], { defaultValue: true });
+const RAGENT_PERF_TIMELINE_CACHE_ENV = 'RAGENT_PERF_TIMELINE_CACHE';
+const PERF_TIMELINE_CACHE_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_TIMELINE_CACHE_ENV], { defaultValue: true });
 const TIMELINE_BUNDLE_CACHE_ENTRIES = 16;
 const TIMELINE_BUNDLE_CACHE_MAX_BYTES = cacheBudget('timeline.bundle', 2);
 // The legacy bundle endpoint is still used by older clients and integrations,
@@ -3222,7 +3222,7 @@ const TIMELINE_BUNDLE_CACHE_MAX_BYTES = cacheBudget('timeline.bundle', 2);
 // compatibility bundle to the same bounded latest window and expose its
 // pagination metadata for callers that want to page backwards.
 const TIMELINE_BUNDLE_PAGE_LIMIT = (() => {
-  const parsed = Number.parseInt(String(process.env.AGENTOC_TIMELINE_BUNDLE_PAGE_LIMIT || '').trim(), 10);
+  const parsed = Number.parseInt(String(process.env.RAGENT_TIMELINE_BUNDLE_PAGE_LIMIT || '').trim(), 10);
   return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 200) : 100;
 })();
 let TIMELINE_BUNDLE_SKIP_ESTIMATE_BYTES = 64 * 1024 * 1024;
@@ -3764,7 +3764,7 @@ async function denyPrivilegedBatchCategories(run, batch, store, categories) {
       batchId: batch.batchId,
       category,
       checkedOpIds: [],
-    }, store, { source: 'agentoc_auto_policy' });
+    }, store, { source: 'ragent_auto_policy' });
     const queued = await enqueuePrivilegedCategoryApprovalResponses(
       run.id, batch.batchId, category, resolved, [], '', { decisionSource: 'policy' },
     );
@@ -4878,7 +4878,7 @@ async function submitApprovedActionApprovalUnlocked(runId, batchId, options = {}
         await resumeHarnessRunBudget(finalRun);
       }
     }
-    // Real `agentoc-privileged` shim: a waiting shim process consumes the
+    // Real `ragent-privileged` shim: a waiting shim process consumes the
     // per-op results off the run record as soon as the batch is terminal.
     const shimResolveUpdate = buildPrivilegedShimResolveUpdate(finalRun, finalBatch);
     if (shimResolveUpdate) {
@@ -6250,7 +6250,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
         }
       }
     } else if (hasDedupKey) {
-      // AGENTOC_PERF_OBSERVER=off: still verify against storage, but scan one
+      // RAGENT_PERF_OBSERVER=off: still verify against storage, but scan one
       // event at a time so the compatibility mode does not reintroduce a full
       // in-memory transcript.
       const scan = await scanProviderDedupKeys(sessionId, durableEvents, { retainAllKeys: false });
@@ -7886,7 +7886,7 @@ export function resolveResumeState(toolId, session, options = {}) {
 
   if (tool === 'codex' || tool === 'codex-cli' || ['codex-json', 'codex-app-server-json'].includes(runtimeFamily)) {
     const codexResumeEnabled = options.codexResume === true
-      || /^(1|true|yes|on)$/i.test(String(process.env.AGENTOC_CODEX_RESUME_ENABLED || '').trim());
+      || /^(1|true|yes|on)$/i.test(String(process.env.RAGENT_CODEX_RESUME_ENABLED || '').trim());
     const codexThreadId = codexResumeEnabled ? (session?.codexThreadId || null) : null;
     if (!codexResumeEnabled) return noResume('codex', 'NATIVE_RESUME_DISABLED');
     if (!codexThreadId) return noResume('codex', 'NO_NATIVE_THREAD_ID');
@@ -8983,7 +8983,7 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
       bodyMarkdown: event.bodyMarkdown,
       items: event.items,
       state: 'cancelled',
-      source: 'agentoc-plan-action',
+      source: 'ragent-plan-action',
       revision: event.revision,
       providerThreadId: event.providerThreadId,
       providerTurnId: event.providerTurnId,
@@ -9036,7 +9036,7 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
         bodyMarkdown: event.bodyMarkdown,
         items: event.items,
         state: 'cancelled',
-        source: 'agentoc-plan-action',
+        source: 'ragent-plan-action',
         revision: event.revision,
         providerThreadId: event.providerThreadId,
         providerTurnId: event.providerTurnId,
@@ -9267,7 +9267,7 @@ function scheduleDetachedRunPostFinalization(sessionId, finalizedRun, manifest, 
 
 function isExternalCodexOAuthOwnershipEnabled(environment = process.env) {
   return ['1', 'true', 'yes', 'on'].includes(
-    trimString(environment?.AGENTOC_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP).toLowerCase(),
+    trimString(environment?.RAGENT_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP).toLowerCase(),
   );
 }
 
@@ -9745,7 +9745,7 @@ export async function startDetachedRunObservers() {
   }
   await reconcileOrphanDetachedRuns();
   await drainQueuedAgyRuns();
-  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRecoveryTimer) {
+  if (process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRecoveryTimer) {
     const recover = (scanAll = false) => {
       if (linuxRunScopeRecoveryPromise) return;
       linuxRunScopeRecoveryPromise = recoverLinuxRunScopeRevocations({ scanAll })
@@ -9756,7 +9756,7 @@ export async function startDetachedRunObservers() {
     linuxRunScopeRecoveryTimer = setInterval(() => recover(false), 15_000);
     linuxRunScopeRecoveryTimer.unref?.();
   }
-  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRenewalTimer) {
+  if (process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeRenewalTimer) {
     const renewalSweep = import('./linux-run-scope-renewal.mjs')
       .then(({ createLinuxRunScopeRenewalSweep }) => createLinuxRunScopeRenewalSweep());
     const renew = (scanAll = false) => {
@@ -9769,7 +9769,7 @@ export async function startDetachedRunObservers() {
     linuxRunScopeRenewalTimer = setInterval(() => renew(false), 30_000);
     linuxRunScopeRenewalTimer.unref?.();
   }
-  if (process.platform === 'linux' && process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeOutboxTimer) {
+  if (process.platform === 'linux' && process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1' && !linuxRunScopeOutboxTimer) {
     const outboxRecovery = import('./linux-run-revocation-outbox.mjs')
       .then(({ createLinuxRunRevocationOutboxRecovery }) => createLinuxRunRevocationOutboxRecovery());
     const recoverOutbox = () => {
@@ -9836,7 +9836,7 @@ export async function listSessions({
   const hierarchyIndex = buildSessionHierarchyIndex(metas);
   // Sessions without a project binding stay
   // visible under the selected project when their folder belongs to that
-  // project's root — mirroring the frontend agentocSessionMatchesSelectedWorkspace
+  // project's root — mirroring the frontend ragentSessionMatchesSelectedWorkspace
   // fallback contract. Without this, a project-scoped list request hides them
   // entirely even though the same session shows up in the folder-scoped view.
   const projectRootPath = normalizedProjectId
@@ -11494,7 +11494,7 @@ export async function steerQueuedFollowUp(id, options = {}) {
 
   // AgY exposes only a non-interactive --print process. It can accept the
   // queued turn after the current run, but cannot receive a mid-turn steer or
-  // an AgentoC cancel-and-replace steer without violating its runtime contract.
+  // an Ragent cancel-and-replace steer without violating its runtime contract.
   if (await isAgyQueuedFollowUp(sessionMeta, queuedEntry)) {
     throwAgySteerUnsupported();
   }
@@ -12479,7 +12479,7 @@ function resolveSessionProviderPermissionContract({
   }
   // Skip requested-mode validation when the session policy is overriding it.
   // A gated mode legitimately differs from the caller's requested provider
-  // mode; runtimes without an AgentoC approval channel were rejected above.
+  // mode; runtimes without an Ragent approval channel were rejected above.
   if (!sessionPrivilegedMode && !riskGated && !unattendedProfile && requestedPermissionMode
       && trimString(effectivePermissionPolicy?.id) !== requestedPermissionMode) {
     throw new Error(`permissionMode "${requestedPermissionMode}" is not supported for this runtime`);
@@ -13557,10 +13557,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   }
   const requestedPermissionMode = normalizeProviderPermissionMode(effectiveRuntimeFamily, options.permissionMode);
   // Gated modes (design §13–§14 Path G + 统一风险门控计划 phase 3): a per-session
-  // risk mode forces a provider permission channel so AgentoC can auto-allow
+  // risk mode forces a provider permission channel so Ragent can auto-allow
   // routine work and hold danger operations for owner approval. The runtime
   // binding above upgrades the built-in Claude compatibility fallback to Bidi;
-  // runtimes without an AgentoC approval channel fail closed below because they
+  // runtimes without an Ragent approval channel fail closed below because they
   // cannot accept an approval response.
   const permissionContract = resolveSessionProviderPermissionContract({
     sessionId,
@@ -13683,14 +13683,14 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   const forceFreshProviderThread = options.freshThread === true;
   // Native thread continuity for codex *app-server* normal replies: continue the
   // same provider thread across runs so codex manages its own context (instead of
-  // AgentoC re-injecting a text handoff every turn — the source of "old context
+  // Ragent re-injecting a text handoff every turn — the source of "old context
   // shown as recent"). The app-server path uses json-rpc `thread/resume`, which is
   // already relied on by the plan→execute flow and is NOT the CLI `exec resume`
   // path that has the documented 0-command no-op bug — so the codex-json/codex-cli
   // (CLI exec) families stay on text-handoff. Kill-switch: set
-  // AGENTOC_CODEX_NATIVE_RESUME=0|false|no|off to disable.
+  // RAGENT_CODEX_NATIVE_RESUME=0|false|no|off to disable.
   const codexAppServerNativeResume = effectiveRuntimeFamily === 'codex-app-server-json'
-    && !/^(0|false|no|off)$/i.test(String(process.env.AGENTOC_CODEX_NATIVE_RESUME ?? 'on').trim());
+    && !/^(0|false|no|off)$/i.test(String(process.env.RAGENT_CODEX_NATIVE_RESUME ?? 'on').trim());
   const effectiveCodexResume = !forceFreshProviderThread && (
     options.codexResume === true
     || shouldResumeCodexForPlanAction
@@ -14007,7 +14007,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(claudeModelContract ? { claudeModelContract } : {}),
       runtimeFamily: effectiveRuntimeFamily || undefined,
       // The runner sidecar runs under a hardened env that never inherits
-      // AGENTOC_CONFIG_DIR/HOME, so it cannot re-resolve custom/test tools from
+      // RAGENT_CONFIG_DIR/HOME, so it cannot re-resolve custom/test tools from
       // the control plane's tools.json.  Carry the resolved command so the
       // sidecar can spawn the provider it was told to run.
       toolCommand: typeof effectiveToolDefinition?.command === 'string' && effectiveToolDefinition.command.trim()
@@ -15603,7 +15603,7 @@ export async function createPrivilegedCategoryWebAuthnChallenge(runId, batchId, 
   });
 }
 
-const SESSION_CONFIRMATION_SOURCE = 'agentoc-confirmation';
+const SESSION_CONFIRMATION_SOURCE = 'ragent-confirmation';
 
 // WebAuthn assertion purpose for passkey-approved privileged categories. The
 // challenge (createOwnerWebAuthnAssertionOptions) and the proof consumption

@@ -327,7 +327,7 @@ export function createFactoryExecutionAdapter({ organizationId, actor, orchestra
     }
     const remoteConfig=item.source?.parentRemoteOperation ? null : org.policy?.factoryRemoteBindings?.[node.id];
     if(remoteConfig) {
-      if(process.env.AGENTOC_REMOTE_FACTORY_ENABLED!=='1' || !remoteConfig.bindingId || !Number.isSafeInteger(remoteConfig.bindingVersion)
+      if(process.env.RAGENT_REMOTE_FACTORY_ENABLED!=='1' || !remoteConfig.bindingId || !Number.isSafeInteger(remoteConfig.bindingVersion)
           || !Number.isSafeInteger(remoteConfig.targetRevision)) refuse('Configured remote Factory target is unavailable');
       const root=await getSession(org.rootSessionId);
       if(!root?.folder || item.contract.accessMode==='read') refuse('Remote execution requires a scoped writer and project root');

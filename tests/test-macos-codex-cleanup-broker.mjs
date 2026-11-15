@@ -28,9 +28,9 @@ test('macOS broker interrupts only the tagged child with a captured service iden
         if (request.method === 'initialize') {
           process.stdout.write(JSON.stringify({ id: request.id, result: {} }) + '\\n');
         } else if (request.method === 'thread/start') {
-          const tag = request.params.config.shell_environment_policy.set.AGENTOC_RUN_ID;
+          const tag = request.params.config.shell_environment_policy.set.RAGENT_RUN_ID;
           const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'],
-            { env: { ...process.env, AGENTOC_RUN_ID: tag }, stdio: 'ignore' });
+            { env: { ...process.env, RAGENT_RUN_ID: tag }, stdio: 'ignore' });
           children.push(child);
           process.stdout.write(JSON.stringify({ id: request.id, result: { thread: { id: tag }, pid: child.pid } }) + '\\n');
         } else if (request.method === 'turn/interrupt') {
@@ -63,7 +63,7 @@ test('macOS broker interrupts only the tagged child with a captured service iden
       assert.ok(broker.pid, 'test must own its broker');
       const left = await openClient(), right = await openClient();
       for (const [client, tag] of [[left, 'run-mac-cancel-a'], [right, 'run-mac-cancel-b']]) {
-        client.send({ id: 1, method: 'thread/start', params: { config: { shell_environment_policy: { set: { AGENTOC_RUN_ID: tag } } } } });
+        client.send({ id: 1, method: 'thread/start', params: { config: { shell_environment_policy: { set: { RAGENT_RUN_ID: tag } } } } });
       }
       const [first, second] = await Promise.all([left.next(), right.next()]);
       const a = first.result.pid, b = second.result.pid;
@@ -71,7 +71,7 @@ test('macOS broker interrupts only the tagged child with a captured service iden
       assert.ok(alive(a) && alive(b));
       left.send({ id: 2, method: 'turn/interrupt', params: { threadId: 'run-mac-cancel-a' } });
       const notification = await left.next();
-      assert.equal(notification.method, 'agentoc/macosRunCleanup');
+      assert.equal(notification.method, 'ragent/macosRunCleanup');
       assert.deepEqual(notification.params, { threadId: 'run-mac-cancel-a', runId: 'run-mac-cancel-a', status: 'attempted' });
       assert.equal((await left.next()).id, 2);
       for (let i = 0; i < 30 && alive(a); i++) await delay(100);

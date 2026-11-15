@@ -1,4 +1,4 @@
-// Gate-side decision logic for the AgentoC privileged-approval flow
+// Gate-side decision logic for the Ragent privileged-approval flow
 // (design §13–§14, Path G). Pure logic, no I/O.
 //
 // In privileged mode the session runs in a GATED permission mode, so the
@@ -19,7 +19,7 @@
 // known to be privileged. Design §13.3 step 2 says "sentinel (or a classifier
 // hit)", which taken literally would treat every tool call as privileged and
 // stall the turn on each one. The real signal is:
-//   * the agent declared the op via the `agentoc-privileged` sentinel, or
+//   * the agent declared the op via the `ragent-privileged` sentinel, or
 //   * the command actually invokes `sudo` (classifier `sawSudo`).
 // Everything else auto-allows. The safety backstop is the runner identity and
 // deny-listed supplementary groups plus the signed privileged executor; a

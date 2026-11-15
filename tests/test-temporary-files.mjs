@@ -7,15 +7,15 @@ import { createHash, randomBytes, sign } from 'node:crypto';
 import { PassThrough, Readable } from 'node:stream';
 
 test('temporary file uploads retain device, scope, digest and bounded storage', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-files-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-files-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config'); process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-  delete process.env.AGENTOC_INSTANCE_ROOT;
-  process.env.AGENTOC_ASSET_STORAGE_BASE_URL = 'https://storage.example.invalid/bucket';
-  process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture';
-  process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture';
-  process.env.AGENTOC_ASSET_STORAGE_PROVIDER = 's3';
-  process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '1';
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config'); process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+  delete process.env.RAGENT_INSTANCE_ROOT;
+  process.env.RAGENT_ASSET_STORAGE_BASE_URL = 'https://storage.example.invalid/bucket';
+  process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture';
+  process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture';
+  process.env.RAGENT_ASSET_STORAGE_PROVIDER = 's3';
+  process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '1';
   const { fixture } = await import('./helpers/temporary-turn-fixture.mjs');
   const { temporaryDeviceJwk } = await import('../lib/temporary-device-access.mjs');
   const { TemporarySessionService } = await import('../chat/temporary-session-service.mjs');

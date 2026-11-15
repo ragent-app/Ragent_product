@@ -11,7 +11,7 @@ import { parseCommandFacts } from './command-parser.mjs';
 
 // P3a — one-shot privileged-executor token: signing + pure verification logic
 // (design: notes/current/privileged-approval-design.md §5.7; proposal:
-// /var/lib/agentoc/workspace/p3-executor-proposal-draft.md §3).
+// /var/lib/ragent/workspace/p3-executor-proposal-draft.md §3).
 //
 // This module is PURE LOGIC, no I/O. It knows how to canonicalize, sign, and
 // verify a single one-shot op token; it does NOT manage the signing key file
@@ -82,7 +82,7 @@ function trimString(value) {
 // (§3.3 step 6) to confirm the token's cgroup is internally consistent.
 export function buildPrivilegedCgroupFromRunId(runId) {
   const sanitized = String(runId || '').trim().replace(/[^A-Za-z0-9:_.@-]+/g, '_');
-  return `agentoc-runner-${sanitized || 'unknown'}`;
+  return `ragent-runner-${sanitized || 'unknown'}`;
 }
 
 // Canonical JSON over the signable subset (everything except `sig`), in a fixed

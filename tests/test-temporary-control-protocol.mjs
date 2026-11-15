@@ -15,7 +15,7 @@ const now = 1_800_000_000_000;
 const freshId = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-control-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-control-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });
   const invitation = normalizeTemporaryControlInvitation({ version: 1, invitationId: freshId('rti'),

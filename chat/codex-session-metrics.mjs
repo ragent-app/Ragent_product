@@ -349,7 +349,7 @@ export function buildCodexContextMetricsPayload(metrics) {
   if (!metrics || !Number.isInteger(metrics.contextTokens)) return null;
 
   return {
-    type: 'agentoc.context_metrics',
+    type: 'ragent.context_metrics',
     contextTokens: metrics.contextTokens,
     ...(Number.isInteger(metrics.inputTokens) ? { inputTokens: metrics.inputTokens } : {}),
     ...(Number.isInteger(metrics.cachedInputTokens)

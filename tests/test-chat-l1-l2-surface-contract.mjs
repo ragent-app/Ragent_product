@@ -18,7 +18,7 @@ const css = await Promise.all([
 
 const fixture = `<!doctype html><html><head><style>${css}</style></head><body>
   <aside class="sidebar" data-sidebar-mode="sessions">
-    <div class="sidebar-app-bar"><div class="sidebar-brand">AgentoC</div><div class="sidebar-app-bar-actions">
+    <div class="sidebar-app-bar"><div class="sidebar-brand">Ragent</div><div class="sidebar-app-bar-actions">
       <button class="sidebar-icon-btn" aria-label="Search"></button><button class="sidebar-icon-btn" aria-label="Back"></button>
     </div></div>
     <nav class="sidebar-primary-nav"><div class="sidebar-workspace"><button class="sidebar-workspace-summary sidebar-primary-action">Workspace</button></div></nav>

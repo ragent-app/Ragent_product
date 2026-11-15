@@ -144,7 +144,7 @@ export class FileAssetUploadCheckpoints {
 
   async append(record, { offset, length, sha256 }, stream, fence, signal) {
     const chunkBytes = uploadChunkBytes(record);
-    const diagnostics = process.env.AGENTOC_UPLOAD_DIAGNOSTICS === '1';
+    const diagnostics = process.env.RAGENT_UPLOAD_DIAGNOSTICS === '1';
     const startedAt = diagnostics ? performance.now() : 0;
     let receivedAt = 0, syncedAt = 0;
     if (!Number.isSafeInteger(offset) || offset < 0 || offset % chunkBytes !== 0
@@ -232,6 +232,6 @@ export function uploadChunkHeaders(headers) {
     return parsed;
   };
   if (headers['content-type'] !== 'application/octet-stream') fail('INVALID_ARGUMENT', 415);
-  return { offset: number('x-agentoc-upload-offset'), length: number('x-agentoc-upload-length'),
-    sha256: headers['x-agentoc-upload-sha256'] };
+  return { offset: number('x-ragent-upload-offset'), length: number('x-ragent-upload-length'),
+    sha256: headers['x-ragent-upload-sha256'] };
 }

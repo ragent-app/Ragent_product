@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {createLocalUiBootstrap,createLocalUiBootstrapClaimStore} from '../../lib/local-ui-bootstrap.mjs';
 export async function bootstrapFixture(t,options={}){
-  const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-ui-bootstrap-')),instanceId=randomUUID();
+  const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-ui-bootstrap-')),instanceId=randomUUID();
   let component,issued=0,revoked=0;
   const sessions=new Set(),observed=[];
   const server=createServer(async(req,res)=>{

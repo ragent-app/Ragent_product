@@ -100,7 +100,7 @@ export function unregisterAllCaches() {
 /**
  * Register a Map-like cache. BoundedLruMap instances expose snapshotMetrics()
  * (hits/misses/evictions/age); plain Maps fall back to size + optional byte
- * estimate with zeroed counters, which also covers the AGENTOC_PERF_CACHES=off
+ * estimate with zeroed counters, which also covers the RAGENT_PERF_CACHES=off
  * path where makeLruOrMap() substitutes plain Maps.
  */
 export function registerLruOrMap(name, cache, { kind = 'lru', bytesOf = null } = {}) {

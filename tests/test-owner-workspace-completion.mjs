@@ -7,9 +7,9 @@ import { tmpdir } from 'node:os';
 
 test('verified shared completion retains the local owner binding', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ragent-shared-completion-'));
-  Object.assign(process.env, { AGENTOC_CONFIG_DIR: join(root, 'config'), AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-    AGENTOC_ACCOUNTS_URL: 'https://accounts.example.test', AGENTOC_ACCOUNTS_ISSUER: 'https://accounts.example.test' });
-  delete process.env.AGENTOC_INSTANCE_ROOT;
+  Object.assign(process.env, { RAGENT_CONFIG_DIR: join(root, 'config'), RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+    RAGENT_ACCOUNTS_URL: 'https://accounts.example.test', RAGENT_ACCOUNTS_ISSUER: 'https://accounts.example.test' });
+  delete process.env.RAGENT_INSTANCE_ROOT;
   const owner = 'acct_workspace_owner', member = 'acct_workspace_member', grantId = 'iag_' + 'c'.repeat(24);
   const file = join(root, 'config', 'owner-account-binding.json');
   await mkdir(join(root, 'config'), { recursive: true });

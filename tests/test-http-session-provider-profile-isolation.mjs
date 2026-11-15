@@ -68,8 +68,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-provider-profile-isolation-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-provider-profile-isolation-'));
+  const configDir = join(home, '.config', 'ragent');
   const binDir = join(home, '.local', 'bin');
   const nativeRuntimeDir = join(configDir, 'native-provider-runtime');
   const secretsDir = join(nativeRuntimeDir, 'secrets');
@@ -120,12 +120,12 @@ async function startServer({ home, configDir, binDir, port }) {
       PATH: `${binDir}:${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-provider-profile-isolation',
-      AGENTOC_PROVIDER_HOMES_DIR: join(configDir, 'provider-homes'),
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-provider-profile-isolation',
+      RAGENT_PROVIDER_HOMES_DIR: join(configDir, 'provider-homes'),
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
     },
     stdio: ['ignore', 'ignore', 'ignore'],
   });

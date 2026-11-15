@@ -13,8 +13,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-phase-gates-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-phase-gates-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const store = await import('../chat/organization-store.mjs');
 const gates = await import('../chat/phase-gates.mjs');
@@ -215,7 +215,7 @@ try {
   // ── NEEDS_CHANGES packet chain: old packet/gate immutable ────────────────
   beginSection('needs-changes-packet-chain');
   {
-    const root = makeRoot('agentoc-phase-chain-root-');
+    const root = makeRoot('ragent-phase-chain-root-');
     const project = await makeProject('Phase Chain', root);
     const runA = nextRunId('run_chain_a');
     await makeTerminalRun({ project, sessionId: 'sess_chain_a', runId: runA, result: { summary: 'old attempt' } });
@@ -265,7 +265,7 @@ try {
   // ── orchestrator dispatchRework: new Attempt -> new Packet -> new Gate ───
   beginSection('orchestrator-rework-chain');
   {
-    const rootDir = makeRoot('agentoc-phase-orch-root-');
+    const rootDir = makeRoot('ragent-phase-orch-root-');
     const root = {
       id: 'root-orch',
       folder: rootDir,

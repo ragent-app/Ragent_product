@@ -8,7 +8,7 @@
 // fail-closed on missing Job host, spec passthrough, whole-tree terminate on
 // kill, and host release after exit.  Nothing here pretends to be Windows
 // live evidence; the real host traces live under
-// /var/lib/agentoc/workspace/windows-a0-evidence/.
+// /var/lib/ragent/workspace/windows-a0-evidence/.
 
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
@@ -232,7 +232,7 @@ function fakeJobHost({ createShouldFail = false } = {}) {
     create.spec.stdin === true && create.spec.stdout === true && create.spec.stderr === true);
   ok('win32 managed spawn returns the job facade', proc === facade);
   ok('win32 managed spawn exposes read-only job membership diagnostics',
-    typeof proc.__agentocWindowsJobList === 'function');
+    typeof proc.__ragentWindowsJobList === 'function');
   ok('win32 managed spawn defaults to controller-owned Job cleanup', createOptions?.preserveOnControllerExit === false);
 
   // Natural exit must release the dedicated host.

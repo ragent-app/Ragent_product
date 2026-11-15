@@ -16,7 +16,7 @@ try {
   server = createServer((socket) => socket.once('data', (chunk) => {
     const request = JSON.parse(chunk.toString().trim());
     assert.equal(request.expectedAccountDigest, codexBrokerAccountDigest('account-a'));
-    socket.end(`${JSON.stringify({ type: 'agentoc-codex-broker-retire-result', accepted: idle })}\n`);
+    socket.end(`${JSON.stringify({ type: 'ragent-codex-broker-retire-result', accepted: idle })}\n`);
   }));
   await new Promise((resolve, reject) => server.once('error', reject).listen(codexAppServerBrokerSocketPath(home), resolve));
   await assert.rejects(retireIdleCodexBrokerForPluginChange({ homeRoot: root, accountId: 'account-a' }), { code: 'CODEX_RETIRE_BUSY' });

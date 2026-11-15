@@ -71,7 +71,7 @@ func ownerInstallEnvironmentWithFolders(userEnvironment []string, root, systemDi
 		"PATH=" + systemDir, "ComSpec=" + filepath.Join(systemDir, "cmd.exe"), "PATHEXT=.COM;.EXE;.BAT;.CMD",
 		"PSModulePath=" + filepath.Join(vendor, "PowerShell", "Modules"),
 		"POWERSHELL_TELEMETRY_OPTOUT=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1",
-		"AGENTOC_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1")}
+		"RAGENT_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1")}
 	for _, key := range []string{"USERPROFILE", "LOCALAPPDATA", "APPDATA", "TEMP", "TMP"} {
 		values = append(values, key+"="+keys[key])
 	}

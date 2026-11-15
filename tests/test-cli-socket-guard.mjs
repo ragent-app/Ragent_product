@@ -25,11 +25,11 @@ import {
 } from '../lib/cli-socket-guard.mjs';
 
 function makeDir() {
-  return mkdtempSync(join(tmpdir(), 'agentoc-cli-socket-guard-'));
+  return mkdtempSync(join(tmpdir(), 'ragent-cli-socket-guard-'));
 }
 
 function socketFilePath(dir) {
-  return join(dir, 'agentoc-cli.sock');
+  return join(dir, 'ragent-cli.sock');
 }
 
 function cleanPath(path) {

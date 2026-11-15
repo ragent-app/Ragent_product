@@ -16,7 +16,7 @@
 //
 // The scenario intentionally covers parallel workers, NEEDS_CHANGES, rework,
 // replan, phase completion and a final aggregation, which §20.12 requires.
-// The real `agentoc.service` clean restart stays a separate gated item; this
+// The real `ragent.service` clean restart stays a separate gated item; this
 // suite models a process crash with fresh-process reads over the same facts.
 import assert from 'assert/strict';
 import { execFileSync } from 'child_process';
@@ -24,13 +24,13 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-acceptance-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-acceptance-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
-process.env.AGENTOC_ORG_PROJECTION_V1_ENABLED = '1';
-process.env.AGENTOC_ORG_RECOVERY_V1_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_ORG_PROJECTION_V1_ENABLED = '1';
+process.env.RAGENT_ORG_RECOVERY_V1_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/organization-store.mjs');

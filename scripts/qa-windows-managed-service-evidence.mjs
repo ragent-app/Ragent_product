@@ -31,14 +31,14 @@ if(hardened){
  assert.deepEqual(sorted(expected.rules),sorted(a.hardened.rules));
 }else{assert.equal(r.dataPlan.exitCode,0);assert.equal(r.dataPlan.result.readOnly,true);}
 assert.equal(r.services.length,2);const pids=new Set(),sids=new Set(),nodes=new Set(),attackPids=new Set();
-const expectedSids={'AgentoC-ControlPlane':'S-1-5-80-555966672-1219555316-1140255090-1259223577-3837636007','AgentoC-RunnerSupervisor':'S-1-5-80-2610452377-2515812077-2882137345-1331524236-1359986107'};
+const expectedSids={'Ragent-ControlPlane':'S-1-5-80-555966672-1219555316-1140255090-1259223577-3837636007','Ragent-RunnerSupervisor':'S-1-5-80-2610452377-2515812077-2882137345-1331524236-1359986107'};
 for(const row of r.services){
  const sid=expectedSids[row.name];assert.ok(sid);sids.add(sid);assert.equal(row.proof.pass,true);assert.equal(row.proof.parentPid,row.pid);assert.equal(row.parentFacts.pid,row.pid);assert.equal(row.nodeFacts.pid,row.proof.pid);assert.equal(row.proof.authorityIssued,false);assert.equal(row.proof.productApiStarted,false);nodes.add(row.proof.node);
  for(const facts of [row.parentFacts,row.nodeFacts,row.proof.token]){assert.equal(facts.sid,sid);assert.equal(facts.integrityRid,8192);assert.equal(facts.sessionId,0);assert.equal(facts.elevated,false);assert.equal(facts.enabledAdministrators,false);assert.deepEqual(facts.privileges,['SeChangeNotifyPrivilege']);assert.ok(Number.isInteger(facts.pid)&&facts.pid>0);pids.add(facts.pid);}
  assert.equal(row.proof.token.privilegeReenableDenied,true);assert.equal(row.proof.token.integrityRaiseDenied,true);assert.equal(row.proof.token.postIntegrityRid,8192);
  if(defaultBaseline){const attack=row.proof.ancestorGuard;assert.equal(attack.pass,true);assert.equal(attack.sid,sid);assert.equal(attack.checks.length,9);assert.equal(attack.metadataOnlyAccess,256);assert.equal(attack.ownedDirectoriesOnly,true);assert.ok(Number.isInteger(attack.pid)&&attack.pid>0&&!pids.has(attack.pid));attackPids.add(attack.pid);}
- for(const path of ['C:/Program Files/AgentoC/payload/node.exe','C:/Program Files/AgentoC/payload/immutable-probe.txt'])assert.ok(row.proof.denied.includes(path));
- if(row.name==='AgentoC-RunnerSupervisor')for(const path of ['C:/ProgramData/AgentoC/instances/owner/config/auth-session-secret','C:/ProgramData/AgentoC/instances/owner/config/blocked-write','C:/ProgramData/AgentoC/instances/owner/runtime/blocked-write','C:/ProgramData/AgentoC/harnesses/blocked-write'])assert.ok(row.proof.denied.includes(path));
+ for(const path of ['C:/Program Files/Ragent/payload/node.exe','C:/Program Files/Ragent/payload/immutable-probe.txt'])assert.ok(row.proof.denied.includes(path));
+ if(row.name==='Ragent-RunnerSupervisor')for(const path of ['C:/ProgramData/Ragent/instances/owner/config/auth-session-secret','C:/ProgramData/Ragent/instances/owner/config/blocked-write','C:/ProgramData/Ragent/instances/owner/runtime/blocked-write','C:/ProgramData/Ragent/harnesses/blocked-write'])assert.ok(row.proof.denied.includes(path));
 }
 assert.equal(pids.size,6);assert.equal(sids.size,2);assert.equal(nodes.size,1);
 if(defaultBaseline){assert.equal(attackPids.size,2);for(const pid of attackPids)assert.ok(!pids.has(pid));}

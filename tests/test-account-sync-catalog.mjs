@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-account-sync-catalog-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-account-sync-catalog-'));
 const { createOwnerAuthBroker } = await import('../accounts/owner-auth-broker.mjs');
 const {
   loadOrCreateInstanceIdentity,
@@ -43,13 +43,13 @@ function catalogProof(identity, requestId) {
     accountId,
     targetInstanceId,
     issuedAt,
-    audience: 'agentoc-account-sync-catalog',
+    audience: 'ragent-account-sync-catalog',
     instance: publicInstanceIdentity(identity),
     signature: signProviderSyncPeerProof(identity, {
       requestId,
       targetInstanceId,
       issuedAt,
-      audience: 'agentoc-account-sync-catalog',
+      audience: 'ragent-account-sync-catalog',
     }).signature,
   };
 }
@@ -110,7 +110,7 @@ const deviceProof = signOwnerAuthDeviceProof(source, {
   transactionId: 'catalog_devices',
   purpose: 'devices',
   issuedAt: deviceIssuedAt,
-  audience: 'agentoc-owner-auth-device',
+  audience: 'ragent-owner-auth-device',
 });
 const devices = await broker.listDevices({
   transactionId: 'catalog_devices',
@@ -118,7 +118,7 @@ const devices = await broker.listDevices({
   accountId,
   instance: publicInstanceIdentity(source),
   issuedAt: deviceIssuedAt,
-  audience: 'agentoc-owner-auth-device',
+  audience: 'ragent-owner-auth-device',
   signature: deviceProof.signature,
 });
 assert.equal(devices.syncCatalog.length, 2);

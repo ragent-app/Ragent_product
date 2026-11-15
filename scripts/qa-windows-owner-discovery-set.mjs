@@ -19,11 +19,11 @@ const identity=await assertOrdinaryWindowsExecutionIdentity();assert.equal(ident
 for(const item of spec.sourceFiles)assert.equal(hash(await readFile(join(source,item.path))),item.sha256);
 const index=JSON.parse(await readFile(join(prepared.bundle,'owner-files.json'),'utf8'));
 for(const item of index.files)assert.equal(hash(await readFile(join(source,item.path))),item.sha256);
-const root=join(process.env.ProgramData,'AgentoCIdentityQA','case-'+spec.caseId);
+const root=join(process.env.ProgramData,'RagentIdentityQA','case-'+spec.caseId);
 const report={caseId:spec.caseId,pass:false,protocolVersion:2,productionChanged:false,phoneTouched:false,providerUsed:false,
   actualPhoneOrTurn:false,credentialSource:'synthetic isolated signing key; original product SQLite auth and local UI broker',cases:[]};
 let launchStatus,launchOutput='',launchError='',stage='waiting-first-ready';
-async function production(){const {stdout}=await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',`[pscustomobject]@{services=@(Get-CimInstance Win32_Service -Filter "Name='AgentoC-ControlPlane' OR Name='AgentoC-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,ProcessId,StartName)}|ConvertTo-Json -Compress`],{windowsHide:true,timeout:10000});return JSON.parse(stdout.trim());}
+async function production(){const {stdout}=await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',`[pscustomobject]@{services=@(Get-CimInstance Win32_Service -Filter "Name='Ragent-ControlPlane' OR Name='Ragent-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,ProcessId,StartName)}|ConvertTo-Json -Compress`],{windowsHide:true,timeout:10000});return JSON.parse(stdout.trim());}
 const productionBefore=await production();await writeFile(join(prepared.bundle,'production-before.json'),JSON.stringify(productionBefore));
 const launch=spawn(process.execPath,[join(source,'scripts/qa-windows-service-identities.mjs'),'--live'],{windowsHide:true,cwd:source,stdio:['ignore','pipe','pipe']});
 launch.stdout.on('data',bytes=>{launchOutput=(launchOutput+bytes).slice(-32768);});launch.stderr.on('data',bytes=>{launchError=(launchError+bytes).slice(-32768);});

@@ -9,7 +9,7 @@
 
 import { readdir, readFile } from 'node:fs/promises';
 
-const DEFAULT_CC_SWITCH_COMMAND = '/opt/agentoc/vendor/cc-switch/cc-switch';
+const DEFAULT_CC_SWITCH_COMMAND = '/opt/ragent/vendor/cc-switch/cc-switch';
 const STOP_GRACE_MS = 2_000;
 
 function trimString(value) {
@@ -17,7 +17,7 @@ function trimString(value) {
 }
 
 function configuredCommand(environment = process.env) {
-  return trimString(environment.AGENTOC_CC_SWITCH_COMMAND) || DEFAULT_CC_SWITCH_COMMAND;
+  return trimString(environment.RAGENT_CC_SWITCH_COMMAND) || DEFAULT_CC_SWITCH_COMMAND;
 }
 
 function commandMatches(tokens, commandPath) {

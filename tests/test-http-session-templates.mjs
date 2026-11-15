@@ -58,8 +58,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-template-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-template-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -136,13 +136,13 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-http-template",
-      AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_AUTH_SESSION_SECRET: "test-secret-ragent-http-template",
+      RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
       HOME: home,
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_CONFIG_DIR: join(home, '.config', 'agentoc'),
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_CONFIG_DIR: join(home, '.config', 'ragent'),
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
     },
@@ -233,13 +233,13 @@ try {
       tool: 'fake-codex',
       name: 'Template from web source',
       sourceId: 'chat',
-      sourceName: 'AgentoC',
+      sourceName: 'Ragent',
       templateId: saved.json.template.id,
       templateName: saved.json.template.name,
     });
     assert.equal(createdWithTemplate.status, 201, 'session create should support source + template together');
     assert.equal(createdWithTemplate.json.session?.sourceId, 'chat', 'creating with a template should keep the requested source id');
-    assert.equal(createdWithTemplate.json.session?.sourceName, 'AgentoC', 'creating with a template should keep the requested source name');
+    assert.equal(createdWithTemplate.json.session?.sourceName, 'Ragent', 'creating with a template should keep the requested source name');
     assert.equal(createdWithTemplate.json.session?.templateId, saved.json.template.id, 'creating with a template should also persist the template id');
 
     const target = await createSession(port, 'Template target');

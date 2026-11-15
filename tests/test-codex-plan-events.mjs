@@ -72,7 +72,7 @@ assert.deepEqual(
   'legacy app-server progress lists misclassified as proposals should normalize on read',
 );
 assert.equal(
-  planEventModeFields({ source: 'agentoc-plan-fallback' }).planIntent,
+  planEventModeFields({ source: 'ragent-plan-fallback' }).planIntent,
   'proposal',
   'fallback plan artifacts should remain actionable proposals',
 );

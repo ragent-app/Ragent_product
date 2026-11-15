@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-early-rename-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-early-rename-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(tempBin, { recursive: true });
 mkdirSync(configDir, { recursive: true });
@@ -21,7 +21,7 @@ const prompt = process.argv[process.argv.length - 1] || '';
 const hasInlineLabels = prompt.includes('Session presentation metadata (hidden protocol)');
 const delayMs = 220;
 const text = hasInlineLabels
-  ? 'main task finished\\n<agentoc-session-labels>{"schemaVersion":1,"title":"AgentoC Rename Flow","group":"AgentoC","description":"Refactor the naming flow after the foreground run finishes."}</agentoc-session-labels>'
+  ? 'main task finished\\n<ragent-session-labels>{"schemaVersion":1,"title":"Ragent Rename Flow","group":"Ragent","description":"Refactor the naming flow after the foreground run finishes."}</ragent-session-labels>'
   : 'main task finished';
 
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'run-thread' }));
@@ -129,7 +129,7 @@ await waitFor(
   async () => {
     const current = await getSession(session.id);
     return current?.name === 'Rename Flow'
-      && current?.group === 'AgentoC'
+      && current?.group === 'Ragent'
       && current?.description === 'Refactor the naming flow after the foreground run finishes.'
       && current?.autoRenamePending === false;
   },
@@ -138,7 +138,7 @@ await waitFor(
 
 const finished = await getSession(session.id);
 assert.equal(finished?.name, 'Rename Flow', 'finished session should adopt the final AI title after the first turn');
-assert.equal(finished?.group, 'AgentoC', 'finished session should keep the early AI grouping');
+assert.equal(finished?.group, 'Ragent', 'finished session should keep the early AI grouping');
 assert.equal(
   finished?.description,
   'Refactor the naming flow after the foreground run finishes.',

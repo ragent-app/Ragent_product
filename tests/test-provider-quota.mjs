@@ -12,7 +12,7 @@ import {
   refreshProviderQuota,
 } from '../lib/provider-runtime/quota.mjs';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-provider-quota-'));
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-provider-quota-'));
 const registry = createNativeProviderRegistry({ configDir });
 const secretStore = createSecretStore({ configDir });
 const quotaStore = createProviderQuotaStore({ configDir });

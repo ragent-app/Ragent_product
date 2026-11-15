@@ -4,14 +4,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-codex-approval-idempotency-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-codex-approval-idempotency-'));
 const instanceRoot = path.join(root, 'instance');
-process.env.AGENTOC_INSTANCE_ROOT = instanceRoot;
-process.env.AGENTOC_CONFIG_DIR = path.join(instanceRoot, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(instanceRoot, 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(instanceRoot, 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(instanceRoot, 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(instanceRoot, 'data', 'chat-runs');
+process.env.RAGENT_INSTANCE_ROOT = instanceRoot;
+process.env.RAGENT_CONFIG_DIR = path.join(instanceRoot, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(instanceRoot, 'workspace');
+process.env.RAGENT_MEMORY_DIR = path.join(instanceRoot, 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(instanceRoot, 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(instanceRoot, 'data', 'chat-runs');
 
 const { createRun, getRun } = await import('../chat/runs.mjs');
 const { trackClaudeBidiApprovalRequest, trackCodexAppServerApprovalRequest } = await import('../chat/runner-sidecar.mjs');
@@ -60,7 +60,7 @@ function makeState({ riskMode = 'recommended', autoApproveServer = true, threadI
     autoApprovedMcpRequestIds: new Set(),
     startedTurn: true,
     mcpRequired: true,
-    mcpAutoApproveServerNames: new Set(autoApproveServer ? ['agentoc_actions'] : []),
+    mcpAutoApproveServerNames: new Set(autoApproveServer ? ['ragent_actions'] : []),
   };
 }
 
@@ -75,7 +75,7 @@ function captureProcess() {
 try {
   const managedRun = await createFixtureRun('managed-replay');
   const managedState = makeState({ threadId: 'thread-managed', turnId: 'turn-managed' });
-  const managedRequest = mcpApproval(41, 'agentoc_actions', managedState.threadId, managedState.turnId);
+  const managedRequest = mcpApproval(41, 'ragent_actions', managedState.threadId, managedState.turnId);
   const managedCapture = captureProcess();
   await trackCodexAppServerApprovalRequest(managedRun.id, managedState, managedRequest, managedCapture.proc);
   await trackCodexAppServerApprovalRequest(managedRun.id, managedState, managedRequest, managedCapture.proc);
@@ -137,6 +137,6 @@ try {
   const target = path.resolve(root);
   const parent = path.resolve(os.tmpdir());
   assert.equal(path.dirname(target).toLowerCase(), parent.toLowerCase(), 'fixture cleanup must stay inside the temp parent');
-  assert.ok(path.basename(target).startsWith('agentoc-codex-approval-idempotency-'));
+  assert.ok(path.basename(target).startsWith('ragent-codex-approval-idempotency-'));
   await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

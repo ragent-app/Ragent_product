@@ -13,7 +13,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempDir = mkdtempSync(join(tmpdir(), 'agentoc-instance-factory-'));
+const tempDir = mkdtempSync(join(tmpdir(), 'ragent-instance-factory-'));
 
 const manifestPath = join(tempDir, 'host.manifest.jsonc');
 const envPath = join(tempDir, 'install.env');
@@ -26,11 +26,11 @@ writeFileSync(manifestPath, `{
   "schemaVersion": 1,
   "host": {
     "provider": "digitalocean",
-    "hostname": "agentoc-sfo3-01",
+    "hostname": "ragent-sfo3-01",
     "region": "sfo3",
     "size": "s-2vcpu-4gb",
     "image": "ubuntu-24-04-x64",
-    "tags": ["agentoc", "owner"],
+    "tags": ["ragent", "owner"],
     "sshKeys": ["fp:test"],
     "repoCheckoutPath": "${repoRoot.replaceAll('\\', '\\\\')}"
   },
@@ -41,11 +41,11 @@ writeFileSync(manifestPath, `{
     }
   },
   "systemd": {
-    "ownerUnit": "agentoc"
+    "ownerUnit": "ragent"
   }
 }`, 'utf8');
 
-writeFileSync(envPath, `AGENTOC_MODE=on
+writeFileSync(envPath, `RAGENT_MODE=on
 INGRESS_CLOUDFLARE_MODE=on
 CONNECTOR_EMAIL_MODE=auto
 WORKER_MAILBOX_MODE=auto
@@ -63,7 +63,7 @@ const manifest = JSON.parse(`{
   "schemaVersion": 1,
   "host": {
     "provider": "digitalocean",
-    "hostname": "agentoc-sfo3-01",
+    "hostname": "ragent-sfo3-01",
     "region": "sfo3",
     "repoCheckoutPath": "${repoRoot.replaceAll('\\', '\\\\')}"
   },
@@ -74,11 +74,11 @@ const manifest = JSON.parse(`{
     }
   },
   "systemd": {
-    "ownerUnit": "agentoc"
+    "ownerUnit": "ragent"
   }
 }`);
 
-const installEnv = parseEnvFileContent(`AGENTOC_MODE=on
+const installEnv = parseEnvFileContent(`RAGENT_MODE=on
 INGRESS_CLOUDFLARE_MODE=on
 CLOUDFLARE_API_TOKEN=token
 CLOUDFLARE_ACCOUNT_ID=acct
@@ -93,7 +93,7 @@ CONNECTOR_CALENDAR_MODE=auto
 const readyHostFacts = {
   commands: { node: true, cloudflared: true, systemctl: true },
   files: { chatServer: true },
-  services: { agentoc: 'active', 'cloudflared-thelab': 'active' },
+  services: { ragent: 'active', 'cloudflared-thelab': 'active' },
 };
 const plan = await deriveProfilePlan({ manifest, installEnv, hostFacts: readyHostFacts, commandName: 'install-profile' });
 assert.equal(plan.summary.overallStatus, 'ready', JSON.stringify(plan.summary));
@@ -131,8 +131,8 @@ const provisionResult = spawnSync(process.execPath, [
 });
 assert.equal(provisionResult.status, 0);
 const provisionJson = JSON.parse(provisionResult.stdout);
-assert.equal(provisionJson.request.body.name, 'agentoc-sfo3-01');
-assert.deepEqual(provisionJson.request.body.tags, ['agentoc', 'owner']);
+assert.equal(provisionJson.request.body.name, 'ragent-sfo3-01');
+assert.deepEqual(provisionJson.request.body.tags, ['ragent', 'owner']);
 assert.equal(readFileSync(join(provisionRenderDir, 'bootstrap-handoff.txt'), 'utf8').includes('scp bootstrap-host.sh'), true);
 
 const cliResult = spawnSync(process.execPath, [
@@ -153,8 +153,8 @@ assert.equal(JSON.parse(cliResult.stdout).summary.overallStatus, renderedPlan.su
 assert.equal(cliResult.status, renderedPlan.summary.overallStatus === 'blocked' ? 1 : 0);
 
 const renderedInstallEnv = readFileSync(join(renderDir, 'derived-profile.env'), 'utf8');
-assert.match(renderedInstallEnv, /AGENTOC_OWNER_DOMAIN=thelab\.example\.com/);
-assert.match(renderedInstallEnv, /AGENTOC_PUBLIC_BASE_URL=https:\/\/thelab\.example\.com/);
+assert.match(renderedInstallEnv, /RAGENT_OWNER_DOMAIN=thelab\.example\.com/);
+assert.match(renderedInstallEnv, /RAGENT_PUBLIC_BASE_URL=https:\/\/thelab\.example\.com/);
 
 const bootstrapResult = spawnSync(process.execPath, [
   'cli.js',
@@ -170,7 +170,7 @@ assert.ok([0, 1].includes(bootstrapResult.status), bootstrapResult.stderr);
 assert.equal(bootstrapResult.status, JSON.parse(bootstrapResult.stdout).summary.overallStatus === 'blocked' ? 1 : 0);
 const bootstrapScript = readFileSync(join(bootstrapRenderDir, 'bootstrap-host.sh'), 'utf8');
 assert.match(bootstrapScript, /apt-get install -y curl git ca-certificates jq build-essential/);
-assert.match(bootstrapScript, /systemctl enable --now 'agentoc'/);
+assert.match(bootstrapScript, /systemctl enable --now 'ragent'/);
 
 const bootstrapExecuteWithoutHost = spawnSync(process.execPath, [
   'cli.js',
@@ -200,13 +200,13 @@ assert.equal(installResult.status, installJson.summary.overallStatus === 'blocke
 assert.equal(typeof installJson.artifacts.installProfileEnv, 'string');
 const applyInstallScript = readFileSync(join(installRenderDir, 'apply-install-profile.sh'), 'utf8');
 assert.equal(applyInstallScript.includes('systemctl restart'), true);
-assert.equal(applyInstallScript.includes('AGENTOC_OWNER_ACCESS_URL='), false, '静态 access token 已下线，不应再注入 access URL');
-assert.equal(applyInstallScript.includes('AGENTOC_OWNER_INITIAL_PASSWORD='), true);
+assert.equal(applyInstallScript.includes('RAGENT_OWNER_ACCESS_URL='), false, '静态 access token 已下线，不应再注入 access URL');
+assert.equal(applyInstallScript.includes('RAGENT_OWNER_INITIAL_PASSWORD='), true);
 assert.equal(applyInstallScript.includes('auth.json'), true);
 assert.equal(readFileSync(join(installRenderDir, 'cloudflared-config.yml'), 'utf8').includes('service: http://127.0.0.1:7690'), true);
 
 const inspectResult = spawnSync(process.execPath, [
-  'automation/instance-factory/scripts/inspect-agentoc-host.mjs',
+  'automation/instance-factory/scripts/inspect-ragent-host.mjs',
 ], {
   cwd: repoRoot,
   encoding: 'utf8',

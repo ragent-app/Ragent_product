@@ -16,65 +16,65 @@ import { buildWindowsSelectStringGlobBridge } from '../chat/windows-ripgrep-brid
 import { buildWindowsWildcardNameBridge } from '../chat/windows-wildcard-list-bridge.mjs';
 import { buildCodexAppServerProjectTrustArgs } from '../chat/adapters/codex-app-server.mjs';
 import { validateCodexAppServerApprovalContext } from '../chat/codex-app-server-protocol.mjs';
-if (process.platform !== 'win32' || process.env.AGENTOC_RUN_CODEX_LOCAL_GATE !== '1') {
+if (process.platform !== 'win32' || process.env.RAGENT_RUN_CODEX_LOCAL_GATE !== '1') {
   console.log('codex-windows-local-gate: skipped (opt-in Windows integration test)');
   process.exit(0);
 }
-if (!process.env.AGENTOC_TEST_CODEX_BINARY || !path.isAbsolute(process.env.AGENTOC_TEST_CODEX_BINARY)) throw new Error('absolute test Codex binary path required');
-const home = await mkdtemp(path.join(tmpdir(), process.env.AGENTOC_QA_CODEX_UNICODE === '1'
-  ? 'agentoc-codex-local-gate-项目 空格-' : 'agentoc-codex-local-gate-'));
-const assetRoute = process.env.AGENTOC_QA_ASSET_UNQUOTED === '1' ? '/api/sessions/$env:AGENTOC_SESSION_ID/assets' : '"/api/sessions/$env:AGENTOC_SESSION_ID/assets"';
-const managedTrigger = process.env.AGENTOC_QA_HOOK_MANAGED_TRIGGER === '1';
-const triggerHelp = managedTrigger && process.env.AGENTOC_QA_TRIGGER_TOP_HELP === '1';
-const triggerCommand = triggerHelp ? 'agentoc trigger --help' : "ragent trigger create --in 1h --text 'isolated follow-up' --json";
-const managedAsset = process.env.AGENTOC_QA_HOOK_MANAGED_ASSET === '1' || managedTrigger;
+if (!process.env.RAGENT_TEST_CODEX_BINARY || !path.isAbsolute(process.env.RAGENT_TEST_CODEX_BINARY)) throw new Error('absolute test Codex binary path required');
+const home = await mkdtemp(path.join(tmpdir(), process.env.RAGENT_QA_CODEX_UNICODE === '1'
+  ? 'ragent-codex-local-gate-项目 空格-' : 'ragent-codex-local-gate-'));
+const assetRoute = process.env.RAGENT_QA_ASSET_UNQUOTED === '1' ? '/api/sessions/$env:RAGENT_SESSION_ID/assets' : '"/api/sessions/$env:RAGENT_SESSION_ID/assets"';
+const managedTrigger = process.env.RAGENT_QA_HOOK_MANAGED_TRIGGER === '1';
+const triggerHelp = managedTrigger && process.env.RAGENT_QA_TRIGGER_TOP_HELP === '1';
+const triggerCommand = triggerHelp ? 'ragent trigger --help' : "ragent trigger create --in 1h --text 'isolated follow-up' --json";
+const managedAsset = process.env.RAGENT_QA_HOOK_MANAGED_ASSET === '1' || managedTrigger;
 if (managedAsset) process.env.CHAT_PORT = '18669';
 const alternateCwd = path.join(home, 'alternate-workdir');
-if (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1') await mkdir(alternateCwd);
-process.env.AGENTOC_INSTANCE_ROOT = path.join(home, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(home, 'instance', 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(home, 'instance', 'workspace');
-process.env.AGENTOC_MEMORY_DIR = path.join(home, 'instance', 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(home, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(home, 'instance', 'data', 'chat-runs');
+if (process.env.RAGENT_QA_HOOK_WORKDIR === '1' || process.env.RAGENT_QA_HOOK_MANAGED_DELETE === '1') await mkdir(alternateCwd);
+process.env.RAGENT_INSTANCE_ROOT = path.join(home, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(home, 'instance', 'config');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(home, 'instance', 'workspace');
+process.env.RAGENT_MEMORY_DIR = path.join(home, 'instance', 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(home, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(home, 'instance', 'data', 'chat-runs');
 const { appendRunSpoolRecord, createRun, getRun } = await import('../chat/runs.mjs');
 const { flushCodexAppServerApprovalResponses, trackCodexAppServerApprovalRequest, handleCodexAppServerInitializeResponse } = await import('../chat/runner-sidecar.mjs');
-const phoneQueueCase = process.env.AGENTOC_QA_SAMSUNG_CODEX_QUEUE === '1';
+const phoneQueueCase = process.env.RAGENT_QA_SAMSUNG_CODEX_QUEUE === '1';
 const phoneSessionId = 'samsung-fixture';
 const { handleSessionMainRoutes } = phoneQueueCase ? await import('../chat/router-session-main-routes.mjs') : {};
 const { getHistory } = phoneQueueCase ? await import('../chat/session-manager.mjs') : {};
 const { withSessionsMetaMutation, mutateSessionMeta } = phoneQueueCase ? await import('../chat/session-meta-store.mjs') : {};
 let phoneApproval = null; let phoneState = null; let phoneQueued = false;
-const riskMode = ['full-auto', 'conservative-auto'].includes(process.env.AGENTOC_QA_MODE) ? process.env.AGENTOC_QA_MODE : 'recommended';
-const boundContext = process.env.AGENTOC_QA_BOUND_CONTEXT === '1'
+const riskMode = ['full-auto', 'conservative-auto'].includes(process.env.RAGENT_QA_MODE) ? process.env.RAGENT_QA_MODE : 'recommended';
+const boundContext = process.env.RAGENT_QA_BOUND_CONTEXT === '1'
   ? await (await import('./fixtures/windows-admitted-context.mjs')).admittedWindowsContext(home, 'fixture-session') : null;
-const managedInstall = process.env.AGENTOC_QA_HOOK_MANAGED_INSTALL === '1';
-const managedElevation = process.env.AGENTOC_QA_HOOK_ELEVATION === '1';
-const pinnedIdentity = managedInstall && process.env.AGENTOC_QA_PIN_INSTALL_KEY === '1'
+const managedInstall = process.env.RAGENT_QA_HOOK_MANAGED_INSTALL === '1';
+const managedElevation = process.env.RAGENT_QA_HOOK_ELEVATION === '1';
+const pinnedIdentity = managedInstall && process.env.RAGENT_QA_PIN_INSTALL_KEY === '1'
   ? { kid: 'fixture-key', publicKey: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString() } : null;
-const packageCommand = process.env.AGENTOC_QA_INSTALL_EQUALS === '1'
-  ? `winget install --id=Vendor.App --source=winget --scope=${process.env.AGENTOC_QA_INSTALL_USER === '1' ? 'user' : 'machine'}`
-  : process.env.AGENTOC_QA_INSTALL_FLAGS === '1'
-  ? `winget install --id Vendor.App -e -h --disable-interactivity --scope ${process.env.AGENTOC_QA_INSTALL_USER === '1' ? 'user' : 'machine'}`
+const packageCommand = process.env.RAGENT_QA_INSTALL_EQUALS === '1'
+  ? `winget install --id=Vendor.App --source=winget --scope=${process.env.RAGENT_QA_INSTALL_USER === '1' ? 'user' : 'machine'}`
+  : process.env.RAGENT_QA_INSTALL_FLAGS === '1'
+  ? `winget install --id Vendor.App -e -h --disable-interactivity --scope ${process.env.RAGENT_QA_INSTALL_USER === '1' ? 'user' : 'machine'}`
   : 'winget install Vendor.App';
-const installCommand = process.env.AGENTOC_QA_HOOK_WRAPPED_INSTALL === '1'
-  ? `agentoc-privileged --description "Install fixture" --category install -- ${packageCommand}`
+const installCommand = process.env.RAGENT_QA_HOOK_WRAPPED_INSTALL === '1'
+  ? `ragent-privileged --description "Install fixture" --category install -- ${packageCommand}`
   : packageCommand;
-const managedDelete = process.env.AGENTOC_QA_HOOK_MANAGED_DELETE === '1';
-const managedRipgrep = process.env.AGENTOC_QA_HOOK_MANAGED_RG === '1';
-const managedGlob = process.env.AGENTOC_QA_HOOK_MANAGED_GLOB === '1';
-const managedList = process.env.AGENTOC_QA_HOOK_MANAGED_LIST === '1';
-const assetOutsideRoot = managedAsset ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-asset-outside-')) : '';
+const managedDelete = process.env.RAGENT_QA_HOOK_MANAGED_DELETE === '1';
+const managedRipgrep = process.env.RAGENT_QA_HOOK_MANAGED_RG === '1';
+const managedGlob = process.env.RAGENT_QA_HOOK_MANAGED_GLOB === '1';
+const managedList = process.env.RAGENT_QA_HOOK_MANAGED_LIST === '1';
+const assetOutsideRoot = managedAsset ? await mkdtemp(path.join(tmpdir(), 'ragent-codex-asset-outside-')) : '';
 const assetFile = managedAsset ? path.join(assetOutsideRoot, 'fixture.txt') : '';
 let assetHelper = '';
 if (managedAsset) {
-  const source = process.env.AGENTOC_TEST_INSTALLED_PAYLOAD, helper = process.env.AGENTOC_TEST_CLI_READ_BINARY;
+  const source = process.env.RAGENT_TEST_INSTALLED_PAYLOAD, helper = process.env.RAGENT_TEST_CLI_READ_BINARY;
   if (!path.isAbsolute(source || '') || !path.isAbsolute(helper || '')) throw new Error('absolute asset helper and payload required');
   await writeFile(assetFile, 'isolated asset fixture');
   const payload = path.join(home, 'asset-payload'); await mkdir(path.join(payload, 'bin'), { recursive: true });
   await Promise.all(['node.exe', 'cli.js', 'package.json'].map(file => copyFile(path.join(source, file), path.join(payload, file))));
   await cp(path.join(source, 'lib'), path.join(payload, 'lib'), { recursive: true });
-  assetHelper = path.join(payload, 'bin', 'agentoc-cli-read-bridge.exe'); await copyFile(helper, assetHelper);
+  assetHelper = path.join(payload, 'bin', 'ragent-cli-read-bridge.exe'); await copyFile(helper, assetHelper);
 }
 const rgFixture = path.join(home, 'rg-fixture');
 const rgConfig = path.join(home, 'rg-config');
@@ -82,17 +82,17 @@ if (managedRipgrep) {
   await mkdir(rgFixture); await writeFile(path.join(rgFixture, 'ordinary-fixture.txt'), 'fixture');
   await writeFile(path.join(rgFixture, '.env'), 'fake-secret'); await writeFile(path.join(rgFixture, '.ignore'), '!.env\n'); await writeFile(rgConfig, '--hidden\n');
 }
-const fileCommand = process.env.AGENTOC_QA_FILE_COMMAND || '';
-const webDownload = process.env.AGENTOC_QA_WEB_DOWNLOAD === '1';
-if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
-if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'where-filter', 'system-copy', 'select-string', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || (process.env.AGENTOC_QA_HOOK_REWRITE === '1' && !managedGlob && !managedList) || process.env.AGENTOC_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
-if (managedGlob && (fileCommand !== 'select-string' || process.env.AGENTOC_QA_SEARCH_GLOB !== '1' || process.env.AGENTOC_QA_HOOK_REWRITE !== '1')) throw new Error('managed wildcard fixture requires a hooked wildcard search');
-if (managedList && (fileCommand !== 'where-filter' || process.env.AGENTOC_QA_HOOK_REWRITE !== '1')) throw new Error('managed listing fixture requires a hooked wildcard listing');
-if (fileCommand === 'git-status' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
-if (fileCommand === 'uninstall' && process.env.AGENTOC_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
-const outsideWrite = process.env.AGENTOC_QA_FILE_OUTSIDE === '1';
+const fileCommand = process.env.RAGENT_QA_FILE_COMMAND || '';
+const webDownload = process.env.RAGENT_QA_WEB_DOWNLOAD === '1';
+if (phoneQueueCase && (fileCommand !== 'uninstall' || riskMode !== 'recommended' || process.env.RAGENT_QA_EXPECT_DECISION !== 'prompt')) throw new Error('phone queue fixture requires recommended uninstall review');
+if (fileCommand && (!['rename', 'clear', 'dotnet', 'read-null', 'conditional-write', 'output-filters', 'where-filter', 'system-copy', 'select-string', 'git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c', 'uninstall'].includes(fileCommand) || managedDelete || managedInstall || (process.env.RAGENT_QA_HOOK_REWRITE === '1' && !managedGlob && !managedList) || process.env.RAGENT_QA_SENSITIVE === '1')) throw new Error('invalid file command fixture mode');
+if (managedGlob && (fileCommand !== 'select-string' || process.env.RAGENT_QA_SEARCH_GLOB !== '1' || process.env.RAGENT_QA_HOOK_REWRITE !== '1')) throw new Error('managed wildcard fixture requires a hooked wildcard search');
+if (managedList && (fileCommand !== 'where-filter' || process.env.RAGENT_QA_HOOK_REWRITE !== '1')) throw new Error('managed listing fixture requires a hooked wildcard listing');
+if (fileCommand === 'git-status' && process.env.RAGENT_QA_EXPECT_DECISION !== 'auto-allow') throw new Error('read-only fixture must expect automatic approval');
+if (fileCommand === 'uninstall' && process.env.RAGENT_QA_EXPECT_DECISION !== 'prompt') throw new Error('uninstall classifier fixture must expect a user-review classification');
+const outsideWrite = process.env.RAGENT_QA_FILE_OUTSIDE === '1';
 if (outsideWrite && fileCommand !== 'dotnet') throw new Error('outside-write fixture requires the fixed dotnet command');
-const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' || managedList || (fileCommand === 'read-null' && process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1') || webDownload ? await mkdtemp(path.join(tmpdir(), 'agentoc-codex-outside-write-')) : '';
+const outsideWriteRoot = outsideWrite || fileCommand === 'select-string' || managedList || (fileCommand === 'read-null' && process.env.RAGENT_QA_STATIC_PATH_VARIABLE === '1') || webDownload ? await mkdtemp(path.join(tmpdir(), 'ragent-codex-outside-write-')) : '';
 const fileFixture = path.join(outsideWriteRoot || home, 'ordinary-fixture.txt');
 if (fileCommand) await writeFile(fileFixture, webDownload ? 'before download' : 'fixture content');
 if (fileCommand === 'git-c') { await mkdir(alternateCwd); execFileSync('git', ['init', '-q'], { cwd: alternateCwd, windowsHide: true }); await writeFile(path.join(alternateCwd, 'ordinary-fixture.txt'), 'fixture content'); }
@@ -104,17 +104,17 @@ if (['git-show', 'git-log-format', 'git-diff-file'].includes(fileCommand)) {
 }
 let safeFileCommand = fileCommand === 'rename'
   ? `Rename-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' -NewName renamed-fixture.txt`
-  : fileCommand === 'read-null' ? process.env.AGENTOC_QA_STATIC_PATH_VARIABLE === '1'
-    ? `$p=${process.env.AGENTOC_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(fileFixture) + path.sep).replace(/'/g, "''")}' + '${path.basename(fileFixture).replace(/'/g, "''")}')` : `'${fileFixture.replace(/'/g, "''")}'`}; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
-    : `${process.env.AGENTOC_QA_CONTEXT_OUTPUT === '2' ? 'Write-Output "context=$env:AGENTOC_SESSION_ID"; ' : process.env.AGENTOC_QA_CONTEXT_OUTPUT === '1' ? '"context=$env:AGENTOC_SESSION_ID"; ' : ''}Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
-  : fileCommand === 'select-string' ? `Select-String ${process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.AGENTOC_QA_SEARCH_GLOB === '1' ? path.join(outsideWriteRoot, '*.txt') : fileFixture).replace(/'/g, "''")}' -Pattern 'fixture content'`
-  : fileCommand === 'conditional-write' ? `if (${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '-not (' : ''}Test-Path -LiteralPath '${(fileFixture + (process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? '.missing' : '')).replace(/'/g, "''")}'${process.env.AGENTOC_QA_TEST_PATH_TYPE === '1' ? ' -PathType Leaf' : ''}${process.env.AGENTOC_QA_NEGATED_TEST_PATH === '1' ? ')' : ''}) { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
+  : fileCommand === 'read-null' ? process.env.RAGENT_QA_STATIC_PATH_VARIABLE === '1'
+    ? `$p=${process.env.RAGENT_QA_STATIC_CONCAT === '1' ? `('${(path.dirname(fileFixture) + path.sep).replace(/'/g, "''")}' + '${path.basename(fileFixture).replace(/'/g, "''")}')` : `'${fileFixture.replace(/'/g, "''")}'`}; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p }`
+    : `${process.env.RAGENT_QA_CONTEXT_OUTPUT === '2' ? 'Write-Output "context=$env:RAGENT_SESSION_ID"; ' : process.env.RAGENT_QA_CONTEXT_OUTPUT === '1' ? '"context=$env:RAGENT_SESSION_ID"; ' : ''}Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' 2>$null`
+  : fileCommand === 'select-string' ? `Select-String ${process.env.RAGENT_QA_SEARCH_GLOB === '1' ? '-Path' : '-LiteralPath'} '${(process.env.RAGENT_QA_SEARCH_GLOB === '1' ? path.join(outsideWriteRoot, '*.txt') : fileFixture).replace(/'/g, "''")}' -Pattern 'fixture content'`
+  : fileCommand === 'conditional-write' ? `if (${process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? '-not (' : ''}Test-Path -LiteralPath '${(fileFixture + (process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? '.missing' : '')).replace(/'/g, "''")}'${process.env.RAGENT_QA_TEST_PATH_TYPE === '1' ? ' -PathType Leaf' : ''}${process.env.RAGENT_QA_NEGATED_TEST_PATH === '1' ? ')' : ''}) { Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' } else { 'TARGET_MISSING' }`
   : fileCommand === 'output-filters' ? `Set-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}' -Value 'changed fixture' | Out-Null; Get-Item -LiteralPath '${fileFixture.replace(/'/g, "''")}' | Format-List Name,Length | Out-String`
   : fileCommand === 'where-filter' ? managedList
-    ? `Get-ChildItem -Path '${path.join(outsideWriteRoot, '*.txt').replace(/'/g, "''")}' -Force${process.env.AGENTOC_QA_BOUND_LIST_FILE === '1' ? ' -File' : ''}${process.env.AGENTOC_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.AGENTOC_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
-    : `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.AGENTOC_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like 'ordinary-*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.AGENTOC_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`
+    ? `Get-ChildItem -Path '${path.join(outsideWriteRoot, '*.txt').replace(/'/g, "''")}' -Force${process.env.RAGENT_QA_BOUND_LIST_FILE === '1' ? ' -File' : ''}${process.env.RAGENT_QA_BOUND_DEFAULT_LIST === '1' ? '' : ` | ${process.env.RAGENT_QA_BOUND_METADATA_LIST === '1' ? 'Select-Object Mode,LastWriteTime,Length,Name | Format-Table -AutoSize' : 'Select-Object Name'} | Out-String`}`
+    : `Get-ChildItem -LiteralPath '${home.replace(/'/g, "''")}' | Where-Object ${process.env.RAGENT_QA_WHERE_SCRIPT === '2' ? "{ ($_.Name -like 'ordinary-*.txt') -and ($_.Length -gt 0) -and -not $_.PSIsContainer }" : process.env.RAGENT_QA_WHERE_SCRIPT === '1' ? "{ $_.Name -like 'ordinary-*.txt' }" : "Name -like 'ordinary-*.txt'"} | Select-Object Name | Out-String`
   : fileCommand === 'system-copy' ? `Copy-Item -LiteralPath '${path.join(process.env.SystemRoot, 'win.ini').replace(/'/g, "''")}' -Destination '${fileFixture.replace(/'/g, "''")}' -Force`
-  : fileCommand === 'uninstall' ? 'winget uninstall --id AgentoC.Nonexistent.Test.Fixture --exact'
+  : fileCommand === 'uninstall' ? 'winget uninstall --id Ragent.Nonexistent.Test.Fixture --exact'
   : fileCommand === 'git-status' ? 'git status --short'
   : fileCommand === 'git-diff' ? 'git diff'
   : fileCommand === 'git-show' ? 'git show --stat HEAD'
@@ -122,21 +122,21 @@ let safeFileCommand = fileCommand === 'rename'
   : fileCommand === 'git-diff-file' ? 'git diff HEAD -- ordinary-fixture.txt'
   : fileCommand === 'git-c' ? `git -C '${alternateCwd.replace(/'/g, "''")}' status --short`
   : fileCommand === 'dotnet'
-    ? `[System.IO.File]::WriteAllText('${fileFixture.replace(/'/g, "''")}', 'dotnet fixture'${process.env.AGENTOC_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`
+    ? `[System.IO.File]::WriteAllText('${fileFixture.replace(/'/g, "''")}', 'dotnet fixture'${process.env.RAGENT_QA_DOTNET_ENCODING === '1' ? ', [System.Text.Encoding]::UTF8' : ''})`
     : `Clear-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}'`;
-const managedDeleteRelative = managedDelete && process.env.AGENTOC_QA_RELATIVE_DELETE === '1';
-const dangerousRetry = managedDeleteRelative && process.env.AGENTOC_QA_RELATIVE_DANGEROUS === '1';
-const safeDeleteBinary = process.env.AGENTOC_TEST_SAFE_DELETE_BINARY;
+const managedDeleteRelative = managedDelete && process.env.RAGENT_QA_RELATIVE_DELETE === '1';
+const dangerousRetry = managedDeleteRelative && process.env.RAGENT_QA_RELATIVE_DANGEROUS === '1';
+const safeDeleteBinary = process.env.RAGENT_TEST_SAFE_DELETE_BINARY;
 let outsideFixture = '';
 if (managedDelete) {
   if (!safeDeleteBinary || !path.isAbsolute(safeDeleteBinary)) throw new Error('absolute safe deletion test helper required');
   await mkdir(path.join(home, 'build')); await writeFile(path.join(home, 'build', 'fixture.txt'), 'fixture');
   await mkdir(path.join(alternateCwd, 'build')); await writeFile(path.join(alternateCwd, 'build', 'keep.txt'), 'keep');
   if (managedDeleteRelative) { await mkdir(path.join(alternateCwd, 'delete-target')); await writeFile(path.join(alternateCwd, 'delete-target', 'fixture.txt'), 'fixture'); }
-  if (dangerousRetry) { outsideFixture = await mkdtemp(path.join(tmpdir(), 'agentoc-delete-outside-')); await mkdir(path.join(outsideFixture, 'target')); await writeFile(path.join(outsideFixture, 'target', 'keep.txt'), 'keep'); }
+  if (dangerousRetry) { outsideFixture = await mkdtemp(path.join(tmpdir(), 'ragent-delete-outside-')); await mkdir(path.join(outsideFixture, 'target')); await writeFile(path.join(outsideFixture, 'target', 'keep.txt'), 'keep'); }
 }
-const productionStartup = (managedInstall || managedDelete || managedElevation || managedRipgrep || managedAsset || managedGlob || managedList) && process.env.AGENTOC_QA_PRODUCTION_STARTUP === '1';
-const failSecondPreflight = managedInstall && process.env.AGENTOC_QA_PREFLIGHT_FAIL_SECOND === '1';
+const productionStartup = (managedInstall || managedDelete || managedElevation || managedRipgrep || managedAsset || managedGlob || managedList) && process.env.RAGENT_QA_PRODUCTION_STARTUP === '1';
+const failSecondPreflight = managedInstall && process.env.RAGENT_QA_PREFLIGHT_FAIL_SECOND === '1';
 let preflights = 0; let submissions = 0; let webHits = 0;
 let providerRequests = 0;
 const fixtureSessionId = phoneQueueCase ? phoneSessionId : 'fixture-session';
@@ -145,7 +145,7 @@ const run = await createRun({ status: { sessionId: fixtureSessionId, requestId: 
   manifest: { sessionId: fixtureSessionId, requestId: 'fixture-request', folder: home, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'fixture', options: phoneQueueCase ? { riskMode: 'recommended' } : {} } });
 if (phoneQueueCase) await mutateSessionMeta(phoneSessionId, row => { row.activeRunId = run.id; return true; });
 const server = createServer((req, res) => {
-  if (process.env.AGENTOC_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
+  if (process.env.RAGENT_QA_WEB_PROBE === '1' && req.method === 'HEAD' && req.url === '/fixture/probe') { webHits++; res.writeHead(204).end(); return; }
   if (webDownload && req.method === 'GET' && req.url === '/fixture/download') { webHits++; res.writeHead(200, { 'content-type': 'text/plain' }).end('fixture content'); return; }
   if (phoneQueueCase && req.url.startsWith('/api/')) {
     void (async () => {
@@ -177,15 +177,15 @@ const server = createServer((req, res) => {
   req.on('end', () => {
     let data; try { data = JSON.parse(body); } catch { res.writeHead(400).end(); return; }
     if (managedTrigger && req.method === 'POST' && req.url === '/api/triggers') {
-      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'fixture-session' || req.headers['x-agentoc-session-control-run-id'] !== run.id || req.headers['x-agentoc-session-control-turn-id'] !== 'fixture-turn' || data.sessionId !== 'fixture-session' || data.text !== 'isolated follow-up' || !data.scheduledAt) { res.writeHead(403).end(); return; }
+      if (req.headers['x-ragent-session-control-token'] !== 'fixture-token' || req.headers['x-ragent-session-control-session-id'] !== 'fixture-session' || req.headers['x-ragent-session-control-run-id'] !== run.id || req.headers['x-ragent-session-control-turn-id'] !== 'fixture-turn' || data.sessionId !== 'fixture-session' || data.text !== 'isolated follow-up' || !data.scheduledAt) { res.writeHead(403).end(); return; }
       submissions++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ trigger: { id: 'fixture-trigger', ...data } })); return;
     }
     if (managedAsset && req.method === 'POST' && req.url === '/api/sessions/fixture-session/assets') {
-      if (req.headers['x-agentoc-session-control-token'] !== 'fixture-token' || req.headers['x-agentoc-session-control-session-id'] !== 'fixture-session' || req.headers['x-agentoc-session-control-run-id'] !== run.id || req.headers['x-agentoc-session-control-turn-id'] !== 'fixture-turn' || data.localPath !== assetFile) { res.writeHead(403).end(); return; }
+      if (req.headers['x-ragent-session-control-token'] !== 'fixture-token' || req.headers['x-ragent-session-control-session-id'] !== 'fixture-session' || req.headers['x-ragent-session-control-run-id'] !== run.id || req.headers['x-ragent-session-control-turn-id'] !== 'fixture-turn' || data.localPath !== assetFile) { res.writeHead(403).end(); return; }
       submissions++; res.writeHead(201, { 'content-type': 'application/json' }).end(JSON.stringify({ asset: { assetId: 'fixture-asset' } })); return;
     }
     if (req.url === '/api/internal/approved-actions/propose') {
-      if (!managedInstall || req.headers['x-agentoc-approved-action-token'] !== 'fixture-token' || data.sessionId !== 'fixture-session' || data.runId !== run.id || data.turnId !== 'fixture-turn' || data.actions?.[0]?.command !== packageCommand) { res.writeHead(400).end(); return; }
+      if (!managedInstall || req.headers['x-ragent-approved-action-token'] !== 'fixture-token' || data.sessionId !== 'fixture-session' || data.runId !== run.id || data.turnId !== 'fixture-turn' || data.actions?.[0]?.command !== packageCommand) { res.writeHead(400).end(); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
       if (data.autoInstallPreflight === true) { preflights++; res.end(JSON.stringify({ kind: 'automatic_install_preflight', ready: !(failSecondPreflight && preflights >= 2) })); }
       else { submissions++; res.end(JSON.stringify({ kind: 'automatic_install', status: 'succeeded' })); }
@@ -199,7 +199,7 @@ const server = createServer((req, res) => {
       ? shellToolSchema.properties : {};
     const shellCommandField = Object.hasOwn(shellToolProperties, 'cmd') ? 'cmd'
       : Object.hasOwn(shellToolProperties, 'command') ? 'command' : '';
-    if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] shell tool: ${JSON.stringify({ name: shellToolName, properties: Object.keys(shellToolProperties), required: shellToolSchema.required || [] })}\n`);
+    if (process.env.RAGENT_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] shell tool: ${JSON.stringify({ name: shellToolName, properties: Object.keys(shellToolProperties), required: shellToolSchema.required || [] })}\n`);
     if (!shellToolName || !shellCommandField) { process.stderr.write('Codex shell tool schema missing a supported command field\n'); process.exitCode = 1; res.writeHead(400).end(); child.kill(); server.close(); return; }
     providerRequests++;
     if ((managedElevation || phoneQueueCase) && providerRequests > 1) {
@@ -216,12 +216,12 @@ const server = createServer((req, res) => {
     const deleteTarget = dangerousRetry ? path.join(outsideFixture, 'target') : managedDeleteRelative ? path.join(alternateCwd, 'delete-target') : path.join(home, 'build');
     const relativeTarget = dangerousRetry ? path.relative(alternateCwd, deleteTarget) : 'delete-target';
     const deleteCommand = managedDeleteRelative && providerRequests === 1 ? `Remove-Item -LiteralPath '${relativeTarget.replace(/'/g, "''")}' -Recurse -Force` : `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
-    const adminCommand = process.env.AGENTOC_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\AgentoC-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.AGENTOC_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start agentoc-fixture' : process.env.AGENTOC_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name agentoc-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
+    const adminCommand = process.env.RAGENT_QA_HOOK_ELEVATION_REGISTRY === '1' ? "Set-ItemProperty -LiteralPath 'HKLM:\\Software\\Ragent-Nonexistent-Fixture' -Name Value -Value 1 -WhatIf" : process.env.RAGENT_QA_HOOK_ELEVATION_SC === '1' ? 'sc.exe start ragent-fixture' : process.env.RAGENT_QA_HOOK_ELEVATION_DIRECT === '1' ? 'New-LocalUser -Name ragent-fixture -WhatIf' : `Start-Process -FilePath '${path.join(home, 'nonexistent.exe').replace(/'/g, "''")}' -Verb RunAs`;
     const shellCommand = managedTrigger ? triggerCommand : managedAsset ? `ragent api POST ${assetRoute} --body '${JSON.stringify({ localPath: assetFile, originalName: 'fixture.txt' }).replaceAll("'", "''")}'` : managedElevation ? adminCommand : managedDelete ? deleteCommand : managedInstall ? installCommand
-      : managedRipgrep ? `rg --files ${process.env.AGENTOC_QA_RG_GLOB === '1' ? "-g '*' " : ''}'${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.AGENTOC_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'agentoc-fixture'";
+      : managedRipgrep ? `rg --files ${process.env.RAGENT_QA_RG_GLOB === '1' ? "-g '*' " : ''}'${rgFixture.replace(/'/g, "''")}'` : fileCommand ? safeFileCommand : process.env.RAGENT_QA_SENSITIVE === '1' ? "Write-Output 'fixture' > .ssh\\dummy" : "Write-Output 'ragent-fixture'";
     const argsObject = { [shellCommandField]: shellCommand };
     if (Object.hasOwn(shellToolProperties, 'yield_time_ms')) argsObject.yield_time_ms = 1000;
-    if (Object.hasOwn(shellToolProperties, 'workdir') && (process.env.AGENTOC_QA_HOOK_WORKDIR === '1' || managedDelete)) argsObject.workdir = alternateCwd;
+    if (Object.hasOwn(shellToolProperties, 'workdir') && (process.env.RAGENT_QA_HOOK_WORKDIR === '1' || managedDelete)) argsObject.workdir = alternateCwd;
     const args = JSON.stringify(argsObject);
     const call = { id: managedDeleteRelative && providerRequests > 1 ? 'fc_fixture_retry' : 'fc_fixture', type: 'function_call', name: shellToolName, call_id: managedDeleteRelative && providerRequests > 1 ? 'call_fixture_retry' : 'call_fixture', arguments: args, status: 'completed' };
     const response = { id: 'resp_fixture', object: 'response', created_at: 1, status: 'completed', model: 'gpt-5.4', output: [call], usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 } };
@@ -240,20 +240,20 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(phoneQueueCase ? 18667 : managedAsset ? 18669 : 0, '127.0.0.1', resolve));
 const port = server.address().port;
 if (webDownload) safeFileCommand = `Invoke-WebRequest -Uri 'http://127.0.0.1:${port}/fixture/download' -UseBasicParsing -OutFile '${fileFixture.replace(/'/g, "''")}'; Get-Content -LiteralPath '${fileFixture.replace(/'/g, "''")}'`;
-if (process.env.AGENTOC_QA_WEB_PROBE === '1') safeFileCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "fixture content status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
-const hookExperiment = process.env.AGENTOC_QA_HOOK_REWRITE === '1';
-const hookShouldRun = hookExperiment && process.env.AGENTOC_QA_HOOK_TRUST !== '0';
-const hookShouldFail = hookShouldRun && process.env.AGENTOC_QA_HOOK_FAIL === '1';
-const exactTrust = hookShouldRun && process.env.AGENTOC_QA_HOOK_EXACT_TRUST === '1';
-const mutateTrustedHook = exactTrust && process.env.AGENTOC_QA_HOOK_MUTATE === '1';
+if (process.env.RAGENT_QA_WEB_PROBE === '1') safeFileCommand = `try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:${port}/fixture/probe' -Method Head -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop; "fixture content status=$($r.StatusCode)" } catch { "error=$($_.Exception.Message)" }`;
+const hookExperiment = process.env.RAGENT_QA_HOOK_REWRITE === '1';
+const hookShouldRun = hookExperiment && process.env.RAGENT_QA_HOOK_TRUST !== '0';
+const hookShouldFail = hookShouldRun && process.env.RAGENT_QA_HOOK_FAIL === '1';
+const exactTrust = hookShouldRun && process.env.RAGENT_QA_HOOK_EXACT_TRUST === '1';
+const mutateTrustedHook = exactTrust && process.env.RAGENT_QA_HOOK_MUTATE === '1';
 const hookExpectedRun = hookShouldRun && !hookShouldFail && !mutateTrustedHook;
 const trapPath = path.join(home, 'unexpected-hook-ran');
 let hookConfig = '';
 let fixtureHookCommand = '';
 let fixtureHookSourcePath = path.join(home, 'config.toml');
 if (hookExperiment) {
-  const hookPath = managedInstall || managedDelete || managedElevation || managedRipgrep || managedAsset || managedGlob || managedList ? fileURLToPath(new URL('../scripts/agentoc-codex-windows-install-hook.mjs', import.meta.url)) : path.join(home, 'fixture-hook.cjs');
-  if (!managedInstall && !managedDelete && !managedElevation && !managedRipgrep && !managedAsset && !managedGlob && !managedList) await writeFile(hookPath, `const fs=require('fs'); process.on('uncaughtException', e => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-error.txt'))}, String(e.stack)); process.exitCode=1; }); let data=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c => data += c); process.stdin.on('end', () => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-input.json'))}, data); fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-process-cwd.txt'))}, process.cwd()); JSON.parse(data); ${hookShouldFail ? "throw new Error('fixture hook failure');" : ''} process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'allow',updatedInput:{command:"Write-Output 'agentoc-rewritten'"}}})); });`);
+  const hookPath = managedInstall || managedDelete || managedElevation || managedRipgrep || managedAsset || managedGlob || managedList ? fileURLToPath(new URL('../scripts/ragent-codex-windows-install-hook.mjs', import.meta.url)) : path.join(home, 'fixture-hook.cjs');
+  if (!managedInstall && !managedDelete && !managedElevation && !managedRipgrep && !managedAsset && !managedGlob && !managedList) await writeFile(hookPath, `const fs=require('fs'); process.on('uncaughtException', e => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-error.txt'))}, String(e.stack)); process.exitCode=1; }); let data=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', c => data += c); process.stdin.on('end', () => { fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-input.json'))}, data); fs.writeFileSync(${JSON.stringify(path.join(home, 'hook-process-cwd.txt'))}, process.cwd()); JSON.parse(data); ${hookShouldFail ? "throw new Error('fixture hook failure');" : ''} process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'allow',updatedInput:{command:"Write-Output 'ragent-rewritten'"}}})); });`);
   const quote = value => `'${value.replace(/'/g, "''")}'`;
   const command = `& ${quote(process.execPath)} ${quote(hookPath)}`;
   fixtureHookCommand = command;
@@ -270,26 +270,26 @@ if (hookExperiment) {
     hookConfig = `\n[hooks.state."preserved-state"]\ntrusted_hash = "sha256:${'a'.repeat(64)}"\n`;
   }
 }
-await writeFile(home + '\\config.toml', `model_provider = "agentoc_fixture"\nmodel = "gpt-5.4"\n${hookConfig}\n[model_providers.agentoc_fixture]\nname = "Fixture"\nbase_url = "http://127.0.0.1:${port}/v1"\nwire_api = "responses"\nenv_key = "AGENTOC_QA_PROVIDER_KEY"\n`);
-const env = { ...process.env, CODEX_HOME: home, XDG_CACHE_HOME: home, XDG_CONFIG_HOME: home, AGENTOC_QA_PROVIDER_KEY: 'fixture',
-  AGENTOC_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`, AGENTOC_APPROVED_ACTIONS_TOKEN: 'fixture-token',
-  AGENTOC_APPROVED_ACTIONS_SESSION_ID: 'fixture-session', AGENTOC_APPROVED_ACTIONS_RUN_ID: run.id, AGENTOC_APPROVED_ACTIONS_TURN_ID: 'fixture-turn',
+await writeFile(home + '\\config.toml', `model_provider = "ragent_fixture"\nmodel = "gpt-5.4"\n${hookConfig}\n[model_providers.ragent_fixture]\nname = "Fixture"\nbase_url = "http://127.0.0.1:${port}/v1"\nwire_api = "responses"\nenv_key = "RAGENT_QA_PROVIDER_KEY"\n`);
+const env = { ...process.env, CODEX_HOME: home, XDG_CACHE_HOME: home, XDG_CONFIG_HOME: home, RAGENT_QA_PROVIDER_KEY: 'fixture',
+  RAGENT_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`, RAGENT_APPROVED_ACTIONS_TOKEN: 'fixture-token',
+  RAGENT_APPROVED_ACTIONS_SESSION_ID: 'fixture-session', RAGENT_APPROVED_ACTIONS_RUN_ID: run.id, RAGENT_APPROVED_ACTIONS_TURN_ID: 'fixture-turn',
   HTTP_PROXY: 'http://127.0.0.1:9', HTTPS_PROXY: 'http://127.0.0.1:9', ALL_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1,localhost',
   http_proxy: 'http://127.0.0.1:9', https_proxy: 'http://127.0.0.1:9', all_proxy: 'http://127.0.0.1:9', no_proxy: '127.0.0.1,localhost' };
 delete env.OPENAI_API_KEY;
-if (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT)) env.AGENTOC_SESSION_ID = 'fixture-context';
-if (pinnedIdentity) env.AGENTOC_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(pinnedIdentity);
+if (['1', '2'].includes(process.env.RAGENT_QA_CONTEXT_OUTPUT)) env.RAGENT_SESSION_ID = 'fixture-context';
+if (pinnedIdentity) env.RAGENT_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(pinnedIdentity);
 if (managedRipgrep) env.RIPGREP_CONFIG_PATH = rgConfig;
-if (managedAsset) Object.assign(env, { AGENTOC_SESSION_ID: 'fixture-session', AGENTOC_SESSION_CONTROL_TOKEN: 'fixture-token', AGENTOC_SESSION_CONTROL_SESSION_ID: 'fixture-session', AGENTOC_SESSION_CONTROL_RUN_ID: run.id, AGENTOC_SESSION_CONTROL_TURN_ID: 'fixture-turn' });
-if (managedDelete || managedRipgrep || managedAsset || managedGlob || managedList) env.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary || '', assetHelperPath: assetHelper, searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER, port: managedAsset ? port : undefined,
+if (managedAsset) Object.assign(env, { RAGENT_SESSION_ID: 'fixture-session', RAGENT_SESSION_CONTROL_TOKEN: 'fixture-token', RAGENT_SESSION_CONTROL_SESSION_ID: 'fixture-session', RAGENT_SESSION_CONTROL_RUN_ID: run.id, RAGENT_SESSION_CONTROL_TURN_ID: 'fixture-turn' });
+if (managedDelete || managedRipgrep || managedAsset || managedGlob || managedList) env.RAGENT_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId: run.id, helperPath: safeDeleteBinary || '', assetHelperPath: assetHelper, searchHelperPath: process.env.RAGENT_QA_SAFE_SEARCH_HELPER, port: managedAsset ? port : undefined,
   state: { riskMode, riskContextValid: boundContext?.valid ?? true, sessionControlReadAvailable: managedAsset, sessionControlReadRunId: managedAsset ? run.id : '', riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } } });
 let productionOverlay = null;
 if (productionStartup) {
   if (!exactTrust) throw new Error('production fixture requires exact trust');
   await writeFile(path.join(home, 'auth.json'), JSON.stringify({ access_token: 'fixture' }));
   productionOverlay = await prepareManagedMcpOverlay({ runtimeFamily: 'codex-app-server-json', runId: run.id, spawnEnv: env,
-    servers: [{ kind: 'actions', scriptPath: fileURLToPath(new URL('../scripts/agentoc-approved-actions-mcp.mjs', import.meta.url)) }],
-    codexWindowsApprovalGate: true, codexWindowsInstallHook: fileURLToPath(new URL('../scripts/agentoc-codex-windows-install-hook.mjs', import.meta.url)) });
+    servers: [{ kind: 'actions', scriptPath: fileURLToPath(new URL('../scripts/ragent-approved-actions-mcp.mjs', import.meta.url)) }],
+    codexWindowsApprovalGate: true, codexWindowsInstallHook: fileURLToPath(new URL('../scripts/ragent-codex-windows-install-hook.mjs', import.meta.url)) });
   if (!productionOverlay?.codexWindowsInstallHook) throw new Error('production hook overlay unavailable');
   env.CODEX_HOME = productionOverlay.root;
   fixtureHookCommand = productionOverlay.codexWindowsInstallHook.command;
@@ -298,17 +298,17 @@ if (productionStartup) {
 // Bypassing hook trust is limited to this disposable home with one fixed,
 // test-owned hook. Never copy this setting into production thread options: it
 // would also trust unrelated user, project, or plugin hooks.
-const codexBinary = process.env.AGENTOC_TEST_CODEX_BINARY;
+const codexBinary = process.env.RAGENT_TEST_CODEX_BINARY;
 const codexArgs = ['app-server', '--disable', 'plugins', '--disable', 'remote_plugin', '--disable', 'plugin_sharing', '--listen', 'stdio://',
   ...buildCodexAppServerProjectTrustArgs(home)];
-const codexEntrypoint = process.env.AGENTOC_TEST_CODEX_ENTRYPOINT;
+const codexEntrypoint = process.env.RAGENT_TEST_CODEX_ENTRYPOINT;
 const child = spawn(codexBinary, codexEntrypoint ? [codexEntrypoint, ...codexArgs] : codexArgs, {
   cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
 });
 let codexStderr = '';
 child.stderr.on('data', chunk => {
   codexStderr = (codexStderr + String(chunk)).slice(-6000);
-  if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] Codex stderr: ${String(chunk).slice(-2000)}\n`);
+  if (process.env.RAGENT_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] Codex stderr: ${String(chunk).slice(-2000)}\n`);
 });
 const timeout = setTimeout(() => { process.stderr.write(`fixture timed out${codexStderr ? `: ${codexStderr}` : ''}\n`); child.kill(); server.close(); process.exitCode = 1; }, phoneQueueCase ? 240000 : 30000);
 let stage = 0; let hookCompleted = false; let hookFailed = false; let hookBlocked = false;
@@ -317,13 +317,13 @@ let managedHookSetup = null;
 let productionState = null;
 function startThread() {
   stage = 1;
-  child.stdin.write(JSON.stringify({ id: 2, method: 'thread/start', params: { cwd: home, model: 'gpt-5.4', modelProvider: 'agentoc_fixture', approvalsReviewer: 'user', sandbox: 'danger-full-access', config: { allow_login_shell: false, ...(hookShouldRun && !exactTrust ? { bypass_hook_trust: true } : {}) } } }) + '\n');
+  child.stdin.write(JSON.stringify({ id: 2, method: 'thread/start', params: { cwd: home, model: 'gpt-5.4', modelProvider: 'ragent_fixture', approvalsReviewer: 'user', sandbox: 'danger-full-access', config: { allow_login_shell: false, ...(hookShouldRun && !exactTrust ? { bypass_hook_trust: true } : {}) } } }) + '\n');
 }
 function fixtureError(message) { process.stderr.write(message + '\n'); process.exitCode = 1; stage = 3; child.kill(); server.close(); }
 createInterface({ input: child.stdout }).on('line', async line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
-  if (process.env.AGENTOC_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] app-server: ${JSON.stringify({ id: msg.id, method: msg.method, error: msg.error?.message, resultKeys: Object.keys(msg.result || {}) })}\n`);
-  if (process.env.AGENTOC_QA_TRACE_LIFECYCLE === '1' && ['item/started', 'hook/started', 'hook/completed', 'item/commandExecution/requestApproval'].includes(msg.method)) process.stderr.write('fixture event: ' + JSON.stringify({ method: msg.method, params: msg.params }) + '\n');
+  if (process.env.RAGENT_QA_TRACE_CODEX === '1') process.stderr.write(`[fixture] app-server: ${JSON.stringify({ id: msg.id, method: msg.method, error: msg.error?.message, resultKeys: Object.keys(msg.result || {}) })}\n`);
+  if (process.env.RAGENT_QA_TRACE_LIFECYCLE === '1' && ['item/started', 'hook/started', 'hook/completed', 'item/commandExecution/requestApproval'].includes(msg.method)) process.stderr.write('fixture event: ' + JSON.stringify({ method: msg.method, params: msg.params }) + '\n');
   if (hookExperiment && msg.method === 'hook/completed' && msg.params?.run?.eventName === 'preToolUse') { hookCompleted = msg.params.run.status === 'completed'; hookFailed = msg.params.run.status === 'failed'; hookBlocked = msg.params.run.status === 'blocked'; }
   if (productionState?.codexManagedHookSetup?.consume(msg)) return;
   if (managedHookSetup?.consume(msg)) return;
@@ -332,7 +332,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     if (productionStartup) {
       stage = 1;
       productionState = { initialized: false, initializeRequestId: 1, threadRequestId: 2, nextControlRequestId: 200, cwd: home,
-        codexWindowsInstallHook: productionOverlay.codexWindowsInstallHook, riskMode, permissionMode: 'untrusted-danger-full-access', agentocApprovalGate: true, model: 'gpt-5.4' };
+        codexWindowsInstallHook: productionOverlay.codexWindowsInstallHook, riskMode, permissionMode: 'untrusted-danger-full-access', ragentApprovalGate: true, model: 'gpt-5.4' };
       handleCodexAppServerInitializeResponse(child, productionState, msg);
       return;
     }
@@ -383,23 +383,23 @@ createInterface({ input: child.stdout }).on('line', async line => {
       stage = 3; child.stdin.write(JSON.stringify({ id: msg.id, result: { decision: 'decline' } }) + '\n'); child.kill(); server.close(); return;
     }
     if (hookExpectedRun) {
-      if (process.env.AGENTOC_QA_TRACE_APPROVAL === '1') process.stderr.write('fixture approval: ' + JSON.stringify(msg.params) + '\n');
+      if (process.env.RAGENT_QA_TRACE_APPROVAL === '1') process.stderr.write('fixture approval: ' + JSON.stringify(msg.params) + '\n');
       const deleteTarget = managedDeleteRelative ? path.join(alternateCwd, 'delete-target') : path.join(home, 'build');
       const deleteCommand = `Remove-Item -LiteralPath '${deleteTarget.replace(/'/g, "''")}' -Recurse -Force`;
       const expectedDelete = managedDelete ? await buildWindowsSafeDeleteBridge({ approval: { approvalId: managedDeleteRelative ? 'call_fixture_retry' : 'call_fixture', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: deleteCommand } } },
         state: { riskMode, turnActive: true, cwd: alternateCwd, riskContextValid: true, riskContext: { trustedWorkspaceRoot: home, protectedRoots: [] } }, runId: run.id, helperPath: safeDeleteBinary }) : null;
       const expectedBridge = managedInstall ? buildClaudeWindowsInstallBridge({ approval: { approvalId: 'call_fixture', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: installCommand } } },
         state: { windowsManagedActionChannel: true, windowsManagedActionBinding: { windowsUserInstallIdentity: pinnedIdentity }, riskMode: 'recommended', riskContextValid: true }, runId: run.id, nodePath: process.execPath,
-        scriptPath: fileURLToPath(new URL('../scripts/agentoc-windows-install-bridge.mjs', import.meta.url)) }) : null;
+        scriptPath: fileURLToPath(new URL('../scripts/ragent-windows-install-bridge.mjs', import.meta.url)) }) : null;
       const assetCommand = `ragent api POST ${assetRoute} --body '${JSON.stringify({ localPath: assetFile, originalName: 'fixture.txt' }).replaceAll("'", "''")}'`;
       const expectedAsset = managedAsset ? await buildWindowsCliAssetBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: assetCommand } } },
         state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, sessionControlReadAvailable: true, sessionControlReadRunId: run.id }, runId: run.id, helperPath: assetHelper, port }) : null;
       const expectedTrigger = managedTrigger ? await buildWindowsCliReadBridge({ approval: { providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: triggerCommand } } },
         state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, sessionControlReadAvailable: true, sessionControlReadRunId: run.id }, runId: run.id, helperPath: assetHelper, port }) : null;
       const expectedGlob = managedGlob ? await buildWindowsSelectStringGlobBridge({ approval: { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: safeFileCommand } } },
-        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER }) : null;
+        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.RAGENT_QA_SAFE_SEARCH_HELPER }) : null;
       const expectedList = managedList ? await buildWindowsWildcardNameBridge({ approval: { kind: 'command', providerMethod: 'can_use_tool', params: { tool_name: 'PowerShell', input: { command: safeFileCommand } } },
-        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER }) : null;
+        state: { riskMode, turnActive: true, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home, protectedRoots: [] } }, helperPath: process.env.RAGENT_QA_SAFE_SEARCH_HELPER }) : null;
       const decodedArgv = decodeCodexShlexArgv(msg.params.command);
       const invocation = readWindowsPowerShellInvocation({ params: { command: decodedArgv } });
       const rewrittenCommand = managedInstall ? decodedArgv?.at(-1) : '';
@@ -408,14 +408,14 @@ createInterface({ input: child.stdout }).on('line', async line => {
         : managedInstall
           ? rewrittenCommand === expectedBridge?.updatedCommand && preflights === 1 && submissions === 0
           : managedRipgrep ? /rg --no-config .*--files/.test(String(decodedArgv?.at(-1) || ''))
-          : String(msg.params.command || '').includes('agentoc-rewritten');
+          : String(msg.params.command || '').includes('ragent-rewritten');
       if (!hookCompleted || !rewriteMatches) {
         process.stderr.write(`approval did not contain the completed hook rewrite (hookCompleted=${hookCompleted}, rewriteMatches=${rewriteMatches}, preflights=${preflights}, submissions=${submissions})\n`); process.exitCode = 1; stage = 3;
         child.stdin.write(JSON.stringify({ id: msg.id, result: { decision: 'decline' } }) + '\n'); child.kill(); server.close(); return;
       }
       if (managedInstall && !invocation) {
         const state = { riskMode, cwd: home, riskContextValid: true, riskContext: { trustedWorkspaceRoot: home }, startedTurn: true,
-          windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
+          windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.RAGENT_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
           threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set() };
         const sent = [];
         await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } });
@@ -432,10 +432,10 @@ createInterface({ input: child.stdout }).on('line', async line => {
       if (managedInstall || managedDelete || managedRipgrep || managedAsset || managedGlob || managedList) {
         const state = { riskMode, cwd: home, riskContextValid: boundContext?.valid ?? true, riskContext: boundContext?.riskContext ?? { trustedWorkspaceRoot: home }, startedTurn: true,
           sessionControlReadAvailable: managedAsset, sessionControlReadRunId: managedAsset ? run.id : '',
-          windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.AGENTOC_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
+          windowsManagedActionChannel: true, windowsManagedActionBinding: { endpoint: env.RAGENT_APPROVED_ACTIONS_ENDPOINT, token: 'fixture-token', sessionId: 'fixture-session', runId: run.id, turnId: 'fixture-turn', windowsUserInstallIdentity: pinnedIdentity },
           threadId: msg.params.threadId, turnId: msg.params.turnId, pendingApprovals: new Map(), activeItems: new Map(), autoApprovedMcpRequestIds: new Set() };
         const sent = [];
-        await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } }, managedDelete ? { safeDeleteHelperPath: safeDeleteBinary } : managedAsset ? { cliReadHelperPath: assetHelper } : (managedGlob || managedList) && process.env.AGENTOC_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.AGENTOC_QA_SAFE_SEARCH_HELPER } : undefined);
+        await trackCodexAppServerApprovalRequest(run.id, state, msg, { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } }, managedDelete ? { safeDeleteHelperPath: safeDeleteBinary } : managedAsset ? { cliReadHelperPath: assetHelper } : (managedGlob || managedList) && process.env.RAGENT_QA_SAFE_SEARCH_HELPER ? { searchHelperPath: process.env.RAGENT_QA_SAFE_SEARCH_HELPER } : undefined);
         if (failSecondPreflight) {
           const pending = (await getRun(run.id)).appServerPendingApprovals || [];
           const stopped = preflights === 2 && submissions === 0 && (riskMode !== 'recommended' ? sent[0]?.result?.decision === 'decline' : sent.length === 0 && pending.length === 1);
@@ -458,7 +458,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     const sent = [];
     const fakeProc = { stdin: { writable: true, write(value) { sent.push(JSON.parse(value)); return true; } } };
     await trackCodexAppServerApprovalRequest(run.id, state, msg, fakeProc);
-    const expected = process.env.AGENTOC_QA_EXPECT_DECISION || 'auto-allow';
+    const expected = process.env.RAGENT_QA_EXPECT_DECISION || 'auto-allow';
     const pending = (await getRun(run.id)).appServerPendingApprovals || [];
     const routed = expected === 'auto-allow' ? sent[0]?.result?.decision === 'accept'
       : riskMode === 'full-auto' ? sent[0]?.result?.decision === 'decline' && pending.length === 0
@@ -487,7 +487,7 @@ createInterface({ input: child.stdout }).on('line', async line => {
     }
   } else if (stage === 4 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     stage = 5;
-    if (process.env.AGENTOC_QA_HOOK_WORKDIR === '1') {
+    if (process.env.RAGENT_QA_HOOK_WORKDIR === '1') {
       const event = JSON.parse(await readFile(path.join(home, 'hook-input.json'), 'utf8'));
       process.stdout.write('fixture hook workdir: ' + JSON.stringify({ cwd: event.cwd, processCwd: await readFile(path.join(home, 'hook-process-cwd.txt'), 'utf8'), tool_input: event.tool_input }) + '\n');
     }
@@ -508,14 +508,14 @@ createInterface({ input: child.stdout }).on('line', async line => {
         : fileCommand === 'system-copy' ? (await readFile(fileFixture).catch(() => Buffer.alloc(0))).equals(await readFile(path.join(process.env.SystemRoot, 'win.ini')))
         : ['conditional-write', 'output-filters'].includes(fileCommand) ? (await readFile(fileFixture, 'utf8').catch(() => '')).replaceAll('\r\n', '\n') === 'changed fixture\n'
         : fileCommand === 'dotnet' ? (await readFile(fileFixture, 'utf8').catch(() => '')).replace(/^\uFEFF/, '') === 'dotnet fixture' : true;
-    if (msg.params.item.exitCode !== 0 || !fileResult || (process.env.AGENTOC_QA_WEB_PROBE === '1' && (webHits !== 1 || !String(msg.params.item.aggregatedOutput || '').includes('status=204'))) || (webDownload && (webHits !== 1 || await readFile(fileFixture, 'utf8').catch(() => '') !== 'fixture content')) || (['1', '2'].includes(process.env.AGENTOC_QA_CONTEXT_OUTPUT) && !String(msg.params.item.aggregatedOutput || '').includes('context=fixture-context')) || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(triggerHelp ? 'trigger <command>' : managedTrigger ? 'fixture-trigger' : managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'agentoc-rewritten' : 'agentoc-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== (triggerHelp ? 0 : 1))) {
+    if (msg.params.item.exitCode !== 0 || !fileResult || (process.env.RAGENT_QA_WEB_PROBE === '1' && (webHits !== 1 || !String(msg.params.item.aggregatedOutput || '').includes('status=204'))) || (webDownload && (webHits !== 1 || await readFile(fileFixture, 'utf8').catch(() => '') !== 'fixture content')) || (['1', '2'].includes(process.env.RAGENT_QA_CONTEXT_OUTPUT) && !String(msg.params.item.aggregatedOutput || '').includes('context=fixture-context')) || (['read-null', 'select-string'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').replace(/\r?\n/g, '').includes('fixture content')) || (['git-show', 'git-diff-file', 'git-c', 'where-filter'].includes(fileCommand) && !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt')) || (fileCommand === 'git-log-format' && !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || ''))) || (!fileCommand && !String(msg.params.item.aggregatedOutput || '').includes(triggerHelp ? 'trigger <command>' : managedTrigger ? 'fixture-trigger' : managedAsset ? 'fixture-asset' : managedDelete ? '"deleted":2' : managedInstall ? 'Installation completed successfully' : managedRipgrep ? 'ordinary-fixture.txt' : hookExpectedRun ? 'ragent-rewritten' : 'ragent-fixture')) || (managedRipgrep && String(msg.params.item.aggregatedOutput || '').includes('.env')) || (!hookExpectedRun && hookCompleted) || ((managedInstall || managedAsset) && submissions !== (triggerHelp ? 0 : 1))) {
       process.stderr.write(`approved harmless command failed: exit=${msg.params.item.exitCode} output=${String(msg.params.item.aggregatedOutput || '').slice(0, 1200)}\n`); process.exitCode = 1;
     } else process.stdout.write(fileCommand ? `codex-windows-local-gate: ${fileCommand} executed on isolated fixture\n` : triggerHelp ? 'codex-windows-local-gate: controlled trigger help returned\n' : managedTrigger ? 'codex-windows-local-gate: controlled trigger creation reached isolated service\n' : managedAsset ? 'codex-windows-local-gate: controlled asset publication reached isolated service\n' : managedDelete ? 'codex-windows-local-gate: bound deletion used the approved absolute target\n' : managedInstall ? 'codex-windows-local-gate: managed install bridge reached mock control plane\n' : hookShouldFail ? 'codex-windows-local-gate: failed hook; original passed gate\n' : hookExpectedRun ? 'codex-windows-local-gate: hook rewrote approved harmless command\n' : hookExperiment ? 'codex-windows-local-gate: untrusted hook skipped; original passed gate\n' : 'codex-windows-local-gate: auto-allow executed harmless command\n');
     child.kill(); server.close();
   } else if (stage === 2 && msg.method === 'item/completed' && msg.params?.item?.type === 'commandExecution') {
     if (managedElevation) { fixtureError('direct elevation unexpectedly executed'); return; }
     if (managedDeleteRelative && msg.params.item.id === 'call_fixture') return;
-    if (['git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c'].includes(fileCommand) && process.env.AGENTOC_QA_EXPECT_DECISION === 'auto-allow') {
+    if (['git-status', 'git-diff', 'git-show', 'git-log-format', 'git-diff-file', 'git-c'].includes(fileCommand) && process.env.RAGENT_QA_EXPECT_DECISION === 'auto-allow') {
       if (msg.params.item.exitCode !== 0 || (fileCommand === 'git-log-format' ? !/\b[0-9a-f]{7,40} fixture\b/.test(String(msg.params.item.aggregatedOutput || '')) : !String(msg.params.item.aggregatedOutput || '').includes('ordinary-fixture.txt'))) {
         fixtureError('read-only Git status did not return the isolated fixture entry'); return;
       }
@@ -539,21 +539,21 @@ child.on('exit', async () => {
   // Only delete the mkdtemp directory created by this test, after its Codex
   // child has exited. Failed cleanup never expands beyond the checked parent.
   const target = path.resolve(home), parent = path.resolve(tmpdir());
-  if (path.dirname(target).toLowerCase() === parent.toLowerCase() && path.basename(target).startsWith('agentoc-codex-local-gate-')) {
+  if (path.dirname(target).toLowerCase() === parent.toLowerCase() && path.basename(target).startsWith('ragent-codex-local-gate-')) {
     await rm(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 }).catch(() => {});
   }
-  if (outsideFixture && path.dirname(path.resolve(outsideFixture)).toLowerCase() === parent.toLowerCase() && path.basename(outsideFixture).startsWith('agentoc-delete-outside-')) {
+  if (outsideFixture && path.dirname(path.resolve(outsideFixture)).toLowerCase() === parent.toLowerCase() && path.basename(outsideFixture).startsWith('ragent-delete-outside-')) {
     await unlink(path.join(outsideFixture, 'target', 'keep.txt')).catch(() => {});
     await rmdir(path.join(outsideFixture, 'target')).catch(() => {});
     await rmdir(outsideFixture).catch(() => {});
   }
-  if (outsideWriteRoot && path.dirname(path.resolve(outsideWriteRoot)).toLowerCase() === parent.toLowerCase() && path.basename(outsideWriteRoot).startsWith('agentoc-codex-outside-write-')) {
+  if (outsideWriteRoot && path.dirname(path.resolve(outsideWriteRoot)).toLowerCase() === parent.toLowerCase() && path.basename(outsideWriteRoot).startsWith('ragent-codex-outside-write-')) {
     await unlink(fileFixture).catch(() => {});
     await rmdir(outsideWriteRoot).catch(() => {});
   }
-  if (assetOutsideRoot && path.dirname(path.resolve(assetOutsideRoot)).toLowerCase() === parent.toLowerCase() && path.basename(assetOutsideRoot).startsWith('agentoc-codex-asset-outside-')) {
+  if (assetOutsideRoot && path.dirname(path.resolve(assetOutsideRoot)).toLowerCase() === parent.toLowerCase() && path.basename(assetOutsideRoot).startsWith('ragent-codex-asset-outside-')) {
     await unlink(assetFile).catch(() => {}); await rmdir(assetOutsideRoot).catch(() => {});
   }
 });
 child.on('error', () => { clearTimeout(timeout); process.exitCode = 1; server.close(); });
-child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'agentoc-qa', version: '0.0.1' }, capabilities: { experimentalApi: true } } }) + '\n');
+child.stdin.write(JSON.stringify({ id: 1, method: 'initialize', params: { clientInfo: { name: 'ragent-qa', version: '0.0.1' }, capabilities: { experimentalApi: true } } }) + '\n');

@@ -18,7 +18,7 @@ const ownerToken = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789ab
 // e43264c 起会话键为 s+HMAC(secret, token)：未配置 secret 时 sessionHashToken
 // 返回空串，预置的 owner 会话被静默丢弃 → /api/auth/me 401 → 启动探活超时。
 const sessionSecret = 'test-session-secret-p2p-frontend-bootstrap';
-process.env.AGENTOC_AUTH_SESSION_SECRET = sessionSecret;
+process.env.RAGENT_AUTH_SESSION_SECRET = sessionSecret;
 
 // 系统临时端口段与出站连接重叠，固定范围随机端口会 EADDRINUSE（flake）；
 // 改为向内核申请空闲端口。
@@ -65,7 +65,7 @@ function rawRequest(port, method, path, headers = {}) {
 }
 
 function setupTempInstance() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-p2p-frontend-'));
+  const home = mkdtempSync(join(tmpdir(), 'ragent-p2p-frontend-'));
   const configDir = join(home, 'config');
   const binDir = join(home, 'bin');
   mkdirSync(configDir, { recursive: true });
@@ -88,20 +88,20 @@ async function startServer({ home, configDir, port, binDir }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${binDir}${delimiter}${process.env.PATH}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -139,12 +139,12 @@ let server = null;
     assert.ok(html.indexOf('chat/p2p.js') < html.indexOf('chat/init.js'), 'chat/p2p.js must load before chat/init.js');
 
     // 2. P2P 凭据不得泄漏进页面 HTML
-    for (const needle of ['p2pRoomId', 'signalingUrl', 'agentoc://pair']) {
+    for (const needle of ['p2pRoomId', 'signalingUrl', 'ragent://pair']) {
       assert.ok(!html.includes(needle), `rendered chat page must not contain ${needle}`);
     }
 
     // 3. 静态资源可服务 + immutable 缓存头
-    const clientAsset = await rawRequest(port, 'GET', '/p2p/agentoc-p2p-client.js?v=test', { Cookie: ownerCookie });
+    const clientAsset = await rawRequest(port, 'GET', '/p2p/ragent-p2p-client.js?v=test', { Cookie: ownerCookie });
     assert.equal(clientAsset.status, 200, 'P2P client module should be served');
     assert.equal(clientAsset.headers['cache-control'], 'public, max-age=31536000, immutable', 'versioned P2P client must be immutable-cached');
     const adapterAsset = await rawRequest(port, 'GET', '/chat/p2p.js?v=test', { Cookie: ownerCookie });

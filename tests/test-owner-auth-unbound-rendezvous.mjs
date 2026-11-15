@@ -4,11 +4,11 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-unbound-rendezvous-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const root = await mkdtemp(join(tmpdir(), 'ragent-unbound-rendezvous-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+delete process.env.RAGENT_INSTANCE_ROOT;
 try {
   const { pollOwnerAccountRendezvous } = await import('../lib/owner-account-auth.mjs');
   const { createTrustedDeviceInvitation, hasPendingTrustedDeviceAccountClaimTicket,

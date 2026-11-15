@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Unit tests for the real `agentoc-privileged` shim protocol + policy
+// Unit tests for the real `ragent-privileged` shim protocol + policy
 // (design docs/privileged-shim-channel-2026-09-03.md). Pure modules only —
 // live socket flows are covered in test-privileged-shim-channel.mjs.
 
@@ -42,7 +42,7 @@ function check(label, condition) {
     command: 'systemctl set-property user-1000.slice TasksMax=infinity',
     description: 'raise TasksMax',
     declaredCategory: 'other',
-    cwd: '/home/example/agentoc-dev',
+    cwd: '/home/example/ragent-dev',
   };
   check('valid request parses', parsePrivilegedShimRequest(base).ok === true);
   check('request id normalized', parsePrivilegedShimRequest(base).request?.requestId === 'pshim_abc123');
@@ -168,7 +168,7 @@ check('join empty token', joinShimCommandTokens(['']) === "''");
 
 // --- launcher + spawn env ---
 {
-  const dir = mkdtempSync(join(tmpdir(), 'agentoc-shim-test-'));
+  const dir = mkdtempSync(join(tmpdir(), 'ragent-shim-test-'));
   const script = buildPrivilegedShimLauncherScript(process.execPath, join(dir, 'privileged-shim-command.mjs'));
   check('launcher has shebang', script.startsWith('#!/bin/sh\n'));
   check('launcher execs node with entry', script.includes(`exec "${process.execPath}"`));

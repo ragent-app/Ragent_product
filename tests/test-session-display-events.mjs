@@ -273,7 +273,7 @@ const compacted = buildSessionDisplayEvents([
 ]);
 assert.deepEqual(compacted.map((event) => event.seq), [1, 4], 'compaction internals must not appear as conversation messages');
 
-const plan = '<agentoc-collaboration-plan>{"schemaVersion":1}</agentoc-collaboration-plan>';
+const plan = '<ragent-collaboration-plan>{"schemaVersion":1}</ragent-collaboration-plan>';
 const pushed = [
   ...filterSessionDisplayPushEvents([{ type: 'text_delta', role: 'assistant', runId: 'run-live', text: `Visible ${plan.slice(0, 18)}` }]),
   ...filterSessionDisplayPushEvents([{ type: 'text_delta', role: 'assistant', runId: 'run-live', text: `${plan.slice(18)} tail` }]),

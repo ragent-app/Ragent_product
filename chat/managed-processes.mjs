@@ -174,13 +174,13 @@ function buildSafeEnvironment(overrides = {}) {
   }
   const env = {};
   for (const [key, raw] of Object.entries(process.env)) {
-    if (!key || key.startsWith('AGENTOC_') || SENSITIVE_ENV_RE.test(key)) continue;
+    if (!key || key.startsWith('RAGENT_') || SENSITIVE_ENV_RE.test(key)) continue;
     if (raw !== undefined && raw !== null && !String(raw).includes('\0')) env[key] = String(raw);
   }
   for (const [rawKey, rawValue] of Object.entries(overrides || {})) {
     const key = String(rawKey);
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)) throw new Error(`Invalid environment key: ${key}`);
-    if (key.startsWith('AGENTOC_') || SENSITIVE_ENV_RE.test(key)) {
+    if (key.startsWith('RAGENT_') || SENSITIVE_ENV_RE.test(key)) {
       throw new Error(`Environment key is not allowed for a managed process: ${key}`);
     }
     if (rawValue === undefined || rawValue === null) delete env[key];
@@ -341,17 +341,17 @@ async function spawnSidecar(processId, { watchExisting = false } = {}) {
     NODE_ENV: process.env.NODE_ENV || 'production',
     HOME: process.env.HOME || '',
   };
-  // The sidecar is detached from the Run but remains inside this AgentoC
+  // The sidecar is detached from the Run but remains inside this Ragent
   // instance. Pass only path-selection variables so it can reopen the same
   // manifest/status files without inheriting session tokens or capabilities.
   for (const key of [
     // Windows per-user paths derive the config root from the instance name
-    // when the launcher deliberately withholds AGENTOC_CONFIG_DIR.
-    'AGENTOC_INSTANCE_NAME',
-    'AGENTOC_CONFIG_DIR',
-    'AGENTOC_INSTANCE_ROOT',
-    'AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES',
-    'AGENTOC_SOURCE_PROJECT_ROOT',
+    // when the launcher deliberately withholds RAGENT_CONFIG_DIR.
+    'RAGENT_INSTANCE_NAME',
+    'RAGENT_CONFIG_DIR',
+    'RAGENT_INSTANCE_ROOT',
+    'RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES',
+    'RAGENT_SOURCE_PROJECT_ROOT',
     // Node's Windows homedir/config resolution relies on these variables;
     // preserve the instance's per-user location when the sidecar is detached.
     'LOCALAPPDATA',
@@ -610,7 +610,7 @@ export async function reconcileManagedProcesses() {
 
 export function startManagedProcessSupervisor(options = {}) {
   if (supervisorTimer) return supervisorTimer;
-  const pollMs = parsePollMs(options.pollMs || process.env.AGENTOC_MANAGED_PROCESS_POLL_MS);
+  const pollMs = parsePollMs(options.pollMs || process.env.RAGENT_MANAGED_PROCESS_POLL_MS);
   void reconcileManagedProcesses().catch(() => {});
   supervisorTimer = setInterval(() => {
     if (supervisorPromise) return;

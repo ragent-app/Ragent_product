@@ -3,10 +3,10 @@ import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGrou
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess, TRUSTED_SETPRIV_PATH } from '../lib/linux-runner-group-drop.mjs';
 
 const built = buildRunnerGroupDropCommand({ uid: 1001, gid: 1002, supplementaryGids: [2002, 1002, 2002],
-  command: '/opt/agentoc/runtime/node', args: ['/opt/agentoc/app/chat/runner-sidecar.mjs', 'run_fixture'] });
+  command: '/opt/ragent/runtime/node', args: ['/opt/ragent/app/chat/runner-sidecar.mjs', 'run_fixture'] });
 assert.equal(built.command, TRUSTED_SETPRIV_PATH);
 assert.deepEqual(built.args, ['--inh-caps=-all', '--ambient-caps=-all', '--reuid', '1001', '--regid', '1002', '--groups', '1002,2002', '--',
-  '/opt/agentoc/runtime/node', '/opt/agentoc/app/chat/runner-sidecar.mjs', 'run_fixture']);
+  '/opt/ragent/runtime/node', '/opt/ragent/app/chat/runner-sidecar.mjs', 'run_fixture']);
 assert.ok(buildRunnerGroupDropCommand({ uid: 1, gid: 1, command: '/bin/true' }).args.includes('--clear-groups'));
 for (const change of [{uid:0}, {gid:0}, {supplementaryGids:[0]}, {uid:1.5}, {command:'relative'}, {args:['bad\0value']}]) {
   assert.throws(() => buildRunnerGroupDropCommand({uid:1001,gid:1002,command:'/bin/true',...change}),

@@ -34,13 +34,13 @@ const shell = `
 `;
 
 const setup = `
-  window.agentocT = (key) => key;
+  window.ragentT = (key) => key;
   window.renderUiIcon = () => '';
-  window.agentocGetProjects = () => [
+  window.ragentGetProjects = () => [
     { id: 'p1', name: 'Alpha', rootPath: '/srv/alpha' },
     { id: 'p2', name: 'Beta', rootPath: '/srv/beta' },
   ];
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = () => 'sessions';
   window.sessionSearchQuery = '';
   window.sidebarSearchMode = false;
@@ -91,7 +91,7 @@ try {
     const list = document.getElementById('sessionList');
     const header = document.getElementById('sidebarProjectHeader');
     return {
-      level: window.AgentocProjectView.getSidebarViewLevel(),
+      level: window.RagentProjectView.getSidebarViewLevel(),
       viewHidden: view.hidden,
       listHidden: list.hidden,
       headerHidden: header.hidden,

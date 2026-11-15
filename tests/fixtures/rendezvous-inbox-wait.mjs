@@ -60,11 +60,11 @@ export async function inboxWaitFixture({ store: suppliedStore, clock = Date.now 
     const authorization = { intentId: intent.intentId, requestId, deviceId: intent.deviceId,
       devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce, issuedAt: intent.issuedAt,
       deviceSignature: sign('sha256', Buffer.from(buildAccountJoinIntentMessage({ ...intent,
-        audience: 'agentoc-account-join' })), phone.privateKey).toString('base64') };
+        audience: 'ragent-account-join' })), phone.privateKey).toString('base64') };
     return { intent, authorization };
   }
   function proof(waitMs) {
-    const issuedAt = new Date(clock()).toISOString(), audience = 'agentoc-account-rendezvous-poll';
+    const issuedAt = new Date(clock()).toISOString(), audience = 'ragent-account-rendezvous-poll';
     return { instance, issuedAt, audience, requestId: 'inbox', ...(waitMs === undefined ? {} : { waitMs }),
       signature: sign(null, Buffer.from(buildAccountRendezvousPollMessage({ instanceId: instance.instanceId,
         requestId: 'inbox', issuedAt, audience })), host.privateKey).toString('base64url') };

@@ -26,7 +26,7 @@ await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 try {
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/internal/approved-actions/propose`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-agentoc-approved-action-token': 'test-token' },
+    headers: { 'content-type': 'application/json', 'x-ragent-approved-action-token': 'test-token' },
     body: JSON.stringify({ requestKey: 'deny-once', actions: [] }),
   });
   assert.equal(response.status, 403);

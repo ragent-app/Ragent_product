@@ -9,15 +9,15 @@ import { fileURLToPath } from 'node:url';
 
 test('runner terminal write invalidates only its protected control binding',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-    const root = await mkdtemp('/srv/agentoc-finish-scope-');
+    const root = await mkdtemp('/srv/ragent-finish-scope-');
     try {
       await mkdir(`${root}/home`, { mode: 0o700 });
       process.env.HOME = `${root}/home`;
-      process.env.AGENTOC_CONFIG_DIR = `${root}/config`;
-      process.env.AGENTOC_RUN_SPOOL_DIR = `${root}/spool`;
-      process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
-      process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
-      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
+      process.env.RAGENT_CONFIG_DIR = `${root}/config`;
+      process.env.RAGENT_RUN_SPOOL_DIR = `${root}/spool`;
+      process.env.RAGENT_MEMORY_DIR = `${root}/memory`;
+      process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { clearRunResult, createRun, getRunResult, removeRunsForSession, requestRunCancel, runPendingResultPath, runResultPath, runStatusPath, updateRun, writeRunResult } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
@@ -48,7 +48,7 @@ test('runner terminal write invalidates only its protected control binding',
         const fields = execFileSync('/usr/bin/getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':');
         return { uid: Number(fields[2]), gid: Number(fields[3]) };
       };
-      const owner = account(process.env.AGENTOC_TEST_OWNER_USER || 'pinggu'), runner = account('agentoc-runner');
+      const owner = account(process.env.RAGENT_TEST_OWNER_USER || 'pinggu'), runner = account('ragent-runner');
       assert.ok(owner.uid > 0 && runner.uid > 0 && owner.uid !== runner.uid);
       execFileSync('/usr/bin/chmod', ['0711', root]);
       execFileSync('/usr/bin/chown', ['-R', `${owner.uid}:${runner.gid}`, `${root}/spool`]);
@@ -73,13 +73,13 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await notifyLinuxRunScopeFinished({ ...run, runnerLaunchAttempt: 1 }, manifest, { base }), false);
         assert.equal(await hasLinuxRunCancelIntent(runId, 0), false);
         const moduleUrl = new URL('../chat/runs.mjs', import.meta.url).href;
-        const isolatedEnv = { ...process.env, HOME: `${root}/runner-config`, AGENTOC_CONFIG_DIR: `${root}/runner-config`,
-          AGENTOC_MEMORY_DIR: `${root}/runner-config/memory`, AGENTOC_WORK_ROOT_DIR: `${root}/runner-config/workspace`,
-          AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1', AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1' };
+        const isolatedEnv = { ...process.env, HOME: `${root}/runner-config`, RAGENT_CONFIG_DIR: `${root}/runner-config`,
+          RAGENT_MEMORY_DIR: `${root}/runner-config/memory`, RAGENT_WORK_ROOT_DIR: `${root}/runner-config/workspace`,
+          RAGENT_LINUX_RUN_SCOPE_GRANTS: '0', RAGENT_RUNNER_DISTINCT_IDENTITY: '1', RAGENT_LINUX_SCOPE_FINISH_ENABLED: '1' };
         const offline = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {updateRun} from ${JSON.stringify(moduleUrl)}; try { await updateRun(${JSON.stringify(runId)}, {state:'completed'}); process.exit(1); } catch (e) { process.exit(e.code === 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' ? 23 : 2); }`],
-        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        { env: { ...isolatedEnv, RAGENT_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
         let offlineError = ''; offline.stderr.on('data', (chunk) => { offlineError += chunk; });
         const offlineCode = await new Promise((resolve, reject) => { offline.once('error', reject); offline.once('close', resolve); });
         assert.equal(offlineCode, 23, offlineError);
@@ -95,7 +95,7 @@ test('runner terminal write invalidates only its protected control binding',
         const child = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {updateRun} from ${JSON.stringify(moduleUrl)}; await updateRun(${JSON.stringify(runId)}, {state:'completed'});`],
-        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
+        { env: { ...isolatedEnv, RAGENT_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });
         const completion = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
         try {
@@ -120,7 +120,7 @@ test('runner terminal write invalidates only its protected control binding',
         const offlineRun = await createRun({ status: { id: offlineId, sessionId: 's1', requestId: 't1',
           state: 'running', runnerLaunchAttempt: 0 }, manifest });
         await issueLinuxRunScopeGrant(offlineId, 0);
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         assert.equal(await notifyLinuxRunScopeFinished(offlineRun, manifest, { base }), false);
         assert.equal(await hasLinuxRunCancelIntent(offlineId, 0), true);
         execFileSync('/usr/bin/chown', ['-R', `${owner.uid}:${runner.gid}`, `${root}/spool/${offlineId}`]);
@@ -131,14 +131,14 @@ test('runner terminal write invalidates only its protected control binding',
         const staged = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; try { await writeRunResult(${JSON.stringify(offlineId)}, ${JSON.stringify(outcome)}); process.exit(1); } catch (e) { process.exit(e.code === 'LINUX_RUN_SCOPE_FINALIZATION_UNAVAILABLE' ? 23 : 2); }`],
-        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
+        { env: { ...isolatedEnv, RAGENT_CHAT_BASE_URL: base }, stdio: ['ignore', 'ignore', 'pipe'] });
         let stagedError = ''; staged.stderr.on('data', (chunk) => { stagedError += chunk; });
         const stagedCode = await new Promise((resolve, reject) => { staged.once('error', reject); staged.once('close', resolve); });
         assert.equal(stagedCode, 23, stagedError);
         assert.equal(JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8')).result.exitCode, 0);
         await assert.rejects(readFile(runResultPath(offlineId), 'utf8'), { code: 'ENOENT' });
         await assert.rejects(getRunResult(offlineId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
         const pending = JSON.parse(await readFile(runPendingResultPath(offlineId), 'utf8'));
         await writeFile(runPendingResultPath(offlineId), JSON.stringify({ ...pending, publicationId: 'tampered' }));
         await assert.rejects(getRunResult(offlineId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
@@ -183,23 +183,23 @@ test('runner terminal write invalidates only its protected control binding',
         const paused = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
           process.execPath, '--input-type=module', '-e',
           `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; await writeRunResult(${JSON.stringify(pausedId)}, ${JSON.stringify(outcome)});`],
-        { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+        { env: { ...isolatedEnv, RAGENT_CHAT_BASE_URL: 'http://127.0.0.1:1' }, stdio: ['ignore', 'ignore', 'pipe'] });
         let pausedError = ''; paused.stderr.on('data', (chunk) => { pausedError += chunk; });
         const pausedCode = await new Promise((resolve, reject) => { paused.once('error', reject); paused.once('close', resolve); });
         assert.equal(pausedCode, 0, pausedError);
         assert.deepEqual(await getRunResult(pausedId), outcome);
         assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), false);
         await updateRun(pausedId, { state: 'running', approvedActionPending: null, actionPause: null });
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         await assert.rejects(getRunResult(pausedId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.equal(await hasLinuxRunCancelIntent(pausedId, 0), true);
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
         await new Promise((resolve) => setTimeout(resolve, 1100));
         assert.deepEqual(await getRunResult(pausedId), outcome);
         const receipt = `${root}/config/linux-run-cancel-intents/${createHash('sha256').update(pausedId).digest('hex')}-0.completion.json`;
         const savedReceipt = JSON.parse(await readFile(receipt, 'utf8'));
         assert.equal(savedReceipt.runId, pausedId);
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         assert.deepEqual(await getRunResult(pausedId), outcome);
         await writeFile(receipt, JSON.stringify({ ...savedReceipt, publicationId: 'tampered' }));
         await assert.rejects(getRunResult(pausedId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
@@ -223,7 +223,7 @@ test('runner terminal write invalidates only its protected control binding',
         await issueLinuxRunScopeGrant(syntheticId, 0);
         await assert.rejects(writeRunResult(syntheticId, outcome), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         await assert.rejects(readFile(runResultPath(syntheticId), 'utf8'), { code: 'ENOENT' });
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
         await new Promise((resolve) => setTimeout(resolve, 1100));
         await writeRunResult(syntheticId, outcome);
         assert.deepEqual(await getRunResult(syntheticId), outcome);
@@ -232,10 +232,10 @@ test('runner terminal write invalidates only its protected control binding',
         const statusId = 'run_statusfixture1';
         await createRun({ status: { id: statusId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
         await issueLinuxRunScopeGrant(statusId, 0);
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/missing.sock`;
         await assert.rejects(updateRun(statusId, { state: 'completed', result: outcome }), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.equal(JSON.parse(await readFile(runStatusPath(statusId), 'utf8')).state, 'running');
-        process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
+        process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = broker.socketPath;
         await new Promise((resolve) => setTimeout(resolve, 1100));
         await updateRun(statusId, { state: 'completed', result: outcome });
         assert.equal(await hasLinuxRunResultTransaction(statusId, 0), false);
@@ -266,7 +266,7 @@ test('runner terminal write invalidates only its protected control binding',
         // The status file is writable by the runner. It cannot hide the
         // control-owned journal by changing attempts or deleting the status.
         for (const enabled of ['1', '0']) {
-          process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = enabled;
+          process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = enabled;
           await writeFile(runStatusPath(statusId), JSON.stringify({ ...beforeRecovery, runnerLaunchAttempt: 1 }));
           await assert.rejects(getRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
           await assert.rejects(clearRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
@@ -277,7 +277,7 @@ test('runner terminal write invalidates only its protected control binding',
           await assert.rejects(clearRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
           await assert.rejects(writeRunResult(statusId, outcome), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         }
-        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+        process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
         await writeFile(runStatusPath(statusId), JSON.stringify({ ...beforeRecovery, updatedAt: '2026-11-12T02:00:00.000Z' }));
         await assert.rejects(getRunResult(statusId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         const recoverTransactions = createLinuxRunResultTransactionRecovery();
@@ -307,7 +307,7 @@ test('runner terminal write invalidates only its protected control binding',
         const beforeCancel = JSON.parse(await readFile(runStatusPath(cancelId), 'utf8'));
         const pendingCompletion = { ...beforeCancel, state: 'completed', result: outcome, updatedAt: '2026-11-12T01:04:05.000Z' };
         await writeLinuxRunResultTransaction(cancelId, 0, beforeCancel, pendingCompletion);
-        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '0';
+        process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '0';
         await assert.rejects(updateRun(cancelId, { cancelRequested: true }, { beforeWrite: () => { throw new Error('cancel denied'); } }), /cancel denied/);
         assert.equal(await hasLinuxRunExplicitCancellation(cancelId), false);
         await writeFile(runStatusPath(cancelId), JSON.stringify({ ...beforeCancel, runnerLaunchAttempt: 1 }));
@@ -315,17 +315,17 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await hasLinuxRunCancelIntent(cancelId, 0), true);
         await writeFile(runStatusPath(cancelId), JSON.stringify(beforeCancel));
         await assert.rejects(getRunResult(cancelId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
-        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+        process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
         const abandonedTemporary = `${snapshot}.${'a'.repeat(32)}.tmp`;
         await writeFile(abandonedTemporary, 'abandoned test result', { mode: 0o600 });
         await removeRunsForSession('s1');
         await assert.rejects(readFile(snapshot, 'utf8'), { code: 'ENOENT' });
         await assert.rejects(readFile(abandonedTemporary, 'utf8'), { code: 'ENOENT' });
         const peerId = 'run_peerboundfixture1';
-        process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET = `${root}/peer-result.sock`;
-        process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER = `${root}/peercred`;
+        process.env.RAGENT_LINUX_PEER_RESULT_SOCKET = `${root}/peer-result.sock`;
+        process.env.RAGENT_LINUX_PEER_CREDENTIAL_HELPER = `${root}/peercred`;
         execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2',
-          fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER]);
+          fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', process.env.RAGENT_LINUX_PEER_CREDENTIAL_HELPER]);
         await createRun({ status: { id: peerId, sessionId: 's1', requestId: 't1', state: 'running' }, manifest });
         await issueLinuxRunScopeGrant(peerId, 0, { resultChannel: 'peer-v1' });
         const { readLinuxRunControlBindingRecord } = await import('../chat/linux-run-control-binding.mjs');
@@ -338,7 +338,7 @@ test('runner terminal write invalidates only its protected control binding',
         await assert.rejects(clearRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         // Turning the configuration off cannot make a peer-bound Run fall
         // back to an untrusted shared result after a control restart.
-        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '0';
+        process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '0';
         await assert.rejects(getRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         const peerStatus = await readFile(runStatusPath(peerId), 'utf8');
         await writeFile(runStatusPath(peerId), JSON.stringify({ ...JSON.parse(peerStatus), runnerLaunchAttempt: 1 }));
@@ -355,7 +355,7 @@ test('runner terminal write invalidates only its protected control binding',
         assert.equal(await getRunResult(peerId), null);
         await assert.rejects(clearRunResult(peerId), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.equal(await getRunResult(peerId), null);
-        process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
+        process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
         await assert.rejects(removeRunsForSession('s1'), { code: 'LINUX_RUN_RESULT_UNAVAILABLE' });
         assert.ok(await readFile(runStatusPath(peerId), 'utf8'));
         const peerId2 = 'run_peerboundfixture2';
@@ -404,8 +404,8 @@ test('runner terminal write invalidates only its protected control binding',
           });
         });
         try {
-          await new Promise((resolve, reject) => { resultBroker.once('error', reject); resultBroker.listen(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, resolve); });
-          await chmod(process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET, 0o666);
+          await new Promise((resolve, reject) => { resultBroker.once('error', reject); resultBroker.listen(process.env.RAGENT_LINUX_PEER_RESULT_SOCKET, resolve); });
+          await chmod(process.env.RAGENT_LINUX_PEER_RESULT_SOCKET, 0o666);
           assert.deepEqual(await getRunResult(peerId3), peerResult);
           assert.equal(JSON.parse(await readFile(runStatusPath(peerId3), 'utf8')).state, 'completed');
           assert.deepEqual(await getRunResult(peerId3), peerResult);
@@ -430,9 +430,9 @@ test('runner terminal write invalidates only its protected control binding',
           const sidecar = spawn('/usr/bin/setpriv', ['--reuid', String(runner.uid), '--regid', String(runner.gid), '--clear-groups', '--',
             process.execPath, '--input-type=module', '-e',
             `import {writeRunResult} from ${JSON.stringify(moduleUrl)}; await writeRunResult(${JSON.stringify(peerId5)}, ${JSON.stringify(peerResult)});`],
-          { env: { ...isolatedEnv, AGENTOC_CHAT_BASE_URL: base, AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
-            AGENTOC_LINUX_PEER_RESULT_SOCKET: process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET,
-            AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER }, stdio: ['ignore', 'ignore', 'pipe'] });
+          { env: { ...isolatedEnv, RAGENT_CHAT_BASE_URL: base, RAGENT_LINUX_PEER_RESULT_RUNNER: '1',
+            RAGENT_LINUX_PEER_RESULT_SOCKET: process.env.RAGENT_LINUX_PEER_RESULT_SOCKET,
+            RAGENT_LINUX_PEER_CREDENTIAL_HELPER: process.env.RAGENT_LINUX_PEER_CREDENTIAL_HELPER }, stdio: ['ignore', 'ignore', 'pipe'] });
           let sidecarError = ''; sidecar.stderr.on('data', chunk => { sidecarError += chunk; });
           const sidecarExit = await new Promise((resolve, reject) => { sidecar.once('error', reject); sidecar.once('close', resolve); });
           assert.equal(sidecarExit, 0, sidecarError);
@@ -455,8 +455,8 @@ test('runner terminal write invalidates only its protected control binding',
         } finally {
           await new Promise(resolve => resultBroker.close(resolve));
           sessionManager.killAll();
-          delete process.env.AGENTOC_LINUX_PEER_RESULT_SOCKET;
-          delete process.env.AGENTOC_LINUX_PEER_CREDENTIAL_HELPER;
+          delete process.env.RAGENT_LINUX_PEER_RESULT_SOCKET;
+          delete process.env.RAGENT_LINUX_PEER_CREDENTIAL_HELPER;
         }
       } finally { await new Promise((resolve) => server.close(resolve)); await broker.close(); }
     } finally { await rm(root, { recursive: true, force: true }); }

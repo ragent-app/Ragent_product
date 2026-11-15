@@ -36,15 +36,15 @@ assert.match(powershellCommand, /Get-ChildItem Env:/);
 assert.match(powershellCommand, /\[char\]0/);
 assert.doesNotMatch(powershellCommand, /env -0/);
 
-const start = '__AGENTOC_SHELL_ENV_START__';
-const end = '__AGENTOC_SHELL_ENV_END__';
+const start = '__RAGENT_SHELL_ENV_START__';
+const end = '__RAGENT_SHELL_ENV_END__';
 const parsed = parseEnvDump(
-  `${start}\0Path=C:\\profile-bin\0AGENTOC_TEST_FLAG=from-powershell\0${end}\0`,
+  `${start}\0Path=C:\\profile-bin\0RAGENT_TEST_FLAG=from-powershell\0${end}\0`,
   { platform: 'win32' },
 );
 assert.deepEqual(parsed, {
   PATH: 'C:\\profile-bin',
-  AGENTOC_TEST_FLAG: 'from-powershell',
+  RAGENT_TEST_FLAG: 'from-powershell',
 });
 
 const snapshot = finalizeShellSnapshot(
@@ -57,7 +57,7 @@ assert.ok(snapshot.fullPath.split(';').includes('C:\\profile-bin'));
 
 const selected = await pickShellExecutable({
   platform: 'win32',
-  env: { AGENTOC_USER_SHELL: 'C:\\missing\\shell.exe', SHELL: '/bin/bash', SystemRoot: 'D:\\Windows' },
+  env: { RAGENT_USER_SHELL: 'C:\\missing\\shell.exe', SHELL: '/bin/bash', SystemRoot: 'D:\\Windows' },
   pathExistsImpl: async (candidate) => candidate === 'D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
 });
 assert.equal(selected, defaultShellForPlatform('win32', { env: winEnv }));

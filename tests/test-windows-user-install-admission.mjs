@@ -8,24 +8,24 @@ import { promisify } from 'node:util';
 import { createServer } from 'node:http';
 
 if (process.platform !== 'win32') { console.log('windows-user-install-admission: skipped (Windows only)'); process.exit(0); }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-user-install-admission-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-user-install-admission-'));
 process.env.HOME = root;
 process.env.USERPROFILE = root;
 process.env.LOCALAPPDATA = path.join(root, 'local');
 process.env.APPDATA = path.join(root, 'roaming');
-process.env.AGENTOC_INSTANCE_ROOT = path.join(root, 'instance');
-process.env.AGENTOC_CONFIG_DIR = path.join(root, 'instance', 'config');
-process.env.AGENTOC_MEMORY_DIR = path.join(root, 'instance', 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
-const fullFixture = process.env.AGENTOC_QA_USER_INSTALL_FULL === '1';
+process.env.RAGENT_INSTANCE_ROOT = path.join(root, 'instance');
+process.env.RAGENT_CONFIG_DIR = path.join(root, 'instance', 'config');
+process.env.RAGENT_MEMORY_DIR = path.join(root, 'instance', 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = path.join(root, 'instance', 'workspace');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(root, 'instance', 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(root, 'instance', 'data', 'chat-runs');
+const fullFixture = process.env.RAGENT_QA_USER_INSTALL_FULL === '1';
 const fakeWinget = path.join(root, 'winget.exe');
 if (fullFixture) {
   const source = path.join(root, 'fake-winget.go');
   await writeFile(source, `package main\nimport ("fmt";"os")\nfunc main(){if len(os.Args)>1 && os.Args[1]=="source" {fmt.Println(\x60{"Name":"winget","Type":"Microsoft.PreIndexed.Package","Identifier":"Microsoft.Winget.Source_8wekyb3d8bbwe","TrustLevel":["Trusted"],"Arg":"https://cdn.winget.microsoft.com/cache"}\x60);return};if len(os.Args)>1 && os.Args[1]=="show" {fmt.Println("Found Fixture [Vendor.App]\\nVersion\\n-------\\n1.2.3");return};os.Exit(17)}\n`);
   await promisify(execFile)('go', ['build', '-o', fakeWinget, source], { cwd: root, windowsHide: true });
-  process.env.AGENTOC_WINGET_EXECUTABLE = fakeWinget;
+  process.env.RAGENT_WINGET_EXECUTABLE = fakeWinget;
 }
 const { createSession, proposeApprovedActions, killAll } = await import('../chat/session-manager.mjs');
 const { createRun } = await import('../chat/runs.mjs');
@@ -35,7 +35,7 @@ const { loadWindowsAutoInstallPublicIdentity } = await import('../chat/windows-m
 const { runWindowsUserInstallBridge } = await import('../chat/windows-user-install-bridge.mjs');
 const { executeWindowsUserInstall } = await import('../chat/windows-user-install-executor.mjs');
 const { revalidateWindowsUserWingetInstall } = await import('../chat/semantic-windows-adapter.mjs');
-const { runWindowsInstallBridge } = await import('../scripts/agentoc-windows-install-bridge.mjs');
+const { runWindowsInstallBridge } = await import('../scripts/ragent-windows-install-bridge.mjs');
 const { trackClaudeBidiApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 try {
@@ -103,7 +103,7 @@ try {
       req.on('end', async () => {
         try {
           const payload = JSON.parse(data);
-          const value = await proposeApprovedActions({ ...payload, token: req.headers['x-agentoc-approved-action-token'], tokenMatches: base.tokenMatches });
+          const value = await proposeApprovedActions({ ...payload, token: req.headers['x-ragent-approved-action-token'], tokenMatches: base.tokenMatches });
           res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(value));
         } catch (error) { res.writeHead(400, { 'content-type': 'application/json' }).end(JSON.stringify({ code: error.code || 'fixture-error', error: error.message })); }
       });
@@ -125,9 +125,9 @@ try {
       assert.deepEqual(JSON.parse(Buffer.from(encoded, 'base64url').toString()).windowsUserInstallIdentity, pinnedIdentity);
       let output = '';
       await runWindowsInstallBridge({ argv: ['', '', encoded], env: {
-        AGENTOC_APPROVED_ACTIONS_ENDPOINT: endpoint,
-        AGENTOC_APPROVED_ACTIONS_TOKEN: token, AGENTOC_APPROVED_ACTIONS_SESSION_ID: binding.sessionId,
-        AGENTOC_APPROVED_ACTIONS_RUN_ID: binding.runId, AGENTOC_APPROVED_ACTIONS_TURN_ID: binding.turnId,
+        RAGENT_APPROVED_ACTIONS_ENDPOINT: endpoint,
+        RAGENT_APPROVED_ACTIONS_TOKEN: token, RAGENT_APPROVED_ACTIONS_SESSION_ID: binding.sessionId,
+        RAGENT_APPROVED_ACTIONS_RUN_ID: binding.runId, RAGENT_APPROVED_ACTIONS_TURN_ID: binding.turnId,
       }, writeOutput: (text) => { output += text; },
       runUser: (options) => runWindowsUserInstallBridge(options, {
         execute: (execOptions, deps) => executeWindowsUserInstall(execOptions, { ...deps, assertIdentity: async () => ({ sid: testSid }), execFile: execFixture,
@@ -154,6 +154,6 @@ try {
   const actualRoot = await realpath(root);
   const actualParent = await realpath(os.tmpdir());
   assert.equal(path.dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-  assert.ok(path.basename(actualRoot).startsWith('agentoc-user-install-admission-'));
+  assert.ok(path.basename(actualRoot).startsWith('ragent-user-install-admission-'));
   await rm(actualRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
 }

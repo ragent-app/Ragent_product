@@ -8,7 +8,7 @@
  *
  * The queue is in-memory only: pending work is dropped on restart, which is
  * acceptable for best-effort suggestions. When the queue is disabled
- * (AGENTOC_BACKGROUND_AI_QUEUE=off), tasks run directly for easy rollback.
+ * (RAGENT_BACKGROUND_AI_QUEUE=off), tasks run directly for easy rollback.
  *
  * Observability (DS-03): when an enqueue carries an `operationId` (from
  * chat/operation-ledger.mjs), the queue records structured events
@@ -38,14 +38,14 @@ import { registerCache } from './memory-registry.mjs';
 import { createAdaptiveConcurrencyBudget } from './adaptive-concurrency.mjs';
 import { getAdaptiveConcurrencyBudget } from './adaptive-concurrency-registry.mjs';
 
-const QUEUE_ENV = 'AGENTOC_BACKGROUND_AI_QUEUE';
-const CONCURRENCY_ENV = 'AGENTOC_BACKGROUND_AI_CONCURRENCY';
-const DELAY_ENV = 'AGENTOC_BACKGROUND_AI_DELAY_MS';
-const MAX_QUEUE_ENV = 'AGENTOC_BACKGROUND_AI_MAX_QUEUE';
-const TIMEOUT_ENV = 'AGENTOC_BACKGROUND_AI_TIMEOUT_MS';
-const DEADLINE_ENV = 'AGENTOC_BACKGROUND_AI_DEADLINE_MS';
-const SESSION_BUDGET_ENV = 'AGENTOC_BACKGROUND_AI_SESSION_BUDGET';
-const SESSION_BUDGET_WINDOW_ENV = 'AGENTOC_BACKGROUND_AI_SESSION_BUDGET_WINDOW_MS';
+const QUEUE_ENV = 'RAGENT_BACKGROUND_AI_QUEUE';
+const CONCURRENCY_ENV = 'RAGENT_BACKGROUND_AI_CONCURRENCY';
+const DELAY_ENV = 'RAGENT_BACKGROUND_AI_DELAY_MS';
+const MAX_QUEUE_ENV = 'RAGENT_BACKGROUND_AI_MAX_QUEUE';
+const TIMEOUT_ENV = 'RAGENT_BACKGROUND_AI_TIMEOUT_MS';
+const DEADLINE_ENV = 'RAGENT_BACKGROUND_AI_DEADLINE_MS';
+const SESSION_BUDGET_ENV = 'RAGENT_BACKGROUND_AI_SESSION_BUDGET';
+const SESSION_BUDGET_WINDOW_ENV = 'RAGENT_BACKGROUND_AI_SESSION_BUDGET_WINDOW_MS';
 
 // Background work is best-effort and must have a finite upper bound by
 // default. Callers that own a stronger cancellation mechanism may still set

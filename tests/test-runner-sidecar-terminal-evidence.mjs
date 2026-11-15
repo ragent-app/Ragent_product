@@ -135,11 +135,11 @@ assert.equal(
   'completed',
 );
 assert.equal(
-  classifyProviderTerminalFrame('qwen-code-acp', { id: 'agentoc-prompt', result: {} })?.kind,
+  classifyProviderTerminalFrame('qwen-code-acp', { id: 'ragent-prompt', result: {} })?.kind,
   'completed',
 );
 assert.equal(
-  classifyProviderTerminalFrame('deepseek-harness-acp', { id: 'agentoc-prompt', result: {} }, { acp: true })?.kind,
+  classifyProviderTerminalFrame('deepseek-harness-acp', { id: 'ragent-prompt', result: {} }, { acp: true })?.kind,
   'completed',
   'DeepSeek ACP mode must share the ACP terminal contract',
 );

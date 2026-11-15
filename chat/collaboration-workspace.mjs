@@ -160,7 +160,7 @@ export async function validateWorkspacePlan({ rootPath, mode = 'shared-exclusive
 export function buildWorktreePath(rootPath, collaborationId, taskId) {
   const rootName = basename(resolve(text(rootPath) || process.cwd()));
   const safe = (value) => text(value).replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80) || 'task';
-  return join(tmpdir(), 'agentoc-collaboration-worktrees', safe(rootName), safe(collaborationId), safe(taskId));
+  return join(tmpdir(), 'ragent-collaboration-worktrees', safe(rootName), safe(collaborationId), safe(taskId));
 }
 
 export async function createGitWorktree({ rootPath, collaborationId, taskId, ref = 'HEAD', execFileFn = execFile } = {}) {
@@ -177,7 +177,7 @@ export async function createGitWorktree({ rootPath, collaborationId, taskId, ref
 export async function removeGitWorktree({ rootPath, worktreePath, execFileFn = execFile } = {}) {
   const projectRoot = resolve(text(rootPath) || process.cwd());
   const target = resolve(text(worktreePath));
-  const worktreeRoot = resolve(tmpdir(), 'agentoc-collaboration-worktrees');
+  const worktreeRoot = resolve(tmpdir(), 'ragent-collaboration-worktrees');
   const targetRelative = relative(worktreeRoot, target);
   if (!target || targetRelative === '..' || targetRelative.startsWith(`..${sep}`) || isAbsolute(targetRelative)) return false;
   await execFileFn('git', ['-C', projectRoot, 'worktree', 'remove', '--force', target], {

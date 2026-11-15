@@ -13,7 +13,7 @@ import {
 } from '../lib/instance-identity.mjs';
 import { verifyTargetRuntimeGrant } from '../lib/target-runtime-grant.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-target-runtime-auth-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-target-runtime-auth-'));
 const now = Date.parse('2026-09-03T00:00:00.000Z');
 const clock = () => now;
 const source = await loadOrCreateInstanceIdentity({ filePath: join(root, 'source.json') });
@@ -92,7 +92,7 @@ function input({
     expectedRevision,
     expiresAt,
     issuedAt,
-    audience: 'agentoc-target-runtime',
+    audience: 'ragent-target-runtime',
   });
   return {
     requestId,
@@ -105,7 +105,7 @@ function input({
     expectedRevision,
     expiresAt,
     issuedAt,
-    audience: 'agentoc-target-runtime',
+    audience: 'ragent-target-runtime',
     instance: publicInstanceIdentity(actor),
     signature: proof.signature,
   };

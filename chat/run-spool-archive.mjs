@@ -49,14 +49,14 @@
 //     system-wide slowdown on 2026-08-05).
 //
 // Scheduler config (env, resolved lazily so tests can change them):
-//   AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED      default 1        master switch (0 disables)
-//   AGENTOC_RUN_SPOOL_ARCHIVE_INTERVAL_MS  default 900000  (15m) cadence
-//   AGENTOC_RUN_SPOOL_ARCHIVE_MIN_AGE_MS   default 600000  (10m) retention gate
-//   AGENTOC_RUN_SPOOL_ARCHIVE_THROTTLE_MS  default 20       sleep between files
-//   AGENTOC_RUN_SPOOL_ARCHIVE_MIN_BYTES    default 1024     skip tiny spools
-//   AGENTOC_RUN_SPOOL_ARCHIVE_CODEC        default gzip     gzip | zstd
-//   AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT  default 64    files per tick
-//   AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_BYTES  default 1073741824 (1 GiB input per tick)
+//   RAGENT_RUN_SPOOL_ARCHIVE_ENABLED      default 1        master switch (0 disables)
+//   RAGENT_RUN_SPOOL_ARCHIVE_INTERVAL_MS  default 900000  (15m) cadence
+//   RAGENT_RUN_SPOOL_ARCHIVE_MIN_AGE_MS   default 600000  (10m) retention gate
+//   RAGENT_RUN_SPOOL_ARCHIVE_THROTTLE_MS  default 20       sleep between files
+//   RAGENT_RUN_SPOOL_ARCHIVE_MIN_BYTES    default 1024     skip tiny spools
+//   RAGENT_RUN_SPOOL_ARCHIVE_CODEC        default gzip     gzip | zstd
+//   RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT  default 64    files per tick
+//   RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_BYTES  default 1073741824 (1 GiB input per tick)
 
 import { createHash } from 'crypto';
 import { createReadStream, createWriteStream } from 'fs';
@@ -495,18 +495,18 @@ function getArchiveConfig() {
     return v === undefined ? fallback : /^(1|true|yes|on)$/i.test(v);
   };
   return {
-    enabled: envFlag('AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED', true),
-    intervalMs: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_INTERVAL_MS', 15 * 60 * 1000),
-    minAgeMs: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_MIN_AGE_MS', 10 * 60 * 1000),
-    throttleMs: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_THROTTLE_MS', 20),
-    minBytes: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_MIN_BYTES', 1024),
-    codec: resolveCodec(process.env.AGENTOC_RUN_SPOOL_ARCHIVE_CODEC),
+    enabled: envFlag('RAGENT_RUN_SPOOL_ARCHIVE_ENABLED', true),
+    intervalMs: envMs('RAGENT_RUN_SPOOL_ARCHIVE_INTERVAL_MS', 15 * 60 * 1000),
+    minAgeMs: envMs('RAGENT_RUN_SPOOL_ARCHIVE_MIN_AGE_MS', 10 * 60 * 1000),
+    throttleMs: envMs('RAGENT_RUN_SPOOL_ARCHIVE_THROTTLE_MS', 20),
+    minBytes: envMs('RAGENT_RUN_SPOOL_ARCHIVE_MIN_BYTES', 1024),
+    codec: resolveCodec(process.env.RAGENT_RUN_SPOOL_ARCHIVE_CODEC),
     // Keep compression work in short, schedulable bursts.  A smaller default
     // prevents the archive worker itself from producing multi-second I/O
     // stalls when a backlog has accumulated; operators can raise the budget
     // explicitly after observing host pressure.
-    perTickLimit: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT', 64),
-    perTickBytes: envMs('AGENTOC_RUN_SPOOL_ARCHIVE_PER_TICK_BYTES', 1024 * 1024 * 1024),
+    perTickLimit: envMs('RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_LIMIT', 64),
+    perTickBytes: envMs('RAGENT_RUN_SPOOL_ARCHIVE_PER_TICK_BYTES', 1024 * 1024 * 1024),
     stateFile: STATE_FILE,
   };
 }
@@ -591,7 +591,7 @@ export async function processRunArchiveDueNow(options = {}) {
 export function startRunArchiveScheduler(options = {}) {
   const config = { ...getArchiveConfig(), ...options };
   if (!config.enabled) {
-    console.log('[run-spool-archive] automatic scheduling disabled (AGENTOC_RUN_SPOOL_ARCHIVE_ENABLED!=1)');
+    console.log('[run-spool-archive] automatic scheduling disabled (RAGENT_RUN_SPOOL_ARCHIVE_ENABLED!=1)');
     return null;
   }
   if (archiveTimer) return archiveTimer;

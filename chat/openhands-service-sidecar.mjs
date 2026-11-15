@@ -93,14 +93,14 @@ function parseGeneratedEnv(text) {
 }
 
 async function readPreparedProviderEnv({ environment = process.env, readFileImpl = readFile } = {}) {
-  const root = typeof environment?.AGENTOC_PROVIDER_HOMES_DIR === 'string'
-    ? environment.AGENTOC_PROVIDER_HOMES_DIR.trim()
+  const root = typeof environment?.RAGENT_PROVIDER_HOMES_DIR === 'string'
+    ? environment.RAGENT_PROVIDER_HOMES_DIR.trim()
     : '';
   if (!root) return {};
   const home = join(root, 'openhands');
   const [generic, openhands] = await Promise.all([
-    readFileImpl(join(home, '.agentoc-provider.env'), 'utf8').catch(() => ''),
-    readFileImpl(join(home, '.agentoc-openhands.env'), 'utf8').catch(() => ''),
+    readFileImpl(join(home, '.ragent-provider.env'), 'utf8').catch(() => ''),
+    readFileImpl(join(home, '.ragent-openhands.env'), 'utf8').catch(() => ''),
   ]);
   return { ...parseGeneratedEnv(generic), ...parseGeneratedEnv(openhands) };
 }
@@ -150,7 +150,7 @@ export async function spawnOpenHandsServiceProcess({
  * Run one OpenHands conversation and return a normal detached-run result.
  * `append` receives both raw Agent Server events and bridged Harness events.
  * `readRun` is polled only for the durable cancel request, so cancellation
- * remains controlled by AgentoC rather than by an in-memory UI state.
+ * remains controlled by Ragent rather than by an in-memory UI state.
  */
 export async function runOpenHandsServiceSidecar({
   runId,
@@ -177,23 +177,23 @@ export async function runOpenHandsServiceSidecar({
   }
   const configured = serviceOptions(manifest);
   const idleTimeoutMs = positiveDuration(
-    configured.idleTimeoutMs || environment.AGENTOC_OPENHANDS_IDLE_TIMEOUT_MS,
+    configured.idleTimeoutMs || environment.RAGENT_OPENHANDS_IDLE_TIMEOUT_MS,
     DEFAULT_OPENHANDS_IDLE_TIMEOUT_MS,
   );
   const streamStartTimeoutMs = positiveDuration(
-    configured.streamStartTimeoutMs || environment.AGENTOC_OPENHANDS_STREAM_START_TIMEOUT_MS,
+    configured.streamStartTimeoutMs || environment.RAGENT_OPENHANDS_STREAM_START_TIMEOUT_MS,
     DEFAULT_OPENHANDS_STREAM_START_TIMEOUT_MS,
   );
   const requestTimeoutMs = positiveDuration(
-    configured.requestTimeoutMs || environment.AGENTOC_OPENHANDS_REQUEST_TIMEOUT_MS,
+    configured.requestTimeoutMs || environment.RAGENT_OPENHANDS_REQUEST_TIMEOUT_MS,
     30_000,
   );
   const eventQueueMax = positiveInteger(
-    configured.eventQueueMax || environment.AGENTOC_OPENHANDS_EVENT_QUEUE_MAX,
+    configured.eventQueueMax || environment.RAGENT_OPENHANDS_EVENT_QUEUE_MAX,
     DEFAULT_OPENHANDS_EVENT_QUEUE_MAX,
   );
   const eventQueueMaxBytes = positiveDuration(
-    configured.eventQueueMaxBytes || environment.AGENTOC_OPENHANDS_EVENT_QUEUE_BYTES,
+    configured.eventQueueMaxBytes || environment.RAGENT_OPENHANDS_EVENT_QUEUE_BYTES,
     DEFAULT_OPENHANDS_EVENT_QUEUE_BYTES,
   );
   // The service runtime bypasses the ordinary process-runner cleanEnv path.
@@ -243,9 +243,9 @@ export async function runOpenHandsServiceSidecar({
     await append({ type: 'openhands.service.started', host, ownedService });
     await waitForServer(client);
     const agent = buildOpenHandsAgent({
-      model: configured.model || manifest.options?.model || preparedEnv.LLM_MODEL || preparedEnv.AGENTOC_PROVIDER_MODEL,
-      apiKey: configured.llmApiKey || preparedEnv.LLM_API_KEY || preparedEnv.AGENTOC_PROVIDER_API_KEY,
-      baseUrl: configured.baseUrl || preparedEnv.LLM_BASE_URL || preparedEnv.AGENTOC_PROVIDER_BASE_URL,
+      model: configured.model || manifest.options?.model || preparedEnv.LLM_MODEL || preparedEnv.RAGENT_PROVIDER_MODEL,
+      apiKey: configured.llmApiKey || preparedEnv.LLM_API_KEY || preparedEnv.RAGENT_PROVIDER_API_KEY,
+      baseUrl: configured.baseUrl || preparedEnv.LLM_BASE_URL || preparedEnv.RAGENT_PROVIDER_BASE_URL,
       agentKind: configured.agentKind || 'Agent',
       agentContext: configured.agentContext,
     });
@@ -435,7 +435,7 @@ export async function runOpenHandsServiceSidecar({
                 appServerPendingApprovals: (Array.isArray(latest?.appServerPendingApprovals) ? latest.appServerPendingApprovals : []).map((entry) => entry.approvalId === queued.approvalId ? { ...entry, state: 'responded', decision } : entry),
                 appServerApprovalResponseQueue: (Array.isArray(latest?.appServerApprovalResponseQueue) ? latest.appServerApprovalResponseQueue : []).map((entry) => entry.id === queued.id ? { ...entry, state: 'sent', sentAt: new Date().toISOString() } : entry),
               }));
-              await append({ type: 'agentoc.approval_response', approvalId: queued.approvalId, decision, status: accepted ? 'approved' : 'denied' });
+              await append({ type: 'ragent.approval_response', approvalId: queued.approvalId, decision, status: accepted ? 'approved' : 'denied' });
             } finally {
               responseInFlight = false;
             }

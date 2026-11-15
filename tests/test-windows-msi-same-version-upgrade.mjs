@@ -7,20 +7,20 @@ import { randomUUID } from 'node:crypto';
 import { resolveWindowsSystemPaths } from '../chat/windows-system-paths.mjs';
 
 if (process.platform !== 'win32') { console.log('windows-msi-same-version-upgrade: skipped off Windows'); process.exit(0); }
-const source = await readFile(new URL('../packaging/windows/AgentoC.ActivatedOwner.wxs', import.meta.url), 'utf8');
+const source = await readFile(new URL('../packaging/windows/Ragent.ActivatedOwner.wxs', import.meta.url), 'utf8');
 const rows = [...source.matchAll(/<MajorUpgrade\b[^>]*\/>/g)].map(match => match[0]);
 assert.equal(rows.length, 2);
 for (const row of rows) assert.match(row, /\bAllowSameVersionUpgrades="yes"/);
-const root = await mkdtemp(path.join(tmpdir(), 'agentoc-sameversion-msi-'));
+const root = await mkdtemp(path.join(tmpdir(), 'ragent-sameversion-msi-'));
 const wxs = path.join(root, 'fixture.wxs'), payload = path.join(root, 'payload.txt'), msi = path.join(root, 'fixture.msi');
 await writeFile(payload, 'isolated fixture');
-await writeFile(wxs, `<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Package Name="AgentoC Version Fixture" Manufacturer="AgentoC QA" Version="0.0.1" UpgradeCode="${randomUUID()}"><MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="Newer"/><MediaTemplate EmbedCab="yes"/><StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="AgentoC-Version-Fixture"><Component Id="Payload" Guid="${randomUUID()}"><File Source="${payload.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" /></Component></Directory></StandardDirectory><Feature Id="Main"><ComponentRef Id="Payload"/></Feature></Package></Wix>`);
+await writeFile(wxs, `<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Package Name="Ragent Version Fixture" Manufacturer="Ragent QA" Version="0.0.1" UpgradeCode="${randomUUID()}"><MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="Newer"/><MediaTemplate EmbedCab="yes"/><StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Ragent-Version-Fixture"><Component Id="Payload" Guid="${randomUUID()}"><File Source="${payload.replaceAll('&', '&amp;').replaceAll('"', '&quot;')}" /></Component></Directory></StandardDirectory><Feature Id="Main"><ComponentRef Id="Payload"/></Feature></Package></Wix>`);
 execFileSync('wix.exe', ['--acceptEula', 'wix7', 'build', '-arch', 'x64', wxs, '-o', msi], { windowsHide: true, stdio: 'pipe' });
-const script = `$i=New-Object -ComObject WindowsInstaller.Installer; $d=$i.OpenDatabase($env:AGENTOC_QA_MSI,0); $v=$d.OpenView('SELECT \`VersionMax\`,\`Attributes\`,\`ActionProperty\` FROM \`Upgrade\`'); $v.Execute(); while($r=$v.Fetch()){ if($r.StringData(3) -eq 'WIX_UPGRADE_DETECTED'){ [pscustomobject]@{max=$r.StringData(1); attributes=$r.IntegerData(2)} | ConvertTo-Json -Compress } }`;
+const script = `$i=New-Object -ComObject WindowsInstaller.Installer; $d=$i.OpenDatabase($env:RAGENT_QA_MSI,0); $v=$d.OpenView('SELECT \`VersionMax\`,\`Attributes\`,\`ActionProperty\` FROM \`Upgrade\`'); $v.Execute(); while($r=$v.Fetch()){ if($r.StringData(3) -eq 'WIX_UPGRADE_DETECTED'){ [pscustomobject]@{max=$r.StringData(1); attributes=$r.IntegerData(2)} | ConvertTo-Json -Compress } }`;
 const shell = resolveWindowsSystemPaths()?.powershell;
 assert.ok(shell, 'Windows system PowerShell path must be discoverable');
 const raw = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-  { env: { ...process.env, AGENTOC_QA_MSI: msi }, encoding: 'utf8', windowsHide: true });
+  { env: { ...process.env, RAGENT_QA_MSI: msi }, encoding: 'utf8', windowsHide: true });
 const record = JSON.parse(raw.trim());
 assert.equal(record.max, '0.0.1');
 assert.equal(record.attributes & 0x200, 0x200);

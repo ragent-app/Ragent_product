@@ -36,8 +36,8 @@ assert.match(server, /RENDEZVOUS_TIMER_MAX_DELAY_MS/, 'rendezvous timer must avo
 // every historical session, or run the one-time stale-approval migration on
 // every ordinary boot. These are the three resource spikes that previously
 // made a fresh instance look like a reconnecting client.
-assert.match(server, /const STARTUP_RECOVERY_DELAY_ENV = 'AGENTOC_STARTUP_RECOVERY_DELAY_MS'/, 'startup recovery should have an explicit delay setting');
-assert.match(server, /const STALE_APPROVAL_BACKFILL_ENV = 'AGENTOC_STALE_APPROVAL_BACKFILL'/, 'stale approval backfill should be explicitly gated');
+assert.match(server, /const STARTUP_RECOVERY_DELAY_ENV = 'RAGENT_STARTUP_RECOVERY_DELAY_MS'/, 'startup recovery should have an explicit delay setting');
+assert.match(server, /const STALE_APPROVAL_BACKFILL_ENV = 'RAGENT_STALE_APPROVAL_BACKFILL'/, 'stale approval backfill should be explicitly gated');
 assert.match(
   server,
   /isEnvToggleEnabled\(process\.env\[STALE_APPROVAL_BACKFILL_ENV\],\s*\{\s*defaultValue: false\s*\}\)/,

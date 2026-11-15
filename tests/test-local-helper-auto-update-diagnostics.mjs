@@ -67,8 +67,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-local-helper-update-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-local-helper-update-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -123,18 +123,18 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_REPLY_SELF_CHECK: 'off',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -175,8 +175,8 @@ function runNodeCliAsync(args, env = {}) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -196,7 +196,7 @@ function runNodeCliAsync(args, env = {}) {
 function buildVersionedHelperBinary({ home, version }) {
   const sourceDir = join(home, `local-helper-src-${version.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
   cpSync(join(repoRoot, 'local-helper'), sourceDir, { recursive: true });
-  const mainPath = join(sourceDir, 'cmd', 'agentoc-helper', 'main.go');
+  const mainPath = join(sourceDir, 'cmd', 'ragent-helper', 'main.go');
   const source = readFileSync(mainPath, 'utf8');
   const currentVersion = '0.2.1';
   assert.ok(source.includes(`const helperVersion = "${currentVersion}"`), 'helper source should contain the current version constant');
@@ -206,8 +206,8 @@ function buildVersionedHelperBinary({ home, version }) {
     'utf8',
   );
 
-  const binaryPath = join(home, `agentoc-helper-${version}`);
-  const build = spawnSync('go', ['build', '-o', binaryPath, './cmd/agentoc-helper'], {
+  const binaryPath = join(home, `ragent-helper-${version}`);
+  const build = spawnSync('go', ['build', '-o', binaryPath, './cmd/ragent-helper'], {
     cwd: sourceDir,
     env: { ...process.env, HOME: home },
     encoding: 'utf8',
@@ -293,7 +293,7 @@ async function main() {
     assert.equal(releaseManifest.status, 200, 'latest helper release should resolve before stale helper launch');
     assert.equal(releaseManifest.json?.release?.version, '0.2.1', 'release manifest should expose the current helper release');
 
-    const helperConfigDir = join(home, '.config', 'AgentoCHelper');
+    const helperConfigDir = join(home, '.config', 'RagentHelper');
     mkdirSync(helperConfigDir, { recursive: true });
     const bootstrapFilePath = join(helperConfigDir, 'bootstrap.json');
     writeFileSync(bootstrapFilePath, JSON.stringify({
@@ -306,8 +306,8 @@ async function main() {
       cwd: repoRoot,
       env: {
         ...process.env,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
         HOME: home,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -332,7 +332,7 @@ async function main() {
       'stale helper should explain why it remained on the old executable',
     );
 
-    const managedBinaryPath = join(helperConfigDir, 'bin', `agentoc-helper-${process.platform}-${helperArch()}`);
+    const managedBinaryPath = join(helperConfigDir, 'bin', `ragent-helper-${process.platform}-${helperArch()}`);
     assert.equal(existsSync(managedBinaryPath), true, 'auto update should write the managed helper binary');
 
     const statusAfterUpdate = await fetchOnlineStatus(port, session.id, '0.2.0');
@@ -348,8 +348,8 @@ async function main() {
       cwd: repoRoot,
       env: {
         ...process.env,
-        AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-        AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+        RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+        RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
         HOME: home,
       },
       stdio: ['ignore', 'pipe', 'pipe'],

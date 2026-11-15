@@ -21,7 +21,7 @@ if ($fields.Count -ne 5 -or @($fields | Where-Object { $_ -notin @('schemaVersio
     $record.sourceCommit -cnotmatch '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' -or $record.msiSha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'SETUP_METADATA_INVALID' }
 if ((Get-Sha256 $msi) -cne $record.msiSha256) { throw 'SETUP_METADATA_MSI_MISMATCH' }
 $setupSha = Get-Sha256 $setup
-$marker = '<!-- agentoc-build:' + $record.buildVersion + ':' + $record.sourceCommit + ':sha256:' + $setupSha + ' -->'
+$marker = '<!-- ragent-build:' + $record.buildVersion + ':' + $record.sourceCommit + ':sha256:' + $setupSha + ' -->'
 $result = [ordered]@{ schemaVersion = 1; publicVersion = $record.publicVersion; buildVersion = $record.buildVersion;
     sourceCommit = $record.sourceCommit; msiSha256 = $record.msiSha256; setupSha256 = $setupSha; releaseBodyMarker = $marker }
 [IO.File]::WriteAllText(($setup + '.build.json'), (($result | ConvertTo-Json -Compress) + "`n"), [Text.UTF8Encoding]::new($false))

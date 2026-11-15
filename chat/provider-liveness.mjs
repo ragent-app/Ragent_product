@@ -24,12 +24,12 @@ export function isAgyRuntimeFamily(runtimeFamily) {
 }
 
 export function resolveProviderHeartbeatIntervalMs(environment = process.env) {
-  return finitePositiveNumber(environment?.AGENTOC_PROVIDER_HEARTBEAT_INTERVAL_MS)
+  return finitePositiveNumber(environment?.RAGENT_PROVIDER_HEARTBEAT_INTERVAL_MS)
     || DEFAULT_PROVIDER_HEARTBEAT_INTERVAL_MS;
 }
 
 export function resolveProviderOutputIdleDiagnosticMs(environment = process.env) {
-  return finitePositiveNumber(environment?.AGENTOC_PROVIDER_OUTPUT_IDLE_DIAGNOSTIC_MS)
+  return finitePositiveNumber(environment?.RAGENT_PROVIDER_OUTPUT_IDLE_DIAGNOSTIC_MS)
     || DEFAULT_PROVIDER_OUTPUT_IDLE_DIAGNOSTIC_MS;
 }
 

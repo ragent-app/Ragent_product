@@ -1,7 +1,7 @@
 "use strict";
 
 (function attachWorkspaceFileReader(root) {
-  const LIST_PANEL_WIDTH_STORAGE_KEY = "agentoc.workspaceFileReaderListWidth";
+  const LIST_PANEL_WIDTH_STORAGE_KEY = "ragent.workspaceFileReaderListWidth";
   const LIST_PANEL_RESIZE_QUERY = "(min-width: 768px)";
   const MIN_LIST_PANEL_WIDTH = 240;
   const MAX_LIST_PANEL_WIDTH = 560;
@@ -40,7 +40,7 @@
   };
 
   function t(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function escapeHtml(value) {
@@ -50,23 +50,23 @@
   }
 
   function renderIcon(name, className = "") {
-    return root.AgentoCIcons?.render(name, { className }) || "";
+    return root.RagentIcons?.render(name, { className }) || "";
   }
 
   function resolveRequestPath(path) {
-    if (typeof root.agentocResolveProductPath === "function") {
-      return root.agentocResolveProductPath(path);
+    if (typeof root.ragentResolveProductPath === "function") {
+      return root.ragentResolveProductPath(path);
     }
     return String(path || "");
   }
 
   function getCurrentWorkspaceSafe() {
-    if (typeof root.agentocGetSelectedSessionFolder === "function") {
-      const selected = String(root.agentocGetSelectedSessionFolder() || "").trim();
+    if (typeof root.ragentGetSelectedSessionFolder === "function") {
+      const selected = String(root.ragentGetSelectedSessionFolder() || "").trim();
       if (selected) return selected;
     }
-    if (typeof root.agentocGetDefaultSessionFolder === "function") {
-      const fallback = String(root.agentocGetDefaultSessionFolder() || "").trim();
+    if (typeof root.ragentGetDefaultSessionFolder === "function") {
+      const fallback = String(root.ragentGetDefaultSessionFolder() || "").trim();
       if (fallback) return fallback;
     }
     return "~";
@@ -262,7 +262,7 @@
     }
 
     try {
-      const response = await (root.agentocFetch || fetch)(file.url, {
+      const response = await (root.ragentFetch || fetch)(file.url, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -384,7 +384,7 @@
       return;
     }
     dom.tree.innerHTML = renderTreeNode(buildTree(files, directories));
-    root.AgentoCIcons?.hydrate?.(dom.tree);
+    root.RagentIcons?.hydrate?.(dom.tree);
   }
 
   async function loadWorkspaceFiles({ force = false } = {}) {
@@ -489,7 +489,7 @@
     if (!bindDom()) return;
     setReading(false);
     renderTree();
-    root.AgentoCIcons?.hydrate?.(dom.panel);
+    root.RagentIcons?.hydrate?.(dom.panel);
   }
 
   function restartReaderAnimation() {
@@ -599,7 +599,7 @@
     dom.listResizeHandle?.addEventListener("pointerdown", handleListResizePointerDown);
     dom.listResizeHandle?.addEventListener("keydown", handleListResizeKeydown);
     dom.tree.addEventListener("click", handleTreeClick);
-    root.AgentoCIcons?.hydrate?.(dom.panel);
+    root.RagentIcons?.hydrate?.(dom.panel);
     setOpen(state.open);
     setReading(state.reading);
     if (dom.searchInput) dom.searchInput.value = state.search || "";
@@ -630,7 +630,7 @@
   root.syncWorkspaceFileReaderForSidebarTab = syncForSidebarTab;
   root.restartWorkspaceFileReaderAnimation = restartReaderAnimation;
   root.syncWorkspaceFileReaderMount = syncMount;
-  root.openAgentoCReadableFile = openExternalReadableFile;
+  root.openRagentReadableFile = openExternalReadableFile;
   root.openWorkspaceReadableFile = openExternalReadableFile;
 
   if (document.readyState === "loading") {

@@ -45,17 +45,17 @@ const labels = {
 };
 const window = {
   __testLocale: 'zh-CN',
-  agentocT(key, vars = {}) {
+  ragentT(key, vars = {}) {
     let text = labels[key] || key;
     for (const [name, value] of Object.entries(vars || {})) {
       text = text.replace(new RegExp(`\\{${name}\\}`, 'g'), String(value));
     }
     return text;
   },
-  agentocGetActiveUiLanguage() {
+  ragentGetActiveUiLanguage() {
     return this.__testLocale;
   },
-  agentocLocalizeContent(value) {
+  ragentLocalizeContent(value) {
     if (value && typeof value === 'object') {
       const wantEn = String(this.__testLocale).toLowerCase().startsWith('en');
       return wantEn ? (value.en || value.zh || '') : (value.zh || value.en || '');
@@ -66,14 +66,14 @@ const window = {
 const context = vm.createContext({ window, globalThis: window, console });
 vm.runInContext(source, context);
 
-const api = window.AgentoCRunActivity;
+const api = window.RagentRunActivity;
 assert.ok(api, 'shared run activity UI API should be installed');
 assert.match(loaderSource, /"chat\/run-activity-ui\.js"/, 'the split asset loader should load the shared activity module');
 
 api.setActivity({
   state: 'working',
   kind: 'file_edit',
-  detail: '/srv/agentoc-promoted/static/chat/ui.js',
+  detail: '/srv/ragent-promoted/static/chat/ui.js',
   subject: 'ui.js',
   sourceSeq: 8,
   outputBoundarySeq: 4,
@@ -225,7 +225,7 @@ api.setActivity({
   state: 'working',
   kind: 'edit',
   labelKind: 'edit',
-  detail: '/srv/agentoc-promoted/static/chat/ui.js',
+  detail: '/srv/ragent-promoted/static/chat/ui.js',
   subject: 'ui.js',
   sourceSeq: 36,
   outputBoundarySeq: 20,

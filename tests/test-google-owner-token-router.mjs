@@ -11,18 +11,18 @@ import { Readable } from 'stream';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-google-owner-token-router-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-google-owner-token-router-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_ACCOUNTS_URL = 'https://accounts.example.test';
-process.env.AGENTOC_ACCOUNTS_ISSUER = 'https://accounts.example.test';
-process.env.AGENTOC_PUBLIC_BASE_URL = 'https://instance.example.test';
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'test-auth-session-secret';
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_ACCOUNTS_URL = 'https://accounts.example.test';
+process.env.RAGENT_ACCOUNTS_ISSUER = 'https://accounts.example.test';
+process.env.RAGENT_PUBLIC_BASE_URL = 'https://instance.example.test';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'test-auth-session-secret';
 process.env.SECURE_COOKIES = '0';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+delete process.env.RAGENT_INSTANCE_ROOT;
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 mkdirSync(configDir, { recursive: true });
 writeFileSync(join(configDir, 'auth.json'), JSON.stringify({ username: 'owner', passwordHash: 'not-used' }));
 const deviceKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
@@ -54,7 +54,7 @@ writeFileSync(join(configDir, 'trusted-devices.json'), JSON.stringify({
 }));
 
 const SERVER_CLIENT_ID = '541054013971-tm7ip89ett0mar1cfph6j9kakl27nadb.apps.googleusercontent.com';
-process.env.AGENTOC_GOOGLE_NATIVE_SERVER_CLIENT_IDS = SERVER_CLIENT_ID;
+process.env.RAGENT_GOOGLE_NATIVE_SERVER_CLIENT_IDS = SERVER_CLIENT_ID;
 
 // --- 测试用 RSA 签名工具：签发可被 JWKS stub 验证的 Google ID token ---
 const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -547,7 +547,7 @@ try {
   const messageFields = { ...rollback, instanceId: rollback.instance.instanceId, deviceId: rollback.device.deviceId,
     devicePublicKeyFingerprint: rollback.device.devicePublicKeyFingerprint };
   check('native rollback proof binds account, revision and distinct completion in its own audience', () => {
-    assert.equal(rollback.audience, 'agentoc-owner-auth-native-rollback');
+    assert.equal(rollback.audience, 'ragent-owner-auth-native-rollback');
     assert.equal(rollback.expectedRevision, '7'); assert.equal(rollback.expectedCompletionId, '101');
     assert.equal(rollback.accountId, recoveredAccountId); assert.equal(rollback.idToken, undefined);
     assert(verify(null, Buffer.from(buildNativeOwnerAuthRollbackMessage(messageFields)), rollback.instance.publicKey,

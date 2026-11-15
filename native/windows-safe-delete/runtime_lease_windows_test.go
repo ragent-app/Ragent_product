@@ -103,7 +103,7 @@ func TestProductionRuntimeACLRefusesUserWritableFixture(t *testing.T) {
 // modifying it. The generated snapshot tests ACL/lease wiring only; it is not
 // an authenticated software provenance manifest.
 func TestOptionalProtectedInstalledRuntimeLease(t *testing.T) {
-	root := os.Getenv("AGENTOC_QA_PROTECTED_RUNTIME")
+	root := os.Getenv("RAGENT_QA_PROTECTED_RUNTIME")
 	if root == "" {
 		t.Skip("no protected installed runtime supplied")
 	}

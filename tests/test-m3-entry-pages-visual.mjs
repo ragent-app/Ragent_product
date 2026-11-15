@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { chromium } from "@playwright/test";
 
 const repoRoot = process.cwd();
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || "/var/lib/agentoc/workspace/visual-ui-reviews/entry-pages-m3";
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || "/var/lib/ragent/workspace/visual-ui-reviews/entry-pages-m3";
 await mkdir(outputDir, { recursive: true });
 
 const pageFiles = [

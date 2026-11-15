@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.feature.organization"
+    namespace = "com.andysagent.ragent.feature.organization"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

@@ -8,7 +8,7 @@ boundary, provider requirements, and runtime configuration.
 
 During dependency installation, npm removed 28 packages that were present as
 extraneous local dependencies. The npm log at
-`G:/AgentoC/tmp/npm-cache/_logs/2026-11-13T13_10_10_727Z-debug-0.log`, entries
+`G:/Ragent/tmp/npm-cache/_logs/2026-11-13T13_10_10_727Z-debug-0.log`, entries
 52–79, records their paths but not their original versions or integrity hashes.
 Exact recovery requires independently verified package metadata or a backup.
 The current restoration state must be checked separately.

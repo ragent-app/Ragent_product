@@ -11,8 +11,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-result-packets-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-result-packets-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   createResultPacketId,
@@ -165,7 +165,7 @@ try {
   // ── system fields cannot be overridden by a model payload ───────────────
   beginSection('system-field-protection');
   {
-    const root = makeRoot('agentoc-rp-sys-root-');
+    const root = makeRoot('ragent-rp-sys-root-');
     const project = await makeProject('RP System', root);
     const runId = nextRunId('run_sys');
     await makeTerminalRun({
@@ -195,7 +195,7 @@ try {
   // ── honest evidence: no evidence ref => never passed ────────────────────
   beginSection('evidence-honesty');
   {
-    const root = makeRoot('agentoc-rp-ev-root-');
+    const root = makeRoot('ragent-rp-ev-root-');
     const project = await makeProject('RP Evidence', root);
     const runId = nextRunId('run_ev');
     await makeTerminalRun({
@@ -230,7 +230,7 @@ try {
   // ── immutability: no in-place mutation, corrections need a new packet ───
   beginSection('immutability');
   {
-    const root = makeRoot('agentoc-rp-imm-root-');
+    const root = makeRoot('ragent-rp-imm-root-');
     const project = await makeProject('RP Immutable', root);
     const runId = nextRunId('run_imm');
     await makeTerminalRun({
@@ -265,7 +265,7 @@ try {
   // ── checkpoint aggregation: dedupe + preserved source refs ──────────────
   beginSection('checkpoint-aggregation');
   {
-    const root = makeRoot('agentoc-rp-ckpt-root-');
+    const root = makeRoot('ragent-rp-ckpt-root-');
     const project = await makeProject('RP Checkpoint', root);
     const runA = nextRunId('run_ck_a');
     const runB = nextRunId('run_ck_b');
@@ -340,7 +340,7 @@ try {
   // ── handoff: reference-only edge, bounded projection, atomic accept ─────
   beginSection('handoff-edge');
   {
-    const root = makeRoot('agentoc-rp-hof-root-');
+    const root = makeRoot('ragent-rp-hof-root-');
     const fromProject = await makeProject('RP From', root);
     const runId = nextRunId('run_hof');
     await makeTerminalRun({

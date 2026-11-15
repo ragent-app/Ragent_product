@@ -9,22 +9,22 @@ import {Pool} from 'pg';
 import {createPostgresStore} from '../../accounts/store/postgres.mjs';
 
 export async function createPostgresBindingAuthorityFixture({identity,accountId}) {
-  const url=new URL(process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || 'invalid:');
+  const url=new URL(process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL || 'invalid:');
   assert.equal(url.protocol,'postgresql:');assert.equal(url.hostname,'127.0.0.1');
   assert.equal(url.username,'qa_authority');assert.equal(url.pathname,'/postgres');
-  const data=process.env.AGENTOC_TEST_OWNED_CLUSTER_DATA,nonce=process.env.AGENTOC_TEST_RUN_NONCE;
+  const data=process.env.RAGENT_TEST_OWNED_CLUSTER_DATA,nonce=process.env.RAGENT_TEST_RUN_NONCE;
   assert(data && /^[a-f0-9]{32}$/.test(nonce || ''));
   const root=await realpath(dirname(data));
   assert.equal((await readFile(join(root,'.qa-owned'),'utf8')).replaceAll('-',''),nonce);
   const bootstrap=new Pool({connectionString:url.href,max:1,connectionTimeoutMillis:5000});
   const pools=[];let owned=false;
   const schema='qa_auth_rev_'+randomBytes(12).toString('hex');
-  const lockKey='agentoc_accounts_store_v1:'+schema;
+  const lockKey='ragent_accounts_store_v1:'+schema;
   const initial='2026-10-25T00:00:00.000Z';
   assert(identity.publicKey.startsWith('-----BEGIN PUBLIC KEY-----'));
   const store=factory=>{
     const pool=new Pool({connectionString:url.href,max:2,connectionTimeoutMillis:5000,
-      options:`-c search_path=${schema} -c statement_timeout=15000 -c application_name=agentoc-pg-pc-qa`});pools.push(pool);
+      options:`-c search_path=${schema} -c statement_timeout=15000 -c application_name=ragent-pg-pc-qa`});pools.push(pool);
     return factory({schema,pool:{connect:async()=>{
       const client=await pool.connect();
       try {assert.equal((await client.query('select current_schema() as schema')).rows[0].schema,schema);}
@@ -32,7 +32,7 @@ export async function createPostgresBindingAuthorityFixture({identity,accountId}
       return {release:()=>client.release(),query:async(sql,values=[])=>{
         assert(!/\bpublic\s*\./i.test(sql));
         if(/pg_advisory/.test(sql)){
-          assert.equal(sql,'select pg_advisory_xact_lock(hashtext($1))');assert.deepEqual(values,['agentoc_accounts_store_v1']);
+          assert.equal(sql,'select pg_advisory_xact_lock(hashtext($1))');assert.deepEqual(values,['ragent_accounts_store_v1']);
           return client.query(sql,[lockKey]);
         }
         return client.query(sql,values);
@@ -48,10 +48,10 @@ export async function createPostgresBindingAuthorityFixture({identity,accountId}
     const {rows}=await bootstrap.query("select current_setting('data_directory') as directory, inet_server_addr()::text as address");
     assert.equal((await realpath(rows[0].directory)).toLowerCase(),(await realpath(data)).toLowerCase());
     assert.equal(rows[0].address,'127.0.0.1/32');
-    const legacyPath=process.env.AGENTOC_TEST_SECOND_STORE_MODULE;assert(legacyPath);
+    const legacyPath=process.env.RAGENT_TEST_SECOND_STORE_MODULE;assert(legacyPath);
     const legacyFactory=(await import(pathToFileURL(resolve(legacyPath)))).createPostgresStore;
     await bootstrap.query(`create schema "${schema}"`);owned=true;
-    if(process.env.AGENTOC_TEST_OWNED_SCHEMA_REPORT)await writeFile(process.env.AGENTOC_TEST_OWNED_SCHEMA_REPORT,JSON.stringify({schema,runNonce:nonce,pid:process.pid}));
+    if(process.env.RAGENT_TEST_OWNED_SCHEMA_REPORT)await writeFile(process.env.RAGENT_TEST_OWNED_SCHEMA_REPORT,JSON.stringify({schema,runNonce:nonce,pid:process.pid}));
     const migrations=new URL('../../accounts/migrations/',import.meta.url);
     const names=(await readdir(migrations)).filter(f=>f.endsWith('.up.sql')).sort();
     assert(names.includes('028_temporary_control_exchanges.up.sql'));

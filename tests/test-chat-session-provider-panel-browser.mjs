@@ -69,8 +69,8 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-runtime-provider-browser-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-runtime-provider-browser-'));
+  const configDir = join(home, '.config', 'ragent');
   const nativeRuntimeDir = join(configDir, 'native-provider-runtime');
   const secretsDir = join(nativeRuntimeDir, 'secrets');
   const binDir = join(home, '.local', 'bin');
@@ -122,12 +122,12 @@ async function startServer({ home, configDir, binDir, port }) {
       PATH: `${binDir}:${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-runtime-provider-browser',
-      AGENTOC_PROVIDER_HOMES_DIR: join(home, '.config', 'provider-homes'),
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-runtime-provider-browser',
+      RAGENT_PROVIDER_HOMES_DIR: join(home, '.config', 'provider-homes'),
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -213,8 +213,8 @@ let browser = null;
 let context = null;
 let page = null;
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR
-  || join(tmpdir(), 'agentoc-runtime-provider-visual', stamp);
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR
+  || join(tmpdir(), 'ragent-runtime-provider-visual', stamp);
 mkdirSync(outputDir, { recursive: true });
 
 try {

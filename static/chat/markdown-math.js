@@ -1,8 +1,8 @@
 "use strict";
 
 (function attachMarkdownMath(root) {
-  const TOKEN_PREFIX = "AGENTOC_MATH_TOKEN_";
-  const TOKEN_RE = /AGENTOC_MATH_TOKEN_(\d+)/g;
+  const TOKEN_PREFIX = "RAGENT_MATH_TOKEN_";
+  const TOKEN_RE = /RAGENT_MATH_TOKEN_(\d+)/g;
 
   const GREEK = {
     alpha: "α",

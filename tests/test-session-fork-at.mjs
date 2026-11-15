@@ -4,11 +4,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-session-fork-at-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-session-fork-at-'));
 process.env.HOME = home;
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 
 const {
   createSession,
@@ -142,7 +142,7 @@ try {
 
   // Keep this fixture explicit: the current native Codex fork test uses a
   // provider-specific fake and is covered separately.
-  const sessionsPath = join(home, '.config', 'agentoc', 'chat-sessions.json');
+  const sessionsPath = join(home, '.config', 'ragent', 'chat-sessions.json');
   assert.ok(JSON.parse(readFileSync(sessionsPath, 'utf8')).some((entry) => entry.id === child.id));
   console.log('test-session-fork-at: ok');
 } finally {

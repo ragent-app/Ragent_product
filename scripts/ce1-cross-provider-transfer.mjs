@@ -217,7 +217,7 @@ function buildExistingContextCarrier(events, state) {
     userText: 'Continue the state machine work.',
     sections: {
       continuationContext: continuation,
-      managerTurnContext: 'Use the current AgentoC context and continue safely.',
+      managerTurnContext: 'Use the current Ragent context and continue safely.',
       systemContext: 'Preserve the workspace and approval boundaries.',
       sourceRuntimePrompt: '',
       templateInstructions: '',
@@ -254,7 +254,7 @@ export async function runCe1OfflineBenchmark() {
   const semantic = renderCrossProviderContinuityBundle(bundle);
   const variants = [
     { variant: 'A', description: 'raw recent transcript', carrier: rawRecent },
-    { variant: 'B', description: 'existing AgentoC context path', carrier: existing },
+    { variant: 'B', description: 'existing Ragent context path', carrier: existing },
     { variant: 'C', description: 'CrossProviderContinuityBundle', carrier: semantic },
   ].map(({ variant, description, carrier }) => ({
     variant,
@@ -292,9 +292,9 @@ export async function runCe1OfflineBenchmark() {
 
 function providerEnv() {
   const env = { ...process.env };
-  delete env.AGENTOC_APPROVED_ACTIONS_TOKEN;
-  delete env.AGENTOC_SESSION_CONTROL_TOKEN;
-  delete env.AGENTOC_PRIVILEGED_TOKEN;
+  delete env.RAGENT_APPROVED_ACTIONS_TOKEN;
+  delete env.RAGENT_SESSION_CONTROL_TOKEN;
+  delete env.RAGENT_PRIVILEGED_TOKEN;
   return env;
 }
 
@@ -389,7 +389,7 @@ function safeOutputSummary(result) {
 }
 
 export async function runCe1Live({ outputPath = '' } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-ce1-live-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-ce1-live-'));
   const workspace = join(root, 'workspace');
   await mkdir(join(workspace, 'src'), { recursive: true });
   await mkdir(join(workspace, 'tests'), { recursive: true });

@@ -1,21 +1,6 @@
 #!/bin/sh
 set -eu
 
-# dpkg treats a package rename as removal of the old package, not an upgrade.
-# Run the installed upgrade guard before stopping anything when the new Ragent
-# package replaces this transitional package. This guard must ship in an
-# AgentoC upgrade before the renamed package is installed.
-rename_migration=0
-if [ "${1:-}" = remove ] && [ "${2:-}" = in-favour ] && [ "${3:-}" = ragent ]; then
-  installed_preinst=/var/lib/dpkg/info/agentoc.preinst
-  if [ ! -x "$installed_preinst" ]; then
-    echo 'Cannot verify the installed upgrade guard; refusing the Ragent package migration.' >&2
-    exit 1
-  fi
-  "$installed_preinst" upgrade
-  rename_migration=1
-fi
-
 # A removed executable must not leave its service or detached Runs alive.
 # Older installations may lack a unit, so tolerate a failed stop only when
 # systemd can still confirm that the unit is inactive or failed.
@@ -24,39 +9,38 @@ stop_unit() {
   if systemctl stop "$unit" >/dev/null 2>&1; then return 0; fi
   state="$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null)" || state=''
   case "$state" in inactive|failed) return 0 ;; esac
-  echo "Cannot confirm $unit is stopped; refusing to remove AgentoC." >&2
+  echo "Cannot confirm $unit is stopped; refusing to remove Ragent." >&2
   return 1
 }
 
 if [ "${1:-}" = remove ] || [ "${1:-}" = deconfigure ]; then
   if [ -d /run/systemd/system ]; then
-    stop_unit agentoc-storage-gc.timer
-    systemctl disable agentoc-storage-gc.timer >/dev/null 2>&1 || true
+    stop_unit ragent-storage-gc.timer
+    systemctl disable ragent-storage-gc.timer >/dev/null 2>&1 || true
     # Stopping a timer does not stop its already-running oneshot service.
     # Wait for that service before removing its executable and package files.
-    stop_unit agentoc-storage-gc.service
-    main_service=agentoc.service
-    if [ "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" = ragent ]; then main_service=ragent.service; fi
+    stop_unit ragent-storage-gc.service
+    main_service=ragent.service
     stop_unit "$main_service"
     # Stop socket activation before stopping the brokers, otherwise a request
     # can bring either service back while the package is being removed.
-    systemctl disable agentoc-runner-lifecycle.socket agentoc-runner-supervisor.socket >/dev/null 2>&1 || true
-    systemctl disable agentoc-peer-result.socket >/dev/null 2>&1 || true
-    stop_unit agentoc-peer-result.socket
-    stop_unit agentoc-peer-result.service
-    stop_unit agentoc-runner-lifecycle.socket
-    stop_unit agentoc-runner-supervisor.socket
-    stop_unit agentoc-runner-lifecycle.service
-    stop_unit agentoc-runner-supervisor.service
+    systemctl disable ragent-runner-lifecycle.socket ragent-runner-supervisor.socket >/dev/null 2>&1 || true
+    systemctl disable ragent-peer-result.socket >/dev/null 2>&1 || true
+    stop_unit ragent-peer-result.socket
+    stop_unit ragent-peer-result.service
+    stop_unit ragent-runner-lifecycle.socket
+    stop_unit ragent-runner-supervisor.socket
+    stop_unit ragent-runner-lifecycle.service
+    stop_unit ragent-runner-supervisor.service
     # Runs are detached transient units in this dedicated slice, so stopping
     # the brokers alone does not terminate active provider processes.
     # Upgrade preparation has already verified independent active Runs. A
     # package-name migration must not terminate those detached processes.
-    if [ "$rename_migration" -ne 1 ]; then stop_unit agentoc-runners.slice; fi
-    stop_unit agentoc-privileged-executor.service
+    stop_unit ragent-runners.slice
+    stop_unit ragent-privileged-executor.service
   fi
-  if [ -x /usr/lib/agentoc/retire-legacy-cc-switch ]; then
-    /usr/lib/agentoc/retire-legacy-cc-switch || true
+  if [ -x /usr/lib/ragent/retire-legacy-cc-switch ]; then
+    /usr/lib/ragent/retire-legacy-cc-switch || true
   fi
 fi
 

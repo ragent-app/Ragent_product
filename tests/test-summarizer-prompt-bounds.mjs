@@ -47,7 +47,7 @@ assert.match(
   'summarizer prompt should either include the latest assistant preview or explicitly mark truncation',
 );
 
-for (const product of ['AgentoC', 'Ragent']) {
+for (const product of ['Ragent', 'Ragent']) {
   const compatible = formatEventsForPrompt([
     { type: 'message', role: 'assistant', content: `already truncated by ${product}` },
     { type: 'message', role: 'assistant', content: 'x'.repeat(100) },

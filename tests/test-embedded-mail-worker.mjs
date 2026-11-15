@@ -6,20 +6,20 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-embedded-mail-worker-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-embedded-mail-worker-'));
 
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_CONFIG_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_CONFIG_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
 process.env.HOME = tempHome;
-process.env.AGENTOC_DISABLE_EMBEDDED_MAIL_WORKER = '1';
+process.env.RAGENT_DISABLE_EMBEDDED_MAIL_WORKER = '1';
 
 try {
   const { initializeMailbox } = await import(pathToFileURL(join(repoRoot, 'lib', 'agent-mailbox.mjs')).href);
   const { startEmbeddedMailWorker } = await import(pathToFileURL(join(repoRoot, 'lib', 'embedded-mail-worker.mjs')).href);
 
   await initializeMailbox({
-    rootDir: join(tempHome, '.config', 'agentoc', 'agent-mailbox'),
+    rootDir: join(tempHome, '.config', 'ragent', 'agent-mailbox'),
     name: 'Rowan',
     localPart: 'rowan',
     domain: 'example.com',
@@ -39,6 +39,6 @@ try {
   assert.equal(worker, null);
   console.log('embedded mail worker disable flag test passed');
 } finally {
-  delete process.env.AGENTOC_DISABLE_EMBEDDED_MAIL_WORKER;
+  delete process.env.RAGENT_DISABLE_EMBEDDED_MAIL_WORKER;
   rmSync(tempHome, { recursive: true, force: true });
 }

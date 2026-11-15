@@ -22,8 +22,8 @@ const resultPromise = spawnChild(process.execPath, ['-e', 'process.exit(0)'], {
   onStdoutLine: (line) => output.push(line),
   spawnManagedImpl: async (spec, options) => {
     calls.push({ spec, options });
-    child.__agentocWindowsManaged = true;
-    child.__agentocWindowsJobObjectCreation = 'suspended-create-assign-resume';
+    child.__ragentWindowsManaged = true;
+    child.__ragentWindowsJobObjectCreation = 'suspended-create-assign-resume';
     setTimeout(() => {
       child.stdout.emit('data', Buffer.from('managed-router-ok\n'));
       child.exitCode = 0;

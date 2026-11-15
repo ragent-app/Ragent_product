@@ -1,7 +1,7 @@
 /**
  * Server-owned Windows named-pipe peer facts resolver.
  *
- * The controlled-executor security contract (docs/agentoc-windows-named-pipe-
+ * The controlled-executor security contract (docs/ragent-windows-named-pipe-
  * executor-handoff-2026-08-12.md §3) requires peer identity facts to come from
  * a trusted adapter resolved by the platform, never from caller-declared
  * request fields. This module is that fact source: it creates a named pipe,
@@ -55,7 +55,7 @@ Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 using System.Diagnostics;
-public static class AgentocPipePeer {
+public static class RagentPipePeer {
   [DllImport("kernel32.dll", SetLastError = true)]
   private static extern bool GetNamedPipeClientProcessId(IntPtr pipe, out int pid);
   [DllImport("kernel32.dll", SetLastError = true)]
@@ -192,7 +192,7 @@ function ConvertTo-ProbeJson($value) {
   return ConvertTo-Json -Compress -InputObject $value
 }
 
-$pipeName = 'agentoc-peer-probe-' + [Guid]::NewGuid().ToString('N')
+$pipeName = 'ragent-peer-probe-' + [Guid]::NewGuid().ToString('N')
 $server = $null
 $clientProc = $null
 try {
@@ -209,10 +209,10 @@ try {
   $clientProc = Start-Process -FilePath 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', $childB64 -PassThru -WindowStyle Hidden
   if (-not $server.WaitForConnectionAsync().Wait(15000)) { throw 'named-pipe connection timed out' }
 
-  $clientPid = [AgentocPipePeer]::ClientPid($server.SafePipeHandle.DangerousGetHandle())
-  $clientSid = [AgentocPipePeer]::ResolveProcessSid($clientPid)
-  $clientIntegrity = [AgentocPipePeer]::ResolveProcessIntegrity($clientPid)
-  $serverSid = [AgentocPipePeer]::CurrentProcessSid()
+  $clientPid = [RagentPipePeer]::ClientPid($server.SafePipeHandle.DangerousGetHandle())
+  $clientSid = [RagentPipePeer]::ResolveProcessSid($clientPid)
+  $clientIntegrity = [RagentPipePeer]::ResolveProcessIntegrity($clientPid)
+  $serverSid = [RagentPipePeer]::CurrentProcessSid()
 
   $facts = @{
     platform = 'win32'

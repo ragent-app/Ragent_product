@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 
 const root = await mkdtemp(join(tmpdir(), 'ragent-codex-mcp-scope-'));
-process.env.AGENTOC_CONFIG_DIR = root;
+process.env.RAGENT_CONFIG_DIR = root;
 const { handleCodexMcpRoutes } = await import('../chat/router-codex-mcp-routes.mjs');
 const { managedCodexMcpAccountBinding, readManagedCodexMcpConfig, withManagedCodexMcpLock } = await import('../lib/provider-runtime/codex-mcp-config.mjs');
 const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');

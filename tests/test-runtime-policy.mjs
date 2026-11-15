@@ -4,7 +4,7 @@ import { lstatSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-runtime-policy-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-runtime-policy-'));
 const personalCodexHome = join(home, '.codex');
 mkdirSync(personalCodexHome, { recursive: true });
 writeFileSync(join(personalCodexHome, 'auth.json'), '{"token":"test"}\n', 'utf8');
@@ -19,7 +19,7 @@ const {
 } = await import('../chat/runtime-policy.mjs');
 
 try {
-  const managedHome = join(home, '.config', 'agentoc', 'provider-runtime-homes', 'codex-test');
+  const managedHome = join(home, '.config', 'ragent', 'provider-runtime-homes', 'codex-test');
   const resolvedManagedHome = await ensureManagedCodexHome({
     homeDir: managedHome,
     authSource: join(personalCodexHome, 'auth.json'),
@@ -27,7 +27,7 @@ try {
   assert.equal(resolvedManagedHome, managedHome, 'managed Codex home should resolve to the requested directory');
   assert.match(
     readFileSync(join(managedHome, 'config.toml'), 'utf8'),
-    /AgentoC-managed Codex runtime home/,
+    /Ragent-managed Codex runtime home/,
     'managed Codex home should carry a minimal manager-owned config',
   );
   assert.match(
@@ -59,7 +59,7 @@ try {
     'managed Codex home should preserve a discovered or user-provided config.toml',
   );
 
-  const nonEmptyManagedConfig = '# AgentoC-managed Codex runtime home.\nmodel_provider = "preserved"\n';
+  const nonEmptyManagedConfig = '# Ragent-managed Codex runtime home.\nmodel_provider = "preserved"\n';
   writeFileSync(join(managedHome, 'config.toml'), nonEmptyManagedConfig, 'utf8');
   await ensureManagedCodexHome({
     homeDir: managedHome,
@@ -82,7 +82,7 @@ try {
   // An interrupted bootstrap can leave a writable provider home without
   // auth.json. Repairing it must not repeat mkdir with setgid bits, which can
   // raise EPERM for an already-existing runner-owned directory.
-  const authlessHome = join(home, '.config', 'agentoc', 'provider-runtime-homes', 'authless-codex');
+  const authlessHome = join(home, '.config', 'ragent', 'provider-runtime-homes', 'authless-codex');
   mkdirSync(authlessHome, { recursive: true });
   const repairedAuthlessEnv = await applyManagedRuntimeEnv('codex', {}, {
     codexHomeDir: authlessHome,
@@ -115,7 +115,7 @@ try {
 
   const clineHome = join(home, 'provider-homes', 'cline');
   mkdirSync(clineHome, { recursive: true });
-  writeFileSync(join(clineHome, '.agentoc-provider.env'), 'AGENTOC_PROVIDER_API_KEY="secret"\n', 'utf8');
+  writeFileSync(join(clineHome, '.ragent-provider.env'), 'RAGENT_PROVIDER_API_KEY="secret"\n', 'utf8');
   const clineEnv = await applyManagedRuntimeEnv('cline', { HOME: '/tmp/ambient' }, {
     runtimeFamily: 'cline-json',
     harnessHomeDir: clineHome,
@@ -123,7 +123,7 @@ try {
   assert.equal(clineEnv.HOME, clineHome);
   assert.equal(clineEnv.CLINE_DATA_DIR, clineHome);
   assert.equal(clineEnv.CLINE_PROVIDER_SETTINGS_PATH, join(clineHome, 'settings', 'providers.json'));
-  assert.equal(clineEnv.AGENTOC_PROVIDER_API_KEY, 'secret');
+  assert.equal(clineEnv.RAGENT_PROVIDER_API_KEY, 'secret');
 
   const kiloHome = join(home, 'provider-homes', 'kilo');
   mkdirSync(kiloHome, { recursive: true });
@@ -155,12 +155,12 @@ try {
 
   // The legacy external-ownership flag is ignored. Control-side one-shot
   // calls remain on the control-owned machine-local home.
-  process.env.AGENTOC_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP = '1';
-  process.env.AGENTOC_EXTERNAL_CODEX_HOME = personalCodexHome;
+  process.env.RAGENT_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP = '1';
+  process.env.RAGENT_EXTERNAL_CODEX_HOME = personalCodexHome;
   const externalControlSideEnv = await applyManagedRuntimeEnv('codex', {});
   assert.equal(externalControlSideEnv.CODEX_HOME, CODEX_CONTROL_HOME_DIR);
-  delete process.env.AGENTOC_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP;
-  delete process.env.AGENTOC_EXTERNAL_CODEX_HOME;
+  delete process.env.RAGENT_CODEX_NATIVE_EXTERNAL_OAUTH_OWNERSHIP;
+  delete process.env.RAGENT_EXTERNAL_CODEX_HOME;
 
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
@@ -205,7 +205,7 @@ try {
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
     /If another service needs login, access, or approval, prefer bringing that checkpoint onto this machine or another Ragent-exposed surface/,
-    'default Codex developer instructions should prefer AgentoC-side login and authorization checkpoints',
+    'default Codex developer instructions should prefer Ragent-side login and authorization checkpoints',
   );
   assert.match(
     DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS,
@@ -280,12 +280,12 @@ try {
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
     /absorbing the operational work on the Ragent side instead of turning the user into the fallback operator with a recipe of manual steps/,
-    'manager runtime boundary should prefer AgentoC-side execution over manual user recipes',
+    'manager runtime boundary should prefer Ragent-side execution over manual user recipes',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,
     /When another service needs access, login, or authorization, prefer completing that checkpoint on this machine or another Ragent-exposed surface/,
-    'manager runtime boundary should prefer AgentoC-side access and login checkpoints',
+    'manager runtime boundary should prefer Ragent-side access and login checkpoints',
   );
   assert.match(
     MANAGER_RUNTIME_BOUNDARY_SECTION,

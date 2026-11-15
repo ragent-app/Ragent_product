@@ -8,14 +8,14 @@ if (process.platform !== 'win32') {
   console.log('SKIP: Windows fake installer fixture');
   process.exit(0);
 }
-const root = await mkdtemp(join(tmpdir(), 'agentoc-first-install-probe-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_HARNESS_ROOT = join(root, 'harnesses');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_HARNESS_POLICY_URL = 'http://invalid.test';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const root = await mkdtemp(join(tmpdir(), 'ragent-first-install-probe-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_HARNESS_ROOT = join(root, 'harnesses');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_HARNESS_POLICY_URL = 'http://invalid.test';
+delete process.env.RAGENT_INSTANCE_ROOT;
 const installer = join(root, 'fixture-installer.cmd');
-process.env.AGENTOC_NPM_COMMAND = installer;
+process.env.RAGENT_NPM_COMMAND = installer;
 const bin = join(root, 'harnesses', 'claude', 'node_modules', '.bin');
 const ready = join(root, 'ready');
 const release = join(root, 'release');

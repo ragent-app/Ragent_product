@@ -8,11 +8,11 @@ import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const root = process.env.AGENTOC_UPLOAD_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-upload-recovery-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-for (const key of ['AGENTOC_MEMORY_DIR', 'AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR',
-  'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR', 'AGENTOC_INSTANCE_KEY_FILE']) delete process.env[key];
+const root = process.env.RAGENT_UPLOAD_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-upload-recovery-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+for (const key of ['RAGENT_MEMORY_DIR', 'RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR',
+  'RAGENT_WORK_ROOT_DIR', 'RAGENT_PLATFORM_SKILLS_DIR', 'RAGENT_INSTANCE_KEY_FILE']) delete process.env[key];
 
 const bytes = Buffer.from('手机分享附件\nExample CSV\na,b\n1,2\n');
 const sha256 = createHash('sha256').update(bytes).digest('hex');
@@ -25,13 +25,13 @@ const storage = createServer((req, res) => {
   res.end(remoteBytes);
 });
 await new Promise((done) => storage.listen(0, '127.0.0.1', done));
-process.env.AGENTOC_ASSET_STORAGE_BASE_URL = `http://127.0.0.1:${storage.address().port}/bucket`;
-process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture-access';
-process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture-secret';
-process.env.AGENTOC_ASSET_STORAGE_PROVIDER = 's3';
-process.env.AGENTOC_ASSET_STORAGE_REGION = 'fixture';
-process.env.AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED = '0';
-delete process.env.AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL;
+process.env.RAGENT_ASSET_STORAGE_BASE_URL = `http://127.0.0.1:${storage.address().port}/bucket`;
+process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID = 'fixture-access';
+process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY = 'fixture-secret';
+process.env.RAGENT_ASSET_STORAGE_PROVIDER = 's3';
+process.env.RAGENT_ASSET_STORAGE_REGION = 'fixture';
+process.env.RAGENT_ASSET_DIRECT_UPLOAD_ENABLED = '0';
+delete process.env.RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL;
 const assets = await import('../chat/file-assets.mjs');
 const { MAX_STABLE_UPLOAD_BYTES } = await import('../chat/file-asset-upload-checkpoints.mjs');
 const { CHAT_FILE_ASSETS_DIR } = await import('../lib/config.mjs');
@@ -102,7 +102,7 @@ if (process.argv[2] === 'restart') {
       { code: 'FILE_ASSET_IDEMPOTENCY_CONFLICT' });
     await assert.rejects(assets.ingestFileAssetUpload(first.asset.id, Readable.from([bytes])), { code: 'FILE_ASSET_NOT_PENDING' });
     const restarted = await promisify(execFile)(process.execPath, [import.meta.filename, 'restart'],
-      { env: { ...process.env, AGENTOC_UPLOAD_TEST_ROOT: root }, timeout: 30000 });
+      { env: { ...process.env, RAGENT_UPLOAD_TEST_ROOT: root }, timeout: 30000 });
     const cold = JSON.parse(restarted.stdout.trim().split('\n').at(-1));
     assert.equal(cold.id, first.asset.id);
     assert.equal(cold.updatedAt, completed.updatedAt);
@@ -228,7 +228,7 @@ if (process.argv[2] === 'restart') {
     await new Promise((done) => storage.close(done));
     storage.closeAllConnections();
     assert.equal(resolve(dirname(root)), resolve(tmpdir()));
-    assert.ok(basename(root).startsWith('agentoc-upload-recovery-'));
+    assert.ok(basename(root).startsWith('ragent-upload-recovery-'));
     await rm(root, { recursive: true, force: true });
   }
 }

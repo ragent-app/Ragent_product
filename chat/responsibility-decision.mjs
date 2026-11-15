@@ -44,8 +44,8 @@ export async function processResponsibilityWake(wakeId,lease) {
   const selected=responsibilityProvider(JSON.parse(p.policy_json));
   if(['project-report','generic-planner'].includes(selected.id)) return processProjectReport(snapshot,lease);
   if(!e||e.source!=='github'||e.verification!=='github_api') return wait(wakeId,'awaiting_verified_ci_event',lease);
-  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
-  if(!String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim()) return wait(wakeId,'admission_service_unconfigured',lease);
+  if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  if(!String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim()) return wait(wakeId,'admission_service_unconfigured',lease);
   const active=await read(db=>{assertLease(db,wakeId,lease);return hasActiveResponsibilityWork(db,r.id,wakeId);});
   if(active) return wait(wakeId,'existing_work',lease);
   const event=JSON.parse(e.payload_json); if(!await isGithubFailureCurrent(event)) return wait(wakeId,'ci_failure_stale',lease);
@@ -53,15 +53,15 @@ export async function processResponsibilityWake(wakeId,lease) {
   if(d) {proposal=JSON.parse(d.proposal_json); await verifyCurrentResponsibilityRepository(proposal.repositoryFactId);}
   else {
     const fact=await captureResponsibilityRepository(r.project_id); const policy=JSON.parse(p.policy_json); if(fact.repository!==event.repository||policy.repository!==fact.repository||policy.targetBranch!==event.branch) return wait(wakeId,'repository_or_branch_mismatch',lease);
-    if(policy.templateId!=='agentoc-reviewed-change'||policy.templateVersion!==3||typeof policy.checkActionId!=='string'||!policy.checkActionId) return wait(wakeId,'verified_check_template_required',lease);
+    if(policy.templateId!=='ragent-reviewed-change'||policy.templateVersion!==3||typeof policy.checkActionId!=='string'||!policy.checkActionId) return wait(wakeId,'verified_check_template_required',lease);
     const keys=['repository','templateId','templateVersion','templateDigest','targetBranch','allowedPaths','candidateScope','maxAttempts','maxCost','nodeBindings',...(policy.templateVersion===3?['checkActionId']:[])]; proposal=Object.fromEntries(keys.map(key=>[key,policy[key]])); proposal.repositoryFactId=fact.id;
     if(keys.some(key=>proposal[key]===undefined)) return wait(wakeId,'policy_incomplete',lease);
     const created=await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(r.id),w=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(!current||current.lifecycle!=='active'||current.revision!==wake.responsibility_revision||current.policy_revision!==wake.policy_revision||w.state!=='pending'||w.decision_id) return null;
       ensureFactorySchema(db); if(hasActiveResponsibilityWork(db,r.id,wakeId)) return 'existing_work';
       const decisionId=newId('decision'); db.prepare('INSERT INTO responsibility_decisions VALUES(?,?,?,?,?,?,?,?,?)').run(decisionId,r.id,wakeId,r.revision,r.policy_revision,'approved',digest({event,policyRevision:r.policy_revision}),JSON.stringify(proposal),now()); db.prepare("UPDATE responsibility_wakes SET state='deciding',decision_id=?,updated_at=? WHERE id=?").run(decisionId,now(),wakeId); activity(db,r.id,'decision_approved',{wakeId,decisionId,eventId:e.id}); return decisionId; }); if(created==='existing_work') return wait(wakeId,'existing_work',lease); if(!created) return; snapshot.wake.decision_id=created;
   }
-  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
-  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
+  if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
   const decisionId=snapshot.wake.decision_id; const actor={kind:'service',role:'responsibility_admission',principalId:`responsibility-admission:${owner}`};
   const result=await admitResponsibilityWorkflow({...proposal,organizationId:r.organization_id,projectId:r.project_id,responsibilityId:r.id,responsibilityRevision:r.revision,policyRevision:r.policy_revision,wakeId,decisionId,wakeLeaseOwnerToken:lease.ownerToken,wakeLeaseGeneration:lease.generation,commandId:`responsibility:${decisionId}`,idempotencyKey:`responsibility:${decisionId}`},actor);
   await transaction(db=>{assertLease(db,wakeId,lease);const current=db.prepare('SELECT * FROM responsibility_wakes WHERE id=?').get(wakeId); if(current?.state==='deciding'&&current.decision_id===decisionId) {db.prepare("UPDATE responsibility_wakes SET state='admitted',updated_at=? WHERE id=?").run(now(),wakeId);activity(db,r.id,'workflow_admitted',{wakeId,decisionId,goalId:result.goal.id,workflowInstanceId:result.instance.id});}});
@@ -69,8 +69,8 @@ export async function processResponsibilityWake(wakeId,lease) {
 async function processProjectReport(snapshot,lease) {
   const {wake,r,p,d}=snapshot, policy=JSON.parse(p.policy_json), wakeId=wake.id;
   validateProjectReportPolicy(policy,r.project_id);
-  if(process.env.AGENTOC_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
-  const owner=String(process.env.AGENTOC_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
+  if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
   const observation=await read(db=>{assertLease(db,wakeId,lease);return db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);});
   if(!observation||!['manual','interval','event'].includes(observation.kind)) return wait(wakeId,'unsupported_observation',lease);
   const active=await read(db=>{assertLease(db,wakeId,lease);return hasActiveResponsibilityWork(db,r.id,wakeId);});

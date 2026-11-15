@@ -9,7 +9,7 @@ function validRole(value) { return value === 'host' || value === 'mobile' || val
 
 // 可 attach 到任意 HTTP server 的信令核心（chat-server 主进程内嵌模式：公网经
 // Caddy catch-all 把 /signal upgrade 转发到 7690，由主服务同一端口提供信令，
-// 无需独立端口/unit/Caddy 路由）。独立模式（agentoc signal）仍走
+// 无需独立端口/unit/Caddy 路由）。独立模式（ragent signal）仍走
 // createP2PSignalingServer 包装。
 export function createP2PSignaling({ authorizeJoin = null, onEvent = null } = {}) {
   const rooms = new Map();

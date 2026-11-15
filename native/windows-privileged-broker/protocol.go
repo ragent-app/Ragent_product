@@ -16,7 +16,7 @@ const (
 	protocolVersion     = 2
 	maxIPCFrame         = 64 * 1024
 	maxRequestID        = 128
-	firstBrokerTargetID = "AgentoC-Broker-QA-Target"
+	firstBrokerTargetID = "Ragent-Broker-QA-Target"
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
@@ -416,7 +416,7 @@ func requestDigest(request brokerRequest) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode request: %w", err)
 	}
-	sum := sha256.Sum256(append([]byte("AgentoC Broker Propose v2\x00"), encoded...))
+	sum := sha256.Sum256(append([]byte("Ragent Broker Propose v2\x00"), encoded...))
 	return hex.EncodeToString(sum[:]), nil
 }
 

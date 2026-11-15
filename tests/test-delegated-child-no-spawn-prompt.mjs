@@ -11,13 +11,13 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-child-spawn-'));
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-child-spawn-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
 
-await fs.mkdir(path.join(tempHome, '.config', 'agentoc'), { recursive: true });
+await fs.mkdir(path.join(tempHome, '.config', 'ragent'), { recursive: true });
 await fs.writeFile(
-  path.join(tempHome, '.config', 'agentoc', 'tools.json'),
+  path.join(tempHome, '.config', 'ragent', 'tools.json'),
   JSON.stringify([]),
   'utf8',
 );
@@ -72,7 +72,7 @@ assert.doesNotMatch(
 );
 assert.doesNotMatch(
   childPrompt,
-  /(?:agentoc|ragent) session-spawn/,
+  /(?:ragent|ragent) session-spawn/,
   'Delegated child must NOT include session-spawn CLI commands',
 );
 

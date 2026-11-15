@@ -16,7 +16,7 @@ import {
 } from '../lib/agent-mailbox.mjs';
 import { loadMailboxRuntimeRegistry } from '../lib/mailbox-runtime-registry.mjs';
 
-const DEFAULT_OWNER_CONFIG_DIR = join(homedir(), '.config', 'agentoc');
+const DEFAULT_OWNER_CONFIG_DIR = join(homedir(), '.config', 'ragent');
 const DEFAULT_GUEST_REGISTRY_FILE = join(DEFAULT_OWNER_CONFIG_DIR, 'guest-instances.json');
 const DEFAULT_CLOUDFLARE_AUTH_FILE = join(DEFAULT_OWNER_CONFIG_DIR, 'cloudflare-auth.json');
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -643,7 +643,7 @@ async function updateZoneSettings(auth, zoneId, body) {
 function buildLiteralWorkerRulePayload(address, workerName, existingRule = null) {
   return {
     enabled: true,
-    name: trimString(existingRule?.name) || `agentoc-mailbox-${safeRuleNameFragment(address)}`,
+    name: trimString(existingRule?.name) || `ragent-mailbox-${safeRuleNameFragment(address)}`,
     priority: Number.isFinite(existingRule?.priority) ? existingRule.priority : 0,
     matchers: [{ type: 'literal', field: 'to', value: address }],
     actions: [{ type: 'worker', value: [workerName] }],
@@ -700,7 +700,7 @@ async function ensureCatchAllWorkerRule({ auth, zoneId, workerName, currentRule 
     path: `/zones/${zoneId}/email/routing/rules/catch_all`,
     body: {
       enabled: true,
-      name: trimString(rule?.name) || 'agentoc-catch-all-worker',
+      name: trimString(rule?.name) || 'ragent-catch-all-worker',
       matchers: [{ type: 'all' }],
       actions: [{ type: 'worker', value: [workerName] }],
     },
@@ -908,7 +908,7 @@ async function smtpProbe(address, mxHost) {
         throw new Error(`Unexpected SMTP banner from ${record.exchange}: ${banner.lines.join(' | ')}`);
       }
 
-      await sendSmtpCommand(socket, 'EHLO agentoc.local', transcript);
+      await sendSmtpCommand(socket, 'EHLO ragent.local', transcript);
       await readSmtpResponse(socket, transcript);
       await sendSmtpCommand(socket, `MAIL FROM:<smtp-probe@${domain}>`, transcript);
       await readSmtpResponse(socket, transcript);

@@ -92,7 +92,7 @@ export function isProviderSuccessfulTerminalPayload(payload, runtimeFamily = '',
     return ['done', 'completed'].includes(String(payload.type || '').trim().toLowerCase());
   }
   if (family === 'qwen-code-acp' || family === 'kimi-code-acp' || family === 'hermes-acp') {
-    return payload.id === 'agentoc-prompt' && !payload.error && Boolean(payload.result);
+    return payload.id === 'ragent-prompt' && !payload.error && Boolean(payload.result);
   }
   return false;
 }

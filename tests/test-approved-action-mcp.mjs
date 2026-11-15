@@ -15,7 +15,7 @@ import {
 import { buildClaudeBidiArgs } from '../chat/adapters/claude-bidi.mjs';
 
 const repoRoot = join(import.meta.dirname, '..');
-const scriptPath = join(repoRoot, 'scripts', 'agentoc-approved-actions-mcp.mjs');
+const scriptPath = join(repoRoot, 'scripts', 'ragent-approved-actions-mcp.mjs');
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
@@ -89,15 +89,15 @@ const port = await listen(server);
 const child = spawn(process.execPath, [scriptPath], {
   env: {
     ...process.env,
-    AGENTOC_APPROVED_ACTIONS_ENABLED: '1',
-    AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
-    AGENTOC_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`,
-    AGENTOC_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
-    AGENTOC_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
-    AGENTOC_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
-    AGENTOC_APPROVED_ACTIONS_TURN_ID: 't_fixture',
-    AGENTOC_APPROVED_ACTIONS_CWD: '/tmp',
-    AGENTOC_APPROVED_ACTIONS_PROJECT_ROOT: '/tmp',
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`,
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
+    RAGENT_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
+    RAGENT_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
+    RAGENT_APPROVED_ACTIONS_TURN_ID: 't_fixture',
+    RAGENT_APPROVED_ACTIONS_CWD: '/tmp',
+    RAGENT_APPROVED_ACTIONS_PROJECT_ROOT: '/tmp',
   },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
@@ -121,7 +121,7 @@ const call = await request(3, 'tools/call', {
 assert.equal(call.result.isError, false);
 assert.match(call.result.content[0].text, /awaiting_approval/);
 assert.equal(received.length, 1);
-assert.equal(received[0].headers['x-agentoc-approved-action-token'], 'run-secret-token');
+assert.equal(received[0].headers['x-ragent-approved-action-token'], 'run-secret-token');
 assert.equal(received[0].body.runId, 'r_fixture');
 assert.equal(received[0].body.actions[0].command, 'systemctl is-active nginx');
 const productCall = await request(4, 'tools/call', {
@@ -182,14 +182,14 @@ await new Promise((resolve, reject) => {
 const disabledChild = spawn(process.execPath, [scriptPath], {
   env: {
     ...process.env,
-    AGENTOC_APPROVED_ACTIONS_ENABLED: '1',
-    AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '0',
-    AGENTOC_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`,
-    AGENTOC_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
-    AGENTOC_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
-    AGENTOC_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
-    AGENTOC_APPROVED_ACTIONS_TURN_ID: 't_fixture',
-    AGENTOC_APPROVED_ACTIONS_CWD: '/tmp',
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '0',
+    RAGENT_APPROVED_ACTIONS_ENDPOINT: `http://127.0.0.1:${port}/api/internal/approved-actions/propose`,
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
+    RAGENT_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
+    RAGENT_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
+    RAGENT_APPROVED_ACTIONS_TURN_ID: 't_fixture',
+    RAGENT_APPROVED_ACTIONS_CWD: '/tmp',
   },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
@@ -210,11 +210,11 @@ await mkdir(codexSource, { recursive: true });
 await writeFile(join(codexSource, 'config.toml'), '[mcp_servers.user_tool]\ncommand = "user-mcp"\n');
 await writeFile(join(codexSource, 'auth.json'), '{"access_token":"fixture"}\n');
 const threadMcp = await prepareCodexThreadMcp({ runId: 'r_fixture', spawnEnv: {
-  CODEX_HOME: codexSource, AGENTOC_APPROVED_ACTIONS_ENABLED: '1', AGENTOC_APPROVED_ACTIONS_TOKEN: 'thread-token', UNRELATED_SECRET: 'not-projected',
+  CODEX_HOME: codexSource, RAGENT_APPROVED_ACTIONS_ENABLED: '1', RAGENT_APPROVED_ACTIONS_TOKEN: 'thread-token', UNRELATED_SECRET: 'not-projected',
 }, servers: [{ kind: 'actions', scriptPath }] });
 assert.equal(threadMcp.serverNames.length, 1);
 const threadServer = threadMcp.config.mcp_servers[threadMcp.serverNames[0]];
-assert.equal(threadServer.env.AGENTOC_APPROVED_ACTIONS_TOKEN, 'thread-token');
+assert.equal(threadServer.env.RAGENT_APPROVED_ACTIONS_TOKEN, 'thread-token');
 assert.equal(threadServer.env.UNRELATED_SECRET, undefined);
 assert.deepEqual(threadServer.args, [scriptPath]);
 await mkdir(join(codexSource, 'rules'));
@@ -225,13 +225,13 @@ const codexOverlay = await prepareApprovedActionMcpOverlay({
   runId: 'r_fixture',
   spawnEnv: {
     CODEX_HOME: codexSource,
-    AGENTOC_APPROVED_ACTIONS_ENABLED: '1',
-    AGENTOC_APPROVED_ACTIONS_ENDPOINT: 'http://127.0.0.1:7690/api/internal/approved-actions/propose',
-    AGENTOC_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
-    AGENTOC_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
-    AGENTOC_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
-    AGENTOC_APPROVED_ACTIONS_TURN_ID: 't_fixture',
-    AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_ENDPOINT: 'http://127.0.0.1:7690/api/internal/approved-actions/propose',
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'run-secret-token',
+    RAGENT_APPROVED_ACTIONS_SESSION_ID: 's_fixture',
+    RAGENT_APPROVED_ACTIONS_RUN_ID: 'r_fixture',
+    RAGENT_APPROVED_ACTIONS_TURN_ID: 't_fixture',
+    RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
   },
   scriptPath,
 });
@@ -247,14 +247,14 @@ assert.equal(await readFile(join(codexSource, 'rules', 'owner.rules'), 'utf8'), 
 const overlayConfig = await readFile(codexOverlay.configPath, 'utf8');
 assert.match(overlayConfig, /mcp_servers\.user_tool/);
 assert.match(overlayConfig, /mcp_servers\.ragent_actions_/);
-assert.match(overlayConfig, /agentoc-approved-actions-mcp\.mjs/);
+assert.match(overlayConfig, /ragent-approved-actions-mcp\.mjs/);
 // Regression: codex MCP children do not inherit the parent env. The run-scoped
 // bindings must be projected into the [mcp_servers.X.env] table or the script
 // reports an unbound runtime and tools/list answers [].
-  assert.match(overlayConfig, /AGENTOC_APPROVED_ACTIONS_ENABLED = "1"/);
-  assert.match(overlayConfig, /AGENTOC_APPROVED_ACTIONS_TOKEN = "run-secret-token"/);
-  assert.match(overlayConfig, /AGENTOC_APPROVED_ACTIONS_RUN_ID = "r_fixture"/);
-  assert.match(overlayConfig, /AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED = "1"/);
+  assert.match(overlayConfig, /RAGENT_APPROVED_ACTIONS_ENABLED = "1"/);
+  assert.match(overlayConfig, /RAGENT_APPROVED_ACTIONS_TOKEN = "run-secret-token"/);
+  assert.match(overlayConfig, /RAGENT_APPROVED_ACTIONS_RUN_ID = "r_fixture"/);
+  assert.match(overlayConfig, /RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED = "1"/);
 assert.equal(await readFile(join(codexSource, 'config.toml'), 'utf8'), '[mcp_servers.user_tool]\ncommand = "user-mcp"\n');
 await codexOverlay.cleanup();
 await assert.rejects(stat(codexOverlay.root), { code: 'ENOENT' });
@@ -264,23 +264,23 @@ const shellGateOverlay = await prepareManagedMcpOverlay({ runtimeFamily: 'codex-
   servers: [{ kind: 'actions', scriptPath }], codexWindowsApprovalGate: true });
 const { readdir } = await import('node:fs/promises');
 const ruleNames = await readdir(join(shellGateOverlay.root, 'rules'));
-const generatedName = ruleNames.find((name) => /^agentoc-shell-gate-[a-f0-9]{16}\.rules$/.test(name));
+const generatedName = ruleNames.find((name) => /^ragent-shell-gate-[a-f0-9]{16}\.rules$/.test(name));
 assert.ok(generatedName);
 const shellRules = await readFile(join(shellGateOverlay.root, 'rules', generatedName), 'utf8');
 assert.ok(shellRules.includes(JSON.stringify('D:\\Custom Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')));
 assert.ok(shellRules.includes(JSON.stringify('E:\\Apps\\PowerShell\\7\\pwsh.exe')));
 assert.match(shellRules, /decision="prompt"/);
 assert.equal(await readFile(join(shellGateOverlay.root, 'rules', 'owner.rules'), 'utf8'), ownerRule);
-if (process.env.AGENTOC_TEST_CODEX_BINARY) {
-  const decision = JSON.parse(execFileSync(process.env.AGENTOC_TEST_CODEX_BINARY,
+if (process.env.RAGENT_TEST_CODEX_BINARY) {
+  const decision = JSON.parse(execFileSync(process.env.RAGENT_TEST_CODEX_BINARY,
     ['execpolicy', 'check', '--rules', join(shellGateOverlay.root, 'rules', generatedName), '--',
       'D:\\Custom Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', '-NoProfile', '-Command', 'Get-Content a'], { encoding: 'utf8' }));
   assert.equal(decision.decision, 'prompt');
-  const lowerCase = JSON.parse(execFileSync(process.env.AGENTOC_TEST_CODEX_BINARY,
+  const lowerCase = JSON.parse(execFileSync(process.env.RAGENT_TEST_CODEX_BINARY,
     ['execpolicy', 'check', '--rules', join(shellGateOverlay.root, 'rules', generatedName), '--',
       'd:/custom windows/system32/windowspowershell/v1.0/powershell.exe', '-NoProfile', '-Command', 'Get-Content a'], { encoding: 'utf8' }));
   assert.equal(lowerCase.decision, 'prompt');
-  const ownerDecision = JSON.parse(execFileSync(process.env.AGENTOC_TEST_CODEX_BINARY,
+  const ownerDecision = JSON.parse(execFileSync(process.env.RAGENT_TEST_CODEX_BINARY,
     ['execpolicy', 'check', '--rules', join(shellGateOverlay.root, 'rules', 'owner.rules'), '--', 'dangerous-tool', 'example'], { encoding: 'utf8' }));
   assert.equal(ownerDecision.decision, 'forbidden');
 }
@@ -289,7 +289,7 @@ await shellGateOverlay.cleanup();
 if (process.platform === 'win32') {
   const ownerHooks = JSON.stringify({ description: 'owner fixture', hooks: { PreToolUse: [{ matcher: '^Edit$', hooks: [{ type: 'command', command: 'owner-command' }] }] } });
   await writeFile(join(codexSource, 'hooks.json'), ownerHooks);
-  const hookPath = join(repoRoot, 'scripts', 'agentoc-codex-windows-install-hook.mjs');
+  const hookPath = join(repoRoot, 'scripts', 'ragent-codex-windows-install-hook.mjs');
   const hookOverlay = await prepareManagedMcpOverlay({ runtimeFamily: 'codex-app-server-json', runId: 'hook-fixture',
     spawnEnv: { CODEX_HOME: codexSource }, servers: [{ kind: 'actions', scriptPath }], codexWindowsInstallHook: hookPath });
   assert.ok(hookOverlay.codexWindowsInstallHook);
@@ -349,16 +349,16 @@ const multiOverlay = await prepareManagedMcpOverlay({
   runId: 'r_fixture_multi',
   spawnEnv: {
     CODEX_HOME: codexSource,
-    AGENTOC_APPROVED_ACTIONS_ENABLED: '1',
-    AGENTOC_APPROVED_ACTIONS_TOKEN: 'action-token',
-    AGENTOC_BROWSER_MCP_ENABLED: '1',
-    AGENTOC_BROWSER_TOKEN: 'browser-token',
-    AGENTOC_WINDOWS_BROKER_TOKEN: 'broker-token',
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'action-token',
+    RAGENT_BROWSER_MCP_ENABLED: '1',
+    RAGENT_BROWSER_TOKEN: 'browser-token',
+    RAGENT_WINDOWS_BROKER_TOKEN: 'broker-token',
   },
   servers: [
-    { kind: 'approved-actions', scriptPath, envKeys: ['AGENTOC_APPROVED_ACTIONS_ENABLED', 'AGENTOC_APPROVED_ACTIONS_TOKEN'] },
-    { kind: 'browser', scriptPath: join(repoRoot, 'scripts', 'agentoc-browser-mcp-server.mjs'), envKeys: ['AGENTOC_BROWSER_MCP_ENABLED', 'AGENTOC_BROWSER_TOKEN'] },
-    { kind: 'broker', scriptPath: join(repoRoot, 'scripts', 'agentoc-windows-broker-mcp.mjs'), envKeys: ['AGENTOC_WINDOWS_BROKER_TOKEN'] },
+    { kind: 'approved-actions', scriptPath, envKeys: ['RAGENT_APPROVED_ACTIONS_ENABLED', 'RAGENT_APPROVED_ACTIONS_TOKEN'] },
+    { kind: 'browser', scriptPath: join(repoRoot, 'scripts', 'ragent-browser-mcp-server.mjs'), envKeys: ['RAGENT_BROWSER_MCP_ENABLED', 'RAGENT_BROWSER_TOKEN'] },
+    { kind: 'broker', scriptPath: join(repoRoot, 'scripts', 'ragent-windows-broker-mcp.mjs'), envKeys: ['RAGENT_WINDOWS_BROKER_TOKEN'] },
   ],
 });
 assert.equal(multiOverlay.serverNames.length, 3);
@@ -366,9 +366,9 @@ const multiConfig = await readFile(multiOverlay.configPath, 'utf8');
 assert.match(multiConfig, /mcp_servers\.ragent_actions_/);
 assert.match(multiConfig, /mcp_servers\.ragent_browser_/);
 assert.match(multiConfig, /mcp_servers\.ragent_broker_/);
-assert.match(multiConfig, /AGENTOC_APPROVED_ACTIONS_TOKEN = "action-token"/);
-assert.match(multiConfig, /AGENTOC_BROWSER_TOKEN = "browser-token"/);
-assert.match(multiConfig, /AGENTOC_WINDOWS_BROKER_TOKEN = "broker-token"/);
+assert.match(multiConfig, /RAGENT_APPROVED_ACTIONS_TOKEN = "action-token"/);
+assert.match(multiConfig, /RAGENT_BROWSER_TOKEN = "browser-token"/);
+assert.match(multiConfig, /RAGENT_WINDOWS_BROKER_TOKEN = "broker-token"/);
 await multiOverlay.cleanup();
 await assert.rejects(stat(multiOverlay.root), { code: 'ENOENT' });
 

@@ -9,7 +9,7 @@ import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 import { resolveRuntimeConfig } from '../lib/provider-runtime/resolver.mjs';
 import { prepareCodexRuntime } from '../lib/provider-runtime/adapters.mjs';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-native-provider-chat-'));
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-native-provider-chat-'));
 const registry = createNativeProviderRegistry({ configDir });
 const secretStore = createSecretStore({ configDir });
 
@@ -52,7 +52,7 @@ try {
   const config = await readFile(join(runtime.codexHomeDir, 'config.toml'), 'utf8');
   assert.match(config, /wire_api = "responses"/);
   assert.doesNotMatch(config, /requires_openai_auth = true/);
-  assert.equal(runtime.env.AGENTOC_RUNTIME_API_KEY, 'sk-chat-test');
+  assert.equal(runtime.env.RAGENT_RUNTIME_API_KEY, 'sk-chat-test');
   console.log('test-native-provider-chat-protocol: Chat upstream metadata with Responses client wire config OK');
 } finally {
   await rm(configDir, { recursive: true, force: true });

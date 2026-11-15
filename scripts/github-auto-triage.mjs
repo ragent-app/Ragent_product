@@ -14,10 +14,10 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
-const MARKER = '<!-- agentoc-github-auto-triage -->';
+const MARKER = '<!-- ragent-github-auto-triage -->';
 const DEFAULT_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`;
 const DEFAULT_SESSION_TOOL = 'codex';
-const REQUEST_MARKER_PREFIX = '<!-- agentoc-github-request-id:';
+const REQUEST_MARKER_PREFIX = '<!-- ragent-github-request-id:';
 const execFileAsync = promisify(execFileCallback);
 
 const STOP_WORDS_EN = new Set([
@@ -25,7 +25,7 @@ const STOP_WORDS_EN = new Set([
   'much', 'only', 'onto', 'that', 'this', 'there', 'their', 'they', 'then', 'than', 'what',
   'when', 'where', 'while', 'which', 'with', 'would', 'your', 'into', 'issue', 'github', 'repo',
   'thread', 'reply', 'please', 'thanks', 'thank', 'problem',
-  'agentoc', 'still', 'should', 'could',
+  'ragent', 'still', 'should', 'could',
   'does', 'doesn', 'dont', 'cant', 'cannot', 'using', 'used', 'want', 'need'
 ]);
 
@@ -270,7 +270,7 @@ async function writeJson(pathname, value) {
 function configRoot() {
   const xdgConfigHome = process.env.XDG_CONFIG_HOME;
   const base = xdgConfigHome || join(homedir(), '.config');
-  return join(base, 'agentoc', 'github-triage');
+  return join(base, 'ragent', 'github-triage');
 }
 
 function trimString(value) {
@@ -1109,7 +1109,7 @@ function snapshotPath(snapshotDir, item) {
 }
 
 async function postIssueComment(repo, number, body) {
-  const payloadFile = join(tmpdir(), `agentoc-github-triage-${process.pid}-${number}.json`);
+  const payloadFile = join(tmpdir(), `ragent-github-triage-${process.pid}-${number}.json`);
   await writeFile(payloadFile, `${JSON.stringify({ body })}\n`);
   try {
     return await runGhJson(['api', '-X', 'POST', `repos/${repo}/issues/${number}/comments`, '--input', payloadFile]);
@@ -1157,7 +1157,7 @@ function formatContextPointer(entry) {
   return `- ${entry.relPath}${suffix}`;
 }
 
-function buildAgentoCMessage({
+function buildRagentMessage({
   repo,
   item,
   kind,
@@ -1294,7 +1294,7 @@ async function submitInboundUpdate(
   const session = createResult.json.session;
   const messagePayload = {
     requestId,
-    text: buildAgentoCMessage({
+    text: buildRagentMessage({
       repo: options.repo,
       item,
       kind,

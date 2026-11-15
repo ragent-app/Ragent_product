@@ -8,7 +8,7 @@ const headers = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Cont
 const fail = (code, status) => { throw temporaryPairingError(code, status); };
 function send(res, status, value) { res.writeHead(status, headers); res.end(JSON.stringify(value)); }
 function scopeFrom(req) {
-  const encoded = req.headers['x-agentoc-app-api-scope'];
+  const encoded = req.headers['x-ragent-app-api-scope'];
   if (typeof encoded !== 'string' || !/^[A-Za-z0-9_-]{1,2048}$/.test(encoded)) fail('temporary_scope_invalid', 400);
   try {
     const bytes = Buffer.from(encoded, 'base64url');
@@ -37,7 +37,7 @@ export async function handleTemporaryCarrierRequest(req, res, { host, temporaryD
     req.resume(); send(res, 403, { code: 'temporary_route_denied' }); return;
   }
   try {
-    if (req.headers.cookie || req.headers['x-agentoc-browser-principal'] || req.headers['x-agentoc-target-grant']
+    if (req.headers.cookie || req.headers['x-ragent-browser-principal'] || req.headers['x-ragent-target-grant']
       || req.headers.upgrade || req.headers['sec-websocket-key']) fail('temporary_credential_mixed', 401);
     const authorization = req.headers.authorization;
     const match = typeof authorization === 'string' ? /^DPoP ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(authorization) : null;

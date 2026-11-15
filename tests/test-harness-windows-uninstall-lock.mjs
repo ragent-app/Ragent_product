@@ -8,13 +8,13 @@ import { pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
 
 if (process.platform !== 'win32') { console.log('SKIP: native Windows executable lock'); process.exit(0); }
-const root = await mkdtemp(join(tmpdir(), 'agentoc-harness-uninstall-lock-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_HARNESS_ROOT = join(root, 'harnesses');
-process.env.AGENTOC_PACKAGED_HARNESS_ROOT = join(root, 'no-bundle');
-process.env.AGENTOC_HARNESS_POLICY_URL = 'http://invalid.test';
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+const root = await mkdtemp(join(tmpdir(), 'ragent-harness-uninstall-lock-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_HARNESS_ROOT = join(root, 'harnesses');
+process.env.RAGENT_PACKAGED_HARNESS_ROOT = join(root, 'no-bundle');
+process.env.RAGENT_HARNESS_POLICY_URL = 'http://invalid.test';
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 const live = join(root, 'harnesses', 'codex');
 const bin = join(live, 'node_modules', '.bin');
 await mkdir(bin, { recursive: true });
@@ -27,8 +27,8 @@ const image = join(live, 'locked.exe');
 await copyFile(process.execPath, image);
 const sentinel = join(live, 'must-survive.txt');
 await writeFile(sentinel, 'complete installation');
-const registry = await import(process.env.AGENTOC_TEST_HARNESS_MODULE
-  ? pathToFileURL(process.env.AGENTOC_TEST_HARNESS_MODULE).href
+const registry = await import(process.env.RAGENT_TEST_HARNESS_MODULE
+  ? pathToFileURL(process.env.RAGENT_TEST_HARNESS_MODULE).href
   : '../lib/harness-registry.mjs');
 const child = spawn(image, ['-e', "console.log('READY');setInterval(()=>{},1000)"], { stdio: ['ignore','pipe','pipe'], windowsHide: true });
 const exited = once(child, 'exit');
@@ -40,7 +40,7 @@ try {
   assert.match(await readFile(shim, 'utf8'), /0.153.4/);
   assert.equal(JSON.parse(await readFile(statePath, 'utf8')).codex.installed, true);
   assert.equal(child.exitCode, null, 'management must not kill the running Harness');
-  if (!process.env.AGENTOC_TEST_HARNESS_MODULE) {
+  if (!process.env.RAGENT_TEST_HARNESS_MODULE) {
     const { handleHarnessRoutes } = await import('../chat/router-harness-routes.mjs');
     const req = Readable.from(['{}']); req.method = 'POST';
     let status; let payload;

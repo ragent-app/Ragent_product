@@ -26,7 +26,7 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const binaryPath = process.env.AGENTOC_TEST_P2P_HOST_BINARY || resolveP2PHostBinary();
+const binaryPath = process.env.RAGENT_TEST_P2P_HOST_BINARY || resolveP2PHostBinary();
 const secret = 'rpi_signal_fault_injection';
 const roomId = createP2PRoomId(secret);
 

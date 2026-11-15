@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
-const root = await mkdtemp(join(tmpdir(), 'agentoc-fresh-directory-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-fresh-directory-'));
 try {
   const bridge = join(root, 'bridge.exe');
   await exec(powershell, ['-NoProfile', '-NonInteractive', '-File',

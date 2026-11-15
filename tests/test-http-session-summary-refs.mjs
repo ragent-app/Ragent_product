@@ -58,8 +58,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-session-summary-refs-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-session-summary-refs-'));
+  const configDir = join(home, '.config', 'ragent');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -83,12 +83,12 @@ async function startServer({ home, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_CONFIG_DIR: join(home, '.config', 'agentoc'),
-      AGENTOC_AUTH_SESSION_SECRET: 'test-session-secret',
-      AGENTOC_LOCAL_WEB_AUTH: '0',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_CONFIG_DIR: join(home, '.config', 'ragent'),
+      RAGENT_AUTH_SESSION_SECRET: 'test-session-secret',
+      RAGENT_LOCAL_WEB_AUTH: '0',
       HOME: home,
       USERPROFILE: home,
       APPDATA: join(home, 'AppData', 'Roaming'),

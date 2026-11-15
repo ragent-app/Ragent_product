@@ -5,18 +5,18 @@ import { test } from 'node:test';
 import { makeDeadlineTempRoot } from './helpers/deadline-temp-root.mjs';
 
 test('queued createApp refuses an expired temporary approval before catalog replacement', async (t) => {
-  const fixture = await makeDeadlineTempRoot('agentoc-app-deadline-');
+  const fixture = await makeDeadlineTempRoot('ragent-app-deadline-');
   t.after(() => fixture.cleanup());
   const { root } = fixture;
   const overrides = {
-    AGENTOC_INSTANCE_ROOT: root,
-    AGENTOC_CONFIG_DIR: join(root, 'config'),
-    AGENTOC_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
-    AGENTOC_PROVIDER_HOMES_DIR: join(root, 'provider-homes'),
-    AGENTOC_MEMORY_DIR: join(root, 'memory'),
-    AGENTOC_WORK_ROOT_DIR: join(root, 'workspace'),
-    AGENTOC_PLATFORM_SKILLS_DIR: join(root, 'platform', 'skills'),
-    AGENTOC_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
+    RAGENT_INSTANCE_ROOT: root,
+    RAGENT_CONFIG_DIR: join(root, 'config'),
+    RAGENT_RUN_SPOOL_DIR: join(root, 'data', 'chat-runs'),
+    RAGENT_PROVIDER_HOMES_DIR: join(root, 'provider-homes'),
+    RAGENT_MEMORY_DIR: join(root, 'memory'),
+    RAGENT_WORK_ROOT_DIR: join(root, 'workspace'),
+    RAGENT_PLATFORM_SKILLS_DIR: join(root, 'platform', 'skills'),
+    RAGENT_INSTANCE_KEY_FILE: join(root, 'config', 'instance-identity.json'),
   };
   const previousEnv = Object.fromEntries(Object.keys(overrides).map(key => [key, process.env[key]]));
   const originalNow = Date.now;

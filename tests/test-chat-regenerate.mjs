@@ -225,7 +225,7 @@ function createHarness() {
     confirm() { return true; },
   };
   context.window = context;
-  context.window.AgentoCRunActivity = {
+  context.window.RagentRunActivity = {
     noteFormalOutput() {},
     applyEvent() {},
   };

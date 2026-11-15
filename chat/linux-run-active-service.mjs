@@ -5,7 +5,7 @@ import { hasLinuxRunCancelIntent } from './linux-run-cancel-intent.mjs';
 import { matchesLinuxRunControlBinding } from './linux-run-control-binding.mjs';
 export { LINUX_RUN_ACTIVE_CHECK_PATH } from './linux-run-active-proof.mjs';
 
-export async function issueLinuxRunActiveProof(context, { enabled = process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS === '1',
+export async function issueLinuxRunActiveProof(context, { enabled = process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS === '1',
   platform = process.platform, readBoundary = assertRunLaunchBoundary, getKey = getActivePrivilegedSigningKey,
   isCancelled = hasLinuxRunCancelIntent, matchesBinding = matchesLinuxRunControlBinding } = {}) {
   if (!enabled || platform !== 'linux') throw new Error('Linux Run active check unavailable');

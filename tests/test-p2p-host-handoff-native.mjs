@@ -17,7 +17,7 @@ const target = http.createServer((req, res) => {
   res.end('ok');
 });
 const signaling = createP2PSignalingServer({ host: '127.0.0.1', port: 0 });
-const source = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+const source = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
 const web = http.createServer((req, res) => {
   if (req.url === '/client.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(source); }
   else res.end('<!doctype html>');
@@ -34,7 +34,7 @@ try {
     p2pAccess: { roomId, secret }, signalingUrl, localBaseUrl: `http://127.0.0.1:${targetAddress.port}`,
     ...credential, expiresAt: new Date(Date.now() + 18_000).toISOString(), refreshHost: async () => credential,
     runHostAgent: options => runP2PHostAgent({ ...options,
-      ...(process.env.AGENTOC_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.AGENTOC_TEST_P2P_HOST_BINARY } : {}),
+      ...(process.env.RAGENT_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.RAGENT_TEST_P2P_HOST_BINARY } : {}),
       // Local loopback exercises actual native WebRTC without contacting a TURN provider.
       iceServers: [], relayOnly: false }),
   });
@@ -43,9 +43,9 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const result = await page.evaluate(async ({ signalingUrl, roomId, secret, token }) => {
-    const { AgentoCP2PClient } = await import('/client.js');
+    const { RagentP2PClient } = await import('/client.js');
     const options = { signalingUrl, roomId, secret, iceServers: [], connectTimeoutMs: 10_000, requestTimeoutMs: 3_000 };
-    const old = new AgentoCP2PClient(options);
+    const old = new RagentP2PClient(options);
     await old.connect();
     const before = (await old.request({ method: 'GET', path: '/connectivity-health' })).status;
     const notice = new Promise(resolve => old.socket.addEventListener('message', event => {
@@ -55,7 +55,7 @@ try {
     const handoffId = await Promise.race([notice, new Promise((_, reject) => setTimeout(() => reject(new Error('handoff notice timed out')), 16_000))]);
     old.socket.close(1000, 'handoff');
     const stillUsable = (await old.request({ method: 'GET', path: '/connectivity-health' })).status;
-    const next = new AgentoCP2PClient(options);
+    const next = new RagentP2PClient(options);
     const send = next.sendSignal.bind(next);
     next.sendSignal = payload => send(payload.type === 'offer' ? { ...payload, handoffId } : payload);
     await next.connect();

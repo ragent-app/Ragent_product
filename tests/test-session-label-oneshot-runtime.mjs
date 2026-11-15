@@ -6,9 +6,9 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-label-oneshot-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-label-oneshot-'));
 const tempBin = join(tempHome, 'bin');
-const configDir = join(tempHome, '.config', 'agentoc');
+const configDir = join(tempHome, '.config', 'ragent');
 const workRoot = join(tempHome, 'workspace');
 const inaccessibleFolder = join(tempHome, 'inaccessible-workspace');
 
@@ -24,7 +24,7 @@ writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
 const args = process.argv.slice(2);
-if (process.env.CODEX_HOME !== process.env.AGENTOC_EXPECT_CODEX_HOME) {
+if (process.env.CODEX_HOME !== process.env.RAGENT_EXPECT_CODEX_HOME) {
   console.error('missing managed CODEX_HOME');
   process.exit(2);
 }
@@ -35,8 +35,8 @@ const prompt = args[args.length - 1] || '';
 const isTitlePrompt = prompt.includes('You are naming a developer session');
 const text = isTitlePrompt
   ? JSON.stringify({
-      title: 'AgentoC Rename Flow',
-      group: 'AgentoC',
+      title: 'Ragent Rename Flow',
+      group: 'Ragent',
       description: 'Name sessions with one-shot Codex prompts.',
     })
   : '{}';
@@ -55,7 +55,7 @@ chmodSync(fakeCodexPath, 0o755);
 writeFileSync(
   fakeClaudePath,
   `#!/usr/bin/env node
-if (process.env.CLAUDE_CONFIG_DIR !== process.env.AGENTOC_EXPECT_CLAUDE_HOME) {
+if (process.env.CLAUDE_CONFIG_DIR !== process.env.RAGENT_EXPECT_CLAUDE_HOME) {
   console.error('missing managed CLAUDE_CONFIG_DIR');
   process.exit(2);
 }
@@ -66,7 +66,7 @@ process.stdin.on('end', () => {
   const text = prompt.includes('You are naming a developer session')
     ? JSON.stringify({
         title: 'Claude Rename Flow',
-        group: 'AgentoC',
+        group: 'Ragent',
         description: 'Name sessions with one-shot Claude prompts.',
       })
     : '{}';
@@ -116,11 +116,11 @@ writeFileSync(
 );
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = workRoot;
-process.env.AGENTOC_EXPECT_CODEX_HOME = join(configDir, 'provider-runtime-homes', 'codex-control');
-process.env.AGENTOC_EXPECT_CLAUDE_HOME = join(configDir, 'provider-runtime-homes', 'claude');
-process.env.AGENTOC_SESSION_LABEL_SUGGESTIONS = 'on';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = workRoot;
+process.env.RAGENT_EXPECT_CODEX_HOME = join(configDir, 'provider-runtime-homes', 'codex-control');
+process.env.RAGENT_EXPECT_CLAUDE_HOME = join(configDir, 'provider-runtime-homes', 'claude');
+process.env.RAGENT_SESSION_LABEL_SUGGESTIONS = 'on';
 process.env.PATH = `${tempBin}:${process.env.PATH}`;
 
 const { createSession, renameSession, getSession, killAll } = await import(
@@ -131,7 +131,7 @@ const { messageEvent } = await import(pathToFileURL(join(repoRoot, 'chat', 'norm
 const { triggerSessionLabelSuggestion } = await import(pathToFileURL(join(repoRoot, 'chat', 'summarizer.mjs')).href);
 
 const session = await createSession(tempHome, 'fake-codex', '');
-await appendEvent(session.id, messageEvent('user', 'Fix AgentoC automatic session naming.'));
+await appendEvent(session.id, messageEvent('user', 'Fix Ragent automatic session naming.'));
 await appendEvent(session.id, messageEvent('assistant', 'I will repair the rename path.'));
 
 const result = await triggerSessionLabelSuggestion({

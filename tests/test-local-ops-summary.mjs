@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-local-ops-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-local-ops-'));
 
 function writeText(filePath, content) {
   mkdirSync(dirname(filePath), { recursive: true });
@@ -24,7 +24,7 @@ function launchAgentPlist({ label, port, instanceRoot }) {
   <dict>
     <key>CHAT_PORT</key>
     <string>${port}</string>
-    <key>AGENTOC_INSTANCE_ROOT</key>
+    <key>RAGENT_INSTANCE_ROOT</key>
     <string>${instanceRoot}</string>
   </dict>
 </dict>
@@ -48,7 +48,7 @@ writeText(
   launchAgentPlist({
     label: 'com.chatserver.trial',
     port: 7696,
-    instanceRoot: join(tempHome, '.agentoc', 'instances', 'trial'),
+    instanceRoot: join(tempHome, '.ragent', 'instances', 'trial'),
   }),
 );
 
@@ -57,20 +57,20 @@ writeText(
   launchAgentPlist({
     label: 'com.chatserver.trial5',
     port: 7700,
-    instanceRoot: join(tempHome, '.agentoc', 'instances', 'trial5'),
+    instanceRoot: join(tempHome, '.ragent', 'instances', 'trial5'),
   }),
 );
 
 writeText(
-  join(tempHome, '.config', 'agentoc', 'guest-instances.json'),
+  join(tempHome, '.config', 'ragent', 'guest-instances.json'),
   `${JSON.stringify([
     {
       name: 'trial5',
       label: 'com.chatserver.trial5',
       port: 7700,
       hostname: 'trial5.example.com',
-      instanceRoot: join(tempHome, '.agentoc', 'instances', 'trial5'),
-      configDir: join(tempHome, '.agentoc', 'instances', 'trial5', 'config'),
+      instanceRoot: join(tempHome, '.ragent', 'instances', 'trial5'),
+      configDir: join(tempHome, '.ragent', 'instances', 'trial5', 'config'),
       publicBaseUrl: 'https://trial5.example.com',
       localBaseUrl: 'http://127.0.0.1:7700',
     },
@@ -78,7 +78,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial', 'config', 'chat-sessions.json'),
+  join(tempHome, '.ragent', 'instances', 'trial', 'config', 'chat-sessions.json'),
   `${JSON.stringify([
     {
       id: 'session_trial',
@@ -92,7 +92,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial', 'config', 'chat-history', 'session_trial', 'meta.json'),
+  join(tempHome, '.ragent', 'instances', 'trial', 'config', 'chat-history', 'session_trial', 'meta.json'),
   `${JSON.stringify({
     latestSeq: 20,
     lastEventAt: Date.parse('2026-03-24T04:00:00.000Z'),
@@ -105,7 +105,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial', 'config', 'api-logs', '2026-03-24.jsonl'),
+  join(tempHome, '.ragent', 'instances', 'trial', 'config', 'api-logs', '2026-03-24.jsonl'),
   [
     JSON.stringify({ ts: '2026-03-24T03:00:00.000Z', pathname: '/api/build-info', route: 'GET /api/build-info' }),
     JSON.stringify({ ts: '2026-03-24T03:01:00.000Z', method: 'POST', pathname: '/api/sessions', route: 'POST /api/sessions' }),
@@ -116,7 +116,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial5', 'config', 'chat-sessions.json'),
+  join(tempHome, '.ragent', 'instances', 'trial5', 'config', 'chat-sessions.json'),
   `${JSON.stringify([
     {
       id: 'session_trial5',
@@ -130,7 +130,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial5', 'config', 'chat-history', 'session_trial5', 'meta.json'),
+  join(tempHome, '.ragent', 'instances', 'trial5', 'config', 'chat-history', 'session_trial5', 'meta.json'),
   `${JSON.stringify({
     latestSeq: 6,
     lastEventAt: Date.parse('2026-03-24T02:30:00.000Z'),
@@ -143,7 +143,7 @@ writeText(
 );
 
 writeText(
-  join(tempHome, '.agentoc', 'instances', 'trial5', 'config', 'api-logs', '2026-03-24.jsonl'),
+  join(tempHome, '.ragent', 'instances', 'trial5', 'config', 'api-logs', '2026-03-24.jsonl'),
   [
     JSON.stringify({ ts: '2026-03-24T03:00:00.000Z', pathname: '/api/build-info', route: 'GET /api/build-info' }),
     JSON.stringify({ ts: '2026-03-24T03:05:00.000Z', pathname: '/api/sessions', route: 'GET /api/sessions' }),
@@ -208,7 +208,7 @@ try {
         port: 7696,
         localBaseUrl: 'http://127.0.0.1:7696',
         publicBaseUrl: 'https://trial.example.com',
-        instanceRoot: join(tempHome, '.agentoc', 'instances', 'trial'),
+        instanceRoot: join(tempHome, '.ragent', 'instances', 'trial'),
         pid: 101,
         cpuPercent: 0.2,
         memPercent: 0.2,
@@ -224,7 +224,7 @@ try {
         port: 7700,
         localBaseUrl: 'http://127.0.0.1:7700',
         publicBaseUrl: 'https://trial5.example.com',
-        instanceRoot: join(tempHome, '.agentoc', 'instances', 'trial5'),
+        instanceRoot: join(tempHome, '.ragent', 'instances', 'trial5'),
         pid: 102,
         cpuPercent: 0.1,
         memPercent: 0.2,
@@ -277,7 +277,7 @@ try {
 
   const sidecar = await generateLocalOpsSidecar({
     homeDir: tempHome,
-    outputDir: join(tempHome, '.agentoc', 'reports', 'local-ops'),
+    outputDir: join(tempHome, '.ragent', 'reports', 'local-ops'),
     date: '2026-03-24',
     days: 1,
     nowMs: Date.parse('2026-03-24T12:00:00.000Z'),

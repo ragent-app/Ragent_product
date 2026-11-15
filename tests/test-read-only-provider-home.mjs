@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { buildSandboxedSpawn, isBwrapPresent } from '../lib/runner-sandbox.mjs';
 import { openReadOnlyProviderSeeds, closeReadOnlyProviderSeeds, deliverReadOnlyProviderSeeds } from '../chat/read-only-provider-home.mjs';
 
-const root = mkdtempSync(join(realpathSync(tmpdir()), 'agentoc-ro-provider-'));
+const root = mkdtempSync(join(realpathSync(tmpdir()), 'ragent-ro-provider-'));
 try {
   const workspace = join(root, 'project');
   const runId = 'isolated-fixture';

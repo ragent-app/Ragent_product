@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR?.trim();
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR?.trim();
 if (outputDir) await mkdir(outputDir, { recursive: true });
 
 const styles = await Promise.all([

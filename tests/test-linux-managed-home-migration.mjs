@@ -12,8 +12,8 @@ const account = name => {
   return {uid:Number(fields[2]),gid:Number(fields[3])};
 };
 const oldUser = account('ubuntu');
-const runner = account('agentoc-runner');
-const base = await mkdtemp('/tmp/agentoc-provider-migrate-');
+const runner = account('ragent-runner');
+const base = await mkdtemp('/tmp/ragent-provider-migrate-');
 const home = join(base,'codex');
 try {
   await mkdir(join(home,'thread-writer-locks'), {recursive:true, mode:0o770});

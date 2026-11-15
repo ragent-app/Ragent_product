@@ -12,7 +12,7 @@ const prepared=JSON.parse(await readFile(join(evidence,'prepared.json'),'utf8'))
 const manifest=JSON.parse(await readFile(join(prepared.bundle,'manifest.json'),'utf8'));
 const exe=join(prepared.bundle,'IdentityCanary.exe');
 assert.equal(hash(await readFile(exe)),manifest['IdentityCanary.exe']);
-const parent=join(process.env.LOCALAPPDATA,'AgentoC/identity-qa'),id=randomBytes(16).toString('hex');
+const parent=join(process.env.LOCALAPPDATA,'Ragent/identity-qa'),id=randomBytes(16).toString('hex');
 const root=join(parent,'case-'+id);await mkdir(root);
 const report={caseId:id,preparedCaseId:manifest.caseId,nativeSha256:manifest['IdentityCanary.exe'],sourceFiles:manifest.sourceFiles,pass:false,productionChanged:false,credentialsUsed:false,servicesCreated:false,checks:[]};
 async function refused(name,args,expected){
@@ -27,9 +27,9 @@ try{
   await refused('outside-self-root',['--self-test',source],'ROOT_ID_INVALID');
   await refused('outside-report-root',['--read-report',join(source,'package.json')],'REPORT_PATH_DENIED');
   await refused('unknown-mode',['--unknown'],'SERVICE_ARGUMENTS_INVALID');
-  await writeFile(join(root,'.agentoc-identity-qa'),'wrong-marker');
+  await writeFile(join(root,'.ragent-identity-qa'),'wrong-marker');
   await refused('marker-mismatch',['--self-test',root],'ROOT_MARKER_INVALID');
-  await writeFile(join(root,'.agentoc-identity-qa'),'case-'+id);
+  await writeFile(join(root,'.ragent-identity-qa'),'case-'+id);
   await writeFile(join(root,'manifest.json'),'x'.repeat(16385));
   await refused('oversized-manifest',['--self-test',root],'MANIFEST_TOO_LARGE');
   await writeFile(join(root,'manifest.json'),JSON.stringify({...manifest,caseId:'0'.repeat(32)}));

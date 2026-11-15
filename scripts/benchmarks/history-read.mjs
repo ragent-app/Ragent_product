@@ -54,12 +54,12 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv.slice(2));
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-history-read-bench-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-history-read-bench-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const history = await import('../../chat/history.mjs');
 const getStats = history.getHistoryReadStats ? () => history.getHistoryReadStats() : () => null;

@@ -8,8 +8,8 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-collaboration-s6-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-collaboration-s6-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { createCollaborationOrchestrator } = await import('../chat/collaboration-orchestrator.mjs');
 

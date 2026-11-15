@@ -8,42 +8,42 @@ const preinst = (await readFile(new URL('../packaging/deb/preinst', import.meta.
 const postrm = (await readFile(new URL('../packaging/deb/postrm', import.meta.url))).toString('base64');
 const prerm = (await readFile(new URL('../packaging/deb/prerm', import.meta.url))).toString('base64');
 const script = String.raw`set -eu
-mkdir -p /tmp/old/DEBIAN /tmp/old/etc/ragent-qa /tmp/old/opt/agentoc/runtime /tmp/old/opt/agentoc/app /tmp/old/lib/systemd/system
-printf 'Package: agentoc\nVersion: 0.0.35\nArchitecture: all\nMaintainer: QA\nDescription: isolated fixture\n' > /tmp/old/DEBIAN/control
+mkdir -p /tmp/old/DEBIAN /tmp/old/etc/ragent-qa /tmp/old/opt/ragent/runtime /tmp/old/opt/ragent/app /tmp/old/lib/systemd/system
+printf 'Package: ragent\nVersion: 0.0.35\nArchitecture: all\nMaintainer: QA\nDescription: isolated fixture\n' > /tmp/old/DEBIAN/control
 printf '/etc/ragent-qa/config\n' > /tmp/old/DEBIAN/conffiles
 printf 'old-default\n' > /tmp/old/etc/ragent-qa/config
-printf 'fixture\n' > /tmp/old/opt/agentoc/app/cli.js
-printf 'legacy\n' > /tmp/old/opt/agentoc/legacy-only
-printf '[Service]\nExecStart=/bin/true\n' > /tmp/old/lib/systemd/system/agentoc.service
-cat > /tmp/old/opt/agentoc/runtime/node <<'EOF'
+printf 'fixture\n' > /tmp/old/opt/ragent/app/cli.js
+printf 'legacy\n' > /tmp/old/opt/ragent/legacy-only
+printf '[Service]\nExecStart=/bin/true\n' > /tmp/old/lib/systemd/system/ragent.service
+cat > /tmp/old/opt/ragent/runtime/node <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> /tmp/preflight-calls
 if [ -e /tmp/independent-run ] && [ "$2" = restart-check ]; then echo 'active independent run'; exit 1; fi
 if [ -e /tmp/deny-upgrade ]; then echo 'blocked run'; exit 1; fi
 exit 0
 EOF
-chmod +x /tmp/old/opt/agentoc/runtime/node
+chmod +x /tmp/old/opt/ragent/runtime/node
 printf '%s' '${postrm}' | base64 -d > /tmp/old/DEBIAN/postrm
 chmod +x /tmp/old/DEBIAN/postrm
 dpkg-deb --build /tmp/old /tmp/old.deb >/dev/null
 dpkg -i /tmp/old.deb >/dev/null
-mkdir -p /var/lib/agentoc/config
-printf 'workspace-kept\n' > /var/lib/agentoc/config/owner-test
+mkdir -p /var/lib/ragent/config
+printf 'workspace-kept\n' > /var/lib/ragent/config/owner-test
 printf 'user-custom\n' > /etc/ragent-qa/config
-export AGENTOC_SERVICE_USER=nobody
+export RAGENT_SERVICE_USER=nobody
 
 build_new() {
   rm -rf /tmp/new
-  mkdir -p /tmp/new/DEBIAN /tmp/new/etc/ragent-qa /tmp/new/opt/agentoc/runtime /tmp/new/opt/agentoc/app /tmp/new/lib/systemd/system
-  printf 'Package: ragent\nVersion: 0.0.1\nArchitecture: all\nMaintainer: QA\nReplaces: agentoc\nDescription: isolated fixture\n' > /tmp/new/DEBIAN/control
+  mkdir -p /tmp/new/DEBIAN /tmp/new/etc/ragent-qa /tmp/new/opt/ragent/runtime /tmp/new/opt/ragent/app /tmp/new/lib/systemd/system
+  printf 'Package: ragent\nVersion: 0.0.1\nArchitecture: all\nMaintainer: QA\nReplaces: ragent\nDescription: isolated fixture\n' > /tmp/new/DEBIAN/control
   printf '/etc/ragent-qa/config\n' > /tmp/new/DEBIAN/conffiles
   printf 'new-default\n' > /tmp/new/etc/ragent-qa/config
-  printf 'fixture-new\n' > /tmp/new/opt/agentoc/app/cli.js
-  cp /tmp/old/opt/agentoc/runtime/node /tmp/new/opt/agentoc/runtime/node
+  printf 'fixture-new\n' > /tmp/new/opt/ragent/app/cli.js
+  cp /tmp/old/opt/ragent/runtime/node /tmp/new/opt/ragent/runtime/node
   printf '[Service]\nExecStart=/bin/true\n' > /tmp/new/lib/systemd/system/ragent.service
-  ln -s ragent.service /tmp/new/lib/systemd/system/agentoc.service
-  if [ "$1" = complete ]; then printf 'new\n' > /tmp/new/opt/agentoc/legacy-only; fi
-  if [ "$1" = directory ]; then mkdir /tmp/new/opt/agentoc/legacy-only; fi
+  ln -s ragent.service /tmp/new/lib/systemd/system/ragent.service
+  if [ "$1" = complete ]; then printf 'new\n' > /tmp/new/opt/ragent/legacy-only; fi
+  if [ "$1" = directory ]; then mkdir /tmp/new/opt/ragent/legacy-only; fi
   printf '%s' '${preinst}' | base64 -d > /tmp/new/DEBIAN/preinst
   cat >> /tmp/new/DEBIAN/preinst <<'EOF'
 
@@ -61,7 +61,7 @@ EOF
 build_new incomplete
 if dpkg --force-confold -i /tmp/new.deb >/tmp/incomplete.log 2>&1; then echo 'missing legacy file was accepted' >&2; exit 1; fi
 grep -q 'absent from the Ragent package' /tmp/incomplete.log
-[ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' agentoc)" = 'ii ' ]
+[ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' ragent)" = 'ii ' ]
 [ "$(cat /etc/ragent-qa/config)" = user-custom ]
 build_new directory
 if dpkg --force-confold -i /tmp/new.deb >/tmp/directory.log 2>&1; then echo 'file-to-directory replacement was accepted' >&2; exit 1; fi
@@ -75,23 +75,23 @@ rm /tmp/independent-run
 touch /tmp/deny-upgrade
 if dpkg --force-confold -i /tmp/new.deb >/tmp/blocked.log 2>&1; then echo 'unsafe running task was accepted' >&2; exit 1; fi
 grep -q 'active Runs are not proven restart-safe' /tmp/blocked.log
-[ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' agentoc)" = 'ii ' ]
+[ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' ragent)" = 'ii ' ]
 rm /tmp/deny-upgrade
 # A migration-ready legacy package keeps independent Runs: use the actual
 # guarded prerm and verify the regular upgrade drain is selected.
-printf '%s' '${prerm}' | base64 -d > /var/lib/dpkg/info/agentoc.prerm
-printf '#!/bin/sh\nexit 0\n' > /var/lib/dpkg/info/agentoc.preinst
-chmod +x /var/lib/dpkg/info/agentoc.prerm /var/lib/dpkg/info/agentoc.preinst
+printf '%s' '${prerm}' | base64 -d > /var/lib/dpkg/info/ragent.prerm
+printf '#!/bin/sh\nexit 0\n' > /var/lib/dpkg/info/ragent.preinst
+chmod +x /var/lib/dpkg/info/ragent.prerm /var/lib/dpkg/info/ragent.preinst
 rm -f /tmp/preflight-calls
 touch /tmp/independent-run
 dpkg --force-confold -i /tmp/new.deb >/dev/null
 grep -q 'upgrade-prepare --json' /tmp/preflight-calls
 rm /tmp/independent-run
 [ "$(dpkg-query -W -f='${'${db:Status-Abbrev}'}' ragent)" = 'ii ' ]
-if [ "$(dpkg-query -W -f='${'${db:Status-Status}'}' agentoc 2>/dev/null || true)" = installed ]; then echo 'legacy package still installed' >&2; exit 1; fi
+if [ "$(dpkg-query -W -f='${'${db:Status-Status}'}' ragent 2>/dev/null || true)" = installed ]; then echo 'legacy package still installed' >&2; exit 1; fi
 [ "$(cat /etc/ragent-qa/config)" = user-custom ]
-[ "$(cat /var/lib/agentoc/config/owner-test)" = workspace-kept ]
-[ "$(readlink /lib/systemd/system/agentoc.service)" = ragent.service ]
+[ "$(cat /var/lib/ragent/config/owner-test)" = workspace-kept ]
+[ "$(readlink /lib/systemd/system/ragent.service)" = ragent.service ]
 `;
 const result = spawnSync('docker', ['run', '--rm', '-i', '--pull=never', '--network=none', 'ubuntu:24.04', 'sh', '-s'],
   { input: script, encoding: 'utf8', timeout: 60_000 });

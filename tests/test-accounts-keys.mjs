@@ -8,7 +8,7 @@ import { join } from 'path';
 import { pathToFileURL } from 'url';
 
 const root = process.cwd();
-const dir = mkdtempSync(join(tmpdir(), 'agentoc-accounts-keys-'));
+const dir = mkdtempSync(join(tmpdir(), 'ragent-accounts-keys-'));
 const { createJwksHandler, KEY_RETIRED_GRACE_MS, loadOrCreateSigningKeyRing, rotateSigningKey, saveSigningKeyRing, signAssertionFactory } =
   await import(pathToFileURL(join(root, 'accounts/keys.mjs')).href);
 

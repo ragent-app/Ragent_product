@@ -31,7 +31,7 @@ try {
     return {
       data,
       calls: window.__fetchCalls,
-      active: window.AgentoCTargetRuntime.getActiveTarget(),
+      active: window.RagentTargetRuntime.getActiveTarget(),
     };
   });
   assert.deepEqual(localRequestResult.data, { ok: true });
@@ -39,8 +39,8 @@ try {
   assert.equal(localRequestResult.active.status, 'online');
 
   const switchResult = await page.evaluate(async () => {
-    const store = window.AgentoCTargetStore;
-    const runtime = window.AgentoCTargetRuntime;
+    const store = window.RagentTargetStore;
+    const runtime = window.RagentTargetRuntime;
     store.replaceTargets([
       {
         targetId: runtime.getLocalTargetId(),
@@ -87,7 +87,7 @@ try {
   const remoteUnavailable = await page.evaluate(async () => {
     let error = null;
     try {
-      await window.AgentoCTargetRuntime.routeRequest({
+      await window.RagentTargetRuntime.routeRequest({
         url: '/api/sessions',
         options: {},
         localRequest: () => ({ accidentalLocalFallback: true }),
@@ -104,7 +104,7 @@ try {
 
   const neutralPath = await page.evaluate(async () => {
     let localCalls = 0;
-    const result = await window.AgentoCTargetRuntime.routeRequest({
+    const result = await window.RagentTargetRuntime.routeRequest({
       url: '/api/auth/me',
       options: {},
       localRequest: () => {
@@ -117,7 +117,7 @@ try {
   assert.deepEqual(neutralPath, { result: { local: true }, localCalls: 1 });
 
   const remoteJson = await page.evaluate(async () => {
-    const runtime = window.AgentoCTargetRuntime;
+    const runtime = window.RagentTargetRuntime;
     await runtime.refreshTargets({
       fetchImpl: async () => new Response(JSON.stringify({
         revision: 0,
@@ -131,7 +131,7 @@ try {
     window.fetch = async (url) => String(url) === '/api/target-runtime/request'
       ? new Response(JSON.stringify({ remote: true }), {
           status: 200,
-          headers: { 'content-type': 'application/json', 'x-agentoc-target-revision': '4' },
+          headers: { 'content-type': 'application/json', 'x-ragent-target-revision': '4' },
         })
       : new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'content-type': 'application/json' } });
     const data = await fetchJsonOrRedirect('/api/sessions', { method: 'GET', revalidate: false });
@@ -141,7 +141,7 @@ try {
   assert.equal(remoteJson.target.snapshotVersion, 4);
 
   const remoteError = await page.evaluate(async () => {
-    const runtime = window.AgentoCTargetRuntime;
+    const runtime = window.RagentTargetRuntime;
     runtime.registerAdapter('remote-a', {
       request: async () => new Response(JSON.stringify({ error: 'stale', code: 'TARGET_RUNTIME_REVISION_CONFLICT' }), {
         status: 409,
@@ -158,7 +158,7 @@ try {
   assert.deepEqual(remoteError, { code: 'TARGET_RUNTIME_REVISION_CONFLICT', status: 409 });
 
   const summaryEvents = await page.evaluate(async () => {
-    const runtime = window.AgentoCTargetRuntime;
+    const runtime = window.RagentTargetRuntime;
     const first = await runtime.readSummaryEvents('remote-a', {
       afterCursor: 0,
       fetchImpl: async () => new Response(JSON.stringify({

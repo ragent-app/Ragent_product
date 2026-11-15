@@ -46,7 +46,7 @@ func TestBrokerTargetFingerprintBindsEveryCollectedFact(t *testing.T) {
 	base := brokerTargetFingerprintInput{
 		ServiceName: firstBrokerTargetID, ServiceType: windows.SERVICE_WIN32_OWN_PROCESS,
 		StartType: windows.SERVICE_DEMAND_START, ErrorControl: windows.SERVICE_ERROR_IGNORE,
-		BinaryPathName:   `G:\Program Files\AgentoC\BrokerQA\AgentoC-Broker-QA-Target.exe`,
+		BinaryPathName:   `G:\Program Files\Ragent\BrokerQA\Ragent-Broker-QA-Target.exe`,
 		ServiceStartName: `NT AUTHORITY\LocalService`, BinarySHA256: stringsOf('a', 64),
 		ServiceSecuritySDDL: "service-sddl", BinarySecuritySDDL: "binary-sddl",
 	}
@@ -128,8 +128,8 @@ func TestBrokerTargetConfigAcceptsOnlyFixedServiceShape(t *testing.T) {
 }
 
 func TestBrokerSignedApprovalRestartsFixedLocalSCMService(t *testing.T) {
-	if os.Getenv("AGENTOC_BROKER_RUN_LOCAL_SCM_TARGET_TEST") != "1" {
-		t.Skip("set AGENTOC_BROKER_RUN_LOCAL_SCM_TARGET_TEST=1 in an elevated local Windows session")
+	if os.Getenv("RAGENT_BROKER_RUN_LOCAL_SCM_TARGET_TEST") != "1" {
+		t.Skip("set RAGENT_BROKER_RUN_LOCAL_SCM_TARGET_TEST=1 in an elevated local Windows session")
 	}
 	token := windows.GetCurrentProcessToken()
 	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
@@ -141,11 +141,11 @@ func TestBrokerSignedApprovalRestartsFixedLocalSCMService(t *testing.T) {
 		t.Fatalf("local SCM target test requires an elevated administrator token: member=%t error=%v", isAdmin, err)
 	}
 
-	root := filepath.Clean(os.Getenv("AGENTOC_BROKER_LOCAL_TARGET_ROOT"))
+	root := filepath.Clean(os.Getenv("RAGENT_BROKER_LOCAL_TARGET_ROOT"))
 	if root == "." || !filepath.IsAbs(root) || !strings.EqualFold(filepath.Base(root), "BrokerQA") ||
-		!strings.EqualFold(filepath.Base(filepath.Dir(root)), "AgentoC") ||
+		!strings.EqualFold(filepath.Base(filepath.Dir(root)), "Ragent") ||
 		!strings.EqualFold(filepath.Base(filepath.Dir(filepath.Dir(root))), "Program Files") {
-		t.Fatalf("refusing target root outside Program Files\\AgentoC\\BrokerQA: %q", root)
+		t.Fatalf("refusing target root outside Program Files\\Ragent\\BrokerQA: %q", root)
 	}
 	if _, err := os.Lstat(root); err == nil {
 		t.Fatalf("refusing pre-existing target root: %s", root)
@@ -270,7 +270,7 @@ func TestBrokerSignedApprovalRestartsFixedLocalSCMService(t *testing.T) {
 		StartType:        windows.SERVICE_DEMAND_START,
 		ErrorControl:     windows.SERVICE_ERROR_IGNORE,
 		ServiceStartName: `NT AUTHORITY\LocalService`,
-		DisplayName:      "AgentoC Broker QA Target",
+		DisplayName:      "Ragent Broker QA Target",
 	})
 	if err != nil {
 		t.Fatalf("register isolated LocalService QA target: %v", err)

@@ -239,7 +239,7 @@ func TestAutoInstallSigningBytesInteroperable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "AgentoC Windows auto install v1\x00" + `{"version":1,"keyId":"key-1","brokerInstallationId":"broker-1","policyGeneration":1,"requestId":"request-1","sessionId":"session-1","runId":"run-1","turnId":"turn-1","actionId":"action-1","nonce":"0123456789abcdefghijklmn","packageId":"Vendor.Application","packageVersion":"1.2.3","source":"winget","installScope":"machine","issuedMs":1000,"expiresMs":2000}`
+	want := "Ragent Windows auto install v1\x00" + `{"version":1,"keyId":"key-1","brokerInstallationId":"broker-1","policyGeneration":1,"requestId":"request-1","sessionId":"session-1","runId":"run-1","turnId":"turn-1","actionId":"action-1","nonce":"0123456789abcdefghijklmn","packageId":"Vendor.Application","packageVersion":"1.2.3","source":"winget","installScope":"machine","issuedMs":1000,"expiresMs":2000}`
 	if string(actual) != want {
 		t.Fatalf("unexpected signing bytes: %q", actual)
 	}
@@ -248,7 +248,7 @@ func TestAutoInstallSigningBytesInteroperable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = "AgentoC Windows auto install v1\x00" + `{"version":1,"keyId":"key-1","brokerInstallationId":"broker-1","policyGeneration":1,"requestId":"request-1","sessionId":"session-1","runId":"run-1","turnId":"turn-1","actionId":"action-1","nonce":"0123456789abcdefghijklmn","packageId":"Vendor.Application","packageVersion":"1.2.3","source":"winget","installScope":"machine","selectedInstaller":{"id":"Vendor.Application","version":"1.2.3","source":"winget","scope":"System","elevation":"ElevationRequired","type":"Msi","nestedType":"Unknown","architecture":"X64","locale":"en-US"},"issuedMs":1000,"expiresMs":2000}`
+	want = "Ragent Windows auto install v1\x00" + `{"version":1,"keyId":"key-1","brokerInstallationId":"broker-1","policyGeneration":1,"requestId":"request-1","sessionId":"session-1","runId":"run-1","turnId":"turn-1","actionId":"action-1","nonce":"0123456789abcdefghijklmn","packageId":"Vendor.Application","packageVersion":"1.2.3","source":"winget","installScope":"machine","selectedInstaller":{"id":"Vendor.Application","version":"1.2.3","source":"winget","scope":"System","elevation":"ElevationRequired","type":"Msi","nestedType":"Unknown","architecture":"X64","locale":"en-US"},"issuedMs":1000,"expiresMs":2000}`
 	if string(actual) != want {
 		t.Fatalf("unexpected selected signing bytes: %q", actual)
 	}

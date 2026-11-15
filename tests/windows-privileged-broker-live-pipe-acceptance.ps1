@@ -12,16 +12,16 @@ if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsI
 }
 
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$brokerService = 'AgentoC-PrivilegedBroker'
-$controlPlaneService = 'AgentoC-ControlPlane'
-$runnerService = 'AgentoC-RunnerSupervisor'
-$product = 'C:\Program Files\AgentoC'
+$brokerService = 'Ragent-PrivilegedBroker'
+$controlPlaneService = 'Ragent-ControlPlane'
+$runnerService = 'Ragent-RunnerSupervisor'
+$product = 'C:\Program Files\Ragent'
 $brokerRoot = Join-Path $product 'Broker'
-$brokerBinary = Join-Path $brokerRoot 'AgentoC.PrivilegedBroker.exe'
-$stateRoot = Join-Path $env:ProgramData 'AgentoC-PrivilegedBroker'
+$brokerBinary = Join-Path $brokerRoot 'Ragent.PrivilegedBroker.exe'
+$stateRoot = Join-Path $env:ProgramData 'Ragent-PrivilegedBroker'
 $statePath = Join-Path $stateRoot 'state.json'
-$probeBinary = Join-Path $brokerRoot 'AgentoC.BrokerPipeProbe.exe'
-$runnerProbeBinary = Join-Path $brokerRoot 'AgentoC.RunnerPipeProbe.exe'
+$probeBinary = Join-Path $brokerRoot 'Ragent.BrokerPipeProbe.exe'
+$runnerProbeBinary = Join-Path $brokerRoot 'Ragent.RunnerPipeProbe.exe'
 $requestId = 'qa-request-1'
 $reportPath = [IO.Path]::GetFullPath($LocalReportPath)
 if (Test-Path -LiteralPath $reportPath) { throw 'APB_LOCAL_PIPE_REPORT_EXISTS' }
@@ -64,7 +64,7 @@ function Assert-NoBroadWrite([string]$Path) {
 }
 
 function Send-BrokerHealth([hashtable]$Request) {
-	$pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'AgentoC.PrivilegedBroker.Health.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+	$pipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'Ragent.PrivilegedBroker.Health.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
 	try {
 		$pipe.Connect(5000)
 		$payload = [Text.Encoding]::UTF8.GetBytes(($Request | ConvertTo-Json -Compress -Depth 4))
@@ -121,7 +121,7 @@ try {
 	if ($existing -and ($existing.Value.status -cne 'denied' -or $existing.Value.code -cne 'BROKER_TARGET_NOT_CONFIGURED')) { throw 'APB_LIVE_PIPE_REQUEST_ID_CONFLICT' }
 	$report.requestAlreadyPersisted = [bool]$existing
 
-	$adminRequestPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'AgentoC.PrivilegedBroker.Request.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
+	$adminRequestPipe = [IO.Pipes.NamedPipeClientStream]::new('.', 'Ragent.PrivilegedBroker.Request.v2', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::None, [Security.Principal.TokenImpersonationLevel]::Impersonation)
 	try {
 		try { $adminRequestPipe.Connect(1500); throw 'APB_LIVE_PIPE_ADMIN_CONNECTED' }
 		catch [UnauthorizedAccessException] { }
@@ -136,7 +136,7 @@ try {
 	foreach ($path in @($probeBinary, $runnerProbeBinary)) { Assert-NoBroadWrite $path }
 
 	$probeArg = '"' + $probeBinary + '"'
-	& sc.exe create $controlPlaneService 'binPath=' $probeArg 'obj=' "NT SERVICE\$controlPlaneService" 'start=' 'demand' 'DisplayName=' 'AgentoC Broker live pipe QA' | Out-Null
+	& sc.exe create $controlPlaneService 'binPath=' $probeArg 'obj=' "NT SERVICE\$controlPlaneService" 'start=' 'demand' 'DisplayName=' 'Ragent Broker live pipe QA' | Out-Null
 	if ($LASTEXITCODE -ne 0) { throw 'APB_LIVE_PIPE_CONTROLPLANE_CREATE_FAILED' }
 	$probeRegistered = $true
 	& sc.exe sidtype $controlPlaneService unrestricted | Out-Null
@@ -157,7 +157,7 @@ try {
 	$report.checks += 'real-controlplane-service-sid-proposal-denied-and-audited-by-broker-scm'
 
 	$runnerArg = '"' + $runnerProbeBinary + '"'
-	& sc.exe create $runnerService 'binPath=' $runnerArg 'obj=' "NT SERVICE\$runnerService" 'start=' 'demand' 'DisplayName=' 'AgentoC Runner live pipe QA' | Out-Null
+	& sc.exe create $runnerService 'binPath=' $runnerArg 'obj=' "NT SERVICE\$runnerService" 'start=' 'demand' 'DisplayName=' 'Ragent Runner live pipe QA' | Out-Null
 	if ($LASTEXITCODE -ne 0) { throw 'APB_LIVE_PIPE_RUNNER_CREATE_FAILED' }
 	$runnerRegistered = $true
 	& sc.exe sidtype $runnerService unrestricted | Out-Null

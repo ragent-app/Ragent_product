@@ -5,12 +5,12 @@ ACTION="${1:-}"
 shift || true
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agentoc"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/ragent"
 
 if [[ "$(uname)" == "Darwin" ]]; then
   DEFAULT_LOG_DIR="$HOME/Library/Logs"
 else
-  DEFAULT_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agentoc/logs"
+  DEFAULT_LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/ragent/logs"
 fi
 
 PORT=""
@@ -37,13 +37,13 @@ Options:
   --name <name>    Optional label used for pid/log filenames
   --home <path>    HOME to use for the instance runtime
   --instance-root <path>
-                    Isolated AgentoC data root (uses <root>/config and <root>/memory)
+                    Isolated Ragent data root (uses <root>/config and <root>/memory)
   --config-dir <path>
-                    Explicit AgentoC config dir override for the instance runtime
+                    Explicit Ragent config dir override for the instance runtime
   --memory-dir <path>
-                    Explicit AgentoC memory dir override for the instance runtime
+                    Explicit Ragent memory dir override for the instance runtime
   --sync-from-home <path>
-                    Mirror ~/.config/agentoc, ~/.agentoc/memory, and ~/.codex/auth.json from source HOME before start
+                    Mirror ~/.config/ragent, ~/.ragent/memory, and ~/.codex/auth.json from source HOME before start
   --log <path>     Explicit log path override
   --node <path>    Explicit node binary override
   --secure-cookies <0|1>
@@ -51,16 +51,16 @@ Options:
 
 Examples:
   scripts/chat-instance.sh restart --port 7695 --name scratch
-  scripts/chat-instance.sh start --port 7692 --name staging --home ~/.agentoc/instances/staging-home --sync-from-home ~ --secure-cookies 0
-  scripts/chat-instance.sh start --port 7692 --name companion --instance-root ~/.agentoc/instances/companion --secure-cookies 1
-  scripts/chat-instance.sh sync --home ~/.agentoc/instances/staging-home --sync-from-home ~
-  scripts/chat-instance.sh sync --instance-root ~/.agentoc/instances/companion --sync-from-home ~
+  scripts/chat-instance.sh start --port 7692 --name staging --home ~/.ragent/instances/staging-home --sync-from-home ~ --secure-cookies 0
+  scripts/chat-instance.sh start --port 7692 --name companion --instance-root ~/.ragent/instances/companion --secure-cookies 1
+  scripts/chat-instance.sh sync --home ~/.ragent/instances/staging-home --sync-from-home ~
+  scripts/chat-instance.sh sync --instance-root ~/.ragent/instances/companion --sync-from-home ~
   scripts/chat-instance.sh status --port 7695
   scripts/chat-instance.sh logs --port 7695
 
 Notes:
   - This is for optional ad-hoc chat-server instances started manually on arbitrary ports.
-  - Production service management still uses launchd/systemd via `agentoc restart chat`.
+  - Production service management still uses launchd/systemd via `ragent restart chat`.
 EOF
 }
 
@@ -241,8 +241,8 @@ sync_instance_home() {
   resolve_instance_storage
 
   if [[ -n "$RESOLVED_INSTANCE_CONFIG_DIR" || -n "$RESOLVED_INSTANCE_MEMORY_DIR" ]]; then
-    source_config_dir="$(canonical_dir_if_exists "$source_home/.config/agentoc")"
-    source_memory_dir="$(canonical_dir_if_exists "$source_home/.agentoc/memory")"
+    source_config_dir="$(canonical_dir_if_exists "$source_home/.config/ragent")"
+    source_memory_dir="$(canonical_dir_if_exists "$source_home/.ragent/memory")"
 
     if [[ -n "$source_config_dir" && -n "$RESOLVED_INSTANCE_CONFIG_DIR" && "$source_config_dir" == "$RESOLVED_INSTANCE_CONFIG_DIR" ]]; then
       echo "refusing to sync config onto itself: $source_config_dir" >&2
@@ -254,10 +254,10 @@ sync_instance_home() {
     fi
 
     if [[ -n "$RESOLVED_INSTANCE_CONFIG_DIR" ]]; then
-      mirror_directory "$source_home/.config/agentoc" "$RESOLVED_INSTANCE_CONFIG_DIR"
+      mirror_directory "$source_home/.config/ragent" "$RESOLVED_INSTANCE_CONFIG_DIR"
     fi
     if [[ -n "$RESOLVED_INSTANCE_MEMORY_DIR" ]]; then
-      mirror_directory "$source_home/.agentoc/memory" "$RESOLVED_INSTANCE_MEMORY_DIR"
+      mirror_directory "$source_home/.ragent/memory" "$RESOLVED_INSTANCE_MEMORY_DIR"
     fi
     mirror_file "$source_home/.codex/auth.json" "$target_home/.codex/auth.json"
 
@@ -279,8 +279,8 @@ sync_instance_home() {
     exit 1
   fi
 
-  mirror_directory "$source_home/.config/agentoc" "$target_home/.config/agentoc"
-  mirror_directory "$source_home/.agentoc/memory" "$target_home/.agentoc/memory"
+  mirror_directory "$source_home/.config/ragent" "$target_home/.config/ragent"
+  mirror_directory "$source_home/.ragent/memory" "$target_home/.ragent/memory"
   mirror_file "$source_home/.codex/auth.json" "$target_home/.codex/auth.json"
 
   echo "synced data: $source_home -> $target_home"
@@ -357,13 +357,13 @@ start_instance() {
     TMPDIR="${TMPDIR:-/tmp}"
   )
   if [[ -n "$RESOLVED_INSTANCE_ROOT" ]]; then
-    env_args+=(AGENTOC_INSTANCE_ROOT="$RESOLVED_INSTANCE_ROOT")
+    env_args+=(RAGENT_INSTANCE_ROOT="$RESOLVED_INSTANCE_ROOT")
   fi
   if [[ -n "$RESOLVED_INSTANCE_CONFIG_DIR" ]]; then
-    env_args+=(AGENTOC_CONFIG_DIR="$RESOLVED_INSTANCE_CONFIG_DIR")
+    env_args+=(RAGENT_CONFIG_DIR="$RESOLVED_INSTANCE_CONFIG_DIR")
   fi
   if [[ -n "$RESOLVED_INSTANCE_MEMORY_DIR" ]]; then
-    env_args+=(AGENTOC_MEMORY_DIR="$RESOLVED_INSTANCE_MEMORY_DIR")
+    env_args+=(RAGENT_MEMORY_DIR="$RESOLVED_INSTANCE_MEMORY_DIR")
   fi
   if [[ -n "$SECURE_COOKIES_VALUE" ]]; then
     env_args+=(SECURE_COOKIES="$SECURE_COOKIES_VALUE")

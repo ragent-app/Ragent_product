@@ -7,7 +7,7 @@
 // unregistering a top layer unwinds its history entry. Falls back to a
 // silent no-op where history is unavailable (sandboxed WebViews); Esc
 // handlers in the layers keep working regardless.
-(function initAgentoCBackHandler() {
+(function initRagentBackHandler() {
   "use strict";
 
   let supported = false;
@@ -135,7 +135,7 @@
     window.addEventListener("popstate", onPopState);
   }
 
-  window.AgentoCBackHandler = {
+  window.RagentBackHandler = {
     push,
     pop,
     active,

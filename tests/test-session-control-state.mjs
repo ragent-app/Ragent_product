@@ -9,7 +9,7 @@ import {
 } from '../chat/session-control-state.mjs';
 
 const promptContext = {
-  scopeRouter: 'Matched scope router entry: agentoc',
+  scopeRouter: 'Matched scope router entry: ragent',
   relatedSessions: 'Related session: prompt-layer cleanup',
 };
 

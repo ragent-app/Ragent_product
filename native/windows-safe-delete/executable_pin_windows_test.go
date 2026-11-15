@@ -243,7 +243,7 @@ func TestPinnedExecutableRemainsLaunchable(t *testing.T) {
 	defer pin.Close()
 	marker := filepath.Join(t.TempDir(), "child.txt")
 	child := exec.Command(pin.Path(), "-test.run=^TestPinnedExecutableChild$")
-	child.Env = append(os.Environ(), "AGENTOC_PIN_TEST_MARKER="+marker)
+	child.Env = append(os.Environ(), "RAGENT_PIN_TEST_MARKER="+marker)
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("pinned image failed to launch: %v: %s", err, out)
 	}
@@ -253,7 +253,7 @@ func TestPinnedExecutableRemainsLaunchable(t *testing.T) {
 }
 
 func TestPinnedExecutableChild(t *testing.T) {
-	marker := os.Getenv("AGENTOC_PIN_TEST_MARKER")
+	marker := os.Getenv("RAGENT_PIN_TEST_MARKER")
 	if marker == "" {
 		t.Skip("child fixture")
 	}

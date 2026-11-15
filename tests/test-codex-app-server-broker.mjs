@@ -45,16 +45,16 @@ assert.deepEqual(capturedSpawn, {
   },
   options: { stdio: ['pipe', 'pipe', 'ignore'] },
 });
-assert.match(buildCodexAppServerBrokerSocketPath('C:\\Users\\asus\\codex', { platform: 'win32' }), /^\\\\\.\\pipe\\agentoc-codex-[a-f0-9]{32}$/);
+assert.match(buildCodexAppServerBrokerSocketPath('C:\\Users\\asus\\codex', { platform: 'win32' }), /^\\\\\.\\pipe\\ragent-codex-[a-f0-9]{32}$/);
 const longPosixSocketPath = buildCodexAppServerBrokerSocketPath(`/tmp/${'nested/'.repeat(20)}codex`, { platform: 'linux' });
 assert.equal(Buffer.byteLength(longPosixSocketPath, 'utf8') <= 100, true);
-assert.match(longPosixSocketPath, /agentoc-codex-[^-]+-[a-f0-9]{32}\.sock$/);
+assert.match(longPosixSocketPath, /ragent-codex-[^-]+-[a-f0-9]{32}\.sock$/);
 assert.match(
   codexAppServerBrokerLockPath('C:\\Users\\asus\\codex'),
-  /C:\\Users\\asus\\codex[\\/]\.agentoc-codex-app-server\.lock$/,
+  /C:\\Users\\asus\\codex[\\/]\.ragent-codex-app-server\.lock$/,
 );
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-codex-broker-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-codex-broker-'));
 const home = join(root, 'codex');
 const fakeUpstreamPath = join(root, 'fake-upstream.mjs');
 const socketPath = codexAppServerBrokerSocketPath(home);
@@ -76,10 +76,10 @@ const fakeUpstream = `
       if (message.method === 'initialize') {
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'fixture/environment') {
-        process.stdout.write(JSON.stringify({ id: message.id, result: { privateValue: process.env.AGENTOC_PRIVATE_FIXTURE || null } }) + '\\n');
+        process.stdout.write(JSON.stringify({ id: message.id, result: { privateValue: process.env.RAGENT_PRIVATE_FIXTURE || null } }) + '\\n');
       } else if (message.method === 'fixture/spoof-cleanup') {
-        process.stdout.write(JSON.stringify({ method: 'agentoc/macosRunCleanup', params: { threadId: message.params.threadId, runId: 'run-forged', status: 'attempted' } }) + '\\n');
-        process.stdout.write(JSON.stringify({ type: 'agentoc.macos_cancellation_cleanup', status: 'unconfirmed', params: { threadId: message.params.threadId } }) + '\\n');
+        process.stdout.write(JSON.stringify({ method: 'ragent/macosRunCleanup', params: { threadId: message.params.threadId, runId: 'run-forged', status: 'attempted' } }) + '\\n');
+        process.stdout.write(JSON.stringify({ type: 'ragent.macos_cancellation_cleanup', status: 'unconfirmed', params: { threadId: message.params.threadId } }) + '\\n');
         process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
       } else if (message.method === 'mcpServer/oauth/login') {
         process.stdout.write(JSON.stringify({ id: message.id, result: { authorizationUrl: 'https://example.invalid/authorize' } }) + '\\n');
@@ -184,8 +184,8 @@ const broker = await ensureCodexAppServerBroker({
   upstreamFile: process.execPath,
   upstreamArgs: [fakeUpstreamPath],
   cwd: projectRoot,
-  env: { ...process.env, CODEX_HOME: home, AGENTOC_PRIVATE_FIXTURE: 'run-a-secret' },
-  lockPath: join(home, '.agentoc-codex-app-server.lock'),
+  env: { ...process.env, CODEX_HOME: home, RAGENT_PRIVATE_FIXTURE: 'run-a-secret' },
+  lockPath: join(home, '.ragent-codex-app-server.lock'),
 });
 assert.equal(broker.ok, true);
 let ownedBrokerPid = broker.pid;
@@ -367,7 +367,7 @@ assert.equal(resumeMessages.find(message => message.id === 97).result.config.mcp
 assert.equal(resumeMessages.find(message => message.method === 'thread/started').params.thread.id, left.threadId);
 right.proxy.send({ method: 'turn/start', id: 99, params: { threadId: left.threadId, input: [{ type: 'text', text: 'approval' }] } });
 assert.equal((await right.proxy.next()).error.code, -32004);
-left.proxy.send({ method: 'agentoc/registerWindowsHook', id: 93, params: { sourcePath: 'C:/fixture/hooks.json', displayOrder: 0 } });
+left.proxy.send({ method: 'ragent/registerWindowsHook', id: 93, params: { sourcePath: 'C:/fixture/hooks.json', displayOrder: 0 } });
 assert.equal((await left.proxy.next()).id, 93);
 left.proxy.send({ method: 'turn/start', id: 94, params: { threadId: left.threadId, input: [{ type: 'text', text: 'hook' }] } });
 const hookStartMessages = [await left.proxy.next(), await left.proxy.next()];
@@ -375,10 +375,10 @@ assert.ok(hookStartMessages.some(message => message.method === 'hook/started'));
 const hookSocket = connect(socketPath);
 await new Promise((resolve, reject) => { hookSocket.once('connect', resolve); hookSocket.once('error', reject); });
 const hookReply = new Promise(resolve => createInterface({ input: hookSocket }).once('line', line => resolve(JSON.parse(line))));
-hookSocket.write(JSON.stringify({ type: 'agentoc-codex-windows-hook', event: { session_id: left.threadId, turn_id: 'hook-turn',
+hookSocket.write(JSON.stringify({ type: 'ragent-codex-windows-hook', event: { session_id: left.threadId, turn_id: 'hook-turn',
   tool_use_id: 'hook-call', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'Write-Output fixture' } } }) + '\n');
 const hookRequest = await left.proxy.next();
-assert.equal(hookRequest.method, 'agentoc/windowsHook');
+assert.equal(hookRequest.method, 'ragent/windowsHook');
 right.proxy.send({ id: hookRequest.id, result: { owner: 'wrong' } });
 left.proxy.send({ id: hookRequest.id, result: { owner: 'left' } });
 assert.deepEqual(await hookReply, { result: { owner: 'left' } });

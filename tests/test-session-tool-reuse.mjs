@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { generateSessionToolReuseSidecar } from '../lib/session-tool-reuse.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-tool-reuse-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-tool-reuse-'));
 const configDir = join(root, 'config');
 const historyDir = join(configDir, 'chat-history');
 const outputDir = join(root, 'reports');
@@ -35,13 +35,13 @@ function toolUse(timestamp, input) {
 }
 
 writeFileSync(join(historyDir, 's1.json'), JSON.stringify([
-  toolUse(march9, 'bash -lc "cat ~/.agentoc/memory/bootstrap.md && cat ~/code/agentoc/AGENTS.md"'),
-  toolUse(march9 + 1000, 'bash -lc "rg -n \"memory\" ~/.agentoc/skills/self-review.md"'),
+  toolUse(march9, 'bash -lc "cat ~/.ragent/memory/bootstrap.md && cat ~/code/ragent/AGENTS.md"'),
+  toolUse(march9 + 1000, 'bash -lc "rg -n \"memory\" ~/.ragent/skills/self-review.md"'),
 ], null, 2));
 
 writeFileSync(join(historyDir, 's2.json'), JSON.stringify([
-  toolUse(march9 + 3000, 'bash -lc "printf \"---BOOT---\"; cat ~/.agentoc/memory/bootstrap.md; printf \"---AGENTS---\"; cat ~/code/agentoc/AGENTS.md"'),
-  toolUse(march9 + 4000, 'bash -lc "rg -n \"skills\" ~/.agentoc/skills/self-review.md"'),
+  toolUse(march9 + 3000, 'bash -lc "printf \"---BOOT---\"; cat ~/.ragent/memory/bootstrap.md; printf \"---AGENTS---\"; cat ~/code/ragent/AGENTS.md"'),
+  toolUse(march9 + 4000, 'bash -lc "rg -n \"skills\" ~/.ragent/skills/self-review.md"'),
 ], null, 2));
 
 writeFileSync(join(historyDir, 's3.json'), JSON.stringify([
@@ -49,11 +49,11 @@ writeFileSync(join(historyDir, 's3.json'), JSON.stringify([
 ], null, 2));
 
 writeFileSync(join(historyDir, 'm1.json'), JSON.stringify([
-  toolUse(march9 + 6000, 'bash -lc "cat ~/.agentoc/memory/global.md"'),
+  toolUse(march9 + 6000, 'bash -lc "cat ~/.ragent/memory/global.md"'),
 ], null, 2));
 
 writeFileSync(join(historyDir, 'old.json'), JSON.stringify([
-  toolUse(march8, 'bash -lc "cat ~/.agentoc/memory/bootstrap.md"'),
+  toolUse(march8, 'bash -lc "cat ~/.ragent/memory/bootstrap.md"'),
 ], null, 2));
 
 try {

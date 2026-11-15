@@ -9,11 +9,11 @@ import { pathToFileURL } from 'url';
 import { HARNESS_VERSION_CONTRACTS } from '../lib/harness-version-catalog.mjs';
 
 const root = process.cwd();
-const dir = mkdtempSync(join(tmpdir(), 'agentoc-accounts-server-'));
+const dir = mkdtempSync(join(tmpdir(), 'ragent-accounts-server-'));
 const { createAccountsServer, createGoogleIdTokenVerifier } = await import(pathToFileURL(join(root, 'accounts/server.mjs')).href);
 const identityModule = await import(pathToFileURL(join(root, 'lib/instance-identity.mjs')).href);
-process.env.AGENTOC_CONFIG_DIR = join(dir, 'instance-config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = join(dir, 'instance-config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 const identity = await identityModule.loadOrCreateInstanceIdentity({ filePath: join(dir, 'instance-identity.json') });
 
 function request(port, method, path, body, headers = {}) {
@@ -66,10 +66,10 @@ try {
   const tx = 'otx_server_test';
   const returnUrl = `http://instance.test/api/auth/google/complete?tx=${tx}`;
   const issuedAt = new Date().toISOString();
-  const proof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt, audience: 'agentoc-owner-auth' });
+  const proof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt, audience: 'ragent-owner-auth' });
   const started = await request(port, 'POST', '/accounts/v1/owner-auth/transactions', {
     transactionId: tx, purpose: 'login', returnUrl, instance: identityModule.publicInstanceIdentity(identity),
-    issuedAt, audience: 'agentoc-owner-auth', signature: proof.signature,
+    issuedAt, audience: 'ragent-owner-auth', signature: proof.signature,
   });
   check('server 挂载事务创建 route', started.status === 201 && started.json?.authUrl);
   const pageUrl = new URL(started.json.authUrl.replace('http://127.0.0.1:0', `http://127.0.0.1:${port}`));
@@ -82,7 +82,7 @@ try {
   check('server 挂载手机 GIS 页面', phone.status === 200 && phoneCookies.length >= 2 && phone.text.includes('gsi/client'));
   const phoneCsrf = String(phoneCookies[1]).split(';')[0].split('=')[1];
   const phoneCredential = await request(port, 'POST', `/accounts/v1/owner-auth/transactions/${tx}/phone-google-credential`, { idToken: 'test-google-id-token' }, {
-    cookie: phoneCookies.map((value) => value.split(';')[0]).join('; '), origin: 'http://127.0.0.1:0', 'x-agentoc-csrf': phoneCsrf,
+    cookie: phoneCookies.map((value) => value.split(';')[0]).join('; '), origin: 'http://127.0.0.1:0', 'x-ragent-csrf': phoneCsrf,
   });
   check('server 完成手机 credential', phoneCredential.status === 200 && phoneCredential.json?.completeUrl);
   const desktopCookie = cookies.map((value) => value.split(';')[0]).join('; ');
@@ -91,7 +91,7 @@ try {
   check('server 只向桌面报告完成', status.status === 200 && status.json?.status === 'completed' && status.json?.grant === undefined);
   const grantMatch = /const deliveryGrant = "([^"]+)"/.exec(page.text);
   const redeemIssuedAt = new Date().toISOString();
-  const redeemProof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt: redeemIssuedAt, audience: 'agentoc-owner-auth' });
+  const redeemProof = identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt: redeemIssuedAt, audience: 'ragent-owner-auth' });
   const redeemed = await request(port, 'POST', `/accounts/v1/owner-auth/transactions/${tx}/redeem`, { ...redeemProof, instance: identityModule.publicInstanceIdentity(identity), issuedAt: redeemIssuedAt, grant: grantMatch?.[1] });
   check('server 签发一次性 EdDSA assertion', redeemed.status === 200 && redeemed.json?.assertion?.split('.').length === 3);
   const jwks = await request(port, 'GET', '/.well-known/jwks.json');
@@ -110,8 +110,8 @@ try {
   const badRedeem = await request(port, 'POST', `/accounts/v1/owner-auth/transactions/${tx}/redeem`, {
     transactionId: tx, purpose: 'login', returnUrl,
     instance: identityModule.publicInstanceIdentity(identity),
-    issuedAt: badRedeemIssuedAt, audience: 'agentoc-owner-auth',
-    signature: identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt: badRedeemIssuedAt, audience: 'agentoc-owner-auth' }).signature,
+    issuedAt: badRedeemIssuedAt, audience: 'ragent-owner-auth',
+    signature: identityModule.signInstanceProof(identity, { transactionId: tx, purpose: 'login', returnUrl, issuedAt: badRedeemIssuedAt, audience: 'ragent-owner-auth' }).signature,
     grant: 'wrong-grant',
   });
   check('错误 grant 兑换被拒并记录安全审计', badRedeem.status === 410 && byEvent('security.rejected').some((item) => item.code === 'owner_auth_grant_invalid'));
@@ -129,18 +129,18 @@ try {
     assert.deepEqual(limits, { getMax: 60, postMax: 60, authorityMax: 600 });
   });
   check('环境变量可覆盖限流上限', () => {
-    const limits = resolveAccountsRateLimits({ env: { AGENTOC_ACCOUNTS_RATE_LIMIT_GET_MAX: '90', AGENTOC_ACCOUNTS_RATE_LIMIT_POST_MAX: '30' } });
+    const limits = resolveAccountsRateLimits({ env: { RAGENT_ACCOUNTS_RATE_LIMIT_GET_MAX: '90', RAGENT_ACCOUNTS_RATE_LIMIT_POST_MAX: '30' } });
     assert.deepEqual(limits, { getMax: 90, postMax: 30, authorityMax: 600 });
   });
   check('显式 options 优先于环境变量，非法值回退默认', () => {
     assert.deepEqual(
-      resolveAccountsRateLimits({ options: { max: 120, postMax: 45 }, env: { AGENTOC_ACCOUNTS_RATE_LIMIT_POST_MAX: '30' } }),
+      resolveAccountsRateLimits({ options: { max: 120, postMax: 45 }, env: { RAGENT_ACCOUNTS_RATE_LIMIT_POST_MAX: '30' } }),
       { getMax: 120, postMax: 45, authorityMax: 600 },
     );
-    assert.deepEqual(resolveAccountsRateLimits({ env: { AGENTOC_ACCOUNTS_RATE_LIMIT_POST_MAX: '-5' } }), { getMax: 60, postMax: 60, authorityMax: 600 });
-    assert.deepEqual(resolveAccountsRateLimits({ env: { AGENTOC_ACCOUNTS_RATE_LIMIT_POST_MAX: '12.9' } }), { getMax: 60, postMax: 12, authorityMax: 600 });
-    assert.equal(resolveAccountsRateLimits({ env: { AGENTOC_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX: '900' } }).authorityMax, 900);
-    assert.equal(resolveAccountsRateLimits({ options: { authorityMax: 12 }, env: { AGENTOC_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX: '900' } }).authorityMax, 12);
+    assert.deepEqual(resolveAccountsRateLimits({ env: { RAGENT_ACCOUNTS_RATE_LIMIT_POST_MAX: '-5' } }), { getMax: 60, postMax: 60, authorityMax: 600 });
+    assert.deepEqual(resolveAccountsRateLimits({ env: { RAGENT_ACCOUNTS_RATE_LIMIT_POST_MAX: '12.9' } }), { getMax: 60, postMax: 12, authorityMax: 600 });
+    assert.equal(resolveAccountsRateLimits({ env: { RAGENT_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX: '900' } }).authorityMax, 900);
+    assert.equal(resolveAccountsRateLimits({ options: { authorityMax: 12 }, env: { RAGENT_ACCOUNTS_RATE_LIMIT_AUTHORITY_MAX: '900' } }).authorityMax, 12);
   });
   console.log(`test-accounts-rate-limits: ok`);
 }

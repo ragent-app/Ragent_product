@@ -10,7 +10,7 @@ import { createSerialTaskQueue, writeJsonAtomic } from './fs-utils.mjs';
 import { defaultProjectIndex } from './project-index.mjs';
 import { createProject, listProjectRecords } from './projects.mjs';
 
-const MARKER_FILE = '.agentoc-intake.json';
+const MARKER_FILE = '.ragent-intake.json';
 const INITIAL_FILE = 'INTAKE.md';
 
 function text(value, max = 0) {

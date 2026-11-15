@@ -158,7 +158,7 @@ func autoInstallSigningBytes(grant autoInstallGrant) ([]byte, error) {
 	if err != nil {
 		return nil, errAutoInstallGrant
 	}
-	return append([]byte("AgentoC Windows auto install v1\x00"), encoded...), nil
+	return append([]byte("Ragent Windows auto install v1\x00"), encoded...), nil
 }
 
 func verifyAutoInstallGrant(grant autoInstallGrant, signature string, trustedKey ed25519.PublicKey, now time.Time) error {

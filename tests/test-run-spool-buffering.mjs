@@ -4,17 +4,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-spool-buffer-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-spool-buffer-'));
 const previousEnv = {
   HOME: process.env.HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_SPOOL_BUFFER_DELAY_MS: process.env.AGENTOC_SPOOL_BUFFER_DELAY_MS,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_SPOOL_BUFFER_DELAY_MS: process.env.RAGENT_SPOOL_BUFFER_DELAY_MS,
 };
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
 // Keep the timer from firing while the test checks that buffered writes are
 // not synchronously persisted; the explicit flush is the terminal equivalent.
-process.env.AGENTOC_SPOOL_BUFFER_DELAY_MS = '60000';
+process.env.RAGENT_SPOOL_BUFFER_DELAY_MS = '60000';
 
 try {
   const {

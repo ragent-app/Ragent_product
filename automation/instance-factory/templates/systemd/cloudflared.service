@@ -1,6 +1,6 @@
 [Unit]
 Description=Ragent Cloudflare tunnel
-After=network-online.target agentoc.service
+After=network-online.target ragent.service
 Wants=network-online.target
 
 [Service]

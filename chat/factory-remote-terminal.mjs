@@ -14,7 +14,7 @@ export function verifyRemoteTerminalReceipt(db,item,binding,sourceInstanceId) {
         || receipt.sourceFactoryBindingId!==binding.id||receipt.contractRevision!==item.contract_revision||receipt.executionEpoch!==item.execution_epoch
         || binding.work_item_id!==item.id||binding.contract_revision!==item.contract_revision||binding.execution_epoch!==item.execution_epoch||binding.binding_generation!==item.binding_generation
         || saved.canonical.sourceFactoryBindingId!==binding.id || !target.workItemId) return null;
-    const message=`agentoc-remote-receipt-v1:${sha(JSON.stringify({targetInstanceId:signed.targetInstanceId,receipt}))}`;
+    const message=`ragent-remote-receipt-v1:${sha(JSON.stringify({targetInstanceId:signed.targetInstanceId,receipt}))}`;
     if(!verify(null,Buffer.from(message),createPublicKey(saved.binding.targetPublicKey),Buffer.from(signed.signature,'base64url'))) return null;
     if(!execution||!target.attemptId||!target.runId||execution.attemptRunId!==target.runId
         || !['completed','failed','cancelled'].includes(execution.runState)||!['succeeded','failed','cancelled'].includes(execution.attemptState)

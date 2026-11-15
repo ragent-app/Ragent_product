@@ -207,10 +207,10 @@ function createHarness() {
           addEventListener() {},
         };
       },
-      agentocResolveProductPath(path) {
+      ragentResolveProductPath(path) {
         return path;
       },
-      AgentoCLayout: {
+      RagentLayout: {
         syncNow() {
           return { ...layoutState };
         },

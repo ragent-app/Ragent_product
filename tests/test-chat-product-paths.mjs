@@ -40,10 +40,10 @@ function createContext({ href, pathname, baseHref = '' }) {
 function loadHelpers(context) {
   vm.runInNewContext(source, context, { filename: 'static/chat/product-paths.js' });
   return {
-    getBasePath: context.agentocGetProductBasePath,
-    getBaseUrl: context.agentocGetProductBaseUrl,
-    resolvePath: context.agentocResolveProductPath,
-    resolveUrl: context.agentocResolveProductUrl,
+    getBasePath: context.ragentGetProductBasePath,
+    getBaseUrl: context.ragentGetProductBaseUrl,
+    resolvePath: context.ragentResolveProductPath,
+    resolveUrl: context.ragentResolveProductUrl,
   };
 }
 

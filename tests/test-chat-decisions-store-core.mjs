@@ -19,12 +19,12 @@ function loadContext(relPath) {
 }
 
 const coreContext = loadContext('static/chat/core/decisions-store.js');
-const core = coreContext.AgentoCDecisionsCore;
-assert.ok(core, 'core/decisions-store.js should attach AgentoCDecisionsCore');
+const core = coreContext.RagentDecisionsCore;
+assert.ok(core, 'core/decisions-store.js should attach RagentDecisionsCore');
 
 const legacyContext = loadContext('static/chat/decisions-store.js');
-const legacy = legacyContext.AgentoCDecisions;
-assert.ok(legacy, 'decisions-store.js should attach AgentoCDecisions');
+const legacy = legacyContext.RagentDecisions;
+assert.ok(legacy, 'decisions-store.js should attach RagentDecisions');
 
 // -- direct contract assertions ---------------------------------------------
 assert.equal(Object.isFrozen(core), true, 'core API should be frozen');

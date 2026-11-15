@@ -120,7 +120,7 @@ export async function startOrchestrationReconciler(options = {}) {
   if (timer) return null;
   const report = await reconcileOrchestrationLedger(options);
   const intervalMs = positiveInteger(
-    options.intervalMs ?? process.env.AGENTOC_ORCHESTRATION_RECONCILE_INTERVAL_MS,
+    options.intervalMs ?? process.env.RAGENT_ORCHESTRATION_RECONCILE_INTERVAL_MS,
     DEFAULT_INTERVAL_MS,
     60 * 60 * 1000,
   );

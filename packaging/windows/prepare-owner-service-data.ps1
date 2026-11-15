@@ -63,10 +63,10 @@ function Get-OwnerDataAclSddl($Acl,[Security.AccessControl.AccessControlSections
   return ($Acl.GetSecurityDescriptorSddlForm($Sections) -creplace 'D:PAI(?=\()','D:P')
 }
 function Initialize-OwnerDataDirectoryType {
-  if('AgentoCOwnerDataDirectory' -as [type]){return}
+  if('RagentOwnerDataDirectory' -as [type]){return}
   Add-Type -TypeDefinition @'
 using System;using System.Runtime.InteropServices;using System.Security.AccessControl;
-public static class AgentoCOwnerDataDirectory {
+public static class RagentOwnerDataDirectory {
  [StructLayout(LayoutKind.Sequential)] struct Attributes {public int length;public IntPtr descriptor;[MarshalAs(UnmanagedType.Bool)]public bool inherit;}
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool CreateDirectory(string path,ref Attributes attributes);
  public static void Create(string path,string sddl) {
@@ -88,7 +88,7 @@ function Invoke-OwnerDataPreparation([switch]$Commit,[string]$OwnerSid=''){
     foreach($marker in @('owner-services.prepare-lock','owner-data.prepare-lock')){if(Test-OwnerServicePreparationPresence (Join-Path $product $marker)){throw 'ODP_PREPARATION_INCOMPLETE'}}
     Open-OwnerServicePreparationInputs $pins
     for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){
-      $pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins
+      $pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins
     }
     if(-not $Commit){return @{ok=$true;readOnly=$true;dataPrepared=$false;servicesActivated=$false;migrationReady=$false;ownerSidRequired=$true}}
     if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'ODP_ADMIN_REQUIRED'}
@@ -101,8 +101,8 @@ function Invoke-OwnerDataPreparation([switch]$Commit,[string]$OwnerSid=''){
     foreach($row in $layout){
       $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot}
       $acl=New-OwnerDataAcl $row.grants $row.traverseOnly
-      [AgentoCOwnerDataDirectory]::Create($path,$acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]'Owner,Access'))
-      $pins.Add([AgentoCOwnerFilePin]::Directory($path))
+      [RagentOwnerDataDirectory]::Create($path,$acl.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]'Owner,Access'))
+      $pins.Add([RagentOwnerFilePin]::Directory($path))
       $actual=[IO.Directory]::GetAccessControl($path)
       if(-not $actual.AreAccessRulesProtected -or $actual.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or
         (Get-OwnerDataAclSddl $actual ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access))){throw 'ODP_ACL_CONFIRMATION_FAILED'}

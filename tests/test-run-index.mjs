@@ -7,11 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-run-index-'));
-process.env.AGENTOC_CONFIG_DIR = join(configDir, 'config');
-process.env.AGENTOC_INSTANCE_ROOT = configDir;
-process.env.AGENTOC_RUN_SPOOL_DIR = join(configDir, 'chat-runs');
-process.env.AGENTOC_MEMORY_DIR = join(configDir, 'memory');
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-run-index-'));
+process.env.RAGENT_CONFIG_DIR = join(configDir, 'config');
+process.env.RAGENT_INSTANCE_ROOT = configDir;
+process.env.RAGENT_RUN_SPOOL_DIR = join(configDir, 'chat-runs');
+process.env.RAGENT_MEMORY_DIR = join(configDir, 'memory');
 
 const runs = await import(pathToFileURL(join(repoRoot, 'chat', 'runs.mjs')).href);
 const {
@@ -95,7 +95,7 @@ try {
   assert.equal(existsSync(runStatusPath(first.id)), false);
 
   // Legacy upgrade path: old installations have run directories but no index.
-  const legacyConfigDir = mkdtempSync(join(tmpdir(), 'agentoc-run-index-legacy-'));
+  const legacyConfigDir = mkdtempSync(join(tmpdir(), 'ragent-run-index-legacy-'));
   const legacyRunDir = join(legacyConfigDir, 'chat-runs', 'run-legacy');
   mkdirSync(legacyRunDir, { recursive: true });
   writeFileSync(join(legacyRunDir, 'status.json'), JSON.stringify({
@@ -109,8 +109,8 @@ try {
     if (ids.length !== 1 || ids[0] !== 'run-legacy') process.exit(2);
     process.stdout.write('legacy-rebuild-hit\\n');
   `], {
-    env: { ...process.env, AGENTOC_CONFIG_DIR: join(legacyConfigDir, 'config'), AGENTOC_INSTANCE_ROOT: legacyConfigDir,
-      AGENTOC_RUN_SPOOL_DIR: join(legacyConfigDir, 'chat-runs'), AGENTOC_MEMORY_DIR: join(legacyConfigDir, 'memory') },
+    env: { ...process.env, RAGENT_CONFIG_DIR: join(legacyConfigDir, 'config'), RAGENT_INSTANCE_ROOT: legacyConfigDir,
+      RAGENT_RUN_SPOOL_DIR: join(legacyConfigDir, 'chat-runs'), RAGENT_MEMORY_DIR: join(legacyConfigDir, 'memory') },
     encoding: 'utf8',
   });
   assert.equal(legacyProbe.status, 0, `legacy index rebuild: ${legacyProbe.stderr}`);
@@ -121,7 +121,7 @@ try {
   // Long-lived installs compact the append-only log once its configured
   // threshold is reached. Use a one-record threshold here so the probe also
   // verifies the cross-process lock path without needing thousands of Runs.
-  const compactConfigDir = mkdtempSync(join(tmpdir(), 'agentoc-run-index-compact-'));
+  const compactConfigDir = mkdtempSync(join(tmpdir(), 'ragent-run-index-compact-'));
   const compactProbe = spawnSync(process.execPath, ['--input-type=module', '--eval', `
     import { readFileSync } from 'node:fs';
     const runs = await import(${JSON.stringify(pathToFileURL(join(repoRoot, 'chat', 'runs.mjs')).href)});
@@ -136,12 +136,12 @@ try {
   `], {
     env: {
       ...process.env,
-      AGENTOC_CONFIG_DIR: join(compactConfigDir, 'config'),
-      AGENTOC_INSTANCE_ROOT: compactConfigDir,
-      AGENTOC_RUN_SPOOL_DIR: join(compactConfigDir, 'chat-runs'),
-      AGENTOC_MEMORY_DIR: join(compactConfigDir, 'memory'),
-      AGENTOC_RUN_INDEX_COMPACT_BYTES: '1',
-      AGENTOC_RUN_INDEX_COMPACT_RECORDS: '1',
+      RAGENT_CONFIG_DIR: join(compactConfigDir, 'config'),
+      RAGENT_INSTANCE_ROOT: compactConfigDir,
+      RAGENT_RUN_SPOOL_DIR: join(compactConfigDir, 'chat-runs'),
+      RAGENT_MEMORY_DIR: join(compactConfigDir, 'memory'),
+      RAGENT_RUN_INDEX_COMPACT_BYTES: '1',
+      RAGENT_RUN_INDEX_COMPACT_RECORDS: '1',
     },
     encoding: 'utf8',
   });

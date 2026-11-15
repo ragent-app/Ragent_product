@@ -19,7 +19,7 @@ import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.m
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 import { prepareNativeRunProviderHome } from '../lib/provider-runtime/run-provider-prepare.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-provider-mgmt-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-provider-mgmt-'));
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 

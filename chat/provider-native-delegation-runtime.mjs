@@ -86,7 +86,7 @@ function readRawFrame(record) {
 
 function readCanonicalEvent(record) {
   const payload = object(record?.json);
-  if (payload?.type !== 'agentoc.delegation_event') return null;
+  if (payload?.type !== 'ragent.delegation_event') return null;
   return object(payload.event);
 }
 
@@ -564,7 +564,7 @@ export function canonicalDelegationSpoolRecord(event) {
   return {
     stream: 'stdout',
     json: {
-      type: 'agentoc.delegation_event',
+      type: 'ragent.delegation_event',
       schemaVersion: PROVIDER_NATIVE_DELEGATION_RUNTIME_SCHEMA_VERSION,
       event: clone(event),
     },

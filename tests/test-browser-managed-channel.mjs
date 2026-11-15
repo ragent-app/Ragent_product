@@ -28,7 +28,7 @@ import { collectBrowserArtifactFilesFromRun } from '../chat/session-result-files
 import { handleBrowserInternalRoutes } from '../chat/router-browser-internal-routes.mjs';
 
 const repoRoot = join(import.meta.dirname, '..');
-const browserMcpPath = join(repoRoot, 'scripts', 'agentoc-browser-mcp-server.mjs');
+const browserMcpPath = join(repoRoot, 'scripts', 'ragent-browser-mcp-server.mjs');
 
 function listen(server) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server.address().port)));
@@ -172,15 +172,15 @@ async function testBrowserMcp() {
   const child = spawn(process.execPath, [browserMcpPath], {
     env: {
       ...process.env,
-      AGENTOC_BROWSER_MCP_ENABLED: '1',
-      AGENTOC_BROWSER_TOKEN: 'browser-fixture-token',
-      AGENTOC_BROWSER_CONFIRMATION_ENDPOINT: `http://127.0.0.1:${approvalPort}/confirmations`,
-      AGENTOC_BROWSER_SESSION_ID: 'session-browser-fixture',
-      AGENTOC_BROWSER_RUN_ID: 'run-browser-fixture',
-      AGENTOC_BROWSER_TURN_ID: 'turn-browser-fixture',
-      AGENTOC_BROWSER_PROFILE_DIR: join(tempRoot, 'profile'),
-      AGENTOC_BROWSER_ARTIFACT_DIR: join(tempRoot, 'artifacts'),
-      AGENTOC_BROWSER_HEADLESS: '1',
+      RAGENT_BROWSER_MCP_ENABLED: '1',
+      RAGENT_BROWSER_TOKEN: 'browser-fixture-token',
+      RAGENT_BROWSER_CONFIRMATION_ENDPOINT: `http://127.0.0.1:${approvalPort}/confirmations`,
+      RAGENT_BROWSER_SESSION_ID: 'session-browser-fixture',
+      RAGENT_BROWSER_RUN_ID: 'run-browser-fixture',
+      RAGENT_BROWSER_TURN_ID: 'turn-browser-fixture',
+      RAGENT_BROWSER_PROFILE_DIR: join(tempRoot, 'profile'),
+      RAGENT_BROWSER_ARTIFACT_DIR: join(tempRoot, 'artifacts'),
+      RAGENT_BROWSER_HEADLESS: '1',
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -201,7 +201,7 @@ async function testBrowserMcp() {
       name: 'ragent_browser_snapshot', arguments: {},
     });
     assert.match(snapshot.result.content[0].text, /Browser fixture/);
-    const legacySnapshot = await request(40, 'tools/call', { name: 'agentoc_browser_snapshot', arguments: {} });
+    const legacySnapshot = await request(40, 'tools/call', { name: 'ragent_browser_snapshot', arguments: {} });
     assert.match(legacySnapshot.result.content[0].text, /Browser fixture/);
     const filled = await request(5, 'tools/call', {
       name: 'ragent_browser_fill',
@@ -269,10 +269,10 @@ async function testBrowserRoutes() {
     },
   };
   const headers = {
-    'x-agentoc-browser-token': token,
-    'x-agentoc-browser-session-id': base.sessionId,
-    'x-agentoc-browser-run-id': base.id,
-    'x-agentoc-browser-turn-id': 'turn-route-fixture',
+    'x-ragent-browser-token': token,
+    'x-ragent-browser-session-id': base.sessionId,
+    'x-ragent-browser-run-id': base.id,
+    'x-ragent-browser-turn-id': 'turn-route-fixture',
   };
   const confirmations = [];
   const responses = [];
@@ -321,9 +321,9 @@ async function testBrowserRoutes() {
     pathname: '/api/internal/browser/confirmations/browser_route_1234',
     writeJson: (res, status, payload) => statusResponses.push({ status, payload }),
     readRuntimeApprovalEvents: async () => [{
-      type: 'approval_request', source: 'agentoc-confirmation', approvalId: 'browser_route_1234', runId: base.id,
+      type: 'approval_request', source: 'ragent-confirmation', approvalId: 'browser_route_1234', runId: base.id,
     }, {
-      type: 'approval_response', source: 'agentoc-confirmation', approvalId: 'browser_route_1234', runId: base.id, decision: 'approve', status: 'approved',
+      type: 'approval_response', source: 'ragent-confirmation', approvalId: 'browser_route_1234', runId: base.id, decision: 'approve', status: 'approved',
     }],
   });
   assert.equal(statusResponses.at(-1).payload.state, 'approved', JSON.stringify(statusResponses));

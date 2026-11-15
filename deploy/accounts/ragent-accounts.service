@@ -5,14 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=agentoc-accounts
-Group=agentoc-accounts
-RuntimeDirectory=agentoc-accounts
+User=ragent-accounts
+Group=ragent-accounts
+RuntimeDirectory=ragent-accounts
 # Accounts has its own versioned release and runtime. It must not execute from
-# the local-control-plane Deb tree under /opt/agentoc.
-ExecStart=/opt/agentoc-accounts/current/runtime/node /opt/agentoc-accounts/current/app/accounts/server.mjs
-EnvironmentFile=/etc/agentoc/accounts.env
-WorkingDirectory=/opt/agentoc-accounts/current/app
+# the local-control-plane Deb tree under /opt/ragent.
+ExecStart=/opt/ragent-accounts/current/runtime/node /opt/ragent-accounts/current/app/accounts/server.mjs
+EnvironmentFile=/etc/ragent/accounts.env
+WorkingDirectory=/opt/ragent-accounts/current/app
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=65536
@@ -22,7 +22,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/agentoc/accounts
+ReadWritePaths=/var/lib/ragent/accounts
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
@@ -33,5 +33,3 @@ SystemCallArchitectures=native
 
 [Install]
 WantedBy=multi-user.target
-# Transitional alias for deployments and integrations still using the former unit.
-Alias=agentoc-accounts.service

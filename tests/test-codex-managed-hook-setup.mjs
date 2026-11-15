@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createCodexManagedHookSetup } from '../chat/codex-managed-hook-setup.mjs';
 import { consumeCodexSharedHookRegistration, handleCodexAppServerInitializeResponse } from '../chat/runner-sidecar.mjs';
 
-const configPath = 'D:\\agentoc\\run\\config.toml', cwd = 'E:\\project';
-const command = "& 'D:\\node.exe' 'D:\\agentoc\\hook.mjs'";
+const configPath = 'D:\\ragent\\run\\config.toml', cwd = 'E:\\project';
+const command = "& 'D:\\node.exe' 'D:\\ragent\\hook.mjs'";
 const hook = { key: `${configPath}:pre_tool_use:0:0`, source: 'user', sourcePath: configPath, isManaged: false, enabled: true,
   eventName: 'preToolUse', handlerType: 'command', matcher: '^Bash$', command, currentHash: 'sha256:' + 'a'.repeat(64), trustStatus: 'untrusted' };
 const result = value => ({ data: [{ cwd, hooks: [value] }] });
@@ -73,7 +73,7 @@ for (const bad of [{ ...hook, sourcePath: 'D:\\other\\config.toml' }, { ...hook,
   state.codexManagedHookSetup.consume({ id: 1000, result: result(sharedHook) });
   state.codexManagedHookSetup.consume({ id: 1001, result: {} });
   state.codexManagedHookSetup.consume({ id: 1002, result: result({ ...sharedHook, trustStatus: 'trusted' }) });
-  assert.equal(messages.at(-1).method, 'agentoc/registerWindowsHook');
+  assert.equal(messages.at(-1).method, 'ragent/registerWindowsHook');
   assert.deepEqual(messages.at(-1).params, { sourcePath, displayOrder: 2 });
   assert.ok(!messages.some(message => message.method === 'thread/start'));
   assert.equal(consumeCodexSharedHookRegistration(state, { id: 1003, result: {} }), true);

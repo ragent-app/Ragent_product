@@ -10,7 +10,7 @@ import { createRunnerWorkspaceCleanupSweep, grantRunnerWorkspaceAccess, revokeRu
 const exec = promisify(execFile);
 test('real ACL cleanup retains its group on failure and retries safely',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-    const root = await mkdtemp('/srv/agentoc-acl-cleanup-test-');
+    const root = await mkdtemp('/srv/ragent-acl-cleanup-test-');
     const workspace = `${root}/workspace`, accessRoot = `${root}/state`;
     const runId = `run_aclqa_${randomBytes(8).toString('hex')}`, group = runnerAccessGroupForRun(runId);
     let granted = false, cleaned = false;
@@ -46,7 +46,7 @@ test('real ACL cleanup retains its group on failure and retries safely',
 
 test('legacy records migrate safely and a prior boot is recovered',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-    const root = await mkdtemp('/srv/agentoc-acl-migration-test-');
+    const root = await mkdtemp('/srv/ragent-acl-migration-test-');
     const workspace = `${root}/workspace`, legacyRoot = `${root}/legacy`, accessRoot = `${root}/persistent`;
     const runId = `run_aclboot_${randomBytes(8).toString('hex')}`, group = runnerAccessGroupForRun(runId);
     const oldBoot = '11111111-1111-4111-8111-111111111111';

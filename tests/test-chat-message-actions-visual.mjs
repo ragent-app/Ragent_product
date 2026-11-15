@@ -11,8 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || join(tmpdir(), `agentoc-message-actions-${Date.now()}`);
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || join(tmpdir(), `ragent-message-actions-${Date.now()}`);
 mkdirSync(outputDir, { recursive: true });
 
 const styles = [

@@ -2,12 +2,12 @@
 // the actual CLI, HTTP request, product auth and SQLite revoke remain real.
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
-assert.ok(process.env.AGENTOC_TEST_INSTANCE_ID);
+assert.ok(process.env.RAGENT_TEST_INSTANCE_ID);
 const origin=process.env.QA_CLI_HTTP_ORIGIN,token=process.env.QA_CLI_SESSION_TOKEN,mode=process.env.QA_CLI_MODE;
 delete process.env.QA_CLI_HTTP_ORIGIN;delete process.env.QA_CLI_SESSION_TOKEN;delete process.env.QA_CLI_MODE;
 assert.equal(new URL(origin).hostname,'127.0.0.1');assert.ok(![7690,7699].includes(Number(new URL(origin).port)));assert.match(token,/^[a-f0-9]{64}$/);
 if(process.platform!=='win32')Object.defineProperty(process,'platform',{value:'win32'});
-const bridge=new URL('../../lib/windows-cli-owner-auth.mjs',import.meta.url).href,client=new URL('../../lib/agentoc-http-client.mjs',import.meta.url).href;
+const bridge=new URL('../../lib/windows-cli-owner-auth.mjs',import.meta.url).href,client=new URL('../../lib/ragent-http-client.mjs',import.meta.url).href;
 globalThis.__cliProductIssue=async options=>{assert.deepEqual(Object.keys(options),['signal']);if(mode==='refuse')throw Object.assign(Error('OBD_SYNTHETIC_REFUSAL'),{code:'OBD_SYNTHETIC_REFUSAL'});return {baseUrl:'http://127.0.0.1:7690',sessionToken:token};};
 const sources={
   'qa:product-issuer':`export async function requestInstalledOwnerActivation(){} export const requestInstalledOwnerBootstrap=globalThis.__cliProductIssue;`,

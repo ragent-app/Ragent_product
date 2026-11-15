@@ -58,8 +58,8 @@ function request(port, path, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-static-route-'));
-  const configDir = join(home, '.agentoc', 'config');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-static-route-'));
+  const configDir = join(home, '.ragent', 'config');
   mkdirSync(configDir, { recursive: true });
 
   writeFileSync(
@@ -82,12 +82,12 @@ async function startServer({ home, port }) {
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
-      ...buildChildEnvironment({id:`static-route-${process.pid}`, instanceDir:join(home,'.agentoc'),
-        configDir:join(home,'.agentoc','config'), memoryDir:join(home,'.agentoc','memory'),
-        workRootDir:join(home,'.agentoc','workspace'), spoolDir:join(home,'.agentoc','data','chat-runs'),
-        providerHomesDir:join(home,'.agentoc','provider-homes'), port}, process.env),
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-static-routing',
-      AGENTOC_WINDOWS_SERVICE_MODE: '0',
+      ...buildChildEnvironment({id:`static-route-${process.pid}`, instanceDir:join(home,'.ragent'),
+        configDir:join(home,'.ragent','config'), memoryDir:join(home,'.ragent','memory'),
+        workRootDir:join(home,'.ragent','workspace'), spoolDir:join(home,'.ragent','data','chat-runs'),
+        providerHomesDir:join(home,'.ragent','provider-homes'), port}, process.env),
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-static-routing',
+      RAGENT_WINDOWS_SERVICE_MODE: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -122,7 +122,7 @@ async function main() {
   const port = randomPort();
   const probeName = `__static_probe_${Date.now().toString(36)}.js`;
   const probePath = join(repoRoot, 'static', 'chat', probeName);
-  writeFileSync(probePath, 'window.__AGENTOC_STATIC_PROBE__ = true;\n', 'utf8');
+  writeFileSync(probePath, 'window.__RAGENT_STATIC_PROBE__ = true;\n', 'utf8');
 
   let server;
   try {
@@ -144,7 +144,7 @@ async function main() {
       'static assets should keep safe revalidation caching',
     );
     assert.ok(probe.headers.etag, 'new static asset should expose an ETag');
-    assert.match(probe.text, /__AGENTOC_STATIC_PROBE__/);
+    assert.match(probe.text, /__RAGENT_STATIC_PROBE__/);
 
     const versionedProbe = await request(port, `/chat/${probeName}?v=test-build`);
     assert.equal(versionedProbe.status, 200, 'versioned static asset should load');
@@ -176,7 +176,7 @@ async function main() {
     rmSync(probePath, { force: true });
     const resolvedHome = realpathSync(home);
     const relativeHome = relative(resolve(tmpdir()), resolvedHome);
-    if (!relativeHome || relativeHome.startsWith('..') || isAbsolute(relativeHome) || !basename(resolvedHome).startsWith('agentoc-static-route-')) {
+    if (!relativeHome || relativeHome.startsWith('..') || isAbsolute(relativeHome) || !basename(resolvedHome).startsWith('ragent-static-route-')) {
       throw new Error('Refusing to remove a test directory outside its temporary root');
     }
     rmSync(resolvedHome, { force: true, recursive: true });

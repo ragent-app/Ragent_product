@@ -13,7 +13,7 @@ import {
 
 export const WINDOWS_BROKER_PROTOCOL_VERSION = 2;
 export const WINDOWS_BROKER_MAX_FRAME_BYTES = 64 * 1024;
-export const WINDOWS_BROKER_TARGET_ID = 'AgentoC-Broker-QA-Target';
+export const WINDOWS_BROKER_TARGET_ID = 'Ragent-Broker-QA-Target';
 export const WINDOWS_BROKER_REQUESTS_PATH = '/api/windows-privileged-broker/requests';
 export const WINDOWS_BROKER_ENROLLMENTS_PATH = '/api/windows-privileged-broker/enrollments';
 export const WINDOWS_BROKER_SERVICE_REQUESTS_PATH = '/api/windows-privileged-broker/service-requests';
@@ -31,8 +31,8 @@ export function resolveWindowsBrokerProfileDecision(riskMode, platform = process
 }
 
 const PIPE_PATHS = Object.freeze({
-  health: String.raw`\\.\pipe\AgentoC.PrivilegedBroker.Health.v2`,
-  request: String.raw`\\.\pipe\AgentoC.PrivilegedBroker.Request.v2`,
+  health: String.raw`\\.\pipe\Ragent.PrivilegedBroker.Health.v2`,
+  request: String.raw`\\.\pipe\Ragent.PrivilegedBroker.Request.v2`,
 });
 const ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const DEVICE_ID_PATTERN = /^[a-f0-9]{64}$/;
@@ -325,7 +325,7 @@ function exchangePipeFrame({ connect, pipePath, request, timeoutMs }) {
 function exchangeViaServiceHost({ request, pipe, timeoutMs, serviceHostPath }) {
   const requestFrame = encodeFrame(request);
   const pipeArgument = pipe === 'health' ? 'health' : 'request';
-  const executable = serviceHostPath || path.resolve(path.dirname(process.execPath), '..', 'AgentoC.ServiceHost.exe');
+  const executable = serviceHostPath || path.resolve(path.dirname(process.execPath), '..', 'Ragent.ServiceHost.exe');
   return new Promise((resolve, reject) => {
     let child;
     let buffer = Buffer.alloc(0);

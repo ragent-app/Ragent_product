@@ -6,10 +6,10 @@ $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
 if($ActiveRemovalAcceptance -and -not $AdministrativeInstallTrust){throw 'MPR_ACTIVE_REMOVAL_REQUIRES_ADMIN_TRUST'}
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'owner/private-qa-repository' -or $env:RUNNER_OS -cne 'Windows' -or $env:GITHUB_REF -cnotmatch '^refs/heads/qa/windows-msi-[a-z0-9-]+$'){throw 'MPR_DISPOSABLE_RUNNER_REQUIRED'}
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'MPR_ADMIN_REQUIRED'}
-$product='C:\Program Files\AgentoC';$data='C:\ProgramData\AgentoC';$names=@('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')
+$product='C:\Program Files\Ragent';$data='C:\ProgramData\Ragent';$names=@('Ragent-ControlPlane','Ragent-RunnerSupervisor')
 foreach($name in $names){if(Get-CimInstance Win32_Service -Filter "Name='$name'"){throw 'MPR_EXISTING_SERVICE'}}
 foreach($path in @($product,$data)){if(Test-Path -LiteralPath $path){throw 'MPR_EXISTING_ROOT'}}
-if([Diagnostics.EventLog]::SourceExists('AgentoC') -or (Get-NetTCPConnection -State Listen -LocalPort 7690 -ErrorAction SilentlyContinue)){throw 'MPR_EXISTING_PRODUCT_RESOURCE'}
+if([Diagnostics.EventLog]::SourceExists('Ragent') -or (Get-NetTCPConnection -State Listen -LocalPort 7690 -ErrorAction SilentlyContinue)){throw 'MPR_EXISTING_PRODUCT_RESOURCE'}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'));$pack=Join-Path $repo 'packaging\windows'
 $evidence=Join-Path $env:RUNNER_TEMP 'managed-product';$null=New-Item -ItemType Directory -Path $evidence
 $node=(Get-Command node.exe).Source
@@ -17,9 +17,9 @@ if((Get-FileHash -LiteralPath $node -Algorithm SHA256).Hash.ToLowerInvariant() -
 $report=[ordered]@{pass=$false;sourceCommit=$env:GITHUB_SHA;runId=$env:GITHUB_RUN_ID;startedAt=(Get-Date).ToUniversalTime().ToString('o');actualProductApi=$true;syntheticEntryScripts=$false;providerRun=$false;ownerNativeTrustSubstituted=$false;installationPerformed=$false;productionChanged=$false;checks=@();phases=@();cleanupConfirmed=$false;releaseReady=$false;migrationReady=$false}
 $report.administrativeInstallTrust=$AdministrativeInstallTrust.IsPresent
 $report.activeRemovalAcceptance=$ActiveRemovalAcceptance.IsPresent
-$report.sourceFiles=@('tests/windows-managed-product.ps1','lib/windows-owner-release-trust.mjs','lib/windows-owner-discovery.mjs','lib/windows-owner-activation-trust.mjs','lib/windows-owner-service-trust.mjs','lib/windows-owner-discovery-publication.mjs','native/windows-owner-bootstrap.cs','packaging/windows/stage-owner-bootstrap.ps1','packaging/windows/read-owner-bootstrap-discovery.ps1','packaging/windows/read-owner-service-trust.ps1','packaging/windows/prepare-owner-install-policy.ps1','packaging/windows/prepare-owner-msi-policy.ps1','packaging/windows/check-owner-msi-activation.ps1','packaging/windows/managed-owner-msi.ps1','packaging/windows/managed-owner-msi-bridge.cs','packaging/windows/owner-msi-relocation-journal.cs','packaging/windows/initialize-owner-service-identity.ps1','packaging/windows/build-managed-owner-msi-bridge.ps1','packaging/windows/AgentoC.ServiceHost.cs')|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash.ToLowerInvariant()}}
+$report.sourceFiles=@('tests/windows-managed-product.ps1','lib/windows-owner-release-trust.mjs','lib/windows-owner-discovery.mjs','lib/windows-owner-activation-trust.mjs','lib/windows-owner-service-trust.mjs','lib/windows-owner-discovery-publication.mjs','native/windows-owner-bootstrap.cs','packaging/windows/stage-owner-bootstrap.ps1','packaging/windows/read-owner-bootstrap-discovery.ps1','packaging/windows/read-owner-service-trust.ps1','packaging/windows/prepare-owner-install-policy.ps1','packaging/windows/prepare-owner-msi-policy.ps1','packaging/windows/check-owner-msi-activation.ps1','packaging/windows/managed-owner-msi.ps1','packaging/windows/managed-owner-msi-bridge.cs','packaging/windows/owner-msi-relocation-journal.cs','packaging/windows/initialize-owner-service-identity.ps1','packaging/windows/build-managed-owner-msi-bridge.ps1','packaging/windows/Ragent.ServiceHost.cs')|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash.ToLowerInvariant()}}
 $owned=$false;$dataAttempted=$false;$eventOwned=$false;$stageAttempted=$false;$rules=@();$profilesBefore=@();$cookies=[Net.CookieContainer]::new();$observed=@();$report.stops=@()
-$bridgePath=Join-Path $product 'AgentoC.ManagedOwnerMsiBridge.exe'
+$bridgePath=Join-Path $product 'Ragent.ManagedOwnerMsiBridge.exe'
 if($ActiveRemovalAcceptance){$bridgePath=Join-Path $env:RUNNER_TEMP 'managed-product-payload\qa-native-bridge.exe';$report.sourceFiles+=@('packaging/windows/remove-owner-msi-policy.ps1','packaging/windows/owner-service-activation-trial.cs','packaging/windows/owner-service-activation-transaction.cs')|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $repo $_) -Algorithm SHA256).Hash.ToLowerInvariant()}}}
 function Parent-Facts {
  $a=Get-Acl -LiteralPath 'C:\ProgramData'
@@ -60,7 +60,7 @@ function Observe-Services {
  return $rows
 }
 function Stop-OwnServices {
- foreach($name in $names){$s=Get-CimInstance Win32_Service -Filter "Name='$name'";if($s -and $s.State -ne 'Stopped'){if(-not $s.PathName.StartsWith(('"'+$product+'\AgentoC.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MPR_SERVICE_OWNERSHIP_REFUSED'};Stop-Service $name -ErrorAction Stop;$c=[ServiceProcess.ServiceController]::new($name);try{$c.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(50))}finally{$c.Dispose()}}}
+ foreach($name in $names){$s=Get-CimInstance Win32_Service -Filter "Name='$name'";if($s -and $s.State -ne 'Stopped'){if(-not $s.PathName.StartsWith(('"'+$product+'\Ragent.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MPR_SERVICE_OWNERSHIP_REFUSED'};Stop-Service $name -ErrorAction Stop;$c=[ServiceProcess.ServiceController]::new($name);try{$c.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(50))}finally{$c.Dispose()}}}
 }
 function Confirm-ControlStop([string]$phase) {
  $left=@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($product+'\',[StringComparison]::OrdinalIgnoreCase)})
@@ -103,7 +103,7 @@ try {
  foreach($sid in @('S-1-5-18','S-1-5-32-544','S-1-5-32-545')){$right=if($sid -eq 'S-1-5-32-545'){'ReadAndExecute'}else{'FullControl'};$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),$right,'ContainerInherit,ObjectInherit','None','Allow'))}
  $null=[IO.Directory]::CreateDirectory($product,$acl);$owned=$true;[IO.File]::WriteAllText((Join-Path $product '.managed-product-qa'),$env:GITHUB_RUN_ID)
  Copy-Item -LiteralPath $stage -Destination (Join-Path $product 'payload') -Recurse
- & (Join-Path $pack 'build-service-host.ps1') -OutputPath (Join-Path $product 'AgentoC.ServiceHost.exe') -SourcePath (Join-Path $product 'payload\packaging\windows\AgentoC.ServiceHost.cs') -RuntimePayloadRoot (Join-Path $product 'payload')
+ & (Join-Path $pack 'build-service-host.ps1') -OutputPath (Join-Path $product 'Ragent.ServiceHost.exe') -SourcePath (Join-Path $product 'payload\packaging\windows\Ragent.ServiceHost.cs') -RuntimePayloadRoot (Join-Path $product 'payload')
  if($AdministrativeInstallTrust){& (Join-Path $pack 'build-managed-owner-msi-bridge.ps1') -OutputPath $bridgePath}
  & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:exe /r:System.Web.Extensions.dll ('/out:'+(Join-Path $product 'TokenProbe.exe')) (Join-Path $repo 'tests\fixtures\windows-service-host-token.cs')
  if($LASTEXITCODE -ne 0){throw 'MPR_TOKEN_PROBE_COMPILE_FAILED'}
@@ -120,12 +120,12 @@ try {
    $stack.Push($item.FullName)
   }else{$fa=[IO.File]::GetAccessControl($item.FullName);$fa.SetAccessRuleProtection($false,$false);$fa.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'));[IO.File]::SetAccessControl($item.FullName,$fa)}
  }}
- $report.runtimeFiles=@('AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')|ForEach-Object {$f=Join-Path $product $_;@{path=$_;bytes=(Get-Item -LiteralPath $f).Length;sha256=(Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()}}
- if($AdministrativeInstallTrust){$f=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe';$report.runtimeFiles+=@{path='payload\AgentoC.OwnerBootstrap.exe';bytes=(Get-Item -LiteralPath $f).Length;sha256=(Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()}}
+ $report.runtimeFiles=@('Ragent.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')|ForEach-Object {$f=Join-Path $product $_;@{path=$_;bytes=(Get-Item -LiteralPath $f).Length;sha256=(Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()}}
+ if($AdministrativeInstallTrust){$f=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe';$report.runtimeFiles+=@{path='payload\Ragent.OwnerBootstrap.exe';bytes=(Get-Item -LiteralPath $f).Length;sha256=(Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash.ToLowerInvariant()}}
  # Block all product Node-initiated outbound connections before any service
  # starts, including startup Accounts/TURN attempts. QA HTTP probes are incoming
  # connections from the separate Windows HTTP client; IPC uses named pipes.
- $rule='AgentoC-ManagedProduct-QA-'+[Guid]::NewGuid().ToString('N');$null=New-NetFirewallRule -Name $rule -DisplayName $rule -Direction Outbound -Action Block -Program (Join-Path $product 'payload\node.exe') -RemoteAddress Any -Profile Any;$rules+=$rule
+ $rule='Ragent-ManagedProduct-QA-'+[Guid]::NewGuid().ToString('N');$null=New-NetFirewallRule -Name $rule -DisplayName $rule -Direction Outbound -Action Block -Program (Join-Path $product 'payload\node.exe') -RemoteAddress Any -Profile Any;$rules+=$rule
  $profilesBefore=@(Get-NetFirewallProfile|Select-Object Name,Enabled)
  $report.firewallProfilesBefore=$profilesBefore
  foreach($profile in $profilesBefore){if([string]$profile.Enabled -cne 'True'){Set-NetFirewallProfile -Name $profile.Name -Enabled True}}
@@ -134,13 +134,13 @@ try {
  $actualRule=Get-NetFirewallRule -Name $rule
  if([string]$actualRule.Enabled -cne 'True' -or [string]$actualRule.Action -cne 'Block' -or [string]$actualRule.Direction -cne 'Outbound'){throw 'MPR_FIREWALL_RULE_INVALID'}
  $report.outboundBlockedForProductNode=$true
- [Diagnostics.EventLog]::CreateEventSource('AgentoC','Application');$eventOwned=$true
+ [Diagnostics.EventLog]::CreateEventSource('Ragent','Application');$eventOwned=$true
  $report.preparation=Call-Prepare (Join-Path $pack 'prepare-owner-services.ps1') @('-Commit');if($report.preparation.exitCode -ne 0){throw 'MPR_SERVICE_PREPARATION_FAILED'}
  $dataAttempted=$true;$owner=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
  if($AdministrativeInstallTrust){
   $report.managedPreparation=Call-ManagedBridge 'prepare' ('prepare '+$owner)
   $report.identityInitialization=Call-ManagedBridge 'initialize' 'initialize'
-  $helper=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe';$manifest=Join-Path $product 'payload\owner-bootstrap-release.json';$original=[IO.File]::ReadAllBytes($helper);$originalManifest=[IO.File]::ReadAllBytes($manifest)
+  $helper=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe';$manifest=Join-Path $product 'payload\owner-bootstrap-release.json';$original=[IO.File]::ReadAllBytes($helper);$originalManifest=[IO.File]::ReadAllBytes($manifest)
   $report.helperSignatureStatus=[string](Get-AuthenticodeSignature -LiteralPath $helper).Status;if($report.helperSignatureStatus -cne 'NotSigned'){throw 'MPR_UNSIGNED_HELPER_REQUIRED'}
   $report.release=[IO.File]::ReadAllText($manifest)|ConvertFrom-Json
   if($report.release.version -ne 2 -or $report.release.trustMode -cne 'admin-installed-sha256'){throw 'MPR_ADMIN_MANIFEST_REQUIRED'}
@@ -156,7 +156,7 @@ try {
   $report.checks+='actual-unsigned-administrative-prepare-initialize-policy-activate-with-integrity-and-acl-refusals'
  }else{
   $report.dataPreparation=Call-Prepare (Join-Path $pack 'prepare-owner-service-data.ps1') @('-Commit','-OwnerSid',$owner);if($report.dataPreparation.exitCode -ne 0){throw 'MPR_DATA_PREPARATION_FAILED'}
-  foreach($name in $names){Set-Service -Name $name -StartupType Manual};Start-Service 'AgentoC-ControlPlane'
+  foreach($name in $names){Set-Service -Name $name -StartupType Manual};Start-Service 'Ragent-ControlPlane'
  }
  Probe-Product 'fresh';$report.checks+='actual-product-localweb-and-session-api-under-separated-medium-tokens'
  Stop-OwnServices;Confirm-ControlStop 'fresh'
@@ -167,7 +167,7 @@ try {
  if(-not $report.sqliteHeaderValid){throw 'MPR_REAL_SQLITE_REQUIRED'}
  $identity=Join-Path $config 'instance-identity.json';$secret=Join-Path $config 'auth-session-secret'
  $identityBefore=(Get-FileHash -LiteralPath $identity -Algorithm SHA256).Hash;$secretBefore=(Get-FileHash -LiteralPath $secret -Algorithm SHA256).Hash
- Start-Service 'AgentoC-ControlPlane';Probe-Product 'restart'
+ Start-Service 'Ragent-ControlPlane';Probe-Product 'restart'
  if((Get-FileHash -LiteralPath $identity -Algorithm SHA256).Hash -cne $identityBefore -or (Get-FileHash -LiteralPath $secret -Algorithm SHA256).Hash -cne $secretBefore){throw 'MPR_DURABLE_IDENTITY_CHANGED'}
  $report.durableIdentityPreserved=$true;$report.secretPreserved=$true;$report.oldLocalwebCookieAccepted=$true;$report.checks+='actual-product-restart-preserves-private-identity-secret-and-sqlite-cookie'
  if($ActiveRemovalAcceptance){
@@ -182,8 +182,8 @@ try {
    $changed=[Text.Encoding]::UTF8.GetString($activeBytes)|ConvertFrom-Json;$changed.policyReceiptSha256='0'*64
    [IO.File]::WriteAllText($activePath,($changed|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
    try{$report.activeReceiptRefusal=Call-ManagedBridge 'active-receipt-refused' 'remove-check' 'ORP_ACTIVE_RECEIPT_INVALID'}finally{[IO.File]::WriteAllBytes($activePath,$activeBytes)}
-   & 'C:\Windows\System32\sc.exe' privs 'AgentoC-ControlPlane' 'SeChangeNotifyPrivilege/SeImpersonatePrivilege'|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_PRIVILEGE_CHANGE_FAILED'}
-   try{$report.activePrivilegesRefusal=Call-ManagedBridge 'active-privileges-refused' 'remove-check' 'OAT_PRIVILEGES_CHANGED'}finally{& 'C:\Windows\System32\sc.exe' privs 'AgentoC-ControlPlane' 'SeChangeNotifyPrivilege'|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_PRIVILEGE_RESTORE_FAILED'}}
+   & 'C:\Windows\System32\sc.exe' privs 'Ragent-ControlPlane' 'SeChangeNotifyPrivilege/SeImpersonatePrivilege'|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_PRIVILEGE_CHANGE_FAILED'}
+   try{$report.activePrivilegesRefusal=Call-ManagedBridge 'active-privileges-refused' 'remove-check' 'OAT_PRIVILEGES_CHANGED'}finally{& 'C:\Windows\System32\sc.exe' privs 'Ragent-ControlPlane' 'SeChangeNotifyPrivilege'|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_PRIVILEGE_RESTORE_FAILED'}}
    $stateAfter=@(Get-CimInstance Win32_Service|Where-Object {$_.Name -cin $names}|Sort-Object Name|Select-Object Name,State,StartMode,ProcessId,StartName)|ConvertTo-Json -Compress
    if($stateAfter -cne $stateBefore -or (Test-Path -LiteralPath (Join-Path $product 'owner-msi.prepare-lock'))){throw 'MPR_REMOVAL_REFUSAL_MUTATED_STATE'}
    $report.activeRemovalPreflight=Call-ManagedBridge 'active-remove-check' 'remove-check'
@@ -206,16 +206,16 @@ finally {
   Stop-OwnServices
   $left=@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($product+'\',[StringComparison]::OrdinalIgnoreCase)})
   if($left.Count){throw 'MPR_OWNED_PROCESS_REMAINS'}
-  foreach($name in $names){$s=Get-CimInstance Win32_Service -Filter "Name='$name'";if($s){if(-not $s.PathName.StartsWith(('"'+$product+'\AgentoC.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MPR_DELETE_OWNERSHIP_REFUSED'};& 'C:\Windows\System32\sc.exe' delete $name|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_DELETE_FAILED'}}}
-  if($eventOwned){[Diagnostics.EventLog]::DeleteEventSource('AgentoC')}
+  foreach($name in $names){$s=Get-CimInstance Win32_Service -Filter "Name='$name'";if($s){if(-not $s.PathName.StartsWith(('"'+$product+'\Ragent.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'MPR_DELETE_OWNERSHIP_REFUSED'};& 'C:\Windows\System32\sc.exe' delete $name|Out-Null;if($LASTEXITCODE -ne 0){throw 'MPR_DELETE_FAILED'}}}
+  if($eventOwned){[Diagnostics.EventLog]::DeleteEventSource('Ragent')}
   foreach($rule in $rules){$app=Get-NetFirewallRule -Name $rule|Get-NetFirewallApplicationFilter;if($app.Program -ine (Join-Path $product 'payload\node.exe')){throw 'MPR_FIREWALL_OWNERSHIP_REFUSED'};Remove-NetFirewallRule -Name $rule}
   foreach($profile in $profilesBefore){Set-NetFirewallProfile -Name $profile.Name -Enabled $profile.Enabled}
   if($profilesBefore.Count){$restored=@(Get-NetFirewallProfile|Select-Object Name,Enabled);if(($restored|Sort-Object Name|ConvertTo-Json -Compress) -cne ($profilesBefore|Sort-Object Name|ConvertTo-Json -Compress)){throw 'MPR_FIREWALL_PROFILE_RESTORE_FAILED'};$report.firewallProfilesRestored=$true}
   if($owned){
-   if([IO.Path]::GetFullPath($product) -cne 'C:\Program Files\AgentoC' -or [IO.File]::ReadAllText((Join-Path $product '.managed-product-qa')) -cne $env:GITHUB_RUN_ID){throw 'MPR_CLEANUP_MARKER_REFUSED'}
+   if([IO.Path]::GetFullPath($product) -cne 'C:\Program Files\Ragent' -or [IO.File]::ReadAllText((Join-Path $product '.managed-product-qa')) -cne $env:GITHUB_RUN_ID){throw 'MPR_CLEANUP_MARKER_REFUSED'}
    foreach($root in @($product,$data)){
     if(-not(Test-Path -LiteralPath $root)){continue};if($root -eq $data -and -not $dataAttempted){throw 'MPR_UNKNOWN_DATA'}
-    if([IO.Path]::GetFullPath($root) -cnotin @('C:\Program Files\AgentoC','C:\ProgramData\AgentoC') -or ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'MPR_CLEANUP_ROOT_REFUSED'}
+    if([IO.Path]::GetFullPath($root) -cnotin @('C:\Program Files\Ragent','C:\ProgramData\Ragent') -or ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'MPR_CLEANUP_ROOT_REFUSED'}
     if($root -eq $data){$da=Get-Acl -LiteralPath $root;if(-not $da.AreAccessRulesProtected -or $da.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544'){throw 'MPR_DATA_CLEANUP_OWNER_REFUSED'}}
     $pending=[Collections.Generic.Stack[string]]::new();$pending.Push($root)
     while($pending.Count){foreach($item in @(Get-ChildItem -LiteralPath $pending.Pop() -Force)){if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'MPR_CLEANUP_REPARSE_REFUSED'};if($item.PSIsContainer){$pending.Push($item.FullName)}}}

@@ -22,18 +22,18 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const home = mkdtempSync(join(tmpdir(), 'agentoc-capabilities-boundary-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-capabilities-boundary-'));
 const workspace = join(home, 'workspace');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 const localBin = join(home, '.local', 'bin');
 mkdirSync(workspace, { recursive: true });
 mkdirSync(configDir, { recursive: true });
 mkdirSync(localBin, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 // Fake codex (absolute command path — absolute commands skip the
 // preferred-path lookup) so forkSession's native-thread probe succeeds.
@@ -107,7 +107,7 @@ function loadDiskEvents(sessionId) {
 function runScript(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [join(repoRoot, 'scripts', 'strip-run-capabilities-events.mjs'), ...args], {
-      env: { ...process.env, HOME: home, AGENTOC_CONFIG_DIR: configDir },
+      env: { ...process.env, HOME: home, RAGENT_CONFIG_DIR: configDir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let err = '';

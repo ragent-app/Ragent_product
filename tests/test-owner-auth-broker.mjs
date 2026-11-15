@@ -9,12 +9,12 @@ import { pathToFileURL } from 'url';
 const repoRoot = process.cwd();
 // Independent Accounts artifacts deliberately exclude desktop identity state
 // helpers. Keep the proof-generating fixture here while testing release code.
-const testedRoot = process.env.AGENTOC_ACCOUNTS_TEST_RELEASE_ROOT || repoRoot;
-const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-auth-broker-'));
+const testedRoot = process.env.RAGENT_ACCOUNTS_TEST_RELEASE_ROOT || repoRoot;
+const home = mkdtempSync(join(tmpdir(), 'ragent-owner-auth-broker-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   loadOrCreateInstanceIdentity,
@@ -55,7 +55,7 @@ function proofFor({ actor = identity, transactionId = 'tx_1', purpose = 'bind', 
     purpose,
     returnUrl: callback,
     issuedAt,
-    audience: 'agentoc-owner-auth',
+    audience: 'ragent-owner-auth',
   });
   return {
     transactionId,
@@ -63,7 +63,7 @@ function proofFor({ actor = identity, transactionId = 'tx_1', purpose = 'bind', 
     returnUrl: callback,
     instance: publicInstanceIdentity(actor),
     issuedAt,
-    audience: 'agentoc-owner-auth',
+    audience: 'ragent-owner-auth',
     signature: signature.signature,
   };
 }
@@ -73,14 +73,14 @@ function deviceProofFor({ actor = identity, transactionId = 'op_1', purpose = 'd
     transactionId,
     purpose,
     issuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
   });
   return {
     transactionId,
     purpose,
     instance: publicInstanceIdentity(actor),
     issuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
     signature: signature.signature,
   };
 }
@@ -155,7 +155,7 @@ try {
       device: { deviceId, alias, devicePublicKeyFingerprint },
       idToken: 'google-id-token',
       issuedAt,
-      audience: 'agentoc-owner-auth-native',
+      audience: 'ragent-owner-auth-native',
       instance: publicInstanceIdentity(actor),
       signature: signNativeOwnerAuthProof(actor, {
         requestId,
@@ -164,7 +164,7 @@ try {
         devicePublicKeyFingerprint,
         deviceAlias: alias,
         issuedAt,
-        audience: 'agentoc-owner-auth-native',
+        audience: 'ragent-owner-auth-native',
       }).signature,
     };
   };
@@ -379,7 +379,7 @@ try {
     purpose: 'publish-endpoint',
     publicEndpoint: endpoint,
     issuedAt: endpointIssuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
   });
   const endpointPublished = await broker.publishInstanceEndpoint({
     transactionId: 'op_endpoint_1',
@@ -388,7 +388,7 @@ try {
     publicEndpoint: endpoint,
     instance: publicInstanceIdentity(identity),
     issuedAt: endpointIssuedAt,
-    audience: 'agentoc-owner-auth-device',
+    audience: 'ragent-owner-auth-device',
     signature: endpointProof.signature,
   });
   await check('已绑定实例可用签名 proof 发布自己的公网控制 endpoint', async () => {
@@ -402,7 +402,7 @@ try {
       transactionId: 'op_identity_1',
       purpose: 'publish-identity',
       issuedAt: identityIssuedAt,
-      audience: 'agentoc-owner-auth-device',
+      audience: 'ragent-owner-auth-device',
     });
     const identityPublished = await broker.publishInstanceIdentity({
       transactionId: 'op_identity_1',
@@ -410,7 +410,7 @@ try {
       accountId: 'acct_owner_1',
       instance: publicInstanceIdentity(identity),
       issuedAt: identityIssuedAt,
-      audience: 'agentoc-owner-auth-device',
+      audience: 'ragent-owner-auth-device',
       signature: identityProof.signature,
     });
     assert.equal(identityPublished.instancePublicKey, publicInstanceIdentity(identity).publicKey.trim());
@@ -425,7 +425,7 @@ try {
         publicEndpoint: 'https://attacker.example.test',
         instance: publicInstanceIdentity(identity),
         issuedAt: endpointIssuedAt,
-        audience: 'agentoc-owner-auth-device',
+        audience: 'ragent-owner-auth-device',
         signature: endpointProof.signature,
       }),
       { code: 'owner_auth_proof_invalid' },
@@ -435,7 +435,7 @@ try {
       purpose: 'publish-endpoint',
       publicEndpoint: 'https://other.example.test',
       issuedAt: endpointIssuedAt,
-      audience: 'agentoc-owner-auth-device',
+      audience: 'ragent-owner-auth-device',
     });
     await assert.rejects(
       () => broker.publishInstanceEndpoint({
@@ -445,7 +445,7 @@ try {
         publicEndpoint: 'https://other.example.test',
         instance: publicInstanceIdentity(secondIdentity),
         issuedAt: endpointIssuedAt,
-        audience: 'agentoc-owner-auth-device',
+        audience: 'ragent-owner-auth-device',
         signature: otherProof.signature,
       }),
       { code: 'owner_auth_instance_mismatch' },
@@ -459,9 +459,9 @@ try {
     const previousDeviceLastSeenAt = device.lastSeenAt;
     async function poll() {
       const issuedAt = new Date(now).toISOString();
-      const proof = signAccountRendezvousPollProof(identity, { requestId: 'inbox', issuedAt, audience: 'agentoc-account-rendezvous-poll' });
+      const proof = signAccountRendezvousPollProof(identity, { requestId: 'inbox', issuedAt, audience: 'ragent-account-rendezvous-poll' });
       assert.deepEqual(await broker.pollAccountRendezvousInbox({ requestId: 'inbox', issuedAt,
-        audience: 'agentoc-account-rendezvous-poll', instance: publicInstanceIdentity(identity), signature: proof.signature }), { intent: null, grant: null });
+        audience: 'ragent-account-rendezvous-poll', instance: publicInstanceIdentity(identity), signature: proof.signature }), { intent: null, grant: null });
     }
     now += 60_000; await poll();
     assert.equal(binding.lastSeenAt, previousBindingLastSeenAt);

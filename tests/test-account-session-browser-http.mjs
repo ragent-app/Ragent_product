@@ -79,14 +79,14 @@ try {
   assert.equal(ACCOUNT_SESSION_CHALLENGE_TTL_MS, 900_000);
   const first = await page('first'); const second = await page('second');
   assert.equal(jar.size, 4, 'two native browser flows need independent cookies');
-  const firstState = [...jar].find(([key, value]) => key.startsWith('agentoc_owner_broker_phone_state_') && value.startsWith(first.challenge.transactionId + '.'));
+  const firstState = [...jar].find(([key, value]) => key.startsWith('ragent_owner_broker_phone_state_') && value.startsWith(first.challenge.transactionId + '.'));
   const csrf = jar.get(firstState[0].replace('phone_state_', 'phone_csrf_'));
   const cookies = [...jar].map(([key, value]) => `${key}=${value}`).join('; ');
   const verifyPath = '/v1/owner-auth/native/session/browser-verified';
   const payload = { transactionId: first.challenge.transactionId, idToken: 'fixture-google-token' };
-  assert.equal((await post(verifyPath, payload, { Origin: origin, 'X-AgentoC-CSRF': csrf })).status, 403, 'missing cookies cannot verify a challenge');
-  assert.equal((await post(verifyPath, payload, { Origin: 'https://attacker.example', Cookie: cookies, 'X-AgentoC-CSRF': csrf })).status, 403, 'foreign origin is refused');
-  assert.equal((await post(verifyPath, { ...payload, transactionId: second.challenge.transactionId }, { Origin: origin, Cookie: cookies, 'X-AgentoC-CSRF': csrf })).status, 403, 'one flow cannot verify another flow');
+  assert.equal((await post(verifyPath, payload, { Origin: origin, 'X-Ragent-CSRF': csrf })).status, 403, 'missing cookies cannot verify a challenge');
+  assert.equal((await post(verifyPath, payload, { Origin: 'https://attacker.example', Cookie: cookies, 'X-Ragent-CSRF': csrf })).status, 403, 'foreign origin is refused');
+  assert.equal((await post(verifyPath, { ...payload, transactionId: second.challenge.transactionId }, { Origin: origin, Cookie: cookies, 'X-Ragent-CSRF': csrf })).status, 403, 'one flow cannot verify another flow');
   assert.equal(googleCalls, 0, 'CSRF failures must precede Google verification');
   now += 600_000;
   assert.equal((await first.complete()).status, 409, 'a phone signature alone cannot skip Google verification');

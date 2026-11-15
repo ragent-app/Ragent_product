@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.navigation"
+    namespace = "com.andysagent.ragent.core.navigation"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

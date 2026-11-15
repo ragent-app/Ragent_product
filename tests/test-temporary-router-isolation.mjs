@@ -8,10 +8,10 @@ import { test } from 'node:test';
 // Run with --test-force-exit: importing the production router starts long-lived service timers.
 
 test('production router rejects temporary requests before local-owner and public dispatch', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-router-'));
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-  process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-  delete process.env.AGENTOC_INSTANCE_ROOT;
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-router-'));
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+  process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+  delete process.env.RAGENT_INSTANCE_ROOT;
   try {
     const { handleRequest } = await import('../chat/router.mjs');
     for (const url of ['/api/sessions', '/api/assets/upload-intents', '/api/auth/google/token', '/', '/healthz']) {

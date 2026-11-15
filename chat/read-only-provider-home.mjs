@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 
 const MAX_SEED_BYTES = 2 * 1024 * 1024;
-const ROOT = '/tmp/agentoc-reviewer';
+const ROOT = '/tmp/ragent-reviewer';
 const SPECS = {
   codex: { envKey: 'CODEX_HOME', files: ['config.toml', 'auth.json'] },
   claude: { envKey: 'CLAUDE_CONFIG_DIR', files: ['settings.json', '.credentials.json'] },

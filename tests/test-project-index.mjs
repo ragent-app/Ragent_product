@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { createProjectIndex } from '../chat/project-index.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-index-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-index-'));
 try {
   const source = [
     { id: 'prj_a', name: 'Same Product', rootPath: '/a', workspaceId: 'ws_a', revision: 1 },

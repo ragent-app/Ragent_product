@@ -99,7 +99,7 @@ const context = {
       'compose.mode.chat': 'Chat',
       'compose.mode.plan': 'Plan',
       'compose.summary.default': 'Chat · default',
-      'compose.placeholder.plan': 'Ask AgentoC to draft a plan first...',
+      'compose.placeholder.plan': 'Ask Ragent to draft a plan first...',
       'compose.add.planOn': 'Turn plan mode on',
       'compose.add.planOff': 'Turn plan mode off',
       'input.placeholder.archived': 'Archived',
@@ -181,7 +181,7 @@ context.inlineAgentSelect.value = '__plan';
 context.inlineAgentSelect.selectedIndex = 1;
 context.syncComposerModeUi();
 
-assert.equal(context.msgInput.placeholder, 'Ask AgentoC to draft a plan first...', 'plan mode should use the plan placeholder');
+assert.equal(context.msgInput.placeholder, 'Ask Ragent to draft a plan first...', 'plan mode should use the plan placeholder');
 assert.equal(context.composerPlanChip.hidden, false, 'plan mode should show the plan chip');
 assert.equal(context.composerPlanMenuItem.attrs['aria-checked'], 'true', 'plan menu item should be checked in plan mode');
 assert.equal(context.composerPlanMenuNote.textContent, 'Turn plan mode off', 'plan menu item should describe disabling plan mode');
@@ -203,10 +203,10 @@ assert.deepEqual(context.inlineAgentSelect.dispatched, ['change'], 'restoring an
 let createdSessionPayload = null;
 const createSessionContext = {
   window: {
-    agentocGetSelectedWorkspaceMode() {
+    ragentGetSelectedWorkspaceMode() {
       return 'default';
     },
-    agentocGetSelectedSessionFolder() {
+    ragentGetSelectedSessionFolder() {
       return '/workspace';
     },
   },

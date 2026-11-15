@@ -1,7 +1,7 @@
-// Runner-sidecar server for the real `agentoc-privileged` shim command
+// Runner-sidecar server for the real `ragent-privileged` shim command
 // (design docs/privileged-shim-channel-2026-09-03.md).
 //
-// The sidecar installs a per-Run launcher (`shim-bin/agentoc-privileged`) plus
+// The sidecar installs a per-Run launcher (`shim-bin/ragent-privileged`) plus
 // a per-Run unix socket (`shim.sock`), then
 // prepends the launcher directory to the provider's PATH. A sentinel command
 // that reaches a shell (Codex danger-full-access, agy, a bypassed gate) now
@@ -138,14 +138,14 @@ export async function startPrivilegedShimChannel({
   // a private directory that can be bound into the sandbox without exposing
   // the Run results directory. mkdtemp creates it mode 0700.
   const resolvedSocketPath = resolve(socketPath);
-  const masked = process.platform === 'linux' && ['/tmp', '/run', '/etc/agentoc', '/var/lib/agentoc/config'].some(
+  const masked = process.platform === 'linux' && ['/tmp', '/run', '/etc/ragent', '/var/lib/ragent/config'].some(
     (root) => resolvedSocketPath === root || resolvedSocketPath.startsWith(`${root}/`),
   );
   if (process.platform !== 'win32' && (Buffer.byteLength(socketPath) > 100 || masked)) {
     const temporaryRoot = resolve(tmpdir());
     // Bubblewrap hides these control-plane roots after other binds; a socket
     // created inside either root would disappear again inside the sandbox.
-    const hidden = ['/etc/agentoc', '/var/lib/agentoc/config'].some(
+    const hidden = ['/etc/ragent', '/var/lib/ragent/config'].some(
       (root) => temporaryRoot === root || temporaryRoot.startsWith(`${root}/`),
     );
     let prefix = join(hidden ? '/tmp' : temporaryRoot, 'ragent-shim-');

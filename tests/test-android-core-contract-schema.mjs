@@ -10,7 +10,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const schema = JSON.parse(readFileSync(join(repoRoot, 'docs/agentoc-android-core-contract.schema.json'), 'utf8'));
+const schema = JSON.parse(readFileSync(join(repoRoot, 'docs/ragent-android-core-contract.schema.json'), 'utf8'));
 const ajv = new Ajv({ strict: false, allErrors: true });
 addFormats(ajv);
 ajv.addSchema(schema);

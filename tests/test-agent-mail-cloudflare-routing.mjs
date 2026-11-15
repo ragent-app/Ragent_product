@@ -44,7 +44,7 @@ assert.deepEqual(allowlistBinding.senderRestrictions, ['rowan@example.com']);
 
 const localPartPlan = buildDesiredCloudflarePlan({
   zone: 'example.test',
-  workerName: 'agentoc-email-worker',
+  workerName: 'ragent-email-worker',
   ownerAddress: 'rowan@example.test',
   localPart: 'rowan',
   desiredAddresses: ['rowan@example.test', 'trial6@example.test', 'trial5@example.test'],
@@ -61,7 +61,7 @@ assert.deepEqual(localPartPlan.requiredLiteralWorkerAddresses, [
 
 const plusPlan = buildDesiredCloudflarePlan({
   zone: 'example.test',
-  workerName: 'agentoc-email-worker',
+  workerName: 'ragent-email-worker',
   ownerAddress: 'rowan@example.test',
   localPart: 'rowan',
   desiredAddresses: ['rowan@example.test', 'rowan+trial6@example.test'],
@@ -78,7 +78,7 @@ const rules = [
     id: 'rule_rowan',
     enabled: true,
     matchers: [{ type: 'literal', field: 'to', value: 'rowan@example.test' }],
-    actions: [{ type: 'worker', value: ['agentoc-email-worker'] }],
+    actions: [{ type: 'worker', value: ['ragent-email-worker'] }],
   },
   {
     id: 'rule_drop',
@@ -92,7 +92,7 @@ assert.equal(literalRuleAddress(rules[0]), 'rowan@example.test');
 assert.equal(literalRuleAddress(rules[1]), '');
 assert.equal(findLiteralRule(rules, 'rowan@example.test')?.id, 'rule_rowan');
 assert.equal(findLiteralRule(rules, 'trial6@example.test'), null);
-assert.equal(ruleTargetsWorker(rules[0], 'agentoc-email-worker'), true);
-assert.equal(ruleTargetsWorker(rules[1], 'agentoc-email-worker'), false);
+assert.equal(ruleTargetsWorker(rules[0], 'ragent-email-worker'), true);
+assert.equal(ruleTargetsWorker(rules[1], 'ragent-email-worker'), false);
 
 console.log('agent mail cloudflare routing tests passed');

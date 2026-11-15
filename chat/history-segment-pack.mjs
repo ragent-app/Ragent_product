@@ -7,12 +7,12 @@
 // recovery (missing/corrupt trailer rejects the segment and the reader falls
 // back to the untouched events/ dir — dual read), per-session rollback
 // (delete segments/), and read-only source access (pack never writes the
-// source). Design: docs/agentoc-history-segmented-index-design.md.
+// source). Design: docs/ragent-history-segmented-index-design.md.
 //
 // This is a PROTOTYPE: nothing here is wired into the default online read or
 // write path. Segment format:
 //
-//   line 0        {"format":"agentoc-history-segment-v1","startSeq":0,"eventCount":1024}
+//   line 0        {"format":"ragent-history-segment-v1","startSeq":0,"eventCount":1024}
 //   lines 1..N    {"seq":0,"event":{...compact event json...}}
 //   last line     {"type":"segment-trailer","sha256":"<sha256 of all preceding bytes>",
 //                  "eventCount":1024,"endSeq":1023}
@@ -26,7 +26,7 @@ import { createHash } from 'crypto';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 
-export const SEGMENT_FORMAT = 'agentoc-history-segment-v1';
+export const SEGMENT_FORMAT = 'ragent-history-segment-v1';
 export const SEGMENT_EVENTS_DEFAULT = 1024;
 export const EVENT_FILE_WIDTH = 9;
 const SEGMENT_SUFFIX = '.jsonl';

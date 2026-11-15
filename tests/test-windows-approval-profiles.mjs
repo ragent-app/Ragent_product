@@ -35,13 +35,13 @@ assert.throws(() => buildCodexAppServerThreadOptions({ permissionMode: 'untruste
   'retired explicit untrusted policy cannot be sent without the project trust override');
 assert.throws(() => buildCodexAppServerTurnStartMessage({ threadId: 'thread', text: 'fixture', permissionMode: 'untrusted-danger-full-access' }), /requires a Run-scoped project trust gate/,
   'turn/start requires the project trust override for untrusted mode');
-assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, agentocApprovalGate: true }).approvalsReviewer, 'user');
-assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, agentocApprovalGate: true }).config.allow_login_shell, false);
-assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, agentocApprovalGate: true }).approvalPolicy, 'on-request');
+assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, ragentApprovalGate: true }).approvalsReviewer, 'user');
+assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, ragentApprovalGate: true }).config.allow_login_shell, false);
+assert.equal(buildCodexAppServerThreadOptions({ permissionMode: windowsCodexMode, ragentApprovalGate: true }).approvalPolicy, 'on-request');
 const codexOnRequestMode = 'on-request-danger-full-access';
 assert.equal(buildCodexAppServerThreadOptions({ permissionMode: codexOnRequestMode }).config.allow_login_shell, undefined);
-assert.equal(buildCodexAppServerTurnStartMessage({ threadId: 'thread', text: 'fixture', permissionMode: windowsCodexMode, agentocApprovalGate: true }).params.approvalsReviewer, 'user');
-assert.equal(buildCodexAppServerTurnStartMessage({ threadId: 'thread', text: 'fixture', permissionMode: windowsCodexMode, agentocApprovalGate: true }).params.approvalPolicy, 'on-request');
+assert.equal(buildCodexAppServerTurnStartMessage({ threadId: 'thread', text: 'fixture', permissionMode: windowsCodexMode, ragentApprovalGate: true }).params.approvalsReviewer, 'user');
+assert.equal(buildCodexAppServerTurnStartMessage({ threadId: 'thread', text: 'fixture', permissionMode: windowsCodexMode, ragentApprovalGate: true }).params.approvalPolicy, 'on-request');
 assert.equal(buildCodexAppServerThreadOptions({ permissionMode: codexOnRequestMode }).approvalsReviewer, undefined);
 
 const verifiedContext = {
@@ -49,27 +49,27 @@ const verifiedContext = {
   approvalsReviewer: 'user',
   sandbox: { type: 'dangerFullAccess' },
   cwd: 'g:/agentoC/WORKSPACE',
-  runtimeWorkspaceRoots: ['G:\\AgentoC\\Workspace'],
+  runtimeWorkspaceRoots: ['G:\\Ragent\\Workspace'],
 };
 assert.deepEqual(validateCodexAppServerApprovalContext({
   response: verifiedContext,
-  cwd: 'G:\\AgentoC\\Workspace',
+  cwd: 'G:\\Ragent\\Workspace',
   permissionMode: windowsCodexMode,
 }), { ok: true, reasonCode: null });
 assert.equal(validateCodexAppServerApprovalContext({
   response: { ...verifiedContext, approvalPolicy: 'untrusted' },
-  cwd: 'G:\\AgentoC\\Workspace',
+  cwd: 'G:\\Ragent\\Workspace',
   permissionMode: windowsCodexMode,
 }).reasonCode, 'CODEX_APPROVAL_POLICY_UNVERIFIED');
 assert.equal(validateCodexAppServerApprovalContext({
   response: { ...verifiedContext, sandbox: { type: 'workspaceWrite' } },
-  cwd: 'G:\\AgentoC\\Workspace',
+  cwd: 'G:\\Ragent\\Workspace',
   permissionMode: windowsCodexMode,
 }).reasonCode, 'CODEX_APPROVAL_SANDBOX_UNVERIFIED');
 const conservativeCodexMode = resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'conservative-auto', platform: 'win32' }).id;
 assert.deepEqual(validateCodexAppServerApprovalContext({
   response: { ...verifiedContext, approvalPolicy: 'untrusted', sandbox: { type: 'workspaceWrite', networkAccess: false } },
-  cwd: 'G:\\AgentoC\\Workspace',
+  cwd: 'G:\\Ragent\\Workspace',
   permissionMode: conservativeCodexMode,
 }), { ok: true, reasonCode: null });
 console.log('windows-approval-profiles: harness mapping checks passed');

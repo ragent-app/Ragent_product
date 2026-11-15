@@ -18,16 +18,16 @@ try {
  $stage='receipt';$bytes=Read-OwnerPinnedFile (Join-Path $product 'owner-msi.prepared.json') @(Get-OwnerAdministrativeSids) $pins
  $receipt=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json
  if(@($receipt.PSObject.Properties).Count -ne 4 -or $receipt.version -isnot [int] -or $receipt.version -ne 1 -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OPP_PREPARED_RECEIPT_REQUIRED'}
- $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
+ $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  $controlSid=($services|Where-Object {$_.role -eq 'control'}).sid;$executorSid=($services|Where-Object {$_.role -eq 'supervisor'}).sid
  foreach($row in @(Get-OwnerDataLayout $controlSid $executorSid $receipt.ownerSid)){
   $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot}
-  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'OPP_LAYOUT_MISMATCH'}
  }
  foreach($p in @(Get-OwnerServicePreparationPlan)){$handles.Add([ManagedPreparedService]::new($p.name,$p.command,$p.account))}
  # The signature gate precedes any identity/result/container open or mutation.
- $stage='signature';$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json';$helperPath=Join-Path $product 'payload\AgentoC.OwnerBootstrap.exe'
+ $stage='signature';$releasePath=Join-Path $product 'payload\owner-bootstrap-release.json';$helperPath=Join-Path $product 'payload\Ragent.OwnerBootstrap.exe'
  if(-not(Test-OwnerServicePreparationPresence $releasePath) -or -not(Test-OwnerServicePreparationPresence $helperPath)){throw 'OIP_SIGNED_RELEASE_REQUIRED'}
  $releaseBytes=Read-OwnerPinnedFile $releasePath @(Get-OwnerAdministrativeSids) $pins
  try{$release=[Text.UTF8Encoding]::new($false,$true).GetString($releaseBytes)|ConvertFrom-Json;Assert-OwnerPolicyRelease $release}catch{throw 'OIP_SIGNED_RELEASE_REQUIRED'}

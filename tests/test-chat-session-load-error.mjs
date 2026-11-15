@@ -159,9 +159,9 @@ function createHarness() {
       clearTimeout,
       addEventListener() {},
       focus() {},
-      agentocT: (key) => key,
-      AgentoCRunActivity: { setActivity() {} },
-      AgentoCTimelineRuntime: {
+      ragentT: (key) => key,
+      RagentRunActivity: { setActivity() {} },
+      RagentTimelineRuntime: {
         getSnapshot: () => ({
           sessionId: "session-error",
           items: [],
@@ -353,7 +353,7 @@ empty.context.fetchJsonOrRedirect = async () => ({
   pagination: { hasMoreBefore: false },
 });
 await empty.context.fetchSessionEvents("session-error", { forceFresh: true });
-const emptyMetrics = empty.context.window.agentocGetEventRefreshMetrics();
+const emptyMetrics = empty.context.window.ragentGetEventRefreshMetrics();
 assert.equal(emptyMetrics.last.outcome, "empty");
 assert.equal(emptyMetrics.last.renderMode, "empty");
 assert.equal(empty.messagesEl.children.some((child) => child.className.includes("messages-session-error")), false);
@@ -366,7 +366,7 @@ await assert.rejects(
 );
 const malformedPanel = malformed.messagesEl.children.find((child) => child.className.includes("messages-session-error"));
 assert.equal(malformedPanel.dataset.reason, "response_invalid");
-assert.equal(malformed.context.window.agentocGetEventRefreshMetrics().last.errorCode, "EVENTS_RESPONSE_INVALID");
+assert.equal(malformed.context.window.ragentGetEventRefreshMetrics().last.errorCode, "EVENTS_RESPONSE_INVALID");
 
 const filtered = createHarness();
 filtered.context.fetchJsonOrRedirect = async () => ({
@@ -375,7 +375,7 @@ filtered.context.fetchJsonOrRedirect = async () => ({
   pagination: { hasMoreBefore: false },
 });
 await filtered.context.fetchSessionEvents("session-error", { forceFresh: true });
-const filteredMetrics = filtered.context.window.agentocGetEventRefreshMetrics();
+const filteredMetrics = filtered.context.window.ragentGetEventRefreshMetrics();
 assert.equal(filteredMetrics.last.outcome, "empty");
 assert.equal(filteredMetrics.last.renderMode, "empty_projection");
 
@@ -424,7 +424,7 @@ try {
       runState: "idle",
       timelineItemCount: 0,
     };
-    window.AgentoCTimelineRuntime = {
+    window.RagentTimelineRuntime = {
       getSnapshot: () => ({
         sessionId: "browser-error",
         items: [],
@@ -442,8 +442,8 @@ try {
     window.applyFinishedTurnCollapseState = () => null;
     window.syncLiveMessageMetadataForRunState = () => {};
     window.syncEditableMessageActions = () => {};
-    window.AgentoCRunActivity = { setActivity() {} };
-    window.agentocT = (key) => key;
+    window.RagentRunActivity = { setActivity() {} };
+    window.ragentT = (key) => key;
   });
   for (const path of [
     "static/chat/session-http-helpers.js",

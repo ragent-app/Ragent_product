@@ -6,15 +6,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 
 test('root challenge checks fresh persisted Run state through the real local route',
   { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 }, async () => {
-    const root = await mkdtemp('/srv/agentoc-active-proof-');
+    const root = await mkdtemp('/srv/ragent-active-proof-');
     try {
       await mkdir(`${root}/home`, { mode: 0o700 });
       process.env.HOME = `${root}/home`;
-      process.env.AGENTOC_CONFIG_DIR = `${root}/config`;
-      process.env.AGENTOC_RUN_SPOOL_DIR = `${root}/spool`;
-      process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
-      process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
-      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
+      process.env.RAGENT_CONFIG_DIR = `${root}/config`;
+      process.env.RAGENT_RUN_SPOOL_DIR = `${root}/spool`;
+      process.env.RAGENT_MEMORY_DIR = `${root}/memory`;
+      process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/offline.sock`;
       const { createRun, requestRunCancel, runStatusPath, updateRun } = await import('../chat/runs.mjs');
       const { loadOrCreatePrivilegedSigningKeys, getActivePrivilegedSigningKey } = await import('../chat/privileged-signing-keys.mjs');
       const { handleTemporaryControlRunCheck } = await import('../chat/router-temporary-control-run-check.mjs');

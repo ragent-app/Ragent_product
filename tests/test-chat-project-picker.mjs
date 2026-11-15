@@ -70,8 +70,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome(projectRootPath) {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-picker-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-picker-'));
+  const configDir = join(home, '.config', 'ragent');
   const binDir = join(home, 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(binDir, { recursive: true });
@@ -98,20 +98,20 @@ function setupTempHome(projectRootPath) {
 }
 
 async function startServer({ home, binDir, port }) {
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${binDir}:${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: AUTH_SESSION_SECRET,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: AUTH_SESSION_SECRET,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -145,7 +145,7 @@ async function startServer({ home, binDir, port }) {
 }
 
 async function main() {
-  const projectRoot = mkdtempSync(join(tmpdir(), 'agentoc-picker-root-'));
+  const projectRoot = mkdtempSync(join(tmpdir(), 'ragent-picker-root-'));
   const { home, binDir } = setupTempHome(projectRoot);
   const port = randomPort();
   const server = await startServer({ home, binDir, port });
@@ -201,9 +201,9 @@ async function main() {
     await page.fill('#projectCreateName', SHARED_PROJECT_NAME);
     await page.click('#projectCreateConfirm');
     const createdProjectState = await waitFor(async () => page.evaluate((rootPath) => {
-      const projects = window.agentocGetProjects?.() || [];
+      const projects = window.ragentGetProjects?.() || [];
       const sharedProjects = projects.filter((project) => project.rootPath === rootPath);
-      const active = window.agentocGetSelectedProject?.();
+      const active = window.ragentGetSelectedProject?.();
       return sharedProjects.length === 2 && active?.name === 'Shared Follow-up Project'
         ? {
             ids: sharedProjects.map((project) => project.id),
@@ -225,7 +225,7 @@ async function main() {
     await page.evaluate(() => document.getElementById('workspaceSummaryButton')?.click());
     await waitFor(async () => (await popoverState()) === false, 'popover to open after summary click');
 
-    // Escape collapses it (document capture handler -> agentocCloseProjectPicker).
+    // Escape collapses it (document capture handler -> ragentCloseProjectPicker).
     await page.keyboard.press('Escape');
     await waitFor(async () => (await popoverState()) === true, 'popover to close on Escape');
 

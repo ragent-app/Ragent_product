@@ -123,7 +123,7 @@ function isDoubaoModel(model) {
 }
 
 function configuredChildTimeoutMs() {
-  const configured = Number.parseInt(String(process.env.AGENTOC_MICRO_AGENT_TIMEOUT_MS || ''), 10);
+  const configured = Number.parseInt(String(process.env.RAGENT_MICRO_AGENT_TIMEOUT_MS || ''), 10);
   return Number.isInteger(configured) && configured > 0 ? configured : DEFAULT_CHILD_TIMEOUT_MS;
 }
 
@@ -202,8 +202,8 @@ export async function spawnChild(
       if (killTimer) clearTimeout(killTimer);
       resolve({
         ...result,
-        windowsJobObjectManaged: child.__agentocWindowsManaged === true,
-        windowsJobObjectCreation: child.__agentocWindowsJobObjectCreation || null,
+        windowsJobObjectManaged: child.__ragentWindowsManaged === true,
+        windowsJobObjectCreation: child.__ragentWindowsJobObjectCreation || null,
       });
     };
     const terminate = () => {

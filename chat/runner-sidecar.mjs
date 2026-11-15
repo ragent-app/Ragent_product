@@ -482,7 +482,7 @@ const DEFAULT_PROVIDER_STDOUT_LINE_MAX_BYTES = 8 * 1024 * 1024;
 const DEFAULT_PROVIDER_STDOUT_DRAIN_TIMEOUT_MS = 15 * 1000;
 const CODEX_FRESH_RECOVERY_WAIT_MS = 2 * 60 * 1000;
 // Codex app-server may hold mcpServerStatus/list behind an unrelated external
-// MCP server that is still starting.  A managed AgentoC MCP that has emitted
+// MCP server that is still starting.  A managed Ragent MCP that has emitted
 // `ready` is safe to use; wait briefly for inventory schema verification, then
 // fall back to that authoritative startup signal rather than blocking a turn.
 const DEFAULT_CODEX_MCP_STARTUP_FALLBACK_MS = 1500;
@@ -699,11 +699,11 @@ export function classifyProviderTerminalFrame(runtimeFamily, parsed, { acp = fal
   // family. DeepSeek uses the same runtime family for a plain headless mode;
   // only classify it when the invocation actually enabled ACP.
   const isAcpFamily = acp || family === 'qwen-code-acp' || family === 'kimi-code-acp' || family === 'hermes-acp';
-  if (isAcpFamily && parsed.id === 'agentoc-prompt') {
+  if (isAcpFamily && parsed.id === 'ragent-prompt') {
     return parsed.error
       ? { kind: 'failed', reason: readStructuredProviderFailureReason(parsed, 'ACP prompt failed') }
       : parsed.result
-        ? { kind: 'completed', reason: 'agentoc-prompt' }
+        ? { kind: 'completed', reason: 'ragent-prompt' }
         : null;
   }
   return null;
@@ -908,7 +908,7 @@ async function terminateAfterProviderTerminal(runId, terminateManagedProcess, ma
   if (typeof terminateManagedProcess === 'function') {
     // Mark only cleanup initiated after a structured provider terminal frame.
     // Windows Job termination reports an exit code rather than SIGTERM.
-    if (managedProcess) managedProcess.__agentocTerminalCleanupRequested = true;
+    if (managedProcess) managedProcess.__ragentTerminalCleanupRequested = true;
     try { await terminateManagedProcess(); } catch {}
   }
 }
@@ -1004,7 +1004,7 @@ async function requestLocalRunAuthRecovery({
   if (!token || !channel?.runId || !channel?.sessionId || !channel?.turnId) {
     return { ok: false, retry: false, reason: 'recovery-capability-unavailable' };
   }
-  const baseUrl = String(process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`).replace(/\/+$/, '');
+  const baseUrl = String(process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`).replace(/\/+$/, '');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   timeout.unref?.();
@@ -1012,10 +1012,10 @@ async function requestLocalRunAuthRecovery({
     const response = await fetch(`${baseUrl}/api/internal/run-auth-recovery`, {
       method: 'POST',
       headers: {
-        ["x-agentoc-run-auth-recovery-token"]: token,
-        ["x-agentoc-run-auth-recovery-run-id"]: channel.runId,
-        ["x-agentoc-run-auth-recovery-session-id"]: channel.sessionId,
-        ["x-agentoc-run-auth-recovery-turn-id"]: channel.turnId,
+        ["x-ragent-run-auth-recovery-token"]: token,
+        ["x-ragent-run-auth-recovery-run-id"]: channel.runId,
+        ["x-ragent-run-auth-recovery-session-id"]: channel.sessionId,
+        ["x-ragent-run-auth-recovery-turn-id"]: channel.turnId,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -1317,15 +1317,15 @@ async function persistRunFailure(runId, error, options = {}) {
 
 export function stripRunnerControlEnv(source = {}) {
   const env = { ...source };
-  delete env.AGENTOC_CONFIG_DIR;
-  delete env.AGENTOC_INSTANCE_ROOT;
-  delete env.AGENTOC_MEMORY_DIR;
+  delete env.RAGENT_CONFIG_DIR;
+  delete env.RAGENT_INSTANCE_ROOT;
+  delete env.RAGENT_MEMORY_DIR;
   // The handoff token is for this sidecar only; never expose it to Codex,
   // Claude, MCP servers, or arbitrary provider subprocesses.
-  delete env.AGENTOC_NATIVE_OAUTH_LOCK_PATH;
-  delete env.AGENTOC_NATIVE_OAUTH_LOCK_TOKEN;
+  delete env.RAGENT_NATIVE_OAUTH_LOCK_PATH;
+  delete env.RAGENT_NATIVE_OAUTH_LOCK_TOKEN;
   for (const key of Object.keys(env)) {
-    if (/^AGENTOC_(?:ASSET|FILE_ASSET)_/i.test(key)) delete env[key];
+    if (/^RAGENT_(?:ASSET|FILE_ASSET)_/i.test(key)) delete env[key];
   }
   return env;
 }
@@ -1334,17 +1334,17 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
   const env = stripRunnerControlEnv(buildToolProcessEnv(options.envOverrides || {}));
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_ENTRYPOINT;
-  env.AGENTOC_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`;
-  env.AGENTOC_PROJECT_ROOT = process.env.AGENTOC_PROJECT_ROOT || PROJECT_ROOT;
-  env.RAGENT_CHAT_BASE_URL = env.AGENTOC_CHAT_BASE_URL;
-  env.RAGENT_PROJECT_ROOT = env.AGENTOC_PROJECT_ROOT;
+  env.RAGENT_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`;
+  env.RAGENT_PROJECT_ROOT = process.env.RAGENT_PROJECT_ROOT || PROJECT_ROOT;
+  env.RAGENT_CHAT_BASE_URL = env.RAGENT_CHAT_BASE_URL;
+  env.RAGENT_PROJECT_ROOT = env.RAGENT_PROJECT_ROOT;
   delete env.RAGENT_SESSION_ID;
   if (typeof manifest?.sessionId === 'string' && manifest.sessionId.trim()) {
-    env.AGENTOC_SESSION_ID = manifest.sessionId.trim();
-    env.RAGENT_SESSION_ID = env.AGENTOC_SESSION_ID;
+    env.RAGENT_SESSION_ID = manifest.sessionId.trim();
+    env.RAGENT_SESSION_ID = env.RAGENT_SESSION_ID;
   }
   if (runId) {
-    env.AGENTOC_RUN_ID = runId;
+    env.RAGENT_RUN_ID = runId;
   }
   const collaborationCapabilities = Array.isArray(manifest?.options?.collaborationCapabilities)
     ? manifest.options.collaborationCapabilities
@@ -1352,45 +1352,45 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
       .map((entry) => ({ operation: entry.operation, grantId: entry.grantId, token: entry.token }))
     : [];
   if (collaborationCapabilities.length > 0) {
-    env.AGENTOC_COLLABORATION_CAPABILITIES = Buffer.from(
+    env.RAGENT_COLLABORATION_CAPABILITIES = Buffer.from(
       JSON.stringify(collaborationCapabilities),
       'utf8',
     ).toString('base64url');
   } else {
-    delete env.AGENTOC_COLLABORATION_CAPABILITIES;
+    delete env.RAGENT_COLLABORATION_CAPABILITIES;
   }
   // A normal owner Run cannot use the owner CLI socket from the detached
   // runner (the socket is deliberately 0600). Carry only the run-scoped
   // session-control capability instead; the control plane re-binds every
   // request to this Run and its delegated-session tree.
-  delete env.AGENTOC_SESSION_CONTROL_TOKEN;
-  delete env.AGENTOC_SESSION_CONTROL_RENEWAL_TOKEN;
-  delete env.AGENTOC_SESSION_CONTROL_RUN_ID;
-  delete env.AGENTOC_SESSION_CONTROL_SESSION_ID;
-  delete env.AGENTOC_SESSION_CONTROL_TURN_ID;
+  delete env.RAGENT_SESSION_CONTROL_TOKEN;
+  delete env.RAGENT_SESSION_CONTROL_RENEWAL_TOKEN;
+  delete env.RAGENT_SESSION_CONTROL_RUN_ID;
+  delete env.RAGENT_SESSION_CONTROL_SESSION_ID;
+  delete env.RAGENT_SESSION_CONTROL_TURN_ID;
   const sessionControlChannel = manifest?.options?.sessionControlChannel;
   const sessionControlToken = sessionControlChannel?.token
     || await readRunSessionControlToken(runId);
   const sessionControlRenewalToken = sessionControlChannel?.renewalToken
     || await readRunSessionControlRenewalToken(runId);
   if (sessionControlToken && sessionControlChannel?.runId && sessionControlChannel?.sessionId) {
-    env.AGENTOC_SESSION_CONTROL_TOKEN = sessionControlToken;
-    env.AGENTOC_SESSION_CONTROL_RUN_ID = sessionControlChannel.runId;
-    env.AGENTOC_SESSION_CONTROL_SESSION_ID = sessionControlChannel.sessionId;
-    env.AGENTOC_SESSION_CONTROL_TURN_ID = sessionControlChannel.turnId || manifest.requestId || '';
+    env.RAGENT_SESSION_CONTROL_TOKEN = sessionControlToken;
+    env.RAGENT_SESSION_CONTROL_RUN_ID = sessionControlChannel.runId;
+    env.RAGENT_SESSION_CONTROL_SESSION_ID = sessionControlChannel.sessionId;
+    env.RAGENT_SESSION_CONTROL_TURN_ID = sessionControlChannel.turnId || manifest.requestId || '';
     if (sessionControlRenewalToken) {
-      env.AGENTOC_SESSION_CONTROL_RENEWAL_TOKEN = sessionControlRenewalToken;
+      env.RAGENT_SESSION_CONTROL_RENEWAL_TOKEN = sessionControlRenewalToken;
     }
-    env.AGENTOC_SESSION_CONTROL_RENEWAL_TOKEN_FILE = runSessionControlRenewalCapabilityPath(runId);
+    env.RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE = runSessionControlRenewalCapabilityPath(runId);
   }
-  delete env.AGENTOC_BROWSER_MCP_ENABLED;
-  delete env.AGENTOC_BROWSER_TOKEN;
-  delete env.AGENTOC_BROWSER_CONFIRMATION_ENDPOINT;
-  delete env.AGENTOC_BROWSER_SESSION_ID;
-  delete env.AGENTOC_BROWSER_RUN_ID;
-  delete env.AGENTOC_BROWSER_TURN_ID;
-  delete env.AGENTOC_BROWSER_PROFILE_DIR;
-  delete env.AGENTOC_BROWSER_ARTIFACT_DIR;
+  delete env.RAGENT_BROWSER_MCP_ENABLED;
+  delete env.RAGENT_BROWSER_TOKEN;
+  delete env.RAGENT_BROWSER_CONFIRMATION_ENDPOINT;
+  delete env.RAGENT_BROWSER_SESSION_ID;
+  delete env.RAGENT_BROWSER_RUN_ID;
+  delete env.RAGENT_BROWSER_TURN_ID;
+  delete env.RAGENT_BROWSER_PROFILE_DIR;
+  delete env.RAGENT_BROWSER_ARTIFACT_DIR;
   const browserChannel = manifest?.options?.browserChannel;
   const browserChannelValid = validateBrowserCapabilityChannel(browserChannel, {
     runId,
@@ -1403,15 +1403,15 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
       && supportsBrowserMcpRuntime(options.runtimeFamily, { acp: options.acp === true })
       && browserChannel?.runId === runId
       && browserChannel?.sessionId === manifest?.sessionId) {
-    const baseUrl = String(process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`).replace(/\/+$/, '');
-    env.AGENTOC_BROWSER_MCP_ENABLED = '1';
-    env.AGENTOC_BROWSER_TOKEN = browserToken;
-    env.AGENTOC_BROWSER_CONFIRMATION_ENDPOINT = `${baseUrl}${browserChannel.endpoint || '/api/internal/browser/confirmations'}`;
-    env.AGENTOC_BROWSER_SESSION_ID = String(browserChannel.sessionId || '');
-    env.AGENTOC_BROWSER_RUN_ID = String(browserChannel.runId || '');
-    env.AGENTOC_BROWSER_TURN_ID = String(browserChannel.turnId || manifest.requestId || '');
-    env.AGENTOC_BROWSER_PROFILE_DIR = sessionBrowserProfileDir(manifest?.sessionId || runId);
-    env.AGENTOC_BROWSER_ARTIFACT_DIR = join(runDir(runId), 'browser', 'artifacts');
+    const baseUrl = String(process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}`).replace(/\/+$/, '');
+    env.RAGENT_BROWSER_MCP_ENABLED = '1';
+    env.RAGENT_BROWSER_TOKEN = browserToken;
+    env.RAGENT_BROWSER_CONFIRMATION_ENDPOINT = `${baseUrl}${browserChannel.endpoint || '/api/internal/browser/confirmations'}`;
+    env.RAGENT_BROWSER_SESSION_ID = String(browserChannel.sessionId || '');
+    env.RAGENT_BROWSER_RUN_ID = String(browserChannel.runId || '');
+    env.RAGENT_BROWSER_TURN_ID = String(browserChannel.turnId || manifest.requestId || '');
+    env.RAGENT_BROWSER_PROFILE_DIR = sessionBrowserProfileDir(manifest?.sessionId || runId);
+    env.RAGENT_BROWSER_ARTIFACT_DIR = join(runDir(runId), 'browser', 'artifacts');
   }
   // A Run must not inherit the control user's or the launcher shell's Codex
   // home.  buildToolProcessEnv intentionally restores user-shell variables for
@@ -1428,8 +1428,8 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
   // Native Claude preparation writes the selected account's settings and
   // credential material under the broker-provided home. Bind that directory
   // here so the child cannot fall back to the interactive ~/.claude home.
-  const runnerClaudeHomeDir = process.env.AGENTOC_PROVIDER_HOMES_DIR
-    ? join(process.env.AGENTOC_PROVIDER_HOMES_DIR, 'claude')
+  const runnerClaudeHomeDir = process.env.RAGENT_PROVIDER_HOMES_DIR
+    ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, 'claude')
     : '';
   const genericHarnessDir = {
     'pi-rpc-jsonl': 'pi', 'qwen-code-acp': 'qwen-code',
@@ -1438,8 +1438,8 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
     'copilot-json': 'copilot', 'hermes-acp': 'hermes',
     'cline-json': 'cline', 'kilo-json': 'kilo',
   }[typeof options.runtimeFamily === 'string' ? options.runtimeFamily.trim() : ''];
-  const harnessHomeDir = genericHarnessDir && process.env.AGENTOC_PROVIDER_HOMES_DIR
-    ? join(process.env.AGENTOC_PROVIDER_HOMES_DIR, genericHarnessDir)
+  const harnessHomeDir = genericHarnessDir && process.env.RAGENT_PROVIDER_HOMES_DIR
+    ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, genericHarnessDir)
     : '';
   return applyManagedRuntimeEnv(toolId, env, {
     runtimeFamily: typeof options.runtimeFamily === 'string' ? options.runtimeFamily : '',
@@ -1490,10 +1490,10 @@ function captureResume(run, parsed, { expectedCodexThreadId = '', runtimeFamily 
     }
   }
   if (runtimeFamily.endsWith('-acp')
-      && (parsed.id === 'agentoc-session-new' || parsed.id === 'agentoc-session-load')
+      && (parsed.id === 'ragent-session-new' || parsed.id === 'ragent-session-load')
       && !parsed.error) {
     const sessionId = acpSessionIdFromResponse(parsed)
-      || (parsed.id === 'agentoc-session-load' ? run?.providerResumeId : '');
+      || (parsed.id === 'ragent-session-load' ? run?.providerResumeId : '');
     if (sessionId) {
       return {
         providerResumeId: sessionId,
@@ -1620,7 +1620,7 @@ export async function createCodexAppServerRunState({
     turnId: '',
     interactionMode: typeof options.interactionMode === 'string' ? options.interactionMode : '',
     permissionMode: typeof options.permissionMode === 'string' ? options.permissionMode : '',
-    agentocApprovalGate: isCodexAppServerRagentApprovalGateEnabled({ riskMode: options.riskMode, permissionMode: options.permissionMode }),
+    ragentApprovalGate: isCodexAppServerRagentApprovalGateEnabled({ riskMode: options.riskMode, permissionMode: options.permissionMode }),
     approvalPolicyVerified: false,
     privilegedMode: options.privilegedMode === true,
     riskMode: typeof options.riskMode === 'string' ? options.riskMode : '',
@@ -1752,7 +1752,7 @@ function createClaudeBidiRunState({ prompt, manifest, cwd } = {}) {
     projectRoot: typeof options.projectRoot === 'string' ? options.projectRoot : '',
     privilegedTurnOps: [],
     initialized: false,
-    initializeRequestId: 'agentoc-initialize-1',
+    initializeRequestId: 'ragent-initialize-1',
     nextControlRequestId: 2,
     startedTurn: false,
     turnActive: false,
@@ -1793,7 +1793,7 @@ function writeClaudeBidiMessage(proc, message) {
 }
 
 function nextClaudeBidiControlRequestId(state) {
-  const requestId = `agentoc-control-${state.nextControlRequestId}`;
+  const requestId = `ragent-control-${state.nextControlRequestId}`;
   state.nextControlRequestId += 1;
   return requestId;
 }
@@ -1860,7 +1860,7 @@ function handleClaudeBidiControlResponse(proc, state, parsed) {
       return true;
     }
     state.initialized = true;
-    state.mcpStatusControlId = `agentoc-mcp-status-${state.nextControlRequestId++}`;
+    state.mcpStatusControlId = `ragent-mcp-status-${state.nextControlRequestId++}`;
     const requested = writeClaudeBidiMessage(proc, { type: 'control_request', request_id: state.mcpStatusControlId,
       request: { subtype: 'mcp_status' } });
     if (requested) {
@@ -1984,7 +1984,7 @@ export function writeCodexAppServerThreadStart(proc, state) {
     developerInstructions: state.developerInstructions,
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
-    agentocApprovalGate: state.agentocApprovalGate,
+    ragentApprovalGate: state.ragentApprovalGate,
     threadMcpConfig: state.threadMcpConfig,
     providerReadOnly: state.providerReadOnly === true,
     factorySingleAgent: state.factorySingleAgent === true,
@@ -2103,7 +2103,7 @@ export function handleCodexAppServerInitializeResponse(proc, state, parsed) {
         }
         const id = state.nextControlRequestId++;
         state.sharedHookRegistration = { id, onReady: continueStartup };
-        if (!writeCodexAppServerMessage(proc, { id, method: 'agentoc/registerWindowsHook', params: {
+        if (!writeCodexAppServerMessage(proc, { id, method: 'ragent/registerWindowsHook', params: {
           sourcePath: selected.sourcePath, displayOrder: selected.displayOrder,
         } })) {
           state.sharedHookRegistration = null; state.hadError = true; state.terminalSeen = true;
@@ -2178,7 +2178,7 @@ function armCodexAppServerMcpStartupFallback(runId, state, proc) {
     || state.startedTurn
     || !areRequiredCodexMcpServersStartupReady(state)
   ) return;
-  const configured = Number(process.env.AGENTOC_CODEX_MCP_STARTUP_FALLBACK_MS);
+  const configured = Number(process.env.RAGENT_CODEX_MCP_STARTUP_FALLBACK_MS);
   const delayMs = Number.isFinite(configured) && configured > 0
     ? configured
     : DEFAULT_CODEX_MCP_STARTUP_FALLBACK_MS;
@@ -2191,7 +2191,7 @@ function armCodexAppServerMcpStartupFallback(runId, state, proc) {
         || state.mcpReady
         || !areRequiredCodexMcpServersStartupReady(state)
       ) return;
-      // The overlay has already been prepared and every AgentoC-owned server
+      // The overlay has already been prepared and every Ragent-owned server
       // reported `ready`. Only the optional inventory response is absent.
       state.mcpStartupFallbackReady = true;
       state.mcpReady = true;
@@ -2227,7 +2227,7 @@ function armCodexAppServerMcpStartupFallback(runId, state, proc) {
 
 function armCodexAppServerMcpReadinessTimeout(runId, state, terminate) {
   if (!state?.mcpRequired || state.mcpReadinessTimer || state.mcpReady) return;
-  const configured = Number(process.env.AGENTOC_CODEX_MCP_READINESS_TIMEOUT_MS);
+  const configured = Number(process.env.RAGENT_CODEX_MCP_READINESS_TIMEOUT_MS);
   const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : 15_000;
   state.mcpReadinessStartedAt = nowIso();
   state.mcpReadinessTimeoutMs = timeoutMs;
@@ -2593,7 +2593,7 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     return false;
   }
   state.threadId = threadId;
-  if ((state.agentocApprovalGate || state.providerReadOnly) && state.approvalPolicyVerified !== true) {
+  if ((state.ragentApprovalGate || state.providerReadOnly) && state.approvalPolicyVerified !== true) {
     state.providerStage = 'verifying_approval_policy';
     return false;
   }
@@ -2691,7 +2691,7 @@ export function maybeStartCodexAppServerTurn(proc, state, parsed) {
     reasoningEffort: state.reasoningEffort,
     interactionMode: state.interactionMode,
     permissionMode: state.permissionMode,
-    agentocApprovalGate: state.agentocApprovalGate,
+    ragentApprovalGate: state.ragentApprovalGate,
     executionEnvironment: state.executionEnvironment,
   }));
   if (written) state.startedTurn = true;
@@ -2993,7 +2993,7 @@ async function recordGateDecision(runId, state, approval, provider, gateDecision
   const allowed = gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW;
   const decisionClass = gateDecision.decisionClass || (allowed ? 'allow' : 'ask');
   await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-    type: 'agentoc.approval_decision', runId, approvalId: approval.approvalId, provider,
+    type: 'ragent.approval_decision', runId, approvalId: approval.approvalId, provider,
     providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
     decisionClass, reasonCode: gateDecision.reasonCode || (allowed ? 'ordinary_operation' : 'approval_required'),
     stage: gateDecision.reviewStatus ? 'ragent_context_review' : 'ragent_rules',
@@ -3064,14 +3064,14 @@ async function reviewRunGate(runId, state, approval, gate) {
     const token = (await readFile(runReviewCapabilityPath(runId), 'utf8')).trim();
     if (!token) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_empty' };
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_review_request', runId, approvalId: approval.approvalId,
+      type: 'ragent.approval_review_request', runId, approvalId: approval.approvalId,
       requestId: state.requestId, requestHash, reasonCode: gate.reasonCode,
     } });
     if (state.reviewStopped) return unknown('review_cancelled');
     const response = await fetch(`http://127.0.0.1:${CHAT_PORT}/api/internal/run-review`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-agentoc-run-review-token': token,
-        'x-agentoc-run-review-run-id': runId, 'x-agentoc-run-review-session-id': channel.sessionId,
-        'x-agentoc-run-review-turn-id': channel.turnId },
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-ragent-run-review-token': token,
+        'x-ragent-run-review-run-id': runId, 'x-ragent-run-review-session-id': channel.sessionId,
+        'x-ragent-run-review-turn-id': channel.turnId },
       body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.any([AbortSignal.timeout(50000), reviewController.signal]), redirect: 'error',
     });
     const result = await response.json();
@@ -3173,7 +3173,7 @@ async function denyUnattendedPermissionRequest(runId, state, approval, proc, pro
     ts: nowIso(),
     stream: 'stdout',
     json: {
-      type: 'agentoc.approval_response',
+      type: 'ragent.approval_response',
       approvalId: approval.approvalId,
       provider,
       decision: 'denied',
@@ -3223,7 +3223,7 @@ function withCurrentCodexFileChanges(approval, state) {
   return { ...approval, params: { ...params, changes: item.changes } };
 }
 
-export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe') } = {}) {
+export async function trackCodexAppServerApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-safe-search.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readCodexAppServerApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
@@ -3256,7 +3256,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
         ts: nowIso(),
         stream: 'stdout',
         json: {
-          type: 'agentoc.approval_response',
+          type: 'ragent.approval_response',
           approvalId: approval.approvalId,
           provider: 'codex',
           decision: 'approved',
@@ -3281,7 +3281,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   // path and use the provider-specific elicitation response shape.
   const controlledInstall = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsInstallBridgeApproval({ approval, state, runId, nodePath: process.execPath,
-      scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-windows-install-bridge.mjs') });
+      scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-install-bridge.mjs') });
   const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
   const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
@@ -3334,7 +3334,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     if (message && proc) {
       writeCodexAppServerMessage(proc, message);
       const event = {
-        type: 'agentoc.approval_response',
+        type: 'ragent.approval_response',
         approvalId: approval.approvalId,
         provider: 'codex',
         decision: 'approved',
@@ -3395,7 +3395,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   return record;
 }
 
-export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe') } = {}) {
+export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc, { safeDeleteHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-safe-delete.exe'), cliReadHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-cli-read-bridge.exe'), searchHelperPath = join(PROJECT_ROOT, 'bin', 'ragent-safe-search.exe') } = {}) {
   if (!state || !parsed) return null;
   const approval = readClaudeBidiApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
@@ -3422,7 +3422,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
         ts: nowIso(),
         stream: 'stdout',
         json: {
-          type: 'agentoc.approval_response',
+          type: 'ragent.approval_response',
           approvalId: approval.approvalId,
           provider: 'claude',
           decision: 'approved',
@@ -3447,7 +3447,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const reason = windowsElevationGuidance(state.windowsManagedActionChannel === true && binding?.runId === runId);
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'deny', null, { message: reason });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to provide managed elevation guidance');
-    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: { type: 'agentoc.approval_response',
+    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: { type: 'ragent.approval_response',
       approvalId: approval.approvalId, provider: 'claude', decision: 'denied', status: 'denied', autoDenied: true,
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '', reason } });
     await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.PROMPT,
@@ -3476,7 +3476,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     state.cwdTransitions ||= new Map();
     state.cwdTransitions.set(cwdTransition.toolUseId, { from: cwdTransition.from, to: cwdTransition.to });
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'directory change bound to verified execution context', ...riskAuditFields(gateDecision.risk),
     } });
@@ -3495,7 +3495,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: posixRipgrep.updatedInput });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound ripgrep response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'ripgrep bound to execution directory and sensitive exclusions', ...riskAuditFields(gateDecision.risk),
     } });
@@ -3513,7 +3513,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: listingBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound wildcard listing response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'pinned local directory name listing', ...riskAuditFields(listingBridge.risk),
     } });
@@ -3528,7 +3528,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: searchGlobBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound wildcard search response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'wildcard search bound to verified file handles', ...riskAuditFields(searchGlobBridge.risk),
     } });
@@ -3544,7 +3544,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: ripgrepBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled ripgrep response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'ripgrep configuration disabled for verified read', ...riskAuditFields(ripgrepBridge.risk),
     } });
@@ -3559,7 +3559,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: defaultFileBridge.updatedInput });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound file search response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'file tool bound to session directory', ...riskAuditFields(defaultFileBridge.risk),
     } });
@@ -3575,7 +3575,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: relativeOperationBridge.updatedInput });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send working-directory-bound operation response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'operation bound to execution working directory', ...riskAuditFields(relativeOperationBridge.risk),
     } });
@@ -3588,7 +3588,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: deleteBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled deletion response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'handle-bound workspace deletion',
     } });
@@ -3605,7 +3605,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: cliReadBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled CLI response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: cliReadBridge.updatedCommand.includes(' asset-publish ') ? 'controlled current-session asset publication'
         : cliReadBridge.updatedCommand.includes(' trigger-create ') ? 'controlled current-session trigger creation' : 'controlled read-only CLI operation',
@@ -3618,13 +3618,13 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
 
   const installBridge = process.platform === 'win32' && !isMcpTool
     ? buildClaudeWindowsInstallBridge({ approval, state, runId, nodePath: process.execPath,
-      scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-windows-install-bridge.mjs') }) : null;
+      scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-install-bridge.mjs') }) : null;
   if (installBridge && await checkWindowsInstallBridgeReadiness({ channel: state.windowsManagedActionBinding,
     command: installBridge.installCommand, requestKey: installBridge.requestKey })) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { command: installBridge.updatedCommand } });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send controlled installation response');
     await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'agentoc.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+      type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
       providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
       autoApproved: true, reason: 'controlled Windows installation',
     } });
@@ -3663,7 +3663,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve');
     if (message && writeClaudeBidiMessage(proc, message)) {
       const event = {
-        type: 'agentoc.approval_response',
+        type: 'ragent.approval_response',
         approvalId: approval.approvalId,
         provider: 'claude',
         decision: 'approved',
@@ -3796,7 +3796,7 @@ export async function flushCodexAppServerApprovalResponses(proc, state, run) {
         ts: nowIso(),
         stream: 'stdout',
         json: {
-          type: 'agentoc.approval_response',
+          type: 'ragent.approval_response',
           approvalId,
           provider: 'codex',
           decision: formattedDecision,
@@ -3842,7 +3842,7 @@ export async function flushClaudeBidiApprovalResponses(proc, state, run) {
     state.lastControlActivityAt = Date.now();
     const formattedDecision = formatCodexAppServerApprovalDecision(decision);
     const event = {
-      type: 'agentoc.approval_response',
+      type: 'ragent.approval_response',
       approvalId,
       provider: 'claude',
       decision: formattedDecision,
@@ -3969,7 +3969,7 @@ async function appendCodexContextMetrics(runId, options = {}) {
 
 async function appendCodexContextMetricsSafely(runId, options = {}) {
   try {
-    if (process.env.AGENTOC_TEST_THROW_ON_FINALIZATION_METRICS === '1') {
+    if (process.env.RAGENT_TEST_THROW_ON_FINALIZATION_METRICS === '1') {
       throw new Error('Synthetic finalization metrics failure');
     }
     return await appendCodexContextMetrics(runId, options);
@@ -4001,11 +4001,11 @@ async function appendFileChangeStatsSummarySafely(runId, tracker) {
 }
 
 async function adoptNativeOAuthLockForSidecar() {
-  const lockPath = typeof process.env.AGENTOC_NATIVE_OAUTH_LOCK_PATH === 'string'
-    ? process.env.AGENTOC_NATIVE_OAUTH_LOCK_PATH.trim()
+  const lockPath = typeof process.env.RAGENT_NATIVE_OAUTH_LOCK_PATH === 'string'
+    ? process.env.RAGENT_NATIVE_OAUTH_LOCK_PATH.trim()
     : '';
-  const lockToken = typeof process.env.AGENTOC_NATIVE_OAUTH_LOCK_TOKEN === 'string'
-    ? process.env.AGENTOC_NATIVE_OAUTH_LOCK_TOKEN.trim()
+  const lockToken = typeof process.env.RAGENT_NATIVE_OAUTH_LOCK_TOKEN === 'string'
+    ? process.env.RAGENT_NATIVE_OAUTH_LOCK_TOKEN.trim()
     : '';
   if (!lockPath && !lockToken) return null;
   if (!lockPath || !lockToken) {
@@ -4079,9 +4079,9 @@ async function main() {
     state: 'running',
     startedAt: current.startedAt || nowIso(),
     runnerProcessId: process.pid,
-    runnerUnitName: current?.runnerUnitName || process.env.AGENTOC_RUNNER_UNIT_NAME || null,
-    runnerUnitScope: current?.runnerUnitScope || process.env.AGENTOC_RUNNER_UNIT_SCOPE || null,
-    runnerLaunchMode: current?.runnerLaunchMode || process.env.AGENTOC_RUNNER_LAUNCH_MODE || null,
+    runnerUnitName: current?.runnerUnitName || process.env.RAGENT_RUNNER_UNIT_NAME || null,
+    runnerUnitScope: current?.runnerUnitScope || process.env.RAGENT_RUNNER_UNIT_SCOPE || null,
+    runnerLaunchMode: current?.runnerLaunchMode || process.env.RAGENT_RUNNER_LAUNCH_MODE || null,
     ...(process.env[CODEX_FRESH_RECOVERY_ENV] === '1'
       ? {
         providerRecovery: {
@@ -4105,7 +4105,7 @@ async function main() {
   // Runs no longer hold a WorkspaceLease (mutation-scoped lease redesign), so
   // there is no sidecar heartbeat to start.
 
-  if (process.env.AGENTOC_TEST_RUNNER_SIDECAR_FAIL_BEFORE_TOOL_SPAWN === '1') {
+  if (process.env.RAGENT_TEST_RUNNER_SIDECAR_FAIL_BEFORE_TOOL_SPAWN === '1') {
     throw new Error('Synthetic sidecar failure before tool spawn');
   }
 
@@ -4167,8 +4167,8 @@ async function main() {
   // early lookup from falling back to the user's project/home config.
   const runnerCodexHomeDir = resolveRunnerCodexHomeDir();
   const runnerAgyHomeDir = resolveRunnerAgyHomeDir();
-  const runnerClaudeHomeDir = process.env.AGENTOC_PROVIDER_HOMES_DIR
-    ? join(process.env.AGENTOC_PROVIDER_HOMES_DIR, 'claude')
+  const runnerClaudeHomeDir = process.env.RAGENT_PROVIDER_HOMES_DIR
+    ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, 'claude')
     : '';
   const {
     command: initialCommand,
@@ -4187,7 +4187,7 @@ async function main() {
     acp,
   } = await createToolInvocation(manifest.tool, forceFreshCodexRecovery ? freshRecoveryPrompt : prompt, {
     dangerouslySkipPermissions: true,
-    // The runner env policy strips AGENTOC_CONFIG_DIR/HOME, so the sidecar
+    // The runner env policy strips RAGENT_CONFIG_DIR/HOME, so the sidecar
     // cannot re-read the control plane's tools.json for custom/test tools.
     // The control plane already resolved the tool for the run manifest; carry
     // that resolution into the invocation instead of losing it to the env
@@ -4212,7 +4212,7 @@ async function main() {
     systemPrefix: manifest.systemPrefix,
     deepSeekHarnessAcp: manifest.options?.deepSeekHarnessAcp === true,
     deepSeekHarnessConfig: manifest.options?.deepSeekHarnessConfig,
-    piProvider: manifest.options?.piProvider || (process.env.AGENTOC_PROVIDER_PROTOCOL === 'anthropic-messages' ? 'anthropic' : 'openai'),
+    piProvider: manifest.options?.piProvider || (process.env.RAGENT_PROVIDER_PROTOCOL === 'anthropic-messages' ? 'anthropic' : 'openai'),
   });
   const supportsExternalUsageProjection = hasProviderCapability(
     { runtimeFamily, providerCapabilities: capabilities },
@@ -4249,10 +4249,10 @@ async function main() {
     attachmentPaths.push(entry);
   }
   if (attachmentPaths.length > 0) {
-    spawnEnv.AGENTOC_ATTACHMENT_PATHS = JSON.stringify(attachmentPaths);
+    spawnEnv.RAGENT_ATTACHMENT_PATHS = JSON.stringify(attachmentPaths);
   }
 
-  // Real `agentoc-privileged` (design docs/privileged-shim-channel-2026-09-03.md):
+  // Real `ragent-privileged` (design docs/privileged-shim-channel-2026-09-03.md):
   // install the per-Run launcher on the provider PATH and serve its callback
   // socket, so the privileged sentinel works even when the provider has no
   // approval gate (agy) or its sandbox auto-runs commands (Codex
@@ -4264,10 +4264,10 @@ async function main() {
     || manifest.options?.readOnlyRequired === true;
   const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
-    && process.env.AGENTOC_CODEX_PROVIDER_READONLY === '1';
+    && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1';
   if (readOnlyRequested) {
     for (const key of Object.keys(spawnEnv)) {
-      if (key.startsWith('AGENTOC_APPROVED_ACTIONS_') || key.startsWith('AGENTOC_BROWSER_')) delete spawnEnv[key];
+      if (key.startsWith('RAGENT_APPROVED_ACTIONS_') || key.startsWith('RAGENT_BROWSER_')) delete spawnEnv[key];
     }
   }
   let privilegedShimChannel = null;
@@ -4391,7 +4391,7 @@ async function main() {
     : null;
   if (appServerState && providerReadOnly) appServerState.providerReadOnly = true;
   if (appServerState && factoryBudget) appServerState.factorySingleAgent = true;
-  if (appServerState?.agentocApprovalGate && (appServerState.permissionMode === 'untrusted' || appServerState.permissionMode.startsWith('untrusted-'))) {
+  if (appServerState?.ragentApprovalGate && (appServerState.permissionMode === 'untrusted' || appServerState.permissionMode.startsWith('untrusted-'))) {
     // Direct process launches still need this override. The shared broker
     // uses the equivalent thread-scoped trust configuration instead.
     args = [...args, ...buildCodexAppServerProjectTrustArgs(resolvedFolder.cwd)];
@@ -4409,17 +4409,17 @@ async function main() {
   if (claudeBidiState) {
     // The scoped CLI bridge must not replace a command unless this child
     // actually has a complete capability for its own run and session.
-    claudeBidiState.sessionControlReadAvailable = Boolean(spawnEnv.AGENTOC_SESSION_CONTROL_TOKEN &&
-      spawnEnv.AGENTOC_SESSION_CONTROL_RUN_ID === runId &&
-      spawnEnv.AGENTOC_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
-      spawnEnv.AGENTOC_SESSION_ID === manifest.sessionId && spawnEnv.AGENTOC_SESSION_CONTROL_TURN_ID);
+    claudeBidiState.sessionControlReadAvailable = Boolean(spawnEnv.RAGENT_SESSION_CONTROL_TOKEN &&
+      spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID === runId &&
+      spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
+      spawnEnv.RAGENT_SESSION_ID === manifest.sessionId && spawnEnv.RAGENT_SESSION_CONTROL_TURN_ID);
     claudeBidiState.sessionControlReadRunId = claudeBidiState.sessionControlReadAvailable ? runId : '';
   }
   if (appServerState) {
-    appServerState.sessionControlReadAvailable = Boolean(spawnEnv.AGENTOC_SESSION_CONTROL_TOKEN &&
-      spawnEnv.AGENTOC_SESSION_CONTROL_RUN_ID === runId &&
-      spawnEnv.AGENTOC_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
-      spawnEnv.AGENTOC_SESSION_ID === manifest.sessionId && spawnEnv.AGENTOC_SESSION_CONTROL_TURN_ID);
+    appServerState.sessionControlReadAvailable = Boolean(spawnEnv.RAGENT_SESSION_CONTROL_TOKEN &&
+      spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID === runId &&
+      spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID === manifest.sessionId &&
+      spawnEnv.RAGENT_SESSION_ID === manifest.sessionId && spawnEnv.RAGENT_SESSION_CONTROL_TURN_ID);
     appServerState.sessionControlReadRunId = appServerState.sessionControlReadAvailable ? runId : '';
   }
   // —— 2026-08-06 防污染兜底：codex run 启动前把 managed home 镜像到 DB current 行 ——
@@ -4432,10 +4432,10 @@ async function main() {
   if (isAgyFamily) {
     const providerHome = runnerAgyHomeDir || '';
     const marker = providerHome
-      ? (await readFile(join(providerHome, '.agentoc-provider-id'), 'utf8').catch(() => '')).trim()
+      ? (await readFile(join(providerHome, '.ragent-provider-id'), 'utf8').catch(() => '')).trim()
       : '';
     const targetProviderId = String(
-      process.env.AGENTOC_PROVIDER_PROFILE_ID
+      process.env.RAGENT_PROVIDER_PROFILE_ID
         || manifest.options?.providerProfile
         || '',
     ).trim();
@@ -4455,10 +4455,10 @@ async function main() {
     // provider 行（config+auth）到 managed home；无后缀（默认/历史会话）
     // → current（原行为，防污染兜底语义不变）。
     const targetProviderId = appServerState?.providerId || '';
-    const providerHome = process.env.AGENTOC_PROVIDER_HOMES_DIR
-      ? join(process.env.AGENTOC_PROVIDER_HOMES_DIR, 'codex')
+    const providerHome = process.env.RAGENT_PROVIDER_HOMES_DIR
+      ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, 'codex')
       : '';
-    const marker = providerHome ? (await readFile(join(providerHome, '.agentoc-provider-id'), 'utf8').catch(() => '')).trim() : '';
+    const marker = providerHome ? (await readFile(join(providerHome, '.ragent-provider-id'), 'utf8').catch(() => '')).trim() : '';
     if (targetProviderId && marker !== targetProviderId) {
       const binding = providerHome ? await readJsonIfPresent(codexRunBindingPath(providerHome, runId), readFile) : null;
       const auth = providerHome ? await readJsonIfPresent(join(providerHome, 'auth.json'), readFile) : null;
@@ -4471,10 +4471,10 @@ async function main() {
     const targetProviderId = typeof manifest.options?.providerProfile === 'string'
       ? manifest.options.providerProfile.trim()
       : '';
-    const providerHome = process.env.AGENTOC_PROVIDER_HOMES_DIR
-      ? join(process.env.AGENTOC_PROVIDER_HOMES_DIR, 'claude')
+    const providerHome = process.env.RAGENT_PROVIDER_HOMES_DIR
+      ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, 'claude')
       : '';
-    const marker = providerHome ? (await readFile(join(providerHome, '.agentoc-provider-id'), 'utf8').catch(() => '')).trim() : '';
+    const marker = providerHome ? (await readFile(join(providerHome, '.ragent-provider-id'), 'utf8').catch(() => '')).trim() : '';
     if (targetProviderId && marker !== targetProviderId) {
       throw new Error(`Claude provider home is not prepared for selected provider ${targetProviderId}`);
     }
@@ -4506,7 +4506,7 @@ async function main() {
   }
   if (appServerState && WORKBENCH_EXECUTION_POLICY?.codexPermissionProfile) {
     // The operator profile supplies the approval policy through requirements.
-    appServerState.agentocApprovalGate = false;
+    appServerState.ragentApprovalGate = false;
   }
   const sharedReadOnlyCodex = Boolean(process.platform === 'linux' && appServerState && codexOAuthRuntime
     && readOnlyRequested);
@@ -4519,16 +4519,16 @@ async function main() {
   );
   // The control-plane feature flag is process-global, but the worker tool is
   // run-scoped. Strip the inherited flag before projecting the manifest grant.
-  delete spawnEnv.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED;
-  delete spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT;
-  delete spawnEnv.AGENTOC_WINDOWS_INSTALL_BRIDGE_DISABLED;
+  delete spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED;
+  delete spawnEnv.RAGENT_WINDOWS_SAFE_DELETE_CONTEXT;
+  delete spawnEnv.RAGENT_WINDOWS_INSTALL_BRIDGE_DISABLED;
   if (windowsElevationHook && !['recommended', 'full-auto'].includes(manifest.options?.riskMode)) {
-    spawnEnv.AGENTOC_WINDOWS_INSTALL_BRIDGE_DISABLED = '1';
+    spawnEnv.RAGENT_WINDOWS_INSTALL_BRIDGE_DISABLED = '1';
   }
   if (process.platform === 'win32' && appServerState && !WORKBENCH_EXECUTION_POLICY && appServerState.riskContextValid === true &&
       ['recommended', 'full-auto'].includes(appServerState.riskMode) && appServerState.interactionMode !== 'plan' && appServerState.permissionMode !== 'plan') {
-    spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-delete.exe'),
-      assetHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-cli-read-bridge.exe'), searchHelperPath: join(PROJECT_ROOT, 'bin', 'agentoc-safe-search.exe'), port: Number(CHAT_PORT), state: { riskMode: appServerState.riskMode, riskContextValid: true,
+    spawnEnv.RAGENT_WINDOWS_SAFE_DELETE_CONTEXT = JSON.stringify({ runId, helperPath: join(PROJECT_ROOT, 'bin', 'ragent-safe-delete.exe'),
+      assetHelperPath: join(PROJECT_ROOT, 'bin', 'ragent-cli-read-bridge.exe'), searchHelperPath: join(PROJECT_ROOT, 'bin', 'ragent-safe-search.exe'), port: Number(CHAT_PORT), state: { riskMode: appServerState.riskMode, riskContextValid: true,
       sessionControlReadAvailable: appServerState.sessionControlReadAvailable, sessionControlReadRunId: appServerState.sessionControlReadRunId,
       interactionMode: appServerState.interactionMode, permissionMode: appServerState.permissionMode,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: appServerState.riskContext.trustedWorkspaceRoot,
@@ -4537,8 +4537,8 @@ async function main() {
   }
   const browserChannel = manifest.options?.browserChannel;
   const browserMcpRequested = !readOnlyRequested && Boolean(
-    spawnEnv.AGENTOC_BROWSER_MCP_ENABLED === '1'
-    && spawnEnv.AGENTOC_BROWSER_TOKEN
+    spawnEnv.RAGENT_BROWSER_MCP_ENABLED === '1'
+    && spawnEnv.RAGENT_BROWSER_TOKEN
     && supportsBrowserMcpRuntime(runtimeFamily, { acp: acp === true })
     && browserChannel?.enabled === true
     && browserChannel?.endpoint,
@@ -4546,32 +4546,32 @@ async function main() {
   let managedMcpOverlay = null;
   let acpMcpServers = [];
   if (managedActionMcpRequested) {
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_ENABLED = '1';
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_ENDPOINT = approvedActionChannel.endpoint;
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_TOKEN = approvedActionChannel.token;
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_SESSION_ID = manifest.sessionId || '';
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_RUN_ID = runId;
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_TURN_ID = approvedActionChannel.turnId || manifest.requestId || runId;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED = '1';
+    spawnEnv.RAGENT_APPROVED_ACTIONS_ENDPOINT = approvedActionChannel.endpoint;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_TOKEN = approvedActionChannel.token;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_SESSION_ID = manifest.sessionId || '';
+    spawnEnv.RAGENT_APPROVED_ACTIONS_RUN_ID = runId;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_TURN_ID = approvedActionChannel.turnId || manifest.requestId || runId;
     if (approvedActionChannel.windowsUserInstallIdentity) {
-      spawnEnv.AGENTOC_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(approvedActionChannel.windowsUserInstallIdentity);
+      spawnEnv.RAGENT_WINDOWS_USER_INSTALL_IDENTITY = JSON.stringify(approvedActionChannel.windowsUserInstallIdentity);
     }
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_CWD = resolvedFolder.cwd;
-    spawnEnv.AGENTOC_APPROVED_ACTIONS_PROJECT_ROOT = manifest.options?.projectRoot || resolvedFolder.cwd;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_CWD = resolvedFolder.cwd;
+    spawnEnv.RAGENT_APPROVED_ACTIONS_PROJECT_ROOT = manifest.options?.projectRoot || resolvedFolder.cwd;
     // The agent-create grant must be decided before overlay preparation: the
     // codex overlay snapshots these bindings into its config.toml env table
     // (codex MCP children do not inherit the process env), so setting the
     // flag after prepare would never reach the script.
     if (approvedActionChannel.productAgentCreate === true) {
-      spawnEnv.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
+      spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
     }
   }
 
   if (windowsBrokerMcpRequested) {
-    spawnEnv.AGENTOC_WINDOWS_BROKER_ENDPOINT = windowsBrokerChannel.endpoint;
-    spawnEnv.AGENTOC_WINDOWS_BROKER_TOKEN = windowsBrokerChannel.token;
-    spawnEnv.AGENTOC_WINDOWS_BROKER_SESSION_ID = manifest.sessionId || '';
-    spawnEnv.AGENTOC_WINDOWS_BROKER_RUN_ID = runId;
-    spawnEnv.AGENTOC_WINDOWS_BROKER_TURN_ID = windowsBrokerChannel.turnId || manifest.requestId || runId;
+    spawnEnv.RAGENT_WINDOWS_BROKER_ENDPOINT = windowsBrokerChannel.endpoint;
+    spawnEnv.RAGENT_WINDOWS_BROKER_TOKEN = windowsBrokerChannel.token;
+    spawnEnv.RAGENT_WINDOWS_BROKER_SESSION_ID = manifest.sessionId || '';
+    spawnEnv.RAGENT_WINDOWS_BROKER_RUN_ID = runId;
+    spawnEnv.RAGENT_WINDOWS_BROKER_TURN_ID = windowsBrokerChannel.turnId || manifest.requestId || runId;
   }
 
   if (managedActionMcpRequested || windowsBrokerMcpRequested || (browserMcpRequested && acp !== true)) {
@@ -4603,37 +4603,37 @@ async function main() {
           // Keep the established server name stable for Codex/Claude readiness
           // and existing provider fixtures; browser gets its own namespace.
           kind: 'actions',
-          scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-approved-actions-mcp.mjs'),
+          scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-approved-actions-mcp.mjs'),
           envKeys: [
-            'AGENTOC_APPROVED_ACTIONS_ENABLED',
-            'AGENTOC_APPROVED_ACTIONS_ENDPOINT',
-            'AGENTOC_APPROVED_ACTIONS_TOKEN',
-            'AGENTOC_APPROVED_ACTIONS_SESSION_ID',
-            'AGENTOC_APPROVED_ACTIONS_RUN_ID',
-            'AGENTOC_APPROVED_ACTIONS_TURN_ID',
-            'AGENTOC_APPROVED_ACTIONS_CWD',
-            'AGENTOC_APPROVED_ACTIONS_PROJECT_ROOT',
-            'AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED',
+            'RAGENT_APPROVED_ACTIONS_ENABLED',
+            'RAGENT_APPROVED_ACTIONS_ENDPOINT',
+            'RAGENT_APPROVED_ACTIONS_TOKEN',
+            'RAGENT_APPROVED_ACTIONS_SESSION_ID',
+            'RAGENT_APPROVED_ACTIONS_RUN_ID',
+            'RAGENT_APPROVED_ACTIONS_TURN_ID',
+            'RAGENT_APPROVED_ACTIONS_CWD',
+            'RAGENT_APPROVED_ACTIONS_PROJECT_ROOT',
+            'RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED',
           ],
         });
       }
       if (windowsBrokerMcpRequested) {
         managedMcpServers.push({
           kind: 'broker',
-          scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-windows-broker-mcp.mjs'),
+          scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-broker-mcp.mjs'),
           envKeys: [
-            'AGENTOC_WINDOWS_BROKER_ENDPOINT',
-            'AGENTOC_WINDOWS_BROKER_TOKEN',
-            'AGENTOC_WINDOWS_BROKER_SESSION_ID',
-            'AGENTOC_WINDOWS_BROKER_RUN_ID',
-            'AGENTOC_WINDOWS_BROKER_TURN_ID',
+            'RAGENT_WINDOWS_BROKER_ENDPOINT',
+            'RAGENT_WINDOWS_BROKER_TOKEN',
+            'RAGENT_WINDOWS_BROKER_SESSION_ID',
+            'RAGENT_WINDOWS_BROKER_RUN_ID',
+            'RAGENT_WINDOWS_BROKER_TURN_ID',
           ],
         });
       }
       if (browserMcpRequested) {
         managedMcpServers.push({
           kind: 'browser',
-          scriptPath: join(PROJECT_ROOT, 'scripts', 'agentoc-browser-mcp-server.mjs'),
+          scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-browser-mcp-server.mjs'),
           envKeys: BROWSER_MCP_ENV_KEYS,
         });
       }
@@ -4647,7 +4647,7 @@ async function main() {
         codexWindowsApprovalGate: process.platform === 'win32' && runtimeFamily === 'codex-app-server-json'
           && ['safe', 'recommended', 'full-auto'].includes(manifest.options?.riskMode),
         codexWindowsInstallHook: windowsElevationHook
-          ? join(PROJECT_ROOT, 'scripts', 'agentoc-codex-windows-install-hook.mjs') : '',
+          ? join(PROJECT_ROOT, 'scripts', 'ragent-codex-windows-install-hook.mjs') : '',
       });
       if (threadScopedCodexMcp && managedMcpOverlay) appServerState.threadMcpConfig = managedMcpOverlay.config;
 
@@ -4719,15 +4719,15 @@ async function main() {
       }
 
       if (!managedMcpOverlay) {
-        delete spawnEnv.AGENTOC_APPROVED_ACTIONS_ENABLED;
-        delete spawnEnv.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED;
+        delete spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED;
+        delete spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED;
         const error = new Error('MCP readiness failed: MCP_OVERLAY_UNAVAILABLE');
         error.code = MCP_OVERLAY_LEGACY_ERROR_CODE;
         throw error;
       }
     } catch (error) {
-      delete spawnEnv.AGENTOC_APPROVED_ACTIONS_ENABLED;
-      delete spawnEnv.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED;
+      delete spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED;
+      delete spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED;
       await managedMcpOverlay?.cleanup?.();
       const preparation = normalizeMcpOverlayPreparation(error);
       await logSidecarDiagnostic(runId, 'Approved action MCP overlay unavailable', {
@@ -4771,8 +4771,8 @@ async function main() {
   // channel exists. It does not add approval rules in other permission modes.
   if (!managedMcpOverlay && appServerState && windowsElevationHook && !sharedCodexThreadSupported) {
     try {
-      managedMcpOverlay = await prepareManagedMcpOverlay({ runtimeFamily, runId, spawnEnv, servers: [], codexWindowsApprovalGate: Boolean(spawnEnv.AGENTOC_WINDOWS_SAFE_DELETE_CONTEXT),
-        codexWindowsInstallHook: join(PROJECT_ROOT, 'scripts', 'agentoc-codex-windows-install-hook.mjs') });
+      managedMcpOverlay = await prepareManagedMcpOverlay({ runtimeFamily, runId, spawnEnv, servers: [], codexWindowsApprovalGate: Boolean(spawnEnv.RAGENT_WINDOWS_SAFE_DELETE_CONTEXT),
+        codexWindowsInstallHook: join(PROJECT_ROOT, 'scripts', 'ragent-codex-windows-install-hook.mjs') });
       if (managedMcpOverlay?.codexWindowsInstallHook) {
         Object.assign(spawnEnv, managedMcpOverlay.env);
         appServerState.codexWindowsInstallHook = managedMcpOverlay.codexWindowsInstallHook;
@@ -4791,7 +4791,7 @@ async function main() {
     acpMcpServers = [{
       name: 'ragent-browser',
       command: process.execPath,
-      args: [join(PROJECT_ROOT, 'scripts', 'agentoc-browser-mcp-server.mjs')],
+      args: [join(PROJECT_ROOT, 'scripts', 'ragent-browser-mcp-server.mjs')],
       env: browserEnv,
     }];
   }
@@ -4835,7 +4835,7 @@ async function main() {
   // refresh-token race without forbidding same-account concurrency.
   const runSpecificCodexMcp = isCodexAppServerFamily
     && ((Boolean(managedMcpOverlay) && !threadScopedCodexMcp)
-      || (appServerState?.agentocApprovalGate === true && !sharedCodexThreadSupported));
+      || (appServerState?.ragentApprovalGate === true && !sharedCodexThreadSupported));
   let sharedSandboxHidePaths = null;
   if (sharedSandboxCodex) {
     const homePath = await realpath(runnerCodexHomeDir);
@@ -4847,7 +4847,7 @@ async function main() {
         { code: 'CODEX_READONLY_ENVIRONMENT_UNAVAILABLE' });
     }
     sharedSandboxHidePaths = [homePath.slice(0, boundary)];
-    for (const candidate of ['/var/lib/agentoc/config', '/etc/agentoc']) {
+    for (const candidate of ['/var/lib/ragent/config', '/etc/ragent']) {
       if (await lstat(candidate).then(() => true, () => false)) sharedSandboxHidePaths.push(candidate);
     }
   }
@@ -4866,7 +4866,7 @@ async function main() {
     try {
       const sharedHook = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY
         ? buildSharedCodexWindowsHook({ socketPath: brokerSocketPath }) : null;
-      const brokerCommand = appServerState?.agentocApprovalGate || sharedHook
+      const brokerCommand = appServerState?.ragentApprovalGate || sharedHook
         ? await resolveCommandSpawnSpec(initialCommand, [...initialArgs, ...(sharedHook?.args || [])], { cwd: resolvedFolder.cwd, env: spawnEnv })
         : resolvedCommand;
       await ensureCodexAppServerBroker({
@@ -4876,9 +4876,9 @@ async function main() {
         upstreamArgs: brokerCommand.args,
         upstreamWindowsVerbatimArguments: brokerCommand.windowsVerbatimArguments === true,
         cwd: resolvedFolder.cwd,
-        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, AGENTOC_CODEX_BROKER_BASE_PATH: codexBrokerBasePath,
-          ...(WORKBENCH_EXECUTION_POLICY ? { AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE: process.env.AGENTOC_WORKBENCH_EXECUTION_POLICY_FILE } : {}),
-          AGENTOC_CODEX_BROKER_SERVICE_MODE: process.platform === 'win32' && process.env.AGENTOC_RUNNER_LAUNCH_MODE === 'runner-supervisor' ? '1' : '0' },
+        env: { ...spawnEnv, CODEX_HOME: runnerCodexHomeDir, RAGENT_CODEX_BROKER_BASE_PATH: codexBrokerBasePath,
+          ...(WORKBENCH_EXECUTION_POLICY ? { RAGENT_WORKBENCH_EXECUTION_POLICY_FILE: process.env.RAGENT_WORKBENCH_EXECUTION_POLICY_FILE } : {}),
+          RAGENT_CODEX_BROKER_SERVICE_MODE: process.platform === 'win32' && process.env.RAGENT_RUNNER_LAUNCH_MODE === 'runner-supervisor' ? '1' : '0' },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
         assertLaunchBoundary: () => assertRunLaunchBoundary(runId),
         expectedPolicyDigest: codexBrokerPolicyDigest(WORKBENCH_EXECUTION_POLICY),
@@ -4923,7 +4923,7 @@ async function main() {
   if (isCodexAppServerFamily && codexOAuthRuntime && !codexAppServerBrokered
       && !nativeOAuthLockHandle) {
     nativeOAuthLockHandle = await acquireNativeOAuthLock(
-      join(dirname(runnerCodexHomeDir), '.agentoc-native-oauth.lock'),
+      join(dirname(runnerCodexHomeDir), '.ragent-native-oauth.lock'),
     );
   }
   if (isCodexAppServerFamily && codexOAuthRuntime && !codexAppServerBrokered) {
@@ -4968,7 +4968,7 @@ async function main() {
         cwd: resolvedFolder.cwd,
         runnerHome: process.env.HOME,
         readOnly: Boolean(readOnlyWorkspace),
-        hidePaths: ['/var/lib/agentoc/config', '/etc/agentoc'],
+        hidePaths: ['/var/lib/ragent/config', '/etc/ragent'],
         bindReadOnlyPaths: [
           ...buildRunnerGuiBindPaths(guiEnvironment),
           ...(privilegedShimChannel?.socketBindDir ? [privilegedShimChannel.socketBindDir] : []),
@@ -5138,44 +5138,44 @@ async function main() {
     terminateProviderProcessTree(proc, 'SIGTERM');
     return Promise.resolve();
   };
-  const idleTimeoutMs = Number.isFinite(Number(process.env.AGENTOC_RUN_IDLE_TIMEOUT_MS))
-    && Number(process.env.AGENTOC_RUN_IDLE_TIMEOUT_MS) > 0
-    ? Number(process.env.AGENTOC_RUN_IDLE_TIMEOUT_MS)
+  const idleTimeoutMs = Number.isFinite(Number(process.env.RAGENT_RUN_IDLE_TIMEOUT_MS))
+    && Number(process.env.RAGENT_RUN_IDLE_TIMEOUT_MS) > 0
+    ? Number(process.env.RAGENT_RUN_IDLE_TIMEOUT_MS)
     : (runtimeFamily === 'agy-json' || runtimeFamily === 'agy-stream-json'
       ? DEFAULT_AGY_IDLE_TIMEOUT_MS
       : defaultIdleTimeoutForRuntime(runtimeFamily));
   const codexToolIdleTimeoutMs = appServerState
     ? readPositiveDurationEnv(
-      'AGENTOC_CODEX_TOOL_IDLE_TIMEOUT_MS',
+      'RAGENT_CODEX_TOOL_IDLE_TIMEOUT_MS',
       Math.max(idleTimeoutMs, DEFAULT_CODEX_TOOL_IDLE_TIMEOUT_MS),
     )
     : idleTimeoutMs;
   const codexTurnIdleTimeoutMs = appServerState
     ? readPositiveDurationEnv(
-      'AGENTOC_CODEX_TURN_IDLE_TIMEOUT_MS',
+      'RAGENT_CODEX_TURN_IDLE_TIMEOUT_MS',
       // An explicitly configured generic timeout remains an operator override
       // for compatibility; the longer Codex default applies only when the
       // generic value was not supplied by the deployment.
-      process.env.AGENTOC_RUN_IDLE_TIMEOUT_MS
+      process.env.RAGENT_RUN_IDLE_TIMEOUT_MS
         ? idleTimeoutMs
         : DEFAULT_CODEX_TURN_IDLE_TIMEOUT_MS,
     )
     : idleTimeoutMs;
   const codexIdleInterruptGraceMs = appServerState
     ? readPositiveDurationEnv(
-      'AGENTOC_CODEX_IDLE_INTERRUPT_GRACE_MS',
+      'RAGENT_CODEX_IDLE_INTERRUPT_GRACE_MS',
       DEFAULT_CODEX_IDLE_INTERRUPT_GRACE_MS,
     )
     : DEFAULT_CODEX_IDLE_INTERRUPT_GRACE_MS;
   const codexStartupTimeoutMs = appServerState
     ? readPositiveDurationEnv(
-      'AGENTOC_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS',
+      'RAGENT_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS',
       DEFAULT_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS,
     )
     : 0;
-  const idleCheckIntervalMs = Number.isFinite(Number(process.env.AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS))
-    && Number(process.env.AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS) > 0
-    ? Number(process.env.AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS)
+  const idleCheckIntervalMs = Number.isFinite(Number(process.env.RAGENT_RUN_IDLE_CHECK_INTERVAL_MS))
+    && Number(process.env.RAGENT_RUN_IDLE_CHECK_INTERVAL_MS) > 0
+    ? Number(process.env.RAGENT_RUN_IDLE_CHECK_INTERVAL_MS)
     : IDLE_CHECK_INTERVAL_MS;
 
   const providerHeartbeatEnabled = isAgyFamily === true
@@ -5459,12 +5459,12 @@ async function main() {
         await logSidecarDiagnostic(runId, 'CODEX_UNREQUESTED_THREAD_EVENT', {
           frameSha256: createHash('sha256').update(line).digest('hex'),
           frameBytes: Buffer.byteLength(line, 'utf8'),
-          agentoc_intermediate: true,
+          ragent_intermediate: true,
         });
         return;
       }
       if (claudeBidiState && isClaudeBidiTurnTerminal(parsed) && claudeBidiState.steerAwaitingTurnEnd) {
-        parsed = { ...parsed, agentoc_intermediate: true };
+        parsed = { ...parsed, ragent_intermediate: true };
         spoolLine = JSON.stringify(parsed);
       }
       const enriched = fileChangeStatsTracker.observeProviderPayload(parsed);
@@ -5507,7 +5507,7 @@ async function main() {
       );
     }
     if (acpState && parsed) {
-      if (parsed.id === 'agentoc-initialize') {
+      if (parsed.id === 'ragent-initialize') {
         if (!isAcpInitializeAccepted(parsed) || acpState.sessionStartRequested || !proc.stdin?.writable) {
           acpState.hadError = true;
           acpState.failureReason = 'ACP initialization was not confirmed';
@@ -5561,7 +5561,7 @@ async function main() {
           void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
         }
       }
-      if (parsed.id === 'agentoc-session-new' || parsed.id === 'agentoc-session-load') {
+      if (parsed.id === 'ragent-session-new' || parsed.id === 'ragent-session-load') {
         if (!acpState.sessionStartRequested || acpState.sessionId) {
           acpState.hadError = true;
           acpState.failureReason = 'ACP session response arrived out of sequence';
@@ -5570,7 +5570,7 @@ async function main() {
           return;
         }
         const sessionId = acpSessionIdFromResponse(parsed)
-          || (parsed.id === 'agentoc-session-load' ? acpState.requestedSessionId : '');
+          || (parsed.id === 'ragent-session-load' ? acpState.requestedSessionId : '');
         const error = acpResponseError(parsed);
         if (error || !sessionId) {
           acpState.hadError = true;
@@ -5637,7 +5637,7 @@ async function main() {
             }
           }
         }
-      } else if (runtimeFamily === 'kimi-code-acp' && parsed.id === 'agentoc-set-mode') {
+      } else if (runtimeFamily === 'kimi-code-acp' && parsed.id === 'ragent-set-mode') {
         if (acpState.modeSwitchTimer) clearTimeout(acpState.modeSwitchTimer);
         acpState.modeSwitchTimer = null;
         if (!acpState.modeSwitchRequested || !isAcpModeSwitchAccepted(parsed)) {
@@ -5666,7 +5666,7 @@ async function main() {
             return;
           }
         }
-      } else if (parsed.id === 'agentoc-prompt') {
+      } else if (parsed.id === 'ragent-prompt') {
         const error = acpResponseError(parsed);
         acpState.hadError = Boolean(error) || acpState.hadError;
         acpState.failureReason = error || acpState.failureReason;
@@ -5691,7 +5691,7 @@ async function main() {
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
       return;
     }
-    if (codexAppServerBrokered && parsed?.method === 'agentoc/windowsHook' && parsed.id != null) {
+    if (codexAppServerBrokered && parsed?.method === 'ragent/windowsHook' && parsed.id != null) {
       const result = await evaluateRunBoundCodexWindowsHook(parsed.params?.event, {
         active: appServerState?.startedTurn === true && !appServerState.terminalSeen && !appServerState.hadError,
         threadId: appServerState?.threadId, turnId: appServerState?.turnId,
@@ -5732,7 +5732,7 @@ async function main() {
       }
       const staleThreadId = appServerState.threadId;
       try {
-        const accountSources = JSON.parse(process.env.AGENTOC_CODEX_ROLLOUT_SOURCES || '[]');
+        const accountSources = JSON.parse(process.env.RAGENT_CODEX_ROLLOUT_SOURCES || '[]');
         if (!Array.isArray(accountSources)) throw new Error('Invalid managed rollout sources');
         if (await retryManagedCodexRolloutResume(proc, appServerState, runnerCodexHomeDir, findManagedCodexRollout, accountSources)) {
           await logSidecarDiagnostic(runId, 'Codex thread index missed an existing managed rollout; retrying resume', { staleThreadId });
@@ -5846,7 +5846,7 @@ async function main() {
       finally { if (isApproval) claudeBidiState.processingApprovalTurnSequence = null; }
     }
     if (foreignCodexThreadEvent) {
-      parsed = { ...parsed, agentoc_intermediate: true };
+      parsed = { ...parsed, ragent_intermediate: true };
       spoolLine = JSON.stringify(parsed);
     }
     const activeAppServerEvent = appServerState
@@ -5924,7 +5924,7 @@ async function main() {
     if (codexTerminalFrame && !currentCodexTerminalFrame) {
       // Keep stale/malformed provider frames in the raw spool for diagnostics,
       // but prevent the adapter and observer from treating them as completion.
-      parsed = { ...parsed, agentoc_intermediate: true };
+      parsed = { ...parsed, ragent_intermediate: true };
       spoolLine = JSON.stringify(parsed);
     }
     if (claudeThinkingTokenSampler && (parsed?.type === 'assistant' || providerTerminalFrame)) {
@@ -5986,7 +5986,7 @@ async function main() {
         && parsed.result?.thread
         ? parsed.result
         : null;
-      if ((appServerState.agentocApprovalGate || appServerState.providerReadOnly) && threadStartResult) {
+      if ((appServerState.ragentApprovalGate || appServerState.providerReadOnly) && threadStartResult) {
         const approvalContext = validateCodexAppServerApprovalContext({
           response: threadStartResult,
           cwd: appServerState.cwd,
@@ -6110,7 +6110,7 @@ async function main() {
                 reasoningEffort: appServerState.reasoningEffort,
                 interactionMode: appServerState.interactionMode,
                 permissionMode: appServerState.permissionMode,
-                agentocApprovalGate: appServerState.agentocApprovalGate,
+                ragentApprovalGate: appServerState.ragentApprovalGate,
                 executionEnvironment: appServerState.executionEnvironment,
               });
               if (writeCodexAppServerMessage(proc, retryMessage)) {
@@ -6248,23 +6248,23 @@ async function main() {
     }
   };
   const stdoutQueueMaxLines = readPositiveIntegerEnv(
-    'AGENTOC_RUN_STDOUT_QUEUE_MAX_LINES',
+    'RAGENT_RUN_STDOUT_QUEUE_MAX_LINES',
     DEFAULT_PROVIDER_STDOUT_QUEUE_MAX_LINES,
   );
   const stdoutQueueMaxBytes = readPositiveIntegerEnv(
-    'AGENTOC_RUN_STDOUT_QUEUE_MAX_BYTES',
+    'RAGENT_RUN_STDOUT_QUEUE_MAX_BYTES',
     DEFAULT_PROVIDER_STDOUT_QUEUE_MAX_BYTES,
   );
   const stdoutLineMaxBytes = readPositiveIntegerEnv(
-    'AGENTOC_RUN_STDOUT_LINE_MAX_BYTES',
+    'RAGENT_RUN_STDOUT_LINE_MAX_BYTES',
     DEFAULT_PROVIDER_STDOUT_LINE_MAX_BYTES,
   );
   const stdoutDrainTimeoutMs = readPositiveDurationEnv(
-    'AGENTOC_RUN_STDOUT_DRAIN_TIMEOUT_MS',
+    'RAGENT_RUN_STDOUT_DRAIN_TIMEOUT_MS',
     DEFAULT_PROVIDER_STDOUT_DRAIN_TIMEOUT_MS,
   );
   const stdoutProcessingTimeoutMs = readPositiveDurationEnv(
-    'AGENTOC_RUN_STDOUT_PROCESSING_TIMEOUT_MS',
+    'RAGENT_RUN_STDOUT_PROCESSING_TIMEOUT_MS',
     Math.max(stdoutDrainTimeoutMs, 20_000),
   );
   const stdoutQueueResumeLines = Math.max(1, Math.floor(stdoutQueueMaxLines / 2));
@@ -6688,7 +6688,7 @@ async function main() {
     });
     fallbackProc.stderr.on('data', handleStderrChunk);
     const fallbackTimeoutMs = readPositiveDurationEnv(
-      'AGENTOC_CLAUDE_FALLBACK_TIMEOUT_MS',
+      'RAGENT_CLAUDE_FALLBACK_TIMEOUT_MS',
       Math.max(idleTimeoutMs, DEFAULT_KNOWN_HARNESS_IDLE_TIMEOUT_MS),
     );
     const fallbackResult = await new Promise((resolveFallback) => {
@@ -7080,7 +7080,7 @@ async function main() {
       const completedAt = nowIso();
       await appendFileChangeStatsSummarySafely(runId, fileChangeStatsTracker);
       await appendCodexContextMetricsSafely(runId, { supportsExternalUsageProjection });
-      const controlledWindowsTerminalCleanup = Boolean(windowsJob && proc.__agentocTerminalCleanupRequested === true && terminalCode === 0xC0DE);
+      const controlledWindowsTerminalCleanup = Boolean(windowsJob && proc.__ragentTerminalCleanupRequested === true && terminalCode === 0xC0DE);
       const providerFailureReason = current.cancelRequested === true
         ? ''
         : fallbackFailureReason || (

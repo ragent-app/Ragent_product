@@ -12,13 +12,13 @@ import { pathToFileURL } from 'url';
 
 const repoRoot = process.cwd();
 const isDirectoryPath = async (path) => stat(path).then((entry) => entry.isDirectory()).catch(() => false);
-const tempHome = await mkdtemp(join(tmpdir(), 'agentoc-project-migrate-'));
+const tempHome = await mkdtemp(join(tmpdir(), 'ragent-project-migrate-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
-const configDir = process.env.AGENTOC_CONFIG_DIR;
+const configDir = process.env.RAGENT_CONFIG_DIR;
 await mkdir(configDir, { recursive: true });
 await writeFile(join(configDir, 'auth.json'), JSON.stringify({
   username: 'testowner',
@@ -80,7 +80,7 @@ function makeBodyReq(body, options = {}) {
   const { method = 'POST', extraHeaders = {} } = options;
   return {
     method,
-    headers: { host: 'a.agentoc.test', ...extraHeaders },
+    headers: { host: 'a.ragent.test', ...extraHeaders },
     on(event, handler) {
       if (event === 'data') queueMicrotask(() => handler(chunk));
       if (event === 'end') queueMicrotask(() => handler());

@@ -3,10 +3,10 @@
     "challengeId": "ch_v3_fixture",
     "deviceId": "rdev_fixture_v3",
     "nonce": "nonce_v3_fixture",
-    "message": "agentoc-device-auth-v3\nrli_fixture_v3\nrdev_fixture_v3\nch_v3_fixture\nnonce_v3_fixture\n2026-08-12T00:00:00Z\nagentoc-device-access",
+    "message": "ragent-device-auth-v3\nrli_fixture_v3\nrdev_fixture_v3\nch_v3_fixture\nnonce_v3_fixture\n2026-08-12T00:00:00Z\nragent-device-access",
     "issuedAt": "2026-08-12T00:00:00.000Z",
     "expiresAt": "2026-08-12T00:01:00.000Z",
-    "audience": "agentoc-device-access",
+    "audience": "ragent-device-access",
     "instanceId": "rli_fixture_v3"
   }
 }

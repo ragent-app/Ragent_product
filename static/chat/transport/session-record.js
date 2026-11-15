@@ -14,16 +14,16 @@
 // and re-renders stays in the view layer).
 //
 // The two local-store lookups are injected via the environment contract
-// (root.AgentocSessionRecordEnvironment); everything else is pure. Locked
+// (root.RagentSessionRecordEnvironment); everything else is pure. Locked
 // against the legacy implementation by tests/test-chat-session-record-core.mjs.
 
-(function attachAgentocSessionRecordCore(root) {
+(function attachRagentSessionRecordCore(root) {
   const DEFAULT_ENVIRONMENT = Object.freeze({
     getLocalSessionReviewedAt: null,
     getSessionReviewBaselineAt: null,
   });
   const environment = new Proxy(
-    root.AgentocSessionRecordEnvironment || {},
+    root.RagentSessionRecordEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -124,7 +124,7 @@
     return next;
   }
 
-  root.AgentocSessionRecordCore = {
+  root.RagentSessionRecordCore = {
     normalizeSessionRecord,
     buildOptimisticArchivedSession,
   };

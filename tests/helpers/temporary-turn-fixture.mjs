@@ -36,7 +36,7 @@ async function listen(t, handler) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 export async function fixture(t, { initialTime = initial } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-turn-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-turn-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let now = initialTime; const clock = () => now;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

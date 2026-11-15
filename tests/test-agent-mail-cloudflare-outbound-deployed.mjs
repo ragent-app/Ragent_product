@@ -38,7 +38,7 @@ function parseArgs(argv) {
 
 const options = parseArgs(process.argv.slice(2));
 const rootDir = trimString(options.root);
-const requestedRecipient = trimString(options.to || process.env.AGENTOC_CF_SMOKE_TO);
+const requestedRecipient = trimString(options.to || process.env.RAGENT_CF_SMOKE_TO);
 const outbound = await loadOutboundConfig(rootDir || undefined);
 const zone = trimString(options.zone) || emailDomain(outbound.from);
 
@@ -74,8 +74,8 @@ if (!sender) {
 }
 
 const stamp = new Date().toISOString();
-const subject = `AgentoC Cloudflare deployed smoke ${stamp}`;
-const text = `AgentoC Cloudflare outbound deployed smoke to ${recipient}.`;
+const subject = `Ragent Cloudflare deployed smoke ${stamp}`;
+const text = `Ragent Cloudflare outbound deployed smoke to ${recipient}.`;
 
 const result = await sendOutboundEmail({
   to: recipient,

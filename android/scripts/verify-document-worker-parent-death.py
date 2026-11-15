@@ -36,7 +36,7 @@ def main():
     seed_log = evidence / "parent-death-seed.log"
     with seed_log.open("wb") as output:
         seed = subprocess.Popen(prefix + ["shell", "am", "instrument", "-w", "-r", "-e", "class",
-            "com.andysagent.agentoc.ResultShareProviderTest#blockedProviderDeadlineRecordsInterruptionAndKeepsOriginal",
+            "com.andysagent.ragent.ResultShareProviderTest#blockedProviderDeadlineRecordsInterruptionAndKeepsOriginal",
             "-e", "documentWorkerDeathWindow", "true", RUNNER], stdout=output, stderr=subprocess.STDOUT)
         marker = None
         until = time.monotonic() + 45
@@ -56,7 +56,7 @@ def main():
             raise RuntimeError("No live parent/worker copy window was established; inspect seed log")
         ticket = marker["ticketId"]
         assert re.fullmatch(r"[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", ticket)
-        metadata = json.loads(adb("exec-out", "run-as", APP, "cat", f"no_backup/agentoc-document-saves/{ticket}.json"))
+        metadata = json.loads(adb("exec-out", "run-as", APP, "cat", f"no_backup/ragent-document-saves/{ticket}.json"))
         assert metadata["state"] == "COPYING" and metadata["ticketId"] == ticket
         assert metadata["operationId"] == marker["operationId"] and metadata["sha256"] == marker["sha256"]
         assert marker["parentPid"] != marker["workerPid"]
@@ -70,7 +70,7 @@ def main():
         assert marker["workerPid"] not in pids(WORKER), "Worker survived the parent"
         seed.wait(timeout=10)
     recovery = subprocess.run(prefix + ["shell", "am", "instrument", "-w", "-r", "-e", "class",
-        "com.andysagent.agentoc.DocumentWorkerParentDeathTest", "-e", "documentWorkerDeathWindow", "true", RUNNER],
+        "com.andysagent.ragent.DocumentWorkerParentDeathTest", "-e", "documentWorkerDeathWindow", "true", RUNNER],
         capture_output=True, timeout=60)
     recovery_log = recovery.stdout.decode("utf-8", errors="replace") + recovery.stderr.decode("utf-8", errors="replace")
     (evidence / "parent-death-recovery.log").write_text(recovery_log, encoding="utf-8")

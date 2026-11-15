@@ -22,8 +22,8 @@ import (
 // This opt-in test exercises the production installer with a disposable,
 // unsigned per-user MSI whose payload is confined to the test directory.
 func TestMSIInstallRealLocalFixture(t *testing.T) {
-	path := os.Getenv("AGENTOC_QA_DISPOSABLE_MSI")
-	marker := os.Getenv("AGENTOC_QA_DISPOSABLE_MARKER")
+	path := os.Getenv("RAGENT_QA_DISPOSABLE_MSI")
+	marker := os.Getenv("RAGENT_QA_DISPOSABLE_MARKER")
 	if path == "" || marker == "" {
 		t.Skip("disposable local fixture not configured")
 	}
@@ -84,8 +84,8 @@ func TestMSIInstallRealLocalFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
-	requestName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
+	healthName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
+	requestName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, healthName, requestName)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestMSIInstallRealLocalFixture(t *testing.T) {
 		t.Fatalf("installer result: %+v", result)
 	}
 	markerData, err := os.ReadFile(marker)
-	if err != nil || string(markerData) != "AgentoC disposable installer QA\r\n" {
+	if err != nil || string(markerData) != "Ragent disposable installer QA\r\n" {
 		t.Fatalf("installed marker: %q %v", markerData, err)
 	}
 	if replay := exchangeTestPipeRequest(t, requestName, request); replay.Status != statusSucceeded {

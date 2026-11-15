@@ -85,7 +85,7 @@ assert.deepEqual(projection.operations[0].outputPreview.head, ['same', 'same']);
 assert.equal(projection.operations[0].toolCall.toolCallId, projection.operations[0].operationId);
 assert.equal(projection.operations[0].toolCall.kind, 'execute');
 assert.equal(projection.operations[0].toolCall.status, 'completed');
-assert.equal(projection.operations[0].toolCall._meta.agentoc.lifecycle, 'completed');
+assert.equal(projection.operations[0].toolCall._meta.ragent.lifecycle, 'completed');
 assert.equal('input' in projection.operations[0].toolCall, false);
 assert.equal('output' in projection.operations[0].toolCall, false);
 assert.equal(projection.operations[0].presentation.kind, 'execute');
@@ -221,7 +221,7 @@ const waitingProjection = buildOperationProjection([
 ]);
 assert.equal(waitingProjection.operations[0].state, 'waiting_approval');
 assert.equal(waitingProjection.operations[0].toolCall.status, 'pending');
-assert.equal(waitingProjection.operations[0].toolCall._meta.agentoc.lifecycle, 'waiting_approval');
+assert.equal(waitingProjection.operations[0].toolCall._meta.ragent.lifecycle, 'waiting_approval');
 
 const legacyProjection = buildOperationProjection([
   { seq: 20, type: 'tool_use', toolName: 'Bash', toolInput: 'pwd' },

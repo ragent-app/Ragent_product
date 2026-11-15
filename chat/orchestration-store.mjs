@@ -12,8 +12,8 @@ import { openDatabase as openCollaborationDatabase } from './collaboration-store
 import { createSerialTaskQueue } from './fs-utils.mjs';
 
 const runMutation = createSerialTaskQueue();
-const COMMAND_LEASE_MS = positiveDurationFromEnv('AGENTOC_ORCHESTRATION_COMMAND_LEASE_MS', 2 * 60 * 1000);
-const RETRY_DELAY_MS = positiveDurationFromEnv('AGENTOC_ORCHESTRATION_RETRY_DELAY_MS', 5 * 1000);
+const COMMAND_LEASE_MS = positiveDurationFromEnv('RAGENT_ORCHESTRATION_COMMAND_LEASE_MS', 2 * 60 * 1000);
+const RETRY_DELAY_MS = positiveDurationFromEnv('RAGENT_ORCHESTRATION_RETRY_DELAY_MS', 5 * 1000);
 const MAX_TEXT = 4000;
 const MAX_JSON_BYTES = 256 * 1024;
 

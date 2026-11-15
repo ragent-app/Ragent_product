@@ -36,7 +36,7 @@ try {
   // 模拟 chat-server 主 HTTP server：/healthz 正常响应 + 挂载 signaling upgrade。
   const chatLike = http.createServer((request, response) => {
     if (request.url === '/healthz' && request.method === 'GET') {
-      response.writeHead(200, { 'content-type': 'application/json', 'x-agentoc-attached': 'yes' });
+      response.writeHead(200, { 'content-type': 'application/json', 'x-ragent-attached': 'yes' });
       response.end(JSON.stringify({ ok: true, via: 'attached-signaling' }));
       return;
     }
@@ -78,15 +78,15 @@ try {
   resources.push(async () => { host.stop(); await host.done; });
   await host.ready;
 
-  const clientSource = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+  const clientSource = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
   const web = http.createServer((request, response) => {
-    if (request.url === '/agentoc-p2p-client.js') {
+    if (request.url === '/ragent-p2p-client.js') {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end(clientSource);
       return;
     }
     response.writeHead(200, { 'content-type': 'text/html' });
-    response.end('<!doctype html><title>AgentoC P2P attached test</title>');
+    response.end('<!doctype html><title>Ragent P2P attached test</title>');
   });
   resources.push(() => close(web));
   const webAddress = await listen(web);
@@ -96,15 +96,15 @@ try {
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const result = await page.evaluate(async ({ signalingUrl: url, roomId: room, secret: roomSecret, deviceToken }) => {
-    const { AgentoCP2PClient } = await import('/agentoc-p2p-client.js');
-    const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
+    const { RagentP2PClient } = await import('/ragent-p2p-client.js');
+    const client = new RagentP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
     await client.connect();
     const response = await client.request({ method: 'GET', path: '/healthz', headers: { Authorization: `Bearer ${deviceToken}` } });
     client.close();
     return { status: response.status, headers: response.headers, text: response.text };
   }, { signalingUrl, roomId, secret, deviceToken: DEVICE_TOKEN });
   assert.equal(result.status, 200);
-  assert.equal(result.headers['X-Agentoc-Attached'], 'yes');
+  assert.equal(result.headers['X-Ragent-Attached'], 'yes');
   assert.deepEqual(JSON.parse(result.text), { ok: true, via: 'attached-signaling' });
   console.log('P2P attached-signaling browser-to-Pion e2e passed');
 } finally {

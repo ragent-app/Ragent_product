@@ -75,8 +75,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-chat-static-'));
-  const configDir = join(home, '.agentoc', 'config');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-chat-static-'));
+  const configDir = join(home, '.ragent', 'config');
   const binDir = join(home, 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(binDir, { recursive: true });
@@ -106,29 +106,29 @@ function setupTempHome() {
 }
 
 async function startServer({ home, binDir, port }) {
-  const configDir = join(home, '.agentoc', 'config');
+  const configDir = join(home, '.ragent', 'config');
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
-      ...buildChildEnvironment({id:'static-auth-'+process.pid,instanceDir:join(home,'.agentoc'),configDir,
-        memoryDir:join(home,'.agentoc','memory'),workRootDir:join(home,'.agentoc','workspace'),
-        spoolDir:join(home,'.agentoc','data','chat-runs'),providerHomesDir:join(home,'.agentoc','provider-homes'),port},process.env),
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      ...buildChildEnvironment({id:'static-auth-'+process.pid,instanceDir:join(home,'.ragent'),configDir,
+        memoryDir:join(home,'.ragent','memory'),workRootDir:join(home,'.ragent','workspace'),
+        spoolDir:join(home,'.ragent','data','chat-runs'),providerHomesDir:join(home,'.ragent','provider-homes'),port},process.env),
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       USERPROFILE: home,
       PATH: `${binDir}${delimiter}${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: join(home, '.agentoc'),
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
-      AGENTOC_RUN_SPOOL_DIR: join(home, '.agentoc', 'data', 'chat-runs'),
-      AGENTOC_PROVIDER_HOMES_DIR: join(home, '.agentoc', 'provider-homes'),
-      AGENTOC_WORK_ROOT_DIR: join(home, '.agentoc', 'workspace'),
-      AGENTOC_WINDOWS_SERVICE_MODE: '0',
+      RAGENT_INSTANCE_ROOT: join(home, '.ragent'),
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
+      RAGENT_RUN_SPOOL_DIR: join(home, '.ragent', 'data', 'chat-runs'),
+      RAGENT_PROVIDER_HOMES_DIR: join(home, '.ragent', 'provider-homes'),
+      RAGENT_WORK_ROOT_DIR: join(home, '.ragent', 'workspace'),
+      RAGENT_WINDOWS_SERVICE_MODE: '0',
       // Without a secret, lib/auth.mjs refuses to load auth-sessions.json and
       // the /api/auth/me owner assertion 401s.
-      AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-static-assets",
+      RAGENT_AUTH_SESSION_SECRET: "test-secret-ragent-static-assets",
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -190,7 +190,7 @@ async function stopServer(server) {
 
 async function main() {
   const { home, binDir } = setupTempHome();
-  const sessionsFile = join(home, '.agentoc', 'config', 'auth-sessions.json');
+  const sessionsFile = join(home, '.ragent', 'config', 'auth-sessions.json');
   const port = randomPort();
   let server;
   try {
@@ -207,7 +207,7 @@ async function main() {
     assert.equal(authMeJson.capabilities?.manageAgents, true, 'owner auth should expose owner capabilities');
     // The legacy JSON is now a one-time input, never the current authority.
     const sessionDb = new DatabaseSync(join(dirname(sessionsFile), 'auth-sessions.sqlite'), { readOnly: true });
-    const hashedKey = `s${createHmac('sha256', 'test-secret-agentoc-static-assets').update('test-session').digest('hex')}`;
+    const hashedKey = `s${createHmac('sha256', 'test-secret-ragent-static-assets').update('test-session').digest('hex')}`;
     const refreshed = sessionDb.prepare('SELECT expiry FROM sessions WHERE token_hash=?').get(hashedKey); sessionDb.close();
     assert.ok(
       refreshed?.expiry > Date.now() + 23 * 60 * 60 * 1000,
@@ -219,7 +219,7 @@ async function main() {
     assert.match(page.text, /chat\/approval-explanation\.js\?v=/, 'approval explanation helper should be loaded with an asset version');
     const approvalExplanationAsset = await request(port, 'GET', '/chat/approval-explanation.js');
     assert.equal(approvalExplanationAsset.status, 200, 'approval explanation helper should be served');
-    assert.match(approvalExplanationAsset.text, /agentocApprovalExplanation/);
+    assert.match(approvalExplanationAsset.text, /ragentApprovalExplanation/);
 
     assert.match(page.text, /<meta name="color-scheme" content="light dark">/);
     assert.match(page.text, /<meta name="theme-color" content="#ffffff" media="\(prefers-color-scheme: light\)">/);
@@ -269,14 +269,14 @@ async function main() {
       /id="workspaceFileReaderListResizeHandle"[^>]*role="separator"[^>]*aria-orientation="vertical"/,
       'workspace file reader should expose a resize handle for the file list column',
     );
-    const bootstrapMatch = page.text.match(/window\.__AGENTOC_BOOTSTRAP__ = ([^;]+);/);
+    const bootstrapMatch = page.text.match(/window\.__RAGENT_BOOTSTRAP__ = ([^;]+);/);
     assert.ok(bootstrapMatch, 'chat page should inline bootstrap payload');
     const bootstrap = JSON.parse(bootstrapMatch[1]);
     assert.equal(bootstrap.auth?.role, 'owner', 'bootstrap payload should include owner auth');
     assert.equal(bootstrap.auth?.surfaceMode, 'owner', 'bootstrap auth should identify the owner surface');
     assert.equal(bootstrap.auth?.principalKind, 'owner', 'bootstrap auth should identify the owner principal kind');
     assert.equal(bootstrap.auth?.capabilities?.createSession, true, 'bootstrap auth should expose owner capabilities');
-    assert.equal(bootstrap.defaultSessionFolder, join(home, '.agentoc', 'workspace'), 'bootstrap should expose the managed default session folder');
+    assert.equal(bootstrap.defaultSessionFolder, join(home, '.ragent', 'workspace'), 'bootstrap should expose the managed default session folder');
     assert.equal(Object.prototype.hasOwnProperty.call(bootstrap, 'settings'), false, 'bootstrap should not expose removed voice settings');
     assert.match(page.text, /<script src="chat\/run-activity-ui\.js(?:\?v=[^"]*)?"/);
     assert.match(page.text, /<script src="chat\/session-store\.js(?:\?v=[^"]*)?"/);
@@ -350,7 +350,7 @@ async function main() {
     assert.match(harnessManagementAsset.text, /upgradeAction === "package-managed"/);
     assert.match(harnessManagementAsset.text, /installationSource === "bundled"/);
     assert.match(harnessManagementAsset.text, /upgradeAction !== "manual" && !packageManaged/);
-    assert.match(harnessManagementAsset.text, /agentocRefreshRuntimeCatalog/);
+    assert.match(harnessManagementAsset.text, /ragentRefreshRuntimeCatalog/);
 
     const harnessCatalog = await request(port, 'GET', '/api/harnesses');
     assert.equal(harnessCatalog.status, 200, 'owner should be able to read harness protocol capabilities');
@@ -424,7 +424,7 @@ async function main() {
 
     const visitorPage = await request(port, 'GET', '/?visitor=1', null, { Cookie: visitorCookie });
     assert.equal(visitorPage.status, 200, 'chat page should also render for visitor session');
-    const visitorBootstrapMatch = visitorPage.text.match(/window\.__AGENTOC_BOOTSTRAP__ = ([^;]+);/);
+    const visitorBootstrapMatch = visitorPage.text.match(/window\.__RAGENT_BOOTSTRAP__ = ([^;]+);/);
     assert.ok(visitorBootstrapMatch, 'visitor page should inline bootstrap payload');
     const visitorBootstrap = JSON.parse(visitorBootstrapMatch[1]);
     assert.equal(visitorBootstrap.auth?.role, 'visitor', 'visitor page should inline visitor auth');
@@ -883,7 +883,7 @@ async function main() {
     });
     assert.equal(defaultOwnerCreated.status, 201, 'owner sessions should be creatable without an explicit folder');
     const defaultOwnerCreatedJson = JSON.parse(defaultOwnerCreated.text);
-    assert.equal(defaultOwnerCreatedJson.session?.folder, join(home, '.agentoc', 'workspace'), 'owner sessions without a folder should default to the managed work root');
+    assert.equal(defaultOwnerCreatedJson.session?.folder, join(home, '.ragent', 'workspace'), 'owner sessions without a folder should default to the managed work root');
 
     const createdChat = await request(port, 'POST', '/api/sessions', {
       folder: home,
@@ -937,7 +937,7 @@ async function main() {
       'split asset should use safe revalidation caching',
     );
     assert.ok(splitAsset.headers.etag, 'split asset should expose an ETag');
-    assert.match(splitAsset.text, /const buildInfo = window\.__AGENTOC_BUILD__ \|\| \{\};/);
+    assert.match(splitAsset.text, /const buildInfo = window\.__RAGENT_BUILD__ \|\| \{\};/);
 
     const initAsset = await request(port, 'GET', '/chat/init.js');
     assert.equal(initAsset.status, 200, 'chat init asset should load');
@@ -946,12 +946,12 @@ async function main() {
       /await openInstallFlow\(\{ source: "auto", replace: true \}\)/,
       'mobile install redirects should funnel through the shared install helper',
     );
-    assert.match(initAsset.text, /window\.agentocOpenInstallFlow = openInstallFlow;/, 'chat init should expose the install entry helper');
+    assert.match(initAsset.text, /window\.ragentOpenInstallFlow = openInstallFlow;/, 'chat init should expose the install entry helper');
 
     const productPathsAsset = await request(port, 'GET', '/chat/product-paths.js');
     assert.equal(productPathsAsset.status, 200, 'product path helper asset should load');
     assert.match(productPathsAsset.text, /function resolveProductPath\(/);
-    assert.match(productPathsAsset.text, /agentocResolveProductPath = resolveProductPath/);
+    assert.match(productPathsAsset.text, /ragentResolveProductPath = resolveProductPath/);
 
     const sessionHttpHelpersAsset = await request(port, 'GET', '/chat/session-http-helpers.js');
     assert.equal(sessionHttpHelpersAsset.status, 200, 'session http helpers asset should load');
@@ -967,10 +967,10 @@ async function main() {
     assert.equal(sessionHttpAsset.status, 200, 'session http asset should load');
     const sessionStoreAsset = await request(port, 'GET', '/chat/session-store.js');
     assert.equal(sessionStoreAsset.status, 200, 'session store asset should load');
-    assert.match(sessionStoreAsset.text, /AgentoCChatStore/);
+    assert.match(sessionStoreAsset.text, /RagentChatStore/);
     const composerStoreAsset = await request(port, 'GET', '/chat/composer-store.js');
     assert.equal(composerStoreAsset.status, 200, 'composer store asset should load');
-    assert.match(composerStoreAsset.text, /AgentoCComposerStore/);
+    assert.match(composerStoreAsset.text, /RagentComposerStore/);
     const bootstrapCatalogAsset = await request(port, 'GET', '/chat/bootstrap-session-catalog.js');
     assert.equal(bootstrapCatalogAsset.status, 200, 'bootstrap session catalog asset should load');
     assert.match(bootstrapCatalogAsset.text, /function getEffectiveSessionSourceId\(/);
@@ -1077,7 +1077,7 @@ async function main() {
       'session state model should use safe revalidation caching',
     );
     assert.ok(stateModelAsset.headers.etag, 'session state model asset should expose an ETag');
-    assert.match(stateModelAsset.text, /AgentoCSessionStateModel/);
+    assert.match(stateModelAsset.text, /RagentSessionStateModel/);
 
     const sessionStoreModelAsset = await request(port, 'GET', '/chat/session-store.js');
     assert.equal(sessionStoreModelAsset.status, 200, 'session store model asset should load');
@@ -1087,7 +1087,7 @@ async function main() {
       'session store model should use safe revalidation caching',
     );
     assert.ok(sessionStoreModelAsset.headers.etag, 'session store model asset should expose an ETag');
-    assert.match(sessionStoreModelAsset.text, /AgentoCChatStore/);
+    assert.match(sessionStoreModelAsset.text, /RagentChatStore/);
 
     const composerStoreModelAsset = await request(port, 'GET', '/chat/composer-store.js');
     assert.equal(composerStoreModelAsset.status, 200, 'composer store model asset should load');
@@ -1097,7 +1097,7 @@ async function main() {
       'composer store model should use safe revalidation caching',
     );
     assert.ok(composerStoreModelAsset.headers.etag, 'composer store model asset should expose an ETag');
-    assert.match(composerStoreModelAsset.text, /AgentoCComposerStore/);
+    assert.match(composerStoreModelAsset.text, /RagentComposerStore/);
 
     const layoutToolingAsset = await request(port, 'GET', '/chat/layout-tooling.js');
     assert.equal(layoutToolingAsset.status, 200, 'layout tooling asset should load');
@@ -1118,7 +1118,7 @@ async function main() {
     assert.match(layoutToolingAsset.text, /style\.setProperty\("--chat-floating-status-fab-offset", `\$\{Math\.ceil\(floatingStatusFabOffset\)\}px`\)/, 'layout tooling should publish the stack-aware FAB offset');
     assert.doesNotMatch(layoutToolingAsset.text, /chatOverlayResizeObserver\.observe\(liveBarSlot\)/, 'layout tooling should not observe the retired bottom Live Bar slot');
     assert.match(layoutToolingAsset.text, /function requestLayoutPass\(/);
-    assert.match(layoutToolingAsset.text, /window\.AgentoCLayout = \{/);
+    assert.match(layoutToolingAsset.text, /window\.RagentLayout = \{/);
     assert.match(layoutToolingAsset.text, /syncChatBottomOverlaySpacing,/);
     assert.match(layoutToolingAsset.text, /window\.visualViewport\?\.addEventListener\("resize", \(\) => requestLayoutPass\("visual-viewport-resize"\)\)/);
     assert.match(layoutToolingAsset.text, /window\.visualViewport\?\.addEventListener\("scroll", \(\) => requestLayoutPass\("visual-viewport-scroll"\)\)/);
@@ -1126,12 +1126,12 @@ async function main() {
 
     const motionAsset = await request(port, 'GET', '/chat/motion.js');
     assert.equal(motionAsset.status, 200, 'motion helper asset should load');
-    assert.match(motionAsset.text, /window\.AgentoCMotion\s*=\s*\{/);
+    assert.match(motionAsset.text, /window\.RagentMotion\s*=\s*\{/);
     assert.match(motionAsset.text, /function setPresence\(/);
 
     const focusScopeAsset = await request(port, 'GET', '/chat/focus-scope.js');
     assert.equal(focusScopeAsset.status, 200, 'focus scope asset should load');
-    assert.match(focusScopeAsset.text, /root\.AgentoCFocusScope\s*=\s*Object\.freeze/);
+    assert.match(focusScopeAsset.text, /root\.RagentFocusScope\s*=\s*Object\.freeze/);
     assert.match(focusScopeAsset.text, /function activate\(/);
 
     const toolingAsset = await request(port, 'GET', '/chat/tooling.js');
@@ -1209,12 +1209,12 @@ async function main() {
     assert.match(workspaceFileReaderAsset.text, /function setReading\(reading\)/, 'workspace file reader should track reading mode separately from sidebar mount state');
     assert.match(workspaceFileReaderAsset.text, /workspace-file-reader--reading/, 'workspace file reader should toggle the reading-mode class');
     assert.match(workspaceFileReaderAsset.text, /dom\.backButton\?\.addEventListener\("click", showFileTree\)/, 'reader back chevron should return to the file tree instead of closing the sidebar');
-    assert.match(workspaceFileReaderAsset.text, /agentoc\.workspaceFileReaderListWidth/, 'workspace file reader should persist the file-list column width');
+    assert.match(workspaceFileReaderAsset.text, /ragent\.workspaceFileReaderListWidth/, 'workspace file reader should persist the file-list column width');
     assert.match(workspaceFileReaderAsset.text, /function handleListResizePointerDown\(event\)/, 'workspace file reader should support pointer-based file-list resizing');
 
     const rightSidebarAsset = await request(port, 'GET', '/chat/right-sidebar.js');
     assert.equal(rightSidebarAsset.status, 200, 'right sidebar asset should load');
-    assert.match(rightSidebarAsset.text, /agentoc\.rightSidebarWidth/, 'workspace sidebar should persist desktop resize width');
+    assert.match(rightSidebarAsset.text, /ragent\.rightSidebarWidth/, 'workspace sidebar should persist desktop resize width');
     assert.match(rightSidebarAsset.text, /function handleResizePointerDown\(event\)/, 'workspace sidebar should support pointer-based desktop resizing');
     assert.match(rightSidebarAsset.text, /SIDEBAR_CLOSE_ANIMATION_MS/, 'workspace sidebar should keep the panel mounted long enough for close animations');
     assert.match(rightSidebarAsset.text, /dom\.panel\.hidden = false/, 'workspace sidebar should unhide before applying the open class so entry animation can run');
@@ -1247,7 +1247,7 @@ async function main() {
     assert.match(sidebarUiAsset.text, /function createNewSessionShortcut\(/);
     assert.match(sidebarUiAsset.text, /function getProjectSummaryLabel\(/, 'workspace picker should derive a one-line collapsed label from the active project');
     assert.match(sidebarUiAsset.text, /t\("sidebar\.project\.summary", \{ name: project\.name \|\| t\("sidebar\.project\.untitled"\) \}\)/, 'workspace summary should prefix the selected project name through localization');
-    assert.match(sidebarUiAsset.text, /workspaceSummaryButton\.addEventListener\("click"[\s\S]*?window\.agentocToggleProjectPicker\(\)/, 'workspace summary click should toggle the project picker');
+    assert.match(sidebarUiAsset.text, /workspaceSummaryButton\.addEventListener\("click"[\s\S]*?window\.ragentToggleProjectPicker\(\)/, 'workspace summary click should toggle the project picker');
     assert.match(sidebarUiAsset.text, /document\.addEventListener\("pointerdown", handleWorkspaceOutsidePointerDown, true\)/, 'workspace picker should collapse when clicking outside');
     assert.match(sidebarUiAsset.text, /document\.getElementById\(labelledBy\)[\s\S]*?picker\?\.contains\?\.?\(trigger\)/, 'workspace picker should treat all floating custom-select panels whose trigger lives inside the workspace controls as internal clicks');
     assert.match(sidebarUiAsset.text, /const nextExpanded = expanded === true/, 'workspace picker expanded state should remain view-only state');
@@ -1275,7 +1275,7 @@ async function main() {
     assert.match(composeAsset.text, /focusComposer\(\{ force: true, preventScroll: true \}\)/);
     assert.match(composeAsset.text, /function syncSidebarTabChrome\(/);
     assert.doesNotMatch(composeAsset.text, /document\.getElementById\("sidebarTitle"\)/);
-    assert.match(composeAsset.text, /window\.AgentoCLayout\?\.subscribe/);
+    assert.match(composeAsset.text, /window\.RagentLayout\?\.subscribe/);
     assert.doesNotMatch(composeAsset.text, /voice-transcriptions/);
 
     const removedVoiceInputAsset = await request(port, 'GET', '/chat/voice-input.js');

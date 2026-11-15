@@ -108,13 +108,13 @@ function loadCore({ mockTimers }) {
     setTimeout: mockTimers.setTimeout,
     clearTimeout: mockTimers.clearTimeout,
   };
-  context.AgentocPostSendRefreshEnvironment = env;
+  context.RagentPostSendRefreshEnvironment = env;
   vm.runInNewContext(
     readFileSync(join(repoRoot, 'static/chat/transport/post-send-refresh.js'), 'utf8'),
     context,
     { filename: 'transport/post-send-refresh.js' },
   );
-  const core = context.AgentocPostSendRefreshCore;
+  const core = context.RagentPostSendRefreshCore;
   return {
     api: {
       schedule: (sessionId, requestId) => core.schedulePostSendRefresh(sessionId, requestId),

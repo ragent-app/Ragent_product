@@ -70,7 +70,7 @@ func TestPinnedReadSetIsAtomicAndPreservesOrder(t *testing.T) {
 }
 
 func TestInheritedReadHandlesChild(t *testing.T) {
-	if os.Getenv("AGENTOC_QA_INHERITED_READ_CHILD") != "1" {
+	if os.Getenv("RAGENT_QA_INHERITED_READ_CHILD") != "1" {
 		return
 	}
 	fmt.Fprintln(os.Stdout, "READY")
@@ -101,7 +101,7 @@ func TestInheritedReadHandlesKeepFilesPinned(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executable, "-test.run=^TestInheritedReadHandlesChild$")
-	cmd.Env = append(os.Environ(), "AGENTOC_QA_INHERITED_READ_CHILD=1")
+	cmd.Env = append(os.Environ(), "RAGENT_QA_INHERITED_READ_CHILD=1")
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, AdditionalInheritedHandles: lease.Handles()}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

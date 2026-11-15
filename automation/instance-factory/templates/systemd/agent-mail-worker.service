@@ -1,12 +1,12 @@
 [Unit]
 Description=Ragent embedded mailbox worker
-After=network-online.target agentoc.service agentoc-agent-mail-http-bridge.service
+After=network-online.target ragent.service ragent-agent-mail-http-bridge.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory={{repoCheckoutPath}}
-EnvironmentFile=/etc/agentoc/install-profile.env
+EnvironmentFile=/etc/ragent/install-profile.env
 ExecStart=/usr/bin/env node {{repoCheckoutPath}}/scripts/agent-mail-worker.mjs
 Restart=always
 RestartSec=3

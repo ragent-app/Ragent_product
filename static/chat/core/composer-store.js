@@ -10,7 +10,7 @@
 // which the parity harness strips from comparisons. Locked against the
 // legacy implementation by tests/test-chat-composer-store-core.mjs.
 
-(function attachAgentocComposerStoreCore(root) {
+(function attachRagentComposerStoreCore(root) {
   function normalizeSessionId(value) {
     if (typeof value !== "string") return "";
     const normalized = value.trim();
@@ -598,7 +598,7 @@
     };
   }
 
-  root.AgentocComposerStoreCore = {
+  root.RagentComposerStoreCore = {
     createState,
     createStore,
     getDraftText,

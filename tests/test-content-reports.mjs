@@ -15,7 +15,7 @@ const payload = (requestId = randomUUID(), more = {}) => ({ schemaVersion: 1, re
   content: 'SYNTHETIC-REPORTED-CONTENT-NO-PERSONAL-DATA', appVersion: '0.0.1', ...more });
 if (process.argv[2] === '--owned-report-qa-child') {
   const [mode, root, requestId] = process.argv.slice(3);
-  assert.equal(await readFile(join(root, '.agentoc-owned-report-qa'), 'utf8'), 'content-report-qa-v1\n');
+  assert.equal(await readFile(join(root, '.ragent-owned-report-qa'), 'utf8'), 'content-report-qa-v1\n');
   const store = await createContentReportStore({ filePath: join(root, 'reports.sqlite') });
   if (mode === 'race') {
     process.send({ ready: true });
@@ -33,14 +33,14 @@ if (process.argv[2] === '--owned-report-qa-child') {
     server.listen(0, '127.0.0.1', () => process.send({ port: server.address().port }));
   }
 } else {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-content-report-qa-'));
-  await writeFile(join(root, '.agentoc-owned-report-qa'), 'content-report-qa-v1\n');
+  const root = await mkdtemp(join(tmpdir(), 'ragent-content-report-qa-'));
+  await writeFile(join(root, '.ragent-owned-report-qa'), 'content-report-qa-v1\n');
   const file = join(root, 'reports.sqlite');
   let store, server, checks = 0;
   const children = [];
   const check = (condition, name) => { assert.ok(condition, name); checks++; };
   const child = (mode, requestId = randomUUID()) => {
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^AGENTOC_/i.test(key)));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^RAGENT_/i.test(key)));
     const proc = spawn(process.execPath, [fileURLToPath(import.meta.url), '--owned-report-qa-child', mode, root, requestId],
       { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     proc.stderr.setEncoding('utf8'); let errors = ''; proc.stderr.on('data', data => { errors += data; });
@@ -174,9 +174,9 @@ if (process.argv[2] === '--owned-report-qa-child') {
     if (server) await new Promise(resolve => server.close(resolve));
     store?.close();
     for (const proc of children) if (proc.exitCode === null && proc.signalCode === null) { proc.kill('SIGTERM'); await once(proc, 'exit'); }
-    assert.equal(await readFile(join(root, '.agentoc-owned-report-qa'), 'utf8'), 'content-report-qa-v1\n');
+    assert.equal(await readFile(join(root, '.ragent-owned-report-qa'), 'utf8'), 'content-report-qa-v1\n');
     const resolved = await realpath(root), base = await realpath(tmpdir());
-    assert.ok(relative(base, resolved).startsWith('agentoc-content-report-qa-'));
+    assert.ok(relative(base, resolved).startsWith('ragent-content-report-qa-'));
     await rm(resolved, { recursive: true, force: true });
   }
 }

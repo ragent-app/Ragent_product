@@ -187,7 +187,7 @@ function createContext({ shareSnapshotMode = false, entryMode = 'resume' } = {})
       return snapshot;
     },
   };
-  context.window.AgentoCTimelineRuntime = runtime;
+  context.window.RagentTimelineRuntime = runtime;
   context.__metrics = metrics;
   return context;
 }

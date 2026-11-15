@@ -21,7 +21,7 @@ import {
 } from '../lib/provider-runtime/run-provider-prepare.mjs';
 import { AGY_AUTH_RELATIVE_PATH } from '../lib/agy-runtime.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-account-migration-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-account-migration-'));
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 const legacyControlHome = join(root, 'legacy-control');

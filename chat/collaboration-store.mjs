@@ -11,14 +11,14 @@ const runStoreMutation = createSerialTaskQueue();
 // like a failed child task.  Keep `LEASE_MS` exported for older callers, but
 // use phase-specific deadlines for all new Attempts.
 const LEASE_MS = 20 * 60 * 1000;
-const DISPATCH_DEADLINE_MS = positiveDurationFromEnv('AGENTOC_COLLABORATION_DISPATCH_DEADLINE_MS', 5 * 60 * 1000);
-const QUEUE_DEADLINE_MS = positiveDurationFromEnv('AGENTOC_COLLABORATION_QUEUE_DEADLINE_MS', 60 * 60 * 1000);
+const DISPATCH_DEADLINE_MS = positiveDurationFromEnv('RAGENT_COLLABORATION_DISPATCH_DEADLINE_MS', 5 * 60 * 1000);
+const QUEUE_DEADLINE_MS = positiveDurationFromEnv('RAGENT_COLLABORATION_QUEUE_DEADLINE_MS', 60 * 60 * 1000);
 // Dispatching a child is a two-system operation: first persist the intent in
 // this database, then ask session-manager to admit the Run.  A short lease on
 // the delivery claim makes the intent recoverable after a control-plane crash
 // without creating a second Run (the requestId is stable per Attempt).
-const DISPATCH_COMMAND_LEASE_MS = positiveDurationFromEnv('AGENTOC_COLLABORATION_DISPATCH_COMMAND_LEASE_MS', 2 * 60 * 1000);
-const DISPATCH_RETRY_DELAY_MS = positiveDurationFromEnv('AGENTOC_COLLABORATION_DISPATCH_RETRY_DELAY_MS', 5 * 1000);
+const DISPATCH_COMMAND_LEASE_MS = positiveDurationFromEnv('RAGENT_COLLABORATION_DISPATCH_COMMAND_LEASE_MS', 2 * 60 * 1000);
+const DISPATCH_RETRY_DELAY_MS = positiveDurationFromEnv('RAGENT_COLLABORATION_DISPATCH_RETRY_DELAY_MS', 5 * 1000);
 const AGGREGATION_LEASE_MS = 5 * 60 * 1000;
 const MAX_COLLABORATION_EVENTS_IN_PROJECTION = 256;
 

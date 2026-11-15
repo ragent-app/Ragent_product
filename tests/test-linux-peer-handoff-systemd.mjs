@@ -11,17 +11,17 @@ import { enrollLinuxServiceKeyPin } from '../scripts/linux-service-key-pin.mjs';
 import { registerLinuxRunContext } from '../scripts/linux-run-context-store.mjs';
 
 for (const scenario of ['runner', 'sidecar', 'cancel']) test(`systemd ${scenario} uses real root broker and non-root control`,
-  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.AGENTOC_TEST_SYSTEMD_PEER !== '1', timeout: 45000 }, async () => {
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || process.env.RAGENT_TEST_SYSTEMD_PEER !== '1', timeout: 45000 }, async () => {
     const realSidecar = scenario === 'sidecar', cancellation = scenario === 'cancel';
     const account = name => {
       const fields = execFileSync('/usr/bin/getent', ['passwd', name], { encoding: 'utf8' }).trim().split(':');
       return { uid: Number(fields[2]), gid: Number(fields[3]) };
     };
-    const controlAccount = account('nobody'), runner = account('agentoc-runner');
+    const controlAccount = account('nobody'), runner = account('ragent-runner');
     assert.ok(controlAccount.uid > 0 && runner.uid > 0 && controlAccount.uid !== runner.uid);
-    const root = await mkdtemp('/srv/agentoc-peer-handoff-');
+    const root = await mkdtemp('/srv/ragent-peer-handoff-');
     const runId = cancellation ? 'run_peercancelfixture1' : realSidecar ? 'run_peersidecarfixture1' : 'run_peerhandofffixture1';
-    const unit = `agentoc-runner-${runId}.service`;
+    const unit = `ragent-runner-${runId}.service`;
     let lifecycle, inbox, control, started = false, succeeded = false;
     try {
       assert.equal(execFileSync('/usr/bin/systemctl', ['show', '--property=LoadState', '--value', unit], { encoding: 'utf8' }).trim(), 'not-found');
@@ -41,18 +41,18 @@ for (const scenario of ['runner', 'sidecar', 'cancel']) test(`systemd ${scenario
       const helper = `${root}/peercred`, endpoint = `${root}/result.sock`, lifecycleSocket = `${root}/lifecycle.sock`;
       execFileSync('/usr/bin/gcc', ['-Wall', '-Wextra', '-Werror', '-O2',
         fileURLToPath(new URL('../native/privileged-peercred.c', import.meta.url)), '-o', helper]);
-      lifecycle = await createRunnerLifecycleServer({ socketPath: lifecycleSocket, serviceUser: 'agentoc-runner',
-        serviceGroup: 'agentoc-runners', controlUser: 'nobody', controlGroup: 'nobody',
+      lifecycle = await createRunnerLifecycleServer({ socketPath: lifecycleSocket, serviceUser: 'ragent-runner',
+        serviceGroup: 'ragent-runners', controlUser: 'nobody', controlGroup: 'nobody',
         runScopeRegistration: { directory: `${root}/contexts`, pinDirectory: `${root}/pin` } });
       const fixture = fileURLToPath(new URL('./fixtures/linux-peer-handoff-control.mjs', import.meta.url));
       let errorOutput = '';
       control = spawn('/usr/bin/setpriv', ['--reuid', String(controlAccount.uid), '--regid', String(controlAccount.gid), '--clear-groups', '--',
-        process.execPath, fixture], { env: { ...process.env, HOME: `${root}/home`, AGENTOC_CONFIG_DIR: `${root}/config`,
-          AGENTOC_MEMORY_DIR: `${root}/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`, AGENTOC_TEST_ROOT: root,
-          AGENTOC_TEST_RUNNER_UID: String(runner.uid), AGENTOC_TEST_REAL_SIDECAR: realSidecar ? '1' : '0', AGENTOC_LINUX_RUN_SCOPE_GRANTS: '1',
-          AGENTOC_TEST_CANCEL_HANDOFF: cancellation ? '1' : '0',
-          AGENTOC_RUNNER_LIFECYCLE_SOCKET: lifecycleSocket, AGENTOC_LINUX_PEER_RESULT_SOCKET: endpoint,
-          AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: helper }, stdio: ['pipe', 'pipe', 'pipe'] });
+        process.execPath, fixture], { env: { ...process.env, HOME: `${root}/home`, RAGENT_CONFIG_DIR: `${root}/config`,
+          RAGENT_MEMORY_DIR: `${root}/memory`, RAGENT_RUN_SPOOL_DIR: `${root}/spool`, RAGENT_TEST_ROOT: root,
+          RAGENT_TEST_RUNNER_UID: String(runner.uid), RAGENT_TEST_REAL_SIDECAR: realSidecar ? '1' : '0', RAGENT_LINUX_RUN_SCOPE_GRANTS: '1',
+          RAGENT_TEST_CANCEL_HANDOFF: cancellation ? '1' : '0',
+          RAGENT_RUNNER_LIFECYCLE_SOCKET: lifecycleSocket, RAGENT_LINUX_PEER_RESULT_SOCKET: endpoint,
+          RAGENT_LINUX_PEER_CREDENTIAL_HELPER: helper }, stdio: ['pipe', 'pipe', 'pipe'] });
       control.stderr.on('data', data => { errorOutput += data.toString(); });
       const lines = createInterface({ input: control.stdout })[Symbol.asyncIterator]();
       const next = async () => {
@@ -76,14 +76,14 @@ for (const scenario of ['runner', 'sidecar', 'cancel']) test(`systemd ${scenario
         task = `${root}/wait.mjs`;
         await writeFile(task, 'setInterval(() => {}, 1000);\n', { mode: 0o644 });
       }
-      const env = { HOME: `${root}/runner-home`, AGENTOC_CONFIG_DIR: `${root}/runner-home`,
-        AGENTOC_MEMORY_DIR: `${root}/runner-home/memory`, AGENTOC_RUN_SPOOL_DIR: `${root}/spool`,
-        AGENTOC_LINUX_RUN_SCOPE_GRANTS: '0', AGENTOC_RUNNER_DISTINCT_IDENTITY: '1',
-        AGENTOC_LINUX_SCOPE_FINISH_ENABLED: '1', AGENTOC_LINUX_PEER_RESULT_RUNNER: '1',
-        AGENTOC_LINUX_PEER_RESULT_SOCKET: endpoint, AGENTOC_LINUX_PEER_CREDENTIAL_HELPER: helper,
-        AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}`, IS_SANDBOX: '1' };
-      const args = ['--quiet', '--collect', '--service-type=exec', `--unit=${unit}`, '--slice=agentoc-runners.slice',
-        '--property=User=agentoc-runner', '--property=NoNewPrivileges=yes', '--property=KillMode=control-group'];
+      const env = { HOME: `${root}/runner-home`, RAGENT_CONFIG_DIR: `${root}/runner-home`,
+        RAGENT_MEMORY_DIR: `${root}/runner-home/memory`, RAGENT_RUN_SPOOL_DIR: `${root}/spool`,
+        RAGENT_LINUX_RUN_SCOPE_GRANTS: '0', RAGENT_RUNNER_DISTINCT_IDENTITY: '1',
+        RAGENT_LINUX_SCOPE_FINISH_ENABLED: '1', RAGENT_LINUX_PEER_RESULT_RUNNER: '1',
+        RAGENT_LINUX_PEER_RESULT_SOCKET: endpoint, RAGENT_LINUX_PEER_CREDENTIAL_HELPER: helper,
+        RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${ready.port}`, IS_SANDBOX: '1' };
+      const args = ['--quiet', '--collect', '--service-type=exec', `--unit=${unit}`, '--slice=ragent-runners.slice',
+        '--property=User=ragent-runner', '--property=NoNewPrivileges=yes', '--property=KillMode=control-group'];
       for (const [key, value] of Object.entries(env)) args.push(`--setenv=${key}=${value}`);
       started = true;
       execFileSync('/usr/bin/systemd-run', [...args, process.execPath, task, ...(realSidecar ? [runId] : [])], { timeout: 10000 });

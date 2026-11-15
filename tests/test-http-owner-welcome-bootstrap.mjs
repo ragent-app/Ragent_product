@@ -65,10 +65,10 @@ async function resolveEventContent(port, sessionId, event, extraHeaders = {}) {
 }
 
 function setupTempHome({ preseedArchivedBasicChat = false, cloudflaredPort = 0, publicHostname = '', noHarness = false } = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-owner-welcome-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const memoryDir = join(home, '.agentoc', 'memory');
-  const workRoot = join(home, '.agentoc', 'workspace');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-owner-welcome-'));
+  const configDir = join(home, '.config', 'ragent');
+  const memoryDir = join(home, '.ragent', 'memory');
+  const workRoot = join(home, '.ragent', 'workspace');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(memoryDir, { recursive: true });
@@ -156,23 +156,23 @@ async function startServer({ home, configDir, memoryDir, workRoot, port, noHarne
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_AUTH_SESSION_SECRET: 'test-owner-welcome-secret',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_AUTH_SESSION_SECRET: 'test-owner-welcome-secret',
       HOME: home,
       ...(noHarness ? {
         PATH: `${join(home, '.local', 'bin')}:/usr/bin:/bin`,
-        AGENTOC_PACKAGED_HARNESS_ROOT: join(home, 'empty-harness-root'),
+        RAGENT_PACKAGED_HARNESS_ROOT: join(home, 'empty-harness-root'),
       } : {}),
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: memoryDir,
-      AGENTOC_WORK_ROOT_DIR: workRoot,
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
-      AGENTOC_MEMORY_WRITEBACK: 'off',
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: memoryDir,
+      RAGENT_WORK_ROOT_DIR: workRoot,
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_MEMORY_WRITEBACK: 'off',
       CHAT_PORT: String(port),
-      AGENTOC_BRIDGE_BASE_URL: '',
-      AGENTOC_PUBLIC_BASE_URL: '',
+      RAGENT_BRIDGE_BASE_URL: '',
+      RAGENT_PUBLIC_BASE_URL: '',
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

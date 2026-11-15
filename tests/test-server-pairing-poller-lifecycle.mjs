@@ -7,7 +7,7 @@ import test from 'node:test';
 
 // Gate the selected package entrypoint as well as the module. A working module
 // cannot authorize anything when the shipped server never starts its poller.
-const source = (await readFile(process.env.AGENTOC_SERVER_LIFECYCLE_SOURCE
+const source = (await readFile(process.env.RAGENT_SERVER_LIFECYCLE_SOURCE
   || resolve('chat-server.mjs'), 'utf8')).replaceAll('\r\n', '\n');
 const pollers = [
   { module: 'account-pairing-service', start: 'startAccountPairingPoller', stop: 'stopAccountPairingPoller',

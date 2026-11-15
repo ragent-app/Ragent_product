@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { prepareControlSideNativeProvider } from '../chat/control-side-provider.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-memory-binding-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-memory-binding-'));
 try {
   const calls = [];
   const prepareProviderHome = async (operationId, manifest, options) => {

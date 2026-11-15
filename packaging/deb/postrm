@@ -6,20 +6,12 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "${1:-}" = purge ]; then
-  # dpkg keeps the old package in config-files state after a rename. A later
-  # purge of that obsolete record must not erase data now owned by Ragent.
-  if [ "${DPKG_MAINTSCRIPT_PACKAGE:-agentoc}" = agentoc ]; then
-    replacement_status="$(dpkg-query -W -f='${db:Status-Status}' ragent 2>/dev/null || true)"
-    case "$replacement_status" in
-      installed|unpacked|half-installed|half-configured|triggers-awaited|triggers-pending|config-files) exit 0 ;;
-    esac
-  fi
   # Finish an interrupted global-command diversion only when our marker and
   # exact empty target match; keep unrelated administrator diversions intact.
   for tool in codex claude; do
     command_path="/usr/bin/$tool"
-    diverted_path="/usr/lib/agentoc/legacy-global-$tool"
-    marker="/etc/agentoc/.legacy-global-$tool-diversion"
+    diverted_path="/usr/lib/ragent/legacy-global-$tool"
+    marker="/etc/ragent/.legacy-global-$tool-diversion"
     [ -f "$marker" ] || continue
     [ "$(cat "$marker")" = "$diverted_path" ] || continue
     current_diversion="$(dpkg-divert --truename "$command_path")"
@@ -32,27 +24,13 @@ if [ "${1:-}" = purge ]; then
       rm -f "$marker"
     fi
   done
-  rm -rf /etc/systemd/system/agentoc.service.d /etc/systemd/system/ragent.service.d /etc/systemd/system/agentoc-storage-gc.service.d /etc/systemd/system/agentoc-runner-supervisor.service.d /etc/systemd/system/agentoc-runner-supervisor.socket.d
-  rm -f /etc/agentoc/service-user /etc/agentoc/auth-secret /etc/agentoc/initial-credentials
-  rmdir /etc/agentoc >/dev/null 2>&1 || true
-  # Accounts is a separately deployed service; its state must survive removal
-  # of the desktop host even though both historically share this parent.
-  if [ -d /var/lib/agentoc ] && [ ! -L /var/lib/agentoc ]; then
-    find /var/lib/agentoc -mindepth 1 -maxdepth 1 ! -name accounts -exec rm -rf -- {} +
-    if [ -e /var/lib/agentoc/accounts ] || [ -L /var/lib/agentoc/accounts ]; then
-      chown root:root /var/lib/agentoc
-      if getent passwd agentoc-accounts >/dev/null 2>&1; then
-        setfacl -m u:agentoc-accounts:--x /var/lib/agentoc
-      fi
-    else
-      rmdir /var/lib/agentoc
-    fi
-  fi
-  rm -rf /var/lib/agentoc-run /var/log/agentoc /run/agentoc-privileged-executor /var/log/agentoc-privileged
-  deluser --system agentoc >/dev/null 2>&1 || true
-  delgroup --system agentoc >/dev/null 2>&1 || true
-  delgroup --system agentoc-privileged >/dev/null 2>&1 || true
-  delgroup --system agentoc-maintenance >/dev/null 2>&1 || true
+  rm -rf /etc/systemd/system/ragent.service.d /etc/systemd/system/ragent-storage-gc.service.d /etc/systemd/system/ragent-runner-supervisor.service.d /etc/systemd/system/ragent-runner-supervisor.socket.d /etc/systemd/system/ragent-runner-lifecycle.socket.d
+  rm -f /etc/ragent/service-user /etc/ragent/auth-secret /etc/ragent/initial-credentials
+  rmdir /etc/ragent >/dev/null 2>&1 || true
+  deluser --system ragent >/dev/null 2>&1 || true
+  delgroup --system ragent >/dev/null 2>&1 || true
+  delgroup --system ragent-privileged >/dev/null 2>&1 || true
+  delgroup --system ragent-maintenance >/dev/null 2>&1 || true
 fi
 
 exit 0

@@ -11,13 +11,13 @@ test('missing owner publication path fails before creating a lock',()=>{
   assert.throws(()=>createOwnerDiscoveryFileStore({filePath:''}),{code:'OBP_PATH_INVALID'});
 });
 function configuration(){const controlSid='S-1-5-80-1-2-3-4-5',ownerSid='S-1-5-21-1-2-3-1001',instanceId=randomUUID();
-  const releaseJson=JSON.stringify({version:1,protocolVersion:1,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),
+  const releaseJson=JSON.stringify({version:1,protocolVersion:1,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)}),
     installationJson=JSON.stringify({version:1,instanceId,controlSid,ownerSid,executorSid:'S-1-5-80-6-7-8-9-10',port:7690});
-  const policy=()=>({pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid,ownerSid,ownerSessionId:1});
+  const policy=()=>({pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId,requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:Date.now()+20000,controlSid,ownerSid,ownerSessionId:1});
   const peer={pid:1234,createdTicks:'134368500000000000',sid:controlSid,sessionId:0,integrityRid:8192,elevated:false,enabledAdministrators:false};
   return {releaseJson,installationJson,policy,peer};
 }
-async function fixture(t){const root=await mkdtemp(join(await realpath(tmpdir()),'agentoc-owner-publish-')),cleanups=[];t.after(async()=>{for(const fn of cleanups.reverse())await fn();await rm(root,{recursive:true,force:true});});return {root,filePath:join(root,'live.json'),cleanup:fn=>cleanups.push(fn)};}
+async function fixture(t){const root=await mkdtemp(join(await realpath(tmpdir()),'ragent-owner-publish-')),cleanups=[];t.after(async()=>{for(const fn of cleanups.reverse())await fn();await rm(root,{recursive:true,force:true});});return {root,filePath:join(root,'live.json'),cleanup:fn=>cleanups.push(fn)};}
 function endpoints(peer){const values=[];return {values,serveEndpoint:async options=>{
   let resolve,reject;const completion=new Promise((yes,no)=>{resolve=yes;reject=no;});completion.catch(()=>{});
   const endpoint={ready:{facts:peer,protectedDacl:true,firstInstance:true,rejectRemote:true},self:{facts:peer},completion,issuer:{},close:async()=>{reject(Object.assign(new Error('closed'),{code:'OBC_PEER_DISCONNECTED'}));await completion.catch(()=>{});}};

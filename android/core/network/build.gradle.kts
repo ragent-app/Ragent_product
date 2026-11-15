@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.network"
+    namespace = "com.andysagent.ragent.core.network"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

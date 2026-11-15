@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const source = await readFile(
-  path.join(repositoryRoot, 'packaging', 'windows', 'agentoc-installer-embedded-ui.cpp'),
+  path.join(repositoryRoot, 'packaging', 'windows', 'ragent-installer-embedded-ui.cpp'),
   'utf8',
 );
 const initializeStart = source.indexOf('extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI');
@@ -13,7 +13,7 @@ assert.notEqual(initializeStart, -1, 'embedded UI initialization entrypoint exis
 assert.match(source, /message == INSTALLMESSAGE_FILESINUSE\s*\|\|\s*message == INSTALLMESSAGE_RMFILESINUSE\) return IDIGNORE/,
   'interactive MSI must not automatically shut down other applications when files are in use');
 const initialize = source.slice(initializeStart);
-assert.match(initialize, /MsiQueryProductStateW\(productCode\) == INSTALLSTATE_DEFAULT[\s\S]*?AGENTOC_INPLACE_UPDATE[\s\S]*?_wcsicmp\(remove, L"ALL"\)/,
+assert.match(initialize, /MsiQueryProductStateW\(productCode\) == INSTALLSTATE_DEFAULT[\s\S]*?RAGENT_INPLACE_UPDATE[\s\S]*?_wcsicmp\(remove, L"ALL"\)/,
   'the update UI is enabled only for a supported installed product and leaves explicit uninstall to MSI');
 assert.match(initialize, /g\.minorUpdate[\s\S]*?MsiSetPropertyW\(install, L"REINSTALL", L"ALL"\)/,
   'only a same-product update enters the existing MSI reinstall transaction');
@@ -32,7 +32,7 @@ assert.match(source, /CoCreateInstance\(CLSID_FileOpenDialog[\s\S]*?FOS_PICKFOLD
 assert.match(source, /SetWindowTextW\(g\.pathEdit, path\)/, 'the selected folder is copied into the custom path field');
 assert.match(source, /FindRecoverySourceHint\(\)[\s\S]*?ChooseRecoverySource\(previous\)[\s\S]*?g\.recoverySource = std::move\(normalizedPrevious\)/,
   'retained data uses a recorded location or an explicitly selected previous directory');
-assert.match(initialize, /MsiSetPropertyW\(install, L"AGENTOC_RECOVERY_SOURCE", g\.recoverySource\.c_str\(\)\)/,
+assert.match(initialize, /MsiSetPropertyW\(install, L"RAGENT_RECOVERY_SOURCE", g\.recoverySource\.c_str\(\)\)/,
   'the recovery source is passed to the MSI transaction');
 
 assert.match(

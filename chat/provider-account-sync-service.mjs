@@ -51,11 +51,11 @@ function schedule(delayMs) {
 }
 
 function nextRetryDelay() {
-  const base = readDelayEnv('AGENTOC_PROVIDER_SYNC_RETRY_BASE_DELAY_MS', DEFAULT_RETRY_BASE_DELAY_MS, {
+  const base = readDelayEnv('RAGENT_PROVIDER_SYNC_RETRY_BASE_DELAY_MS', DEFAULT_RETRY_BASE_DELAY_MS, {
     min: 1_000,
     max: DEFAULT_RETRY_MAX_DELAY_MS,
   });
-  const max = readDelayEnv('AGENTOC_PROVIDER_SYNC_RETRY_MAX_DELAY_MS', DEFAULT_RETRY_MAX_DELAY_MS, {
+  const max = readDelayEnv('RAGENT_PROVIDER_SYNC_RETRY_MAX_DELAY_MS', DEFAULT_RETRY_MAX_DELAY_MS, {
     min: base,
     max: 24 * 60 * 60 * 1_000,
   });
@@ -79,7 +79,7 @@ async function runSyncCycle() {
       return;
     }
     consecutiveFailures = 0;
-    schedule(readDelayEnv('AGENTOC_PROVIDER_SYNC_INTERVAL_MS', DEFAULT_INTERVAL_MS, {
+    schedule(readDelayEnv('RAGENT_PROVIDER_SYNC_INTERVAL_MS', DEFAULT_INTERVAL_MS, {
       min: 60_000,
       max: 24 * 60 * 60 * 1_000,
     }));
@@ -94,7 +94,7 @@ export function startProviderAccountSync() {
   if (schedulerStarted) return { started: false, reason: 'already-running' };
   schedulerStarted = true;
   consecutiveFailures = 0;
-  schedule(readDelayEnv('AGENTOC_PROVIDER_SYNC_INITIAL_DELAY_MS', DEFAULT_INITIAL_DELAY_MS, {
+  schedule(readDelayEnv('RAGENT_PROVIDER_SYNC_INITIAL_DELAY_MS', DEFAULT_INITIAL_DELAY_MS, {
     min: 0,
     max: 5 * 60 * 1_000,
   }));
@@ -106,6 +106,6 @@ export function stopProviderAccountSync() {
   schedulerTimer = null;
   schedulerStarted = false;
   consecutiveFailures = 0;
-  if (process.env.AGENTOC_RUNTIME_MODE === 'proot') stopProviderPeerSessions();
+  if (process.env.RAGENT_RUNTIME_MODE === 'proot') stopProviderPeerSessions();
   else void import('../lib/provider-runtime/peer-transport.mjs').then(({ stopProviderPeerSessions }) => stopProviderPeerSessions());
 }

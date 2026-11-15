@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCComposerStore(root) {
+(function attachRagentComposerStore(root) {
   function normalizeSessionId(value) {
     if (typeof value !== "string") return "";
     const normalized = value.trim();
@@ -771,7 +771,7 @@
     getPendingEditResend,
   };
 
-  root.AgentoCComposerStore = api;
+  root.RagentComposerStore = api;
   root.getComposerStore = getComposerStore;
   root.getComposerStoreStateSnapshot = getComposerStoreStateSnapshot;
   root.dispatchComposerStore = dispatchComposerStore;
@@ -799,7 +799,7 @@
   root.hasAnyComposerUnsavedState = hasAnyComposerUnsavedState;
 
   if (root.window && root.window !== root) {
-    root.window.AgentoCComposerStore = api;
+    root.window.RagentComposerStore = api;
     root.window.getComposerStore = getComposerStore;
     root.window.getComposerStoreStateSnapshot = getComposerStoreStateSnapshot;
     root.window.dispatchComposerStore = dispatchComposerStore;

@@ -15,7 +15,7 @@ export const FAKE_PROVIDER_SOURCE = join(here, 'fake-provider.mjs');
 
 export const COOKIE = 'session_token=test-session';
 export const AUTH_TOKEN = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
-export const TEMP_PREFIX = 'agentoc-bench-';
+export const TEMP_PREFIX = 'ragent-bench-';
 
 export function randomPort() {
   return 33000 + Math.floor(Math.random() * 10000);
@@ -78,7 +78,7 @@ export function installFakeProvider(localBin) {
 
 export function setupTempHome() {
   const home = mkdtempSync(join(tmpdir(), TEMP_PREFIX));
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -114,29 +114,29 @@ export function setupTempHome() {
 }
 
 export async function startServer({ home, port, envOverrides = {} }) {
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: '',
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: '',
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: '',
-      AGENTOC_RUNNER_LIFECYCLE_REQUIRED: '',
-      AGENTOC_RUNNER_UNIT_NAME: '',
-      AGENTOC_RUNNER_UNIT_SCOPE: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: '',
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: '',
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: '',
+      RAGENT_RUNNER_LIFECYCLE_REQUIRED: '',
+      RAGENT_RUNNER_UNIT_NAME: '',
+      RAGENT_RUNNER_UNIT_SCOPE: '',
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
       // Synthetic session-secret for the throwaway instance only: without it
       // lib/auth.mjs refuses to load auth-sessions.json and the cookie
       // session never authenticates. Never used against a real instance.
-      AGENTOC_AUTH_SESSION_SECRET: 'benchmark-harness-synthetic-secret',
+      RAGENT_AUTH_SESSION_SECRET: 'benchmark-harness-synthetic-secret',
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
+      RAGENT_REPLY_SELF_CHECK: 'off',
       PATH: `${localBin}:${process.env.PATH || ''}`,
       ...envOverrides,
     },

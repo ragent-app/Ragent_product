@@ -145,9 +145,9 @@ async function run(processId, { watchExisting = false } = {}) {
     state: 'running',
     pid: Number.isInteger(child.pid) ? child.pid : null,
     sidecarPid: process.pid,
-    windowsJobObjectManaged: child.__agentocWindowsManaged === true,
-    windowsJobObjectCreation: typeof child.__agentocWindowsJobObjectCreation === 'string'
-      ? child.__agentocWindowsJobObjectCreation
+    windowsJobObjectManaged: child.__ragentWindowsManaged === true,
+    windowsJobObjectCreation: typeof child.__ragentWindowsJobObjectCreation === 'string'
+      ? child.__ragentWindowsJobObjectCreation
       : '',
     startedAt: new Date().toISOString(),
   });

@@ -14,10 +14,10 @@ const runId = 'run_0123456789abcdef';
 const status = join(spool, runId, 'status.json');
 try {
   process.env.HOME = root;
-  process.env.AGENTOC_INSTANCE_ROOT = root;
-  process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-  process.env.AGENTOC_RUN_SPOOL_DIR = spool;
-  process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  process.env.RAGENT_INSTANCE_ROOT = root;
+  process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+  process.env.RAGENT_RUN_SPOOL_DIR = spool;
+  process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
   await mkdir(join(spool, runId), { recursive: true });
   await writeFile(status, JSON.stringify({ id: runId, sessionId: 'fixture', state: 'accepted' }), { mode: 0o600 });
   // A different owner reproduces the root lifecycle broker updating the

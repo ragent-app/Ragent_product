@@ -11,15 +11,15 @@ import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-operation-ledger-'));
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-operation-ledger-'));
+const configDir = join(tempHome, '.config', 'ragent');
 const ledgerDir = join(configDir, 'usage-ledger');
 const operationLedgerDir = join(ledgerDir, 'operations');
 
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_USAGE_LEDGER_DIR = ledgerDir;
-process.env.AGENTOC_OPERATION_LEDGER_DIR = operationLedgerDir;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_USAGE_LEDGER_DIR = ledgerDir;
+process.env.RAGENT_OPERATION_LEDGER_DIR = operationLedgerDir;
 
 const operationLedger = await import(
   pathToFileURL(join(repoRoot, 'chat', 'operation-ledger.mjs')).href
@@ -350,7 +350,7 @@ try {
     const script = join(repoRoot, '..', 'scripts', 'operation-ledger-summary-24h.mjs');
     const result = spawnSync(process.execPath, [script, '--days', '1', '--json', '--ledger-dir', operationLedgerDir], {
       encoding: 'utf8',
-      env: { ...process.env, HOME: tempHome, AGENTOC_CONFIG_DIR: configDir, AGENTOC_USAGE_LEDGER_DIR: ledgerDir },
+      env: { ...process.env, HOME: tempHome, RAGENT_CONFIG_DIR: configDir, RAGENT_USAGE_LEDGER_DIR: ledgerDir },
     });
     assert.equal(result.status, 0, `summary script should exit 0: ${result.stderr?.slice(0, 300)}`);
     const scriptSummary = JSON.parse(result.stdout);
@@ -359,7 +359,7 @@ try {
 
     const humanResult = spawnSync(process.execPath, [script, '--days', '1', '--ledger-dir', operationLedgerDir], {
       encoding: 'utf8',
-      env: { ...process.env, HOME: tempHome, AGENTOC_CONFIG_DIR: configDir, AGENTOC_USAGE_LEDGER_DIR: ledgerDir },
+      env: { ...process.env, HOME: tempHome, RAGENT_CONFIG_DIR: configDir, RAGENT_USAGE_LEDGER_DIR: ledgerDir },
     });
     assert.equal(humanResult.status, 0);
     assert.match(humanResult.stdout, /By operation:/);
@@ -369,7 +369,7 @@ try {
 
   // 9. End-to-end through the summarizer subprocess path: provider_exit
   // classification on a failing fake tool, and a hard timeout that SIGKILLs
-  // a hanging fake tool (AGENTOC_SUMMARIZER_TIMEOUT_MS).
+  // a hanging fake tool (RAGENT_SUMMARIZER_TIMEOUT_MS).
   //
   // Note: lib/config.mjs resolves configDir at import time, so tools.json
   // must go into the already-resolved configDir rather than a new env value.
@@ -387,7 +387,7 @@ const mode = process.env.FAKE_TOOL_MODE || 'ok';
 if (process.env.FAKE_PID_FILE) require('fs').writeFileSync(process.env.FAKE_PID_FILE, String(process.pid));
 if (mode === 'fail') process.exit(3);
 if (mode === 'hang') setTimeout(() => {}, 60000);
-const text = JSON.stringify({ title: 'Ledger Rename Flow', group: 'AgentoC', description: 'Ledger test.' });
+const text = JSON.stringify({ title: 'Ledger Rename Flow', group: 'Ragent', description: 'Ledger test.' });
 console.log(JSON.stringify({ type: 'thread.started', thread_id: 'ledger-thread' }));
 console.log(JSON.stringify({ type: 'turn.started' }));
 console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } }));
@@ -411,8 +411,8 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
     );
 
     const previousPath = process.env.PATH;
-    const previousTimeout = process.env.AGENTOC_SUMMARIZER_TIMEOUT_MS;
-    process.env.AGENTOC_OPERATION_LEDGER_DIR = operationLedgerDir;
+    const previousTimeout = process.env.RAGENT_SUMMARIZER_TIMEOUT_MS;
+    process.env.RAGENT_OPERATION_LEDGER_DIR = operationLedgerDir;
     process.env.PATH = `${tempBin}:${previousPath}`;
 
     const { createSession, getSession, renameSession, killAll } = await import(
@@ -447,7 +447,7 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
     const hangPidFile = join(integrationHome, 'hang.pid');
     process.env.FAKE_TOOL_MODE = 'hang';
     process.env.FAKE_PID_FILE = hangPidFile;
-    process.env.AGENTOC_SUMMARIZER_TIMEOUT_MS = '300';
+    process.env.RAGENT_SUMMARIZER_TIMEOUT_MS = '300';
     const hangSession = await makeSession();
     const hangResult = await triggerLabel(hangSession);
     assert.equal(hangResult.ok, false, 'hanging tool should time out');
@@ -491,8 +491,8 @@ console.log(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1, o
     assert.ok(Number.isInteger(failedEvent.durationMs), 'duration must be recorded');
 
     // Restore env for the rest of the file.
-    if (previousTimeout === undefined) delete process.env.AGENTOC_SUMMARIZER_TIMEOUT_MS;
-    else process.env.AGENTOC_SUMMARIZER_TIMEOUT_MS = previousTimeout;
+    if (previousTimeout === undefined) delete process.env.RAGENT_SUMMARIZER_TIMEOUT_MS;
+    else process.env.RAGENT_SUMMARIZER_TIMEOUT_MS = previousTimeout;
     process.env.PATH = previousPath;
     delete process.env.FAKE_TOOL_MODE;
     delete process.env.FAKE_PID_FILE;

@@ -22,17 +22,17 @@ import {
 
 const env = {
   LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-  AGENTOC_INSTANCE_NAME: 'owner workspace',
+  RAGENT_INSTANCE_NAME: 'owner workspace',
 };
 const perUserLauncher = await readFile(new URL('../scripts/windows-per-user-runtime.ps1', import.meta.url), 'utf8');
 assert.match(
   perUserLauncher,
-  /SetEnvironmentVariable\('AGENTOC_RUN_SPOOL_DIR', \$Paths\.spoolDir, 'Process'\)/,
+  /SetEnvironmentVariable\('RAGENT_RUN_SPOOL_DIR', \$Paths\.spoolDir, 'Process'\)/,
   'per-user launcher must pass the validated spool root to the Supervisor process',
 );
 assert.match(
   perUserLauncher,
-  /SetEnvironmentVariable\('AGENTOC_PROVIDER_HOMES_DIR', \$Paths\.providerHomesDir, 'Process'\)/,
+  /SetEnvironmentVariable\('RAGENT_PROVIDER_HOMES_DIR', \$Paths\.providerHomesDir, 'Process'\)/,
   'per-user launcher must pass the validated provider-homes root to the Supervisor process',
 );
 const paths = resolveWindowsPerUserPaths({ platform: 'win32', env });
@@ -48,14 +48,14 @@ assert.equal(windowsPathFacts(paths).usesProgramData, false);
 assert.equal(windowsPathFacts(paths).allUnderLocalAppData, true);
 assert.equal(windowsPathFacts(paths).uniqueRoots, true);
 assert.equal(isWindowsPathWithin(paths.productRoot, paths.providerHomesDir), true);
-assert.equal(isWindowsPathWithin(paths.productRoot, '\\\\server\\share\\agentoc'), false);
+assert.equal(isWindowsPathWithin(paths.productRoot, '\\\\server\\share\\ragent'), false);
 assert.equal(isWindowsPathWithin(paths.instanceRoot, `${paths.instanceRoot}2`), false);
 assert.equal(isWindowsPathWithin(paths.instanceRoot, `${paths.instanceRoot}\\..\\other`), false);
 
 const runnerScopedEnv = {
   ...env,
-  AGENTOC_RUN_SPOOL_DIR: `${paths.instanceRoot}\\data\\chat-runs`,
-  AGENTOC_PROVIDER_HOMES_DIR: `${paths.instanceRoot}\\provider-homes`,
+  RAGENT_RUN_SPOOL_DIR: `${paths.instanceRoot}\\data\\chat-runs`,
+  RAGENT_PROVIDER_HOMES_DIR: `${paths.instanceRoot}\\provider-homes`,
 };
 const runnerScopedPaths = resolveWindowsPerUserPaths({ platform: 'win32', env: runnerScopedEnv });
 assert.equal(
@@ -63,14 +63,14 @@ assert.equal(
   paths.instanceRoot.toLowerCase(),
   'runner-scoped paths must recover their shared instance root when control-plane roots are stripped',
 );
-assert.equal(runnerScopedPaths.spoolDir, runnerScopedEnv.AGENTOC_RUN_SPOOL_DIR);
-assert.equal(runnerScopedPaths.providerHomesDir, runnerScopedEnv.AGENTOC_PROVIDER_HOMES_DIR);
+assert.equal(runnerScopedPaths.spoolDir, runnerScopedEnv.RAGENT_RUN_SPOOL_DIR);
+assert.equal(runnerScopedPaths.providerHomesDir, runnerScopedEnv.RAGENT_PROVIDER_HOMES_DIR);
 
 const customSpoolRunnerPaths = resolveWindowsPerUserPaths({
   platform: 'win32',
   env: {
     ...runnerScopedEnv,
-    AGENTOC_RUN_SPOOL_DIR: `${paths.instanceRoot}\\data\\custom-spool`,
+    RAGENT_RUN_SPOOL_DIR: `${paths.instanceRoot}\\data\\custom-spool`,
   },
 });
 assert.equal(customSpoolRunnerPaths.instanceRoot.toLowerCase(), paths.instanceRoot.toLowerCase());
@@ -81,7 +81,7 @@ assert.throws(
     platform: 'win32',
     env: {
       ...runnerScopedEnv,
-      AGENTOC_PROVIDER_HOMES_DIR: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\other\\provider-homes',
+      RAGENT_PROVIDER_HOMES_DIR: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\other\\provider-homes',
     },
   }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
@@ -92,22 +92,22 @@ assert.equal(normalizeWindowsInstanceName('  财务\u0301  '), '财务́');
 assert.equal(
   resolveWindowsPerUserPaths({
     platform: 'win32',
-    env: { ...env, AGENTOC_INSTANCE_NAME: '财务\u0301' },
+    env: { ...env, RAGENT_INSTANCE_NAME: '财务\u0301' },
   }).instanceRoot,
   resolveWindowsPerUserPaths({
     platform: 'win32',
-    env: { ...env, AGENTOC_INSTANCE_NAME: '财务́' },
+    env: { ...env, RAGENT_INSTANCE_NAME: '财务́' },
   }).instanceRoot,
   'canonically equivalent instance names must share an instance root',
 );
 
 const cjkPaths = resolveWindowsPerUserPaths({
   platform: 'win32',
-  env: { ...env, AGENTOC_INSTANCE_NAME: '财务 自动化' },
+  env: { ...env, RAGENT_INSTANCE_NAME: '财务 自动化' },
 });
 assert.match(cjkPaths.instanceRoot, /财务 自动化$/);
 assert.equal(
-  resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, AGENTOC_INSTANCE_NAME: 'OWNER WORKSPACE' } }).instanceRoot,
+  resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, RAGENT_INSTANCE_NAME: 'OWNER WORKSPACE' } }).instanceRoot,
   paths.instanceRoot,
   'Windows case variants must map to the same durable instance root',
 );
@@ -117,7 +117,7 @@ assert.throws(
   (error) => error.code === 'WINDOWS_RUNTIME_PLATFORM_REQUIRED',
 );
 assert.throws(
-  () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, AGENTOC_INSTANCE_NAME: '..\\escape' } }),
+  () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, RAGENT_INSTANCE_NAME: '..\\escape' } }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
 );
 assert.throws(
@@ -129,23 +129,23 @@ assert.throws(
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
 );
 assert.throws(
-  () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, AGENTOC_INSTANCE_NAME: 'con' } }),
+  () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, RAGENT_INSTANCE_NAME: 'con' } }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
 );
 for (const instanceName of ['CON.txt', 'com1', 'LPT9.log', 'COM¹', 'foo.']) {
   assert.throws(
-    () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, AGENTOC_INSTANCE_NAME: instanceName } }),
+    () => resolveWindowsPerUserPaths({ platform: 'win32', env: { ...env, RAGENT_INSTANCE_NAME: instanceName } }),
     (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
     `reserved or non-canonical instance name must fail closed: ${instanceName}`,
   );
 }
 for (const pathField of [
-  'AGENTOC_INSTANCE_ROOT',
-  'AGENTOC_CONFIG_DIR',
-  'AGENTOC_RUN_SPOOL_DIR',
-  'AGENTOC_PROVIDER_HOMES_DIR',
-  'AGENTOC_WORK_ROOT_DIR',
-  'AGENTOC_PLATFORM_SKILLS_DIR',
+  'RAGENT_INSTANCE_ROOT',
+  'RAGENT_CONFIG_DIR',
+  'RAGENT_RUN_SPOOL_DIR',
+  'RAGENT_PROVIDER_HOMES_DIR',
+  'RAGENT_WORK_ROOT_DIR',
+  'RAGENT_PLATFORM_SKILLS_DIR',
 ]) {
   assert.throws(
     () => resolveWindowsPerUserPaths({
@@ -168,29 +168,29 @@ const servicePaths = resolveWindowsPerUserPaths({
   platform: 'win32',
   env: {
     ...env,
-    AGENTOC_WINDOWS_SERVICE_MODE: '1',
-    AGENTOC_INSTANCE_ROOT: 'C:\\ProgramData\\AgentoC\\instances\\owner',
-    AGENTOC_CONFIG_DIR: 'C:\\ProgramData\\AgentoC\\instances\\owner\\config',
+    RAGENT_WINDOWS_SERVICE_MODE: '1',
+    RAGENT_INSTANCE_ROOT: 'C:\\ProgramData\\Ragent\\instances\\owner',
+    RAGENT_CONFIG_DIR: 'C:\\ProgramData\\Ragent\\instances\\owner\\config',
   },
 });
-assert.equal(servicePaths.instanceRoot, 'C:\\ProgramData\\AgentoC\\instances\\owner');
+assert.equal(servicePaths.instanceRoot, 'C:\\ProgramData\\Ragent\\instances\\owner');
 assert.equal(windowsPathFacts(servicePaths).usesProgramData, true);
 const canonicalServicePaths = resolveWindowsServicePaths({
   platform: 'win32',
   env: {
     ProgramData: 'C:\\ProgramData',
-    AGENTOC_INSTANCE_ROOT: 'C:\\Users\\Alice\\must-be-ignored',
-    AGENTOC_RUN_SPOOL_DIR: 'C:\\Users\\Alice\\must-be-ignored\\data\\chat-runs',
+    RAGENT_INSTANCE_ROOT: 'C:\\Users\\Alice\\must-be-ignored',
+    RAGENT_RUN_SPOOL_DIR: 'C:\\Users\\Alice\\must-be-ignored\\data\\chat-runs',
   },
 });
-assert.equal(canonicalServicePaths.productRoot, 'C:\\ProgramData\\AgentoC');
-assert.equal(canonicalServicePaths.instanceRoot, 'C:\\ProgramData\\AgentoC\\instances\\owner');
-assert.equal(canonicalServicePaths.spoolDir, 'C:\\ProgramData\\AgentoC\\instances\\owner\\data\\chat-runs');
-assert.equal(canonicalServicePaths.providerHomesDir, 'C:\\ProgramData\\AgentoC\\instances\\owner\\provider-homes');
+assert.equal(canonicalServicePaths.productRoot, 'C:\\ProgramData\\Ragent');
+assert.equal(canonicalServicePaths.instanceRoot, 'C:\\ProgramData\\Ragent\\instances\\owner');
+assert.equal(canonicalServicePaths.spoolDir, 'C:\\ProgramData\\Ragent\\instances\\owner\\data\\chat-runs');
+assert.equal(canonicalServicePaths.providerHomesDir, 'C:\\ProgramData\\Ragent\\instances\\owner\\provider-homes');
 assert.throws(
   () => resolveWindowsPerUserPaths({
     platform: 'win32',
-    env: { ...env, AGENTOC_INSTANCE_ROOT: 'C:\\Users\\Alice\\instance', AGENTOC_CONFIG_DIR: 'C:\\Users\\Alice\\other\\config' },
+    env: { ...env, RAGENT_INSTANCE_ROOT: 'C:\\Users\\Alice\\instance', RAGENT_CONFIG_DIR: 'C:\\Users\\Alice\\other\\config' },
   }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
   'explicit config directory must remain inside explicit instance root',
@@ -198,7 +198,7 @@ assert.throws(
 assert.throws(
   () => resolveWindowsPerUserPaths({
     platform: 'win32',
-    env: { ...env, AGENTOC_INSTANCE_ROOT: 'C:\\Users\\Alice\\instance', AGENTOC_CONFIG_DIR: 'C:\\Users\\Alice\\instance\\..\\other\\config' },
+    env: { ...env, RAGENT_INSTANCE_ROOT: 'C:\\Users\\Alice\\instance', RAGENT_CONFIG_DIR: 'C:\\Users\\Alice\\instance\\..\\other\\config' },
   }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
   'normalized config traversal must remain inside explicit instance root',
@@ -208,17 +208,17 @@ assert.throws(
     platform: 'win32',
     env: {
       ...env,
-      AGENTOC_INSTANCE_ROOT: paths.instanceRoot,
-      AGENTOC_PROVIDER_HOMES_DIR: 'C:\\other-instance\\provider-homes',
+      RAGENT_INSTANCE_ROOT: paths.instanceRoot,
+      RAGENT_PROVIDER_HOMES_DIR: 'C:\\other-instance\\provider-homes',
     },
   }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
 );
-for (const pathField of ['AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR', 'AGENTOC_WORK_ROOT_DIR', 'AGENTOC_PLATFORM_SKILLS_DIR']) {
+for (const pathField of ['RAGENT_RUN_SPOOL_DIR', 'RAGENT_PROVIDER_HOMES_DIR', 'RAGENT_WORK_ROOT_DIR', 'RAGENT_PLATFORM_SKILLS_DIR']) {
   assert.throws(
     () => resolveWindowsPerUserPaths({
       platform: 'win32',
-      env: { ...env, [pathField]: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\other\\data' },
+      env: { ...env, [pathField]: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\other\\data' },
     }),
     (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
     `external ${pathField} must not cross the instance boundary`,
@@ -227,7 +227,7 @@ for (const pathField of ['AGENTOC_RUN_SPOOL_DIR', 'AGENTOC_PROVIDER_HOMES_DIR', 
 assert.throws(
   () => resolveWindowsPerUserPaths({
     platform: 'win32',
-    env: { ...env, AGENTOC_PROVIDER_HOMES_DIR: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\config' },
+    env: { ...env, RAGENT_PROVIDER_HOMES_DIR: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\config' },
   }),
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
   'provider homes must not overlap config state',
@@ -235,21 +235,21 @@ assert.throws(
 
 const safeBoundary = assessWindowsPathBoundary({
   expectedRoot: paths.workspaceDir,
-  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\workspace\\input file.txt',
-  canonicalPath: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\workspace\\input file.txt',
+  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\workspace\\input file.txt',
+  canonicalPath: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\workspace\\input file.txt',
   reparsePoint: false,
 });
 assert.equal(safeBoundary.ok, true);
 assert.equal(assessWindowsPathBoundary({
   expectedRoot: paths.workspaceDir,
-  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\workspace\\linked',
+  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\workspace\\linked',
   canonicalPath: 'C:\\outside\\secret.txt',
   reparsePoint: true,
 }).reason, 'canonical-path-outside-root');
 assert.equal(assessWindowsPathBoundary({
   expectedRoot: paths.workspaceDir,
-  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\workspace\\unknown',
-  canonicalPath: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner workspace\\workspace\\unknown',
+  configuredPath: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\workspace\\unknown',
+  canonicalPath: 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner workspace\\workspace\\unknown',
 }).reason, 'reparse-fact-unverified');
 
 const endpointA = deriveWindowsEndpointName({ instanceRoot: paths.instanceRoot, instanceId: 'inst_a' });
@@ -262,7 +262,7 @@ const endpointAFromPathVariant = deriveWindowsEndpointName({
   instanceRoot: `${paths.instanceRoot}\\.\\`,
   instanceId: 'inst_a',
 });
-assert.match(endpointA, /^\\\\\.\\pipe\\agentoc-[0-9a-f-]+$/);
+assert.match(endpointA, /^\\\\\.\\pipe\\ragent-[0-9a-f-]+$/);
 assert.notEqual(endpointA, endpointB);
 assert.equal(endpointAFromCaseVariant, endpointA, 'endpoint identity must be stable across Windows root casing');
 assert.equal(endpointAFromPathVariant, endpointA, 'endpoint identity must be stable across path normalization');
@@ -276,7 +276,7 @@ assert.throws(
   (error) => error.code === 'WINDOWS_RUNTIME_PATH_INVALID',
 );
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-p0-1-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-p0-1-'));
 const ownershipPath = join(root, 'runtime', 'instance-ownership.json');
 const owner = await acquireInstanceOwnership({
   filePath: ownershipPath,

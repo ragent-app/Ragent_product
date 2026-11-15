@@ -80,11 +80,11 @@ function request(port, method, path, body = null) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-codex-app-server-sidecar-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const memoryDir = join(home, '.agentoc', 'memory');
-  const workDir = join(home, '.agentoc', 'workspace');
-  const providerHomesDir = join(home, '.agentoc', 'provider-homes');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-codex-app-server-sidecar-'));
+  const configDir = join(home, '.config', 'ragent');
+  const memoryDir = join(home, '.ragent', 'memory');
+  const workDir = join(home, '.ragent', 'workspace');
+  const providerHomesDir = join(home, '.ragent', 'provider-homes');
   const providerCodexHome = join(providerHomesDir, 'codex');
   const localBin = join(home, '.local', 'bin');
   const recordPath = join(home, 'fake-app-server-messages.jsonl');
@@ -147,7 +147,7 @@ let mcpReadySent = false;
 let fixtureHookTrusted = false;
 let mcpMode = process.env.FAKE_CODEX_APP_SERVER_MCP_MODE || '';
 const delayedTurnStartMs = Number(process.env.FAKE_CODEX_APP_SERVER_TURN_START_DELAY_MS || '0');
-if (recordPath) fs.appendFileSync(recordPath, JSON.stringify({ agentocFixtureProcessArgs: process.argv.slice(2), ragentEnv: { session: process.env.RAGENT_SESSION_ID, baseUrl: process.env.RAGENT_CHAT_BASE_URL, projectRoot: process.env.RAGENT_PROJECT_ROOT } }) + '\\n');
+if (recordPath) fs.appendFileSync(recordPath, JSON.stringify({ ragentFixtureProcessArgs: process.argv.slice(2), ragentEnv: { session: process.env.RAGENT_SESSION_ID, baseUrl: process.env.RAGENT_CHAT_BASE_URL, projectRoot: process.env.RAGENT_PROJECT_ROOT } }) + '\\n');
 function record(message) {
   messages.push(message);
   // A stale-resume handoff starts a second app-server process. Append each
@@ -159,12 +159,12 @@ function send(message) {
 }
 function managedMcpServerName() {
   return 'ragent_actions_' + crypto.createHash('sha256')
-    .update(process.env.AGENTOC_RUN_ID || 'run', 'utf8')
+    .update(process.env.RAGENT_RUN_ID || 'run', 'utf8')
     .digest('hex')
     .slice(0, 16);
 }
 function managedBrokerServerName() {
-  return 'ragent_broker_' + crypto.createHash('sha256').update((process.env.AGENTOC_RUN_ID || 'run') + ':broker', 'utf8').digest('hex').slice(0, 16);
+  return 'ragent_broker_' + crypto.createHash('sha256').update((process.env.RAGENT_RUN_ID || 'run') + ':broker', 'utf8').digest('hex').slice(0, 16);
 }
 function threadPayload(id) {
   return {
@@ -367,7 +367,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 	    }
 	    send({ method: 'turn/started', params: { threadId, turn: { id: turnId, items: [], itemsView: 'complete', status: 'inProgress', error: null, startedAt: 1, completedAt: null, durationMs: null } } });
 	    if (message.params.clientUserMessageId === 'req-app-server-shim-pending') {
-	      const shim = spawnSync('agentoc-privileged', ['--description', 'isolated fixture', '--category', 'delete', '--', 'rm', '/tmp/ragent-shim-fixture'], { encoding: 'utf8', timeout: 5000 });
+	      const shim = spawnSync('ragent-privileged', ['--description', 'isolated fixture', '--category', 'delete', '--', 'rm', '/tmp/ragent-shim-fixture'], { encoding: 'utf8', timeout: 5000 });
 	      record({ fixtureShimExit: shim.status, fixtureShimError: shim.error?.message || '' });
 	      if (shim.status !== 78) { send({ method: 'error', params: { error: { message: 'fixture shim did not create a pending request' }, turnId } }); process.exit(1); return; }
 	      finishTurn(turnId);
@@ -601,9 +601,9 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           itemId: 'cmd-approval-1',
           startedAtMs: Date.now(),
           reason: 'Need shell access',
-          command: 'sudo systemctl restart agentoc-fixture',
+          command: 'sudo systemctl restart ragent-fixture',
           cwd: process.cwd(),
-          commandActions: [{ type: 'unknown', command: 'sudo systemctl restart agentoc-fixture' }],
+          commandActions: [{ type: 'unknown', command: 'sudo systemctl restart ragent-fixture' }],
         },
       });
       return;
@@ -653,54 +653,54 @@ async function startServer({
       FAKE_CODEX_APP_SERVER_TURN_START_DELAY_MS: String(turnStartDelayMs) };
     writeFileSync(join(home, 'fixture-env.json'), JSON.stringify(fixtureEnv), 'utf8');
   }
-  const supervisorPipe = process.platform === 'win32' ? `\\\\.\\pipe\\agentoc-test-codex-${randomBytes(12).toString('hex')}` : '';
+  const supervisorPipe = process.platform === 'win32' ? `\\\\.\\pipe\\ragent-test-codex-${randomBytes(12).toString('hex')}` : '';
   const childEnv = {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
       LOCALAPPDATA: join(home, 'local-appdata'),
       APPDATA: join(home, 'roaming-appdata'),
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: memoryDir,
-      AGENTOC_WORK_ROOT_DIR: workDir,
-      AGENTOC_RUN_SPOOL_DIR: join(home, '.agentoc', 'data', 'chat-runs'),
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: '',
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: memoryDir,
+      RAGENT_WORK_ROOT_DIR: workDir,
+      RAGENT_RUN_SPOOL_DIR: join(home, '.ragent', 'data', 'chat-runs'),
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: '',
       // This protocol fixture intentionally keeps several fake turns open.
       // Admission-controller behavior has separate tests; host load must not
       // shrink this fixture's provider budget and strand its terminal checks.
-      AGENTOC_ADAPTIVE_CONCURRENCY: 'off',
-      AGENTOC_RUN_CAPACITY_MAX_CONCURRENT: '32',
-      AGENTOC_RUN_PROVIDER_MAX_CONCURRENT: '32',
-      AGENTOC_AUTH_SESSION_SECRET: 'test-secret-agentoc-sidecar',
+      RAGENT_ADAPTIVE_CONCURRENCY: 'off',
+      RAGENT_RUN_CAPACITY_MAX_CONCURRENT: '32',
+      RAGENT_RUN_PROVIDER_MAX_CONCURRENT: '32',
+      RAGENT_AUTH_SESSION_SECRET: 'test-secret-ragent-sidecar',
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
-      AGENTOC_REPLY_SELF_CHECK: 'off',
+      RAGENT_REPLY_SELF_CHECK: 'off',
       // Keep the fixture on its isolated provider home even when the host
-      // running the test exports an external AGENTOC_CODEX_HOME_DIR.
-      AGENTOC_CODEX_HOME_DIR: '',
+      // running the test exports an external RAGENT_CODEX_HOME_DIR.
+      RAGENT_CODEX_HOME_DIR: '',
       FAKE_CODEX_APP_SERVER_RECORD: recordPath,
       FAKE_CODEX_APP_SERVER_STALE_RESUME: staleResumeRecovery ? '1' : '0',
       FAKE_CODEX_APP_SERVER_EXIT_AFTER_STALE_RESUME: exitAfterStaleResume ? '1' : '0',
       FAKE_CODEX_APP_SERVER_MCP_MODE: mcpMode,
       // Keep the production fallback conservative while making this focused
       // protocol test fast enough to run as a normal unit-style check.
-      AGENTOC_CODEX_MCP_STARTUP_FALLBACK_MS: '100',
-      AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
+      RAGENT_CODEX_MCP_STARTUP_FALLBACK_MS: '100',
+      RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1',
       FAKE_CODEX_APP_SERVER_TURN_START_DELAY_MS: String(turnStartDelayMs),
-      ...(runnerLaunchMode ? { AGENTOC_RUNNER_LAUNCH_MODE: runnerLaunchMode } : {}),
-      ...(providerHomesDir ? { AGENTOC_PROVIDER_HOMES_DIR: providerHomesDir } : {}),
-      ...(idleTimeoutMs ? { AGENTOC_RUN_IDLE_TIMEOUT_MS: String(idleTimeoutMs) } : {}),
-      ...(idleCheckIntervalMs ? { AGENTOC_RUN_IDLE_CHECK_INTERVAL_MS: String(idleCheckIntervalMs) } : {}),
-      ...(codexTurnIdleTimeoutMs ? { AGENTOC_CODEX_TURN_IDLE_TIMEOUT_MS: String(codexTurnIdleTimeoutMs) } : {}),
-      ...(codexToolIdleTimeoutMs ? { AGENTOC_CODEX_TOOL_IDLE_TIMEOUT_MS: String(codexToolIdleTimeoutMs) } : {}),
-      ...(codexIdleInterruptGraceMs ? { AGENTOC_CODEX_IDLE_INTERRUPT_GRACE_MS: String(codexIdleInterruptGraceMs) } : {}),
-      ...(codexStartupTimeoutMs ? { AGENTOC_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS: String(codexStartupTimeoutMs) } : {}),
-      ...(stdoutQueueMaxLines ? { AGENTOC_RUN_STDOUT_QUEUE_MAX_LINES: String(stdoutQueueMaxLines) } : {}),
-      ...(stdoutQueueMaxBytes ? { AGENTOC_RUN_STDOUT_QUEUE_MAX_BYTES: String(stdoutQueueMaxBytes) } : {}),
+      ...(runnerLaunchMode ? { RAGENT_RUNNER_LAUNCH_MODE: runnerLaunchMode } : {}),
+      ...(providerHomesDir ? { RAGENT_PROVIDER_HOMES_DIR: providerHomesDir } : {}),
+      ...(idleTimeoutMs ? { RAGENT_RUN_IDLE_TIMEOUT_MS: String(idleTimeoutMs) } : {}),
+      ...(idleCheckIntervalMs ? { RAGENT_RUN_IDLE_CHECK_INTERVAL_MS: String(idleCheckIntervalMs) } : {}),
+      ...(codexTurnIdleTimeoutMs ? { RAGENT_CODEX_TURN_IDLE_TIMEOUT_MS: String(codexTurnIdleTimeoutMs) } : {}),
+      ...(codexToolIdleTimeoutMs ? { RAGENT_CODEX_TOOL_IDLE_TIMEOUT_MS: String(codexToolIdleTimeoutMs) } : {}),
+      ...(codexIdleInterruptGraceMs ? { RAGENT_CODEX_IDLE_INTERRUPT_GRACE_MS: String(codexIdleInterruptGraceMs) } : {}),
+      ...(codexStartupTimeoutMs ? { RAGENT_CODEX_APP_SERVER_STARTUP_TIMEOUT_MS: String(codexStartupTimeoutMs) } : {}),
+      ...(stdoutQueueMaxLines ? { RAGENT_RUN_STDOUT_QUEUE_MAX_LINES: String(stdoutQueueMaxLines) } : {}),
+      ...(stdoutQueueMaxBytes ? { RAGENT_RUN_STDOUT_QUEUE_MAX_BYTES: String(stdoutQueueMaxBytes) } : {}),
     };
   const supervisorFixture = join(home, 'supervisor-fixture.mjs');
   if (supervisorPipe) writeFileSync(supervisorFixture, `import {spawn} from 'node:child_process';
@@ -907,7 +907,7 @@ try {
       error.message += `\nfixture messages: ${JSON.stringify(readRecordedMessages(recordPath).filter((entry) => entry.fixtureShimExit !== undefined))}`;
       const output = server.getOutput();
       error.message += `\nserver stderr tail: ${(output.stderr || '').slice(-3000)}`;
-      try { error.message += `\nshim spool tail: ${readFileSync(join(home, '.agentoc', 'data', 'chat-runs', shimRun.id, 'spool.jsonl'), 'utf8').slice(-3000)}`; } catch {}
+      try { error.message += `\nshim spool tail: ${readFileSync(join(home, '.ragent', 'data', 'chat-runs', shimRun.id, 'spool.jsonl'), 'utf8').slice(-3000)}`; } catch {}
       throw error;
     }
     const decision = await request(port, 'POST', `/api/runs/${shimRun.id}/privileged-batches/${batch.batchId}/categories/delete`, {
@@ -944,7 +944,7 @@ try {
     const output = server.getOutput?.() || {};
     console.error(`sidecar test server output:\n${output.stdout || '(no stdout)'}\n${output.stderr || '(no stderr)'}\n${output.supervisorOutput || '(no supervisor output)'}`);
     try {
-      const spool = readFileSync(join(home, '.agentoc', 'data', 'chat-runs', planRun.id, 'spool.jsonl'), 'utf8');
+      const spool = readFileSync(join(home, '.ragent', 'data', 'chat-runs', planRun.id, 'spool.jsonl'), 'utf8');
       const lines = spool.split('\n').filter((line) => /mcpServer|fixture MCP|codexMcp|stderr/.test(line));
       console.error(`fixture MCP spool:\n${lines.map((line) => line.slice(0, 1200)).join('\n')}`);
     } catch {}
@@ -962,14 +962,14 @@ try {
     throw error;
   }
   const processStart = await waitFor(() => {
-    try { return readRecordedMessages(recordPath).find((message) => Array.isArray(message.agentocFixtureProcessArgs)) || false; }
+    try { return readRecordedMessages(recordPath).find((message) => Array.isArray(message.ragentFixtureProcessArgs)) || false; }
     catch { return false; }
   }, 'Run-scoped Codex project trust process arguments');
-  const processArgs = processStart.agentocFixtureProcessArgs || [];
+  const processArgs = processStart.ragentFixtureProcessArgs || [];
   const trustOverride = processArgs.find((arg) => typeof arg === 'string' && arg.startsWith('projects='));
   assert.equal(trustOverride, undefined, 'on-request runs do not force untrusted project trust');
   assert.equal(approvalRequest.kind, 'command');
-  assert.equal(approvalRequest.command, 'sudo systemctl restart agentoc-fixture');
+  assert.equal(approvalRequest.command, 'sudo systemctl restart ragent-fixture');
   assert.equal(approvalRequest.runId, planRun.id);
   assert.equal(approvalRequest.provider, 'codex');
   assert.equal(approvalRequest.runtimeFamily, 'codex-app-server-json');
@@ -1371,7 +1371,7 @@ try {
     model: 'fake-model',
   });
   assert.ok(queuedFollowUp.status === 202 || queuedFollowUp.status === 200, `follow-up should queue: ${queuedFollowUp.text}`);
-  assert.equal(queuedFollowUp.json.queued, true, 'busy app-server follow-up should still use the AgentoC queue');
+  assert.equal(queuedFollowUp.json.queued, true, 'busy app-server follow-up should still use the Ragent queue');
   recorded = readRecordedMessages(recordPath);
   assert.equal(
     recorded.some((message) => message.method === 'turn/steer' && message.params?.clientUserMessageId === 'req-app-server-steer'),
@@ -1461,7 +1461,7 @@ try {
   const appServerPlanEvent = eventsRes.json.events.find((event) => (
     event.type === 'plan' && event.source === 'codex-app-server'
   ));
-  assert.ok(appServerPlanEvent, 'app-server plan notifications should become AgentoC plan events');
+  assert.ok(appServerPlanEvent, 'app-server plan notifications should become Ragent plan events');
   assert.equal(appServerPlanEvent.provider, 'codex');
   assert.equal(appServerPlanEvent.runtimeFamily, 'codex-app-server-json');
   assert.equal(appServerPlanEvent.providerCapabilities?.supportsSteer, true);
@@ -1630,7 +1630,7 @@ try {
   );
 
   // An unrelated MCP can remain `starting` and cause Codex to withhold the
-  // global inventory response even after the AgentoC-owned server is ready.
+  // global inventory response even after the Ragent-owned server is ready.
   // That must not turn into a 15-second false failure for the user turn.
   const blockedInventorySession = await createSession(port, 'recommended');
   const blockedInventoryRun = await submitMessage(port, blockedInventorySession.id, {
@@ -1695,7 +1695,7 @@ try {
     recordPath,
     mcpMode: 'ready',
     runnerLaunchMode: 'detached-process',
-    providerHomesDir: join(home, '.agentoc', 'missing-provider-homes'),
+    providerHomesDir: join(home, '.ragent', 'missing-provider-homes'),
   });
   const overlayFailureSession = await createSession(port, 'recommended');
   const overlayFailureRun = await submitMessage(port, overlayFailureSession.id, {

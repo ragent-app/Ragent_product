@@ -28,12 +28,12 @@ try {
     <script>
       window.getChatStoreStateSnapshot = () => ({ currentSessionId: "foreground" });
       window.getChatStoreSession = (id) => ({ id, name: "background session" });
-      window.agentocT = (key) => key;
+      window.ragentT = (key) => key;
     </script>
   </body></html>`);
   await page.addScriptTag({ content: source });
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       approvalId: "approval-replay",
       kind: "permission",
@@ -46,7 +46,7 @@ try {
   const first = await page.locator(".oneui-notification").elementHandle();
   assert.ok(first, "approval notification should be visible");
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       approvalId: "approval-replay",
       kind: "permission",
@@ -60,7 +60,7 @@ try {
   assert.equal(await first.evaluate((node) => node === document.querySelector(".oneui-notification")), true);
   assert.equal(await second.evaluate((node) => node === document.querySelector(".oneui-notification")), true);
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_response",
       approvalId: "approval-replay",
       runId: "run-replay",
@@ -68,7 +68,7 @@ try {
     }]);
     // The provider may replay the request on the next invalidation. It must
     // stay resolved instead of re-entering after the exit animation.
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       approvalId: "approval-replay",
       runId: "run-replay",
@@ -79,8 +79,8 @@ try {
   await page.waitForTimeout(320);
   assert.equal(await page.locator("#attentionPopupHost").getAttribute("hidden"), "", "resolved replay must not resurrect the notification");
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup._reset();
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup._reset();
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       kind: "permission",
       status: "pending",
@@ -91,7 +91,7 @@ try {
   const noIdFirst = await page.locator(".oneui-notification").elementHandle();
   assert.ok(noIdFirst, "id-less approval notification should be visible");
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       kind: "permission",
       status: "pending",
@@ -105,8 +105,8 @@ try {
     "id-less replay must keep the same notification node",
   );
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup._reset();
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [
+    window.RagentAttentionPopup._reset();
+    window.RagentAttentionPopup.onRealtimeEvents("background", [
       {
         type: "approval_request",
         approvalId: "provider-approval",
@@ -129,8 +129,8 @@ try {
     "a batch projection must be the only visible surface for a paired provider approval",
   );
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup._reset();
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup._reset();
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "approval_request",
       approvalId: "provider-approval-separated",
       runId: "run-danger-separated",
@@ -144,7 +144,7 @@ try {
     "the separated generic request starts as a regular card",
   );
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup.onRealtimeEvents("background", [{
+    window.RagentAttentionPopup.onRealtimeEvents("background", [{
       type: "privileged_batch_request",
       batchId: "batch-danger-separated",
       runId: "run-danger-separated",
@@ -160,12 +160,12 @@ try {
   const sheetPage = await browser.newPage();
   await sheetPage.setContent(`<!doctype html><html><head><style>${css}\n${decisionCss}</style></head><body>
     <div id="inputArea"><div id="liveBar"></div></div>
-    <script>window.agentocT = (key) => key;</script>
+    <script>window.ragentT = (key) => key;</script>
   </body></html>`);
   await sheetPage.addScriptTag({ content: decisionsSource });
   await sheetPage.addScriptTag({ content: decisionSheetSource });
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.noteRequest({
+    window.RagentDecisions.noteRequest({
       type: "approval_request",
       approvalId: "sheet-replay",
       kind: "permission",
@@ -177,7 +177,7 @@ try {
   const firstSheet = await sheetPage.locator("#decisionSheet").elementHandle();
   assert.ok(firstSheet && await firstSheet.isVisible(), "decision sheet should be visible");
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.noteRequest({
+    window.RagentDecisions.noteRequest({
       type: "approval_request",
       approvalId: "sheet-replay",
       kind: "permission",
@@ -188,11 +188,11 @@ try {
   });
   assert.equal(await firstSheet.evaluate((node) => node === document.querySelector("#decisionSheet")), true);
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.noteResponse({ approvalId: "sheet-replay", runId: "run-replay" });
+    window.RagentDecisions.noteResponse({ approvalId: "sheet-replay", runId: "run-replay" });
   });
   await sheetPage.waitForTimeout(220);
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.noteRequest({
+    window.RagentDecisions.noteRequest({
       type: "approval_request",
       approvalId: "sheet-replay",
       runId: "run-replay",
@@ -203,7 +203,7 @@ try {
   assert.equal(await sheetPage.locator("#decisionSheet").getAttribute("hidden"), "", "resolved replay must not resurrect the decision sheet");
 
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.notePrivilegedBatch({
+    window.RagentDecisions.notePrivilegedBatch({
       type: "privileged_batch_request",
       batchId: "batch-replay",
       runId: "run-1",
@@ -220,7 +220,7 @@ try {
   assert.equal(await firstSheet.isVisible(), true, "batch takeover must not close the decision sheet");
   assert.equal(await firstSheet.evaluate((node) => node.classList.contains("is-closing")), false);
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.notePrivilegedBatch({
+    window.RagentDecisions.notePrivilegedBatch({
       type: "privileged_batch_request",
       batchId: "batch-replay",
       runId: "run-1",
@@ -232,9 +232,9 @@ try {
   });
   assert.equal(await firstBatch.evaluate((node) => node === document.querySelector("#decisionSheet .decision-sheet__batch")), true);
   await sheetPage.evaluate(() => {
-    window.AgentoCDecisions.reset();
-    window.agentocGetActiveUiLanguage = () => 'zh-CN';
-    window.AgentoCDecisions.notePrivilegedBatch({
+    window.RagentDecisions.reset();
+    window.ragentGetActiveUiLanguage = () => 'zh-CN';
+    window.RagentDecisions.notePrivilegedBatch({
       type: 'privileged_batch_request', batchId: 'mac-unavailable', runId: 'run-mac',
       executorUnavailableReasonCode: 'macos_administrator_unavailable',
       other: [{ opId: 'mac-op', command: 'launchctl kickstart system/example' }], delete: [],
@@ -245,11 +245,11 @@ try {
   assert.equal(await sheetPage.locator('#decisionSheet [data-batch-decision="approve"]').count(), 0);
   assert.equal(await sheetPage.locator('#decisionSheet [data-batch-decision="deny"]').count(), 1);
   assert.equal(await sheetPage.locator('#decisionSheet input[type="checkbox"]').isDisabled(), true);
-  if (process.env.AGENTOC_QA_SCREENSHOT) await sheetPage.screenshot({ path: process.env.AGENTOC_QA_SCREENSHOT });
+  if (process.env.RAGENT_QA_SCREENSHOT) await sheetPage.screenshot({ path: process.env.RAGENT_QA_SCREENSHOT });
   await page.evaluate(() => {
-    window.AgentoCAttentionPopup._reset();
-    window.agentocGetActiveUiLanguage = () => 'zh-CN';
-    window.AgentoCAttentionPopup.onRealtimeEvents('background', [{
+    window.RagentAttentionPopup._reset();
+    window.ragentGetActiveUiLanguage = () => 'zh-CN';
+    window.RagentAttentionPopup.onRealtimeEvents('background', [{
       type: 'privileged_batch_request', batchId: 'mac-notification', runId: 'run-mac',
       executorUnavailableReasonCode: 'macos_administrator_unavailable',
       other: [{ opId: 'mac-op', command: 'launchctl kickstart system/example' }], delete: [],

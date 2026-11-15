@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const fixtureRoot = mkdtempSync(join(tmpdir(), 'agentoc-runtime-family-'));
-process.env.AGENTOC_INSTANCE_ROOT = fixtureRoot;
-process.env.AGENTOC_CONFIG_DIR = join(fixtureRoot, 'config');
-process.env.AGENTOC_HARNESS_ROOT = join(fixtureRoot, 'harnesses');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-const fixtureBin = join(process.env.AGENTOC_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
+const fixtureRoot = mkdtempSync(join(tmpdir(), 'ragent-runtime-family-'));
+process.env.RAGENT_INSTANCE_ROOT = fixtureRoot;
+process.env.RAGENT_CONFIG_DIR = join(fixtureRoot, 'config');
+process.env.RAGENT_HARNESS_ROOT = join(fixtureRoot, 'harnesses');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+const fixtureBin = join(process.env.RAGENT_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
 mkdirSync(fixtureBin, { recursive: true });
 const fixtureCommand = join(fixtureBin, process.platform === 'win32' ? 'claude.cmd' : 'claude');
 writeFileSync(fixtureCommand, process.platform === 'win32'
@@ -43,8 +43,8 @@ const {
 }
 
 // Keep invocation assertions independent from the runner's inherited default.
-const previousServiceTier = process.env.AGENTOC_CODEX_SERVICE_TIER;
-delete process.env.AGENTOC_CODEX_SERVICE_TIER;
+const previousServiceTier = process.env.RAGENT_CODEX_SERVICE_TIER;
+delete process.env.RAGENT_CODEX_SERVICE_TIER;
 
 assert.throws(
   () => buildRuntimeInvocation('', 'Ping', {}, 'missing-runtime'),
@@ -306,7 +306,7 @@ const kiloInvocation = buildRuntimeInvocation('kilo-json', 'Run the task.', {
   model: 'gpt-5@provider-a',
 }, 'kilo');
 assert.deepEqual(kiloInvocation.args, [
-  'run', '--format', 'json', '--auto', '--model', 'agentoc/gpt-5', 'Run the task.',
+  'run', '--format', 'json', '--auto', '--model', 'ragent/gpt-5', 'Run the task.',
 ]);
 assert.equal(kiloInvocation.isKiloFamily, true);
 assert.equal(kiloInvocation.capabilities?.provider, 'kilo');
@@ -333,5 +333,5 @@ assert.equal(manifestFallbackInvocation.isCodexFamily, true);
 
 console.log('test-process-runner-runtime-family: ok');
 
-if (previousServiceTier === undefined) delete process.env.AGENTOC_CODEX_SERVICE_TIER;
-else process.env.AGENTOC_CODEX_SERVICE_TIER = previousServiceTier;
+if (previousServiceTier === undefined) delete process.env.RAGENT_CODEX_SERVICE_TIER;
+else process.env.RAGENT_CODEX_SERVICE_TIER = previousServiceTier;

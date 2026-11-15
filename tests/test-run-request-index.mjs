@@ -7,11 +7,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-run-request-index-'));
-process.env.AGENTOC_CONFIG_DIR = join(configDir, 'config');
-process.env.AGENTOC_INSTANCE_ROOT = configDir;
-process.env.AGENTOC_RUN_SPOOL_DIR = join(configDir, 'chat-runs');
-process.env.AGENTOC_MEMORY_DIR = join(configDir, 'memory');
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-run-request-index-'));
+process.env.RAGENT_CONFIG_DIR = join(configDir, 'config');
+process.env.RAGENT_INSTANCE_ROOT = configDir;
+process.env.RAGENT_RUN_SPOOL_DIR = join(configDir, 'chat-runs');
+process.env.RAGENT_MEMORY_DIR = join(configDir, 'memory');
 
 const runs = await import(pathToFileURL(join(repoRoot, 'chat', 'runs.mjs')).href);
 const {
@@ -70,7 +70,7 @@ try {
     if (!run || run.id !== 'run-index-second') process.exit(2);
     process.stdout.write('restart-hit\\n');
   `], {
-    env: { ...process.env, AGENTOC_CONFIG_DIR: join(configDir, 'config') },
+    env: { ...process.env, RAGENT_CONFIG_DIR: join(configDir, 'config') },
     encoding: 'utf8',
   });
   assert.equal(restartProbe.status, 0, `request index survives restart: ${restartProbe.stderr}`);
@@ -81,7 +81,7 @@ try {
   assert.equal(await findRunByRequest('session-index', 'request-second'), null, 'deleted session runs do not become stale duplicates');
 
   // Simulate an upgraded instance with old run directories but no index file.
-  const legacyConfigDir = mkdtempSync(join(tmpdir(), 'agentoc-run-request-index-legacy-'));
+  const legacyConfigDir = mkdtempSync(join(tmpdir(), 'ragent-run-request-index-legacy-'));
   const legacyRunDir = join(legacyConfigDir, 'chat-runs', 'run-legacy');
   mkdirSync(legacyRunDir, { recursive: true });
   writeFileSync(
@@ -94,8 +94,8 @@ try {
     if (!run || run.id !== 'run-legacy') process.exit(3);
     process.stdout.write('legacy-rebuild-hit\\n');
   `], {
-    env: { ...process.env, AGENTOC_CONFIG_DIR: join(legacyConfigDir, 'config'), AGENTOC_INSTANCE_ROOT: legacyConfigDir,
-      AGENTOC_RUN_SPOOL_DIR: join(legacyConfigDir, 'chat-runs'), AGENTOC_MEMORY_DIR: join(legacyConfigDir, 'memory') },
+    env: { ...process.env, RAGENT_CONFIG_DIR: join(legacyConfigDir, 'config'), RAGENT_INSTANCE_ROOT: legacyConfigDir,
+      RAGENT_RUN_SPOOL_DIR: join(legacyConfigDir, 'chat-runs'), RAGENT_MEMORY_DIR: join(legacyConfigDir, 'memory') },
     encoding: 'utf8',
   });
   assert.equal(legacyProbe.status, 0, `legacy index rebuild: ${legacyProbe.stderr}`);

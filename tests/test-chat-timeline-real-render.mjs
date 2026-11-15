@@ -20,11 +20,11 @@ try {
   await page.setContent(`<!doctype html><html><head><style>${source('static/chat/chat-base.css')}${source('static/chat/chat-messages.css')}</style></head><body><main id="messages"><div class="messages-inner" id="messagesInner"><div class="empty-state" id="emptyState"><h2>Empty</h2></div><section class="home-workspace" id="homeWorkspace" hidden></section></div></main><div id="inputArea"></div></body></html>`);
   await page.evaluate(() => {
     window.marked = { parse: (value) => `<p>${String(value ?? '')}</p>` };
-    window.agentocT = (key) => key;
-    window.AgentoCIcons = { render: () => '' };
-    window.AgentoCMotion = { subscribeReducedMotion: () => {} };
-    window.AgentoCRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
-    window.AgentoCDecisions = { reset: () => {} };
+    window.ragentT = (key) => key;
+    window.RagentIcons = { render: () => '' };
+    window.RagentMotion = { subscribeReducedMotion: () => {} };
+    window.RagentRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
+    window.RagentDecisions = { reset: () => {} };
     window.visitorMode = false;
     window.shareSnapshotMode = false;
     window.currentSessionId = 'real-render';
@@ -88,7 +88,7 @@ try {
     const localEcho = messagesInner.querySelector('.msg-user-local-echo');
     localEcho.dataset.sendAwaitingCommit = 'true';
     window.clearMessages();
-    const runtime = window.AgentoCTimelineRuntime;
+    const runtime = window.RagentTimelineRuntime;
     runtime.renderBatch([
       { id: 'user', seq: 1, type: 'message', role: 'user', requestId: 'request-user', timelineEntityId: 'message:user:request', content: 'Inspect the renderer' },
       { id: 'agent-before', seq: 2, type: 'message', role: 'assistant', runId: 'run-render', timelineEntityId: 'message:assistant:before', content: 'I am checking it.' },
@@ -152,7 +152,7 @@ try {
     }], {
       sessionId: 'real-render', runState: 'running', source: 'ws',
     });
-    window.AgentoCStreamingPresentation.finishSyntheticAssistantMessage();
+    window.RagentStreamingPresentation.finishSyntheticAssistantMessage();
     const oneShotFinalRoot = [...messagesInner.children].at(-1);
     const unknownHost = document.createElement('div');
     const unknownResult = window.renderUnknownEventInto(unknownHost, {
@@ -238,7 +238,7 @@ try {
     const echo = messagesInner.querySelector('.msg-user-local-echo[data-request-id="request-refresh-order"]');
     echo.dataset.sendAwaitingCommit = 'true';
     window.clearMessages();
-    window.AgentoCTimelineRuntime.renderBatch([
+    window.RagentTimelineRuntime.renderBatch([
       { id: 'before-refresh', seq: 10, type: 'message', role: 'assistant', content: 'Earlier answer' },
       { id: 'after-refresh', seq: 11, type: 'message', role: 'assistant', content: 'First answer token' },
     ], {
@@ -273,7 +273,7 @@ try {
     const transitionDuringLoad = messagesInner.classList.contains('is-session-transitioning')
       && messagesInner.getAttribute('aria-busy') === 'true';
 
-    window.AgentoCTimelineRuntime.renderBatch([
+    window.RagentTimelineRuntime.renderBatch([
       { id: 'next-user', seq: 1, type: 'message', role: 'user', content: 'Next session' },
       { id: 'next-assistant', seq: 2, type: 'message', role: 'assistant', content: 'Loaded without a blank frame.' },
     ], {
@@ -310,11 +310,11 @@ try {
   await mobilePage.setContent(`<!doctype html><html><head><style>${source('static/chat/chat-base.css')}${source('static/chat/chat-messages.css')}</style></head><body><main id="messages"><div class="messages-inner" id="messagesInner"></div></main></body></html>`);
   await mobilePage.evaluate(() => {
     window.marked = { parse: (value) => `<p>${String(value ?? '')}</p>` };
-    window.agentocT = (key) => key;
-    window.AgentoCIcons = { render: () => '' };
-    window.AgentoCMotion = { subscribeReducedMotion: () => {} };
-    window.AgentoCRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
-    window.AgentoCDecisions = { reset: () => {} };
+    window.ragentT = (key) => key;
+    window.RagentIcons = { render: () => '' };
+    window.RagentMotion = { subscribeReducedMotion: () => {} };
+    window.RagentRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
+    window.RagentDecisions = { reset: () => {} };
     window.visitorMode = false;
     window.shareSnapshotMode = false;
     window.currentSessionId = 'mobile-render';
@@ -338,7 +338,7 @@ try {
   await mobilePage.addScriptTag({ content: source('static/chat/core/timeline-projector.js') });
   await mobilePage.addScriptTag({ content: source('static/chat/timeline-runtime.js') });
   const mobileResult = await mobilePage.evaluate(() => {
-    window.AgentoCTimelineRuntime.renderBatch([
+    window.RagentTimelineRuntime.renderBatch([
       { id: 'mobile-user', seq: 1, type: 'message', role: 'user', content: 'Keep this message' },
       { id: 'mobile-thinking', seq: 2, type: 'thinking_block', state: 'completed', label: 'Thought' },
       { id: 'mobile-operation', seq: 3, type: 'operation', operationId: 'mobile-op', state: 'completed', detail: 'Ran a command' },

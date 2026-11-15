@@ -66,7 +66,7 @@ func (runner ownerInstallRunner) install(parent context.Context, ownerSID, packa
 	if err != nil {
 		return failed("OWNER_INSTALL_ENVIRONMENT_UNAVAILABLE")
 	}
-	env = append(env, "AGENTOC_INSTALL_PACKAGE_ID="+packageID, "AGENTOC_INSTALL_PACKAGE_VERSION="+version, "AGENTOC_INSTALL_SCOPE="+scope)
+	env = append(env, "RAGENT_INSTALL_PACKAGE_ID="+packageID, "RAGENT_INSTALL_PACKAGE_VERSION="+version, "RAGENT_INSTALL_SCOPE="+scope)
 	units := utf16.Encode([]rune(ownerInstallScript))
 	encoded := make([]byte, len(units)*2)
 	for i, unit := range units {
@@ -77,7 +77,7 @@ func (runner ownerInstallRunner) install(parent context.Context, ownerSID, packa
 	var selected *selectedInstallerFacts
 	if runner.inspect != nil && runner.elevate != nil && runner.closeElevated != nil {
 		inspectCtx, cancelInspect := context.WithTimeout(parent, 30*time.Second)
-		data, inspectErr := runner.inspect(inspectCtx, token, executable, args, append(append([]string{}, env...), "AGENTOC_INSTALL_INSPECT=1"), systemDir)
+		data, inspectErr := runner.inspect(inspectCtx, token, executable, args, append(append([]string{}, env...), "RAGENT_INSTALL_INSPECT=1"), systemDir)
 		cancelInspect()
 		if inspectErr == nil && len(data) <= 64*1024 {
 			var facts selectedInstallerFacts
@@ -128,7 +128,7 @@ func (runner ownerInstallRunner) install(parent context.Context, ownerSID, packa
 			if marshalErr != nil {
 				return failed("OWNER_INSTALL_INVALID")
 			}
-			env = append(env, "AGENTOC_INSTALL_SELECTED="+string(data))
+			env = append(env, "RAGENT_INSTALL_SELECTED="+string(data))
 			executionToken = elevated
 		}
 	}

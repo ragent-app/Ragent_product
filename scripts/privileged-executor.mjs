@@ -9,7 +9,7 @@ import { promisify } from 'util';
 import { execFile as execFileCallback } from 'child_process';
 
 // P3c — privileged executor daemon (root)
-// (proposal: /var/lib/agentoc/workspace/p3-executor-proposal-draft.md §2.1, §3.3, §4).
+// (proposal: /var/lib/ragent/workspace/p3-executor-proposal-draft.md §2.1, §3.3, §4).
 //
 // This daemon runs as root and accepts one-shot signed token exec requests
 // from the chat-server over a Unix socket. It owns the narrow socket/exec/
@@ -20,7 +20,7 @@ import { execFile as execFileCallback } from 'child_process';
 // Executor lifecycle (§2.3):
 // - No persistent request queue (pure request/response)
 // - Socket in /run (volatile) — prepareSocket rebuilds on restart
-// - Audit in /var/lib/agentoc/config (persistent) — append-only
+// - Audit in /var/lib/ragent/config (persistent) — append-only
 // - Consumed set rebuilt from audit on startup (blocks replay across restarts)
 // - SIGTERM/SIGINT graceful shutdown
 
@@ -31,27 +31,27 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;     // 2 MiB
 const DEFAULT_EXEC_TIMEOUT_MS = 10 * 60 * 1000; // 10 min
 const MAX_EXEC_TIMEOUT_MS = 30 * 60 * 1000;     // 30 min
 
-const EXECUTOR_GROUP = process.env.AGENTOC_PRIVILEGED_EXECUTOR_GROUP || 'agentoc-privileged';
-const SOCKET_PATH = process.env.AGENTOC_PRIVILEGED_EXECUTOR_SOCKET
-  || '/run/agentoc-privileged-executor/sock';
-const AUDIT_FILE = process.env.AGENTOC_PRIVILEGED_EXECUTOR_AUDIT_FILE
-  || '/var/log/agentoc-privileged/audit.jsonl';
-const SERVICE_USER_FILE = process.env.AGENTOC_SERVICE_USER_FILE
-  || '/etc/agentoc/service-user';
-const PEERCRED_HELPER = process.env.AGENTOC_PRIVILEGED_PEERCRED_HELPER
-  || '/usr/lib/agentoc/privileged-peercred';
+const EXECUTOR_GROUP = process.env.RAGENT_PRIVILEGED_EXECUTOR_GROUP || 'ragent-privileged';
+const SOCKET_PATH = process.env.RAGENT_PRIVILEGED_EXECUTOR_SOCKET
+  || '/run/ragent-privileged-executor/sock';
+const AUDIT_FILE = process.env.RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE
+  || '/var/log/ragent-privileged/audit.jsonl';
+const SERVICE_USER_FILE = process.env.RAGENT_SERVICE_USER_FILE
+  || '/etc/ragent/service-user';
+const PEERCRED_HELPER = process.env.RAGENT_PRIVILEGED_PEERCRED_HELPER
+  || '/usr/lib/ragent/privileged-peercred';
 
-const ALLOW_UNPRIVILEGED_TEST = process.env.AGENTOC_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST === '1';
-const SKIP_RUNNER_LIVENESS = process.env.AGENTOC_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS === '1';
+const ALLOW_UNPRIVILEGED_TEST = process.env.RAGENT_PRIVILEGED_EXECUTOR_ALLOW_UNPRIVILEGED_TEST === '1';
+const SKIP_RUNNER_LIVENESS = process.env.RAGENT_PRIVILEGED_EXECUTOR_SKIP_RUNNER_LIVENESS === '1';
 // Default off. This controls only the separate fixed-argv semantic route.
-const SEMANTIC_APT_ADAPTER_ENABLED = process.env.AGENTOC_SEMANTIC_APT_ADAPTER_ENABLED === '1';
+const SEMANTIC_APT_ADAPTER_ENABLED = process.env.RAGENT_SEMANTIC_APT_ADAPTER_ENABLED === '1';
 // Windows adapters remain hard-disabled until this executor has a verified
 // named-pipe peer, the Phase 2A policy gate, Windows service liveness, ACL,
 // and artifact-facts boundaries. The environment cannot opt into a partially
 // implemented trust boundary.
 // Test-only: even in unprivileged-test mode, run the real SO_PEERCRED helper
 // path so the uid-mismatch rejection branch can be exercised without root.
-const FORCE_PEERCRED_TEST = process.env.AGENTOC_PRIVILEGED_EXECUTOR_FORCE_PEERCRED === '1';
+const FORCE_PEERCRED_TEST = process.env.RAGENT_PRIVILEGED_EXECUTOR_FORCE_PEERCRED === '1';
 
 const execFileAsync = promisify(execFileCallback);
 
@@ -137,7 +137,7 @@ async function resolveAccount(name) {
   return {
     user,
     group,
-    home: trimString(passwd[5]) || '/var/lib/agentoc',
+    home: trimString(passwd[5]) || '/var/lib/ragent',
     uid,
     gid,
   };
@@ -229,7 +229,7 @@ async function resolveServiceAccount() {
   try {
     serviceUser = trimString((await readFile(SERVICE_USER_FILE, 'utf8')).split(/\r?\n/, 1)[0]);
   } catch {}
-  return await resolveAccount(serviceUser || 'agentoc');
+  return await resolveAccount(serviceUser || 'ragent');
 }
 
 async function resolveCaller(socket, request = {}) {
@@ -239,7 +239,7 @@ async function resolveCaller(socket, request = {}) {
   const peer = await readPeerCredentials(socket);
   const account = await resolveServiceAccount();
   if (peer.uid !== account.uid) {
-    const error = new Error('Privileged executor caller is not the configured AgentoC service user');
+    const error = new Error('Privileged executor caller is not the configured Ragent service user');
     error.code = 'PRIVILEGED_CALLER_DENIED';
     throw error;
   }
@@ -248,8 +248,8 @@ async function resolveCaller(socket, request = {}) {
 
 // ── public key loading (self-contained, no dependency on chat-server modules) ──
 
-const PRIVILEGED_SIGNING_KEYS_FILE = process.env.AGENTOC_PRIVILEGED_SIGNING_KEYS_FILE
-  || '/var/lib/agentoc/config/privileged-signing-keys.json';
+const PRIVILEGED_SIGNING_KEYS_FILE = process.env.RAGENT_PRIVILEGED_SIGNING_KEYS_FILE
+  || '/var/lib/ragent/config/privileged-signing-keys.json';
 
 // In-memory map: kid → publicKey (KeyObject). Loaded once at startup from
 // the same keys file the chat-server writes, which the executor can read
@@ -507,7 +507,7 @@ async function spawnCaptured(command, options = {}) {
     const child = spawn('/bin/sh', ['-c', command], {
       cwd,
       env: {
-        PATH: '/opt/agentoc/runtime:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        PATH: '/opt/ragent/runtime:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
         HOME: '/root',
         LANG: process.env.LANG || 'C.UTF-8',
         ...(options.env || {}),

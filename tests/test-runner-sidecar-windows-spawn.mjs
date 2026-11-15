@@ -14,11 +14,11 @@ const replacement = {
 
 const result = await spawnFreshCodexRecoverySidecar({
   runId: 'run_fresh_recovery_123',
-  cwd: '/tmp/agentoc-runner-sidecar-test',
-  runnerScriptPath: '/tmp/agentoc-runner-sidecar-test/chat/runner-sidecar.mjs',
+  cwd: '/tmp/ragent-runner-sidecar-test',
+  runnerScriptPath: '/tmp/ragent-runner-sidecar-test/chat/runner-sidecar.mjs',
   env: {
     PATH: '/usr/bin',
-    AGENTOC_TEST_MARKER: 'fresh-recovery',
+    RAGENT_TEST_MARKER: 'fresh-recovery',
   },
   spawnManagedImpl: async (spec, options) => {
     calls.push({ spec, options });
@@ -33,14 +33,14 @@ assert.deepEqual(calls[0].spec, {
   ...(process.platform === 'win32' ? { kind: 'exe' } : {}),
   file: process.execPath,
   args: [
-    '/tmp/agentoc-runner-sidecar-test/chat/runner-sidecar.mjs',
+    '/tmp/ragent-runner-sidecar-test/chat/runner-sidecar.mjs',
     'run_fresh_recovery_123',
   ],
-  cwd: '/tmp/agentoc-runner-sidecar-test',
+  cwd: '/tmp/ragent-runner-sidecar-test',
   env: {
     PATH: '/usr/bin',
-    AGENTOC_TEST_MARKER: 'fresh-recovery',
-    AGENTOC_CODEX_FORCE_FRESH_RECOVERY: '1',
+    RAGENT_TEST_MARKER: 'fresh-recovery',
+    RAGENT_CODEX_FORCE_FRESH_RECOVERY: '1',
   },
   shell: false,
 });

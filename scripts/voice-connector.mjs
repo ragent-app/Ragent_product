@@ -11,20 +11,20 @@ import { pathToFileURL } from 'url'
 import { CHAT_PORT } from '../lib/config.mjs'
 import {
   buildExternalTriggerId,
-  buildAgentoCMessage,
+  buildRagentMessage,
   ensureAuthCookie,
-  generateAgentoCReply,
+  generateRagentReply,
   loginWithToken,
   normalizeSpokenReplyText,
   readOwnerToken,
-} from './voice-connector-agentoc.mjs'
+} from './voice-connector-ragent.mjs'
 import {
   parseCommandPayload,
   runSay,
   runShellCommand,
 } from './voice-connector-shell.mjs'
 
-const DEFAULT_STORAGE_DIR = join(homedir(), '.config', 'agentoc', 'voice-connector')
+const DEFAULT_STORAGE_DIR = join(homedir(), '.config', 'ragent', 'voice-connector')
 const DEFAULT_CONFIG_PATH = join(DEFAULT_STORAGE_DIR, 'config.json')
 const DEFAULT_CHAT_BASE_URL = `http://127.0.0.1:${CHAT_PORT}`
 const DEFAULT_SESSION_TOOL = 'codex'
@@ -37,7 +37,7 @@ const DEFAULT_STT_TIMEOUT_MS = 2 * 60 * 1000
 const DEFAULT_TTS_TIMEOUT_MS = 2 * 60 * 1000
 const DEFAULT_TTS_RATE = 185
 const LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT = [
-  'You are replying through a local wake-word voice connector powered by AgentoC.',
+  'You are replying through a local wake-word voice connector powered by Ragent.',
   'For each assistant turn, output exactly the text that should be spoken aloud through the speaker.',
   'Keep replies concise, natural, and conversational.',
   'Prefer short sentences that sound good when spoken.',
@@ -53,7 +53,7 @@ const DEFAULT_SESSION_SYSTEM_PROMPT = [
 
 function normalizeSystemPrompt(value) {
   const normalized = trimString(value)
-  if (!normalized || normalized === DEFAULT_SESSION_SYSTEM_PROMPT || normalized === DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') || normalized === LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT) {
+  if (!normalized || normalized === DEFAULT_SESSION_SYSTEM_PROMPT || normalized === DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'Ragent') || normalized === LEGACY_DEFAULT_SESSION_SYSTEM_PROMPT) {
     return ''
   }
   return normalized
@@ -229,9 +229,9 @@ Wake command contract:
   - JSON may include: eventId, wakeWord, transcript, audioPath, detectedAt, connectorId, roomName, metadata.
 
 Stage command contract:
-  - capture.command is optional. It receives AGENTOC_VOICE_* env vars and may output either a plain audio path or JSON with { audioPath, transcript }.
-  - stt.command is optional. It receives AGENTOC_VOICE_AUDIO_PATH and should output either plain transcript text or JSON with { text } / { transcript }.
-  - tts.command receives AGENTOC_VOICE_REPLY_TEXT and also gets the reply on stdin.
+  - capture.command is optional. It receives RAGENT_VOICE_* env vars and may output either a plain audio path or JSON with { audioPath, transcript }.
+  - stt.command is optional. It receives RAGENT_VOICE_AUDIO_PATH and should output either plain transcript text or JSON with { text } / { transcript }.
+  - tts.command receives RAGENT_VOICE_REPLY_TEXT and also gets the reply on stdin.
 
 Config shape:
   {
@@ -349,15 +349,15 @@ function normalizeIngressEvent(value, defaults = {}) {
 
 function buildProcessEnv(runtime, summary, extra = {}) {
   return {
-    AGENTOC_VOICE_CONNECTOR_ID: trimString(summary?.connectorId || runtime.config.connectorId),
-    AGENTOC_VOICE_ROOM_NAME: trimString(summary?.roomName || runtime.config.roomName),
-    AGENTOC_VOICE_WAKE_WORD: trimString(summary?.wakeWord || runtime.config.wake.keyword),
-    AGENTOC_VOICE_EVENT_ID: trimString(summary?.eventId),
-    AGENTOC_VOICE_DETECTED_AT: trimString(summary?.detectedAt),
-    AGENTOC_VOICE_AUDIO_PATH: trimString(summary?.audioPath),
-    AGENTOC_VOICE_TRANSCRIPT: trimString(summary?.transcript),
-    AGENTOC_VOICE_REPLY_TEXT: trimString(extra.replyText),
-    AGENTOC_VOICE_METADATA_JSON: JSON.stringify(summary?.metadata || {}),
+    RAGENT_VOICE_CONNECTOR_ID: trimString(summary?.connectorId || runtime.config.connectorId),
+    RAGENT_VOICE_ROOM_NAME: trimString(summary?.roomName || runtime.config.roomName),
+    RAGENT_VOICE_WAKE_WORD: trimString(summary?.wakeWord || runtime.config.wake.keyword),
+    RAGENT_VOICE_EVENT_ID: trimString(summary?.eventId),
+    RAGENT_VOICE_DETECTED_AT: trimString(summary?.detectedAt),
+    RAGENT_VOICE_AUDIO_PATH: trimString(summary?.audioPath),
+    RAGENT_VOICE_TRANSCRIPT: trimString(summary?.transcript),
+    RAGENT_VOICE_REPLY_TEXT: trimString(extra.replyText),
+    RAGENT_VOICE_METADATA_JSON: JSON.stringify(summary?.metadata || {}),
     ...Object.fromEntries(Object.entries(extra).filter(([, value]) => value !== undefined && value !== null).map(([key, value]) => [key, String(value)])),
   }
 }
@@ -533,7 +533,7 @@ async function processVoiceTurn(runtime, rawSummary, options = {}) {
       audioPath: turn.audioPath,
     })
 
-    const reply = await generateAgentoCReply(runtime, turn)
+    const reply = await generateRagentReply(runtime, turn)
     await logConnectorEvent(runtime, 'reply_ready', {
       eventId: turn.eventId,
       sessionId: reply.sessionId,
@@ -633,9 +633,9 @@ async function runWakeLoop(runtime, options = {}) {
     env: {
       ...process.env,
       ...runtime.config.wake.env,
-      AGENTOC_VOICE_CONNECTOR_ID: runtime.config.connectorId,
-      AGENTOC_VOICE_ROOM_NAME: runtime.config.roomName,
-      AGENTOC_VOICE_WAKE_WORD: runtime.config.wake.keyword,
+      RAGENT_VOICE_CONNECTOR_ID: runtime.config.connectorId,
+      RAGENT_VOICE_ROOM_NAME: runtime.config.roomName,
+      RAGENT_VOICE_WAKE_WORD: runtime.config.wake.keyword,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -700,7 +700,7 @@ async function main() {
   const runtime = createRuntimeContext(config)
   installSignalHandlers(runtime)
 
-  console.log(`[voice-connector] AgentoC base URL: ${config.chatBaseUrl}`)
+  console.log(`[voice-connector] Ragent base URL: ${config.chatBaseUrl}`)
   console.log(`[voice-connector] connector id: ${config.connectorId}`)
   console.log(`[voice-connector] room: ${config.roomName || '(unspecified)'}`)
   console.log(`[voice-connector] wake mode: ${config.wake.mode}`)
@@ -731,11 +731,11 @@ export {
   DEFAULT_APP_NAME,
   DEFAULT_SESSION_SYSTEM_PROMPT,
   buildExternalTriggerId,
-  buildAgentoCMessage,
+  buildRagentMessage,
   createRuntimeContext,
   enqueueVoiceTurn,
   ensureAuthCookie,
-  generateAgentoCReply,
+  generateRagentReply,
   loadConfig,
   normalizeConfig,
   normalizeIngressEvent,

@@ -4,12 +4,12 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-observer-noop-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-observer-noop-'));
 const previousHome = process.env.HOME;
 process.env.HOME = home;
 
-const runStatusPath = (runId) => join(home, '.config', 'agentoc', 'chat-runs', runId, 'status.json');
-const runResultPath = (runId) => join(home, '.config', 'agentoc', 'chat-runs', runId, 'result.json');
+const runStatusPath = (runId) => join(home, '.config', 'ragent', 'chat-runs', runId, 'status.json');
+const runResultPath = (runId) => join(home, '.config', 'ragent', 'chat-runs', runId, 'result.json');
 
 try {
   const {

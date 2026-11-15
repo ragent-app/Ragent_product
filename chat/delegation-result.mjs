@@ -14,8 +14,8 @@ const STATE_SET = new Set(DELEGATION_RESULT_STATES);
 const MAX_SUMMARY_CHARS = 4000;
 const MAX_ITEM_CHARS = 1200;
 const MAX_ITEMS = 100;
-const RESULT_START = '<agentoc-result-packet>';
-const RESULT_END = '</agentoc-result-packet>';
+const RESULT_START = '<ragent-result-packet>';
+const RESULT_END = '</ragent-result-packet>';
 
 function text(value, max = MAX_ITEM_CHARS) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';

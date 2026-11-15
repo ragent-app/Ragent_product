@@ -6,7 +6,7 @@ const processKey = randomBytes(32);
 const stages = new Set(['relay_open', 'relay_receive', 'relay_wait', 'finalize_local',
   'quota_binding', 'quota_complete', 'finalize_total']);
 
-export function createAttachmentTiming({ enabled = process.env.AGENTOC_ATTACHMENT_TIMING === '1',
+export function createAttachmentTiming({ enabled = process.env.RAGENT_ATTACHMENT_TIMING === '1',
   clock = () => performance.now(), sink = line => console.error(line), key = processKey } = {}) {
   function start() {
     if (!enabled) return 0;

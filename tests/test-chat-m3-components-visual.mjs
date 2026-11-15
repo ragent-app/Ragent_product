@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "chat-m3-components");
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || join(repoRoot, "artifacts", "chat-m3-components");
 await mkdir(outputDir, { recursive: true });
 
 const css = await Promise.all([

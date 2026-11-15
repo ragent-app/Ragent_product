@@ -13,7 +13,7 @@ import {
 import { explanationForApproval } from './risk-explanation.mjs';
 import { isOwnerHostPasskeyRequired } from './approved-action-policy.mjs';
 
-// Batch model + event builders for the AgentoC sudo-approval gate (design:
+// Batch model + event builders for the Ragent sudo-approval gate (design:
 // notes/current/privileged-approval-design.md). Pure logic, no I/O.
 //
 // P1 scope: classification, batch construction, default per-category selection

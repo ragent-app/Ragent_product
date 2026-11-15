@@ -14,7 +14,7 @@ import (
 // This test imports only a purpose-built mock. Never use a real package
 // manager or -WhatIf here: some WinGet versions perform work despite WhatIf.
 func TestAutoInstallModuleScriptWithMock(t *testing.T) {
-	pwsh := os.Getenv("AGENTOC_TEST_PWSH")
+	pwsh := os.Getenv("RAGENT_TEST_PWSH")
 	if pwsh != "" {
 		if !filepath.IsAbs(pwsh) {
 			t.Fatal("test PowerShell path must be absolute")
@@ -69,8 +69,8 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 		t.Run(test.name, func(t *testing.T) {
 			_ = os.Remove(marker)
 			cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(autoInstallModuleScript))
-			cmd.Env = append(os.Environ(), "AGENTOC_INSTALL_PACKAGE_ID=Vendor.App", "AGENTOC_INSTALL_PACKAGE_VERSION="+test.version,
-				"AGENTOC_INSTALL_MODULE="+module, "MOCK_URL="+test.url, "MOCK_MARKER="+marker, "MOCK_RESULT="+test.result)
+			cmd.Env = append(os.Environ(), "RAGENT_INSTALL_PACKAGE_ID=Vendor.App", "RAGENT_INSTALL_PACKAGE_VERSION="+test.version,
+				"RAGENT_INSTALL_MODULE="+module, "MOCK_URL="+test.url, "MOCK_MARKER="+marker, "MOCK_RESULT="+test.result)
 			output, err := cmd.CombinedOutput()
 			actual := 0
 			if err != nil {
@@ -93,9 +93,9 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 	// installer must fail before invoking the installation command.
 	_ = os.Remove(marker)
 	cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(autoInstallModuleScript))
-	cmd.Env = append(os.Environ(), "AGENTOC_INSTALL_PACKAGE_ID=Vendor.App", "AGENTOC_INSTALL_PACKAGE_VERSION=1.2.3",
-		"AGENTOC_INSTALL_MODULE="+module, "MOCK_URL=https://cdn.winget.microsoft.com/cache", "MOCK_MARKER="+marker,
-		`AGENTOC_INSTALL_SELECTED={"id":"Vendor.App","version":"1.2.3","source":"winget","scope":"System","elevation":"ElevationRequired","type":"Msi","nestedType":"Unknown","architecture":"X64","locale":"en-US"}`)
+	cmd.Env = append(os.Environ(), "RAGENT_INSTALL_PACKAGE_ID=Vendor.App", "RAGENT_INSTALL_PACKAGE_VERSION=1.2.3",
+		"RAGENT_INSTALL_MODULE="+module, "MOCK_URL=https://cdn.winget.microsoft.com/cache", "MOCK_MARKER="+marker,
+		`RAGENT_INSTALL_SELECTED={"id":"Vendor.App","version":"1.2.3","source":"winget","scope":"System","elevation":"ElevationRequired","type":"Msi","nestedType":"Unknown","architecture":"X64","locale":"en-US"}`)
 	if err := cmd.Run(); err == nil {
 		t.Fatal("missing catalog metadata unexpectedly accepted")
 	} else if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 25 {
@@ -109,17 +109,17 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 // Read real catalog metadata but replace the installation cmdlet with a local
 // marker-writing stub. This test never installs or downloads an application.
 func TestOptionalSelectedInstallerAgainstLiveCatalog(t *testing.T) {
-	if os.Getenv("AGENTOC_TEST_LIVE_WINGET_SELECTED") != "1" {
+	if os.Getenv("RAGENT_TEST_LIVE_WINGET_SELECTED") != "1" {
 		t.Skip("live catalog probe is opt-in")
 	}
-	pwsh, realModule, packageID := os.Getenv("AGENTOC_TEST_PWSH"), os.Getenv("AGENTOC_TEST_WINGET_MODULE"), os.Getenv("AGENTOC_TEST_PACKAGE_ID")
+	pwsh, realModule, packageID := os.Getenv("RAGENT_TEST_PWSH"), os.Getenv("RAGENT_TEST_WINGET_MODULE"), os.Getenv("RAGENT_TEST_PACKAGE_ID")
 	if !filepath.IsAbs(pwsh) || !filepath.IsAbs(realModule) || !autoInstallPackagePattern.MatchString(packageID) {
 		t.Fatal("invalid fixture parameters")
 	}
 	dir := t.TempDir()
 	module, marker := filepath.Join(dir, "mock.psm1"), filepath.Join(dir, "called.txt")
 	stub := `
-Import-Module $env:AGENTOC_TEST_WINGET_MODULE -Force -ErrorAction Stop
+Import-Module $env:RAGENT_TEST_WINGET_MODULE -Force -ErrorAction Stop
 function Get-WinGetSource { param($Name) Microsoft.WinGet.Client\Get-WinGetSource -Name $Name -ErrorAction Stop }
 function Find-WinGetPackage { param($Id,$Source,$MatchOption) Microsoft.WinGet.Client\Find-WinGetPackage -Id $Id -Source $Source -MatchOption $MatchOption -ErrorAction Stop }
 function Install-WinGetPackage { [CmdletBinding(SupportsShouldProcess)] param($Id,$Version,$Source,$MatchOption,$Mode,$Scope)
@@ -133,8 +133,8 @@ Export-ModuleMember -Function Get-WinGetSource,Find-WinGetPackage,Install-WinGet
 	}
 	prelude := `
 $ErrorActionPreference='Stop'
-Import-Module $env:AGENTOC_TEST_WINGET_MODULE -Force -ErrorAction Stop
-$found = @(Find-WinGetPackage -Id $env:AGENTOC_TEST_PACKAGE_ID -Source winget -MatchOption Equals -ErrorAction Stop)
+Import-Module $env:RAGENT_TEST_WINGET_MODULE -Force -ErrorAction Stop
+$found = @(Find-WinGetPackage -Id $env:RAGENT_TEST_PACKAGE_ID -Source winget -MatchOption Equals -ErrorAction Stop)
 if ($found.Count -ne 1) { throw 'package unavailable' }
 $property = $found[0].GetType().GetProperty('CatalogPackageCOM',[Reflection.BindingFlags]'Instance,NonPublic')
 $catalog = $property.GetValue($found[0]); $version = $catalog.DefaultInstallVersion
@@ -143,9 +143,9 @@ $options = [Activator]::CreateInstance($type); $options.PackageInstallScope = 'S
 $installer = $version.GetApplicableInstaller($options)
 if (-not $installer -or [string]$installer.Scope -cne 'System') { throw 'system installer unavailable' }
 $selected = @{id=$version.Id;version=$version.Version;source='winget';scope=[string]$installer.Scope;elevation=[string]$installer.ElevationRequirement;type=[string]$installer.InstallerType;nestedType=[string]$installer.NestedInstallerType;architecture=[string]$installer.Architecture;locale=[string]$installer.Locale}
-if ($env:AGENTOC_TEST_MUTATE_SELECTED -eq '1') { $selected.architecture = 'tampered' }
-$env:AGENTOC_INSTALL_SELECTED = $selected | ConvertTo-Json -Compress
-$env:AGENTOC_INSTALL_PACKAGE_ID = $version.Id; $env:AGENTOC_INSTALL_PACKAGE_VERSION = $version.Version; $env:AGENTOC_INSTALL_MODULE = $env:MOCK_MODULE
+if ($env:RAGENT_TEST_MUTATE_SELECTED -eq '1') { $selected.architecture = 'tampered' }
+$env:RAGENT_INSTALL_SELECTED = $selected | ConvertTo-Json -Compress
+$env:RAGENT_INSTALL_PACKAGE_ID = $version.Id; $env:RAGENT_INSTALL_PACKAGE_VERSION = $version.Version; $env:RAGENT_INSTALL_MODULE = $env:MOCK_MODULE
 `
 	for _, mode := range []string{"match", "mismatch", "inspect"} {
 		_ = os.Remove(marker)
@@ -154,9 +154,9 @@ $env:AGENTOC_INSTALL_PACKAGE_ID = $version.Id; $env:AGENTOC_INSTALL_PACKAGE_VERS
 		if mode == "mismatch" {
 			value = "1"
 		}
-		cmd.Env = append(os.Environ(), "MOCK_MODULE="+module, "MOCK_MARKER="+marker, "AGENTOC_TEST_MUTATE_SELECTED="+value)
+		cmd.Env = append(os.Environ(), "MOCK_MODULE="+module, "MOCK_MARKER="+marker, "RAGENT_TEST_MUTATE_SELECTED="+value)
 		if mode == "inspect" {
-			cmd.Env = append(cmd.Env, "AGENTOC_INSTALL_INSPECT=1")
+			cmd.Env = append(cmd.Env, "RAGENT_INSTALL_INSPECT=1")
 		}
 		output, err := cmd.CombinedOutput()
 		if mode == "mismatch" {
@@ -191,7 +191,7 @@ $env:AGENTOC_INSTALL_PACKAGE_ID = $version.Id; $env:AGENTOC_INSTALL_PACKAGE_VERS
 // Inspect the staged vendor module's command contract without looking up or
 // installing any package. This catches drift that a mock alone cannot prove.
 func TestOptionalStagedWinGetModuleContract(t *testing.T) {
-	pwsh, module := os.Getenv("AGENTOC_TEST_PWSH"), os.Getenv("AGENTOC_TEST_WINGET_MODULE")
+	pwsh, module := os.Getenv("RAGENT_TEST_PWSH"), os.Getenv("RAGENT_TEST_WINGET_MODULE")
 	if pwsh == "" || module == "" {
 		t.Skip("staged PowerShell and module paths not supplied")
 	}
@@ -200,7 +200,7 @@ func TestOptionalStagedWinGetModuleContract(t *testing.T) {
 	}
 	script := `
 $ErrorActionPreference = 'Stop'
-Import-Module -Name $env:AGENTOC_TEST_WINGET_MODULE -Force -ErrorAction Stop
+Import-Module -Name $env:RAGENT_TEST_WINGET_MODULE -Force -ErrorAction Stop
 $install = Get-Command Install-WinGetPackage -ErrorAction Stop
 $find = Get-Command Find-WinGetPackage -ErrorAction Stop
 $source = Get-Command Get-WinGetSource -ErrorAction Stop
@@ -216,7 +216,7 @@ $package = $find.OutputType[0].Type
 foreach ($name in @('Id','Source','AvailableVersions')) { if ($null -eq $package.GetProperty($name)) { throw 'package property missing' } }
 `
 	cmd := exec.Command(pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShellScript(script))
-	cmd.Env = append(os.Environ(), "AGENTOC_TEST_WINGET_MODULE="+module)
+	cmd.Env = append(os.Environ(), "RAGENT_TEST_WINGET_MODULE="+module)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("staged module contract failed: %v %s", err, output)
 	}

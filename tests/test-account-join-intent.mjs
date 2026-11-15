@@ -7,11 +7,11 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const repoRoot = process.cwd();
-const home = mkdtempSync(join(tmpdir(), 'agentoc-account-join-intent-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-account-join-intent-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const { createOwnerAuthBroker } = await import(pathToFileURL(join(repoRoot, 'accounts/owner-auth-broker.mjs')).href);
 const {
@@ -64,13 +64,13 @@ const instanceProof = signAccountJoinIntentProof(identity, {
   devicePublicKeyFingerprint: deviceFingerprint,
   nonce,
   issuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
 });
 const createInput = {
   intentId,
   nonce,
   issuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
   instance,
   device: {
     deviceId,
@@ -102,7 +102,7 @@ function deviceSignature() {
     devicePublicKeyFingerprint: deviceFingerprint,
     nonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   return cryptoSign('sha256', Buffer.from(message), device.privateKey).toString('base64');
 }
@@ -115,7 +115,7 @@ function completeInput(requestId, overrides = {}) {
     devicePublicKeyFingerprint: deviceFingerprint,
     nonce,
     issuedAt: currentIssuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   return {
     intentId,
@@ -126,7 +126,7 @@ function completeInput(requestId, overrides = {}) {
     deviceSignature: deviceSignature(),
     idToken: 'owner-token',
     issuedAt: currentIssuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
     instance,
     signature: proof.signature,
     ...overrides,
@@ -158,7 +158,7 @@ try {
     devicePublicKeyFingerprint: deviceFingerprint,
     nonce: otherNonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   await assert.rejects(
     () => broker.createAccountJoinIntent({ ...createInput, nonce: otherNonce, signature: otherNonceProof.signature }),
@@ -175,7 +175,7 @@ try {
     devicePublicKeyFingerprint: deviceFingerprint,
     nonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   await assert.rejects(
     () => broker.completeAccountJoinIntent(completeInput('join-request-alt', {
@@ -210,7 +210,7 @@ try {
     devicePublicKeyFingerprint: conflictingFingerprint,
     nonce: conflictingNonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   await broker.createAccountJoinIntent({
     ...createInput,
@@ -230,7 +230,7 @@ try {
     devicePublicKeyFingerprint: conflictingFingerprint,
     nonce: conflictingNonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   })), conflictingDevice.privateKey).toString('base64');
   const conflictingCompletionProof = signAccountJoinIntentProof(identity, {
     intentId: conflictingIntentId,
@@ -238,7 +238,7 @@ try {
     devicePublicKeyFingerprint: conflictingFingerprint,
     nonce: conflictingNonce,
     issuedAt,
-    audience: 'agentoc-account-join',
+    audience: 'ragent-account-join',
   });
   await assert.rejects(
     () => broker.completeAccountJoinIntent({
@@ -250,7 +250,7 @@ try {
       deviceSignature: conflictingDeviceSignature,
       idToken: 'owner-token',
       issuedAt,
-      audience: 'agentoc-account-join',
+      audience: 'ragent-account-join',
       instance,
       signature: conflictingCompletionProof.signature,
     }),

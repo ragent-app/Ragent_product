@@ -23,11 +23,11 @@ async function createPage(browser, { disablePointerEvents = false } = {}) {
       try { delete window.PointerEvent; } catch {}
     }
     window.marked = { parse: (value) => `<p>${String(value ?? '')}</p>` };
-    window.agentocT = (key) => key;
-    window.AgentoCIcons = { render: () => '' };
-    window.AgentoCMotion = { subscribeReducedMotion: () => {} };
-    window.AgentoCRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
-    window.AgentoCDecisions = { reset: () => {} };
+    window.ragentT = (key) => key;
+    window.RagentIcons = { render: () => '' };
+    window.RagentMotion = { subscribeReducedMotion: () => {} };
+    window.RagentRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
+    window.RagentDecisions = { reset: () => {} };
     window.visitorMode = false;
     window.shareSnapshotMode = false;
     window.currentSessionId = 'touch-menu-session';
@@ -483,8 +483,8 @@ try {
           content: 'Hello timeline assistant',
         },
       ];
-      window.AgentoCTimelineRuntime.reset('tl-session');
-      window.AgentoCTimelineRuntime.renderBatch(events, { live: false });
+      window.RagentTimelineRuntime.reset('tl-session');
+      window.RagentTimelineRuntime.renderBatch(events, { live: false });
       return {
         userBubble: !!document.querySelector('.msg-user-bubble'),
         assistantNode: !!document.querySelector('.msg-assistant'),

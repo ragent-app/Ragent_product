@@ -36,7 +36,7 @@ const checkpoint = {
     blockers: [],
   },
   execution: {
-    workspace: { root: '/work/agentoc', snapshotRevision: 'ws-1', stale: false },
+    workspace: { root: '/work/ragent', snapshotRevision: 'ws-1', stale: false },
     files: [{ path: 'chat/context-attention-assembler.mjs', contentHash: 'sha256:file' }],
     validations: [{ id: 'test-1', name: 'npm test:continuity', state: 'passed', exitCode: 0 }],
     approvals: [],

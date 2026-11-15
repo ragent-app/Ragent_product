@@ -344,7 +344,7 @@ async function runTaggedProbe(base, path, {
 
 async function fetchProbeEtag(base, path, { cookieJar } = {}) {
   const perfId = createPerfId('etag');
-  const headerFile = join(tmpdir(), `agentoc-etag-${perfId}.txt`);
+  const headerFile = join(tmpdir(), `ragent-etag-${perfId}.txt`);
   try {
     const url = joinBasePath(base, appendQueryMarker(path, PERF_QUERY_KEY, perfId));
     const metrics = await fetchHeaders(url, { cookieJar, headerFile });
@@ -362,7 +362,7 @@ async function fetchProbeEtag(base, path, { cookieJar } = {}) {
 
 async function probeTrace(base) {
   const tracePath = '/cdn-cgi/trace';
-  const tempDir = await mkdtemp(join(tmpdir(), 'agentoc-trace-'));
+  const tempDir = await mkdtemp(join(tmpdir(), 'ragent-trace-'));
   const bodies = [join(tempDir, 'cold.txt'), join(tempDir, 'warm.txt')];
   try {
     const url = joinBasePath(base, tracePath);
@@ -456,7 +456,7 @@ async function main() {
     throw new Error(`At least one /api/* path was requested, but no owner token was available in ${AUTH_FILE}.`);
   }
 
-  const tempDir = await mkdtemp(join(tmpdir(), 'agentoc-tunnel-diag-'));
+  const tempDir = await mkdtemp(join(tmpdir(), 'ragent-tunnel-diag-'));
   try {
     const localCookie = needsAuth ? await createCookieJar(tempDir, args.localBase, token, 'local') : null;
     const remoteCookie = needsAuth ? await createCookieJar(tempDir, remoteBase, token, 'remote') : null;

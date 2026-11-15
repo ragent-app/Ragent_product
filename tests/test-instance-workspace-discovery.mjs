@@ -48,7 +48,7 @@ test('discovery exposes only workspaces with an active grant bound to the same o
   const authorize = { intentId: intent.intentId, requestId: 'request_workspace_authorize_001', deviceId,
     devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce, issuedAt: intent.issuedAt,
     deviceSignature: sign('sha256', Buffer.from(buildAccountJoinIntentMessage({ ...intent,
-      audience: 'agentoc-account-join' })), phoneKeys.privateKey).toString('base64') };
+      audience: 'ragent-account-join' })), phoneKeys.privateKey).toString('base64') };
   for (const [field, min] of Object.entries({ intentId: 8, requestId: 16, deviceId: 8,
     devicePublicKeyFingerprint: 64, nonce: 16, issuedAt: 20, deviceSignature: 1 })) {
     assert.ok(typeof authorize[field] === 'string' && authorize[field].length >= min, `Missing ${field}`);
@@ -65,7 +65,7 @@ test('discovery exposes only workspaces with an active grant bound to the same o
   assert.deepEqual((await discover()).instances, [], 'a disabled owner cannot share a workspace');
   delete draft.accounts[0].disabledAt;
   const instance = { instanceId, publicKey: computerKey, keyFingerprint: createInstancePublicKeyFingerprint(computerKey) };
-  const issuedAt = new Date(now).toISOString(), audience = 'agentoc-account-join';
+  const issuedAt = new Date(now).toISOString(), audience = 'ragent-account-join';
   const instanceProof = buildAccountJoinIntentProofMessage({ instanceId, intentId: intent.intentId, deviceId,
     devicePublicKeyFingerprint: intent.devicePublicKeyFingerprint, nonce: intent.nonce, issuedAt, audience, publicEndpoint: '' });
   const completion = { intentId: intent.intentId, requestId: 'request_workspace_completion_001', nonce: intent.nonce,

@@ -4,11 +4,11 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-harness-installation-sync-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-harness-installation-sync-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+process.env.RAGENT_CONFIG_DIR = join(home, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   HARNESS_INSTALLATION_SYNC_SCOPE,
@@ -31,7 +31,7 @@ assert.deepEqual(parseHarnessInstallationCatalogKey(activeEntries[0].key), {
 });
 
 await writeFile(
-  join(process.env.AGENTOC_CONFIG_DIR, 'harness-installations.json'),
+  join(process.env.RAGENT_CONFIG_DIR, 'harness-installations.json'),
   JSON.stringify({
     'qwen-code': {
       installed: false,

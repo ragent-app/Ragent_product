@@ -6,7 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-usage-summary-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-usage-summary-'));
 
 function makeSessionPath(rootDir, threadId) {
   return join(rootDir, '2026', '03', '19', `rollout-2026-03-19T12-00-00-${threadId}.jsonl`);
@@ -22,7 +22,7 @@ process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
 
 const personalRoot = join(tempHome, '.codex', 'sessions');
-const managedRoot = join(tempHome, '.config', 'agentoc', 'provider-runtime-homes', 'codex', 'sessions');
+const managedRoot = join(tempHome, '.config', 'ragent', 'provider-runtime-homes', 'codex', 'sessions');
 
 writeSessionFile(personalRoot, 'thread-personal', [
   {
@@ -103,7 +103,7 @@ writeSessionFile(personalRoot, 'thread-personal', [
   {
     timestamp: '2026-03-19T01:00:00.700Z',
     type: 'event_msg',
-    payload: { type: 'user_message', message: 'You are an AI agent operating on this computer via AgentoC. Follow the system instructions.' },
+    payload: { type: 'user_message', message: 'You are an AI agent operating on this computer via Ragent. Follow the system instructions.' },
   },
   {
     timestamp: '2026-03-19T01:00:01.000Z',
@@ -141,7 +141,7 @@ writeSessionFile(managedRoot, 'thread-managed', [
   {
     timestamp: '2026-03-18T22:00:01.000Z',
     type: 'event_msg',
-    payload: { type: 'user_message', message: '[Manager turn policy reminder]\n\nCurrent user message:\nAgentoC 这边也看一下。' },
+    payload: { type: 'user_message', message: '[Manager turn policy reminder]\n\nCurrent user message:\nRagent 这边也看一下。' },
   },
   {
     timestamp: '2026-03-18T22:00:02.000Z',
@@ -205,7 +205,7 @@ const { runUsageSummaryCommand } = await import(
 try {
   assert.equal(normalizeUserMessageText('Please quote this: User message: keep the entire sentence.'), 'Please quote this: User message: keep the entire sentence.');
   assert.equal(normalizeUserMessageText('You are an AI agent operating through Ragent.\n\nUser message:\nActual question'), 'Actual question');
-  assert.equal(normalizeUserMessageText('You are an AI agent operating on this computer via AgentoC.\n\nUser message:\nLegacy question'), 'Legacy question');
+  assert.equal(normalizeUserMessageText('You are an AI agent operating on this computer via Ragent.\n\nUser message:\nLegacy question'), 'Legacy question');
   const summary = await collectCodexUsageSummary({
     days: 2,
     top: 5,
@@ -225,7 +225,7 @@ try {
   assert.equal(summary.byModel[0].key, 'gpt-5.4', 'model aggregation should be preserved');
   assert.equal(summary.byCwd[0].key, '/Users/test/repo-a', 'cwd aggregation should preserve the top directory');
   assert.equal(summary.topSessions[0].promptPreview, '再看看最近两天是不是都在 xhigh。', 'top session should retain the latest contributing user prompt');
-  assert.equal(summary.topSessions[1].promptPreview, 'AgentoC 这边也看一下。', 'manager wrapper should be stripped from prompt previews');
+  assert.equal(summary.topSessions[1].promptPreview, 'Ragent 这边也看一下。', 'manager wrapper should be stripped from prompt previews');
 
   const rendered = renderCodexUsageSummary(summary);
   assert.match(rendered, /Total tokens: 315/, 'text rendering should include total tokens');

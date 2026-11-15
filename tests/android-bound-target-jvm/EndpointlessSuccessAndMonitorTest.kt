@@ -1,10 +1,10 @@
-package com.andysagent.agentoc
+package com.andysagent.ragent
 
 import android.app.Application
-import com.andysagent.agentoc.core.network.*
-import com.andysagent.agentoc.core.model.RuntimeConnectionState
-import com.andysagent.agentoc.core.p2p.P2PCandidate
-import com.andysagent.agentoc.core.protocol.*
+import com.andysagent.ragent.core.network.*
+import com.andysagent.ragent.core.model.RuntimeConnectionState
+import com.andysagent.ragent.core.p2p.P2PCandidate
+import com.andysagent.ragent.core.protocol.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import org.junit.Assert.*
@@ -33,7 +33,7 @@ class EndpointlessSuccessAndMonitorTest {
     @Test fun verifiedFreshEndpointlessPlanRestartsStoppedSupervisorAndConnects() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val token = AtomicReference<String?>("rda_old_fixture")
-        val transport = OkHttpAgentoCTransport({ "" }, { token.get() }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { token.get() }, requireVerifiedCarrier = true)
         val initial = CompletableDeferred<Unit>(); val repairing = CompletableDeferred<Job>()
         val release = CompletableDeferred<Unit>(); val attempts = AtomicInteger(); val notifications = AtomicInteger()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { token.get() }, { null }, transport, scope, scope,
@@ -64,7 +64,7 @@ class EndpointlessSuccessAndMonitorTest {
 
     @Test fun endpointlessMonitorUsesFreshBootstrapAtActualThirtySecondInterval() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val due = AtomicBoolean(false); val attempts = AtomicInteger(); val repair = CompletableDeferred<Job>()
         val release = CompletableDeferred<Unit>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
@@ -88,7 +88,7 @@ class EndpointlessSuccessAndMonitorTest {
 
     @Test fun transientRefreshKeepsValidCarrierButCannotOutliveOriginalPlan() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val attempts = AtomicInteger(); val retry = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
             endpointlessBootstrap = {
@@ -115,12 +115,12 @@ class EndpointlessSuccessAndMonitorTest {
 
     @Test fun authoritativeRefreshDenialClosesPreviouslyHealthyCarrier() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val attempts = AtomicInteger(); val notifications = AtomicInteger()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
             endpointlessBootstrap = {
                 if (attempts.incrementAndGet() == 1) verifiedCallbackPlan()
-                else throw com.andysagent.agentoc.core.auth.AccountSessionException(403, "owner_auth_binding_revoked", "revoked")
+                else throw com.andysagent.ragent.core.auth.AccountSessionException(403, "owner_auth_binding_revoked", "revoked")
             }, onAuthenticationRequired = { notifications.incrementAndGet() },
             renewCredential = { _, _ -> error("No direct renewal") })
         try {
@@ -137,7 +137,7 @@ class EndpointlessSuccessAndMonitorTest {
     @Test fun pendingRefreshCannotKeepCarrierAfterCredentialStoreExpires() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val token = AtomicReference<String?>("rda_fixture")
-        val transport = OkHttpAgentoCTransport({ "" }, { token.get() }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { token.get() }, requireVerifiedCarrier = true)
         val attempts = AtomicInteger(); val pending = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { token.get() }, { null }, transport, scope, scope,
             endpointlessBootstrap = {
@@ -160,7 +160,7 @@ class EndpointlessSuccessAndMonitorTest {
 
     @Test fun pendingRefreshHonorsEarlierCandidateDeadline() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val attempts = AtomicInteger(); val pending = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
             endpointlessBootstrap = {
@@ -180,7 +180,7 @@ class EndpointlessSuccessAndMonitorTest {
 
     @Test fun freshSelectedPlanCannotExtendReusedCarrierOriginalWindow() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val attempts = AtomicInteger(); val publishedB = CompletableDeferred<Job>()
         val pending = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
@@ -194,21 +194,21 @@ class EndpointlessSuccessAndMonitorTest {
         try {
             controller.start()
             withTimeout(2_000) { transport.connectionState.first { it == RuntimeConnectionState.Connected } }
-            val connections = com.andysagent.agentoc.core.p2p.WebRTCDataChannelTransport.connections.get()
+            val connections = com.andysagent.ragent.core.p2p.WebRTCDataChannelTransport.connections.get()
             controller.refresh(); withTimeout(2_000) { publishedB.await().join() }
-            assertEquals(connections, com.andysagent.agentoc.core.p2p.WebRTCDataChannelTransport.connections.get())
+            assertEquals(connections, com.andysagent.ragent.core.p2p.WebRTCDataChannelTransport.connections.get())
             assertEquals(RuntimeConnectionState.Connected, transport.connectionState.value)
             controller.refresh(); withTimeout(2_000) { pending.await() }
             withTimeout(4_000) { transport.connectionState.first { it != RuntimeConnectionState.Connected } }
             reply.complete(Unit)
             withTimeout(2_000) { transport.connectionState.first { it == RuntimeConnectionState.Connected } }
-            assertTrue(com.andysagent.agentoc.core.p2p.WebRTCDataChannelTransport.connections.get() > connections)
+            assertTrue(com.andysagent.ragent.core.p2p.WebRTCDataChannelTransport.connections.get() > connections)
         } finally { reply.complete(Unit); controller.stop(); transport.close(); scope.coroutineContext[Job]?.cancelAndJoin() }
     }
 
     @Test fun reusedSessionCloseReleasesItsOwnReservationOnce() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val transport = OkHttpAgentoCTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
+        val transport = OkHttpRagentTransport({ "" }, { "rda_fixture" }, requireVerifiedCarrier = true)
         val released = java.util.concurrent.CopyOnWriteArrayList<String>()
         val controller = BoundTargetConnection("pc-a", Application(), { "" }, { "rda_fixture" }, { null }, transport, scope, scope,
             endpointlessBootstrap = { verifiedCallbackPlan(connectionId = "turn-A") }, onAuthenticationRequired = {},
@@ -217,7 +217,7 @@ class EndpointlessSuccessAndMonitorTest {
             controller.start()
             withTimeout(2_000) { transport.connectionState.first { it == RuntimeConnectionState.Connected } }
             val active = controller.javaClass.getDeclaredField("activeTurnSession").apply { isAccessible = true }
-            val sessionA = (active.get(controller) as AtomicReference<*>).get() as com.andysagent.agentoc.core.p2p.P2PSession
+            val sessionA = (active.get(controller) as AtomicReference<*>).get() as com.andysagent.ragent.core.p2p.P2PSession
             controller.applyVerifiedBootstrap(verifiedCallbackPlan(connectionId = "turn-B"))
             assertSame(sessionA, (active.get(controller) as AtomicReference<*>).get())
             sessionA.close(); sessionA.close()

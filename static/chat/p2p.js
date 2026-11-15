@@ -4,7 +4,7 @@
 // 管理连接状态机，并把 HTTP-over-DC 请求暴露给 session-http-helpers 的 transport hook。
 // 状态机：idle → connecting → ready | failed | closed。凭据来自配对邀请响应
 // （{signalingUrl, roomId, secret}），仅保存在内存中，不写入页面 HTML。
-(function attachAgentocP2P(root) {
+(function attachRagentP2P(root) {
   const RETRY_ATTEMPTS = 2;
   const RETRY_DELAY_MS = 2000;
   const state = {
@@ -15,15 +15,15 @@
   };
 
   function buildClientModuleUrl() {
-    const version = root.__AGENTOC_BUILD__?.assetVersion || "";
+    const version = root.__RAGENT_BUILD__?.assetVersion || "";
     const suffix = version ? `?v=${encodeURIComponent(version)}` : "";
-    return `/p2p/agentoc-p2p-client.js${suffix}`;
+    return `/p2p/ragent-p2p-client.js${suffix}`;
   }
 
   function setStatus(status, error) {
     state.status = status;
     state.lastError = error || "";
-    root.dispatchEvent(new CustomEvent("agentoc:p2p-status", {
+    root.dispatchEvent(new CustomEvent("ragent:p2p-status", {
       detail: { status, error: state.lastError },
     }));
   }
@@ -40,8 +40,8 @@
     let lastError = "";
     for (let attempt = 0; attempt <= RETRY_ATTEMPTS; attempt += 1) {
       try {
-        const { AgentoCP2PClient } = await import(buildClientModuleUrl());
-        const client = new AgentoCP2PClient({
+        const { RagentP2PClient } = await import(buildClientModuleUrl());
+        const client = new RagentP2PClient({
           signalingUrl: state.credentials.signalingUrl,
           roomId: state.credentials.roomId,
           secret: state.credentials.secret,
@@ -105,7 +105,7 @@
     }
   }
 
-  root.AgentocP2P = {
+  root.RagentP2P = {
     get status() { return state.status; },
     get ready() { return state.status === "ready"; },
     get hasCredentials() { return state.status !== "closed" && !!state.credentials; },

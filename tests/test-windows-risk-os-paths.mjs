@@ -36,8 +36,8 @@ test('run admission protects OS-derived roots across drives for every file opera
 
 test('a bound ProgramData workspace is readable while control paths and mutations stay protected', async () => {
   const windowsOsPaths = { windows: 'D:\\Windows', programData: 'E:\\Shared Data', programFiles: 'F:\\Applications', programFilesX86: 'H:\\Apps32' };
-  const workspace = `${windowsOsPaths.programData}\\AgentoC\\instances\\owner\\workspace`;
-  const memory = `${windowsOsPaths.programData}\\AgentoC\\instances\\owner\\memory`;
+  const workspace = `${windowsOsPaths.programData}\\Ragent\\instances\\owner\\workspace`;
+  const memory = `${windowsOsPaths.programData}\\Ragent\\instances\\owner\\memory`;
   const context = buildRunRiskContext({
     platform: 'win32',
     workspaceRoot: { realPath: workspace },

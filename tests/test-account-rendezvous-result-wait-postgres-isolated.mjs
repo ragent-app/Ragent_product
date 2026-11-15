@@ -10,15 +10,15 @@ import { startAccountsServer } from '../accounts/server.mjs';
 import { loadOrCreateSigningKeyRing } from '../accounts/keys.mjs';
 import { rendezvousWaitFixture } from './fixtures/rendezvous-result-wait.mjs';
 
-const database=process.env.AGENTOC_QA_OWNED_DATABASE,socket=process.env.AGENTOC_QA_SOCKET;
+const database=process.env.RAGENT_QA_OWNED_DATABASE,socket=process.env.RAGENT_QA_SOCKET;
 assert(/^qa_rendezvous_read_[a-f0-9]{16}$/.test(database||''));
-assert(/^\/tmp\/agentoc-scoped-result-pg-[a-f0-9]{16}\/socket$/.test(socket||''));
+assert(/^\/tmp\/ragent-scoped-result-pg-[a-f0-9]{16}\/socket$/.test(socket||''));
 const worker=process.argv.includes('--accounts-worker');
 const pool=new Pool({database,host:socket,user:'postgres',max:worker?1:2,
   connectionTimeoutMillis:5000,idleTimeoutMillis:5000,
-  options:'-c application_name=agentoc-result-wait-qa -c statement_timeout=10000 -c lock_timeout=1500'});
+  options:'-c application_name=ragent-result-wait-qa -c statement_timeout=10000 -c lock_timeout=1500'});
 assert.equal((await pool.query('select current_database() as name')).rows[0].name,database);
-const scopedWrites=process.env.AGENTOC_QA_SCOPED_WRITES==='1';
+const scopedWrites=process.env.RAGENT_QA_SCOPED_WRITES==='1';
 const store=createPostgresStore({pool,enableScopedRendezvousResult:scopedWrites,
   enableScopedRendezvousCreation:scopedWrites});
 const sourceRoot=fileURLToPath(new URL('../',import.meta.url));

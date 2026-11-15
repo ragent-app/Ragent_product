@@ -5,9 +5,9 @@ import { queryWindowsSelectedInstallerFacts, validateWindowsSelectedInstallerFac
 
 // Opt-in read-only contract probe: this queries metadata but does not install.
 // The module and runtime are supplied by the caller from an isolated payload.
-const modulePath = process.env.AGENTOC_QA_WINGET_MODULE;
-const powershell = process.env.AGENTOC_QA_PWSH;
-const id = process.env.AGENTOC_QA_PACKAGE_ID;
+const modulePath = process.env.RAGENT_QA_WINGET_MODULE;
+const powershell = process.env.RAGENT_QA_PWSH;
+const id = process.env.RAGENT_QA_PACKAGE_ID;
 if (!modulePath || !powershell || !id) {
   console.log('windows-winget-selected-installer: skipped (runtime, module and package ID required)');
   process.exit(0);
@@ -16,14 +16,14 @@ assert.match(id, /^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const script = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-Import-Module $env:AGENTOC_QA_WINGET_MODULE -ErrorAction Stop
-$matches = @(Find-WinGetPackage -Id $env:AGENTOC_QA_PACKAGE_ID -Source winget -MatchOption Equals -ErrorAction Stop)
-if ($matches.Count -ne 1 -or $matches[0].Id -cne $env:AGENTOC_QA_PACKAGE_ID -or $matches[0].Source -ine 'winget') { throw 'Exact package unavailable' }
+Import-Module $env:RAGENT_QA_WINGET_MODULE -ErrorAction Stop
+$matches = @(Find-WinGetPackage -Id $env:RAGENT_QA_PACKAGE_ID -Source winget -MatchOption Equals -ErrorAction Stop)
+if ($matches.Count -ne 1 -or $matches[0].Id -cne $env:RAGENT_QA_PACKAGE_ID -or $matches[0].Source -ine 'winget') { throw 'Exact package unavailable' }
 $property = $matches[0].GetType().GetProperty('CatalogPackageCOM', [Reflection.BindingFlags]'Instance,NonPublic')
 if (-not $property) { throw 'Catalog metadata unavailable' }
 $catalog = $property.GetValue($matches[0])
 $version = $catalog.DefaultInstallVersion
-if (-not $version -or $version.Id -cne $env:AGENTOC_QA_PACKAGE_ID) { throw 'Package version unavailable' }
+if (-not $version -or $version.Id -cne $env:RAGENT_QA_PACKAGE_ID) { throw 'Package version unavailable' }
 $optionsType = $property.PropertyType.Assembly.GetType('Microsoft.Management.Deployment.InstallOptions', $true)
 $options = [Activator]::CreateInstance($optionsType)
 $installer = $version.GetApplicableInstaller($options)
@@ -46,5 +46,5 @@ if (facts.otherVersion) {
   const other = await queryWindowsSelectedInstallerFacts({ packageId: id, packageVersion: facts.otherVersion }, { runtime: powershell, module: modulePath });
   assert.ok(other && other.version === facts.otherVersion, 'non-default versions must be resolved independently');
 }
-assert.equal(await queryWindowsSelectedInstallerFacts({ packageId: id, packageVersion: `0.0.0-agentoc-unmatched-${Date.now()}` }, { runtime: powershell, module: modulePath }), null, 'an unknown version must not reuse another installer metadata');
+assert.equal(await queryWindowsSelectedInstallerFacts({ packageId: id, packageVersion: `0.0.0-ragent-unmatched-${Date.now()}` }, { runtime: powershell, module: modulePath }), null, 'an unknown version must not reuse another installer metadata');
 console.log(`windows-winget-selected-installer: metadata read for ${facts.id} (${facts.scope}, ${facts.elevation})`);

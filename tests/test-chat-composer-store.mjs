@@ -20,7 +20,7 @@ vm.runInNewContext(source, context, {
   filename: 'composer-store.js',
 });
 
-const storeModel = context.AgentoCComposerStore;
+const storeModel = context.RagentComposerStore;
 
 assert.ok(storeModel, 'composer store should attach to the global scope');
 

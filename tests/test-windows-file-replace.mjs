@@ -22,7 +22,7 @@ test('persistent denial keeps original error; cancellation stops the backoff',as
   const abort=new AbortController();calls=0;
   await assert.rejects(renameWithWindowsRetry('a','b',{platform:'win32',signal:abort.signal,renameImpl:async()=>{calls++;throw error;},waitImpl:async()=>{abort.abort();}}),{code:'ABORT_ERR'});assert.equal(calls,1);
 });
-async function fixture(t){const parent=await realpath(tmpdir()),root=await mkdtemp(join(parent,'agentoc-file-replace-'));
+async function fixture(t){const parent=await realpath(tmpdir()),root=await mkdtemp(join(parent,'ragent-file-replace-'));
   t.after(async()=>{const actual=await realpath(root);assert.equal(dirname(actual).toLowerCase(),parent.toLowerCase());await rm(actual,{recursive:true,force:true});});return root;}
 async function hold(path){
   const quoted="'"+path.replaceAll("'","''")+"'";

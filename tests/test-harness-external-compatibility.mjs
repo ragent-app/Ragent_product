@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { chmod, mkdir, mkdtemp, readFile, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative } from 'node:path';
-const root = await mkdtemp(join(tmpdir(), 'agentoc-internal-harness-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-internal-harness-'));
 const external = join(root, 'external'); const managed = join(root, 'managed'); const bundled = join(root, 'bundled');
 await Promise.all([mkdir(external), mkdir(bundled)]);
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config'); process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_HARNESS_ROOT = managed; process.env.AGENTOC_PACKAGED_HARNESS_ROOT = bundled;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1'; process.env.AGENTOC_HARNESS_POLICY_URL = 'http://invalid.test';
+process.env.RAGENT_CONFIG_DIR = join(root, 'config'); process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_HARNESS_ROOT = managed; process.env.RAGENT_PACKAGED_HARNESS_ROOT = bundled;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1'; process.env.RAGENT_HARNESS_POLICY_URL = 'http://invalid.test';
 process.env.PATH = external + delimiter + process.env.PATH;
 const win = process.platform === 'win32'; const marker = join(root, 'external-was-executed');
 async function cli(dir, name, body) {
@@ -38,7 +38,7 @@ const npm = await cli(external, 'npm', [
  'const file=path.join(bin,'+JSON.stringify('qwen'+(win?'.cmd':''))+');',
  'fs.writeFileSync(file,'+JSON.stringify(qwenLauncher)+');fs.chmodSync(file,0o700);',
 ].join('\n'));
-process.env.AGENTOC_NPM_COMMAND=npm;
+process.env.RAGENT_NPM_COMMAND=npm;
 await registry.upgradeHarness('qwen-code','0.22.2');const qwen=await registry.getHarnessDefinition('qwen-code');
 assert.equal(qwen.installationSource,'managed');assert.equal(qwen.detectedVersion,'0.22.2');assert.ok(qwen.path.startsWith(managed));
 await registry.uninstallHarness('qwen-code');assert.equal(await resolveExecutableCommandPathAsync('qwen'),null);await access(join(external,'qwen'+(win?'.cmd':'')));

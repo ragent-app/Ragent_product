@@ -6,10 +6,10 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 
-const root = process.env.AGENTOC_RESULT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-result-api-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const root = process.env.RAGENT_RESULT_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-result-api-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+delete process.env.RAGENT_INSTANCE_ROOT;
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 const { createSessionWithOutcome, getRetainedRunReplyPublication, getRetainedRunExportPublication,
   MAX_RETAINED_EXPORT_TEXT_BYTES } = await import('../chat/session-manager.mjs');
@@ -36,7 +36,7 @@ async function lookup(sessionId, requestId, allowed = true) {
   return res;
 }
 if (process.argv[2] === 'cold') {
-  const { sessionId, runId, exportRunId, exportHash } = JSON.parse(process.env.AGENTOC_RESULT_TEST_CASE);
+  const { sessionId, runId, exportRunId, exportHash } = JSON.parse(process.env.RAGENT_RESULT_TEST_CASE);
   const response = await lookup(sessionId, 'exact-request');
   assert.equal(response.body.runId, runId);
   assert.equal(response.body.text, 'Exact published result');
@@ -115,7 +115,7 @@ if (process.argv[2] === 'cold') {
   const previous = checks;
   assert.equal((await lookup(session.id, 'x'.repeat(201))).status, 400); assert.equal(checks, previous);
   await promisify(execFile)(process.execPath, [import.meta.filename, 'cold'], {
-    env: { ...process.env, AGENTOC_RESULT_TEST_ROOT: root, AGENTOC_RESULT_TEST_CASE: JSON.stringify({ sessionId: session.id, runId: run.id,
+    env: { ...process.env, RAGENT_RESULT_TEST_ROOT: root, RAGENT_RESULT_TEST_CASE: JSON.stringify({ sessionId: session.id, runId: run.id,
       exportRunId: exportRun.id, exportHash: createHash('sha256').update(largeText).digest('hex') }) },
   });
   assert.equal(await readFile(metadataPath, 'utf8'), metadataBefore);
@@ -134,6 +134,6 @@ if (process.argv[2] === 'cold') {
   console.log('Exact result route: request isolation, queued/live/failed/cancelled/checking, bounded UTF-8, authorization, cold read-only recovery passed');
   console.log('Export publication: complete UTF-8 body beyond preview budgets, continuation ownership, incomplete rejection, 25 MiB limit and cold digest passed');
 } finally {
-  assert.equal(resolve(dirname(root)), resolve(tmpdir())); assert.ok(basename(root).startsWith('agentoc-result-api-'));
+  assert.equal(resolve(dirname(root)), resolve(tmpdir())); assert.ok(basename(root).startsWith('ragent-result-api-'));
   await rm(root, { recursive: true, force: true });
 }

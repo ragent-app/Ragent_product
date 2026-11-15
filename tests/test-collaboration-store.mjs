@@ -5,8 +5,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 // Redirect the SQLite store into a throwaway temp dir before importing config.
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-collab-store-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-collab-store-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const store = await import('../chat/collaboration-store.mjs');
 const { compileCollaborationPlan } = await import('../chat/collaboration-plan.mjs');

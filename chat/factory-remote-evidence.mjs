@@ -29,7 +29,7 @@ function validate(db,item,binding,signed,sourceInstanceId) {
   if(!saved.binding||saved.binding.version!==b.version||saved.binding.targetPublicKey!==b.target_public_key
       || q.operationId!==e.operationId||q.requestId!==e.requestId||q.payload.expectedBaselineDigest!==e.baselineManifestDigest
       || q.payload.expectedBaseHead!==e.baseline?.head||q.payload.expectedBaseBranch!==e.baseline?.branch) fail('Candidate delegation or baseline changed');
-  let valid=false; try {valid=verify(null,Buffer.from(`agentoc-remote-candidate-v1:${sha(JSON.stringify(e))}`),createPublicKey(b.target_public_key),Buffer.from(signature,'base64url'));} catch {}
+  let valid=false; try {valid=verify(null,Buffer.from(`ragent-remote-candidate-v1:${sha(JSON.stringify(e))}`),createPublicKey(b.target_public_key),Buffer.from(signature,'base64url'));} catch {}
   if(!valid||digest(e.baseline)!==e.baselineManifestDigest||digest(e.changes)!==e.contentDigest||!Array.isArray(e.baseline?.files)||!Array.isArray(e.changes)) fail('Candidate signature or content digest is invalid');
   if(!e.targetWorkItemId||!e.targetExecutionBindingId||!e.attemptId||!e.runId||!Number.isSafeInteger(e.targetContractRevision)||!Number.isSafeInteger(e.targetExecutionEpoch)||!Number.isSafeInteger(e.targetBindingGeneration)) fail('Target execution identity is incomplete');
   const expected=sha(JSON.stringify({workItemId:e.targetWorkItemId,contractRevision:e.targetContractRevision,executionEpoch:e.targetExecutionEpoch,

@@ -1,13 +1,13 @@
-// Sentinel command parser for the AgentoC privileged-approval gate (design
+// Sentinel command parser for the Ragent privileged-approval gate (design
 // §13–§14, Path G). Pure logic, no I/O.
 //
 // The agent declares a privileged op by running a Bash command of the form:
 //
-//   agentoc-privileged --description "<text>" --category install|other|delete -- <real command>
+//   ragent-privileged --description "<text>" --category install|other|delete -- <real command>
 //
 // At the provider permission gate (Claude bidi `can_use_tool` /
 // Codex app-server `item/.../requestApproval`) — which only fires in gated,
-// non-bypass mode — AgentoC recognizes this sentinel, extracts the real command
+// non-bypass mode — Ragent recognizes this sentinel, extracts the real command
 // VERBATIM (so the allow-response can rewrite `updatedInput.command` to it and
 // the wrapper never reaches a shell) plus the declared description/category,
 // then defers the gate response to run the P1b batch approval flow.
@@ -26,13 +26,13 @@ function trimString(value) {
 }
 
 // Basename of the first token, allowing an optional directory prefix
-// (`/usr/local/bin/agentoc-privileged`). The agent is system-prompt-instructed
+// (`/usr/local/bin/ragent-privileged`). The agent is system-prompt-instructed
 // to emit the bare token; the prefix tolerance just avoids fragility.
 function isSentinelProgram(token) {
   const value = trimString(token);
   if (!value) return false;
   const base = value.slice(value.lastIndexOf('/') + 1);
-  return base === PRIVILEGED_SENTINEL_PROGRAM || base === 'agentoc-privileged';
+  return base === PRIVILEGED_SENTINEL_PROGRAM || base === 'ragent-privileged';
 }
 
 // Quote-aware tokenizer that records character spans in the source string. NOT
@@ -72,7 +72,7 @@ function consumeFlagValue(tokens, index) {
  *
  * @param {string} input - The raw command (e.g. a Bash `input.command`).
  * @returns {null|object} `null` if `input` is not a sentinel invocation at all
- *   (first token is not `agentoc-privileged`); otherwise an object describing
+ *   (first token is not `ragent-privileged`); otherwise an object describing
  *   the parsed sentinel, with `valid` indicating whether it has a real command
  *   to gate on.
  */

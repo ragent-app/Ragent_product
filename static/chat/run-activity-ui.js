@@ -6,7 +6,7 @@
   let currentProgress = null;
 
   function tr(key, vars = {}) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   function trOrFallback(key, fallback) {
@@ -292,7 +292,7 @@
     return () => subscribers.delete(subscriber);
   }
 
-  root.AgentoCRunActivity = {
+  root.RagentRunActivity = {
     applyEvent,
     format: formatRunActivitySummary,
     formatOperationActivity,

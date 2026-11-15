@@ -6,7 +6,7 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 ----------------------
 1. 把 Ragent.app 拖入 Applications（或直接双击运行）。
 2. 首次运行会自动生成 owner 登录凭据并弹出文本文件显示用户名/密码
-   （保存在 ~/.config/agentoc/owner-credentials.txt，登录后请改密并删除该文件）。
+   （保存在 ~/.config/ragent/owner-credentials.txt，登录后请改密并删除该文件）。
 3. 自动打开 Ragent 桌面管理器；也可在浏览器中打开 http://127.0.0.1:7690/。
 
 日常使用
@@ -15,14 +15,14 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 - 命令行：Ragent.app/Contents/Resources/ragent <command>
   （例如 ragent doctor、ragent set-password）
 - 停止服务：Ragent.app/Contents/Resources/ragent-stop
-- 日志：~/.config/agentoc/chat-server.log
-- 实例配置（升级保留）：~/.config/agentoc/instance.env
+- 日志：~/.config/ragent/chat-server.log
+- 实例配置（升级保留）：~/.config/ragent/instance.env
 - 升级前先停止服务；如启用了登录自启动，先按下方步骤停用。替换 App 后
   再启动或重新启用。应用会检查运行中的服务版本，避免误连旧版本。
 
 回滚与卸载
 ----------
-- 更新之前，备份 ~/.config/agentoc/ 和自行选择的工作区；备份中包含凭据，
+- 更新之前，备份 ~/.config/ragent/ 和自行选择的工作区；备份中包含凭据，
   请妥善保护。保留旧版安装镜像，以便需要时恢复。
 - 回滚时，先退出桌面管理器；若启用了登录自启动，先按下方步骤停用，
   然后使用当前应用的 ragent-stop 停止服务。用旧版应用替换现有应用，
@@ -44,7 +44,7 @@ Ragent — 本地 AI 自动化工作台 (macOS)
 不会覆盖或卸载它，请先自行检查和移除旧配置。移动应用前请先停用，移动后
 再从新位置启用。服务日志位于配置目录下 launch-agent.stdout.log 和
 launch-agent.stderr.log，要求仅当前用户可读写。
-如通过 AGENTOC_INSTANCE_ROOT 指定了自定义实例目录，启用自启动时会
+如通过 RAGENT_INSTANCE_ROOT 指定了自定义实例目录，启用自启动时会
 记录该目录；更改目录前请先停用自启动，更改后再重新启用。
 
 手机连接（TURN + P2P）
@@ -71,4 +71,4 @@ AI 执行引擎
 --------
 - 服务仅监听 127.0.0.1，不经本机对外暴露端口。
 - 中继和直连的可用性取决于账号、服务和网络状态。
-- 凭据与会话数据保存在 ~/.config/agentoc/。
+- 凭据与会话数据保存在 ~/.config/ragent/。

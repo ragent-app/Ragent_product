@@ -9,9 +9,9 @@ import {
 } from '../chat/provider-liveness.mjs';
 
 assert.equal(resolveProviderHeartbeatIntervalMs({}), 15000);
-assert.equal(resolveProviderHeartbeatIntervalMs({ AGENTOC_PROVIDER_HEARTBEAT_INTERVAL_MS: '2500' }), 2500);
+assert.equal(resolveProviderHeartbeatIntervalMs({ RAGENT_PROVIDER_HEARTBEAT_INTERVAL_MS: '2500' }), 2500);
 assert.equal(resolveProviderOutputIdleDiagnosticMs({}), 90000);
-assert.equal(resolveProviderOutputIdleDiagnosticMs({ AGENTOC_PROVIDER_OUTPUT_IDLE_DIAGNOSTIC_MS: '60000' }), 60000);
+assert.equal(resolveProviderOutputIdleDiagnosticMs({ RAGENT_PROVIDER_OUTPUT_IDLE_DIAGNOSTIC_MS: '60000' }), 60000);
 
 assert.equal(buildProviderLivenessSnapshot({ runtimeFamily: 'codex-json' }), null);
 

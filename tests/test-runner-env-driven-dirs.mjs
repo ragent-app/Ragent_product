@@ -3,8 +3,8 @@
 // so they can be relocated out of the control CONFIG_DIR in a migration step.
 // Defaults are unchanged (dev / pre-migration production stay under config);
 // this test proves the override channels work end to end:
-//   1. AGENTOC_PROVIDER_HOMES_DIR relocates CODEX/CLAUDE_MANAGED_HOME_DIR;
-//   2. the lifecycle broker passes an env-configured AGENTOC_RUN_SPOOL_DIR to
+//   1. RAGENT_PROVIDER_HOMES_DIR relocates CODEX/CLAUDE_MANAGED_HOME_DIR;
+//   2. the lifecycle broker passes an env-configured RAGENT_RUN_SPOOL_DIR to
 //      the Run instead of forcing the legacy config/chat-runs path.
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
@@ -18,7 +18,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFileCallback);
 
 async function main() {
-  const tmp = await mkdtemp(join(tmpdir(), 'agentoc-env-dirs-'));
+  const tmp = await mkdtemp(join(tmpdir(), 'ragent-env-dirs-'));
   try {
     // The harness may retain USER=root while dropping the process to the
     // unprivileged test UID. Resolve the service identity from the OS instead
@@ -50,9 +50,9 @@ async function main() {
     await writeFile(join(secretsDir, 'secret-provider-luna.json'), JSON.stringify({
       authType: 'api-key', apiKey: 'test-provider-luna',
     }));
-    process.env.AGENTOC_PROVIDER_HOMES_DIR = providerHomes;
-    process.env.AGENTOC_CONFIG_DIR = configDir;
-    delete process.env.AGENTOC_RUN_SPOOL_DIR;
+    process.env.RAGENT_PROVIDER_HOMES_DIR = providerHomes;
+    process.env.RAGENT_CONFIG_DIR = configDir;
+    delete process.env.RAGENT_RUN_SPOOL_DIR;
 
     // 1) provider-homes base override flows into the managed home exports.
     const configUrl = new URL('../lib/config.mjs', import.meta.url);
@@ -93,8 +93,8 @@ async function main() {
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',
-        AGENTOC_RUN_SPOOL_DIR: spoolRoot,
-        AGENTOC_CONFIG_DIR: configDir,
+        RAGENT_RUN_SPOOL_DIR: spoolRoot,
+        RAGENT_CONFIG_DIR: configDir,
       },
       execFileImpl: async (bin, args) => {
         if (bin === 'systemctl') return { stdout: '4242\n' };
@@ -108,12 +108,12 @@ async function main() {
       if (captures[0].args[index] === '--setenv') setenv.push(captures[0].args[index + 1]);
     }
     assert.ok(
-      setenv.includes(`AGENTOC_RUN_SPOOL_DIR=${spoolRoot}`),
+      setenv.includes(`RAGENT_RUN_SPOOL_DIR=${spoolRoot}`),
       'broker must pass the env-configured spool root, not the legacy config/chat-runs',
     );
     assert.ok(
-      setenv.every((value) => !value.startsWith('AGENTOC_CONFIG_DIR=')),
-      'AGENTOC_CONFIG_DIR still never reaches a Run',
+      setenv.every((value) => !value.startsWith('RAGENT_CONFIG_DIR=')),
+      'RAGENT_CONFIG_DIR still never reaches a Run',
     );
 
     // 3) scoped providers receive stable, distinct homes. This prevents two
@@ -133,8 +133,8 @@ async function main() {
       readUnitStateImpl: async () => ({ loadState: 'not-found', activeState: 'inactive', pid: null }),
       environment: {
         PATH: '/usr/bin',
-        AGENTOC_RUN_SPOOL_DIR: spoolRoot,
-        AGENTOC_PROVIDER_HOMES_DIR: providerHomes,
+        RAGENT_RUN_SPOOL_DIR: spoolRoot,
+        RAGENT_PROVIDER_HOMES_DIR: providerHomes,
       },
       readManifestImpl: async () => ({
         tool: 'codex',
@@ -151,16 +151,16 @@ async function main() {
       if (scopedCaptures[0].args[index] === '--setenv') scopedSetenv.push(scopedCaptures[0].args[index + 1]);
     }
     const preparedRunHome = scopedSetenv
-      .find((value) => value.startsWith('AGENTOC_PROVIDER_HOMES_DIR='))
-      ?.slice('AGENTOC_PROVIDER_HOMES_DIR='.length) || '';
+      .find((value) => value.startsWith('RAGENT_PROVIDER_HOMES_DIR='))
+      ?.slice('RAGENT_PROVIDER_HOMES_DIR='.length) || '';
     assert.equal(preparedRunHome, lunaHomes);
     assert.equal(
-      await readFile(join(preparedRunHome, 'codex', '.agentoc-provider-id'), 'utf8'),
+      await readFile(join(preparedRunHome, 'codex', '.ragent-provider-id'), 'utf8'),
       'provider-luna\n',
       'lifecycle broker must pass the prepared provider-scoped home to the Run',
     );
     assert.equal(
-      await readFile(join(providerHomes, 'codex', '.agentoc-provider-id'), 'utf8').catch(() => null),
+      await readFile(join(providerHomes, 'codex', '.ragent-provider-id'), 'utf8').catch(() => null),
       null,
       'lifecycle provider preparation must not populate the shared flat Codex home',
     );

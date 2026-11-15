@@ -37,7 +37,7 @@ function verifyReceipt(envelope,b,request,sourceId) {
       || envelope.receipt.requestId!==request.requestId
       || envelope.receipt.bindingVersion!==b.targetBindingVersion || envelope.receipt.sourceFactoryBindingId!==request.sourceFactoryBindingId
       || envelope.receipt.contractRevision!==request.contractRevision || envelope.receipt.executionEpoch!==request.executionEpoch) throw factoryError('REMOTE_RECEIPT_INVALID','Receipt scope mismatch',502);
-  let valid=false;try {valid=verify(null,Buffer.from(`agentoc-remote-receipt-v1:${hash({targetInstanceId:envelope.targetInstanceId,receipt:envelope.receipt})}`),createPublicKey(b.targetPublicKey),Buffer.from(text(envelope.signature),'base64url'));} catch {}
+  let valid=false;try {valid=verify(null,Buffer.from(`ragent-remote-receipt-v1:${hash({targetInstanceId:envelope.targetInstanceId,receipt:envelope.receipt})}`),createPublicKey(b.targetPublicKey),Buffer.from(text(envelope.signature),'base64url'));} catch {}
   if(!valid) throw factoryError('REMOTE_RECEIPT_INVALID','Receipt signature invalid',502);
   return envelope.receipt;
 }
@@ -117,7 +117,7 @@ export async function fetchRemoteFactoryCandidate(bindingId,operationId,actor,{t
       || e.operationId!==operationId || e.requestId!==q.requestId || e.sourceFactoryBindingId!==q.sourceFactoryBindingId
       || e.sourceContractRevision!==q.contractRevision || e.sourceExecutionEpoch!==q.executionEpoch
       || e.baselineManifestDigest!==q.payload.expectedBaselineDigest) throw factoryError('REMOTE_RECEIPT_INVALID','Candidate scope or baseline mismatch',502);
-  let valid=false; try {valid=verify(null,Buffer.from(`agentoc-remote-candidate-v1:${hash(e)}`),createPublicKey(data.binding.targetPublicKey),Buffer.from(text(signed.signature),'base64url'));} catch {}
+  let valid=false; try {valid=verify(null,Buffer.from(`ragent-remote-candidate-v1:${hash(e)}`),createPublicKey(data.binding.targetPublicKey),Buffer.from(text(signed.signature),'base64url'));} catch {}
   if(!valid) throw factoryError('REMOTE_RECEIPT_INVALID','Candidate signature invalid',502);
   return signed;
 }
@@ -130,7 +130,7 @@ export async function requestRemoteFactoryCancellationFromSource(bindingId,opera
   const signature=await signRemoteFactoryCancellation(cancellation), path=`/api/remote-factory/bindings/${cancellation.bindingId}/operations/${operationId}/cancel`, requestId=`cancel_${randomUUID()}`;
   try {const currentRevision=await readTargetRevision(data.binding.targetInstanceId);const {response,body}=await proxyToTarget({targetId:data.binding.targetInstanceId,requestId,idempotencyKey:cancellation.cancelId,method:'POST',path,operation:'factory.remote.cancel',resourceId:cancellation.bindingId,expectedRevision:currentRevision,body:JSON.stringify({...cancellation,signature}),headers:{'content-type':'application/json'}});
     if(!response.ok) throw new Error('Cancellation unconfirmed');const envelope=JSON.parse(body.toString('utf8')),receipt=envelope?.receipt;
-    let valid=false;try {valid=envelope.targetInstanceId===data.binding.targetInstanceId && verify(null,Buffer.from(`agentoc-remote-receipt-v1:${hash({targetInstanceId:envelope.targetInstanceId,receipt})}`),createPublicKey(data.binding.targetPublicKey),Buffer.from(text(envelope.signature),'base64url'));} catch {}
+    let valid=false;try {valid=envelope.targetInstanceId===data.binding.targetInstanceId && verify(null,Buffer.from(`ragent-remote-receipt-v1:${hash({targetInstanceId:envelope.targetInstanceId,receipt})}`),createPublicKey(data.binding.targetPublicKey),Buffer.from(text(envelope.signature),'base64url'));} catch {}
     if(!valid||receipt?.bindingId!==cancellation.bindingId||receipt?.operationId!==operationId||receipt?.cancelId!==cancellation.cancelId||receipt?.contractRevision!==cancellation.contractRevision||receipt?.executionEpoch!==cancellation.executionEpoch) throw new Error('Cancellation receipt mismatch');
     return receipt;
   } catch {return {operationId,requestState:'unknown',reason:'query_required'};}

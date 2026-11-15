@@ -7,7 +7,7 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 7690,
     [string]$InitialUsername = '',
-    [string]$SupervisorPipe = '\\.\pipe\agentoc-runner-supervisor-owner',
+    [string]$SupervisorPipe = '\\.\pipe\ragent-runner-supervisor-owner',
     [switch]$WaitForHealth
 )
 
@@ -21,7 +21,7 @@ function Trim-Value([object]$Value) {
 function Resolve-SourceRoot {
     param([string]$Candidate)
     $value = Trim-Value $Candidate
-    if (-not $value) { $value = Trim-Value $env:AGENTOC_LIVE_ROOT }
+    if (-not $value) { $value = Trim-Value $env:RAGENT_LIVE_ROOT }
     if (-not $value) { $value = Join-Path $PSScriptRoot '..' }
     $resolved = Resolve-Path -LiteralPath $value -ErrorAction Stop
     return $resolved.Path.TrimEnd('\').TrimEnd('/')
@@ -55,14 +55,14 @@ function Normalize-InstanceName([string]$Value) {
 function Get-PerUserPaths {
     param([string]$NormalizedInstanceName)
     $localAppData = Get-LocalAppDataRoot
-    $instanceRoot = Join-Path $localAppData ('AgentoC\instances\' + $NormalizedInstanceName)
+    $instanceRoot = Join-Path $localAppData ('Ragent\instances\' + $NormalizedInstanceName)
     return [pscustomobject]@{
         localAppData = $localAppData
         instanceRoot = $instanceRoot
         configDir = Join-Path $instanceRoot 'config'
         runtimeDir = Join-Path $instanceRoot 'runtime'
         spoolDir = Join-Path $instanceRoot 'data\chat-runs'
-        harnessRoot = Join-Path $localAppData 'AgentoC\harnesses'
+        harnessRoot = Join-Path $localAppData 'Ragent\harnesses'
         providerHomesDir = Join-Path $instanceRoot 'provider-homes'
         workspaceDir = Join-Path $instanceRoot 'workspace'
         stateFile = Join-Path $instanceRoot 'runtime\per-user-runtime.json'
@@ -76,16 +76,16 @@ function Get-PerUserPaths {
 
 function Assert-NoServiceOverrides {
     foreach ($name in @(
-        'AGENTOC_WINDOWS_SERVICE_MODE',
-        'AGENTOC_WINDOWS_SERVICE_ROLE',
-        'AGENTOC_WINDOWS_SERVICE_STOP_FILE',
-        'AGENTOC_INSTANCE_ROOT',
-        'AGENTOC_CONFIG_DIR',
-        'AGENTOC_RUN_SPOOL_DIR',
-        'AGENTOC_PROVIDER_HOMES_DIR',
-        'AGENTOC_WORK_ROOT_DIR',
-        'AGENTOC_MEMORY_DIR',
-        'AGENTOC_PLATFORM_SKILLS_DIR'
+        'RAGENT_WINDOWS_SERVICE_MODE',
+        'RAGENT_WINDOWS_SERVICE_ROLE',
+        'RAGENT_WINDOWS_SERVICE_STOP_FILE',
+        'RAGENT_INSTANCE_ROOT',
+        'RAGENT_CONFIG_DIR',
+        'RAGENT_RUN_SPOOL_DIR',
+        'RAGENT_PROVIDER_HOMES_DIR',
+        'RAGENT_WORK_ROOT_DIR',
+        'RAGENT_MEMORY_DIR',
+        'RAGENT_PLATFORM_SKILLS_DIR'
     )) {
         if (Trim-Value ([Environment]::GetEnvironmentVariable($name, 'Process'))) {
             throw "A0 per-user launcher refuses inherited $name; remove service/runner overrides first."
@@ -149,35 +149,35 @@ function Assert-NoActiveRuntime([object]$State) {
 
 function Set-PerUserEnvironment([object]$Paths, [string]$NormalizedInstanceName, [string]$SourceRoot, [string]$Secret, [string]$Pipe) {
     foreach ($name in @(
-        'AGENTOC_WINDOWS_SERVICE_MODE',
-        'AGENTOC_WINDOWS_SERVICE_ROLE',
-        'AGENTOC_WINDOWS_SERVICE_STOP_FILE',
-        'AGENTOC_INSTANCE_ROOT',
-        'AGENTOC_CONFIG_DIR',
-        'AGENTOC_RUN_SPOOL_DIR',
-        'AGENTOC_PROVIDER_HOMES_DIR',
-        'AGENTOC_WORK_ROOT_DIR',
-        'AGENTOC_MEMORY_DIR',
-        'AGENTOC_PLATFORM_SKILLS_DIR'
+        'RAGENT_WINDOWS_SERVICE_MODE',
+        'RAGENT_WINDOWS_SERVICE_ROLE',
+        'RAGENT_WINDOWS_SERVICE_STOP_FILE',
+        'RAGENT_INSTANCE_ROOT',
+        'RAGENT_CONFIG_DIR',
+        'RAGENT_RUN_SPOOL_DIR',
+        'RAGENT_PROVIDER_HOMES_DIR',
+        'RAGENT_WORK_ROOT_DIR',
+        'RAGENT_MEMORY_DIR',
+        'RAGENT_PLATFORM_SKILLS_DIR'
     )) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
-    [Environment]::SetEnvironmentVariable('AGENTOC_INSTANCE_NAME', $NormalizedInstanceName, 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_AUTH_SESSION_SECRET', $Secret, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_INSTANCE_NAME', $NormalizedInstanceName, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_AUTH_SESSION_SECRET', $Secret, 'Process')
     # These are the two runner-owned write/credential roots.  They must be
     # derived from the validated per-user instance after inherited overrides
     # are cleared, so the Supervisor can validate every launch request.
-    [Environment]::SetEnvironmentVariable('AGENTOC_RUN_SPOOL_DIR', $Paths.spoolDir, 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_PROVIDER_HOMES_DIR', $Paths.providerHomesDir, 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_RUNNER_SUPERVISOR_SOCKET', $Pipe, 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_RUNNER_SUPERVISOR_REQUIRED', '1', 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_HARNESS_ROOT', $Paths.harnessRoot, 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_ALLOW_EMPTY_ACCESS_TOKEN_ON_NETWORK', '0', 'Process')
-    [Environment]::SetEnvironmentVariable('AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER', '1', 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_RUN_SPOOL_DIR', $Paths.spoolDir, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_PROVIDER_HOMES_DIR', $Paths.providerHomesDir, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_RUNNER_SUPERVISOR_SOCKET', $Pipe, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_RUNNER_SUPERVISOR_REQUIRED', '1', 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_HARNESS_ROOT', $Paths.harnessRoot, 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_ALLOW_EMPTY_ACCESS_TOKEN_ON_NETWORK', '0', 'Process')
+    [Environment]::SetEnvironmentVariable('RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER', '1', 'Process')
     [Environment]::SetEnvironmentVariable('CHAT_PORT', [string]$Port, 'Process')
     [Environment]::SetEnvironmentVariable('CHAT_BIND_HOST', '127.0.0.1', 'Process')
     if ($InitialUsername) {
-        [Environment]::SetEnvironmentVariable('AGENTOC_INITIAL_USERNAME', $InitialUsername.Trim(), 'Process')
+        [Environment]::SetEnvironmentVariable('RAGENT_INITIAL_USERNAME', $InitialUsername.Trim(), 'Process')
     }
     if (-not (Trim-Value $env:PATH).ToLowerInvariant().StartsWith($SourceRoot.ToLowerInvariant())) {
         [Environment]::SetEnvironmentVariable('PATH', "$SourceRoot;$env:PATH", 'Process')

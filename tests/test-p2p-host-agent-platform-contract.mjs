@@ -22,7 +22,7 @@ function close(server) {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-p2p-host-contract-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-p2p-host-contract-'));
 const binary = join(root, 'fake-p2p-host.mjs');
 await writeFile(binary, '#!/usr/bin/env node\nsetInterval(() => {}, 60_000);\n', 'ascii');
 await chmod(binary, 0o755);
@@ -53,11 +53,11 @@ try {
   await agent.ready;
   assert.ok(Number.isInteger(agent.child.pid) && agent.child.pid > 0, 'host process should expose a pid');
   if (process.platform === 'win32') {
-    assert.equal(agent.child.__agentocWindowsManaged, true, 'Windows P2P host must use a Job Object');
-    assert.equal(agent.child.__agentocWindowsJobObjectCreation, 'suspended-create-assign-resume');
-    assert.equal(typeof agent.child.__agentocWindowsJobList, 'function');
+    assert.equal(agent.child.__ragentWindowsManaged, true, 'Windows P2P host must use a Job Object');
+    assert.equal(agent.child.__ragentWindowsJobObjectCreation, 'suspended-create-assign-resume');
+    assert.equal(typeof agent.child.__ragentWindowsJobList, 'function');
   } else {
-    assert.equal(agent.child.__agentocWindowsManaged, undefined, 'POSIX host should retain the native child contract');
+    assert.equal(agent.child.__ragentWindowsManaged, undefined, 'POSIX host should retain the native child contract');
   }
 } finally {
   agent?.stop();

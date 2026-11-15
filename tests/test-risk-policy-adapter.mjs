@@ -36,9 +36,9 @@ const invalid = await evaluateRiskPolicy({ tier: 'nonsense', reasons: REASONS })
 eq('invalid tier fails closed to caution', invalid.tier, 'caution');
 
 // OPA 启用但二进制不可用：builtin-fallback，且不改判。
-const oldEnv = process.env.AGENTOC_RISK_POLICY_OPA;
-process.env.AGENTOC_RISK_POLICY_OPA = '1';
-process.env.AGENTOC_OPA_BIN = '/nonexistent/opa';
+const oldEnv = process.env.RAGENT_RISK_POLICY_OPA;
+process.env.RAGENT_RISK_POLICY_OPA = '1';
+process.env.RAGENT_OPA_BIN = '/nonexistent/opa';
 const fallback = await evaluateRiskPolicy({ tier: 'danger', reasons: REASONS });
 eq('opa missing falls back', fallback.engine, RISK_POLICY_ADAPTER_ENGINE.BUILTIN_FALLBACK);
 eq('fallback keeps danger tier', fallback.tier, 'danger');
@@ -52,8 +52,8 @@ await evaluateRiskPolicy({ tier: 'danger', reasons: REASONS });
 eq('no diff listener on fallback', diffCalls, 0);
 setRiskPolicyDiffListener(null);
 
-if (oldEnv === undefined) delete process.env.AGENTOC_RISK_POLICY_OPA;
-else process.env.AGENTOC_RISK_POLICY_OPA = oldEnv;
-delete process.env.AGENTOC_OPA_BIN;
+if (oldEnv === undefined) delete process.env.RAGENT_RISK_POLICY_OPA;
+else process.env.RAGENT_RISK_POLICY_OPA = oldEnv;
+delete process.env.RAGENT_OPA_BIN;
 
 console.log(`risk-policy-adapter: ${passed} checks passed`);

@@ -50,7 +50,7 @@ function testProductAgentCreateConditional() {
   // preparation (the codex overlay snapshots the env into config.toml, and
   // codex MCP children do not inherit the process env), and still only when
   // the manifest grants productAgentCreate.
-  const grantPattern = /if \(approvedActionChannel\.productAgentCreate === true\)\s*\{\s*spawnEnv\.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';\s*\}/;
+  const grantPattern = /if \(approvedActionChannel\.productAgentCreate === true\)\s*\{\s*spawnEnv\.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';\s*\}/;
   const grantMatch = grantPattern.exec(source);
   assert.ok(grantMatch, 'productAgentCreate env grant must be conditioned on the manifest flag');
   const prepareIndex = source.indexOf('await prepareManagedMcpOverlay(');

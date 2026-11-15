@@ -61,7 +61,7 @@ Windows 仍有原活跃业务任务，未部署本次候选；Mac 本次候选�
 
 Linux 候选 `c5bb0cfc` 的独立 QA 会话 `ce8612aff95823f962c5eadb92e93c1b` 中，真实 Codex Run `run_418c00f06796bc4f80b1ce8d` 未进入 provider 或审批，在启动阶段失败；服务端保存的 seq 3 是 `status`/`system` 错误。旧 APK 未显示失败，新 APK `F865...` 重开同一历史时显示该错误，停止按钮消失且输入框存在。这验证该条持久历史的失败呈现，不证明实时错误、审批、分页或跨端链路通过。服务端确认 Codex OAuth 锁由运行中的 broker 持有，未删除该锁。
 
-截图：`G:\AgentoC\.task-temp\qa-failure-history-f865.png`。旋转尝试后界面回到会话列表；恢复自动旋转并重开后该错误出现一次。该回合没有可展开的操作内容，不能以此验证折叠或隐藏操作。长历史分页、持续流式和键盘期间滚动仍待真实数据。Windows 和 Mac 仍未完成本次候选服务及真实跨端验收。
+截图：`G:\Ragent\.task-temp\qa-failure-history-f865.png`。旋转尝试后界面回到会话列表；恢复自动旋转并重开后该错误出现一次。该回合没有可展开的操作内容，不能以此验证折叠或隐藏操作。长历史分页、持续流式和键盘期间滚动仍待真实数据。Windows 和 Mac 仍未完成本次候选服务及真实跨端验收。
 
 另在 `F865...` 上只读打开既有 Linux 会话 `f946d33d982a18c03c7748e6f3d2aa3c`：长用户消息可展开和收起，手机显示两条助手正文而未显示操作记录；服务端只读统计该会话有两组 tool_use/tool_result，未见独立 thinking/reasoning。此证据限于该会话，不代表思考事件、Run Details、长历史分页或流式滚动已验收。该会话副标题曾错误显示此前浏览项目；`BD315...` 重开显示 `real-root-approval-034 · MSI`，与服务器项目归属一致。平板跨电脑场景仍仅静态复核。
 
@@ -77,7 +77,7 @@ Linux 候选 `c5bb0cfc` 的独立 QA 会话 `ce8612aff95823f962c5eadb92e93c1b` �
 
 Linux 后续修复 `b8aba048` 已部署为 `0.0.84+main.b8aba048`，针对本次发现的 provider-home 准备和跨服务 socket 问题。真实 Codex 会话 `e096cace9d00bb6b601aa44435f81c30`、Run `run_d51e2504a7a52b9ff08defaf` 经服务端确认由 running 到 completed、primary 清空；三星显示助手正文、停止按钮退场。该运行未出现审批，不能作为审批或精准停止验收。之前的启动失败继续保留，另一次在专用目录 `.codex/config.toml` 权限处失败，手机显示真实错误；仅专用目录权限已调整。
 
-该专用目录的空 `.codex` 曾因现有 TemporaryFileSystem 产生 root:root、0750 权限而阻止访问；只对该 QA 目录做了局部缓解，其他新项目仍有此风险，不能称全局修复。Linux 旧 lifecycle fixture 因缺少新增必需的 `status` 未通过；现有 broker/reconciler 检查通过不代表全部检查通过。部署和 0.0.82 回滚证据位于 Linux `/home/pinggu/agentoc-build/candidate-b8aba048/deployment-evidence.txt`。
+该专用目录的空 `.codex` 曾因现有 TemporaryFileSystem 产生 root:root、0750 权限而阻止访问；只对该 QA 目录做了局部缓解，其他新项目仍有此风险，不能称全局修复。Linux 旧 lifecycle fixture 因缺少新增必需的 `status` 未通过；现有 broker/reconciler 检查通过不代表全部检查通过。部署和 0.0.82 回滚证据位于 Linux `/home/pinggu/ragent-build/candidate-b8aba048/deployment-evidence.txt`。
 
 ## Linux 真实审批与停止结果
 

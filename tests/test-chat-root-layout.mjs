@@ -38,7 +38,7 @@ function rootMarkup() {
         <div class="app-shell">
           <div class="header">
             <button class="header-btn header-btn--sessions" type="button"></button>
-            <div class="header-title-block"><h1>AgentoC Chat</h1></div>
+            <div class="header-title-block"><h1>Ragent Chat</h1></div>
             <button class="header-more-btn" type="button"></button>
           </div>
           <div class="app-container">

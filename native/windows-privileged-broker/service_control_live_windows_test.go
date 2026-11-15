@@ -26,11 +26,11 @@ import (
 // Opt-in acceptance touches only a fresh randomly named, inert test service.
 // Its executable and all build/cache artifacts remain inside the owner workspace.
 func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
-	if os.Getenv("AGENTOC_BROKER_RUN_ISOLATED_SERVICE_TEST") != "1" {
+	if os.Getenv("RAGENT_BROKER_RUN_ISOLATED_SERVICE_TEST") != "1" {
 		t.Skip("isolated live SCM test is opt-in")
 	}
-	if !strings.HasPrefix(strings.ToLower(filepath.Clean(os.TempDir()))+`\`, `g:\agentoc\`) {
-		t.Fatal("test temporary directory must be under G:\\AgentoC")
+	if !strings.HasPrefix(strings.ToLower(filepath.Clean(os.TempDir()))+`\`, `g:\ragent\`) {
+		t.Fatal("test temporary directory must be under G:\\Ragent")
 	}
 	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
 	if err != nil {
@@ -43,7 +43,7 @@ func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	name := "AgentoC-QA-Service-" + random
+	name := "Ragent-QA-Service-" + random
 	binary := filepath.Join(t.TempDir(), "inert-service.exe")
 	build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", binary, "./targetfixture")
 	if output, err := build.CombinedOutput(); err != nil {
@@ -69,7 +69,7 @@ func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
 	}
 	service, err := manager.CreateService(name, binary, mgr.Config{
 		ServiceType: windows.SERVICE_WIN32_OWN_PROCESS, StartType: windows.SERVICE_DEMAND_START,
-		ErrorControl: windows.SERVICE_ERROR_IGNORE, DisplayName: "AgentoC isolated service test",
+		ErrorControl: windows.SERVICE_ERROR_IGNORE, DisplayName: "Ragent isolated service test",
 	}, "--service-name", name)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + random
+	base := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + random
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, base+".Health", base+".Request")
 	if err != nil {
 		t.Fatal(err)
@@ -278,11 +278,11 @@ func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
 	if result := server.handleRequest(mustJSON(t, approval), false); result.Status != statusSucceeded {
 		t.Fatalf("approval replay changed outcome: %+v", result)
 	}
-	if crossDir := os.Getenv("AGENTOC_BROKER_LIVE_CLIENT_DIR"); crossDir != "" {
+	if crossDir := os.Getenv("RAGENT_BROKER_LIVE_CLIENT_DIR"); crossDir != "" {
 		requireLivePipeTestDir(t, crossDir)
 		run("stop-service", svc.Stopped)
 		phoneID := ""
-		if os.Getenv("AGENTOC_BROKER_LIVE_ANDROID") == "1" {
+		if os.Getenv("RAGENT_BROKER_LIVE_ANDROID") == "1" {
 			var phone struct {
 				DeviceID  string `json:"deviceId"`
 				PublicKey string `json:"publicKey"`
@@ -308,7 +308,7 @@ func TestWindowsServiceControlIsolatedLiveSCM(t *testing.T) {
 		if phoneID != "" {
 			payload.Approval.DeviceID, payload.Approval.DeviceSignature = phoneID, ""
 		}
-		if os.Getenv("AGENTOC_BROKER_LIVE_JS_CONTROL_PLANE") == "1" {
+		if os.Getenv("RAGENT_BROKER_LIVE_JS_CONTROL_PLANE") == "1" {
 			// Fresh test-only keys authorize only this disposable broker and
 			// randomly named fixture service; they never come from an install.
 			signerDER, err := x509.MarshalPKCS8PrivateKey(private)
@@ -423,7 +423,7 @@ func readLivePipeJSON(t *testing.T, path string, output any) {
 }
 
 func TestWindowsServiceControlOrdinaryUserPipe(t *testing.T) {
-	dir := os.Getenv("AGENTOC_BROKER_LIVE_CLIENT_DIR")
+	dir := os.Getenv("RAGENT_BROKER_LIVE_CLIENT_DIR")
 	if dir == "" {
 		t.Skip("cross-process live pipe test is opt-in")
 	}
@@ -445,7 +445,7 @@ func TestWindowsServiceControlOrdinaryUserPipe(t *testing.T) {
 	}()
 	var fixture liveServicePipeCase
 	readLivePipeJSON(t, filepath.Join(dir, "ready.json"), &fixture)
-	if !strings.HasPrefix(fixture.Pipe, `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.`) ||
+	if !strings.HasPrefix(fixture.Pipe, `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.`) ||
 		fixture.Proposal.ServiceControl == nil || fixture.Approval.RequestID != fixture.Proposal.ServiceControl.RequestID {
 		t.Fatal("invalid cross-process service fixture")
 	}

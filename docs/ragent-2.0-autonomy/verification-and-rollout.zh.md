@@ -20,7 +20,7 @@
 
 现有检查按改动选择：Trigger 对应 `test-http-triggers.mjs`；旧执行基础对应 `test-collaboration-store.mjs`、`test-collaboration-orchestrator.mjs`；账本对应 `test-orchestration-store.mjs` / `test-orchestration-reconciler.mjs`；组织预算和恢复需核对 S22/S23 等既有场景实际覆盖；权限对应既有 permission-policy、capability-grant 和 execution-boundary 检查。旧 fixture 不符合新行为时，先核对契约变更，不擅改 expected output 让检查变绿。
 
-保持 Factory 默认不准入新工作。现有控制开关检查 `AGENTOC_FACTORY_CONTROL_ENABLED === 'true'`，scheduler 开关检查 `AGENTOC_FACTORY_SCHEDULER_ENABLED === '1'`，组织白名单、owner 授权来源和 Governor 另有前提；这应统一配置解析并在能力页展示拒绝原因。关闭新准入后继续观察已有工作，避免开关关闭导致状态失联。
+保持 Factory 默认不准入新工作。现有控制开关检查 `RAGENT_FACTORY_CONTROL_ENABLED === 'true'`，scheduler 开关检查 `RAGENT_FACTORY_SCHEDULER_ENABLED === '1'`，组织白名单、owner 授权来源和 Governor 另有前提；这应统一配置解析并在能力页展示拒绝原因。关闭新准入后继续观察已有工作，避免开关关闭导致状态失联。
 
 发布先单项目、单组织、单权威实例、经验证的 Harness/平台组合。灰度前记录数据库与产物备份边界；回滚先关新事件准入和新派发，保留读取、取消和对账。已执行外部操作不靠数据库回滚撤销；unknown 保留人工核实。加法迁移不得删除历史 Session、Run、候选或旧责任证据。
 ## 每阶段的证据交付

@@ -5,7 +5,7 @@ import { LINUX_RUN_ACTIVE_CHECK_PATH, verifyLinuxRunActiveProof } from '../chat/
 // Called under the root operation lock. A local socket address is not an
 // identity: the response must also verify under the root-pinned service key.
 export async function checkLinuxRunActive(state, { publicKey,
-  base = process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}` } = {}) {
+  base = process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${CHAT_PORT}` } = {}) {
   try {
     if (process.platform !== 'linux' || process.geteuid?.() !== 0) return false;
     const url = new URL(base);

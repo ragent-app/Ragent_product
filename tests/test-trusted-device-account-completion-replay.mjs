@@ -24,11 +24,11 @@ if (!selected) {
   process.exitCode = failed ? 1 : 0;
 } else {
   assert(cases.includes(selected), 'Unknown fixture case');
-  const root = mkdtempSync(join(tmpdir(), 'agentoc-completion-replay-'));
+  const root = mkdtempSync(join(tmpdir(), 'ragent-completion-replay-'));
   const configRoot = join(root, 'config');
-  process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-  process.env.AGENTOC_CONFIG_DIR = configRoot;
-  delete process.env.AGENTOC_INSTANCE_ROOT;
+  process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  process.env.RAGENT_CONFIG_DIR = configRoot;
+  delete process.env.RAGENT_INSTANCE_ROOT;
   mkdirSync(configRoot);
   const file = join(configRoot, 'trusted-devices.json');
   const NativeDate = Date;
@@ -156,7 +156,7 @@ if (!selected) {
     console.log(`ok - account completion ${selected}`);
   } finally {
     globalThis.Date = NativeDate;
-    assert(dirname(resolve(root)) === resolve(tmpdir()) && basename(root).startsWith('agentoc-completion-replay-'), 'Cleanup must remain in the owned temporary root');
+    assert(dirname(resolve(root)) === resolve(tmpdir()) && basename(root).startsWith('ragent-completion-replay-'), 'Cleanup must remain in the owned temporary root');
     rmSync(root, { recursive: true, force: true });
   }
 }

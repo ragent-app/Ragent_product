@@ -12,10 +12,10 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 export const RUN_REVIEW_CAPABILITY_VERSION = 'run-review/v1';
 export const RUN_REVIEW_OPERATION = 'run.approval.review';
 export const RUN_REVIEW_ENDPOINT = '/api/internal/run-review';
-export const RUN_REVIEW_TOKEN_HEADER = 'x-agentoc-run-review-token';
-export const RUN_REVIEW_RUN_ID_HEADER = 'x-agentoc-run-review-run-id';
-export const RUN_REVIEW_SESSION_ID_HEADER = 'x-agentoc-run-review-session-id';
-export const RUN_REVIEW_TURN_ID_HEADER = 'x-agentoc-run-review-turn-id';
+export const RUN_REVIEW_TOKEN_HEADER = 'x-ragent-run-review-token';
+export const RUN_REVIEW_RUN_ID_HEADER = 'x-ragent-run-review-run-id';
+export const RUN_REVIEW_SESSION_ID_HEADER = 'x-ragent-run-review-session-id';
+export const RUN_REVIEW_TURN_ID_HEADER = 'x-ragent-run-review-turn-id';
 
 // Run liveness is checked on every request, including after model inference.
 // The expiry is a hard ceiling for unusually long detached runs.
@@ -92,7 +92,7 @@ export function createRunReviewCapability({
   turnId,
   now = Date.now(),
   ttlMs = DEFAULT_TTL_MS,
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
 } = {}) {
   const normalizedRunId = trimString(runId);
   const normalizedSessionId = trimString(sessionId);
@@ -128,7 +128,7 @@ export function createRunReviewCapability({
 }
 
 export function createRunReviewAuthenticator({
-  secret = process.env.AGENTOC_AUTH_SESSION_SECRET || '',
+  secret = process.env.RAGENT_AUTH_SESSION_SECRET || '',
   getRunImpl = async () => null,
   getRunManifestImpl = async () => null,
   now = () => Date.now(),

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const exec=promisify(execFile);
-const root=await mkdtemp(join(tmpdir(),'agentoc-relocation-fixture-'));
+const root=await mkdtemp(join(tmpdir(),'ragent-relocation-fixture-'));
 try{
   const exe=join(root,'fixture.exe');
   await exec('C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe',

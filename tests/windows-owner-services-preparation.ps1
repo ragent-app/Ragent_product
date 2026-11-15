@@ -7,7 +7,7 @@ if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-host
    $env:GITHUB_REPOSITORY -cne 'owner/private-qa-repository' -or $env:RUNNER_OS -cne 'Windows' -or
    $env:GITHUB_REF -cnotmatch '^refs/heads/qa/windows-msi-[a-z0-9-]+$'){throw 'OSPQ_DISPOSABLE_RUNNER_REQUIRED'}
 if(-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'OSPQ_ADMIN_REQUIRED'}
-$product='C:\Program Files\AgentoC';$data='C:\ProgramData\AgentoC';$names=@('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')
+$product='C:\Program Files\Ragent';$data='C:\ProgramData\Ragent';$names=@('Ragent-ControlPlane','Ragent-RunnerSupervisor')
 foreach($name in $names){if(Get-CimInstance Win32_Service -Filter "Name='$name'"){throw 'OSPQ_EXISTING_SERVICE_REFUSED'}}
 foreach($path in @($product,$data)){if(Test-Path -LiteralPath $path){throw 'OSPQ_EXISTING_INSTALLATION_REFUSED'}}
 if(-not $env:RUNNER_TEMP){throw 'OSPQ_TEMP_REQUIRED'}
@@ -19,7 +19,7 @@ New-Item -ItemType Directory -Path $evidence|Out-Null
 $source=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\packaging\windows\prepare-owner-services.ps1'))
 $report=[ordered]@{pass=$false;runId=$env:GITHUB_RUN_ID;sourceCommit=$env:GITHUB_SHA;startedAt=(Get-Date).ToUniversalTime().ToString('o');productionHostTouched=$false;syntheticInputs=$true;installationPerformed=$false;servicesStarted=$false;authorityIssued=$false;sourceSha256=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant();checks=@();observed=@();refusals=@();cleanupConfirmed=$false}
 $marker=Join-Path $product '.owner-service-preparation-qa'
-$files=@('AgentoC.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')
+$files=@('Ragent.ServiceHost.exe','payload\node.exe','payload\chat-server.mjs','payload\chat\runner-supervisor-daemon.mjs')
 function Invoke-Preparation([switch]$Commit,[switch]$Diagnose){
   $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName='C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
   $info.Arguments='-NoLogo -NoProfile -NonInteractive -File "'+$source+'"'+$(if($Commit){' -Commit'}else{''})
@@ -146,9 +146,9 @@ try{
   # a successful transaction. This is not an injected transaction-failure test.
   . $source -LibraryOnly
   Initialize-OwnerServiceRegistrationType
-  $rollback=[AgentoCOwnerServiceRegistration]::new('AgentoC-RunnerSupervisor',$plan.result.plan[0].command,$null)
+  $rollback=[RagentOwnerServiceRegistration]::new('Ragent-RunnerSupervisor',$plan.result.plan[0].command,$null)
   try{$rollback.RestrictPrivileges();$rollback.Rollback()}finally{$rollback.Dispose()}
-  if(Get-CimInstance Win32_Service -Filter "Name='AgentoC-RunnerSupervisor'"){throw 'OSPQ_ROLLBACK_SERVICE_REMAINS'}
+  if(Get-CimInstance Win32_Service -Filter "Name='Ragent-RunnerSupervisor'"){throw 'OSPQ_ROLLBACK_SERVICE_REMAINS'}
   $report.checks+='actual-created-handle-rollback'
   $prepared=Invoke-Preparation -Commit
   $report.prepared=$prepared
@@ -173,7 +173,7 @@ finally{
     foreach($name in $names){
       $service=Get-CimInstance Win32_Service -Filter "Name='$name'"
       if($service){
-        if($service.StartName -ine ('NT SERVICE\'+$name) -or $service.State -cne 'Stopped' -or $service.ProcessId -ne 0 -or -not $service.PathName.StartsWith(('"'+$product+'\AgentoC.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'OSPQ_CLEANUP_OWNERSHIP_REFUSED'}
+        if($service.StartName -ine ('NT SERVICE\'+$name) -or $service.State -cne 'Stopped' -or $service.ProcessId -ne 0 -or -not $service.PathName.StartsWith(('"'+$product+'\Ragent.ServiceHost.exe"'),[StringComparison]::Ordinal)){throw 'OSPQ_CLEANUP_OWNERSHIP_REFUSED'}
         $service=$null;& 'C:\Windows\System32\sc.exe' delete $name|Out-Null;if($LASTEXITCODE -ne 0){throw 'OSPQ_DELETE_FAILED'}
       }
     }

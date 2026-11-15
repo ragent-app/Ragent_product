@@ -6,11 +6,11 @@ import { join } from 'node:path';
 
 // Catalog tests must never install packages into the operator's managed
 // runtime. Availability depends on the host; installation has separate fixtures.
-const registryFixture = mkdtempSync(join(tmpdir(), 'agentoc-harness-registry-'));
-process.env.AGENTOC_CONFIG_DIR = join(registryFixture, 'config');
-process.env.AGENTOC_HARNESS_ROOT = join(registryFixture, 'harnesses');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const registryFixture = mkdtempSync(join(tmpdir(), 'ragent-harness-registry-'));
+process.env.RAGENT_CONFIG_DIR = join(registryFixture, 'config');
+process.env.RAGENT_HARNESS_ROOT = join(registryFixture, 'harnesses');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 
 const {
   getHarnessDefinition,

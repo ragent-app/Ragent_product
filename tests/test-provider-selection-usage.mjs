@@ -11,7 +11,7 @@ import { recordSelectionUsage } from '../lib/provider-runtime/run-provider-prepa
 const exec = promisify(execFile);
 
 test('concurrent processes preserve selections for different harnesses', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-selection-usage-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-selection-usage-'));
   try {
     const moduleUrl = pathToFileURL(join(process.cwd(), 'lib/provider-runtime/run-provider-prepare.mjs')).href;
     const child = `
@@ -37,7 +37,7 @@ test('concurrent processes preserve selections for different harnesses', async (
 });
 
 test('readers see the previous complete selection while an update is staged', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-selection-atomic-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-selection-atomic-'));
   try {
     await recordSelectionUsage(root, 'codex', 'previous');
     const path = join(root, 'native-provider-runtime', 'selection-usage.json');

@@ -1,7 +1,7 @@
 $ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue'
-$env:TEMP='G:\AgentoC\tmp';$env:TMP=$env:TEMP;$env:TMPDIR=$env:TEMP
-$id=[Guid]::NewGuid().ToString('N');$service='AgentoC-EarlyValidateQa-'+$id.Substring(0,10)
-$root=Join-Path 'G:\AgentoC\_qa\msi-relocation-20261102' ('early-validation-'+$id)
+$env:TEMP='G:\Ragent\tmp';$env:TMP=$env:TEMP;$env:TMPDIR=$env:TEMP
+$id=[Guid]::NewGuid().ToString('N');$service='Ragent-EarlyValidateQa-'+$id.Substring(0,10)
+$root=Join-Path 'G:\Ragent\_qa\msi-relocation-20261102' ('early-validation-'+$id)
 if(Test-Path -LiteralPath $root){throw 'ROOT_EXISTS'}
 New-Item -ItemType Directory -Path $root|Out-Null
 $source=Join-Path $root 'service.cs';$exe=Join-Path $root 'service.exe';$actionSource=Join-Path $root 'action.cs';$action=Join-Path $root 'action.exe';$msi=Join-Path $root 'probe.msi'
@@ -19,10 +19,10 @@ $csc='C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $wxs=Join-Path $root 'probe.wxs';$upgrade=[Guid]::NewGuid().ToString('B').ToUpperInvariant()
 @"
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
- <Package Name="AgentoC early validation isolated QA $id" Manufacturer="AgentoC QA" Version="0.0.1" UpgradeCode="$upgrade" Scope="perMachine" UpgradeStrategy="none">
+ <Package Name="Ragent early validation isolated QA $id" Manufacturer="Ragent QA" Version="0.0.1" UpgradeCode="$upgrade" Scope="perMachine" UpgradeStrategy="none">
   <MediaTemplate EmbedCab="yes" />
   <Property Id="INJECTFAIL" Secure="yes" />
-  <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="AgentoC-EarlyValidateQa-$id">
+  <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Ragent-EarlyValidateQa-$id">
    <Component Id="ProbeService" Guid="*"><File Id="ProbeExe" Source="$exe" KeyPath="yes" />
     <ServiceInstall Id="InstallProbe" Name="$service" DisplayName="$service" Type="ownProcess" Start="auto" Account="LocalSystem" ErrorControl="normal" />
     <ServiceControl Id="ControlProbe" Name="$service" Start="install" Stop="both" Remove="uninstall" Wait="yes" />

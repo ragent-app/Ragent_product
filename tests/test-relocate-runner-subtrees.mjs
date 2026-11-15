@@ -29,15 +29,15 @@ async function writeTree(base, spec) {
 }
 
 async function main() {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-relocate-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-relocate-'));
   try {
     // ── 1) no pair when the env target equals the legacy location ──────────
     {
       const configDir = join(root, 'config');
       const pairs = resolveSubtreePairs({
         env: {
-          AGENTOC_RUN_SPOOL_DIR: join(configDir, 'chat-runs'),
-          AGENTOC_PROVIDER_HOMES_DIR: join(configDir, 'provider-runtime-homes'),
+          RAGENT_RUN_SPOOL_DIR: join(configDir, 'chat-runs'),
+          RAGENT_PROVIDER_HOMES_DIR: join(configDir, 'provider-runtime-homes'),
         },
         configDir,
       });
@@ -160,14 +160,14 @@ async function main() {
       const configDir = join(root, 'c6');
       const pairs = resolveSubtreePairs({
         env: {
-          AGENTOC_RUN_SPOOL_DIR: '/var/lib/agentoc-run/results',
-          AGENTOC_PROVIDER_HOMES_DIR: join(configDir, 'provider-runtime-homes'),
+          RAGENT_RUN_SPOOL_DIR: '/var/lib/ragent-run/results',
+          RAGENT_PROVIDER_HOMES_DIR: join(configDir, 'provider-runtime-homes'),
         },
         configDir,
       });
       assert.equal(pairs.length, 1, 'only the spool differs from legacy');
       assert.equal(pairs[0].kind, 'spool');
-      assert.equal(pairs[0].target, '/var/lib/agentoc-run/results');
+      assert.equal(pairs[0].target, '/var/lib/ragent-run/results');
     }
 
     console.log('test-relocate-runner-subtrees: ok');

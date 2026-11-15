@@ -177,7 +177,7 @@ const fileEditActivity = buildRunActivityProjection([
     kind: 'file_edit',
     state: 'running',
     title: 'Editing file',
-    detail: '/srv/agentoc/static/chat/ui.js',
+    detail: '/srv/ragent/static/chat/ui.js',
     startSeq: 7,
     endSeq: 8,
   },

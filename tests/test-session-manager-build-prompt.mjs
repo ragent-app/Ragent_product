@@ -4,14 +4,14 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 
-const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'agentoc-build-prompt-'));
-process.env.AGENTOC_INSTANCE_ROOT = path.join(tempHome, 'instance');
+const tempHome = await fs.mkdtemp(path.join(os.tmpdir(), 'ragent-build-prompt-'));
+process.env.RAGENT_INSTANCE_ROOT = path.join(tempHome, 'instance');
 if (process.platform === 'win32') {
   process.env.USERPROFILE = tempHome;
   process.env.LOCALAPPDATA = path.join(tempHome, 'AppData', 'Local');
   process.env.APPDATA = path.join(tempHome, 'AppData', 'Roaming');
 }
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
+process.env.RAGENT_PUBLIC_BASE_URL = '';
 
 const { TOOLS_FILE } = await import('../lib/config.mjs');
 await fs.mkdir(path.dirname(TOOLS_FILE), { recursive: true });
@@ -122,7 +122,7 @@ for (const runtime of [
   );
   assert.ok(
     [envelope.prompt, envelope.developerInstructions, envelope.systemPrefix]
-      .some((carrier) => String(carrier || '').includes('<agentoc-session-labels>')),
+      .some((carrier) => String(carrier || '').includes('<ragent-session-labels>')),
     `${runtimeFamily} should receive the shared inline session-label contract`,
   );
 }

@@ -98,12 +98,12 @@ function loadCore() {
     AbortController,
   };
   vm.runInNewContext(RENDERED_SHAPE, context);
-  context.AgentocEventRenderPlanEnvironment = {
+  context.RagentEventRenderPlanEnvironment = {
     renderedEventState: null,
     hasRenderedEmptyState: true,
   };
   vm.runInNewContext(
-    'AgentocEventRenderPlanEnvironment.renderedEventState = renderedEventState;',
+    'RagentEventRenderPlanEnvironment.renderedEventState = renderedEventState;',
     context,
   );
   vm.runInNewContext(
@@ -111,7 +111,7 @@ function loadCore() {
     context,
     { filename: 'transport/event-render-plan.js' },
   );
-  const core = context.AgentocEventRenderPlanCore;
+  const core = context.RagentEventRenderPlanCore;
   return {
     api: {
       getNormalizedEventRenderType: (e) => core.getNormalizedEventRenderType(e),

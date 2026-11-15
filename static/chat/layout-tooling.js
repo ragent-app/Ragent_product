@@ -327,7 +327,7 @@ function focusComposer({ force = false, preventScroll = false } = {}) {
   return true;
 }
 
-window.AgentoCLayout = {
+window.RagentLayout = {
   getState: getLayoutState,
   getViewportHeight: getViewportHeightPx,
   requestPass: requestLayoutPass,
@@ -353,8 +353,8 @@ function initResponsiveLayout() {
   }
   if (!chatLayoutMotionCleanup) {
     const chatArea = document.querySelector(".chat-area");
-    if (chatArea && typeof window.AgentoCMotion?.observeLayout === "function") {
-      chatLayoutMotionCleanup = window.AgentoCMotion.observeLayout(chatArea, {
+    if (chatArea && typeof window.RagentMotion?.observeLayout === "function") {
+      chatLayoutMotionCleanup = window.RagentMotion.observeLayout(chatArea, {
         // Composer, Live Bar, and queued messages each own their own
         // transitions. Do not FLIP them again from the page-level observer:
         // two motion owners are what makes those surfaces twitch during

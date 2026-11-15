@@ -66,4 +66,4 @@ API 可以保留原方案的 `/api/responsibilities` 用户入口，但内部通
 
 责任 API 目前限定同实例认证的 owner；跨设备及受限代理身份尚需可信账户映射。每日预算采用 policy.dailyBudget 的 timeZone、maxRuns、maxTokens、maxCost，首次预留固定时区；改变时区需要迁移协议，未承诺运行费用硬上限。以上为源码记录，重启恢复、真实业务、平台兼容和发布均未验收。
 
-责任后台默认关闭；只有设置 `AGENTOC_RESPONSIBILITY_RUNTIME_ENABLED=1` 才扫描和处理唤醒，单独的 Factory 控制、调度和组织授权仍须满足。等待状态按原因变更记录活动并冷却，周期合并保留累计数及首末到期时间；同一仓库事实摘要复用已有记录。新政策版本和新 CI 事件有独立身份，不沿用旧 wake 的冷却。记忆修改预览可读，提交默认关闭，须设置 `AGENTOC_RESPONSIBILITY_MEMORY_WRITES_ENABLED=1`，且必须确认有效预览摘要；实际业务与恢复仍未验收。
+责任后台默认关闭；只有设置 `RAGENT_RESPONSIBILITY_RUNTIME_ENABLED=1` 才扫描和处理唤醒，单独的 Factory 控制、调度和组织授权仍须满足。等待状态按原因变更记录活动并冷却，周期合并保留累计数及首末到期时间；同一仓库事实摘要复用已有记录。新政策版本和新 CI 事件有独立身份，不沿用旧 wake 的冷却。记忆修改预览可读，提交默认关闭，须设置 `RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED=1`，且必须确认有效预览摘要；实际业务与恢复仍未验收。

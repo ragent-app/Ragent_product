@@ -19,7 +19,7 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PROJECT_ROOT = join(__dirname, '..')
 
-const DEFAULT_STORAGE_DIR = join(homedir(), '.config', 'agentoc', 'proactive-observer')
+const DEFAULT_STORAGE_DIR = join(homedir(), '.config', 'ragent', 'proactive-observer')
 const DEFAULT_CONFIG_PATH = join(DEFAULT_STORAGE_DIR, 'config.json')
 const DEFAULT_STATE_PATH = join(DEFAULT_STORAGE_DIR, 'state.json')
 const DEFAULT_EVENTS_LOG_PATH = join(DEFAULT_STORAGE_DIR, 'events.jsonl')
@@ -97,7 +97,7 @@ function normalizeBoolean(value, fallback = false) {
 
 function normalizeSystemPrompt(value) {
   const normalized = trimString(value)
-  if (!normalized || normalized === DEFAULT_SYSTEM_PROMPT || normalized === DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') || normalized === LEGACY_DEFAULT_SYSTEM_PROMPT) {
+  if (!normalized || normalized === DEFAULT_SYSTEM_PROMPT || normalized === DEFAULT_SYSTEM_PROMPT.replace('Ragent', 'Ragent') || normalized === LEGACY_DEFAULT_SYSTEM_PROMPT) {
     return ''
   }
   return normalized
@@ -197,7 +197,7 @@ function normalizeCameraConfig(value) {
 
 function normalizeVisionConfig(value) {
   const normalized = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-  const defaultDetectorCommand = `swift "${join(PROJECT_ROOT, 'scripts', 'proactive-observer-human-detect.swift')}" --image "$AGENTOC_OBSERVER_IMAGE_PATH"`
+  const defaultDetectorCommand = `swift "${join(PROJECT_ROOT, 'scripts', 'proactive-observer-human-detect.swift')}" --image "$RAGENT_OBSERVER_IMAGE_PATH"`
   return {
     enabled: normalizeBoolean(normalized.enabled, true),
     detectorCommand: trimString(normalized.detectorCommand || defaultDetectorCommand),
@@ -209,7 +209,7 @@ function normalizeVisionConfig(value) {
 
 function normalizeSpeechConfig(value) {
   const normalized = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
-  const defaultListenCommand = `swift "${join(PROJECT_ROOT, 'scripts', 'proactive-observer-listen-once.swift')}" --timeout-ms "$AGENTOC_OBSERVER_SPEECH_TIMEOUT_MS"`
+  const defaultListenCommand = `swift "${join(PROJECT_ROOT, 'scripts', 'proactive-observer-listen-once.swift')}" --timeout-ms "$RAGENT_OBSERVER_SPEECH_TIMEOUT_MS"`
   return {
     enabled: normalizeBoolean(normalized.enabled, true),
     listenCommand: trimString(normalized.listenCommand || defaultListenCommand),
@@ -428,7 +428,7 @@ function buildSessionDescription(runtimeConfig, trigger, event) {
   return pieces.join(' ')
 }
 
-export function buildAgentoCMessage(runtimeConfig, trigger, episode, event) {
+export function buildRagentMessage(runtimeConfig, trigger, episode, event) {
   const lines = [
     'Inbound proactive observer event from a standalone local service.',
     `Episode ID: ${episode.episodeId}`,
@@ -468,15 +468,15 @@ function buildRequestId(runtimeConfig, episode, event) {
 
 function buildProcessEnv(runtime, event = {}, extra = {}) {
   return {
-    AGENTOC_OBSERVER_CONNECTOR_ID: runtime.config.connectorId,
-    AGENTOC_OBSERVER_ROOM_NAME: runtime.config.roomName,
-    AGENTOC_OBSERVER_STORAGE_DIR: runtime.storagePaths.storageDir,
-    AGENTOC_OBSERVER_EVENT_ID: trimString(event.eventId),
-    AGENTOC_OBSERVER_EVENT_TYPE: trimString(event.type),
-    AGENTOC_OBSERVER_IMAGE_PATH: trimString(event.imagePath),
-    AGENTOC_OBSERVER_TRANSCRIPT: normalizeMultilineText(event.transcript),
-    AGENTOC_OBSERVER_SPEECH_TIMEOUT_MS: String(runtime.config.speech.timeoutMs || DEFAULT_SPEECH_TIMEOUT_MS),
-    ...(extra.replyText ? { AGENTOC_OBSERVER_REPLY_TEXT: String(extra.replyText) } : {}),
+    RAGENT_OBSERVER_CONNECTOR_ID: runtime.config.connectorId,
+    RAGENT_OBSERVER_ROOM_NAME: runtime.config.roomName,
+    RAGENT_OBSERVER_STORAGE_DIR: runtime.storagePaths.storageDir,
+    RAGENT_OBSERVER_EVENT_ID: trimString(event.eventId),
+    RAGENT_OBSERVER_EVENT_TYPE: trimString(event.type),
+    RAGENT_OBSERVER_IMAGE_PATH: trimString(event.imagePath),
+    RAGENT_OBSERVER_TRANSCRIPT: normalizeMultilineText(event.transcript),
+    RAGENT_OBSERVER_SPEECH_TIMEOUT_MS: String(runtime.config.speech.timeoutMs || DEFAULT_SPEECH_TIMEOUT_MS),
+    ...(extra.replyText ? { RAGENT_OBSERVER_REPLY_TEXT: String(extra.replyText) } : {}),
   }
 }
 
@@ -549,7 +549,7 @@ async function loginWithToken(baseUrl, token) {
   })
   const setCookie = response.headers.get('set-cookie')
   if (response.status !== 302 || !setCookie) {
-    throw new Error(`Failed to authenticate to AgentoC at ${baseUrl} (status ${response.status})`)
+    throw new Error(`Failed to authenticate to Ragent at ${baseUrl} (status ${response.status})`)
   }
   return setCookie.split(';')[0]
 }
@@ -619,7 +619,7 @@ async function ensureAuthCookie(runtime, forceRefresh = false) {
   return runtime.authCookie
 }
 
-async function requestAgentoC(runtime, path, options = {}) {
+async function requestRagent(runtime, path, options = {}) {
   const cookie = await ensureAuthCookie(runtime, false)
   let result = await requestJson(runtime.config.chatBaseUrl, path, { ...options, cookie })
   if ([401, 403].includes(result.response.status)) {
@@ -641,7 +641,7 @@ async function createEpisodeSession(runtime, trigger, episode, event) {
     systemPrompt: runtime.config.systemPrompt,
     externalTriggerId: buildEpisodeExternalTriggerId(runtime.config, trigger, episode),
   }
-  const result = await requestAgentoC(runtime, '/api/sessions', {
+  const result = await requestRagent(runtime, '/api/sessions', {
     method: 'POST',
     body: payload,
   })
@@ -673,7 +673,7 @@ async function readImageAsAttachment(imagePath, maxBytes) {
 async function submitEpisodeMessage(runtime, sessionId, trigger, episode, event) {
   const payload = {
     requestId: buildRequestId(runtime.config, episode, event),
-    text: buildAgentoCMessage(runtime.config, trigger, episode, event),
+    text: buildRagentMessage(runtime.config, trigger, episode, event),
     tool: runtime.config.sessionTool,
     thinking: runtime.config.thinking === true,
   }
@@ -683,7 +683,7 @@ async function submitEpisodeMessage(runtime, sessionId, trigger, episode, event)
     payload.images = await readImageAsAttachment(event.imagePath, runtime.config.maxImageBytes)
   }
 
-  const result = await requestAgentoC(runtime, `/api/sessions/${sessionId}/messages`, {
+  const result = await requestRagent(runtime, `/api/sessions/${sessionId}/messages`, {
     method: 'POST',
     body: payload,
   })
@@ -700,7 +700,7 @@ async function submitEpisodeMessage(runtime, sessionId, trigger, episode, event)
 async function waitForRunCompletion(runtime, runId) {
   const deadline = Date.now() + DEFAULT_RUN_POLL_TIMEOUT_MS
   while (Date.now() < deadline) {
-    const result = await requestAgentoC(runtime, `/api/runs/${runId}`)
+    const result = await requestRagent(runtime, `/api/runs/${runId}`)
     if (!result.response.ok || !result.json?.run) {
       throw new Error(result.json?.error || result.text || `Failed to load run ${runId}`)
     }
@@ -718,7 +718,7 @@ function normalizeSpokenReplyText(value) {
   return stripHiddenBlocks(value || '').replace(/\s+/g, ' ').trim()
 }
 
-async function generateAgentoCReply(runtime, trigger, episode, event) {
+async function generateRagentReply(runtime, trigger, episode, event) {
   if (!episode.sessionId) {
     const session = await createEpisodeSession(runtime, trigger, episode, event)
     episode.sessionId = session.id
@@ -728,7 +728,7 @@ async function generateAgentoCReply(runtime, trigger, episode, event) {
   const submission = await submitEpisodeMessage(runtime, episode.sessionId, trigger, episode, event)
   await waitForRunCompletion(runtime, submission.runId)
   const replyEvent = await loadAssistantReply(
-    (path) => requestAgentoC(runtime, path),
+    (path) => requestRagent(runtime, path),
     episode.sessionId,
     submission.runId,
     submission.requestId,
@@ -957,7 +957,7 @@ async function processTranscriptEvent(runtime, transcriptEvent) {
     return { ignored: true, reason: 'missing_trigger' }
   }
 
-  const reply = await generateAgentoCReply(runtime, trigger, episode, transcriptEvent)
+  const reply = await generateRagentReply(runtime, trigger, episode, transcriptEvent)
   if (reply.replyText) {
     await speakReply(runtime, reply.replyText, transcriptEvent)
   }
@@ -999,7 +999,7 @@ export async function processArrivalEvent(runtime, arrivalEvent, options = {}) {
       imagePath: arrivalEvent.imagePath,
     })
 
-    const reply = await generateAgentoCReply(runtime, trigger, episode, arrivalEvent)
+    const reply = await generateRagentReply(runtime, trigger, episode, arrivalEvent)
     if (reply.replyText) {
       await speakReply(runtime, reply.replyText, arrivalEvent)
     }
@@ -1096,7 +1096,7 @@ async function analyzeSnapshot(runtime, imagePath) {
   const result = await runShellCommand(runtime.config.vision.detectorCommand, {
     env: {
       ...runtime.config.vision.env,
-      AGENTOC_OBSERVER_IMAGE_PATH: imagePath,
+      RAGENT_OBSERVER_IMAGE_PATH: imagePath,
     },
     timeoutMs: Math.max(runtime.config.camera.intervalMs, 10000),
   })
@@ -1299,8 +1299,8 @@ async function stopRuntime(runtime) {
 }
 
 function printConfigTemplate() {
-  const detectorCommand = `swift \"${join(PROJECT_ROOT, 'scripts', 'proactive-observer-human-detect.swift')}\" --image \"$AGENTOC_OBSERVER_IMAGE_PATH\"`
-  const listenCommand = `swift \"${join(PROJECT_ROOT, 'scripts', 'proactive-observer-listen-once.swift')}\" --timeout-ms \"$AGENTOC_OBSERVER_SPEECH_TIMEOUT_MS\"`
+  const detectorCommand = `swift \"${join(PROJECT_ROOT, 'scripts', 'proactive-observer-human-detect.swift')}\" --image \"$RAGENT_OBSERVER_IMAGE_PATH\"`
+  const listenCommand = `swift \"${join(PROJECT_ROOT, 'scripts', 'proactive-observer-listen-once.swift')}\" --timeout-ms \"$RAGENT_OBSERVER_SPEECH_TIMEOUT_MS\"`
   console.log(`{
   "connectorId": "home-observer",
   "roomName": "Living Room",

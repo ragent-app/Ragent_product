@@ -24,7 +24,7 @@ import { mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { formatBytes, migrateRunSpool, scanAllRunSpools } from '../chat/run-spool-reclaim.mjs';
 
-const DEFAULT_ROOT = '/var/lib/agentoc/config';
+const DEFAULT_ROOT = '/var/lib/ragent/config';
 
 function parseArgs(argv) {
   const out = {

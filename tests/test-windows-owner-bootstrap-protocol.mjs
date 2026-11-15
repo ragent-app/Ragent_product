@@ -3,7 +3,7 @@ import {test} from 'node:test';
 import {randomUUID,randomBytes} from 'node:crypto';
 import {createOwnerBootstrapIssuer,validateOwnerBootstrapPolicy} from '../lib/windows-owner-bootstrap-protocol.mjs';
 const ownerSid='S-1-5-21-1-2-3-1001',controlSid='S-1-5-80-1-2-3-4-5';
-function fixture(){let now=100000,calls=0;const policy={pipeName:'agentoc-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:randomUUID(),requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:now+10000,controlSid,ownerSid,ownerSessionId:1};
+function fixture(){let now=100000,calls=0;const policy={pipeName:'ragent-owner-bootstrap-'+randomBytes(16).toString('hex'),instanceId:randomUUID(),requestId:randomBytes(16).toString('hex'),expiresAtUnixMs:now+10000,controlSid,ownerSid,ownerSessionId:1};
   const event={kind:'request',facts:{sid:ownerSid,sessionId:1,pid:4321,createdTicks:'134368500000000000',integrityRid:8192,elevated:false,enabledAdministrators:false,queryOnlyAuthorityVerified:true},
     frame:{version:1,operation:'owner.bootstrap',instanceId:policy.instanceId,requestId:policy.requestId,expiresAtUnixMs:policy.expiresAtUnixMs,challenge:randomBytes(32).toString('base64url')}};
   return {policy,event,clock:()=>now,advance:()=>now+=11000,issue:async()=>{calls++;return 'a'.repeat(64);},calls:()=>calls};}

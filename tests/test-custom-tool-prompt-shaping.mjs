@@ -74,10 +74,10 @@ async function resolveMessageContent(port, sessionId, event) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-custom-prompt-shape-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const memoryDir = join(home, '.agentoc', 'memory');
-  const workDir = join(home, '.agentoc', 'workspace');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-custom-prompt-shape-'));
+  const configDir = join(home, '.config', 'ragent');
+  const memoryDir = join(home, '.ragent', 'memory');
+  const workDir = join(home, '.ragent', 'workspace');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(memoryDir, { recursive: true });
@@ -174,22 +174,22 @@ async function startServer({ home, configDir, memoryDir, workDir, localBin, port
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_RUNNER_LAUNCH_MODE: "",
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: "",
-      AGENTOC_RUNNER_LIFECYCLE_REQUIRED: "",
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_PROJECT_ROOT: repoRoot,
-      AGENTOC_PROVIDER_HOMES_DIR: '',
-      AGENTOC_RUN_SPOOL_DIR: '',
-      AGENTOC_USER_SHELL_ENV_B64: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_LAUNCH_MODE: "",
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: "",
+      RAGENT_RUNNER_LIFECYCLE_REQUIRED: "",
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_PROJECT_ROOT: repoRoot,
+      RAGENT_PROVIDER_HOMES_DIR: '',
+      RAGENT_RUN_SPOOL_DIR: '',
+      RAGENT_USER_SHELL_ENV_B64: '',
       HOME: home,
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: memoryDir,
-      AGENTOC_WORK_ROOT_DIR: workDir,
-      AGENTOC_AUTH_SESSION_SECRET: 'test-auth-session-secret',
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: memoryDir,
+      RAGENT_WORK_ROOT_DIR: workDir,
+      RAGENT_AUTH_SESSION_SECRET: 'test-auth-session-secret',
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
       PATH: `${localBin}:${process.env.PATH || ''}`,

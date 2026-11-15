@@ -126,7 +126,7 @@ function sampleBatch() {
     batchId: batch.batchId,
     category: CATEGORY_INSTALL,
     checkedOpIds: [],
-  }, store, { source: 'agentoc_auto_policy' });
+  }, store, { source: 'ragent_auto_policy' });
   check('unattended install has no approved operation', denied.approved.length === 0);
   check('unattended install is denied', denied.denied.length === batch.installAuto.length);
   const duplicate = await resolvePrivilegedCategoryApproval({

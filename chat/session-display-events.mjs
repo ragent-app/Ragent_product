@@ -408,7 +408,7 @@ export function buildSessionDisplayEvents(history = [], { projectRoot = '', home
   const markdownRewrites = buildRewriteMap(source, 'localMarkdownImageRewrites');
   const resultRewrites = buildRewriteMap(source, 'localResultFileRewrites');
   const replacedMessageSeqs = new Set(source
-    .filter((event) => event?.type === 'plan' && event.source === 'agentoc-plan-fallback')
+    .filter((event) => event?.type === 'plan' && event.source === 'ragent-plan-fallback')
     .map((event) => Number.isInteger(event.sourceMessageSeq) ? event.sourceMessageSeq : 0)
     .filter((seq) => seq > 0));
   const operationProjection = buildOperationProjection(source, { projectRoot, home });

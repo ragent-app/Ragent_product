@@ -55,7 +55,7 @@ if(!process.argv.includes('--live')){
   if(crossServiceProvider){
     const providerBuild=await exec(join(windows,'Microsoft.NET/Framework64/v4.0.30319/csc.exe'),['/nologo','/utf8output','/target:exe','/platform:x64','/r:System.Web.Extensions.dll',`/out:${join(bundle,'RestrictedProviderCandidate.exe')}`,join(source,'native/windows-restricted-provider-candidate.cs')],{windowsHide:true,timeout:30000,maxBuffer:32768});
     await writeFile(join(bundle,'provider-build.log'),providerBuild.stdout+providerBuild.stderr);
-    await copyFile('C:/ProgramData/AgentoC/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe',join(bundle,'claude.exe'));
+    await copyFile('C:/ProgramData/Ragent/harnesses/claude/node_modules/@anthropic-ai/claude-code/bin/claude.exe',join(bundle,'claude.exe'));
     for(const file of providerFiles.slice(2)){await mkdir(dirname(join(bundle,file)),{recursive:true});await copyFile(join(source,file),join(bundle,file));}
   }
   if(crossServiceOwnerBootstrap||crossServiceCredentialChannel){
@@ -95,7 +95,7 @@ if(!process.argv.includes('--live')){
     for(const row of ownerRows){await mkdir(dirname(join(bundle,row.path)),{recursive:true});await copyFile(join(source,row.path),join(bundle,row.path));}
     await writeFile(join(bundle,'owner-files.json'),JSON.stringify({version:1,files:ownerRows}));
   }
-  let nodeSource='C:/Program Files/AgentoC/payload/node.exe';
+  let nodeSource='C:/Program Files/Ragent/payload/node.exe';
   if(process.argv.includes('--frozen-internal-node')){
     nodeSource=join(evidence,'bundle-c62e7d1319543507823ed7728b247518/node.exe');
     if(hash(await readFile(nodeSource))!=='2ffe3acc0458fdde999f50d11809bbe7c9b7ef204dcf17094e325d26ace101d8')throw new Error('Frozen internal Node mismatch');
@@ -107,7 +107,7 @@ if(!process.argv.includes('--live')){
   for(const file of [...runtimeFiles(crossServiceIpc,crossServiceProvider).filter(file=>!ownerRows.some(row=>row.path===file)||providerFiles.includes(file)||ipcFiles.includes(file)),'bootstrap.ps1'])manifest[file]=hash(await readFile(join(bundle,file)));
   if(crossServiceCredentialProvider){
     const {createNativeProviderRegistry}=await import('../lib/provider-runtime/registry.mjs');
-    const registry=createNativeProviderRegistry({configDir:'C:/ProgramData/AgentoC/instances/owner/config'});
+    const registry=createNativeProviderRegistry({configDir:'C:/ProgramData/Ragent/instances/owner/config'});
     const selected=(await registry.listProviderProfiles()).find(row=>row.agentType==='claude'&&row.enabled!==false&&row.status==='ready'&&row.protocol==='anthropic-messages');
     if(!selected)throw new Error('Selected Claude static Provider unavailable');
     const auth=await registry.getAuthProfile(selected.authProfileId);
@@ -118,13 +118,13 @@ if(!process.argv.includes('--live')){
     manifest.providerSource={profileId:selected.id,profileRevision:selected.revision,authRevision:auth.revision,baseUrl:selected.baseUrl,model:selected.modelPolicy.defaultModel};
   }
   await writeFile(join(bundle,'manifest.json'),JSON.stringify(manifest,null,2));
-  const selfParent=join(process.env.LOCALAPPDATA,'AgentoC/identity-qa');await mkdir(selfParent,{recursive:true});await noReparse(selfParent);
+  const selfParent=join(process.env.LOCALAPPDATA,'Ragent/identity-qa');await mkdir(selfParent,{recursive:true});await noReparse(selfParent);
   const self=join(selfParent,'case-'+id);await mkdir(self);
   try{
     for(const path of ['runtime','workspace','extra-workspace','state','state/selftest'])await mkdir(join(self,path));
     for(const file of runtimeFiles(crossServiceIpc,crossServiceProvider)){await mkdir(dirname(join(self,'runtime',file)),{recursive:true});await copyFile(join(bundle,file),join(self,'runtime',file));}
     await copyFile(join(bundle,'manifest.json'),join(self,'manifest.json'));
-    await writeFile(join(self,'.agentoc-identity-qa'),'case-'+id);
+    await writeFile(join(self,'.ragent-identity-qa'),'case-'+id);
     await writeFile(join(self,'workspace/input.csv'),'name,amount\nalpha,17\nbeta,11\nalpha,25\n');
     let stdout;
     try{({stdout}=await exec(join(self,'runtime/IdentityCanary.exe'),['--self-test',self],{windowsHide:true,timeout:35000,maxBuffer:65536}));}
@@ -166,13 +166,13 @@ if(!process.argv.includes('--live')){
   const encoded=Buffer.from(command,'utf16le').toString('base64');
   const launcher=`$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';${powershellUtf8}$qaStage='request-elevation';try{$qaProcess=Start-Process -FilePath ${quote(powershell)} -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',${quote(encoded)}) -Verb RunAs -WindowStyle Hidden -PassThru;$qaStage='wait-for-bootstrap';$qaProcess.WaitForExit();$qaStage='read-exit-code';$qaExitCode=$qaProcess.ExitCode;if($null -eq $qaExitCode){throw 'Elevated process exit code unavailable'};exit $qaExitCode}catch{$qaNative=$_.Exception;while($qaNative.InnerException){$qaNative=$qaNative.InnerException};[pscustomobject]@{phase='uac-launch';stage=$qaStage;type=$qaNative.GetType().Name;nativeErrorCode=$qaNative.NativeErrorCode;message=$qaNative.Message}|ConvertTo-Json -Compress;exit 1}`;
   await writeFile(join(bundle,'launch-intent.json'),JSON.stringify({caseId:manifest.caseId,manifestSha256:prepared.manifestSha256,bootstrapSha256:manifest['bootstrap.ps1'],
-    serviceNames:['Control','Executor'].map(role=>'AgentoC-IdentityQA-'+role+'-'+manifest.caseId),protectedRoot:join(process.env.ProgramData,'AgentoCIdentityQA','case-'+manifest.caseId),startBefore:new Date(startBeforeMs).toISOString(),productionChanged:false},null,2));
+    serviceNames:['Control','Executor'].map(role=>'Ragent-IdentityQA-'+role+'-'+manifest.caseId),protectedRoot:join(process.env.ProgramData,'RagentIdentityQA','case-'+manifest.caseId),startBefore:new Date(startBeforeMs).toISOString(),productionChanged:false},null,2));
   let launchFailure;
   try{
     await exec(powershell,['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(launcher,'utf16le').toString('base64')],{windowsHide:true,timeout:manifest.crossServiceProvider?420000:240000,maxBuffer:32768});
   }catch(error){launchFailure=error;await writeFile(join(bundle,'launch-failure.json'),JSON.stringify({code:error.code,killed:error.killed,stdout:error.stdout,stderr:error.stderr}));
   }finally{
-    const exported=join(process.env.ProgramData,'AgentoCIdentityQA','case-'+manifest.caseId,'export');
+    const exported=join(process.env.ProgramData,'RagentIdentityQA','case-'+manifest.caseId,'export');
     try{
       for(const file of await readdir(exported))if(/^(summary|desktop-preparer-report|(?:control|executor)-(?:service|node)-report)\.json$/.test(file))await copyFile(join(exported,file),join(bundle,file));
       const summary=JSON.parse(await readFile(join(bundle,'summary.json'),'utf8'));

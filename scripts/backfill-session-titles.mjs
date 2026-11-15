@@ -61,7 +61,7 @@ const pending = sessions.filter((session) => (
 let backupPath = '';
 if (APPLY && pending.length > 0) {
   if (await isChatPlaneRunning()) {
-    throw new Error(`Refusing live metadata backfill while the chat plane is reachable on port ${CHAT_PORT}; stop the matching AgentoC instance, rerun --apply, then start it again.`);
+    throw new Error(`Refusing live metadata backfill while the chat plane is reachable on port ${CHAT_PORT}; stop the matching Ragent instance, rerun --apply, then start it again.`);
   }
   const stamp = new Date().toISOString().replace(/[:.]/gu, '-');
   backupPath = `${CHAT_SESSIONS_FILE}.titles-${stamp}.bak`;

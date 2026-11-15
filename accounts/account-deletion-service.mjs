@@ -39,7 +39,7 @@ export function createAccountDeletionService({pool,schema='public',googleWebClie
   let observed=0;
   function now(){const value=clock();if(!Number.isSafeInteger(value)||value<observed||value<0||value>8640000000000000-300_000)fail('account_deletion_clock_invalid',503);return value;}
   const verifiers=Object.fromEntries(Object.entries(audiences).map(([channel,clientIds])=>[channel,createGoogleIdTokenVerifier({clientIds,fetchImpl:boundedJwksFetch(fetchImpl),clock:now,requireNonce:true})]));
-  async function transaction(run,{readOnly=false,lock='agentoc_accounts_store_v1'}={}){
+  async function transaction(run,{readOnly=false,lock='ragent_accounts_store_v1'}={}){
     const client=await pool.connect();
     try{
       await client.query(readOnly?'begin isolation level repeatable read read only':'begin');
@@ -81,7 +81,7 @@ export function createAccountDeletionService({pool,schema='public',googleWebClie
       if(row.deletion_requested_at)fail('account_deletion_pending',410);
       return{accountId:row.account_id,providerSubject:row.provider_subject,confirmationId:row.confirmation_id,requestId,
         receiptSecretHash:row.receipt_secret_hash,issuedAt:stamp(row.verified_at),expiresAt:stamp(row.expires_at),
-        purpose:'delete-account-and-associated-data',audience:'agentoc-account-deletion'};
+        purpose:'delete-account-and-associated-data',audience:'ragent-account-deletion'};
     });
   }});
   async function lookup(input){shape(input,['requestId','receiptSecret']);id(input.requestId);secret(input.receiptSecret);return core.getReceipt(input);}
@@ -116,7 +116,7 @@ export function createAccountDeletionService({pool,schema='public',googleWebClie
       return{schemaVersion:1,phase:'challenge',requestId,confirmationId:row.confirmation_id,nonce:row.nonce,
         expiresAt:new Date(row.expires_at).toISOString(),channel:row.channel,googleClientId:audiences[row.channel][0],
         purpose:'delete-account-and-associated-data'};
-    },{lock:'agentoc_account_deletion_confirmations_v1'});
+    },{lock:'ragent_account_deletion_confirmations_v1'});
   }
 
   async function verifyGoogle(input){
@@ -174,7 +174,7 @@ export function createAccountDeletionService({pool,schema='public',googleWebClie
   let stopped=true,timer=null,active=null,lastFailure=null,failures=0;
   async function runWorkerBatch(){
     await transaction(async client=>{const at=await authNow(client);return client.query(`delete from account_deletion_confirmations where request_id in
-      (select request_id from account_deletion_confirmations where expires_at<=$1 limit 128)`,[new Date(at).toISOString()]);},{lock:'agentoc_account_deletion_confirmations_v1'});
+      (select request_id from account_deletion_confirmations where expires_at<=$1 limit 128)`,[new Date(at).toISOString()]);},{lock:'ragent_account_deletion_confirmations_v1'});
     const jobs=await transaction(async client=>(await client.query(`select job_id from account_deletion_jobs
       where cloud_erased_at is null order by requested_at,job_id limit 8`)).rows,{readOnly:true});
     let failure;

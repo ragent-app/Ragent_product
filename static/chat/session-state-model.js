@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCSessionStateModel(root) {
+(function attachRagentSessionStateModel(root) {
   const fallbackStrings = {
     "status.idle": "idle",
     "status.running": "running",
@@ -60,8 +60,8 @@
     ));
   }
 
-  const t = root.agentocT
-    ? (key, vars) => root.agentocT(key, vars)
+  const t = root.ragentT
+    ? (key, vars) => root.ragentT(key, vars)
     : fallbackTranslate;
   const workflowPrioritySpecs = {
     high: {
@@ -176,7 +176,7 @@
   // -- waiting/profile classification -------------------------------------------------
   // Resolve the SEPARATE waiting states the Live Bar surfaces for a pending
   // user action. The server workflow state only knows "waiting_user"; the live
-  // pending approval event (AgentoCDecisions) carries the kind (plan/question/
+  // pending approval event (RagentDecisions) carries the kind (plan/question/
   // command/permissions) and risk so the user sees exactly what they are being
   // asked to do: approve a plan, approve a dangerous action, approve a generic
   // action, or answer a question.
@@ -747,7 +747,7 @@
     return String(a?.id || "").localeCompare(String(b?.id || ""));
   }
 
-  root.AgentoCSessionStateModel = {
+  root.RagentSessionStateModel = {
     createEmptyStatus,
     normalizeSessionWorkflowPriority,
     normalizeSessionWorkflowState,

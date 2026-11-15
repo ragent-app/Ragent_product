@@ -1,6 +1,6 @@
 import { win32 } from 'node:path';
 
-// Trust only the exact AgentoC-owned definition reported by the app-server.
+// Trust only the exact Ragent-owned definition reported by the app-server.
 // Writes target the private run overlay, never the owner's provider config.
 export function createCodexManagedHookSetup({ cwd, configPath, sourcePath = configPath, source = 'user', matcher = '^Bash$', command, nextRequestId, send, onDone, timeoutMs = 10000 } = {}) {
   let pending = null; let phase = 'idle'; let timer = null; let selected = null;

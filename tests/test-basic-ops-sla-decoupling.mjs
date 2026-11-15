@@ -23,24 +23,24 @@ function assertNoRequires(unitText, unitName, forbiddenUnit) {
 }
 
 const chatServer = read('chat-server.mjs');
-const agentocUnit = read('packaging/deb/agentoc.service');
-const runnerSupervisorService = read('packaging/deb/agentoc-runner-supervisor.service');
-const privilegedUnit = read('packaging/deb/agentoc-privileged-executor.service');
+const ragentUnit = read('packaging/deb/ragent.service');
+const runnerSupervisorService = read('packaging/deb/ragent-runner-supervisor.service');
+const privilegedUnit = read('packaging/deb/ragent-privileged-executor.service');
 
 for (const forbidden of [
-  'agentoc-maintenance-broker.service',
-  'agentoc-maintenance-control.service',
-  'agentoc-privileged-executor.service',
+  'ragent-maintenance-broker.service',
+  'ragent-maintenance-control.service',
+  'ragent-privileged-executor.service',
 ]) {
-  assertNoRequires(agentocUnit, 'agentoc.service', forbidden);
+  assertNoRequires(ragentUnit, 'ragent.service', forbidden);
 }
 
-assert.match(agentocUnit, /^Requires=agentoc-runner-supervisor\.service$/m);
-assert.match(agentocUnit, /^Restart=always$/m);
-assert.doesNotMatch(agentocUnit, /^ConditionPathExists=.*privileged/m);
+assert.match(ragentUnit, /^Requires=ragent-runner-supervisor\.service$/m);
+assert.match(ragentUnit, /^Restart=always$/m);
+assert.doesNotMatch(ragentUnit, /^ConditionPathExists=.*privileged/m);
 assert.equal(unitValue(privilegedUnit, 'Restart'), 'on-failure');
-assert.doesNotMatch(agentocUnit, /agentoc-maintenance|maintenance-control/);
-assert.doesNotMatch(runnerSupervisorService, /agentoc-maintenance|maintenance-control/);
+assert.doesNotMatch(ragentUnit, /ragent-maintenance|maintenance-control/);
+assert.doesNotMatch(runnerSupervisorService, /ragent-maintenance|maintenance-control/);
 
 assert.match(chatServer, /req\.method === 'GET' && req\.url === '\/healthz'/);
 assert.match(chatServer, /writeHealthz\(res\);\s*return;/);

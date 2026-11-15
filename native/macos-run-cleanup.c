@@ -149,8 +149,8 @@ int main(int argc, char **argv) {
     if (pids[i] > 1 && info(pids[i], &p) && p.uid == getuid()) items[count++] = p;
   }
   free(pids);
-  char tag[sizeof("AGENTOC_RUN_ID=") + 160];
-  snprintf(tag, sizeof(tag), "AGENTOC_RUN_ID=%s", argv[2]);
+  char tag[sizeof("RAGENT_RUN_ID=") + 160];
+  snprintf(tag, sizeof(tag), "RAGENT_RUN_ID=%s", argv[2]);
   int incomplete = 0;
   for (size_t i = 0; i < count; i++) {
     if (items[i].pid == root || !beneath(items, count, i, root)) continue;

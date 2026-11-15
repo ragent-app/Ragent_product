@@ -10,12 +10,12 @@ import { mkdirSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-provisioning-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-provisioning-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_INSTANCE_ROOT = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-process.env.AGENTOC_ORG_SCHEMA_ENABLED = '1';
-process.env.AGENTOC_ORG_AUTONOMOUS_PROVISIONING_ENABLED = '1';
+process.env.RAGENT_INSTANCE_ROOT = tempHome;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+process.env.RAGENT_ORG_SCHEMA_ENABLED = '1';
+process.env.RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED = '1';
 mkdirSync(join(tempHome, 'workspace'), { recursive: true });
 
 const store = await import('../chat/organization-store.mjs');
@@ -183,7 +183,7 @@ const childOut = execFileSync(process.execPath, ['--input-type=module', '--eval'
 `], {
   env: {
     ...process.env,
-    AGENTOC_ORG_AUTONOMOUS_PROVISIONING_ENABLED: '',
+    RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED: '',
   },
   encoding: 'utf8',
 }).trim().split('\n').at(-1);

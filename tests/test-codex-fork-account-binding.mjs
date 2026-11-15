@@ -23,7 +23,7 @@ test('fork checks the selected account on the same broker connection', async (t)
       while ((end = buffer.indexOf('\n')) >= 0) {
         const message = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1);
         const send = (reply) => socket.write(`${JSON.stringify(reply)}\n`);
-        if (message.type === 'agentoc-codex-broker-ping') send({ type: 'agentoc-codex-broker-pong', ready: true,
+        if (message.type === 'ragent-codex-broker-ping') send({ type: 'ragent-codex-broker-pong', ready: true,
           accountMatches: message.expectedAccountDigest === codexBrokerAccountDigest('account-a') });
         else if (message.method === 'initialize') send({ id: message.id, result: {} });
         else if (message.method === 'thread/fork') { forks++; send({ id: message.id, result: { thread: { id: 'forked-thread' } } }); }

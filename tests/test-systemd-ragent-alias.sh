@@ -5,7 +5,7 @@ dir="$HOME/.config/systemd/user"
 mkdir -p "$dir"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/ragent-unit-qa.XXXXXXXX")"
 token="$(basename "$scratch" | tr -cd 'A-Za-z0-9')"
-old="agentoc-qa-$token.service"
+old="ragent-qa-$token.service"
 new="ragent-qa-$token.service"
 for p in "$dir/$old" "$dir/$new" "$dir/$old.d"; do
   if [ -e "$p" ] || [ -L "$p" ]; then rmdir "$scratch"; echo 'QA unit path already exists' >&2; exit 1; fi

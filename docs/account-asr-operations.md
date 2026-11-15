@@ -6,21 +6,21 @@ An ASR request can become `unknown` when Accounts cannot tell whether OpenAI acc
 
 Accounts sends the opaque Ragent idempotency request ID as OpenAI's `X-Client-Request-Id`. OpenAI documents that support can use this ID to look up whether a request was received when a timeout or network failure hides the response; the server-generated `x-request-id` is available only when a response arrives. Use the `request_id` from the Accounts reconciliation listing as the support correlation ID. If OpenAI cannot confirm whether the request was processed, leave the row `unknown` and keep the reservation. Do not infer that it was unprocessed from the absence of a transcript in Ragent.
 
-Run the tool from a secured Oracle administrator shell that can read the root-only environment file. The PostgreSQL URL uses the restricted Accounts database role; before starting the tool, remove every other setting from the shell environment so the OpenAI key and signing configuration are not inherited by the CLI. The command reads `AGENTOC_ACCOUNTS_DATABASE_URL` from the environment and never accepts a database URL on the command line:
+Run the tool from a secured Oracle administrator shell that can read the root-only environment file. The PostgreSQL URL uses the restricted Accounts database role; before starting the tool, remove every other setting from the shell environment so the OpenAI key and signing configuration are not inherited by the CLI. The command reads `RAGENT_ACCOUNTS_DATABASE_URL` from the environment and never accepts a database URL on the command line:
 
 ```sh
 set -a
-. /etc/agentoc/accounts.env
+. /etc/ragent/accounts.env
 set +a
-asr_db_url=$AGENTOC_ACCOUNTS_DATABASE_URL
+asr_db_url=$RAGENT_ACCOUNTS_DATABASE_URL
 for asr_env_name in $(compgen -e); do
   case "$asr_env_name" in PATH|HOME|LANG|LC_*) ;; *) unset "$asr_env_name" ;; esac
 done
-export AGENTOC_ACCOUNTS_DATABASE_URL="$asr_db_url"
+export RAGENT_ACCOUNTS_DATABASE_URL="$asr_db_url"
 unset asr_db_url
-cd /opt/agentoc-accounts/current/app
-/opt/agentoc-accounts/current/runtime/node accounts/asr-reconcile.mjs list --limit 100
-unset AGENTOC_ACCOUNTS_DATABASE_URL
+cd /opt/ragent-accounts/current/app
+/opt/ragent-accounts/current/runtime/node accounts/asr-reconcile.mjs list --limit 100
+unset RAGENT_ACCOUNTS_DATABASE_URL
 ```
 
 The output includes account/request IDs, duration, provider/model, price version, state, error code, and timestamps. It excludes the audio digest, audio, transcript, provider key, and account credential. Restrict the terminal and any retained output to authorized Accounts operators.
@@ -28,7 +28,7 @@ The output includes account/request IDs, duration, provider/model, price version
 For one request, first preview a proposed outcome:
 
 ```sh
-/opt/agentoc-accounts/current/runtime/node accounts/asr-reconcile.mjs preview \
+/opt/ragent-accounts/current/runtime/node accounts/asr-reconcile.mjs preview \
   --account-id ACCOUNT_ID --request-id REQUEST_ID \
   --outcome provider_not_processed
 ```
@@ -41,7 +41,7 @@ Allowed outcomes:
 If the evidence does not distinguish these outcomes, stop at the preview and leave the request unresolved. After review, use a ticket or provider-log reference, an operator ID, and a short reason. `resolve` stays read-only unless `--apply` is present:
 
 ```sh
-/opt/agentoc-accounts/current/runtime/node accounts/asr-reconcile.mjs resolve \
+/opt/ragent-accounts/current/runtime/node accounts/asr-reconcile.mjs resolve \
   --account-id ACCOUNT_ID --request-id REQUEST_ID \
   --outcome provider_not_processed \
   --operator-id OPERATOR_ID --evidence-ref SUPPORT_OR_PROVIDER_REFERENCE \

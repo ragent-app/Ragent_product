@@ -8,7 +8,7 @@ import { spawnManagedProviderProcess } from '../lib/windows-managed-spawn.mjs';
 import { makeDeadlineTempRoot } from './helpers/deadline-temp-root.mjs';
 
 test('a queued approved-action decision refuses an expired control grant before append', async (t) => {
-  const fixture = await makeDeadlineTempRoot('agentoc-approval-deadline-');
+  const fixture = await makeDeadlineTempRoot('ragent-approval-deadline-');
   t.after(() => fixture.cleanup());
   const { root } = fixture;
   const events = [];
@@ -54,7 +54,7 @@ test('an approved action does not execute after its temporary grant expires', as
 });
 
 test('a session revalidation that finishes after expiry cannot launch argv', async (t) => {
-  const fixture = await makeDeadlineTempRoot('agentoc-session-deadline-');
+  const fixture = await makeDeadlineTempRoot('ragent-session-deadline-');
   t.after(() => fixture.cleanup());
   const { root } = fixture;
   const marker = join(root, 'launched.txt');

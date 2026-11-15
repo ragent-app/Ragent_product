@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { WINDOWS_APPROVAL_PAYLOAD_FILES, verifyWindowsApprovalPayload } from '../scripts/verify-windows-approval-payload.mjs';
 
-const root = await mkdtemp(path.join(tmpdir(), 'agentoc-approval-payload-'));
+const root = await mkdtemp(path.join(tmpdir(), 'ragent-approval-payload-'));
 try {
 for (const file of WINDOWS_APPROVAL_PAYLOAD_FILES) {
   const target = path.join(root, ...file.split('/'));
@@ -12,9 +12,9 @@ for (const file of WINDOWS_APPROVAL_PAYLOAD_FILES) {
   await writeFile(target, 'fixture');
 }
 await verifyWindowsApprovalPayload(root);
-const missing = 'scripts/agentoc-codex-windows-install-hook.mjs';
+const missing = 'scripts/ragent-codex-windows-install-hook.mjs';
 await unlink(path.join(root, ...missing.split('/')));
-await assert.rejects(verifyWindowsApprovalPayload(root), /agentoc-codex-windows-install-hook/);
+await assert.rejects(verifyWindowsApprovalPayload(root), /ragent-codex-windows-install-hook/);
 await writeFile(path.join(root, ...missing.split('/')), 'fixture');
 await unlink(path.join(root, 'chat', 'windows-user-install-store.mjs'));
 await assert.rejects(verifyWindowsApprovalPayload(root), /windows-user-install-store/);
@@ -29,6 +29,6 @@ console.log('windows-approval-payload: incomplete package is rejected');
   const actualRoot = await realpath(root);
   const actualParent = await realpath(tmpdir());
   assert.equal(path.dirname(actualRoot).toLowerCase(), actualParent.toLowerCase());
-  assert.ok(path.basename(actualRoot).startsWith('agentoc-approval-payload-'));
+  assert.ok(path.basename(actualRoot).startsWith('ragent-approval-payload-'));
   await rm(actualRoot, { recursive: true, force: true });
 }

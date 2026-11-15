@@ -3,12 +3,12 @@ import assert from 'assert/strict';
 import { buildMonitorArgv } from '../scripts/github-ci-auto-repair-runner.mjs';
 
 const argv = buildMonitorArgv({
-  repo: 'Ninglo/agentoc',
+  repo: 'Ninglo/ragent',
   branches: ['main', 'master'],
   events: ['push', 'workflow_dispatch'],
   workflows: ['CI'],
   chatBaseUrl: 'http://127.0.0.1:7690',
-  sessionFolder: '/tmp/agentoc',
+  sessionFolder: '/tmp/ragent',
   sessionTool: 'codex',
   model: 'gpt-5',
   effort: 'high',
@@ -23,14 +23,14 @@ const argv = buildMonitorArgv({
 });
 
 assert.deepEqual(argv, [
-  '--repo', 'Ninglo/agentoc',
+  '--repo', 'Ninglo/ragent',
   '--branch', 'main',
   '--branch', 'master',
   '--event', 'push',
   '--event', 'workflow_dispatch',
   '--workflow', 'CI',
   '--chat-base-url', 'http://127.0.0.1:7690',
-  '--session-folder', '/tmp/agentoc',
+  '--session-folder', '/tmp/ragent',
   '--session-tool', 'codex',
   '--model', 'gpt-5',
   '--effort', 'high',

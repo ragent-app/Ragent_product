@@ -71,7 +71,7 @@ function loadCore() {
     context,
     { filename: 'transport/approval-gate.js' },
   );
-  const core = context.AgentocApprovalGateCore;
+  const core = context.RagentApprovalGateCore;
   return {
     api: {
       resolvePendingApprovalEvent: (events) => core.resolvePendingApprovalEvent(events),

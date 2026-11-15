@@ -25,7 +25,7 @@ test('exact Host/Origin, duplicate headers and forwarding/Fetch Metadata deny be
   const f=await bootstrapFixture(t),value=f.issue();
   const bad=[{Host:'evil.example:'+f.port},{Host:'localhost:'+f.port},{Host:'127.1:'+f.port},{Host:'127.0.0.1:'+String(f.port+1)},
     {Origin:'null'},{Origin:undefined},{Origin:f.origin+'/'},{Origin:'http://127.0.0.1:'+String(f.port+1)},
-    {'Sec-Fetch-Site':'same-site'},{'Sec-Fetch-Site':'cross-site'},{'X-Agentoc-Tunnel':'1'},{Forwarded:'for=127.0.0.1'}, {'X-Forwarded-Host':'127.0.0.1:'+f.port},{Via:'test'}];
+    {'Sec-Fetch-Site':'same-site'},{'Sec-Fetch-Site':'cross-site'},{'X-Ragent-Tunnel':'1'},{Forwarded:'for=127.0.0.1'}, {'X-Forwarded-Host':'127.0.0.1:'+f.port},{Via:'test'}];
   for(const headers of bad){if(headers.Origin===undefined&&Object.hasOwn(headers,'Origin'))headers.Origin='';const result=await f.send(value,{headers});assert.equal(result.status,403,JSON.stringify(headers));assert.equal(result.headers['set-cookie'],undefined);}
   for(const name of ['Host','Origin']){
     const raw=['Host','127.0.0.1:'+f.port,'Origin',f.origin,'Content-Type','application/json',name,name==='Host'?'127.0.0.1:'+f.port:f.origin];

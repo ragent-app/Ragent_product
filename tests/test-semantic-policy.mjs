@@ -134,7 +134,7 @@ const del = operation('rm -rf build/cache');
         computed: true,
         matched: true,
         workspaceRecommended: false,
-        boundary: 'agentoc-service',
+        boundary: 'ragent-service',
       },
     },
   }));

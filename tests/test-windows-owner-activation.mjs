@@ -5,13 +5,13 @@ import {validateOwnerActivationEvidence} from '../lib/windows-owner-activation-t
 import {validateOwnerActivationPolicy} from '../lib/windows-owner-activation-protocol.mjs';
 import {createOwnerActivationService} from '../lib/windows-owner-activation-service.mjs';
 const policy={domain:'owner.activation.v1',instanceId:'inst_'+'a'.repeat(32),ownerSid:'S-1-5-21-1-2-3-1001',controlSid:'S-1-5-80-1-2-3-4-5',ownerSessionId:1};
-const release={version:1,protocolVersion:2,helperFile:'AgentoC.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)};
+const release={version:1,protocolVersion:2,helperFile:'Ragent.OwnerBootstrap.exe',helperSha256:'a'.repeat(64),publisherSha256:'b'.repeat(64)};
 function observed(){return {version:1,aclVerified:true,signatureStatus:'Valid',helperSha256:release.helperSha256,publisherSha256:release.publisherSha256,ownerSid:policy.ownerSid,ownerSessionId:1,
   releaseJson:JSON.stringify(release),installationJson:JSON.stringify({version:1,instanceId:policy.instanceId,ownerSid:policy.ownerSid,controlSid:policy.controlSid,executorSid:'S-1-5-80-6-7-8-9-10',port:7690})};}
 function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});promise.catch(()=>{});return {promise,resolve,reject};}
 const settle=async()=>{await tick();await tick();};
 test('activation installed evidence is signed, fixed, exact and independent of expired CLI discovery',()=>{
-  const o=observed(),trusted=validateOwnerActivationEvidence(o);assert.deepEqual(trusted.policy,policy);assert.equal(trusted.executablePath,'C:/Program Files/AgentoC/payload/AgentoC.OwnerBootstrap.exe');assert.ok(Object.isFrozen(trusted));
+  const o=observed(),trusted=validateOwnerActivationEvidence(o);assert.deepEqual(trusted.policy,policy);assert.equal(trusted.executablePath,'C:/Program Files/Ragent/payload/Ragent.OwnerBootstrap.exe');assert.ok(Object.isFrozen(trusted));
   for(const patch of [{aclVerified:false},{signatureStatus:'NotSigned'},{helperSha256:'c'.repeat(64)},{ownerSid:'S-1-5-21-1-2-3-999'},{ownerSessionId:0},{liveJson:'{}'},
     {installationJson:'{'},{releaseJson:JSON.stringify({...release,protocolVersion:1})},{installationJson:JSON.stringify({...JSON.parse(o.installationJson),executorSid:policy.controlSid})}])assert.throws(()=>validateOwnerActivationEvidence({...o,...patch}));
   for(const patch of [{domain:'owner.cli'},{expiresAtUnixMs:Date.now()+30000},{sessionToken:'a'.repeat(64)},{ownerSessionId:'1'},{ownerSid:policy.ownerSid+'\n'}])assert.throws(()=>validateOwnerActivationPolicy({...policy,...patch}));

@@ -10,7 +10,7 @@
   "use strict";
 
   function t(key, vars) {
-    return root.agentocT ? root.agentocT(key, vars) : key;
+    return root.ragentT ? root.ragentT(key, vars) : key;
   }
 
   // The current device endpoint is optional in the first backend phase. Keep
@@ -29,7 +29,7 @@
   }
 
   async function getDeviceInfo() {
-    const activeTarget = root.AgentoCTargetRuntime?.getActiveTarget?.();
+    const activeTarget = root.RagentTargetRuntime?.getActiveTarget?.();
     if (activeTarget?.targetId) {
       return { id: activeTarget.targetId, name: activeTarget.label || t("sidebar.device.localName") };
     }
@@ -38,8 +38,8 @@
   }
 
   async function addDevice() {
-    if (root.AgentoCCrossDevicePanel?.open) {
-      root.AgentoCCrossDevicePanel.open({ view: "register" });
+    if (root.RagentCrossDevicePanel?.open) {
+      root.RagentCrossDevicePanel.open({ view: "register" });
       return { ok: true };
     }
     const message = t("sidebar.device.unavailable");
@@ -48,8 +48,8 @@
   }
 
   async function openDeviceManager() {
-    if (root.AgentoCCrossDevicePanel?.open) {
-      root.AgentoCCrossDevicePanel.open({ view: "devices" });
+    if (root.RagentCrossDevicePanel?.open) {
+      root.RagentCrossDevicePanel.open({ view: "devices" });
       return { ok: true };
     }
     const message = t("sidebar.device.unavailable");
@@ -95,14 +95,14 @@
     syncSidebarDeviceBar();
   }
 
-  root.AgentocDeviceBar = Object.freeze({
+  root.RagentDeviceBar = Object.freeze({
     getDeviceInfo,
     openDeviceManager,
     addDevice,
     refresh,
   });
   root.syncSidebarDeviceBar = syncSidebarDeviceBar;
-  root.addEventListener?.("agentoc:target-change", () => { void refresh(); });
+  root.addEventListener?.("ragent:target-change", () => { void refresh(); });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", wireDeviceBar, { once: true });

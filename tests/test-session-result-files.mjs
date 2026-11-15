@@ -46,7 +46,7 @@ assert.equal(
 // ── collectUnresolvedAssistantFileReferences ─────────────────────────
 
 async function unresolvedAssistantFixture() {
-  const work = mkdtempSync(join(tmpdir(), 'agentoc-result-files-'));
+  const work = mkdtempSync(join(tmpdir(), 'ragent-result-files-'));
   writeFileSync(join(work, 'chart.png'), 'fake-png-bytes');
   const manifest = { folder: work };
   const events = [
@@ -100,7 +100,7 @@ function makeWorkspaceFile(work, relativePath, contents = 'fake-bytes') {
 // even with no legacy folder, and Claude-style `Bash` tool_use (JSON-serialized
 // input) must not block collection.
 {
-  const work = mkdtempSync(join(tmpdir(), 'agentoc-rf-scope-'));
+  const work = mkdtempSync(join(tmpdir(), 'ragent-rf-scope-'));
   try {
     makeWorkspaceFile(work, 'n2_4c_results/n2_4c_final_report.md');
     makeWorkspaceFile(work, 'n2_4c_results/n2_4c_reproducibility_report.json');
@@ -146,8 +146,8 @@ function makeWorkspaceFile(work, relativePath, contents = 'fake-bytes') {
 // capitalized external-harness command names (`Shell`) still unlock cd-root
 // discovery — previously only a literal lowercase `bash` matched.
 {
-  const base = mkdtempSync(join(tmpdir(), 'agentoc-rf-base-'));
-  const out = mkdtempSync(join(tmpdir(), 'agentoc-rf-out-'));
+  const base = mkdtempSync(join(tmpdir(), 'ragent-rf-base-'));
+  const out = mkdtempSync(join(tmpdir(), 'ragent-rf-out-'));
   try {
     makeWorkspaceFile(out, 'report.md', '# report');
     const manifest = { folder: '', executionScope: { cwd: { realPath: base } } };
@@ -175,8 +175,8 @@ function makeWorkspaceFile(work, relativePath, contents = 'fake-bytes') {
 
 // file_change events anchor the directory the harness actually wrote into.
 {
-  const base = mkdtempSync(join(tmpdir(), 'agentoc-rf-edit-'));
-  const edited = mkdtempSync(join(tmpdir(), 'agentoc-rf-edited-'));
+  const base = mkdtempSync(join(tmpdir(), 'ragent-rf-edit-'));
+  const edited = mkdtempSync(join(tmpdir(), 'ragent-rf-edited-'));
   try {
     makeWorkspaceFile(edited, 'generated/out.csv', 'a,b\n1,2\n');
     const manifest = { folder: base };

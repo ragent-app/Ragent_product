@@ -12,8 +12,8 @@ let sequence = 0;
 
 async function exercise(matches) {
   const socketPath = process.platform === 'win32'
-    ? `\\\\.\\pipe\\agentoc-proxy-binding-${process.pid}-${sequence++}`
-    : join(process.env.TEMP || '/tmp', `agentoc-proxy-binding-${process.pid}-${sequence++}.sock`);
+    ? `\\\\.\\pipe\\ragent-proxy-binding-${process.pid}-${sequence++}`
+    : join(process.env.TEMP || '/tmp', `ragent-proxy-binding-${process.pid}-${sequence++}.sock`);
   const server = createServer();
   server.listen(socketPath);
   await once(server, 'listening');
@@ -30,10 +30,10 @@ async function exercise(matches) {
   lines.on('line', (line) => received.push(JSON.parse(line)));
   child.stdin.write('{"id":1,"method":"initialize"}\n');
   while (received.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.deepEqual(received, [{ type: 'agentoc-codex-broker-ping', expectedAccountDigest: digest }]);
+  assert.deepEqual(received, [{ type: 'ragent-codex-broker-ping', expectedAccountDigest: digest }]);
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(received.length, 1, 'request must wait for account verification');
-  socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true, accountMatches: matches })}\n`);
+  socket.write(`${JSON.stringify({ type: 'ragent-codex-broker-pong', ready: true, accountMatches: matches })}\n`);
   if (matches) {
     while (received.length < 2) await new Promise((resolve) => setTimeout(resolve, 10));
     assert.deepEqual(received[1], { id: 1, method: 'initialize' });

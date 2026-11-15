@@ -11,25 +11,25 @@ function read(relativePath) {
 }
 
 const setup = read('setup.sh');
-assert.match(setup, /Created: \/etc\/systemd\/system\/agentoc\.service/, 'Linux setup should install the owner system service');
-assert.match(setup, /sudo systemctl start agentoc\.service/, 'Linux setup should start the owner system service');
-assert.match(setup, /sudo systemctl enable agentoc\.service/, 'Linux setup should enable the owner system service');
-assert.doesNotMatch(setup, /Created: ~\/\.config\/systemd\/user\/agentoc-chat\.service/, 'Linux setup should not install the legacy owner user service');
-assert.doesNotMatch(setup, /systemctl --user start agentoc-chat\.service/, 'Linux setup should not start the legacy owner user service');
+assert.match(setup, /Created: \/etc\/systemd\/system\/ragent\.service/, 'Linux setup should install the owner system service');
+assert.match(setup, /sudo systemctl start ragent\.service/, 'Linux setup should start the owner system service');
+assert.match(setup, /sudo systemctl enable ragent\.service/, 'Linux setup should enable the owner system service');
+assert.doesNotMatch(setup, /Created: ~\/\.config\/systemd\/user\/ragent-chat\.service/, 'Linux setup should not install the legacy owner user service');
+assert.doesNotMatch(setup, /systemctl --user start ragent-chat\.service/, 'Linux setup should not start the legacy owner user service');
 
 const startScript = read('start.sh');
-assert.match(startScript, /sudo systemctl start agentoc\.service/, '`agentoc start` should target the owner system service on Linux');
+assert.match(startScript, /sudo systemctl start ragent\.service/, '`ragent start` should target the owner system service on Linux');
 
 const stopScript = read('stop.sh');
-assert.match(stopScript, /sudo systemctl stop agentoc\.service/, '`agentoc stop` should target the owner system service on Linux');
+assert.match(stopScript, /sudo systemctl stop ragent\.service/, '`ragent stop` should target the owner system service on Linux');
 
 const readme = read('README.md');
-assert.match(readme, /journalctl -u agentoc\.service -n 50/, 'README troubleshooting should point Linux users at the owner system service logs');
-assert.match(readme, /\/var\/log\/agentoc\/chat-server\.log/, 'README should point Linux users at the system log directory');
+assert.match(readme, /journalctl -u ragent\.service -n 50/, 'README troubleshooting should point Linux users at the owner system service logs');
+assert.match(readme, /\/var\/log\/ragent\/chat-server\.log/, 'README should point Linux users at the system log directory');
 
 const readmeZh = read('README.zh.md');
-assert.match(readmeZh, /journalctl -u agentoc\.service -n 50/, 'README.zh troubleshooting should point Linux users at the owner system service logs');
-assert.match(readmeZh, /\/var\/log\/agentoc\/chat-server\.log/, 'README.zh should point Linux users at the system log directory');
+assert.match(readmeZh, /journalctl -u ragent\.service -n 50/, 'README.zh troubleshooting should point Linux users at the owner system service logs');
+assert.match(readmeZh, /\/var\/log\/ragent\/chat-server\.log/, 'README.zh should point Linux users at the system log directory');
 
 const agents = read('AGENTS.md');
 assert.match(agents, /run-launcher\.mjs/, 'AGENTS should document the run launcher');
@@ -48,6 +48,6 @@ assert.match(implementationMapping, /chat\/run-projection\.mjs/, 'Current implem
 assert.match(implementationMapping, /chat\/run-reconciler\.mjs/, 'Current implementation mapping should reference the run reconciler');
 
 const setupDoc = read('docs/setup.md');
-assert.match(setupDoc, /agentoc\.service/, 'Setup contract should name the Linux owner service explicitly');
+assert.match(setupDoc, /ragent\.service/, 'Setup contract should name the Linux owner service explicitly');
 
 console.log('test-setup-service-model-and-run-boundaries: ok');

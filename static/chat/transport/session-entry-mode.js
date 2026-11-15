@@ -13,17 +13,17 @@
 //
 // Platform hooks (current-session id, share snapshot state, the session
 // record lookup) are injected via the environment contract
-// (root.AgentocSessionEntryModeEnvironment). Locked against the legacy
+// (root.RagentSessionEntryModeEnvironment). Locked against the legacy
 // implementation by tests/test-chat-session-entry-mode-core.mjs.
 
-(function attachAgentocSessionEntryModeCore(root) {
+(function attachRagentSessionEntryModeCore(root) {
   const DEFAULT_ENVIRONMENT = Object.freeze({
     currentSessionId: "",
     isShareSnapshotMode: false,
     getClientSessionRecord: null,
   });
   const environment = new Proxy(
-    root.AgentocSessionEntryModeEnvironment || {},
+    root.RagentSessionEntryModeEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -68,7 +68,7 @@
     return normalizeSessionViewportIntent(viewportIntent) === "session_entry_bottom";
   }
 
-  root.AgentocSessionEntryModeCore = {
+  root.RagentSessionEntryModeCore = {
     resolveSessionEntryMode,
     getCurrentSessionEntryMode,
     normalizeSessionViewportIntent,

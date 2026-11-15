@@ -5,7 +5,7 @@ import { basename } from 'path';
 import { backfillOwnerBootstrapSessions } from '../chat/bootstrap-sessions.mjs';
 
 const result = await backfillOwnerBootstrapSessions();
-const instanceRoot = process.env.AGENTOC_INSTANCE_ROOT || '';
+const instanceRoot = process.env.RAGENT_INSTANCE_ROOT || '';
 
 console.log(JSON.stringify({
   instance: instanceRoot ? basename(instanceRoot) : '',

@@ -9,7 +9,7 @@ import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-resend-edited-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-resend-edited-'));
 process.env.HOME = home;
 
 const {

@@ -55,7 +55,7 @@ test('native preparation writes distinct account-bound records for concurrent ru
   const broker = createServer((socket) => {
     createInterface({ input: socket }).on('line', (line) => {
       const ping = JSON.parse(line);
-      socket.write(`${JSON.stringify({ type: 'agentoc-codex-broker-pong', ready: true,
+      socket.write(`${JSON.stringify({ type: 'ragent-codex-broker-pong', ready: true,
         accountMatches: ping.expectedAccountDigest === codexBrokerAccountDigest('account-a') })}\n`);
     });
   });

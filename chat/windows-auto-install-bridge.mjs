@@ -11,7 +11,7 @@ function unwrapInstallSentinel(command) {
   if (!sentinel) return command;
   if (!sentinel.valid || (sentinel.declaredCategory && sentinel.declaredCategory !== 'install')) return '';
   const wrapper = command.trim().slice(0, command.trim().length - sentinel.realCommand.length);
-  if (!/^(?:agentoc|ragent)-privileged\s+(?:(?:--description|--desc|--category)\s+(?:"[^"\\\r\n$`]*"|'[^'\\\r\n]*'|[A-Za-z0-9._-]+)\s+)*--\s+$/i.test(wrapper)) return '';
+  if (!/^(?:ragent|ragent)-privileged\s+(?:(?:--description|--desc|--category)\s+(?:"[^"\\\r\n$`]*"|'[^'\\\r\n]*'|[A-Za-z0-9._-]+)\s+)*--\s+$/i.test(wrapper)) return '';
   return sentinel.realCommand;
 }
 
@@ -56,7 +56,7 @@ export async function checkWindowsInstallBridgeReadiness({ channel, command, req
         !channel.token || !channel.sessionId || !channel.runId || !channel.turnId ||
         typeof command !== 'string' || !/^gate:[a-f0-9]{64}$/.test(requestKey || '')) return false;
     const response = await fetchImpl(endpoint, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30000),
-      headers: { 'content-type': 'application/json', 'x-agentoc-approved-action-token': channel.token },
+      headers: { 'content-type': 'application/json', 'x-ragent-approved-action-token': channel.token },
       body: JSON.stringify({ autoInstallPreflight: true, requestKey, sessionId: channel.sessionId, runId: channel.runId,
         turnId: channel.turnId, actions: [{ command }] }) });
     if (!response.ok) return false;

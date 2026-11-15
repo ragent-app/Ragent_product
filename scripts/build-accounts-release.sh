@@ -4,14 +4,18 @@ set -euo pipefail
 # Builds the Accounts service as an independent, versioned release archive.
 # This never stages the local Ragent control plane, its providers, or a Deb.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${RAGENT_ACCOUNTS_RELEASE_VERSION:-${AGENTOC_ACCOUNTS_RELEASE_VERSION:-$(node -p "require('$ROOT/package.json').version")+accounts}}"
-ARCH="${RAGENT_ACCOUNTS_RELEASE_ARCH:-${AGENTOC_ACCOUNTS_RELEASE_ARCH:-$(dpkg --print-architecture)}}"
-OUTPUT_DIR="${RAGENT_ACCOUNTS_RELEASE_OUTPUT_DIR:-${AGENTOC_ACCOUNTS_RELEASE_OUTPUT_DIR:-$ROOT/release}}"
-NODE_VERSION="${RAGENT_ACCOUNTS_NODE_VERSION:-${AGENTOC_ACCOUNTS_NODE_VERSION:-v24.18.0}}"
-NODE_CACHE_DIR="${RAGENT_ACCOUNTS_NODE_CACHE_DIR:-${AGENTOC_ACCOUNTS_NODE_CACHE_DIR:-$ROOT/cache/node}}"
-SOURCE_REVISION="${RAGENT_ACCOUNTS_SOURCE_REVISION:-${AGENTOC_ACCOUNTS_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}}"
-SOURCE_MODE="${RAGENT_ACCOUNTS_SOURCE_MODE:-${AGENTOC_ACCOUNTS_SOURCE_MODE:-git-objects}}"
-if [[ ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
+VERSION="${RAGENT_ACCOUNTS_RELEASE_VERSION:-$(node -p "require('$ROOT/package.json').version")+accounts}"
+ARCH="${RAGENT_ACCOUNTS_RELEASE_ARCH:-$(dpkg --print-architecture)}"
+OUTPUT_DIR="${RAGENT_ACCOUNTS_RELEASE_OUTPUT_DIR:-$ROOT/release}"
+NODE_VERSION="${RAGENT_ACCOUNTS_NODE_VERSION:-v24.18.0}"
+NODE_CACHE_DIR="${RAGENT_ACCOUNTS_NODE_CACHE_DIR:-$ROOT/cache/node}"
+SOURCE_MODE="${RAGENT_ACCOUNTS_SOURCE_MODE:-git-objects}"
+if [[ "$SOURCE_MODE" = dev-snapshot ]]; then
+  SOURCE_REVISION=''
+else
+  SOURCE_REVISION="${RAGENT_ACCOUNTS_SOURCE_REVISION:-$(git -C "$ROOT" rev-parse HEAD)}"
+fi
+if [[ "$SOURCE_MODE" != dev-snapshot && ! "$SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "Accounts source revision must be a full 40-character Git commit SHA" >&2
   exit 1
 fi
@@ -24,7 +28,7 @@ esac
 
 mkdir -p "$OUTPUT_DIR" "$NODE_CACHE_DIR"
 WORK_DIR="$(mktemp -d "$OUTPUT_DIR/.ragent-accounts-release.XXXXXX")"
-export npm_config_cache="${RAGENT_ACCOUNTS_NPM_CACHE:-${AGENTOC_ACCOUNTS_NPM_CACHE:-$WORK_DIR/npm-cache}}"
+export npm_config_cache="${RAGENT_ACCOUNTS_NPM_CACHE:-$WORK_DIR/npm-cache}"
 RELEASE_NAME="ragent-accounts-${VERSION}-${ARCH}"
 RELEASE_DIR="$WORK_DIR/$RELEASE_NAME"
 APP_DIR="$RELEASE_DIR/app"
@@ -36,17 +40,49 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "$APP_DIR" "$RELEASE_DIR/runtime"
-node "$ROOT/scripts/stage-runtime-payload.mjs" \
-  --source "$ROOT" --destination "$APP_DIR" --profile accounts --source-mode "$SOURCE_MODE"
-actual_source_revision="$(tr -d '\r\n' < "$APP_DIR/.agentoc-source-commit")"
-if [[ "$actual_source_revision" != "$SOURCE_REVISION" ]]; then
-  echo "Accounts staged source revision differs from the requested release revision" >&2
-  exit 1
+if [[ "$SOURCE_MODE" = dev-snapshot ]]; then
+  SNAPSHOT="${RAGENT_ACCOUNTS_DEV_SNAPSHOT:?Development snapshot archive required}"
+  SNAPSHOT_SHA="${RAGENT_ACCOUNTS_DEV_SNAPSHOT_SHA256:?Development snapshot SHA-256 required}"
+  [[ "$SNAPSHOT_SHA" =~ ^[a-f0-9]{64}$ ]] || { echo 'Invalid development snapshot SHA-256' >&2; exit 1; }
+  [ "$(sha256sum "$SNAPSHOT" | awk '{print $1}')" = "$SNAPSHOT_SHA" ] || { echo 'Development snapshot checksum mismatch' >&2; exit 1; }
+  mkdir "$WORK_DIR/snapshot"
+  python3 - "$SNAPSHOT" "$WORK_DIR/snapshot" <<'PY'
+import sys, tarfile
+with tarfile.open(sys.argv[1], 'r:gz') as archive:
+    for member in archive.getmembers():
+        if not (member.isfile() or member.isdir()) or member.name.startswith('/') or '..' in member.name.split('/'):
+            raise SystemExit('Unsafe snapshot member')
+    archive.extractall(sys.argv[2], filter='data')
+PY
+  node "$ROOT/scripts/stage-runtime-payload.mjs" --source "$WORK_DIR/snapshot" --destination "$APP_DIR" --profile accounts --source-mode dev-snapshot --snapshot-sha256 "$SNAPSHOT_SHA"
+  SERVICE_SOURCE="$WORK_DIR/snapshot/deploy/accounts/ragent-accounts.service"
+  SOURCE_REVISION="dev-snapshot-sha256:$SNAPSHOT_SHA"
+else
+  node "$ROOT/scripts/stage-runtime-payload.mjs" \
+    --source "$ROOT" --destination "$APP_DIR" --profile accounts --source-mode "$SOURCE_MODE"
+  actual_source_revision="$(tr -d '\r\n' < "$APP_DIR/.ragent-source-commit")"
+  if [[ "$actual_source_revision" != "$SOURCE_REVISION" ]]; then
+    echo "Accounts staged source revision differs from the requested release revision" >&2
+    exit 1
+  fi
+  SERVICE_SOURCE="$ROOT/deploy/accounts/ragent-accounts.service"
 fi
-install -m 0644 "$ROOT/deploy/accounts/ragent-accounts.service" "$RELEASE_DIR/ragent-accounts.service"
+install -m 0644 "$SERVICE_SOURCE" "$RELEASE_DIR/ragent-accounts.service"
 
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund)
-rm -f "$APP_DIR/package-lock.json"
+node --input-type=module - "$APP_DIR" <<'NODE'
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+const root = process.argv[2];
+const manifest = JSON.parse(await readFile(join(root, 'runtime-payload-manifest.json'), 'utf8'));
+for (const file of manifest.files) {
+  const content = await readFile(join(root, file.path));
+  if (content.length !== file.bytes || createHash('sha256').update(content).digest('hex') !== file.sha256) {
+    throw new Error(`Final Accounts payload differs from its manifest: ${file.path}`);
+  }
+}
+NODE
 
 NODE_DIST="node-${NODE_VERSION}-linux-${NODE_ARCH}"
 NODE_TARBALL="${NODE_DIST}.tar.xz"

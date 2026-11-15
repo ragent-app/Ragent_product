@@ -43,17 +43,17 @@ const MAX_PROMPT_EVENT_LINES = 120;
 const MAX_PROMPT_EVENT_CHARS = 24000;
 const MAX_STRUCTURED_PROMPT_CHARS = 64000;
 const MAX_STRUCTURED_OUTPUT_CHARS = 1_048_576;
-const TASK_CARD_SUGGESTIONS_ENV = 'AGENTOC_TASK_CARD_SUGGESTIONS';
-const WORKFLOW_STATE_SUGGESTIONS_ENV = 'AGENTOC_WORKFLOW_STATE_SUGGESTIONS';
+const TASK_CARD_SUGGESTIONS_ENV = 'RAGENT_TASK_CARD_SUGGESTIONS';
+const WORKFLOW_STATE_SUGGESTIONS_ENV = 'RAGENT_WORKFLOW_STATE_SUGGESTIONS';
 // DS-05: when enabled, task-card and workflow-state suggestions after a
 // completed turn coalesce into ONE model call (merged suggestion). Set to
 // 'off' to restore the old per-kind separate triggers.
-const MERGED_SUGGESTIONS_ENV = 'AGENTOC_SUGGESTION_MERGED';
-const LABEL_SUGGESTIONS_ENV = 'AGENTOC_SESSION_LABEL_SUGGESTIONS';
+const MERGED_SUGGESTIONS_ENV = 'RAGENT_SUGGESTION_MERGED';
+const LABEL_SUGGESTIONS_ENV = 'RAGENT_SESSION_LABEL_SUGGESTIONS';
 const MERGED_SUGGESTION_OPERATION = 'merged_suggestion';
-const SUMMARIZER_TIMEOUT_ENV = 'AGENTOC_SUMMARIZER_TIMEOUT_MS';
+const SUMMARIZER_TIMEOUT_ENV = 'RAGENT_SUMMARIZER_TIMEOUT_MS';
 const DEFAULT_SUMMARIZER_TIMEOUT_MS = 2 * 60_000;
-const LABEL_SUGGESTION_DELAY_ENV = 'AGENTOC_SESSION_LABEL_SUGGESTION_DELAY_MS';
+const LABEL_SUGGESTION_DELAY_ENV = 'RAGENT_SESSION_LABEL_SUGGESTION_DELAY_MS';
 const DEFAULT_LABEL_SUGGESTION_DELAY_MS = 1000;
 
 async function resolveStructuredPromptRuntimeFamily(toolId) {
@@ -101,7 +101,7 @@ function pushPromptLine(lines, line, { maxTotalChars = MAX_PROMPT_EVENT_CHARS } 
   const currentLength = lines.reduce((total, part) => total + part.length + 1, 0);
   const nextLength = currentLength + text.length + 1;
   if (nextLength > maxTotalChars) {
-    if (!/truncated by (?:AgentoC|Ragent)/.test(lines.at(-1) || '')) {
+    if (!/truncated by (?:Ragent|Ragent)/.test(lines.at(-1) || '')) {
       lines.push('[... additional events truncated by Ragent ...]');
     }
     return false;
@@ -1333,7 +1333,7 @@ export function buildSessionBackgroundAiProjection(session) {
 // DS-05: merged session suggestion — one model call per completed turn that
 // returns taskCard + workflowState + nextAction + confidence + reason.
 // The two per-kind triggers above stay as the legacy compatibility path
-// (used when AGENTOC_SUGGESTION_MERGED=off); the schedulers coalesce into
+// (used when RAGENT_SUGGESTION_MERGED=off); the schedulers coalesce into
 // triggerSessionMergedSuggestion below, which is gated by one shared
 // per-session throttle slot and one queue dedupe key, so both schedulers
 // firing in the same turn still cause at most one model call.

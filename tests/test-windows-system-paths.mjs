@@ -21,12 +21,12 @@ for (const invocation of [executor, peer]) {
 }
 if (process.platform === 'win32') {
   const cleanEnv = { ...process.env };
-  for (const key of Object.keys(cleanEnv)) if (['systemroot', 'windir', 'agentoc_winget_executable', 'agentoc_msiexec_executable'].includes(key.toLowerCase())) delete cleanEnv[key];
+  for (const key of Object.keys(cleanEnv)) if (['systemroot', 'windir', 'ragent_winget_executable', 'ragent_msiexec_executable'].includes(key.toLowerCase())) delete cleanEnv[key];
   const moduleUrl = new URL('../chat/semantic-windows-adapter.mjs', import.meta.url).href;
-  const script = `delete process.env.SystemRoot; delete process.env.WINDIR; if (process.env.AGENTOC_TEST_WINDOWS_ROOT) process.env.WINDIR = process.env.AGENTOC_TEST_WINDOWS_ROOT; const m = await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify([m.WINGET_EXECUTABLE, m.MSIEXEC_EXECUTABLE]));`;
+  const script = `delete process.env.SystemRoot; delete process.env.WINDIR; if (process.env.RAGENT_TEST_WINDOWS_ROOT) process.env.WINDIR = process.env.RAGENT_TEST_WINDOWS_ROOT; const m = await import(${JSON.stringify(moduleUrl)}); console.log(JSON.stringify([m.WINGET_EXECUTABLE, m.MSIEXEC_EXECUTABLE]));`;
   const missing = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: cleanEnv, encoding: 'utf8' }));
   assert.deepEqual(missing, ['', '']);
-  const custom = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...cleanEnv, AGENTOC_TEST_WINDOWS_ROOT: 'D:\\Operating Systems\\Windows' }, encoding: 'utf8' }));
+  const custom = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script], { env: { ...cleanEnv, RAGENT_TEST_WINDOWS_ROOT: 'D:\\Operating Systems\\Windows' }, encoding: 'utf8' }));
   assert.deepEqual(custom, ['D:\\Operating Systems\\Windows\\System32\\winget.exe', 'D:\\Operating Systems\\Windows\\System32\\msiexec.exe']);
 }
 console.log('windows-system-paths: actual system root and non-C paths passed');

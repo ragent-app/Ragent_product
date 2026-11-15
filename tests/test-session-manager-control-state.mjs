@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-control-state-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-control-state-'));
 process.env.HOME = home;
 
 const workspace = join(home, 'workspace');
@@ -56,7 +56,7 @@ try {
   assert.equal(loaded.workState.workflow.state, 'waiting_user');
   assert.equal(loaded.workState.workflow.priority, 'medium');
 
-  const sessionsPath = join(home, '.config', 'agentoc', 'chat-sessions.json');
+  const sessionsPath = join(home, '.config', 'ragent', 'chat-sessions.json');
   const storedSessions = JSON.parse(readFileSync(sessionsPath, 'utf8'));
   const storedRecord = storedSessions.find((entry) => entry.id === created.id);
   assert.ok(storedRecord, 'stored session meta should exist');

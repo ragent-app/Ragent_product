@@ -1,5 +1,5 @@
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 const HIDDEN_MANAGED_AGENT_IDS = new Set([
@@ -73,7 +73,7 @@ async function fetchManagedApps({ forceFresh = false } = {}) {
     : { cacheMaxAgeMs: SETTINGS_CATALOG_CACHE_MAX_AGE_MS };
   const data = typeof fetchJsonOrRedirect === "function"
     ? await fetchJsonOrRedirect("/api/agents", requestOptions)
-    : await (window.agentocFetch || fetch)("/api/agents", requestOptions).then((response) => response.json());
+    : await (window.ragentFetch || fetch)("/api/agents", requestOptions).then((response) => response.json());
   const apps = Array.isArray(data?.agents) ? data.agents : [];
   managedAppsCache = apps;
   managedAppsLoaded = true;
@@ -114,18 +114,18 @@ async function openManagedAppSession(app, { rememberPreference = true } = {}) {
   }
   await dispatchAction({
     action: "create",
-    folder: typeof window.agentocGetSelectedSessionFolder === "function"
-      ? window.agentocGetSelectedSessionFolder()
-      : (typeof window.agentocGetDefaultSessionFolder === "function"
-        ? window.agentocGetDefaultSessionFolder()
+    folder: typeof window.ragentGetSelectedSessionFolder === "function"
+      ? window.ragentGetSelectedSessionFolder()
+      : (typeof window.ragentGetDefaultSessionFolder === "function"
+        ? window.ragentGetDefaultSessionFolder()
         : "~"),
     tool,
     sourceId: DEFAULT_APP_ID,
     sourceName: DEFAULT_WEB_SOURCE_NAME,
     templateId: app.id || "",
     templateName: app.name || "",
-    ...(typeof window.agentocGetSelectedProjectId === "function" && window.agentocGetSelectedProjectId()
-      ? { projectId: window.agentocGetSelectedProjectId() }
+    ...(typeof window.ragentGetSelectedProjectId === "function" && window.ragentGetSelectedProjectId()
+      ? { projectId: window.ragentGetSelectedProjectId() }
       : {}),
   });
 }
@@ -143,7 +143,7 @@ async function deleteManagedApp(app) {
       method: "DELETE",
     });
   } else {
-    const response = await (window.agentocFetch || fetch)(`/api/agents/${encodeURIComponent(app.id)}`, {
+    const response = await (window.ragentFetch || fetch)(`/api/agents/${encodeURIComponent(app.id)}`, {
       method: "DELETE",
     });
     if (!response.ok) {
@@ -225,15 +225,15 @@ function buildManagedAppCard(app) {
   }
 
   card.appendChild(actions);
-  if (typeof window.AgentoCIcons?.hydrate === "function") {
-    window.AgentoCIcons.hydrate(card);
+  if (typeof window.RagentIcons?.hydrate === "function") {
+    window.RagentIcons.hydrate(card);
   }
   return card;
 }
 
 function hydrateSettingsAppIcons() {
-  if (typeof window.AgentoCIcons?.hydrate === "function") {
-    window.AgentoCIcons.hydrate(settingsAgentsList);
+  if (typeof window.RagentIcons?.hydrate === "function") {
+    window.RagentIcons.hydrate(settingsAgentsList);
   }
 }
 
@@ -302,7 +302,7 @@ async function renderSettingsAgentsPanel({ force = false } = {}) {
   }
 }
 
-window.AgentoCManagedAgents = Object.freeze({
+window.RagentManagedAgents = Object.freeze({
   async list({ force = false } = {}) {
     if (force || !managedAppsLoaded) {
       await fetchManagedApps({ forceFresh: force });
@@ -335,18 +335,18 @@ async function createAgentBuilderSession() {
     }
     await dispatchAction({
       action: "create",
-      folder: typeof window.agentocGetSelectedSessionFolder === "function"
-        ? window.agentocGetSelectedSessionFolder()
-        : (typeof window.agentocGetDefaultSessionFolder === "function"
-          ? window.agentocGetDefaultSessionFolder()
+      folder: typeof window.ragentGetSelectedSessionFolder === "function"
+        ? window.ragentGetSelectedSessionFolder()
+        : (typeof window.ragentGetDefaultSessionFolder === "function"
+          ? window.ragentGetDefaultSessionFolder()
           : "~"),
       tool,
       name: t("settings.apps.create"),
       sourceId: DEFAULT_APP_ID,
       sourceName: DEFAULT_WEB_SOURCE_NAME,
       starterPreset: CREATE_AGENT_STARTER_PRESET,
-      ...(typeof window.agentocGetSelectedProjectId === "function" && window.agentocGetSelectedProjectId()
-        ? { projectId: window.agentocGetSelectedProjectId() }
+      ...(typeof window.ragentGetSelectedProjectId === "function" && window.ragentGetSelectedProjectId()
+        ? { projectId: window.ragentGetSelectedProjectId() }
         : {}),
       forceComposerFocus: true,
     });
@@ -359,8 +359,8 @@ async function createAgentBuilderSession() {
 
 function renderUiLanguageOptions(selectEl, selectedValue = "auto") {
   if (!selectEl) return;
-  const options = typeof window.agentocGetUiLanguageOptions === "function"
-    ? window.agentocGetUiLanguageOptions()
+  const options = typeof window.ragentGetUiLanguageOptions === "function"
+    ? window.ragentGetUiLanguageOptions()
     : [
       { value: "auto", label: t("settings.language.optionAuto") },
       { value: "zh-CN", label: t("settings.language.optionZhCN") },
@@ -379,8 +379,8 @@ function renderUiLanguageOptions(selectEl, selectedValue = "auto") {
 function syncUiLanguageSelect() {
   renderUiLanguageOptions(
     uiLanguageSelect,
-    typeof window.agentocGetUiLanguagePreference === "function"
-      ? window.agentocGetUiLanguagePreference()
+    typeof window.ragentGetUiLanguagePreference === "function"
+      ? window.ragentGetUiLanguagePreference()
       : "auto",
   );
 }
@@ -395,8 +395,8 @@ function initUiLanguageSettings() {
   }
   uiLanguageSelect.addEventListener("change", () => {
     const value = uiLanguageSelect.value || "auto";
-    if (typeof window.agentocSetUiLanguagePreference === "function") {
-      window.agentocSetUiLanguagePreference(value, { reload: true });
+    if (typeof window.ragentSetUiLanguagePreference === "function") {
+      window.ragentSetUiLanguagePreference(value, { reload: true });
     }
   });
   uiLanguageSelect.dataset.bound = "true";
@@ -404,8 +404,8 @@ function initUiLanguageSettings() {
 
 function renderThemeOptions(selectEl, selectedValue = "system") {
   if (!selectEl) return;
-  const options = typeof window.agentocGetThemeOptions === "function"
-    ? window.agentocGetThemeOptions()
+  const options = typeof window.ragentGetThemeOptions === "function"
+    ? window.ragentGetThemeOptions()
     : [
       { value: "system", label: t("settings.theme.optionSystem") },
       { value: "light", label: t("settings.theme.optionLight") },
@@ -431,8 +431,8 @@ function renderThemeOptions(selectEl, selectedValue = "system") {
 function syncThemeSelect() {
   const uiThemeSelect = document.getElementById("uiThemeSelect");
   if (!uiThemeSelect) return;
-  const currentPreference = typeof window.agentocGetThemePreference === "function"
-    ? window.agentocGetThemePreference()
+  const currentPreference = typeof window.ragentGetThemePreference === "function"
+    ? window.ragentGetThemePreference()
     : "system";
   renderThemeOptions(uiThemeSelect, currentPreference);
 }
@@ -448,8 +448,8 @@ function initThemeSettings() {
   }
   uiThemeSelect.addEventListener("change", () => {
     const value = uiThemeSelect.value || "system";
-    if (typeof window.agentocSetThemePreference === "function") {
-      window.agentocSetThemePreference(value);
+    if (typeof window.ragentSetThemePreference === "function") {
+      window.ragentSetThemePreference(value);
     }
     syncThemeSelect();
   });
@@ -458,8 +458,8 @@ function initThemeSettings() {
 
 function renderThinkingBlockDisplayOptions(selectEl, selectedValue = "collapsed") {
   if (!selectEl) return;
-  const options = typeof window.agentocGetThinkingBlockDisplayOptions === "function"
-    ? window.agentocGetThinkingBlockDisplayOptions()
+  const options = typeof window.ragentGetThinkingBlockDisplayOptions === "function"
+    ? window.ragentGetThinkingBlockDisplayOptions()
     : [
       { value: "expanded", label: t("settings.thinkingBlocks.optionExpanded") },
       { value: "collapsed", label: t("settings.thinkingBlocks.optionCollapsed") },
@@ -476,8 +476,8 @@ function renderThinkingBlockDisplayOptions(selectEl, selectedValue = "collapsed"
 
 function syncThinkingBlockDisplaySelect() {
   if (!thinkingBlockDisplaySelect) return;
-  const currentMode = typeof window.agentocGetThinkingBlockDisplayMode === "function"
-    ? window.agentocGetThinkingBlockDisplayMode()
+  const currentMode = typeof window.ragentGetThinkingBlockDisplayMode === "function"
+    ? window.ragentGetThinkingBlockDisplayMode()
     : "collapsed";
   renderThinkingBlockDisplayOptions(thinkingBlockDisplaySelect, currentMode);
 }
@@ -492,8 +492,8 @@ function initThinkingBlockDisplaySettings() {
   }
   thinkingBlockDisplaySelect.addEventListener("change", () => {
     const value = thinkingBlockDisplaySelect.value || "collapsed";
-    if (typeof window.agentocSetThinkingBlockDisplayMode === "function") {
-      window.agentocSetThinkingBlockDisplayMode(value);
+    if (typeof window.ragentSetThinkingBlockDisplayMode === "function") {
+      window.ragentSetThinkingBlockDisplayMode(value);
     }
     syncThinkingBlockDisplaySelect();
   });
@@ -505,8 +505,8 @@ function renderInstallSettingsPanel() {
   const statusEl = document.getElementById("settingsInstallStatus");
   if (!installBtn) return;
 
-  const state = typeof window.agentocGetInstallFlowState === "function"
-    ? window.agentocGetInstallFlowState()
+  const state = typeof window.ragentGetInstallFlowState === "function"
+    ? window.ragentGetInstallFlowState()
     : { standalone: false, mobileEligible: false };
 
   installBtn.disabled = visitorMode;
@@ -534,8 +534,8 @@ function initInstallSettings() {
     installBtn.addEventListener("click", async () => {
       installBtn.disabled = true;
       try {
-        if (typeof window.agentocOpenInstallFlow === "function") {
-          await window.agentocOpenInstallFlow({ source: "settings_button" });
+        if (typeof window.ragentOpenInstallFlow === "function") {
+          await window.ragentOpenInstallFlow({ source: "settings_button" });
         }
       } finally {
         installBtn.disabled = false;
@@ -659,8 +659,8 @@ function canManageConnectorSurfacesFromUi() {
 function resolveConnectorSurfaceUrl(entryUrl) {
   const normalized = typeof entryUrl === "string" ? entryUrl.trim() : "";
   if (!normalized) return "";
-  if (typeof window.agentocResolveProductUrl === "function") {
-    return window.agentocResolveProductUrl(normalized);
+  if (typeof window.ragentResolveProductUrl === "function") {
+    return window.ragentResolveProductUrl(normalized);
   }
   return new URL(normalized, window.location.origin).toString();
 }
@@ -693,7 +693,7 @@ async function fetchConnectorSurfaces({ forceFresh = false } = {}) {
     : { cacheMaxAgeMs: SETTINGS_CATALOG_CACHE_MAX_AGE_MS };
   const data = typeof fetchJsonOrRedirect === "function"
     ? await fetchJsonOrRedirect("/api/connectors/surfaces", requestOptions)
-    : await (window.agentocFetch || fetch)("/api/connectors/surfaces", requestOptions).then((response) => response.json());
+    : await (window.ragentFetch || fetch)("/api/connectors/surfaces", requestOptions).then((response) => response.json());
   const surfaces = Array.isArray(data?.surfaces)
     ? data.surfaces.filter((surface) => surface && typeof surface === "object")
     : [];
@@ -987,7 +987,7 @@ if (settingsEntryBtn && settingsEntryBtn.dataset.connectorsBound !== "true") {
   settingsEntryBtn.dataset.connectorsBound = "true";
 }
 
-window.addEventListener("agentoc:localechange", () => {
+window.addEventListener("ragent:localechange", () => {
   if (uiLanguageSelect) {
     syncUiLanguageSelect();
   }
@@ -1000,10 +1000,10 @@ window.addEventListener("agentoc:localechange", () => {
   void renderSettingsAgentsPanel();
 });
 
-window.addEventListener("agentoc:themechange", () => {
+window.addEventListener("ragent:themechange", () => {
   syncThemeSelect();
 });
 
-window.addEventListener("agentoc:thinkingblockdisplaychange", () => {
+window.addEventListener("ragent:thinkingblockdisplaychange", () => {
   syncThinkingBlockDisplaySelect();
 });

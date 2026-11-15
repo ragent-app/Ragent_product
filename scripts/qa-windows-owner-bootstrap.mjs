@@ -20,11 +20,11 @@ assert.match(basename(prepared.bundle),/^bundle-[a-f0-9]{32}$/);
 const bytes=await readFile(join(prepared.bundle,'manifest.json'));assert.equal(hash(bytes),prepared.manifestSha256);
 const spec=JSON.parse(bytes);assert.equal(spec.crossServiceOwnerBootstrap,true);
 const identity=await assertOrdinaryWindowsExecutionIdentity();assert.equal(identity.sid,spec.requestorSid);
-const root=join(process.env.ProgramData,'AgentoCIdentityQA','case-'+spec.caseId);
+const root=join(process.env.ProgramData,'RagentIdentityQA','case-'+spec.caseId);
 const report={caseId:spec.caseId,pass:false,productionChanged:false,phoneTouched:false,providerUsed:false,
   actualPhoneOrTurn:false,credentialSource:'synthetic isolated signing key; original product auth',cases:[]};
 let launchStatus,launchOutput='',launchError='';
-async function production(){const {stdout}=await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',`[pscustomobject]@{services=@(Get-CimInstance Win32_Service -Filter "Name='AgentoC-ControlPlane' OR Name='AgentoC-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,ProcessId,StartName)}|ConvertTo-Json -Compress`],{windowsHide:true,timeout:10000});return JSON.parse(stdout.trim());}
+async function production(){const {stdout}=await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-Command',`[pscustomobject]@{services=@(Get-CimInstance Win32_Service -Filter "Name='Ragent-ControlPlane' OR Name='Ragent-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,ProcessId,StartName)}|ConvertTo-Json -Compress`],{windowsHide:true,timeout:10000});return JSON.parse(stdout.trim());}
 const productionBefore=await production();await writeFile(join(prepared.bundle,'production-before.json'),JSON.stringify(productionBefore));
 const launch=spawn(process.execPath,[join(source,'scripts/qa-windows-service-identities.mjs'),'--live'],
   {windowsHide:true,cwd:source,stdio:['ignore','pipe','pipe']});

@@ -30,8 +30,8 @@ const helpersSource = read('static/chat/session-http-helpers.js');
 // ---------------------------------------------------------------------------
 assert.match(
   storeSource,
-  /root\.AgentoCDecisions\s*=\s*Object\.freeze\(\{[\s\S]*?\bsubscribe\b[\s\S]*?\bnoteRequest\b[\s\S]*?\bnoteResponse\b[\s\S]*?\bgetPending\b[\s\S]*?\breset\b[\s\S]*?\}\);/,
-  'AgentoCDecisions must expose subscribe/noteRequest/noteResponse/getPending/reset, frozen',
+  /root\.RagentDecisions\s*=\s*Object\.freeze\(\{[\s\S]*?\bsubscribe\b[\s\S]*?\bnoteRequest\b[\s\S]*?\bnoteResponse\b[\s\S]*?\bgetPending\b[\s\S]*?\breset\b[\s\S]*?\}\);/,
+  'RagentDecisions must expose subscribe/noteRequest/noteResponse/getPending/reset, frozen',
 );
 assert.match(
   storeSource,
@@ -50,12 +50,12 @@ assert.match(storeSource, /noteApprovedActionResolution/, 'approved-action batch
 // ---------------------------------------------------------------------------
 assert.match(
   realtimeRenderSource,
-  /case "approval_request":[\s\S]*?window\.AgentoCDecisions\?\.noteRequest\(evt\);/,
-  'approval_request must notify AgentoCDecisions (the Decision Sheet store)',
+  /case "approval_request":[\s\S]*?window\.RagentDecisions\?\.noteRequest\(evt\);/,
+  'approval_request must notify RagentDecisions (the Decision Sheet store)',
 );
 assert.match(
   realtimeRenderSource,
-  /case "approval_request":[\s\S]*?!historyPrepend[\s\S]*?window\.AgentoCDecisions\?\.noteRequest\(evt\);/,
+  /case "approval_request":[\s\S]*?!historyPrepend[\s\S]*?window\.RagentDecisions\?\.noteRequest\(evt\);/,
   'approval_request must not notify the store on history replays (scroll-up pagination)',
 );
 assert.match(
@@ -70,8 +70,8 @@ assert.doesNotMatch(
 );
 assert.match(
   realtimeRenderSource,
-  /renderApprovalResponse\(evt\);[\s\S]*?!historyPrepend[\s\S]*?window\.AgentoCDecisions\?\.noteResponse\(evt\);/,
-  'approval_response must notify AgentoCDecisions (skipped on history replays) so the sheet can dismiss',
+  /renderApprovalResponse\(evt\);[\s\S]*?!historyPrepend[\s\S]*?window\.RagentDecisions\?\.noteResponse\(evt\);/,
+  'approval_response must notify RagentDecisions (skipped on history replays) so the sheet can dismiss',
 );
 assert.match(
   realtimeRenderSource,
@@ -117,7 +117,7 @@ assert.match(
 );
 assert.match(
   realtimeRenderSource,
-  /case "plan":[\s\S]*?awaiting_decision[\s\S]*?buildPlanApprovalRequestEvent[\s\S]*?window\.AgentoCDecisions\?\.noteRequest\(sheetEvent\);/,
+  /case "plan":[\s\S]*?awaiting_decision[\s\S]*?buildPlanApprovalRequestEvent[\s\S]*?window\.RagentDecisions\?\.noteRequest\(sheetEvent\);/,
   'a live awaiting_decision plan must pop the Decision Sheet like a plan approval',
 );
 assert.match(
@@ -144,7 +144,7 @@ assert.match(
 );
 assert.match(
   sheetSource,
-  /decision === "approve"[\s\S]*?root\.submitPlanArtifactAction[\s\S]*?root\.AgentoCDecisions\?\.noteResponse/,
+  /decision === "approve"[\s\S]*?root\.submitPlanArtifactAction[\s\S]*?root\.RagentDecisions\?\.noteResponse/,
   'sheet must clear the store after approving a plan proposal',
 );
 assert.match(
@@ -322,8 +322,8 @@ assert.match(
 );
 assert.match(
   sheetSource,
-  /root\.AgentoCDecisions && typeof root\.AgentoCDecisions\.subscribe === "function"/,
-  'the view must subscribe to AgentoCDecisions on init',
+  /root\.RagentDecisions && typeof root\.RagentDecisions\.subscribe === "function"/,
+  'the view must subscribe to RagentDecisions on init',
 );
 // Reuse of ui.js helpers (not a re-implementation)
 assert.match(sheetSource, /root\.getApprovalTitle/, 'reuses getApprovalTitle');
@@ -429,8 +429,8 @@ assert.match(
 // ---------------------------------------------------------------------------
 assert.match(
   bootstrapSource,
-  /nextState\.currentSessionId !== prevSessionId[\s\S]*?window\.AgentoCDecisions\?\.reset\?\.\(\)/,
-  'session switch must reset AgentoCDecisions so a prior session approval does not linger',
+  /nextState\.currentSessionId !== prevSessionId[\s\S]*?window\.RagentDecisions\?\.reset\?\.\(\)/,
+  'session switch must reset RagentDecisions so a prior session approval does not linger',
 );
 
 // ---------------------------------------------------------------------------
@@ -532,8 +532,8 @@ assert.doesNotMatch(
 const sandbox = { console, Object, Set, String, Number, Error, JSON };
 vm.createContext(sandbox);
 vm.runInContext(storeSource, sandbox);
-const store = sandbox.AgentoCDecisions;
-assert.ok(store, 'AgentoCDecisions attached to the global');
+const store = sandbox.RagentDecisions;
+assert.ok(store, 'RagentDecisions attached to the global');
 
 let calls = 0;
 let snap = null;
@@ -583,7 +583,7 @@ assert.equal(calls, callsAfterReset, 'no notifications after unsubscribe');
 assert.match(
   storeSource,
   /Object\.freeze\(\{[\s\S]*?\bsubscribeBatch\b[\s\S]*?\bnotePrivilegedBatch\b[\s\S]*?\bnotePrivilegedBatchResponse\b[\s\S]*?\bgetPendingBatch\b[\s\S]*?\bgetBatchState\b[\s\S]*?\}\);/,
-  'AgentoCDecisions must expose subscribeBatch/notePrivilegedBatch/notePrivilegedBatchResponse/getPendingBatch/getBatchState, frozen',
+  'RagentDecisions must expose subscribeBatch/notePrivilegedBatch/notePrivilegedBatchResponse/getPendingBatch/getBatchState, frozen',
 );
 assert.match(
   storeSource,
@@ -668,20 +668,20 @@ unsubBatch();
 // ---------------------------------------------------------------------------
 assert.match(
   realtimeRenderSource,
-  /case "privileged_batch_request":[\s\S]*?!historyPrepend[\s\S]*?window\.AgentoCDecisions\?\.notePrivilegedBatch\(evt\);/,
-  'privileged_batch_request must notify AgentoCDecisions, gated on history replays',
+  /case "privileged_batch_request":[\s\S]*?!historyPrepend[\s\S]*?window\.RagentDecisions\?\.notePrivilegedBatch\(evt\);/,
+  'privileged_batch_request must notify RagentDecisions, gated on history replays',
 );
 assert.match(
   realtimeRenderSource,
-  /case "privileged_batch_response":[\s\S]*?!historyPrepend[\s\S]*?window\.AgentoCDecisions\?\.notePrivilegedBatchResponse\(evt\);/,
-  'privileged_batch_response must notify AgentoCDecisions, gated on history replays',
+  /case "privileged_batch_response":[\s\S]*?!historyPrepend[\s\S]*?window\.RagentDecisions\?\.notePrivilegedBatchResponse\(evt\);/,
+  'privileged_batch_response must notify RagentDecisions, gated on history replays',
 );
 // A terminal status (cancelled / error) must drop any leftover approval or
 // batch surface — the belt-and-braces dismissal for events that race the
 // run's end (run-finalize also emits per-approval cancelled responses).
 assert.match(
   realtimeRenderSource,
-  /case "status":[\s\S]*?statusText === "cancelled"[\s\S]*?statusText\.startsWith\("error:"\)[\s\S]*?AgentoCDecisions\?\.reset\?\.\(\)/,
+  /case "status":[\s\S]*?statusText === "cancelled"[\s\S]*?statusText\.startsWith\("error:"\)[\s\S]*?RagentDecisions\?\.reset\?\.\(\)/,
   'terminal status events must reset the decisions store (approval + batch sheets)',
 );
 

@@ -47,7 +47,7 @@ export async function serviceRunIpc(root, role, spec) {
             expiresAtUnixMs: Date.now() + 15000 };
           const grant = createRestrictedRunIpcGrant({ instanceId: 'service-ipc-' + spec.caseId, lease });
           const frame = grant.frame('Sum the amount column in workspace/input.csv by name.');
-          const policy = { pipeName: 'agentoc-run-candidate-' + randomBytes(16).toString('hex'),
+          const policy = { pipeName: 'ragent-run-candidate-' + randomBytes(16).toString('hex'),
             expiresAtUnixMs: lease.expiresAtUnixMs, binding: { ...grant.binding, capability: frame.capability },
             localSid: spec.executorSid, localSessionId: 0, peerSid: spec.controlSid, peerSessionId: 0,
             permitVirtualPeerQuery: true };

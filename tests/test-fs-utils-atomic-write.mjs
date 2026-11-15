@@ -12,7 +12,7 @@ import { join } from 'path';
 
 const { writeJsonAtomic, writeTextAtomic } = await import('../chat/fs-utils.mjs');
 
-const home = mkdtempSync(join(tmpdir(), 'agentoc-fs-utils-atomic-'));
+const home = mkdtempSync(join(tmpdir(), 'ragent-fs-utils-atomic-'));
 
 // Pin Date.now so every write lands in the same millisecond (same process
 // pid), which is the worst-case collision window.

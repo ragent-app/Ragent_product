@@ -2,13 +2,13 @@
 # isolated from installed instances. No SCM, live Provider, phone or online API.
 [CmdletBinding()]
 param(
- [string]$NodePath='G:\AgentoC\agentoc-v0.3.12-main\artifacts\showcase\T2-current-20261017\service-identities\bundle-c62e7d1319543507823ed7728b247518\node.exe',
+ [string]$NodePath='G:\Ragent\ragent-v0.3.12-main\artifacts\showcase\T2-current-20261017\service-identities\bundle-c62e7d1319543507823ed7728b247518\node.exe',
  [string]$DependencyRoot=''
 )
 $ErrorActionPreference='Stop'
 $qaSource=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $qaId=[guid]::NewGuid().ToString('N')
-$qaRoot=Join-Path ([IO.Path]::GetTempPath()) ('agentoc-offline-recovery-'+$qaId)
+$qaRoot=Join-Path ([IO.Path]::GetTempPath()) ('ragent-offline-recovery-'+$qaId)
 $qaEvidence=Join-Path $qaSource ('artifacts\offline-recovery\'+$qaId)
 $null=New-Item -ItemType Directory -Path $qaRoot,$qaEvidence
 [IO.File]::WriteAllText((Join-Path $qaRoot '.qa-owned'),$qaId)
@@ -26,17 +26,17 @@ try{
  }
  # This script runs in its own PowerShell process. Drop inherited authority and
  # instance routing before importing application modules in any child.
- Get-ChildItem Env: | Where-Object {$_.Name -like 'AGENTOC_*'} | ForEach-Object {Remove-Item -LiteralPath ('Env:'+$_.Name)}
+ Get-ChildItem Env: | Where-Object {$_.Name -like 'RAGENT_*'} | ForEach-Object {Remove-Item -LiteralPath ('Env:'+$_.Name)}
  foreach($name in @('OPENAI_API_KEY','ANTHROPIC_API_KEY','GOOGLE_API_KEY','GEMINI_API_KEY','DEEPSEEK_API_KEY','CODEX_HOME','CLAUDE_CONFIG_DIR')){Remove-Item -LiteralPath ('Env:'+$name) -ErrorAction SilentlyContinue}
- $env:AGENTOC_INSTANCE_ROOT=$qaRoot
- $env:AGENTOC_CONFIG_DIR=Join-Path $qaRoot 'config'
- $env:AGENTOC_MEMORY_DIR=Join-Path $qaRoot 'memory'
- $env:AGENTOC_HARNESS_ROOT=Join-Path $qaRoot 'harnesses'
- $env:AGENTOC_SHARED_TOOLS_DIR=Join-Path $qaRoot 'shared-tools'
- $env:AGENTOC_ASSET_DIRECT_UPLOAD_ENABLED='0'
- $env:AGENTOC_RUNNER_LIFECYCLE_SOCKET='\\.\pipe\agentoc-offline-missing-'+$qaId
- $env:AGENTOC_RUNNER_LIFECYCLE_REQUIRED='1'
- $env:AGENTOC_MESSAGE_COMMIT_TEST_ROOT=Join-Path $qaRoot 'message-commit'
+ $env:RAGENT_INSTANCE_ROOT=$qaRoot
+ $env:RAGENT_CONFIG_DIR=Join-Path $qaRoot 'config'
+ $env:RAGENT_MEMORY_DIR=Join-Path $qaRoot 'memory'
+ $env:RAGENT_HARNESS_ROOT=Join-Path $qaRoot 'harnesses'
+ $env:RAGENT_SHARED_TOOLS_DIR=Join-Path $qaRoot 'shared-tools'
+ $env:RAGENT_ASSET_DIRECT_UPLOAD_ENABLED='0'
+ $env:RAGENT_RUNNER_LIFECYCLE_SOCKET='\\.\pipe\ragent-offline-missing-'+$qaId
+ $env:RAGENT_RUNNER_LIFECYCLE_REQUIRED='1'
+ $env:RAGENT_MESSAGE_COMMIT_TEST_ROOT=Join-Path $qaRoot 'message-commit'
  $qaFiles=@('tests/test-run-reconciler-idempotent-recovery.mjs','tests/test-run-reconciler-terminal-result-repair.mjs','tests/test-run-reconciler-stalled-run.mjs','tests/test-message-receipt-lookup.mjs','tests/test-message-commit.mjs')
  $qaReport.sourceFiles=@(($qaFiles+@('tests/test-offline-recovery-evidence.ps1','chat/run-reconciler.mjs','chat/message-commit-store.mjs','chat/message-preparation-store.mjs','chat/session-manager.mjs','chat/runs.mjs','chat/router-session-main-routes.mjs'))|ForEach-Object {@{path=$_;sha256=(Get-FileHash -LiteralPath (Join-Path $qaSource $_) -Algorithm SHA256).Hash.ToLowerInvariant()}})
  Push-Location $qaSource

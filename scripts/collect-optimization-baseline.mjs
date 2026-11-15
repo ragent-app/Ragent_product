@@ -11,12 +11,12 @@
 //   - Degrades gracefully: on a clean instance (no service, no journalctl,
 //     no healthz endpoint, no git repo) every missing source is null / empty
 //     and the exit code stays 0, so the script can run anywhere read-only.
-//   - Flags: --source-root DIR (default /srv/agentoc-promoted),
-//     --data-root DIR (default /var/lib/agentoc/config),
+//   - Flags: --source-root DIR (default /srv/ragent-promoted),
+//     --data-root DIR (default /var/lib/ragent/config),
 //     --json (machine-readable single JSON document on stdout),
 //     --healthz-url URL (default http://127.0.0.1:7690/healthz; "" disables),
 //     --log-since "24 hours ago" (journalctl window),
-//     --log-unit UNIT (default agentoc.service).
+//     --log-unit UNIT (default ragent.service).
 //
 // Usage:
 //   node scripts/collect-optimization-baseline.mjs [--source-root DIR] [--data-root DIR] [--json] [flags...]
@@ -35,7 +35,7 @@ const SCHEMA_VERSION = 1;
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { sourceRoot: '/srv/agentoc-promoted', dataRoot: '/var/lib/agentoc/config', json: false, healthzUrl: 'http://127.0.0.1:7690/healthz', logSince: '24 hours ago', logUnit: 'agentoc.service' };
+  const args = { sourceRoot: '/srv/ragent-promoted', dataRoot: '/var/lib/ragent/config', json: false, healthzUrl: 'http://127.0.0.1:7690/healthz', logSince: '24 hours ago', logUnit: 'ragent.service' };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--json') args.json = true;
@@ -51,7 +51,7 @@ function parseArgs(argv) {
 }
 
 function printUsage() {
-  console.log(`Usage: node collect-optimization-baseline.mjs [--source-root DIR] [--data-root DIR] [--json] [--healthz-url URL] [--log-since "24 hours ago"] [--log-unit agentoc.service]`);
+  console.log(`Usage: node collect-optimization-baseline.mjs [--source-root DIR] [--data-root DIR] [--json] [--healthz-url URL] [--log-since "24 hours ago"] [--log-unit ragent.service]`);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +237,7 @@ function collectData(dataRoot) {
   return out;
 }
 
-const SERVICE_UNITS = ['agentoc.service', 'agentoc-runner-lifecycle.service', 'agentoc-runner-supervisor.service', 'agentoc-privileged-executor.service', 'agentoc-health-watchdog.timer'];
+const SERVICE_UNITS = ['ragent.service', 'ragent-runner-lifecycle.service', 'ragent-runner-supervisor.service', 'ragent-privileged-executor.service', 'ragent-health-watchdog.timer'];
 
 function collectServices() {
   const out = {};
@@ -273,7 +273,7 @@ function collectServices() {
   return out;
 }
 
-// Active processes whose cmdline lives under /opt/agentoc (app + vendor AI).
+// Active processes whose cmdline lives under /opt/ragent (app + vendor AI).
 // Vendor AI processes (claude/codex) are counted but their cmdline is not
 // recorded (may embed session/resume ids); app processes keep a truncated
 // cmdline (run ids are operational identifiers, no secrets).
@@ -288,7 +288,7 @@ function collectProcesses() {
     if (!m) continue;
     const [, pid, rss, pcpu, comm, args] = m;
     total += 1;
-    if (args.startsWith('/opt/agentoc/')) {
+    if (args.startsWith('/opt/ragent/')) {
       appProcesses.push({ pid: Number(pid), rssBytes: Number(rss) * 1024, cpuPct: Number(pcpu), comm, cmdline: args.length > 220 ? `${args.slice(0, 220)}…` : args });
     } else if (comm === 'claude' || comm === 'codex') {
       vendorAiCount += 1;
@@ -337,7 +337,7 @@ function collectTests(pkg) {
 // values are never read or recorded.
 function collectEnvPresence() {
   const names = Object.keys(process.env)
-    .filter((k) => /^(AGENTOC_|ANTHROPIC_|OPENAI_|GEMINI_|DEEPSEEK_|CODEX_|GITHUB_|GOOGLE_)/.test(k))
+    .filter((k) => /^(RAGENT_|ANTHROPIC_|OPENAI_|GEMINI_|DEEPSEEK_|CODEX_|GITHUB_|GOOGLE_)/.test(k))
     .sort();
   const presence = {};
   for (const n of names) presence[n] = true;
@@ -379,7 +379,7 @@ async function main() {
 
   // Human-readable summary (used for the docs report).
   const lines = [];
-  lines.push(`AgentoC optimization baseline (collector v${SCRIPT_VERSION})`);
+  lines.push(`Ragent optimization baseline (collector v${SCRIPT_VERSION})`);
   lines.push(`generated: ${payload.generatedAt}`);
   lines.push(`host: ${payload.host.hostname} (${payload.host.platform}/${payload.host.arch}, ${payload.host.cpuCores} cores, ${Math.round(payload.host.memTotalBytes / 1048576)} MiB RAM)`);
   for (const d of payload.disk) lines.push(`disk ${d.mount}: ${d.usePct} used (${(d.usedKiB / 1048576).toFixed(0)} GiB / ${(d.totalKiB / 1048576).toFixed(0)} GiB)`);

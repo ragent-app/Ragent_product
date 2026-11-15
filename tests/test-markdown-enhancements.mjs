@@ -16,17 +16,17 @@ try {
     <div id="sequence" class="md-content"><div class="code-block-wrap"><pre><code class="language-mermaid">sequenceDiagram\n  participant U as User\n  participant A as Agent\n  U->>A: Start work\n  A-->>U: Done</code></pre></div></div>
   </body></html>`);
   await page.addScriptTag({ path: sourcePath });
-  await page.evaluate(() => window.AgentoCMarkdownEnhancements.enhanceCodeBlocks(document.body));
+  await page.evaluate(() => window.RagentMarkdownEnhancements.enhanceCodeBlocks(document.body));
 
   assert.equal(await page.locator("#code .code-token--keyword").count(), 2, "JavaScript keywords and booleans should be highlighted");
   assert.equal(await page.locator("#code .code-token--builtin").count(), 1, "known builtins should be highlighted");
   assert.equal(await page.locator("#code .code-token--string").count(), 1, "strings should be highlighted");
   assert.equal(await page.locator("#code .code-token--comment").count(), 1, "comments should be highlighted");
-  assert.equal(await page.evaluate(() => window.AgentoCMarkdownEnhancements.codeLanguageLabel("js")), "JavaScript", "JavaScript aliases should have a readable language label");
-  assert.equal(await page.evaluate(() => window.AgentoCMarkdownEnhancements.codeLanguageLabel("ps1")), "PowerShell", "PowerShell aliases should have a readable language label");
-  assert.equal(await page.evaluate(() => window.AgentoCMarkdownEnhancements.codeLanguageLabel("")), "Plain text", "untyped fences should have a plain-text label");
-  assert.equal(await page.evaluate(() => window.AgentoCMarkdownEnhancements.highlightCode("New-Item -Path $target", "ps1").includes("code-token--builtin")), true, "PowerShell commands should receive syntax colors");
-  assert.equal(await page.evaluate(() => window.AgentoCMarkdownEnhancements.highlightCode("true // plain", "text").includes("code-token")), false, "plain-text blocks should not receive syntax colors");
+  assert.equal(await page.evaluate(() => window.RagentMarkdownEnhancements.codeLanguageLabel("js")), "JavaScript", "JavaScript aliases should have a readable language label");
+  assert.equal(await page.evaluate(() => window.RagentMarkdownEnhancements.codeLanguageLabel("ps1")), "PowerShell", "PowerShell aliases should have a readable language label");
+  assert.equal(await page.evaluate(() => window.RagentMarkdownEnhancements.codeLanguageLabel("")), "Plain text", "untyped fences should have a plain-text label");
+  assert.equal(await page.evaluate(() => window.RagentMarkdownEnhancements.highlightCode("New-Item -Path $target", "ps1").includes("code-token--builtin")), true, "PowerShell commands should receive syntax colors");
+  assert.equal(await page.evaluate(() => window.RagentMarkdownEnhancements.highlightCode("true // plain", "text").includes("code-token")), false, "plain-text blocks should not receive syntax colors");
   assert.equal(await page.locator("#flow .mermaid-diagram svg").count(), 1, "flowcharts should render to SVG");
   assert.equal(await page.locator("#sequence .mermaid-diagram svg").count(), 1, "sequence diagrams should render to SVG");
   assert.equal(await page.locator("#flow .mermaid-node").count(), 3, "flowchart nodes should be preserved");

@@ -85,7 +85,7 @@ await page.evaluate(() => {
     const menu = document.getElementById('composerAddMenu');
     menu.hidden = open !== true;
   };
-  window.agentocGetSelectedToolDefinition = () => ({
+  window.ragentGetSelectedToolDefinition = () => ({
     id: 'codex',
     runtimeFamily: 'codex-app-server-json',
   });

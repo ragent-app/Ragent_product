@@ -23,7 +23,7 @@ function showSystemToast(message, level = "info") {
   const closeNode = document.createElement("span");
   closeNode.className = "system-toast__close";
   closeNode.setAttribute("aria-hidden", "true");
-  closeNode.innerHTML = window.AgentoCIcons?.render?.("close", {
+  closeNode.innerHTML = window.RagentIcons?.render?.("close", {
     className: "system-toast__close-icon",
   }) || "×";
   toast.append(messageNode, closeNode);
@@ -357,7 +357,7 @@ function applyShareSnapshotMode(snapshot) {
 // ---- Init ----
 initResponsiveLayout();
 
-const MOBILE_INSTALL_SKIP_STORAGE_KEY = "agentoc.mobileInstall.skipUntil";
+const MOBILE_INSTALL_SKIP_STORAGE_KEY = "ragent.mobileInstall.skipUntil";
 const MOBILE_INSTALL_SKIP_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const QUICK_ENTRY_FOCUS_PROMPT_DELAY_MS = 420;
 const QUICK_ENTRY_FOCUS_RETRY_DELAY_MS = 160;
@@ -445,8 +445,8 @@ async function openInstallFlow({ source = "manual", replace = false } = {}) {
     await ensureServiceWorkerRegistration();
   }
 
-  const installUrl = typeof window.agentocResolveProductPath === "function"
-    ? window.agentocResolveProductPath(`/m/install?source=${encodeURIComponent(source)}`)
+  const installUrl = typeof window.ragentResolveProductPath === "function"
+    ? window.ragentResolveProductPath(`/m/install?source=${encodeURIComponent(source)}`)
     : `m/install?source=${encodeURIComponent(source)}`;
   if (replace) {
     window.location.replace(installUrl);
@@ -456,8 +456,8 @@ async function openInstallFlow({ source = "manual", replace = false } = {}) {
   return true;
 }
 
-window.agentocGetInstallFlowState = getInstallFlowState;
-window.agentocOpenInstallFlow = openInstallFlow;
+window.ragentGetInstallFlowState = getInstallFlowState;
+window.ragentOpenInstallFlow = openInstallFlow;
 
 function getQuickEntryFocusPromptEls() {
   return {
@@ -490,11 +490,11 @@ function clearQuickEntryFocusRecovery() {
 }
 
 function getQuickEntryLayoutState() {
-  if (window.AgentoCLayout?.syncNow) {
-    return window.AgentoCLayout.syncNow("quick-entry-focus-check");
+  if (window.RagentLayout?.syncNow) {
+    return window.RagentLayout.syncNow("quick-entry-focus-check");
   }
-  if (window.AgentoCLayout?.getState) {
-    return window.AgentoCLayout.getState();
+  if (window.RagentLayout?.getState) {
+    return window.RagentLayout.getState();
   }
   return {
     isDesktop: typeof isDesktop === "boolean" ? isDesktop : false,
@@ -556,8 +556,8 @@ function syncQuickEntryFocusPromptVisibility() {
     return false;
   }
   const shouldShow = shouldShowQuickEntryFocusPrompt();
-  if (window.AgentoCMotion?.setPresence) {
-    window.AgentoCMotion.setPresence(prompt, shouldShow, {
+  if (window.RagentMotion?.setPresence) {
+    window.RagentMotion.setPresence(prompt, shouldShow, {
       duration: 140,
     });
   } else {
@@ -572,8 +572,8 @@ function beginQuickEntryFocusRecovery() {
     return false;
   }
   attemptQuickEntryComposerFocus();
-  if (window.AgentoCLayout?.subscribe) {
-    quickEntryFocusLayoutUnsubscribe = window.AgentoCLayout.subscribe((state) => {
+  if (window.RagentLayout?.subscribe) {
+    quickEntryFocusLayoutUnsubscribe = window.RagentLayout.subscribe((state) => {
       if (state?.keyboardOpen) {
         clearQuickEntryFocusRecovery();
       }

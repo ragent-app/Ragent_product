@@ -14,7 +14,7 @@ const secret = 'synthetic-suspend-signaling-secret';
 const roomId = createP2PRoomId(secret);
 const target = http.createServer((req, res) => { res.writeHead(200); res.end('ok'); });
 const signaling = createP2PSignalingServer({ host: '127.0.0.1', port: 0 });
-const source = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+const source = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
 const web = http.createServer((req, res) => {
   if (req.url === '/client.js') { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(source); }
   else res.end('<!doctype html>');
@@ -28,7 +28,7 @@ try {
   agent = await runP2PHostAgent({ signalingUrl, roomId, secret,
     handoffId: 'a'.repeat(32),
     localBaseUrl: `http://127.0.0.1:${targetAddress.port}`,
-    ...(process.env.AGENTOC_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.AGENTOC_TEST_P2P_HOST_BINARY } : {}) });
+    ...(process.env.RAGENT_TEST_P2P_HOST_BINARY ? { binaryPath: process.env.RAGENT_TEST_P2P_HOST_BINARY } : {}) });
   await agent.ready;
   await agent.joined;
   mobile = new WebSocket(`ws://127.0.0.1:${signalAddress.port}/signal`);
@@ -48,8 +48,8 @@ try {
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const status = () => page.evaluate(async () => (await window.testClient.request({ method: 'GET', path: '/connectivity-health' })).status);
   await page.evaluate(async options => {
-    const { AgentoCP2PClient } = await import('/client.js');
-    window.testClient = new AgentoCP2PClient({ ...options, iceServers: [], connectTimeoutMs: 12_000, requestTimeoutMs: 3_000 });
+    const { RagentP2PClient } = await import('/client.js');
+    window.testClient = new RagentP2PClient({ ...options, iceServers: [], connectTimeoutMs: 12_000, requestTimeoutMs: 3_000 });
     await window.testClient.connect();
   }, { signalingUrl, roomId, secret });
   assert.equal(await status(), 200);

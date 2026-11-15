@@ -11,11 +11,11 @@ import {
 import { createApprovedActionStore, recoverApprovedActionBatches } from '../chat/approved-action-store.mjs';
 import { executeApprovedAction } from '../chat/approved-action-executor.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-approved-action-resolution-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-approved-action-resolution-'));
 try {
 const batch = buildApprovedActionBatch([
   { command: 'sudo systemctl restart nginx', description: 'Restart nginx', category: 'privileged_other' },
-  { command: 'rm -f /tmp/agentoc-approved-action-fixture', description: 'Remove fixture', category: 'destructive_delete' },
+  { command: 'rm -f /tmp/ragent-approved-action-fixture', description: 'Remove fixture', category: 'destructive_delete' },
 ], {
   requestKey: 'resolution-fixture',
   sessionId: 'session-fixture',
@@ -131,7 +131,7 @@ await assert.rejects(
 console.log('test-approved-action-resolution: ok');
 } finally {
   assert.equal(dirname(resolve(root)), resolve(tmpdir()));
-  assert.ok(basename(root).startsWith('agentoc-approved-action-resolution-'));
+  assert.ok(basename(root).startsWith('ragent-approved-action-resolution-'));
   assert.equal((await lstat(root)).isSymbolicLink(), false);
   assert.equal((await realpath(root)).toLowerCase(), resolve(root).toLowerCase());
   await rm(root, { recursive: true, force: true });

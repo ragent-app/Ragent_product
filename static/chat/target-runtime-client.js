@@ -1,17 +1,17 @@
 // Target Runtime boundary for the Web surface. The browser always talks to
 // the current Web instance; that instance is the only gateway to a remote
 // target. Credentials and signing keys never enter this file.
-(function attachAgentoCTargetRuntime(root) {
+(function attachRagentTargetRuntime(root) {
   "use strict";
 
-  const store = root.AgentoCTargetStore;
+  const store = root.RagentTargetStore;
   const adapters = new Map();
   const activeControllers = new Set();
   const summaries = new Map();
   const summaryCursors = new Map();
   const seenSummaryEvents = new Map();
   const MAX_SEEN_SUMMARY_EVENTS = 2048;
-  const SUMMARY_CURSOR_STORAGE_KEY = "agentoc.target-summary-cursors.v1";
+  const SUMMARY_CURSOR_STORAGE_KEY = "ragent.target-summary-cursors.v1";
   const neutralExactPaths = new Set([
     "/api/account-policy",
     "/api/account/password",
@@ -252,7 +252,7 @@
   }
 
   function markResponseTargetRevision(target, response) {
-    updateRevision(target, response?.headers?.get?.("x-agentoc-target-revision"));
+    updateRevision(target, response?.headers?.get?.("x-ragent-target-revision"));
   }
 
   function createGatewayAdapter() {
@@ -295,7 +295,7 @@
           // response was lost.
           response = await root.fetch("/api/target-runtime/request", requestOptions);
         }
-        if (response.ok) updateRevision(target, response.headers?.get?.("x-agentoc-target-revision"));
+        if (response.ok) updateRevision(target, response.headers?.get?.("x-ragent-target-revision"));
         else store?.updateTarget?.(target.targetId, { status: response.status >= 500 ? "offline" : "degraded" });
         markResponseTargetRevision(target, response);
         return response;
@@ -358,7 +358,7 @@
     await adapters.get(selected.targetId)?.activate?.(selected);
     void refreshTargetSummary(selected.targetId);
     if (typeof root.CustomEvent === "function" && typeof root.dispatchEvent === "function") {
-      root.dispatchEvent(new root.CustomEvent("agentoc:target-selected", {
+      root.dispatchEvent(new root.CustomEvent("ragent:target-selected", {
         detail: { target: selected, previous, generation: selectionGeneration },
       }));
     }
@@ -399,10 +399,10 @@
         snapshotVersion: Number.isSafeInteger(Number(data?.revision)) ? Number(data.revision) : target.snapshotVersion,
         lastSeenAt: data?.generatedAt || new Date().toISOString(),
       }, { revision: Number.isSafeInteger(Number(data?.revision)) ? Number(data.revision) : undefined });
-      if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("agentoc:target-summary", { detail: { targetId: target.targetId, summary: data } }));
+      if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary", { detail: { targetId: target.targetId, summary: data } }));
       return data;
     } catch (error) {
-      if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("agentoc:target-summary", { detail: { targetId: target.targetId, error } }));
+      if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary", { detail: { targetId: target.targetId, error } }));
       return null;
     }
   }
@@ -464,7 +464,7 @@
           }, { revision });
         }
         if (typeof root.CustomEvent === "function") {
-          root.dispatchEvent?.(new root.CustomEvent("agentoc:target-summary-event", {
+          root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary-event", {
             detail: { targetId: eventTargetId, event },
           }));
         }
@@ -472,7 +472,7 @@
       return data;
     } catch (error) {
       if (typeof root.CustomEvent === "function") {
-        root.dispatchEvent?.(new root.CustomEvent("agentoc:target-summary-event", {
+        root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary-event", {
           detail: { targetId: target.targetId, error },
         }));
       }
@@ -526,7 +526,7 @@
   store?.replaceTargets?.([localFallbackTarget()], { activeTargetId: localTargetId, preserveActive: false });
   void refreshTargets().catch(() => {});
 
-  root.AgentoCTargetRuntime = Object.freeze({
+  root.RagentTargetRuntime = Object.freeze({
     getActiveTarget,
     getLocalTargetId: () => localTargetId,
     getSnapshot: () => store?.getSnapshot?.() || null,
@@ -542,15 +542,15 @@
     routeRequest,
     selectTarget,
   });
-  root.agentocFetch = fetchTarget;
-  root.addEventListener?.("agentoc:target-selected", () => {
+  root.ragentFetch = fetchTarget;
+  root.addEventListener?.("ragent:target-selected", () => {
     // The selected target is part of the cache key, but this explicit refresh
     // also clears any older browser cache owned by a pre-target build.
     Promise.resolve(root.queueForegroundRefresh?.({ forceFresh: true })).catch(() => {});
     Promise.resolve(root.refreshHomeWorkspace?.()).catch(() => {});
     Promise.resolve(root.refreshRunSheet?.()).catch(() => {});
     Promise.resolve(root.refreshCurrentSession?.({ forceFresh: true })).catch(() => {});
-    Promise.resolve(root.agentocEnsureProjectsReady?.({ force: true })).catch(() => {});
+    Promise.resolve(root.ragentEnsureProjectsReady?.({ force: true })).catch(() => {});
     root.scheduleWorkbenchInspectorRefresh?.(root.currentSessionId, { forceFresh: true, delay: 0 });
   });
   if (root.document && typeof root.setInterval === "function") {

@@ -12,7 +12,7 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const outputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
 if (outputDir) mkdirSync(outputDir, { recursive: true });
 
 const styles = [

@@ -36,10 +36,10 @@ function header(req, name) {
 
 function bindingInput(req, payload = {}) {
   return {
-    token: header(req, 'x-agentoc-browser-token'),
-    sessionId: text(payload.sessionId) || header(req, 'x-agentoc-browser-session-id'),
-    runId: text(payload.runId) || header(req, 'x-agentoc-browser-run-id'),
-    turnId: text(payload.turnId) || header(req, 'x-agentoc-browser-turn-id'),
+    token: header(req, 'x-ragent-browser-token'),
+    sessionId: text(payload.sessionId) || header(req, 'x-ragent-browser-session-id'),
+    runId: text(payload.runId) || header(req, 'x-ragent-browser-run-id'),
+    turnId: text(payload.turnId) || header(req, 'x-ragent-browser-turn-id'),
   };
 }
 
@@ -108,12 +108,12 @@ function normalizedConfirmationId(value) {
 
 function confirmationStatus(events, approvalId, runId) {
   const request = events.find((event) => event?.type === 'approval_request'
-    && event?.source === 'agentoc-confirmation'
+    && event?.source === 'ragent-confirmation'
     && text(event.approvalId) === approvalId
     && text(event.runId) === runId);
   if (!request) return { state: 'not_found' };
   const response = events.find((event) => event?.type === 'approval_response'
-    && event?.source === 'agentoc-confirmation'
+    && event?.source === 'ragent-confirmation'
     && text(event.approvalId) === approvalId
     && text(event.runId) === runId);
   if (!response) return { state: 'pending', approvalId };

@@ -1,6 +1,6 @@
 // Runtime-family independent persistence policy.
 //
-// Adapters translate wire protocols into normalized AgentoC events. This
+// Adapters translate wire protocols into normalized Ragent events. This
 // module is the single place that decides which provider progress is ephemeral
 // and how much payload is safe to retain in hot session history. Raw provider
 // lines remain available in the bounded run spool for diagnostics/replay.

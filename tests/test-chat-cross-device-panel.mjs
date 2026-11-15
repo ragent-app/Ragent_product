@@ -39,8 +39,8 @@ const [tokens, components, panelStyles, icons, qrCreator, panelSource] = await P
   readFile(new URL('static/qr-creator.min.js', repoRoot), 'utf8'),
   readFile(new URL('static/chat/cross-device-panel.js', repoRoot), 'utf8'),
 ]);
-const reviewDir = process.env.AGENTOC_VISUAL_REVIEW_DIR
-  || '/var/lib/agentoc/workspace/visual-ui-reviews/cross-device-panel';
+const reviewDir = process.env.RAGENT_VISUAL_REVIEW_DIR
+  || '/var/lib/ragent/workspace/visual-ui-reviews/cross-device-panel';
 await mkdir(reviewDir, { recursive: true });
 
 const markup = `<!doctype html><html lang="en"><head><meta charset="utf-8"><base href="http://localhost/"></head><body>
@@ -70,7 +70,7 @@ const markup = `<!doctype html><html lang="en"><head><meta charset="utf-8"><base
   </div>
 </body></html>`;
 
-const browser = await chromium.launch({ headless: true, ...(process.env.AGENTOC_TEST_BROWSER_CHANNEL ? { channel: process.env.AGENTOC_TEST_BROWSER_CHANNEL } : {}) });
+const browser = await chromium.launch({ headless: true, ...(process.env.RAGENT_TEST_BROWSER_CHANNEL ? { channel: process.env.RAGENT_TEST_BROWSER_CHANNEL } : {}) });
 try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   page.on('pageerror', (error) => console.error(`cross-device pageerror: ${error.message}`));
@@ -78,10 +78,10 @@ try {
   await page.setContent(markup);
   await page.addStyleTag({ content: `body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; }\n${tokens}\n${components}\n${panelStyles}` });
   await page.evaluate(({ iconSource, qrCreatorSource, temporaryPairingFixture }) => {
-    window.agentocT = (key) => key;
-    window.agentocResolveProductPath = (path) => new URL(path, 'http://localhost/').toString();
-    window.AgentoCFocusScope = { activate: () => () => {} };
-    window.AgentoCBackHandler = { push: () => 'cross-device-test', pop: () => {} };
+    window.ragentT = (key) => key;
+    window.ragentResolveProductPath = (path) => new URL(path, 'http://localhost/').toString();
+    window.RagentFocusScope = { activate: () => () => {} };
+    window.RagentBackHandler = { push: () => 'cross-device-test', pop: () => {} };
     window.open = (...args) => { window.__opened = args; };
     window.__requests = [];
     window.__googleStatus = { enabled: true, bound: false };
@@ -121,7 +121,7 @@ try {
         '/api/entry-switch/invite': { jumpUrl: 'https://office.example.test/agentoc/?join=fixture' },
         '/api/device-pairing/invitations': { invitation: {
           id: 'rpinv_protocol_test_0001', accountHandoff: window.__accountHandoff === true,
-          pairingUri: 'agentoc://pair?v=3&i=inst_local_001&e=https%3A%2F%2Fcomputer.example.test&t=rpi_0123456789abcdef0123456789abcdef&x=2099-08-09T09%3A02%3A00.000Z', shortCode: 'AB12CD34', expiresAt: '2099-08-09T09:02:00Z',
+          pairingUri: 'ragent://pair?v=3&i=inst_local_001&e=https%3A%2F%2Fcomputer.example.test&t=rpi_0123456789abcdef0123456789abcdef&x=2099-08-09T09%3A02%3A00.000Z', shortCode: 'AB12CD34', expiresAt: '2099-08-09T09:02:00Z',
         } },
         '/api/auth/google/bind': { authUrl: 'https://accounts.example.test/bind' },
       };
@@ -185,7 +185,7 @@ try {
   }, { iconSource: icons, qrCreatorSource: qrCreator, temporaryPairingFixture });
   await page.addScriptTag({ content: panelSource });
 
-  const opened = await page.evaluate(() => window.AgentoCCrossDevicePanel.open({ view: 'account' }));
+  const opened = await page.evaluate(() => window.RagentCrossDevicePanel.open({ view: 'account' }));
   assert.equal(opened, true, 'workspace should open');
   await page.waitForSelector('#crossDeviceAccountContent .cross-device-card');
   assert.equal(await page.locator('#crossDeviceAccountContent .cross-device-card').count(), 1, 'account view should not show a history card');
@@ -255,7 +255,7 @@ try {
   await page.getByRole('button', { name: 'Edit entry URL' }).click();
   await page.screenshot({ path: `${reviewDir}/entry-editor-390-light.png`, fullPage: true });
   const entryInput = page.locator('#crossDeviceEntryUrl-rdev_remote_001');
-  await entryInput.fill('ftp://office.example.test/agentoc');
+  await entryInput.fill('ftp://office.example.test/ragent');
   await page.getByRole('button', { name: 'Save' }).click();
   assert.equal(await page.getByText('Enter a valid http(s) entry URL.').count(), 1, 'invalid entry URL should be rejected before the request');
   assert.equal(await page.evaluate(() => window.__requests.some((request) => request.path.endsWith('/entry-url'))), false, 'invalid entry URL must not be sent');
@@ -288,7 +288,7 @@ try {
   assert.equal(await page.locator('.cross-device-pair-qr canvas').count(), 1, 'pairing invitation should render a scannable QR code');
   assert.equal(await page.locator('.cross-device-pair-qr canvas').evaluate((canvas) => canvas.width), 512, 'pairing QR should preserve camera-readable module size');
   assert.equal(await decodeQrCanvas(page.locator('.cross-device-pair-qr canvas')),
-    'agentoc://pair?v=3&i=inst_local_001&e=https%3A%2F%2Fcomputer.example.test&t=rpi_0123456789abcdef0123456789abcdef&x=2099-08-09T09%3A02%3A00.000Z',
+    'ragent://pair?v=3&i=inst_local_001&e=https%3A%2F%2Fcomputer.example.test&t=rpi_0123456789abcdef0123456789abcdef&x=2099-08-09T09%3A02%3A00.000Z',
   'formal pairing QR must decode to the exact server-issued URI');
   assert.equal(await page.getByText('AB12CD34').count(), 1, 'pairing short code should be visible as a fallback');
   const pairingRequest = await page.evaluate(() => window.__requests.find((request) => request.path === '/api/device-pairing/invitations'));
@@ -333,15 +333,15 @@ try {
   assert.ok(temporaryQrBounds.width <= 384 && temporaryQrBounds.width >= temporaryQrBounds.viewportWidth * 0.8,
     `temporary pairing QR should stay compact while remaining camera-readable: ${JSON.stringify(temporaryQrBounds)}`);
   const expectedTemporaryQr = JSON.stringify({
-    kind: 'agentoc-temporary-control-v1',
+    kind: 'ragent-temporary-control-v1',
     version: 1,
     envelope: temporaryPairingFixture.envelope,
     token: 'rtt_0123456789abcdefghijklmnopqrstuv',
   });
-  if (process.env.AGENTOC_QR_OUTPUT_PATH) {
+  if (process.env.RAGENT_QR_OUTPUT_PATH) {
     const pngBase64 = await page.locator('.cross-device-pair-qr-temporary canvas')
       .evaluate((canvas) => canvas.toDataURL('image/png').split(',')[1]);
-    await writeFile(process.env.AGENTOC_QR_OUTPUT_PATH, Buffer.from(pngBase64, 'base64'));
+    await writeFile(process.env.RAGENT_QR_OUTPUT_PATH, Buffer.from(pngBase64, 'base64'));
   }
   assert.equal(await decodeQrCanvas(page.locator('.cross-device-pair-qr-temporary canvas')), expectedTemporaryQr,
     'temporary pairing QR must decode to the exact server-issued envelope and token');
@@ -426,9 +426,9 @@ try {
 
   await page.evaluate(() => document.documentElement.dataset.theme = 'dark');
   await page.screenshot({ path: `${reviewDir}/devices-390-dark.png`, fullPage: true });
-  await page.evaluate(() => window.AgentoCCrossDevicePanel.close());
+  await page.evaluate(() => window.RagentCrossDevicePanel.close());
   await page.setViewportSize({ width: 1024, height: 820 });
-  await page.evaluate(() => window.AgentoCCrossDevicePanel.open({ view: 'devices' }));
+  await page.evaluate(() => window.RagentCrossDevicePanel.open({ view: 'devices' }));
   await page.waitForSelector('#crossDeviceDevicesContent .cross-device-device-row');
   await page.screenshot({ path: `${reviewDir}/devices-1024-dark.png`, fullPage: true });
   console.log(`test-chat-cross-device-panel: ok (${reviewDir})`);

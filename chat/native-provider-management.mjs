@@ -1785,7 +1785,7 @@ export async function startNativeOAuthLogin({
       ...proxyEnv,
       HOME: tempHome,
       CODEX_HOME: providerHome,
-      // npm's owned command shim launches Node. Use AgentoC's own runtime
+      // npm's owned command shim launches Node. Use Ragent's own runtime
       // first even on clean machines without a global Node installation.
       PATH: [dirname(process.execPath), process.env.PATH || process.env.Path].filter(Boolean).join(delimiter),
     };

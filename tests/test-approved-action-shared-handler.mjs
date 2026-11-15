@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { actionTool, agentCreateTool, handleRequest } from '../scripts/agentoc-approved-actions-mcp.mjs';
+import { actionTool, agentCreateTool, handleRequest } from '../scripts/ragent-approved-actions-mcp.mjs';
 import { codexApprovedActionTools, handleCodexApprovedActionCall } from '../chat/codex-approved-action-dynamic-tools.mjs';
 
 // Both calls use the same imported handler, but distinct run-bound credentials.
@@ -11,7 +11,7 @@ const server = createServer((req, res) => {
   req.on('data', chunk => { body += chunk; });
   req.on('end', () => {
     const payload = JSON.parse(body);
-    received.push({ token: req.headers['x-agentoc-approved-action-token'], payload });
+    received.push({ token: req.headers['x-ragent-approved-action-token'], payload });
     setTimeout(() => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ batchId: `batch-${payload.runId}`, actions: [] }));
@@ -43,9 +43,9 @@ try {
   const response = await handleCodexApprovedActionCall(call, binding);
   assert.equal(response.result.success, true);
   assert.equal(JSON.parse(response.result.contentItems[0].text).batchId, 'batch-run-a');
-  const legacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'agentoc_request_actions' } }, binding);
+  const legacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'ragent_request_actions' } }, binding);
   assert.equal(legacy.result.success, true);
-  const disabledLegacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'agentoc_create_agent' } }, { ...binding, config: { ...binding.config, agentCreateEnabled: false } });
+  const disabledLegacy = await handleCodexApprovedActionCall({ ...call, params: { ...call.params, tool: 'ragent_create_agent' } }, { ...binding, config: { ...binding.config, agentCreateEnabled: false } });
   assert.equal(disabledLegacy.error.code, -32003);
   for (const badBinding of [{ ...binding, threadId: 'other' }, { ...binding, turnId: 'other' }, { ...binding, active: false }]) {
     assert.equal((await handleCodexApprovedActionCall(call, badBinding)).error.code, -32003);

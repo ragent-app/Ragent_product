@@ -3,7 +3,7 @@
  *
  * 第三阶段设计：OPA 只负责“策略镜像”，绝不负责 Shell 解析，也绝不成为
  * 唯一安全边界。默认走 Node 内置策略（engine: 'builtin'）；当
- * AGENTOC_RISK_POLICY_OPA=1 且 opa 二进制可用时，用
+ * RAGENT_RISK_POLICY_OPA=1 且 opa 二进制可用时，用
  * policy/risk/linux-command.rego 并行计算并记录与内置策略的差异
  * （shadow），内置策略始终是最终裁决。
  *
@@ -11,9 +11,9 @@
  * 降级成 safe）；tier 无效时同样按 caution 处理。
  *
  * env:
- *   AGENTOC_RISK_POLICY_OPA  = '1' 启用 OPA shadow
- *   AGENTOC_OPA_BIN          = opa 可执行文件路径（默认 'opa'）
- *   AGENTOC_RISK_POLICY_REGO = rego 文件路径（默认 policy/risk/linux-command.rego）
+ *   RAGENT_RISK_POLICY_OPA  = '1' 启用 OPA shadow
+ *   RAGENT_OPA_BIN          = opa 可执行文件路径（默认 'opa'）
+ *   RAGENT_RISK_POLICY_REGO = rego 文件路径（默认 policy/risk/linux-command.rego）
  */
 
 import { execFile } from 'node:child_process';
@@ -69,7 +69,7 @@ function builtinResult({ tier, reasons, policyVersion }) {
 }
 
 function regoPath() {
-  return process.env.AGENTOC_RISK_POLICY_REGO || DEFAULT_REGO;
+  return process.env.RAGENT_RISK_POLICY_REGO || DEFAULT_REGO;
 }
 
 async function evalOpaTier(opaBin, input) {
@@ -109,9 +109,9 @@ export async function evaluateRiskPolicy({
 } = {}) {
   stats.requests += 1;
   const builtin = builtinResult({ tier, reasons, policyVersion });
-  if (process.env.AGENTOC_RISK_POLICY_OPA !== '1') return builtin;
+  if (process.env.RAGENT_RISK_POLICY_OPA !== '1') return builtin;
 
-  const opaBin = process.env.AGENTOC_OPA_BIN || 'opa';
+  const opaBin = process.env.RAGENT_OPA_BIN || 'opa';
   try {
     const context = riskContext && typeof riskContext === 'object' ? riskContext : null;
     const resolvedTargetScope = targetScope

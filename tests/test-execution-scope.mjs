@@ -72,7 +72,7 @@ try {
     'physicalKeyForPath should require a hostId');
 
   // ── resolveRealRoot: ~ expansion, absolutize, realpath, failures ─────────
-  const root = makeRootDir('agentoc-es-root-');
+  const root = makeRootDir('ragent-es-root-');
   assert.equal(await resolveRealRoot(root), await realpath(root),
     'resolveRealRoot should realpath an existing directory');
   assert.equal(await resolveRealRoot(join(root, '.')), root,
@@ -92,7 +92,7 @@ try {
     'resolveRealRoot should reject NUL bytes');
 
   // ── resolveContainedScope: shared scope + nested subpaths ────────────────
-  const wsRoot = makeRootDir('agentoc-es-ws-');
+  const wsRoot = makeRootDir('ragent-es-ws-');
   const app = join(wsRoot, 'app');
   const application = join(wsRoot, 'application');
   const sub = join(app, 'sub');
@@ -146,7 +146,7 @@ try {
   }
 
   // ── symlink handling: outside → reject, inside → allow ───────────────────
-  const outside = makeRootDir('agentoc-es-outside-');
+  const outside = makeRootDir('ragent-es-outside-');
   const escapeLink = join(wsRoot, 'escape-link');
   symlinkSync(outside, escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(
@@ -179,7 +179,7 @@ try {
 
 
   // ── ExecutionScopeSnapshot builder (slice 2) ──────────────────────────────
-  const snapWsRoot = makeRootDir('agentoc-ess-ws-');
+  const snapWsRoot = makeRootDir('ragent-ess-ws-');
   mkdirSync(join(snapWsRoot, 'sub'));
   const snapProject = {
     id: 'prj_snap',

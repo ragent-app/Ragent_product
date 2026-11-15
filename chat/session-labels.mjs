@@ -9,7 +9,7 @@ import {
 import { extractTaggedBlock, parseJsonObjectText } from './session-text-parsing.mjs';
 
 export const SESSION_LABELS_CONTROL_KIND = 'session-labels';
-export const SESSION_LABELS_CONTROL_TAG = 'agentoc-session-labels';
+export const SESSION_LABELS_CONTROL_TAG = 'ragent-session-labels';
 export const SESSION_LABELS_SCHEMA_VERSION = 1;
 
 const SESSION_TITLE_MAX_CHARS = 64;

@@ -64,9 +64,9 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-asset-registration-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const workRoot = join(home, '.agentoc', 'workspace');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-asset-registration-'));
+  const configDir = join(home, '.config', 'ragent');
+  const workRoot = join(home, '.ragent', 'workspace');
   const outputsDir = join(home, 'code', 'renders');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(workRoot, { recursive: true });
@@ -111,16 +111,16 @@ async function startServer({ home, configDir, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_AUTH_SESSION_SECRET: "test-secret-agentoc-http-assets",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_AUTH_SESSION_SECRET: "test-secret-ragent-http-assets",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
-      AGENTOC_WORK_ROOT_DIR: join(home, '.agentoc', 'workspace'),
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
+      RAGENT_WORK_ROOT_DIR: join(home, '.ragent', 'workspace'),
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
       SECURE_COOKIES: '0',
     },
     stdio: ['ignore', 'pipe', 'pipe'],

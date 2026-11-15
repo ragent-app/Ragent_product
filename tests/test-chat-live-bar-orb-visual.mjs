@@ -11,13 +11,13 @@ import { chromium } from '@playwright/test';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const requestedOutputDir = String(process.env.AGENTOC_VISUAL_OUTPUT_DIR || '').trim();
-const outputDir = requestedOutputDir || join(tmpdir(), `agentoc-live-bar-orb-visual-${Date.now()}`);
+const requestedOutputDir = String(process.env.RAGENT_VISUAL_OUTPUT_DIR || '').trim();
+const outputDir = requestedOutputDir || join(tmpdir(), `ragent-live-bar-orb-visual-${Date.now()}`);
 mkdirSync(outputDir, { recursive: true });
 // Full-page screenshots can block headless Chromium when a WebGL canvas is
 // present in this host environment. The default proof stays a real browser
 // render plus canvas pixel check; opt into the screenshot artifact explicitly.
-const captureScreenshot = process.env.AGENTOC_CAPTURE_ORB_SCREENSHOT === '1';
+const captureScreenshot = process.env.RAGENT_CAPTURE_ORB_SCREENSHOT === '1';
 // Element screenshots avoid the host-specific full-page/WebGL hang while still
 // giving us a real GPU/canvas material frame to inspect.
 

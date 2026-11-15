@@ -158,7 +158,7 @@ function createContext({
       return () => {};
     },
   };
-  windowTarget.AgentoCLayout = agentoCLayout;
+  windowTarget.RagentLayout = agentoCLayout;
   const context = {
     console: consoleMock,
     msgInput,

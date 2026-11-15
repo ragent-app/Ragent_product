@@ -14,12 +14,12 @@ const {
   AGY_RUNTIME_LAUNCHER_PATH,
 } = await import('../lib/agy-runtime.mjs');
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-runtime-test-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-runtime-test-'));
 const home = join(root, 'agy-home');
 const output = join(root, 'observed.json');
 const command = join(root, 'fake-agy');
 await writeFile(command, `#!/bin/sh
-printf 'home=%s\nmanaged=%s\ndbus=%s\nkeyring=%s\n' "$HOME" "$AGENTOC_AGY_HOME_DIR" "${'${DBUS_SESSION_BUS_ADDRESS:-}'}" "${'${GNOME_KEYRING_CONTROL:-}'}" > "$AGY_RUNTIME_TEST_OUTPUT"
+printf 'home=%s\nmanaged=%s\ndbus=%s\nkeyring=%s\n' "$HOME" "$RAGENT_AGY_HOME_DIR" "${'${DBUS_SESSION_BUS_ADDRESS:-}'}" "${'${GNOME_KEYRING_CONTROL:-}'}" > "$AGY_RUNTIME_TEST_OUTPUT"
 `, 'utf8');
 await chmod(command, 0o755);
 
@@ -32,7 +32,7 @@ const env = await buildAgyRuntimeEnv({
   AGY_RUNTIME_TEST_OUTPUT: output,
 }, { homeDir: home });
 assert.equal(env.HOME, home);
-assert.equal(env.AGENTOC_AGY_HOME_DIR, home);
+assert.equal(env.RAGENT_AGY_HOME_DIR, home);
 assert.equal(env.XDG_CONFIG_HOME, join(home, '.config'));
 assert.equal(env.GNOME_KEYRING_CONTROL, undefined);
 

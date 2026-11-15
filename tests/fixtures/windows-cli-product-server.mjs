@@ -6,10 +6,10 @@ import {promisify} from 'node:util';
 import {writeFile} from 'node:fs/promises';
 import {resolve,relative,join} from 'node:path';
 import {randomBytes} from 'node:crypto';
-const root=resolve(process.env.AGENTOC_INSTANCE_ROOT||''),config=resolve(process.env.AGENTOC_CONFIG_DIR||'');
-assert.ok(process.env.AGENTOC_TEST_INSTANCE_ID&&relative(root,config)==='config');assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));
-assert.equal(new URL(process.env.AGENTOC_ACCOUNTS_URL).hostname,'127.0.0.1');
-process.env.AGENTOC_LOCAL_WEB_AUTH='1';
+const root=resolve(process.env.RAGENT_INSTANCE_ROOT||''),config=resolve(process.env.RAGENT_CONFIG_DIR||'');
+assert.ok(process.env.RAGENT_TEST_INSTANCE_ID&&relative(root,config)==='config');assert.ok(![7690,7699].includes(Number(process.env.CHAT_PORT)));
+assert.equal(new URL(process.env.RAGENT_ACCOUNTS_URL).hostname,'127.0.0.1');
+process.env.RAGENT_LOCAL_WEB_AUTH='1';
 const old=randomBytes(32).toString('hex');await writeFile(join(config,'auth-sessions.json'),JSON.stringify({[old]:{role:'owner',authMethod:'local_web',expiry:Date.now()+60000}}));
 const exec=promisify(execFile);
 try{

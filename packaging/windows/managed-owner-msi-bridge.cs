@@ -3,12 +3,12 @@ using System;using System.IO;using System.Text;using System.Linq;using System.Co
 using System.Collections.Generic;using System.Diagnostics;using System.Management;
 using System.Reflection;using System.Runtime.InteropServices;using System.Security.AccessControl;
 using System.Security.Principal;using System.Security.Cryptography;using System.Text.RegularExpressions;using System.Web.Script.Serialization;
-using Microsoft.Win32.SafeHandles;using AgentoC.ServiceHost;
+using Microsoft.Win32.SafeHandles;using Ragent.ServiceHost;
 using Microsoft.Win32;
 static class ManagedOwnerMsiBridge {
- static string Product=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"AgentoC");
- static readonly string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"AgentoC");
- const string BrokerServiceName="AgentoC-PrivilegedBroker";
+ static string Product=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"Ragent");
+ static readonly string Data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),"Ragent");
+ const string BrokerServiceName="Ragent-PrivilegedBroker";
  const uint ScManagerConnect=0x0001,ServiceQueryConfig=0x0001,ServiceChangeConfig=0x0002,ServiceReadControl=0x00020000;
  const uint ServiceConfigSidInfo=5,ServiceConfigRequiredPrivileges=6,ServiceSidUnrestricted=1;
  const uint ServiceChangeConfigRight=0x0002,ServiceDeleteRight=0x00010000,ServiceStartRight=0x0010,ServiceStopRight=0x0020;
@@ -16,9 +16,9 @@ static class ManagedOwnerMsiBridge {
  const uint GenericWriteRight=0x40000000,GenericAllRight=0x10000000;
  [DllImport("msi.dll",CharSet=CharSet.Unicode,EntryPoint="MsiGetProductInfoW",ExactSpelling=true)]
  static extern uint MsiGetProductInfo(string productCode,string property,StringBuilder value,ref uint valueLength);
- static readonly string[] Names={"AgentoC-ControlPlane","AgentoC-RunnerSupervisor"};
+ static readonly string[] Names={"Ragent-ControlPlane","Ragent-RunnerSupervisor"};
  static string LegacyVoicePath(){
-  string value=null;using(var settings=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\AgentoC\LocalVoiceSettings",false))
+  string value=null;using(var settings=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Ragent\LocalVoiceSettings",false))
    if(settings!=null)value=settings.GetValue("RuntimeDirectory",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
   if(String.IsNullOrWhiteSpace(value))value=Path.Combine(Data,@"instances\owner\config\voice-runtime");
   if(!Regex.IsMatch(value,@"\A[A-Za-z]:\\")||value.StartsWith(@"\\",StringComparison.Ordinal))return null;
@@ -84,12 +84,12 @@ static class ManagedOwnerMsiBridge {
  static void CloseInstalledDesktop(){
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_CLOSE_SYSTEM_REQUIRED");
   ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  foreach(string name in new[]{"Ragent.exe","AgentoC.exe"})
+  foreach(string name in new[]{"Ragent.exe","Ragent.exe"})
    CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),false);
  }
  static void CloseCurrentUserDesktop(){
   ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  foreach(string name in new[]{"Ragent.exe","AgentoC.exe"})
+  foreach(string name in new[]{"Ragent.exe","Ragent.exe"})
    CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),true);
  }
  static bool HasWindow(Process process){try{return process.MainWindowHandle!=IntPtr.Zero;}catch{return false;}}
@@ -115,7 +115,7 @@ static class ManagedOwnerMsiBridge {
   for(int round=0;round<3;round++){
    // Windows Installer can rename an executable to a rollback filename while
    // its old image remains mapped. Its process name then no longer matches
-   // AgentoC even though its executable path still identifies our desktop.
+   // Ragent even though its executable path still identifies our desktop.
    int matched=0;var processes=Process.GetProcesses().OrderByDescending(HasWindow).ToArray();
    try{foreach(var process in processes){
     IntPtr handle=OpenProcess(0x1000|0x0001|0x00100000,false,process.Id);
@@ -158,7 +158,7 @@ static class ManagedOwnerMsiBridge {
    byte[] bytes=new byte[(int)needed];Marshal.Copy(buffer,bytes,0,bytes.Length);var descriptor=new RawSecurityDescriptor(bytes,0);
    Need(descriptor.Owner!=null&&Admins.Contains(descriptor.Owner.Value)&&descriptor.DiscretionaryAcl!=null,"OMI_BROKER_SERVICE_ACL_REFUSED");
    int dangerous=unchecked((int)(ServiceChangeConfigRight|ServiceDeleteRight|ServiceStartRight|ServiceStopRight|ServicePauseContinueRight|ServiceUserControlRight|WriteDacRight|WriteOwnerRight|GenericWriteRight|GenericAllRight));
-   string controlSid=new NTAccount("NT SERVICE","AgentoC-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;bool controlQuery=false;
+   string controlSid=new NTAccount("NT SERVICE","Ragent-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;bool controlQuery=false;
    foreach(GenericAce ace in descriptor.DiscretionaryAcl){
     if(ace.AceType==AceType.AccessDenied||ace.AceType==AceType.AccessDeniedObject)continue;
     var common=ace as CommonAce;Need(common!=null&&common.AceQualifier==AceQualifier.AccessAllowed,"OMI_BROKER_SERVICE_ACL_ACE_REFUSED");
@@ -169,14 +169,14 @@ static class ManagedOwnerMsiBridge {
   }finally{Marshal.FreeHGlobal(buffer);}
  }
  static void SetBrokerServiceDacl(IntPtr service){
-  string controlSid=new NTAccount("NT SERVICE","AgentoC-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;
+  string controlSid=new NTAccount("NT SERVICE","Ragent-ControlPlane").Translate(typeof(SecurityIdentifier)).Value;
   var descriptor=new RawSecurityDescriptor("O:SYG:SYD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x00000004;;;"+controlSid+")");byte[] bytes=new byte[descriptor.BinaryLength];descriptor.GetBinaryForm(bytes,0);IntPtr buffer=Marshal.AllocHGlobal(bytes.Length);
   try{Marshal.Copy(bytes,0,buffer,bytes.Length);Need(SetServiceObjectSecurity(service,7,buffer),"OMI_BROKER_SERVICE_ACL_APPLY_FAILED");}finally{Marshal.FreeHGlobal(buffer);}
  }
  static void SetBrokerServiceConfiguration(IntPtr service,uint level,IntPtr info){Need(ChangeServiceConfig2(service,level,info),"OMI_BROKER_SERVICE_CONFIG_APPLY_FAILED");}
  static void VerifyBrokerServiceConfiguration(IntPtr service){
   var config=ReadBrokerServiceConfig(service);string binary=Marshal.PtrToStringUni(config.binaryPathName)??"";binary=binary.Trim();if(binary.Length>=2&&binary[0]=='"'&&binary[binary.Length-1]=='"')binary=binary.Substring(1,binary.Length-2);
-  Need(config.serviceType==0x10&&config.startType==2&&String.Equals(Path.GetFullPath(binary),Path.Combine(Product,"Broker","AgentoC.PrivilegedBroker.exe"),StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_IDENTITY_REFUSED");
+  Need(config.serviceType==0x10&&config.startType==2&&String.Equals(Path.GetFullPath(binary),Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.exe"),StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_IDENTITY_REFUSED");
   string account=Marshal.PtrToStringUni(config.serviceStartName)??"";Need(String.Equals(account,"LocalSystem",StringComparison.OrdinalIgnoreCase)||String.Equals(account,@"NT AUTHORITY\LocalSystem",StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_ACCOUNT_REFUSED");
   IntPtr sidBuffer=Marshal.AllocHGlobal(4);try{uint needed;Need(QueryServiceConfig2(service,ServiceConfigSidInfo,sidBuffer,4,out needed),"OMI_BROKER_SERVICE_SID_QUERY_FAILED");Need((uint)Marshal.ReadInt32(sidBuffer)==ServiceSidUnrestricted,"OMI_BROKER_SERVICE_SID_REFUSED");}finally{Marshal.FreeHGlobal(sidBuffer);}
   IntPtr requiredBuffer=Marshal.AllocHGlobal(IntPtr.Size+256);try{uint needed;Need(QueryServiceConfig2(service,ServiceConfigRequiredPrivileges,requiredBuffer,(uint)(IntPtr.Size+256),out needed),"OMI_BROKER_REQUIRED_PRIVILEGES_QUERY_FAILED");IntPtr value=Marshal.ReadIntPtr(requiredBuffer);string privilege=Marshal.PtrToStringUni(value)??"";Need(privilege=="SeChangeNotifyPrivilege"&&Marshal.ReadInt16(value,(privilege.Length+1)*2)==0,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");}finally{Marshal.FreeHGlobal(requiredBuffer);}
@@ -185,7 +185,7 @@ static class ManagedOwnerMsiBridge {
  static void ConfigureBrokerService(string version,string expectedSha256){
   Need(Regex.IsMatch(version,@"\A\d+\.\d+\.\d+\.\d+\z")&&Regex.IsMatch(expectedSha256,@"\A[a-f0-9]{64}\z"),"OMI_BROKER_BUILD_ID_INVALID");
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_BROKER_CONFIG_SYSTEM_REQUIRED");ValidateProductRoot();
-  string binary=Path.Combine(Product,"Broker","AgentoC.PrivilegedBroker.exe"),manifest=Path.Combine(Product,"Broker","AgentoC.PrivilegedBroker.manifest.json");var pins=new List<IDisposable>();
+  string binary=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.exe"),manifest=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.manifest.json");var pins=new List<IDisposable>();
   try{
    PinBrokerInputs(pins,binary,manifest);var binaryStream=(FileStream)pins[pins.Count-2];string actualHash=Hash(binaryStream);Need(actualHash==expectedSha256,"OMI_BROKER_BINARY_HASH_REFUSED");
    var manifestStream=(FileStream)pins[pins.Count-1];string manifestText;manifestStream.Position=0;using(var reader=new StreamReader(manifestStream,new UTF8Encoding(false,true),true,1024,true))manifestText=reader.ReadToEnd();
@@ -207,7 +207,7 @@ static class ManagedOwnerMsiBridge {
  // This action runs after that rollback and restores the verified old Broker.
  static void RestoreBrokerAfterMajorRollback(){
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_BROKER_ROLLBACK_SYSTEM_REQUIRED");
-  ValidateProductRoot();string binary=Path.Combine(Product,"Broker","AgentoC.PrivilegedBroker.exe"),manifest=Path.Combine(Product,"Broker","AgentoC.PrivilegedBroker.manifest.json");
+  ValidateProductRoot();string binary=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.exe"),manifest=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.manifest.json");
   var pins=new List<IDisposable>();string version,hash;
   try{
    PinBrokerInputs(pins,binary,manifest);var binaryStream=(FileStream)pins[pins.Count-2];var manifestStream=(FileStream)pins[pins.Count-1];
@@ -345,7 +345,7 @@ static class ManagedOwnerMsiBridge {
      Need(Present(path)&&Directory.Exists(path),"OMI_RECOVERY_TARGET_CONFLICT");
      pins.Add(ServiceDirectoryPin.Directory(path));Acl(path,true,false);continue;
     }
-    if(installedPayload&&String.Equals(name,"AgentoC.ServiceHost.exe",StringComparison.OrdinalIgnoreCase)){
+    if(installedPayload&&String.Equals(name,"Ragent.ServiceHost.exe",StringComparison.OrdinalIgnoreCase)){
      Need(Present(path)&&(File.GetAttributes(path)&FileAttributes.Directory)==0,"OMI_RECOVERY_TARGET_CONFLICT");
      var installedFile=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
      try{ServiceDirectoryPin.VerifyFile(installedFile.SafeFileHandle,path);Acl(path,false,false);pins.Add(installedFile);}catch{installedFile.Dispose();throw;}
@@ -467,7 +467,7 @@ static class ManagedOwnerMsiBridge {
   using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)){
    ServiceDirectoryPin.VerifyFile(stream.SafeFileHandle,path);Acl(path,false,false);
    Need(stream.Length>0&&stream.Length<=128,"OMI_PREVALIDATION_MARKER_INVALID");
-   using(var reader=new StreamReader(stream,new UTF8Encoding(false,true)))Need(reader.ReadToEnd()=="agentoc-msi-prevalidation-v1\n","OMI_PREVALIDATION_MARKER_INVALID");
+   using(var reader=new StreamReader(stream,new UTF8Encoding(false,true)))Need(reader.ReadToEnd()=="ragent-msi-prevalidation-v1\n","OMI_PREVALIDATION_MARKER_INVALID");
   }
   return true;
  }
@@ -538,9 +538,9 @@ static class ManagedOwnerMsiBridge {
   Need(Directory.Exists(Product),"OMI_INSTALL_ROOT_MISSING");ValidateProductRoot();
   Need(new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator),"OMI_ADMIN_REQUIRED");
   // Keep the private, transient installer workspace on the selected product
-  // volume. This avoids filling the system drive when AgentoC is installed
+  // volume. This avoids filling the system drive when Ragent is installed
   // elsewhere; the root is already ACL-validated above.
-  string parent=Product,root=Path.Combine(parent,"AgentoC-managed-msi-"+Guid.NewGuid().ToString("N"));
+  string parent=Product,root=Path.Combine(parent,"Ragent-managed-msi-"+Guid.NewGuid().ToString("N"));
   Need(Directory.Exists(parent),"OMI_TEMP_UNAVAILABLE");
   var acl=new DirectorySecurity();acl.SetAccessRuleProtection(true,false);acl.SetOwner(new SecurityIdentifier("S-1-5-32-544"));
   foreach(string sid in new[]{"S-1-5-18","S-1-5-32-544"})acl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid),FileSystemRights.FullControl,InheritanceFlags.ContainerInherit|InheritanceFlags.ObjectInherit,PropagationFlags.None,AccessControlType.Allow));
@@ -549,7 +549,7 @@ static class ManagedOwnerMsiBridge {
    Marshal.Copy(bytes,0,sd,bytes.Length);var attr=new Attributes{size=Marshal.SizeOf(typeof(Attributes)),sd=sd,inherit=false};Need(CreateDirectory(root,ref attr),"OMI_TEMP_CREATE_REFUSED");owned=true;
    pins.Add(ServiceDirectoryPin.Directory(root));Acl(root,true,false);Need(Directory.GetAccessControl(root).AreAccessRulesProtected,"OMI_TEMP_ACL_REFUSED");
    var assembly=Assembly.GetExecutingAssembly();
-   foreach(string name in new[]{"read-owner-bootstrap-discovery.ps1","prepare-owner-services.ps1","prepare-owner-service-data.ps1","managed-owner-msi.ps1","initialize-owner-service-identity.ps1","prepare-owner-install-policy.ps1","prepare-owner-msi-policy.ps1","prepare-owner-msi-upgrade.ps1","remove-owner-msi-policy.ps1","rollback-owner-msi-uninstall.ps1","prevalidate-owner-msi.ps1","check-owner-msi-upgrade.ps1","check-owner-msi-activation.ps1","owner-activation-service-read.cs","owner-service-activation-trial.cs","owner-service-activation-transaction.cs","AgentoC.ServiceHost.cs"}){
+   foreach(string name in new[]{"read-owner-bootstrap-discovery.ps1","prepare-owner-services.ps1","prepare-owner-service-data.ps1","managed-owner-msi.ps1","initialize-owner-service-identity.ps1","prepare-owner-install-policy.ps1","prepare-owner-msi-policy.ps1","prepare-owner-msi-upgrade.ps1","remove-owner-msi-policy.ps1","rollback-owner-msi-uninstall.ps1","prevalidate-owner-msi.ps1","check-owner-msi-upgrade.ps1","check-owner-msi-activation.ps1","owner-activation-service-read.cs","owner-service-activation-trial.cs","owner-service-activation-transaction.cs","Ragent.ServiceHost.cs"}){
     using(var input=assembly.GetManifestResourceStream(name)){Need(input!=null,"OMI_RESOURCE_MISSING");using(var output=new FileStream(Path.Combine(root,name),FileMode.CreateNew,FileAccess.Write,FileShare.Read)){input.CopyTo(output);output.Flush(true);}}
     pins.Add(new FileStream(Path.Combine(root,name),FileMode.Open,FileAccess.Read,FileShare.Read));
    }
@@ -567,7 +567,7 @@ static class ManagedOwnerMsiBridge {
    string windowsRoot=Environment.GetFolderPath(Environment.SpecialFolder.Windows);Need(!String.IsNullOrWhiteSpace(windowsRoot)&&Path.IsPathRooted(windowsRoot),"OMI_WINDOWS_DIRECTORY_UNAVAILABLE");
    var info=new ProcessStartInfo{FileName=Path.Combine(Environment.SystemDirectory,@"WindowsPowerShell\v1.0\powershell.exe"),Arguments="-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""+Path.Combine(root,script)+"\""+scriptArguments,UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
    string systemDrive=Path.GetPathRoot(windowsRoot).TrimEnd('\\');Need(Regex.IsMatch(systemDrive,@"\A[A-Za-z]:\z"),"OMI_SYSTEM_DRIVE_UNAVAILABLE");
-   info.EnvironmentVariables.Clear();foreach(string key in new[]{"SystemRoot","WINDIR"})info.EnvironmentVariables[key]=windowsRoot;info.EnvironmentVariables["SystemDrive"]=systemDrive;info.EnvironmentVariables["AGENTOC_INSTALL_ROOT"]=Product;info.EnvironmentVariables["TEMP"]=info.EnvironmentVariables["TMP"]=root;
+   info.EnvironmentVariables.Clear();foreach(string key in new[]{"SystemRoot","WINDIR"})info.EnvironmentVariables[key]=windowsRoot;info.EnvironmentVariables["SystemDrive"]=systemDrive;info.EnvironmentVariables["RAGENT_INSTALL_ROOT"]=Product;info.EnvironmentVariables["TEMP"]=info.EnvironmentVariables["TMP"]=root;
    using(var child=new Process{StartInfo=info})using(var outputDone=new System.Threading.ManualResetEventSlim())using(var errorDone=new System.Threading.ManualResetEventSlim()){
     var output=new StringBuilder();int errorBytes=0,overflow=0;
     child.OutputDataReceived+=(s,e)=>{if(e.Data==null){outputDone.Set();return;}lock(output){if(output.Length+e.Data.Length>65536)System.Threading.Interlocked.Exchange(ref overflow,1);else output.AppendLine(e.Data);}};
@@ -625,14 +625,14 @@ static class ManagedOwnerMsiBridge {
       if(action=="UpgradeAdmission"&&result.ContainsKey("failureLine")&&result["failureLine"] is int&&result.ContainsKey("failureHResult")&&result["failureHResult"] is int)
        detail=" line="+((int)result["failureLine"]).ToString(System.Globalization.CultureInfo.InvariantCulture)+" hresult="+((int)result["failureHResult"]).ToString(System.Globalization.CultureInfo.InvariantCulture);
       if(action=="UpgradeAdmission"&&result.ContainsKey("failureStage")&&result["failureStage"] is string&&Regex.IsMatch((string)result["failureStage"],@"\A[a-z-]{1,32}\z"))detail+=" stage="+(string)result["failureStage"];
-      EventLog.WriteEntry("AgentoC","Owner MSI "+action+" failed: "+(string)result["code"]+detail,EventLogEntryType.Error,4101);
+      EventLog.WriteEntry("Ragent","Owner MSI "+action+" failed: "+(string)result["code"]+detail,EventLogEntryType.Error,4101);
      }catch{}
     }
     Console.Out.Write(value);if(errorBytes>0)Console.Error.WriteLine("OMI_SCRIPT_STDERR");return child.ExitCode;
    }
   }finally{
    Marshal.FreeHGlobal(sd);for(int i=pins.Count-1;i>=0;i--)pins[i].Dispose();
-   if(owned){Need(Path.GetDirectoryName(Path.GetFullPath(root))==parent&&Path.GetFileName(root).StartsWith("AgentoC-managed-msi-",StringComparison.Ordinal),"OMI_TEMP_CLEANUP_REFUSED");
+   if(owned){Need(Path.GetDirectoryName(Path.GetFullPath(root))==parent&&Path.GetFileName(root).StartsWith("Ragent-managed-msi-",StringComparison.Ordinal),"OMI_TEMP_CLEANUP_REFUSED");
     // Only these fresh administrator-private embedded resources/compiler output
     // exist here. Reject every reparse before recursive native cleanup.
     var stack=new Stack<string>();stack.Push(root);while(stack.Count>0){string dir=stack.Pop();Need((File.GetAttributes(dir)&FileAttributes.ReparsePoint)==0,"OMI_TEMP_REPARSE");foreach(string f in Directory.GetFileSystemEntries(dir)){var a=File.GetAttributes(f);Need((a&FileAttributes.ReparsePoint)==0,"OMI_TEMP_REPARSE");if((a&FileAttributes.Directory)!=0)stack.Push(f);}}
@@ -730,6 +730,6 @@ static class ManagedOwnerMsiBridge {
     return Run("Prepare",args[1]);
    }
    throw new InvalidOperationException("OMI_ARGUMENTS_REFUSED");
-  }catch(Exception e){string code=e.GetBaseException().Message;string safe=Regex.IsMatch(code,@"\AOMI_[A-Z_]+\z")?code:"OMI_BRIDGE_FAILED";if(args.Length>0&&args[0]=="configure-broker-service"){try{EventLog.WriteEntry("AgentoC","Owner MSI Broker trust failed: "+safe,EventLogEntryType.Error,4102);}catch{}}else if(args.Length>0&&args[0]=="prepare"){try{EventLog.WriteEntry("AgentoC","Owner MSI prepare bridge failed: "+safe,EventLogEntryType.Error,4103);}catch{}}Console.Error.WriteLine(safe);return 1;}
+  }catch(Exception e){string code=e.GetBaseException().Message;string safe=Regex.IsMatch(code,@"\AOMI_[A-Z_]+\z")?code:"OMI_BRIDGE_FAILED";if(args.Length>0&&args[0]=="configure-broker-service"){try{EventLog.WriteEntry("Ragent","Owner MSI Broker trust failed: "+safe,EventLogEntryType.Error,4102);}catch{}}else if(args.Length>0&&args[0]=="prepare"){try{EventLog.WriteEntry("Ragent","Owner MSI prepare bridge failed: "+safe,EventLogEntryType.Error,4103);}catch{}}Console.Error.WriteLine(safe);return 1;}
  }
 }

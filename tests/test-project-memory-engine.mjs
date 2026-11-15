@@ -13,7 +13,7 @@ import {
 } from '../chat/project-memory-engine.mjs';
 import { createProjectMemoryStore } from '../chat/project-memory-store.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-project-memory-engine-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-project-memory-engine-'));
 const store = createProjectMemoryStore({
   databasePath: join(root, 'project-memory.sqlite'),
   workspaceRoot: join(root, 'project-memory'),
@@ -21,8 +21,8 @@ const store = createProjectMemoryStore({
 
 try {
   assert.equal(readProjectMemoryMode({}), 'off');
-  assert.equal(readProjectMemoryMode({ AGENTOC_PROJECT_MEMORY_MODE: 'shadow' }), 'shadow');
-  assert.equal(readProjectMemoryMode({ AGENTOC_PROJECT_MEMORY_MODE: 'unexpected' }), 'off');
+  assert.equal(readProjectMemoryMode({ RAGENT_PROJECT_MEMORY_MODE: 'shadow' }), 'shadow');
+  assert.equal(readProjectMemoryMode({ RAGENT_PROJECT_MEMORY_MODE: 'unexpected' }), 'off');
 
   const source = filterProjectMemorySourceEvents([
     { seq: 1, type: 'message', role: 'user', requestId: 'req-a', content: 'Use workspace B.' },
@@ -61,26 +61,26 @@ try {
 
   const summaryContext = await buildProjectMemoryContext(
     { projectId: 'prj_engine', tool: 'codex' },
-    { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'summary' } },
+    { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'summary' } },
   );
   const claudeContext = await buildProjectMemoryContext(
     { projectId: 'prj_engine', tool: 'claude' },
-    { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'summary' } },
+    { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'summary' } },
   );
-  assert.equal(summaryContext, claudeContext, 'Codex-to-Claude uses the same AgentoC-owned memory version');
+  assert.equal(summaryContext, claudeContext, 'Codex-to-Claude uses the same Ragent-owned memory version');
   assert.match(summaryContext, /Workspace B/);
   const fullContext = await buildProjectMemoryContext(
     { projectId: 'prj_engine' },
     {
       store,
-      env: { AGENTOC_PROJECT_MEMORY_MODE: 'full' },
+      env: { RAGENT_PROJECT_MEMORY_MODE: 'full' },
       workspaceSnapshot: { projectId: 'prj_engine', workspaceId: 'ws_engine', rootPath: '/workspace/b', resolutionState: 'resolved' },
     },
   );
   assert.match(fullContext, /Relevant current Project Memory/);
   assert.match(fullContext, /Deterministic current project\/workspace reality/);
   assert.match(fullContext, /\/workspace\/b/);
-  assert.equal(await buildProjectMemoryContext({ projectId: 'prj_engine' }, { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'shadow' } }), '');
+  assert.equal(await buildProjectMemoryContext({ projectId: 'prj_engine' }, { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'shadow' } }), '');
 
   await store.enqueueExtraction({
     projectId: 'prj_fresh', workspaceId: 'ws_fresh', sessionId: 'session-fresh', runId: 'run-fresh',
@@ -103,10 +103,10 @@ try {
   assert.match(freshDelta, /Fresh change is verified/);
   assert.doesNotMatch(freshDelta, /Tentative proposal/);
   assert.equal(await buildProjectMemoryContext(
-    { projectId: 'prj_fresh' }, { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'shadow' } },
+    { projectId: 'prj_fresh' }, { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'shadow' } },
   ), '', 'shadow records Fresh Delta without injecting it');
   const freshContext = await buildProjectMemoryContext(
-    { projectId: 'prj_fresh' }, { store, env: { AGENTOC_PROJECT_MEMORY_MODE: 'summary' } },
+    { projectId: 'prj_fresh' }, { store, env: { RAGENT_PROJECT_MEMORY_MODE: 'summary' } },
   );
   assert.match(freshContext, /Fresh change is verified/);
 

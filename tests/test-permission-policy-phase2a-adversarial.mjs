@@ -158,7 +158,7 @@ eq('finding 5: both unknown channels use the unknown-host reason',
 const protectedOperation = operation({
   scope: {
     ...narrow.scope,
-    selfProtection: { computed: true, matched: true, workspaceRecommended: false, boundary: 'agentoc-service' },
+    selfProtection: { computed: true, matched: true, workspaceRecommended: false, boundary: 'ragent-service' },
   },
 });
 const protectedFacts = factsFor(protectedOperation);

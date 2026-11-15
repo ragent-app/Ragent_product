@@ -10,11 +10,11 @@
 //
 // All platform hooks (current-session id, the refresh command, the committed
 // message-node probe, timers) are injected via the environment contract
-// (root.AgentocPostSendRefreshEnvironment), so this module stays free of
+// (root.RagentPostSendRefreshEnvironment), so this module stays free of
 // browser globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-post-send-refresh-core.mjs.
 
-(function attachAgentocPostSendRefreshCore(root) {
+(function attachRagentPostSendRefreshCore(root) {
   const SEND_FALLBACK_REFRESH_DELAY_MS = 220;
 
   const DEFAULT_ENVIRONMENT = Object.freeze({
@@ -26,7 +26,7 @@
     clearTimeout: null,
   });
   const environment = new Proxy(
-    root.AgentocPostSendRefreshEnvironment || {},
+    root.RagentPostSendRefreshEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -65,7 +65,7 @@
     pendingSendRefreshTimers.set(timerKey, timer);
   }
 
-  root.AgentocPostSendRefreshCore = {
+  root.RagentPostSendRefreshCore = {
     schedulePostSendRefresh,
     SEND_FALLBACK_REFRESH_DELAY_MS,
   };

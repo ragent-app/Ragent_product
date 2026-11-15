@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-const root = await mkdtemp(join(tmpdir(), 'agentoc-auto-account-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const root = await mkdtemp(join(tmpdir(), 'ragent-auto-account-'));
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+delete process.env.RAGENT_INSTANCE_ROOT;
 try {
   const devices = await import('../chat/trusted-devices.mjs');
   const { loadOrCreateInstanceIdentity } = await import('../lib/instance-identity.mjs');

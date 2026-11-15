@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.integration.appfunctions"
+    namespace = "com.andysagent.ragent.integration.appfunctions"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {

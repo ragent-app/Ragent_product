@@ -12,16 +12,16 @@
 // the idle shape; entryMode is always "read").
 //
 // The ambient payload is read live via the environment contract
-// (root.AgentocShareSnapshotEnvironment) — a function, so the current payload
+// (root.RagentShareSnapshotEnvironment) — a function, so the current payload
 // is observed at call time, never frozen at attach. Locked against the legacy
 // implementation by tests/test-chat-share-snapshot-core.mjs.
 
-(function attachAgentocShareSnapshotCore(root) {
+(function attachRagentShareSnapshotCore(root) {
   const DEFAULT_ENVIRONMENT = Object.freeze({
     getActiveShareSnapshotPayload: null,
   });
   const environment = new Proxy(
-    root.AgentocShareSnapshotEnvironment || {},
+    root.RagentShareSnapshotEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -114,7 +114,7 @@
     };
   }
 
-  root.AgentocShareSnapshotCore = {
+  root.RagentShareSnapshotCore = {
     hasShareSnapshotPayload,
     buildShareSnapshotSessionId,
     getShareSnapshotDisplayEvents,

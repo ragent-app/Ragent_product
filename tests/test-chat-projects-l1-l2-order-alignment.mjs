@@ -61,10 +61,10 @@ function stubSetup(includeL2Comparator) {
   const comparatorLine = includeL2Comparator
     ? `
   window.getSessionSortTime = function (session) {
-    return window.AgentoCSessionStateModel.getSessionSortTime(session);
+    return window.RagentSessionStateModel.getSessionSortTime(session);
   };
   window.compareSessionListSessions = function (a, b) {
-    return window.AgentoCSessionStateModel.compareSessionListSessions(a, b);
+    return window.RagentSessionStateModel.compareSessionListSessions(a, b);
   };`
     : '';
   return `
@@ -75,12 +75,12 @@ function stubSetup(includeL2Comparator) {
       setItem: function () {},
     },
   });
-  window.agentocT = function (key) { return key; };
+  window.ragentT = function (key) { return key; };
   window.renderUiIcon = function () { return ""; };
-  window.agentocGetProjects = function () {
+  window.ragentGetProjects = function () {
     return [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
   };
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = function () { return "sessions"; };
   window.sessionSearchQuery = "";
   window.sidebarSearchMode = false;

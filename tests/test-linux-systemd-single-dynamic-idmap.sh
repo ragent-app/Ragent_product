@@ -3,15 +3,15 @@
 # python3-dbus, systemd, gcc and idmapped mount support.
 set -euo pipefail
 test "$(id -u)" = 0
-owner=${AGENTOC_TEST_OWNER_USER:-pinggu}
+owner=${RAGENT_TEST_OWNER_USER:-pinggu}
 owner_uid=$(id -u "$owner") owner_gid=$(id -g "$owner")
-root=$(mktemp -d /srv/agentoc-idmap-single-XXXXXXXX)
-case "$root" in /srv/agentoc-idmap-single-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
+root=$(mktemp -d /srv/ragent-idmap-single-XXXXXXXX)
+case "$root" in /srv/ragent-idmap-single-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
 suffix=${root##*-}
-user="agentoc-map-${suffix}-a" other="agentoc-map-${suffix}-b"
-unit="agentoc-idmap-single-${suffix}.service" other_unit="agentoc-idmap-single-${suffix}-other.service"
-reuse_unit="agentoc-idmap-single-${suffix}-reuse.service" runtime="agentoc-idmap-single-${suffix}"
-postkill_unit="agentoc-idmap-single-${suffix}-postkill.service"
+user="ragent-map-${suffix}-a" other="ragent-map-${suffix}-b"
+unit="ragent-idmap-single-${suffix}.service" other_unit="ragent-idmap-single-${suffix}-other.service"
+reuse_unit="ragent-idmap-single-${suffix}-reuse.service" runtime="ragent-idmap-single-${suffix}"
+postkill_unit="ragent-idmap-single-${suffix}-postkill.service"
 started=0 started_other=0 started_reuse=0 started_postkill=0
 cleanup() {
   if test "$started" = 1 && ! systemctl stop "$unit" >/dev/null 2>&1; then

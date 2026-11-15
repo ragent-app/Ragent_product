@@ -10,14 +10,14 @@ const SCHEMA_VERSION = 2;
 const MAX_DIFF_PREVIEW_LINES = 80;
 const MAX_DIFF_CELLS = Math.max(
   100_000,
-  Number.parseInt(process.env.AGENTOC_MAX_DIFF_CELLS || '1000000', 10) || 1_000_000,
+  Number.parseInt(process.env.RAGENT_MAX_DIFF_CELLS || '1000000', 10) || 1_000_000,
 );
 const MAX_AUDIT_ARTIFACT_FILES = 2000;
 const MAX_AUDIT_CHANGED_FILES = 1000;
 const MAX_AUDIT_PROGRESS_PLANS = 500;
 const FILE_EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-// Perf (AGENTOC_PERF_WRITE_DEBOUNCE=off / AGENTOC_PERF_COMPACT_JSON=off):
+// Perf (RAGENT_PERF_WRITE_DEBOUNCE=off / RAGENT_PERF_COMPACT_JSON=off):
 // the projection file (up to ~1.4MB, pretty-printed) was rewritten wholesale
 // on every appended event batch. Now the in-process value updates
 // immediately and the disk write is debounced per session; the projection is
@@ -25,10 +25,10 @@ const FILE_EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 // so a hard crash inside the window costs at most the last 750ms of derived
 // rows — and the stale-rebuild path in updateSessionAuditProjectionForEvents
 // already handles a lagging file after restart.
-const AGENTOC_PERF_WRITE_DEBOUNCE_ENV = 'AGENTOC_PERF_WRITE_DEBOUNCE';
-const PERF_WRITE_DEBOUNCE_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_WRITE_DEBOUNCE_ENV], { defaultValue: true });
-const AGENTOC_PERF_COMPACT_JSON_ENV = 'AGENTOC_PERF_COMPACT_JSON';
-const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[AGENTOC_PERF_COMPACT_JSON_ENV], { defaultValue: true });
+const RAGENT_PERF_WRITE_DEBOUNCE_ENV = 'RAGENT_PERF_WRITE_DEBOUNCE';
+const PERF_WRITE_DEBOUNCE_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_WRITE_DEBOUNCE_ENV], { defaultValue: true });
+const RAGENT_PERF_COMPACT_JSON_ENV = 'RAGENT_PERF_COMPACT_JSON';
+const PERF_COMPACT_JSON_ENABLED = isEnvToggleEnabled(process.env[RAGENT_PERF_COMPACT_JSON_ENV], { defaultValue: true });
 const PROJECTION_FLUSH_DELAY_MS = 750;
 const COMPACT_JSON_OPTIONS = PERF_COMPACT_JSON_ENABLED ? { spaces: 0 } : {};
 const PROJECTION_READ_CACHE_TTL_MS = 1_000;

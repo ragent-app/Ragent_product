@@ -10,7 +10,7 @@ if (process.platform !== 'win32') {
   console.log('windows-git-status: skipped (requires Windows PowerShell)');
   process.exit(0);
 }
-const root = mkdtempSync(path.join(tmpdir(), 'agentoc-git-status-'));
+const root = mkdtempSync(path.join(tmpdir(), 'ragent-git-status-'));
 try {
   assert.equal(await compileWindowsGitStatus('git status', { parse: async () => ({ commands: [] }) }), null);
   assert.equal(await compileWindowsGitStatus('git status', { parse: async () => { throw new Error('parser unavailable'); } }), null);
@@ -18,7 +18,7 @@ try {
   assert.ok(git && path.win32.isAbsolute(git), 'real Git executable required');
   execFileSync(git, ['init', '-q'], { cwd: root, windowsHide: true });
   writeFileSync(path.join(root, '普通 file.txt'), 'fixture');
-  for (const shell of [undefined, process.env.AGENTOC_TEST_PWSH].filter((value, index) => value || index === 0)) {
+  for (const shell of [undefined, process.env.RAGENT_TEST_PWSH].filter((value, index) => value || index === 0)) {
     for (const [source, args] of [
       ['git status', ['status']], ['git status --short', ['status', '--short']],
       ['git.exe status -sb', ['status', '-sb']], ['git status --porcelain=v1 -uno', ['status', '--porcelain=v1', '-uno']],
@@ -47,7 +47,7 @@ try {
   const env = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: path.join(root, 'empty-global-config') };
   const run = (cwd, args) => execFileSync(git, args, { cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   const init = cwd => {
-    run(cwd, ['init', '-q']); run(cwd, ['config', 'user.name', 'AgentoC Fixture']);
+    run(cwd, ['init', '-q']); run(cwd, ['config', 'user.name', 'Ragent Fixture']);
     run(cwd, ['config', 'user.email', 'fixture@agentoc.local']);
   };
   init(subSource);

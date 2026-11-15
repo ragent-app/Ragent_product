@@ -21,7 +21,7 @@ import { defaultProjectMemoryStore } from './project-memory-store.mjs';
 import { runDetachedAssistantPrompt } from './session-detached-assistant.mjs';
 import { getWorkspaceById } from './workspaces.mjs';
 
-const PROJECT_MEMORY_MODE_ENV = 'AGENTOC_PROJECT_MEMORY_MODE';
+const PROJECT_MEMORY_MODE_ENV = 'RAGENT_PROJECT_MEMORY_MODE';
 const MAX_SOURCE_EVENT_CHARS = 80_000;
 const MAX_SUMMARY_CONTEXT_CHARS = 8_000;
 const MAX_FULL_CONTEXT_CHARS = 20_000;

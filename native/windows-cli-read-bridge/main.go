@@ -1,4 +1,4 @@
-// A fixed, non-elevated entry point for approved scoped AgentoC CLI calls.
+// A fixed, non-elevated entry point for approved scoped Ragent CLI calls.
 // It does not evaluate shell text and launches the installed CLI with a
 // restricted environment so Node startup hooks cannot change the operation.
 package main
@@ -36,10 +36,10 @@ func childEnvironment(env []string, base string) ([]string, error) {
 	allowed := map[string]bool{
 		"SYSTEMROOT": true, "WINDIR": true, "SYSTEMDRIVE": true, "TEMP": true, "TMP": true, "TMPDIR": true,
 		"USERPROFILE": true, "HOME": true, "APPDATA": true, "LOCALAPPDATA": true,
-		"AGENTOC_SESSION_ID": true, "AGENTOC_SESSION_CONTROL_TOKEN": true,
-		"AGENTOC_SESSION_CONTROL_RENEWAL_TOKEN": true, "AGENTOC_SESSION_CONTROL_RENEWAL_TOKEN_FILE": true,
-		"AGENTOC_SESSION_CONTROL_RUN_ID": true, "AGENTOC_SESSION_CONTROL_SESSION_ID": true,
-		"AGENTOC_SESSION_CONTROL_TURN_ID": true,
+		"RAGENT_SESSION_ID": true, "RAGENT_SESSION_CONTROL_TOKEN": true,
+		"RAGENT_SESSION_CONTROL_RENEWAL_TOKEN": true, "RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE": true,
+		"RAGENT_SESSION_CONTROL_RUN_ID": true, "RAGENT_SESSION_CONTROL_SESSION_ID": true,
+		"RAGENT_SESSION_CONTROL_TURN_ID": true,
 	}
 	seen := map[string]bool{}
 	values := map[string]string{}
@@ -57,19 +57,19 @@ func childEnvironment(env []string, base string) ([]string, error) {
 		values[upper] = value
 		result = append(result, entry)
 	}
-	for _, key := range []string{"AGENTOC_SESSION_CONTROL_TOKEN", "AGENTOC_SESSION_CONTROL_RUN_ID", "AGENTOC_SESSION_CONTROL_SESSION_ID", "AGENTOC_SESSION_CONTROL_TURN_ID"} {
+	for _, key := range []string{"RAGENT_SESSION_CONTROL_TOKEN", "RAGENT_SESSION_CONTROL_RUN_ID", "RAGENT_SESSION_CONTROL_SESSION_ID", "RAGENT_SESSION_CONTROL_TURN_ID"} {
 		if !seen[key] || values[key] == "" {
 			return nil, errors.New("session capability unavailable")
 		}
 	}
-	if values["AGENTOC_SESSION_ID"] != values["AGENTOC_SESSION_CONTROL_SESSION_ID"] {
+	if values["RAGENT_SESSION_ID"] != values["RAGENT_SESSION_CONTROL_SESSION_ID"] {
 		return nil, errors.New("session identity mismatch")
 	}
 	u, _ := url.Parse(base)
 	// This fixed scoped helper runs inside the managed Windows service
 	// environment, whose profile legitimately lives under ProgramData.
 	// Set the mode ourselves rather than trusting an inherited value.
-	result = append(result, "AGENTOC_WINDOWS_SERVICE_MODE=1", "AGENTOC_CHAT_BASE_URL="+base, "CHAT_PORT="+u.Port())
+	result = append(result, "RAGENT_WINDOWS_SERVICE_MODE=1", "RAGENT_CHAT_BASE_URL="+base, "CHAT_PORT="+u.Port())
 	return result, nil
 }
 
@@ -181,7 +181,7 @@ func run(args []string) error {
 	}
 	argv := []string{cli, "trigger", "list", "--base-url", base}
 	if create {
-		session := os.Getenv("AGENTOC_SESSION_ID")
+		session := os.Getenv("RAGENT_SESSION_ID")
 		if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
 			return errors.New("invalid session identity")
 		}
@@ -189,7 +189,7 @@ func run(args []string) error {
 		argv = append(argv, "--session", session, "--base-url", base)
 	}
 	if asset {
-		session := os.Getenv("AGENTOC_SESSION_ID")
+		session := os.Getenv("RAGENT_SESSION_ID")
 		if session == "" || len(session) > 128 || strings.Trim(session, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
 			return errors.New("invalid session identity")
 		}
@@ -209,7 +209,7 @@ func run(args []string) error {
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "AgentoC scoped operation failed:", err)
+		fmt.Fprintln(os.Stderr, "Ragent scoped operation failed:", err)
 		if failure, ok := err.(*exec.ExitError); ok {
 			os.Exit(failure.ExitCode())
 		}

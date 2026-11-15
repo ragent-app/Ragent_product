@@ -4,8 +4,8 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-runtime-selection-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-runtime-selection-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const selection = await import('../chat/organization-runtime-selection.mjs');
 const planner = await import('../chat/organization-planner.mjs');

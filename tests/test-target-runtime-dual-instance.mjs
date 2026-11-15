@@ -15,7 +15,7 @@ import {
 import { createTargetRuntimeGrantClaims, verifyTargetRuntimeGrant } from '../lib/target-runtime-grant.mjs';
 import { handleTargetRuntimeGatewayRoutes } from '../chat/router-target-runtime-routes.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-target-runtime-dual-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-target-runtime-dual-'));
 const nowMs = Date.now();
 const clock = () => nowMs;
 const source = await loadOrCreateInstanceIdentity({ filePath: join(root, 'source.json') });
@@ -80,7 +80,7 @@ let lastAuthorization = null;
 
 function targetRuntimeRequestHandler(req, res) {
   void (async () => {
-    const token = String(req.headers['x-agentoc-target-grant'] || '').trim();
+    const token = String(req.headers['x-ragent-target-grant'] || '').trim();
     if (req.headers.cookie || req.headers.authorization) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ code: 'TARGET_RUNTIME_CREDENTIAL_MIXED' }));
@@ -122,7 +122,7 @@ function targetRuntimeRequestHandler(req, res) {
     const responseBody = JSON.stringify({ target: 'B', method: req.method, path: req.url, body });
     const response = {
       status: 200,
-      headers: { 'Content-Type': 'application/json', 'X-AgentoC-Target-Revision': '1' },
+      headers: { 'Content-Type': 'application/json', 'X-Ragent-Target-Revision': '1' },
       body: responseBody,
     };
     replayResponses.set(replayKey, response);
@@ -203,12 +203,12 @@ const authorizeImpl = async (input) => {
   const proof = signTargetRuntimeAuthorizationProof(source, {
     ...input,
     issuedAt,
-    audience: 'agentoc-target-runtime',
+    audience: 'ragent-target-runtime',
   });
   lastAuthorization = await broker.authorizeTargetRuntime({
     ...input,
     issuedAt,
-    audience: 'agentoc-target-runtime',
+    audience: 'ragent-target-runtime',
     instance: publicInstanceIdentity(source),
     signature: proof.signature,
   });
@@ -308,7 +308,7 @@ try {
   catalog.targets.find((entry) => entry.targetId === target.instanceId).status = 'online';
 
   const badPath = await fetch(`${targetServer.url}/api/agents`, {
-    headers: { 'X-AgentoC-Target-Grant': lastAuthorization.grant },
+    headers: { 'X-Ragent-Target-Grant': lastAuthorization.grant },
   });
   const badPathBody = await badPath.json();
   assert.equal(badPath.status, 403);
@@ -317,8 +317,8 @@ try {
   const mixed = await fetch(`${targetServer.url}/api/sessions/session-b/messages`, {
     method: 'POST',
     headers: {
-      'X-AgentoC-Target-Grant': lastAuthorization.grant,
-      Cookie: 'agentoc_session=unexpected',
+      'X-Ragent-Target-Grant': lastAuthorization.grant,
+      Cookie: 'ragent_session=unexpected',
     },
   });
   assert.equal(mixed.status, 400);
@@ -342,7 +342,7 @@ try {
   });
   const expiredToken = await signAssertion({ ...expiredClaims, exp: Math.floor(nowMs / 1000) - 1, expiresAt: new Date(nowMs - 1000).toISOString() });
   const expired = await fetch(`${targetServer.url}/api/sessions`, {
-    headers: { 'X-AgentoC-Target-Grant': expiredToken },
+    headers: { 'X-Ragent-Target-Grant': expiredToken },
   });
   assert.equal(expired.status, 401);
   assert.match((await expired.json()).code, /TARGET_GRANT/);

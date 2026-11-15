@@ -9,15 +9,15 @@ import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 import { buildAccountSessionMessage, createDevicePublicKeyFingerprint } from '../lib/device-auth-protocol.mjs';
 import { loadOrCreateInstanceIdentity, publicInstanceIdentity, signOwnerAuthDeviceProof } from '../lib/instance-identity.mjs';
 
-const url = process.env.AGENTOC_ACCOUNTS_DATABASE_URL;
+const url = process.env.RAGENT_ACCOUNTS_DATABASE_URL;
 if (!url) { console.log('test-account-detach-postgres: skipped (no isolated database)'); process.exit(0); }
 const parsed = new URL(url);
 assert.equal(parsed.hostname, '127.0.0.1');
 assert.equal(parsed.port, '25433');
-assert.equal(parsed.pathname, '/agentoc_qa_detach');
+assert.equal(parsed.pathname, '/ragent_qa_detach');
 const pool = new Pool({ connectionString: url, max: 3 });
 const store = createPostgresStore({ pool });
-const identityFile = join(tmpdir(), `agentoc-detach-test-${process.pid}.json`);
+const identityFile = join(tmpdir(), `ragent-detach-test-${process.pid}.json`);
 const accountId = 'acct_detach_isolated';
 const broker = createOwnerAuthBroker({ store,
   verifyGoogleCredential: async () => ({ providerSubject: 'detach-user' }),
@@ -60,7 +60,7 @@ try {
       alias: 'QA computer', deviceKind: 'computer', createdAt: now, lastSeenAt: now, unboundAt: '' });
   });
   const before = await pool.query('select revision from instance_authority_revisions where instance_id=$1', [publicInstance.instanceId]);
-  const fields = { transactionId: 'isolated-unbind-computer-0001', purpose: 'unbind', issuedAt: new Date().toISOString(), audience: 'agentoc-owner-auth-device' };
+  const fields = { transactionId: 'isolated-unbind-computer-0001', purpose: 'unbind', issuedAt: new Date().toISOString(), audience: 'ragent-owner-auth-device' };
   const proof = signOwnerAuthDeviceProof(instance, fields);
   await broker.unbindInstance({ ...fields, accountId, instance: publicInstance, signature: proof.signature });
   assert.equal((await pool.query('select 1 from instance_bindings where instance_id=$1', [publicInstance.instanceId])).rowCount, 0);

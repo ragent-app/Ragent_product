@@ -21,7 +21,7 @@ assert.doesNotMatch(template, /id="tabAgents"/);
 assert.doesNotMatch(template, /id="tabSettings"/);
 assert.doesNotMatch(template, /id="sourceFilterSelect"/);
 assert.doesNotMatch(template, /id="sidebarFilters"/);
-assert.match(template, /class="sidebar-brand">AgentoC</);
+assert.match(template, /class="sidebar-brand">Ragent</);
 assert.match(template, /id="sidebarSearchBtn"[^>]*data-icon="search"/);
 assert.match(template, /id="closeSidebar"[^>]*data-icon="close"/);
 assert.match(template, /id="sidebarFilterBtn"[^>]*data-icon="gear-solid"/);
@@ -75,13 +75,13 @@ assert.match(sidebarJs, /function renderSidebarAgentSearchResults\(/);
 assert.match(sidebarJs, /function closeSidebarTransientSurfaces\(/);
 assert.match(sidebarJs, /async function requestSidebarAccountStatus\(/);
 assert.match(sidebarJs, /\/api\/auth\/google\/status/);
-assert.match(sidebarJs, /AgentoCCrossDevicePanel\?\.open\?\.\(\{ view: "account" \}\)/);
+assert.match(sidebarJs, /RagentCrossDevicePanel\?\.open\?\.\(\{ view: "account" \}\)/);
 assert.match(sidebarJs, /function openSidebarSubpageWithSymbol\(/);
 assert.match(sidebarJs, /sidebar-symbol-flight/);
 assert.match(sidebarJs, /sidebar-subpage-panel-morph-pending/);
 assert.match(sidebarJs, /sidebarSubpageIcon/);
 assert.match(sessionSurfaceJs, /function bindSidebarLongPress\(/);
-assert.match(sessionSurfaceJs, /window\.agentocOpenProjectActionSheet/);
+assert.match(sessionSurfaceJs, /window\.ragentOpenProjectActionSheet/);
 assert.match(sessionSurfaceJs, /className = `sidebar-action-sheet-action/);
 assert.match(sessionSurfaceJs, /button\.dataset\.action = action/);
 assert.doesNotMatch(sessionSurfaceJs, /className = "session-context-menu"/);
@@ -100,8 +100,8 @@ assert.match(sidebarJs, /sidebar\.subpage\.backToSettings/);
 // "selected" project/folder getters resolve to the project the user is inside
 // (agents panel, managed apps, new-session shortcuts land in THAT project),
 // falling back to the persisted selection everywhere else.
-assert.match(sidebarJs, /window\.agentocGetSelectedProjectId[\s\S]*?agentocGetBrowsingProject\(\)[\s\S]*?return activeProjectId/);
-assert.match(sidebarJs, /window\.agentocGetSelectedSessionFolder[\s\S]*?agentocGetBrowsingProject\(\)[\s\S]*?return getActiveProject\(\)\?\.rootPath/);
+assert.match(sidebarJs, /window\.ragentGetSelectedProjectId[\s\S]*?ragentGetBrowsingProject\(\)[\s\S]*?return activeProjectId/);
+assert.match(sidebarJs, /window\.ragentGetSelectedSessionFolder[\s\S]*?ragentGetBrowsingProject\(\)[\s\S]*?return getActiveProject\(\)\?\.rootPath/);
 assert.match(composeJs, /syncSidebarShellState\(normalizedTab\)/);
 assert.doesNotMatch(composeJs, /tabSettings/);
 for (const iconName of ['search', 'filter', 'folder', 'agent', 'sparkle', 'new-chat', 'gear-solid', 'trash']) {

@@ -17,7 +17,7 @@ and deterministic hard denials cannot be supplied by a model answer.
 Each review is bound to a run, turn, approval ID and request hash, with an
 independent capability valid for at most 24 hours and rejected after the run
 ends or is cancelled. The provider timeout defaults to 30 seconds; an operator
-may set `AGENTOC_APPROVAL_REVIEW_TIMEOUT_MS` to 5000–45000 milliseconds in the
+may set `RAGENT_APPROVAL_REVIEW_TIMEOUT_MS` to 5000–45000 milliseconds in the
 control-plane environment. There is no automatic retry. The decision event
 includes the review status, reason code, adapter and reported token usage.
 

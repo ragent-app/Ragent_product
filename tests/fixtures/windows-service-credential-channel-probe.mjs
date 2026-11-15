@@ -86,7 +86,7 @@ export async function serviceCredentialChannel(root,role,spec){
         const privateRoot=join(root,'state/control','credential-r'+round,'config');const denials=[];
         for(const file of ['authority-identity.json','temporary-registry.json','native-provider-runtime/providers.json','native-provider-runtime/secrets/selected.json','native-provider-runtime/secrets/unselected.json']){
           let denied=false;try{await readFile(join(privateRoot,file));}catch(error){denied=['EACCES','EPERM'].includes(error.code);}assert.equal(denied,true);denials.push({file,denied});}
-        const policy={pipeName:'agentoc-run-credential-'+randomBytes(16).toString('hex'),binding:offer.binding,controlSid:spec.controlSid,executorSid:spec.executorSid};
+        const policy={pipeName:'ragent-run-credential-'+randomBytes(16).toString('hex'),binding:offer.binding,controlSid:spec.controlSid,executorSid:spec.executorSid};
         channel=await listenExecutorCredentialChannel({...paths,policy});assert.equal(channel.ready.protectedDacl,true);assert.equal(channel.ready.firstInstance,true);assert.equal(channel.ready.rejectRemote,true);
         const serverFacts=channel.ready.facts;await put(executor,prefix,'ready',{policy,ready:channel.ready});let calls=0,peer,code='',warmReplayRefused=false,coldReplayRefused=false,worker;
         try{const request=await channel.receive();peer=request.peer;assert.equal(peer.sid,spec.controlSid);assert.equal(peer.queryOnlyAuthorityVerified,true);

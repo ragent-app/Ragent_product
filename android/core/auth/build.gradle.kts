@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.auth"
+    namespace = "com.andysagent.ragent.core.auth"
     compileSdk = 37
     defaultConfig {
         minSdk = 26

@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-collaboration-orchestrator-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-collaboration-orchestrator-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { createCollaborationOrchestrator } = await import('../chat/collaboration-orchestrator.mjs');
 const store = await import('../chat/collaboration-store.mjs');
@@ -181,7 +181,7 @@ const worktreeOrchestrator = createCollaborationOrchestrator({
     }],
     createGitWorktree: async ({ taskId }) => {
       worktreeCalls.push(taskId);
-      return `/tmp/agentoc-collaboration-worktrees/test/${taskId}`;
+      return `/tmp/ragent-collaboration-worktrees/test/${taskId}`;
     },
   },
 });
@@ -209,7 +209,7 @@ try {
   assert.equal(automaticWakeCreates, 0, 'collaboration dispatch must not create a parent-session completion trigger');
   assert.equal(first.policy.agentContracts.contract.agentRevision, 'specialist-r1');
   assert.equal(first.policy.agentContracts.contract.policyRevision, 'manager-r1:specialist-r1');
-  assert.match(prompts[0], /agentoc-result-packet/, 'collaboration workers receive the bounded result contract');
+  assert.match(prompts[0], /ragent-result-packet/, 'collaboration workers receive the bounded result contract');
   assert.match(prompts[0], /Allowed state values are: completed \| failed \| blocked \| waiting/);
   assert.equal(dispatches[0].options.recordUserMessage, false, 'worker dispatch must not create a synthetic user message');
   assert.equal(dispatches[0].options.skipSessionContinuation, true, 'worker dispatch must bypass user-session continuation routing');
@@ -433,8 +433,8 @@ try {
   const wtAfter = await worktreeOrchestrator.get(wt.id);
   const wtTask = wtAfter.tasks.find((t) => t.id === 'wt-task');
   const wtSession2 = worktreeSessions.get(wtTask.sessionId);
-  assert.equal(wtSession2.folder, '/tmp/agentoc-collaboration-worktrees/test/wt-task:attempt:2');
-  assert.equal(wtSession2.sourceContext.worktreeRef, '/tmp/agentoc-collaboration-worktrees/test/wt-task:attempt:2');
+  assert.equal(wtSession2.folder, '/tmp/ragent-collaboration-worktrees/test/wt-task:attempt:2');
+  assert.equal(wtSession2.sourceContext.worktreeRef, '/tmp/ragent-collaboration-worktrees/test/wt-task:attempt:2');
   assert.equal(wtSession2.sourceContext.taskId, 'wt-task', 'sourceContext must carry the logical task id');
   console.log('test-collaboration-orchestrator: ok');
 } finally {

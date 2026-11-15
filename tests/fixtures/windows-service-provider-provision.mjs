@@ -7,12 +7,12 @@ import {createNativeProviderRegistry} from '../../lib/provider-runtime/registry.
 import {createSecretStore} from '../../lib/provider-runtime/secret-store.mjs';
 try{
   const root=resolve(process.argv[2]);
-  assert.equal(dirname(root).toLowerCase(),'c:\\programdata\\agentocidentityqa');
+  assert.equal(dirname(root).toLowerCase(),'c:\\programdata\\ragentidentityqa');
   assert.match(root.split('\\').at(-1),/^case-[a-f0-9]{32}$/);
   for(let path=root;;path=dirname(path)){assert.equal((await lstat(path)).isSymbolicLink(),false);assert.equal((await realpath(path)).toLowerCase(),path.toLowerCase());if(dirname(path)===path)break;}
   const spec=JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));assert.equal(spec.crossServiceCredentialProvider,true);
-  assert.ok([1,2].includes(spec.ipcRound));assert.equal(await readFile(join(root,'.agentoc-identity-qa'),'utf8'),'case-'+spec.caseId);
-  const configDir='C:/ProgramData/AgentoC/instances/owner/config',registry=createNativeProviderRegistry({configDir});
+  assert.ok([1,2].includes(spec.ipcRound));assert.equal(await readFile(join(root,'.ragent-identity-qa'),'utf8'),'case-'+spec.caseId);
+  const configDir='C:/ProgramData/Ragent/instances/owner/config',registry=createNativeProviderRegistry({configDir});
   const selected=await registry.getProviderProfile(spec.providerSource.profileId),auth=await registry.getAuthProfile(selected?.authProfileId);
   assert.equal(selected?.revision,spec.providerSource.profileRevision);assert.equal(selected?.agentType,'claude');assert.equal(selected?.protocol,'anthropic-messages');
   assert.equal(selected?.enabled,true);assert.equal(selected?.status,'ready');assert.equal(selected?.baseUrl,spec.providerSource.baseUrl);

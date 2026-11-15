@@ -14,8 +14,8 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-collab-workspace-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-collab-workspace-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   validateWorkspacePlan,
@@ -47,7 +47,7 @@ function makeRoot(prefix) {
 
 // ── legacy behavior preserved (now async) ─────────────────────────────────
 {
-  const root = '/home/example/agentoc-dev';
+  const root = '/home/example/ragent-dev';
   const single = await validateWorkspacePlan({
     rootPath: root,
     tasks: [{ id: 'one', role: 'specialist', writablePaths: ['chat/a'] }],
@@ -80,11 +80,11 @@ function makeRoot(prefix) {
     /escapes project root/,
     '.. escape is refused',
   );
-  assert.match(buildWorktreePath(root, 'collab-1', 'task/a'), /agentoc-collaboration-worktrees/);
+  assert.match(buildWorktreePath(root, 'collab-1', 'task/a'), /ragent-collaboration-worktrees/);
   let removed = false;
   await removeGitWorktree({
     rootPath: root,
-    worktreePath: '/tmp/agentoc-collaboration-worktrees/test/collab/task',
+    worktreePath: '/tmp/ragent-collaboration-worktrees/test/collab/task',
     execFileFn: async () => { removed = true; },
   });
   eq(removed, true, 'worktree removal guard passes');
@@ -92,8 +92,8 @@ function makeRoot(prefix) {
 
 // ── path safety matrix: realpath + relative, no prefix confusion ──────────
 {
-  const root = makeRoot('agentoc-collab-path-root-');
-  const outside = makeRoot('agentoc-collab-outside-');
+  const root = makeRoot('ragent-collab-path-root-');
+  const outside = makeRoot('ragent-collab-outside-');
   mkdirSync(join(root, 'app'), { recursive: true });
   mkdirSync(join(root, 'application'), { recursive: true });
   mkdirSync(join(root, 'app', 'sub'), { recursive: true });

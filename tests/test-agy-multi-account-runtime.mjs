@@ -12,7 +12,7 @@ import {
 } from '../lib/provider-runtime/run-provider-prepare.mjs';
 import { buildRuntimeInvocation } from '../chat/process-runner.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-multi-account-runtime-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-multi-account-runtime-'));
 const configDir = join(root, 'config');
 const providerHomesRoot = join(root, 'provider-homes');
 const registry = createNativeProviderRegistry({ configDir });
@@ -78,11 +78,11 @@ try {
     'personal-token',
   );
   assert.equal(
-    (await readFile(join(workRun.agyHomeDir, '.agentoc-provider-id'), 'utf8')).trim(),
+    (await readFile(join(workRun.agyHomeDir, '.ragent-provider-id'), 'utf8')).trim(),
     'agy-work',
   );
   assert.equal(
-    (await readFile(join(personalRun.agyHomeDir, '.agentoc-provider-id'), 'utf8')).trim(),
+    (await readFile(join(personalRun.agyHomeDir, '.ragent-provider-id'), 'utf8')).trim(),
     'agy-personal',
   );
 

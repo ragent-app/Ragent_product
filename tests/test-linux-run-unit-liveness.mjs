@@ -4,14 +4,14 @@ import { linuxRunUnitName, matchesLinuxRunUnitState, captureLinuxRunUnitIdentity
 
 const expected = { runId: 'run_test12345678', launchAttempt: 2, invocationId: 'a'.repeat(32) };
 const unit = linuxRunUnitName(expected.runId, expected.launchAttempt);
-const state = `MainPID=123\nControlGroup=/agentoc.slice/agentoc-runners.slice/${unit}\nId=${unit}\nLoadState=loaded\nActiveState=active\nSubState=running\nInvocationID=${expected.invocationId}\n`;
+const state = `MainPID=123\nControlGroup=/ragent.slice/ragent-runners.slice/${unit}\nId=${unit}\nLoadState=loaded\nActiveState=active\nSubState=running\nInvocationID=${expected.invocationId}\n`;
 test('a unit must match the recorded launch generation and systemd invocation', () => {
   assert.equal(matchesLinuxRunUnitState(state, expected), true);
   assert.equal(matchesLinuxRunUnitState(state, { ...expected, launchAttempt: 3 }), false);
   assert.equal(matchesLinuxRunUnitState(state, { ...expected, invocationId: 'b'.repeat(32) }), false);
   assert.equal(matchesLinuxRunUnitState(state.replace('ActiveState=active', 'ActiveState=inactive'), expected), false);
   assert.equal(matchesLinuxRunUnitState(state.replace('MainPID=123', 'MainPID=0'), expected), false);
-  assert.equal(matchesLinuxRunUnitState(state.replace('agentoc-runners.slice/', 'system.slice/'), expected), false);
+  assert.equal(matchesLinuxRunUnitState(state.replace('ragent-runners.slice/', 'system.slice/'), expected), false);
   assert.equal(matchesLinuxRunUnitState(`${state}MainPID=123\n`, expected), false);
   assert.equal(matchesLinuxRunUnitState(state, { ...expected, runId: '../../etc' }), false);
 });
@@ -32,10 +32,10 @@ test('process identity requires the UID, no-new-privileges, empty capabilities a
   assert.equal(parseLinuxRunProcessIdentity(status, stat, 0), null);
   assert.equal(parseLinuxRunProcessIdentity(status, 'bad', 1001), null);
 });
-test('real systemd fixture is active only for the recorded invocation', { skip: !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
-  const runnerUid = Number(process.env.AGENTOC_TEST_SYSTEMD_UID);
+test('real systemd fixture is active only for the recorded invocation', { skip: !process.env.RAGENT_TEST_SYSTEMD_INVOCATION }, async () => {
+  const runnerUid = Number(process.env.RAGENT_TEST_SYSTEMD_UID);
   const identity = await captureLinuxRunUnitIdentity({ runId: 'run_test12345678', launchAttempt: 2, runnerUid });
-  assert.equal(identity.invocationId, process.env.AGENTOC_TEST_SYSTEMD_INVOCATION);
+  assert.equal(identity.invocationId, process.env.RAGENT_TEST_SYSTEMD_INVOCATION);
   assert.equal(await isLinuxRunUnitLive(identity), true);
   assert.equal(await isLinuxRunUnitLive({ ...identity, invocationId: 'b'.repeat(32) }), false);
   assert.equal(await isLinuxRunUnitLive({ ...identity, runnerUid: runnerUid + 1 }), false);

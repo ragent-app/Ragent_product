@@ -70,7 +70,7 @@ function opaqueFileId(value) {
 }
 
 function nativeProfileFamily(tool) {
-  if (['codex', 'codex-cli', 'agentoc-codex-app-server'].includes(tool)) return 'codex';
+  if (['codex', 'codex-cli', 'ragent-codex-app-server'].includes(tool)) return 'codex';
   if (['claude', 'claude-bidi'].includes(tool)) return 'claude';
   return '';
 }
@@ -220,9 +220,9 @@ async function listPlatformSkillCapabilities(root) {
     const command = text(fields.name || stem, 120);
     if (!command || !title) continue;
     items.push(normalizeCapability({
-      id: `agentoc:skill:${opaqueFileId(rel)}`,
+      id: `ragent:skill:${opaqueFileId(rel)}`,
       kind: 'skill',
-      source: 'agentoc',
+      source: 'ragent',
       title: command,
       description,
       invocationText: '',
@@ -295,7 +295,7 @@ function codexCapabilityItems(catalog) {
     for (const server of flattenCodexMcpServers(catalog.mcp.data)) {
       const name = text(server?.name || server?.serverName || server?.id, 120);
       if (!name) continue;
-      const source = name.toLowerCase() === 'agentoc' ? 'agentoc' : 'codex';
+      const source = name.toLowerCase() === 'ragent' ? 'ragent' : 'codex';
       const status = text(server?.status || server?.startupStatus, 40).toLowerCase();
       const authStatus = text(server?.authStatus, 40);
       const authorization = authStatus === 'oAuth' ? 'connected'
@@ -307,7 +307,7 @@ function codexCapabilityItems(catalog) {
       // Runtime readiness remains explicitly unknown in the state projection.
       const enabled = !['failed', 'cancelled', 'disabled'].includes(status);
       items.push(normalizeCapability({
-        id: `${source}:mcp:${source === 'agentoc' ? opaqueFileId(name) : name}`,
+        id: `${source}:mcp:${source === 'ragent' ? opaqueFileId(name) : name}`,
         kind: 'mcp',
         source,
         title: name,
@@ -373,7 +373,7 @@ function normalizeMcpNames(servers, { source, kind = 'mcp' }) {
   return (Array.isArray(servers) ? servers : []).map((server) => {
     const name = text(server?.name, 120);
     if (!name) return null;
-    const capabilitySource = kind === 'mcp' && name.toLowerCase() === 'agentoc' ? 'agentoc' : source;
+    const capabilitySource = kind === 'mcp' && name.toLowerCase() === 'ragent' ? 'ragent' : source;
     return normalizeCapability({
       id: `${capabilitySource}:${kind}:${opaqueFileId(name)}`,
       kind,
@@ -420,11 +420,11 @@ export async function listHarnessCapabilities({
     try {
       profileHome = await resolveNativeProfileHome(requestedProviderProfile, tool);
     } catch {
-      errors[tool.startsWith('codex') || tool === 'agentoc-codex-app-server' ? 'codex' : 'claude'] =
+      errors[tool.startsWith('codex') || tool === 'ragent-codex-app-server' ? 'codex' : 'claude'] =
         'Harness provider profile is unavailable.';
     }
   }
-  if (tool === 'codex' || tool === 'codex-cli' || tool === 'agentoc-codex-app-server') {
+  if (tool === 'codex' || tool === 'codex-cli' || tool === 'ragent-codex-app-server') {
     try {
       if (!requestedProviderProfile) throw new Error('provider-profile-not-selected');
       if (requestedProviderProfile && !profileHome) throw new Error('provider-profile-unavailable');
@@ -469,7 +469,7 @@ export async function listHarnessCapabilities({
     try {
       const managed = await listPlatformSkillCapabilities(platformSkillsDir);
       items.push(...managed);
-    } catch { errors.agentoc = 'AgentoC skill catalog is unavailable.'; }
+    } catch { errors.ragent = 'Ragent skill catalog is unavailable.'; }
   }
   const unique = new Map();
   for (const item of items) {
@@ -495,7 +495,7 @@ function capabilityResolutionError(message, code = 'HARNESS_CAPABILITY_STALE', s
 async function readPlatformSkillById(root, id) {
   for (const pathname of await collectMarkdownFiles(root, '*.md', { maxDepth: 1 })) {
     const rel = relative(resolve(root), pathname).split(sep).join('/');
-    if (`agentoc:skill:${opaqueFileId(rel)}` !== id) continue;
+    if (`ragent:skill:${opaqueFileId(rel)}` !== id) continue;
     return readFile(pathname, 'utf8');
   }
   return '';
@@ -503,7 +503,7 @@ async function readPlatformSkillById(root, id) {
 
 /**
  * Resolve selected opaque IDs against the current session catalog. Only
- * provider-configured MCP/plugin entries and AgentoC managed skills can be
+ * provider-configured MCP/plugin entries and Ragent managed skills can be
  * attached; caller-provided paths, server names, and instruction bodies are
  * never trusted.
  */
@@ -544,12 +544,12 @@ export async function resolveHarnessCapabilityInstructions({
     if (!item || !item.enabled) {
       throw capabilityResolutionError('A selected harness capability is no longer available. Refresh the slash menu and try again.');
     }
-    if (item.source === 'agentoc' && item.kind === 'skill') {
+    if (item.source === 'ragent' && item.kind === 'skill') {
       const markdown = await readPlatformSkillById(platformSkillsDir, id);
       if (!markdown.trim()) {
-        throw capabilityResolutionError('A selected AgentoC skill could not be read. Refresh the slash menu and try again.');
+        throw capabilityResolutionError('A selected Ragent skill could not be read. Refresh the slash menu and try again.');
       }
-      sections.push(`### AgentoC skill: ${item.title}\n${markdown.trim()}`);
+      sections.push(`### Ragent skill: ${item.title}\n${markdown.trim()}`);
       continue;
     }
     if (item.kind === 'mcp') {

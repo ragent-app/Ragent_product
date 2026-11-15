@@ -38,9 +38,9 @@ const RAW_SPREADSHEET_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.raw.x
 const CLEANED_SPREADSHEET_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.cleaned.xlsx');
 const CLEANUP_NOTES_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'sales-march.notes.md');
 const DIGEST_SHOWCASE_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'ai-coding-agent-digest.sample.md');
-const SHORTCUT_VOICE_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'agentoc-voice.shortcut');
-const SHORTCUT_TEXT_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'agentoc-text.shortcut');
-const SHORTCUT_OPEN_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'agentoc-open.shortcut');
+const SHORTCUT_VOICE_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'ragent-voice.shortcut');
+const SHORTCUT_TEXT_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'ragent-text.shortcut');
+const SHORTCUT_OPEN_ASSET_PATH = join(BOOTSTRAP_ASSETS_DIR, 'ragent-open.shortcut');
 const OWNER_BOOTSTRAP_FILE_SHOWCASE_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:file_cleanup';
 const OWNER_BOOTSTRAP_DIGEST_SHOWCASE_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:digest_email_delivery';
 const OWNER_BOOTSTRAP_INSTANCE_EMAIL_EXTERNAL_TRIGGER_ID = 'owner_bootstrap:showcase:instance_email';
@@ -83,7 +83,7 @@ async function resolveCurrentMailboxAddress() {
     : '';
   if (runtimeMailboxAddress) return runtimeMailboxAddress;
 
-  const ownerIdentity = await safeReadJson(join(homedir(), '.config', 'agentoc', 'agent-mailbox', 'identity.json'), null);
+  const ownerIdentity = await safeReadJson(join(homedir(), '.config', 'ragent', 'agent-mailbox', 'identity.json'), null);
   const guestMailboxAddress = buildGuestMailboxAddress(basename(INSTANCE_ROOT || ''), ownerIdentity);
   if (guestMailboxAddress) return guestMailboxAddress;
   const ownerMailboxAddress = typeof ownerIdentity?.address === 'string' ? ownerIdentity.address.trim() : '';

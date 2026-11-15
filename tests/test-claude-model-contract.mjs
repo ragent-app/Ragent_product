@@ -16,7 +16,7 @@ import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.m
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 import { prepareNativeRunProviderHome } from '../lib/provider-runtime/run-provider-prepare.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-claude-model-contract-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-claude-model-contract-'));
 const configDir = join(root, 'config');
 const homesRoot = join(root, 'homes');
 

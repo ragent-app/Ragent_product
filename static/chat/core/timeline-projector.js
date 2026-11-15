@@ -3,7 +3,7 @@
 // Web implementation of android/core/timeline's durable-baseline + live-overlay
 // reducer.  Transport events never own DOM nodes: immutable source events update
 // an entity, and the renderer receives one ordered item list.
-(function attachAgentoCTimelineProjector(root) {
+(function attachRagentTimelineProjector(root) {
   const MAX_SEEN_KEYS = 8192;
   const MAX_DURABLE_ITEMS = 4000;
   // These events are durable protocol/control records. They must still be
@@ -867,7 +867,7 @@
     getChangeSet() { return this.lastChange; }
   }
 
-  root.AgentoCTimelineProjector = Object.freeze({
+  root.RagentTimelineProjector = Object.freeze({
     TimelineProjector,
     getEventStartSeq,
     getEventBoundarySeq,

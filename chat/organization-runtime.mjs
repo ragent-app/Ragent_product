@@ -89,7 +89,7 @@ async function runStore(fn) {
 function assertCommandEnabled() {
   if (!ORG_SCHEMA_ENABLED) {
     throw runtimeError(
-      'organization schema is disabled; set AGENTOC_ORG_SCHEMA_ENABLED=1 to enable organization commands',
+      'organization schema is disabled; set RAGENT_ORG_SCHEMA_ENABLED=1 to enable organization commands',
       'ORGANIZATION_SCHEMA_DISABLED',
       503,
     );

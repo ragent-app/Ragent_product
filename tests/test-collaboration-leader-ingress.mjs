@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-collaboration-leader-ingress-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_COLLABORATION_LEADER_ENABLED = '1';
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-collaboration-leader-ingress-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_COLLABORATION_LEADER_ENABLED = '1';
 
 const ingress = await import('../chat/collaboration-leader-ingress.mjs');
 
@@ -132,7 +132,7 @@ assert.match(context, /Durable Collaboration Plan Ingress/);
 assert.match(context, /worker-1/);
 assert.match(context, /legacy-worker-1/, 'legacy Agent without a policy remains globally visible');
 assert.match(context, /"roleSource": "default"/, 'legacy Agent exposes its default role source');
-assert.match(context, /agentoc-collaboration-plan/);
+assert.match(context, /ragent-collaboration-plan/);
 assert.match(context, /allowedProvidersByTool/);
 assert.match(context, /provider-child/);
 

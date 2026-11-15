@@ -19,11 +19,11 @@ test('two original temporary Runs complete through separate services and restric
   const prepared = JSON.parse(await readFile(join(evidence, 'prepared.json'), 'utf8'));
   const manifest = JSON.parse(await readFile(join(prepared.bundle, 'manifest.json'), 'utf8'));
   assert.equal(manifest.crossServiceProvider, true);
-  const qaRoot = join(process.env.ProgramData, 'AgentoCIdentityQA', 'case-' + manifest.caseId);
+  const qaRoot = join(process.env.ProgramData, 'RagentIdentityQA', 'case-' + manifest.caseId);
   const report = { caseId: manifest.caseId, pass: false, authority: 'local signed Accounts/DPoP fixture; original durable product Run',
     productionChanged: false, phoneTouched: false, actualPhoneOrTurn: false, providerCredentialResolved: false, cases: [], sourceFiles: manifest.sourceFiles };
   let liveStatus, liveOutput = '', liveError = '', key = '', controlFiles = [];
-  const child = spawn('C:/Program Files/AgentoC/payload/node.exe', [join(source, 'scripts/qa-windows-service-identities.mjs'), '--live'],
+  const child = spawn('C:/Program Files/Ragent/payload/node.exe', [join(source, 'scripts/qa-windows-service-identities.mjs'), '--live'],
     { windowsHide: true, cwd: source, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', bytes => { liveOutput = (liveOutput + bytes).slice(-65536); });
   child.stderr.on('data', bytes => { liveError = (liveError + bytes).slice(-65536); });
@@ -41,8 +41,8 @@ test('two original temporary Runs complete through separate services and restric
     }
     throw Object.assign(new Error('Service reply deadline'), { code: 'SERVICE_REPLY_DEADLINE' });
   }
-  const hostRoot = await mkdtemp(join(tmpdir(), 'agentoc-service-provider-host-'));
-  await writeFile(join(hostRoot, '.agentoc-service-provider-host'), manifest.caseId);
+  const hostRoot = await mkdtemp(join(tmpdir(), 'ragent-service-provider-host-'));
+  await writeFile(join(hostRoot, '.ragent-service-provider-host'), manifest.caseId);
   try {
     const first = await waitJson(join(qaRoot, 'control/outbox/r1-provider-ready.json'), 180000);
     assert.equal(first.pass, true); // No production credential resolution before actual service boundary preflight.
@@ -50,7 +50,7 @@ test('two original temporary Runs complete through separate services and restric
       spoolDir: join(hostRoot, 'spool'), providerHomesDir: join(hostRoot, 'providers'), workRootDir: join(hostRoot, 'work'),
       port: 48172, id: 'service-provider-' + manifest.caseId, ttlSeconds: 180 };
     const env = buildChildEnvironment(instance);
-    for (const name of Object.keys(process.env)) if (/^(AGENTOC_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(name)) delete process.env[name];
+    for (const name of Object.keys(process.env)) if (/^(RAGENT_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(name)) delete process.env[name];
     Object.assign(process.env, env);
     await Promise.all([instance.configDir, instance.workRootDir, instance.spoolDir].map(path => mkdir(path, { recursive: true })));
     const { fixture } = await import('../tests/helpers/temporary-turn-fixture.mjs');
@@ -63,7 +63,7 @@ test('two original temporary Runs complete through separate services and restric
     const runs = await import('../chat/runs.mjs'), meta = await import('../chat/session-meta-store.mjs');
     const { createNativeProviderRegistry } = await import('../lib/provider-runtime/registry.mjs');
     const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');
-    const configDir = 'C:/ProgramData/AgentoC/instances/owner/config', registry = createNativeProviderRegistry({ configDir });
+    const configDir = 'C:/ProgramData/Ragent/instances/owner/config', registry = createNativeProviderRegistry({ configDir });
     const selected = (await registry.listProviderProfiles()).find(row => row.agentType === 'claude' && row.enabled !== false && row.status === 'ready' && row.protocol === 'anthropic-messages');
     assert.ok(selected);
     const auth = await registry.getAuthProfile(selected.authProfileId); assert.equal(auth?.authType, 'api-key');
@@ -146,8 +146,8 @@ test('two original temporary Runs complete through separate services and restric
     await writeFile(join(prepared.bundle, 'provider-launch.log'), liveOutput.split(key || '\0NO_KEY').join('[REDACTED]') + liveError.split(key || '\0NO_KEY').join('[REDACTED]'));
     await writeFile(join(prepared.bundle, 'original-run-provider.json'), JSON.stringify(report, null, 2) + '\n');
     const actual = await realpath(hostRoot); assert.equal(dirname(actual).toLowerCase(), (await realpath(tmpdir())).toLowerCase());
-    assert.ok(basename(actual).startsWith('agentoc-service-provider-host-'));
-    assert.equal(await readFile(join(actual, '.agentoc-service-provider-host'), 'utf8'), manifest.caseId);
+    assert.ok(basename(actual).startsWith('ragent-service-provider-host-'));
+    assert.equal(await readFile(join(actual, '.ragent-service-provider-host'), 'utf8'), manifest.caseId);
     await rm(actual, { recursive: true, force: true });
     console.log(JSON.stringify({ pass: report.pass, caseId: manifest.caseId, completedOriginalRuns: report.cases.length, error: report.error || null }));
   }

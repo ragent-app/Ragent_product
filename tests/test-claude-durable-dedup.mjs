@@ -70,10 +70,10 @@ function line(obj) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-claude-durable-dedup-'));
-  const configDir = join(home, '.config', 'agentoc');
-  const memoryDir = join(home, '.agentoc', 'memory');
-  const workDir = join(home, '.agentoc', 'workspace');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-claude-durable-dedup-'));
+  const configDir = join(home, '.config', 'ragent');
+  const memoryDir = join(home, '.ragent', 'memory');
+  const workDir = join(home, '.ragent', 'workspace');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(memoryDir, { recursive: true });
@@ -198,29 +198,29 @@ if (process.platform === 'win32') {
 }
 
 async function startServer({ home, configDir, memoryDir, workDir, localBin, port }) {
-  const supervisorPipe = process.platform === 'win32' ? `\\\\.\\pipe\\agentoc-test-dedup-${randomBytes(12).toString('hex')}` : '';
+  const supervisorPipe = process.platform === 'win32' ? `\\\\.\\pipe\\ragent-test-dedup-${randomBytes(12).toString('hex')}` : '';
   const env = {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
-      AGENTOC_RUNNER_LIFECYCLE_SOCKET: "",
-      AGENTOC_RUNNER_LIFECYCLE_REQUIRED: "",
-      AGENTOC_RUNNER_LAUNCH_MODE: "",
-      AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-      AGENTOC_AUTH_SESSION_SECRET: 'test-auth-session-secret',
-      AGENTOC_INSTANCE_ROOT: home,
-      AGENTOC_PROJECT_ROOT: repoRoot,
-      AGENTOC_PROVIDER_HOMES_DIR: supervisorPipe ? join(home, 'provider-homes') : '',
-      AGENTOC_RUN_SPOOL_DIR: supervisorPipe ? join(home, 'data', 'chat-runs') : '',
-      AGENTOC_USER_SHELL_ENV_B64: '',
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: supervisorPipe,
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_LIFECYCLE_SOCKET: "",
+      RAGENT_RUNNER_LIFECYCLE_REQUIRED: "",
+      RAGENT_RUNNER_LAUNCH_MODE: "",
+      RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+      RAGENT_AUTH_SESSION_SECRET: 'test-auth-session-secret',
+      RAGENT_INSTANCE_ROOT: home,
+      RAGENT_PROJECT_ROOT: repoRoot,
+      RAGENT_PROVIDER_HOMES_DIR: supervisorPipe ? join(home, 'provider-homes') : '',
+      RAGENT_RUN_SPOOL_DIR: supervisorPipe ? join(home, 'data', 'chat-runs') : '',
+      RAGENT_USER_SHELL_ENV_B64: '',
       HOME: home,
       USERPROFILE: home,
       LOCALAPPDATA: join(home, 'local-appdata'),
       APPDATA: join(home, 'roaming-appdata'),
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_MEMORY_DIR: memoryDir,
-      AGENTOC_WORK_ROOT_DIR: workDir,
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_MEMORY_DIR: memoryDir,
+      RAGENT_WORK_ROOT_DIR: workDir,
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
       CHAT_PORT: String(port),
       SECURE_COOKIES: '0',
       PATH: `${localBin}${delimiter}${process.env.PATH || ''}`,
@@ -306,8 +306,8 @@ try {
   const eventsRes = await request(port, 'GET', `/api/sessions/${session.id}/events?filter=all`);
   assert.equal(eventsRes.status, 200, 'events request should succeed');
   const events = eventsRes.json.events || [];
-  if (process.env.AGENTOC_TEST_EVIDENCE_DIR) writeFileSync(
-    join(process.env.AGENTOC_TEST_EVIDENCE_DIR, 'claude-http-events.json'), JSON.stringify({ terminal, events }, null, 2));
+  if (process.env.RAGENT_TEST_EVIDENCE_DIR) writeFileSync(
+    join(process.env.RAGENT_TEST_EVIDENCE_DIR, 'claude-http-events.json'), JSON.stringify({ terminal, events }, null, 2));
   assert.equal(terminal.state, 'completed', `fixture provider failed: ${terminal.failureReason || terminal.error || ''}`);
 
   const duplicates = (events, keyFn) => {

@@ -48,7 +48,7 @@ if (hasCodex.error?.code === 'ENOENT' || hasCodex.status === 127) {
   process.exit(0);
 }
 
-const outDir = mkdtempSync(join(tmpdir(), 'agentoc-codex-schema-'));
+const outDir = mkdtempSync(join(tmpdir(), 'ragent-codex-schema-'));
 try {
   const generated = invoke(['app-server', 'generate-json-schema', '--experimental', '--out', outDir], {
     encoding: 'utf8',

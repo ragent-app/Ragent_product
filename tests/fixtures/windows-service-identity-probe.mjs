@@ -3,16 +3,16 @@ import { readFile, writeFile, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import net from 'node:net';
 import https from 'node:https';
-const root=process.env.AGENTOC_IDENTITY_QA_ROOT,role=process.env.AGENTOC_IDENTITY_QA_ROLE;
+const root=process.env.RAGENT_IDENTITY_QA_ROOT,role=process.env.RAGENT_IDENTITY_QA_ROLE;
 if(!root||!['control','executor','selftest'].includes(role))throw new Error('Invalid fixed canary context');
 const spec=JSON.parse(await readFile(join(root,'manifest.json'),'utf8'));
-const checks={noControlEnvironment:!Object.keys(process.env).some(k=>/AUTH_SESSION|OAUTH|API_KEY|TOKEN|SECRET|AGENTOC_CONFIG|PROVIDER/.test(k))};
+const checks={noControlEnvironment:!Object.keys(process.env).some(k=>/AUTH_SESSION|OAUTH|API_KEY|TOKEN|SECRET|RAGENT_CONFIG|PROVIDER/.test(k))};
 let ipc,provider,ownerBootstrap,credentialChannel;
 const state=join(root,'state',role);
 async function deniedRead(path){try{await readFile(path);return false;}catch(e){return ['EACCES','EPERM'].includes(e.code);}}
 async function deniedWrite(path){try{const file=await open(path,'r+');await file.close();return false;}catch(e){return ['EACCES','EPERM'].includes(e.code);}}
 async function pipe(){return new Promise(resolve=>{
-  const client=net.connect('\\\\.\\pipe\\agentoc-identity-owner-'+spec.caseId);
+  const client=net.connect('\\\\.\\pipe\\ragent-identity-owner-'+spec.caseId);
   const timer=setTimeout(()=>{client.destroy();resolve('timeout');},2500);
   client.once('connect',()=>{clearTimeout(timer);client.end();resolve('connected');});
   client.once('error',e=>{clearTimeout(timer);client.destroy();resolve(e.code);});

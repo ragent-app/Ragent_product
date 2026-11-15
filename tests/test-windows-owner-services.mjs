@@ -12,9 +12,9 @@ const file=resolve('packaging/windows/prepare-owner-services.ps1');
 const command=`. '${file.replaceAll("'","''")}' -LibraryOnly; Initialize-OwnerServiceRegistrationType; @(Get-OwnerServicePreparationPlan)|ConvertTo-Json -Depth 5 -Compress`;
 const {stdout}=await exec(ps,['-NoLogo','-NoProfile','-NonInteractive','-Command',command],{windowsHide:true,timeout:60000,maxBuffer:65536});
 const plan=JSON.parse(stdout.replace(/^\uFEFF/,''));assert.equal(plan.length,2);
-assert.deepEqual(plan.map(r=>r.name),['AgentoC-RunnerSupervisor','AgentoC-ControlPlane']);
-for(const row of plan){assert.equal(row.account,'NT SERVICE\\'+row.name);assert.equal(row.startMode,'Disabled');assert.ok(row.command.startsWith('"C:\\Program Files\\AgentoC\\AgentoC.ServiceHost.exe"'));assert.ok(row.command.includes('--instance-root "C:\\ProgramData\\AgentoC\\instances\\owner"'));assert.ok(row.command.includes('--config-dir "C:\\ProgramData\\AgentoC\\instances\\owner\\'+(row.role==='control'?'':'executor\\')+'config"'));}
-assert.deepEqual(plan[0].dependencies,[]);assert.deepEqual(plan[1].dependencies,['AgentoC-RunnerSupervisor']);
+assert.deepEqual(plan.map(r=>r.name),['Ragent-RunnerSupervisor','Ragent-ControlPlane']);
+for(const row of plan){assert.equal(row.account,'NT SERVICE\\'+row.name);assert.equal(row.startMode,'Disabled');assert.ok(row.command.startsWith('"C:\\Program Files\\Ragent\\Ragent.ServiceHost.exe"'));assert.ok(row.command.includes('--instance-root "C:\\ProgramData\\Ragent\\instances\\owner"'));assert.ok(row.command.includes('--config-dir "C:\\ProgramData\\Ragent\\instances\\owner\\'+(row.role==='control'?'':'executor\\')+'config"'));}
+assert.deepEqual(plan[0].dependencies,[]);assert.deepEqual(plan[1].dependencies,['Ragent-RunnerSupervisor']);
 const sidProbe=`. '${file.replaceAll("'","''")}' -LibraryOnly; $observed=[Security.Principal.NTAccount]::new('NT SERVICE','TrustedInstaller').Translate([Security.Principal.SecurityIdentifier]).Value;@{allowed=@(Get-OwnerAdministrativeSids);resolved=$observed}|ConvertTo-Json -Compress`;
 const sids=JSON.parse((await exec(ps,['-NoLogo','-NoProfile','-NonInteractive','-Command',sidProbe],{windowsHide:true,timeout:60000,maxBuffer:65536})).stdout);
 assert.deepEqual(sids.allowed,['S-1-5-18','S-1-5-32-544',sids.resolved]);

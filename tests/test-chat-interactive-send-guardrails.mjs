@@ -6,7 +6,7 @@ const sidecar = readFileSync('chat/runner-sidecar.mjs', 'utf8');
 const realtime = readFileSync('static/chat/realtime.js', 'utf8');
 const compose = readFileSync('static/chat/compose.js', 'utf8');
 
-assert.match(summarizer, /AGENTOC_SESSION_LABEL_SUGGESTIONS/);
+assert.match(summarizer, /RAGENT_SESSION_LABEL_SUGGESTIONS/);
 assert.match(summarizer, /defaultValue:\s*false/);
 assert.match(sidecar, /DEFAULT_IDLE_TIMEOUT_MS\s*=\s*2\s*\*\s*60\s*\*\s*1000/);
 assert.match(sidecar, /recordStderrText = async \(text\) => \{\s*\/\/ stderr is diagnostic noise/s);

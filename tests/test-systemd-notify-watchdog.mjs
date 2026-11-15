@@ -33,9 +33,9 @@ assert.equal(buildNotifyMessage({ status: 'two\nlines' }), 'STATUS=two lines\n')
 assert.equal(buildNotifyMessage({}), '');
 
 assert.equal(resolveNotifyFd({}), null);
-assert.equal(resolveNotifyFd({ AGENTOC_NOTIFY_FD: 'not-a-number' }), null);
-assert.equal(resolveNotifyFd({ AGENTOC_NOTIFY_FD: '2' }), null);
-assert.equal(resolveNotifyFd({ AGENTOC_NOTIFY_FD: '7' }), 7);
+assert.equal(resolveNotifyFd({ RAGENT_NOTIFY_FD: 'not-a-number' }), null);
+assert.equal(resolveNotifyFd({ RAGENT_NOTIFY_FD: '2' }), null);
+assert.equal(resolveNotifyFd({ RAGENT_NOTIFY_FD: '7' }), 7);
 
 // fd plumbing: a writable /dev/null descriptor round-trips through the direct
 // path; dgram semantics are covered end-to-end by test-systemd-notify-direct.
@@ -66,7 +66,7 @@ assert.equal(skipped.skipped, true);
   try {
     const brokenEnv = () => ({
       NOTIFY_SOCKET: '/run/systemd/notify',
-      AGENTOC_NOTIFY_FD: String(fd),
+      RAGENT_NOTIFY_FD: String(fd),
     });
     const broken = await systemdNotify({ watchdog: true }, { env: brokenEnv() });
     assert.ok(broken.error);
@@ -90,7 +90,7 @@ assert.equal(inactive.active, false);
 inactive.stop();
 
 const chatServer = read('chat-server.mjs');
-const unit = read('packaging/deb/agentoc.service');
+const unit = read('packaging/deb/ragent.service');
 assert.match(chatServer, /import\('\.\/lib\/systemd-notify\.mjs'\)/);
 assert.match(chatServer, /systemdNotify\.systemdNotify\(\{ ready: true/);
 assert.match(chatServer, /startSystemdWatchdog/);
@@ -98,7 +98,7 @@ assert.match(unit, /^WatchdogSec=45s$/m);
 // NotifyAccess=main is the point of the notify-exec wrapper: only the main
 // pid may speak for the unit, so cgroup children cannot forge STOPPING=1.
 assert.match(unit, /^NotifyAccess=main$/m);
-assert.match(unit, /^ExecStart=\/usr\/lib\/agentoc\/notify-exec \/opt\/agentoc\/runtime\/node \/opt\/agentoc\/app\/chat-server\.mjs$/m);
+assert.match(unit, /^ExecStart=\/usr\/lib\/ragent\/notify-exec \/opt\/ragent\/runtime\/node \/opt\/ragent\/app\/chat-server\.mjs$/m);
 assert.match(unit, /^Restart=always$/m);
 
 console.log('test-systemd-notify-watchdog: ok');

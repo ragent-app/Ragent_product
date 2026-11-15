@@ -4,11 +4,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-local-asset-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-for (const key of ['AGENTOC_ASSET_STORAGE_BASE_URL', 'AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL',
-  'AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID', 'AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[key];
+const root = await mkdtemp(join(tmpdir(), 'ragent-local-asset-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+for (const key of ['RAGENT_ASSET_STORAGE_BASE_URL', 'RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL',
+  'RAGENT_ASSET_STORAGE_ACCESS_KEY_ID', 'RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY']) delete process.env[key];
 const assets = await import('../chat/file-assets.mjs');
 const bytes = Buffer.from('a,b\n1,2\n');
 const input = { sessionId: 'session-a', requestId: 'local-test', originalName: 'first.csv',

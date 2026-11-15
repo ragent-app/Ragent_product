@@ -1,4 +1,4 @@
-using System;using System.IO;using System.Runtime.InteropServices;using AgentoC.ServiceHost;
+using System;using System.IO;using System.Runtime.InteropServices;using Ragent.ServiceHost;
 static class IdentityInputPinProbe {
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool CreateHardLink(string target,string source,IntPtr security);
  static void Need(bool condition){if(!condition)throw new Exception("QA_INPUT_PIN_FAILED");}

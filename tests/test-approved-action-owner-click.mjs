@@ -9,10 +9,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const root = await mkdtemp(join(tmpdir(), 'approved-action-owner-click-'));
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
-process.env.AGENTOC_PERF_WRITE_DEBOUNCE = 'off';
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED = '1';
+process.env.RAGENT_PERF_WRITE_DEBOUNCE = 'off';
 
 const {
   createSession,
@@ -87,7 +87,7 @@ async function proposeHostBatch(suffix) {
 let failed = false;
 try {
   // --- default owner-click policy ---
-  delete process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED;
+  delete process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED;
   const clickApproval = await proposeHostBatch('click');
   const preflight = { ...hostProposal(clickApproval.binding, clickApproval.session.id), autoInstallPreflight: true,
     actions: [{ command: 'winget install Example.Package' }] };
@@ -106,7 +106,7 @@ try {
   assert.equal((await getRun(clickApproval.binding.runId)).approvedActionPending, undefined);
 
   // --- passkey policy opt-in does not resurrect a denied approval card ---
-  process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED = '1';
+  process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED = '1';
   const passkeyApproval = await proposeHostBatch('passkey');
   await assert.rejects(
     proposeApprovedActions(hostProposal(passkeyApproval.binding, passkeyApproval.session.id)),
@@ -121,6 +121,6 @@ try {
   console.error(error);
 } finally {
   await import('../chat/session-manager.mjs').then((m) => m.killAll?.()).catch(() => {});
-  delete process.env.AGENTOC_OWNER_HOST_PASSKEY_REQUIRED;
+  delete process.env.RAGENT_OWNER_HOST_PASSKEY_REQUIRED;
 }
 if (failed) process.exit(1);

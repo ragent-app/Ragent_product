@@ -23,19 +23,19 @@ function eq(label, actual, expected) {
   passed += 1;
 }
 
-// ── I-3 env: a worker's AGENTOC_WINGET_EXECUTABLE never reaches a Run ─────────
-check('runner env allowlist does not carry AGENTOC_WINGET_EXECUTABLE',
-  !RUNNER_ENV_ALLOWLIST.includes('AGENTOC_WINGET_EXECUTABLE'));
-check('runner env allowlist does not carry AGENTOC_MSIEXEC_EXECUTABLE',
-  !RUNNER_ENV_ALLOWLIST.includes('AGENTOC_MSIEXEC_EXECUTABLE'));
+// ── I-3 env: a worker's RAGENT_WINGET_EXECUTABLE never reaches a Run ─────────
+check('runner env allowlist does not carry RAGENT_WINGET_EXECUTABLE',
+  !RUNNER_ENV_ALLOWLIST.includes('RAGENT_WINGET_EXECUTABLE'));
+check('runner env allowlist does not carry RAGENT_MSIEXEC_EXECUTABLE',
+  !RUNNER_ENV_ALLOWLIST.includes('RAGENT_MSIEXEC_EXECUTABLE'));
 const picked = pickRunnerEnvAllowlist({
-  AGENTOC_WINGET_EXECUTABLE: 'C:\\evil\\winget.exe',
-  AGENTOC_MSIEXEC_EXECUTABLE: 'C:\\evil\\msiexec.exe',
+  RAGENT_WINGET_EXECUTABLE: 'C:\\evil\\winget.exe',
+  RAGENT_MSIEXEC_EXECUTABLE: 'C:\\evil\\msiexec.exe',
   PATH: 'C:\\Windows\\System32',
   HOME: 'C:\\Users\\x',
 });
-check('allowlist pick strips a worker-set AGENTOC_WINGET_EXECUTABLE', picked.AGENTOC_WINGET_EXECUTABLE === undefined);
-check('allowlist pick strips a worker-set AGENTOC_MSIEXEC_EXECUTABLE', picked.AGENTOC_MSIEXEC_EXECUTABLE === undefined);
+check('allowlist pick strips a worker-set RAGENT_WINGET_EXECUTABLE', picked.RAGENT_WINGET_EXECUTABLE === undefined);
+check('allowlist pick strips a worker-set RAGENT_MSIEXEC_EXECUTABLE', picked.RAGENT_MSIEXEC_EXECUTABLE === undefined);
 const osEnv = pickRunnerEnvAllowlist({ SystemRoot: 'D:\\WinNT', WINDIR: 'D:\\WinNT', USERPROFILE: 'E:\\Users\\owner',
   LOCALAPPDATA: 'E:\\Users\\owner\\AppData\\Local', APPDATA: 'E:\\Users\\owner\\AppData\\Roaming',
   TEMP: 'G:\\temp', TMP: 'G:\\temp', TMPDIR: 'G:\\temp', PATHEXT: '.EXE;.CMD', MY_SERVICE_TOKEN: 'secret' });
@@ -87,20 +87,20 @@ const importWith = (env) => {
     return { ok: false, stderr: String(error?.stderr || '') };
   }
 };
-eq('relative override is rejected', importWith({ AGENTOC_WINGET_EXECUTABLE: 'winget.exe' }).ok, false);
-eq('UNC override is rejected', importWith({ AGENTOC_WINGET_EXECUTABLE: '\\\\server\\share\\winget.exe' }).ok, false);
-check('valid absolute override imports', importWith({ AGENTOC_WINGET_EXECUTABLE: 'C:\\Tools\\winget.exe' }).ok === true);
+eq('relative override is rejected', importWith({ RAGENT_WINGET_EXECUTABLE: 'winget.exe' }).ok, false);
+eq('UNC override is rejected', importWith({ RAGENT_WINGET_EXECUTABLE: '\\\\server\\share\\winget.exe' }).ok, false);
+check('valid absolute override imports', importWith({ RAGENT_WINGET_EXECUTABLE: 'C:\\Tools\\winget.exe' }).ok === true);
 const previousSystemRoot = process.env.SystemRoot;
-const previousMsiexec = process.env.AGENTOC_MSIEXEC_EXECUTABLE;
+const previousMsiexec = process.env.RAGENT_MSIEXEC_EXECUTABLE;
 let alternateAdapter; let alternateFacts;
 try {
   process.env.SystemRoot = 'D:\\WinNT';
-  delete process.env.AGENTOC_MSIEXEC_EXECUTABLE;
+  delete process.env.RAGENT_MSIEXEC_EXECUTABLE;
   alternateAdapter = await import('../chat/semantic-windows-adapter.mjs?alternate-root');
   alternateFacts = await import('../chat/windows-runtime-facts-provider.mjs?alternate-root');
 } finally {
   if (previousSystemRoot === undefined) delete process.env.SystemRoot; else process.env.SystemRoot = previousSystemRoot;
-  if (previousMsiexec === undefined) delete process.env.AGENTOC_MSIEXEC_EXECUTABLE; else process.env.AGENTOC_MSIEXEC_EXECUTABLE = previousMsiexec;
+  if (previousMsiexec === undefined) delete process.env.RAGENT_MSIEXEC_EXECUTABLE; else process.env.RAGENT_MSIEXEC_EXECUTABLE = previousMsiexec;
 }
 eq('msiexec follows an alternate system root', alternateAdapter.MSIEXEC_EXECUTABLE, 'D:\\WinNT\\System32\\msiexec.exe');
 eq('facts provider follows an alternate system root', alternateFacts.WINDOWS_POWERSHELL_EXECUTABLE, 'D:\\WinNT\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');

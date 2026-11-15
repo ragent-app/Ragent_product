@@ -23,7 +23,7 @@
 - Windows 本地提交 `2f775bc1` 包含普通 PowerShell HTTP 查询和下载的补充识别；该记录对应的修改尚未部署至此前确认的正式安装版本。实际测试必须重新核验安装版本和文件摘要。
 - 现有审批历史缺少所有工具调用的完整分母，不能直接推算自动通过率。历史被拦截记录只用于发现误拦样本，不能代表日常工作分布。
 - 此准备方案不修改产品审批策略、Broker 或业务逻辑，也不授权访问真实个人文件、凭据和生产设备。发现产品缺陷后另行记录和安排修复。
-- Windows 开发和 QA 产物、worktree、测试实例、下载、缓存、日志和临时目录须位于 `G:/AgentoC`；执行前检查容量并设置任务专用 `TEMP`、`TMP`、`TMPDIR` 和可变缓存。不得清理个人数据、已安装服务或并行工作。
+- Windows 开发和 QA 产物、worktree、测试实例、下载、缓存、日志和临时目录须位于 `G:/Ragent`；执行前检查容量并设置任务专用 `TEMP`、`TMP`、`TMPDIR` 和可变缓存。不得清理个人数据、已安装服务或并行工作。
 
 ## 3. 测试分层与证据等级
 
@@ -268,7 +268,7 @@ Oracle 独立输出 `policy_result`、`effect_result`、`task_result`、`securit
 
 ## 12. 资料
 
-- 原始任务书：`G:/AgentoC/.codex-attachments/8770c460-1f04-42f1-9579-eac8410705d8/71159029-a762-4da9-a66c-2c79a07a9e64/Ragent_Cross_Platform_Security_Benchmark_Codex.md`
+- 原始任务书：`G:/Ragent/.codex-attachments/8770c460-1f04-42f1-9579-eac8410705d8/71159029-a762-4da9-a66c-2c79a07a9e64/Ragent_Cross_Platform_Security_Benchmark_Codex.md`
 - 本仓库现有审批调整与阶段验收：[approval-gate-adjustment-plan.md](approval-gate-adjustment-plan.md)
 - [AgentDojo 论文](https://arxiv.org/abs/2406.13352)
 - [AgentDojo 官方仓库](https://github.com/ethz-spylab/agentdojo)

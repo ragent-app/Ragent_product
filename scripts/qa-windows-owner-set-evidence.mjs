@@ -14,7 +14,7 @@ export async function verifyOwnerSet({manifest,summary,bundle,protectedRoot,sids
     const key=facts.pid+'/'+facts.createdTicks;assert.equal(identities.has(key),false);identities.add(key);pids.add(facts.pid);}
   function descriptor(value,purpose,deadline){const {policy,peer}=value.descriptor;assert.deepEqual(value.peer,peer);assert.equal(policy.protocolVersion,2);assert.equal(policy.purpose,purpose);
     assert.equal(policy.instanceId,manifest.ownerInstanceId);assert.equal(policy.controlSid,sids.control);assert.equal(policy.ownerSid,manifest.requestorSid);assert.equal(policy.ownerSessionId,manifest.ownerSessionId);
-    assert.equal(policy.expiresAtUnixMs,deadline);assert.match(policy.pipeName,/^agentoc-owner-bootstrap-[a-f0-9]{32}$/);assert.match(policy.requestId,/^[a-f0-9]{32}$/);
+    assert.equal(policy.expiresAtUnixMs,deadline);assert.match(policy.pipeName,/^ragent-owner-bootstrap-[a-f0-9]{32}$/);assert.match(policy.requestId,/^[a-f0-9]{32}$/);
     assert.equal(pipes.has(policy.pipeName),false);pipes.add(policy.pipeName);assert.equal(requests.has(policy.requestId),false);requests.add(policy.requestId);
     for(const key of ['launchNonce','bootstrapTicket','sessionToken'])assert.equal(JSON.stringify(value).includes(key),false);
     remember(peer,sids.control,0);

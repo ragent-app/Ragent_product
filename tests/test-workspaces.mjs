@@ -7,7 +7,7 @@
 // replacement → WORKSPACE_ROOT_DRIFT, monotonic revision, and hostId stability
 // when the store file is reopened by a fresh module instance.
 //
-// Config isolation: AGENTOC_CONFIG_DIR must be set to a throwaway dir BEFORE
+// Config isolation: RAGENT_CONFIG_DIR must be set to a throwaway dir BEFORE
 // importing lib/config.mjs (see tests/test-chat-projects.mjs).
 import assert from 'assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs';
@@ -15,8 +15,8 @@ import { realpath } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-workspaces-test-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-workspaces-test-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 const createdRootDirs = [];
 
 const {
@@ -39,7 +39,7 @@ function makeRootDir(prefix) {
 }
 
 function makeAlias(target) {
-  const alias = join(tmpdir(), `agentoc-ws-alias-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const alias = join(tmpdir(), `ragent-ws-alias-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   symlinkSync(target, alias);
   createdRootDirs.push(alias);
   return alias;
@@ -47,7 +47,7 @@ function makeAlias(target) {
 
 try {
   // ── realpath aliasing: textual + symlink aliases → one Workspace ─────────
-  const root = makeRootDir('agentoc-ws-root-');
+  const root = makeRootDir('ragent-ws-root-');
   const alias = makeAlias(root);
   const viaRoot = await ensureWorkspaceForRoot(root);
   const viaDot = await ensureWorkspaceForRoot(join(root, '.'));
@@ -76,12 +76,12 @@ try {
   assert.ok((await listWorkspaces()).some((ws) => ws.id === viaRoot.id));
 
   // ── shared-root backfill: one Workspace per physical root ────────────────
-  const sharedRoot = makeRootDir('agentoc-ws-shared-');
+  const sharedRoot = makeRootDir('ragent-ws-shared-');
   writeFileSync(CHAT_PROJECTS_FILE, JSON.stringify({
     schemaVersion: 1,
     projects: [
       { id: 'prj_backfill_a', name: 'A', rootPath: sharedRoot },
-      { id: 'prj_backfill_b', name: 'B', rootPath: join(sharedRoot, '..', 'agentoc-ws-shared-' + sharedRoot.slice(sharedRoot.lastIndexOf('-') + 1)) },
+      { id: 'prj_backfill_b', name: 'B', rootPath: join(sharedRoot, '..', 'ragent-ws-shared-' + sharedRoot.slice(sharedRoot.lastIndexOf('-') + 1)) },
     ],
   }));
   const backfill = await backfillWorkspacesFromProjects();
@@ -98,7 +98,7 @@ try {
     'backfilled Workspace must be readable by id');
 
   // ── unresolved root: no throw, later resolution upgrades the record ──────
-  const missing = join(tmpdir(), `agentoc-ws-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const missing = join(tmpdir(), `ragent-ws-missing-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const unresolved = await ensureWorkspaceForRoot(missing);
   assert.equal(unresolved.resolutionState, 'unresolved', 'missing roots must stay listable');
   assert.equal(unresolved.revision, 1);
@@ -120,8 +120,8 @@ try {
   assert.equal(await resolveWorkspaceRoot('ws_missing'), null);
 
   // ── WORKSPACE_ROOT_DRIFT: root replaced → recorded identity mismatch ─────
-  const driftTarget = makeRootDir('agentoc-ws-drift-target-');
-  const driftReplacement = makeRootDir('agentoc-ws-drift-replacement-');
+  const driftTarget = makeRootDir('ragent-ws-drift-target-');
+  const driftReplacement = makeRootDir('ragent-ws-drift-replacement-');
   const driftLink = makeAlias(driftTarget);
   const drifted = await ensureWorkspaceForRoot(driftLink);
   assert.equal(drifted.resolutionState, 'resolved');
@@ -140,12 +140,12 @@ try {
   );
 
   // ── monotonic revision across canonical mutations ────────────────────────
-  const revRoot = makeRootDir('agentoc-ws-rev-');
+  const revRoot = makeRootDir('ragent-ws-rev-');
   const rev1 = await ensureWorkspaceForRoot(revRoot);
   const rev2 = await ensureWorkspaceForRoot(revRoot);
   assert.equal(rev1.revision, 1);
   assert.equal(rev2.revision, 1, 're-ensuring a stable root must not bump revision');
-  const revMissing = join(tmpdir(), `agentoc-ws-rev-missing-${Date.now()}`);
+  const revMissing = join(tmpdir(), `ragent-ws-rev-missing-${Date.now()}`);
   const revU = await ensureWorkspaceForRoot(revMissing);
   mkdirSync(revMissing);
   createdRootDirs.push(revMissing);
@@ -157,7 +157,7 @@ try {
 
   // ── hostId stability across module reopen (fresh instance reads the file) ─
   const reopenA = await import(`../chat/workspaces.mjs?reopen-a=${Date.now()}`);
-  const reopenRoot = makeRootDir('agentoc-ws-hostid-');
+  const reopenRoot = makeRootDir('ragent-ws-hostid-');
   await reopenA.ensureWorkspaceForRoot(reopenRoot);
   const persisted = JSON.parse(readFileSync(WORKSPACES_FILE, 'utf8'));
   assert.ok(persisted.hostId.startsWith('host_'));

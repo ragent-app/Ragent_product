@@ -10,7 +10,7 @@ if (process.platform !== 'win32' || process.argv.length !== 3 || process.argv[2]
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const caseId = randomBytes(16).toString('hex'), root = join(source, 'artifacts/showcase/T2-current-20261017/identity-migration/audit-' + caseId);
 await mkdir(root, { recursive: true });
-const files = ['scripts/audit-windows-identity-migration.ps1', 'lib/windows-identity-migration.mjs', 'scripts/qa-windows-identity-migration.mjs', 'packaging/windows/AgentoC.ServiceHost.cs', 'packaging/windows/AgentoC.wxs', 'packaging/windows/install-agentoc.ps1'];
+const files = ['scripts/audit-windows-identity-migration.ps1', 'lib/windows-identity-migration.mjs', 'scripts/qa-windows-identity-migration.mjs', 'packaging/windows/Ragent.ServiceHost.cs', 'packaging/windows/Ragent.wxs', 'packaging/windows/install-ragent.ps1'];
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceFiles = await Promise.all(files.map(async path => ({ path, sha256: hash(await readFile(join(source, path))) })));
 const { stdout } = await promisify(execFile)('C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(source, files[0])], { windowsHide: true, timeout: 30000, maxBuffer: 131072 });

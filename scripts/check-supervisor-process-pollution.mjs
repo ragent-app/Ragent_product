@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // DS-02: alarm-only diagnostic for processes inside the runner-supervisor cgroup.
 //
-// The runner supervisor (agentoc-runner-supervisor.service, KillMode=process)
+// The runner supervisor (ragent-runner-supervisor.service, KillMode=process)
 // is a pure launcher: it is allowed to contain exactly two kinds of processes:
 //   - the supervisor daemon itself (runner-supervisor-daemon.mjs)
 //   - supervised runner sidecars (runner-sidecar.mjs <runId>) whose argv carries
@@ -24,7 +24,7 @@
 // Options:
 //   --json                  machine-readable JSON on stdout
 //   --unit <name>           systemd unit whose cgroup to inspect (default:
-//                           agentoc-runner-supervisor.service)
+//                           ragent-runner-supervisor.service)
 //   --cgroup-dir <dir>      read <dir>/cgroup.procs instead of auto-discovery
 //                           (used by tests to simulate a cgroup)
 //   --long-running-hours <n>  elapsed threshold for the long-running heuristic
@@ -50,7 +50,7 @@ function trimString(value) {
 function parseArgs(argv) {
   const options = {
     json: false,
-    unit: 'agentoc-runner-supervisor.service',
+    unit: 'ragent-runner-supervisor.service',
     cgroupDir: '',
     longRunningHours: 24,
   };
@@ -129,7 +129,7 @@ function classifyProcess({ argv, comm, environ, elapsedSeconds, longRunningHours
   const joined = tokens.join(' ');
 
   // Marker contract violations are reported regardless of the rest.
-  const instanceMarker = environ?.find((entry) => entry.startsWith('AGENTOC_TEST_INSTANCE_ID='));
+  const instanceMarker = environ?.find((entry) => entry.startsWith('RAGENT_TEST_INSTANCE_ID='));
   const runnerMarkerPresent = tokens.some((token) => RUN_MANIFEST_ID_RE.test(token));
 
   if (tokens.some((token) => token.includes('runner-supervisor-daemon.mjs'))) {
@@ -305,7 +305,7 @@ async function inspectPids(pids, { longRunningHours }) {
       cmdline: argv ?? null,
       comm: comm ?? null,
       elapsedSeconds,
-      instanceMarker: environ?.find((entry) => entry.startsWith('AGENTOC_TEST_INSTANCE_ID=')) ?? null,
+      instanceMarker: environ?.find((entry) => entry.startsWith('RAGENT_TEST_INSTANCE_ID=')) ?? null,
     });
   }
   return processes;
@@ -321,7 +321,7 @@ Reads /proc and (optionally) systemd; never kills, never modifies the unit.
 
 Options:
   --json                   machine-readable JSON on stdout
-  --unit <name>            unit to inspect (default agentoc-runner-supervisor.service)
+  --unit <name>            unit to inspect (default ragent-runner-supervisor.service)
   --cgroup-dir <dir>       read <dir>/cgroup.procs instead of auto-discovery (tests)
   --long-running-hours <n> elapsed threshold for long-running heuristic (default 24)
   -h, --help               this help

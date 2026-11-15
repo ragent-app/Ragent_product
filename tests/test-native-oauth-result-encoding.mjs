@@ -4,19 +4,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-oauth-encoding-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-oauth-encoding-'));
 const configDir = join(root, 'config');
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 await mkdir(configDir, { recursive: true });
 const { createNativeProviderRegistry } = await import('../lib/provider-runtime/registry.mjs');
 const { createSecretStore } = await import('../lib/provider-runtime/secret-store.mjs');
 const { createCredentialMutationLedger } = await import('../lib/provider-runtime/credential-mutation.mjs');
 const { managedCodexMcpAccountBinding } = await import('../lib/provider-runtime/codex-mcp-config.mjs');
 const { readCodexCapabilitySync } = await import('../chat/codex-capability-sync.mjs');
-const management = await import(process.env.AGENTOC_TEST_OAUTH_MODULE
-  ? pathToFileURL(process.env.AGENTOC_TEST_OAUTH_MODULE).href
+const management = await import(process.env.RAGENT_TEST_OAUTH_MODULE
+  ? pathToFileURL(process.env.RAGENT_TEST_OAUTH_MODULE).href
   : '../chat/native-provider-management.mjs');
 const context = {
   configDir,

@@ -11,7 +11,7 @@ import {
 } from '../lib/instance-identity.mjs';
 import { createOwnerAuthBroker } from '../accounts/owner-auth-broker.mjs';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-provider-sync-auth-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-provider-sync-auth-'));
 const source = await loadOrCreateInstanceIdentity({ filePath: join(root, 'source.json') });
 const target = await loadOrCreateInstanceIdentity({ filePath: join(root, 'target.json') });
 const other = await loadOrCreateInstanceIdentity({ filePath: join(root, 'other.json') });
@@ -39,14 +39,14 @@ function proofFor(actor, targetInstanceId, requestId = 'psync_auth_1', issuedAt 
     accountId: 'acct_same',
     targetInstanceId,
     issuedAt,
-    audience: 'agentoc-provider-sync',
+    audience: 'ragent-provider-sync',
     ...(syncKeyFingerprint ? { syncKeyFingerprint } : {}),
     instance: publicInstanceIdentity(actor),
     signature: signProviderSyncPeerProof(actor, {
       requestId,
       targetInstanceId,
       issuedAt,
-      audience: 'agentoc-provider-sync',
+      audience: 'ragent-provider-sync',
       syncKeyFingerprint,
     }).signature,
   };

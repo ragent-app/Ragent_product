@@ -4,20 +4,20 @@ import { authorize, required } from './work-graph.mjs';
 // A formula is data, not code or a source of authority. Callers must submit the
 // resulting proposal through the same Factory Control authorization boundary.
 const FORMULAS = Object.freeze({
-  'agentoc-project-report@1': Object.freeze({
-    id:'agentoc-project-report', version:1,
+  'ragent-project-report@1': Object.freeze({
+    id:'ragent-project-report', version:1,
     source:'docs/ragent-2.0-autonomy/phase-d-context-organization.zh.md',
     roles:['specialist'], capabilities:['read'],
     rules:[{key:'report',kind:'execution',role:'specialist',accessMode:'read',criteria:['report-reviewed']}],
   }),
-  'agentoc-responsibility-planner@1': Object.freeze({
-    id:'agentoc-responsibility-planner', version:1,
+  'ragent-responsibility-planner@1': Object.freeze({
+    id:'ragent-responsibility-planner', version:1,
     source:'docs/ragent-2.0-autonomy/phase-d-context-organization.zh.md',
     roles:['specialist'], capabilities:['read'],
     rules:[{key:'planning',kind:'execution',role:'specialist',accessMode:'read',criteria:['plan-reviewed']}],
   }),
-  'agentoc-reviewed-change@1': Object.freeze({
-    id:'agentoc-reviewed-change', version:1,
+  'ragent-reviewed-change@1': Object.freeze({
+    id:'ragent-reviewed-change', version:1,
     source:'docs/factory-runtime/phase-4-delivery.zh.md',
     roles:['writer','reviewer'], capabilities:['read','write','review'],
     rules:[
@@ -26,8 +26,8 @@ const FORMULAS = Object.freeze({
       {key:'integration',kind:'integration',role:'writer',criteria:['integration-recorded'],dependsOn:{key:'review',milestone:'accepted'}},
     ],
   }),
-  'agentoc-reviewed-change@2': Object.freeze({
-    id:'agentoc-reviewed-change', version:2,
+  'ragent-reviewed-change@2': Object.freeze({
+    id:'ragent-reviewed-change', version:2,
     source:'docs/factory-runtime/phase-4-delivery.zh.md',
     roles:['writer','reviewer'], capabilities:['read','write','review'],
     rules:[
@@ -36,8 +36,8 @@ const FORMULAS = Object.freeze({
       {key:'integration',kind:'integration',role:'writer',criteria:['integration-recorded'],dependsOn:{key:'review',milestone:'accepted'}},
     ],
   }),
-  'agentoc-reviewed-change@3': Object.freeze({
-    id:'agentoc-reviewed-change', version:3,
+  'ragent-reviewed-change@3': Object.freeze({
+    id:'ragent-reviewed-change', version:3,
     source:'docs/ragent-2.0-autonomy/phase-a-execution-closure.zh.md',
     roles:['writer','reviewer'], capabilities:['read','write','review'],
     rules:[
@@ -54,12 +54,12 @@ function safeBranch(v) { string(v,'targetBranch'); if (v.startsWith('-')||v.incl
 export function getFactoryFormula(id,version=1) { const f=FORMULAS[`${id}@${version}`]; if (!f) throw factoryError('FACTORY_NOT_FOUND','Formula version not found',404); return {...structuredClone(f),digest:digest(f)}; }
 export function compileFactoryWorkflow({templateId,templateVersion=1,organizationId,projectId,objective,targetBranch,allowedPaths,candidateScope,maxAttempts,maxCost,checkActionId,resource}={}) {
   const formula=getFactoryFormula(templateId,templateVersion); string(organizationId,'organizationId'); string(projectId,'projectId'); string(objective,'objective');
-  const report=['agentoc-project-report','agentoc-responsibility-planner'].includes(templateId) && templateVersion===1;
+  const report=['ragent-project-report','ragent-responsibility-planner'].includes(templateId) && templateVersion===1;
   if(report) { if(!resource || resource.projectId!==projectId || resource.readScope!=='entire_project' || !['deny','inherit_existing_permissions'].includes(resource.networkPolicy) || Object.keys(resource).sort().join(',')!=='networkPolicy,projectId,readScope') invalid('Explicit whole-project read and network authority is required'); }
   else { safeBranch(targetBranch); if (!Array.isArray(allowedPaths)||!allowedPaths.length) invalid('allowedPaths are required'); allowedPaths.forEach(safePath); safePath(candidateScope); if (!allowedPaths.some(path=>candidateScope===path || candidateScope.startsWith(path+'/'))) invalid('candidateScope must be within an allowed path'); }
   if (!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>10) invalid('maxAttempts must be between 1 and 10'); if (!Number.isFinite(maxCost)||maxCost<=0) invalid('A positive cost budget is required');
   const reservationCost=maxCost/(formula.rules.length*maxAttempts); if (!Number.isFinite(reservationCost)||reservationCost<=0) invalid('Cost budget is too small to reserve');
-  if (templateId==='agentoc-reviewed-change' && templateVersion===3) string(checkActionId,'checkActionId');
+  if (templateId==='ragent-reviewed-change' && templateVersion===3) string(checkActionId,'checkActionId');
   if(report) { const input={organizationId,projectId,objective,resource,maxAttempts,maxCost}; return {schemaVersion:1,templateId:formula.id,templateVersion:formula.version,templateDigest:formula.digest,inputDigest:digest(input),goal:{organizationId,projectId,objective},resources:{roles:formula.roles,capabilities:formula.capabilities,maxAttempts,maxCost},workItems:formula.rules.map(rule=>({key:rule.key,kind:rule.kind,requiredRole:rule.role,contract:{objective,requiredRole:rule.role,acceptanceCriteria:rule.criteria.map(id=>({id,method:'manual'})),accessMode:'read',allowedPaths:[],resource,retry:{maxAttempts},budget:{maxCost},budgetReservation:{cost:reservationCost}},dependencies:[]}))}; }
   const input={organizationId,projectId,objective,targetBranch,allowedPaths:[...allowedPaths],candidateScope,maxAttempts,maxCost,...(templateVersion===3?{checkActionId}:{})};
   return {schemaVersion:1,templateId:formula.id,templateVersion:formula.version,templateDigest:formula.digest,inputDigest:digest(input),goal:{organizationId,projectId,objective},resources:{roles:formula.roles,capabilities:formula.capabilities,maxAttempts,maxCost},workItems:formula.rules.map(rule=>({key:rule.key,kind:rule.kind,requiredRole:rule.role,contract:{objective,requiredRole:rule.role,...(rule.independentReview?{independentReview:true}:{}),acceptanceCriteria:rule.criteria.map(id=>({id,...(id==='registered-check'?{method:'check',actionId:checkActionId}:id==='integration-recorded'?{}:{method:'manual'})})),allowedPaths:[...allowedPaths],accessMode:rule.kind==='review'?'read':'write',targetBranch,candidateScope,retry:{maxAttempts},budget:{maxCost},budgetReservation:{cost:reservationCost}},dependencies:rule.dependsOn?[{predecessorKey:rule.dependsOn.key,milestone:rule.dependsOn.milestone}]:[]}))};

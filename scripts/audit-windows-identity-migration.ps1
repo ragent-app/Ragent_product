@@ -2,12 +2,12 @@
 # connects to Owner IPC, or calls service/ACL/registry mutation commands.
 $ErrorActionPreference='Stop'
 $qaSystemRoot=[Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
-$qaProduct=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'AgentoC'
-$qaData=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'AgentoC'
+$qaProduct=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'Ragent'
+$qaData=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::CommonApplicationData)) 'Ragent'
 $qaInstance=Join-Path $qaData 'instances\owner'
 function Get-ServiceInventory {
   foreach($qaRole in @('control','supervisor')){
-    $qaName=if($qaRole -eq 'control'){'AgentoC-ControlPlane'}else{'AgentoC-RunnerSupervisor'}
+    $qaName=if($qaRole -eq 'control'){'Ragent-ControlPlane'}else{'Ragent-RunnerSupervisor'}
     $qaService=Get-CimInstance Win32_Service -Filter "Name='$qaName'"
     $qaSid=$null
     if($qaService){try{$qaSid=[Security.Principal.NTAccount]::new('NT SERVICE',$qaName).Translate([Security.Principal.SecurityIdentifier]).Value}catch{}}
@@ -16,7 +16,7 @@ function Get-ServiceInventory {
     try{$qaCommandHash=([BitConverter]::ToString($qaDigest.ComputeHash([Text.Encoding]::UTF8.GetBytes($qaCommand)))).Replace('-','').ToLowerInvariant()}finally{$qaDigest.Dispose()}
     [ordered]@{name=$qaName;role=$qaRole;present=($null -ne $qaService);configuredAccount=$qaService.StartName;state=$qaService.State;
       pid=$qaService.ProcessId;startMode=$qaService.StartMode;serviceSid=$qaSid;commandSha256=$qaCommandHash;
-      commandUsesOwnedHost=$qaCommand.StartsWith(('"'+(Join-Path $qaProduct 'AgentoC.ServiceHost.exe')+'"'),[StringComparison]::OrdinalIgnoreCase);
+      commandUsesOwnedHost=$qaCommand.StartsWith(('"'+(Join-Path $qaProduct 'Ragent.ServiceHost.exe')+'"'),[StringComparison]::OrdinalIgnoreCase);
       expectedVirtualAccount=('NT SERVICE\'+$qaName);tokenDirectlyVerified=$false}
   }
 }
@@ -51,7 +51,7 @@ $qaPaths=@(
   @('run-spool',(Join-Path $qaInstance 'data\chat-runs')),
   @('provider-homes',(Join-Path $qaInstance 'provider-homes')),
   @('harness-root',(Join-Path $qaData 'harnesses')),
-  @('installed-host',(Join-Path $qaProduct 'AgentoC.ServiceHost.exe'))
+  @('installed-host',(Join-Path $qaProduct 'Ragent.ServiceHost.exe'))
 )
 $qaBefore=@(Get-ServiceInventory)
 $qaSnapshot=[ordered]@{schemaVersion=1;capturedAt=(Get-Date).ToString('o');readOnly=$true;credentialContentsRead=$false;

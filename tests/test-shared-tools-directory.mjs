@@ -7,9 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-shared-tools-'));
-const sharedToolsDir = join(tempHome, '.agentoc', 'shared-tools');
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-shared-tools-'));
+const sharedToolsDir = join(tempHome, '.ragent', 'shared-tools');
+const configDir = join(tempHome, '.config', 'ragent');
 
 mkdirSync(join(sharedToolsDir, 'review-helper'), { recursive: true });
 mkdirSync(join(sharedToolsDir, 'skipped-helper'), { recursive: true });

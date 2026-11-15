@@ -186,7 +186,7 @@ state.accountJoinIntents = [{
 }];
 const joinDeviceSignature = deviceSign(buildAccountJoinIntentMessage({
   instanceId, intentId: joinIntentId, deviceId: targetDeviceId, devicePublicKeyFingerprint: deviceFingerprint,
-  nonce: joinNonce, issuedAt: joinIssuedAt, audience: 'agentoc-account-join',
+  nonce: joinNonce, issuedAt: joinIssuedAt, audience: 'ragent-account-join',
 }));
 const granted = await broker.authorizeAccountJoinIntent({
   intentId: joinIntentId,
@@ -209,7 +209,7 @@ await check('rac_ 只能在 Accounts 换取绑定目标电脑的一次性 grant'
 const targetProofIssuedAt = new Date(now).toISOString();
 const targetProof = instanceSign(buildAccountJoinIntentProofMessage({
   instanceId, intentId: joinIntentId, deviceId: targetDeviceId, devicePublicKeyFingerprint: deviceFingerprint,
-  nonce: joinNonce, issuedAt: targetProofIssuedAt, audience: 'agentoc-account-join',
+  nonce: joinNonce, issuedAt: targetProofIssuedAt, audience: 'ragent-account-join',
 }));
 const joined = await broker.completeAccountJoinIntent({
   intentId: joinIntentId,
@@ -220,7 +220,7 @@ const joined = await broker.completeAccountJoinIntent({
   deviceSignature: joinDeviceSignature,
   accountJoinGrant: granted.accountJoinGrant,
   issuedAt: targetProofIssuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
   instance: { instanceId, publicKey: instancePublicKey, keyFingerprint: instanceFingerprint },
   signature: targetProof,
 });
@@ -250,7 +250,7 @@ const claimDeviceSignature = deviceSign(buildAccountJoinIntentMessage({
   devicePublicKeyFingerprint: deviceFingerprint,
   nonce: claimNonce,
   issuedAt: claimIssuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
 }));
 state.accountJoinIntents.push({
   intentId: claimIntentId,
@@ -286,7 +286,7 @@ const claimProof = cryptoSign(null, Buffer.from(buildAccountJoinIntentProofMessa
   devicePublicKeyFingerprint: deviceFingerprint,
   nonce: claimNonce,
   issuedAt: claimProofIssuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
   publicEndpoint: claimEndpoint,
 }), 'utf8'), claimInstanceKeys.privateKey).toString('base64url');
 const claimed = await broker.completeAccountJoinIntent({
@@ -299,7 +299,7 @@ const claimed = await broker.completeAccountJoinIntent({
   accountJoinGrant: claimGrant.accountJoinGrant,
   publicEndpoint: claimEndpoint,
   issuedAt: claimProofIssuedAt,
-  audience: 'agentoc-account-join',
+  audience: 'ragent-account-join',
   instance: { instanceId: claimInstanceId, publicKey: claimInstancePublicKey, keyFingerprint: claimInstanceFingerprint },
   signature: claimProof,
 });
@@ -341,7 +341,7 @@ function reenrollment(suffix, overrides = {}) {
   state.accountJoinIntents.push(intent);
   const signature = deviceSign(buildAccountJoinIntentMessage({ instanceId: claimInstanceId, intentId,
     deviceId: claimTargetDeviceId, devicePublicKeyFingerprint: deviceFingerprint, nonce, issuedAt,
-    audience: 'agentoc-account-join' }));
+    audience: 'ragent-account-join' }));
   return { intent, authorize: { intentId, requestId: `authorize_reenrollment_${suffix}`, deviceId: claimTargetDeviceId,
     devicePublicKeyFingerprint: deviceFingerprint, nonce, issuedAt, deviceSignature: signature },
   complete(grant) {
@@ -349,10 +349,10 @@ function reenrollment(suffix, overrides = {}) {
     return { intentId, requestId: `complete_reenrollment_${suffix}`, nonce, deviceIssuedAt: issuedAt,
       device: { deviceId: claimTargetDeviceId, devicePublicKeyFingerprint: deviceFingerprint }, deviceSignature: signature,
       accountJoinGrant: grant.accountJoinGrant, publicEndpoint: claimEndpoint, issuedAt: proofIssuedAt,
-      audience: 'agentoc-account-join', instance,
+      audience: 'ragent-account-join', instance,
       signature: cryptoSign(null, Buffer.from(buildAccountJoinIntentProofMessage({ instanceId: claimInstanceId,
         intentId, deviceId: claimTargetDeviceId, devicePublicKeyFingerprint: deviceFingerprint, nonce,
-        issuedAt: proofIssuedAt, audience: 'agentoc-account-join', publicEndpoint: claimEndpoint })), claimInstanceKeys.privateKey).toString('base64url') };
+        issuedAt: proofIssuedAt, audience: 'ragent-account-join', publicEndpoint: claimEndpoint })), claimInstanceKeys.privateKey).toString('base64url') };
   } };
 }
 now += 1;

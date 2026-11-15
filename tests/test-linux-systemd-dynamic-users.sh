@@ -3,13 +3,13 @@
 # systemd units. Requires root and a running systemd; never touches product data.
 set -eu
 if [ "$(id -u)" -ne 0 ]; then echo 'root required' >&2; exit 1; fi
-dir=$(mktemp -d /srv/agentoc-dynamic-qa-XXXXXXXX)
+dir=$(mktemp -d /srv/ragent-dynamic-qa-XXXXXXXX)
 suffix=${dir##*-}
-a="agentoc-qa-dynamic-${suffix}-a.service"
-b="agentoc-qa-dynamic-${suffix}-b.service"
-c="agentoc-qa-dynamic-${suffix}-c.service"
-runtime="agentoc-qa-${suffix}-runtime"
-state="agentoc-qa-${suffix}-state"
+a="ragent-qa-dynamic-${suffix}-a.service"
+b="ragent-qa-dynamic-${suffix}-b.service"
+c="ragent-qa-dynamic-${suffix}-c.service"
+runtime="ragent-qa-${suffix}-runtime"
+state="ragent-qa-${suffix}-state"
 created_a=0
 created_b=0
 created_c=0
@@ -23,11 +23,11 @@ cleanup() {
     rm -rf -- "/var/lib/private/$state"
     rm -f -- "/var/lib/$state"
   fi
-  case "$dir" in /srv/agentoc-dynamic-qa-*) rm -rf -- "$dir" ;; *) echo 'unexpected fixture path' >&2 ;; esac
+  case "$dir" in /srv/ragent-dynamic-qa-*) rm -rf -- "$dir" ;; *) echo 'unexpected fixture path' >&2 ;; esac
 }
 trap cleanup EXIT
 chmod 0711 "$dir"
-if getent passwd "agentoc-qa-${suffix}-a" >/dev/null || getent passwd "agentoc-qa-${suffix}-b" >/dev/null; then
+if getent passwd "ragent-qa-${suffix}-a" >/dev/null || getent passwd "ragent-qa-${suffix}-b" >/dev/null; then
   echo 'fixture account name already exists' >&2; exit 1
 fi
 if [ -e "/run/$runtime" ] || [ -L "/run/$runtime" ] || [ -e "/var/lib/$state" ] || [ -L "/var/lib/$state" ] ||
@@ -46,12 +46,12 @@ printf state > "$STATE_DIRECTORY/old-state"
 exec /usr/bin/sleep 120
 EOF
 chmod 0644 "$dir/run.sh"
-systemd-run --quiet --collect --unit="$a" --property=DynamicUser=yes --property="User=agentoc-qa-${suffix}-a" \
+systemd-run --quiet --collect --unit="$a" --property=DynamicUser=yes --property="User=ragent-qa-${suffix}-a" \
   --property="RuntimeDirectory=$runtime" --property="StateDirectory=$state" \
   --property="LoadCredential=seed:$dir/credential" /bin/sh "$dir/run.sh"
 created_a=1
 created_state=1
-systemd-run --quiet --collect --unit="$b" --property=DynamicUser=yes --property="User=agentoc-qa-${suffix}-b" /usr/bin/sleep 120
+systemd-run --quiet --collect --unit="$b" --property=DynamicUser=yes --property="User=ragent-qa-${suffix}-b" /usr/bin/sleep 120
 created_b=1
 pid_a=$(systemctl show "$a" -p MainPID --value)
 pid_b=$(systemctl show "$b" -p MainPID --value)
@@ -80,7 +80,7 @@ systemctl stop "$a"
 created_a=0
 if [ -e "/run/$runtime" ] || [ -L "/run/$runtime" ] || [ -e "/run/private/$runtime" ]; then echo runtime_not_cleaned; exit 1; fi
 test -e "/var/lib/$state/old-state"
-systemd-run --quiet --collect --unit="$c" --property=DynamicUser=yes --property="User=agentoc-qa-${suffix}-a" \
+systemd-run --quiet --collect --unit="$c" --property=DynamicUser=yes --property="User=ragent-qa-${suffix}-a" \
   --property="RuntimeDirectory=$runtime" --property="StateDirectory=$state" \
   --property="LoadCredential=seed:$dir/credential" /bin/sh "$dir/run.sh"
 created_c=1

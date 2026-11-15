@@ -6,10 +6,10 @@ import { join, sep } from 'node:path';
 import { createServer } from 'node:http';
 import { listenFetchLoopback } from './helpers/listen-fetch-loopback.mjs';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-turn-generations-'));
-Object.assign(process.env, { HOME: home, AGENTOC_CONFIG_DIR: join(home, 'config'), AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
-  AGENTOC_ACCOUNTS_URL: 'https://turn-generation.fixture.invalid/accounts' });
-delete process.env.AGENTOC_INSTANCE_ROOT;
+const home = await mkdtemp(join(tmpdir(), 'ragent-turn-generations-'));
+Object.assign(process.env, { HOME: home, RAGENT_CONFIG_DIR: join(home, 'config'), RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: '1',
+  RAGENT_ACCOUNTS_URL: 'https://turn-generation.fixture.invalid/accounts' });
+delete process.env.RAGENT_INSTANCE_ROOT;
 const { loadOrCreateInstanceIdentity, publicInstanceIdentity, signOwnerAuthDeviceProof } = await import('../lib/instance-identity.mjs');
 const { createTurnConnectionId } = await import('../lib/turn-authorization.mjs');
 const { createTurnLeaseId, createTurnOperationRequestId } = await import('../lib/turn-lease-identity.mjs');
@@ -32,7 +32,7 @@ let store = { mutate(fn) { const operation = tail.then(async () => {
   const draft = structuredClone(state); const result = await fn(draft); state = draft; return result;
 }); tail = operation.catch(() => {}); return operation; } };
 try {
-  const url = process.env.AGENTOC_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
+  const url = process.env.RAGENT_ACCOUNTS_ISOLATED_TEST_DATABASE_URL;
   if (url) {
     const { Pool } = await import('pg'); const { createPostgresStore } = await import('../accounts/store/postgres.mjs');
     schema = 'qa_turn_generation_' + randomBytes(12).toString('hex');
@@ -82,7 +82,7 @@ try {
   const logical = deviceId => createTurnConnectionId({ accountId, instanceId: identity.instanceId, deviceId });
   function request(connectionId, purpose, { deviceId = phoneId, actor = identity, expiresAt = new Date(now + 300_000).toISOString(), reason = '', protocolVersion = 2 } = {}) {
     const body = { protocolVersion, accountId, deviceId, deviceKind: 'phone', connectionId, expiresAt, reason,
-      instance: publicInstanceIdentity(actor), issuedAt: iso(), audience: 'agentoc-owner-auth-device' };
+      instance: publicInstanceIdentity(actor), issuedAt: iso(), audience: 'ragent-owner-auth-device' };
     body.requestId = createTurnOperationRequestId({ ...body, instanceId: actor.instanceId, purpose });
     body.signature = signOwnerAuthDeviceProof(actor, { transactionId: body.requestId, purpose,
       issuedAt: body.issuedAt, audience: body.audience }).signature;
@@ -305,6 +305,6 @@ try {
   if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
   await pgPool?.end();
   if (bootstrap) { if (schema) await bootstrap.query(`drop schema "${schema}" cascade`); await bootstrap.end(); }
-  const absolute = await realpath(home), parent = await realpath(tmpdir()); assert(absolute.startsWith(parent + sep) && absolute.includes('agentoc-turn-generations-'));
+  const absolute = await realpath(home), parent = await realpath(tmpdir()); assert(absolute.startsWith(parent + sep) && absolute.includes('ragent-turn-generations-'));
   await rm(absolute, { recursive: true, force: true });
 }

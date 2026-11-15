@@ -4,7 +4,7 @@
 
 本方案仅规划调查，不执行测试、部署、服务操作或 owner 操作。调查对象依次为原始 `Native codex provider preparation failed`、旧会话 hook 拒绝、owner `OSV_INSPECTION_TIMEOUT`。MCP readiness 超时是独立旁支；只有同一原始 Run 的证据建立关联后才纳入第一项因果链。固定文字直接交付、跨 Run 子代理绑定及其他新功能不在本方案内。
 
-现场已安装 0.0.93，其构建源码为 `55cdb7d0a58bdde9faa16109ad3f7cf1ce96ffb8`；此前验收文档提交 `6827e30f` 已包含在编写时 main 的 `eddfb0b12f90ec85597dadcf4e91a783eab1e137` 中。此为已有记录，不代替调查执行时重新确认的安装文件身份。工作继续使用当前工作树和 main；开发、QA 的可配置产物默认放在 G:/AgentoC，保护其他人的未提交修改和活动产物。证据入口为原始方案 `G:/AgentoC/ragent-trigger-delivery-remediation-plan-20261113.md` 第 9、10 节和本仓库 `docs/trigger-delivery-windows-acceptance.zh.md`，尤其第 49、77、79、81–89 行；行号随文档演进可能变化。
+现场已安装 0.0.93，其构建源码为 `55cdb7d0a58bdde9faa16109ad3f7cf1ce96ffb8`；此前验收文档提交 `6827e30f` 已包含在编写时 main 的 `eddfb0b12f90ec85597dadcf4e91a783eab1e137` 中。此为已有记录，不代替调查执行时重新确认的安装文件身份。工作继续使用当前工作树和 main；开发、QA 的可配置产物默认放在 G:/Ragent，保护其他人的未提交修改和活动产物。证据入口为原始方案 `G:/Ragent/ragent-trigger-delivery-remediation-plan-20261113.md` 第 9、10 节和本仓库 `docs/trigger-delivery-windows-acceptance.zh.md`，尤其第 49、77、79、81–89 行；行号随文档演进可能变化。
 
 ## 统一决策门
 

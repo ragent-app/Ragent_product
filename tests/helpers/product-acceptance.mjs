@@ -36,7 +36,7 @@ export function parseFixtureCsv(value){
 }
 export async function prepareProductCases(destination){
  const root=resolve(destination),parent=dirname(root);await noLinks(parent);await mkdir(root); // Never reuse/overwrite an existing workspace.
- await writeFile(join(root,'.agentoc-product-fixture.json'),JSON.stringify({schemaVersion:1,nonce:randomUUID(),synthetic:true}));
+ await writeFile(join(root,'.ragent-product-fixture.json'),JSON.stringify({schemaVersion:1,nonce:randomUUID(),synthetic:true}));
  const cases=await loadProductCases();
  for(const task of cases.cases){
   if(!/^[a-z0-9-]+$/.test(task.id))fail('FIXTURE_CASE_INVALID');const dir=join(root,task.id);await mkdir(dir);

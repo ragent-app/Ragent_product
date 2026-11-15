@@ -28,7 +28,7 @@ import {
 } from './privileged-quota.mjs';
 
 // P3d — chat-server privileged signing keys + mint-and-send pipeline
-// (proposal: /var/lib/agentoc/workspace/p3-executor-proposal-draft.md §3.2, §8.1 P3d).
+// (proposal: /var/lib/ragent/workspace/p3-executor-proposal-draft.md §3.2, §8.1 P3d).
 //
 // Key management (load-or-create, mirror chat/push.mjs:40-47 VAPID pattern):
 //   - Ed25519 asymmetric key pair, stored at configDir/privileged-signing-keys.json
@@ -235,8 +235,8 @@ export async function executePrivilegedOp(op, options = {}) {
   // INSTALL_QUOTA_EXCEEDED (passkey fallback for over-quota installs lands
   // with P2/passkey semantics; until then over-quota means denied).
   if (trimString(options.authMode) === PRIVILEGED_TOKEN_AUTH_MODE_INSTALL_AUTO) {
-    const max = Number(process.env.AGENTOC_INSTALL_AUTO_QUOTA_MAX) || INSTALL_AUTO_QUOTA_MAX_DEFAULT;
-    const windowMs = Number(process.env.AGENTOC_INSTALL_AUTO_QUOTA_WINDOW_MS) || INSTALL_AUTO_QUOTA_WINDOW_MS_DEFAULT;
+    const max = Number(process.env.RAGENT_INSTALL_AUTO_QUOTA_MAX) || INSTALL_AUTO_QUOTA_MAX_DEFAULT;
+    const windowMs = Number(process.env.RAGENT_INSTALL_AUTO_QUOTA_WINDOW_MS) || INSTALL_AUTO_QUOTA_WINDOW_MS_DEFAULT;
     const quota = await installAutoQuotaQueue(PRIVILEGED_QUOTA_FILE, () =>
       checkInstallQuotaFile(PRIVILEGED_QUOTA_FILE, { record: true, max, windowMs }));
     if (!quota.allowed) {

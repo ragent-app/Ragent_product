@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureBaseline } from '../scripts/capture-release-baseline.mjs';
 
-const root = mkdtempSync(join(tmpdir(), 'agentoc-release-baseline-'));
+const root = mkdtempSync(join(tmpdir(), 'ragent-release-baseline-'));
 try {
   const git = (...args) => execFileSync('git', args, { cwd: root, windowsHide: true, stdio: 'pipe' });
   git('init');
@@ -33,6 +33,6 @@ try {
   assert.equal(readFileSync(join(root, 'untracked-fixture.txt'), 'utf8'), secret);
   console.log('release baseline: clean/dirty/deleted/untracked/artifact/redaction checks passed');
 } finally {
-  assert.ok(root.startsWith(join(tmpdir(), 'agentoc-release-baseline-')));
+  assert.ok(root.startsWith(join(tmpdir(), 'ragent-release-baseline-')));
   rmSync(root, { recursive: true, force: true });
 }

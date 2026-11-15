@@ -2,7 +2,7 @@
 
 // Project overview projection (Stage 2 extraction of project-overview.js).
 // The legacy module is already a pure function set — it attaches to the root
-// under AgentoCProjectOverview and reads nothing from its scope; this transport
+// under RagentProjectOverview and reads nothing from its scope; this transport
 // copy keeps the function bodies verbatim so the parity tests in
 // tests/test-chat-project-overview-core.mjs lock the two implementations
 // together until the view layer re-binds to this module in Stage 3.
@@ -22,7 +22,7 @@
 // change time). Callers pass getSortTime so this module stays deterministic
 // and unit-testable; it falls back to a local equivalent when omitted.
 
-(function attachAgentocProjectOverviewCore(root) {
+(function attachRagentProjectOverviewCore(root) {
   "use strict";
 
   const INBOX_PROJECT_KEY = "";
@@ -278,7 +278,7 @@
     return (sessions || []).filter((session) => getSessionProjectKey(session, projects) === key);
   }
 
-  root.AgentocProjectOverviewCore = {
+  root.RagentProjectOverviewCore = {
     buildProjectOverview,
     searchProjectView,
     sessionsOfProject,

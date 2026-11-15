@@ -48,7 +48,7 @@ const { downloadPackage, startInstaller, clearCachedPackage } = require("../desk
       };
       const result = await startInstaller({ ...file, platform, appRoot: root, executable: "app", resultFile: path.join(root, "result"), packageSha256: info.packageSha256,
         onStatus: status => statuses.push(status), onReadyToQuit: () => { quit = true; }, spawnImpl: mockSpawn });
-      if (platform === "linux") { assert.equal(command, "/usr/bin/pkexec"); assert.equal(args[1], "/opt/agentoc/Desktop/resources/app/update-linux.sh"); assert.equal(result.installed, true); assert.deepEqual(statuses, ["waiting", "installing"]); }
+      if (platform === "linux") { assert.equal(command, "/usr/bin/pkexec"); assert.equal(args[1], "/opt/ragent/Desktop/resources/app/update-linux.sh"); assert.equal(result.installed, true); assert.deepEqual(statuses, ["waiting", "installing"]); }
       else { assert.equal(quit, true); assert.equal(result.handedOff, true); assert.deepEqual(statuses, ["installing"]); }
     }
     await clearCachedPackage(path.join(root, "ragent-update-cache"), info.packageSha256, "linux", "x64");

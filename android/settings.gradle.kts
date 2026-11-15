@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AgentoCAndroid"
+rootProject.name = "RagentAndroid"
 
 include(":app")
 include(":core:model")

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || '/tmp/agentoc-sidebar-navigation-visual';
+const outputDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || '/tmp/ragent-sidebar-navigation-visual';
 mkdirSync(outputDir, { recursive: true });
 
 const styles = [
@@ -34,7 +34,7 @@ function fixtureHtml() {
   <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${styles}</style>
   <style>*{box-sizing:border-box}body{margin:0;background:#ddd;font-family:Inter,system-ui,sans-serif}.sidebar-overlay{opacity:1;visibility:visible;pointer-events:auto}.sidebar{transform:none}.settings-panel{display:none}.settings-panel.visible{display:block}.sidebar-workspace-popover,.custom-select-panel{animation:none!important;transition:none!important;transform:none!important}</style></head>
   <body><div class="sidebar-overlay open"><aside class="sidebar" id="sidebar" data-sidebar-mode="sessions">
-    <div class="sidebar-app-bar" id="sidebarAppBar"><div class="sidebar-brand">AgentoC</div><div class="sidebar-app-bar-actions"><button class="sidebar-icon-btn" aria-label="Search" data-icon="search"></button><button class="sidebar-icon-btn" aria-label="Back" data-icon="chevron-left"></button></div></div>
+    <div class="sidebar-app-bar" id="sidebarAppBar"><div class="sidebar-brand">Ragent</div><div class="sidebar-app-bar-actions"><button class="sidebar-icon-btn" aria-label="Search" data-icon="search"></button><button class="sidebar-icon-btn" aria-label="Back" data-icon="chevron-left"></button></div></div>
     <div class="sidebar-search-mode-header" id="sidebarSearchModeHeader" hidden><label class="sidebar-search-shell"><span class="sidebar-search-shell-icon" data-icon="search"></span><input class="sidebar-search-input" value="report" aria-label="Search"></label><button class="sidebar-icon-btn" aria-label="Close search" data-icon="close"></button></div>
     <div class="sidebar-subpage-header" id="sidebarSubpageHeader" hidden><button class="sidebar-icon-btn" aria-label="Back" data-icon="chevron-left"></button><span class="sidebar-subpage-icon" id="sidebarSubpageIcon" data-icon="sparkle-solid"></span><div class="sidebar-subpage-title" id="sidebarSubpageTitle">Agent</div></div>
     <nav class="sidebar-primary-nav" id="sidebarPrimaryNav"><div class="sidebar-workspace" id="workspacePicker"><button class="sidebar-workspace-summary sidebar-primary-action"><span class="sidebar-workspace-summary-text">Workspace: “Quarterly reporting workspace with a long name”</span><span class="sidebar-primary-action-chevron" data-icon="chevron-down"></span></button><div class="sidebar-workspace-popover" id="workspacePopover" hidden><div class="sidebar-section-title">Switch workspace</div><div class="custom-select-wrap"><button class="cs-trigger">Default workspace</button></div><button class="sidebar-workspace-confirm">Confirm</button></div></div></nav>
@@ -63,7 +63,7 @@ function fixtureHtml() {
       <section class="settings-group">
         <div class="settings-group-heading"><span class="settings-group-icon" data-icon="monitor"></span><h2 class="settings-group-title">App &amp; account</h2></div>
         <div class="settings-group-card">
-          <div class="settings-row settings-row-action"><div class="settings-row-copy"><div class="settings-row-title">Install App</div><div class="settings-row-note">Install AgentoC on this device.</div></div><button class="settings-row-button" type="button">Install AgentoC</button></div>
+          <div class="settings-row settings-row-action"><div class="settings-row-copy"><div class="settings-row-title">Install App</div><div class="settings-row-note">Install Ragent on this device.</div></div><button class="settings-row-button" type="button">Install Ragent</button></div>
           <div class="settings-row settings-row-action"><div class="settings-row-copy"><div class="settings-row-title">Password</div></div><button class="settings-row-button" type="button">Change password</button></div>
         </div>
       </section>
@@ -99,7 +99,7 @@ function fixtureHtml() {
       </div>
     </section>
   </div>
-  <script>${icons}\nwindow.AgentoCIcons.hydrate(document);</script></body></html>`;
+  <script>${icons}\nwindow.RagentIcons.hydrate(document);</script></body></html>`;
 }
 
 function overlaps(a, b) {
@@ -147,7 +147,7 @@ try {
       document.getElementById('sidebarSubpageTitle').textContent = settings ? 'Settings' : 'Agent';
       const subpageIcon = document.getElementById('sidebarSubpageIcon');
       subpageIcon.setAttribute('data-icon', settings ? 'gear-solid' : 'sparkle-solid');
-      subpageIcon.innerHTML = window.AgentoCIcons.render(settings ? 'gear-solid' : 'sparkle-solid');
+      subpageIcon.innerHTML = window.RagentIcons.render(settings ? 'gear-solid' : 'sparkle-solid');
       document.getElementById('sidebarPrimaryNav').hidden = search || subpage;
       document.getElementById('sidebarSessionSurface').hidden = subpage;
       document.getElementById('sidebarBottomActions').hidden = search || subpage;
@@ -191,9 +191,9 @@ try {
       const subtitle = mode === 'project-delete' ? 'Quarterly reporting' : 'Weekly report';
       panel.innerHTML = `
         <div class="sidebar-action-sheet-header">
-          <span class="sidebar-action-sheet-header-icon">${window.AgentoCIcons.render(icon)}</span>
+          <span class="sidebar-action-sheet-header-icon">${window.RagentIcons.render(icon)}</span>
           <div class="sidebar-action-sheet-title-block"><h2 class="sidebar-action-sheet-title">${title}</h2><p class="sidebar-action-sheet-subtitle">${subtitle}</p></div>
-          <button class="sidebar-action-sheet-close" type="button" aria-label="Close">${window.AgentoCIcons.render('close')}</button>
+          <button class="sidebar-action-sheet-close" type="button" aria-label="Close">${window.RagentIcons.render('close')}</button>
         </div>`;
       if (mode === 'session-rename') {
         panel.insertAdjacentHTML('beforeend', `
@@ -206,21 +206,21 @@ try {
         panel.insertAdjacentHTML('beforeend', `
           <p class="sidebar-action-sheet-confirm-copy">This permanently deletes the session and its run history.</p>
           <div class="sidebar-action-sheet-actions">
-            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete</span></span></button>
+            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete</span></span></button>
           </div>`);
       } else if (mode === 'project-delete') {
         panel.insertAdjacentHTML('beforeend', `
           <p class="sidebar-action-sheet-confirm-copy">This project contains 6 sessions. Choose what happens next.</p>
           <div class="sidebar-action-sheet-actions">
-            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete project and all sessions</span><span class="sidebar-action-sheet-action-hint">Permanently removes the project and its sessions.</span></span></button>
-            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('archive')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete project, keep sessions</span><span class="sidebar-action-sheet-action-hint">Move sessions to the Inbox at the bottom.</span></span></button>
+            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete project and all sessions</span><span class="sidebar-action-sheet-action-hint">Permanently removes the project and its sessions.</span></span></button>
+            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('archive')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete project, keep sessions</span><span class="sidebar-action-sheet-action-hint">Move sessions to the Inbox at the bottom.</span></span></button>
           </div>`);
       } else {
         panel.insertAdjacentHTML('beforeend', `
           <div class="sidebar-action-sheet-actions">
-            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('pin')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Pin</span></span></button>
-            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('edit')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Rename</span></span></button>
-            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.AgentoCIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete</span></span></button>
+            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('pin')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Pin</span></span></button>
+            <button class="sidebar-action-sheet-action" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('edit')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Rename</span></span></button>
+            <button class="sidebar-action-sheet-action is-danger" type="button"><span class="sidebar-action-sheet-action-icon">${window.RagentIcons.render('trash')}</span><span class="sidebar-action-sheet-action-copy"><span class="sidebar-action-sheet-action-label">Delete</span></span></button>
           </div>`);
       }
       actionSheet.classList.add('is-open');

@@ -72,7 +72,7 @@ async function createPage(browser, width) {
   await page.addScriptTag({ content: runActivitySource });
   await page.addScriptTag({
     content: `
-      window.agentocT = (key) => ({
+      window.ragentT = (key) => ({
         'activity.label.approval': 'Approval required',
         'activity.label.command': 'Running command',
         'activity.label.read': 'Reading file',
@@ -119,7 +119,7 @@ async function createPage(browser, width) {
         container.appendChild(node);
       }
       ${extractedSource}
-      window.AgentoCRunActivity.subscribe(syncMobileLiveActivityLine);
+      window.RagentRunActivity.subscribe(syncMobileLiveActivityLine);
       window.mobileThinkingTest = {
         compactMobileThinkingTimeline,
         syncMobileLiveActivityLine,
@@ -141,7 +141,7 @@ try {
   const mobilePage = await createPage(browser, 390);
   await mobilePage.evaluate(() => {
     window.mobileThinkingTest.setRunState('running');
-    window.AgentoCRunActivity.reset();
+    window.RagentRunActivity.reset();
   });
   assert.equal(
     await mobilePage.locator('#messages > .mobile-live-activity-line').count(),
@@ -155,7 +155,7 @@ try {
   );
 
   await mobilePage.evaluate(() => {
-    window.AgentoCRunActivity.setActivity({
+    window.RagentRunActivity.setActivity({
       state: 'working', kind: 'thinking', sourceSeq: 0, outputBoundarySeq: 0, inlineEligible: true,
     });
     window.mobileThinkingTest.renderThinkingBlockEvent({
@@ -175,7 +175,7 @@ try {
   );
 
   await mobilePage.evaluate(() => {
-    window.AgentoCRunActivity.noteFormalOutput({ type: 'text_delta', seq: 5 });
+    window.RagentRunActivity.noteFormalOutput({ type: 'text_delta', seq: 5 });
   });
   assert.equal(
     await mobilePage.locator('#messages > .mobile-live-activity-line').count(),
@@ -201,7 +201,7 @@ try {
   assert.equal(await mobilePage.locator('.mobile-live-activity-line__label').textContent(), 'Searching thinking row…');
 
   await mobilePage.evaluate(() => {
-    window.AgentoCRunActivity.noteFormalOutput({ type: 'text_delta' });
+    window.RagentRunActivity.noteFormalOutput({ type: 'text_delta' });
   });
   assert.equal(await mobilePage.locator('#messages > .mobile-live-activity-line').count(), 1);
 
@@ -230,7 +230,7 @@ try {
   const desktopPage = await createPage(browser, 1024);
   await desktopPage.evaluate(() => {
     window.mobileThinkingTest.setRunState('running');
-    window.AgentoCRunActivity.setActivity({
+    window.RagentRunActivity.setActivity({
       state: 'working', kind: 'thinking', sourceSeq: 2, outputBoundarySeq: 0, inlineEligible: true,
     });
     window.mobileThinkingTest.renderThinkingBlockEvent({

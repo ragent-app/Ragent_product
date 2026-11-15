@@ -49,7 +49,7 @@ public static class AncestorMutationProbe {
 #if HOST_PROBE
 static class HostAncestorProbe {
  public static int Main(string[] args) {
-  try {Console.WriteLine(AncestorMutationProbe.Run(args[0],AgentoC.ServiceHost.ServiceDirectoryPin.NonemptyDirectory,AgentoC.ServiceHost.ServiceDirectoryPin.Directory));return 0;}
+  try {Console.WriteLine(AncestorMutationProbe.Run(args[0],Ragent.ServiceHost.ServiceDirectoryPin.NonemptyDirectory,Ragent.ServiceHost.ServiceDirectoryPin.Directory));return 0;}
   catch(Exception e){Console.Error.WriteLine(e.ToString());return 1;}
  }
 }

@@ -221,12 +221,12 @@ async function prepareProfile({ profileId, model, registry, secretStore, prepare
 function buildChildEnv({ claudeConfigDir, profileId, provider, sourceRoot }) {
   const env = { ...process.env };
   for (const key of [
-    'AGENTOC_CONFIG_DIR',
-    'AGENTOC_INSTANCE_ROOT',
-    'AGENTOC_MEMORY_DIR',
-    'AGENTOC_SESSION_CONTROL_TOKEN',
-    'AGENTOC_PRIVILEGED_TOKEN',
-    'AGENTOC_APPROVED_ACTIONS_TOKEN',
+    'RAGENT_CONFIG_DIR',
+    'RAGENT_INSTANCE_ROOT',
+    'RAGENT_MEMORY_DIR',
+    'RAGENT_SESSION_CONTROL_TOKEN',
+    'RAGENT_PRIVILEGED_TOKEN',
+    'RAGENT_APPROVED_ACTIONS_TOKEN',
     'CLAUDECODE',
     'CLAUDE_CODE_ENTRYPOINT',
     'ANTHROPIC_API_KEY',
@@ -239,13 +239,13 @@ function buildChildEnv({ claudeConfigDir, profileId, provider, sourceRoot }) {
     'ANTHROPIC_SMALL_FAST_MODEL',
     'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
     'CLAUDE_CODE_DISABLE_LEGACY_MODEL_REMAP',
-    'AGENTOC_PROVIDER_HOMES_DIR',
+    'RAGENT_PROVIDER_HOMES_DIR',
   ]) delete env[key];
   env.HOME = claudeConfigDir;
   env.CLAUDE_CONFIG_DIR = claudeConfigDir;
-  env.AGENTOC_PROVIDER_PROFILE_ID = profileId;
-  env.AGENTOC_PROVIDER_PROTOCOL = provider.protocol || '';
-  env.AGENTOC_PROJECT_ROOT = sourceRoot;
+  env.RAGENT_PROVIDER_PROFILE_ID = profileId;
+  env.RAGENT_PROVIDER_PROTOCOL = provider.protocol || '';
+  env.RAGENT_PROJECT_ROOT = sourceRoot;
   return env;
 }
 
@@ -345,7 +345,7 @@ async function runProfile({ profileId, repeat, timeoutMs, command, sourceRoot, r
 
 async function runTransportProbe({ sourceConfigDir, profiles, repeat, timeoutMs, command, outputPath }) {
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const scratchRoot = await mkdtemp(join(tmpdir(), 'agentoc-ce11-transport-'));
+  const scratchRoot = await mkdtemp(join(tmpdir(), 'ragent-ce11-transport-'));
   const scratchConfig = join(scratchRoot, 'config');
   const providerHomesRoot = join(scratchRoot, 'provider-homes');
   const workspace = join(scratchRoot, 'workspace');
@@ -353,11 +353,11 @@ async function runTransportProbe({ sourceConfigDir, profiles, repeat, timeoutMs,
   await mkdir(scratchConfig, { recursive: true });
 
   const previousEnv = {
-    AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-    AGENTOC_PROVIDER_HOMES_DIR: process.env.AGENTOC_PROVIDER_HOMES_DIR,
+    RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+    RAGENT_PROVIDER_HOMES_DIR: process.env.RAGENT_PROVIDER_HOMES_DIR,
   };
-  process.env.AGENTOC_CONFIG_DIR = scratchConfig;
-  process.env.AGENTOC_PROVIDER_HOMES_DIR = providerHomesRoot;
+  process.env.RAGENT_CONFIG_DIR = scratchConfig;
+  process.env.RAGENT_PROVIDER_HOMES_DIR = providerHomesRoot;
 
   let report;
   try {
@@ -399,7 +399,7 @@ async function runTransportProbe({ sourceConfigDir, profiles, repeat, timeoutMs,
       expectedReply: EXPECTED_REPLY,
       repeat,
       timeoutMs,
-      topology: 'AgentoC probe -> Claude Code CLI -> Anthropic Messages endpoint/provider proxy -> Claude model -> Claude CLI stream-json JSONL -> chat/adapters/claude.mjs -> normalized events',
+      topology: 'Ragent probe -> Claude Code CLI -> Anthropic Messages endpoint/provider proxy -> Claude model -> Claude CLI stream-json JSONL -> chat/adapters/claude.mjs -> normalized events',
       primaryProfile: profiles[0] || null,
       profiles: profileResults,
       acceptance: {
@@ -414,10 +414,10 @@ async function runTransportProbe({ sourceConfigDir, profiles, repeat, timeoutMs,
       note: 'Upstream response headers are recorded as unknown when Claude CLI does not expose them. Secrets and raw stderr are never persisted; stdout prefix/suffix are redacted summaries.',
     };
   } finally {
-    if (previousEnv.AGENTOC_CONFIG_DIR === undefined) delete process.env.AGENTOC_CONFIG_DIR;
-    else process.env.AGENTOC_CONFIG_DIR = previousEnv.AGENTOC_CONFIG_DIR;
-    if (previousEnv.AGENTOC_PROVIDER_HOMES_DIR === undefined) delete process.env.AGENTOC_PROVIDER_HOMES_DIR;
-    else process.env.AGENTOC_PROVIDER_HOMES_DIR = previousEnv.AGENTOC_PROVIDER_HOMES_DIR;
+    if (previousEnv.RAGENT_CONFIG_DIR === undefined) delete process.env.RAGENT_CONFIG_DIR;
+    else process.env.RAGENT_CONFIG_DIR = previousEnv.RAGENT_CONFIG_DIR;
+    if (previousEnv.RAGENT_PROVIDER_HOMES_DIR === undefined) delete process.env.RAGENT_PROVIDER_HOMES_DIR;
+    else process.env.RAGENT_PROVIDER_HOMES_DIR = previousEnv.RAGENT_PROVIDER_HOMES_DIR;
     await rm(scratchRoot, { recursive: true, force: true });
   }
 
@@ -430,11 +430,11 @@ async function runTransportProbe({ sourceConfigDir, profiles, repeat, timeoutMs,
 
 function parseArgs(argv) {
   const profiles = [];
-  let sourceConfigDir = process.env.AGENTOC_CE11_SOURCE_CONFIG_DIR || process.env.AGENTOC_CONFIG_DIR || join(process.env.HOME || tmpdir(), '.config', 'agentoc');
+  let sourceConfigDir = process.env.RAGENT_CE11_SOURCE_CONFIG_DIR || process.env.RAGENT_CONFIG_DIR || join(process.env.HOME || tmpdir(), '.config', 'ragent');
   let outputPath = DEFAULT_OUTPUT;
   let repeat = DEFAULT_REPEAT;
   let timeoutMs = DEFAULT_TIMEOUT_MS;
-  let command = process.env.AGENTOC_CE11_CLAUDE_COMMAND || 'claude';
+  let command = process.env.RAGENT_CE11_CLAUDE_COMMAND || 'claude';
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--profile') profiles.push(argv[++index]);

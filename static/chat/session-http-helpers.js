@@ -11,9 +11,9 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 function redirectToLogin() {
-  window.agentocInvalidateSessionHttpCache?.();
-  const loginPath = typeof window.agentocResolveProductPath === "function"
-    ? window.agentocResolveProductPath("/login")
+  window.ragentInvalidateSessionHttpCache?.();
+  const loginPath = typeof window.ragentResolveProductPath === "function"
+    ? window.ragentResolveProductPath("/login")
     : "/login";
   const loginUrl = new URL(loginPath, window.location.href);
   if (window.location.pathname !== loginUrl.pathname) {
@@ -30,8 +30,8 @@ function enhanceRenderedContentLinks(root) {
     let href = (link.getAttribute("href") || "").trim();
     if (!href) return;
 
-    if (PRODUCT_LOCAL_HREF_RE.test(href) && typeof window.agentocResolveProductPath === "function") {
-      const resolvedHref = window.agentocResolveProductPath(href);
+    if (PRODUCT_LOCAL_HREF_RE.test(href) && typeof window.ragentResolveProductPath === "function") {
+      const resolvedHref = window.ragentResolveProductPath(href);
       if (resolvedHref) {
         href = resolvedHref;
         if (typeof link.setAttribute === "function") {
@@ -51,8 +51,8 @@ function enhanceRenderedContentLinks(root) {
   root.querySelectorAll("img[src]").forEach((image) => {
     const src = (image.getAttribute("src") || "").trim();
     if (!src) return;
-    if (PRODUCT_LOCAL_HREF_RE.test(src) && typeof window.agentocResolveProductPath === "function") {
-      const resolvedSrc = window.agentocResolveProductPath(src);
+    if (PRODUCT_LOCAL_HREF_RE.test(src) && typeof window.ragentResolveProductPath === "function") {
+      const resolvedSrc = window.ragentResolveProductPath(src);
       if (resolvedSrc) {
         image.setAttribute("src", resolvedSrc);
       }
@@ -63,13 +63,13 @@ function enhanceRenderedContentLinks(root) {
 
 function buildJsonCacheKey(url) {
   try {
-    const resolvedUrl = typeof window.agentocResolveProductUrl === "function"
-      ? window.agentocResolveProductUrl(url)
+    const resolvedUrl = typeof window.ragentResolveProductUrl === "function"
+      ? window.ragentResolveProductUrl(url)
       : new URL(url, window.location.origin).toString();
     const resolved = new URL(resolvedUrl, window.location.origin);
-    const targetId = window.AgentoCTargetRuntime?.getActiveTarget?.()?.targetId || "local";
-    const authEpoch = typeof window.agentocAuthEpoch === "string" && window.agentocAuthEpoch
-      ? window.agentocAuthEpoch
+    const targetId = window.RagentTargetRuntime?.getActiveTarget?.()?.targetId || "local";
+    const authEpoch = typeof window.ragentAuthEpoch === "string" && window.ragentAuthEpoch
+      ? window.ragentAuthEpoch
       : "anonymous";
     return `${authEpoch}:${targetId}:${resolved.pathname}${resolved.search}`;
   } catch {
@@ -82,16 +82,16 @@ function buildJsonCacheKey(url) {
 // request started under the previous principal/target can resolve after the
 // transition and repopulate an otherwise fresh cache.
 if (typeof window !== "undefined") {
-  window.agentocInvalidateSessionHttpCache = function agentocInvalidateSessionHttpCache() {
+  window.ragentInvalidateSessionHttpCache = function ragentInvalidateSessionHttpCache() {
     try {
       jsonResponseCache?.clear?.();
     } catch {}
     try {
-      window.agentocClearSessionEventCaches?.();
+      window.ragentClearSessionEventCaches?.();
     } catch {}
   };
-  window.addEventListener?.("agentoc:target-change", () => {
-    window.agentocInvalidateSessionHttpCache?.();
+  window.addEventListener?.("ragent:target-change", () => {
+    window.ragentInvalidateSessionHttpCache?.();
   });
 }
 
@@ -105,8 +105,8 @@ function resolveRequestUrl(url) {
   if (typeof withVisitorModeUrl === "function") {
     return withVisitorModeUrl(url);
   }
-  if (typeof window.agentocResolveProductPath === "function") {
-    return window.agentocResolveProductPath(url);
+  if (typeof window.ragentResolveProductPath === "function") {
+    return window.ragentResolveProductPath(url);
   }
   return typeof url === "string" ? url : String(url || "");
 }
@@ -629,7 +629,7 @@ function buildShareSnapshotSessionRecord(snapshot = getActiveShareSnapshotPayloa
 }
 
 async function fetchJsonViaP2P(requestUrl, method, headers, body, cacheKey, cached) {
-  const response = await window.AgentocP2P.tryRequest(requestUrl, method, headers, body);
+  const response = await window.RagentP2P.tryRequest(requestUrl, method, headers, body);
   if (!response) return null;
   // A paired host cannot read the browser's HttpOnly session cookie. Its 401
   // is therefore a transport-authentication miss, not proof that the browser
@@ -660,7 +660,7 @@ async function fetchJsonViaP2P(requestUrl, method, headers, body, cacheKey, cach
     error.status = response.status;
     error.stage = String(data?.stage || "transport").trim() || "transport";
     error.retryable = data?.retryable === true || response.status === 408 || response.status === 429 || response.status >= 500;
-    error.requestId = String(data?.requestId || responseHeaders.get("x-agentoc-request-id") || "").trim() || null;
+    error.requestId = String(data?.requestId || responseHeaders.get("x-ragent-request-id") || "").trim() || null;
     const retryAfterMs = Number.isFinite(Number(data?.retryAfterMs))
       ? Math.max(0, Math.min(30_000, Number(data.retryAfterMs)))
       : parseRetryAfterMs(responseHeaders.get("retry-after"));
@@ -684,38 +684,38 @@ async function fetchJsonViaP2P(requestUrl, method, headers, body, cacheKey, cach
 const httpRuntimeConfig = typeof globalThis === "object" && globalThis !== null
   ? globalThis
   : {};
-const AGENTOC_HTTP_REQUEST_TIMEOUT_MS = Math.max(
+const RAGENT_HTTP_REQUEST_TIMEOUT_MS = Math.max(
   5_000,
-  Number.parseInt(httpRuntimeConfig.AGENTOC_HTTP_REQUEST_TIMEOUT_MS || "30000", 10) || 30_000,
+  Number.parseInt(httpRuntimeConfig.RAGENT_HTTP_REQUEST_TIMEOUT_MS || "30000", 10) || 30_000,
 );
 // P2P is an opportunistic transport. Its request cannot be cancelled on the
 // DataChannel, so it must give the browser HTTP path a short head start rather
 // than inheriting the full user-visible request deadline.
-const AGENTOC_P2P_REQUEST_TIMEOUT_MS = Math.max(
+const RAGENT_P2P_REQUEST_TIMEOUT_MS = Math.max(
   250,
   Math.min(
-    AGENTOC_HTTP_REQUEST_TIMEOUT_MS - 250,
-    Number.parseInt(httpRuntimeConfig.AGENTOC_P2P_REQUEST_TIMEOUT_MS || "2500", 10) || 2_500,
+    RAGENT_HTTP_REQUEST_TIMEOUT_MS - 250,
+    Number.parseInt(httpRuntimeConfig.RAGENT_P2P_REQUEST_TIMEOUT_MS || "2500", 10) || 2_500,
   ),
 );
 // A half-open DataChannel can repeatedly consume the full opportunistic
 // timeout even though the normal loopback HTTP path is healthy. Trip a short
 // browser-local circuit breaker after that timeout so subsequent requests use
 // HTTP directly until the paired transport gets another chance.
-const AGENTOC_P2P_FAILURE_COOLDOWN_MS = Math.max(
+const RAGENT_P2P_FAILURE_COOLDOWN_MS = Math.max(
   250,
-  Number.parseInt(httpRuntimeConfig.AGENTOC_P2P_FAILURE_COOLDOWN_MS || "30000", 10) || 30_000,
+  Number.parseInt(httpRuntimeConfig.RAGENT_P2P_FAILURE_COOLDOWN_MS || "30000", 10) || 30_000,
 );
-const AGENTOC_P2P_HEAD_START_MS = Math.max(
+const RAGENT_P2P_HEAD_START_MS = Math.max(
   0,
   Math.min(
-    AGENTOC_P2P_REQUEST_TIMEOUT_MS,
-    Number.parseInt(httpRuntimeConfig.AGENTOC_P2P_HEAD_START_MS || "350", 10) || 350,
+    RAGENT_P2P_REQUEST_TIMEOUT_MS,
+    Number.parseInt(httpRuntimeConfig.RAGENT_P2P_HEAD_START_MS || "350", 10) || 350,
   ),
 );
 let p2pUnavailableUntil = 0;
 
-function createRequestDeadline(signal, timeoutMs = AGENTOC_HTTP_REQUEST_TIMEOUT_MS) {
+function createRequestDeadline(signal, timeoutMs = RAGENT_HTTP_REQUEST_TIMEOUT_MS) {
   // Older embedded WebViews and the lightweight VM used by connector/UI
   // tests may not expose AbortController. Keep the same tiny signal contract
   // (aborted + add/remove listener + abort notification) so request timeout
@@ -790,14 +790,14 @@ function parseRetryAfterMs(value) {
 }
 
 async function parseJsonResponseOrRedirect(res, { cacheKey, cached, cacheMaxAgeMs = 0 } = {}) {
-  const loginPath = typeof window.agentocResolveProductPath === "function"
-    ? new URL(window.agentocResolveProductPath("/login"), window.location.href).pathname
+  const loginPath = typeof window.ragentResolveProductPath === "function"
+    ? new URL(window.ragentResolveProductPath("/login"), window.location.href).pathname
     : "/login";
   const redirectedToLogin =
     res.redirected && new URL(res.url, window.location.href).pathname === loginPath;
 
   if (res.status === 401 || redirectedToLogin) {
-    window.agentocInvalidateSessionHttpCache?.();
+    window.ragentInvalidateSessionHttpCache?.();
     redirectToLogin();
     const error = new Error("Authentication required");
     error.code = "AUTH_EXPIRED";
@@ -822,7 +822,7 @@ async function parseJsonResponseOrRedirect(res, { cacheKey, cached, cacheMaxAgeM
     error.status = res.status;
     error.stage = String(data?.stage || "transport").trim() || "transport";
     error.retryable = data?.retryable === true || res.status === 408 || res.status === 429 || res.status >= 500;
-    error.requestId = String(data?.requestId || res.headers.get("x-agentoc-request-id") || "").trim() || null;
+    error.requestId = String(data?.requestId || res.headers.get("x-ragent-request-id") || "").trim() || null;
     const retryAfterMs = Number.isFinite(Number(data?.retryAfterMs))
       ? Math.max(0, Math.min(30_000, Number(data.retryAfterMs)))
       : parseRetryAfterMs(res.headers.get("retry-after"));
@@ -845,7 +845,7 @@ async function parseJsonResponseOrRedirect(res, { cacheKey, cached, cacheMaxAgeM
 
 async function fetchJsonOrRedirect(url, options = {}) {
   const requestOptions = { ...options };
-  const targetRuntime = window.AgentoCTargetRuntime;
+  const targetRuntime = window.RagentTargetRuntime;
   const useTargetRuntime = !requestOptions.__targetRuntimeBypass && targetRuntime?.isRuntimePath?.(url);
   delete requestOptions.__targetRuntimeBypass;
   const skipP2P = requestOptions.skipP2P === true;
@@ -936,7 +936,7 @@ async function fetchJsonOrRedirect(url, options = {}) {
     return parseJsonResponseOrRedirect(res, { cacheKey, cached, cacheMaxAgeMs });
   };
 
-  if (!skipP2P && window.AgentocP2P?.ready && Date.now() >= p2pUnavailableUntil) {
+  if (!skipP2P && window.RagentP2P?.ready && Date.now() >= p2pUnavailableUntil) {
     if (requestOptions.signal?.aborted) {
       const abortedError = new Error("Aborted");
       abortedError.name = "AbortError";
@@ -947,7 +947,7 @@ async function fetchJsonOrRedirect(url, options = {}) {
     // apply stale state from a superseded refresh.
     let p2pTimer;
     const viaP2PResult = new Promise((_, reject) => {
-      p2pTimer = setTimeout(() => reject(requestTimeoutError()), AGENTOC_P2P_REQUEST_TIMEOUT_MS);
+      p2pTimer = setTimeout(() => reject(requestTimeoutError()), RAGENT_P2P_REQUEST_TIMEOUT_MS);
     });
     let abortP2P;
     const viaP2PAbort = requestOptions.signal
@@ -973,7 +973,7 @@ async function fetchJsonOrRedirect(url, options = {}) {
         directStartTimer = setTimeout(() => {
           directStartTimer = null;
           directRequest().then(resolve, reject);
-        }, AGENTOC_P2P_HEAD_START_MS);
+        }, RAGENT_P2P_HEAD_START_MS);
         requestOptions.signal?.addEventListener?.("abort", () => {
           if (directStartTimer) clearTimeout(directStartTimer);
           directStartTimer = null;
@@ -1009,7 +1009,7 @@ async function fetchJsonOrRedirect(url, options = {}) {
       }
       p2pUnavailableUntil = Math.max(
         p2pUnavailableUntil,
-        Date.now() + AGENTOC_P2P_FAILURE_COOLDOWN_MS,
+        Date.now() + RAGENT_P2P_FAILURE_COOLDOWN_MS,
       );
       viaP2P = null;
     } finally {
@@ -1044,8 +1044,8 @@ function createRequestId() {
 }
 
 function shouldExpandThinkingBlocksByDefaultForSessionUi() {
-  return typeof window.agentocShouldExpandThinkingBlocksByDefault === "function"
-    ? window.agentocShouldExpandThinkingBlocksByDefault()
+  return typeof window.ragentShouldExpandThinkingBlocksByDefault === "function"
+    ? window.ragentShouldExpandThinkingBlocksByDefault()
     : false;
 }
 
@@ -1057,7 +1057,7 @@ function resetRenderedEventState(sessionId = null) {
   renderedEventState.timelineItemCount = 0;
   renderedEventState.runState = "idle";
   renderedEventState.runActivity = null;
-  window.AgentoCRunActivity?.reset?.();
+  window.RagentRunActivity?.reset?.();
   renderedEventState.operationNodesById = new Map();
   renderedEventState.operationSnapshotsById = new Map();
   renderedEventState.expandedOperationIds = new Set();

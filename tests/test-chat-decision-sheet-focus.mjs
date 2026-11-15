@@ -17,12 +17,12 @@ try {
     <div id="inputArea"><div id="liveBar"></div></div>
   </body></html>`, { waitUntil: 'load' });
   await page.evaluate(() => {
-    window.agentocT = (key) => key;
+    window.ragentT = (key) => key;
     window.getApprovalTitle = () => 'Review this command';
-    window.AgentoCLayout = { requestPass() {}, syncChatBottomOverlaySpacing() {}, observeOverlay() {} };
-    window.AgentoCBackHandler = { push() {}, pop() {} };
-    window.AgentoCMotion = { prefersReducedMotion: () => true };
-    window.AgentoCDecisions = {
+    window.RagentLayout = { requestPass() {}, syncChatBottomOverlaySpacing() {}, observeOverlay() {} };
+    window.RagentBackHandler = { push() {}, pop() {} };
+    window.RagentMotion = { prefersReducedMotion: () => true };
+    window.RagentDecisions = {
       subscribe(callback) { callback({ pending: false, evt: null }); return () => {}; },
       subscribeBatch(callback) { callback({ pending: false, evt: null }); return () => {}; },
       getPending() {
@@ -33,7 +33,7 @@ try {
   });
   await page.addScriptTag({ content: source });
   await page.locator('#decision-trigger').focus();
-  await page.evaluate(() => window.AgentoCDecisionSheet.reopen());
+  await page.evaluate(() => window.RagentDecisionSheet.reopen());
 
   const sheet = page.locator('#decisionSheet');
   await sheet.waitFor();

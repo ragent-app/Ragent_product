@@ -121,9 +121,9 @@ const STUB_SETUP = `
       setItem: function () {},
     },
   });
-  window.agentocT = function (key) { return key; };
+  window.ragentT = function (key) { return key; };
   window.renderUiIcon = function () { return ""; };
-  window.AgentoCIcons = {
+  window.RagentIcons = {
     render: function () { return '<svg class="rl-icon" viewBox="0 0 24 24"><path d="M12 3v18" /></svg>'; },
     hydrate: function () {},
   };
@@ -137,7 +137,7 @@ const STUB_SETUP = `
     if (typeof window.syncSidebarShellState === "function") window.syncSidebarShellState(tab);
   };
   // The real sidebar-ui.js fetches the project catalog at load and publishes
-  // its own agentocProjectsReady, which project-view-ui.js awaits before
+  // its own ragentProjectsReady, which project-view-ui.js awaits before
   // rendering the L1 rows — so the stub must succeed with a real project.
   window.fetch = async function (url) {
     if (String(url).includes("/api/projects")) {
@@ -149,10 +149,10 @@ const STUB_SETUP = `
     return { ok: false, json: async () => ({}) };
   };
   window.fetchSessionsList = async function () { return []; };
-  window.agentocGetProjects = function () {
+  window.ragentGetProjects = function () {
     return [{ id: "p1", name: "Alpha", rootPath: "/srv/alpha" }];
   };
-  window.agentocProjectsReady = Promise.resolve();
+  window.ragentProjectsReady = Promise.resolve();
   window.getActiveSidebarTabValue = function () { return window.__activeTab; };
   window.sessionSearchQuery = "";
   window.getFilteredActiveSessions = function () {
@@ -330,7 +330,7 @@ await withPage(async (page) => {
   });
 
   await page.evaluate(() => {
-    window.agentocOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn"));
+    window.ragentOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn"));
   });
   await page.waitForFunction(() => (
     document.querySelector(".sidebar-symbol-flight")
@@ -374,7 +374,7 @@ await withPage(async (page) => {
   assert.equal(agentSettled.morphing, false, "Agent header should settle without a stale morph class");
 
   await page.evaluate(() => {
-    window.agentocOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn"));
+    window.ragentOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn"));
   });
   await page.waitForFunction(() => document.querySelector(".sidebar-symbol-flight"));
   await page.evaluate(() => window.switchTab("sessions"));
@@ -390,7 +390,7 @@ await withPage(async (page) => {
 
   await page.evaluate(() => window.switchTab("sessions"));
   await page.evaluate(() => {
-    window.agentocOpenSidebarSubpage("settings", document.getElementById("sidebarFilterBtn"));
+    window.ragentOpenSidebarSubpage("settings", document.getElementById("sidebarFilterBtn"));
   });
   await page.waitForFunction(() => document.getElementById("settingsPanel").classList.contains("sidebar-subpage-panel-morph-pending"));
   await page.waitForFunction(() => document.getElementById("settingsPanel").classList.contains("sidebar-subpage-panel-reveal"), null, { timeout: 1500 });
@@ -436,7 +436,7 @@ await withPage(async (page) => {
   assert.equal(await page.evaluate(() => document.getElementById("sidebarFilterBtn").querySelector("svg")?.style.visibility), "",
     "Settings destination should be restored after return flight");
 
-  await page.evaluate(() => window.agentocOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn")));
+  await page.evaluate(() => window.ragentOpenSidebarSubpage("agents", document.getElementById("sidebarAgentBtn")));
   await page.waitForFunction(() => document.getElementById("agentsPanel").classList.contains("sidebar-subpage-panel-reveal"), null, { timeout: 1500 });
   await page.locator("#sidebarSubpageCloseBtn").click();
   await page.waitForFunction(() => document.querySelector(".sidebar-symbol-flight-return"), null, { timeout: 1500 });

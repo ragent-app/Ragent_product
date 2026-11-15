@@ -9,11 +9,11 @@
 //
 // Ambient facts the legacy file reads from its shared scope (renderedEventState
 // and the empty-state DOM check) are injected via the environment contract
-// (root.AgentocEventRenderPlanEnvironment), so this module stays free of
+// (root.RagentEventRenderPlanEnvironment), so this module stays free of
 // browser globals and runs identically in Node. Locked against the legacy
 // implementation by tests/test-chat-event-render-plan-core.mjs.
 
-(function attachAgentocEventRenderPlanCore(root) {
+(function attachRagentEventRenderPlanCore(root) {
   // Live environment: reads always go to the injected object (mutations after
   // attach are visible), falling back to the defaults for absent keys. An
   // Object.assign copy would freeze scalar bindings at attach time, which
@@ -23,7 +23,7 @@
     hasRenderedEmptyState: false,
   });
   const environment = new Proxy(
-    root.AgentocEventRenderPlanEnvironment || {},
+    root.RagentEventRenderPlanEnvironment || {},
     {
       get: (target, prop) => (prop in target ? target[prop] : DEFAULT_ENVIRONMENT[prop]),
     },
@@ -191,7 +191,7 @@
     return Number.isInteger(event?.seq) ? event.seq : 0;
   }
 
-  root.AgentocEventRenderPlanCore = {
+  root.RagentEventRenderPlanCore = {
     getNormalizedEventRenderType,
     isRunningThinkingBlockEvent,
     getAttachmentDeliveryRenderKey,

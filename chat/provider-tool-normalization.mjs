@@ -2,7 +2,7 @@ import { redactSensitiveText, redactSensitiveValue } from './tool-call-schema.mj
 
 const MAX_SERIALIZED_TOOL_VALUE_CHARS = Math.max(
   4 * 1024,
-  Number.parseInt(process.env.AGENTOC_MAX_SERIALIZED_TOOL_VALUE_CHARS || String(256 * 1024), 10)
+  Number.parseInt(process.env.RAGENT_MAX_SERIALIZED_TOOL_VALUE_CHARS || String(256 * 1024), 10)
     || 256 * 1024,
 );
 

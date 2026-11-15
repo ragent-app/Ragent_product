@@ -5,10 +5,10 @@ import { promisify } from 'node:util';
 const exec = promisify(execFile);
 const powershell = 'C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe';
 for (const [root, prefix] of [
-  ['G:\\AgentoCapp', 'G:\\AgentoCapp\\AgentoC.ServiceHost.exe --role '],
-  ['G:\\Program Files\\AgentoC', '"G:\\Program Files\\AgentoC\\AgentoC.ServiceHost.exe" --role '],
+  ['G:\\Ragentapp', 'G:\\Ragentapp\\Ragent.ServiceHost.exe --role '],
+  ['G:\\Program Files\\Ragent', '"G:\\Program Files\\Ragent\\Ragent.ServiceHost.exe" --role '],
 ]) {
-  const script = "$env:AGENTOC_INSTALL_ROOT='" + root + "'; . ./packaging/windows/prepare-owner-services.ps1 -LibraryOnly; Get-OwnerServicePreparationPlan | ConvertTo-Json -Compress";
+  const script = "$env:RAGENT_INSTALL_ROOT='" + root + "'; . ./packaging/windows/prepare-owner-services.ps1 -LibraryOnly; Get-OwnerServicePreparationPlan | ConvertTo-Json -Compress";
   const { stdout } = await exec(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand',
     Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 30000 });
   const rows = JSON.parse(stdout);

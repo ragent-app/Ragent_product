@@ -376,7 +376,7 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
         let message;
         try { message = JSON.parse(line); } catch { continue; }
         if (checkingAccount) {
-          if (message?.type !== 'agentoc-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
+          if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
             finish(new Error('The Codex broker could not verify the selected account'));
             return;
           }
@@ -405,7 +405,7 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
       }
     });
     socket.once('connect', () => writeMessage(checkingAccount
-      ? { type: 'agentoc-codex-broker-ping', expectedAccountDigest: expectedDigest }
+      ? { type: 'ragent-codex-broker-ping', expectedAccountDigest: expectedDigest }
       : buildCodexAppServerInitializeMessage()));
   });
 }
@@ -526,7 +526,7 @@ async function runCodexAppServerForkRequest({
 } = {}) {
   const sourceThreadId = trimString(threadId);
   if (!sourceThreadId) return null;
-  const agentocApprovalGate = isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode });
+  const ragentApprovalGate = isCodexAppServerRagentApprovalGateEnabled({ riskMode, permissionMode });
   let codexHomeDir = '';
   let expectedAccountId = '';
   {
@@ -550,7 +550,7 @@ async function runCodexAppServerForkRequest({
     developerInstructions,
     interactionMode,
     permissionMode,
-    agentocApprovalGate,
+    ragentApprovalGate,
   });
   if (!forkMessage) return null;
 
@@ -566,7 +566,7 @@ async function runCodexAppServerForkRequest({
     return forkCodexThreadViaBroker(socketPath, forkMessage, { timeoutMs, expectedAccountId });
   }
 
-  const args = ['app-server', '--stdio', ...(agentocApprovalGate && (permissionMode === 'untrusted' || String(permissionMode || '').startsWith('untrusted-')) ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
+  const args = ['app-server', '--stdio', ...(ragentApprovalGate && (permissionMode === 'untrusted' || String(permissionMode || '').startsWith('untrusted-')) ? buildCodexAppServerProjectTrustArgs(cwd) : [])];
   const spawnSpec = buildPlatformSpawnSpec(command, args, {
     cwd: trimString(cwd) || process.cwd(),
     env,

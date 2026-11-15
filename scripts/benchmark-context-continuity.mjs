@@ -294,13 +294,13 @@ function executionInput(events, { stale = true } = {}) {
     run: { id: 'run-codex-12', state: 'completed', runnerProcessId: 4242 },
     events,
     workspace: {
-      root: 'C:\\agentoc\\fixture',
+      root: 'C:\\ragent\\fixture',
       snapshotRevision: stale ? 'workspace-after-external-edit' : 'workspace-stable',
       stale,
       staleReason: stale ? 'External workspace modification was observed after the last provider turn.' : '',
     },
     git: {
-      root: 'C:\\agentoc\\fixture',
+      root: 'C:\\ragent\\fixture',
       head: 'fixture-head-2026-08-24',
       branch: 'main',
       trackedDiffHash: 'sha256:fixture-tracked-diff',
@@ -336,7 +336,7 @@ function buildCanonicalContext({ runtimeFamily, provider, hasResume, events, sta
     sections: {
       continuationContext: legacy,
       managerTurnContext: 'The manager requires deterministic evidence-backed handoff and no duplicate source of truth.',
-      systemContext: 'AgentoC system instructions: preserve owner approval boundaries and trust deterministic execution facts.',
+      systemContext: 'Ragent system instructions: preserve owner approval boundaries and trust deterministic execution facts.',
       sourceRuntimePrompt: 'Use the provider runtime only as an execution carrier for the canonical context.',
       templateInstructions: 'Keep the existing Node implementation and avoid an unrelated rewrite.',
       perMessageInstruction: '',
@@ -531,7 +531,7 @@ async function verifyDurability(events, state) {
   assert.deepEqual(restartState.task, state.task, 'restart replay should preserve task facts');
   assert.deepEqual(restartState.execution, state.execution, 'restart replay should preserve execution facts');
 
-  const historyDir = await mkdtemp(join(tmpdir(), 'agentoc-context-benchmark-'));
+  const historyDir = await mkdtemp(join(tmpdir(), 'ragent-context-benchmark-'));
   const store = createContinuityStore({ historyDir });
   await store.write(SESSION_ID, state, { expectedRevision: 0 });
   await assert.rejects(

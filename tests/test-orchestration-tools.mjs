@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-orchestration-tools-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-orchestration-tools-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const tools = await import('../chat/orchestration-tools.mjs');
 const calls = [];

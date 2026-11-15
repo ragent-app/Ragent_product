@@ -51,7 +51,7 @@ export async function receiveRemoteFile(input,principal) {
   const canonical={grantId,transferId,sourceGrantId:id(input.sourceGrantId),sourceVersion:input.sourceVersion,targetVersion:input.targetVersion,sha256:text(input.sha256),sizeBytes:input.sizeBytes,bytes:text(input.bytes)};
   const bytes=Buffer.from(canonical.bytes,'base64');
   if(!g.enabled||Date.parse(g.expiresAt)<=Date.now()||canonical.targetVersion!==g.version||canonical.sourceGrantId!==g.peerGrantId||canonical.sourceVersion!==g.peerVersion||canonical.sha256!==g.sha256||canonical.sizeBytes!==g.sizeBytes||bytes.length!==g.sizeBytes||hash(bytes)!==g.sha256) throw factoryError('FILE_TRANSFER_FORBIDDEN','Transfer scope changed',403);
-  let ok=false;try {ok=verify(null,Buffer.from(`agentoc-file-transfer-v1:${hash(JSON.stringify(canonical))}`),createPublicKey(g.peerKey),Buffer.from(text(input.signature),'base64url'));}catch{} if(!ok) throw factoryError('FILE_TRANSFER_FORBIDDEN','Transfer signature invalid',403);
+  let ok=false;try {ok=verify(null,Buffer.from(`ragent-file-transfer-v1:${hash(JSON.stringify(canonical))}`),createPublicKey(g.peerKey),Buffer.from(text(input.signature),'base64url'));}catch{} if(!ok) throw factoryError('FILE_TRANSFER_FORBIDDEN','Transfer signature invalid',403);
   const payloadDigest=hash(JSON.stringify(canonical));
   const claimed=await factoryTransaction(db=>{schema(db);const row=db.prepare('SELECT * FROM remote_file_grants WHERE id=?').get(grantId), old=db.prepare('SELECT * FROM remote_file_transfers WHERE grant_id=? AND transfer_id=?').get(grantId,transferId);
     if(!active(row)||row.version!==g.version) throw factoryError('FILE_TRANSFER_FORBIDDEN','Target authorization changed',403);
@@ -74,7 +74,7 @@ export async function queryRemoteFile(grantId,transferId,principal,{operation='f
   const found=await findFileAssetUploadReceipt({sessionId:g.sessionId,requestId:transferId,principalScope:`remote-file:${grantId}`}).catch(()=>null);
   const asset=found?.asset;return asset?.status==='ready'&&asset.sha256===g.sha256&&asset.sizeBytes===g.sizeBytes?{grantId,transferId,status:'received',targetAssetId:asset.id,sha256:g.sha256,sizeBytes:g.sizeBytes}:{grantId,transferId,status:'unknown'};
 }
-export async function signRemoteFileReceipt(receipt) {const identity=await loadOrCreateInstanceIdentity(),body={targetInstanceId:identity.instanceId,receipt};return {...body,signature:signWithInstanceIdentity(identity,`agentoc-file-receipt-v1:${hash(JSON.stringify(body))}`)};}
+export async function signRemoteFileReceipt(receipt) {const identity=await loadOrCreateInstanceIdentity(),body={targetInstanceId:identity.instanceId,receipt};return {...body,signature:signWithInstanceIdentity(identity,`ragent-file-receipt-v1:${hash(JSON.stringify(body))}`)};}
 export async function sendRemoteFile(grantId,transferId,actor,{targetRevision=0}={}) {
   grantId=id(grantId);transferId=id(transferId);const row=await factoryRead(db=>{schema(db);return db.prepare('SELECT * FROM remote_file_grants WHERE id=?').get(grantId);});
   if(!active(row)||row.role!=='source'||actor?.kind!=='user'||actor.role!=='owner'||row.owner_id!==actor.principalId) throw factoryError('FILE_TRANSFER_FORBIDDEN','Source authorization unavailable',403);
@@ -87,12 +87,12 @@ export async function sendRemoteFile(grantId,transferId,actor,{targetRevision=0}
     if(!active(still)||still.version!==g.version) throw factoryError('FILE_TRANSFER_FORBIDDEN','Source authorization changed',403);
     db.prepare('INSERT INTO remote_file_source_transfers (grant_id,transfer_id,payload_digest,status,receipt_json,updated_at,scope_json) VALUES(?,?,?,?,?,?,?)').run(grantId,transferId,payloadDigest,'unknown',null,now(),JSON.stringify(g));return true;});
   if(!claimed) return {grantId,transferId,status:'unknown',reason:'query_required'};
-  const signature=signWithInstanceIdentity(identity,`agentoc-file-transfer-v1:${hash(JSON.stringify(canonical))}`),path=`/api/remote-files/grants/${g.peerGrantId}/transfers/${transferId}`,requestId=`file_${randomUUID()}`;
+  const signature=signWithInstanceIdentity(identity,`ragent-file-transfer-v1:${hash(JSON.stringify(canonical))}`),path=`/api/remote-files/grants/${g.peerGrantId}/transfers/${transferId}`,requestId=`file_${randomUUID()}`;
   try {const summaryId=`summary_${randomUUID()}`,summary=await proxyToTarget({targetId:g.peerId,requestId:summaryId,idempotencyKey:summaryId,method:'GET',path:'/api/runtime/summary',operation:'runtime.summary',resourceId:g.peerId,expectedRevision:0});if(!summary.response.ok) throw new Error();const revision=Number(JSON.parse(summary.body.toString('utf8'))?.revision);if(!Number.isSafeInteger(revision)||revision<0) throw new Error();
     const latest=await factoryRead(db=>{schema(db);return db.prepare('SELECT * FROM remote_file_grants WHERE id=?').get(grantId);}),currentSession=await getSession(g.sessionId),currentAsset=await getFileAsset(g.assetId);
     if(!active(latest)||latest.version!==g.version||!currentSession?.id||currentSession.archived||!currentAsset||currentAsset.status!=='ready'||currentAsset.sessionId!==g.sessionId||currentAsset.sha256!==g.sha256||currentAsset.sizeBytes!==g.sizeBytes) throw new Error('Source authorization, session or asset changed');
     const {response,body}=await proxyToTarget({targetId:g.peerId,requestId,idempotencyKey:transferId,method:'POST',path,operation:'file.transfer.write',resourceId:g.peerGrantId,expectedRevision:revision,body:JSON.stringify({...canonical,signature}),headers:{'content-type':'application/json'}});if(!response.ok) throw new Error();const envelope=JSON.parse(body.toString('utf8')),receipt=envelope?.receipt;
-    const valid=envelope?.targetInstanceId===g.peerId&&verify(null,Buffer.from(`agentoc-file-receipt-v1:${hash(JSON.stringify({targetInstanceId:envelope.targetInstanceId,receipt}))}`),createPublicKey(g.peerKey),Buffer.from(text(envelope.signature),'base64url'));
+    const valid=envelope?.targetInstanceId===g.peerId&&verify(null,Buffer.from(`ragent-file-receipt-v1:${hash(JSON.stringify({targetInstanceId:envelope.targetInstanceId,receipt}))}`),createPublicKey(g.peerKey),Buffer.from(text(envelope.signature),'base64url'));
     if(!valid||receipt?.grantId!==g.peerGrantId||receipt?.transferId!==transferId||receipt?.sha256!==g.sha256||receipt?.sizeBytes!==g.sizeBytes) throw new Error();
     await factoryTransaction(db=>{schema(db);db.prepare('UPDATE remote_file_source_transfers SET status=?,receipt_json=?,updated_at=? WHERE grant_id=? AND transfer_id=?').run(receipt.status,JSON.stringify(receipt),now(),grantId,transferId);});return receipt;
   }catch{return {grantId,transferId,status:'unknown'};}
@@ -105,7 +105,7 @@ export async function queryRemoteFileFromSource(grantId,transferId,actor) {
   const path=`/api/remote-files/grants/${g.peerGrantId}/transfers/${transferId}`,requestId=`file_read_${randomUUID()}`;
   try {const {response,body}=await proxyToTarget({targetId:g.peerId,requestId,idempotencyKey:requestId,method:'GET',path,operation:'file.transfer.read',resourceId:g.peerGrantId,expectedRevision:0});
     if(!response.ok) throw new Error();const envelope=JSON.parse(body.toString('utf8')),receipt=envelope?.receipt;
-    const valid=envelope?.targetInstanceId===g.peerId&&verify(null,Buffer.from(`agentoc-file-receipt-v1:${hash(JSON.stringify({targetInstanceId:envelope.targetInstanceId,receipt}))}`),createPublicKey(g.peerKey),Buffer.from(text(envelope.signature),'base64url'));
+    const valid=envelope?.targetInstanceId===g.peerId&&verify(null,Buffer.from(`ragent-file-receipt-v1:${hash(JSON.stringify({targetInstanceId:envelope.targetInstanceId,receipt}))}`),createPublicKey(g.peerKey),Buffer.from(text(envelope.signature),'base64url'));
     if(!valid||receipt?.grantId!==g.peerGrantId||receipt?.transferId!==transferId||(receipt.status==='received'&&(receipt.sha256!==g.sha256||receipt.sizeBytes!==g.sizeBytes))) throw new Error();
     await factoryTransaction(db=>{schema(db);db.prepare('UPDATE remote_file_source_transfers SET status=?,receipt_json=?,updated_at=? WHERE grant_id=? AND transfer_id=?').run(receipt.status,JSON.stringify(receipt),now(),grantId,transferId);});return receipt;
   }catch{return {grantId,transferId,status:'unknown'};}

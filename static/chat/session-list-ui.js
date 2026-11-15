@@ -1,6 +1,6 @@
 // ---- Session list ----
 function t(key, vars) {
-  return window.agentocT ? window.agentocT(key, vars) : key;
+  return window.ragentT ? window.ragentT(key, vars) : key;
 }
 
 // Inbox view: attention-band labels
@@ -15,8 +15,8 @@ const INBOX_BANDS = [
 ];
 
 function getInboxBandForSession(session) {
-  if (typeof window.AgentoCSessionStateModel?.getSessionAttentionBand === "function") {
-    return window.AgentoCSessionStateModel.getSessionAttentionBand(session);
+  if (typeof window.RagentSessionStateModel?.getSessionAttentionBand === "function") {
+    return window.RagentSessionStateModel.getSessionAttentionBand(session);
   }
   return 3;
 }
@@ -75,7 +75,7 @@ function cancelActiveFlipAnimations() {
   _flipActiveAnimations.clear();
 }
 
-window.AgentoCMotion?.subscribeReducedMotion?.((reduced) => {
+window.RagentMotion?.subscribeReducedMotion?.((reduced) => {
   if (reduced) cancelActiveFlipAnimations();
 });
 
@@ -110,8 +110,8 @@ function captureSessionItemPositions(container) {
 function playSessionItemFlip(container, before) {
   if (!before || before.count === 0 || before.sessionSwitched) return;
   if (
-    typeof window.AgentoCMotion?.prefersReducedMotion === "function"
-    && window.AgentoCMotion.prefersReducedMotion()
+    typeof window.RagentMotion?.prefersReducedMotion === "function"
+    && window.RagentMotion.prefersReducedMotion()
   ) {
     return;
   }
@@ -455,7 +455,7 @@ function attachSession(id, session, {
   // while the latest page is in flight.
   if (shouldReattach && typeof window !== "undefined") {
     try {
-      window.AgentoCTimelineRuntime?.restoreCachedSession?.(id, {
+      window.RagentTimelineRuntime?.restoreCachedSession?.(id, {
         runState: attachedSession?.activity?.run?.state || "idle",
       });
     } catch (error) {

@@ -18,7 +18,7 @@ import (
 // staged PowerShell, but replaces WinGet with an inert local fixture module.
 // No software is installed and runtime trust is injected only for this test.
 func TestSystemAutoInstallLiveProcessMock(t *testing.T) {
-	pwsh := os.Getenv("AGENTOC_TEST_PWSH")
+	pwsh := os.Getenv("RAGENT_TEST_PWSH")
 	if !filepath.IsAbs(pwsh) {
 		t.Skip("packaged PowerShell path not supplied")
 	}
@@ -36,7 +36,7 @@ func TestSystemAutoInstallLiveProcessMock(t *testing.T) {
 	program := fmt.Sprintf(`package main
 import("os";"os/exec")
 func main(){
- if os.Getenv("DOTNET_STARTUP_HOOKS")!="" || os.Getenv("AGENTOC_INSTALL_PACKAGE_ID")!="Vendor.App" || os.Getenv("AGENTOC_INSTALL_PACKAGE_VERSION")!="1.2.3" {os.Exit(31)}
+ if os.Getenv("DOTNET_STARTUP_HOOKS")!="" || os.Getenv("RAGENT_INSTALL_PACKAGE_ID")!="Vendor.App" || os.Getenv("RAGENT_INSTALL_PACKAGE_VERSION")!="1.2.3" {os.Exit(31)}
  c:=exec.Command(%s,os.Args[1:]...); c.Env=os.Environ(); c.Stdout=os.Stdout;c.Stderr=os.Stderr
  if e:=c.Run();e!=nil {if x,ok:=e.(*exec.ExitError);ok {os.Exit(x.ExitCode())};os.Exit(32)}
 }`, strconv.Quote(pwsh))

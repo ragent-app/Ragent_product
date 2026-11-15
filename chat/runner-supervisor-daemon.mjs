@@ -33,10 +33,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const runnerEntry = join(__dirname, 'runner-sidecar.mjs');
 // Same-user default: postinst runs the supervisor daemon and sidecars as the
 // configured control-plane service user so legacy worktrees remain usable.
-// Its socket still lives in the separate runner state root /var/lib/agentoc-run
+// Its socket still lives in the separate runner state root /var/lib/ragent-run
 // and is systemd-owned; control-plane paths remain masked by the unit. Export
 // for the boundary tests.
-export const DEFAULT_SUPERVISOR_SOCKET_PATH = '/var/lib/agentoc-run/runner-supervisor.sock';
+export const DEFAULT_SUPERVISOR_SOCKET_PATH = '/var/lib/ragent-run/runner-supervisor.sock';
 const DEFAULT_SOCKET_PATH = DEFAULT_SUPERVISOR_SOCKET_PATH;
 const MAX_REQUEST_BYTES = 16 * 1024;
 
@@ -65,7 +65,7 @@ function normalizeRunId(value) {
 }
 
 export function validateScopedProviderHomesDir(value, {
-  providerHomesRoot = process.env.AGENTOC_PROVIDER_HOMES_DIR,
+  providerHomesRoot = process.env.RAGENT_PROVIDER_HOMES_DIR,
 } = {}) {
   const candidate = trimString(value);
   const root = trimString(providerHomesRoot);
@@ -128,20 +128,20 @@ export async function spawnSupervisedRunner(runId, {
     launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE,
     proxyEnv,
   });
-  env.AGENTOC_CODEX_ROLLOUT_SOURCES = JSON.stringify(codexRolloutSources);
+  env.RAGENT_CODEX_ROLLOUT_SOURCES = JSON.stringify(codexRolloutSources);
   if (providerHomesDir) {
-    env.AGENTOC_PROVIDER_HOMES_DIR = providerHomesDir;
+    env.RAGENT_PROVIDER_HOMES_DIR = providerHomesDir;
     // The supervisor receives only a validated provider-home root over its
     // socket. Bind the AgY HOME from that root so Windows and fallback paths
     // use the same per-Run directory as the control-plane preparation.
-    env.AGENTOC_AGY_HOME_DIR = join(providerHomesDir, 'agy');
+    env.RAGENT_AGY_HOME_DIR = join(providerHomesDir, 'agy');
   }
   if (oauthLockPath || oauthLockToken) {
     if (!oauthLockPath || !oauthLockToken) {
       throw new Error('Native OAuth lock handoff is incomplete');
     }
-    env.AGENTOC_NATIVE_OAUTH_LOCK_PATH = oauthLockPath;
-    env.AGENTOC_NATIVE_OAUTH_LOCK_TOKEN = oauthLockToken;
+    env.RAGENT_NATIVE_OAUTH_LOCK_PATH = oauthLockPath;
+    env.RAGENT_NATIVE_OAUTH_LOCK_TOKEN = oauthLockToken;
   }
   // Proxy discovery can wait beyond a temporary control grant. The sidecar
   // process must be admitted again at its actual creation boundary.
@@ -163,8 +163,8 @@ export async function spawnSupervisedRunner(runId, {
 }
 
 export async function createRunnerSupervisorServer({
-  socketPath = process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET || DEFAULT_SOCKET_PATH,
-  providerHomesRoot = process.env.AGENTOC_PROVIDER_HOMES_DIR,
+  socketPath = process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET || DEFAULT_SOCKET_PATH,
+  providerHomesRoot = process.env.RAGENT_PROVIDER_HOMES_DIR,
   spawnRunner = spawnSupervisedRunner,
   inheritFd = null,
   inheritedSocketFdImpl = inheritedSocketFd,
@@ -173,7 +173,7 @@ export async function createRunnerSupervisorServer({
   if (!normalizedSocketPath) throw new Error('Runner supervisor socket path is required');
   const windowsNamedPipe = isWindowsNamedPipePath(normalizedSocketPath);
 
-  // P2-C: when systemd pre-bound our socket (agentoc-runner-supervisor.socket),
+  // P2-C: when systemd pre-bound our socket (ragent-runner-supervisor.socket),
   // accept the inherited listening fd instead of creating the socket file
   // ourselves.  The systemd-owned socket survives daemon restarts, so launches
   // never hit ECONNREFUSED during a Restart=always restart.

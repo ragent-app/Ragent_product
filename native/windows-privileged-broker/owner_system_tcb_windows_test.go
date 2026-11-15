@@ -31,7 +31,7 @@ func TestSystemLinkedOwnerTokenRejectsNonSystemAndWrongOwner(t *testing.T) {
 // An opt-in service-context probe never installs software. It verifies the
 // exact owner's active session and checks the token returned by Windows.
 func TestSystemLinkedOwnerTokenLive(t *testing.T) {
-	ownerSID := os.Getenv("AGENTOC_QA_SYSTEM_OWNER_SID")
+	ownerSID := os.Getenv("RAGENT_QA_SYSTEM_OWNER_SID")
 	if ownerSID == "" {
 		t.Skip("requires a disposable LocalSystem test service and owner SID")
 	}

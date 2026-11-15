@@ -53,17 +53,17 @@ try {
       role: 'assistant',
       content: `message ${index + 1}`,
     }));
-    window.AgentoCTimelineRuntime.renderBatch(events, {
+    window.RagentTimelineRuntime.renderBatch(events, {
       sessionId: 'timeline-large',
       runState: 'idle',
       latestSeq: 1200,
     });
-    const metrics = window.agentocGetTimelineRuntimeMetrics();
+    const metrics = window.ragentGetTimelineRuntimeMetrics();
     return {
       domCount: messagesInner.children.length,
       firstText: messagesInner.firstElementChild?.textContent || '',
       lastText: messagesInner.lastElementChild?.textContent || '',
-      snapshotCount: window.AgentoCTimelineRuntime.getSnapshot()?.items?.length || 0,
+      snapshotCount: window.RagentTimelineRuntime.getSnapshot()?.items?.length || 0,
       metrics,
     };
   });
@@ -77,10 +77,10 @@ try {
 
   const isolated = await page.evaluate(() => {
     window.renderMessageInto = () => { throw new Error('synthetic malformed renderer frame'); };
-    window.AgentoCTimelineRuntime.renderIncremental([{
+    window.RagentTimelineRuntime.renderIncremental([{
       id: 'bad-frame', type: 'message', role: 'assistant', content: 'bad',
     }], { sessionId: 'timeline-large', runState: 'running', source: 'ws' });
-    return window.agentocGetTimelineRuntimeMetrics();
+    return window.ragentGetTimelineRuntimeMetrics();
   });
   assert.equal(isolated.renderErrors, 1, 'one malformed frame is isolated and counted');
   assert.equal(pageErrors.length, 0, `frontend page errors: ${pageErrors.join(' | ')}`);

@@ -6,15 +6,15 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const home = mkdtempSync(join(tmpdir(), 'agentoc-claude-model-alias-'));
-const configDir = join(home, '.config', 'agentoc');
-process.env.AGENTOC_INSTANCE_ROOT = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-process.env.AGENTOC_HARNESS_ROOT = join(home, 'harnesses');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+const home = mkdtempSync(join(tmpdir(), 'ragent-claude-model-alias-'));
+const configDir = join(home, '.config', 'ragent');
+process.env.RAGENT_INSTANCE_ROOT = home;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+process.env.RAGENT_HARNESS_ROOT = join(home, 'harnesses');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
 if (process.platform === 'win32') process.env.USERPROFILE = home;
-const claudeBin = join(process.env.AGENTOC_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
+const claudeBin = join(process.env.RAGENT_HARNESS_ROOT, 'claude', 'node_modules', '.bin');
 mkdirSync(claudeBin, { recursive: true });
 const fakeClaude = join(claudeBin, process.platform === 'win32' ? 'claude.cmd' : 'claude');
 writeFileSync(fakeClaude, process.platform === 'win32' ? '@echo off\r\necho 2.1.310\r\n' : '#!/bin/sh\necho 2.1.310\n');
@@ -58,8 +58,8 @@ assert.equal(await resolveClaudeRuntimeModelAlias(null), 'k3');
 // When the managed env has no ANTHROPIC_MODEL, an empty request stays empty
 // rather than inventing a value.
 {
-  const emptyEnvHome = mkdtempSync(join(tmpdir(), 'agentoc-claude-model-alias-noenv-'));
-  const emptyEnvConfigDir = join(emptyEnvHome, '.config', 'agentoc');
+  const emptyEnvHome = mkdtempSync(join(tmpdir(), 'ragent-claude-model-alias-noenv-'));
+  const emptyEnvConfigDir = join(emptyEnvHome, '.config', 'ragent');
   const emptyEnvClaudeHome = join(emptyEnvConfigDir, 'provider-runtime-homes', 'claude');
   mkdirSync(emptyEnvClaudeHome, { recursive: true });
   writeFileSync(join(emptyEnvClaudeHome, 'settings.json'), JSON.stringify({ env: {} }), 'utf8');
@@ -107,12 +107,12 @@ if (process.platform !== 'win32') {
 
 
 // Older provider exports may omit ANTHROPIC_SMALL_FAST_MODEL and
-// without the Claude host-managed switches. AgentoC must add them before
+// without the Claude host-managed switches. Ragent must add them before
 // spawning Claude Code so opus/sonnet/haiku aliases do not fall through to
 // Claude Code's legacy model remap defaults.
 {
-  const noSmallFastHome = mkdtempSync(join(tmpdir(), 'agentoc-claude-managed-env-'));
-  const noSmallFastConfigDir = join(noSmallFastHome, '.config', 'agentoc');
+  const noSmallFastHome = mkdtempSync(join(tmpdir(), 'ragent-claude-managed-env-'));
+  const noSmallFastConfigDir = join(noSmallFastHome, '.config', 'ragent');
   const noSmallFastClaudeHome = join(noSmallFastConfigDir, 'provider-runtime-homes', 'claude');
   const noSmallFastBridgeHome = join(noSmallFastConfigDir, 'provider-runtime-homes', 'claude');
   mkdirSync(noSmallFastClaudeHome, { recursive: true });

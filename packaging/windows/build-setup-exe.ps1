@@ -19,26 +19,26 @@ if (Test-Path -LiteralPath $buildRecord -PathType Leaf) {
     $revision = [string]$record.sourceCommit
     if ($revision -cnotmatch '^(?:[a-f0-9]{40}|[a-f0-9]{64})$') { throw 'SETUP_SOURCE_IDENTITY_INVALID' }
     $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
-    foreach ($item in @('packaging/windows/build-setup-exe.ps1','packaging/windows/AgentoC.Setup.cs','packaging/windows/write-setup-metadata.ps1')) {
+    foreach ($item in @('packaging/windows/build-setup-exe.ps1','packaging/windows/Ragent.Setup.cs','packaging/windows/write-setup-metadata.ps1')) {
         $expected = (& git.exe -C $repo rev-parse ("${revision}:$item")).Trim()
         if ($LASTEXITCODE -ne 0) { throw "SETUP_SOURCE_MISSING: $item" }
         $actual = (& git.exe -C $repo hash-object "--path=$item" (Join-Path $repo $item)).Trim()
         if ($LASTEXITCODE -ne 0 -or $actual -cne $expected) { throw "SETUP_SOURCE_MISMATCH: $item" }
     }
 }
-$hashFile = Join-Path ([IO.Path]::GetTempPath()) ('agentoc-setup-hash-' + [guid]::NewGuid().ToString('N') + '.txt')
-$versionFile = Join-Path ([IO.Path]::GetTempPath()) ('agentoc-setup-version-' + [guid]::NewGuid().ToString('N') + '.cs')
+$hashFile = Join-Path ([IO.Path]::GetTempPath()) ('ragent-setup-hash-' + [guid]::NewGuid().ToString('N') + '.txt')
+$versionFile = Join-Path ([IO.Path]::GetTempPath()) ('ragent-setup-version-' + [guid]::NewGuid().ToString('N') + '.cs')
 try {
     [IO.File]::WriteAllText($hashFile, (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash, [Text.Encoding]::ASCII)
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    $source = Join-Path $PSScriptRoot 'AgentoC.Setup.cs'
+    $source = Join-Path $PSScriptRoot 'Ragent.Setup.cs'
     $sources = @($source)
     if ($publicVersion) {
         $fileVersion = if ($publicVersion.Split('.').Count -eq 3) { $publicVersion + '.0' } else { $publicVersion }
         [IO.File]::WriteAllText($versionFile, ('[assembly: System.Reflection.AssemblyFileVersion("' + $fileVersion + '")]' + "`n" + '[assembly: System.Reflection.AssemblyInformationalVersion("' + $publicVersion + '")]'), [Text.Encoding]::ASCII)
         $sources += $versionFile
     }
-    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll ('/win32icon:' + $icon) ('/resource:' + $msi + ',AgentoC.Payload.msi') ('/resource:' + $hashFile + ',AgentoC.Payload.sha256') ('/out:' + $output) $sources
+    & $compiler /nologo /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll ('/win32icon:' + $icon) ('/resource:' + $msi + ',Ragent.Payload.msi') ('/resource:' + $hashFile + ',Ragent.Payload.sha256') ('/out:' + $output) $sources
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Installer launcher build failed.' }
     if ($publicVersion) {
         $versionInfo = (Get-Item -LiteralPath $output).VersionInfo

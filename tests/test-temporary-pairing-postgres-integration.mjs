@@ -14,8 +14,8 @@ import { loadOrCreateInstanceIdentity, signWithInstanceIdentity } from '../lib/i
 import { buildTemporaryClaimMessage, temporaryInvitationDigest } from '../lib/temporary-pairing-protocol.mjs';
 import { buildTemporaryBrokerMessage } from '../lib/temporary-pairing-broker-protocol.mjs';
 
-const databaseUrl = process.env.AGENTOC_TEMPORARY_TEST_DATABASE_URL;
-if (!databaseUrl) throw new Error('Set AGENTOC_TEMPORARY_TEST_DATABASE_URL to an isolated migrated database');
+const databaseUrl = process.env.RAGENT_TEMPORARY_TEST_DATABASE_URL;
+if (!databaseUrl) throw new Error('Set RAGENT_TEMPORARY_TEST_DATABASE_URL to an isolated migrated database');
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 const now = 1_800_000_000_000;
 const clock = () => now;
@@ -34,7 +34,7 @@ if (process.argv[2] === '--verify-child') {
   } finally { await storeA.close(); }
 } else {
   const storeB = createPostgresStoreFromUrl(databaseUrl);
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-pg-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-pg-'));
   try {
     const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'instance.json') });
     const accountId = id('acct');

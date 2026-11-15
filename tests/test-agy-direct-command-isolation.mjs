@@ -4,18 +4,18 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-agy-direct-command-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-agy-direct-command-'));
 const home = join(root, 'home');
-const configDir = join(home, '.config', 'agentoc');
+const configDir = join(home, '.config', 'ragent');
 const command = join(root, 'agy');
 const observedFile = join(root, 'observed-home');
 const terminalAgyHome = join(home, 'terminal-agy');
 const original = {
   HOME: process.env.HOME,
   AGY_HOME: process.env.AGY_HOME,
-  AGENTOC_CONFIG_DIR: process.env.AGENTOC_CONFIG_DIR,
-  AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES,
-  AGENTOC_AGY_COMMAND: process.env.AGENTOC_AGY_COMMAND,
+  RAGENT_CONFIG_DIR: process.env.RAGENT_CONFIG_DIR,
+  RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES: process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES,
+  RAGENT_AGY_COMMAND: process.env.RAGENT_AGY_COMMAND,
   AGY_OBSERVED_HOME: process.env.AGY_OBSERVED_HOME,
 };
 
@@ -31,9 +31,9 @@ fi
   await chmod(command, 0o755);
   process.env.HOME = home;
   process.env.AGY_HOME = terminalAgyHome;
-  process.env.AGENTOC_CONFIG_DIR = configDir;
-  process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-  process.env.AGENTOC_AGY_COMMAND = command;
+  process.env.RAGENT_CONFIG_DIR = configDir;
+  process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+  process.env.RAGENT_AGY_COMMAND = command;
   process.env.AGY_OBSERVED_HOME = observedFile;
 
   const { createNativeProviderRegistry } = await import('../lib/provider-runtime/registry.mjs');

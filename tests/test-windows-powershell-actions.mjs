@@ -12,7 +12,7 @@ if (process.platform !== 'win32') {
   console.log('windows-powershell-actions: skipped (requires Windows)');
   process.exit(0);
 }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-powershell-actions-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-powershell-actions-'));
 const workspace = path.join(root, 'workspace');
 await mkdir(path.join(workspace, 'folder'), { recursive: true });
 await mkdir(path.join(workspace, 'linked-dest'), { recursive: true });
@@ -174,11 +174,11 @@ assert.equal((await inspect("Test-Path -LiteralPath 'readme.txt' -PathType Unkno
   ]) assert.equal((await inspect(command)).decision, 'review', `unsafe web probe: ${command}`);
 }
 
-for (const name of ['AGENTOC_CHAT_BASE_URL', 'AGENTOC_PROJECT_ROOT', 'AGENTOC_SESSION_ID', 'RAGENT_CHAT_BASE_URL', 'RAGENT_PROJECT_ROOT', 'RAGENT_SESSION_ID']) {
+for (const name of ['RAGENT_CHAT_BASE_URL', 'RAGENT_PROJECT_ROOT', 'RAGENT_SESSION_ID', 'RAGENT_CHAT_BASE_URL', 'RAGENT_PROJECT_ROOT', 'RAGENT_SESSION_ID']) {
   assert.equal((await inspect(`"value=$env:${name}"`)).decision, 'allow', `context output ${name}`);
   assert.equal((await inspect(`Write-Output "value=$env:${name}"`)).decision, 'allow', `context Write-Output ${name}`);
 }
-for (const command of ['"value=$env:AGENTOC_SESSION_CONTROL_TOKEN"', '"$env:AGENTOC_SESSION_ID $env:SECRET"', '"value=$(Get-Content ..\\protected\\secret)"', 'Write-Output "$env:AGENTOC_SESSION_ID $env:SECRET"', 'Write-Output "$env:AGENTOC_SESSION_ID" | Invoke-Expression', '"$env:AGENTOC_SESSION_ID"; Get-Content ..\\protected\\secret']) {
+for (const command of ['"value=$env:RAGENT_SESSION_CONTROL_TOKEN"', '"$env:RAGENT_SESSION_ID $env:SECRET"', '"value=$(Get-Content ..\\protected\\secret)"', 'Write-Output "$env:RAGENT_SESSION_ID $env:SECRET"', 'Write-Output "$env:RAGENT_SESSION_ID" | Invoke-Expression', '"$env:RAGENT_SESSION_ID"; Get-Content ..\\protected\\secret']) {
   assert.equal((await inspect(command)).decision, 'review', `dynamic or sensitive use: ${command}`);
 }
 
@@ -250,8 +250,8 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.doesNotMatch(bridge.updatedCommand, /\*/);
   assert.doesNotMatch(bridge.updatedCommand, /hidden\.md/i, 'wildcard search does not add hidden files that Select-String would omit');
   assert.equal((await inspect(bridge.updatedCommand)).decision, 'allow');
-  if (process.env.AGENTOC_QA_SAFE_SEARCH_HELPER) {
-    const helperPath = process.env.AGENTOC_QA_SAFE_SEARCH_HELPER;
+  if (process.env.RAGENT_QA_SAFE_SEARCH_HELPER) {
+    const helperPath = process.env.RAGENT_QA_SAFE_SEARCH_HELPER;
     const pinned = await buildWindowsSelectStringGlobBridge({ approval, state, helperPath });
     assert.ok(pinned, `${riskMode}: wildcard search gets a handle-bound executor`);
     const rawApproval = { ...approval, params: { ...approval.params, input: { command: `${approval.params.input.command} -Raw -NoEmphasis` } } };
@@ -348,12 +348,12 @@ assert.equal((await inspect('Get-Command -ListImported -CommandType Unknown')).d
 assert.equal((await inspect('Get-Command -CommandType Cmdlet')).decision, 'allow');
 assert.equal((await inspect('Get-Command -ListImported -CommandType Cmdlet -Name Get-Content')).decision, 'review');
 assert.equal((await inspect('Get-Command -ListImported | Select-Object -First 1')).decision, 'allow');
-assert.equal((await inspect("'AgentoCFixture\\Invoke-AgentoCProbe' | Get-Command -ListImported")).decision, 'review');
-assert.equal((await inspect("Write-Output 'AgentoCFixture\\Invoke-AgentoCProbe' | Get-Command")).decision, 'review');
+assert.equal((await inspect("'RagentFixture\\Invoke-RagentProbe' | Get-Command -ListImported")).decision, 'review');
+assert.equal((await inspect("Write-Output 'RagentFixture\\Invoke-RagentProbe' | Get-Command")).decision, 'review');
 assert.equal((await inspect('Get-Command -Name Get-Content -CommandType Cmdlet')).decision, 'review');
 assert.equal((await inspect('Get-Command -ErrorAction SilentlyContinue')).decision, 'allow');
-assert.equal((await inspect('Get-Command -ListImported -Name Invoke-AgentoCProbe')).decision, 'review');
-assert.equal((await inspect('Get-Command -ListImported AgentoCFixture\\Invoke-AgentoCProbe')).decision, 'review');
+assert.equal((await inspect('Get-Command -ListImported -Name Invoke-RagentProbe')).decision, 'review');
+assert.equal((await inspect('Get-Command -ListImported RagentFixture\\Invoke-RagentProbe')).decision, 'review');
 assert.equal((await inspect('Get-Command $env:COMMAND')).decision, 'review');
 assert.equal((await inspect('Start-Sleep -Seconds 20')).decision, 'allow');
 assert.equal((await inspect('sleep -Milliseconds 5')).decision, 'allow');
@@ -480,9 +480,9 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal((await decideWindowsApproval(approval(`python -c 'import time; time.sleep(0.1); print("ready")'`), state)).decision, 'auto-allow', `${riskMode}: pure Python timer`);
   assert.equal((await decideWindowsApproval(approval('ping -n 1 127.0.0.1 | Out-Null; Get-Date'), state)).decision, 'auto-allow', `${riskMode}: ordinary network probe`);
   assert.equal((await decideWindowsApproval(approval('Start-Sleep -Seconds 1; Remove-Item . -Recurse'), state)).decision, 'prompt', `${riskMode}: subsequent dangerous operation`);
-  assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported AgentoCFixture\\Invoke-AgentoCProbe'), state)).decision, 'prompt', `${riskMode}: module lookup`);
-  assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported -Name Invoke-AgentoCProbe'), state)).decision, 'prompt', `${riskMode}: unqualified lookup`);
-  assert.equal((await decideWindowsApproval(approval("'AgentoCFixture\\Invoke-AgentoCProbe' | Get-Command -ListImported"), state)).decision, 'prompt', `${riskMode}: piped module lookup`);
+  assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported RagentFixture\\Invoke-RagentProbe'), state)).decision, 'prompt', `${riskMode}: module lookup`);
+  assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported -Name Invoke-RagentProbe'), state)).decision, 'prompt', `${riskMode}: unqualified lookup`);
+  assert.equal((await decideWindowsApproval(approval("'RagentFixture\\Invoke-RagentProbe' | Get-Command -ListImported"), state)).decision, 'prompt', `${riskMode}: piped module lookup`);
   assert.equal((await decideWindowsApproval(approval("'..\\protected' | Get-ChildItem"), state)).decision, 'prompt', `${riskMode}: piped listing target`);
   assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported'), state)).decision, 'auto-allow', `${riskMode}: imported command inventory`);
   assert.equal((await decideWindowsApproval(approval('Get-Command -ListImported -CommandType Cmdlet'), state)).decision, 'auto-allow', `${riskMode}: imported command type inventory`);
@@ -509,13 +509,13 @@ for (const riskMode of ['recommended', 'full-auto']) {
 // A module-qualified lookup executes the module body even with ListImported.
 // Verify the behavior against both Windows PowerShell and packaged PowerShell
 // when provided; the fixture writes only an isolated marker under TEMP.
-for (const [index, shell] of [resolveWindowsSystemPaths().powershell, process.env.AGENTOC_TEST_PWSH].filter(Boolean).entries()) {
-  const name = `AgentoCQueryFixture${index}`;
+for (const [index, shell] of [resolveWindowsSystemPaths().powershell, process.env.RAGENT_TEST_PWSH].filter(Boolean).entries()) {
+  const name = `RagentQueryFixture${index}`;
   const modules = path.join(root, `modules-${index}`);
   const moduleDir = path.join(modules, name);
   const marker = path.join(root, `module-loaded-${index}.txt`);
   await mkdir(moduleDir, { recursive: true });
-  await writeFile(path.join(moduleDir, `${name}.psm1`), `Set-Content -LiteralPath '${marker.replaceAll("'", "''")}' -Value loaded\nfunction Invoke-AgentoCProbe { 'fixture' }\nExport-ModuleMember -Function Invoke-AgentoCProbe\n`);
+  await writeFile(path.join(moduleDir, `${name}.psm1`), `Set-Content -LiteralPath '${marker.replaceAll("'", "''")}' -Value loaded\nfunction Invoke-RagentProbe { 'fixture' }\nExport-ModuleMember -Function Invoke-RagentProbe\n`);
   const env = { ...process.env, PSModulePath: `${modules};${process.env.PSModulePath || ''}` };
   execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command -ListImported | Out-Null'], { env, windowsHide: true });
   await assert.rejects(access(marker), { code: 'ENOENT' });
@@ -523,7 +523,7 @@ for (const [index, shell] of [resolveWindowsSystemPaths().powershell, process.en
   await assert.rejects(access(marker), { code: 'ENOENT' });
   execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', 'Get-Command -CommandType Cmdlet | Out-Null'], { env, windowsHide: true });
   await assert.rejects(access(marker), { code: 'ENOENT' });
-  const query = `Get-Command -ListImported ${name}\\Invoke-AgentoCProbe`;
+  const query = `Get-Command -ListImported ${name}\\Invoke-RagentProbe`;
   assert.equal((await inspect(query, { executable: shell })).decision, 'review');
   execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', `${query} | Out-Null`], { env, windowsHide: true });
   await access(marker);
@@ -531,15 +531,15 @@ for (const [index, shell] of [resolveWindowsSystemPaths().powershell, process.en
   const pipedDir = path.join(modules, pipedName);
   const pipedMarker = path.join(root, `module-piped-${index}.txt`);
   await mkdir(pipedDir);
-  await writeFile(path.join(pipedDir, `${pipedName}.psm1`), `Set-Content -LiteralPath '${pipedMarker.replaceAll("'", "''")}' -Value loaded\nfunction Invoke-AgentoCProbe { 'fixture' }\nExport-ModuleMember -Function Invoke-AgentoCProbe\n`);
-  const pipedQuery = `'${pipedName}\\Invoke-AgentoCProbe' | Get-Command -ListImported`;
+  await writeFile(path.join(pipedDir, `${pipedName}.psm1`), `Set-Content -LiteralPath '${pipedMarker.replaceAll("'", "''")}' -Value loaded\nfunction Invoke-RagentProbe { 'fixture' }\nExport-ModuleMember -Function Invoke-RagentProbe\n`);
+  const pipedQuery = `'${pipedName}\\Invoke-RagentProbe' | Get-Command -ListImported`;
   assert.equal((await inspect(pipedQuery, { executable: shell })).decision, 'review');
   execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command', `${pipedQuery} | Out-Null`], { env, windowsHide: true });
   await access(pipedMarker);
   const unqualifiedName = `${name}Unqualified`;
   const unqualifiedDir = path.join(modules, unqualifiedName);
   const unqualifiedMarker = path.join(root, `module-unqualified-${index}.txt`);
-  const unqualifiedFunction = `Invoke-AgentoCUnqualified${index}`;
+  const unqualifiedFunction = `Invoke-RagentUnqualified${index}`;
   await mkdir(unqualifiedDir);
   await writeFile(path.join(unqualifiedDir, `${unqualifiedName}.psm1`), `Set-Content -LiteralPath '${unqualifiedMarker.replaceAll("'", "''")}' -Value loaded\nfunction ${unqualifiedFunction} { 'fixture' }\nExport-ModuleMember -Function ${unqualifiedFunction}\n`);
   const unqualifiedQuery = `Get-Command -ListImported -Name ${unqualifiedFunction}`;
@@ -694,14 +694,14 @@ for (const riskMode of ['recommended', 'full-auto']) {
   assert.equal((await decideWindowsApproval(request(`[System.IO.File]::WriteAllText(${outsideFile}, 'x', [System.Text.Encoding]::UTF8)`), state)).decision, 'auto-allow');
   assert.equal((await decideWindowsApproval(request(`[System.IO.File]::WriteAllText(${protectedFile}, 'x')`), state)).decision, 'prompt');
 }
-if (process.env.AGENTOC_TEST_PWSH) {
-  const modern = await analyzeWindowsPowerShell(`[System.IO.File]::WriteAllText(${ordinaryFile}, 'hello')`, context, { executable: process.env.AGENTOC_TEST_PWSH });
+if (process.env.RAGENT_TEST_PWSH) {
+  const modern = await analyzeWindowsPowerShell(`[System.IO.File]::WriteAllText(${ordinaryFile}, 'hello')`, context, { executable: process.env.RAGENT_TEST_PWSH });
   assert.equal(decideWindowsPowerShellActions(modern).decision, 'allow');
-  const modernProtected = await analyzeWindowsPowerShell(`[System.IO.File]::WriteAllText(${protectedFile}, 'hello')`, context, { executable: process.env.AGENTOC_TEST_PWSH });
+  const modernProtected = await analyzeWindowsPowerShell(`[System.IO.File]::WriteAllText(${protectedFile}, 'hello')`, context, { executable: process.env.RAGENT_TEST_PWSH });
   assert.equal(decideWindowsPowerShellActions(modernProtected).decision, 'review');
   const utf8Target = path.join(workspace, 'unicode-编码.txt');
   const utf8Command = `[System.IO.File]::WriteAllText(${psLiteral(utf8Target)}, '中文', [System.Text.Encoding]::UTF8)`;
-  for (const shell of [resolveWindowsSystemPaths().powershell, process.env.AGENTOC_TEST_PWSH]) {
+  for (const shell of [resolveWindowsSystemPaths().powershell, process.env.RAGENT_TEST_PWSH]) {
     const encoded = await analyzeWindowsPowerShell(utf8Command, context, { executable: shell });
     assert.equal(decideWindowsPowerShellActions(encoded).decision, 'allow');
     execFileSync(shell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', utf8Command], { windowsHide: true });

@@ -4,19 +4,19 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 
 test('sweep renews a real live root registration and does not renew cancellation',
-  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.env.AGENTOC_TEST_SYSTEMD_INVOCATION }, async () => {
-    const root = await mkdtemp('/srv/agentoc-renew-sweep-');
+  { skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !process.env.RAGENT_TEST_SYSTEMD_INVOCATION }, async () => {
+    const root = await mkdtemp('/srv/ragent-renew-sweep-');
     let server;
     try {
       await mkdir(`${root}/home`, { mode: 0o700 });
       await mkdir(`${root}/contexts`, { mode: 0o700 });
       await mkdir(`${root}/pin`, { mode: 0o700 });
       process.env.HOME = `${root}/home`;
-      process.env.AGENTOC_CONFIG_DIR = `${root}/config`;
-      process.env.AGENTOC_RUN_SPOOL_DIR = `${root}/spool`;
-      process.env.AGENTOC_MEMORY_DIR = `${root}/memory`;
-      process.env.AGENTOC_LINUX_RUN_SCOPE_GRANTS = '1';
-      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
+      process.env.RAGENT_CONFIG_DIR = `${root}/config`;
+      process.env.RAGENT_RUN_SPOOL_DIR = `${root}/spool`;
+      process.env.RAGENT_MEMORY_DIR = `${root}/memory`;
+      process.env.RAGENT_LINUX_RUN_SCOPE_GRANTS = '1';
+      process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = `${root}/broker.sock`;
       const { createRun, updateRun } = await import('../chat/runs.mjs');
       const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
       const { issueLinuxRunScopeGrant } = await import('../chat/linux-run-scope-issuance.mjs');
@@ -42,7 +42,7 @@ test('sweep renews a real live root registration and does not renew cancellation
       const { run, manifest } = await assertRunLaunchBoundary(runId);
       const grant = signLinuxRunScopeGrant({ run, manifest, launchAttempt: attempt, privateKey: key.privateKey, ttlMs: 60000 });
       await registerLinuxRunContext({ directory: `${root}/contexts`, pinDirectory: `${root}/pin`, run, manifest, grant,
-        launchAttempt: attempt, runnerUid: Number(process.env.AGENTOC_TEST_SYSTEMD_UID) });
+        launchAttempt: attempt, runnerUid: Number(process.env.RAGENT_TEST_SYSTEMD_UID) });
       const options = { socketPath: `${root}/broker.sock`, serviceUser: 'root', serviceGroup: 'root', controlUser: 'root',
         controlGroup: 'root', chownImpl: async () => {}, runScopeRegistration: { directory: `${root}/contexts`, pinDirectory: `${root}/pin` } };
       const sweep = createLinuxRunScopeRenewalSweep();

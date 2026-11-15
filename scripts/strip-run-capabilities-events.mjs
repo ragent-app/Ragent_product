@@ -36,7 +36,7 @@
 import { readdir, readFile, rename, writeFile } from 'fs/promises';
 import { join } from 'path';
 
-const DEFAULT_ROOT = '/var/lib/agentoc/config/chat-history';
+const DEFAULT_ROOT = '/var/lib/ragent/config/chat-history';
 const PROGRESS_EVERY = 5000;
 
 function parseArgs(argv) {

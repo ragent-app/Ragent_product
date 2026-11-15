@@ -320,7 +320,7 @@ export function createSessionTurnCompletionHelpers(services) {
     // creating a replacement run, which makes the generic self-check prone to
     // false "continue" decisions against already-correct steered output.
     if (hasNativeSteerEntries(run)) return false;
-    const setting = normalizeReplySelfCheckSetting(process.env.AGENTOC_REPLY_SELF_CHECK);
+    const setting = normalizeReplySelfCheckSetting(process.env.RAGENT_REPLY_SELF_CHECK);
     if (setting === 'off') return false;
     if (setting === 'all') return true;
     const toolDefinition = await getToolDefinitionAsync(run.tool || session.tool || '');

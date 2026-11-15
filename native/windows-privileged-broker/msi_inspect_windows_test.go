@@ -10,7 +10,7 @@ import (
 )
 
 func TestMSIInspectionSignedFixture(t *testing.T) {
-	path, publisher := os.Getenv("AGENTOC_TEST_SIGNED_MSI"), os.Getenv("AGENTOC_TEST_SIGNED_MSI_PUBLISHER_SHA256")
+	path, publisher := os.Getenv("RAGENT_TEST_SIGNED_MSI"), os.Getenv("RAGENT_TEST_SIGNED_MSI_PUBLISHER_SHA256")
 	if path == "" || publisher == "" {
 		t.Skip("signed fixture not configured")
 	}
@@ -35,7 +35,7 @@ func TestMSIInspectionSignedFixture(t *testing.T) {
 	}
 }
 func TestMSIInspectionUnsignedFixture(t *testing.T) {
-	path := os.Getenv("AGENTOC_TEST_UNSIGNED_MSI")
+	path := os.Getenv("RAGENT_TEST_UNSIGNED_MSI")
 	if path == "" {
 		t.Skip("unsigned fixture not configured")
 	}

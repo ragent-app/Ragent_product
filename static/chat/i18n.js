@@ -1,7 +1,7 @@
 "use strict";
 
-(function attachAgentoCI18n(root) {
-  const UI_LANGUAGE_STORAGE_KEY = "agentoc.uiLanguage";
+(function attachRagentI18n(root) {
+  const UI_LANGUAGE_STORAGE_KEY = "ragent.uiLanguage";
   const AUTO_UI_LANGUAGE = "auto";
   const DEFAULT_UI_LANGUAGE = "en";
 
@@ -3417,7 +3417,7 @@
   }
 
   function getBootstrapPreferredLanguage() {
-    const auth = root.__AGENTOC_BOOTSTRAP__?.auth;
+    const auth = root.__RAGENT_BOOTSTRAP__?.auth;
     return normalizeUiLanguagePreference(auth?.preferredLanguage, { allowAuto: true });
   }
 
@@ -3492,7 +3492,7 @@
     activeUiLanguage = resolveActiveUiLanguage(uiLanguagePreference);
     applyTranslations(root.document);
     try {
-      root.dispatchEvent(new CustomEvent("agentoc:localechange", {
+      root.dispatchEvent(new CustomEvent("ragent:localechange", {
         detail: {
           preference: uiLanguagePreference,
           active: activeUiLanguage,
@@ -3516,17 +3516,17 @@
     ];
   }
 
-  root.agentocT = t;
-  root.agentocApplyTranslations = applyTranslations;
-  root.agentocGetUiLanguagePreference = function getUiLanguagePreference() {
+  root.ragentT = t;
+  root.ragentApplyTranslations = applyTranslations;
+  root.ragentGetUiLanguagePreference = function getUiLanguagePreference() {
     return uiLanguagePreference;
   };
-  root.agentocGetActiveUiLanguage = function getActiveUiLanguage() {
+  root.ragentGetActiveUiLanguage = function getActiveUiLanguage() {
     return activeUiLanguage;
   };
   // 内容本地化取用（翻译层）：LLM 等动态内容以 {zh,en} 对象或字符串形态到达，
   // 此处按活动 UI 语言解析成展示文本——en 界面取 en（缺则回退 zh），zh 界面取 zh。
-  root.agentocLocalizeContent = function localizeContent(value) {
+  root.ragentLocalizeContent = function localizeContent(value) {
     if (value && typeof value === "object" && !Array.isArray(value)) {
       const lang = String(activeUiLanguage || "").toLowerCase();
       const zh = String(value.zh || "").trim();
@@ -3535,13 +3535,13 @@
     }
     return String(value == null ? "" : value);
   };
-  root.agentocSetUiLanguagePreference = setUiLanguagePreference;
-  root.agentocGetUiLanguageOptions = getUiLanguageOptions;
-  root.AgentoCI18n = {
+  root.ragentSetUiLanguagePreference = setUiLanguagePreference;
+  root.ragentGetUiLanguageOptions = getUiLanguageOptions;
+  root.RagentI18n = {
     t,
     applyTranslations,
-    getUiLanguagePreference: root.agentocGetUiLanguagePreference,
-    getActiveUiLanguage: root.agentocGetActiveUiLanguage,
+    getUiLanguagePreference: root.ragentGetUiLanguagePreference,
+    getActiveUiLanguage: root.ragentGetActiveUiLanguage,
     setUiLanguagePreference,
     getUiLanguageOptions,
     normalizeUiLanguagePreference,

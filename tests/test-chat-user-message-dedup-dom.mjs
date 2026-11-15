@@ -25,7 +25,7 @@ try {
       window.messagesEl = {};
       window.renderedEventState = {};
       window.sessionStateModel = {};
-      window.AgentoCSessionStateModel = {};
+      window.RagentSessionStateModel = {};
       window.formatDecodedDisplayText = (value) => String(value ?? '');
       window.createMessageAttachmentNode = () => null;
       window.enhanceCodeBlocks = () => {};

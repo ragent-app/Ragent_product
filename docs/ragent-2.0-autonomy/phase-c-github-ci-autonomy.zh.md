@@ -57,4 +57,4 @@ CI 观察器现在要求配置 responsibilityId；旧脚本不会继续直接创
 
 此记录不代表真实 CI、候选、审批、重启恢复或发布通过。缺失身份、预算、仓库事实、有效政策或可信来源时应保持等待或拒绝，不自动创建 PR。
 
-旧静态 token 登录已退役；观察脚本使用现有密码登录，从运行环境读取 `AGENTOC_CI_OWNER_USERNAME` 和 `AGENTOC_CI_OWNER_PASSWORD`，不会把凭据写入配置。现有 runner 配置需显式增加 `responsibilityId`；调度器环境必须能够安全取得对应凭据，未配置时失败。GitHub MVP 只接受固定 `agentoc-reviewed-change@3` 和政策指定的现有检查 action；注册和验收仍需实际检查证据与人工操作。远端 Factory 接收另有 `AGENTOC_REMOTE_FACTORY_ENABLED=1` 开关，默认关闭；已有回执读取和新准入分别受目标授权约束。
+旧静态 token 登录已退役；观察脚本使用现有密码登录，从运行环境读取 `RAGENT_CI_OWNER_USERNAME` 和 `RAGENT_CI_OWNER_PASSWORD`，不会把凭据写入配置。现有 runner 配置需显式增加 `responsibilityId`；调度器环境必须能够安全取得对应凭据，未配置时失败。GitHub MVP 只接受固定 `ragent-reviewed-change@3` 和政策指定的现有检查 action；注册和验收仍需实际检查证据与人工操作。远端 Factory 接收另有 `RAGENT_REMOTE_FACTORY_ENABLED=1` 开关，默认关闭；已有回执读取和新准入分别受目标授权约束。

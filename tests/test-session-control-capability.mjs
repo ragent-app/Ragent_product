@@ -7,7 +7,7 @@ import {
   createSessionControlAuthenticator,
   sessionControlOperation,
 } from '../chat/session-control-capability.mjs';
-import { createAgentoCHttpClient } from '../lib/agentoc-http-client.mjs';
+import { createRagentHttpClient } from '../lib/ragent-http-client.mjs';
 import { runSessionSpawnCommand } from '../lib/session-spawn-command.mjs';
 
 const secret = 'session-control-test-secret';
@@ -49,10 +49,10 @@ const authenticate = createSessionControlAuthenticator({
 
 function headers(overrides = {}) {
   return {
-    'x-agentoc-session-control-token': capability.token,
-    'x-agentoc-session-control-run-id': capability.runId,
-    'x-agentoc-session-control-session-id': capability.sessionId,
-    'x-agentoc-session-control-turn-id': capability.turnId,
+    'x-ragent-session-control-token': capability.token,
+    'x-ragent-session-control-run-id': capability.runId,
+    'x-ragent-session-control-session-id': capability.sessionId,
+    'x-ragent-session-control-turn-id': capability.turnId,
     ...overrides,
   };
 }
@@ -140,7 +140,7 @@ assert.equal(await authenticate({
 assert.equal(await authenticate({
   method: 'POST',
   url: `/api/sessions/${root.id}/delegate`,
-  headers: headers({ 'x-agentoc-session-control-turn-id': 'wrong-turn' }),
+  headers: headers({ 'x-ragent-session-control-turn-id': 'wrong-turn' }),
 }), null, 'a stale turn must be rejected');
 assert.equal(await authenticate({
   method: 'GET',
@@ -176,7 +176,7 @@ globalThis.fetch = async (_url, init = {}) => {
   });
 };
 try {
-  const client = createAgentoCHttpClient({
+  const client = createRagentHttpClient({
     baseUrl: 'http://127.0.0.1:7690',
     sessionControlToken: capability.token,
     sessionControlRunId: capability.runId,
@@ -190,24 +190,24 @@ try {
   assert.equal(result.response.status, 200);
   assert.equal(seen.length, 1);
   const requestHeaders = seen[0].headers;
-  assert.equal(requestHeaders['x-agentoc-session-control-token'], capability.token);
-  assert.equal(requestHeaders['x-agentoc-session-control-run-id'], capability.runId);
+  assert.equal(requestHeaders['x-ragent-session-control-token'], capability.token);
+  assert.equal(requestHeaders['x-ragent-session-control-run-id'], capability.runId);
   assert.equal(requestHeaders.Authorization, undefined);
   assert.equal(requestHeaders.Cookie, undefined);
 
   const savedEnv = {
-    AGENTOC_SESSION_ID: process.env.AGENTOC_SESSION_ID,
-    AGENTOC_SESSION_CONTROL_TOKEN: process.env.AGENTOC_SESSION_CONTROL_TOKEN,
-    AGENTOC_SESSION_CONTROL_RUN_ID: process.env.AGENTOC_SESSION_CONTROL_RUN_ID,
-    AGENTOC_SESSION_CONTROL_SESSION_ID: process.env.AGENTOC_SESSION_CONTROL_SESSION_ID,
-    AGENTOC_SESSION_CONTROL_TURN_ID: process.env.AGENTOC_SESSION_CONTROL_TURN_ID,
+    RAGENT_SESSION_ID: process.env.RAGENT_SESSION_ID,
+    RAGENT_SESSION_CONTROL_TOKEN: process.env.RAGENT_SESSION_CONTROL_TOKEN,
+    RAGENT_SESSION_CONTROL_RUN_ID: process.env.RAGENT_SESSION_CONTROL_RUN_ID,
+    RAGENT_SESSION_CONTROL_SESSION_ID: process.env.RAGENT_SESSION_CONTROL_SESSION_ID,
+    RAGENT_SESSION_CONTROL_TURN_ID: process.env.RAGENT_SESSION_CONTROL_TURN_ID,
   };
   try {
-    process.env.AGENTOC_SESSION_ID = root.id;
-    process.env.AGENTOC_SESSION_CONTROL_TOKEN = capability.token;
-    process.env.AGENTOC_SESSION_CONTROL_RUN_ID = capability.runId;
-    process.env.AGENTOC_SESSION_CONTROL_SESSION_ID = capability.sessionId;
-    process.env.AGENTOC_SESSION_CONTROL_TURN_ID = capability.turnId;
+    process.env.RAGENT_SESSION_ID = root.id;
+    process.env.RAGENT_SESSION_CONTROL_TOKEN = capability.token;
+    process.env.RAGENT_SESSION_CONTROL_RUN_ID = capability.runId;
+    process.env.RAGENT_SESSION_CONTROL_SESSION_ID = capability.sessionId;
+    process.env.RAGENT_SESSION_CONTROL_TURN_ID = capability.turnId;
     globalThis.fetch = async (url, init = {}) => {
       seen.push({ url, ...init, headers: { ...(init.headers || {}) } });
       if (String(url).includes('/delegate')) {
@@ -235,26 +235,26 @@ try {
     const spawnRequests = seen.slice(1);
     assert.ok(spawnRequests.length >= 3);
     for (const request of spawnRequests) {
-      assert.equal(request.headers['x-agentoc-session-control-token'], capability.token);
+      assert.equal(request.headers['x-ragent-session-control-token'], capability.token);
       assert.equal(request.headers.Authorization, undefined);
       assert.equal(request.headers.Cookie, undefined);
     }
 
-    const envClient = createAgentoCHttpClient({ baseUrl: 'http://127.0.0.1:7690' });
+    const envClient = createRagentHttpClient({ baseUrl: 'http://127.0.0.1:7690' });
     const envResult = await envClient.request(`/api/sessions/${root.id}/assets`, {
       method: 'POST',
       body: { localPath: '/tmp/generated.apk' },
     });
     assert.equal(envResult.response.status, 200);
     const envRequest = seen[seen.length - 1];
-    assert.equal(envRequest.headers['x-agentoc-session-control-token'], capability.token);
-    assert.equal(envRequest.headers['x-agentoc-session-control-run-id'], capability.runId);
-    assert.equal(envRequest.headers['x-agentoc-session-control-session-id'], capability.sessionId);
-    assert.equal(envRequest.headers['x-agentoc-session-control-turn-id'], capability.turnId);
+    assert.equal(envRequest.headers['x-ragent-session-control-token'], capability.token);
+    assert.equal(envRequest.headers['x-ragent-session-control-run-id'], capability.runId);
+    assert.equal(envRequest.headers['x-ragent-session-control-session-id'], capability.sessionId);
+    assert.equal(envRequest.headers['x-ragent-session-control-turn-id'], capability.turnId);
     assert.equal(envRequest.headers.Authorization, undefined);
     assert.equal(envRequest.headers.Cookie, undefined);
 
-    const collaborationClient = createAgentoCHttpClient({
+    const collaborationClient = createRagentHttpClient({
       baseUrl: 'http://127.0.0.1:7690',
       capabilityToken: 'collaboration-read-token',
     });
@@ -262,7 +262,7 @@ try {
     assert.equal(collaborationResult.response.status, 200);
     const collaborationRequest = seen[seen.length - 1];
     assert.equal(collaborationRequest.headers.Authorization, 'Bearer collaboration-read-token');
-    assert.equal(collaborationRequest.headers['x-agentoc-session-control-token'], undefined);
+    assert.equal(collaborationRequest.headers['x-ragent-session-control-token'], undefined);
     assert.equal(collaborationRequest.headers.Cookie, undefined);
   } finally {
     for (const [key, value] of Object.entries(savedEnv)) {

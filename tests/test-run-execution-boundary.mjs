@@ -9,14 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { buildChildEnvironment } from '../scripts/launch-test-instance.mjs';
 
 test('durable Run admission never routes temporary work to the generic runner', async t => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-boundary-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-boundary-'));
   const instance = { instanceDir: root, configDir: join(root, 'config'),
     memoryDir: join(root, 'memory'), spoolDir: join(root, 'spool'),
     providerHomesDir: join(root, 'provider-homes'), workRootDir: join(root, 'work'),
     port: 48731, id: 'boundary-test', ttlSeconds: 60 };
   const env = buildChildEnvironment(instance);
   for (const key of Object.keys(process.env)) {
-    if (/^(AGENTOC_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(key)) delete process.env[key];
+    if (/^(RAGENT_|CHAT_|FCM_|FIREBASE_|OPENAI_|ANTHROPIC_|CODEX_|CLAUDE_)/.test(key)) delete process.env[key];
   }
   Object.assign(process.env, env);
   const runs = await import('../chat/runs.mjs');
@@ -92,8 +92,8 @@ test('durable Run admission never routes temporary work to the generic runner', 
     });
     await t.test('common entry rejects before lifecycle, supervisor, systemd or process fallback', async () => {
       let transports = 0;
-      process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET = 'synthetic-lifecycle';
-      process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET = 'synthetic-supervisor';
+      process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = 'synthetic-lifecycle';
+      process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET = 'synthetic-supervisor';
       const spawner = createDetachedRunnerSpawner({ platform: 'linux', getScopeImpl() { transports++; return 'system'; },
         connectImpl() { transports++; throw new Error('must not contact a broker'); },
         execFileImpl() { transports++; throw new Error('must not start systemd'); },
@@ -103,8 +103,8 @@ test('durable Run admission never routes temporary work to the generic runner', 
         await assert.rejects(spawner('run_missing_boundary_123'), { code: 'RUN_EXECUTION_INPUT_UNAVAILABLE' });
         assert.equal(transports, 0);
       } finally {
-        delete process.env.AGENTOC_RUNNER_LIFECYCLE_SOCKET;
-        delete process.env.AGENTOC_RUNNER_SUPERVISOR_SOCKET;
+        delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
+        delete process.env.RAGENT_RUNNER_SUPERVISOR_SOCKET;
       }
     });
     await t.test('direct Provider preparation rejects before compatibility, home creation or credential resolution', async () => {
@@ -127,7 +127,7 @@ test('durable Run admission never routes temporary work to the generic runner', 
     });
     await t.test('real supervisor IPC rejects a bypass of the common entry', async () => {
       const socketPath = process.platform === 'win32'
-        ? '\\\\.\\pipe\\agentoc-boundary-' + randomBytes(12).toString('hex') : join(root, 'supervisor.sock');
+        ? '\\\\.\\pipe\\ragent-boundary-' + randomBytes(12).toString('hex') : join(root, 'supervisor.sock');
       let spawned = 0;
       const server = await createRunnerSupervisorServer({ socketPath, spawnRunner: (id, options) =>
         spawnSupervisedRunner(id, { ...options, spawnImpl() { spawned++; throw new Error('must never spawn'); } }) });
@@ -163,7 +163,7 @@ test('durable Run admission never routes temporary work to the generic runner', 
   } finally {
     const actual = await realpath(root);
     assert.equal(dirname(actual).toLowerCase(), (await realpath(tmpdir())).toLowerCase());
-    assert.ok(basename(actual).startsWith('agentoc-boundary-'));
+    assert.ok(basename(actual).startsWith('ragent-boundary-'));
     await rm(actual, { recursive: true, force: true });
   }
 });

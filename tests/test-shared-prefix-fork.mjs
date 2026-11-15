@@ -5,14 +5,14 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-shared-prefix-fork-'));
+const home = await mkdtemp(join(tmpdir(), 'ragent-shared-prefix-fork-'));
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = join(home, '.config', 'agentoc');
-process.env.AGENTOC_MEMORY_DIR = join(home, 'memory');
-process.env.AGENTOC_WORK_ROOT_DIR = join(home, 'workspace');
-await mkdir(process.env.AGENTOC_CONFIG_DIR, { recursive: true });
+process.env.RAGENT_CONFIG_DIR = join(home, '.config', 'ragent');
+process.env.RAGENT_MEMORY_DIR = join(home, 'memory');
+process.env.RAGENT_WORK_ROOT_DIR = join(home, 'workspace');
+await mkdir(process.env.RAGENT_CONFIG_DIR, { recursive: true });
 await writeFile(
-  join(process.env.AGENTOC_CONFIG_DIR, 'auth.json'),
+  join(process.env.RAGENT_CONFIG_DIR, 'auth.json'),
   JSON.stringify({ username: 'test-owner', passwordHash: 'not-a-real-hash' }),
   'utf8',
 );
@@ -35,7 +35,7 @@ const { defaultContinuityStore } = await import('../chat/continuity-store.mjs');
 const { createProject, deleteProject } = await import('../chat/projects.mjs');
 const { handleControlRoutes } = await import('../chat/router-control-routes.mjs');
 
-const historyRoot = join(process.env.AGENTOC_CONFIG_DIR, 'chat-history');
+const historyRoot = join(process.env.RAGENT_CONFIG_DIR, 'chat-history');
 const historyDir = (sessionId) => join(historyRoot, sessionId);
 const eventsDir = (sessionId) => join(historyDir(sessionId), 'events');
 const bodiesDir = (sessionId) => join(historyDir(sessionId), 'bodies');

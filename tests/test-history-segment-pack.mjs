@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // DS-12: golden-file tests for the segmented history index prototype
-// (chat/history-segment-pack.mjs, design docs/agentoc-history-segmented-index-design.md).
+// (chat/history-segment-pack.mjs, design docs/ragent-history-segmented-index-design.md).
 //
 // Pins the segment v1 byte format, then covers: parse-equal roundtrip
 // (pretty-printed source in, compact events out), sha256/count/contiguity
@@ -43,7 +43,7 @@ function fabricateSession(root, sessionId, { events, meta } = {}) {
   return dir;
 }
 
-const home = join(tmpdir(), `agentoc-segment-pack-${process.pid}`);
+const home = join(tmpdir(), `ragent-segment-pack-${process.pid}`);
 await mkdir(home, { recursive: true });
 
 // --- 1. golden bytes: the segment v1 format is pinned ---
@@ -60,7 +60,7 @@ await mkdir(home, { recursive: true });
 
   const segment0 = await readFile(join(out, 'segments', '000000000.jsonl'), 'utf8');
   const golden0 = [
-    '{"format":"agentoc-history-segment-v1","startSeq":0,"eventCount":2}',
+    '{"format":"ragent-history-segment-v1","startSeq":0,"eventCount":2}',
     '{"seq":0,"event":{"id":"e1","type":"message","role":"user","content":"hello"}}',
     '{"seq":1,"event":{"id":"e2","type":"status","content":"running"}}',
     '{"type":"segment-trailer","sha256":"57a377d133c4253fcc4d4168bf12077d3dade095c525f602285b08f7702df592","eventCount":2,"endSeq":1}',
@@ -70,7 +70,7 @@ await mkdir(home, { recursive: true });
 
   const segment1 = await readFile(join(out, 'segments', '000000002.jsonl'), 'utf8');
   const golden1 = [
-    '{"format":"agentoc-history-segment-v1","startSeq":2,"eventCount":1}',
+    '{"format":"ragent-history-segment-v1","startSeq":2,"eventCount":1}',
     '{"seq":2,"event":{"id":"e3","type":"message","role":"assistant","content":"hi","bodyRef":"evt_000000002_content"}}',
     '{"type":"segment-trailer","sha256":"5077471f305cc5e2d47b68640a6691914852a6f5cb50a50912c66e01eedf3c92","eventCount":1,"endSeq":2}',
     '',
@@ -137,7 +137,7 @@ await mkdir(home, { recursive: true });
 
   // Unknown format version must be refused.
   const unknown = join(out, 'segments', '000009999.jsonl');
-  await writeFile(unknown, '{"format":"agentoc-history-segment-v2","startSeq":9999,"eventCount":0}\n{"type":"segment-trailer","sha256":"00","eventCount":0,"endSeq":9998}\n');
+  await writeFile(unknown, '{"format":"ragent-history-segment-v2","startSeq":9999,"eventCount":0}\n{"type":"segment-trailer","sha256":"00","eventCount":0,"endSeq":9998}\n');
   const unknownCheck = await verifySegment(unknown);
   assert.equal(unknownCheck.ok, false);
   assert.ok(unknownCheck.reason.includes('unsupported header'), unknownCheck.reason);
@@ -154,7 +154,7 @@ await mkdir(home, { recursive: true });
   await packSession(session, { outDir: out, eventsPerSegment: 2 });
   // Simulate a crash mid-write: truncate segment 0 to 2 lines (header only).
   const segmentsDir = join(out, 'segments');
-  await writeFile(join(segmentsDir, '000000000.jsonl'), '{"format":"agentoc-history-segment-v1","startSeq":0,"eventCount":2}\n');
+  await writeFile(join(segmentsDir, '000000000.jsonl'), '{"format":"ragent-history-segment-v1","startSeq":0,"eventCount":2}\n');
 
   const sessionCheck = await verifySession(segmentsDir);
   assert.equal(sessionCheck.ok, false);

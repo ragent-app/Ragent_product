@@ -64,8 +64,8 @@ function request(port, method, path, body = null, extraHeaders = {}) {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-workspace-readable-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-workspace-readable-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const workspaceDir = join(home, 'workspace');
   mkdirSync(configDir, { recursive: true });
@@ -76,7 +76,7 @@ function setupTempHome() {
 
   writeFileSync(join(workspaceDir, 'README.md'), '# Workspace\n\nReadable markdown.', 'utf8');
   writeFileSync(join(workspaceDir, 'docs', 'manual.markdown'), '## Manual\n\nDetails.', 'utf8');
-  writeFileSync(join(workspaceDir, 'docs', 'index.pdf'), Buffer.from('%PDF-1.4\n% AgentoC test\n'));
+  writeFileSync(join(workspaceDir, 'docs', 'index.pdf'), Buffer.from('%PDF-1.4\n% Ragent test\n'));
   writeFileSync(join(workspaceDir, 'notes.txt'), 'not a reader file', 'utf8');
   writeFileSync(join(workspaceDir, 'node_modules', 'ignored.md'), '# ignored', 'utf8');
 
@@ -120,24 +120,24 @@ async function startServer({ home, configDir, localBin, port }) {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       PATH: `${localBin}:${process.env.PATH || ''}`,
       CHAT_PORT: String(port),
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
-      AGENTOC_AUTH_SESSION_SECRET: sessionSecret,
-      AGENTOC_MEMORY_DIR: join(home, '.agentoc', 'memory'),
-      AGENTOC_WORK_ROOT_DIR: join(home, '.agentoc', 'workspace'),
-      AGENTOC_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
+      RAGENT_AUTH_SESSION_SECRET: sessionSecret,
+      RAGENT_MEMORY_DIR: join(home, '.ragent', 'memory'),
+      RAGENT_WORK_ROOT_DIR: join(home, '.ragent', 'workspace'),
+      RAGENT_DISABLE_SYSTEMD_DETACHED_RUNNER: '1',
       SECURE_COOKIES: '0',
-      AGENTOC_ASSET_STORAGE_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PUBLIC_BASE_URL: '',
-      AGENTOC_ASSET_STORAGE_PROVIDER: '',
-      AGENTOC_ASSET_STORAGE_REGION: '',
-      AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID: '',
-      AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
+      RAGENT_ASSET_STORAGE_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PUBLIC_BASE_URL: '',
+      RAGENT_ASSET_STORAGE_PROVIDER: '',
+      RAGENT_ASSET_STORAGE_REGION: '',
+      RAGENT_ASSET_STORAGE_ACCESS_KEY_ID: '',
+      RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -225,7 +225,7 @@ try {
   assert.equal(workspaceMarkdownRes.status, 200, 'workspace-scoped markdown content should stream');
   assert.equal(workspaceMarkdownRes.text, '## Manual\n\nDetails.', 'workspace-scoped markdown content should match the workspace file');
 
-  const escapeRes = await request(port, 'GET', `/api/workspace-files/content?workspace=${encodeURIComponent(workspaceDir)}&path=${encodeURIComponent('../.config/agentoc/auth.json')}`);
+  const escapeRes = await request(port, 'GET', `/api/workspace-files/content?workspace=${encodeURIComponent(workspaceDir)}&path=${encodeURIComponent('../.config/ragent/auth.json')}`);
   assert.equal(escapeRes.status, 400, 'workspace file reader should reject paths outside the workspace folder');
 
   writeFileSync(join(home, 'outside.md'), 'outside workspace');

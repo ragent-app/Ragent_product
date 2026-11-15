@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 
-const configDir = await mkdtemp(join(tmpdir(), 'agentoc-legacy-collaboration-trigger-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = await mkdtemp(join(tmpdir(), 'ragent-legacy-collaboration-trigger-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 try {
   const { CHAT_TRIGGERS_FILE } = await import('../lib/config.mjs');

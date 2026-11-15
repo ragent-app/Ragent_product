@@ -11,11 +11,11 @@ import { buildTemporaryControlClaimMessage, temporaryControlInvitationDigest } f
 import { temporaryDeviceJwk } from '../lib/temporary-device-access.mjs';
 
 const initial = 1_800_000_000_000;
-const targetUri = 'https://temporary-control.agentoc.invalid/api/temporary-control/v1/instances/inst_abcdefghijklmnopqrstuvwx/projects';
+const targetUri = 'https://temporary-control.ragent.invalid/api/temporary-control/v1/instances/inst_abcdefghijklmnopqrstuvwx/projects';
 const id = (prefix) => `${prefix}_${'a'.repeat(24)}`;
 
 async function fixture(t) {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-temporary-control-host-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-temporary-control-host-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   let now = initial;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

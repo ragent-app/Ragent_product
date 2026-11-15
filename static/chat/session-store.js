@@ -1,6 +1,6 @@
 "use strict";
 
-(function attachAgentoCChatStore(root) {
+(function attachRagentChatStore(root) {
   function normalizeSessionId(value) {
     return typeof value === "string" && value.trim() ? value.trim() : null;
   }
@@ -374,8 +374,8 @@
     findSession,
     getCurrentSession,
   };
-  root.AgentoCChatStore = api;
+  root.RagentChatStore = api;
   if (root.window && root.window !== root) {
-    root.window.AgentoCChatStore = api;
+    root.window.RagentChatStore = api;
   }
 })(typeof globalThis !== "undefined" ? globalThis : window);

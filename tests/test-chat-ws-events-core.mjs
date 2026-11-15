@@ -54,7 +54,7 @@ function loadCore(withVisitorMode) {
     Date,
     Promise,
     Error,
-    AgentocWsEventsEnvironment: withVisitorMode
+    RagentWsEventsEnvironment: withVisitorMode
       ? { withVisitorModeUrl: (path) => `/visitor${path}` }
       : {},
   };
@@ -63,7 +63,7 @@ function loadCore(withVisitorMode) {
     context,
     { filename: 'transport/ws-events.js' },
   );
-  const core = context.AgentocWsEventsCore;
+  const core = context.RagentWsEventsCore;
   return {
     api: {
       resolveWsUrl: (path) => core.resolveWsUrl(path),

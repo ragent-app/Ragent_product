@@ -2,7 +2,7 @@
 # AlwaysInstallElevated/UAC changes, persisted password or local production use.
 function Invoke-OrdinaryUninstallProbe([string]$Bridge,[string]$MsiPath,[string]$EvidenceRoot){
  if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:GITHUB_REPOSITORY -cne 'owner/private-qa-repository'){throw 'OUQ_DISPOSABLE_REQUIRED'}
- $name='AgcQa'+[guid]::NewGuid().ToString('N').Substring(0,8);$parent='C:\Users\Public';$root=Join-Path $parent ('AgentoC-uninstall-qa-'+[guid]::NewGuid().ToString('N'));$user=$null;$child=$null;$done=$false
+ $name='AgcQa'+[guid]::NewGuid().ToString('N').Substring(0,8);$parent='C:\Users\Public';$root=Join-Path $parent ('Ragent-uninstall-qa-'+[guid]::NewGuid().ToString('N'));$user=$null;$child=$null;$done=$false
  $password=[Convert]::ToBase64String([guid]::NewGuid().ToByteArray())+'aA!9';$secret=ConvertTo-SecureString $password -AsPlainText -Force
  try {
   $user=New-LocalUser -Name $name -Password $secret -AccountNeverExpires -PasswordNeverExpires
@@ -10,7 +10,7 @@ function Invoke-OrdinaryUninstallProbe([string]$Bridge,[string]$MsiPath,[string]
   $acl=[Security.AccessControl.DirectorySecurity]::new();$acl.SetAccessRuleProtection($true,$false);$acl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
   foreach($sid in @('S-1-5-18','S-1-5-32-544')){$acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))}
   $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($user.SID,'ReadAndExecute','ContainerInherit,ObjectInherit','None','Allow'));$null=[IO.Directory]::CreateDirectory($root,$acl)
-  Copy-Item -LiteralPath $Bridge -Destination (Join-Path $root 'AgentoC.ManagedOwnerMsiBridge.exe')
+  Copy-Item -LiteralPath $Bridge -Destination (Join-Path $root 'Ragent.ManagedOwnerMsiBridge.exe')
   $exe=Join-Path $root 'OrdinaryUninstallProbe.exe'; & 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe' /nologo /target:exe /r:System.Web.Extensions.dll ('/out:'+$exe) (Join-Path $repo 'tests\fixtures\windows-ordinary-uninstall.cs')|Out-Null;if($LASTEXITCODE -ne 0){throw 'OUQ_CLIENT_COMPILE'}
   $resultDir=Join-Path $root 'result';$resultAcl=[Security.AccessControl.DirectorySecurity]::new();$resultAcl.SetAccessRuleProtection($true,$false);$resultAcl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'));foreach($sid in @('S-1-5-18','S-1-5-32-544')){$resultAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','ContainerInherit,ObjectInherit','None','Allow'))};$resultAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($user.SID,'Modify','ContainerInherit,ObjectInherit','None','Allow'));$null=[IO.Directory]::CreateDirectory($resultDir,$resultAcl)
   $installer=New-Object -ComObject WindowsInstaller.Installer;$db=$installer.OpenDatabase($MsiPath,0);$view=$db.OpenView('SELECT `Value` FROM `Property` WHERE `Property`=''ProductCode''');$null=$view.Execute();$row=$view.Fetch();$code=$row.StringData(1)

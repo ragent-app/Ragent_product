@@ -6,7 +6,7 @@
 //    READY must be accepted from the main pid or the unit never activates.
 // 2. A rogue child sends STOPPING=1 from inside the cgroup. With
 //    NotifyAccess=main systemd must reject it: the unit keeps running past
-//    the point where the 08-31 incident flipped agentoc.service into
+//    the point where the 08-31 incident flipped ragent.service into
 //    stop-sigterm (proven equivalent signature: no signal is ever delivered,
 //    then "State 'stop-sigterm' timed out. Killing.").
 // 3. WatchdogSec keepalives must keep flowing from the main pid or systemd
@@ -48,7 +48,7 @@ async function userSystemdAvailable() {
   }
 }
 
-const unit = `agentoc-notify-direct-test-${process.pid}`;
+const unit = `ragent-notify-direct-test-${process.pid}`;
 const appPath = join(dir, 'notify-app.mjs');
 const watchdogSec = 8;
 const probeSeconds = 13; // > WatchdogSec, so surviving proves keepalives

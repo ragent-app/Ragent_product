@@ -108,8 +108,8 @@ func TestOwnerInstallRealNamedPipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	healthName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
-	requestName := `\\.\pipe\AgentoC.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
+	healthName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Health.v1`
+	requestName := `\\.\pipe\Ragent.PrivilegedBroker.LocalTest.` + suffix + `.Request.v1`
 	server, err := newBrokerIPCServerForPipeNames(store, user.User.Sid, healthName, requestName)
 	if err != nil {
 		t.Fatal(err)

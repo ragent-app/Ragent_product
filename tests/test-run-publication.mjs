@@ -8,11 +8,11 @@ import { promisify } from 'node:util';
 import { syncBuiltinESMExports } from 'node:module';
 import { test, after } from 'node:test';
 
-const root = process.env.AGENTOC_RUN_PUBLICATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'agentoc-run-publication-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_MEMORY_DIR = join(root, 'memory');
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'isolated-run-publication-fixture-secret';
+const root = process.env.RAGENT_RUN_PUBLICATION_TEST_ROOT || await mkdtemp(join(tmpdir(), 'ragent-run-publication-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_MEMORY_DIR = join(root, 'memory');
+process.env.RAGENT_AUTH_SESSION_SECRET = 'isolated-run-publication-fixture-secret';
 const runs = await import('../chat/runs.mjs');
 const contract = await import('../chat/run-publication-contract.mjs');
 const meta = await import('../chat/session-meta-store.mjs');
@@ -30,17 +30,17 @@ async function seed(value) {
 }
 
 if (process.argv[2] === 'cold') {
-  const value = JSON.parse(process.env.AGENTOC_RUN_PUBLICATION_INPUT);
+  const value = JSON.parse(process.env.RAGENT_RUN_PUBLICATION_INPUT);
   const receipt = await getMessageSubmissionReceipt(value.status.sessionId, value.status.requestId);
   const evidence = await runs.findRunByRequest(value.status.sessionId, value.status.requestId);
   process.stdout.write('COLD=' + JSON.stringify({ receipt, evidence }) + '\n');
 } else if (process.argv[2] === 'duplicate') {
-  const value = JSON.parse(process.env.AGENTOC_RUN_PUBLICATION_INPUT);
+  const value = JSON.parse(process.env.RAGENT_RUN_PUBLICATION_INPUT);
   await assert.rejects(runs.createRun(value), { code: 'RUN_ALREADY_EXISTS' });
   process.stdout.write('COLD_DUPLICATE_REJECTED\n');
 } else if (process.argv[2] === 'crash') {
-  const value = JSON.parse(process.env.AGENTOC_RUN_PUBLICATION_INPUT);
-  const window = process.env.AGENTOC_RUN_PUBLICATION_WINDOW;
+  const value = JSON.parse(process.env.RAGENT_RUN_PUBLICATION_INPUT);
+  const window = process.env.RAGENT_RUN_PUBLICATION_WINDOW;
   const original = fs.promises.rename;
   fs.promises.rename = async (from, to) => {
     const target = String(to);
@@ -145,7 +145,7 @@ test('published same Run ID cannot be recreated or credentials replaced by concu
   const before = await readFile(path(value.status.id, 'manifest.json'));
   await assert.rejects(runs.createRun(value), { code: 'RUN_ALREADY_EXISTS' });
   const cold = await promisify(execFile)(process.execPath, [import.meta.filename, 'duplicate'], {
-    env: { ...process.env, AGENTOC_RUN_PUBLICATION_TEST_ROOT: root, AGENTOC_RUN_PUBLICATION_INPUT: JSON.stringify(value) }, timeout: 10000 });
+    env: { ...process.env, RAGENT_RUN_PUBLICATION_TEST_ROOT: root, RAGENT_RUN_PUBLICATION_INPUT: JSON.stringify(value) }, timeout: 10000 });
   assert.match(cold.stdout, /COLD_DUPLICATE_REJECTED/);
   assert.deepEqual(await readFile(path(value.status.id, 'manifest.json')), before);
 });
@@ -258,7 +258,7 @@ test('Run publication inside the actual Session guard rejects stale scope and le
 
 for (const window of ['before-manifest', 'after-manifest', 'after-status']) test(`owned process death at ${window} has truthful cold acceptance and recoverable exact identity`, { timeout: 20000 }, async () => {
   const value = input(); await seed(value);
-  const env = { ...process.env, AGENTOC_RUN_PUBLICATION_TEST_ROOT: root, AGENTOC_RUN_PUBLICATION_INPUT: JSON.stringify(value), AGENTOC_RUN_PUBLICATION_WINDOW: window };
+  const env = { ...process.env, RAGENT_RUN_PUBLICATION_TEST_ROOT: root, RAGENT_RUN_PUBLICATION_INPUT: JSON.stringify(value), RAGENT_RUN_PUBLICATION_WINDOW: window };
   const child = fork(import.meta.filename, ['crash'], { env, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
   const exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));

@@ -57,7 +57,7 @@ export function sanitizeAccountDeletionUrl(value) {
  */
 export function createAccountsLoggerOptions({ level } = {}) {
   return {
-    level: level || process.env.AGENTOC_ACCOUNTS_LOG_LEVEL || 'info',
+    level: level || process.env.RAGENT_ACCOUNTS_LOG_LEVEL || 'info',
     redact: { paths: ACCOUNTS_LOGGER_REDACT_PATHS, censor: '[redacted]' },
     serializers: {
       path: sanitizeAccountDeletionUrl,

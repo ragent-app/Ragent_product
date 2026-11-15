@@ -31,7 +31,7 @@ try {
   </body></html>`, { waitUntil: 'load' });
 
   await page.evaluate(() => {
-    window.agentocT = (key, vars) => {
+    window.ragentT = (key, vars) => {
       const map = {
         'decisionSheet.island.title': 'Pending Decision',
         'decisionSheet.island.defaultLabel': 'Pending Approval',
@@ -40,12 +40,12 @@ try {
       return map[key] || key;
     };
     window.getApprovalTitle = (evt) => evt.title || 'Execute Command';
-    window.AgentoCLayout = {
+    window.RagentLayout = {
       requestPass() {},
       syncChatBottomOverlaySpacing() {},
       observeOverlay() {},
     };
-    window.AgentoCMotion = {
+    window.RagentMotion = {
       prefersReducedMotion: () => false,
     };
   });
@@ -60,7 +60,7 @@ try {
 
   // 2. An approval arrives
   await page.evaluate(() => {
-    window.AgentoCDecisions.noteRequest({
+    window.RagentDecisions.noteRequest({
       approvalId: 'req-1',
       title: 'Run rm -rf /tmp/test',
       kind: 'approval',
@@ -114,7 +114,7 @@ try {
 
   // 6. Resolving approval -> Both sheet and island are dismissed
   await page.evaluate(() => {
-    window.AgentoCDecisions.noteResponse({ approvalId: 'req-1' });
+    window.RagentDecisions.noteResponse({ approvalId: 'req-1' });
   });
   await page.waitForTimeout(300);
 

@@ -4,14 +4,14 @@ param([Parameter(Mandatory=$true)][string]$EvidenceRoot)
 $ErrorActionPreference='Stop'
 $msiRoot=[IO.Path]::GetFullPath($EvidenceRoot)
 if(-not(Test-Path -LiteralPath (Join-Path $msiRoot 'qa-instance.json'))){throw 'Marked QA root required'}
-$msiGuard=Join-Path $msiRoot 'AgentoC.LegacyOwnerInstallGuard.exe'
+$msiGuard=Join-Path $msiRoot 'Ragent.LegacyOwnerInstallGuard.exe'
 if(-not(Test-Path -LiteralPath $msiGuard)){throw 'Previously compiled QA guard required'}
 $msiDirectory=Join-Path $msiRoot ('msi-schema-only-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $msiDirectory | Out-Null
-Copy-Item -LiteralPath $msiGuard -Destination (Join-Path $msiDirectory 'AgentoC.ServiceHost.exe')
+Copy-Item -LiteralPath $msiGuard -Destination (Join-Path $msiDirectory 'Ragent.ServiceHost.exe')
 $msiPayload=Join-Path $msiDirectory 'payload.wxs'
 [IO.File]::WriteAllText($msiPayload,'<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Fragment><ComponentGroup Id="PayloadGroup" Directory="INSTALLFOLDER" Subdirectory="payload"><Component Id="QaPayload" Guid="*"><File Source="!(bindpath.OwnerInstallGuard)\qa-instance.json" /></Component></ComponentGroup></Fragment></Wix>',[Text.UTF8Encoding]::new($false))
-$msiSource=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\packaging\windows\AgentoC.wxs'))
+$msiSource=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\packaging\windows\Ragent.wxs'))
 $msiScripts=[IO.Path]::GetDirectoryName($msiSource)
 $msiOutput=Join-Path $msiDirectory 'NOT-FOR-INSTALL-guard-schema.msi'
 $msiTool=(Get-Command wix.exe -ErrorAction Stop).Source

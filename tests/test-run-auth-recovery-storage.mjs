@@ -4,11 +4,11 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-run-auth-storage-'));
-process.env.AGENTOC_INSTANCE_ROOT = root;
-process.env.AGENTOC_CONFIG_DIR = join(root, 'config');
-process.env.AGENTOC_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
-process.env.AGENTOC_AUTH_SESSION_SECRET = 'storage-test-secret';
+const root = await mkdtemp(join(tmpdir(), 'ragent-run-auth-storage-'));
+process.env.RAGENT_INSTANCE_ROOT = root;
+process.env.RAGENT_CONFIG_DIR = join(root, 'config');
+process.env.RAGENT_ALLOW_EXTERNAL_TEST_INSTANCE_OVERRIDES = '1';
+process.env.RAGENT_AUTH_SESSION_SECRET = 'storage-test-secret';
 
 try {
   const {
@@ -34,7 +34,7 @@ try {
       codexThreadId: 'thread_storage_1',
       completedAt: '2026-08-27T00:00:01.000Z',
       runnerProcessId: 12345,
-      runnerUnitName: 'agentoc-runner-old.service',
+      runnerUnitName: 'ragent-runner-old.service',
       runnerLaunchQueuedAt: '2026-08-27T00:00:00.100Z',
       runnerLifecycleSubmittedAt: '2026-08-27T00:00:00.200Z',
       runnerLifecycleAcceptedAt: '2026-08-27T00:00:00.300Z',

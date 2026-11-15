@@ -41,7 +41,7 @@ const RUN = 'run-agent-create';
 const TURN = 'turn-agent-create';
 const REQUEST = 'request-agent-create';
 const NOW = Date.now();
-const ENV_ENABLED = { AGENTOC_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1' };
+const ENV_ENABLED = { RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED: '1' };
 const payload = {
   name: 'Weekly Report Agent',
   systemPrompt: 'Prepare the weekly report. TOKEN=must-not-appear-in-review',
@@ -215,7 +215,7 @@ assert.equal((await revalidateApprovedAgentCreateAction(action, {
 })).code, 'AGENT_CREATE_TOOL_FINGERPRINT_MISMATCH');
 assert.equal((await revalidateApprovedAgentCreateAction(action, {
   ...revalidationOptions,
-  getToolDefinitionImpl: async () => ({ id: 'codex', available: true, runtimeFamily: 'codex-app-server-json', command: 'agentoc-codex-app-server' }),
+  getToolDefinitionImpl: async () => ({ id: 'codex', available: true, runtimeFamily: 'codex-app-server-json', command: 'ragent-codex-app-server' }),
 })).code, 'AGENT_CREATE_TOOL_FINGERPRINT_MISMATCH');
 // An approval that never bound a fingerprint must be unapprovable.
 const unboundProjection = prepareAgentCreateSemanticProjection({

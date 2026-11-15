@@ -184,7 +184,7 @@ function parsePositiveInteger(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function resolveTriggerPollMs(value = process.env.AGENTOC_TRIGGER_POLL_MS) {
+function resolveTriggerPollMs(value = process.env.RAGENT_TRIGGER_POLL_MS) {
   return Math.max(MIN_TRIGGER_POLL_MS, parsePositiveInteger(value, DEFAULT_TRIGGER_POLL_MS));
 }
 
@@ -1010,7 +1010,7 @@ function renderTriggerText(trigger, eventContext = null) {
     ), payload);
     return value === undefined || value === null ? '' : String(value);
   });
-  return `${rendered}\n\nAgentoC event: ${eventContext.type}\n${JSON.stringify(payload)}`.slice(0, 64 * 1024);
+  return `${rendered}\n\nRagent event: ${eventContext.type}\n${JSON.stringify(payload)}`.slice(0, 64 * 1024);
 }
 
 async function deliverTrigger(trigger, eventContext = null) {

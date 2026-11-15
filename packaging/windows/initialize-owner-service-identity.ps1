@@ -19,8 +19,8 @@ public sealed class OwnerIdentityServiceLease:IDisposable {
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool ControlService(IntPtr service,uint control,out Status status);
  [DllImport("advapi32.dll")]static extern bool CloseServiceHandle(IntPtr service);
  IntPtr handle;readonly string command;bool temporary;
- const string Dependency="AgentoC-RunnerSupervisor",Account=@"NT SERVICE\AgentoC-ControlPlane";
- public OwnerIdentityServiceLease(string expectedCommand){command=expectedCommand;var m=OpenSCManager(null,null,1);if(m==IntPtr.Zero)throw new InvalidOperationException("OII_SCM_OPEN_REFUSED");try{handle=OpenService(m,"AgentoC-ControlPlane",0x37);}finally{CloseServiceHandle(m);}if(handle==IntPtr.Zero)throw new InvalidOperationException("OII_SERVICE_OPEN_REFUSED");try{Verify(4,Dependency,true);}catch{Dispose();throw;}}
+ const string Dependency="Ragent-RunnerSupervisor",Account=@"NT SERVICE\Ragent-ControlPlane";
+ public OwnerIdentityServiceLease(string expectedCommand){command=expectedCommand;var m=OpenSCManager(null,null,1);if(m==IntPtr.Zero)throw new InvalidOperationException("OII_SCM_OPEN_REFUSED");try{handle=OpenService(m,"Ragent-ControlPlane",0x37);}finally{CloseServiceHandle(m);}if(handle==IntPtr.Zero)throw new InvalidOperationException("OII_SERVICE_OPEN_REFUSED");try{Verify(4,Dependency,true);}catch{Dispose();throw;}}
  Status State(){Status s;int n;if(!QueryServiceStatusEx(handle,0,out s,Marshal.SizeOf(typeof(Status)),out n))throw new InvalidOperationException("OII_STATUS_REFUSED");return s;}
  void Verify(uint mode,string dependency,bool stopped){
   uint n;QueryServiceConfig(handle,IntPtr.Zero,0,out n);if(n<1||n>65536)throw new InvalidOperationException("OII_CONFIG_REFUSED");var memory=Marshal.AllocHGlobal((int)n);
@@ -49,11 +49,11 @@ try {
  $receipt=[Text.UTF8Encoding]::new($false,$true).GetString($receiptBytes)|ConvertFrom-Json
  if(@($receipt.PSObject.Properties).Count -ne 4 -or $receipt.version -ne 1 -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OII_PREPARED_RECEIPT_REQUIRED'}
  # Verify the entire protected prepared directory layout without changing it.
- $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([AgentoCOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
+ $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  $controlSid=($services|Where-Object {$_.role -eq 'control'}).sid;$executorSid=($services|Where-Object {$_.role -eq 'supervisor'}).sid
  foreach($row in @(Get-OwnerDataLayout $controlSid $executorSid $receipt.ownerSid)){
   $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot}
-  $pins.Add([AgentoCOwnerFilePin]::Directory($path));$a=[IO.Directory]::GetAccessControl($path)
+  $pins.Add([RagentOwnerFilePin]::Directory($path));$a=[IO.Directory]::GetAccessControl($path)
   if(-not $a.AreAccessRulesProtected -or $a.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $a ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'OII_LAYOUT_MISMATCH'}
  }
  $stage='modules';foreach($relative in @('scripts\initialize-windows-owner-identity.mjs','lib\instance-identity.mjs','lib\instance-proof-protocol.mjs','lib\windows-owner-identity-paths.mjs')){$null=Read-OwnerPinnedFile (Join-Path (Join-Path $product 'payload') $relative) @(Get-OwnerAdministrativeSids) $pins 131072}
@@ -61,7 +61,7 @@ try {
  $stage='lease';$plan=@(Get-OwnerServicePreparationPlan);$p=$plan|Where-Object {$_.role -eq 'supervisor'};$supervisor=[ManagedPreparedService]::new($p.name,$p.command,$p.account)
  $p=$plan|Where-Object {$_.role -eq 'control'};$control=[OwnerIdentityServiceLease]::new($p.command)
  $create=[IO.FileStream]::new($lockPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::Read)
- try{$bytes=[Text.Encoding]::UTF8.GetBytes("agentoc-owner-identity-initialization-v1`n");$create.Write($bytes,0,$bytes.Length);$create.Flush($true)}finally{$create.Dispose()}
+ try{$bytes=[Text.Encoding]::UTF8.GetBytes("ragent-owner-identity-initialization-v1`n");$create.Write($bytes,0,$bytes.Length);$create.Flush($true)}finally{$create.Dispose()}
  $marker=[IO.FileStream]::new($lockPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
  $stage='run';$control.Initialize();$control.Restore();$supervisor.Verify();$null=@(Get-OwnerDataServices)
  $stage='result';$resultBytes=Read-OwnerPinnedFile (Join-Path $config 'owner-identity.result.json') (@(Get-OwnerAdministrativeSids)+@($controlSid)) $pins

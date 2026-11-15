@@ -3,7 +3,7 @@
 // DOM state (msgInput / sendBtn) and dispatched input events, so compose.js
 // needs just one optional sync hook after auto-resize. Degrades to a silent
 // no-op when the composer is absent (e.g. share-snapshot pages).
-(function initAgentoCComposerFullscreen() {
+(function initRagentComposerFullscreen() {
   "use strict";
 
   const FULLSCREEN_QUERY = "(max-width: 767px)";
@@ -33,7 +33,7 @@
   ) {
     return;
   }
-  window.AgentoCMarkdownComposer?.mount?.(fullscreenInput, fullscreenEditor);
+  window.RagentMarkdownComposer?.mount?.(fullscreenInput, fullscreenEditor);
 
   let active = false;
   let focusScopeDeactivate = null;
@@ -90,8 +90,8 @@
   // Collapses any add/runtime menu left open from the re-parented triggers so
   // a floating menu never outlives the overlay.
   function closeOpenMenus() {
-    window.AgentoCComposerAddMenu?.close?.();
-    window.AgentoCComposerRuntimeMenu?.close?.();
+    window.RagentComposerAddMenu?.close?.();
+    window.RagentComposerRuntimeMenu?.close?.();
   }
 
   function isMobile() {
@@ -100,8 +100,8 @@
   }
 
   function atAutoGrowCap() {
-    const mainEditor = window.AgentoCMarkdownComposer?.getEditable?.(msgInput)
-      || window.AgentoCMarkdownComposer?.getEditor?.(msgInput)
+    const mainEditor = window.RagentMarkdownComposer?.getEditable?.(msgInput)
+      || window.RagentMarkdownComposer?.getEditor?.(msgInput)
       || msgInput;
     const lineHeight = parseFloat(getComputedStyle(mainEditor).lineHeight) || 24;
     // scrollHeight carries the full content height even when max-height
@@ -155,12 +155,12 @@
     startSendDisabledSync();
     fullscreenInput.value = msgInput.value;
     fullscreenEl.style.zIndex = String(FULLSCREEN_Z_INDEX);
-    window.AgentoCMotion?.setPresence?.(fullscreenEl, true, {
+    window.RagentMotion?.setPresence?.(fullscreenEl, true, {
       openClass: "is-open",
       duration: MOTION_DURATION_MS,
       onAfterOpen: () => syncViewport(),
     });
-    focusScopeDeactivate = window.AgentoCFocusScope?.activate?.(fullscreenEl, {
+    focusScopeDeactivate = window.RagentFocusScope?.activate?.(fullscreenEl, {
       containmentRoot: document.body,
       initialFocus: fullscreenInput,
       restoreFocus: () => (focusBeforeOpen && focusBeforeOpen.isConnected !== false)
@@ -171,7 +171,7 @@
     }) || null;
     sync();
     syncViewport();
-    backEntryId = window.AgentoCBackHandler?.push?.({
+    backEntryId = window.RagentBackHandler?.push?.({
       id: "composer-fullscreen",
       onBack: () => {
         // The back-handler already consumed the history entry; collapse
@@ -200,7 +200,7 @@
       msgInput.value = fullscreenInput.value;
       msgInput.dispatchEvent(new Event("input"));
     }
-    window.AgentoCMotion?.setPresence?.(fullscreenEl, false, {
+    window.RagentMotion?.setPresence?.(fullscreenEl, false, {
       openClass: "is-open",
       closingClass: "is-closing",
       duration: MOTION_DURATION_MS,
@@ -216,7 +216,7 @@
       // User-initiated close (button / Esc / send): unwind the history
       // entry pushed on open so the next back leaves the page instead of
       // re-entering this session.
-      window.AgentoCBackHandler?.pop?.(backEntryId);
+      window.RagentBackHandler?.pop?.(backEntryId);
     }
     if (viewportRafId) {
       window.cancelAnimationFrame(viewportRafId);
@@ -260,5 +260,5 @@
   window.visualViewport?.addEventListener("resize", scheduleSyncViewport);
   window.visualViewport?.addEventListener("scroll", scheduleSyncViewport);
 
-  window.AgentoCComposerFullscreen = { sync, open, close };
+  window.RagentComposerFullscreen = { sync, open, close };
 })();

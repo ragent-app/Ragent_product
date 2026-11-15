@@ -10,8 +10,8 @@ import { mkdtempSync, mkdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-result-packets-v2-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-result-packets-v2-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   createResultPacketId,
@@ -149,7 +149,7 @@ try {
   // ── server derivation carries explicit v2 options ───────────────────────
   beginSection('v2-derive-options');
   {
-    const root = makeRoot('agentoc-rp-v2-root-');
+    const root = makeRoot('ragent-rp-v2-root-');
     const project = await makeProject('RP V2', root);
     const runId = nextRunId('run_v2');
     await makeTerminalRun({
@@ -183,7 +183,7 @@ try {
   // ── system-field protection: a model payload cannot set v2 fields ────────
   beginSection('v2-system-field-protection');
   {
-    const root = makeRoot('agentoc-rp-v2-sys-root-');
+    const root = makeRoot('ragent-rp-v2-sys-root-');
     const project = await makeProject('RP V2 Sys', root);
     const runId = nextRunId('run_v2_sys');
     await makeTerminalRun({
@@ -217,7 +217,7 @@ try {
   // ── checkpoint aggregation carries v2 context + parent packet chain ──────
   beginSection('v2-checkpoint-aggregation');
   {
-    const root = makeRoot('agentoc-rp-v2-ckpt-root-');
+    const root = makeRoot('ragent-rp-v2-ckpt-root-');
     const project = await makeProject('RP V2 Ckpt', root);
     const runA = nextRunId('run_v2_ck_a');
     const runB = nextRunId('run_v2_ck_b');
@@ -258,7 +258,7 @@ try {
   // ── immutability + honest evidence remain untouched ──────────────────────
   beginSection('v2-s5-semantics-unchanged');
   {
-    const root = makeRoot('agentoc-rp-v2-imm-root-');
+    const root = makeRoot('ragent-rp-v2-imm-root-');
     const project = await makeProject('RP V2 Imm', root);
     const runId = nextRunId('run_v2_imm');
     await makeTerminalRun({

@@ -15,16 +15,16 @@ import {
 let bootstrapCalls = 0;
 const unix = await prepareCliIpcTransport({
   platform: 'linux',
-  unixSocketPath: '/tmp/agentoc-cli.sock',
+  unixSocketPath: '/tmp/ragent-cli.sock',
   bootstrapInstanceRuntime: async () => { bootstrapCalls += 1; },
 });
 assert.equal(unix.kind, 'unix-socket');
-assert.equal(cliIpcListenTarget(unix), '/tmp/agentoc-cli.sock');
+assert.equal(cliIpcListenTarget(unix), '/tmp/ragent-cli.sock');
 assert.equal(bootstrapCalls, 0, 'Unix must not call the Windows instance bootstrap');
 
 const darwin = await prepareCliIpcTransport({
   platform: 'darwin',
-  unixSocketPath: '/Users/alice/.config/agentoc/agentoc-cli.sock',
+  unixSocketPath: '/Users/alice/.config/ragent/ragent-cli.sock',
 });
 assert.equal(darwin.kind, 'unix-socket');
 
@@ -36,9 +36,9 @@ await assert.rejects(
 for (const runtime of [
   null,
   {},
-  { instanceId: 'inst_a', endpointName: '\\\\server\\pipe\\agentoc-owner', release() {} },
+  { instanceId: 'inst_a', endpointName: '\\\\server\\pipe\\ragent-owner', release() {} },
   { instanceId: 'inst_a', endpointName: '\\\\.\\pipe\\foreign-owner', release() {} },
-  { instanceId: 'inst_a', endpointName: '\\\\.\\pipe\\agentoc-owner' },
+  { instanceId: 'inst_a', endpointName: '\\\\.\\pipe\\ragent-owner' },
 ]) {
   await assert.rejects(
     prepareCliIpcTransport({
@@ -57,7 +57,7 @@ const windows = await prepareCliIpcTransport({
     assert.deepEqual(request, { purpose: 'local-cli', transport: 'named-pipe' });
     return {
       instanceId: 'inst_a',
-      endpointName: '\\\\.\\pipe\\agentoc-0123456789abcdef-owner',
+      endpointName: '\\\\.\\pipe\\ragent-0123456789abcdef-owner',
       release() { released += 1; },
     };
   },
@@ -66,7 +66,7 @@ assert.equal(windows.kind, 'windows-named-pipe');
 assert.equal(windows.instanceId, 'inst_a');
 assert.equal(isWindowsCliPipeEndpoint(windows.endpoint), true);
 assert.deepEqual(cliIpcListenTarget(windows), {
-  path: '\\\\.\\pipe\\agentoc-0123456789abcdef-owner',
+  path: '\\\\.\\pipe\\ragent-0123456789abcdef-owner',
   exclusive: true,
   readableAll: false,
   writableAll: false,
@@ -86,9 +86,9 @@ assert.equal(
   CLI_IPC_REQUEST_BODY_REFUSED,
 );
 for (const header of [
-  'x-agentoc-instance-id',
-  'x-agentoc-peer-pid',
-  'x-agentoc-peer-sid',
+  'x-ragent-instance-id',
+  'x-ragent-peer-pid',
+  'x-ragent-peer-sid',
   'x-windows-peer-pid',
   'x-windows-peer-sid',
 ]) {

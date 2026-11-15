@@ -11,8 +11,8 @@ import { tmpdir } from 'os';
 import { join, win32 } from 'path';
 import { spawn as realSpawn } from 'child_process';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-git-prov-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-git-prov-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const {
   collectGitProvenance,
@@ -36,12 +36,12 @@ function git(dir, args) {
 function initRepo(dir) {
   git(dir, ['init', '-q']);
   git(dir, ['config', 'user.email', 'test@agentoc.local']);
-  git(dir, ['config', 'user.name', 'Agentoc Test']);
+  git(dir, ['config', 'user.name', 'Ragent Test']);
 }
 
 function commitAll(dir, message) {
   git(dir, ['add', '-A']);
-  git(dir, ['-c', 'user.email=test@agentoc.local', '-c', 'user.name=Agentoc Test', 'commit', '-q', '-m', message]);
+  git(dir, ['-c', 'user.email=test@agentoc.local', '-c', 'user.name=Ragent Test', 'commit', '-q', '-m', message]);
 }
 
 function makeFakeChild({ stdoutText = '', stderrText = '', exitCode = 0, error = null, hang = false }) {
@@ -85,7 +85,7 @@ try {
   );
 
   // ── real repo: clean / dirty / untracked / detached HEAD ─────────────────
-  const repo = makeDir('agentoc-git-prov-repo-');
+  const repo = makeDir('ragent-git-prov-repo-');
   initRepo(repo);
   writeFileSync(join(repo, 'a.txt'), 'hello\n');
   commitAll(repo, 'init');
@@ -150,12 +150,12 @@ try {
   assert.ok(detached.headCommit, 'detached HEAD should still report headCommit');
 
   // ── non-git directory / unborn HEAD ──────────────────────────────────────
-  const plain = makeDir('agentoc-git-prov-plain-');
+  const plain = makeDir('ragent-git-prov-plain-');
   const notGit = await collectGitProvenance(plain);
   assert.equal(notGit.state, 'not_git', 'a directory without .git should be not_git');
   assert.equal(notGit.partial, false);
 
-  const unborn = makeDir('agentoc-git-prov-unborn-');
+  const unborn = makeDir('ragent-git-prov-unborn-');
   git(unborn, ['init', '-q']);
   const unbornResult = await collectGitProvenance(unborn);
   assert.equal(unbornResult.state, 'partial', 'a repo with no commits cannot produce provenance');
@@ -172,7 +172,7 @@ try {
   git(repo, ['config', 'core.hooksPath', hooksDir]);
   // Git's fsmonitor is a separate executable hook, not covered by hooksPath.
   // First prove this actual Git invokes our harmless fixture on status, then
-  // ensure AgentoC's background read-only capture does not invoke it.
+  // ensure Ragent's background read-only capture does not invoke it.
   const fsmonitorMarker = join(repo, 'fsmonitor-ran.txt');
   const fsmonitorScript = join(repo, '.git', 'fsmonitor-fixture');
   writeFileSync(fsmonitorScript, '#!/bin/sh\necho invoked > fsmonitor-ran.txt\nexit 0\n');

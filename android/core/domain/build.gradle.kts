@@ -5,14 +5,14 @@ plugins {
 }
 
 android {
-    namespace = "com.andysagent.agentoc.core.domain"
+    namespace = "com.andysagent.ragent.core.domain"
     compileSdk = 37
     defaultConfig {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Allow local device runs to coexist with independently signed test
         // packages from other checkouts without uninstalling their data.
-        providers.gradleProperty("agentocDomainTestApplicationId").orNull?.let { testApplicationId = it }
+        providers.gradleProperty("ragentDomainTestApplicationId").orNull?.let { testApplicationId = it }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

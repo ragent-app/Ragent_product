@@ -9,7 +9,7 @@ import { applyPrivilegedShimSpawnEnv } from '../chat/privileged-shim-listener.mj
 if (process.platform !== 'win32') {
   console.log('Windows Run CLI launcher: skipped on non-Windows');
 } else {
-  const directory = await mkdtemp(join(tmpdir(), 'agentoc-cli-shim-'));
+  const directory = await mkdtemp(join(tmpdir(), 'ragent-cli-shim-'));
   try {
     const env = { ...process.env };
     const probe = { PATH: 'C:\\Windows' };
@@ -19,7 +19,7 @@ if (process.platform !== 'win32') {
       entryPath: resolve('cli.js') });
     const powershell = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
     const result = spawnSync(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-      'agentoc trigger --help'], { env, encoding: 'utf8', timeout: 30_000 });
+      'ragent trigger --help'], { env, encoding: 'utf8', timeout: 30_000 });
     assert.equal(result.status, 0, result.stderr || String(result.error));
     assert.match(result.stdout, /ragent trigger <command>/);
     assert.match(result.stdout, /--session/);

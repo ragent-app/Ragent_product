@@ -15,10 +15,10 @@ It does not require a separately installed Node runtime.
 
 On an interactive installation, the installer can ask for an owner username
 and password. A non-interactive installation generates a password instead and
-stores it in `/etc/agentoc/initial-credentials`, readable only by root. An
-administrator can read it with `sudo cat /etc/agentoc/initial-credentials`.
+stores it in `/etc/ragent/initial-credentials`, readable only by root. An
+administrator can read it with `sudo cat /etc/ragent/initial-credentials`.
 After recording it and changing the password in Settings, remove the file with
-`sudo rm /etc/agentoc/initial-credentials`. An existing installation's
+`sudo rm /etc/ragent/initial-credentials`. An existing installation's
 credentials are retained on upgrade.
 
 Local HTML navigation can automatically create an owner session. Loopback TCP
@@ -28,24 +28,24 @@ access requires its own authentication and must not expose the local service
 without an appropriate access-control boundary.
 
 The installer uses the invoking sudo user as the service user when it can
-establish that identity; otherwise it uses the `agentoc` system account. Runs
+establish that identity; otherwise it uses the `ragent` system account. Runs
 have the configured service user's ordinary file access. Check
-`/etc/agentoc/service-user` before relying on access to an existing workspace.
+`/etc/ragent/service-user` before relying on access to an existing workspace.
 By default, the systemd launcher removes restricted supplementary groups such
 as `sudo` and `docker` before starting a same-user Run. It uses the trusted
 `/usr/bin/setpriv` and verifies numeric group IDs as well as names to catch
 aliases. If the executable or group identities cannot be verified, the Run is
 refused. This preserves ordinary access granted directly to the service user;
 access that depends on a removed group is unavailable to the Run.
-For a separate unprivileged runner, set `AGENTOC_RUNNER_SAME_USER=0`,
-`AGENTOC_RUNNER_USER` and `AGENTOC_RUNNER_GROUP` in the root-controlled
+For a separate unprivileged runner, set `RAGENT_RUNNER_SAME_USER=0`,
+`RAGENT_RUNNER_USER` and `RAGENT_RUNNER_GROUP` in the root-controlled
 environment, then restart the lifecycle broker and service. Run publication
 files and capability tokens use file ACLs for the designated runner; older
 versions of those files are repaired on launch.
 On a physical Ubuntu 24.04 x86-64 host, an OAuth Codex Run completed after
 the managed Codex home was migrated from the previous runner identity. Other
 providers, upgrades and security boundaries still need release acceptance.
-The packaged `AGENTOC_RUNNER_DROP_GROUPS=auto` setting uses this path for
+The packaged `RAGENT_RUNNER_DROP_GROUPS=auto` setting uses this path for
 same-user Runs; a separate runner uses the systemd group-membership check.
 Setting it to `0` retains that check for all Runs, so an account in a restricted
 group is refused. Setting it to `1` explicitly uses group dropping for both
@@ -54,7 +54,7 @@ completed and a process-identity probe confirmed restricted groups were absent.
 Broader host, security and release acceptance are still outstanding.
 
 The privileged executor records one-shot approvals in
-`/var/log/agentoc-privileged/audit.jsonl` before execution. If that file is
+`/var/log/ragent-privileged/audit.jsonl` before execution. If that file is
 unreadable, malformed, incomplete, linked or writable by other users, the
 executor refuses to start; if a required record cannot be persisted, it
 refuses that operation. An administrator should investigate and restore a
@@ -65,7 +65,7 @@ unauthorized deletion or replacement by the host administrator.
 
 ## Optional runner sandbox
 
-When `AGENTOC_RUN_SANDBOX=1` is configured, Runs require the root-owned system
+When `RAGENT_RUN_SANDBOX=1` is configured, Runs require the root-owned system
 binary at `/usr/bin/bwrap` and safe ownership and permissions on its parent
 directories. A missing or untrusted binary refuses the Run instead of silently
 running without the requested isolation. Without this option, the product does
@@ -83,12 +83,12 @@ acceptance.
 
 ## Maintain and remove
 
-- `systemctl status agentoc.service` shows the service state.
-- `journalctl -u agentoc.service` shows the service log.
-- `sudo apt remove agentoc` removes the package and keeps user state.
-- `sudo apt purge agentoc` removes the host's local configuration, data, run
+- `systemctl status ragent.service` shows the service state.
+- `journalctl -u ragent.service` shows the service log.
+- `sudo apt remove ragent` removes the package and keeps user state.
+- `sudo apt purge ragent` removes the host's local configuration, data, run
   state and logs. State for a separately deployed Accounts service under
-  `/var/lib/agentoc/accounts` is retained.
+  `/var/lib/ragent/accounts` is retained.
 
 Removal stops scheduled and already-running storage cleanup, the service,
 activation sockets, brokers and detached Runs. If
@@ -106,13 +106,13 @@ Read the release notes for migration and rollback limits.
 
 Use a clean committed checkout, Node 24, the Go version declared in `p2p/go.mod`,
 the Debian packaging tools, a C compiler and the native architecture. Set
-`AGENTOC_PACKAGE_VERSION` to the intended three-part public version,
-`AGENTOC_DEB_OUTPUT_DIR` to the output directory, and `AGENTOC_NODE_CACHE_DIR`
+`RAGENT_PACKAGE_VERSION` to the intended three-part public version,
+`RAGENT_DEB_OUTPUT_DIR` to the output directory, and `RAGENT_NODE_CACHE_DIR`
 to an existing writable cache directory before running `bash scripts/build-deb.sh`.
 The builder records the full source commit and rejects a dirty checkout.
 For an archive build without a second checkout or worktree, set
-`AGENTOC_SOURCE_GIT_DIR` to a bare Git object store and
-`AGENTOC_SOURCE_COMMIT` to its full expected HEAD commit. Invoke the build and
+`RAGENT_SOURCE_GIT_DIR` to a bare Git object store and
+`RAGENT_SOURCE_COMMIT` to its full expected HEAD commit. Invoke the build and
 staging scripts from exact copies of that commit. The builder checks those
 scripts against Git, stages the desktop allowlist from committed objects, and
 rechecks the staged files before publishing the package. A commit marker in an
@@ -124,7 +124,7 @@ installation, upgrade, security and device-connection acceptance before release.
 Use the [desktop release validation checklist](desktop-release-validation.md)
 to record the candidate's evidence and remaining limitations.
 An offline Claude Code binary override also requires its SHA-256 and its
-license file (`AGENTOC_CLAUDE_BINARY_SHA256` and
-`AGENTOC_CLAUDE_LICENSE_SOURCE`). Release owners must review the applicable
+license file (`RAGENT_CLAUDE_BINARY_SHA256` and
+`RAGENT_CLAUDE_LICENSE_SOURCE`). Release owners must review the applicable
 [Claude Code preinstallation terms](https://code.claude.com/docs/en/legal-and-compliance),
 including end-user authentication and billing conditions, before distribution.

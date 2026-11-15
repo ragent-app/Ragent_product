@@ -6,20 +6,20 @@ import { mkdtemp, mkdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-if (process.platform !== 'win32' || process.env.AGENTOC_SAMSUNG_APPROVAL_QA !== '1') {
+if (process.platform !== 'win32' || process.env.RAGENT_SAMSUNG_APPROVAL_QA !== '1') {
   console.log('samsung-windows-approval-bridge: skipped (explicit Windows device opt-in required)');
   process.exit(0);
 }
-const root = await mkdtemp(path.join(os.tmpdir(), 'agentoc-phone-approval-'));
+const root = await mkdtemp(path.join(os.tmpdir(), 'ragent-phone-approval-'));
 const instance = path.join(root, 'instance');
 const workspace = path.join(instance, 'workspace');
 await mkdir(workspace, { recursive: true });
-process.env.AGENTOC_INSTANCE_ROOT = instance;
-process.env.AGENTOC_CONFIG_DIR = path.join(instance, 'config');
-process.env.AGENTOC_WORK_ROOT_DIR = workspace;
-process.env.AGENTOC_MEMORY_DIR = path.join(instance, 'memory');
-process.env.AGENTOC_PROVIDER_HOMES_DIR = path.join(instance, 'provider-homes');
-process.env.AGENTOC_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
+process.env.RAGENT_INSTANCE_ROOT = instance;
+process.env.RAGENT_CONFIG_DIR = path.join(instance, 'config');
+process.env.RAGENT_WORK_ROOT_DIR = workspace;
+process.env.RAGENT_MEMORY_DIR = path.join(instance, 'memory');
+process.env.RAGENT_PROVIDER_HOMES_DIR = path.join(instance, 'provider-homes');
+process.env.RAGENT_RUN_SPOOL_DIR = path.join(instance, 'data', 'chat-runs');
 
 const { appendRunSpoolRecord, createRun, getRun } = await import('../chat/runs.mjs');
 const { withSessionsMetaMutation, mutateSessionMeta } = await import('../chat/session-meta-store.mjs');
@@ -27,7 +27,7 @@ const { getHistory } = await import('../chat/session-manager.mjs');
 const { trackClaudeBidiApprovalRequest, trackCodexAppServerApprovalRequest } = await import('../chat/runner-sidecar.mjs');
 const { handleSessionMainRoutes } = await import('../chat/router-session-main-routes.mjs');
 const sessionId = 'samsung-fixture';
-const groupedCodex = process.env.AGENTOC_SAMSUNG_APPROVAL_GROUP === '1';
+const groupedCodex = process.env.RAGENT_SAMSUNG_APPROVAL_GROUP === '1';
 const tool = groupedCodex ? 'codex' : 'claude';
 const runtimeFamily = groupedCodex ? 'codex-app-server-json' : 'claude-stream-json-bidi';
 await withSessionsMetaMutation(async (rows, save) => {

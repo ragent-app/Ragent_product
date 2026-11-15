@@ -75,7 +75,7 @@ try {
       assert.equal(existsSync(join(f.destination, name)), true, name);
     }
     assert.equal((await scanRuntimePayload(f.destination)).ok, true);
-    assert.equal(readFileSync(join(f.destination, '.agentoc-source-commit'), 'utf8').trim(), result.sourceRevision);
+    assert.equal(readFileSync(join(f.destination, '.ragent-source-commit'), 'utf8').trim(), result.sourceRevision);
   });
   await check('Accounts profile maps independent package identity and includes only its allowed shared modules', async () => {
     const f = fixture({ 'lib/target-runtime-policy.mjs': 'export {};', 'static/m3-pages.css': 'body{}' });
@@ -112,7 +112,7 @@ try {
     const names = ['package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs'];
     const inputs = Object.fromEntries(names.map(name => [`desktop/${name}`, `committed ${name}\n`]));
     inputs['android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png'] = Buffer.from([0, 255, 1]);
-    inputs['static/desktop/agentoc-android-logo.png'] = Buffer.from([0, 255, 1]);
+    inputs['static/desktop/ragent-android-logo.png'] = Buffer.from([0, 255, 1]);
     inputs['static/icon-512.png'] = Buffer.from([0, 255, 1]);
     const f = fixture({ 'packaging/runtime-payload.json': committedManifest, ...inputs });
     writeFileSync(join(f.source, 'desktop/main.cjs'), 'dirty desktop code');

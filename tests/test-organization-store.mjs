@@ -9,15 +9,15 @@ import { fileURLToPath } from 'url';
 // Isolate config + session storage before importing anything that reads it
 // (matches tests/test-collaboration-store.mjs style with a throwaway dir).
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-org-store-'));
-const probeHome = mkdtempSync(join(tmpdir(), 'agentoc-org-probe-'));
-const shadowChildHome = mkdtempSync(join(tmpdir(), 'agentoc-org-shadow-child-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-org-store-'));
+const probeHome = mkdtempSync(join(tmpdir(), 'ragent-org-probe-'));
+const shadowChildHome = mkdtempSync(join(tmpdir(), 'ragent-org-shadow-child-'));
 process.env.HOME = tempHome;
 // Keep the feature flags deterministically off for the main process so the
 // "flag off -> projection null" path is exercised without ambient env noise.
-delete process.env.AGENTOC_ORG_SCHEMA_ENABLED;
-delete process.env.AGENTOC_ORG_SHADOW_PROJECTION;
-delete process.env.AGENTOC_CONFIG_DIR;
+delete process.env.RAGENT_ORG_SCHEMA_ENABLED;
+delete process.env.RAGENT_ORG_SHADOW_PROJECTION;
+delete process.env.RAGENT_CONFIG_DIR;
 
 const workspace = join(tempHome, 'workspace');
 mkdirSync(workspace, { recursive: true });
@@ -49,13 +49,13 @@ const a = new Proxy(assert, {
 function childEnv(home, overrides = {}) {
   const env = { ...process.env, HOME: home };
   for (const key of [
-    'AGENTOC_CONFIG_DIR',
-    'AGENTOC_INSTANCE_ROOT',
-    'AGENTOC_WORK_ROOT_DIR',
-    'AGENTOC_MEMORY_DIR',
-    'AGENTOC_RUN_SPOOL_DIR',
-    'AGENTOC_ORG_SCHEMA_ENABLED',
-    'AGENTOC_ORG_SHADOW_PROJECTION',
+    'RAGENT_CONFIG_DIR',
+    'RAGENT_INSTANCE_ROOT',
+    'RAGENT_WORK_ROOT_DIR',
+    'RAGENT_MEMORY_DIR',
+    'RAGENT_RUN_SPOOL_DIR',
+    'RAGENT_ORG_SCHEMA_ENABLED',
+    'RAGENT_ORG_SHADOW_PROJECTION',
   ]) {
     delete env[key];
   }
@@ -434,22 +434,22 @@ async function testFlagParsing() {
   a.equal(ORG_SHADOW_PROJECTION, false, 'ORG_SHADOW_PROJECTION defaults to false in-process');
 
   const unset = probeFlags({});
-  a.equal(unset.ORG_SCHEMA_ENABLED, false, 'unset AGENTOC_ORG_SCHEMA_ENABLED -> false');
-  a.equal(unset.ORG_SHADOW_PROJECTION, false, 'unset AGENTOC_ORG_SHADOW_PROJECTION -> false');
+  a.equal(unset.ORG_SCHEMA_ENABLED, false, 'unset RAGENT_ORG_SCHEMA_ENABLED -> false');
+  a.equal(unset.ORG_SHADOW_PROJECTION, false, 'unset RAGENT_ORG_SHADOW_PROJECTION -> false');
 
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: '1' }).ORG_SCHEMA_ENABLED, true, 'flag=1 enables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: '0' }).ORG_SCHEMA_ENABLED, false, 'flag=0 disables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'true' }).ORG_SCHEMA_ENABLED, true, 'flag=true enables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'false' }).ORG_SCHEMA_ENABLED, false, 'flag=false disables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'off' }).ORG_SCHEMA_ENABLED, false, 'flag=off disables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'no' }).ORG_SCHEMA_ENABLED, false, 'flag=no disables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'TRUE' }).ORG_SCHEMA_ENABLED, true, 'flag is case-insensitive');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: 'yes' }).ORG_SCHEMA_ENABLED, true, 'flag=yes enables');
-  a.equal(probeFlags({ AGENTOC_ORG_SCHEMA_ENABLED: ' ' }).ORG_SCHEMA_ENABLED, false, 'blank flag falls back to default');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: '1' }).ORG_SCHEMA_ENABLED, true, 'flag=1 enables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: '0' }).ORG_SCHEMA_ENABLED, false, 'flag=0 disables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'true' }).ORG_SCHEMA_ENABLED, true, 'flag=true enables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'false' }).ORG_SCHEMA_ENABLED, false, 'flag=false disables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'off' }).ORG_SCHEMA_ENABLED, false, 'flag=off disables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'no' }).ORG_SCHEMA_ENABLED, false, 'flag=no disables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'TRUE' }).ORG_SCHEMA_ENABLED, true, 'flag is case-insensitive');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: 'yes' }).ORG_SCHEMA_ENABLED, true, 'flag=yes enables');
+  a.equal(probeFlags({ RAGENT_ORG_SCHEMA_ENABLED: ' ' }).ORG_SCHEMA_ENABLED, false, 'blank flag falls back to default');
 
-  a.equal(probeFlags({ AGENTOC_ORG_SHADOW_PROJECTION: '1' }).ORG_SHADOW_PROJECTION, true, 'shadow flag=1 enables');
-  a.equal(probeFlags({ AGENTOC_ORG_SHADOW_PROJECTION: '0' }).ORG_SHADOW_PROJECTION, false, 'shadow flag=0 disables');
-  a.equal(probeFlags({ AGENTOC_ORG_SHADOW_PROJECTION: 'false' }).ORG_SHADOW_PROJECTION, false, 'shadow flag=false disables');
+  a.equal(probeFlags({ RAGENT_ORG_SHADOW_PROJECTION: '1' }).ORG_SHADOW_PROJECTION, true, 'shadow flag=1 enables');
+  a.equal(probeFlags({ RAGENT_ORG_SHADOW_PROJECTION: '0' }).ORG_SHADOW_PROJECTION, false, 'shadow flag=0 disables');
+  a.equal(probeFlags({ RAGENT_ORG_SHADOW_PROJECTION: 'false' }).ORG_SHADOW_PROJECTION, false, 'shadow flag=false disables');
 }
 
 // ---------------------------------------------------------------------------
@@ -478,7 +478,7 @@ async function testShadowProjection() {
     `console.log('SHADOW=' + JSON.stringify(shadow));`,
   ].join('\n');
   const out = execFileSync(process.execPath, ['--input-type=module', '--eval', script], {
-    env: childEnv(shadowChildHome, { AGENTOC_ORG_SHADOW_PROJECTION: '1' }),
+    env: childEnv(shadowChildHome, { RAGENT_ORG_SHADOW_PROJECTION: '1' }),
     encoding: 'utf8',
   });
   const line = out.trim().split('\n').filter((l) => l.startsWith('SHADOW=')).pop();

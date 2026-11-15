@@ -21,18 +21,18 @@ import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-consult-session-persist-'));
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-consult-session-persist-'));
 
 // Isolate config + session storage before importing anything that reads it.
 process.env.HOME = tempHome;
-process.env.AGENTOC_CONFIG_DIR = join(tempHome, 'config');
-delete process.env.AGENTOC_INSTANCE_ROOT;
-delete process.env.AGENTOC_WORK_ROOT_DIR;
-delete process.env.AGENTOC_MEMORY_DIR;
-delete process.env.AGENTOC_RUN_SPOOL_DIR;
-delete process.env.AGENTOC_ORG_SCHEMA_ENABLED;
-delete process.env.AGENTOC_ORG_SHADOW_PROJECTION;
-delete process.env.AGENTOC_MANAGED_INPUT_ENFORCEMENT;
+process.env.RAGENT_CONFIG_DIR = join(tempHome, 'config');
+delete process.env.RAGENT_INSTANCE_ROOT;
+delete process.env.RAGENT_WORK_ROOT_DIR;
+delete process.env.RAGENT_MEMORY_DIR;
+delete process.env.RAGENT_RUN_SPOOL_DIR;
+delete process.env.RAGENT_ORG_SCHEMA_ENABLED;
+delete process.env.RAGENT_ORG_SHADOW_PROJECTION;
+delete process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT;
 
 const workspace = join(tempHome, 'workspace');
 mkdirSync(workspace, { recursive: true });

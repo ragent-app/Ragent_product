@@ -4,14 +4,14 @@
 param([Parameter(Mandatory=$true)][string]$ArtifactDirectory,
       [Parameter(Mandatory=$true)][string]$EvidenceDirectory)
 $ErrorActionPreference='Stop'
-$qaServices=@('AgentoC-ControlPlane','AgentoC-RunnerSupervisor')
-$qaProduct='C:\Program Files\AgentoC'
-$qaData='C:\ProgramData\AgentoC'
+$qaServices=@('Ragent-ControlPlane','Ragent-RunnerSupervisor')
+$qaProduct='C:\Program Files\Ragent'
+$qaData='C:\ProgramData\Ragent'
 $qaRoot=[IO.Path]::GetFullPath($EvidenceDirectory)
 $qaArtifacts=[IO.Path]::GetFullPath($ArtifactDirectory)
 $qaSpec=@{
-    preview=@{name='AgentoC-0.3.13.29-x64-unsigned.msi';hash='6ae728a6f397024742bea2e0590b9a8fa25650fbdb4c2de49f50249b1f9807a2'}
-    previous=@{name='AgentoC-0.3.13.28-x64.msi';hash='ad7384d40f2923d5deebc95f0c0923a41f8806d0820f93ad394b4305f85aeda0'}
+    preview=@{name='Ragent-0.3.13.29-x64-unsigned.msi';hash='6ae728a6f397024742bea2e0590b9a8fa25650fbdb4c2de49f50249b1f9807a2'}
+    previous=@{name='Ragent-0.3.13.28-x64.msi';hash='ad7384d40f2923d5deebc95f0c0923a41f8806d0820f93ad394b4305f85aeda0'}
 }
 function Assert-QaDisposable {
     if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or
@@ -83,7 +83,7 @@ function Probe-QaProduct([string]$Stage){
         try{$last=Read-QaHttp '/healthz';if($last.status -eq 200){break}}catch{}
         Start-Sleep -Milliseconds 500
     }while((Get-Date) -lt $until)
-    $services=@(Get-CimInstance Win32_Service -Filter "Name='AgentoC-ControlPlane' OR Name='AgentoC-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,StartName,ProcessId)
+    $services=@(Get-CimInstance Win32_Service -Filter "Name='Ragent-ControlPlane' OR Name='Ragent-RunnerSupervisor'"|Sort-Object Name|Select-Object Name,State,StartName,ProcessId)
     $page=$null;try{$page=Read-QaHttp '/' -Html}catch{}
     $pass=$null -ne $last -and $last.status -eq 200 -and $null -ne $page -and $page.status -eq 200 -and $page.ownerCookie -and
           $services.Count -eq 2 -and @($services|Where-Object {$_.State -ne 'Running'}).Count -eq 0
@@ -94,7 +94,7 @@ function Probe-QaProduct([string]$Stage){
 function Assert-QaRemoved([string]$Stage){
     $remaining=@(Get-Service -Name $qaServices -ErrorAction SilentlyContinue)
     $processes=@(Get-CimInstance Win32_Process|Where-Object {$_.ExecutablePath -and $_.ExecutablePath.StartsWith($qaProduct+'\',[StringComparison]::OrdinalIgnoreCase)}|Select-Object ProcessId,Name)
-    $binaryExists=Test-Path -LiteralPath (Join-Path $qaProduct 'AgentoC.ServiceHost.exe')
+    $binaryExists=Test-Path -LiteralPath (Join-Path $qaProduct 'Ragent.ServiceHost.exe')
     $pass=$remaining.Count -eq 0 -and $processes.Count -eq 0 -and -not $binaryExists
     $qaReport.probes+=@{stage=$Stage;pass=$pass;servicesRemaining=$remaining.Count;processesRemaining=$processes;serviceHostPresent=$binaryExists}
     if(-not $pass){$qaReport.failures+=($Stage+':REMOVE_INCOMPLETE')}
@@ -105,7 +105,7 @@ try{
     if(Invoke-QaMsi 'fresh-install' '/i' 'preview'){
         Probe-QaProduct 'fresh'
         foreach($name in $qaServices){Stop-Service -Name $name -ErrorAction Stop}
-        foreach($name in @('AgentoC-RunnerSupervisor','AgentoC-ControlPlane')){Start-Service -Name $name -ErrorAction Stop}
+        foreach($name in @('Ragent-RunnerSupervisor','Ragent-ControlPlane')){Start-Service -Name $name -ErrorAction Stop}
         Probe-QaProduct 'restart'
         if(Invoke-QaMsi 'repair' '/fa' 'preview'){Probe-QaProduct 'repair'}
     }

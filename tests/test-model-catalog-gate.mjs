@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const root = await mkdtemp(join(tmpdir(), 'agentoc-model-catalog-gate-'));
+const root = await mkdtemp(join(tmpdir(), 'ragent-model-catalog-gate-'));
 
 try {
   // Isolated CONFIG_DIR with one synthetic codex provider + api-key secret.
@@ -47,7 +47,7 @@ try {
     JSON.stringify({ authType: 'api-key', apiKey: 'sk-test-only-not-a-real-key' }),
   );
 
-  process.env.AGENTOC_CONFIG_DIR = configDir;
+  process.env.RAGENT_CONFIG_DIR = configDir;
   process.env.HOME = root;
   // Fresh import so CONFIG_DIR binds to the synthetic dir.
   const { getModelsForTool, getToolModelCatalog } = await import('../chat/models.mjs');

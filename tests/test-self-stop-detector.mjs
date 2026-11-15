@@ -21,11 +21,11 @@ assert.equal(isStoppingSubState('deactivating'), true);
 assert.equal(isStoppingSubState('final-sigkill'), true);
 
 assert.equal(
-  detectOwnSystemdUnit('12:pids:/foo\n0::/system.slice/agentoc.service\n'),
-  'agentoc.service',
+  detectOwnSystemdUnit('12:pids:/foo\n0::/system.slice/ragent.service\n'),
+  'ragent.service',
 );
 assert.equal(detectOwnSystemdUnit('0::/user.slice/user-1000.slice/session-3.scope\n'), '');
-assert.equal(detectOwnSystemdUnit('0::/agentoc-runners.slice/agentoc-runner-run_x.service\n'), '');
+assert.equal(detectOwnSystemdUnit('0::/ragent-runners.slice/ragent-runner-run_x.service\n'), '');
 assert.equal(detectOwnSystemdUnit(''), '');
 assert.equal(detectOwnSystemdUnit('0::/system.slice/not-a-unit.slice\n'), '');
 
@@ -45,14 +45,14 @@ assert.match(describeSignalForensics('', 3), /pid=3 SigPnd=\?/);
 {
   const clean = sanitizeSystemctlEnv({
     NOTIFY_SOCKET: '/run/systemd/notify',
-    AGENTOC_NOTIFY_FD: '100',
+    RAGENT_NOTIFY_FD: '100',
     WATCHDOG_PID: '123',
     WATCHDOG_USEC: '45000000',
     PATH: '/usr/bin',
     KEEP_ME: 'yes',
   });
   assert.equal(clean.NOTIFY_SOCKET, undefined);
-  assert.equal(clean.AGENTOC_NOTIFY_FD, undefined);
+  assert.equal(clean.RAGENT_NOTIFY_FD, undefined);
   assert.equal(clean.WATCHDOG_PID, undefined);
   assert.equal(clean.WATCHDOG_USEC, undefined);
   assert.equal(clean.PATH, '/usr/bin');
@@ -66,7 +66,7 @@ assert.match(
 
 // Env kill switch.
 const off = startSelfStopDetector({
-  env: { AGENTOC_SELF_STOP_DETECTOR: 'off' },
+  env: { RAGENT_SELF_STOP_DETECTOR: 'off' },
   showFn: async () => 'stop-sigterm',
   startDelayMs: 0,
   intervalMs: 5,
@@ -79,7 +79,7 @@ const script = ['running', 'stop-sigterm', 'stop-sigterm', 'stop-sigterm'];
 let call = 0;
 let seen = [];
 const detector = startSelfStopDetector({
-  unit: 'agentoc.service',
+  unit: 'ragent.service',
   startDelayMs: 0,
   intervalMs: 5,
   consecutiveHits: 2,
@@ -90,13 +90,13 @@ assert.equal(detector.active, true);
 await sleep(90);
 detector.stop();
 assert.equal(seen.length, 1);
-assert.equal(seen[0].unit, 'agentoc.service');
+assert.equal(seen[0].unit, 'ragent.service');
 assert.equal(seen[0].subState, 'stop-sigterm');
 
 // A failing systemctl probe must never fire the detector.
 let failures = 0;
 const failing = startSelfStopDetector({
-  unit: 'agentoc.service',
+  unit: 'ragent.service',
   startDelayMs: 0,
   intervalMs: 5,
   consecutiveHits: 1,
@@ -116,7 +116,7 @@ const script2 = ['stop-sigterm', 'running', 'stop-sigterm', 'stop-sigterm'];
 call = 0;
 seen = [];
 const resetting = startSelfStopDetector({
-  unit: 'agentoc.service',
+  unit: 'ragent.service',
   startDelayMs: 0,
   intervalMs: 5,
   consecutiveHits: 2,

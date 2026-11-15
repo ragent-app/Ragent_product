@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 
 import { collectWindowsRuntimeDiagnostics } from '../lib/windows-runtime-diagnostics.mjs';
 
-const instanceRoot = 'C:\\Users\\Alice\\AppData\\Local\\AgentoC\\instances\\owner';
+const instanceRoot = 'C:\\Users\\Alice\\AppData\\Local\\Ragent\\instances\\owner';
 const paths = {
-  productRoot: 'C:\\Users\\Alice\\AppData\\Local\\AgentoC',
+  productRoot: 'C:\\Users\\Alice\\AppData\\Local\\Ragent',
   instanceRoot,
   configDir: `${instanceRoot}\\config`,
   dataDir: `${instanceRoot}\\data`,
@@ -66,8 +66,8 @@ const report = await collectWindowsRuntimeDiagnostics({
           installed: true,
           missing: [],
           states: {
-            'AgentoC-RunnerSupervisor': 'Running',
-            'AgentoC-ControlPlane': 'Running',
+            'Ragent-RunnerSupervisor': 'Running',
+            'Ragent-ControlPlane': 'Running',
           },
         }),
         stderr: '',
@@ -84,7 +84,7 @@ assert.equal(report.identity.status, 'loaded');
 assert.equal(report.identity.instanceId, 'inst_diagnostic');
 assert.equal(report.endpoint.status, 'derived');
 assert.equal(report.endpoint.transport, 'named-pipe');
-assert.match(report.endpoint.name, /^\\\\\.\\pipe\\agentoc-[0-9a-f-]+$/);
+assert.match(report.endpoint.name, /^\\\\\.\\pipe\\ragent-[0-9a-f-]+$/);
 assert.deepEqual(report.files.auth, { path: `${paths.configDir}\\auth.json`, exists: true, type: 'file' });
 assert.deepEqual(report.files.secretEntries, [
   { name: 'secret-api.json', type: 'file' },
@@ -124,11 +124,11 @@ const serviceReport = await collectWindowsRuntimeDiagnostics({
   env: {
     ProgramData: 'C:\\ProgramData',
     LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-    AGENTOC_INSTANCE_ROOT: 'C:\\Users\\Alice\\wrong-instance',
-    AGENTOC_RUN_SPOOL_DIR: 'C:\\Users\\Alice\\wrong-instance\\data\\chat-runs',
+    RAGENT_INSTANCE_ROOT: 'C:\\Users\\Alice\\wrong-instance',
+    RAGENT_RUN_SPOOL_DIR: 'C:\\Users\\Alice\\wrong-instance\\data\\chat-runs',
   },
   identityLoader: async ({ filePath }) => {
-    assert.equal(filePath, 'C:\\ProgramData\\AgentoC\\instances\\owner\\config\\instance-identity.json');
+    assert.equal(filePath, 'C:\\ProgramData\\Ragent\\instances\\owner\\config\\instance-identity.json');
     return { instanceId: 'inst_service_diagnostic' };
   },
   lstatImpl: async () => {
@@ -143,8 +143,8 @@ const serviceReport = await collectWindowsRuntimeDiagnostics({
           installed: true,
           missing: [],
           states: {
-            'AgentoC-RunnerSupervisor': 'Running',
-            'AgentoC-ControlPlane': 'Running',
+            'Ragent-RunnerSupervisor': 'Running',
+            'Ragent-ControlPlane': 'Running',
           },
         }),
         stderr: '',
@@ -156,10 +156,10 @@ const serviceReport = await collectWindowsRuntimeDiagnostics({
 assert.equal(serviceReport.scope, 'service');
 assert.equal(serviceReport.status, 'ready');
 assert.equal(serviceReport.services.status, 'ready');
-assert.equal(serviceReport.services.states['AgentoC-ControlPlane'], 'Running');
-assert.equal(serviceReport.paths.productRoot, 'C:\\ProgramData\\AgentoC');
-assert.equal(serviceReport.paths.instanceRoot, 'C:\\ProgramData\\AgentoC\\instances\\owner');
-assert.match(serviceReport.endpoint.name, /^\\\\\.\\pipe\\agentoc-/);
+assert.equal(serviceReport.services.states['Ragent-ControlPlane'], 'Running');
+assert.equal(serviceReport.paths.productRoot, 'C:\\ProgramData\\Ragent');
+assert.equal(serviceReport.paths.instanceRoot, 'C:\\ProgramData\\Ragent\\instances\\owner');
+assert.match(serviceReport.endpoint.name, /^\\\\\.\\pipe\\ragent-/);
 
 const stoppedServiceReport = await collectWindowsRuntimeDiagnostics({
   platform: 'win32',
@@ -178,8 +178,8 @@ const stoppedServiceReport = await collectWindowsRuntimeDiagnostics({
           installed: true,
           missing: [],
           states: {
-            'AgentoC-RunnerSupervisor': 'Running',
-            'AgentoC-ControlPlane': 'Stopped',
+            'Ragent-RunnerSupervisor': 'Running',
+            'Ragent-ControlPlane': 'Stopped',
           },
         }),
         stderr: '',
@@ -206,7 +206,7 @@ const missingServiceReport = await collectWindowsRuntimeDiagnostics({
       return {
         stdout: JSON.stringify({
           installed: false,
-          missing: ['AgentoC-RunnerSupervisor', 'AgentoC-ControlPlane'],
+          missing: ['Ragent-RunnerSupervisor', 'Ragent-ControlPlane'],
           states: {},
         }),
         stderr: '',
@@ -218,8 +218,8 @@ const missingServiceReport = await collectWindowsRuntimeDiagnostics({
 assert.equal(missingServiceReport.status, 'degraded');
 assert.equal(missingServiceReport.services.status, 'missing');
 assert.deepEqual(missingServiceReport.services.missing, [
-  'AgentoC-RunnerSupervisor',
-  'AgentoC-ControlPlane',
+  'Ragent-RunnerSupervisor',
+  'Ragent-ControlPlane',
 ]);
 
 const invalidScope = await collectWindowsRuntimeDiagnostics({ platform: 'win32', scope: 'machine' });

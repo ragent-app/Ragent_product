@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { assessWindowsIdentityMigration as assess } from '../lib/windows-identity-migration.mjs';
 const control='S-1-5-80-1-2-3-4-5',executor='S-1-5-80-6-7-8-9-10';
 function snapshot(){
-  const services=['AgentoC-ControlPlane','AgentoC-RunnerSupervisor'].map((name,i)=>({name,present:true,
+  const services=['Ragent-ControlPlane','Ragent-RunnerSupervisor'].map((name,i)=>({name,present:true,
     configuredAccount:'NT SERVICE\\'+name,serviceSid:i?executor:control,commandUsesOwnedHost:true,tokenDirectlyVerified:false,pid:100+i,state:'Running'}));
   return {schemaVersion:1,readOnly:true,credentialContentsRead:false,ownerIpcConnected:false,services,
     serviceObservationAfter:structuredClone(services),paths:['control-config','control-auth-key','instance-runtime','run-spool','provider-homes','harness-root','installed-host'].map(label=>({label,

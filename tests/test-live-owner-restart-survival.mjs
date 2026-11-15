@@ -7,28 +7,28 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
-import { createAgentoCHttpClient } from '../lib/agentoc-http-client.mjs';
+import { createRagentHttpClient } from '../lib/ragent-http-client.mjs';
 
 const execFileAsync = promisify(execFileCallback);
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
 
-const shouldRun = process.argv.includes('--live') || process.env.AGENTOC_LIVE_RESTART_TEST === '1';
+const shouldRun = process.argv.includes('--live') || process.env.RAGENT_LIVE_RESTART_TEST === '1';
 if (!shouldRun) {
-  console.log('test-live-owner-restart-survival: skipped (set AGENTOC_LIVE_RESTART_TEST=1 or pass --live)');
+  console.log('test-live-owner-restart-survival: skipped (set RAGENT_LIVE_RESTART_TEST=1 or pass --live)');
   process.exit(0);
 }
 
-const baseUrl = String(process.env.AGENTOC_LIVE_BASE_URL || 'http://127.0.0.1:7690').trim();
-const serviceName = String(process.env.AGENTOC_LIVE_SERVICE || 'agentoc.service').trim();
-const configDir = String(process.env.AGENTOC_LIVE_CONFIG_DIR || join(homedir(), '.config', 'agentoc')).trim();
+const baseUrl = String(process.env.RAGENT_LIVE_BASE_URL || 'http://127.0.0.1:7690').trim();
+const serviceName = String(process.env.RAGENT_LIVE_SERVICE || 'ragent.service').trim();
+const configDir = String(process.env.RAGENT_LIVE_CONFIG_DIR || join(homedir(), '.config', 'ragent')).trim();
 const runsDir = join(configDir, 'chat-runs');
 const toolsFile = join(configDir, 'tools.json');
-const tempDir = mkdtempSync(join(tmpdir(), 'agentoc-live-restart-'));
+const tempDir = mkdtempSync(join(tmpdir(), 'ragent-live-restart-'));
 const fakeToolPath = join(tempDir, 'fake-codex-live-restart');
 const toolId = 'fake-codex-live-restart';
-const client = createAgentoCHttpClient({ baseUrl });
+const client = createRagentHttpClient({ baseUrl });
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

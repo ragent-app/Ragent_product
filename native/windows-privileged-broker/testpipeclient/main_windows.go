@@ -17,14 +17,14 @@ import (
 )
 
 const (
-	requestPipe     = `\\.\pipe\AgentoC.PrivilegedBroker.Request.v2`
+	requestPipe     = `\\.\pipe\Ragent.PrivilegedBroker.Request.v2`
 	clientPipeMask  = 0x0012019B
 	maxFrameBytes   = 64 * 1024
-	brokerBinary    = `C:\Program Files\AgentoC\Broker\AgentoC.PrivilegedBroker.exe`
-	brokerStateFile = `C:\ProgramData\AgentoC-PrivilegedBroker\state.json`
+	brokerBinary    = `C:\Program Files\Ragent\Broker\Ragent.PrivilegedBroker.exe`
+	brokerStateFile = `C:\ProgramData\Ragent-PrivilegedBroker\state.json`
 )
 
-var serviceName = "AgentoC-ControlPlane"
+var serviceName = "Ragent-ControlPlane"
 
 type proposal struct {
 	Version   int    `json:"version"`
@@ -55,7 +55,7 @@ func (probeService) Execute(args []string, requests <-chan svc.ChangeRequest, ch
 	}
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	if err := submitOneProposal(); err != nil {
-		if serviceName == "AgentoC-RunnerSupervisor" && errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		if serviceName == "Ragent-RunnerSupervisor" && errors.Is(err, windows.ERROR_ACCESS_DENIED) {
 			if err := assertProtectedBoundary(); err == nil {
 				return false, 0
 			}
@@ -81,7 +81,7 @@ func assertProtectedBoundary() error {
 		return err
 	}
 	defer windows.CloseServiceHandle(manager)
-	name, err := windows.UTF16PtrFromString("AgentoC-PrivilegedBroker")
+	name, err := windows.UTF16PtrFromString("Ragent-PrivilegedBroker")
 	if err != nil {
 		return err
 	}
@@ -148,7 +148,7 @@ func submitOneProposal() error {
 		TurnID:    "qa-turn-1",
 		ActionID:  "qa-action-1",
 		Operation: "service.restart",
-		TargetID:  "AgentoC-Broker-QA-Target",
+		TargetID:  "Ragent-Broker-QA-Target",
 	}
 	payload, err := json.Marshal(request)
 	if err != nil || len(payload) == 0 || len(payload) > maxFrameBytes {
@@ -213,7 +213,7 @@ func readAll(handle windows.Handle, data []byte) error {
 }
 
 func main() {
-	if (serviceName != "AgentoC-ControlPlane" && serviceName != "AgentoC-RunnerSupervisor") || len(os.Args) != 1 {
+	if (serviceName != "Ragent-ControlPlane" && serviceName != "Ragent-RunnerSupervisor") || len(os.Args) != 1 {
 		fmt.Fprintln(os.Stderr, "APB_TEST_CLIENT_ARGUMENTS_REFUSED")
 		os.Exit(2)
 	}

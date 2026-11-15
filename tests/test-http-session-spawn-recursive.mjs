@@ -84,8 +84,8 @@ function buildFakeCodexScript() {
     '  ];',
     '}',
     'async function spawnChildSessions() {',
-    '  const projectRoot = process.env.AGENTOC_PROJECT_ROOT || process.cwd();',
-    "  const baseUrl = process.env.AGENTOC_CHAT_BASE_URL || `http://127.0.0.1:${process.env.CHAT_PORT || '7690'}`;",
+    '  const projectRoot = process.env.RAGENT_PROJECT_ROOT || process.cwd();',
+    "  const baseUrl = process.env.RAGENT_CHAT_BASE_URL || `http://127.0.0.1:${process.env.CHAT_PORT || '7690'}`;",
     '  const cliPath = `${projectRoot}/cli.js`;',
     '  const tasks = buildSpawnTasks();',
     '  return Promise.all(tasks.map(async (task) => {',
@@ -106,7 +106,7 @@ function buildFakeCodexScript() {
     '        type: \"item.completed\",',
     '        item: {',
     '          type: \"command_execution\",',
-    "          command: shouldSpawnThreeChildren ? 'agentoc session-spawn x3' : 'echo fake',",
+    "          command: shouldSpawnThreeChildren ? 'ragent session-spawn x3' : 'echo fake',",
     "          aggregated_output: shouldSpawnThreeChildren ? 'spawned parallel sessions' : 'fake',",
     '          exit_code: 0,',
     '          status: \"completed\",',
@@ -143,8 +143,8 @@ function buildFakeCodexScript() {
 }
 
 function setupTempHome() {
-  const home = mkdtempSync(join(tmpdir(), 'agentoc-http-session-spawn-'));
-  const configDir = join(home, '.config', 'agentoc');
+  const home = mkdtempSync(join(tmpdir(), 'ragent-http-session-spawn-'));
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   mkdirSync(configDir, { recursive: true });
   mkdirSync(localBin, { recursive: true });
@@ -182,19 +182,19 @@ function setupTempHome() {
 }
 
 async function startServer({ home, port, delayMs = 120 }) {
-  const configDir = join(home, '.config', 'agentoc');
+  const configDir = join(home, '.config', 'ragent');
   const localBin = join(home, '.local', 'bin');
   const child = spawn(process.execPath, ['chat-server.mjs'], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      AGENTOC_RUNNER_SUPERVISOR_SOCKET: "",
-      AGENTOC_RUNNER_SUPERVISOR_REQUIRED: "",
+      RAGENT_RUNNER_SUPERVISOR_SOCKET: "",
+      RAGENT_RUNNER_SUPERVISOR_REQUIRED: "",
       HOME: home,
       CHAT_PORT: String(port),
-      AGENTOC_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
-      AGENTOC_INSTANCE_ROOT: '',
-      AGENTOC_CONFIG_DIR: configDir,
+      RAGENT_CHAT_BASE_URL: `http://127.0.0.1:${port}`,
+      RAGENT_INSTANCE_ROOT: '',
+      RAGENT_CONFIG_DIR: configDir,
       SECURE_COOKIES: '0',
       FAKE_CODEX_DELAY_MS: String(delayMs),
       PATH: `${localBin}:${process.env.PATH || ''}`,
@@ -282,7 +282,7 @@ async function getEvents(port, sessionId) {
 
 function readRunManifest(home, runId) {
   return JSON.parse(
-    readFileSync(join(home, '.config', 'agentoc', 'chat-runs', runId, 'manifest.json'), 'utf8'),
+    readFileSync(join(home, '.config', 'ragent', 'chat-runs', runId, 'manifest.json'), 'utf8'),
   );
 }
 
@@ -436,7 +436,7 @@ try {
     throw error;
   } finally {
     await stopServer(server);
-    if (process.env.AGENTOC_KEEP_TEST_HOME === '1') {
+    if (process.env.RAGENT_KEEP_TEST_HOME === '1') {
       console.error(`[debug] kept test home at ${home}`);
     } else {
       rmSync(home, { recursive: true, force: true });

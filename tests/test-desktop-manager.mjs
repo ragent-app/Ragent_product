@@ -15,18 +15,18 @@ const [managerScript, managerStyles, baseStyles, sidebarStyles, responsiveStyles
   readFile(new URL('desktop/main.cjs', root), 'utf8'),
   readFile(new URL('desktop/preload.cjs', root), 'utf8'),
   readFile(new URL('desktop/wait.html', root), 'utf8'),
-  readFile(new URL('packaging/windows/AgentoC.wxs', root), 'utf8'),
+  readFile(new URL('packaging/windows/Ragent.wxs', root), 'utf8'),
   readFile(new URL('packaging/windows/build-msi.ps1', root), 'utf8'),
   readFile(new URL('tests/windows-desktop-manager-acceptance.ps1', root), 'utf8'),
 ]);
 
 const androidLogo = await readFile(new URL('android/app/src/main/res/drawable-nodpi/adaptive_foreground_png.png', root));
-const desktopLogo = await readFile(new URL('static/desktop/agentoc-android-logo.png', root));
+const desktopLogo = await readFile(new URL('static/desktop/ragent-android-logo.png', root));
 const crossDevicePanel = await readFile(new URL('static/chat/cross-device-panel.js', root), 'utf8');
 assert.deepEqual(desktopLogo, androidLogo, 'Windows manager branding must reuse the Android logo asset exactly');
 
 assert.match(router, /BODY_CLASS: parsedUrl\.query\?\.desktop === 'manager' \? 'desktop-manager' : ''/);
-assert.match(template, /desktop\/agentoc-android-logo\.png/);
+assert.match(template, /desktop\/ragent-android-logo\.png/);
 assert.match(template, /id="desktopManagerNav"/);
 assert.match(template, /id="desktopManagerGoogleAccountContent"/);
 assert.match(template, /id="desktopManagerDevicesContent"/);
@@ -48,12 +48,12 @@ assert.match(preload, /writeText: \(value\) => ipcRenderer\.invoke\("desktop:wri
 assert.doesNotMatch(preload, /exec|spawn|readFile|writeFile/);
 assert.match(preload, /onExternalOpenFailed/);
 assert.match(installer, /WixUnelevatedShellExec/);
-assert.match(installer, /CloseApplication Id="CloseAgentoCManager" Target="AgentoC\.exe" CloseMessage="yes" PromptToContinue="yes"/);
-assert.match(installer, /EmbeddedUI Id="AgentoCMsiEmbeddedUI"/);
-assert.match(installer, /Property Id="ARPPRODUCTICON" Value="AgentoCIcon"/);
-assert.match(installer, /Property Id="AGENTOC_LAUNCH"/);
-assert.match(installer, /Target="\[INSTALLFOLDER\]payload\\Desktop\\AgentoC\.exe"/);
-assert.match(installer, /AgentoCStartMenuShortcut/);
+assert.match(installer, /CloseApplication Id="CloseRagentManager" Target="Ragent\.exe" CloseMessage="yes" PromptToContinue="yes"/);
+assert.match(installer, /EmbeddedUI Id="RagentMsiEmbeddedUI"/);
+assert.match(installer, /Property Id="ARPPRODUCTICON" Value="RagentIcon"/);
+assert.match(installer, /Property Id="RAGENT_LAUNCH"/);
+assert.match(installer, /Target="\[INSTALLFOLDER\]payload\\Desktop\\Ragent\.exe"/);
+assert.match(installer, /RagentStartMenuShortcut/);
 assert.match(build, /generate-brand-assets\.ps1/);
 assert.match(build, /stage-windows\.mjs/);
 assert.match(build, /'\*\.d\.ts'/, 'staged runtime omits TypeScript-only declaration files to preserve the MSI size budget');
@@ -65,7 +65,7 @@ assert.match(build, /600MB/);
 assert.match(waitPage, /id="serviceState"/);
 assert.match(waitPage, /img-src 'self'/);
 assert.match(waitPage, /id="retry"/);
-assert.match(waitPage, /agentocDesktop\?\.retryService/);
+assert.match(waitPage, /ragentDesktop\?\.retryService/);
 assert.match(acceptance, /existingOwnerCookieAccepted=\$true/);
 assert.match(acceptance, /sqliteStorePresent=\$true/);
 assert.doesNotMatch(acceptance, /OpenRead\([^\n]*auth-sessions\.sqlite/);
@@ -86,7 +86,7 @@ const managerMarkup = template
   .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
 const normalMarkup = managerMarkup.replace('class="desktop-manager"', 'class=""');
 
-const browser = await chromium.launch({ headless: true, ...(process.env.AGENTOC_TEST_BROWSER_CHANNEL ? {channel: process.env.AGENTOC_TEST_BROWSER_CHANNEL} : {}) });
+const browser = await chromium.launch({ headless: true, ...(process.env.RAGENT_TEST_BROWSER_CHANNEL ? {channel: process.env.RAGENT_TEST_BROWSER_CHANNEL} : {}) });
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 760 } });
   await page.setContent(managerMarkup);
@@ -96,7 +96,7 @@ try {
   await page.evaluate(() => {
     window.__activeTab = 'settings';
     window.__updateOpens = 0;
-    window.agentocDesktop = {
+    window.ragentDesktop = {
       getUpdateState: async () => ({ status: 'ready', currentVersion: '1.0.0', latestVersion: 'v1.1.0', updateAvailable: true }),
       checkForUpdates: async () => ({ status: 'ready', currentVersion: '1.0.0', latestVersion: 'v1.1.0', updateAvailable: true }),
       openUpdate: async () => { window.__updateOpens++; return true; },
@@ -115,7 +115,7 @@ try {
       }
     };
     window.getActiveSidebarTabValue = () => window.__activeTab;
-    window.AgentoCCrossDevicePanel = {
+    window.RagentCrossDevicePanel = {
       open: (options) => window.__openedViews.push(options.view),
       refreshManager: () => { window.__managerRefreshes += 1; },
     };

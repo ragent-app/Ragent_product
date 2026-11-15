@@ -31,7 +31,7 @@ const verifier = path.join(repoRoot, 'scripts', 'verify-source-parity.mjs');
 // The compared path set is part of the verifier contract; keep this fixture
 // tree in sync with COMPARED in scripts/verify-source-parity.mjs.
 const TREE = {
-  'package.json': '{"name":"agentoc-test","version":"0.0.0-test"}',
+  'package.json': '{"name":"ragent-test","version":"0.0.0-test"}',
   'chat-server.mjs': 'export const ENTRY = "chat-server";\n',
   'chat/session-manager.mjs': 'export const ENTRY = "session-manager";\n',
   'lib/config.mjs': 'export const ENTRY = "config";\n',
@@ -173,7 +173,7 @@ async function main() {
     const f = await makeFixture();
     try {
       // working tree changes to a compared path; install mirrors the working tree
-      await fs.writeFile(path.join(f.src, 'package.json'), '{"name":"agentoc-test","version":"0.0.0-test-dirty"}');
+      await fs.writeFile(path.join(f.src, 'package.json'), '{"name":"ragent-test","version":"0.0.0-test-dirty"}');
       await fs.copyFile(path.join(f.src, 'package.json'), path.join(f.inst, 'package.json'));
 
       const strict = await runVerifier(baseArgs(f));
@@ -197,7 +197,7 @@ async function main() {
     const f = await makeFixture();
     try {
       // dirty source AND stale install (install still holds committed content)
-      await fs.writeFile(path.join(f.src, 'package.json'), '{"name":"agentoc-test","version":"0.0.0-test-dirty"}');
+      await fs.writeFile(path.join(f.src, 'package.json'), '{"name":"ragent-test","version":"0.0.0-test-dirty"}');
       const res = await runVerifier([...baseArgs(f), '--allow-dirty-source']);
       const rep = parseReport(res);
       assert.equal(res.code, 1, `hash mismatch must fail even with flag, got ${res.code}`);

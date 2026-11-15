@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFileCallback);
-const PROJECT_ROOT = '/opt/agentoc';
+const PROJECT_ROOT = '/opt/ragent';
 const DEFAULT_SSH_KEY = join(homedir(), '.ssh', 'id_ed25519');
 
 function trimString(value) {
@@ -186,7 +186,7 @@ async function injectLocalSshAccess(manifest) {
   }
   const publicKey = trimString(await readFile(`${DEFAULT_SSH_KEY}.pub`, 'utf8'));
   if (trimString(updated.host.provider).toLowerCase() === 'digitalocean') {
-    const providerEnv = await readFile('/root/.config/agentoc/providers/digitalocean.env', 'utf8');
+    const providerEnv = await readFile('/root/.config/ragent/providers/digitalocean.env', 'utf8');
     const token = providerEnv.match(/^DIGITALOCEAN_ACCESS_TOKEN=(.+)$/m)?.[1]?.trim();
     if (token) {
       const response = await fetch('https://api.digitalocean.com/v2/account/keys?per_page=200', {
@@ -202,7 +202,7 @@ async function injectLocalSshAccess(manifest) {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            name: `agentoc-root-${Date.now()}`,
+            name: `ragent-root-${Date.now()}`,
             public_key: publicKey,
           }),
         });
@@ -274,7 +274,7 @@ async function main() {
   let manifest = await readManifest(resolve(options.manifestPath));
   manifest = await injectLocalSshAccess(manifest);
   const { manifest: preparedManifest, onboarding } = await ensureCloudflareIngress(manifest);
-  const tempDir = await mkdtemp(join(tmpdir(), 'agentoc-full-host-cycle-'));
+  const tempDir = await mkdtemp(join(tmpdir(), 'ragent-full-host-cycle-'));
   const tempManifestPath = join(tempDir, `${sanitizeName(preparedManifest.host?.hostname || 'host')}.manifest.json`);
   await writeFile(tempManifestPath, `${JSON.stringify(preparedManifest, null, 2)}\n`, 'utf8');
 
@@ -282,7 +282,7 @@ async function main() {
     'cli.js',
     'provision-host',
     '--manifest', tempManifestPath,
-    '--provider-env', '/root/.config/agentoc/providers/digitalocean.env',
+    '--provider-env', '/root/.config/ragent/providers/digitalocean.env',
     '--execute',
     '--wait',
     '--json',

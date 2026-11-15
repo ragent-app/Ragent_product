@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const artifactDir = process.env.AGENTOC_VISUAL_OUTPUT_DIR || join(tmpdir(), 'agentoc-visual-review');
+const artifactDir = process.env.RAGENT_VISUAL_OUTPUT_DIR || join(tmpdir(), 'ragent-visual-review');
 mkdirSync(artifactDir, { recursive: true });
 
 const cssFiles = [
@@ -249,7 +249,7 @@ function renderFixtureHtml(theme = 'light') {
             <input class="workspace-file-reader-search-input" placeholder="在文件中搜索…" style="width: 100%;">
           </div>
           <div class="workspace-file-reader-content" style="padding: 16px; font-family: monospace; font-size: 12px; line-height: 1.6;">
-            # AGENTS.md — AgentoC Project Context<br>
+            # AGENTS.md — Ragent Project Context<br>
             All platform assumptions, packaging, capability boundaries, and adapter gating treat Windows and Android as first-class surfaces.
           </div>
         </div>

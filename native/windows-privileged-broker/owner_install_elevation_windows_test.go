@@ -47,7 +47,7 @@ func TestOwnerInstallSelectsBoundElevation(t *testing.T) {
 					return []string{`USERPROFILE=D:\Owner`, `LOCALAPPDATA=D:\Owner\Local`, `APPDATA=D:\Owner\Roaming`}, nil
 				},
 				inspect: func(_ context.Context, token windows.Token, _ string, _ []string, env []string, _ string) ([]byte, error) {
-					if token != 7 || !strings.Contains(strings.Join(env, "\n"), "AGENTOC_INSTALL_INSPECT=1") {
+					if token != 7 || !strings.Contains(strings.Join(env, "\n"), "RAGENT_INSTALL_INSPECT=1") {
 						t.Fatal("inspection did not use the owner")
 					}
 					if tc.malformed {
@@ -75,7 +75,7 @@ func TestOwnerInstallSelectsBoundElevation(t *testing.T) {
 				run: func(_ context.Context, token windows.Token, _ string, _ []string, env []string, _ string) (int, error) {
 					calls++
 					isElevated := tc.wantElevations > 0 && !tc.unavailable
-					if (token == 99) != isElevated || strings.Contains(strings.Join(env, "\n"), "AGENTOC_INSTALL_SELECTED=") != isElevated {
+					if (token == 99) != isElevated || strings.Contains(strings.Join(env, "\n"), "RAGENT_INSTALL_SELECTED=") != isElevated {
 						t.Fatal("unexpected execution identity or selection binding")
 					}
 					if tc.exit != 0 {

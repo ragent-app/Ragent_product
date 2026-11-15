@@ -37,8 +37,8 @@ PY
 fi
 
 test "$(id -u)" = 0
-owner=${AGENTOC_TEST_OWNER_USER:-pinggu}
-runner=${AGENTOC_TEST_RUNNER_USER:-agentoc-runner}
+owner=${RAGENT_TEST_OWNER_USER:-pinggu}
+runner=${RAGENT_TEST_RUNNER_USER:-ragent-runner}
 owner_uid=$(id -u "$owner") owner_gid=$(id -g "$owner")
 runner_uid=$(id -u "$runner") runner_gid=$(id -g "$runner")
 other_uid=222222
@@ -49,8 +49,8 @@ test "$runner_gid" != "$(cat /proc/sys/kernel/overflowgid)"
 if getent passwd "$other_uid" >/dev/null || getent group "$other_uid" >/dev/null; then
   echo 'fixture UID/GID is already allocated' >&2; exit 1
 fi
-root=$(mktemp -d /srv/agentoc-idmap-test-XXXXXXXX)
-case "$root" in /srv/agentoc-idmap-test-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
+root=$(mktemp -d /srv/ragent-idmap-test-XXXXXXXX)
+case "$root" in /srv/ragent-idmap-test-*) ;; *) echo 'unexpected fixture path' >&2; exit 1;; esac
 trap 'rm -rf -- "$root"' EXIT
 chmod 0711 "$root"
 mkdir "$root/source" "$root/mapped" "$root/outside"

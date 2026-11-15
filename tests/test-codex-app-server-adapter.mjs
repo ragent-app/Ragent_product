@@ -36,7 +36,7 @@ import {
 } from '../chat/adapters/codex-app-server.mjs';
 
 assert.deepEqual(buildCodexAppServerArgs(), ['app-server', '--stdio']);
-assert.deepEqual(buildCodexAppServerArgs({ cwd: 'G:/QA/project', agentocApprovalGate: true, permissionMode: 'untrusted-read-only' }), [
+assert.deepEqual(buildCodexAppServerArgs({ cwd: 'G:/QA/project', ragentApprovalGate: true, permissionMode: 'untrusted-read-only' }), [
   'app-server', '--stdio', '-c', 'projects={"G:/QA/project"={trust_level="untrusted"}}',
 ]);
 assert.deepEqual(buildCodexAppServerProjectTrustArgs('G:\\QA\\Ragent "fixture"'), [
@@ -77,10 +77,10 @@ assert.deepEqual(
 );
 const mcpStartup = readCodexAppServerMcpStartupStatus({
   method: 'mcpServer/startupStatus/updated',
-  params: { name: 'agentoc_actions_fixture', status: 'ready', threadId: 'thread-123' },
+  params: { name: 'ragent_actions_fixture', status: 'ready', threadId: 'thread-123' },
 });
 assert.deepEqual(mcpStartup, {
-  name: 'agentoc_actions_fixture',
+  name: 'ragent_actions_fixture',
   status: 'ready',
   threadId: 'thread-123',
   hasError: false,
@@ -89,10 +89,10 @@ const mcpInventoryMessage = {
   id: 77,
   result: {
     data: [{
-      name: 'agentoc_actions_fixture',
+      name: 'ragent_actions_fixture',
       tools: {
-        agentoc_request_actions: {
-          name: 'agentoc_request_actions',
+        ragent_request_actions: {
+          name: 'ragent_request_actions',
           inputSchema: { type: 'object', properties: {} },
         },
       },
@@ -102,33 +102,33 @@ const mcpInventoryMessage = {
   },
 };
 assert.deepEqual(readCodexAppServerMcpStatusList(mcpInventoryMessage), [{
-  name: 'agentoc_actions_fixture',
+  name: 'ragent_actions_fixture',
   runtimeStatus: null,
   schemaAvailable: true,
-  toolNames: ['agentoc_request_actions'],
+  toolNames: ['ragent_request_actions'],
 }]);
 assert.equal(
   evaluateCodexAppServerMcpReadiness({
     inventory: readCodexAppServerMcpStatusList(mcpInventoryMessage),
-    startupStatuses: { agentoc_actions_fixture: 'ready' },
-    expectedServerName: 'agentoc_actions_fixture',
-    requiredToolNames: ['agentoc_request_actions'],
+    startupStatuses: { ragent_actions_fixture: 'ready' },
+    expectedServerName: 'ragent_actions_fixture',
+    requiredToolNames: ['ragent_request_actions'],
   }).state,
   'ready',
 );
 assert.equal(
   evaluateCodexAppServerMcpReadiness({
     inventory: [{
-      name: 'agentoc_actions_fixture',
+      name: 'ragent_actions_fixture',
       schemaAvailable: true,
-      toolNames: ['agentoc_request_actions'],
+      toolNames: ['ragent_request_actions'],
     }],
     startupStatuses: {
-      agentoc_actions_fixture: 'ready',
+      ragent_actions_fixture: 'ready',
     },
     requiredServers: [
-      { name: 'agentoc_actions_fixture', requiredToolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', requiredToolNames: ['agentoc_browser_navigate'] },
+      { name: 'ragent_actions_fixture', requiredToolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', requiredToolNames: ['ragent_browser_navigate'] },
     ],
   }).reasonCode,
   'MCP_SERVER_DISCOVERY_PENDING',
@@ -136,26 +136,26 @@ assert.equal(
 assert.equal(
   evaluateCodexAppServerMcpReadiness({
     inventory: [
-      { name: 'agentoc_actions_fixture', schemaAvailable: true, toolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', schemaAvailable: true, toolNames: ['agentoc_browser_navigate'] },
+      { name: 'ragent_actions_fixture', schemaAvailable: true, toolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', schemaAvailable: true, toolNames: ['ragent_browser_navigate'] },
     ],
     startupStatuses: {
-      agentoc_actions_fixture: 'ready',
-      agentoc_browser_fixture: 'starting',
+      ragent_actions_fixture: 'ready',
+      ragent_browser_fixture: 'starting',
     },
     requiredServers: [
-      { name: 'agentoc_actions_fixture', requiredToolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', requiredToolNames: ['agentoc_browser_navigate'] },
+      { name: 'ragent_actions_fixture', requiredToolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', requiredToolNames: ['ragent_browser_navigate'] },
     ],
   }).reasonCode,
   'MCP_STARTUP_PENDING',
 );
 assert.equal(
   evaluateCodexAppServerMcpReadiness({
-    inventory: [{ name: 'agentoc_actions_fixture', schemaAvailable: false, toolNames: [] }],
-    startupStatuses: { agentoc_actions_fixture: 'ready' },
-    expectedServerName: 'agentoc_actions_fixture',
-    requiredToolNames: ['agentoc_request_actions'],
+    inventory: [{ name: 'ragent_actions_fixture', schemaAvailable: false, toolNames: [] }],
+    startupStatuses: { ragent_actions_fixture: 'ready' },
+    expectedServerName: 'ragent_actions_fixture',
+    requiredToolNames: ['ragent_request_actions'],
   }).reasonCode,
   'MCP_TOOL_SCHEMA_UNAVAILABLE',
 );
@@ -163,23 +163,23 @@ assert.equal(
   evaluateCodexAppServerMcpReadiness({
     inventory: [
       {
-        name: 'agentoc_actions_fixture',
+        name: 'ragent_actions_fixture',
         schemaAvailable: true,
-        toolNames: ['agentoc_request_actions'],
+        toolNames: ['ragent_request_actions'],
       },
       {
-        name: 'agentoc_browser_fixture',
+        name: 'ragent_browser_fixture',
         schemaAvailable: true,
-        toolNames: ['agentoc_browser_navigate'],
+        toolNames: ['ragent_browser_navigate'],
       },
     ],
     startupStatuses: {
-      agentoc_actions_fixture: 'ready',
-      agentoc_browser_fixture: 'ready',
+      ragent_actions_fixture: 'ready',
+      ragent_browser_fixture: 'ready',
     },
     requiredServers: [
-      { name: 'agentoc_actions_fixture', requiredToolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', requiredToolNames: ['agentoc_browser_navigate'] },
+      { name: 'ragent_actions_fixture', requiredToolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', requiredToolNames: ['ragent_browser_navigate'] },
     ],
   }).state,
   'ready',
@@ -187,16 +187,16 @@ assert.equal(
 assert.equal(
   evaluateCodexAppServerMcpReadiness({
     inventory: [
-      { name: 'agentoc_actions_fixture', schemaAvailable: true, toolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', schemaAvailable: true, toolNames: [] },
+      { name: 'ragent_actions_fixture', schemaAvailable: true, toolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', schemaAvailable: true, toolNames: [] },
     ],
     startupStatuses: {
-      agentoc_actions_fixture: 'ready',
-      agentoc_browser_fixture: 'ready',
+      ragent_actions_fixture: 'ready',
+      ragent_browser_fixture: 'ready',
     },
     requiredServers: [
-      { name: 'agentoc_actions_fixture', requiredToolNames: ['agentoc_request_actions'] },
-      { name: 'agentoc_browser_fixture', requiredToolNames: ['agentoc_browser_navigate'] },
+      { name: 'ragent_actions_fixture', requiredToolNames: ['ragent_request_actions'] },
+      { name: 'ragent_browser_fixture', requiredToolNames: ['ragent_browser_navigate'] },
     ],
   }).reasonCode,
   'MCP_REQUIRED_TOOL_MISSING',
@@ -206,14 +206,14 @@ assert.equal(
     inventory: readCodexAppServerMcpStatusList({
       result: {
         data: [{
-          name: 'agentoc_actions_fixture',
-          tools: { agentoc_request_actions: { inputSchema: { type: 'object' } } },
+          name: 'ragent_actions_fixture',
+          tools: { ragent_request_actions: { inputSchema: { type: 'object' } } },
         }],
       },
     }),
-    startupStatuses: { agentoc_actions_fixture: 'ready' },
-    expectedServerName: 'agentoc_actions_fixture',
-    requiredToolNames: ['agentoc_request_actions'],
+    startupStatuses: { ragent_actions_fixture: 'ready' },
+    expectedServerName: 'ragent_actions_fixture',
+    requiredToolNames: ['ragent_request_actions'],
   }).reasonCode,
   'MCP_TOOL_SCHEMA_UNAVAILABLE',
 );
@@ -222,21 +222,21 @@ const planThreadStart = buildCodexAppServerThreadMessage({
   cwd: '/tmp/work',
   interactionMode: 'plan',
   model: 'gpt-test',
-  developerInstructions: 'Use AgentoC context renderer output.',
+  developerInstructions: 'Use Ragent context renderer output.',
 });
 assert.equal(planThreadStart.method, 'thread/start');
 assert.equal(planThreadStart.params.approvalPolicy, 'never');
 assert.equal(planThreadStart.params.sandbox, 'read-only');
 assert.equal(planThreadStart.params.config.mode, 'plan');
 assert.equal(planThreadStart.params.model, 'gpt-test');
-assert.equal(planThreadStart.params.developerInstructions, 'Use AgentoC context renderer output.');
+assert.equal(planThreadStart.params.developerInstructions, 'Use Ragent context renderer output.');
 
 const executeThreadResume = buildCodexAppServerThreadMessage({
   threadId: 'thread-123',
   useResume: true,
   interactionMode: 'agent',
 });
-const oldRollout = 'G:\\Agentoc\\legacy\\sessions\\rollout.jsonl';
+const oldRollout = 'G:\\Ragent\\legacy\\sessions\\rollout.jsonl';
 assert.equal(buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume: true, rolloutPath: oldRollout }).params.path, oldRollout);
 assert.equal(buildCodexAppServerThreadForkMessage({ threadId: 'thread-123', rolloutPath: oldRollout }).params.path, oldRollout);
 assert.equal(Object.hasOwn(buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume: false, rolloutPath: oldRollout }).params, 'path'), false);
@@ -245,9 +245,9 @@ assert.throws(() => buildCodexAppServerThreadForkMessage({ threadId: 'thread-123
 const scopedMcp = { mcp_servers: { fixture: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'fixture' } } } };
 for (const useResume of [false, true]) {
   const scopedThread = buildCodexAppServerThreadMessage({ threadId: 'thread-123', useResume, interactionMode: 'plan', threadMcpConfig: scopedMcp,
-    threadShellEnvironment: { AGENTOC_RUN_ID: 'run-fixture' } });
+    threadShellEnvironment: { RAGENT_RUN_ID: 'run-fixture' } });
   assert.deepEqual(scopedThread.params.config.mcp_servers, scopedMcp.mcp_servers);
-  assert.deepEqual(scopedThread.params.config.shell_environment_policy.set, { AGENTOC_RUN_ID: 'run-fixture' });
+  assert.deepEqual(scopedThread.params.config.shell_environment_policy.set, { RAGENT_RUN_ID: 'run-fixture' });
   assert.equal(scopedThread.params.config.mode, 'plan');
 }
 assert.equal(executeThreadResume.method, 'thread/resume');
@@ -260,7 +260,7 @@ const gatedThreadFork = buildCodexAppServerThreadForkMessage({
   threadId: 'source-thread',
   cwd: 'G:/QA/project',
   permissionMode: 'untrusted-danger-full-access',
-  agentocApprovalGate: true,
+  ragentApprovalGate: true,
 });
 assert.equal(gatedThreadFork.method, 'thread/fork');
 assert.equal(Object.hasOwn(gatedThreadFork.params, 'approvalPolicy'), false);
@@ -482,7 +482,7 @@ const managedMcpRequestMessage = {
   method: 'mcpServer/elicitation/request',
   id: 'mcp-elicitation-1',
   params: {
-    serverName: 'agentoc_actions_0123456789abcdef',
+    serverName: 'ragent_actions_0123456789abcdef',
     threadId: 'thread-123',
     turnId: 'turn-abc',
     mode: 'form',
@@ -492,7 +492,7 @@ const managedMcpRequestMessage = {
   },
 };
 const managedMcpRequest = readCodexAppServerManagedMcpRequest(managedMcpRequestMessage);
-assert.equal(managedMcpRequest.mcpServerName, 'agentoc_actions_0123456789abcdef');
+assert.equal(managedMcpRequest.mcpServerName, 'ragent_actions_0123456789abcdef');
 assert.equal(readCodexAppServerManagedMcpRequest({ ...managedMcpRequestMessage, params: { ...managedMcpRequestMessage.params, _meta: {} } }), null);
 assert.equal(readCodexAppServerManagedMcpRequest({ ...managedMcpRequestMessage, params: { ...managedMcpRequestMessage.params, requestedSchema: { type: 'object', properties: { secret: { type: 'string' } } } } }), null);
 assert.deepEqual(
@@ -535,23 +535,23 @@ assert.equal(argvApprovalEvents[0].command, 'argv: ["/bin/bash","-c","rm /tmp/a 
 
 const mcpStatusEvents = adapter.parseLine(JSON.stringify({
   method: 'mcpServer/startupStatus/updated',
-  params: { name: 'agentoc_actions_fixture', status: 'ready', threadId: 'thread-123' },
+  params: { name: 'ragent_actions_fixture', status: 'ready', threadId: 'thread-123' },
 }));
 assert.equal(mcpStatusEvents.length, 1);
-assert.equal(mcpStatusEvents[0].codexMcpServer, 'agentoc_actions_fixture');
+assert.equal(mcpStatusEvents[0].codexMcpServer, 'ragent_actions_fixture');
 assert.equal(mcpStatusEvents[0].codexMcpStatus, 'ready');
 
 const mcpInventoryEvents = adapter.parseLine(JSON.stringify(mcpInventoryMessage));
 assert.equal(mcpInventoryEvents.length, 1);
 assert.equal(mcpInventoryEvents[0].codexMcpStatus, 'inventory');
 assert.deepEqual(mcpInventoryEvents[0].codexMcpServers, [{
-  name: 'agentoc_actions_fixture',
-  toolNames: ['agentoc_request_actions'],
+  name: 'ragent_actions_fixture',
+  toolNames: ['ragent_request_actions'],
   toolSchemaAvailable: true,
 }]);
 assert.deepEqual(
   adapter.parseLine(JSON.stringify({
-    agentoc_intermediate: true,
+    ragent_intermediate: true,
     method: 'turn/completed',
     params: { threadId: 'thread-child', turn: { id: 'turn-child', status: 'completed' } },
   })),
@@ -602,12 +602,12 @@ assert.notEqual(inProgressTurnEvents[0].content, 'completed');
 assert.equal(inProgressTurnEvents[0].providerLifecycle, 'inProgress');
 
 // Sidecar auto-approvals must never surface as user-facing approvals. The
-// sidecar echoes its synthetic agentoc.approval_response (autoApproved: true)
+// sidecar echoes its synthetic ragent.approval_response (autoApproved: true)
 // into the stream BEFORE the requestApproval it answers; the adapter tracks
 // the id so the later request frame is suppressed too (no card, no push).
 const autoApprovalAdapter = createCodexAppServerAdapter();
 const autoAckEvents = autoApprovalAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'item/commandExecution/requestApproval:auto-allowed-1',
   decision: 'approved',
   status: 'approved',
@@ -626,7 +626,7 @@ assert.equal(suppressedRequestEvents.length, 0, 'requestApproval for an auto-app
 
 const autoDenialAdapter = createCodexAppServerAdapter();
 assert.equal(autoDenialAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'item/commandExecution/requestApproval:auto-denied-1',
   decision: 'denied', status: 'denied', providerRequestId: 'auto-denied-1',
   providerMethod: 'item/commandExecution/requestApproval', autoDenied: true,
@@ -645,7 +645,7 @@ assert.equal(heldEvents[0].status, 'pending');
 // A real provider ack (no autoApproved flag) still emits its response event —
 // only sidecar-synthesized auto-approvals are suppressed.
 const realAckEvents = heldAdapter.parseLine(JSON.stringify({
-  type: 'agentoc.approval_response',
+  type: 'ragent.approval_response',
   approvalId: 'item/commandExecution/requestApproval:approval-1',
   decision: 'approved',
   status: 'approved',

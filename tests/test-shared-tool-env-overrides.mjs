@@ -7,9 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = dirname(__dirname);
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-shared-tool-env-'));
-const sharedToolDir = join(tempHome, '.agentoc', 'shared-tools', 'calendar-helper');
-const configDir = join(tempHome, '.config', 'agentoc');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-shared-tool-env-'));
+const sharedToolDir = join(tempHome, '.ragent', 'shared-tools', 'calendar-helper');
+const configDir = join(tempHome, '.config', 'ragent');
 const overlaysDir = join(configDir, 'tool-overlays');
 
 mkdirSync(sharedToolDir, { recursive: true });
@@ -41,12 +41,12 @@ try {
   const invocation = await createToolInvocation('calendar-helper', 'Ping');
 
   assert.equal(invocation.command, commandPath);
-  assert.equal(invocation.envOverrides?.AGENTOC_TOOL_ID, 'calendar-helper');
-  assert.equal(invocation.envOverrides?.AGENTOC_TOOL_SOURCE, 'shared');
-  assert.equal(invocation.envOverrides?.AGENTOC_TOOL_NAME, 'Calendar Helper');
-  assert.equal(invocation.envOverrides?.AGENTOC_SHARED_TOOL_DIR, sharedToolDir);
-  assert.equal(invocation.envOverrides?.AGENTOC_SHARED_TOOL_CARD, cardPath);
-  assert.equal(invocation.envOverrides?.AGENTOC_TOOL_OVERLAY, overlayPath);
+  assert.equal(invocation.envOverrides?.RAGENT_TOOL_ID, 'calendar-helper');
+  assert.equal(invocation.envOverrides?.RAGENT_TOOL_SOURCE, 'shared');
+  assert.equal(invocation.envOverrides?.RAGENT_TOOL_NAME, 'Calendar Helper');
+  assert.equal(invocation.envOverrides?.RAGENT_SHARED_TOOL_DIR, sharedToolDir);
+  assert.equal(invocation.envOverrides?.RAGENT_SHARED_TOOL_CARD, cardPath);
+  assert.equal(invocation.envOverrides?.RAGENT_TOOL_OVERLAY, overlayPath);
 } finally {
   rmSync(tempHome, { recursive: true, force: true });
 }

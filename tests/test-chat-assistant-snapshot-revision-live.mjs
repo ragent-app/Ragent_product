@@ -32,11 +32,11 @@ async function createPage(browser) {
   await page.setContent('<!doctype html><html><body><div id="messages"><div id="messagesInner"></div></div></body></html>');
   await page.evaluate(() => {
     window.marked = { parse: (value) => `<p>${String(value ?? '')}</p>` };
-    window.agentocT = (key) => key;
-    window.AgentoCIcons = { render: () => '' };
-    window.AgentoCMotion = { subscribeReducedMotion: () => {} };
-    window.AgentoCRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
-    window.AgentoCDecisions = { reset: () => {} };
+    window.ragentT = (key) => key;
+    window.RagentIcons = { render: () => '' };
+    window.RagentMotion = { subscribeReducedMotion: () => {} };
+    window.RagentRunActivity = { applyEvent: () => {}, noteFormalOutput: () => {} };
+    window.RagentDecisions = { reset: () => {} };
     window.visitorMode = false;
     window.shareSnapshotMode = false;
     window.currentSessionId = 'snapshot-revision-session';

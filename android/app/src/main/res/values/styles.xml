@@ -1,13 +1,13 @@
 <resources>
-    <style name="Theme.Agentoc" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.Ragent" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_canvas</item>
     </style>
 
     <!-- Theme-aware launch mark remains visible while local UI initializes. -->
-    <style name="Theme.Agentoc.Splash" parent="Theme.SplashScreen">
+    <style name="Theme.Ragent.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_symbol</item>
-        <item name="postSplashScreenTheme">@style/Theme.Agentoc</item>
+        <item name="postSplashScreenTheme">@style/Theme.Ragent</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

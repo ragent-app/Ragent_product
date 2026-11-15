@@ -34,7 +34,7 @@ if(manifest.crossServiceOwnerBootstrap||manifest.crossServiceCredentialChannel){
 for (const file of [...runtimeFiles, 'bootstrap.ps1']) assert.equal(hash(await readFile(join(prepared.bundle, file))), manifest[file], file);
 runtimeFiles.push(...ownerRows.map(x=>x.path).filter(path=>!runtimeFiles.includes(path)));
 const summaryBytes = await readFile(join(prepared.bundle, 'summary.json'));
-const protectedRoot = join(process.env.ProgramData, 'AgentoCIdentityQA', 'case-' + id);
+const protectedRoot = join(process.env.ProgramData, 'RagentIdentityQA', 'case-' + id);
 assert.equal(hash(summaryBytes), hash(await readFile(join(protectedRoot, 'export/summary.json'))));
 const summary = JSON.parse(summaryBytes);
 if(process.argv.includes('--verify-provider-preflight-failure')){
@@ -42,7 +42,7 @@ if(process.argv.includes('--verify-provider-preflight-failure')){
   for(const key of ['productionChanged','phoneTouched','credentialsUsed'])assert.equal(summary[key],false);
   const original=JSON.parse(await readFile(join(prepared.bundle,'original-run-provider.json'),'utf8'));
   assert.equal(original.pass,false);assert.equal(original.providerCredentialResolved,false);assert.deepEqual(original.cases,[]);
-  const names=['Control','Executor'].map(role=>'AgentoC-IdentityQA-'+role+'-'+id),owned=[];const exports=[];
+  const names=['Control','Executor'].map(role=>'Ragent-IdentityQA-'+role+'-'+id),owned=[];const exports=[];
   assert.deepEqual(summary.cleanup.map(x=>x.name).sort(),[...names].sort());
   for(const item of summary.cleanup){assert.equal(item.stopped,true);assert.equal(item.deleted,true);}
   assert.deepEqual(summary.runtimeRemoved.map(x=>x.file).sort(),[...runtimeFiles].sort());
@@ -77,7 +77,7 @@ assert.equal(summary.caseId, id);
 assert.equal(summary.root, protectedRoot);
 for (const key of ['productionChanged', 'phoneTouched']) assert.equal(summary[key], false);
 assert.equal(summary.credentialsUsed,!!manifest.crossServiceProvider);
-const names = ['Control', 'Executor',...(manifest.crossServiceProvider?['Preparer']:[])].map(role => 'AgentoC-IdentityQA-' + role + '-' + id);
+const names = ['Control', 'Executor',...(manifest.crossServiceProvider?['Preparer']:[])].map(role => 'Ragent-IdentityQA-' + role + '-' + id);
 assert.equal(summary.registrations.length, 2);
 assert.equal(summary.services.length, 2);
 assert.equal(summary.rounds.length, 2);
@@ -298,7 +298,7 @@ if(manifest.crossServiceProvider){
   assert.equal(summary.desktopPreparerRegistration.account,'LocalSystem');
   for(const round of summary.rounds){assert.equal(round.desktopPreparer.pass,true);assert.equal(round.desktopPreparer.stationClosed,true);
     assert.equal(round.desktopPreparer.tasksAccepted,0);assert.equal(round.desktopPreparer.processesLaunched,0);assert.equal(round.desktopPreparer.executorMask,0x6002b);
-    assert.equal(round.desktopPreparer.stationName,'AgentoC-QA-'+id+'-r'+round.round);assert.equal(round.desktopPreparer.executorSid,sids.executor);}
+    assert.equal(round.desktopPreparer.stationName,'Ragent-QA-'+id+'-r'+round.round);assert.equal(round.desktopPreparer.executorSid,sids.executor);}
   const desktopBytes=await readFile(join(prepared.bundle,'desktop-preparer-report.json'));
   assert.equal(hash(desktopBytes),hash(await readFile(join(protectedRoot,'export/desktop-preparer-report.json'))));
   if(!manifest.crossServiceCredentialProvider){

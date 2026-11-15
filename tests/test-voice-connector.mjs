@@ -11,15 +11,15 @@ const repoRoot = process.cwd()
 const {
   DEFAULT_SESSION_SYSTEM_PROMPT,
   buildExternalTriggerId,
-  buildAgentoCMessage,
+  buildRagentMessage,
   createRuntimeContext,
-  generateAgentoCReply,
+  generateRagentReply,
   loadConfig,
   normalizeIngressEvent,
   normalizeSpokenReplyText,
 } = await import(pathToFileURL(join(repoRoot, 'scripts', 'voice-connector.mjs')).href)
 
-const tempConfigDir = await mkdtemp(join(tmpdir(), 'agentoc-voice-config-'))
+const tempConfigDir = await mkdtemp(join(tmpdir(), 'ragent-voice-config-'))
 const tempConfigPath = join(tempConfigDir, 'config.json')
 
 await writeFile(tempConfigPath, `${JSON.stringify({
@@ -43,7 +43,7 @@ assert.equal(loadedConfig.sessionTool, 'codex')
 assert.equal(loadedConfig.wake.mode, 'stdin')
 assert.equal(loadedConfig.systemPrompt, '')
 assert.match(DEFAULT_SESSION_SYSTEM_PROMPT, /Keep connector-specific overrides minimal/i)
-await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'AgentoC') }), 'utf8')
+await writeFile(tempConfigPath, JSON.stringify({ systemPrompt: DEFAULT_SESSION_SYSTEM_PROMPT.replace('Ragent', 'Ragent') }), 'utf8')
 assert.equal((await loadConfig(tempConfigPath)).systemPrompt, '', 'old shipped defaults must not become custom prompts')
 
 await writeFile(tempConfigPath, `${JSON.stringify({
@@ -98,7 +98,7 @@ assert.ok(plainIngress.eventId.startsWith('voice-'))
 assert.equal(buildExternalTriggerId({ connectorId: 'Living Room Speaker' }), 'voice:living-room-speaker')
 assert.equal(buildExternalTriggerId({ connectorId: 'Living Room Speaker', eventId: 'wake_1' }, { sessionMode: 'per-wake' }), 'voice:living-room-speaker:wake_1')
 
-const renderedPrompt = buildAgentoCMessage({
+const renderedPrompt = buildRagentMessage({
   connectorId: 'living-room-speaker',
   roomName: 'Living Room',
   wakeWord: 'Hey Rowan',
@@ -203,7 +203,7 @@ try {
   })
   runtime.authCookie = 'session_token=test-cookie'
 
-  const reply = await generateAgentoCReply(runtime, {
+  const reply = await generateRagentReply(runtime, {
     eventId: 'wake_1',
     connectorId: 'living-room-speaker',
     roomName: 'Living Room',
@@ -239,4 +239,4 @@ try {
 console.log('ok - voice connector config defaults load correctly')
 console.log('ok - voice ingress normalization handles JSON and plain text')
 console.log('ok - voice messages stay transcript-first')
-console.log('ok - AgentoC roundtrip uses the voice app scope')
+console.log('ok - Ragent roundtrip uses the voice app scope')

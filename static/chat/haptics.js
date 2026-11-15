@@ -4,7 +4,7 @@
 // system reduced-motion preference and document visibility so background
 // runs never buzz the user. Wired at decision-sheet approval, stop-run, and
 // run terminal-state transitions (see observeRunState).
-(function initAgentoCHaptics() {
+(function initRagentHaptics() {
   "use strict";
 
   // Vibrate patterns are alternating on/off milliseconds. All four stay
@@ -27,8 +27,8 @@
   let lastObservedRun = null;
 
   function prefersReducedMotion() {
-    if (typeof window.AgentoCMotion?.prefersReducedMotion === "function") {
-      return window.AgentoCMotion.prefersReducedMotion();
+    if (typeof window.RagentMotion?.prefersReducedMotion === "function") {
+      return window.RagentMotion.prefersReducedMotion();
     }
     return typeof window.matchMedia === "function"
       && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -86,7 +86,7 @@
     }
   }
 
-  window.AgentoCHaptics = {
+  window.RagentHaptics = {
     approval: () => play("approval"),
     danger: () => play("danger"),
     complete: () => play("complete"),

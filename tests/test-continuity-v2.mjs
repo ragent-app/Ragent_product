@@ -185,10 +185,10 @@ assert.equal(legacy.task.goal.text, 'Migrate this checkpoint.');
 assert.equal(legacy.execution.files[0].path, 'old.txt');
 assert.equal(legacy.execution.activeRunId, 'run-old');
 
-const tempHome = await mkdtemp(join(tmpdir(), 'agentoc-binding-'));
+const tempHome = await mkdtemp(join(tmpdir(), 'ragent-binding-'));
 process.env.HOME = tempHome;
-process.env.AGENTOC_PUBLIC_BASE_URL = '';
-await mkdir(join(tempHome, '.config', 'agentoc'), { recursive: true });
+process.env.RAGENT_PUBLIC_BASE_URL = '';
+await mkdir(join(tempHome, '.config', 'ragent'), { recursive: true });
 const {
   buildProviderRuntimeFingerprint,
   resolveResumeState,

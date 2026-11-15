@@ -18,7 +18,7 @@ export async function serviceProviderWorker(qaRoot, spec, request, { boundaryOnl
     await exec('C:/Windows/System32/icacls.exe', [root, '/inheritance:r', '/grant:r', `*${spec.executorSid}:(OI)(CI)F`], { windowsHide: true, timeout: 10000 });
     for (const name of ['runtime', 'workspace', 'control', 'state', 'evidence', 'other-grant']) await mkdir(join(root, name));
     for (const name of ['workspace', 'state']) await exec('C:/Windows/System32/icacls.exe', [join(root, name), '/setintegritylevel', '(OI)(CI)L'], { windowsHide: true, timeout: 10000 });
-    await writeFile(join(root, '.agentoc-restricted-run'), 'agentoc.restricted.' + id);
+    await writeFile(join(root, '.ragent-restricted-run'), 'ragent.restricted.' + id);
     await writeFile(join(root, 'control/secret.txt'), 'SYNTHETIC-SERVICE-WORKER');
     await writeFile(join(root, 'other-grant/secret.txt'), 'SYNTHETIC-OTHER-GRANT');
     await symlink(join(root, 'other-grant'), join(root, 'workspace/escape-junction'), 'junction');
@@ -33,7 +33,7 @@ export async function serviceProviderWorker(qaRoot, spec, request, { boundaryOnl
 fs.writeFileSync(root+'/workspace/boundary.txt','ok');checks.workspaceWrite=true;
 for(const [name,path] of [['controlReadDenied',root+'/control/secret.txt'],['otherGrantDenied',root+'/other-grant/secret.txt'],['junctionDenied',root+'/workspace/escape-junction/secret.txt'],['serviceControlDenied',qa+'/control/secret.txt'],['serviceStateDenied',qa+'/state/control/private-state.txt']]){try{fs.readFileSync(path);checks[name]=false}catch(e){checks[name]=['EACCES','EPERM'].includes(e.code)}}
 try{const fd=fs.openSync(root+'/runtime/node.exe','r+');fs.closeSync(fd);checks.runtimeWriteDenied=false}catch(e){checks.runtimeWriteDenied=['EACCES','EPERM'].includes(e.code)}
-checks.noCredentialEnvironment=!Object.keys(process.env).some(k=>/API_KEY|TOKEN|SECRET|OAUTH|AGENTOC_CONFIG/.test(k));
+checks.noCredentialEnvironment=!Object.keys(process.env).some(k=>/API_KEY|TOKEN|SECRET|OAUTH|RAGENT_CONFIG/.test(k));
 await new Promise(done=>{const socket=net.connect(${port},'127.0.0.1');const timer=setTimeout(()=>{checks.loopbackDenied=true;socket.destroy();done()},1800);socket.once('connect',()=>{clearTimeout(timer);checks.loopbackDenied=false;socket.destroy();done()});socket.once('error',e=>{clearTimeout(timer);checks.loopbackDenied=['EPERM','EACCES','ETIMEDOUT'].includes(e.code);done()})});
 console.log(JSON.stringify({pass:Object.values(checks).every(Boolean),checks}));process.exitCode=Object.values(checks).every(Boolean)?0:1;`;
     const csv = boundaryOnly ? 'name,amount\nalpha,17\nbeta,11\nalpha,25\n' : request.inputCSV;
@@ -62,7 +62,7 @@ console.log(JSON.stringify({pass:Object.values(checks).every(Boolean),checks}));
     const windows = 'C:/Windows';
     let nativeOutput='';
     try {
-      ({stdout:nativeOutput}=await exec(join(root, 'runtime/RestrictedProviderCandidate.exe'), [boundaryOnly ? '--service-boundary' : '--service-run', root, 'agentoc.restricted.' + id],
+      ({stdout:nativeOutput}=await exec(join(root, 'runtime/RestrictedProviderCandidate.exe'), [boundaryOnly ? '--service-boundary' : '--service-run', root, 'ragent.restricted.' + id],
         { windowsHide: true, timeout: 105000, maxBuffer: 65536, env: { SystemRoot: windows, WINDIR: windows, PATH: windows + '/System32',
           ProgramData: 'C:/ProgramData', USERPROFILE: join(root,'state'), LOCALAPPDATA: join(root,'state'), APPDATA: join(root,'state'),
           HOME: join(root,'state'), TEMP: join(root,'state'), TMP: join(root,'state') } }));

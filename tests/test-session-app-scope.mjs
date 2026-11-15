@@ -6,8 +6,8 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const tempHome = mkdtempSync(join(tmpdir(), 'agentoc-session-app-scope-'));
-process.env.AGENTOC_INSTANCE_ROOT = join(tempHome, 'instance');
+const tempHome = mkdtempSync(join(tmpdir(), 'ragent-session-app-scope-'));
+process.env.RAGENT_INSTANCE_ROOT = join(tempHome, 'instance');
 if (process.platform === 'win32') process.env.USERPROFILE = tempHome;
 
 const workspace = join(tempHome, 'workspace');

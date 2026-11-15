@@ -92,7 +92,7 @@ function loadCore() {
     context,
     { filename: 'transport/session-signature.js' },
   );
-  const core = context.AgentocSessionSignatureCore;
+  const core = context.RagentSessionSignatureCore;
   return {
     api: {
       buildComparableSessionState: (v) => core.buildComparableSessionState(v),

@@ -40,7 +40,7 @@ test('broker creation rechecks authority after the broker lock wait', async () =
   Date.now = () => now;
   try {
     await assert.rejects(ensureCodexAppServerBroker({
-      socketPath: `\\\\.\\pipe\\agentoc-deadline-broker-${process.pid}`,
+      socketPath: `\\\\.\\pipe\\ragent-deadline-broker-${process.pid}`,
       upstreamFile: process.execPath,
       acquireLockImpl: async () => {
         now = deadline;

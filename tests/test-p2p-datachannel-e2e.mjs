@@ -21,7 +21,7 @@ if (!['arm64', 'x64'].includes(arch)) {
   process.exit(0);
 }
 
-const binaryPath = process.env.AGENTOC_P2P_TEST_BINARY || resolveP2PHostBinary();
+const binaryPath = process.env.RAGENT_P2P_TEST_BINARY || resolveP2PHostBinary();
 await access(binaryPath);
 const listen = (server) => new Promise((resolve, reject) => {
   server.once('error', reject);
@@ -36,7 +36,7 @@ try {
     request.on('data', (chunk) => chunks.push(chunk));
     request.on('end', () => {
       const body = Buffer.concat(chunks);
-      response.writeHead(200, { 'content-type': 'application/json', 'x-agentoc-p2p': 'yes' });
+      response.writeHead(200, { 'content-type': 'application/json', 'x-ragent-p2p': 'yes' });
       response.end(JSON.stringify({ method: request.method, url: request.url,
         body: request.url === '/stream-probe' || request.url.startsWith('/api/assets/') ? undefined : body.toString('utf8'),
         bodyBytes: body.length, sha256: createHash('sha256').update(body).digest('hex') }));
@@ -62,27 +62,27 @@ try {
   resources.push(async () => { host.stop(); await host.done; });
   await host.ready;
 
-  const clientSource = await readFile(new URL('../static/p2p/agentoc-p2p-client.js', import.meta.url));
+  const clientSource = await readFile(new URL('../static/p2p/ragent-p2p-client.js', import.meta.url));
   const web = http.createServer((request, response) => {
-    if (request.url === '/agentoc-p2p-client.js') {
+    if (request.url === '/ragent-p2p-client.js') {
       response.writeHead(200, { 'content-type': 'text/javascript' });
       response.end(clientSource);
       return;
     }
     response.writeHead(200, { 'content-type': 'text/html' });
-    response.end('<!doctype html><title>AgentoC P2P test</title>');
+    response.end('<!doctype html><title>Ragent P2P test</title>');
   });
   resources.push(() => close(web));
   const webAddress = await listen(web);
 
   const browser = await chromium.launch({ headless: true,
-    ...(process.env.AGENTOC_P2P_TEST_CHROMIUM ? { executablePath: process.env.AGENTOC_P2P_TEST_CHROMIUM } : {}) });
+    ...(process.env.RAGENT_P2P_TEST_CHROMIUM ? { executablePath: process.env.RAGENT_P2P_TEST_CHROMIUM } : {}) });
   resources.push(() => browser.close());
   const page = await browser.newPage();
   await page.goto(`http://127.0.0.1:${webAddress.port}/`);
   const result = await page.evaluate(async ({ signalingUrl: url, roomId: room, secret: roomSecret, deviceToken }) => {
-    const { AgentoCP2PClient } = await import('/agentoc-p2p-client.js');
-    const client = new AgentoCP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
+    const { RagentP2PClient } = await import('/ragent-p2p-client.js');
+    const client = new RagentP2PClient({ signalingUrl: url, roomId: room, secret: roomSecret, iceServers: [], connectTimeoutMs: 10000, requestTimeoutMs: 10000 });
     await client.connect();
     const response = await client.request({ method: 'POST', path: '/probe?q=1', body: 'hello-p2p', headers: { Authorization: `Bearer ${deviceToken}` } });
     const streamBody = Uint8Array.from({ length: 1024 * 1024 }, (_, index) => (index * 37) % 251);
@@ -136,7 +136,7 @@ try {
       streamExpectedBytes: streamBody.byteLength, streamExpectedSha256: sha256 };
   }, { signalingUrl, roomId, secret, deviceToken: DEVICE_TOKEN });
   assert.equal(result.status, 200);
-  assert.equal(result.headers['X-Agentoc-P2p'], 'yes');
+  assert.equal(result.headers['X-Ragent-P2p'], 'yes');
   assert.deepEqual(JSON.parse(result.text), { method: 'POST', url: '/probe?q=1', body: 'hello-p2p',
     bodyBytes: 9, sha256: createHash('sha256').update('hello-p2p').digest('hex') });
   assert.equal(result.streamedStatus, 200);

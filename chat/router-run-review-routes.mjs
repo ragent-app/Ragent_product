@@ -54,7 +54,7 @@ export async function handleRunReviewRoute({ req, res, pathname, writeJson, auth
     let result;
     try {
       const records = await readRunSpoolRecords(principal.runId);
-      const matching = records.filter(record => record?.json?.type === 'agentoc.approval_review_request'
+      const matching = records.filter(record => record?.json?.type === 'ragent.approval_review_request'
         && record.json.runId === principal.runId && record.json.approvalId === approvalId
         && record.json.requestId === requestId && record.json.requestHash === requestHash);
       if (matching.length !== 1) { writeJson(res, 403, { verdict: 'unknown', reason: 'review_spool_binding_invalid', ...binding }); return true; }

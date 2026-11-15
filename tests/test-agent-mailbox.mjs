@@ -14,7 +14,7 @@ import {
 } from '../lib/agent-mailbox.mjs';
 
 async function testCloudflareWebhookHealthy() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-healthy-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-healthy-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -45,7 +45,7 @@ async function testCloudflareWebhookHealthy() {
 }
 
 async function testCloudflareQueueReady() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-ready-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-ready-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -77,7 +77,7 @@ async function testCloudflareQueueReady() {
 }
 
 async function testCloudflareValidatedDelivery() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-validated-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-validated-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -110,7 +110,7 @@ async function testCloudflareValidatedDelivery() {
 }
 
 async function testAllowlistAutoApprove() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-auto-approve-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-auto-approve-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -151,7 +151,7 @@ async function testAllowlistAutoApprove() {
 }
 
 async function testStripsQuotedReplyContent() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-quoted-reply-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-quoted-reply-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -171,7 +171,7 @@ async function testStripsQuotedReplyContent() {
         'References: <root-thread@example.com>',
         'Content-Type: text/plain; charset=UTF-8',
         '',
-        'email test turn2, did you continue use the same agentoc chat session ?',
+        'email test turn2, did you continue use the same ragent chat session ?',
         '',
         'On Tue, Mar 10, 2026 at 9:56 PM <rowan@example.test> wrote:',
         '> Hi! Got your test email successfully — everything looks good on my end.',
@@ -183,7 +183,7 @@ async function testStripsQuotedReplyContent() {
       rootDir,
       {
         text: [
-          'email test turn2, did you continue use the same agentoc chat session ?',
+          'email test turn2, did you continue use the same ragent chat session ?',
           '',
           'On Tue, Mar 10, 2026 at 9:56 PM <rowan@example.test> wrote:',
           '> Hi! Got your test email successfully — everything looks good on my end.',
@@ -194,8 +194,8 @@ async function testStripsQuotedReplyContent() {
       },
     );
 
-    assert.equal(ingested.content.extractedText, 'email test turn2, did you continue use the same agentoc chat session ?');
-    assert.equal(ingested.content.preview, 'email test turn2, did you continue use the same agentoc chat session ?');
+    assert.equal(ingested.content.extractedText, 'email test turn2, did you continue use the same ragent chat session ?');
+    assert.equal(ingested.content.preview, 'email test turn2, did you continue use the same ragent chat session ?');
     assert.doesNotMatch(ingested.content.extractedText, /wrote:/i);
     assert.doesNotMatch(ingested.content.extractedText, /^>/m);
   } finally {
@@ -204,7 +204,7 @@ async function testStripsQuotedReplyContent() {
 }
 
 async function testStripsUniformQuotedReplyContent() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-uniform-quoted-reply-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-uniform-quoted-reply-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -224,7 +224,7 @@ async function testStripsUniformQuotedReplyContent() {
         'References: <root-thread@example.com>',
         'Content-Type: text/plain; charset=UTF-8',
         '',
-        '> email trim test turn2, did you continue use the same agentoc chat session ?',
+        '> email trim test turn2, did you continue use the same ragent chat session ?',
         '>',
         '> On Tue, Mar 10, 2026 at 9:56 PM <rowan@example.test> wrote:',
         '> > Hi! Got your test email successfully - everything looks good on my end.',
@@ -236,7 +236,7 @@ async function testStripsUniformQuotedReplyContent() {
       rootDir,
       {
         text: [
-          '> email trim test turn2, did you continue use the same agentoc chat session ?',
+          '> email trim test turn2, did you continue use the same ragent chat session ?',
           '>',
           '> On Tue, Mar 10, 2026 at 9:56 PM <rowan@example.test> wrote:',
           '> > Hi! Got your test email successfully - everything looks good on my end.',
@@ -247,8 +247,8 @@ async function testStripsUniformQuotedReplyContent() {
       },
     );
 
-    assert.equal(ingested.content.extractedText, 'email trim test turn2, did you continue use the same agentoc chat session ?');
-    assert.equal(ingested.content.preview, 'email trim test turn2, did you continue use the same agentoc chat session ?');
+    assert.equal(ingested.content.extractedText, 'email trim test turn2, did you continue use the same ragent chat session ?');
+    assert.equal(ingested.content.preview, 'email trim test turn2, did you continue use the same ragent chat session ?');
     assert.doesNotMatch(ingested.content.extractedText, /wrote:/i);
     assert.doesNotMatch(ingested.content.extractedText, /^>/m);
   } finally {
@@ -257,7 +257,7 @@ async function testStripsUniformQuotedReplyContent() {
 }
 
 async function testDecodesBase64BodyText() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-base64-body-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-base64-body-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -294,7 +294,7 @@ async function testDecodesBase64BodyText() {
 }
 
 async function testDecodesNestedMultipartBodyText() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-nested-multipart-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-nested-multipart-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -349,7 +349,7 @@ async function testDecodesNestedMultipartBodyText() {
 }
 
 async function testExtractsInlineImageAttachments() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-inline-image-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-inline-image-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -412,7 +412,7 @@ async function testExtractsInlineImageAttachments() {
 }
 
 async function testEnvelopeRecipientRoutesToGuestInstanceAlias() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-routing-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-routing-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -457,7 +457,7 @@ async function testEnvelopeRecipientRoutesToGuestInstanceAlias() {
 }
 
 async function testSubjectInstanceTagRoutesBaseMailboxToGuestInstance() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-subject-routing-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-subject-routing-'));
   try {
     await initializeMailbox({
       rootDir,
@@ -499,7 +499,7 @@ async function testSubjectInstanceTagRoutesBaseMailboxToGuestInstance() {
 }
 
 async function testDirectInstanceRecipientRoutesWhenLocalPartModeEnabled() {
-  const rootDir = mkdtempSync(join(tmpdir(), 'agentoc-agent-mailbox-direct-routing-'));
+  const rootDir = mkdtempSync(join(tmpdir(), 'ragent-agent-mailbox-direct-routing-'));
   try {
     await initializeMailbox({
       rootDir,

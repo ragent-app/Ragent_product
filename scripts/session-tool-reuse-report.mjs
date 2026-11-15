@@ -12,8 +12,8 @@ function readArg(flag) {
 
 const date = readArg('--date');
 const daysArg = readArg('--days');
-const configDir = readArg('--config-dir') || join(homedir(), '.config', 'agentoc');
-const outputDir = readArg('--output-dir') || join(homedir(), '.agentoc', 'reports', 'session-tool-reuse');
+const configDir = readArg('--config-dir') || join(homedir(), '.config', 'ragent');
+const outputDir = readArg('--output-dir') || join(homedir(), '.ragent', 'reports', 'session-tool-reuse');
 const days = daysArg ? Number(daysArg) : 1;
 
 if (!Number.isInteger(days) || days < 1) {

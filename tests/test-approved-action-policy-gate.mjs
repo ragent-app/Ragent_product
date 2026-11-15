@@ -52,7 +52,7 @@ import {
 
 // The apt adapter path is enabled so a gate ALLOW proceeds into the existing
 // semantic-apt capability creation path.
-process.env.AGENTOC_SEMANTIC_APT_ADAPTER_ENABLED = '1';
+process.env.RAGENT_SEMANTIC_APT_ADAPTER_ENABLED = '1';
 
 let passed = 0;
 function check(label, condition) {

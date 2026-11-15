@@ -12,8 +12,8 @@ SOURCE_COMMIT="$(git -C "$ROOT" rev-parse --verify HEAD)"
   echo 'A full committed source identity is required.' >&2; exit 1;
 }
 HEAD_HASH="${SOURCE_COMMIT:0:8}"
-OUTPUT_DIR="${AGENTOC_SRC_TAR_OUTPUT_DIR:-/tmp}"
-OUTPUT="${AGENTOC_SRC_TAR:-$OUTPUT_DIR/agentoc-src-main-$HEAD_HASH.tar}"
+OUTPUT_DIR="${RAGENT_SRC_TAR_OUTPUT_DIR:-/tmp}"
+OUTPUT="${RAGENT_SRC_TAR:-$OUTPUT_DIR/ragent-src-main-$HEAD_HASH.tar}"
 [ ! -e "$OUTPUT" ] || { echo 'Source archive already exists; refusing to overwrite it.' >&2; exit 1; }
 
 git -C "$ROOT" archive --format=tar \
@@ -38,8 +38,8 @@ git -C "$ROOT" archive --format=tar \
 # archives (no .git), and build-deb.sh uses this marker to keep the commit in
 # the generated package version.
 META_DIR="$(mktemp -d)"
-printf '%s\n' "$SOURCE_COMMIT" > "$META_DIR/.agentoc-source-commit"
-tar --append --file="$OUTPUT" --directory="$META_DIR" .agentoc-source-commit
+printf '%s\n' "$SOURCE_COMMIT" > "$META_DIR/.ragent-source-commit"
+tar --append --file="$OUTPUT" --directory="$META_DIR" .ragent-source-commit
 rm -rf "$META_DIR"
 
 # Do not mix live working-tree files into an archive attributed to a commit.

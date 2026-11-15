@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const outputDir = "/var/lib/agentoc/workspace/visual-ui-reviews/markdown-final";
+const outputDir = "/var/lib/ragent/workspace/visual-ui-reviews/markdown-final";
 mkdirSync(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 
@@ -34,10 +34,10 @@ try {
       await page.addScriptTag({ path: join(repoRoot, "static/chat/markdown-enhancements.js") });
       await page.addScriptTag({ path: join(repoRoot, "static/chat/realtime-render.js") });
       await page.evaluate(() => {
-        window.agentocT = (key) => key;
+        window.ragentT = (key) => key;
         window.renderRealtimeIcon = (name) => `<svg data-icon="${name}"></svg>`;
         enhanceCodeBlocks(document.querySelector("main"));
-        window.AgentoCMarkdownEnhancements.enhanceCodeBlocks(document.querySelector("main"));
+        window.RagentMarkdownEnhancements.enhanceCodeBlocks(document.querySelector("main"));
       });
       assert.equal(await page.locator(".code-token--keyword").count() > 0, true);
       assert.equal(await page.locator(".mermaid-diagram svg").count(), 2);

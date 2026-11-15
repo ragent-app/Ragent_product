@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonNull
 object AppApiWire {
     const val VERSION = 1
     const val PACKAGE = "com.agentoncloud.android"
-    const val SERVICE = "com.andysagent.agentoc.AppApiService"
+    const val SERVICE = "com.andysagent.ragent.AppApiService"
     const val ACTION = "com.agentoncloud.android.action.BIND_APP_API"
     const val MAX_REQUEST_BYTES = 64 * 1024
     const val MAX_RESPONSE_BYTES = 128 * 1024

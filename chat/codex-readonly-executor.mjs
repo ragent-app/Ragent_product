@@ -32,9 +32,9 @@ export async function startReadOnlyCodexExecutor({ command, cwd, workspace, hide
   // Bubblewrap terminates the executor when the owning sidecar disappears.
   const separator = sandbox.args.indexOf('--');
   if (separator < 0) { await rmdir(sandbox.emptyDir).catch(() => {}); throw new Error('Invalid executor sandbox'); }
-  const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/agentoc-executor',
-    '--perms', '0700', '--dir', '/tmp/agentoc-executor/codex', '--setenv', 'CODEX_HOME', '/tmp/agentoc-executor/codex',
-    '--setenv', 'AGENTOC_CODEX_HOME_DIR', '/tmp/agentoc-executor/codex',
+  const privateHome = readOnly ? [] : ['--perms', '0700', '--dir', '/tmp/ragent-executor',
+    '--perms', '0700', '--dir', '/tmp/ragent-executor/codex', '--setenv', 'CODEX_HOME', '/tmp/ragent-executor/codex',
+    '--setenv', 'RAGENT_CODEX_HOME_DIR', '/tmp/ragent-executor/codex',
     '--setenv', 'TMPDIR', '/tmp', '--setenv', 'TMP', '/tmp', '--setenv', 'TEMP', '/tmp'];
   sandbox.args.splice(separator, 0, '--die-with-parent', ...privateHome);
   const childEnv = Object.fromEntries(Object.entries(env).filter(([key, value]) => EXECUTOR_ENV_KEYS.has(key)

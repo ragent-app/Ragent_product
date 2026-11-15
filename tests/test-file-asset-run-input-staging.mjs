@@ -5,18 +5,18 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const home = await mkdtemp(join(tmpdir(), 'agentoc-file-asset-staging-'));
-const configDir = join(home, '.config', 'agentoc');
+const home = await mkdtemp(join(tmpdir(), 'ragent-file-asset-staging-'));
+const configDir = join(home, '.config', 'ragent');
 const sourceDir = join(home, 'source');
 await mkdir(configDir, { recursive: true });
 await mkdir(sourceDir, { recursive: true });
 process.env.HOME = home;
-process.env.AGENTOC_CONFIG_DIR = configDir;
-process.env.AGENTOC_INSTANCE_ROOT = '';
-delete process.env.AGENTOC_ASSET_STORAGE_BASE_URL;
-delete process.env.AGENTOC_ASSET_STORAGE_ACCESS_KEY_ID;
-delete process.env.AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY;
-delete process.env.AGENTOC_ASSET_STORAGE_REGION;
+process.env.RAGENT_CONFIG_DIR = configDir;
+process.env.RAGENT_INSTANCE_ROOT = '';
+delete process.env.RAGENT_ASSET_STORAGE_BASE_URL;
+delete process.env.RAGENT_ASSET_STORAGE_ACCESS_KEY_ID;
+delete process.env.RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY;
+delete process.env.RAGENT_ASSET_STORAGE_REGION;
 
 const [{ CHAT_FILE_ASSETS_DIR, CHAT_RUNS_DIR }, fileAssets, staging, sidecar] = await Promise.all([
   import('../lib/config.mjs?file-asset-staging-test-config'),
@@ -165,13 +165,13 @@ assert.equal(sidecarSource.includes('materializeFileAssetAttachments'), false, '
 assert.deepEqual(
   sidecar.stripRunnerControlEnv({
     PATH: '/usr/bin',
-    AGENTOC_CONFIG_DIR: '/control/config',
-    AGENTOC_INSTANCE_ROOT: '/control',
-    AGENTOC_MEMORY_DIR: '/control/memory',
-    AGENTOC_NATIVE_OAUTH_LOCK_PATH: '/control/provider/.agentoc-native-oauth.lock',
-    AGENTOC_NATIVE_OAUTH_LOCK_TOKEN: 'test-oauth-lock-token',
-    AGENTOC_ASSET_STORAGE_SECRET_ACCESS_KEY: 'secret',
-    AGENTOC_FILE_ASSET_TOKEN: 'token',
+    RAGENT_CONFIG_DIR: '/control/config',
+    RAGENT_INSTANCE_ROOT: '/control',
+    RAGENT_MEMORY_DIR: '/control/memory',
+    RAGENT_NATIVE_OAUTH_LOCK_PATH: '/control/provider/.ragent-native-oauth.lock',
+    RAGENT_NATIVE_OAUTH_LOCK_TOKEN: 'test-oauth-lock-token',
+    RAGENT_ASSET_STORAGE_SECRET_ACCESS_KEY: 'secret',
+    RAGENT_FILE_ASSET_TOKEN: 'token',
   }),
   { PATH: '/usr/bin' },
   'runner environment excludes control paths and asset credentials',

@@ -175,8 +175,8 @@ try {
   assert.equal(expandedWorkspace.firstSessionPointInsidePopover, true, 'workspace chooser should cover session-row hit targets beneath it');
   assert.equal(expandedWorkspace.confirmParentDisplay, 'flex', 'workspace chooser should expose its confirm action row');
   assert.ok(expandedWorkspace.confirm.right <= expandedWorkspace.popover.right, 'confirm button should stay inside the popover right edge');
-  if (process.env.AGENTOC_TEST_SCREENSHOT) {
-    await page.screenshot({ path: process.env.AGENTOC_TEST_SCREENSHOT, fullPage: true });
+  if (process.env.RAGENT_TEST_SCREENSHOT) {
+    await page.screenshot({ path: process.env.RAGENT_TEST_SCREENSHOT, fullPage: true });
   }
 
   await page.locator('#sessionList').evaluate((node) => {

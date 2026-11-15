@@ -55,7 +55,7 @@ try {
         .sidebar-overlay .sidebar { position: relative; width: 100%; height: 100%; transform: none; }
       </style></head><body>
       <div class="sidebar-overlay open"><aside class="sidebar" data-sidebar-mode="sessions">
-        <div class="sidebar-app-bar"><div class="sidebar-brand">AgentoC</div></div>
+        <div class="sidebar-app-bar"><div class="sidebar-brand">Ragent</div></div>
         <nav class="sidebar-primary-nav"><div class="sidebar-workspace"><button class="sidebar-workspace-summary" type="button">Workspace</button></div></nav>
         <div class="sidebar-session-surface">
           <div class="sidebar-projects-view" id="projectsView" hidden>${projectItems(14)}</div>

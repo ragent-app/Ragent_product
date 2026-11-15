@@ -29,7 +29,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await page.setContent(`<!doctype html><html><body>
     <div id="sidebarAppBar">
-      <div class="sidebar-brand">AgentoC</div>
+      <div class="sidebar-brand">Ragent</div>
     </div>
     <div class="sidebar-device-bar" id="sidebarDeviceBar" hidden>
       <button class="sidebar-device-name-btn" id="sidebarDeviceNameBtn" type="button" data-i18n-title="sidebar.device.switch" data-i18n-aria-label="sidebar.device.switch">
@@ -52,7 +52,7 @@ try {
   await page.evaluate((src) => {
     window.FILTER_ALL_VALUE = '__all__';
     window.marked = { use: () => {} };
-    window.agentocT = (key) => ({
+    window.ragentT = (key) => ({
       'sidebar.device.localName': 'This device',
       'sidebar.device.comingSoon': 'Device management is coming soon.',
       'sidebar.projects.newProject': 'New project',
@@ -62,14 +62,14 @@ try {
     const toasts = [];
     window.showSystemToast = (message, level) => toasts.push({ message, level });
     window.__toasts = toasts;
-    window.AgentoCCrossDevicePanel = {
+    window.RagentCrossDevicePanel = {
       open(options) {
         window.__crossDeviceOpen = options;
         return true;
       },
     };
     window.getSidebarViewLevel = () => window.__level || 'projects';
-    window.agentocProjectsReady = Promise.resolve();
+    window.ragentProjectsReady = Promise.resolve();
     window.getActiveSidebarTabValue = () => 'sessions';
     window.sidebarSearchMode = false;
     window.sessionSearchQuery = '';
@@ -126,7 +126,7 @@ try {
 
   // Add-device click opens the owner-side registration view.
   await page.evaluate(() => {
-    window.AgentocDeviceBar.addDevice().then((result) => { window.__addResult = result; });
+    window.RagentDeviceBar.addDevice().then((result) => { window.__addResult = result; });
   });
   await page.waitForFunction(() => window.__addResult !== undefined);
   const addResult = await page.evaluate(() => window.__addResult);
@@ -134,7 +134,7 @@ try {
   assert.deepEqual(await page.evaluate(() => window.__crossDeviceOpen), { view: 'register' }, 'addDevice should open registration');
 
   await page.evaluate(() => {
-    window.AgentocDeviceBar.openDeviceManager().then((result) => { window.__managerResult = result; });
+    window.RagentDeviceBar.openDeviceManager().then((result) => { window.__managerResult = result; });
   });
   await page.waitForFunction(() => window.__managerResult !== undefined);
   assert.deepEqual(await page.evaluate(() => window.__managerResult), { ok: true }, 'openDeviceManager should open the workspace');

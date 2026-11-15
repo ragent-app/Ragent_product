@@ -9,18 +9,18 @@ import { inheritedSocketFd } from '../lib/systemd-socket-activation.mjs';
 import { createLinuxRunPeerResultServer } from './linux-run-peer-result-server.mjs';
 
 const execFile = promisify(execFileCallback);
-const socketPath = '/run/agentoc-peer-result/result.sock';
-const resultDirectory = '/var/lib/agentoc-peer-results';
-const socketName = 'agentoc-peer-result';
+const socketPath = '/run/ragent-peer-result/result.sock';
+const resultDirectory = '/var/lib/ragent-peer-results';
+const socketName = 'ragent-peer-result';
 
 export async function startProtectedResultBroker({ env = process.env, pid = process.pid,
-  readUser = () => readFile('/etc/agentoc/service-user', 'utf8'), exec = execFile,
+  readUser = () => readFile('/etc/ragent/service-user', 'utf8'), exec = execFile,
   createServer = createLinuxRunPeerResultServer } = {}) {
   if (process.platform !== 'linux' || process.geteuid?.() !== 0) throw new Error('Protected result broker requires root');
   const inherited = inheritedSocketFd({ env, pid, expectedName: socketName });
   if (!inherited || inherited.count !== 1 || env.LISTEN_FDNAMES !== socketName) throw new Error('Protected result socket activation is required');
-  const directory = String(env.AGENTOC_LINUX_RUN_CONTEXT_DIR || '').trim();
-  const pinDirectory = String(env.AGENTOC_LINUX_SERVICE_PIN_DIR || '').trim();
+  const directory = String(env.RAGENT_LINUX_RUN_CONTEXT_DIR || '').trim();
+  const pinDirectory = String(env.RAGENT_LINUX_SERVICE_PIN_DIR || '').trim();
   if (!directory || !pinDirectory) throw new Error('Protected Run context and key pin are required');
   const user = String(await readUser()).split(/\r?\n/, 1)[0].trim();
   if (!/^[a-z_][a-z0-9_-]{0,31}\$?$/.test(user)) throw new Error('Invalid control user');

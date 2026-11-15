@@ -15,7 +15,7 @@ import { temporaryControlRelayPrincipal } from '../lib/temporary-control-broker-
 const id = (prefix) => `${prefix}_${randomBytes(24).toString('base64url')}`;
 
 for (const bound of [true, false]) test(`control carrier resumes and revokes (Google bound: ${bound})`, async (t) => {
-  const root = await mkdtemp(join(tmpdir(), 'agentoc-control-carrier-'));
+  const root = await mkdtemp(join(tmpdir(), 'ragent-control-carrier-'));
   t.after(async () => { assert.ok(resolve(root).startsWith(resolve(tmpdir()) + sep)); await rm(root, { recursive: true, force: true }); });
   const now = 1_800_000_000_000;
   const identity = await loadOrCreateInstanceIdentity({ filePath: join(root, 'identity.json') });

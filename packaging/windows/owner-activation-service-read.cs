@@ -13,8 +13,8 @@ public sealed class OwnerActivationServiceRead : IDisposable {
  IntPtr handle;readonly string command,account,dependency;
  static void Need(bool ok,string code){if(!ok)throw new InvalidOperationException(code);}
  public OwnerActivationServiceRead(string name,string expectedCommand){
-  Need(name=="AgentoC-ControlPlane"||name=="AgentoC-RunnerSupervisor","OAC_SERVICE_NAME_REFUSED");
-  Need(!String.IsNullOrEmpty(expectedCommand),"OAC_COMMAND_REQUIRED");command=expectedCommand;account=@"NT SERVICE\"+name;dependency=name=="AgentoC-ControlPlane"?"AgentoC-RunnerSupervisor":"";
+  Need(name=="Ragent-ControlPlane"||name=="Ragent-RunnerSupervisor","OAC_SERVICE_NAME_REFUSED");
+  Need(!String.IsNullOrEmpty(expectedCommand),"OAC_COMMAND_REQUIRED");command=expectedCommand;account=@"NT SERVICE\"+name;dependency=name=="Ragent-ControlPlane"?"Ragent-RunnerSupervisor":"";
   var manager=OpenSCManager(null,null,1);Need(manager!=IntPtr.Zero,"OAC_SCM_OPEN_REFUSED");
   try{handle=OpenService(manager,name,5);}finally{CloseServiceHandle(manager);}Need(handle!=IntPtr.Zero,"OAC_SERVICE_OPEN_REFUSED");
   try{Verify();}catch{Dispose();throw;}

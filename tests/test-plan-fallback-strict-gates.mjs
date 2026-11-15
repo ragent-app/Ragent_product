@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Strict gates for the end-of-run plan fallback card (agentoc-plan-fallback).
+// Strict gates for the end-of-run plan fallback card (ragent-plan-fallback).
 // The fallback exists so plan-mode runs that finish with a plain-text plan
 // (no ExitPlanMode approval — Claude asks mid-run, not always) still leave a
 // plan card. It is STRICT: a run that already surfaced an ExitPlanMode
@@ -124,8 +124,8 @@ assert.match(
 );
 assert.match(
   maybeAppend,
-  /source: 'agentoc-plan-fallback'/,
-  'fallback cards keep the agentoc-plan-fallback source',
+  /source: 'ragent-plan-fallback'/,
+  'fallback cards keep the ragent-plan-fallback source',
 );
 
 console.log('test-plan-fallback-strict-gates: ok');

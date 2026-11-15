@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const configDir = mkdtempSync(join(tmpdir(), 'agentoc-collaboration-http-'));
-process.env.AGENTOC_CONFIG_DIR = configDir;
+const configDir = mkdtempSync(join(tmpdir(), 'ragent-collaboration-http-'));
+process.env.RAGENT_CONFIG_DIR = configDir;
 
 const { handleCollaborationRoutes } = await import('../chat/router-collaboration-routes.mjs');
 

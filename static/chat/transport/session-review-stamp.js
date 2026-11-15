@@ -14,7 +14,7 @@
 // Fully pure: no environment contract, no platform hooks. Locked against the
 // legacy implementation by tests/test-chat-session-review-stamp-core.mjs.
 
-(function attachAgentocSessionReviewStampCore(root) {
+(function attachRagentSessionReviewStampCore(root) {
   function normalizeSessionReviewStamp(value) {
     if (typeof value === "number") {
       return Number.isFinite(value) ? new Date(value).toISOString() : "";
@@ -61,7 +61,7 @@
     return best;
   }
 
-  root.AgentocSessionReviewStampCore = {
+  root.RagentSessionReviewStampCore = {
     normalizeSessionReviewStamp,
     getSessionReviewStampTime,
     getSessionReviewStamp,

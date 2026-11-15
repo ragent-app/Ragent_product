@@ -46,7 +46,7 @@ func TestSystemAutoInstallUsesPinnedRuntimeAndReportsOutcomes(t *testing.T) {
 						t.Fatalf("unsafe invocation: %q %q", exe, args)
 					}
 					joined := "\n" + strings.Join(env, "\n") + "\n"
-					for _, required := range []string{"\nAGENTOC_INSTALL_PACKAGE_ID=Vendor.App\n", "\nAGENTOC_INSTALL_PACKAGE_VERSION=1.2.3\n", "\nAGENTOC_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1") + "\n"} {
+					for _, required := range []string{"\nRAGENT_INSTALL_PACKAGE_ID=Vendor.App\n", "\nRAGENT_INSTALL_PACKAGE_VERSION=1.2.3\n", "\nRAGENT_INSTALL_MODULE=" + filepath.Join(vendor, "Microsoft.WinGet.Client", "Microsoft.WinGet.Client.psd1") + "\n"} {
 						if !strings.Contains(joined, required) {
 							t.Fatalf("missing fixed environment value %q", required)
 						}
@@ -71,7 +71,7 @@ func TestSystemAutoInstallUsesPinnedRuntimeAndReportsOutcomes(t *testing.T) {
 	selected := grant
 	selected.SelectedInstaller = &selectedInstallerFacts{ID: grant.PackageID, Version: grant.VersionID, Source: "winget", Scope: "System", Elevation: "ElevationRequired", Type: "Msi", NestedType: "Unknown", Architecture: "X64", Locale: "en-US"}
 	installer = windowsAutoInstaller{acquire: func() (runtimeLease, error) { return runtimeLease{vendor: vendor, close: func() {}}, nil }, run: func(_ context.Context, _ string, _ []string, env []string, _ string) (int, error) {
-		if !strings.Contains(strings.Join(env, "\n"), `AGENTOC_INSTALL_SELECTED={"id":"Vendor.App","version":"1.2.3"`) {
+		if !strings.Contains(strings.Join(env, "\n"), `RAGENT_INSTALL_SELECTED={"id":"Vendor.App","version":"1.2.3"`) {
 			t.Fatal("selected metadata did not reach the fixed runner")
 		}
 		return 25, errors.New("selection changed")
@@ -108,7 +108,7 @@ func TestSystemInstallerInspectionIsReadOnlyAndBound(t *testing.T) {
 		},
 		inspect: func(_ context.Context, exe string, args, env []string, cwd string) ([]byte, error) {
 			called = true
-			if exe != filepath.Join(vendor, "PowerShell", "pwsh.exe") || !filepath.IsAbs(cwd) || args[6] != encodePowerShellScript(autoInstallModuleScript) || !strings.Contains(strings.Join(env, "\n"), "AGENTOC_INSTALL_INSPECT=1") {
+			if exe != filepath.Join(vendor, "PowerShell", "pwsh.exe") || !filepath.IsAbs(cwd) || args[6] != encodePowerShellScript(autoInstallModuleScript) || !strings.Contains(strings.Join(env, "\n"), "RAGENT_INSTALL_INSPECT=1") {
 				t.Fatal("invalid inspection invocation")
 			}
 			return []byte(output), nil
@@ -139,10 +139,10 @@ func TestSystemInstallerInspectionIsReadOnlyAndBound(t *testing.T) {
 }
 
 func TestOptionalSystemInstallerInspectionWithPinnedRuntime(t *testing.T) {
-	if os.Getenv("AGENTOC_TEST_LIVE_WINGET_SELECTED") != "1" {
+	if os.Getenv("RAGENT_TEST_LIVE_WINGET_SELECTED") != "1" {
 		t.Skip("live catalog inspection is opt-in")
 	}
-	vendor, digest, packageID, versionID := os.Getenv("AGENTOC_TEST_RUNTIME_VENDOR"), os.Getenv("AGENTOC_TEST_RUNTIME_MANIFEST_SHA256"), os.Getenv("AGENTOC_TEST_PACKAGE_ID"), os.Getenv("AGENTOC_TEST_PACKAGE_VERSION")
+	vendor, digest, packageID, versionID := os.Getenv("RAGENT_TEST_RUNTIME_VENDOR"), os.Getenv("RAGENT_TEST_RUNTIME_MANIFEST_SHA256"), os.Getenv("RAGENT_TEST_PACKAGE_ID"), os.Getenv("RAGENT_TEST_PACKAGE_VERSION")
 	if !filepath.IsAbs(vendor) || digest == "" || !autoInstallPackagePattern.MatchString(packageID) || !autoInstallVersionPattern.MatchString(versionID) {
 		t.Fatal("invalid isolated fixture")
 	}

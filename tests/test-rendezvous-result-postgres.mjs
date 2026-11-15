@@ -78,7 +78,7 @@ test('broker validates the instance signature before publishing through the scop
   const broker = createOwnerAuthBroker({ store: f.store, clock: () => now,
     verifyGoogleCredential: async () => ({}), resolveAccount: async () => ({}), signAssertion: async () => '' });
   const instance = { instanceId: 'inst_scoped', publicKey, keyFingerprint: fingerprint };
-  const requestId = 'request_scoped', issuedAt = new Date(now).toISOString(), audience = 'agentoc-account-rendezvous-poll';
+  const requestId = 'request_scoped', issuedAt = new Date(now).toISOString(), audience = 'ragent-account-rendezvous-poll';
   const message = buildAccountRendezvousPollMessage({ instanceId: instance.instanceId, requestId, issuedAt, audience });
   const proof = { instance, requestId, issuedAt, audience, result: { value: 'fixture' },
     signature: sign(null, Buffer.from(message), key.privateKey).toString('base64url') };

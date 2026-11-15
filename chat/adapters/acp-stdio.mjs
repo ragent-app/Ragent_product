@@ -10,7 +10,7 @@ export function acpRequest(id, method, params = {}) {
 }
 
 export function buildAcpStartInput({ clientName = 'Ragent', clientVersion = '1.0' } = {}) {
-  return acpRequest('agentoc-initialize', 'initialize', {
+  return acpRequest('ragent-initialize', 'initialize', {
     protocolVersion: 1,
     clientInfo: { name: clientName, version: clientVersion },
     clientCapabilities: {},
@@ -23,27 +23,27 @@ export function buildAcpSessionInput({ cwd, mcpServers = [], resumeSessionId = '
     : [];
   const normalizedResumeId = text(resumeSessionId);
   const startRequest = normalizedResumeId
-    ? acpRequest('agentoc-session-load', 'session/load', {
+    ? acpRequest('ragent-session-load', 'session/load', {
       sessionId: normalizedResumeId,
       cwd: cwd || '',
       mcpServers: servers,
     })
-    : acpRequest('agentoc-session-new', 'session/new', { cwd: cwd || '', mcpServers: servers });
+    : acpRequest('ragent-session-new', 'session/new', { cwd: cwd || '', mcpServers: servers });
   return startRequest;
 }
 
 export function isAcpInitializeAccepted(payload) {
-  return payload?.jsonrpc === '2.0' && payload.id === 'agentoc-initialize'
+  return payload?.jsonrpc === '2.0' && payload.id === 'ragent-initialize'
     && !payload.error && payload.result?.protocolVersion === 1;
 }
 
 export function buildAcpPromptInput(sessionId, prompt) {
-  return acpRequest('agentoc-prompt', 'session/prompt', {
+  return acpRequest('ragent-prompt', 'session/prompt', {
     sessionId, prompt: [{ type: 'text', text: typeof prompt === 'string' ? prompt : '' }],
   });
 }
 
-export function buildAcpModeSwitchInput(sessionId, modeId, availableModes, requestId = 'agentoc-set-mode') {
+export function buildAcpModeSwitchInput(sessionId, modeId, availableModes, requestId = 'ragent-set-mode') {
   if (!text(sessionId) || !text(modeId) || !Array.isArray(availableModes)
       || !availableModes.some((mode) => mode?.id === modeId || mode?.value === modeId)) return null;
   return acpRequest(requestId, 'session/set_mode', { sessionId, modeId });
@@ -58,7 +58,7 @@ export function acpAvailableModesFromResponse(payload) {
   return Array.isArray(modeOption?.options) ? modeOption.options : [];
 }
 
-export function isAcpModeSwitchAccepted(payload, requestId = 'agentoc-set-mode') {
+export function isAcpModeSwitchAccepted(payload, requestId = 'ragent-set-mode') {
   return payload?.jsonrpc === '2.0' && payload.id === requestId
     && !payload.error && payload.result !== null
     && typeof payload.result === 'object' && !Array.isArray(payload.result);
@@ -159,13 +159,13 @@ export function parseAcpEvent(line, {
     return [];
   }
   if (payload.error) return [statusEvent(`error: ${text(payload.error.message) || 'ACP request failed'}`, { ...fields, runState: 'failed' })];
-  if ((payload.id === 'agentoc-session-new' || payload.id === 'agentoc-session-load') && !payload.error) {
-    return [statusEvent(payload.id === 'agentoc-session-load' ? 'ACP session resumed' : 'ACP session started', {
+  if ((payload.id === 'ragent-session-new' || payload.id === 'ragent-session-load') && !payload.error) {
+    return [statusEvent(payload.id === 'ragent-session-load' ? 'ACP session resumed' : 'ACP session started', {
       ...fields,
       ...(payload.result?.sessionId ? { providerSessionId: payload.result.sessionId } : {}),
     })];
   }
-  if (payload.id === 'agentoc-prompt' && payload.result) return [statusEvent('completed', { ...fields, runState: 'completed' })];
+  if (payload.id === 'ragent-prompt' && payload.result) return [statusEvent('completed', { ...fields, runState: 'completed' })];
   return [];
 }
 

@@ -416,7 +416,7 @@ function validatePermissionFactsShape(operation, facts) {
     || typeof facts.selfProtection.computed !== 'boolean'
     || typeof facts.selfProtection.matched !== 'boolean'
     || typeof facts.selfProtection.workspaceRecommended !== 'boolean'
-    || !['none', 'agentoc-service'].includes(facts.selfProtection.boundary)) {
+    || !['none', 'ragent-service'].includes(facts.selfProtection.boundary)) {
     return errorResult(C.FACTS_REQUIRED, 'permission facts selfProtection must be server-computed');
   }
   // A resolver-bound operation may carry the self-protection projection in
