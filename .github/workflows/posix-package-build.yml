@@ -10,7 +10,7 @@ on:
       build_version:
         description: Internal package build version (must increase on every rebuild)
         required: true
-        default: '0.0.81'
+        default: '1.0.0'
         type: string
 permissions:
   contents: read

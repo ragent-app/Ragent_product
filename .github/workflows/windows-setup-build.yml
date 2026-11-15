@@ -9,6 +9,7 @@ on:
       msi_product_version:
         description: 'MSI product version newer than the latest published installer'
         required: true
+        default: '1.0.0'
         type: string
 permissions:
   contents: read
