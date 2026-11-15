@@ -432,6 +432,13 @@ else
   mkdir -p "$STAGE/usr/lib/systemd/system"
   mv "$STAGE/lib/systemd/system/"* "$STAGE/usr/lib/systemd/system/"
   rmdir "$STAGE/lib/systemd/system" "$STAGE/lib/systemd" "$STAGE/lib"
+  # On EL9 systemd cannot bind the lifecycle socket under the private state
+  # tree. Keep control traffic in the supervisor's masked runtime directory;
+  # keep the supervisor's own endpoint outside that mask.
+  sed -i 's|^ListenStream=/var/lib/ragent/config/runner-lifecycle.sock$|ListenStream=/run/ragent/control/runner-lifecycle.sock\nDirectoryMode=0755|' "$STAGE/usr/lib/systemd/system/ragent-runner-lifecycle.socket"
+  sed -i 's|^ListenStream=/var/lib/ragent-run/runner-supervisor.sock$|ListenStream=/run/ragent-run/runner-supervisor.sock\nDirectoryMode=0755|' "$STAGE/usr/lib/systemd/system/ragent-runner-supervisor.socket"
+  sed -i '/^RuntimeDirectory=ragent$/a RuntimeDirectoryPreserve=yes' "$STAGE/usr/lib/systemd/system/ragent-runner-lifecycle.service"
+  printf '%s\n' 'RAGENT_RUNNER_SUPERVISOR_SOCKET=/run/ragent-run/runner-supervisor.sock' 'RAGENT_RUNNER_LIFECYCLE_SOCKET=/run/ragent/control/runner-lifecycle.sock' > "$STAGE/usr/lib/ragent/socket-paths.env"
   rm -f "$STAGE/usr/lib/ragent/retire-legacy-cc-switch"
   sed -i '/^ExecStartPre=\/usr\/lib\/ragent\/retire-legacy-cc-switch$/d' "$STAGE/usr/lib/systemd/system/ragent.service"
   chmod -R a+rX "$APP_DIR" "$STAGE/opt/ragent/vendor"
