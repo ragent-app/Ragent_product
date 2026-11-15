@@ -1,4 +1,4 @@
-package com.andysagent.agentoc.core.p2p
+package com.andysagent.ragent.core.p2p
 
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
