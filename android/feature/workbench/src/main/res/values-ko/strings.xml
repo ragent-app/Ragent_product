@@ -282,6 +282,7 @@
     <string name="pairing_error_quota_hint">이 계정은 기기 수 한도에 도달했습니다. Pro로 업그레이드하면 더 많은 기기를 연결할 수 있습니다.</string>
     <string name="pairing_error_retry_hint">현재 단계를 다시 시도하거나 이 창을 닫으세요.</string>
     <string name="workbench_session_run_details">실행 세부 정보</string>
+    <string name="workbench_session_team">팀</string>
     <string name="workbench_session_rename">대화 이름 변경</string>
     <string name="workbench_session_copy_id">대화 ID 복사</string>
     <string name="workbench_session_compact">컨텍스트 정리</string>

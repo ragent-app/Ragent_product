@@ -722,6 +722,7 @@ fun WorkbenchScreen(
                     chatParityState = detailParityState,
                     onChatParityEvent = detailParityEvent,
                     onEvent = stableOnEvent,
+                    onOpenOrganization = if (state.chatOpen && state.sessionId != null && organizationTransport != null) ({ organizationOpen = true }) else null,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     backProgress = backProgress,
                     composerActionSheetOpen = composerActionSheetOpen,
@@ -780,6 +781,7 @@ fun WorkbenchScreen(
                         parityState = detailParityState,
                         onParityEvent = detailParityEvent,
                         onEvent = stableOnEvent,
+                        onOpenOrganization = if (state.chatOpen && state.sessionId != null && organizationTransport != null) ({ organizationOpen = true }) else null,
                         modifier = Modifier.fillMaxSize(),
                         composerActionSheetOpen = composerActionSheetOpen,
                         onSetComposerActionSheetOpen = { composerActionSheetOpen = it },
@@ -831,11 +833,6 @@ fun WorkbenchScreen(
                     onResponsibilitySelected = { responsibilitySelection = it },
                     onBack = { organizationOpen = false },
                 )
-            } else {
-                androidx.compose.material3.TextButton(
-                    onClick = { organizationOpen = true },
-                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().zIndex(5f),
-                ) { Text("Organization") }
             }
         }
         state.error?.takeUnless(::isTransportConnectionFailure)?.let { error ->
@@ -996,6 +993,7 @@ private fun TabletDetailSurface(
     chatParityState: WebParityUiState,
     onChatParityEvent: (WebParityEvent) -> Unit,
     onEvent: (WorkbenchEvent) -> Unit,
+    onOpenOrganization: (() -> Unit)?,
     modifier: Modifier,
     backProgress: Float,
     composerActionSheetOpen: Boolean,
@@ -1055,6 +1053,7 @@ private fun TabletDetailSurface(
                 parityState = chatParityState,
                 onParityEvent = onChatParityEvent,
                 onEvent = { event -> onEvent(if (event == WorkbenchEvent.Retry) WorkbenchEvent.RetryChat else event) },
+                onOpenOrganization = onOpenOrganization,
                 modifier = Modifier.fillMaxSize(),
                 composerActionSheetOpen = composerActionSheetOpen,
                 onSetComposerActionSheetOpen = onSetComposerActionSheetOpen,
@@ -1588,6 +1587,7 @@ private suspend fun copyClipboardImage(
 private fun ChatSurface(
     state: WorkbenchUiState,
     onEvent: (WorkbenchEvent) -> Unit,
+    onOpenOrganization: (() -> Unit)? = null,
     modifier: Modifier,
     parityState: WebParityUiState = WebParityUiState(),
     onParityEvent: (WebParityEvent) -> Unit = {},
@@ -3361,6 +3361,16 @@ private fun ChatSurface(
                 .padding(top = 56.dp, end = AgentoSpacing.ComposerMargin)
                 .zIndex(10f),
         ) {
+            if (onOpenOrganization != null && state.sessionId != null) {
+                AgentoDropdownMenuItem(
+                    text = stringResource(R.string.workbench_session_team),
+                    onClick = {
+                        onEvent(WorkbenchEvent.CloseSessionMenu)
+                        onOpenOrganization()
+                    },
+                    leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null) },
+                )
+            }
             AgentoDropdownMenuItem(
                 text = stringResource(R.string.workbench_session_run_details),
                 onClick = {

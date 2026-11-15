@@ -355,6 +355,7 @@
     <string name="temporary_pairing_retry_hint">使用同一個配對碼重試是安全的。</string>
     <string name="account_pairing_waiting">正在自動完成帳號登入，請保持兩台裝置連線。</string>
     <string name="workbench_session_run_details">執行詳細資料</string>
+    <string name="workbench_session_team">團隊</string>
     <string name="workbench_session_rename">重新命名對話</string>
     <string name="workbench_session_copy_id">複製對話 ID</string>
     <string name="workbench_session_compact">整理內容脈絡</string>

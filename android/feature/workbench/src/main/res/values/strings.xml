@@ -225,6 +225,7 @@
     <string name="workbench_upload_retrying">Reconnecting upload…</string>
     <string name="workbench_upload_progress">Uploading attachment · %1$d%%</string>
     <string name="workbench_session_run_details">Run details</string>
+    <string name="workbench_session_team">Team</string>
     <string name="workbench_session_rename">Rename chat</string>
     <string name="workbench_session_copy_id">Copy chat ID</string>
     <string name="workbench_session_compact">Compact context</string>

@@ -372,6 +372,7 @@
     <string name="pairing_error_google_incomplete">Google 验证未完成，请重试。</string>
     <string name="pairing_error_link_failed">无法关联这台电脑。请重新开始帐号关联流程。</string>
     <string name="workbench_session_run_details">运行详情</string>
+    <string name="workbench_session_team">团队</string>
     <string name="workbench_session_rename">重命名会话</string>
     <string name="workbench_session_copy_id">复制会话 ID</string>
     <string name="workbench_session_compact">整理上下文</string>
