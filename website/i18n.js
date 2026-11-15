@@ -43,7 +43,16 @@
   const validationMessage = 'Candidate targets have not completed release validation. Automatic updates require both support and validation for that release.';
   linuxTranslations['zh-CN'][validationMessage] = '候选目标尚未完成发布验证。自动更新需要支持该目标且该版本已完成验证。';
   linuxTranslations['zh-TW'][validationMessage] = '候選目標尚未完成發行驗證。自動更新需要支援該目標且該版本已完成驗證。';
-  const translate = text => (current === 'en' ? text : linuxTranslations[current]?.[text] || dictionary[current]?.[text] || text);
+  const linuxBriefTranslations = {
+    'zh-CN': ['Ubuntu 22.04、24.04、26.04 和 Debian 12、13。需要 systemd 和 glibc 2.34 或更高版本。', 'Linux 验收详情 ↗', 'Rocky Linux 9.8：安装兼容验收通过。', 'Rocky Linux 9.8：等待验收。', 'RHEL 9：安装兼容验收通过。', 'RHEL 9：尚未验收。'],
+    'zh-TW': ['Ubuntu 22.04、24.04、26.04 和 Debian 12、13。需要 systemd 和 glibc 2.34 或更新版本。', 'Linux 驗收詳情 ↗', 'Rocky Linux 9.8：安裝相容驗收通過。', 'Rocky Linux 9.8：等待驗收。', 'RHEL 9：安裝相容驗收通過。', 'RHEL 9：尚未驗收。'],
+    ja: ['Ubuntu 22.04、24.04、26.04 および Debian 12、13。systemd と glibc 2.34 以降が必要です。', 'Linux の検証詳細 ↗', 'Rocky Linux 9.8：インストール互換性を検証済み。', 'Rocky Linux 9.8：検証待ち。', 'RHEL 9：インストール互換性を検証済み。', 'RHEL 9：未検証。'],
+    ko: ['Ubuntu 22.04, 24.04, 26.04 및 Debian 12, 13. systemd와 glibc 2.34 이상이 필요합니다.', 'Linux 검증 상세 ↗', 'Rocky Linux 9.8: 설치 호환성 검증 완료.', 'Rocky Linux 9.8: 검증 대기 중.', 'RHEL 9: 설치 호환성 검증 완료.', 'RHEL 9: 아직 검증되지 않음.'],
+    fr: ['Ubuntu 22.04, 24.04, 26.04 et Debian 12, 13. Nécessite systemd et glibc 2.34 ou version ultérieure.', 'Détails de validation Linux ↗', 'Rocky Linux 9.8 : compatibilité d’installation vérifiée.', 'Rocky Linux 9.8 : validation en attente.', 'RHEL 9 : compatibilité d’installation vérifiée.', 'RHEL 9 : validation en attente.'],
+    es: ['Ubuntu 22.04, 24.04, 26.04 y Debian 12, 13. Requiere systemd y glibc 2.34 o posterior.', 'Detalles de validación de Linux ↗', 'Rocky Linux 9.8: compatibilidad de instalación verificada.', 'Rocky Linux 9.8: validación pendiente.', 'RHEL 9: compatibilidad de instalación verificada.', 'RHEL 9: validación pendiente.'],
+  };
+  const linuxBriefKeys = ['Ubuntu 22.04, 24.04, 26.04 and Debian 12, 13. Requires systemd and glibc 2.34 or later.', 'Linux validation details ↗', 'Rocky Linux 9.8: installation compatibility verified.', 'Rocky Linux 9.8: validation pending.', 'RHEL 9: installation compatibility verified.', 'RHEL 9: validation pending.'];
+  const translate = text => (current === 'en' ? text : linuxBriefTranslations[current]?.[linuxBriefKeys.indexOf(text)] || linuxTranslations[current]?.[text] || dictionary[current]?.[text] || text);
   window.siteT = translate;
   function apply() {
     document.documentElement.lang = current;

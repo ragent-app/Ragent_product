@@ -3,7 +3,6 @@
   const status = document.getElementById('download-status');
   const grid = document.getElementById('download-grid');
   const history = document.getElementById('release-history');
-  const linuxTargets = document.getElementById('linux-targets');
   if (!status || !grid || !history) return;
   const t = text => window.siteT ? window.siteT(text) : text;
   let cached = null;
@@ -34,7 +33,7 @@
   function link(text, url, className) { const node = el('a', text, className); node.href = url; return node; }
   async function load() {
     const generation = ++renderGeneration;
-    status.textContent = t('Checking available releases…'); grid.replaceChildren(); history.replaceChildren(); if (linuxTargets) linuxTargets.replaceChildren();
+    status.textContent = t('Checking available releases…'); grid.replaceChildren(); history.replaceChildren();
     try {
       if (!cached && !pending) pending = (async () => {
         const result = [];
@@ -95,32 +94,19 @@
               link(t('Installation instructions ↗'), `https://github.com/${repo}/blob/main/docs/android-proot.md`));
           } else {
             card.append(el('h3', `${asset.requirement || platform} · ${t(asset.arch)}`), el('p', `${asset.version} · ${asset.format}`), link(`${t('Download')} ${asset.format} ↓`, asset.url, 'button'));
-            if (asset.requirement === 'Ubuntu / Debian') card.append(el('p', t('Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.')));
+            if (asset.requirement === 'Ubuntu / Debian') {
+              card.append(el('p', t('Ubuntu 22.04, 24.04, 26.04 and Debian 12, 13. Requires systemd and glibc 2.34 or later.')),
+                link(t('Linux validation details ↗'), `https://github.com/${repo}/blob/main/docs/linux-release-acceptance.md`));
+            }
+            if (asset.requirement === 'RHEL 9' && asset.format === 'RPM') {
+              const release = releases.find(item => item.tag_name === asset.version && !item.prerelease);
+              const verified = (id) => Boolean(release && /^sha256:[a-f0-9]{64}$/.test(asset.digest || '') && String(release.body || '').includes(`<!-- ragent-linux-validated:${asset.name}:${id}:9:x64:${asset.digest} -->`));
+              card.append(el('p', `${t(verified('rocky') ? 'Rocky Linux 9.8: installation compatibility verified.' : 'Rocky Linux 9.8: validation pending.')} ${t(verified('rhel') ? 'RHEL 9: installation compatibility verified.' : 'RHEL 9: validation pending.')}`),
+                link(t('Linux validation details ↗'), `https://github.com/${repo}/blob/main/docs/linux-release-acceptance.md`));
+            }
             if (platform === 'Android') card.append(el('p', t('The GitHub APK is signed separately from the Google Play build. Uninstall the other version before switching.')));
           }
           grid.append(card);
-        }
-      }
-      if (linuxTargets) {
-        const targets = [
-          ...['22.04', '24.04', '26.04'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'ubuntu', version, arch, format: 'DEB' }))),
-          ...['12', '13'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'debian', version, arch, format: 'DEB' }))),
-          { id: 'rhel', version: '9', arch: 'x64', format: 'RPM' },
-          { id: 'rocky', version: '9', arch: 'x64', format: 'RPM' },
-        ];
-        for (const target of targets) {
-          const asset = [...latest.values()].find(item => item.format === target.format && item.arch.toLowerCase() === target.arch && item.requirement === (target.format === 'DEB' ? 'Ubuntu / Debian' : 'RHEL 9'));
-          const release = asset && releases.find(item => item.tag_name === asset.version && !item.prerelease);
-          const validated = Boolean(release && /^sha256:[a-f0-9]{64}$/.test(asset.digest || '') && String(release.body || '').includes(`<!-- ragent-linux-validated:${asset.name}:${target.id}:${target.version}:${target.arch}:${asset.digest} -->`));
-          const name = { ubuntu: 'Ubuntu', debian: 'Debian', rhel: 'RHEL', rocky: 'Rocky Linux' }[target.id];
-          const card = el('article', '', 'download-item');
-          card.append(el('h3', `${name} ${target.version} · ${target.arch === 'x64' ? 'x64' : 'ARM64'} · ${target.format}`), el('p', t(validated ? 'Installation compatibility verified' : 'Candidate — validation pending')));
-          if (target.id === 'rocky') card.append(el('p', t('Compatibility target only; automatic updates are not available.')));
-          if (!asset) {
-            const legacy = target.id === 'ubuntu' && target.version === '24.04' && [...latest.values()].some(item => item.requirement === 'Ubuntu 24.04' && item.format === 'DEB' && item.arch.toLowerCase() === target.arch);
-            card.append(el('span', t(legacy ? 'The new shared package is not published yet; an Ubuntu 24.04 package is available above.' : 'No public package is available yet.'), 'unavailable'));
-          }
-          linuxTargets.append(card);
         }
       }
       status.textContent = releases.length ? '' : t('No published releases are available yet.');
