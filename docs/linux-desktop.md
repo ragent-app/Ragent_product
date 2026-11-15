@@ -22,6 +22,8 @@ For an RPM candidate on an EL9 system, use
 [Linux acceptance record](linux-release-acceptance.md) and release notes for
 the exact tested distribution; a Rocky Linux result does not establish RHEL
 compatibility. RPM auto-update is not enabled for Rocky Linux.
+On RPM systems, the apt-based privileged package-install adapter and remote
+instance bootstrap are unavailable. The local service remains available.
 
 On an interactive installation, the installer can ask for an owner username
 and password. A non-interactive installation generates a password instead and
