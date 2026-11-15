@@ -7,7 +7,7 @@ BuildArch: x86_64
 %global __os_install_post %{nil}
 AutoReqProv: no
 Requires: glibc >= 2.34, systemd, shadow-utils, util-linux, acl, ca-certificates
-Requires: bash, coreutils, findutils, gawk, grep, sed, procps-ng, openssl, polkit
+Requires: bash, coreutils, findutils, gawk, grep, sed, procps-ng, openssl, polkit, python3
 Requires: alsa-lib, atk, at-spi2-atk, at-spi2-core, cairo, cups-libs, dbus-libs
 Requires: expat, gtk3, libgcc, libstdc++, libX11, libxcb, libXcomposite, libXdamage, libXext
 Requires: libXfixes, libXrandr, libdrm, libxkbcommon, mesa-libgbm, nspr, nss, pango

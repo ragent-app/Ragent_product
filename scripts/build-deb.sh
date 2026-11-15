@@ -382,7 +382,7 @@ Section: net
 Priority: optional
 Architecture: $ARCH
 Maintainer: Ninglo
-Depends: adduser, ca-certificates, util-linux, acl, procps, openssl, pkexec | policykit-1, libasound2t64 | libasound2, libatk-bridge2.0-0, libatk1.0-0, libatspi2.0-0, libc6 (>= 2.34), libcairo2, libcups2, libdbus-1-3, libdrm2, libexpat1, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3, libpango-1.0-0, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2
+Depends: adduser, ca-certificates, util-linux, acl, procps, openssl, python3, systemd, pkexec | policykit-1, libasound2t64 | libasound2, libatk-bridge2.0-0, libatk1.0-0, libatspi2.0-0, libc6 (>= 2.34), libcairo2, libcups2, libdbus-1-3, libdrm2, libexpat1, libgbm1, libglib2.0-0, libgtk-3-0, libnspr4, libnss3, libpango-1.0-0, libx11-6, libxcb1, libxcomposite1, libxdamage1, libxext6, libxfixes3, libxkbcommon0, libxrandr2
 Description: Ragent local AI workbench with TURN-first mobile pairing
  Ragent runs an AI automation control plane on the local machine and can
  pair through authenticated Cloudflare Realtime TURN and upgrade to LAN/P2P
