@@ -19,11 +19,11 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   assert(!windowsAssetUrl(url.replace("setup.exe", "payload.exe")));
   assert(!windowsAsset({ ...asset, browser_download_url: "https://evil.example/releases/download/x" }));
   assert(!windowsAsset({ ...asset, name: "ragent-arm64.msi" }));
-  for (const [platform, arch, name] of [
-    ["linux", "x64", "Ragent-1.2.3-linux-x64.deb"],
-    ["linux", "x64", "Ragent-1.2.3-ubuntu24.04-x86_64.deb"],
-    ["linux", "x64", "ragent_1.2.3_amd64.deb"],
-    ["linux", "x64", "ragent_1.2.3_amd64.deb"],
+  for (const [platform, arch, name, target] of [
+    ["linux", "x64", "Ragent-1.2.3-linux-x86_64.deb", "ubuntu:24.04"],
+    ["linux", "arm64", "Ragent-1.2.3-linux-arm64.deb", "ubuntu:24.04"],
+    ["linux", "x64", "Ragent-1.2.3-linux-x86_64.deb", "debian:12"],
+    ["linux", "x64", "Ragent-1.2.3-rhel9-x86_64.rpm", "rhel:9"],
     ["darwin", "arm64", "Ragent-1.2.3-macos-arm64.dmg"],
     ["darwin", "arm64", "Ragent-1.2.3-macos13plus-arm64.dmg"],
     ["darwin", "arm64", "ragent_1.2.3-darwin-arm64.dmg"],
@@ -31,29 +31,30 @@ const asset = { name: "Ragent-1.2.3-windows-x64-setup.exe", browser_download_url
   ]) {
     const platformUrl = `https://github.com/ragent-app/Ragent_product/releases/download/v1.2.3/${name}`;
     const platformAsset = { name, browser_download_url: platformUrl };
-    assert(releaseAsset(platformAsset, platform, arch));
-    assert(releaseAssetUrl(platformUrl, platform, arch));
-    assert(!releaseAssetUrl(platformUrl + "?redirect=evil", platform, arch));
-    assert(!releaseAsset(platformAsset, platform, "unsupported"));
-    assert(!releaseAsset(asset, platform, arch));
-    const platformFetch = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", assets: [asset, platformAsset] }] });
-    const result = await checkPlatform("1.2.2", platformFetch, { platform, arch });
+    assert(releaseAsset(platformAsset, platform, arch, target));
+    assert(releaseAssetUrl(platformUrl, platform, arch, target));
+    assert(!releaseAssetUrl(platformUrl + "?redirect=evil", platform, arch, target));
+    assert(!releaseAsset(platformAsset, platform, "unsupported", target));
+    assert(!releaseAsset(asset, platform, arch, target));
+    const digest = "c".repeat(64), commit = "b".repeat(40), oldCommit = "a".repeat(40);
+    const validated = (hash) => platform === "linux" ? `<!-- ragent-linux-validated:${name}:${target}:${arch}:sha256:${hash} -->` : "";
+    const platformFetch = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: validated(digest), assets: [asset, { ...platformAsset, digest: `sha256:${digest}` }] }] });
+    const result = await checkPlatform("1.2.2", platformFetch, { platform, arch, target });
     assert.equal(result.downloadUrl, platformUrl);
     assert.equal(result.updateAvailable, true);
-    const digest = "c".repeat(64), commit = "b".repeat(40), oldCommit = "a".repeat(40);
     const marker = `<!-- ragent-asset-build:${name}:1.2.3:${commit}:sha256:${digest} -->`;
-    const labeled = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker,
+    const labeled = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker + validated(digest),
       assets: [{ ...platformAsset, digest: `sha256:${digest}` }] }] });
-    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, currentCommit: oldCommit })).buildChanged, true);
-    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, currentCommit: commit })).updateAvailable, false);
-    const wrongDigest = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker,
+    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, target, currentCommit: oldCommit })).buildChanged, true);
+    assert.equal((await checkPlatform("1.2.3", labeled, { platform, arch, target, currentCommit: commit })).updateAvailable, false);
+    const wrongDigest = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker + validated("d".repeat(64)),
       assets: [{ ...platformAsset, digest: `sha256:${"d".repeat(64)}` }] }] });
-    assert.equal((await checkPlatform("1.2.3", wrongDigest, { platform, arch, currentCommit: oldCommit })).buildIdentityUnavailable, true);
-    const duplicate = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker + marker,
+    assert.equal((await checkPlatform("1.2.3", wrongDigest, { platform, arch, target, currentCommit: oldCommit })).buildIdentityUnavailable, true);
+    const duplicate = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.3", body: marker + marker + validated(digest),
       assets: [{ ...platformAsset, digest: `sha256:${digest}` }] }] });
-    assert.equal((await checkPlatform("1.2.3", duplicate, { platform, arch, currentCommit: oldCommit })).buildIdentityUnavailable, true);
+    assert.equal((await checkPlatform("1.2.3", duplicate, { platform, arch, target, currentCommit: oldCommit })).buildIdentityUnavailable, true);
     const mismatchedTag = async () => ({ ok: true, json: async () => [{ tag_name: "v1.2.4", assets: [platformAsset] }] });
-    await assert.rejects(checkPlatform("1.2.2", mismatchedTag, { platform, arch }), /no-platform-release/);
+    await assert.rejects(checkPlatform("1.2.2", mismatchedTag, { platform, arch, target }), /no-platform-release/);
   }
   const releases = [
     { tag_name: "v9.0.0", prerelease: true, assets: [asset] },

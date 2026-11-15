@@ -66,8 +66,20 @@
         if (releaseURL.origin === 'https://github.com' && releaseURL.pathname.startsWith('/' + repo + '/releases/tag/')) links.append(link(t('Release notes ↗'), releaseURL.href));
         row.append(description, links); history.append(row);
       }
+      const preferred = [...latest.values()].sort((a, b) => {
+        const priority = item => item.requirement === 'Ubuntu / Debian' ? 2 : item.requirement ? 1 : 0;
+        return priority(b) - priority(a);
+      });
+      const seenDigests = new Set();
+      const distinct = preferred.filter(item => {
+        if (!/^sha256:[a-f0-9]{64}$/.test(item.digest || '')) return true;
+        const aliasGroup = item.platform === 'Linux' && item.format === 'DEB' && ['Ubuntu / Debian', 'Ubuntu 24.04'].includes(item.requirement) ? 'ubuntu-debian' : item.platform === 'Windows' && ['', 'Windows 11'].includes(item.requirement) ? 'windows' : item.requirement;
+        const key = `${item.platform}/${aliasGroup}/${item.arch}/${item.format}/${item.digest}`;
+        if (seenDigests.has(key)) return false;
+        seenDigests.add(key); return true;
+      });
       for (const platform of ['Windows', 'macOS', 'Linux', 'Android', 'Android local runtime']) {
-        const items = [...latest.values()].filter(a => a.platform === platform);
+        const items = distinct.filter(a => a.platform === platform);
         if (!items.length && platform === 'Android local runtime') continue;
         if (!items.length) {
           const card = el('article', '', 'download-item'); card.append(el('h3', platform), el('p', t(platform === 'Android' ? 'The Android app is currently in closed testing.' : 'No public package is available yet.')), el('span', t('Not available'), 'unavailable')); grid.append(card);
@@ -94,15 +106,20 @@
           ...['22.04', '24.04', '26.04'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'ubuntu', version, arch, format: 'DEB' }))),
           ...['12', '13'].flatMap(version => ['x64', 'arm64'].map(arch => ({ id: 'debian', version, arch, format: 'DEB' }))),
           { id: 'rhel', version: '9', arch: 'x64', format: 'RPM' },
+          { id: 'rocky', version: '9', arch: 'x64', format: 'RPM' },
         ];
         for (const target of targets) {
           const asset = [...latest.values()].find(item => item.format === target.format && item.arch.toLowerCase() === target.arch && item.requirement === (target.format === 'DEB' ? 'Ubuntu / Debian' : 'RHEL 9'));
           const release = asset && releases.find(item => item.tag_name === asset.version && !item.prerelease);
           const validated = Boolean(release && /^sha256:[a-f0-9]{64}$/.test(asset.digest || '') && String(release.body || '').includes(`<!-- ragent-linux-validated:${asset.name}:${target.id}:${target.version}:${target.arch}:${asset.digest} -->`));
-          const name = { ubuntu: 'Ubuntu', debian: 'Debian', rhel: 'RHEL' }[target.id];
+          const name = { ubuntu: 'Ubuntu', debian: 'Debian', rhel: 'RHEL', rocky: 'Rocky Linux' }[target.id];
           const card = el('article', '', 'download-item');
-          card.append(el('h3', `${name} ${target.version} · ${target.arch === 'x64' ? 'x64' : 'ARM64'} · ${target.format}`), el('p', t(validated ? 'Validated for this release' : 'Candidate — validation pending')));
-          if (!asset) card.append(el('span', t('No public package is available yet.'), 'unavailable'));
+          card.append(el('h3', `${name} ${target.version} · ${target.arch === 'x64' ? 'x64' : 'ARM64'} · ${target.format}`), el('p', t(validated ? 'Installation compatibility verified' : 'Candidate — validation pending')));
+          if (target.id === 'rocky') card.append(el('p', t('Compatibility target only; automatic updates are not available.')));
+          if (!asset) {
+            const legacy = target.id === 'ubuntu' && target.version === '24.04' && [...latest.values()].some(item => item.requirement === 'Ubuntu 24.04' && item.format === 'DEB' && item.arch.toLowerCase() === target.arch);
+            card.append(el('span', t(legacy ? 'The new shared package is not published yet; an Ubuntu 24.04 package is available above.' : 'No public package is available yet.'), 'unavailable'));
+          }
           linuxTargets.append(card);
         }
       }

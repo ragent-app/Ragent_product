@@ -8,8 +8,8 @@
   };
   let current = initial(), dictionary = {};
   const linuxTranslations = {
-    'zh-CN': {'Linux package targets.': 'Linux 软件包目标。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候选目标尚未完成发布验证。自动更新仅针对该版本已验证的目标启用。', 'Validated for this release': '此版本已验证', 'Candidate — validation pending': '候选版本，等待验证', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更高版本。发行版版本支持情况见下方 Linux 目标状态。'},
-    'zh-TW': {'Linux package targets.': 'Linux 套件目標。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候選目標尚未完成發行驗證。自動更新僅針對該版本已驗證的目標啟用。', 'Validated for this release': '此版本已驗證', 'Candidate — validation pending': '候選版本，等待驗證', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更新版本。發行版版本支援情況見下方 Linux 目標狀態。'},
+    'zh-CN': {'Linux package targets.': 'Linux 软件包目标。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候选目标尚未完成发布验证。自动更新仅针对该版本已验证的目标启用。', 'Installation compatibility verified': '安装兼容验收通过', 'Candidate — validation pending': '候选版本，等待验证', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更高版本。发行版版本支持情况见下方 Linux 目标状态。'},
+    'zh-TW': {'Linux package targets.': 'Linux 套件目標。', 'Candidate targets have not completed release validation. Automatic updates are enabled only for targets validated for that release.': '候選目標尚未完成發行驗證。自動更新僅針對該版本已驗證的目標啟用。', 'Installation compatibility verified': '安裝相容驗收通過', 'Candidate — validation pending': '候選版本，等待驗證', 'Requires systemd and glibc 2.34 or later. See the Linux target status below for supported distribution versions.': '需要 systemd 和 glibc 2.34 或更新版本。發行版版本支援情況見下方 Linux 目標狀態。'},
   };
   const originals = new WeakMap();
   const pageTitle = document.title;
@@ -34,6 +34,15 @@
     if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); options[event.key === 'Home' ? 0 : options.length - 1].focus(); }
   });
   document.addEventListener('click', event => { if (!control.contains(event.target)) closeMenu(); });
+  const legacyPackageMessage = 'The new shared package is not published yet; an Ubuntu 24.04 package is available above.';
+  linuxTranslations['zh-CN'][legacyPackageMessage] = '新的通用软件包尚未发布；上方提供 Ubuntu 24.04 软件包。';
+  linuxTranslations['zh-TW'][legacyPackageMessage] = '新的共用套件尚未發行；上方提供 Ubuntu 24.04 套件。';
+  const compatibilityMessage = 'Compatibility target only; automatic updates are not available.';
+  linuxTranslations['zh-CN'][compatibilityMessage] = '仅作兼容性验证目标；暂不支持自动更新。';
+  linuxTranslations['zh-TW'][compatibilityMessage] = '僅作相容性驗證目標；暫不支援自動更新。';
+  const validationMessage = 'Candidate targets have not completed release validation. Automatic updates require both support and validation for that release.';
+  linuxTranslations['zh-CN'][validationMessage] = '候选目标尚未完成发布验证。自动更新需要支持该目标且该版本已完成验证。';
+  linuxTranslations['zh-TW'][validationMessage] = '候選目標尚未完成發行驗證。自動更新需要支援該目標且該版本已完成驗證。';
   const translate = text => (current === 'en' ? text : linuxTranslations[current]?.[text] || dictionary[current]?.[text] || text);
   window.siteT = translate;
   function apply() {

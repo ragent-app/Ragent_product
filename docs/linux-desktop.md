@@ -17,6 +17,12 @@ applications menu. The manager connects to the service on `127.0.0.1:7690`.
 The package starts its system services during installation and after reboot.
 It does not require a separately installed Node runtime.
 
+For an RPM candidate on an EL9 system, use
+`sudo dnf install ./Ragent-<version>-rhel9-x86_64.rpm`. Consult the
+[Linux acceptance record](linux-release-acceptance.md) and release notes for
+the exact tested distribution; a Rocky Linux result does not establish RHEL
+compatibility. RPM auto-update is not enabled for Rocky Linux.
+
 On an interactive installation, the installer can ask for an owner username
 and password. A non-interactive installation generates a password instead and
 stores it in `/etc/ragent/initial-credentials`, readable only by root. An
@@ -93,6 +99,11 @@ acceptance.
 - `sudo apt purge ragent` removes the host's local configuration, data, run
   state and logs. State for a separately deployed Accounts service under
   `/var/lib/ragent/accounts` is retained.
+- On RPM systems, `sudo dnf remove ragent` removes the package. On the tested
+  Rocky 9 system it retained `/var/lib/ragent` and generated credentials, but
+  removed the unmodified packaged `/etc/ragent/ragent.env`. A modified file
+  was saved as `ragent.env.rpmsave`; after reinstalling, an administrator
+  must merge the saved settings into the new file.
 
 Removal stops scheduled and already-running storage cleanup, the service,
 activation sockets, brokers and detached Runs. If
