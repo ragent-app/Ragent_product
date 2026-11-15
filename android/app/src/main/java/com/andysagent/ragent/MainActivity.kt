@@ -39,6 +39,8 @@ import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -468,22 +470,11 @@ class MainActivity : ComponentActivity() {
                     if (!hasSavedLocal) localDiscovered = discoverLocalRuntime()
                 }
                 val localLinkStates by app.runtime.localAccountLinkStates.collectAsStateWithLifecycle()
+                val localRevocationsPending by app.runtime.localSessionRevocationsPending.collectAsStateWithLifecycle()
                 var localLinkReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
                 var localUnbindReview by remember { mutableStateOf<LocalAccountLinkStatus?>(null) }
                 var localLinkPhoneAccount by remember { mutableStateOf<String?>(null) }
                 var localLinkBusy by remember { mutableStateOf(false) }
-                val localLinkNotice = when {
-                    localLinkStates.values.any { it == "conflict" } -> "conflict"
-                    localLinkStates.values.any { it == "pending" } -> "pending"
-                    else -> null
-                }
-                var localLinkNoticeDismissed by remember(localLinkNotice) { mutableStateOf(false) }
-                if (localLinkNotice != null && !localLinkNoticeDismissed) AlertDialog(
-                    onDismissRequest = { localLinkNoticeDismissed = true },
-                    title = { Text(getString(R.string.local_link_title)) },
-                    text = { Text(getString(if (localLinkNotice == "conflict") R.string.local_link_conflict else R.string.local_link_pending)) },
-                    confirmButton = { TextButton(onClick = { localLinkNoticeDismissed = true }) { Text(getString(android.R.string.ok)) } },
-                )
                 var addComputerChoiceOpen by remember { mutableStateOf(false) }
                 var addComputerFromPairing by remember { mutableStateOf(false) }
                 var addRemoteRequested by remember { mutableStateOf(false) }
@@ -519,15 +510,18 @@ class MainActivity : ComponentActivity() {
                     onDismissRequest = { localSetupOpen = false },
                     title = { Text(getString(R.string.local_runtime_title)) },
                     text = {
-                        Column {
+                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                             Text(getString(R.string.local_runtime_instructions))
-                            localLinkDirectory.computers.firstOrNull { it.localRuntime }?.let { target ->
+                            if (localRevocationsPending) Text(getString(R.string.local_link_revocation_pending))
+                            localLinkDirectory.computers.filter { it.localRuntime }.forEach { target ->
                                 val state = localLinkStates[target.instanceId]
+                                if (state != null) Text(getString(R.string.local_link_device, target.label.ifBlank { getString(R.string.local_runtime_title) }))
                                 if (state != null) Text(getString(when (state) {
                                     "active" -> R.string.local_link_active
                                     "signed_out" -> R.string.local_link_signed_out
                                     "conflict" -> R.string.local_link_conflict
-                                    else -> R.string.local_link_pending
+                                    "pending" -> R.string.local_link_pending
+                                    else -> R.string.local_link_status_unavailable
                                 }))
                                 if (state == "signed_out") TextButton(enabled = !localLinkBusy, onClick = {
                                     localLinkBusy = true
@@ -544,7 +538,7 @@ class MainActivity : ComponentActivity() {
                                     localLinkBusy = true
                                     runtimeScope.launch {
                                         try {
-                                            val status = app.runtime.localAccountLinkStatus(target.instanceId)
+                                            val status = app.runtime.refreshLocalAccountLink(target.instanceId)
                                             localLinkPhoneAccount = app.runtime.configStore.accountSession.first()?.accountId
                                             localLinkReview = status
                                             localSetupOpen = false
@@ -552,7 +546,7 @@ class MainActivity : ComponentActivity() {
                                         catch (_: Exception) { requestError = getString(R.string.local_link_unavailable) }
                                         finally { localLinkBusy = false }
                                     }
-                                }) { Text(getString(R.string.local_link_entry)) }
+                                }) { Text(getString(if (state in setOf("pending", "unavailable", "conflict")) R.string.local_link_check_status else R.string.local_link_entry)) }
                             }
                         }
                     },

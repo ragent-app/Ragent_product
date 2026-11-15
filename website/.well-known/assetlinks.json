@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.agentoncloud.android",
+      "sha256_cert_fingerprints": [
+        "7A:D4:0E:EA:F8:D2:03:C3:EB:46:68:D5:32:05:36:A9:53:B0:0A:2B:A8:13:96:9C:C6:5E:7A:83:7D:A5:F0:AA",
+        "C6:9D:B3:E9:7C:F5:7B:93:E3:14:8F:21:D5:78:4B:07:28:4E:52:E0:4E:DB:34:C3:19:0E:25:A4:61:31:43:EF"
+      ]
+    }
+  }
+]

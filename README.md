@@ -86,6 +86,14 @@ npm ci --ignore-scripts
 node cli.js --help
 ```
 
+On a running Ragent host, `ragent pair` creates a one-time invitation and
+prints a QR code, pairing payload, and HTTPS share link. Open the link on the
+phone to continue pairing in Ragent. The link and payload contain a credential:
+keep them private and share them only with the intended phone. Invitations expire
+after 120 seconds by default; on an unbound host, `--ttl-seconds` can change
+the lifetime. Account-bound hosts use 120 seconds. `ragent pair --help` describes
+the output options. An expired or used invitation requires a new `ragent pair`.
+
 To inspect a disposable local instance, run this from the project root:
 
 ```sh

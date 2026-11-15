@@ -334,6 +334,8 @@ class AndroidRuntimeGraph internal constructor(
     private val localHandoffActive = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val mutableLocalAccountLinkStates = MutableStateFlow<Map<String, String>>(emptyMap())
     val localAccountLinkStates: StateFlow<Map<String, String>> = mutableLocalAccountLinkStates.asStateFlow()
+    private val mutableLocalSessionRevocationsPending = MutableStateFlow(false)
+    val localSessionRevocationsPending: StateFlow<Boolean> = mutableLocalSessionRevocationsPending.asStateFlow()
 
     internal suspend fun localAccountLinkStatus(instanceId: String): LocalAccountLinkStatus {
         val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId && it.localRuntime }
@@ -341,6 +343,11 @@ class AndroidRuntimeGraph internal constructor(
         return withTargetRuntime(target.instanceId) { runtime ->
             parseLocalAccountLinkStatus(runtime.transport.execute(ApiRequest("GET", "/api/local/account-link")).body, instanceId)
         }
+    }
+
+    internal suspend fun refreshLocalAccountLink(instanceId: String): LocalAccountLinkStatus {
+        reconcileLocalAccountLink(instanceId)
+        return localAccountLinkStatus(instanceId)
     }
 
     suspend fun beginLocalInstanceAccountLogin(instanceId: String): String {
@@ -507,7 +514,10 @@ class AndroidRuntimeGraph internal constructor(
 
     private suspend fun reconcileLocalAccountLink(instanceId: String) {
         localAccountLinkMutex.withLock {
-            var record = localAccountLinks.read(instanceId) ?: return@withLock
+            var record = localAccountLinks.read(instanceId) ?: run {
+                mutableLocalAccountLinkStates.update { it - instanceId }
+                return
+            }
             if (record.tombstone && !record.localClearCompleted) {
                 // The durable fence must also be applied while the peer is offline.
                 if (configStore.accountSession.first()?.accountId == record.accountId) accountSessions.clearLocalSession()
@@ -1655,12 +1665,29 @@ class AndroidRuntimeGraph internal constructor(
                 try { reconcileSessionRevocations() }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* The encrypted queue is retried later. */ }
+                // The queue can contain detached credentials with no reliable instance identity.
+                mutableLocalSessionRevocationsPending.value = try { localSessionRevocations.ids().isNotEmpty() }
+                catch (_: Exception) { false }
                 val instanceIds = localAccountLinks.instanceIds() + configStore.directory.first().computers.filter { it.localRuntime }.map { it.instanceId }
                 instanceIds.forEach { instanceId ->
                     try { reconcileLocalAccountLink(instanceId) }
                     catch (cancelled: CancellationException) { throw cancelled }
                     catch (_: Exception) {
-                        mutableLocalAccountLinkStates.update { it + (instanceId to "pending") }
+                        // A failed status query does not prove that an operation is pending.
+                        // Preserve durable outbox evidence and previously detected conflicts.
+                        val pending = try {
+                            val record = localAccountLinks.read(instanceId)
+                            record != null && (record.pendingEventId != null || record.pendingCloudToken != null ||
+                                record.unbindPending || !record.localClearCompleted)
+                        } catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { false }
+                        mutableLocalAccountLinkStates.update { states ->
+                            states + (instanceId to when {
+                                pending -> "pending"
+                                states[instanceId] == "conflict" -> "conflict"
+                                else -> "unavailable"
+                            })
+                        }
                     }
                 }
                 delay(15_000)

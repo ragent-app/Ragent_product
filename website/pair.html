@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <title>Pair with Ragent</title>
+  <link rel="stylesheet" href="/pair/pair.css">
+  <script src="/pair/pair.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="brand">Ragent</p>
+    <h1>Pair your phone</h1>
+    <p id="status" role="status">Preparing your pairing link…</p>
+    <p id="expiry" class="expiry" hidden></p>
+    <button id="open" type="button" hidden>Open Ragent</button>
+    <p>Don't have Ragent for Android? <a href="https://www.agentoncloud.com/download.html" target="_blank" rel="noopener noreferrer">Get Ragent</a>. After installation, return to this page and select Open Ragent.</p>
+    <p>If you refreshed or closed this page, reopen the original link. If it has expired or already been used, run <code>ragent pair</code> on your host to create a new invitation, then open the new link on this phone.</p>
+    <p class="note">Pairing links are one-time credentials. Keep them private and share them only with the intended device. The expiry shown uses this device’s clock; the host determines whether an invitation is still valid.</p>
+  </main>
+</body>
+</html>

@@ -77,7 +77,7 @@ Usage:
   ragent api                      Call the local Ragent HTTP API with owner auth
   ragent mail                     Manage agent mailbox and send outbound email
   ragent assistant-message        Append an assistant message with optional local-file attachments
-  ragent pair                     Create a trusted-device pairing QR and short code
+  ragent pair                     Create a pairing QR, short code, and share link
   ragent signal                   Run metadata-only P2P signaling
   ragent p2p-host                 Run the local WebRTC DataChannel host
   ragent connector                Run or inspect the outbound host connector

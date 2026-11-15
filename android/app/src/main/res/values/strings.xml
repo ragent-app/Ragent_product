@@ -9,6 +9,7 @@
     <string name="local_runtime_offline">The local runtime is unavailable. Open Termux and run ragent start. If it is already running, import its current pairing file again.</string>
     <string name="local_runtime_expired">The local pairing credential is no longer accepted. Export and import a current pairing file from Termux.</string>
     <string name="local_link_entry">Link this device and local account</string>
+    <string name="local_link_check_status">Check account link status</string>
     <string name="local_link_title">Link accounts on this device</string>
     <string name="local_link_review">Instance: %1$s\nPhone account: %2$s\nInstance owner: %3$s</string>
     <string name="local_link_none">Not signed in or not bound</string>
@@ -19,8 +20,11 @@
     <string name="local_link_failed">Account link could not be confirmed. Check both account identities and try again.</string>
     <string name="local_link_active">Same-device account link is active.</string>
     <string name="local_link_signed_out">The linked account is signed out.</string>
-    <string name="local_link_conflict">Account link needs your attention; no account was replaced.</string>
-    <string name="local_link_pending">Account link or sign-out is waiting to synchronize.</string>
+    <string name="local_link_conflict">Account link needs your attention. Review the phone and local instance accounts below; no account was replaced.</string>
+    <string name="local_link_pending">An account link or sign-out is waiting to synchronize. Start the local runtime in Termux and check the network; synchronization will retry automatically.</string>
+    <string name="local_link_status_unavailable">Could not check account link status. Start the local runtime in Termux and check the network, then try again.</string>
+    <string name="local_link_revocation_pending">An account session recovery or revocation is awaiting confirmation. Check your network; the app will retry automatically.</string>
+    <string name="local_link_device">Local instance: %1$s</string>
     <string name="local_link_instance_sign_in">Sign in to the local instance</string>
     <string name="local_link_unbind_action">Resolve account conflict</string>
     <string name="local_link_unbind_title">Remove the instance owner?</string>
