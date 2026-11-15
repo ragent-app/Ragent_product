@@ -20,7 +20,7 @@ assert.equal(resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMo
 assert.equal(resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'conservative-auto', platform: 'win32' }).id, 'untrusted-workspace-write');
 assert.equal(resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'conservative-auto', platform: 'linux' }).id, 'untrusted-workspace-write');
 assert.equal(resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'full-auto', platform: 'linux' }).id, 'on-request-danger-full-access');
-assert.equal(resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'full-auto', platform: 'linux' }).id, 'bypassPermissions');
+assert.equal(resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'full-auto', platform: 'linux' }).id, 'default');
 assert.equal(resolveProviderPermissionPolicy('claude-stream-json', { riskMode: 'full-auto', platform: 'win32' }), null);
 for (const riskMode of ['safe', 'recommended', 'full-auto', 'conservative-auto']) {
   assert.equal(isCodexAppServerRagentApprovalGateEnabled({ riskMode, platform: 'win32' }), true);
