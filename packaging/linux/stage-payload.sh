@@ -67,6 +67,10 @@ DESKTOP_VERSION="$(node -p "require('$ROOT/desktop/package.json').version")"
 printf '{"name":"ragent-desktop-manager","version":"%s","private":true,"main":"main.cjs"}\n' "$DESKTOP_VERSION" > "$DESKTOP_APP/package.json"
 # Chromium's setuid helper is installed root-owned by dpkg; the renderer still
 # uses Electron's sandbox and must not fall back to --no-sandbox.
+# Electron resources must be readable by the desktop user even when the
+# package builder has a restrictive umask. Preserve executable bits.
+chmod -R a+rX "$DESKTOP_ROOT"
+find "$DESKTOP_ROOT" -type d -exec chmod 0755 {} +
 chmod 4755 "$DESKTOP_ROOT/chrome-sandbox"
 
 NODE_DIST="node-${NODE_VERSION}-linux-${NODE_ARCH}"
