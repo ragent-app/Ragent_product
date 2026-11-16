@@ -8,6 +8,8 @@ import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrato
 import { getOrganization, getRevision, listOrganizationNodes } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
 import { getToolDefinitionAsync } from '../lib/tools.mjs';
+import { createHash } from 'crypto';
+import { appendOrganizationEvent } from './organization-messaging.mjs';
 
 function text(value, max = 512) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -241,6 +243,13 @@ export async function dispatchOrganizationPhase({
           retry: { maxAttempts: 1, retryOn: [] },
         }],
       },
+    });
+    await appendOrganizationEvent({
+      organizationId: organization.id,
+      eventKey: `phase-dispatch:${createHash('sha256').update(`${normalizedKey}:${node.stableKey}`).digest('hex')}`,
+      type: 'task.dispatch_requested', organizationRevision: targetRevision,
+      phaseId: normalizedPhaseId, nodeId: node.id, taskId,
+      payload: { objective: text(nodePlan?.objective || phase.objective || organization.id, 4000) },
     });
     dispatched.push({ stableKey: node.stableKey, sessionId: session.id, runtime, collaboration: result });
     await ensurePhaseExecution(organization, phase, targetRevision, {

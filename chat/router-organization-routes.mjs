@@ -1,6 +1,8 @@
 // S24 owner-only organization API. Android/Web consume the projection; the
 // explicit provisioning command is the only Runtime-owned mutation exposed.
 import { createHash } from 'crypto';
+import { access } from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import {
   ORG_AUTONOMOUS_PROVISIONING_ENABLED,
   ORG_PROJECTION_V1_ENABLED,
@@ -10,7 +12,10 @@ import { readBody as readRequestBody } from '../lib/utils.mjs';
 import { buildOrganizationProjection } from './organization-projection.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { provisionRootLeadershipRevision } from './organization-provisioning.mjs';
-import { getOrganization, getOrganizationByRootSession, getNode } from './organization-store.mjs';
+import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
+import { listOrganizationEvents, hasCreatedOrganizationSubordinate, getInternalEnvelope } from './organization-messaging.mjs';
+import { getCollaboration } from './collaboration-store.mjs';
+import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
@@ -36,7 +41,88 @@ export async function handleOrganizationRoutes({
   const conversationMatch = /^\/api\/organizations\/([^/]+)\/nodes\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const phaseDispatchMatch = /^\/api\/organizations\/([^/]+)\/phases\/([^/]+)\/dispatch$/.exec(String(pathname || ''));
   const rootSessionMatch = /^\/api\/sessions\/([^/]+)\/organization\/projection$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch) return false;
+  const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
+  const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch) return false;
+  if (nativeMatch) {
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const sessionId = decodeURIComponent(nativeMatch[1]);
+      const runs = await listDurableSessionRunIndexEntries(sessionId);
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      if (!nativeMatch[2]) {
+        writeJson(res, 200, { sessionId, runs: runs.map((run) => ({ id: run.id, state: run.state })) });
+        return true;
+      }
+      const runId = decodeURIComponent(nativeMatch[2]);
+      if (!runs.some((run) => run.id === runId && run.sessionId === sessionId)) {
+        writeJson(res, 404, { error: 'Run not found' }); return true;
+      }
+      const url = new URL(req.url, `http://${req.headers?.host || 'localhost'}`);
+      const afterLines = Number(url.searchParams.get('afterLines') || 0);
+      if (!Number.isSafeInteger(afterLines) || afterLines < 0) { writeJson(res, 400, { error: 'Invalid cursor' }); return true; }
+      const readable = (await Promise.all([runSpoolPath(runId), runSpoolGzPath(runId), runSpoolZstPath(runId)]
+        .map((path) => access(path, fsConstants.R_OK).then(() => true, () => false)))).some(Boolean);
+      const delta = await readRunSpoolDelta(runId, { skipLines: afterLines, maxRecords: 200 });
+      const run = await getRun(runId);
+      const delegations = run?.sessionId === sessionId && Array.isArray(run?.providerNativeDelegation?.delegations)
+        ? run.providerNativeDelegation.delegations.filter((entry) => entry.parentSessionId === sessionId && entry.parentRunId === runId && entry.delegationId)
+          .map((entry) => ({ delegationId: entry.delegationId, parentDelegationId: entry.parentDelegationId || null,
+            parentSessionId: sessionId, childSessionId: entry.childSessionId || entry.providerRefs?.childSessionId || null,
+            provider: entry.provider || null, runId, state: entry.state, currentAction: entry.currentAction || null,
+            startedAt: entry.startedAt || null, updatedAt: entry.updatedAt || null, completedAt: entry.completedAt || null })) : [];
+      const nextAfterLines = delta.nextOffset === 0
+        ? Math.max(afterLines, delta.processedLineCount || 0)
+        : (delta.skippedLineCount || 0) + (delta.processedLineCount || 0);
+      const events = delta.records.map((record) => record.json)
+        .filter((value) => value?.type === 'ragent.delegation_event' && value.event?.parentSessionId === sessionId && value.event?.runId === runId)
+        .map(({ event }) => ({ id: event.id, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
+      writeJson(res, 200, { sessionId, runId, events, delegations, nextAfterLines, hasMore: delta.truncated === true,
+        sourceAvailability: readable ? 'readable_unverified' : 'missing',
+        gap: !readable, recoverability: readable ? 'unknown' : 'unavailable' });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (actionsMatch) {
+    if (!ORG_PROJECTION_V1_ENABLED && !ORG_PROJECTION_V2_ENABLED) return false;
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const rootSessionId = decodeURIComponent(actionsMatch[1]);
+      const org = await getOrganizationByRootSession(rootSessionId);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const url = new URL(req.url, `http://${req.headers?.host || 'localhost'}`);
+      const afterId = Number(url.searchParams.get('afterId') || 0);
+      const limit = Number(url.searchParams.get('limit') || 100);
+      if (!Number.isSafeInteger(afterId) || afterId < 0 || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+        writeJson(res, 400, { error: 'Invalid action cursor or limit' }); return true;
+      }
+      const nodes = await listOrganizationNodes(org.id);
+      const rows = await listOrganizationEvents(org.id, { afterId, limit: limit + 1 });
+      const page = rows.slice(0, limit);
+      const nodeById = new Map(nodes.map((node) => [node.id, node]));
+      const actions = await Promise.all(page.filter((event) => ['node.created', 'task.delegated', 'task.dispatch_requested', 'result.available', 'organization.cancel_requested', 'node.session_replaced'].includes(event.type)).map(async (event) => {
+        const envelope = event.envelopeId ? await getInternalEnvelope(event.envelopeId) : null;
+        const collaboration = event.type === 'task.delegated' && event.payload?.collaborationId ? await getCollaboration(event.payload.collaborationId) : null;
+        const task = collaboration?.rootSessionId === rootSessionId ? collaboration.tasks?.find((item) => item.id === event.taskId) : null;
+        return { id: event.id, type: event.type, nodeId: event.nodeId || null, taskId: event.taskId || null, attemptId: event.attemptId || null, createdAt: event.createdAt,
+          displayName: nodeById.get(event.nodeId)?.stableKey || null,
+          summary: task?.objective || (event.type === 'task.dispatch_requested' ? event.payload?.objective : null) || (envelope?.organizationId === org.id ? envelope.subject : null),
+          details: event.type === 'organization.cancel_requested' && typeof event.payload?.reason === 'string' ? event.payload.reason : null,
+          operationId: null, status: ['organization.cancel_requested', 'task.dispatch_requested'].includes(event.type) ? 'requested' : null };
+      }));
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, {
+        rootSessionId, organizationId: org.id,
+        hasCreatedSubordinate: await hasCreatedOrganizationSubordinate(org.id) || nodes.some((node) => node.parentNodeId && node.currentSessionId && node.currentSessionId !== rootSessionId && node.retiredRevision == null && !['retired', 'deleted'].includes(String(node.lifecycleState || '').toLowerCase())),
+        actions,
+        nextAfterId: page.at(-1)?.id || afterId,
+        hasMore: rows.length > limit,
+      });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
   if (conversationMatch) {
     if (!ORG_PROJECTION_V1_ENABLED && !ORG_PROJECTION_V2_ENABLED) return false;
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }

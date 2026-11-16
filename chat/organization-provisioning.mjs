@@ -42,6 +42,7 @@ import {
   materializeFrozenNodeGrants,
 } from './organization-store.mjs';
 import { organizationGrantForNode } from './organization-role-contract.mjs';
+import { appendOrganizationEvent } from './organization-messaging.mjs';
 
 export const ORG_PROVISIONING_DISABLED = 'ORG_PROVISIONING_DISABLED';
 
@@ -336,6 +337,9 @@ export async function provisionFrozenRevision({
         canDelegate: grant.canDelegate,
         idempotencyKey: `${opKey}:delegation`,
       });
+      if (node.currentSessionId && node.currentSessionId !== org.rootSessionId) {
+        await appendOrganizationEvent({ organizationId: org.id, eventKey: `node-created:${node.id}`, type: 'node.created', organizationRevision: revision, nodeId: node.id, actorNodeId: parentNode.id });
+      }
     }
 
     nodeByKey.set(stableKey, node);

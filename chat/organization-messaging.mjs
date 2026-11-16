@@ -389,13 +389,19 @@ export async function getOrganizationEvent(eventId) {
   return read((db) => rowEvent(db.prepare('SELECT * FROM organization_events WHERE id = ?').get(Number(eventId))));
 }
 
-export async function listOrganizationEvents(organizationId, { limit = 500, latest = false } = {}) {
+export async function hasCreatedOrganizationSubordinate(organizationId) {
+  const orgId = ensureId(organizationId, 'organizationId', ORG_EVENT_INVALID);
+  return read((db) => Boolean(db.prepare("SELECT 1 FROM organization_events WHERE organization_id = ? AND type = 'node.created' LIMIT 1").get(orgId)));
+}
+
+export async function listOrganizationEvents(organizationId, { limit = 500, latest = false, afterId = 0 } = {}) {
   const orgId = ensureId(organizationId, 'organizationId', ORG_EVENT_INVALID);
   const boundedLimit = Math.max(1, Math.min(5000, boundedInteger(limit, 500)));
   return read((db) => {
     ensureOrganization(db, orgId, ORG_EVENT_INVALID);
-    const rows = db.prepare(`SELECT * FROM organization_events WHERE organization_id = ? ORDER BY id ${latest ? 'DESC' : 'ASC'} LIMIT ?`)
-      .all(orgId, boundedLimit);
+    const cursor = Number.isSafeInteger(Number(afterId)) && Number(afterId) >= 0 ? Number(afterId) : 0;
+    const rows = db.prepare(`SELECT * FROM organization_events WHERE organization_id = ? AND id > ? ORDER BY id ${latest ? 'DESC' : 'ASC'} LIMIT ?`)
+      .all(orgId, cursor, boundedLimit);
     return (latest ? rows.reverse() : rows).map(rowEvent);
   });
 }

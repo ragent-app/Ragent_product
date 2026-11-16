@@ -3,6 +3,7 @@ package com.andysagent.ragent.feature.organization.data
 import android.net.Uri
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.core.network.ApiException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -10,6 +11,10 @@ import kotlinx.serialization.json.decodeFromJsonElement
 interface OrganizationApi {
     suspend fun getProjection(organizationId: String, version: Int = 2, sinceEventId: Long = 0L): Result<OrganizationProjectionDto>
     suspend fun getSessionOrganization(sessionId: String): Result<OrganizationProjectionDto?>
+    suspend fun getSessionActions(sessionId: String, afterId: Long = 0L, limit: Int = 100): Result<OrganizationActionsDto?> =
+        Result.failure(UnsupportedOperationException("Organization actions unavailable"))
+    suspend fun getDelegationRuns(sessionId: String): Result<DelegationRunsDto> = Result.failure(UnsupportedOperationException())
+    suspend fun getDelegationEvents(sessionId: String, runId: String, afterLines: Long = 0L): Result<DelegationEventsDto> = Result.failure(UnsupportedOperationException())
 }
 
 class RealOrganizationApi(
@@ -20,6 +25,26 @@ class RealOrganizationApi(
         coerceInputValues = true
     },
 ) : OrganizationApi {
+
+    override suspend fun getDelegationRuns(sessionId: String): Result<DelegationRunsDto> = runCatching {
+        val response = transport.execute(ApiRequest("GET", "/api/sessions/${Uri.encode(sessionId)}/delegation-runs"))
+        if (!response.isSuccessful) throw ApiException(response.statusCode, null, "Failed to load delegation runs: ${response.statusCode}")
+        json.decodeFromJsonElement(json.parseToJsonElement(response.body))
+    }
+
+    override suspend fun getDelegationEvents(sessionId: String, runId: String, afterLines: Long): Result<DelegationEventsDto> = runCatching {
+        val response = transport.execute(ApiRequest("GET", "/api/sessions/${Uri.encode(sessionId)}/delegation-runs/${Uri.encode(runId)}/events?afterLines=$afterLines"))
+        if (!response.isSuccessful) throw ApiException(response.statusCode, null, "Failed to load delegation events: ${response.statusCode}")
+        json.decodeFromJsonElement(json.parseToJsonElement(response.body))
+    }
+
+    override suspend fun getSessionActions(sessionId: String, afterId: Long, limit: Int): Result<OrganizationActionsDto?> = runCatching {
+        val path = "/api/sessions/${Uri.encode(sessionId)}/organization/actions?afterId=$afterId&limit=$limit"
+        val response = transport.execute(ApiRequest(method = "GET", path = path))
+        if (response.statusCode == 404) return@runCatching null
+        if (!response.isSuccessful) throw ApiException(response.statusCode, null, "Failed to load organization actions: ${response.statusCode}")
+        json.decodeFromJsonElement(json.parseToJsonElement(response.body))
+    }
 
     override suspend fun getProjection(
         organizationId: String,

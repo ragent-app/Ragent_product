@@ -4,6 +4,78 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class DelegationRunsDto(val sessionId: String, val runs: List<DelegationRunDto> = emptyList())
+
+@Serializable
+data class DelegationRunDto(val id: String, val state: String = "")
+
+@Serializable
+data class DelegationEventsDto(
+    val sessionId: String,
+    val runId: String,
+    val events: List<DelegationEventDto> = emptyList(),
+    val delegations: List<NativeDelegationDto> = emptyList(),
+    val nextAfterLines: Long = 0L,
+    val hasMore: Boolean = false,
+    val sourceAvailability: String = "unknown",
+    val gap: Boolean = false,
+    val recoverability: String = "unknown",
+)
+
+@Serializable
+data class NativeDelegationDto(
+    val delegationId: String,
+    val parentDelegationId: String? = null,
+    val parentSessionId: String,
+    val childSessionId: String? = null,
+    val provider: String? = null,
+    val runId: String,
+    val state: String,
+    val currentAction: String? = null,
+    val startedAt: Long? = null,
+    val updatedAt: Long? = null,
+    val completedAt: Long? = null,
+)
+
+@Serializable
+data class DelegationEventDto(
+    val id: String,
+    val delegationId: String,
+    val parentDelegationId: String? = null,
+    val childSessionId: String? = null,
+    val kind: String,
+    val state: String,
+    val seq: Long,
+    val timestamp: Long,
+    val details: String? = null,
+)
+
+@Serializable
+data class OrganizationActionsDto(
+    val rootSessionId: String,
+    val organizationId: String,
+    val hasCreatedSubordinate: Boolean = false,
+    val actions: List<OrganizationActionDto> = emptyList(),
+    val nextAfterId: Long = 0L,
+    val hasMore: Boolean = false,
+)
+
+@Serializable
+data class OrganizationActionDto(
+    val id: Long,
+    val type: String,
+    val nodeId: String? = null,
+    val taskId: String? = null,
+    val attemptId: String? = null,
+    val createdAt: String,
+    val displayName: String? = null,
+    val summary: String? = null,
+    val details: String? = null,
+    val operationId: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
 data class OrganizationProjectionDto(
     val schemaVersion: Int = 1,
     val organizationId: String,
