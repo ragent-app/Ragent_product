@@ -274,7 +274,13 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
     }
-    val rootNodeId = nodes.filter { it.parentId == null }.singleOrNull()?.id
+    val rootSession = rootSessionId?.takeIf { it.isNotBlank() } ?: sessionId
+    val rootMatches = nodes.filter { it.sessionId == rootSession }
+    val rootNodeId = when (rootMatches.size) {
+        0 -> nodes.filter { it.parentId == null }.singleOrNull()?.id
+        1 -> rootMatches.single().id
+        else -> null
+    }
     val nativeMemberName = stringResource(R.string.organization_native_member)
     LaunchedEffect(baseProjection, records, rootNodeId, nativeMemberName) {
         val projection = baseProjection ?: return@LaunchedEffect

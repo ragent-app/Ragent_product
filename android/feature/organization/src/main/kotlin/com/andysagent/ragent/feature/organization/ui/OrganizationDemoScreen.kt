@@ -28,6 +28,31 @@ import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 
+/** Existing local-only demonstration projection, reusable by debug visual review. */
+fun organizationDemoProjection(rootSessionId: String = "organization-demo-root"): OrganizationProjectionDto {
+    return OrganizationProjectionDto(
+        organizationId = "demo_only",
+        rootSessionId = rootSessionId,
+        hasCreatedSubordinate = true,
+        objective = "优化聊天体验",
+        state = "idle",
+        nodes = listOf(
+            OrganizationNodeDto(id = "lead", sessionId = rootSessionId, role = "executive", domain = "architecture", displayName = "负责人"),
+            OrganizationNodeDto(id = "planning", sessionId = "organization-demo-planning", parentId = "lead", role = "manager", domain = "architecture", displayName = "规划"),
+            OrganizationNodeDto(id = "android", sessionId = "organization-demo-android", parentId = "planning", role = "worker", domain = "android", iconKey = "mobile", displayName = "Android开发"),
+            OrganizationNodeDto(id = "backend", sessionId = "organization-demo-backend", parentId = "planning", role = "worker", domain = "backend", iconKey = "backend", displayName = "后端开发"),
+            OrganizationNodeDto(id = "review", sessionId = "organization-demo-review", parentId = null, role = "reviewer", domain = "security", displayName = "质量审核"),
+        ),
+        edges = listOf(
+            OrganizationEdgeDto(id = "lead-plan", parentId = "lead", childId = "planning", type = "MANAGES"),
+            OrganizationEdgeDto(id = "plan-android", parentId = "planning", childId = "android", type = "MANAGES"),
+            OrganizationEdgeDto(id = "plan-backend", parentId = "planning", childId = "backend", type = "MANAGES"),
+            OrganizationEdgeDto(id = "plan-review", parentId = "planning", childId = "review", type = "REVIEWS"),
+        ),
+        phases = emptyList(), activeCommunications = emptyList(), recentEvents = emptyList(),
+)
+}
+
 /** A separate, local-only view model: the sample never reaches the real repository or cache. */
 @Composable
 internal fun OrganizationDemoScreen(onBack: () -> Unit) {
@@ -35,25 +60,7 @@ internal fun OrganizationDemoScreen(onBack: () -> Unit) {
         object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                val projection = OrganizationProjectionDto(
-                        organizationId = "demo_only",
-                        objective = "优化聊天体验",
-                        state = "idle",
-                        nodes = listOf(
-                            OrganizationNodeDto(id = "lead", role = "executive", domain = "architecture", displayName = "负责人"),
-                            OrganizationNodeDto(id = "planning", parentId = "lead", role = "manager", domain = "architecture", displayName = "规划"),
-                            OrganizationNodeDto(id = "android", parentId = "planning", role = "worker", domain = "android", iconKey = "mobile", displayName = "Android开发"),
-                            OrganizationNodeDto(id = "backend", parentId = "planning", role = "worker", domain = "backend", iconKey = "backend", displayName = "后端开发"),
-                            OrganizationNodeDto(id = "review", parentId = null, role = "reviewer", domain = "security", displayName = "质量审核"),
-                        ),
-                        edges = listOf(
-                            OrganizationEdgeDto(id = "lead-plan", parentId = "lead", childId = "planning", type = "MANAGES"),
-                            OrganizationEdgeDto(id = "plan-android", parentId = "planning", childId = "android", type = "MANAGES"),
-                            OrganizationEdgeDto(id = "plan-backend", parentId = "planning", childId = "backend", type = "MANAGES"),
-                            OrganizationEdgeDto(id = "plan-review", parentId = "planning", childId = "review", type = "REVIEWS"),
-                        ),
-                        phases = emptyList(), activeCommunications = emptyList(), recentEvents = emptyList(),
-                )
+                val projection = organizationDemoProjection()
                 val api = object : OrganizationApi {
                     override suspend fun getProjection(organizationId: String, version: Int, sinceEventId: Long) = Result.success(projection)
                     override suspend fun getSessionOrganization(sessionId: String): Result<OrganizationProjectionDto?> = Result.success(projection)
