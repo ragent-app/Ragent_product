@@ -3039,6 +3039,8 @@ private fun ChatSurface(
                 onOpenNodeConsumed = { organizationFormalNode = null },
                 onRootVisualChanged = { organizationRootVisual = it },
                 records = nativeNodes,
+                nativeEvents = nativeRecords.map { com.andysagent.ragent.feature.organization.data.NativeBirthEvent(it.runId, it.event) },
+                nativeContinuous = nativeDefinitive,
                 programmaticOpen = organizationOpenNode,
                 onProgrammaticOpenConsumed = { organizationOpenNode = null },
                 onCollaboratorSnapshot = { resolved, definitive, hasCollaborators ->

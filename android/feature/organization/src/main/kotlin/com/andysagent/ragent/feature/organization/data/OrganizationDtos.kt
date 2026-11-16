@@ -40,6 +40,8 @@ data class NativeDelegationDto(
 @Serializable
 data class DelegationEventDto(
     val id: String,
+    val runId: String? = null,
+    val parentSessionId: String? = null,
     val delegationId: String,
     val parentDelegationId: String? = null,
     val childSessionId: String? = null,
@@ -65,6 +67,7 @@ data class OrganizationActionDto(
     val id: Long,
     val type: String,
     val nodeId: String? = null,
+    val actorNodeId: String? = null,
     val taskId: String? = null,
     val attemptId: String? = null,
     val createdAt: String,
@@ -237,6 +240,7 @@ data class OrganizationEventDto(
     val revision: Int? = null,
     val phaseId: String? = null,
     val nodeId: String? = null,
+    val actorNodeId: String? = null,
     val taskId: String? = null,
     val attemptId: String? = null,
     val packetId: String? = null,

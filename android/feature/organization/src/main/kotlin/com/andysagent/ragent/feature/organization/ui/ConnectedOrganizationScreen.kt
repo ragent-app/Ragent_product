@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -58,13 +59,16 @@ import com.andysagent.ragent.feature.organization.data.RealOrganizationRepositor
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.data.NativeDelegationDto
 import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
+import com.andysagent.ragent.feature.organization.data.BirthEventTracker
+import com.andysagent.ragent.feature.organization.data.NativeBirthEvent
+import com.andysagent.ragent.feature.organization.data.BirthCue
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 @Composable
-fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
+fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
@@ -99,6 +103,11 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     var organizationNotFound by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var baseProjection by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<OrganizationProjectionDto?>(null) }
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
+    val formalBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
+    val nativeBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
+    val latestRecords by rememberUpdatedState(records)
+    val latestMemberName by rememberUpdatedState(stringResource(R.string.organization_native_member))
+    var nativeBirthCues by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<BirthCue>>(emptyList()) }
     LaunchedEffect(scopeKey, cacheInvalidations) {
         val generation = projectionGeneration
         if (offlineScope != null && generation != null && !cache.isCurrent(offlineScope, generation)) {
@@ -257,21 +266,59 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         val generation = projectionGeneration ?: return@LaunchedEffect
         val scope = offlineScope ?: return@LaunchedEffect
         if (!ownerVerified || ownerGeneration != generation || connection != RuntimeConnectionState.Connected || cachedAt != null || lifecycleState != Lifecycle.State.RESUMED || demoOpen) return@LaunchedEffect
+        val api = RealOrganizationApi(cachedTransport)
+        var cursor = 0L
+        var established = false
         while (true) {
+            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
+            val batch = mutableListOf<com.andysagent.ragent.feature.organization.data.OrganizationActionDto>()
+            var nextCursor = cursor
+            var complete = true
+            var more: Boolean
+            do {
+                val response = api.getSessionActions(sessionId, nextCursor)
+                response.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                val page = response.getOrNull()
+                if (page == null || page.organizationId != id || page.rootSessionId != sessionId ||
+                    (page.hasMore && page.nextAfterId <= nextCursor)) {
+                    complete = false
+                    break
+                }
+                batch.addAll(page.actions)
+                nextCursor = page.nextAfterId
+                more = page.hasMore
+            } while (more)
+            val result = if (complete) api.getSessionOrganization(sessionId) else null
+            result?.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            val projection = result?.getOrNull()
+            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
+            if (!complete || projection == null || projection.organizationId != id || projection.rootSessionId != sessionId) {
+                formalBirthTracker.reset()
+                cursor = 0L
+                established = false
+                delay(3_000)
+                continue
+            }
+            val roots = projection.nodes.filter { it.sessionId == sessionId }
+            val root = when (roots.size) {
+                0 -> projection.nodes.filter { it.parentId == null }.singleOrNull()?.id
+                1 -> roots.single().id
+                else -> null
+            }
+            if (root == null) {
+                formalBirthTracker.reset(); established = false; cursor = 0L
+                delay(3_000); continue
+            }
+            val nativeNodes = nativeDisplayNodes(latestRecords, root, latestMemberName)
+            val graph = projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes))
+            val cues = formalBirthTracker.observe("$scopeKey:$sessionId:$id", sessionId,
+                established && projection.nodes.size < 200, graph.nodes.associate { it.id to it.parentId }, id, batch, emptyList(), emptyList())
+            organizationViewModel.applyProjection(graph, birthCues = cues)
+            cursor = nextCursor
+            established = projection.nodes.size < 200
+            baseProjection = projection
+            nodes = projection.nodes
             delay(3_000)
-            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
-            val projection = try {
-                RealOrganizationApi(cachedTransport).getSessionOrganization(sessionId).getOrNull()
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                null
-            }
-            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
-            if (projection != null && projection.organizationId == id) {
-                baseProjection = projection
-                nodes = projection.nodes
-            }
         }
     }
     val rootSession = rootSessionId?.takeIf { it.isNotBlank() } ?: sessionId
@@ -282,6 +329,23 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         else -> null
     }
     val nativeMemberName = stringResource(R.string.organization_native_member)
+    LaunchedEffect(records, nativeEvents, nativeContinuous, connection, lifecycleState, rootNodeId, baseProjection) {
+        val root = rootNodeId ?: "native-root:$sessionId"
+        val nativeNodes = nativeDisplayNodes(records, root, nativeMemberName)
+        val formal = baseProjection
+        val parents = (formal?.nodes.orEmpty() + nativeNodes).associate { it.id to it.parentId }.toMutableMap()
+        parents.putIfAbsent(root, null)
+        val cues = nativeBirthTracker.observe("$scopeKey:$sessionId:${formal?.organizationId.orEmpty()}", sessionId,
+            nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED && (formal == null || formal.nodes.size < 200),
+            parents, null, emptyList(), nativeEvents, records)
+        if (formal != null && rootNodeId != null && cues.isNotEmpty()) {
+            organizationViewModel.applyProjection(formal.copy(nodes = formal.nodes + nativeNodes, edges = formal.edges + nativeDisplayEdges(nativeNodes)), birthCues = cues)
+        } else if (formal == null && cues.isNotEmpty()) {
+            nativeBirthCues = cues
+            androidx.compose.runtime.withFrameNanos { }
+            nativeBirthCues = emptyList()
+        }
+    }
     LaunchedEffect(baseProjection, records, rootNodeId, nativeMemberName) {
         val projection = baseProjection ?: return@LaunchedEffect
         val root = rootNodeId ?: return@LaunchedEffect
@@ -362,7 +426,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
         else if (embedded && records.isNotEmpty()) {
-            NativeOrganizationGraph(transport, sessionId, records, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed)
+            NativeOrganizationGraph(transport, sessionId, records, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, birthCues = nativeBirthCues)
         }
         else if (!embedded) {
             val colors = LocalRagentColors.current
@@ -400,9 +464,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
 fun ConnectedOrganizationGraph(
     transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null,
     modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit,
-    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit,
+    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit,
 ) {
     ConnectedOrganizationScreen(transport, sessionId, targetId, offlineScope, onBack = {}, embedded = true,
-        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, onCollaboratorSnapshot = onCollaboratorSnapshot,
+        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, nativeEvents = nativeEvents, nativeContinuous = nativeContinuous, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, onCollaboratorSnapshot = onCollaboratorSnapshot,
         onHasCollaboratorsChanged = onHasCollaboratorsChanged)
 }

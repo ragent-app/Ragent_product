@@ -289,7 +289,10 @@ export async function delegateHierarchicalTask(input = {}, {
     childNodeId: node.id,
     idempotencyKey: `${idempotencyKey}:edge`,
   });
-  await appendOrganizationEvent({ organizationId, eventKey: `node-created:${node.id}`, type: 'node.created', organizationRevision: revision, nodeId: node.id, actorNodeId: parentNodeId });
+  const birthActorSession = text(input.fromSessionId);
+  const verifiedBirthSession = birthActorSession && birthActorSession === text(parent.currentSessionId);
+  await appendOrganizationEvent({ organizationId, eventKey: `node-created:${node.id}`, type: 'node.created', organizationRevision: revision, nodeId: node.id, actorNodeId: parentNodeId,
+    ...(verifiedBirthSession ? { actorSessionId: birthActorSession, payload: { birthActorSource: 'hierarchical_session' } } : {}) });
   const delegationGrant = await createDelegationGrant({
     organizationId,
     organizationRevision: revision,

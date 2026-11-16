@@ -6,6 +6,7 @@ import { canonicalJson } from './execution-scope.mjs';
 import { getOrganization, getRevision, listOrganizationNodes, listOrganizationEdges, listOrganizationGates } from './organization-store.mjs';
 import { listOrganizationEvents, listInternalEnvelopes } from './organization-messaging.mjs';
 import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
+import { verifiedBirthActor } from './organization-birth-evidence.mjs';
 import { getBudgetCounter } from './organization-governor.mjs';
 import { collectOrganizationStatus } from './organization-status-projection.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
@@ -49,13 +50,14 @@ function publicNode(node, edgeByChild = new Map(), display = {}) {
   };
 }
 
-function publicEvent(event) {
+function publicEvent(event, nodes) {
   return {
     id: event.id,
     type: event.type,
     revision: event.organizationRevision ?? null,
     phaseId: event.phaseId || null,
     nodeId: event.nodeId || null,
+    actorNodeId: verifiedBirthActor(event, nodes),
     taskId: event.taskId || null,
     attemptId: event.attemptId || null,
     packetId: event.packetId || null,
@@ -116,7 +118,7 @@ async function buildOrganizationProjectionUncached(organizationId, {
   const safeEdges = bounded(edges).map((edge) => ({
     id: edge.id, type: edge.edgeType, parentId: edge.parentNodeId, childId: edge.childNodeId, revision: edge.organizationRevision,
   }));
-  const safeEvents = bounded(events).map(publicEvent);
+  const safeEvents = bounded(events).map((event) => publicEvent(event, nodes));
   const eventsByPhase = new Map();
   for (const event of eventHistory) {
     const phaseId = text(event?.phaseId);
@@ -171,7 +173,7 @@ async function buildOrganizationProjectionUncached(organizationId, {
       progressEpoch: integer(org.progressEpoch),
       projectionDigest: null,
     };
-    projection.changes = eventHistory.filter((event) => event.id > since).slice(-itemLimit).map(publicEvent);
+    projection.changes = eventHistory.filter((event) => event.id > since).slice(-itemLimit).map((event) => publicEvent(event, nodes));
   }
   projection.digest = projectionDigest(projection);
   if (projection.asOf) projection.asOf.projectionDigest = projection.digest;

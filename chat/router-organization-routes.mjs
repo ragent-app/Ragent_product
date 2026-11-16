@@ -15,6 +15,7 @@ import { provisionRootLeadershipRevision } from './organization-provisioning.mjs
 import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
 import { listOrganizationEvents, getInternalEnvelope } from './organization-messaging.mjs';
 import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
+import { verifiedBirthActor } from './organization-birth-evidence.mjs';
 import { getCollaboration } from './collaboration-store.mjs';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
@@ -66,7 +67,7 @@ export async function handleOrganizationRoutes({
       if (!Number.isSafeInteger(afterLines) || afterLines < 0) { writeJson(res, 400, { error: 'Invalid cursor' }); return true; }
       const readable = (await Promise.all([runSpoolPath(runId), runSpoolGzPath(runId), runSpoolZstPath(runId)]
         .map((path) => access(path, fsConstants.R_OK).then(() => true, () => false)))).some(Boolean);
-      const delta = await readRunSpoolDelta(runId, { skipLines: afterLines, maxRecords: 200 });
+      const delta = await readRunSpoolDelta(runId, { skipLines: afterLines, maxRecords: 200, strictStatus: true });
       const run = await getRun(runId);
       const delegations = run?.sessionId === sessionId && Array.isArray(run?.providerNativeDelegation?.delegations)
         ? run.providerNativeDelegation.delegations.filter((entry) => entry.parentSessionId === sessionId && entry.parentRunId === runId && entry.delegationId)
@@ -79,10 +80,10 @@ export async function handleOrganizationRoutes({
         : (delta.skippedLineCount || 0) + (delta.processedLineCount || 0);
       const events = delta.records.map((record) => record.json)
         .filter((value) => value?.type === 'ragent.delegation_event' && value.event?.parentSessionId === sessionId && value.event?.runId === runId)
-        .map(({ event }) => ({ id: event.id, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
+        .map(({ event }) => ({ id: event.id, runId: event.runId, parentSessionId: event.parentSessionId, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
       writeJson(res, 200, { sessionId, runId, events, delegations, nextAfterLines, hasMore: delta.truncated === true,
-        sourceAvailability: readable ? 'readable_unverified' : 'missing',
-        gap: !readable, recoverability: readable ? 'unknown' : 'unavailable' });
+        sourceAvailability: readable ? delta.readStatus : 'missing',
+        gap: !readable || delta.readStatus !== 'verified', recoverability: readable ? 'unknown' : 'unavailable' });
     } catch (error) { writeError(res, writeJson, error); }
     return true;
   }
@@ -109,7 +110,7 @@ export async function handleOrganizationRoutes({
         const envelope = event.envelopeId ? await getInternalEnvelope(event.envelopeId) : null;
         const collaboration = event.type === 'task.delegated' && event.payload?.collaborationId ? await getCollaboration(event.payload.collaborationId) : null;
         const task = collaboration?.rootSessionId === rootSessionId ? collaboration.tasks?.find((item) => item.id === event.taskId) : null;
-        return { id: event.id, type: event.type, nodeId: event.nodeId || null, taskId: event.taskId || null, attemptId: event.attemptId || null, createdAt: event.type === 'task.dispatch_requested' ? (event.payload?.requestedAt || event.createdAt) : event.createdAt,
+        return { id: event.id, type: event.type, nodeId: event.nodeId || null, actorNodeId: verifiedBirthActor(event, nodes), taskId: event.taskId || null, attemptId: event.attemptId || null, createdAt: event.type === 'task.dispatch_requested' ? (event.payload?.requestedAt || event.createdAt) : event.createdAt,
           displayName: nodeById.get(event.nodeId)?.stableKey || null,
           summary: task?.objective || (event.type === 'task.dispatch_requested' ? event.payload?.objective : null) || (envelope?.organizationId === org.id ? envelope.subject : null),
           details: event.type === 'organization.cancel_requested' && typeof event.payload?.reason === 'string' ? event.payload.reason : null,

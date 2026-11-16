@@ -2996,6 +2996,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
         records: [],
         nextOffset: 0,
         processedLineCount: 0,
+        ...(options.strictStatus ? { readStatus: 'missing' } : {}),
       };
     }
     const path = resolved.path;
@@ -3010,6 +3011,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
       let processedLineCount = 0;
       let skippedLineCount = 0;
       let truncated = false;
+      let invalid = false;
       const maxRecords = Number.isInteger(options.maxRecords) && options.maxRecords >= 0
         ? options.maxRecords
         : MAX_SPOOL_DELTA_RECORDS;
@@ -3020,17 +3022,19 @@ export async function readRunSpoolDelta(runId, options = {}) {
           const raw = chunk.slice(start, idx);
           start = idx + 1;
           const line = raw.trim();
-          if (!line) continue;
+          if (!line) { invalid = true; continue; }
           processedLineCount++;
           if (skippedLineCount < Math.max(0, Number.isInteger(options.skipLines) ? options.skipLines : 0)) {
             skippedLineCount++;
             continue;
           }
           if (line.length > MAX_SPOOL_RECORD_CHARS) {
+            invalid = true;
             truncated = true;
             continue;
           }
           const record = maybeParseSpoolRecord(line);
+          if (!record) invalid = true;
           if (record) {
             records.push(record);
             if (records.length >= maxRecords) {
@@ -3041,7 +3045,8 @@ export async function readRunSpoolDelta(runId, options = {}) {
         }
         if (truncated) break;
       }
-      return { records, nextOffset: 0, processedLineCount, skippedLineCount, truncated };
+      return { records, nextOffset: 0, processedLineCount, skippedLineCount, truncated,
+        ...(options.strictStatus ? { readStatus: invalid || skippedLineCount < (options.skipLines || 0) ? 'gap' : 'verified' } : {}) };
     }
 
     if (!stats) {
@@ -3049,6 +3054,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
         records: [],
         nextOffset: 0,
         processedLineCount: 0,
+        ...(options.strictStatus ? { readStatus: 'missing' } : {}),
       };
     }
 
@@ -3060,6 +3066,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
       ? options.maxRecords
       : MAX_SPOOL_DELTA_RECORDS;
     let truncated = false;
+    let invalid = false;
     let processedLineCount = 0;
     let skippedLineCount = 0;
     let remainder = Buffer.alloc(0);
@@ -3114,10 +3121,12 @@ export async function readRunSpoolDelta(runId, options = {}) {
           processedLineCount += 1;
           nextOffset = lineEndOffset;
           if (!line || line.length > MAX_SPOOL_RECORD_CHARS) {
+            invalid = true;
             lineStart = newlineIndex + 1;
             continue;
           }
           const record = maybeParseSpoolRecord(line);
+          if (!record) invalid = true;
           if (record) {
             records.push(record);
             if (maxRecords > 0 && records.length >= maxRecords) {
@@ -3135,6 +3144,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
         remainder = chunk.subarray(lineStart);
         remainderOffset = dataStartOffset + lineStart;
         if (remainder.length > MAX_SPOOL_RECORD_CHARS) {
+          invalid = true;
           remainder = Buffer.alloc(0);
           discardingOversizeLine = true;
         }
@@ -3149,6 +3159,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
         nextOffset = stats.size;
         if (!truncated && remainder.length <= MAX_SPOOL_RECORD_CHARS) {
           const record = maybeParseSpoolRecord(remainder.toString('utf8'));
+          if (!record) invalid = true;
           if (record) records.push(record);
         }
       }
@@ -3163,6 +3174,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
       processedLineCount,
       skippedLineCount,
       truncated,
+      ...(options.strictStatus ? { readStatus: invalid || (!canResumeFromOffset && skippedLineCount < (options.skipLines || 0)) ? 'gap' : 'verified' } : {}),
     };
   } catch {
     return {
@@ -3171,6 +3183,7 @@ export async function readRunSpoolDelta(runId, options = {}) {
       processedLineCount: 0,
       skippedLineCount: 0,
       truncated: false,
+      ...(options.strictStatus ? { readStatus: 'error' } : {}),
     };
   }
 }

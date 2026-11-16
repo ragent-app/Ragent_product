@@ -102,6 +102,11 @@ internal fun rememberCollaborationActions(
             }
             var authorizationDenied = false
             var incomplete = false
+            var nextNodes = nativeNodes
+            var nextEvents = nativeEvents
+            val nextCursors = cursors.toMutableMap()
+            val nextFinished = nativePoll.finished.toMutableMap()
+            val nextScannedAt = nativePoll.scannedAt.toMutableMap()
             runs.getOrNull()?.runs?.forEach { run ->
                 if (authorizationDenied) return@forEach
                 val version = "${run.state}:${run.updatedAt.orEmpty()}"
@@ -110,7 +115,7 @@ internal fun rememberCollaborationActions(
                 var more = true
                 var reachedTail = false
                 while (more) {
-                    val cursor = cursors[run.id] ?: 0L
+                    val cursor = nextCursors[run.id] ?: 0L
                     val response = api.getDelegationEvents(sessionId, run.id, cursor)
                     val error = response.exceptionOrNull()
                     if (error is CancellationException) throw error
@@ -122,22 +127,31 @@ internal fun rememberCollaborationActions(
                     val page = response.getOrNull()
                     if (page == null) { incomplete = true; break }
                     if (page.gap || page.sourceAvailability != "verified") incomplete = true
-                    if (!page.gap) nativeNodes = nativeNodes.filterNot { it.runId == run.id } + page.delegations
-                    nativeEvents = (nativeEvents + page.events.map { NativeDelegationRecord(run.id, it) })
+                    if (!page.gap) nextNodes = nextNodes.filterNot { it.runId == run.id } + page.delegations
+                    nextEvents = (nextEvents + page.events.map { NativeDelegationRecord(run.id, it) })
                         .distinctBy { it.runId to it.event.id }
-                    cursors[run.id] = maxOf(cursor, page.nextAfterLines)
+                    nextCursors[run.id] = maxOf(cursor, page.nextAfterLines)
                     more = page.hasMore && page.nextAfterLines > cursor
                     if (page.hasMore && !more) incomplete = true
                     reachedTail = !page.hasMore && !page.gap
                 }
                 if (reachedTail && run.state.lowercase() in setOf("completed", "failed", "cancelled", "interrupted")) {
-                    nativePoll.finished[run.id] = version
-                    nativePoll.scannedAt[run.id] = android.os.SystemClock.elapsedRealtime()
-                } else nativePoll.finished.remove(run.id)
+                    nextFinished[run.id] = version
+                    nextScannedAt[run.id] = android.os.SystemClock.elapsedRealtime()
+                } else nextFinished.remove(run.id)
             }
             if (runs.isSuccess) {
                 nativeResolved = true
                 nativeDefinitive = !authorizationDenied && !incomplete
+                if (!authorizationDenied) {
+                    nativeNodes = nextNodes
+                    nativeEvents = nextEvents
+                }
+                if (nativeDefinitive) {
+                    cursors.clear(); cursors.putAll(nextCursors)
+                    nativePoll.finished.clear(); nativePoll.finished.putAll(nextFinished)
+                    nativePoll.scannedAt.clear(); nativePoll.scannedAt.putAll(nextScannedAt)
+                }
             }
             delay(3_000)
         }
