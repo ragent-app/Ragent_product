@@ -6,7 +6,7 @@ try {
   [Console]::Out.WriteLine('RAGENT_READY')
   [Console]::Out.Flush()
   try { Wait-Process -Id $ParentId -Timeout 90 -ErrorAction Stop } catch { if (Get-Process -Id $ParentId -ErrorAction SilentlyContinue) { throw 'Desktop did not close' } }
-  $installer = Start-Process -FilePath $Package -ArgumentList '/passive','/norestart' -Verb RunAs -Wait -PassThru
+  $installer = Start-Process -FilePath $Package -ArgumentList '/passive','/norestart' -Wait -PassThru
   if ($installer.ExitCode -ne 0 -and $installer.ExitCode -ne 3010) { throw ('Installer failed: ' + $installer.ExitCode) }
   Save-Result 'installed'
 } catch {

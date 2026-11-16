@@ -8,6 +8,9 @@ param(
     [switch]$LocalHost,
     [string]$LocalInstallBase
 )
+# This lifecycle assumes the retired combined machine MSI and can mutate real
+# services. It must not be run against the split desktop/service installer.
+throw 'DESKTOP_ACCEPTANCE_RETIRED_SPLIT_INSTALLER_REQUIRES_NEW_LIFECYCLE'
 $ErrorActionPreference = 'Stop'
 $localRunId = [Guid]::NewGuid().ToString('N')
 $script:localInstallBase = if ($LocalHost -and -not [string]::IsNullOrWhiteSpace($LocalInstallBase)) { [IO.Path]::GetFullPath($LocalInstallBase) } else { [IO.Path]::GetFullPath($env:ProgramFiles) }

@@ -10,7 +10,7 @@ $msiDirectory=Join-Path $msiRoot ('msi-schema-only-'+[guid]::NewGuid().ToString(
 New-Item -ItemType Directory -Path $msiDirectory | Out-Null
 Copy-Item -LiteralPath $msiGuard -Destination (Join-Path $msiDirectory 'Ragent.ServiceHost.exe')
 $msiPayload=Join-Path $msiDirectory 'payload.wxs'
-[IO.File]::WriteAllText($msiPayload,'<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Fragment><ComponentGroup Id="PayloadGroup" Directory="INSTALLFOLDER" Subdirectory="payload"><Component Id="QaPayload" Guid="*"><File Source="!(bindpath.OwnerInstallGuard)\qa-instance.json" /></Component></ComponentGroup></Fragment></Wix>',[Text.UTF8Encoding]::new($false))
+[IO.File]::WriteAllText($msiPayload,'<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Fragment><ComponentGroup Id="PayloadGroup" Directory="RagentMachineRoot" Subdirectory="payload"><Component Id="QaPayload" Guid="*"><File Source="!(bindpath.OwnerInstallGuard)\qa-instance.json" /></Component></ComponentGroup></Fragment></Wix>',[Text.UTF8Encoding]::new($false))
 $msiSource=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\packaging\windows\Ragent.wxs'))
 $msiScripts=[IO.Path]::GetDirectoryName($msiSource)
 $msiOutput=Join-Path $msiDirectory 'NOT-FOR-INSTALL-guard-schema.msi'

@@ -244,11 +244,11 @@ void SetPage(Page page) {
     }
     if (g.welcomeButton) ShowWindow(g.welcomeButton, page == Page::Welcome ? SW_SHOW : SW_HIDE);
     if (g.backButton) ShowWindow(g.backButton, page == Page::Location ? SW_SHOW : SW_HIDE);
-    if (g.browseButton) ShowWindow(g.browseButton, page == Page::Location ? SW_SHOW : SW_HIDE);
+    if (g.browseButton) ShowWindow(g.browseButton, SW_HIDE);
     if (g.installButton) ShowWindow(g.installButton, page == Page::Location ? SW_SHOW : SW_HIDE);
     if (g.cancelButton) ShowWindow(g.cancelButton, (page == Page::Location || page == Page::Installing) ? SW_SHOW : SW_HIDE);
     if (g.finishButton) ShowWindow(g.finishButton, (page == Page::Complete || page == Page::Cancelled || page == Page::Failed) ? SW_SHOW : SW_HIDE);
-    if (g.launchOption) ShowWindow(g.launchOption, page == Page::Location ? SW_SHOW : SW_HIDE);
+    if (g.launchOption) ShowWindow(g.launchOption, SW_HIDE);
     if (g.window) {
         InvalidateRect(g.window, nullptr, TRUE);
         UpdateWindow(g.window);
@@ -271,8 +271,8 @@ void LayoutControls() {
     Position(g.languageSelect, right - Px(170), Px(35), Px(170), Px(250), true);
 
     Position(g.pathEdit, left + margin, Px(270), width - left - margin * 2 - Px(120), Px(46), g.page == Page::Location);
-    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), g.page == Page::Location && !g.updating);
-    Position(g.launchOption, left + margin, Px(334), width - left - margin * 2, Px(28), g.page == Page::Location && !g.updating);
+    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), false);
+    Position(g.launchOption, left + margin, Px(334), width - left - margin * 2, Px(28), false);
     Position(g.welcomeButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Welcome);
     Position(g.installButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Location);
     Position(g.backButton, right - buttonW * 2 - gap, footerY, buttonW, buttonH, g.page == Page::Location);
@@ -389,6 +389,19 @@ bool NormalizeInstallPath(std::wstring value, std::wstring& normalized, std::wst
     }
     normalized.assign(fullPath.data(), fullLength);
     while (normalized.size() > 3 && (normalized.back() == L'\\' || normalized.back() == L'/')) normalized.pop_back();
+
+    const wchar_t* local = _wgetenv(L"LOCALAPPDATA");
+    if (local && *local) {
+        std::wstring maintenance = std::wstring(local) + L"\\RagentSetup";
+        auto overlaps = [](const std::wstring& a, const std::wstring& b) {
+            return _wcsicmp(a.c_str(), b.c_str()) == 0 ||
+                (a.size() < b.size() && _wcsnicmp(a.c_str(), b.c_str(), a.size()) == 0 && b[a.size()] == L'\\');
+        };
+        if (overlaps(normalized, maintenance) || overlaps(maintenance, normalized)) {
+            error = Text(L"Choose a folder separate from the Ragent setup folder.", L"请选择与 Ragent 安装维护目录分开的文件夹。");
+            return false;
+        }
+    }
 
     DWORD attributes = GetFileAttributesW(normalized.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
@@ -522,9 +535,9 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
         Gdiplus::SolidBrush successFill(Color(229, 247, 239));
         FillRounded(graphics, Gdiplus::RectF(x, y + Px(44), Px(52), Px(52)), Px(16), successFill);
         DrawText(graphics, L"✓", x, y + Px(54), Px(52), Px(25), Color(27, 143, 91), true, Gdiplus::StringAlignmentCenter);
-        DrawText(graphics, Text(L"Ragent is ready", L"Ragent 已准备就绪"), x, y + Px(124), width, Px(29), ink, true);
-        DrawText(graphics, Text(L"Installation completed successfully. You can open the desktop manager from the Start menu.",
-            L"安装已成功完成。你可以从开始菜单打开桌面管理器。"), x, y + Px(176), width, Px(14), muted);
+        DrawText(graphics, Text(L"Desktop installed", L"桌面程序已安装"), x, y + Px(124), width, Px(29), ink, true);
+        DrawText(graphics, Text(L"Desktop installation finished. Setup will continue with the service.",
+            L"桌面程序已安装。安装程序将继续安装服务。"), x, y + Px(176), width, Px(14), muted);
         break;
     }
     case Page::Cancelled: {
@@ -550,7 +563,7 @@ void DrawMainContent(Gdiplus::Graphics& graphics, const RECT& client, float left
 void UpdateWindowTitle() {
     if (!g.window) return;
     if (g.page == Page::Installing) SetWindowTextW(g.window, Text(L"Installing Ragent", L"正在安装 Ragent").c_str());
-    else if (g.page == Page::Complete) SetWindowTextW(g.window, Text(L"Ragent setup complete", L"Ragent 安装完成").c_str());
+    else if (g.page == Page::Complete) SetWindowTextW(g.window, Text(L"Desktop installation complete", L"桌面程序安装完成").c_str());
     else if (g.page == Page::Failed) SetWindowTextW(g.window, Text(L"Ragent setup", L"Ragent 安装程序").c_str());
     else SetWindowTextW(g.window, Text(L"Ragent setup", L"Ragent 安装程序").c_str());
 }
@@ -562,7 +575,7 @@ void UpdateLocalizedControls() {
         {g.browseButton, Text(L"Browse…", L"浏览…")},
         {g.installButton, Text(L"Install", L"安装")},
         {g.cancelButton, Text(L"Cancel", L"取消")},
-        {g.finishButton, Text(L"Finish", L"完成")},
+        {g.finishButton, Text(L"Continue", L"继续")},
         {g.launchOption, Text(L"Open Ragent when setup finishes", L"安装完成后打开 Ragent")}}) {
         if (item.first) SetWindowTextW(item.first, item.second.c_str());
     }
@@ -650,21 +663,6 @@ void SubmitInstall() {
         return;
     }
     g.recoverySource.clear();
-    const DWORD retained = GetFileAttributesW(L"C:\\ProgramData\\Ragent");
-    const std::wstring selectedReceipt = selected + L"owner-msi.removed.json";
-    if (retained != INVALID_FILE_ATTRIBUTES && (retained & FILE_ATTRIBUTE_DIRECTORY)
-        && GetFileAttributesW(selectedReceipt.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        std::wstring previous = FindRecoverySourceHint(), normalizedPrevious;
-        if ((previous.empty() && !ChooseRecoverySource(previous)) || !NormalizeInstallPath(previous, normalizedPrevious, error)) {
-            g.errorDetail = error.empty()
-                ? Text(L"Select the previous installation folder to retain existing data.",
-                       L"请选择之前的安装文件夹，以保留现有数据。") : error;
-            InvalidateRect(g.window, nullptr, TRUE);
-            MessageBeep(MB_ICONWARNING);
-            return;
-        }
-        g.recoverySource = std::move(normalizedPrevious);
-    }
     g.installPath = std::move(selected);
     g.errorDetail.clear();
     g.progress = 0;
@@ -704,8 +702,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         g.launchOption = CreateWindowExW(0, L"BUTTON", Text(L"Open Ragent when setup finishes", L"安装完成后打开 Ragent").c_str(),
             WS_CHILD | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0, 1, 1, window,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonLaunchOption)), gModule, nullptr);
-        if (g.launchOption) SendMessageW(g.launchOption, BM_SETCHECK, BST_CHECKED, 0);
-        if (g.updating && g.pathEdit) {
+        if (g.pathEdit) {
             SetWindowTextW(g.pathEdit, g.installPath.c_str());
             EnableWindow(g.pathEdit, FALSE);
         }
@@ -778,6 +775,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return 0;
         }
         if (id == kButtonCancel) {
+            if (g.page == Page::Welcome || g.page == Page::Location) {
+                g.closing = true;
+                SetEvent(gExitEvent);
+                DestroyWindow(window);
+                return 0;
+            }
             gCancelRequested.store(true);
             g.currentAction = Text(L"Cancel requested. Windows Installer is rolling back safely…", L"已请求取消，Windows Installer 正在安全回滚…");
             InvalidateRect(window, nullptr, TRUE);
@@ -1055,8 +1058,22 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     gProgressTotal.store(0);
     g.progress = 0;
     g.errorDetail.clear();
-    g.installPath.clear();
-    if (g.updating && !FindInstalledFolder(install, g.minorUpdate ? productCode : previousProduct.c_str(), g.installPath)) return ERROR_INSTALL_FAILURE;
+    wchar_t userFolder[32768]{}; DWORD userFolderLength = static_cast<DWORD>(std::size(userFolder));
+    if (MsiGetPropertyW(install, L"DESKTOPINSTALLDIR", userFolder, &userFolderLength) != ERROR_SUCCESS)
+        return ERROR_INSTALL_FAILURE;
+    if (!userFolder[0]) {
+        DWORD bytes = sizeof(userFolder);
+        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Ragent\\DesktopInstaller", L"InstallLocation",
+                RRF_RT_REG_SZ, nullptr, userFolder, &bytes) != ERROR_SUCCESS || !userFolder[0]) {
+            const wchar_t* local = _wgetenv(L"LOCALAPPDATA");
+            if (!local || !*local) return ERROR_INSTALL_FAILURE;
+            std::wstring fallback = std::wstring(local) + L"\\Ragent";
+            if (fallback.size() >= std::size(userFolder)) return ERROR_INSTALL_FAILURE;
+            std::copy(fallback.begin(), fallback.end(), userFolder);
+            userFolder[fallback.size()] = L'\0';
+        }
+    }
+    g.installPath = userFolder;
     g.recoverySource.clear();
     g.closing = false;
     ClearEvents();
@@ -1106,15 +1123,13 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     }
 
     UINT propertyResult = ERROR_SUCCESS;
-    if (propertyResult == ERROR_SUCCESS)
-        propertyResult = MsiSetPropertyW(install, L"RAGENT_INSTALLFOLDER", g.installPath.c_str());
-    if (propertyResult == ERROR_SUCCESS && g.updating)
-        propertyResult = MsiSetPropertyW(install, L"INSTALLFOLDER", g.installPath.c_str());
     if (propertyResult == ERROR_SUCCESS && g.minorUpdate)
         propertyResult = MsiSetPropertyW(install, L"REINSTALL", L"ALL");
+    if (propertyResult == ERROR_SUCCESS)
+        propertyResult = MsiSetPropertyW(install, L"DESKTOPINSTALLDIR", g.installPath.c_str());
     const UINT recoveryPropertyResult = MsiSetPropertyW(install, L"RAGENT_RECOVERY_SOURCE", g.recoverySource.c_str());
     if (propertyResult == ERROR_SUCCESS && recoveryPropertyResult != ERROR_SUCCESS) propertyResult = recoveryPropertyResult;
-    const UINT launchPropertyResult = MsiSetPropertyW(install, L"RAGENT_LAUNCH", g.openAfterInstall ? L"1" : L"");
+    const UINT launchPropertyResult = MsiSetPropertyW(install, L"RAGENT_LAUNCH", L"");
     if (propertyResult == ERROR_SUCCESS && launchPropertyResult != ERROR_SUCCESS) propertyResult = launchPropertyResult;
     if (propertyResult != ERROR_SUCCESS) {
         PostUiText(3, Text(L"Windows Installer could not apply the selected setup options.", L"Windows Installer 无法应用所选安装选项。"));

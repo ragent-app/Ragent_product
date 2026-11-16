@@ -1,211 +1,179 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 internal static class RagentSetup {
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool CreateHardLink(string newFileName, string existingFileName, IntPtr securityAttributes);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiOpenDatabaseW")]
-    private static extern uint MsiOpenDatabase(string path, IntPtr persist, out uint database);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiDatabaseOpenViewW")]
-    private static extern uint MsiDatabaseOpenView(uint database, string query, out uint view);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiOpenDatabaseW")] private static extern uint MsiOpenDatabase(string path, IntPtr persist, out uint db);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiDatabaseOpenViewW")] private static extern uint MsiDatabaseOpenView(uint db, string sql, out uint view);
     [DllImport("msi.dll")] private static extern uint MsiViewExecute(uint view, uint record);
     [DllImport("msi.dll")] private static extern uint MsiViewFetch(uint view, out uint record);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiRecordGetStringW")]
-    private static extern uint MsiRecordGetString(uint record, uint field, StringBuilder value, ref uint length);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiRecordGetStringW")] private static extern uint MsiRecordGetString(uint record, uint field, StringBuilder value, ref uint length);
     [DllImport("msi.dll")] private static extern uint MsiCloseHandle(uint handle);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiEnumRelatedProductsW")]
-    private static extern uint MsiEnumRelatedProducts(string upgradeCode, uint reserved, uint index, StringBuilder product);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiQueryProductStateW")]
-    private static extern int MsiQueryProductState(string product);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiGetProductInfoW")]
-    private static extern uint MsiGetProductInfo(string product, string property, StringBuilder value, ref uint length);
-    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiGetComponentPathW")]
-    private static extern int MsiGetComponentPath(string product, string component, StringBuilder path, ref uint length);
-    private const string PayloadResource = "Ragent.Payload.msi";
-    private const string HashResource = "Ragent.Payload.sha256";
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiEnumRelatedProductsW")] private static extern uint MsiEnumRelatedProducts(string upgradeCode, uint reserved, uint index, StringBuilder product);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiQueryProductStateW")] private static extern int MsiQueryProductState(string product);
+    [DllImport("msi.dll", CharSet = CharSet.Unicode, EntryPoint = "MsiGetProductInfoW")] private static extern uint MsiGetProductInfo(string product, string property, StringBuilder value, ref uint length);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern bool CreateHardLink(string newFile, string existingFile, IntPtr securityAttributes);
+    private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\Ragent";
+    private static bool quiet;
+    private static string ownerSid;
 
-    [STAThread]
-    private static int Main(string[] args) {
-        string directory = null;
-        string payloadPath = null;
-        var repairSourcePaths = new List<string>();
+    [STAThread] private static int Main(string[] args) {
+        string temp = null;
         try {
-            directory = Path.Combine(Path.GetTempPath(), "Ragent-setup-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(directory);
-            payloadPath = Path.Combine(directory, "Ragent.msi");
-            Assembly assembly = Assembly.GetExecutingAssembly();
-            using (Stream input = assembly.GetManifestResourceStream(PayloadResource)) {
-                if (input == null) throw new InvalidOperationException("Installer payload is missing.");
-                using (FileStream output = new FileStream(payloadPath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) input.CopyTo(output);
+            quiet = Has(args, "/quiet") || Has(args, "/q") || Has(args, "/qn") || Has(args, "/passive") || Has(args, "/qb");
+            if (new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator))
+                throw new InvalidOperationException("Run Ragent Setup without administrator elevation. Windows Installer will request approval for the service when needed.");
+            ownerSid = WindowsIdentity.GetCurrent().User.Value;
+            temp = Path.Combine(Path.GetTempPath(), "Ragent-setup-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(temp);
+            string machine = Extract("Machine", temp), desktop = Extract("Desktop", temp);
+            AddRepairAlias(machine); AddRepairAlias(desktop);
+            bool uninstall = Has(args, "/uninstall") || Has(args, "/x");
+            if (uninstall) {
+                SetStatus("removing-service", 0);
+                int b = RemoveRelated(machine, true);
+                if (!Succeeded(b)) { SetStatus("service-removal-failed", b); Report("The service removal did not finish. The desktop and uninstall entry remain available; run Uninstall again to retry."); return b; }
+                SetStatus("removing-desktop", 0);
+                int a = RemoveRelated(desktop, false);
+                if (!Succeeded(a)) { SetStatus("desktop-removal-failed", a); Report("The service was removed, but the desktop removal did not finish. Run Uninstall again to retry."); return a; }
+                // Keep the ownership record for the running maintenance EXE;
+                // it permits a later reinstall without treating it as foreign.
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(UninstallKey, true)) {
+                    if (key != null) { key.SetValue("SystemComponent", 1, RegistryValueKind.DWord); key.SetValue("SetupStatus", "removed"); }
+                }
+                return a == 3010 || b == 3010 ? 3010 : 0;
             }
-            string expected;
-            using (Stream input = assembly.GetManifestResourceStream(HashResource)) {
-                if (input == null) throw new InvalidOperationException("Installer checksum is missing.");
-                using (StreamReader reader = new StreamReader(input, Encoding.ASCII)) expected = reader.ReadToEnd().Trim();
+            int user = RunInstall(desktop, args, false);
+            if (!Succeeded(user)) {
+                if (user != 1602) Report("The desktop installation did not finish. Run Ragent Setup again to retry.");
+                return user;
             }
-            string actual;
-            using (SHA256 hash = SHA256.Create())
-            using (FileStream input = File.OpenRead(payloadPath)) actual = BitConverter.ToString(hash.ComputeHash(input)).Replace("-", "");
-            if (!String.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Installer payload verification failed.");
-
-            // Secure Repair resolves the package name registered by the first
-            // install. That name can differ between MSI and EXE distributions.
-            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            aliases.Add("Ragent-0.0.1.msi");
-            string registeredPackageName = GetRegisteredPackageName(payloadPath);
-            if (!String.IsNullOrEmpty(registeredPackageName)) aliases.Add(registeredPackageName);
-            foreach (string alias in aliases) {
-                string aliasPath = Path.Combine(directory, alias);
-                if (String.Equals(aliasPath, payloadPath, StringComparison.OrdinalIgnoreCase)) continue;
-                if (!CreateHardLink(aliasPath, payloadPath, IntPtr.Zero)) File.Copy(payloadPath, aliasPath, false);
-                repairSourcePaths.Add(aliasPath);
+            RegisterSetup(machine, desktop);
+            SetStatus("installing-service", 0);
+            int service = RunInstall(machine, args, true);
+            if (!Succeeded(service)) {
+                SetStatus("service-install-failed", service);
+                Report("The desktop was installed or updated, but the service installation did not finish. Run Ragent Setup again to complete or repair the installation.");
+                return service;
             }
-
-            string command = BuildMsiCommand(payloadPath, args);
-            ProcessStartInfo start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "msiexec.exe"), command.ToString());
-            start.UseShellExecute = false;
-            using (Process process = Process.Start(start)) {
-                if (process == null) throw new InvalidOperationException("Windows Installer could not be started.");
-                process.WaitForExit();
-                return process.ExitCode;
+            using (RegistryKey key = Registry.CurrentUser.OpenSubKey(UninstallKey, true)) {
+                key.SetValue("MachineProductCode", Property(machine, "ProductCode"));
+                key.SetValue("MachineProductVersion", Property(machine, "ProductVersion"));
+                var version = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(Assembly.GetExecutingAssembly(), typeof(AssemblyInformationalVersionAttribute));
+                if (version != null) key.SetValue("DisplayVersion", version.InformationalVersion);
             }
-        } catch (Exception error) {
-            MessageBox.Show("Ragent setup could not start.\n\n" + error.Message, "Ragent Setup", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return 1;
-        } finally {
-            foreach (string repairSourcePath in repairSourcePaths) {
-                try { if (File.Exists(repairSourcePath)) File.Delete(repairSourcePath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            }
-            try { if (payloadPath != null && File.Exists(payloadPath)) File.Delete(payloadPath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            try { if (directory != null && Directory.Exists(directory)) Directory.Delete(directory, false); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+            SetStatus("installed", 0);
+            return user == 3010 || service == 3010 ? 3010 : 0;
+        } catch (Exception error) { Report("Ragent Setup could not finish. Run it again to retry.\n\n" + error.Message); return 1; }
+        finally { if (temp != null) try { Directory.Delete(temp, true); } catch (IOException) {} catch (UnauthorizedAccessException) {} }
+    }
+    private static bool Has(string[] args, string value) { foreach (string a in args) if (String.Equals(a, value, StringComparison.OrdinalIgnoreCase)) return true; return false; }
+    private static bool Succeeded(int code) { return code == 0 || code == 3010; }
+    private static void Report(string message) { if (!quiet) MessageBox.Show(message, "Ragent Setup", MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    private static string Extract(string name, string directory) {
+        Assembly assembly = Assembly.GetExecutingAssembly();
+        string file = Path.Combine(directory, "Ragent." + name + ".msi"), expected;
+        using (Stream input = assembly.GetManifestResourceStream("Ragent." + name + ".msi")) {
+            if (input == null) throw new InvalidOperationException(name + " installer is missing.");
+            using (FileStream output = new FileStream(file, FileMode.CreateNew)) input.CopyTo(output);
         }
-    }
-
-    private static bool IsQuiet(string[] args) {
-        foreach (string arg in args) {
-            string value = arg.ToLowerInvariant();
-            if (value == "/q" || value == "/quiet" || value == "/passive" || value.StartsWith("/qn", StringComparison.Ordinal) || value.StartsWith("/qb", StringComparison.Ordinal)) return true;
+        using (Stream input = assembly.GetManifestResourceStream("Ragent." + name + ".sha256")) {
+            if (input == null) throw new InvalidOperationException(name + " checksum is missing.");
+            using (StreamReader reader = new StreamReader(input, Encoding.ASCII)) expected = reader.ReadToEnd().Trim();
         }
-        return false;
+        using (SHA256 hash = SHA256.Create()) using (FileStream input = File.OpenRead(file))
+            if (!String.Equals(expected, BitConverter.ToString(hash.ComputeHash(input)).Replace("-", ""), StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException(name + " installer verification failed.");
+        return file;
     }
-
-    private static bool HasInstallFolder(string[] args) {
-        foreach (string arg in args)
-            if (arg.StartsWith("RAGENT_INSTALLFOLDER=", StringComparison.OrdinalIgnoreCase) || arg.StartsWith("INSTALLFOLDER=", StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
-    }
-
-    private static bool HasMsiProperty(string[] args, string name) {
-        string prefix = name + "=";
-        foreach (string arg in args)
-            if (arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
-    }
-
-    private static bool IsExactProductInstalled(string msi) {
-        uint database;
-        if (MsiOpenDatabase(msi, IntPtr.Zero, out database) != 0)
-            throw new InvalidOperationException("Installer product identity could not be read.");
+    private static string Property(string msi, string name) {
+        uint db, view = 0, record = 0;
+        if (MsiOpenDatabase(msi, IntPtr.Zero, out db) != 0) throw new InvalidOperationException("Cannot read installer identity.");
         try {
-            string productCode = ReadMsiValue(database, "SELECT `Value` FROM `Property` WHERE `Property` = 'ProductCode'");
-            if (String.IsNullOrEmpty(productCode))
-                throw new InvalidOperationException("Installer product code is missing.");
-            return MsiQueryProductState(productCode) == 5;
-        } finally { MsiCloseHandle(database); }
-    }
-
-    private static string GetRegisteredPackageName(string msi) {
-        uint database;
-        if (MsiOpenDatabase(msi, IntPtr.Zero, out database) != 0)
-            throw new InvalidOperationException("Installer product identity could not be read.");
-        string productCode;
-        try { productCode = ReadMsiValue(database, "SELECT `Value` FROM `Property` WHERE `Property` = 'ProductCode'"); }
-        finally { MsiCloseHandle(database); }
-        if (String.IsNullOrEmpty(productCode) || MsiQueryProductState(productCode) != 5) return null;
-        var value = new StringBuilder(512); uint length = (uint)value.Capacity;
-        if (MsiGetProductInfo(productCode, "PackageName", value, ref length) != 0) return null;
-        string name = value.ToString();
-        if (String.IsNullOrWhiteSpace(name) || name.Length > 240 ||
-            !String.Equals(Path.GetFileName(name), name, StringComparison.Ordinal) ||
-            !String.Equals(Path.GetExtension(name), ".msi", StringComparison.OrdinalIgnoreCase) ||
-            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
-        return name;
-    }
-
-    private static string BuildMsiCommand(string payloadPath, string[] args) {
-        StringBuilder command = new StringBuilder("/i ").Append(Quote(payloadPath));
-        // A same-ProductCode minor update needs both properties or Windows
-        // Installer rejects it as an older product. Detect only this exact
-        // product so another installed product cannot enter the minor lane.
-        if (IsExactProductInstalled(payloadPath)) {
-            if (!HasMsiProperty(args, "REINSTALL")) command.Append(" REINSTALL=ALL");
-            if (!HasMsiProperty(args, "REINSTALLMODE")) command.Append(" REINSTALLMODE=vomus");
-        }
-        // Embedded UI discovers the previous installation interactively. MSI
-        // does not load it in quiet mode, so resolve its registered location.
-        // The installer's admission checks still validate the resulting path.
-        string existingFolder;
-        if (IsQuiet(args) && !HasInstallFolder(args) && TryFindInstalledFolder(payloadPath, out existingFolder))
-            command.Append(' ').Append(Quote("RAGENT_INSTALLFOLDER=" + existingFolder));
-        foreach (string arg in args) command.Append(' ').Append(Quote(arg));
-        return command.ToString();
-    }
-
-    private static string ReadMsiValue(uint database, string query) {
-        uint view = 0, record = 0;
-        try {
-            if (MsiDatabaseOpenView(database, query, out view) != 0 || MsiViewExecute(view, 0) != 0 || MsiViewFetch(view, out record) != 0) return null;
+            if (MsiDatabaseOpenView(db, "SELECT `Value` FROM `Property` WHERE `Property` = '" + name + "'", out view) != 0 || MsiViewExecute(view, 0) != 0 || MsiViewFetch(view, out record) != 0) throw new InvalidOperationException("Installer identity is incomplete.");
             var value = new StringBuilder(256); uint length = (uint)value.Capacity;
-            return MsiRecordGetString(record, 1, value, ref length) == 0 ? value.ToString() : null;
-        } finally { if (record != 0) MsiCloseHandle(record); if (view != 0) MsiCloseHandle(view); }
+            if (MsiRecordGetString(record, 1, value, ref length) != 0) throw new InvalidOperationException("Cannot read installer identity.");
+            return value.ToString();
+        } finally { if (record != 0) MsiCloseHandle(record); if (view != 0) MsiCloseHandle(view); MsiCloseHandle(db); }
     }
-
-    private static bool TryFindInstalledFolder(string msi, out string folder) {
-        folder = null; uint database;
-        if (MsiOpenDatabase(msi, IntPtr.Zero, out database) != 0) return false;
-        string upgradeCode, component;
-        try {
-            upgradeCode = ReadMsiValue(database, "SELECT `Value` FROM `Property` WHERE `Property` = 'UpgradeCode'");
-            component = ReadMsiValue(database, "SELECT `ComponentId` FROM `Component` WHERE `Component` = 'ManagedServiceHost'");
-        } finally { MsiCloseHandle(database); }
-        if (String.IsNullOrEmpty(upgradeCode) || String.IsNullOrEmpty(component)) return false;
-        var installed = new List<string>();
-        for (uint i = 0; ; i++) {
-            var product = new StringBuilder(40); uint result = MsiEnumRelatedProducts(upgradeCode, 0, i, product);
-            if (result == 259) break; // ERROR_NO_MORE_ITEMS
-            if (result != 0) return false;
-            if (MsiQueryProductState(product.ToString()) == 5) installed.Add(product.ToString());
+    private static void AddRepairAlias(string msi) {
+        string product = Property(msi, "ProductCode");
+        if (MsiQueryProductState(product) != 5) return;
+        var value = new StringBuilder(512); uint length = (uint)value.Capacity;
+        if (MsiGetProductInfo(product, "PackageName", value, ref length) != 0) return;
+        string name = value.ToString();
+        if (String.IsNullOrWhiteSpace(name) || name.Length > 240 || name != Path.GetFileName(name) ||
+            !String.Equals(Path.GetExtension(name), ".msi", StringComparison.OrdinalIgnoreCase) || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return;
+        string alias = Path.Combine(Path.GetDirectoryName(msi), name);
+        if (String.Equals(alias, msi, StringComparison.OrdinalIgnoreCase)) return;
+        if (File.Exists(alias)) throw new InvalidOperationException("The installer repair source names conflict.");
+        if (!CreateHardLink(alias, msi, IntPtr.Zero)) File.Copy(msi, alias, false);
+    }
+    private static int RunInstall(string msi, string[] args, bool machine) {
+        var command = new StringBuilder("/i ").Append(Quote(msi)).Append(" /norestart ARPSYSTEMCOMPONENT=1");
+        if (!machine) command.Append(" RAGENT_INPLACE_UPDATE=1");
+        if (MsiQueryProductState(Property(msi, "ProductCode")) == 5) command.Append(" REINSTALL=ALL REINSTALLMODE=vomus");
+        if (machine) command.Append(" /passive ").Append(Quote("RAGENT_OWNER_SID=" + ownerSid));
+        else foreach (string arg in args) {
+            // The embedded UI supports basic UI; /passive must not wait for
+            // a button during the automatic update flow.
+            if (arg.Equals("/passive", StringComparison.OrdinalIgnoreCase) || arg.Equals("/qb", StringComparison.OrdinalIgnoreCase)) command.Append(" /qn");
+            else if (arg.Equals("/norestart", StringComparison.OrdinalIgnoreCase) || arg.Equals("/quiet", StringComparison.OrdinalIgnoreCase) || arg.Equals("/q", StringComparison.OrdinalIgnoreCase) || arg.Equals("/qn", StringComparison.OrdinalIgnoreCase) || arg.StartsWith("DESKTOPINSTALLDIR=", StringComparison.OrdinalIgnoreCase)) command.Append(' ').Append(Quote(arg));
         }
-        if (installed.Count != 1) return false;
-        var service = new StringBuilder(32768); uint length = (uint)service.Capacity;
-        if (MsiGetComponentPath(installed[0], component, service, ref length) != 3) return false; // INSTALLSTATE_LOCAL
-        string servicePath = service.ToString();
-        if (!Path.IsPathRooted(servicePath) || !String.Equals(Path.GetFileName(servicePath), "Ragent.ServiceHost.exe", StringComparison.OrdinalIgnoreCase)) return false;
-        folder = Path.GetDirectoryName(servicePath);
-        return !String.IsNullOrEmpty(folder);
+        return Run(command.ToString(), machine);
     }
-
-    // Windows command line escaping for CommandLineToArgvW / MSI arguments.
+    private static int RemoveRelated(string msi, bool machine) {
+        var products = new List<string>(); string upgrade = Property(msi, "UpgradeCode");
+        for (uint i = 0; ; i++) { var product = new StringBuilder(40); uint result = MsiEnumRelatedProducts(upgrade, 0, i, product); if (result == 259) break; if (result != 0) throw new InvalidOperationException("Cannot enumerate installed products."); if (MsiQueryProductState(product.ToString()) == 5) products.Add(product.ToString()); }
+        int resultCode = 0;
+        foreach (string product in products) { int result = Run("/x " + product + " /passive /norestart", machine); if (!Succeeded(result) && result != 1605) return result; if (result == 3010) resultCode = result; }
+        return resultCode;
+    }
+    private static int Run(string command, bool elevated) {
+        var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "msiexec.exe"), command);
+        start.UseShellExecute = elevated; if (elevated) start.Verb = "runas";
+        try { using (Process process = Process.Start(start)) { if (process == null) throw new InvalidOperationException("Windows Installer could not start."); process.WaitForExit(); return process.ExitCode; } }
+        catch (System.ComponentModel.Win32Exception error) { if (error.NativeErrorCode == 1223) return 1602; throw; }
+    }
+    private static void RegisterSetup(string machine, string desktop) {
+        string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RagentSetup");
+        string source = Assembly.GetExecutingAssembly().Location, dest = Path.Combine(directory, "RagentSetup.exe");
+        if (Directory.Exists(directory) && (File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidOperationException("The setup maintenance directory is a link.");
+        if (File.Exists(dest) && !String.Equals(source, dest, StringComparison.OrdinalIgnoreCase)) {
+            string registered = null;
+            using (RegistryKey existing = Registry.CurrentUser.OpenSubKey(UninstallKey)) if (existing != null) registered = existing.GetValue("SetupPath") as string;
+            if (!String.Equals(registered, dest, StringComparison.OrdinalIgnoreCase) || (File.GetAttributes(dest) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("The setup maintenance file already belongs to another application.");
+        }
+        Directory.CreateDirectory(directory);
+        if (!String.Equals(source, dest, StringComparison.OrdinalIgnoreCase)) File.Copy(source, dest, true);
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKey)) {
+            key.SetValue("CandidateMachineProductCode", Property(machine, "ProductCode")); key.SetValue("CandidateMachineProductVersion", Property(machine, "ProductVersion"));
+            key.SetValue("CandidateDesktopProductCode", Property(desktop, "ProductCode")); key.SetValue("CandidateDesktopProductVersion", Property(desktop, "ProductVersion"));
+            key.SetValue("DesktopProductCode", Property(desktop, "ProductCode")); key.SetValue("DesktopProductVersion", Property(desktop, "ProductVersion"));
+            key.SetValue("DisplayName", "Ragent"); key.SetValue("Publisher", "Ragent"); key.SetValue("DisplayIcon", dest);
+            key.SetValue("SystemComponent", 0, RegistryValueKind.DWord);
+            key.SetValue("SetupPath", dest);
+            key.SetValue("UninstallString", Quote(dest) + " /uninstall"); key.SetValue("ModifyPath", Quote(dest)); key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
+        }
+    }
+    private static void SetStatus(string status, int result) {
+        using (RegistryKey key = Registry.CurrentUser.CreateSubKey(UninstallKey)) {
+            key.SetValue("SetupStatus", status); key.SetValue("SetupResult", result, RegistryValueKind.DWord);
+        }
+    }
     private static string Quote(string value) {
-        // msiexec parses switches itself and does not accept quoted switches.
-        if (value.Length > 0 && value.IndexOfAny(new char[] { ' ', '\t', '\n', '\v', '"' }) < 0) return value;
-        StringBuilder text = new StringBuilder("\"");
-        int slashes = 0;
-        foreach (char c in value) {
-            if (c == '\\') { slashes++; continue; }
-            if (c == '"') { text.Append('\\', slashes * 2 + 1).Append('"'); slashes = 0; continue; }
-            text.Append('\\', slashes).Append(c);
-            slashes = 0;
-        }
-        text.Append('\\', slashes * 2).Append('"');
-        return text.ToString();
+        if (value.Length > 0 && value.IndexOfAny(new char[] {' ', '\t', '\n', '\v', '"'}) < 0) return value;
+        var text = new StringBuilder("\""); int slashes = 0;
+        foreach (char c in value) { if (c == '\\') { slashes++; continue; } if (c == '"') { text.Append('\\', slashes * 2 + 1).Append('"'); slashes = 0; continue; } text.Append('\\', slashes).Append(c); slashes = 0; }
+        return text.Append('\\', slashes * 2).Append('"').ToString();
     }
 }

@@ -43,7 +43,6 @@ jobs:
           $source = $env:GITHUB_WORKSPACE
           $out = Join-Path $env:RUNNER_TEMP 'ragent-release'
           New-Item -ItemType Directory -Force $out | Out-Null
-          $msi = Join-Path $out 'Ragent-inner.msi'
           # The internal MSI version must advance for every replacement package.
           $releaseVersion = $env:RELEASE_VERSION
           if ($releaseVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') { throw 'Invalid public release version' }
@@ -55,13 +54,9 @@ jobs:
           $latestMsiVersion = [version]$versionMatch.Groups[1].Value
           $msiVersion = $env:MSI_PRODUCT_VERSION
           if ($msiVersion -notmatch '^\d+\.\d+\.\d+$' -or [version]$msiVersion -le $latestMsiVersion) { throw 'MSI product version must exceed the version recorded in the latest release notes' }
-          & "$source\packaging\windows\build-msi.ps1" -SourceRoot $source -OutputPath $msi -Version "$releaseVersion.0" -MsiProductVersion $msiVersion
-          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $msi)) { throw 'MSI build failed' }
-          $brand = Join-Path $env:TEMP ('brand-' + [guid]::NewGuid().ToString('N'))
-          & "$source\packaging\windows\generate-brand-assets.ps1" -SourceRoot $source -OutputDirectory $brand
           $exeName = "Ragent-$releaseVersion-windows-x64-setup.exe"
           $exe = Join-Path $out $exeName
-          & "$source\packaging\windows\build-setup-exe.ps1" -MsiPath $msi -IconPath (Join-Path $brand 'ragent.ico') -OutputPath $exe
+          & "$source\packaging\windows\build-windows-setup.ps1" -SourceRoot $source -OutputPath $exe -Version "$releaseVersion.0" -MsiProductVersion $msiVersion
           if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { throw 'EXE build failed' }
           $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           [IO.File]::WriteAllText((Join-Path $out 'SHA256SUMS.txt'), "$hash  $exeName`n", [Text.Encoding]::ASCII)

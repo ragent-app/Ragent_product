@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { chromium } from '@playwright/test';
 
 const root = new URL('../', import.meta.url);
-const [managerScript, managerStyles, baseStyles, sidebarStyles, responsiveStyles, template, router, electronMain, preload, waitPage, installer, build, acceptance] = await Promise.all([
+const [managerScript, managerStyles, baseStyles, sidebarStyles, responsiveStyles, template, router, electronMain, preload, waitPage, installer, build, desktopBuild, acceptance] = await Promise.all([
   readFile(new URL('static/chat/desktop-manager.js', root), 'utf8'),
   readFile(new URL('static/chat/desktop-manager.css', root), 'utf8'),
   readFile(new URL('static/chat/chat-base.css', root), 'utf8'),
@@ -15,8 +15,9 @@ const [managerScript, managerStyles, baseStyles, sidebarStyles, responsiveStyles
   readFile(new URL('desktop/main.cjs', root), 'utf8'),
   readFile(new URL('desktop/preload.cjs', root), 'utf8'),
   readFile(new URL('desktop/wait.html', root), 'utf8'),
-  readFile(new URL('packaging/windows/Ragent.wxs', root), 'utf8'),
+  readFile(new URL('packaging/windows/Ragent.Desktop.wxs', root), 'utf8'),
   readFile(new URL('packaging/windows/build-msi.ps1', root), 'utf8'),
+  readFile(new URL('packaging/windows/build-desktop-msi.ps1', root), 'utf8'),
   readFile(new URL('tests/windows-desktop-manager-acceptance.ps1', root), 'utf8'),
 ]);
 
@@ -47,15 +48,13 @@ assert.doesNotMatch(electronMain, /shell\.openExternal\(\s*(?:url|targetUrl)\s*\
 assert.match(preload, /writeText: \(value\) => ipcRenderer\.invoke\("desktop:write-text", value\)/);
 assert.doesNotMatch(preload, /exec|spawn|readFile|writeFile/);
 assert.match(preload, /onExternalOpenFailed/);
-assert.match(installer, /WixUnelevatedShellExec/);
-assert.match(installer, /CloseApplication Id="CloseRagentManager" Target="Ragent\.exe" CloseMessage="yes" PromptToContinue="yes"/);
+assert.match(installer, /Scope="perUser"/);
 assert.match(installer, /EmbeddedUI Id="RagentMsiEmbeddedUI"/);
 assert.match(installer, /Property Id="ARPPRODUCTICON" Value="RagentIcon"/);
-assert.match(installer, /Property Id="RAGENT_LAUNCH"/);
-assert.match(installer, /Target="\[INSTALLFOLDER\]payload\\Desktop\\Ragent\.exe"/);
-assert.match(installer, /RagentStartMenuShortcut/);
+assert.match(installer, /Target="\[DESKTOPINSTALLDIR\]Ragent\.exe"/);
+assert.match(installer, /DesktopStartMenuShortcut/);
 assert.match(build, /generate-brand-assets\.ps1/);
-assert.match(build, /stage-windows\.mjs/);
+assert.match(desktopBuild, /DesktopPayloadRoot/);
 assert.match(build, /'\*\.d\.ts'/, 'staged runtime omits TypeScript-only declaration files to preserve the MSI size budget');
 assert.match(build, /node_modules\\npm\\bin\\npm-cli\.js/);
 assert.match(build, /node_modules\\corepack\\dist\\corepack\.js/);

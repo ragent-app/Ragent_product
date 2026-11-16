@@ -4,9 +4,10 @@
   <Package Name="Ragent Managed Owner Preparation" Manufacturer="Ragent" Version="$(var.MsiProductVersion)" UpgradeCode="42CB1771-FF93-48F7-85A1-3148A8D5EF09" Scope="perMachine">
     <MajorUpgrade DowngradeErrorMessage="A newer preparation candidate is installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
     <Property Id="RAGENT_OWNER_SID" Secure="yes" />
     <Binary Id="ManagedOwnerMsiBridge" SourceFile="!(bindpath.ManagedBridge)\Ragent.ManagedOwnerMsiBridge.exe" />
-    <CustomAction Id="ManagedFreshGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="fresh &quot;[RAGENT_OWNER_SID]&quot; &quot;[INSTALLFOLDER].&quot;" Return="check" />
+    <CustomAction Id="ManagedFreshGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="fresh &quot;[RAGENT_OWNER_SID]&quot; &quot;[RagentMachineRoot].&quot;" Return="check" />
     <CustomAction Id="ManagedRemoveGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove-admission" Return="check" />
     <CustomAction Id="ManagedMaintenanceRefused" Error="This preparation candidate supports fresh installation and removal of disabled prepared services only." />
     <CustomAction Id="ManagedPrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prepare &quot;[RAGENT_OWNER_SID]&quot;" Execute="deferred" Impersonate="no" Return="check" />
@@ -24,8 +25,8 @@
     </Feature>
   </Package>
   <Fragment>
-    <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="INSTALLFOLDER" Name="Ragent" /></StandardDirectory>
-    <Component Id="ManagedServiceHost" Directory="INSTALLFOLDER" Guid="*">
+    <StandardDirectory Id="ProgramFiles64Folder"><Directory Id="RagentMachineRoot" Name="Ragent" /></StandardDirectory>
+    <Component Id="ManagedServiceHost" Directory="RagentMachineRoot" Guid="*">
       <File Id="ManagedHost" Source="!(bindpath.ServiceHost)\Ragent.ServiceHost.exe" KeyPath="yes" />
       <ServiceInstall Id="ManagedControl" Name="Ragent-ControlPlane" DisplayName="Ragent Control Plane" Type="ownProcess" Start="disabled" Account="NT SERVICE\Ragent-ControlPlane" ErrorControl="normal" Arguments="--role control --config-dir &quot;[CommonAppDataFolder]Ragent\instances\owner\config&quot; --instance-root &quot;[CommonAppDataFolder]Ragent\instances\owner&quot;">
         <ServiceDependency Id="Ragent-RunnerSupervisor" />

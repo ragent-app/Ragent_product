@@ -43,7 +43,7 @@ try {
  $report.bridge=@{sha256=(Get-FileHash -LiteralPath (Join-Path $work 'Ragent.ManagedOwnerMsiBridge.exe') -Algorithm SHA256).Hash.ToLowerInvariant();bytes=(Get-Item -LiteralPath (Join-Path $work 'Ragent.ManagedOwnerMsiBridge.exe')).Length}
  $null=New-Item -ItemType Directory -Path (Join-Path $work 'payload\chat') -Force
  foreach($path in @('node.exe','chat-server.mjs','chat\runner-supervisor-daemon.mjs')){[IO.File]::WriteAllText((Join-Path $work ('payload\'+$path)),'SYNTHETIC-NONEXECUTABLE-MSI-PREPARATION')}
- $payload=Join-Path $work 'payload.wxs';[IO.File]::WriteAllText($payload,'<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Fragment><ComponentGroup Id="PayloadGroup" Directory="INSTALLFOLDER" Subdirectory="payload"><Files Include="$(var.SourceDir)\**" /></ComponentGroup></Fragment></Wix>',[Text.UTF8Encoding]::new($false))
+ $payload=Join-Path $work 'payload.wxs';[IO.File]::WriteAllText($payload,'<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Fragment><ComponentGroup Id="PayloadGroup" Directory="RagentMachineRoot" Subdirectory="payload"><Files Include="$(var.SourceDir)\**" /></ComponentGroup></Fragment></Wix>',[Text.UTF8Encoding]::new($false))
  & wix.exe --acceptEula wix7 build -arch x64 (Join-Path $pack 'Ragent.ManagedOwner.wxs') $payload -d ProductVersion=0.0.0.1 -d ('SourceDir='+(Join-Path $work 'payload')) -bindpath ('ServiceHost='+$work) -bindpath ('ManagedBridge='+$work) -o $msi > (Join-Path $evidence 'build.log')
  if($LASTEXITCODE -ne 0){throw 'MMQ_MSI_COMPILE_FAILED'}
  $report.msi=@{sha256=(Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash.ToLowerInvariant();bytes=(Get-Item -LiteralPath $msi).Length}

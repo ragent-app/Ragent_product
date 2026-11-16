@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <!--
     Full fresh-install lane. Owner identity and protected data are prepared,
@@ -24,17 +23,12 @@
       <Property Id="RAGENT_MAJOR_UPDATE_UI" Value="1" />
     <?endif?>
     <MediaTemplate EmbedCab="yes" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
     <Icon Id="RagentIcon" SourceFile="!(bindpath.BrandAsset)\ragent.ico" />
     <Property Id="ARPPRODUCTICON" Value="RagentIcon" />
-    <Property Id="RAGENT_INSTALLFOLDER" Secure="yes" />
+    <!-- The outer setup supplies the intended Owner; elevation authorizes that target. -->
+    <Property Id="RAGENT_OWNER_SID" Secure="yes" />
     <Property Id="RAGENT_RECOVERY_SOURCE" Secure="yes" />
-    <Property Id="RAGENT_LAUNCH" Secure="yes" />
-    <CustomAction Id="SetSelectedInstallFolder" Directory="INSTALLFOLDER" Value="[RAGENT_INSTALLFOLDER]" />
-    <CustomAction Id="SetRagentLaunchTarget" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" />
-    <WixVariable Id="WixUIBannerBmp" Value="!(bindpath.BrandAsset)\wix-banner.bmp" />
-    <WixVariable Id="WixUIDialogBmp" Value="!(bindpath.BrandAsset)\wix-dialog.bmp" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
-    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open Ragent" />
     <Property Id="MSIUNINSTALLSUPERSEDEDCOMPONENTS" Value="1" />
     <!-- Use Restart Manager for accurate, fast file-in-use detection while
          disabling its automatic restart mitigation in the ordinary UI. -->
@@ -57,94 +51,74 @@
            Fresh installs must lay down this package's own immutable payload. -->
       <SetProperty Id="REINSTALLMODE" Value="amus" Before="CostInitialize" Sequence="execute" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT (REMOVE = &quot;ALL&quot;)" />
     <?endif?>
-    <CustomAction Id="LaunchRagent" BinaryRef="Wix4UtilCA_X64" DllEntry="WixUnelevatedShellExec" Execute="immediate" Return="check" />
-    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-    <UI>
-      <EmbeddedUI Id="RagentMsiEmbeddedUI" SourceFile="!(bindpath.InstallUi)\Ragent.MsiEmbeddedUI.dll" SupportBasicUI="yes">
-        <EmbeddedUIResource Id="RagentEmbeddedLogo" Name="ragent-android-logo.png" SourceFile="!(bindpath.InstallUi)\ragent-android-logo.png" />
-        <EmbeddedUIResource Id="RagentEmbeddedIcon" Name="ragent.ico" SourceFile="!(bindpath.InstallUi)\ragent.ico" />
-        <?if $(var.IncludeMingwUiRuntime) = 1 ?>
-          <EmbeddedUIResource Id="RagentMingwThreadRuntime" Name="libwinpthread-1.dll" SourceFile="!(bindpath.InstallUi)\libwinpthread-1.dll" />
-        <?endif ?>
-      </EmbeddedUI>
-      <Publish Dialog="ExitDialog" Control="Finish" Property="WixUnelevatedShellExecTarget" Value="[INSTALLFOLDER]payload\Desktop\Ragent.exe" Order="1" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchRagent" Order="2" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
-    </UI>
 
     <Binary Id="ManagedOwnerMsiBridge" SourceFile="!(bindpath.ManagedBridge)\Ragent.ManagedOwnerMsiBridge.exe" />
-    <CustomAction Id="ManagedFreshGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="fresh &quot;[UserSID]&quot; &quot;[INSTALLFOLDER].&quot; &quot;[RAGENT_RECOVERY_SOURCE].&quot;" Execute="immediate" Return="check" />
-    <CustomAction Id="ManagedRelocationRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedRelocationPrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-prepare &quot;[UserSID]&quot; &quot;[RAGENT_RECOVERY_SOURCE].&quot; &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedRelocationCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedRemoveGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove-admission &quot;[INSTALLFOLDER].&quot;" Execute="immediate" Return="check" />
-    <CustomAction Id="ManagedCloseDesktopBeforeValidation" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="close-desktop-current-user &quot;[INSTALLFOLDER].&quot;" Execute="immediate" Return="check" />
-    <CustomAction Id="ManagedCloseDesktop" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="close-desktop &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedCloseDesktopForMajorUpdate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="close-desktop &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedCloseDesktopForUpdate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="close-desktop &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedFreshGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="fresh &quot;[RAGENT_OWNER_SID]&quot; &quot;[RagentMachineRoot].&quot; &quot;[RAGENT_RECOVERY_SOURCE].&quot;" Execute="immediate" Return="check" />
+    <CustomAction Id="ManagedRelocationRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedRelocationPrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-prepare &quot;[RAGENT_OWNER_SID]&quot; &quot;[RAGENT_RECOVERY_SOURCE].&quot; &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedRelocationCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="relocation-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedRemoveGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove-admission &quot;[RagentMachineRoot].&quot;" Execute="immediate" Return="check" />
     <?if $(var.EarlyServiceQuiescence) = "1" ?>
-    <CustomAction Id="ManagedPreValidationRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-rollback $(var.ProductVersion) $(var.BrokerSha256) &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedPreValidationStop" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-stop $(var.ProductVersion) $(var.BrokerSha256) &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedPreValidationCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedPreValidationRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-rollback $(var.ProductVersion) $(var.BrokerSha256) &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedPreValidationStop" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-stop $(var.ProductVersion) $(var.BrokerSha256) &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedPreValidationCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prevalidate-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="check" />
     <?endif?>
-    <CustomAction Id="ManagedConfigureBrokerServiceTrust" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="configure-broker-service $(var.ProductVersion) $(var.BrokerSha256) &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedConfigureBrokerServiceTrustUpgrade" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="configure-broker-service $(var.ProductVersion) $(var.BrokerSha256) &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedConfigureBrokerServiceTrust" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="configure-broker-service $(var.ProductVersion) $(var.BrokerSha256) &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedConfigureBrokerServiceTrustUpgrade" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="configure-broker-service $(var.ProductVersion) $(var.BrokerSha256) &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedBrokerOwnerReset" FileRef="PrivilegedBrokerBinary" ExeCommand="admin owner-reset" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedBrokerAutoSigner" FileRef="PrivilegedBrokerBinary" ExeCommand="admin auto-signer-from-instance" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedRemoveRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove-rollback $(var.ProductVersion) $(var.BrokerSha256) &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedRemoveRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove-rollback $(var.ProductVersion) $(var.BrokerSha256) &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
     <!-- Admission needs an administrator token to inspect the protected owner
          state. Run it in the elevated transaction before any mutation. -->
     <?if $(var.MsiUpgradeLane) = "major" ?>
-    <CustomAction Id="ManagedUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;[WIX_UPGRADE_DETECTED]&quot; &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedSameUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;[ProductCode]&quot; &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedSameUpgradeRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedSameUpgradeBegin" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-begin &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;[WIX_UPGRADE_DETECTED]&quot; &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedSameUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;[ProductCode]&quot; &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedSameUpgradeRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedSameUpgradeBegin" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-begin &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <?else?>
-    <CustomAction Id="ManagedUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;$(var.ProductCode)&quot; &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeGuard" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-admission $(var.MsiProductVersion) &quot;$(var.ProductCode)&quot; &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <?endif?>
-    <CustomAction Id="ManagedUpgradeBegin" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-begin &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedUpgradeRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedMajorBrokerRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="restore-broker-after-major-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedPrepareExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-prepare &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedPreparePolicyExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-policy &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedUpgradeActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activation-check &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedUpgradeActivate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activate &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedUpgradeCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedVoiceRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedVoicePrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-prepare &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedVoiceCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedUpgradeBegin" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-begin &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedMajorBrokerRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="restore-broker-after-major-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedPrepareExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-prepare &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedPreparePolicyExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-policy &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activation-check &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeActivate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activate &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedUpgradeCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedVoiceRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedVoicePrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-prepare &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedVoiceCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="voice-retire-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="ignore" />
     <CustomAction Id="ManagedMaintenanceRefused" Error="Ragent maintenance is unavailable in this installer; use a Ragent update package." />
     <CustomAction Id="ManagedMajorUpgradeRefused" Error="This MSI major upgrade is disabled until its rollback path is validated." />
 
     <!-- One rollback action covers the complete ordered fresh-install
          transaction. It is embedded in the MSI and runs before MSI reverses
          service/file installation. The bridge keeps failures quarantined. -->
-    <CustomAction Id="ManagedInstallRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="install-rollback &quot;[INSTALLFOLDER].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="ManagedInstallCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="install-commit &quot;[INSTALLFOLDER].&quot;" Execute="commit" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedPrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prepare &quot;[UserSID]&quot; &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedInitializeIdentity" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="initialize &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedPreparePolicy" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="policy &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="activation-check &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedActivate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="activate &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="ManagedRemove" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedInstallRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="install-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedInstallCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="install-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedPrepare" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="prepare &quot;[RAGENT_OWNER_SID]&quot; &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedInitializeIdentity" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="initialize &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedPreparePolicy" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="policy &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="activation-check &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedActivate" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="activate &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedRemove" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="remove &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
 
     <?if $(var.TestPostActivationRollback) = 1 ?>
       <!-- A deferred failure executes inside InstallFinalize after the deferred
            ManagedActivate action has actually completed. An immediate Error
            action here would only fail while MSI was still scheduling actions. -->
-      <CustomAction Id="ManagedInjectedPostActivationFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
-      <CustomAction Id="ManagedInjectedPostUpgradeFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="ManagedInjectedPostActivationFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="ManagedInjectedPostUpgradeFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <?endif ?>
     <?if $(var.TestPostRemovalRollback) = 1 ?>
-      <CustomAction Id="ManagedInjectedPostRemovalFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-remove-failure &quot;[INSTALLFOLDER].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+      <CustomAction Id="ManagedInjectedPostRemovalFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-remove-failure &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <?endif?>
 
     <InstallExecuteSequence>
       <!-- PublishProduct writes its internal MSI version to ARP. Apply the
            public package version afterwards as a rollback-aware registry component. -->
       <WriteRegistryValues Sequence="6450" />
-      <Custom Action="SetSelectedInstallFolder" After="CostFinalize" Condition="RAGENT_INSTALLFOLDER AND NOT Installed AND NOT (REMOVE = &quot;ALL&quot;)" />
-      <Custom Action="SetRagentLaunchTarget" After="InstallFinalize" Condition="RAGENT_LAUNCH = &quot;1&quot; AND NOT Installed" />
-      <Custom Action="LaunchRagent" After="SetRagentLaunchTarget" Condition="RAGENT_LAUNCH = &quot;1&quot; AND NOT Installed" />
       <!-- Refuse both the old SYSTEM install and prepared/active state before
            RemoveExistingProducts can make any change to an existing install. -->
       <?if $(var.MsiUpgradeLane) = "major" ?>
@@ -152,10 +126,9 @@
       <!-- Flush only the read-only elevated guard before MSI removes the old
            product; receipts must remain intact for the old uninstall guard. -->
       <Custom Action="ManagedUpgradeGuard" After="InstallInitialize" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
-      <Custom Action="ManagedCloseDesktopForMajorUpdate" After="ManagedUpgradeGuard" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <!-- Rollback is registered before old-product removal, so it runs after
            the predecessor MSI has recreated its Broker service. -->
-      <Custom Action="ManagedMajorBrokerRollback" After="ManagedCloseDesktopForMajorUpdate" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+      <Custom Action="ManagedMajorBrokerRollback" After="ManagedUpgradeGuard" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <?if $(var.EarlyServiceQuiescence) = "1" ?>
       <InstallExecuteAgain After="ManagedMajorBrokerRollback" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <?else?>
@@ -169,14 +142,12 @@
       <?endif?>
       <Custom Action="ManagedFreshGuard" Before="InstallValidate" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND NOT (REMOVE = &quot;ALL&quot;)" />
       <Custom Action="ManagedRemoveGuard" Before="InstallValidate" Condition="Installed AND REMOVE = &quot;ALL&quot;" />
-      <Custom Action="ManagedCloseDesktopBeforeValidation" After="ManagedRemoveGuard" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <?if $(var.EarlyServiceQuiescence) = "1" ?>
       <Custom Action="ManagedPreValidationRollback" Before="ManagedPreValidationStop" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ManagedPreValidationStop" Before="InstallExecute" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <InstallExecute Before="InstallValidate" Condition="(Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE) OR (WIX_UPGRADE_DETECTED AND NOT Installed)" />
       <Custom Action="ManagedPreValidationCommit" Before="InstallFinalize" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <?endif?>
-      <Custom Action="ManagedCloseDesktop" Before="ManagedRemoveRollback" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ManagedRemoveRollback" Before="ManagedBrokerOwnerReset" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
       <Custom Action="ManagedVoiceRollback" After="StopServices" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
       <Custom Action="ManagedVoicePrepare" After="ManagedVoiceRollback" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
@@ -185,16 +156,14 @@
 
       <?if $(var.MsiUpgradeLane) = "minor" ?>
         <Custom Action="ManagedMaintenanceRefused" Before="InstallValidate" Condition="Installed AND NOT (REMOVE = &quot;ALL&quot;) AND NOT REINSTALL" />
-        <Custom Action="ManagedUpgradeGuard" Before="ManagedCloseDesktopForUpdate" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
-        <Custom Action="ManagedCloseDesktopForUpdate" Before="ManagedUpgradeRollback" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
+        <Custom Action="ManagedUpgradeGuard" Before="ManagedUpgradeRollback" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <Custom Action="ManagedUpgradeRollback" Before="ManagedUpgradeBegin" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <Custom Action="ManagedUpgradeBegin" Before="StopServices" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
       <?else?>
         <?if $(var.ExperimentalMajorUpgrade) = "1" ?>
         <Custom Action="SetRepairReinstallMode" Before="CostInitialize" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <Custom Action="ManagedMaintenanceRefused" Before="InstallValidate" Condition="Installed AND NOT (REMOVE = &quot;ALL&quot;) AND NOT REINSTALL" />
-        <Custom Action="ManagedSameUpgradeGuard" Before="ManagedCloseDesktopForUpdate" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
-        <Custom Action="ManagedCloseDesktopForUpdate" Before="ManagedSameUpgradeRollback" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
+        <Custom Action="ManagedSameUpgradeGuard" Before="ManagedSameUpgradeRollback" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <Custom Action="ManagedSameUpgradeRollback" Before="ManagedSameUpgradeBegin" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <Custom Action="ManagedSameUpgradeBegin" Before="StopServices" Condition="Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;)" />
         <?else?>
@@ -254,7 +223,6 @@
 
     <Feature Id="Main" Title="Ragent" Level="1">
       <ComponentRef Id="ManagedServiceHost" />
-      <ComponentRef Id="ManagedStartMenuShortcut" />
       <ComponentRef Id="ManagedEventSource" />
       <ComponentRef Id="ManagedPublicDisplayVersion" />
       <ComponentRef Id="PrivilegedBrokerService" />
@@ -264,30 +232,22 @@
 
   <Fragment>
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Ragent">
-        <Directory Id="BROKERINSTALLFOLDER" Name="Broker" />
+      <Directory Id="RagentMachineRoot" Name="Ragent">
+        <Directory Id="RagentBrokerRoot" Name="Broker" />
       </Directory>
     </StandardDirectory>
-    <StandardDirectory Id="ProgramMenuFolder"><Directory Id="ApplicationProgramsFolder" Name="Ragent" /></StandardDirectory>
-
-    <Component Id="ManagedStartMenuShortcut" Directory="ApplicationProgramsFolder" Guid="*">
-      <Shortcut Id="RagentStartMenuShortcut" Name="Ragent" Target="[INSTALLFOLDER]payload\Desktop\Ragent.exe" WorkingDirectory="INSTALLFOLDER" Icon="RagentIcon" IconIndex="0" Advertise="no" />
-      <RemoveFolder Id="RemoveRagentProgramMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKCU" Key="Software\Ragent\DesktopManager" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
-    </Component>
-
-    <Component Id="ManagedPublicDisplayVersion" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="ManagedPublicDisplayVersion" Directory="RagentMachineRoot" Guid="*">
       <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\[ProductCode]" Name="DisplayVersion" Type="string" Value="$(var.DisplayVersion)" KeyPath="yes" />
     </Component>
 
-    <Component Id="ManagedEventSource" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="ManagedEventSource" Directory="RagentMachineRoot" Guid="*">
       <RegistryKey Root="HKLM" Key="SYSTEM\CurrentControlSet\Services\EventLog\Application\Ragent">
         <RegistryValue Name="EventMessageFile" Type="string" Value="[System64Folder]EventCreate.exe" />
         <RegistryValue Name="TypesSupported" Type="integer" Value="7" />
       </RegistryKey>
     </Component>
 
-    <Component Id="ManagedServiceHost" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="ManagedServiceHost" Directory="RagentMachineRoot" Guid="*">
       <File Id="ManagedHost" Source="!(bindpath.ServiceHost)\Ragent.ServiceHost.exe" KeyPath="yes" />
       <ServiceInstall Id="ManagedControl" Name="Ragent-ControlPlane" DisplayName="Ragent Control Plane" Type="ownProcess" Start="disabled" Account="NT SERVICE\Ragent-ControlPlane" ErrorControl="normal" Arguments="--role control --config-dir &quot;[CommonAppDataFolder]Ragent\instances\owner\config&quot; --instance-root &quot;[CommonAppDataFolder]Ragent\instances\owner&quot;">
         <ServiceDependency Id="Ragent-RunnerSupervisor" />
@@ -302,7 +262,7 @@
            the only code that starts them after all trust gates pass. -->
     </Component>
 
-    <Component Id="PrivilegedBrokerService" Directory="BROKERINSTALLFOLDER" Guid="{6EE17079-43E5-4B73-80CA-9E5B946E8B21}">
+    <Component Id="PrivilegedBrokerService" Directory="RagentBrokerRoot" Guid="{6EE17079-43E5-4B73-80CA-9E5B946E8B21}">
       <File Id="PrivilegedBrokerBinary" Source="!(bindpath.PrivilegedBroker)\Ragent.PrivilegedBroker.exe" KeyPath="yes" />
       <File Id="PrivilegedBrokerManifest" Source="!(bindpath.PrivilegedBroker)\Ragent.PrivilegedBroker.manifest.json" />
       <ServiceInstall Id="PrivilegedBrokerInstall" Name="Ragent-PrivilegedBroker" DisplayName="Ragent Privileged Broker" Type="ownProcess" Start="auto" Account="LocalSystem" ErrorControl="normal">

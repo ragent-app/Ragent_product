@@ -98,7 +98,7 @@ try {
   assert.equal(await page.locator('#desktopManagerNav [data-desktop-manager-tab]').count(), 5);
   await page.locator('[data-desktop-manager-tab="about"]').click();
   await page.waitForFunction(() => document.querySelector('#desktopManagerCurrentVersion')?.textContent.trim() !== '—', null, { timeout: 30000 });
-  assert.equal((await page.locator('#desktopManagerCurrentVersion').innerText()).trim(), (await readFile(resolve(dirname(executable), '..', '.ragent-package-version'), 'utf8')).trim());
+  assert.equal((await page.locator('#desktopManagerCurrentVersion').innerText()).trim(), (await readFile(resolve(dirname(executable), '.ragent-package-version'), 'utf8')).trim());
   assert.equal(await page.locator('#desktopManagerAboutPanel').isVisible(), true);
   record('public version and About page');
   const healthz = await fetch('http://127.0.0.1:7690/healthz');

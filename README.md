@@ -112,6 +112,23 @@ passed on Windows with `go test ./...` from that directory. Prebuilt host
 executables are excluded from the source repository; packaging scripts build
 them for their target platforms.
 
+## Windows setup build
+
+From a clean committed source tree on Windows, with Node.js, npm, Go, WiX 7 and
+the required Windows build tools installed, build the combined installer with:
+
+```powershell
+./packaging/windows/build-windows-setup.ps1 -SourceRoot (Get-Location).Path `
+  -OutputPath G:/AgentoC/Ragent-setup.exe -Version 0.0.1.0 -MsiProductVersion '<next-internal-version>'
+```
+
+Use a new MSI product version for each release. The build stages the desktop
+and service separately and embeds both in one setup executable. Set `TEMP` and
+`TMP` to a location with sufficient free space before building.
+The combined installer still requires end-to-end acceptance for fresh installs,
+cross-account UAC, upgrades, repairs and removal; older installer acceptance
+scripts do not establish coverage for this new two-package flow.
+
 ## Android contributor build
 
 The contributor build uses a local debug key and does not include the production

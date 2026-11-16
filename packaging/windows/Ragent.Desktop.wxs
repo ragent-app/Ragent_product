@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Ragent Desktop" Manufacturer="Ragent" Version="$(var.MsiProductVersion)" UpgradeCode="D344770C-41D4-470F-B9FD-AE8E91CFDA15" Scope="perUser">
+    <MajorUpgrade DowngradeErrorMessage="A newer Ragent Desktop version is already installed." AllowSameVersionUpgrades="yes" />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="RagentIcon" SourceFile="!(bindpath.BrandAsset)\ragent.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RagentIcon" />
+    <Property Id="ARPDISPLAYVERSION" Value="$(var.DisplayVersion)" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+    <Property Id="DESKTOPINSTALLDIR" Secure="yes">
+      <RegistrySearch Id="FindDesktopInstallDirectory" Root="HKCU" Key="Software\Ragent\DesktopInstaller" Name="InstallLocation" Type="raw" />
+    </Property>
+    <SetProperty Id="DESKTOPINSTALLDIR" Value="[LocalAppDataFolder]Ragent" After="AppSearch" Sequence="both" Condition="NOT DESKTOPINSTALLDIR" />
+    <UI>
+      <EmbeddedUI Id="RagentMsiEmbeddedUI" SourceFile="!(bindpath.InstallUi)\Ragent.MsiEmbeddedUI.dll" SupportBasicUI="yes">
+        <EmbeddedUIResource Id="RagentEmbeddedLogo" Name="ragent-android-logo.png" SourceFile="!(bindpath.InstallUi)\ragent-android-logo.png" />
+        <EmbeddedUIResource Id="RagentEmbeddedIcon" Name="ragent.ico" SourceFile="!(bindpath.InstallUi)\ragent.ico" />
+        <?if $(var.IncludeMingwUiRuntime) = 1 ?>
+        <EmbeddedUIResource Id="RagentMingwThreadRuntime" Name="libwinpthread-1.dll" SourceFile="!(bindpath.InstallUi)\libwinpthread-1.dll" />
+        <?endif ?>
+      </EmbeddedUI>
+    </UI>
+    <Binary Id="DesktopGuard" SourceFile="!(bindpath.Guard)\Ragent.DesktopGuard.exe" />
+    <CustomAction Id="CheckDesktopDirectory" BinaryRef="DesktopGuard" ExeCommand="&quot;[DESKTOPINSTALLDIR].&quot; &quot;[Installed]&quot; &quot;[REMOVE]&quot; &quot;[UILevel]&quot;" Execute="immediate" Return="check" />
+    <InstallExecuteSequence>
+      <Custom Action="CheckDesktopDirectory" Before="InstallValidate" />
+    </InstallExecuteSequence>
+    <Feature Id="Desktop" Title="Ragent Desktop" Level="1">
+      <ComponentGroupRef Id="DesktopPayload" />
+      <ComponentRef Id="DesktopRegistration" />
+    </Feature>
+  </Package>
+  <Fragment>
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="DESKTOPINSTALLDIR" Name="Ragent" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="DesktopProgramsFolder" Name="Ragent" />
+    </StandardDirectory>
+    <Component Id="DesktopRegistration" Directory="DesktopProgramsFolder" Guid="*">
+      <Shortcut Id="DesktopStartMenuShortcut" Name="Ragent" Target="[DESKTOPINSTALLDIR]Ragent.exe" WorkingDirectory="DESKTOPINSTALLDIR" Icon="RagentIcon" Advertise="no" />
+      <RemoveFolder Id="RemoveDesktopProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\Ragent\DesktopInstaller" Name="InstallLocation" Type="string" Value="[DESKTOPINSTALLDIR]" KeyPath="yes" />
+      <RegistryValue Root="HKCU" Key="Software\Ragent\DesktopInstaller" Name="ProductCode" Type="string" Value="[ProductCode]" />
+    </Component>
+  </Fragment>
+</Wix>

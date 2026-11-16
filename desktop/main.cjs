@@ -67,7 +67,7 @@ function createTray() {
 }
 
 async function queryUpdate() {
-  const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
+  const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : process.platform === "win32" ? "../.." : "../../..");
   let currentVersion = (await fs.readFile(path.join(metadataDir, ".ragent-package-version"), "utf8")).trim();
   if (process.platform !== "win32") currentVersion = currentVersion.split("+")[0];
   const currentCommit = await fs.readFile(path.join(metadataDir, ".ragent-source-commit"), "utf8").catch(() => "");
@@ -126,7 +126,7 @@ async function installUpdate() {
       publishUpdate({ status: "downloading", progress: 0 });
       const downloaded = await autoUpdate.downloadPackage(updateState, { cacheRoot: path.join(app.getPath("userData"), "ragent-update-cache"), onProgress: (bytes, total) => publishUpdate({ status: "downloading", progress: total ? Math.floor(bytes * 100 / total) : null }) });
       publishUpdate({ status: "waiting" });
-      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : "../../..");
+      const metadataDir = path.resolve(app.getAppPath(), process.platform === "linux" ? "../../../app" : process.platform === "darwin" ? "../../../../app" : process.platform === "win32" ? "../.." : "../../..");
       const appRoot = process.platform === "darwin" ? path.resolve(metadataDir, "../../..") : metadataDir;
       resultFile = path.join(app.getPath("userData"), "ragent-update-result.json");
       await fs.writeFile(resultFile, '{"status":"pending"}\n', { mode: 0o600 });

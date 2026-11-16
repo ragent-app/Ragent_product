@@ -50,12 +50,6 @@ static class ManagedOwnerMsiBridge {
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool QueryServiceObjectSecurity(IntPtr service,uint information,IntPtr descriptor,uint size,out uint needed);
  [DllImport("advapi32.dll",SetLastError=true)]static extern bool SetServiceObjectSecurity(IntPtr service,uint information,IntPtr descriptor);
  [DllImport("advapi32.dll")]static extern bool CloseServiceHandle(IntPtr handle);
- [DllImport("kernel32.dll",SetLastError=true)]static extern IntPtr OpenProcess(uint access,bool inherit,int processId);
- [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]static extern bool QueryFullProcessImageName(IntPtr process,uint flags,StringBuilder name,ref int size);
- [DllImport("kernel32.dll",SetLastError=true)]static extern bool TerminateProcess(IntPtr process,uint exitCode);
- [DllImport("kernel32.dll",SetLastError=true)]static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
- [DllImport("kernel32.dll",SetLastError=true)]static extern bool GetProcessTimes(IntPtr process,out long creation,out long exit,out long kernel,out long user);
- [DllImport("kernel32.dll",SetLastError=true)]static extern bool CloseHandle(IntPtr handle);
  static void Need(bool ok,string code){if(!ok)throw new InvalidOperationException(code);}
  static int UpgradeAdmission(string packageVersion,string productCode){
   Need(Regex.IsMatch(packageVersion,@"\A\d{1,5}(?:\.\d{1,5}){2}\z"),"OMI_PRODUCT_VERSION_INVALID");
@@ -75,67 +69,36 @@ static class ManagedOwnerMsiBridge {
   }
   return Run("UpgradeAdmission",null);
  }
- static void SetProductRoot(string value){
+ // The SID names an administrator-authorized target; it is not proof of
+ // the MSI client's identity. Preserve the existing account SID format and
+ // require Windows to resolve it as a user, including domain users.
+ [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+ static extern bool LookupAccountSid(string system,byte[] sid,StringBuilder name,ref uint nameLength,StringBuilder domain,ref uint domainLength,out uint use);
+ static void ValidateOwnerAccount(string sid){
+  Need(sid!=null&&sid.Length<=184&&Regex.IsMatch(sid,@"\AS-1-5-21-(\d+-){3}\d+\z"),"OMI_OWNER_SID_REQUIRED");
+  try{
+   var identity=new SecurityIdentifier(sid);
+   Need(String.Equals(identity.Value,sid,StringComparison.Ordinal),"OMI_OWNER_SID_REQUIRED");
+   var bytes=new byte[identity.BinaryLength];identity.GetBinaryForm(bytes,0);
+   uint nameLength=0,domainLength=0,use;
+   LookupAccountSid(null,bytes,null,ref nameLength,null,ref domainLength,out use);
+   Need(Marshal.GetLastWin32Error()==122&&nameLength>0&&nameLength<=32768&&domainLength<=32768,"OMI_OWNER_ACCOUNT_REQUIRED");
+   var name=new StringBuilder((int)nameLength);var domain=new StringBuilder((int)Math.Max(domainLength,1));
+   uint domainCapacity=(uint)domain.Capacity;
+   Need(LookupAccountSid(null,bytes,name,ref nameLength,domain,ref domainCapacity,out use)&&use==1&&name.Length>0,"OMI_OWNER_ACCOUNT_REQUIRED");
+  }catch(InvalidOperationException){throw;}catch{throw new InvalidOperationException("OMI_OWNER_ACCOUNT_REQUIRED");}
+ }
+ static void SetRecoverySourceRoot(string value){
   Need(!String.IsNullOrWhiteSpace(value)&&value.Length<=32767&&Regex.IsMatch(value,@"\A[A-Za-z]:\\"),"OMI_INSTALL_ROOT_REQUIRED");
   string full=Path.GetFullPath(value).TrimEnd('\\');
   Need(full.Length>2&&!String.Equals(full,Path.GetPathRoot(full).TrimEnd('\\'),StringComparison.OrdinalIgnoreCase),"OMI_INSTALL_ROOT_REFUSED");
   Product=full;
  }
- static void CloseInstalledDesktop(){
-  Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_CLOSE_SYSTEM_REQUIRED");
-  ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  foreach(string name in new[]{"Ragent.exe","Ragent.exe"})
-   CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),false);
- }
- static void CloseCurrentUserDesktop(){
-  ValidateProductRoot();if(ActiveLayout())ActiveAdmission();else RemoveCheck(true);
-  foreach(string name in new[]{"Ragent.exe","Ragent.exe"})
-   CloseProcessesForPath(Path.GetFullPath(Path.Combine(Product,"payload","Desktop",name)),true);
- }
- static bool HasWindow(Process process){try{return process.MainWindowHandle!=IntPtr.Zero;}catch{return false;}}
- static bool MatchesDesktopImage(IntPtr handle,int pid,string image,string expected){
-  if(String.Equals(Path.GetFullPath(image),expected,StringComparison.OrdinalIgnoreCase))return true;
-  // MSI can move a mapped executable into its rollback folder while WMI
-  // retains its original executable path. Accept that path only for an MSI
-  // rollback image and bind the WMI row to the already-open process handle.
-  string rollback=Path.Combine(Path.GetPathRoot(expected),"Config.Msi")+Path.DirectorySeparatorChar;
-  if(!image.StartsWith(rollback,StringComparison.OrdinalIgnoreCase)||!image.EndsWith(".rbf",StringComparison.OrdinalIgnoreCase))return false;
-  long creation,exit,kernel,user;if(!GetProcessTimes(handle,out creation,out exit,out kernel,out user))return false;
-  try{using(var query=new ManagementObjectSearcher("SELECT ExecutablePath,CreationDate FROM Win32_Process WHERE ProcessId="+pid))
-   using(var rows=query.Get())foreach(ManagementObject row in rows){using(row){
-    string path=row["ExecutablePath"] as string,created=row["CreationDate"] as string;
-    if(String.IsNullOrEmpty(path)||String.IsNullOrEmpty(created))continue;
-    var wmiTime=ManagementDateTimeConverter.ToDateTime(created).ToUniversalTime();
-    if(Math.Abs((wmiTime-DateTime.FromFileTimeUtc(creation)).Ticks)<10000&&String.Equals(Path.GetFullPath(path),expected,StringComparison.OrdinalIgnoreCase))return true;
-   }}
-  }catch(ManagementException){}catch(UnauthorizedAccessException){}catch(ArgumentException){}
-  return false;
- }
- static void CloseProcessesForPath(string expected,bool tolerateAccessDenied){
-  for(int round=0;round<3;round++){
-   // Windows Installer can rename an executable to a rollback filename while
-   // its old image remains mapped. Its process name then no longer matches
-   // Ragent even though its executable path still identifies our desktop.
-   int matched=0;var processes=Process.GetProcesses().OrderByDescending(HasWindow).ToArray();
-   try{foreach(var process in processes){
-    IntPtr handle=OpenProcess(0x1000|0x0001|0x00100000,false,process.Id);
-    if(handle==IntPtr.Zero){int error=Marshal.GetLastWin32Error();if(error==87||error==1168||error==5)continue;throw new InvalidOperationException("OMI_CLOSE_PROCESS_OPEN_FAILED");}
-    try{
-     if(WaitForSingleObject(handle,0)==0)continue;
-     var image=new StringBuilder(32768);int length=image.Capacity;
-     if(!QueryFullProcessImageName(handle,0,image,ref length))continue;
-     if(!MatchesDesktopImage(handle,process.Id,image.ToString(),expected))continue;
-     matched++;
-     bool requested=false;
-     try{requested=process.CloseMainWindow();}catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}catch(NotSupportedException){}
-     if(requested&&WaitForSingleObject(handle,3000)==0)continue;
-     if(!TerminateProcess(handle,0)&&WaitForSingleObject(handle,0)!=0)throw new InvalidOperationException("OMI_CLOSE_PROCESS_TERMINATE_FAILED");
-     Need(WaitForSingleObject(handle,10000)==0,"OMI_CLOSE_PROCESS_TIMEOUT");
-    }finally{CloseHandle(handle);}
-   }}finally{foreach(var process in processes)process.Dispose();}
-   if(matched==0){Console.WriteLine("OMI_DESKTOP_CLOSED");return;}
-  }
-  throw new InvalidOperationException("OMI_CLOSE_PROCESS_RESPAWNING");
+ static void SetProductRoot(string value){
+  Need(!String.IsNullOrWhiteSpace(value),"OMI_INSTALL_ROOT_REQUIRED");
+  string fixedRoot=Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),"Ragent")).TrimEnd('\\');
+  Need(String.Equals(Path.GetFullPath(value).TrimEnd('\\'),fixedRoot,StringComparison.OrdinalIgnoreCase),"OMI_FIXED_ROOT_REQUIRED");
+  Product=fixedRoot;
  }
  static string Hash(Stream stream){using(var sha=SHA256.Create())return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","").ToLowerInvariant();}
  static void PinBrokerInputs(List<IDisposable> pins,string binary,string manifest){
@@ -326,7 +289,7 @@ static class ManagedOwnerMsiBridge {
   }finally{for(int i=pins.Count-1;i>=0;i--)pins[i].Dispose();}
  }
  static int ValidateRecoveryDestination(string ownerSid,string sourceRoot,string targetRoot,bool installedPayload=false){
-  SetProductRoot(sourceRoot);string source=Product;
+  SetRecoverySourceRoot(sourceRoot);string source=Product;
   ValidateRecoverySource(ownerSid);
   SetProductRoot(targetRoot);string target=Product;
   Need(!String.Equals(source,target,StringComparison.OrdinalIgnoreCase)
@@ -644,7 +607,7 @@ static class ManagedOwnerMsiBridge {
   try{
    Need(args.Length>0,"OMI_ARGUMENTS_REFUSED");
    if(args.Length==3&&args[0]=="recovery-source-check"){
-    SetProductRoot(args[2]);ValidateRecoverySource(args[1]);Console.WriteLine("OMI_RECOVERY_SOURCE_VALID");return 0;
+    SetRecoverySourceRoot(args[2]);ValidateRecoverySource(args[1]);Console.WriteLine("OMI_RECOVERY_SOURCE_VALID");return 0;
    }
    if(args.Length==4&&args[0]=="recovery-relocation-check"){
     int conflicts=ValidateRecoveryDestination(args[1],args[2],args[3]);
@@ -652,12 +615,12 @@ static class ManagedOwnerMsiBridge {
    }
    if(args.Length==4&&args[0]=="fresh"){
     Need(args[1].Length<=184&&Regex.IsMatch(args[1],@"\AS-1-5-21-(\d+-){3}\d+\z"),"OMI_OWNER_SID_REQUIRED");
-    if(String.IsNullOrWhiteSpace(args[3])||args[3]=="."){SetProductRoot(args[2]);Fresh();}
-    else ValidateRecoveryDestination(args[1],args[3],args[2]);
+    if(String.IsNullOrWhiteSpace(args[3])||args[3]=="."){SetProductRoot(args[2]);ValidateOwnerAccount(args[1]);Fresh();}
+    else {ValidateOwnerAccount(args[1]);ValidateRecoveryDestination(args[1],args[3],args[2]);}
     Console.WriteLine("OMI_FRESH_ADMITTED");return 0;
    }
    if(args.Length==4&&args[0]=="relocation-prepare"){
-    PrepareRecoveryRelocation(args[1],args[2],args[3]);Console.WriteLine("OMI_RELOCATION_PREPARED");return 0;
+    ValidateOwnerAccount(args[1]);PrepareRecoveryRelocation(args[1],args[2],args[3]);Console.WriteLine("OMI_RELOCATION_PREPARED");return 0;
    }
    if(args[0]=="fresh"&&args.Length==3){SetProductRoot(args[2]);}
    else if(args.Length>1&&Regex.IsMatch(args[args.Length-1],@"\A[A-Za-z]:\\")){
@@ -666,6 +629,7 @@ static class ManagedOwnerMsiBridge {
    if((args.Length>=1&&args.Length<=3)&&args[0]=="fresh"){
     if(args.Length>=2)Need(args[1].Length<=184&&Regex.IsMatch(args[1],@"\AS-1-5-21-(\d+-){3}\d+\z"),"OMI_OWNER_SID_REQUIRED");
     if(args.Length==3)Need(String.Equals(Path.GetFullPath(args[2]).TrimEnd('\\'),Product,StringComparison.OrdinalIgnoreCase),"OMI_FIXED_ROOT_REQUIRED");
+    if(args.Length>=2)ValidateOwnerAccount(args[1]);
     bool recovery=Fresh();Console.WriteLine(recovery?"OMI_RECOVERY_ADMITTED":"OMI_FRESH");return 0;
    }
    if(args.Length==3&&args[0]=="configure-broker-service"&&Regex.IsMatch(args[1],@"\A\d+\.\d+\.\d+\.\d+\z")&&Regex.IsMatch(args[2],@"\A[a-f0-9]{64}\z")){
@@ -676,8 +640,6 @@ static class ManagedOwnerMsiBridge {
    // admission only reads public state; the deferred non-impersonating Remove
    // repeats all privileged validation before any deletion or RemoveFiles.
    if(args.Length==1&&args[0]=="remove-admission"){if(ActiveLayout()){ActiveAdmission();Console.WriteLine(new JavaScriptSerializer().Serialize(new{ok=true,readOnly=true,requiresDeferredValidation=true,activeInstallation=true,authorityIssued=false}));return 0;}bool policy=RemoveCheck(true);Console.WriteLine(new JavaScriptSerializer().Serialize(new{ok=true,readOnly=true,requiresDeferredValidation=true,policyPrepared=policy,authorityIssued=false}));return 0;}
-   if(args.Length==1&&args[0]=="close-desktop-current-user"){CloseCurrentUserDesktop();return 0;}
-   if(args.Length==1&&args[0]=="close-desktop"){CloseInstalledDesktop();return 0;}
    if(args.Length==1&&args[0]=="remove-check"){if(ActiveLayout()){ActiveAdmission();return Run("ActiveRemoveCheck",null);}if(RemoveCheck(true))return Run("PolicyRemoveCheck",null);Console.WriteLine("OMI_REMOVABLE_PREPARED");return 0;}
    if(args.Length==1&&args[0]=="remove"){if(ActiveLayout()){ActiveAdmission();return Run("ActiveRemove",null);}return Run(RemoveCheck(true)?"PolicyRemove":"Remove",null);}
    if(args.Length==1&&args[0]=="initialize"){
@@ -722,6 +684,7 @@ static class ManagedOwnerMsiBridge {
     RemoveCheck();return Run("Policy",null);
    }
    if(args.Length==2&&args[0]=="prepare"&&args[1].Length<=184&&Regex.IsMatch(args[1],@"\AS-1-5-21-(\d+-){3}\d+\z")){
+    ValidateOwnerAccount(args[1]);
     if(Present(Path.Combine(Product,"owner-msi.removed.json"))){
      var removed=RemovedAdmission();Need((string)removed["ownerSid"]==args[1],"OMI_RECOVERY_OWNER_MISMATCH");
      int begin=Run("UpgradeBegin",null);if(begin!=0)return begin;

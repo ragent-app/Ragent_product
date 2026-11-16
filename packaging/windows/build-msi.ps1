@@ -37,7 +37,6 @@ if($InjectPostActivationFailure -and -not $fullOwnerActivation){throw 'MSI_ROLLB
 if($InjectPostRemovalFailure -and -not $fullOwnerActivation){throw 'MSI_REMOVAL_ROLLBACK_INJECTION_REQUIRES_ACTIVATION_LANE'}
 if (-not (Get-Command wix.exe -ErrorAction SilentlyContinue)) { throw 'Pinned WiX 7 wix.exe is required to build the Ragent MSI.' }
 if (-not (Test-Path (Join-Path $SourceRoot 'chat-server.mjs'))) { throw 'SourceRoot must contain the Ragent application tree.' }
-if (-not (Test-Path (Join-Path $SourceRoot 'desktop\package.json'))) { throw 'SourceRoot must include the pinned desktop Electron project.' }
 if ($Version -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw 'Version must be a four-part numeric application version.' }
 $applicationVersionParts=@($Version.Split('.')|ForEach-Object {[int]::Parse($_)})
 $displayVersion=if($applicationVersionParts[3] -eq 0){$applicationVersionParts[0..2] -join '.'}else{$applicationVersionParts -join '.'}
@@ -108,17 +107,6 @@ try {
     }
     $brandRoot = Join-Path $staging ('brand-' + [guid]::NewGuid().ToString('N'))
     & (Join-Path $scriptRoot 'generate-brand-assets.ps1') -SourceRoot $buildInputRoot -OutputDirectory $brandRoot
-    $installerUiRoot = ''
-    $includeMingwUiRuntime = '0'
-    if (-not $ManagedOwnerPreparation) {
-        $installerUiRoot = Join-Path $staging ('installer-ui-' + [guid]::NewGuid().ToString('N'))
-        & (Join-Path $scriptRoot 'build-ragent-installer-ui.ps1') -OutputDirectory $installerUiRoot -BrandAssetDirectory $brandRoot
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $installerUiRoot 'Ragent.MsiEmbeddedUI.dll') -PathType Leaf)) {
-            throw 'The custom MSI embedded UI could not be built.'
-        }
-        $uiMetadata = Get-Content -LiteralPath (Join-Path $installerUiRoot 'installer-ui-build.json') -Raw | ConvertFrom-Json
-        if ($uiMetadata.includeMingwRuntime) { $includeMingwUiRuntime = '1' }
-    }
     # Never recursively copy a developer checkout. Use committed runtime inputs.
     if (-not $CommittedTree) {
         $runtimeStager = Join-Path $SourceRoot 'scripts\stage-runtime-payload.mjs'
@@ -136,26 +124,6 @@ try {
     Assert-BuildFreeSpace 'after runtime staging'
     # Keep the host's displayed build version aligned with the actual package.
     & (Join-Path $scriptRoot 'write-package-version.ps1') -PayloadRoot $payloadRoot -Version $Version -BuildVersion $MsiProductVersion
-    # Build Electron in a temporary, locked install so npm never mutates the
-    # developer checkout. The staged tree contains only Electron's runtime and
-    # the three desktop shell files, not npm or its build-only dependencies.
-    $desktopBuildRoot = Join-Path $staging 'desktop-build'
-    New-Item -ItemType Directory -Force $desktopBuildRoot | Out-Null
-    foreach ($desktopInput in @('package.json', 'package-lock.json', 'main.cjs', 'preload.cjs', 'update-check.cjs', 'auto-update.cjs', 'update-linux.sh', 'update-macos.sh', 'update-windows.ps1', 'wait.html', 'stage-windows.mjs')) {
-        Copy-Item -LiteralPath (Join-Path $buildInputRoot ('desktop\' + $desktopInput)) -Destination (Join-Path $desktopBuildRoot $desktopInput)
-    }
-    if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm.cmd is required to stage the pinned Electron desktop manager.' }
-    Push-Location $desktopBuildRoot
-    try {
-        & cmd.exe /c 'npm.cmd ci --no-audit --no-fund'
-        if ($LASTEXITCODE -ne 0) { throw 'Locked Electron desktop dependencies could not be staged.' }
-    } finally { Pop-Location }
-    $desktopPayloadRoot = Join-Path $payloadRoot 'Desktop'
-    & $node.Source (Join-Path $desktopBuildRoot 'stage-windows.mjs') $desktopPayloadRoot $brandRoot $Version $buildInputRoot '--move-staged-electron'
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $desktopPayloadRoot 'Ragent.exe') -PathType Leaf)) {
-        throw 'Branded, unelevated Electron runtime staging failed.'
-    }
-    Assert-BuildFreeSpace 'after desktop staging'
     # Keep the Windows payload self-contained and in parity with the Debian
     # builder: install only locked production dependencies in the staging tree.
     $payloadLock = Join-Path $payloadRoot 'package-lock.json'
@@ -295,14 +263,9 @@ try {
     $runtimeVerifierRoot = if ($CommittedTree) { $payloadRoot } else { $SourceRoot }
     & $node.Source (Join-Path $runtimeVerifierRoot 'scripts\verify-runtime-payload.mjs') $payloadRoot
     if ($LASTEXITCODE -ne 0) { throw 'Final Windows runtime secret/state verification failed.' }
-    # Preserve an explicit uncompressed installer ceiling for the desktop payload.
-    $payloadBytes = [long](Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Force |
+    # Keep an explicit uncompressed ceiling for the machine runtime payload.
+    $completePayloadBytes = [long](Get-ChildItem -LiteralPath $payloadRoot -Recurse -File -Force |
         Measure-Object Length -Sum).Sum
-    $completePayloadBytes = $payloadBytes
-    $desktopPayloadBytes = (Get-ChildItem -LiteralPath (Join-Path $payloadRoot 'Desktop') -Recurse -File -Force |
-        Measure-Object Length -Sum).Sum
-    Write-Output ('Electron desktop payload: {0:N0} bytes' -f $desktopPayloadBytes)
-    Write-Output ('Core Windows payload: {0:N0} bytes' -f ($payloadBytes - $desktopPayloadBytes))
     $maxPayloadBytes = if ($fullOwnerActivation) { 1024MB } else { 600MB }
     Write-Output ('Complete MSI payload: {0:N0} bytes ({1:N0} MiB maximum)' -f $completePayloadBytes, ($maxPayloadBytes / 1MB))
     if ($completePayloadBytes -gt $maxPayloadBytes) {
@@ -335,7 +298,7 @@ try {
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
-    <ComponentGroup Id="PayloadGroup" Directory="INSTALLFOLDER" Subdirectory="payload">
+    <ComponentGroup Id="PayloadGroup" Directory="RagentMachineRoot" Subdirectory="payload">
       <Files Include="`$(var.SourceDir)\**" />
     </ComponentGroup>
   </Fragment>
@@ -345,7 +308,7 @@ try {
     New-Item -ItemType Directory -Force (Split-Path -Parent $OutputPath) | Out-Null
     $wixInstalled = @(& wix.exe --acceptEula wix7 extension list --global 2>$null)
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing WiX extension cache.' }
-    foreach ($extension in @('WixToolset.UI.wixext/7.0.0', 'WixToolset.Util.wixext/7.0.0')) {
+    foreach ($extension in @('WixToolset.Util.wixext/7.0.0')) {
         $parts = $extension.Split('/')
         if (-not ($wixInstalled | Where-Object { $_ -match ('^' + [regex]::Escape($parts[0]) + '\s+' + [regex]::Escape($parts[1]) + '$') })) {
             throw ('Required pinned WiX extension must be installed before building: ' + $extension)
@@ -356,7 +319,7 @@ try {
         & (Join-Path $installScriptRoot 'build-managed-owner-msi-bridge.ps1') -OutputPath (Join-Path $staging 'Ragent.ManagedOwnerMsiBridge.exe')
         $managedWxs = if($fullOwnerActivation){Join-Path $installScriptRoot 'Ragent.ActivatedOwner.wxs'}else{Join-Path $installScriptRoot 'Ragent.ManagedOwner.wxs'}
         $wixSources = @($managedWxs, $payloadWxs)
-        $wixArguments = @('--acceptEula','wix7','build','-arch','x64') + $wixSources + @('-d',"ProductVersion=$Version",'-d',"DisplayVersion=$displayVersion",'-d',"MsiProductVersion=$MsiProductVersion",'-d',"ProductCode=$ProductCode",'-d',"MsiUpgradeLane=$MsiUpgradeLane",'-d',"MsiUpgradeStrategy=$msiUpgradeStrategy",'-d',"SourceDir=$payloadDir",'-bindpath',"ServiceHost=$serviceHostDir",'-bindpath',"ManagedBridge=$staging",'-bindpath',"BrandAsset=$brandRoot",'-ext','WixToolset.UI.wixext/7.0.0','-ext','WixToolset.Util.wixext/7.0.0','-o',$OutputPath)
+        $wixArguments = @('--acceptEula','wix7','build','-arch','x64') + $wixSources + @('-d',"ProductVersion=$Version",'-d',"DisplayVersion=$displayVersion",'-d',"MsiProductVersion=$MsiProductVersion",'-d',"ProductCode=$ProductCode",'-d',"MsiUpgradeLane=$MsiUpgradeLane",'-d',"MsiUpgradeStrategy=$msiUpgradeStrategy",'-d',"SourceDir=$payloadDir",'-bindpath',"ServiceHost=$serviceHostDir",'-bindpath',"ManagedBridge=$staging",'-bindpath',"BrandAsset=$brandRoot",'-ext','WixToolset.Util.wixext/7.0.0','-o',$OutputPath)
         if($fullOwnerActivation){
             # The guarded major-upgrade transaction has passed real upgrade
             # and injected rollback verification. Use it for ordinary Owner
@@ -365,7 +328,6 @@ try {
             $wixArguments += @('-d',"ExperimentalMajorUpgrade=$experimentalMajor")
             $earlyQuiesce = if($useEarlyQuiescence){'1'}else{'0'}
             $wixArguments += @('-d',"EarlyServiceQuiescence=$earlyQuiesce")
-            $wixArguments += @('-d',"IncludeMingwUiRuntime=$includeMingwUiRuntime",'-bindpath',"InstallUi=$installerUiRoot")
             $wixArguments += @('-bindpath',"PrivilegedBroker=$brokerBuildRoot")
             $wixArguments += @('-d',"BrokerSha256=$brokerSha256")
             $rollbackInjection = if($InjectPostActivationFailure){'1'}else{'0'}
@@ -376,7 +338,7 @@ try {
         & wix.exe @wixArguments
     }else{
         & (Join-Path $installScriptRoot 'build-legacy-owner-install-guard.ps1') -OutputPath (Join-Path $staging 'Ragent.LegacyOwnerInstallGuard.exe')
-        & wix.exe --acceptEula wix7 build -arch x64 (Join-Path $installScriptRoot 'Ragent.wxs') $payloadWxs -d "ProductVersion=$Version" -d "MsiProductVersion=$MsiProductVersion" -d "SourceDir=$payloadDir" -d "IncludeMingwUiRuntime=$includeMingwUiRuntime" -bindpath "ServiceHost=$serviceHostDir" -bindpath "InstallScript=$installScriptRoot" -bindpath "OwnerInstallGuard=$staging" -bindpath "BrandAsset=$brandRoot" -bindpath "InstallUi=$installerUiRoot" -ext 'WixToolset.UI.wixext/7.0.0' -ext 'WixToolset.Util.wixext/7.0.0' -o $OutputPath
+        & wix.exe --acceptEula wix7 build -arch x64 (Join-Path $installScriptRoot 'Ragent.wxs') $payloadWxs -d "ProductVersion=$Version" -d "MsiProductVersion=$MsiProductVersion" -d "SourceDir=$payloadDir" -bindpath "ServiceHost=$serviceHostDir" -bindpath "InstallScript=$installScriptRoot" -bindpath "OwnerInstallGuard=$staging" -bindpath "BrandAsset=$brandRoot" -ext 'WixToolset.Util.wixext/7.0.0' -o $OutputPath
     }
     if ($LASTEXITCODE -ne 0) { throw 'WiX MSI build failed.' }
     if($useEarlyQuiescence){
@@ -387,9 +349,9 @@ try {
         $installer=$null;$database=$null;$view=$null;$record=$null
         $sequences=[ordered]@{
             InstallInitialize=1300;ManagedFreshGuard=1310;ManagedRemoveGuard=1320;
-            ManagedCloseDesktopBeforeValidation=1330;ManagedMaintenanceRefused=1340;
+            ManagedMaintenanceRefused=1340;
             ManagedPreValidationRollback=1350;ManagedPreValidationStop=1360;InstallExecute=1370;
-            ManagedUpgradeGuard=1501;ManagedCloseDesktopForMajorUpdate=1502;ManagedMajorBrokerRollback=1503;
+            ManagedUpgradeGuard=1501;ManagedMajorBrokerRollback=1503;
             InstallExecuteAgain=1504;RemoveExistingProducts=1505;ManagedUpgradeRollback=1506;ManagedUpgradeBegin=1507
         }
         try{

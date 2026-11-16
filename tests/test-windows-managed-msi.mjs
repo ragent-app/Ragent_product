@@ -15,13 +15,13 @@ assert.match(activatedWix, /Id="ManagedVoiceCommit"[^\n]+Execute="commit"[^\n]+I
 assert.match(activatedWix, /Action="ManagedVoiceRollback" After="StopServices"/);
 assert.match(activatedWix, /Action="ManagedVoicePrepare" After="ManagedVoiceRollback"/);
 assert.match(activatedWix, /Action="ManagedVoiceCommit" After="ManagedUpgradeCommit"/);
-assert.match(activatedWix, /<EmbeddedUI Id="RagentMsiEmbeddedUI"/, 'the released owner MSI must include the custom installer UI');
-assert.match(activatedWix, /SetSelectedInstallFolder[^\n]*RAGENT_INSTALLFOLDER/, 'the custom installer must pass its chosen directory to MSI');
+assert.doesNotMatch(activatedWix, /<EmbeddedUI|WixUI_InstallDir/, 'the machine MSI is driven by the outer installer');
+assert.match(activatedWix, /<StandardDirectory Id="ProgramFiles64Folder">[\s\S]*?<Directory Id="RagentMachineRoot" Name="Ragent"/, 'the machine installation root is fixed under Program Files');
 assert.match(activatedWix, /Property Id="RAGENT_RECOVERY_SOURCE" Secure="yes"/, 'the recovery source survives elevation');
 assert.match(activatedWix, /ManagedRelocationRollback" Before="InstallFiles"/, 'relocation rollback is scheduled before receipts can be moved');
 assert.match(activatedWix, /ManagedRelocationPrepare" After="InstallFiles"/, 'relocation preparation follows MSI payload installation');
 assert.match(activatedWix, /ManagedRelocationCommit" After="ManagedInstallCommit"/, 'old destination data stays recoverable until owner activation commits');
-assert.match(activatedWix, /RAGENT_LAUNCH = &quot;1&quot; AND NOT Installed/, 'the custom installer launch option must reach the execution sequence');
+assert.doesNotMatch(activatedWix, /RAGENT_LAUNCH|ManagedCloseDesktop|payload\\Desktop/, 'the machine MSI must not manage the user desktop');
 const msiBuilder=await readFile(resolve('packaging/windows/build-msi.ps1'),'utf8');
 const brokerBuilder=await readFile(resolve('packaging/windows/build-privileged-broker.ps1'),'utf8');
 const activationTrialSource=await readFile(resolve('packaging/windows/owner-service-activation-trial.cs'),'utf8');
@@ -47,15 +47,15 @@ assert.match(bridge,/args\.Length==2&&args\[0\]=="prepare"/,'the bridge must acc
 assert.match(bridge,/static void ValidateProductRoot\(\)/,'the selected install root and its ancestors must be checked before preparation');
 for(const action of ['ManagedFreshGuard']){
  const line=wix.split(/\r?\n/).find(value=>value.includes(`<CustomAction Id="${action}"`));
- assert.ok(line,`Missing ${action} action`);assert.match(line,/INSTALLFOLDER/,`${action} must receive its package install root`);
+ assert.ok(line,`Missing ${action} action`);assert.match(line,/RagentMachineRoot/,`${action} must receive its package install root`);
 }
 for(const action of ['ManagedFreshGuard','ManagedRemoveGuard','ManagedPrepare','ManagedRemove']){
  const line=activatedWix.split(/\r?\n/).find(value=>value.includes(`<CustomAction Id="${action}"`));
- assert.ok(line,`Missing activated Owner ${action} action`);assert.match(line,/INSTALLFOLDER/,`Activated Owner ${action} must receive its package install root`);
+ assert.ok(line,`Missing activated Owner ${action} action`);assert.match(line,/RagentMachineRoot/,`Activated Owner ${action} must receive its package install root`);
 }
 for(const action of ['ManagedUpgradeGuard','ManagedUpgradeBegin','ManagedUpgradeRollback','ManagedPrepareExisting','ManagedPreparePolicyExisting','ManagedUpgradeActivationCheck','ManagedUpgradeActivate','ManagedUpgradeCommit']){
  const line=activatedWix.split(/\r?\n/).find(value=>value.includes(`<CustomAction Id="${action}"`));
- assert.ok(line,`Missing ${action} action`);assert.match(line,/INSTALLFOLDER/,`${action} must receive the selected install root`);
+ assert.ok(line,`Missing ${action} action`);assert.match(line,/RagentMachineRoot/,`${action} must receive the selected install root`);
 }
 assert.match(activatedWix,/ProductCode="\$\(var\.ProductCode\)"/,'the first in-place MSI migration must be able to retain the registered product identity');
 assert.match(activatedWix,/MsiUpgradeLane/,'the migration and major-upgrade lanes must be explicit at build time');
@@ -70,9 +70,9 @@ assert.match(activatedWix,/MSIUNINSTALLSUPERSEDEDCOMPONENTS/,'the minor update m
 assert.match(activatedWix,/NOT UPGRADINGPRODUCTCODE/,'major-upgrade removal must preserve Owner and Broker state');
 assert.match(activatedWix,/ManagedMajorUpgradeRefused/,'unvalidated ProductCode changes must stop before RemoveExistingProducts');
 assert.match(activatedWix,/<\?else\?>\s*<Custom Action="ManagedMajorUpgradeRefused" Before="RemoveExistingProducts"/,'major upgrades remain refused unless the explicit experimental lane is selected');
-assert.match(activatedWix,/<Custom Action="ManagedUpgradeGuard" After="InstallInitialize" Condition="WIX_UPGRADE_DETECTED AND NOT Installed"\s*\/>[\s\S]*?<Custom Action="ManagedCloseDesktopForMajorUpdate" After="ManagedUpgradeGuard"[\s\S]*?<Custom Action="ManagedMajorBrokerRollback" After="ManagedCloseDesktopForMajorUpdate"[\s\S]*?<InstallExecute After="ManagedMajorBrokerRollback"/,'the major lane closes its desktop after admission before old-product removal');
+assert.match(activatedWix, /<Custom Action="ManagedUpgradeGuard" After="InstallInitialize"[\s\S]*?<Custom Action="ManagedMajorBrokerRollback" After="ManagedUpgradeGuard"[\s\S]*?<InstallExecute After="ManagedMajorBrokerRollback"/, 'major upgrade registers Broker rollback after admission and before removal');
 assert.match(activatedWix,/<CustomAction Id="ManagedSameUpgradeGuard"[^>]*upgrade-admission \$\(var\.MsiProductVersion\) &quot;\[ProductCode\]&quot;/,'a same-package reinstall verifies the actual installed product');
-assert.match(activatedWix,/<Custom Action="ManagedSameUpgradeGuard" Before="ManagedCloseDesktopForUpdate" Condition="Installed AND REINSTALL AND NOT \(REMOVE = &quot;ALL&quot;\)"\s*\/>[\s\S]*?<Custom Action="ManagedCloseDesktopForUpdate" Before="ManagedSameUpgradeRollback"[\s\S]*?<Custom Action="ManagedSameUpgradeRollback" Before="ManagedSameUpgradeBegin"[\s\S]*?<Custom Action="ManagedSameUpgradeBegin" Before="StopServices"/,'same-package reinstall closes its desktop after admission and registers rollback before stopping services');
+assert.match(activatedWix, /<Custom Action="ManagedSameUpgradeGuard" Before="ManagedSameUpgradeRollback"[\s\S]*?<Custom Action="ManagedSameUpgradeRollback" Before="ManagedSameUpgradeBegin"[\s\S]*?<Custom Action="ManagedSameUpgradeBegin" Before="StopServices"/, 'same-package reinstall admits and registers rollback before stopping services');
 assert.match(activatedWix,/<Custom Action="ManagedUpgradeCommit" Before="InstallFinalize" Condition="\(WIX_UPGRADE_DETECTED AND NOT Installed\) OR \(Installed AND REINSTALL AND NOT \(REMOVE = &quot;ALL&quot;\)\)"\s*\/>/,'both major upgrades and same-package reinstalls commit their transaction');
 assert.match(bridge,/RestoreBrokerAfterMajorRollback[\s\S]*?ConfigureBrokerService\(version,hash\)[\s\S]*?ServiceController\(BrokerServiceName\)/,'major rollback restores the verified old broker configuration and service');
 assert.match(activatedWix,/<Custom Action="ManagedUpgradeRollback" After="RemoveExistingProducts"[\s\S]*?<Custom Action="ManagedUpgradeBegin" After="ManagedUpgradeRollback"/,'the experimental lane registers receipt rollback before beginning its migration');
@@ -82,7 +82,7 @@ assert.match(activatedWix,/<Package[^>]+Version="\$\(var\.MsiProductVersion\)"/,
 assert.match(msiBuilder,/MSI_MINOR_EFFECTIVE_VERSION_REQUIRED/,'minor updates must specify a Windows Installer effective version');
 assert.match(msiBuilder,/MSI_MINOR_EFFECTIVE_VERSION_NOT_NEWER/,'minor updates must increase a Windows Installer version field');
 assert.match(msiBuilder,/assert-minor-component-compat\.ps1/,'minor updates must preserve the previous MSI component tree');
-assert.match(activatedWix,/<Custom Action="ManagedUpgradeGuard" Before="ManagedCloseDesktopForUpdate" Condition="Installed AND REINSTALL/,'minor-upgrade admission must precede desktop shutdown and rollback registration');
+assert.match(activatedWix, /<Custom Action="ManagedUpgradeGuard" Before="ManagedUpgradeRollback" Condition="Installed AND REINSTALL/, 'minor admission precedes rollback registration');
 assert.match(bridge,/MsiGetProductInfo\(productCode,"VersionString"/,'minor-upgrade admission must read the installed version from Windows Installer');
 assert.match(bridge,/package\.CompareTo\(installed\)<0/,'downgrades must be refused while same-version repair remains available');
 assert.match(bridge,/OMI_UPDATE_OLDER/,'downgrade refusal must have a typed result');
@@ -119,9 +119,6 @@ assert.match(activatedWix,/<Custom Action="ManagedInstallCommit" Before="Install
 assert.match(activatedWix,/<Property Id="MSIRESTARTMANAGERCONTROL" Value="DisableShutdown"/,'use Restart Manager file detection without automatic restart mitigation');
 assert.match(activatedWix,/<Property Id="MSIRMSHUTDOWN" Value="2"/,'restrict unattended restart-manager shutdown to restartable applications');
 assert.match(activatedWix,/<Custom Action="ManagedRemove" Before="DeleteServices"/,'active removal must drain and verify ordinary services before MSI deletes their registrations');
-assert.match(activatedWix,/<CustomAction Id="ManagedCloseDesktop"[^>]+Execute="deferred" Impersonate="no"/,'uninstall must use the elevated scoped desktop shutdown action');
-assert.match(activatedWix,/<Custom Action="ManagedCloseDesktopBeforeValidation" After="ManagedRemoveGuard"/,'close the current user desktop before MSI checks in-use files');
-assert.match(activatedWix,/<Custom Action="ManagedCloseDesktop" Before="ManagedRemoveRollback" Condition="Installed AND REMOVE = &quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE"/,'desktop shutdown must be part of uninstall before service teardown');
 assert.doesNotMatch(activatedWix,/<util:CloseApplication[^>]+Target="Ragent\.exe"/,'uninstall must not terminate other same-named applications by name alone');
 assert.match(activatedWix,/<Custom Action="ManagedRemoveRollback" Before="ManagedBrokerOwnerReset"/,'uninstall rollback must be registered before irreversible owner reset');
 assert.equal((activatedWix.match(/<PermissionEx Sddl="O:SYG:SYD:\(A;;GA;;;SY\)\(A;;GA;;;BA\)\(A;;CCLCSWLOCRRC;;;IU\)\(A;;CCLCSWLOCRRC;;;SU\)"\s*\/>/g)||[]).length,2,'both Owner service objects must grant SYSTEM service configuration rights without granting ordinary users mutations');
@@ -134,8 +131,6 @@ assert.match(activatedWix,/<CustomAction Id="ManagedPreValidationRollback"[^>]*E
 assert.match(bridge,/if\(marker\)RemovedAdmission\(\)/,'uninstall rollback must validate a completed removal marker before clearing it');
 assert.match(bridge,/if\(marker\)RemovedAdmission\(\);else ActiveAdmission\(true\)/,'rollback must admit an authenticated in-progress removal');
 assert.match(bridge,/OMI_REMOVAL_LOCK_INVALID/,'rollback must only accept the exact authenticated removal lock');
-assert.match(bridge,/Process\.GetProcesses\(\)\.OrderByDescending\(HasWindow\)/,'desktop shutdown must also find running images renamed by MSI rollback');
-assert.match(bridge,/GetProcessTimes\(handle,out creation/,'rollback image matching must bind WMI process identity to the retained handle');
 assert.match(removeRollback,/ORR_REMOVAL_LOCK_INVALID/,'rollback must validate the removal lock before clearing it');
 assert.match(removeRollback,/Get-OwnerServicePreparationPlan/,'uninstall rollback must use the fixed Owner service plan');
 assert.match(removeRollback,/CreateService\(manager,name,display/,'uninstall rollback must recreate Owner service registrations deleted by the removal transaction');
@@ -148,7 +143,7 @@ assert.match(activatedWix,/<ServiceInstall[^>]+Name="Ragent-PrivilegedBroker"[^>
 assert.match(activatedWix,/<Component Id="PrivilegedBrokerService"[^>]+Guid="\{[A-F0-9-]{36}\}"/,'the Broker EXE and manifest component must use a stable GUID because the native EXE has no MSI file version');
 assert.match(activatedWix,/<ServiceControl[^>]+Name="Ragent-PrivilegedBroker"[^>]+Start="install"[^>]+Stop="both"[^>]+Remove="uninstall"/,'MSI must start and remove the Broker service through owned service actions');
 assert.match(activatedWix,/ManagedConfigureBrokerServiceTrust[^\r\n]+configure-broker-service \$\(var\.ProductVersion\) \$\(var\.BrokerSha256\)/,'the MSI must verify the exact versioned Broker binary and manifest before service start');
-assert.match(activatedWix,/configure-broker-service \$\(var\.ProductVersion\) \$\(var\.BrokerSha256\) &quot;\[INSTALLFOLDER\]\.&quot;/,'the deferred Broker trust action must pass the selected install root after the version and binary hash');
+assert.match(activatedWix,/configure-broker-service \$\(var\.ProductVersion\) \$\(var\.BrokerSha256\) &quot;\[RagentMachineRoot\]\.&quot;/,'the deferred Broker trust action must pass the selected install root after the version and binary hash');
 assert.match(bridge,/else if\(args\.Length>1&&Regex\.IsMatch\(args\[args\.Length-1\],@"\\A\[A-Za-z\]:\\\\"\)\)/,'the bridge must consume and validate the final install-root argument before dispatching Broker trust configuration');
 assert.match(bridge,/args\.Length==3&&args\[0\]=="configure-broker-service"/,'the bridge must accept only version, hash and selected-root arguments for Broker trust configuration');
 assert.match(bridge,/Owner MSI Broker trust failed:/,'failed Broker trust actions must log only a typed code for local MSI diagnosis');
@@ -168,7 +163,7 @@ assert.match(msiBuilder,/Ragent\.PrivilegedBroker\.manifest\.json/,'the MSI must
 assert.match(brokerBuilder,/Privileged Broker output is not a native Windows x64 PE32\+ executable/,'the Broker package helper must validate its Windows PE output');
 assert.match(brokerBuilder,/GOOS = 'windows'/,'the Broker package helper must build for Windows');
 assert.match(brokerBuilder,/GOARCH = 'amd64'/,'the Broker package helper must build x64 explicitly');
-assert.match(activatedWix,/<CustomAction Id="ManagedInjectedPostActivationFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;\[INSTALLFOLDER\]\.\&quot;" Execute="deferred" Impersonate="no" Return="check"\s*\/>/);
+assert.match(activatedWix,/<CustomAction Id="ManagedInjectedPostActivationFailure" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="injected-failure &quot;\[RagentMachineRoot\]\.\&quot;" Execute="deferred" Impersonate="no" Return="check"\s*\/>/);
 assert.doesNotMatch(activatedWix,/<CustomAction Id="ManagedInjectedPostActivationFailure" Error=/);
 assert.match(activatedWix,/<Custom Action="ManagedInjectedPostUpgradeFailure" After="ManagedUpgradeActivate" Condition="Installed AND REINSTALL/,'fault-injected minor update must fail after activation inside the rollback transaction');
 assert.match(activatedWix,/<Custom Action="ManagedInjectedPostRemovalFailure" After="DeleteServices" Condition="Installed AND REMOVE/,'fault-injected uninstall must fail after MSI has tried to delete service registrations');
@@ -181,13 +176,13 @@ assert.match(activationCheck,/HttpWebRequest\]::Create\('http:\/\/127\.0\.0\.1:7
 assert.match(activationTrialSource,/OpenProcess\(0x00100000,false,status\.pid\)/);assert.doesNotMatch(activationTrialSource,/OpenProcess\(0x00100000\s*\|\s*0x1000/);
 assert.match(serviceHostSource,/ProcessSynchronize=0x00100000/);assert.match(serviceHostSource,/permissions=ProcessSynchronize,mode=\(int\)GrantAccess,inheritance=0/);assert.match(serviceHostSource,/type=TrusteeTypeUnknown/);assert.match(serviceHostSource,/GrantSystemWaitOnServiceProcess\(\);/);
 assert.match(rollbackTest,/actual error code 93/);assert.match(rollbackTest,/AOMR_SESSION_SECRET_NOT_RETAINED/);assert.ok(rollbackTest.includes('Target=injected-failure(?:\\s+"[^"]+")?,'));
-for(const [args,code] of [[['remove',missingRoot],'OMI_INSTALL_ROOT_MISSING'],[['remove-check','--force'],'OMI_ARGUMENTS_REFUSED'],[['ActiveRemove'],'OMI_ARGUMENTS_REFUSED'],[['remove-admission','--skip-verify'],'OMI_ARGUMENTS_REFUSED'],[['activate','--force'],'OMI_ARGUMENTS_REFUSED'],[['activation-check',missingRoot],'OMI_INSTALL_ROOT_MISSING'],[['activation-check','--skip-signature'],'OMI_ARGUMENTS_REFUSED'],[['fresh','S-1-5-21-1-2-3-1001','C:\\'],'OMI_INSTALL_ROOT_REFUSED'],[['fresh','S-1-5-18'],'OMI_OWNER_SID_REQUIRED'],[['recovery-source-check','S-1-5-18',missingRoot],'OMI_OWNER_SID_REQUIRED'],[['prepare','S-1-5-18'],'OMI_ARGUMENTS_REFUSED'],[['prepare','S-1-5-21-1-2-3-1001','extra'],'OMI_ARGUMENTS_REFUSED'],[['prepare','S-1-5-21-1-2-3-1001" -Action Remove'],'OMI_ARGUMENTS_REFUSED']]){
+for(const [args,code] of [[['remove',missingRoot],'OMI_FIXED_ROOT_REQUIRED'],[['remove-check','--force'],'OMI_ARGUMENTS_REFUSED'],[['ActiveRemove'],'OMI_ARGUMENTS_REFUSED'],[['remove-admission','--skip-verify'],'OMI_ARGUMENTS_REFUSED'],[['activate','--force'],'OMI_ARGUMENTS_REFUSED'],[['activation-check',missingRoot],'OMI_FIXED_ROOT_REQUIRED'],[['activation-check','--skip-signature'],'OMI_ARGUMENTS_REFUSED'],[['fresh','S-1-5-21-1-2-3-1001','C:\\'],'OMI_FIXED_ROOT_REQUIRED'],[['fresh','S-1-5-18'],'OMI_OWNER_SID_REQUIRED'],[['recovery-source-check','S-1-5-18',missingRoot],'OMI_OWNER_SID_REQUIRED'],[['prepare','S-1-5-18'],'OMI_ARGUMENTS_REFUSED'],[['prepare','S-1-5-21-1-2-3-1001','extra'],'OMI_ARGUMENTS_REFUSED'],[['prepare','S-1-5-21-1-2-3-1001" -Action Remove'],'OMI_ARGUMENTS_REFUSED']]){
  try{await exec(exe,args,{windowsHide:true,timeout:15000,maxBuffer:16384});assert.fail('Unsafe invocation accepted');}catch(e){assert.equal(e.code,1);assert.equal(e.stderr.trim(),code);}count++;
 }
 for(const action of ['prevalidate-stop','prevalidate-rollback','prevalidate-commit']){
  const args=action==='prevalidate-commit'?[action,missingRoot]:[action,'0.0.1.0','a'.repeat(64),missingRoot];
  try{await exec(exe,args,{windowsHide:true,timeout:15000,maxBuffer:16384});assert.fail('Prevalidation action accepted a non-SYSTEM caller');}
- catch(e){assert.equal(e.code,1);assert.equal(e.stderr.trim(),'OMI_PREVALIDATION_SYSTEM_REQUIRED');}count++;
+ catch(e){assert.equal(e.code,1);assert.equal(e.stderr.trim(),'OMI_FIXED_ROOT_REQUIRED');}count++;
 }
 try{const result=await exec(exe,['fresh'],{windowsHide:true,timeout:15000,maxBuffer:16384});assert.match(result.stdout,/OMI_FRESH/);}
 catch(e){assert.equal(e.code,1);assert.ok(['OMI_EXISTING_SERVICE_REFUSED','OMI_EXISTING_INSTALL_REFUSED','OMI_INPUT_OWNER_REFUSED'].includes(e.stderr.trim()),`Unexpected safe fresh refusal: ${e.stderr.trim()}`);}
