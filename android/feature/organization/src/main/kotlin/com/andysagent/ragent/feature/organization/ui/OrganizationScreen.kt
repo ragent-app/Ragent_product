@@ -41,6 +41,10 @@ fun OrganizationScreen(
     isDemo: Boolean = false,
     conversationContent: @Composable (String, Modifier) -> Unit = { _, modifier -> Text(stringResource(R.string.organization_conversation_unavailable), modifier.padding(20.dp)) },
     conversationRuntimeState: (String) -> String? = { null },
+    embeddedRootId: String? = null,
+    onRootClick: (Rect) -> Unit = {},
+    onRootAnchorChanged: (Rect?) -> Unit = {},
+    embedded: Boolean = false,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     OrganizationScreenContent(
@@ -52,7 +56,7 @@ fun OrganizationScreen(
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
         onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels,
-        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState,
+        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded,
     )
 }
 
@@ -80,6 +84,10 @@ fun OrganizationScreenContent(
     isDemo: Boolean = false,
     conversationContent: @Composable (String, Modifier) -> Unit = { _, modifier -> Text(stringResource(R.string.organization_conversation_unavailable), modifier.padding(20.dp)) },
     conversationRuntimeState: (String) -> String? = { null },
+    embeddedRootId: String? = null,
+    onRootClick: (Rect) -> Unit = {},
+    onRootAnchorChanged: (Rect?) -> Unit = {},
+    embedded: Boolean = false,
 ) {
     val colors = LocalRagentColors.current
     if (uiState.activeDetailNode != null) {
@@ -103,7 +111,7 @@ fun OrganizationScreenContent(
             else if (currentCluster == null) { deleted = true; expanded = false }
         }
     }
-    BoxWithConstraints(modifier.fillMaxSize().background(colors.canvas).statusBarsPadding().navigationBarsPadding()
+    BoxWithConstraints(modifier.fillMaxSize().background(colors.canvas).then(if (embedded) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())
         .onGloballyPositioned { screenOrigin = it.localToRoot(Offset.Zero) }) {
         val density = LocalDensity.current
         val pageScroll = rememberScrollState()
@@ -118,8 +126,8 @@ fun OrganizationScreenContent(
         ) {
             Column(Modifier.widthIn(max = 600.dp).fillMaxWidth().padding(horizontal = 20.dp)) {
                 val members = uiState.nodes.flatMap { if (it.isCluster) it.clusterChildIds else listOf(it.id) }.toSet().size
-                OrganizationNavigation(onBack, members, onOpenWorkItems, onOpenTeamMessages, onReset, Modifier.onSizeChanged { navigationHeight = it.height })
-                Column(Modifier.fillMaxWidth().onSizeChanged { taskHeight = it.height }.padding(top = 20.dp, bottom = 12.dp)) {
+                if (!embedded) OrganizationNavigation(onBack, members, onOpenWorkItems, onOpenTeamMessages, onReset, Modifier.onSizeChanged { navigationHeight = it.height })
+                if (!embedded) Column(Modifier.fillMaxWidth().onSizeChanged { taskHeight = it.height }.padding(top = 20.dp, bottom = 12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.organization_current_task), color = colors.secondaryContent, fontSize = 12.sp, lineHeight = 18.sp)
                         if (isDemo) Text(stringResource(R.string.organization_demo_badge), Modifier.background(colors.quietSurface, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp), color = colors.primaryContent, fontSize = 12.sp)
@@ -137,22 +145,28 @@ fun OrganizationScreenContent(
                     }
                     Text(stringResource(if (isDemo) R.string.organization_demo_explanation else statusText), Modifier.padding(top = 6.dp), color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 2)
                 }
-                if (navigationHeight > 0 && taskHeight > 0 && activityHeight > 0) {
+                if (embedded || (navigationHeight > 0 && taskHeight > 0 && activityHeight > 0)) {
                     OrganizationGraph(uiState, onPan, onZoom, { id ->
                         val node = uiState.nodes.firstOrNull { it.id == id }
-                        if (node?.isCluster == true) onNodeClick(id)
+                        if (embedded && id == embeddedRootId) anchors[id]?.let { onRootClick(Rect(it.center.x - it.radius, it.center.y - it.radius, it.center.x + it.radius, it.center.y + it.radius)) }
+                        else if (node?.isCluster == true) onNodeClick(id)
                         else if (node != null && anchors[id] != null && selectedId == null) {
                             selectedId = id; selectedNode = node; deleted = false; expanded = true
                         }
                     }, onNodeDoubleTap, onSizeChanged, modifier = Modifier.fillMaxWidth().height(graphHeight).clip(AgentoShapes.SurfaceLargeShape),
                         hiddenNodeId = anchorId, onAnchorsChanged = { latest, bounds ->
                             if (anchors != latest) anchors = latest
+                            if (embedded) {
+                                val root = latest[embeddedRootId]
+                                val rect = root?.let { Rect(it.center.x - it.radius, it.center.y - it.radius, it.center.x + it.radius, it.center.y + it.radius) }
+                                onRootAnchorChanged(rect?.takeIf { bounds != null && it.left >= bounds.left && it.right <= bounds.right && it.top >= bounds.top && it.bottom <= bounds.bottom })
+                            }
                             if (viewport != bounds) viewport = bounds
                         })
                 } else {
                     Spacer(Modifier.fillMaxWidth().height(graphHeight))
                 }
-                OrganizationActivityFeed(uiState.activityFeed, uiState.isActivityFeedExpanded, onToggleActivityFeed, Modifier.onSizeChanged { activityHeight = it.height }.padding(top = 12.dp, bottom = 16.dp), reduceMotion = uiState.reduceMotion)
+                if (!embedded) OrganizationActivityFeed(uiState.activityFeed, uiState.isActivityFeedExpanded, onToggleActivityFeed, Modifier.onSizeChanged { activityHeight = it.height }.padding(top = 12.dp, bottom = 16.dp), reduceMotion = uiState.reduceMotion)
             }
         }
         val rememberedNode = selectedNode
