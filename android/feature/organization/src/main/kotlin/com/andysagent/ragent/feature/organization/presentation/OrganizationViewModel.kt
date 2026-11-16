@@ -2,6 +2,8 @@ package com.andysagent.ragent.feature.organization.presentation
 
 import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.ViewModel
+import com.andysagent.ragent.core.designsystem.MotionPreference
+import com.andysagent.ragent.feature.organization.data.BirthCue
 import androidx.lifecycle.viewModelScope
 import com.andysagent.ragent.feature.organization.animation.CommunicationVisualScheduler
 import com.andysagent.ragent.feature.organization.animation.GraphDiffAnimator
@@ -30,6 +32,8 @@ private data class ViewportAnimationBundle(
     val focus: String?,
 )
 
+private data class GraphRenderState(val layout: LayoutResult? = null, val physics: PhysicsSnapshot = PhysicsSnapshot())
+
 private data class OrganizationInteractionState(
     val selectedSheetNodeId: String?,
     val activeDetailNodeId: String?,
@@ -42,7 +46,25 @@ class OrganizationViewModel(
     private val layoutEngine: OrganizationLayoutEngine = OrganizationLayoutEngine(),
 ) : ViewModel() {
 
-    fun applyProjection(projection: OrganizationProjectionDto) = repository.applyProjection(projection)
+    fun applyProjection(projection: OrganizationProjectionDto, birthCues: List<BirthCue> = emptyList()) {
+        if (birthCues.isNotEmpty()) {
+            pendingBirths = (pendingBirths + birthCues.mapIndexed { index, cue -> PhysicsBirth(cue.nodeId, cue.actorNodeId, index) })
+                .distinctBy { it.nodeId }
+        }
+        repository.applyProjection(projection)
+    }
+
+    private val physics = OrganizationPhysicsSolver()
+    private val renderState = MutableStateFlow(GraphRenderState())
+    private var motionPreference = MotionPreference.Full
+    private var pendingBirths: List<PhysicsBirth> = emptyList()
+    private var lastLayoutKey: String? = null
+    private var lastAppliedLayoutKey: String? = null
+    private var lastFitKey: String? = null
+    private var lastFitScale: Float? = null
+    private var lastAppliedWidth = 0f
+    private var lastAppliedHeight = 0f
+    private var hasUserTransform = false
 
     private val diffAnimator = GraphDiffAnimator(viewModelScope)
     private val communicationScheduler = CommunicationVisualScheduler(viewModelScope)
@@ -61,7 +83,6 @@ class OrganizationViewModel(
     private var viewportDensity = 1f
     private var layoutGeneration = 0L
 
-    private val layoutResult = MutableStateFlow<LayoutResult?>(null)
     private val previousPositions = mutableMapOf<String, EdgePoint>()
 
     private val _uiState = MutableStateFlow(OrganizationUiState())
@@ -103,11 +124,13 @@ class OrganizationViewModel(
         viewModelScope.launch {
             combine(
                 repository.state,
-                layoutResult,
+                renderState,
                 bundleFlow,
                 interactionFlow,
-            ) { state, layout, bundle, interaction ->
-                OrganizationUiMapper.mapToUiState(
+            ) { state, render, bundle, interaction ->
+                val layout = render.layout
+                val physicsFrame = render.physics
+                val mapped = OrganizationUiMapper.mapToUiState(
                         state = state,
                         layout = layout ?: LayoutResult(emptyMap(), emptyList(), LayoutBounds(0f, 0f, 0f, 0f), null),
                         nodeAnimations = bundle.nodeAnims,
@@ -120,6 +143,14 @@ class OrganizationViewModel(
                         isActivityFeedExpanded = interaction.isActivityFeedExpanded,
                         reduceMotion = interaction.reduceMotion,
                     )
+                mapped.copy(
+                    nodes = mapped.nodes.map { node ->
+                        val frame = physicsFrame.frames[node.id]
+                        if (frame == null) node else node.copy(x = frame.centerX, y = frame.centerY,
+                            radiusDp = frame.radiusDp, scale = 1f, physicsFrame = frame)
+                    },
+                    physicsRunning = physicsFrame.running,
+                )
             }.collect { mapped ->
                 _uiState.value = mapped
             }
@@ -128,7 +159,9 @@ class OrganizationViewModel(
 
     fun updateViewportSize(width: Float, height: Float, density: Float = 1f) {
         if (width.isFinite() && height.isFinite() && density.isFinite() && width > 0 && height > 0 && density > 0 &&
-            (width != viewportWidth || height != viewportHeight || density != viewportDensity)) {
+            (viewportWidth == 0f || viewportHeight == 0f || density != viewportDensity ||
+                kotlin.math.abs(width - viewportWidth) / viewportWidth >= .03f ||
+                kotlin.math.abs(height - viewportHeight) / viewportHeight >= .03f)) {
             viewportWidth = width
             viewportHeight = height
             viewportDensity = density
@@ -142,6 +175,20 @@ class OrganizationViewModel(
         collapsed: Set<String>,
     ) {
         if (viewportWidth <= 0f || viewportHeight <= 0f) return
+        val topology = buildString {
+            append(state.rootSessionId).append('\u0001')
+            state.nodes.values.sortedBy { it.id }.forEach { append(it.id).append('\u0000').append(it.parentId).append('\u0000').append(it.sessionId).append('\u0000').append(it.role).append('\u0000').append(it.domain).append('\u0001') }
+            state.edges.sortedBy { it.id }.forEach { append(it.id).append('\u0000').append(it.fromNodeId).append('\u0000').append(it.toNodeId).append('\u0000').append(it.type).append('\u0001') }
+            collapsed.sorted().forEach { append(it).append('\u0001') }
+        }
+        val fitKey = "$topology|$viewportWidth|$viewportHeight|$viewportDensity"
+        val layoutKey = "$fitKey|$focus"
+        if (lastLayoutKey == layoutKey) {
+            if (lastAppliedLayoutKey == layoutKey) pendingBirths = emptyList()
+            return
+        }
+        lastLayoutKey = layoutKey
+        val retainedFit = lastFitScale.takeIf { lastFitKey == fitKey }
         val generation = ++layoutGeneration
         val width = viewportWidth
         val height = viewportHeight
@@ -158,28 +205,68 @@ class OrganizationViewModel(
                     focusNodeId = focus,
                     collapsedClusterIds = collapsed,
                     previousPositions = positions,
+                    preferredFitScale = retainedFit,
+                    rootSessionId = state.rootSessionId,
                 )
             }
             if (generation != layoutGeneration) return@launch
+            if (hasUserTransform && lastAppliedWidth > 0f && lastAppliedHeight > 0f) {
+                val oldRoot = result.rootId?.let(previousPositions::get)
+                val newRoot = result.rootId?.let(result.nodePositions::get)
+                if (oldRoot != null && newRoot != null) {
+                    val zoom = zoomScale.value
+                    val oldCenter = Offset(lastAppliedWidth / 2f, lastAppliedHeight / 2f)
+                    val newCenter = Offset(width / 2f, height / 2f)
+                    val oldScreen = oldCenter + (Offset(oldRoot.x, oldRoot.y) - oldCenter) * zoom
+                    val newScreen = newCenter + (Offset(newRoot.x, newRoot.y) - newCenter) * zoom
+                    panOffset.value += oldScreen - newScreen
+                }
+            }
+            val minimumZoom = minimumZoomFor(result, density)
+            if (zoomScale.value < minimumZoom) zoomScale.value = minimumZoom
+            lastAppliedWidth = width; lastAppliedHeight = height
+            lastFitKey = fitKey; lastFitScale = result.fitScale
+            lastAppliedLayoutKey = layoutKey
+            val parents = state.nodes.mapValues { it.value.parentId }.toMutableMap()
+            result.nodePositions.values.filter { it.isCluster }.forEach { parents[it.id] = it.id.removePrefix("cluster_") }
+            val births = pendingBirths.filter { it.nodeId in result.nodePositions }
+            // Hidden/clustered creations are consumed, never replayed when a cluster opens.
+            pendingBirths = emptyList()
+            val frame = physics.updateTargets(result, parents, density, births, motionPreference == MotionPreference.Full && !reduceMotion.value)
             // Update previous positions cache for stable layout diffs
             previousPositions.clear()
             result.nodePositions.forEach { (id, pos) ->
                 previousPositions[id] = EdgePoint(pos.x, pos.y)
             }
-            layoutResult.value = result
+            renderState.value = GraphRenderState(result, frame)
         }
     }
 
     fun onPan(dragAmount: Offset) {
+        hasUserTransform = true
         panOffset.value = panOffset.value + dragAmount
     }
 
+    private fun minimumZoomFor(layout: LayoutResult?, density: Float): Float {
+        val positions = layout?.nodePositions?.values?.toList().orEmpty()
+        val minimumRadius = positions.minOfOrNull { it.radius * it.scale } ?: 32f
+        var minimumSeparation = Float.POSITIVE_INFINITY
+        positions.forEachIndexed { index, node ->
+            positions.drop(index + 1).forEach { other ->
+                minimumSeparation = minOf(minimumSeparation, kotlin.math.hypot(node.x - other.x, node.y - other.y))
+            }
+        }
+        val hitFloor = if (minimumSeparation.isFinite()) 64f * density / minimumSeparation.coerceAtLeast(.01f) else 0f
+        return maxOf(24f / minimumRadius.coerceAtLeast(.01f), hitFloor).coerceIn(.75f, 2.25f)
+    }
+
     fun onZoom(zoomMultiplier: Float) {
-        val current = zoomScale.value
-        zoomScale.value = (current * zoomMultiplier).coerceIn(0.75f, 2.25f)
+        hasUserTransform = true
+        zoomScale.value = (zoomScale.value * zoomMultiplier).coerceIn(minimumZoomFor(renderState.value.layout, viewportDensity), 2.25f)
     }
 
     fun onResetView() {
+        hasUserTransform = false
         panOffset.value = Offset.Zero
         zoomScale.value = 1.0f
         focusNodeId.value = null
@@ -229,7 +316,20 @@ class OrganizationViewModel(
         // User rejected action
     }
 
+    fun setMotionPreference(preference: MotionPreference) {
+        if (motionPreference == preference) return
+        motionPreference = preference
+        if (preference != MotionPreference.Full) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
+    }
+
+    fun advancePhysicsFrame(frameNanos: Long) {
+        if (motionPreference == MotionPreference.Full && !reduceMotion.value && renderState.value.physics.running) {
+            renderState.value = renderState.value.copy(physics = physics.advance(frameNanos))
+        }
+    }
+
     fun setReduceMotion(reduce: Boolean) {
         reduceMotion.value = reduce
+        if (reduce) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
     }
 }

@@ -53,6 +53,7 @@ data class LayoutResult(
     val edges: List<EdgePathModel>,
     val bounds: LayoutBounds,
     val rootId: String?,
+    val fitScale: Float = 1f,
 )
 
 class OrganizationLayoutEngine {
@@ -69,6 +70,8 @@ class OrganizationLayoutEngine {
         collapsedClusterIds: Set<String> = emptySet(),
         previousPositions: Map<String, EdgePoint> = emptyMap(),
         density: Float = 1f,
+        preferredFitScale: Float? = null,
+        rootSessionId: String? = null,
     ): LayoutResult {
         if (nodes.isEmpty()) {
             return LayoutResult(
@@ -79,40 +82,24 @@ class OrganizationLayoutEngine {
             )
         }
 
-        val rootNode = nodes.values.firstOrNull { it.role == NodeRole.EXECUTIVE }
+        val rootNode = rootSessionId?.let { session -> nodes.values.singleOrNull { it.sessionId == session } }
+            ?: nodes.values.firstOrNull { it.role == NodeRole.EXECUTIVE }
             ?: nodes.values.firstOrNull { it.parentId == null }
             ?: nodes.values.first()
 
         val rootId = rootNode.id
         val childrenByParent = nodes.values.groupBy { it.parentId }
-        // Depth is based only on the actual parent chain, never on the visual center.
-        fun managementDepth(node: OrganizationNodeModel): Int? {
-            val seen = mutableSetOf<String>()
-            var current = node
-            var depth = 0
-            while (true) {
-                if (!seen.add(current.id)) return null
-                val parentId = current.parentId ?: return depth
-                current = nodes[parentId] ?: return null
-                depth++
-            }
+        // Size derives from real management ancestry; review roles and labels do not create hierarchy.
+        fun descendantHeight(id: String, seen: Set<String> = emptySet()): Int {
+            if (id in seen) return 0
+            val children = childrenByParent[id].orEmpty().filter { it.id != id && it.id !in seen }
+            return if (children.isEmpty()) 0 else 1 + (children.maxOfOrNull { descendantHeight(it.id, seen + id) } ?: 0)
         }
+        val maximumDescendantHeight = nodes.keys.maxOfOrNull { descendantHeight(it) } ?: 0
         fun nodeRadius(node: OrganizationNodeModel): Float {
-            if (node.role == NodeRole.EXECUTIVE) return 36f
-            val manages = node.role == NodeRole.MANAGER || node.role == NodeRole.PHASE_LEAD ||
-                childrenByParent[node.id].orEmpty().any { it.id != node.id }
-            if (!manages) return 24f
-            return when (managementDepth(node)) {
-                0 -> 36f
-                1 -> 32f
-                2 -> 28f
-                null -> when (node.role) {
-                    NodeRole.MANAGER -> 32f
-                    NodeRole.PHASE_LEAD -> 28f
-                    else -> 24f
-                }
-                else -> 26f
-            }
+            if (node.id == rootId) return 42f
+            val hierarchyFraction = descendantHeight(node.id).toFloat() / (maximumDescendantHeight + 1).toFloat()
+            return 28f * (1f + .5f * hierarchyFraction)
         }
         val calculatedPositions = mutableMapOf<String, EdgePoint>()
         val clusterNodes = mutableMapOf<String, NodePosition>()
@@ -254,6 +241,51 @@ class OrganizationLayoutEngine {
         // Add cluster nodes to position map
         nodePositions.putAll(clusterNodes)
 
+        // A single scale fits actual node/touch bounds. If the 48dp minimum prevents
+        // fitting, retain that minimum and let the viewport pan over the overflow.
+        // The 48dp leaf floor also applies when a snapshot currently has only a root.
+        val minFit = 24f / 28f
+        val maxFit = max(minFit, 32f / 28f)
+        fun extents(scale: Float): LayoutBounds {
+            var l = Float.POSITIVE_INFINITY; var t = Float.POSITIVE_INFINITY
+            var r = Float.NEGATIVE_INFINITY; var b = Float.NEGATIVE_INFINITY
+            nodePositions.values.forEach { pos ->
+                val point = calculatedPositions.getValue(pos.id)
+                val extent = (max(pos.radius * scale * max(pos.scale, 1f), 32f) + 8f) * d
+                l = min(l, point.x * scale - extent); r = max(r, point.x * scale + extent)
+                t = min(t, point.y * scale - extent); b = max(b, point.y * scale + extent)
+            }
+            return LayoutBounds(l, t, r, b)
+        }
+        val fit = preferredFitScale?.coerceIn(minFit, maxFit) ?: run {
+            var low = minFit; var high = maxFit
+            repeat(20) {
+                val middle = (low + high) / 2f
+                val bounds = extents(middle)
+                if (bounds.width <= viewportWidth * .88f && bounds.height <= viewportHeight * .86f) low = middle else high = middle
+            }
+            low
+        }
+        val fitted = extents(fit)
+        val shiftX = viewportWidth / 2f - fitted.centerX
+        val rootPosition = calculatedPositions.getValue(rootId)
+        val rootRadius = nodePositions.getValue(rootId).radius * fit
+        val rootSafety = max(56f * d, (max(rootRadius, 32f) + 8f) * d)
+        val shiftY = if (fitted.height <= viewportHeight * .86f) {
+            viewportHeight / 2f - (fitted.minY + fitted.maxY) / 2f
+        } else {
+            rootSafety.coerceAtMost(84f * d) - rootPosition.y * fit
+        }
+        calculatedPositions.keys.toList().forEach { id ->
+            val point = calculatedPositions.getValue(id)
+            calculatedPositions[id] = EdgePoint(point.x * fit + shiftX, point.y * fit + shiftY)
+        }
+        nodePositions.keys.toList().forEach { id ->
+            val point = calculatedPositions.getValue(id)
+            val node = nodePositions.getValue(id)
+            nodePositions[id] = node.copy(x = point.x, y = point.y, radius = node.radius * fit)
+        }
+
         // 4. Edge routing
         val edgePaths = mutableListOf<EdgePathModel>()
         val clusterByChild = clusterNodes.values.flatMap { cluster -> cluster.clusterChildIds.map { it to cluster.id } }.toMap()
@@ -304,6 +336,7 @@ class OrganizationLayoutEngine {
             edges = edgePaths,
             bounds = bounds,
             rootId = rootId,
+            fitScale = fit,
         )
     }
 }

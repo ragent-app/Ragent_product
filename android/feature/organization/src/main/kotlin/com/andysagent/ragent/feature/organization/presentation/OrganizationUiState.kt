@@ -8,6 +8,21 @@ import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.layout.LayoutBounds
 
+/** One shared graph frame, in graph-local physical pixels and unzoomed dp. */
+data class NodePhysicsFrame(
+    val centerX: Float,
+    val centerY: Float,
+    val radiusDp: Float,
+    val birthProgress: Float = 1f,
+    val birthSourceId: String? = null,
+    val birthVisible: Boolean = true,
+    val clickable: Boolean = true,
+    val iconAlpha: Float = 1f,
+    val sourceDeformation: Float = 0f,
+    val deformationDirectionX: Float = 0f,
+    val deformationDirectionY: Float = 1f,
+)
+
 data class RenderedNodeUiState(
     val id: String,
     val x: Float,
@@ -34,6 +49,7 @@ data class RenderedNodeUiState(
     val accessibilityText: String = "",
     val hasRecognizedDomain: Boolean = false,
     val professionName: String? = null,
+    val physicsFrame: NodePhysicsFrame? = null,
 )
 
 data class RenderedEdgeUiState(
@@ -135,5 +151,6 @@ data class OrganizationUiState(
     val bounds: LayoutBounds = LayoutBounds(0f, 0f, 1000f, 1000f),
     val focusNodeId: String? = null,
     val reduceMotion: Boolean = false,
+    val physicsRunning: Boolean = false,
     val isLoading: Boolean = false,
 )
