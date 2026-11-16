@@ -23,7 +23,9 @@ internal class OrganizationPhysicsSolver {
         var materialElapsed: Float = 0f,
         var materialStarted: Boolean = false,
         var materialGapDp: Float = 0f,
-        var recoilX: Float = 0f, var recoilY: Float = 0f, var recoilVx: Float = 0f, var recoilVy: Float = 0f,
+        var releaseAge: Float = 0f,
+        var releaseX: Float = 0f, var releaseY: Float = 0f,
+        var releaseOffsetX: Float = 0f, var releaseOffsetY: Float = 0f,
     )
     private val bodies = linkedMapOf<String, Body>()
     private var density = 1f
@@ -102,7 +104,7 @@ internal class OrganizationPhysicsSolver {
             b.x = b.targetX; b.y = b.targetY; b.vx = 0f; b.vy = 0f
             b.radius = b.targetRadius; b.radiusVelocity = 0f
             if (preserveMaterial && b.source != null) b.birthSettled = true else b.source = null
-            b.recoilX = 0f; b.recoilY = 0f; b.recoilVx = 0f; b.recoilVy = 0f
+            b.launched = false; b.releaseAge = 0f
         }
         moving = false
         lastFrameNanos = null
@@ -122,9 +124,7 @@ internal class OrganizationPhysicsSolver {
         val positionTolerance = .10f * density
         moving = bodies.values.any { b -> (b.source != null && (!b.birthSettled || b.materialStarted && b.materialElapsed < materialDuration)) || abs(b.x - b.targetX) > positionTolerance ||
             abs(b.y - b.targetY) > positionTolerance || abs(b.vx) > .5f * density || abs(b.vy) > .5f * density ||
-            abs(b.radius - b.targetRadius) > .025f || abs(b.radiusVelocity) > .1f ||
-            abs(b.recoilX) > .05f * density || abs(b.recoilY) > .05f * density ||
-            abs(b.recoilVx) > .25f * density || abs(b.recoilVy) > .25f * density }
+            abs(b.radius - b.targetRadius) > .025f || abs(b.radiusVelocity) > .1f }
         if (!moving) return snapToTargets(preserveMaterial = true)
         return snapshot()
     }
@@ -134,84 +134,86 @@ internal class OrganizationPhysicsSolver {
         return source.source == null || source.radius >= source.targetRadius * .85f
     }
 
+    private fun mass(body: Body): Float = (body.targetRadius * body.targetRadius * if (body.root) 2f else 1f).coerceAtLeast(.001f)
+
+    private fun releaseBlend(body: Body): Float {
+        val t = (body.releaseAge / .2f).coerceIn(0f, 1f)
+        return t * t * (3f - 2f * t)
+    }
+
     private fun integrate(dt: Float) {
+        // Resolve attachment and one-time release before evaluating any forces.
+        bodies.values.forEach { b ->
+            val active = b.source != null && !b.birthSettled
+            if (b.source != null && b.materialStarted) b.materialElapsed = (b.materialElapsed + dt).coerceAtMost(materialDuration)
+            if (active && sourceReady(b)) b.birthAge += dt
+            val age = (b.birthAge - b.birthDelay).coerceAtLeast(0f)
+            val actor = if (active && !b.launched) b.source?.let(bodies::get) else null
+            if (actor != null) {
+                val dx = b.targetX - actor.targetX; val dy = b.targetY - actor.targetY
+                val length = hypot(dx, dy)
+                val ux = if (length > .001f) dx / length else 0f
+                val uy = if (length > .001f) dy / length else 1f
+                val t = (age / .14f).coerceIn(0f, 1f)
+                val budding = t * t * (3f - 2f * t)
+                b.radius = 2f + (b.targetRadius * .35f - 2f).coerceAtLeast(0f) * budding
+                b.radiusVelocity = 0f
+                val distance = (actor.radius + (-.7f + .4f * budding) * b.radius).coerceAtLeast(0f) * density
+                b.x = actor.x + ux * distance; b.y = actor.y + uy * distance
+                b.vx = actor.vx; b.vy = actor.vy
+                if (age >= .22f) {
+                    val parent = b.parent?.let(bodies::get)
+                    b.releaseX = b.x; b.releaseY = b.y
+                    b.releaseOffsetX = b.x - (parent?.x ?: b.x)
+                    b.releaseOffsetY = b.y - (parent?.y ?: b.y)
+                    b.releaseAge = 0f
+                    val sourceMass = mass(actor); val childMass = mass(b)
+                    val reducedMass = sourceMass * childMass / (sourceMass + childMass)
+                    val side = if (dx >= 0f) -1f else 1f
+                    val jx = reducedMass * (80f * ux - 12f * side * uy) * density
+                    val jy = reducedMass * (80f * uy + 12f * side * ux) * density
+                    b.vx += jx / childMass; b.vy += jy / childMass
+                    actor.vx -= jx / sourceMass; actor.vy -= jy / sourceMass
+                    b.launched = true
+                }
+            } else if (b.launched && b.releaseAge < .2f) {
+                b.releaseAge = (b.releaseAge + dt).coerceAtMost(.2f)
+            }
+        }
         val accelerations = bodies.values.associate { b ->
             val omega = if (b.root) 18f else 8f
             val damping = if (b.root) .95f else .90f
-            b.id to floatArrayOf(-omega * omega * (b.x - b.targetX) - 2f * damping * omega * b.vx,
-                -omega * omega * (b.y - b.targetY) - 2f * damping * omega * b.vy)
+            val blend = if (b.launched) releaseBlend(b) else 1f
+            val anchorX = if (b.launched) b.releaseX + (b.targetX - b.releaseX) * blend else b.targetX
+            val anchorY = if (b.launched) b.releaseY + (b.targetY - b.releaseY) * blend else b.targetY
+            b.id to floatArrayOf(-omega * omega * (b.x - anchorX) - 2f * damping * omega * b.vx,
+                -omega * omega * (b.y - anchorY) - 2f * damping * omega * b.vy)
         }
-        val reactions = bodies.keys.associateWith { floatArrayOf(0f, 0f) }
-        val birthReactions = bodies.keys.associateWith { floatArrayOf(0f, 0f) }
         bodies.values.forEach { child ->
-            if (child.source != null && !child.birthSettled && (!sourceReady(child) || child.birthAge - child.birthDelay < .22f)) return@forEach
+            if (child.source != null && !child.launched && !child.birthSettled) return@forEach
             val parent = child.parent?.let(bodies::get) ?: return@forEach
-            val tx = child.targetX - parent.targetX; val ty = child.targetY - parent.targetY
-            val length = hypot(tx, ty).coerceAtLeast(1f); val ux = tx / length; val uy = ty / length
+            val targetX = child.targetX - parent.targetX; val targetY = child.targetY - parent.targetY
+            val blend = if (child.launched) releaseBlend(child) else 1f
+            val tx = if (child.launched) child.releaseOffsetX + (targetX - child.releaseOffsetX) * blend else targetX
+            val ty = if (child.launched) child.releaseOffsetY + (targetY - child.releaseOffsetY) * blend else targetY
+            val length = hypot(targetX, targetY)
+            val ux = if (length > .001f) targetX / length else 0f
+            val uy = if (length > .001f) targetY / length else 1f
             val ex = (child.x - parent.x) - tx; val ey = (child.y - parent.y) - ty
             val vx = child.vx - parent.vx; val vy = child.vy - parent.vy
             val radial = -14f * 14f * (ex * ux + ey * uy) - 2f * .68f * 14f * (vx * ux + vy * uy)
             val tangent = -10f * 10f * (-ex * uy + ey * ux) - 2f * .78f * 10f * (-vx * uy + vy * ux)
             val ax = radial * ux - tangent * uy; val ay = radial * uy + tangent * ux
-            val childForce = accelerations.getValue(child.id); childForce[0] += ax; childForce[1] += ay
-            val childMass = child.targetRadius * child.targetRadius
-            val parentMass = parent.targetRadius * parent.targetRadius * if (parent.root) 2f else 1f
-            val birthActive = child.source != null && !child.birthSettled
-            val reactionTarget = (if (birthActive) child.source?.let(bodies::get) else null) ?: parent
-            val reactionMass = reactionTarget.targetRadius * reactionTarget.targetRadius * if (reactionTarget.root) 2f else 1f
-            val parentForce = if (birthActive) birthReactions.getValue(reactionTarget.id) else reactions.getValue(parent.id)
-            val mass = if (birthActive) reactionMass else parentMass
-            parentForce[0] -= ax * childMass / mass
-            parentForce[1] -= ay * childMass / mass
-        }
-        bodies.values.forEach { body ->
-            val reaction = reactions.getValue(body.id)
-            val force = accelerations.getValue(body.id)
-            force[0] += reaction[0]; force[1] += reaction[1]
-            val birthForce = birthReactions.getValue(body.id)
-            val limit = (if (body.root) 2f else 4f) * density
-            val accelerationLimit = limit * 18f * 18f
-            body.recoilVx += (-18f * 18f * body.recoilX - 2f * .95f * 18f * body.recoilVx + birthForce[0].coerceIn(-accelerationLimit, accelerationLimit)) * dt
-            body.recoilVy += (-18f * 18f * body.recoilY - 2f * .95f * 18f * body.recoilVy + birthForce[1].coerceIn(-accelerationLimit, accelerationLimit)) * dt
-            body.recoilX += body.recoilVx * dt; body.recoilY += body.recoilVy * dt
-            val magnitude = hypot(body.recoilX, body.recoilY)
-            if (magnitude > limit && magnitude > 0f) {
-                body.recoilX *= limit / magnitude; body.recoilY *= limit / magnitude
-                val outward = (body.recoilVx * body.recoilX + body.recoilVy * body.recoilY) / (limit * limit)
-                if (outward > 0f) { body.recoilVx -= outward * body.recoilX; body.recoilVy -= outward * body.recoilY }
-            }
+            val childMass = mass(child); val parentMass = mass(parent)
+            val reducedMass = childMass * parentMass / (childMass + parentMass)
+            val childForce = accelerations.getValue(child.id); val parentForce = accelerations.getValue(parent.id)
+            childForce[0] += ax * reducedMass / childMass; childForce[1] += ay * reducedMass / childMass
+            parentForce[0] -= ax * reducedMass / parentMass; parentForce[1] -= ay * reducedMass / parentMass
         }
         bodies.values.forEach { b ->
             val activeBirth = b.source != null && !b.birthSettled
-            if (b.source != null && b.materialStarted) b.materialElapsed = (b.materialElapsed + dt).coerceAtMost(materialDuration)
-            if (activeBirth && sourceReady(b)) b.birthAge += dt
             val emergence = (b.birthAge - b.birthDelay).coerceAtLeast(0f)
-            if (activeBirth && emergence < .22f) {
-                val actor = b.source?.let(bodies::get)
-                if (actor != null) {
-                    val dx = b.targetX - actor.targetX; val dy = b.targetY - actor.targetY
-                    val length = hypot(dx, dy).coerceAtLeast(1f)
-                    val t = (emergence / .14f).coerceIn(0f, 1f)
-                    val budding = t * t * (3f - 2f * t)
-                    b.radius = 2f + (b.targetRadius * .35f - 2f).coerceAtLeast(0f) * budding
-                    b.radiusVelocity = 0f
-                    val distance = (actor.radius + (-.7f + .4f * budding) * b.radius).coerceAtLeast(0f) * density
-                    b.x = actor.x + actor.recoilX + dx / length * distance - b.recoilX
-                    b.y = actor.y + actor.recoilY + dy / length * distance - b.recoilY
-                    b.vx = 0f; b.vy = 0f
-                }
-            } else {
-                if (activeBirth && !b.launched) {
-                    val actor = b.source?.let(bodies::get)
-                    if (actor != null) {
-                        val dx = b.targetX - actor.targetX; val dy = b.targetY - actor.targetY
-                        val length = hypot(dx, dy).coerceAtLeast(1f)
-                        val direction = if (dx >= 0f) -1f else 1f
-                        b.vx += (-dy / length) * direction * 30f * density
-                        b.vy += (dx / length) * direction * 30f * density
-                    }
-                    b.launched = true
-                }
+            if (!activeBirth || b.launched) {
                 val a = accelerations.getValue(b.id)
                 b.vx += a[0] * dt; b.vy += a[1] * dt
                 b.x += b.vx * dt; b.y += b.vy * dt
@@ -273,6 +275,21 @@ internal class OrganizationPhysicsSolver {
                 }
             }
         }
+        // Sources may have moved during this substep or a layout constraint. Keep
+        // attached children on their final displayed source, including its velocity.
+        bodies.values.forEach { b ->
+            if (b.source == null || b.launched || b.birthSettled) return@forEach
+            val actor = b.source?.let(bodies::get) ?: return@forEach
+            val dx = b.targetX - actor.targetX; val dy = b.targetY - actor.targetY
+            val length = hypot(dx, dy)
+            val ux = if (length > .001f) dx / length else 0f
+            val uy = if (length > .001f) dy / length else 1f
+            val t = ((b.birthAge - b.birthDelay).coerceAtLeast(0f) / .14f).coerceIn(0f, 1f)
+            val budding = t * t * (3f - 2f * t)
+            val distance = (actor.radius + (-.7f + .4f * budding) * b.radius).coerceAtLeast(0f) * density
+            b.x = actor.x + ux * distance; b.y = actor.y + uy * distance
+            b.vx = actor.vx; b.vy = actor.vy
+        }
     }
 
     private fun snapshot(): PhysicsSnapshot {
@@ -296,7 +313,7 @@ internal class OrganizationPhysicsSolver {
         }
         return PhysicsSnapshot(bodies.mapValues { (_, b) ->
             val progress = if (b.targetRadius > 0f) (b.radius / b.targetRadius).coerceIn(0f, 1f) else 1f
-            NodePhysicsFrame(b.x + b.recoilX, b.y + b.recoilY, b.radius, progress, b.source,
+            NodePhysicsFrame(b.x, b.y, b.radius, progress, b.source,
                 separationMaterialProgress = if (b.source == null || materialDuration == 0f) 1f else (b.materialElapsed / materialDuration).coerceIn(0f, 1f),
                 birthVisible = b.source == null || (sourceReady(b) && b.birthAge >= b.birthDelay),
                 clickable = b.source == null || (sourceReady(b) && progress >= .85f),
