@@ -1,0 +1,14 @@
+<resources>
+    <string name="org_conversation_loading">正在加载工作会话…</string>
+    <string name="org_conversation_unbound">暂无工作会话</string>
+    <string name="org_conversation_denied">无法查看此会话</string>
+    <string name="org_conversation_offline">已离线，显示最近核实的消息</string>
+    <string name="org_conversation_error">会话暂不可用</string>
+    <string name="org_conversation_empty">暂无消息</string>
+    <string name="org_conversation_new">有新消息</string>
+    <string name="org_conversation_older">查看更多消息</string>
+    <string name="org_conversation_input">输入</string>
+    <string name="org_conversation_output">输出</string>
+    <string name="org_conversation_exit">退出码</string>
+    <string name="org_conversation_latest">回到最新</string>
+</resources>

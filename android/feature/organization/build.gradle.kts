@@ -25,6 +25,7 @@ dependencies {
     implementation(project(":core:designsystem"))
     implementation(project(":core:agentui"))
     implementation(project(":core:timeline"))
+    implementation(project(":core:sync"))
     implementation(project(":core:navigation"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

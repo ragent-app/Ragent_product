@@ -1,0 +1,14 @@
+<resources>
+    <string name="org_conversation_loading">Loading conversation…</string>
+    <string name="org_conversation_unbound">No work conversation yet.</string>
+    <string name="org_conversation_denied">This conversation is not available.</string>
+    <string name="org_conversation_offline">Offline · showing last verified messages</string>
+    <string name="org_conversation_error">Conversation unavailable.</string>
+    <string name="org_conversation_empty">No messages yet.</string>
+    <string name="org_conversation_new">New messages</string>
+    <string name="org_conversation_older">Load earlier messages</string>
+    <string name="org_conversation_input">Input</string>
+    <string name="org_conversation_output">Output</string>
+    <string name="org_conversation_exit">Exit code</string>
+    <string name="org_conversation_latest">Back to latest</string>
+</resources>
