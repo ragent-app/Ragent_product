@@ -211,8 +211,10 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $stagedP2pHost -PathType Leaf)) {
         throw 'Windows P2P host staging failed.'
     }
+    # The builder has verified this exact binary as native Windows x64 PE32+.
+    $stagedP2pSha256 = (Get-FileHash -LiteralPath $stagedP2pHost -Algorithm SHA256).Hash
     foreach ($legacyP2pName in @(
-        'ragent-p2p-host', 'ragent-p2p-host.exe', 'ragent-p2p-host-amd64', 'ragent-p2p-host-arm64',
+        'ragent-p2p-host', 'ragent-p2p-host-amd64', 'ragent-p2p-host-arm64',
         'ragent-p2p-host-amd64.exe', 'ragent-p2p-host-arm64.exe'
     )) {
         $legacyP2pPath = Join-Path $stagedP2pBin $legacyP2pName
@@ -288,6 +290,11 @@ try {
         $brokerSha256 = (Get-FileHash -LiteralPath $brokerSource -Algorithm SHA256).Hash.ToLowerInvariant()
         $brokerManifest = [ordered]@{ schemaVersion = 1; productVersion = $Version; sha256 = $brokerSha256 } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText((Join-Path $brokerBuildRoot 'Ragent.PrivilegedBroker.manifest.json'), $brokerManifest, [Text.UTF8Encoding]::new($false))
+    }
+    # Keep the validated P2P binary in the final harvested payload.
+    if (-not (Test-Path -LiteralPath $stagedP2pHost -PathType Leaf) -or
+        (Get-FileHash -LiteralPath $stagedP2pHost -Algorithm SHA256).Hash -cne $stagedP2pSha256) {
+        throw 'Windows P2P host is missing or changed after validation.'
     }
     $payloadWxs = Join-Path $staging 'payload.wxs'
     $payloadDir = Join-Path $staging 'payload'
