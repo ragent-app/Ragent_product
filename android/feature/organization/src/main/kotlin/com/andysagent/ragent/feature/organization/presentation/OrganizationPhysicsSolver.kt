@@ -36,7 +36,15 @@ internal class OrganizationPhysicsSolver {
             if (source != null && source !in newIds) body.source = null
         }
         val cues = births.associateBy { it.nodeId }
-        layout.nodePositions.values.forEach { node ->
+        val remaining = layout.nodePositions.values.sortedBy { cues[it.id]?.order ?: -1 }.toMutableList()
+        while (remaining.isNotEmpty()) {
+            // An actor that is also newly present must be created before its child.
+            // Cycles or absent actors fall back to ordinary appearance.
+            val next = remaining.indexOfFirst { node ->
+                val actor = cues[node.id]?.actorNodeId
+                node.id in bodies || actor == null || actor in bodies || remaining.none { it.id == actor }
+            }.let { if (it < 0) 0 else it }
+            val node = remaining.removeAt(next)
             val targetRadius = node.radius * node.scale
             val existing = bodies[node.id]
             if (existing != null) {
@@ -61,6 +69,14 @@ internal class OrganizationPhysicsSolver {
         }
         if (!animate) snapToTargets() else if (moving) lastFrameNanos = null
         return snapshot()
+    }
+
+    /** Replays existing demo nodes through the same integrator; no business data changes. */
+    fun replayDemoBirths(layout: LayoutResult, parents: Map<String, String?>, density: Float,
+        births: List<PhysicsBirth>, animate: Boolean): PhysicsSnapshot {
+        if (!animate) return snapToTargets()
+        births.forEach { bodies.remove(it.nodeId) }
+        return updateTargets(layout, parents, density, births, animate = true)
     }
 
     fun snapToTargets(): PhysicsSnapshot {
@@ -93,6 +109,11 @@ internal class OrganizationPhysicsSolver {
         return snapshot()
     }
 
+    private fun sourceReady(body: Body): Boolean {
+        val source = body.source?.let(bodies::get) ?: return true
+        return source.source == null || source.radius >= source.targetRadius * .85f
+    }
+
     private fun integrate(dt: Float) {
         val accelerations = bodies.values.associate { b ->
             val omega = if (b.root) 18f else 8f
@@ -103,7 +124,7 @@ internal class OrganizationPhysicsSolver {
         val reactions = bodies.keys.associateWith { floatArrayOf(0f, 0f) }
         val birthReactions = bodies.keys.associateWith { floatArrayOf(0f, 0f) }
         bodies.values.forEach { child ->
-            if (child.source != null && child.birthAge - child.birthDelay < .08f) return@forEach
+            if (child.source != null && (!sourceReady(child) || child.birthAge - child.birthDelay < .08f)) return@forEach
             val parent = child.parent?.let(bodies::get) ?: return@forEach
             val tx = child.targetX - parent.targetX; val ty = child.targetY - parent.targetY
             val length = hypot(tx, ty).coerceAtLeast(1f); val ux = tx / length; val uy = ty / length
@@ -141,7 +162,7 @@ internal class OrganizationPhysicsSolver {
         }
         bodies.values.forEach { b ->
             val activeBirth = b.source != null
-            if (activeBirth) b.birthAge += dt
+            if (activeBirth && sourceReady(b)) b.birthAge += dt
             val emergence = (b.birthAge - b.birthDelay).coerceAtLeast(0f)
             if (activeBirth && emergence < .08f) {
                 val actor = b.source?.let(bodies::get)
@@ -232,7 +253,7 @@ internal class OrganizationPhysicsSolver {
         bodies.values.forEach { b ->
             val age = b.birthAge - b.birthDelay
             val source = b.source
-            if (source != null && age in 0f..0.08f) {
+            if (source != null && sourceReady(b) && age in 0f..0.08f) {
                 val value = sin(Math.PI.toFloat() * age / .08f)
                 if (value > (deformation[source] ?: 0f)) {
                     val actor = bodies[source]
@@ -248,8 +269,8 @@ internal class OrganizationPhysicsSolver {
         return PhysicsSnapshot(bodies.mapValues { (_, b) ->
             val progress = if (b.targetRadius > 0f) (b.radius / b.targetRadius).coerceIn(0f, 1f) else 1f
             NodePhysicsFrame(b.x + b.recoilX, b.y + b.recoilY, b.radius, progress, b.source,
-                birthVisible = b.source == null || b.birthAge >= b.birthDelay,
-                clickable = b.source == null || progress >= .85f,
+                birthVisible = b.source == null || (sourceReady(b) && b.birthAge >= b.birthDelay),
+                clickable = b.source == null || (sourceReady(b) && progress >= .85f),
                 iconAlpha = if (b.source == null) 1f else ((progress - .60f) / .25f).coerceIn(0f, 1f),
                 sourceDeformation = deformation[b.id] ?: 0f,
                 deformationDirectionX = deformationDirection[b.id]?.first ?: 0f,

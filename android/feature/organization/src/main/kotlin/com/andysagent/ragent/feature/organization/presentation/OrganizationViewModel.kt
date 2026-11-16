@@ -268,7 +268,7 @@ class OrganizationViewModel(
     fun onResetView() {
         hasUserTransform = false
         panOffset.value = Offset.Zero
-        zoomScale.value = 1.0f
+        zoomScale.value = maxOf(1.0f, minimumZoomFor(renderState.value.layout, viewportDensity))
         focusNodeId.value = null
     }
 
@@ -314,6 +314,23 @@ class OrganizationViewModel(
 
     fun onRejectBlocker(blockerId: String) {
         // User rejected action
+    }
+
+    /** Called only by the local debug demonstration, not by production events. */
+    fun replayLocalDemoBirths() {
+        val state = repository.state.value
+        if (state.organizationId != "demo_only") return
+        val layout = renderState.value.layout ?: return
+        val parents = state.nodes.mapValues { it.value.parentId }
+        val births = listOf("android", "backend").mapNotNull { id ->
+            val node = state.nodes[id] ?: return@mapNotNull null
+            if (node.parentId != "planning" || id !in layout.nodePositions || "planning" !in layout.nodePositions) null
+            else id
+        }.mapIndexed { index, id -> PhysicsBirth(id, "planning", index) }
+        if (births.isEmpty()) return
+        val frame = physics.replayDemoBirths(layout, parents, viewportDensity, births,
+            motionPreference == MotionPreference.Full && !reduceMotion.value)
+        renderState.value = renderState.value.copy(physics = frame)
     }
 
     fun setMotionPreference(preference: MotionPreference) {

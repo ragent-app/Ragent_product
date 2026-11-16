@@ -20,7 +20,8 @@ internal class LocalOrganizationDemoTransport(private val sessionId: String) : R
     override val invalidations = MutableSharedFlow<InvalidationHint>()
     private val connection = MutableStateFlow(RuntimeConnectionState.Connected)
     override val connectionState: StateFlow<RuntimeConnectionState> = connection
-    private var membersVisible = false
+    var membersVisible = false
+        private set
 
     suspend fun showMembers(visible: Boolean) {
         membersVisible = visible

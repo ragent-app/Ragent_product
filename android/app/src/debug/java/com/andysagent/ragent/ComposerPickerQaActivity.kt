@@ -9,6 +9,10 @@ import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import com.andysagent.ragent.feature.organization.ui.LocalOrganizationDemoBirthReplay
+import com.andysagent.ragent.feature.organization.ui.OrganizationDemoBirthReplay
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,9 +52,21 @@ import kotlinx.coroutines.delay
 class ComposerPickerQaActivity : ComponentActivity() {
     private var organizationDemoTransport: LocalOrganizationDemoTransport? = null
     private var organizationDemoSwitch: Job? = null
+    private val organizationDemoReplay = OrganizationDemoBirthReplay()
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         val transport = organizationDemoTransport
+        if (transport != null && keyCode == KeyEvent.KEYCODE_F8) {
+            if (event.repeatCount == 0) {
+                if (transport.membersVisible) {
+                    organizationDemoReplay.request()
+                    Toast.makeText(this, "本地出生动画演示", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "本地出生动画演示 · 请先显示五成员", Toast.LENGTH_SHORT).show()
+                }
+            }
+            return true
+        }
         if (transport != null && event.repeatCount == 0 &&
             (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
             val visible = keyCode == KeyEvent.KEYCODE_VOLUME_UP
@@ -79,7 +95,7 @@ class ComposerPickerQaActivity : ComponentActivity() {
         if (intent.getBooleanExtra("organization_demo", false)) {
             val demoSessionId = if (mixedProjectSessions) "qa-session-4" else "composer-visual-qa"
             organizationDemoTransport = LocalOrganizationDemoTransport(demoSessionId)
-            Toast.makeText(this, "本地演示 · 音量上键显示协作，音量下键还原", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "本地演示 · 音量键切换协作，F8重播出生动画", Toast.LENGTH_LONG).show()
         }
         val longPreviewTitles = intent.getBooleanExtra("long_preview_titles", false)
         val qaFontScale = intent.getFloatExtra("font_scale", 1f)
@@ -281,7 +297,12 @@ class ComposerPickerQaActivity : ComponentActivity() {
                         ))
                 }
             }
+            SideEffect {
+                if (!state.chatOpen || fullscreenOpen) organizationDemoReplay.discardPending()
+            }
             RagentTheme(darkTheme = dark, themeVariant = state.appTheme.value) {
+              CompositionLocalProvider(LocalOrganizationDemoBirthReplay provides
+                  if (organizationDemoTransport != null) organizationDemoReplay else null) {
                 if (fullscreenOpen) {
                     com.andysagent.ragent.core.agentui.FullscreenComposerModal(
                         value = state.composerText,
@@ -392,6 +413,7 @@ class ComposerPickerQaActivity : ComponentActivity() {
                     }
                 }, onAttentionOpenSession = { attention = AttentionUiState() },
                     organizationTransport = organizationDemoTransport)
+              }
             }
         }
     }
