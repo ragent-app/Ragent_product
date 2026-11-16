@@ -33,7 +33,7 @@ import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
 import kotlin.math.hypot
 
-internal data class OrganizationNodeAnchor(val center: Offset, val radius: Float, val baseRadiusDp: Float)
+internal data class OrganizationNodeAnchor(val center: Offset, val radius: Float, val baseRadiusDp: Float, val alpha: Float)
 
 @Composable
 internal fun OrganizationGraph(
@@ -110,7 +110,7 @@ internal fun OrganizationGraph(
         val layerCenter = Offset(actualCoordinates.size.width / 2f, actualCoordinates.size.height / 2f)
         val transformed = layerCenter + (position - layerCenter) * uiState.zoomScale + uiState.panOffset
         node.id to OrganizationNodeAnchor(actualCoordinates.localToRoot(transformed),
-            radius * density * (scales[node.id] ?: node.scale) * uiState.zoomScale, radius)
+            radius * density * (scales[node.id] ?: node.scale) * uiState.zoomScale, radius, opacity * (alphas[node.id] ?: node.alpha))
     }.toMap()
     SideEffect { onAnchorsChanged(anchors, viewport) }
     Box(modifier.clipToBounds().onSizeChanged { onSizeChanged(it.width, it.height, density) }.onGloballyPositioned { viewportCoordinates = it; viewportOrigin = it.localToRoot(Offset.Zero) }) {

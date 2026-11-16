@@ -46,13 +46,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     val density = LocalDensity.current
     val dark = colors.canvas.luminance() < .5f
     val visual = nodeVisual(node)
-    val accent = when (visual.family) {
-        NodeColorFamily.PURPLE -> if (dark) listOf(Color(0xFFADC1E5), Color(0xFFBAC1E9), Color(0xFFC5BEE5)) else listOf(Color(0xFF657AA5), Color(0xFF6E76A6), Color(0xFF7B73A1))
-        NodeColorFamily.WARM -> if (dark) listOf(Color(0xFFC5B58F), Color(0xFFCBB69B), Color(0xFFD0B7A8)) else listOf(Color(0xFF958263), Color(0xFF9B846C), Color(0xFFA08776))
-        NodeColorFamily.GREY -> if (dark) listOf(Color(0xFF95B2BE), Color(0xFF9EB0BC), Color(0xFFA8ADBB)) else listOf(Color(0xFF6F8997), Color(0xFF798696), Color(0xFF838293))
-        NodeColorFamily.BLUE -> if (dark) listOf(Color(0xFF92B6D5), Color(0xFF9FB2D4), Color(0xFFAEAED0)) else listOf(Color(0xFF6487A8), Color(0xFF6E84A6), Color(0xFF7A80A1))
-        NodeColorFamily.GREEN -> if (dark) listOf(Color(0xFF98BCAF), Color(0xFFA6BCAB), Color(0xFFB2BCA8)) else listOf(Color(0xFF64887F), Color(0xFF6E887C), Color(0xFF7A8A78))
-    }
+    val accent = nodeAccent(visual, dark)
     val status = when (node.runtimeState) {
         NodeRuntimeState.WORKING -> stringResource(R.string.organization_node_working)
         NodeRuntimeState.WAITING -> stringResource(R.string.organization_node_waiting)
@@ -78,13 +72,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     val press by rememberAgentoPressScale(interaction)
     val diameter = (node.radiusDp * 2f).dp
     val touchSize = maxOf(diameter, 64.dp)
-    val radius = node.radiusDp.coerceIn(24f, 36f)
-    val iconSize = when {
-        radius < 26f -> 22f + (radius - 24f)
-        radius < 28f -> 24f
-        radius < 32f -> 24f + (radius - 28f)
-        else -> 28f + (radius - 32f)
-    }.dp
+    val iconSize = nodeIconSize(node.radiusDp).dp
     Box(
         modifier = modifier.offset {
             val half = with(density) { touchSize.toPx() / 2f }
@@ -124,10 +112,30 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     }
 }
 
-private enum class NodeColorFamily { BLUE, PURPLE, GREEN, GREY, WARM }
-private data class NodeVisual(val icon: Int, val family: NodeColorFamily)
+internal fun nodeIconSize(radiusDp: Float): Float {
+    val radius = radiusDp.coerceIn(24f, 36f)
+    return when {
+        radius < 26f -> 22f + (radius - 24f)
+        radius < 28f -> 24f
+        radius < 32f -> 24f + (radius - 28f)
+        else -> 28f + (radius - 32f)
+    }
+}
 
-private fun nodeVisual(node: RenderedNodeUiState): NodeVisual {
+internal fun nodeAccent(visual: NodeVisual, dark: Boolean): List<Color> {
+    return when (visual.family) {
+        NodeColorFamily.PURPLE -> if (dark) listOf(Color(0xFFADC1E5), Color(0xFFBAC1E9), Color(0xFFC5BEE5)) else listOf(Color(0xFF657AA5), Color(0xFF6E76A6), Color(0xFF7B73A1))
+        NodeColorFamily.WARM -> if (dark) listOf(Color(0xFFC5B58F), Color(0xFFCBB69B), Color(0xFFD0B7A8)) else listOf(Color(0xFF958263), Color(0xFF9B846C), Color(0xFFA08776))
+        NodeColorFamily.GREY -> if (dark) listOf(Color(0xFF95B2BE), Color(0xFF9EB0BC), Color(0xFFA8ADBB)) else listOf(Color(0xFF6F8997), Color(0xFF798696), Color(0xFF838293))
+        NodeColorFamily.BLUE -> if (dark) listOf(Color(0xFF92B6D5), Color(0xFF9FB2D4), Color(0xFFAEAED0)) else listOf(Color(0xFF6487A8), Color(0xFF6E84A6), Color(0xFF7A80A1))
+        NodeColorFamily.GREEN -> if (dark) listOf(Color(0xFF98BCAF), Color(0xFFA6BCAB), Color(0xFFB2BCA8)) else listOf(Color(0xFF64887F), Color(0xFF6E887C), Color(0xFF7A8A78))
+    }
+}
+
+internal enum class NodeColorFamily { BLUE, PURPLE, GREEN, GREY, WARM }
+internal data class NodeVisual(val icon: Int, val family: NodeColorFamily)
+
+internal fun nodeVisual(node: RenderedNodeUiState): NodeVisual {
     when (node.role) {
         NodeRole.EXECUTIVE -> return NodeVisual(R.drawable.org_role_explore, NodeColorFamily.PURPLE)
         NodeRole.MANAGER -> return NodeVisual(R.drawable.org_role_route, NodeColorFamily.GREY)

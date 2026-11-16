@@ -1,6 +1,7 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateOffsetAsState
 import androidx.compose.animation.core.spring
@@ -11,7 +12,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,11 +26,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,7 +44,9 @@ import androidx.compose.ui.unit.sp
 import com.andysagent.ragent.core.designsystem.*
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.presentation.RenderedNodeUiState
+import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import kotlin.math.roundToInt
+import kotlin.math.pow
 
 @Composable
 internal fun OrganizationConversationIsland(
@@ -66,7 +74,7 @@ internal fun OrganizationConversationIsland(
     var openingStarted by remember(node.id) { mutableStateOf(false) }
     var lastProgress by remember(node.id) { mutableFloatStateOf(0f) }
     LaunchedEffect(node.id) { openingStarted = true }
-    val expansion by animateFloatAsState(if (deleted) lastProgress else if (expanded && openingStarted) 1f else 0f, animationSpec = islandMorphMotionSpec(preference), label = "conversation-shell")
+    val expansion by animateFloatAsState(if (deleted) lastProgress else if (expanded && openingStarted) 1f else 0f, animationSpec = when (preference) { MotionPreference.Full -> spring(dampingRatio = 1f, stiffness = 220f, visibilityThreshold = .002f); MotionPreference.Reduced -> tween(160, easing = FastOutSlowInEasing); MotionPreference.None -> tween(0) }, label = "conversation-shell")
     SideEffect { if (!deleted) lastProgress = expansion }
     var endpointHeight by remember(node.id) { mutableFloatStateOf(cardHeight) }
     var endpointWidth by remember(node.id) { mutableFloatStateOf(cardWidth) }
@@ -83,38 +91,47 @@ internal fun OrganizationConversationIsland(
     val targetCenter by animateOffsetAsState(endpointCenter, animationSpec = followSpec, label = "conversation-card-center")
     val deletionAlpha by animateFloatAsState(if (deleted) 0f else 1f, animationSpec = tween(if (preference == MotionPreference.None) 0 else 120), label = "conversation-deleted")
     var lastFrame by remember(node.id) { mutableStateOf<ConversationIslandFrame?>(null) }
-    val currentFrame = ConversationIslandFrame(expansion, liveCenter, liveRadius, targetWidth, targetHeight, targetCenter, anchor.baseRadiusDp)
+    val currentFrame = ConversationIslandFrame(expansion, liveCenter, liveRadius, targetWidth, targetHeight, targetCenter, anchor.baseRadiusDp, anchor.alpha)
     SideEffect { if (!deleted) lastFrame = currentFrame }
     val frame = if (deleted) lastFrame ?: currentFrame else currentFrame
-    val geometry = islandMorphGeometry(frame.expansion)
-    val shellWidth = frame.radius * 2f + (frame.width - frame.radius * 2f) * geometry.shellProgress
-    val shellHeight = frame.radius * 2f + (frame.height - frame.radius * 2f) * geometry.bodyProgress
-    val center = frame.center + (frame.targetCenter - frame.center) * geometry.shellProgress
-    val cornerPx = frame.radius + (with(density) { 22.dp.toPx() } - frame.radius) * geometry.shellProgress
+    val p = frame.expansion.coerceIn(0f, 1f)
+    val shellWidth = frame.radius * 2f + (frame.width - frame.radius * 2f) * p
+    val shellHeight = frame.radius * 2f + (frame.height - frame.radius * 2f) * p.pow(1.15f)
+    val center = frame.center + (frame.targetCenter - frame.center) * p
+    val cornerPx = minOf(shellWidth, shellHeight) / 2f + (with(density) { 22.dp.toPx() } - minOf(shellWidth, shellHeight) / 2f) * islandSmooth(p, .10f, .80f)
+    val contentAlpha = islandSmooth(p, .45f, .90f)
     val closeReady = !expanded && expansion <= .001f && (liveCenter - (anchor.center - screenOrigin)).getDistance() < .5f && kotlin.math.abs(liveRadius - anchor.radius) < .5f
     LaunchedEffect(closeReady, deleted, deletionAlpha) {
         if ((deleted && deletionAlpha <= .001f) || (!deleted && closeReady)) onClosed()
     }
     BackHandler(enabled = true, onBack = onDismiss)
     val colors = LocalRagentColors.current
-    Box(Modifier.fillMaxSize()) {
+    val visual = nodeVisual(node)
+    val accent = nodeAccent(visual, colors.canvas.luminance() < .5f)
+    val surfaceMix = islandSmooth(p, .15f, .85f)
+    val surface = accent.map { lerp(it, colors.canvas.copy(alpha = 1f), surfaceMix) }
+    val groupAlpha = (frame.sourceAlpha + (1f - frame.sourceAlpha) * islandSmooth(p, 0f, .15f)) * deletionAlpha
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = groupAlpha }) {
         Box(Modifier.matchParentSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
         val shape = RoundedCornerShape(with(density) { cornerPx.coerceAtLeast(0f).toDp() })
         Box(Modifier.offset { IntOffset((center.x - shellWidth / 2f).roundToInt(), (center.y - shellHeight / 2f).roundToInt()) }
             .size(with(density) { shellWidth.coerceAtLeast(1f).toDp() }, with(density) { shellHeight.coerceAtLeast(1f).toDp() })
-            .graphicsLayer { alpha = deletionAlpha }.clip(shape)
+            .clip(shape)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                 onClick = { if (closingRequested && !deleted) onReopen() })) {
-            Box(Modifier.matchParentSize().graphicsLayer { alpha = geometry.bodyAlpha }
-                .background(colors.canvas.copy(alpha = 1f), shape)) {
-                AgentoFrostedGlassBox(Modifier.matchParentSize(),
+            Box(Modifier.matchParentSize().drawWithCache {
+                val brush = Brush.linearGradient(0f to surface[0], .55f to surface[1], 1f to surface[2],
+                    start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
+                onDrawBehind { drawRect(brush) }
+            }) {
+                AgentoFrostedGlassBox(Modifier.matchParentSize().graphicsLayer { alpha = islandSmooth(p, .55f, 1f) },
                     shape = shape, surface = AgentoGlassSurface.Neutral, material = AgentoGlassMaterial.LiquidClear,
                     backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = false) {}
             }
             Layout(modifier = Modifier.fillMaxSize(), content = {
             Column(Modifier.organizationConversationForegroundReveal(
-                    progress = { geometry.bodyProgress }, visibleWidth = { shellWidth }, visibleHeight = { shellHeight })
-                .graphicsLayer { alpha = geometry.bodyAlpha }
+                    progress = { p.pow(1.15f) }, visibleWidth = { shellWidth }, visibleHeight = { shellHeight })
+                .graphicsLayer { alpha = contentAlpha }
                 .then(if (expansion < .999f || !expanded) Modifier.pointerInput(Unit) {
                     awaitPointerEventScope { while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() } }
                 } else Modifier)
@@ -152,19 +169,50 @@ internal fun OrganizationConversationIsland(
                 }
             }
         }
-        val avatarX = center.x - shellWidth / 2f + shellWidth / 2f * (1f - geometry.shellProgress) + with(density) { 32.dp.toPx() } * geometry.shellProgress
-        val avatarY = center.y - shellHeight / 2f + shellHeight / 2f * (1f - geometry.shellProgress) + with(density) { 32.dp.toPx() } * geometry.shellProgress
-        val avatarRadius = frame.radius + (with(density) { 16.dp.toPx() } - frame.radius) * geometry.shellProgress
-        val baseRadius = frame.baseRadiusDp.coerceAtLeast(1f)
-        OrganizationNode(node.copy(x = avatarX, y = avatarY, radiusDp = baseRadius,
-            scale = avatarRadius / (baseRadius * density.density), alpha = deletionAlpha),
-            onClick = { if (closingRequested && !deleted) onReopen() }, modifier = Modifier.clearAndSetSemantics {})
+        val glyphMotion = islandSmooth(p, .15f, .90f)
+        val glyphX = center.x + (center.x - shellWidth / 2f + with(density) { 32.dp.toPx() } - center.x) * glyphMotion
+        val glyphY = center.y + (center.y - shellHeight / 2f + with(density) { 32.dp.toPx() } - center.y) * glyphMotion
+        val sourceScale = frame.radius / (frame.baseRadiusDp.coerceAtLeast(1f) * density.density)
+        val glyphSize = with(density) { nodeIconSize(frame.baseRadiusDp).dp.toPx() } * sourceScale * (1f - glyphMotion) + with(density) { 20.dp.toPx() } * glyphMotion
+        val badgeAlpha = islandSmooth(p, .15f, .50f)
+        val badgeSize = with(density) { 32.dp.toPx() }
+        Box(Modifier.offset { IntOffset((glyphX - badgeSize / 2f).roundToInt(), (glyphY - badgeSize / 2f).roundToInt()) }
+            .size(32.dp).graphicsLayer { alpha = badgeAlpha }.clip(CircleShape).drawWithCache {
+                val brush = Brush.linearGradient(0f to accent[0], .55f to accent[1], 1f to accent[2],
+                    start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
+                onDrawBehind { drawRect(brush) }
+            })
+        Icon(painterResource(visual.icon), contentDescription = null, tint = colors.canvas,
+            modifier = Modifier.offset { IntOffset((glyphX - glyphSize / 2f).roundToInt(), (glyphY - glyphSize / 2f).roundToInt()) }
+                .size(with(density) { glyphSize.toDp() })
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (closingRequested && !deleted) onReopen() }.clearAndSetSemantics {})
+        if (node.runtimeState != NodeRuntimeState.IDLE) {
+            val dotAlpha = 1f - islandSmooth(p, 0f, .18f)
+            val dotSize = with(density) { 11.dp.toPx() } * sourceScale
+            val dotX = center.x + frame.radius * .70710678f
+            val dotY = center.y + frame.radius * .70710678f
+            val dotColor = when (node.runtimeState) {
+                NodeRuntimeState.WORKING, NodeRuntimeState.REVIEWING -> colors.running
+                NodeRuntimeState.BLOCKED, NodeRuntimeState.FAILED -> colors.error
+                NodeRuntimeState.DONE -> colors.success
+                else -> colors.secondaryContent
+            }
+            Box(Modifier.offset { IntOffset((dotX - dotSize / 2f).roundToInt(), (dotY - dotSize / 2f).roundToInt()) }
+                .size(with(density) { dotSize.toDp() }).graphicsLayer { alpha = dotAlpha }.clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxSize(7f / 11f).clip(CircleShape).background(dotColor))
+            }
+        }
     }
+}
+
+private fun islandSmooth(p: Float, start: Float, end: Float): Float {
+    val u = ((p - start) / (end - start)).coerceIn(0f, 1f)
+    return u * u * (3f - 2f * u)
 }
 
 private data class ConversationIslandFrame(
     val expansion: Float, val center: Offset, val radius: Float,
-    val width: Float, val height: Float, val targetCenter: Offset, val baseRadiusDp: Float,
+    val width: Float, val height: Float, val targetCenter: Offset, val baseRadiusDp: Float, val sourceAlpha: Float,
 )
 
 /** Fade the moving reading-window edges while the normal-size body is revealed. */
