@@ -55,7 +55,11 @@ data class LayoutResult(
     val rootId: String?,
 )
 
-class OrganizationLayoutEngine {
+class OrganizationLayoutEngine(
+    private val minimumFanRadius: Float = 180f,
+    private val childVerticalSpacing: Float = 110f,
+    private val childHorizontalSpacing: Float = 90f,
+) {
 
     // Threshold for automatic clustering (> 5 direct children)
     val clusterThreshold = 5
@@ -99,7 +103,7 @@ class OrganizationLayoutEngine {
         val level1Count = level1Nodes.size
 
         if (level1Count > 0) {
-            val fanRadius = max(180f, 60f + level1Count * 30f)
+            val fanRadius = max(minimumFanRadius, 60f + level1Count * 30f)
             val idealPoints = RadialLayout.calculateFanPositions(
                 centerX = rootPos.x,
                 centerY = rootPos.y,
@@ -147,8 +151,8 @@ class OrganizationLayoutEngine {
                 val childPositions = FocusTreeLayout.layoutChildren(
                     parentPoint = leadPos,
                     children = children,
-                    verticalSpacing = 110f,
-                    horizontalSpacing = 90f,
+                    verticalSpacing = childVerticalSpacing,
+                    horizontalSpacing = childHorizontalSpacing,
                 )
                 childPositions.forEach { (childId, pt) ->
                     val pos = previousPositions[childId] ?: pt
