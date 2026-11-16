@@ -1,38 +1,38 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateOffsetAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
+import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.core.designsystem.motionPolicy
-import com.andysagent.ragent.feature.organization.domain.NodeRole
-import com.andysagent.ragent.feature.organization.layout.EdgePoint
+import com.andysagent.ragent.core.designsystem.rememberAgentoPressScale
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
-import kotlin.math.hypot
 
 internal data class OrganizationNodeAnchor(val center: Offset, val radius: Float, val baseRadiusDp: Float, val alpha: Float)
 
@@ -47,87 +47,72 @@ internal fun OrganizationGraph(
     modifier: Modifier = Modifier,
     hiddenNodeId: String? = null,
     onAnchorsChanged: (Map<String, OrganizationNodeAnchor>, Rect?) -> Unit = { _, _ -> },
+    onAdvancePhysicsFrame: (Long) -> Unit = {},
 ) {
     val density = LocalDensity.current.density
     val preference = if (uiState.reduceMotion && motionPolicy().preference == MotionPreference.Full) MotionPreference.Reduced else motionPolicy().preference
+    LaunchedEffect(uiState.physicsRunning, preference) {
+        if (uiState.physicsRunning && preference == MotionPreference.Full) {
+            while (true) withFrameNanos { onAdvancePhysicsFrame(it) }
+        }
+    }
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.nodes.isNotEmpty()) { if (uiState.nodes.isNotEmpty()) shown = true }
-    val opacity by animateFloatAsState(
-        if (shown) 1f else 0f,
-        animationSpec = tween(when (preference) { MotionPreference.Full -> 180; MotionPreference.Reduced -> 100; MotionPreference.None -> 0 }),
-        label = "organization-graph-opacity",
-    )
-    val positions = mutableMapOf<String, Offset>()
-    val scales = mutableMapOf<String, Float>()
-    val radii = mutableMapOf<String, Float>()
-    val alphas = mutableMapOf<String, Float>()
-    uiState.nodes.forEach { node ->
-        key(node.id) {
-            val spec = if (preference == MotionPreference.Full) {
-                if (node.role == NodeRole.EXECUTIVE) spring<Offset>(dampingRatio = .92f, stiffness = 260f)
-                else spring(dampingRatio = .74f, stiffness = 140f)
-            } else snap()
-            positions[node.id] = animateOffsetAsState(Offset(node.x, node.y), animationSpec = spec, label = "organization-node-${node.id}").value
-            scales[node.id] = animateFloatAsState(node.scale,
-                animationSpec = if (preference == MotionPreference.Full) spring(dampingRatio = .88f, stiffness = 320f) else snap(),
-                label = "organization-scale-${node.id}").value
-            radii[node.id] = animateFloatAsState(node.radiusDp,
-                animationSpec = if (preference == MotionPreference.Full) spring(dampingRatio = .88f, stiffness = 320f) else snap(),
-                label = "organization-radius-${node.id}").value
-            alphas[node.id] = animateFloatAsState(node.alpha,
-                animationSpec = when (preference) { MotionPreference.Full -> tween(120); MotionPreference.Reduced -> tween(100); MotionPreference.None -> snap() },
-                label = "organization-alpha-${node.id}").value
-        }
+    val opacity by animateFloatAsState(if (shown) 1f else 0f,
+        animationSpec = tween(when (preference) { MotionPreference.Full -> 180; MotionPreference.Reduced -> 100; MotionPreference.None -> 0 }), label = "organization-graph-opacity")
+    val interactions = mutableMapOf<String, MutableInteractionSource>()
+    val presses = mutableMapOf<String, Float>()
+    uiState.nodes.forEach { node -> key(node.id) {
+        val interaction = remember { MutableInteractionSource() }
+        val press by rememberAgentoPressScale(interaction)
+        interactions[node.id] = interaction
+        presses[node.id] = press
+    } }
+    val dark = LocalRagentColors.current.canvas.luminance() < .5f
+    val surfaces = uiState.nodes.map { node ->
+        val frame = node.physicsFrame
+        val radiusDp = frame?.radiusDp ?: (node.radiusDp * node.scale)
+        GraphNodeSurface(node.id, Offset(frame?.centerX ?: node.x, frame?.centerY ?: node.y),
+            radiusDp * density * (presses[node.id] ?: 1f),
+            nodeAccent(nodeVisual(node), dark), node.alpha, node.id == hiddenNodeId,
+            frame?.birthSourceId, frame?.birthProgress ?: 1f, frame?.birthVisible ?: true,
+            frame?.sourceDeformation ?: 0f, Offset(frame?.deformationDirectionX ?: 0f, frame?.deformationDirectionY ?: 1f))
     }
-    val nodesById = uiState.nodes.associateBy { it.id }
-    val edges = uiState.edges.mapNotNull { edge ->
-        val from = positions[edge.fromNodeId]
-        val to = positions[edge.toNodeId]
-        val fromNode = nodesById[edge.fromNodeId]
-        val toNode = nodesById[edge.toNodeId]
-        val fromRadius = radii[edge.fromNodeId]
-        val toRadius = radii[edge.toNodeId]
-        if (from == null || to == null || fromNode == null || toNode == null || fromRadius == null || toRadius == null) {
-            null
-        } else {
-            val delta = to - from
-            val length = hypot(delta.x, delta.y).coerceAtLeast(1f)
-            val unit = delta / length
-            val start = from + unit * (fromRadius * density * (scales[edge.fromNodeId] ?: fromNode.scale))
-            val end = to - unit * (toRadius * density * (scales[edge.toNodeId] ?: toNode.scale))
-            edge.copy(start = EdgePoint(start.x, start.y), end = EdgePoint(end.x, end.y), control1 = null, control2 = null, isCurved = false)
-        }
-    }
+    val surfacesById = surfaces.associateBy { it.id }
     val transform = rememberTransformableState { zoom, pan, _ -> onZoom(zoom); onPan(pan) }
     var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var viewportOrigin by remember { mutableStateOf(Offset.Unspecified) }
-    val viewport = viewportCoordinates?.takeIf { it.isAttached && viewportOrigin != Offset.Unspecified }?.let {
-        Rect(viewportOrigin, androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat()))
-    }
-    val actualCoordinates = viewportCoordinates?.takeIf { it.isAttached && viewportOrigin != Offset.Unspecified }
-    val anchors = if (actualCoordinates == null) emptyMap() else uiState.nodes.mapNotNull { node ->
-        val position = positions[node.id] ?: return@mapNotNull null
-        val radius = radii[node.id] ?: return@mapNotNull null
-        val layerCenter = Offset(actualCoordinates.size.width / 2f, actualCoordinates.size.height / 2f)
-        val transformed = layerCenter + (position - layerCenter) * uiState.zoomScale + uiState.panOffset
-        node.id to OrganizationNodeAnchor(actualCoordinates.localToRoot(transformed),
-            radius * density * (scales[node.id] ?: node.scale) * uiState.zoomScale, radius, opacity * (alphas[node.id] ?: node.alpha))
+    val coordinates = viewportCoordinates?.takeIf { it.isAttached && viewportOrigin != Offset.Unspecified }
+    val viewport = coordinates?.let { Rect(viewportOrigin, androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat())) }
+    val anchors = if (coordinates == null) emptyMap() else uiState.nodes.mapNotNull { node ->
+        val surface = surfacesById[node.id] ?: return@mapNotNull null
+        val layerCenter = Offset(coordinates.size.width / 2f, coordinates.size.height / 2f)
+        val transformed = layerCenter + (surface.center - layerCenter) * uiState.zoomScale + uiState.panOffset
+        node.id to OrganizationNodeAnchor(coordinates.localToRoot(transformed), surface.major * uiState.zoomScale,
+            node.physicsFrame?.radiusDp ?: node.radiusDp, opacity * node.alpha)
     }.toMap()
     SideEffect { onAnchorsChanged(anchors, viewport) }
-    Box(modifier.clipToBounds().onSizeChanged { onSizeChanged(it.width, it.height, density) }.onGloballyPositioned { viewportCoordinates = it; viewportOrigin = it.localToRoot(Offset.Zero) }) {
+    Box(modifier.clipToBounds().onSizeChanged { onSizeChanged(it.width, it.height, density) }
+        .onGloballyPositioned { viewportCoordinates = it; viewportOrigin = it.localToRoot(Offset.Zero) }) {
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = opacity }.transformable(state = transform).graphicsLayer {
             translationX = uiState.panOffset.x; translationY = uiState.panOffset.y
             scaleX = uiState.zoomScale; scaleY = uiState.zoomScale
         }) {
-            // Particle records have no edge identity, so they cannot follow these animated paths reliably.
-            OrganizationCanvas(edges, emptyList())
+            OrganizationGraphArt(surfaces, uiState.edges, uiState.zoomScale)
             uiState.nodes.forEach { node ->
-                val position = positions[node.id]
-                OrganizationNode(node.copy(x = position?.x ?: node.x, y = position?.y ?: node.y, radiusDp = radii[node.id] ?: node.radiusDp,
-                    scale = scales[node.id] ?: node.scale, alpha = alphas[node.id] ?: node.alpha),
+                val frame = node.physicsFrame
+                val surface = surfacesById[node.id] ?: return@forEach
+                val press = presses[node.id] ?: 1f
+                val radiusDp = surface.radius / density / press.coerceAtLeast(.001f)
+                val source = frame?.birthSourceId?.let(surfacesById::get)?.takeIf { it.visible && !it.hidden }
+                OrganizationNode(node.copy(x = surface.center.x, y = surface.center.y, radiusDp = radiusDp, scale = 1f),
                     onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
-                    modifier = Modifier.align(AbsoluteAlignment.TopLeft),
-                    morphHidden = node.id == hiddenNodeId)
+                    modifier = Modifier.align(AbsoluteAlignment.TopLeft), morphHidden = node.id == hiddenNodeId || !surface.visible,
+                    interactionSource = interactions[node.id], externalPressScale = press, drawSurface = false,
+                    clickable = surface.visible && (frame?.clickable ?: true), iconAlpha = frame?.iconAlpha ?: 1f,
+                    occluderOffset = source?.let { it.center - surface.center }, occluderRadius = source?.radius ?: 0f,
+                    occluderMajor = source?.major ?: 0f, occluderMinor = source?.minor ?: 0f, occluderAxis = source?.axis ?: Offset(0f, 1f),
+                    minimumTouchSize = 64.dp / (uiState.zoomScale * press).coerceAtLeast(.001f))
             }
         }
     }

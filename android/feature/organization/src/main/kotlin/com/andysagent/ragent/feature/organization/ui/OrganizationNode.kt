@@ -15,6 +15,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -28,6 +33,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
@@ -41,7 +47,12 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap: () -> Unit = {}, modifier: Modifier = Modifier, showLabel: Boolean = true, morphHidden: Boolean = false) {
+fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap: () -> Unit = {}, modifier: Modifier = Modifier, showLabel: Boolean = true, morphHidden: Boolean = false,
+    interactionSource: MutableInteractionSource? = null, externalPressScale: Float? = null,
+    drawSurface: Boolean = true, clickable: Boolean = true, iconAlpha: Float = 1f,
+    occluderOffset: Offset? = null, occluderRadius: Float = 0f,
+    occluderMajor: Float = occluderRadius, occluderMinor: Float = occluderRadius,
+    occluderAxis: Offset = Offset(0f, 1f), minimumTouchSize: Dp = 64.dp) {
     val colors = LocalRagentColors.current
     val density = LocalDensity.current
     val dark = colors.canvas.luminance() < .5f
@@ -68,33 +79,55 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
         NodeRole.EXPERT -> R.string.org_detail_role_expert
         NodeRole.UNKNOWN -> R.string.org_detail_role_unknown
     })
-    val interaction = remember { MutableInteractionSource() }
-    val press by rememberAgentoPressScale(interaction)
+    val internalInteraction = remember { MutableInteractionSource() }
+    val interaction = interactionSource ?: internalInteraction
+    val press = externalPressScale ?: rememberAgentoPressScale(interaction).value
     val diameter = (node.radiusDp * 2f).dp
-    val touchSize = maxOf(diameter, 64.dp)
+    val touchSize = maxOf(diameter, minimumTouchSize)
     val iconSize = nodeIconSize(node.radiusDp).dp
     Box(
         modifier = modifier.absoluteOffset {
             val half = with(density) { touchSize.toPx() / 2f }
             IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
-        }.size(touchSize).then(if (morphHidden) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") })
+        }.size(touchSize).then(if (morphHidden || !clickable) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") })
             .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = if (morphHidden) 0f else node.alpha }
-            .combinedClickable(interactionSource = interaction, indication = null, onClick = onClick, onDoubleClick = onDoubleTap),
+            .drawWithContent {
+                val offset = occluderOffset
+                if (offset == null || occluderRadius <= 0f) drawContent() else {
+                    val scale = (node.scale * press).coerceAtLeast(.001f)
+                    val center = Offset(size.width / 2f, size.height / 2f) + offset / scale
+                    val axis = occluderAxis.let { if (it.getDistance() > .001f) it / it.getDistance() else Offset(0f, 1f) }
+                    val major = axis * (occluderMajor / scale)
+                    val minor = Offset(-axis.y, axis.x) * (occluderMinor / scale)
+                    val k = .55228475f
+                    val mask = Path().apply {
+                        moveTo(center.x + major.x, center.y + major.y)
+                        fun curve(a: Offset, b: Offset, c: Offset) = cubicTo(a.x, a.y, b.x, b.y, c.x, c.y)
+                        curve(center + major + minor * k, center + minor + major * k, center + minor)
+                        curve(center + minor - major * k, center - major + minor * k, center - major)
+                        curve(center - major - minor * k, center - minor - major * k, center - minor)
+                        curve(center - minor + major * k, center + major - minor * k, center + major)
+                        close()
+                    }
+                    clipPath(mask, clipOp = ClipOp.Difference) { this@drawWithContent.drawContent() }
+                }
+            }
+            .combinedClickable(enabled = clickable && !morphHidden, interactionSource = interaction, indication = null, onClick = onClick, onDoubleClick = onDoubleTap),
         contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.size(diameter).clip(CircleShape).drawWithCache {
+        Box(Modifier.size(diameter).clip(CircleShape).then(if (drawSurface) Modifier.drawWithCache {
             val brush = Brush.linearGradient(
                 0f to accent[0], .55f to accent[1], 1f to accent[2],
                 start = Offset(size.width * .12f, size.height * .08f),
                 end = Offset(size.width * .88f, size.height * .92f),
             )
             onDrawBehind { drawRect(brush) }
-        }, contentAlignment = Alignment.Center) {
+        } else Modifier), contentAlignment = Alignment.Center) {
             if (node.isCluster) {
-                Text("+${node.clusterCount}", color = colors.canvas, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("+${node.clusterCount}", color = colors.canvas, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.graphicsLayer { alpha = iconAlpha })
             } else {
                 Icon(painterResource(visual.icon), contentDescription = null, tint = colors.canvas,
-                    modifier = Modifier.size(iconSize))
+                    modifier = Modifier.size(iconSize).graphicsLayer { alpha = iconAlpha })
             }
         }
         val stateColor = when (node.runtimeState) {
@@ -103,7 +136,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
             NodeRuntimeState.DONE -> colors.success
             else -> colors.secondaryContent
         }
-        if (node.runtimeState != NodeRuntimeState.IDLE) {
+        if (node.runtimeState != NodeRuntimeState.IDLE && iconAlpha >= 1f) {
             Box(Modifier.align(Alignment.Center).absoluteOffset(x = (node.radiusDp * .70710678f).dp, y = (node.radiusDp * .70710678f).dp)
                 .size(11.dp).clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(stateColor))

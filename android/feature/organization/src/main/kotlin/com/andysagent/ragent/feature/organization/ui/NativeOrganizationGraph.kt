@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.data.NativeDelegationDto
+import com.andysagent.ragent.feature.organization.data.BirthCue
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.data.OrganizationEdgeDto
 import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
@@ -32,6 +33,7 @@ fun NativeOrganizationGraph(
     transport: RagentTransport,
     sessionId: String,
     records: List<NativeDelegationDto>,
+    birthCues: List<BirthCue> = emptyList(),
     modifier: Modifier = Modifier,
     onRootClick: (Rect) -> Unit,
     onRootAnchorChanged: (Rect?) -> Unit = {},
@@ -61,9 +63,9 @@ fun NativeOrganizationGraph(
         listOf(OrganizationNodeDto(id = rootId, role = "root", displayName = rootName, sessionId = sessionId)) +
             nativeDisplayNodes(distinct, rootId, memberName)
     }
-    LaunchedEffect(nodes, sessionId) {
+    LaunchedEffect(nodes, sessionId, birthCues) {
         // This projection is held only in this ViewModel; no formal organization is created.
-        vm.applyProjection(OrganizationProjectionDto(organizationId = "native:$sessionId", rootSessionId = sessionId, nodes = nodes, edges = nativeDisplayEdges(nodes)))
+        vm.applyProjection(OrganizationProjectionDto(organizationId = "native:$sessionId", rootSessionId = sessionId, nodes = nodes, edges = nativeDisplayEdges(nodes)), birthCues = birthCues)
     }
     OrganizationScreen(vm, modifier = modifier, embedded = true, embeddedRootId = rootId,
         onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged,

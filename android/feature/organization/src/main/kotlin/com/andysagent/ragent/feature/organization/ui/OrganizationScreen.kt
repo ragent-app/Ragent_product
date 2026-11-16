@@ -53,6 +53,9 @@ fun OrganizationScreen(
     onOpenNodeConsumed: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val preference = motionPolicy().preference
+    val effectivePreference = if (uiState.reduceMotion && preference == MotionPreference.Full) MotionPreference.Reduced else preference
+    LaunchedEffect(effectivePreference, viewModel) { viewModel.setMotionPreference(effectivePreference) }
     OrganizationScreenContent(
         uiState = uiState,
         onPan = viewModel::onPan, onZoom = viewModel::onZoom, onReset = viewModel::onResetView,
@@ -61,7 +64,7 @@ fun OrganizationScreen(
         onCloseDetail = viewModel::onCloseAgentDetail, onToggleActivityFeed = viewModel::onToggleActivityFeed,
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
-        onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels,
+        onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels, onAdvancePhysicsFrame = viewModel::advancePhysicsFrame,
         onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged, rootHidden = rootHidden, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed,
     )
 }
@@ -81,6 +84,7 @@ fun OrganizationScreenContent(
     onApproveBlocker: (String) -> Unit,
     onRejectBlocker: (String) -> Unit,
     onSizeChanged: (Int, Int, Float) -> Unit = { _, _, _ -> },
+    onAdvancePhysicsFrame: (Long) -> Unit = {},
     onSendRootInstruction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     showNodeLabels: Boolean = false,
@@ -105,7 +109,7 @@ fun OrganizationScreenContent(
     if (embedded && rootVisualNode != null) {
         val visual = nodeVisual(rootVisualNode)
         val palette = nodeAccent(visual, colors.canvas.luminance() < .5f)
-        SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.radiusDp, rootVisualNode.runtimeState)) }
+        SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.physicsFrame?.radiusDp ?: rootVisualNode.radiusDp, rootVisualNode.runtimeState)) }
     }
     if (uiState.activeDetailNode != null) {
         AgentDetailScreen(node = uiState.activeDetailNode, onBack = onCloseDetail)
@@ -144,12 +148,12 @@ fun OrganizationScreenContent(
         var taskHeight by remember { mutableIntStateOf(0) }
         var activityHeight by remember { mutableIntStateOf(0) }
         val usedHeight = with(density) { (navigationHeight + taskHeight + activityHeight).toDp() }
-        val graphHeight = if (maxHeight < 500.dp || density.fontScale >= 1.5f) 300.dp else (maxHeight - usedHeight).coerceIn(280.dp, 460.dp)
+        val graphHeight = if (embedded) maxHeight else if (maxHeight < 500.dp || density.fontScale >= 1.5f) 300.dp else (maxHeight - usedHeight).coerceIn(280.dp, 460.dp)
         Column(
             Modifier.fillMaxSize().verticalScroll(pageScroll),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Column(Modifier.widthIn(max = 600.dp).fillMaxWidth().padding(horizontal = 20.dp)) {
+            Column(Modifier.fillMaxWidth().then(if (embedded) Modifier else Modifier.widthIn(max = 600.dp).padding(horizontal = 20.dp))) {
                 val members = uiState.nodes.flatMap { if (it.isCluster) it.clusterChildIds else listOf(it.id) }.toSet().size
                 if (!embedded) OrganizationNavigation(onBack, members, onOpenWorkItems, onOpenTeamMessages, onReset, Modifier.onSizeChanged { navigationHeight = it.height })
                 if (!embedded) Column(Modifier.fillMaxWidth().onSizeChanged { taskHeight = it.height }.padding(top = 20.dp, bottom = 12.dp)) {
@@ -179,7 +183,7 @@ fun OrganizationScreenContent(
                             selectedId = id; selectedNode = node; deleted = false; expanded = true
                         }
                     }, onNodeDoubleTap, onSizeChanged, modifier = Modifier.fillMaxWidth().height(graphHeight).clip(AgentoShapes.SurfaceLargeShape),
-                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAnchorsChanged = { latest, bounds ->
+                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAdvancePhysicsFrame = onAdvancePhysicsFrame, onAnchorsChanged = { latest, bounds ->
                             if (anchors != latest) anchors = latest
                             if (embedded) {
                                 val root = latest[embeddedRootId]
