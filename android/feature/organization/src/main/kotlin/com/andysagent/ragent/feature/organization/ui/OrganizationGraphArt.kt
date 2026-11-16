@@ -336,6 +336,74 @@ private fun birthBridgeSide(
     return BridgeSide(start, start + t0 * length0, end - t3 * length3, end)
 }
 
+// External offset circles provide the initial guess; bounded Newton iterations
+// project onto the actual (slightly deformed) ellipses.
+private fun birthFilletSide(
+    a: GraphNodeSurface, b: GraphNodeSurface, direction: Offset, normal: Offset,
+    sign: Float, radius: Float, tolerance: Float,
+): BridgeSide? {
+    val distance = (b.center - a.center).getDistance()
+    if (distance <= .001f || radius <= .0001f) return null
+    val ar = a.radius + radius
+    val br = b.radius + radius
+    val x = (ar * ar - br * br + distance * distance) / (2f * distance)
+    val h2 = ar * ar - x * x
+    if (h2 < 0f) return null
+    var center = a.center + direction * x + normal * (sign * sqrt(h2))
+    fun nearest(node: GraphNodeSurface, point: Offset): Offset {
+        val axis = node.axis
+        val cross = Offset(-axis.y, axis.x)
+        val v = point - node.center
+        var angle = atan2(dot(v, cross) / node.minor.coerceAtLeast(.001f), dot(v, axis) / node.major.coerceAtLeast(.001f))
+        repeat(10) {
+            val sn = kotlin.math.sin(angle); val cs = kotlin.math.cos(angle)
+            val position = axis * (node.major * cs) + cross * (node.minor * sn)
+            val derivative = axis * (-node.major * sn) + cross * (node.minor * cs)
+            val second = -position
+            val denominator = dot(derivative, derivative) + dot(position - v, second)
+            if (kotlin.math.abs(denominator) > .000001f) {
+                angle -= (dot(position - v, derivative) / denominator).coerceIn(-.35f, .35f)
+            }
+        }
+        return ellipseBoundary(node, angle)
+    }
+    repeat(10) {
+        val pa = nearest(a, center); val pb = nearest(b, center)
+        val va = center - pa; val vb = center - pb
+        val da = va.getDistance() * if (ellipseImplicit(a, center) < 0f) -1f else 1f
+        val db = vb.getDistance() * if (ellipseImplicit(b, center) < 0f) -1f else 1f
+        val na = ellipseNormal(a, pa - a.center); val nb = ellipseNormal(b, pb - b.center)
+        val determinant = na.x * nb.y - na.y * nb.x
+        if (kotlin.math.abs(determinant) > .00001f) {
+            val ea = da - radius; val eb = db - radius
+            val step = Offset((ea * nb.y - eb * na.y) / determinant, (eb * na.x - ea * nb.x) / determinant)
+            val limit = maxOf(radius, 1f)
+            if (step.x.isFinite() && step.y.isFinite()) {
+                center -= if (step.getDistance() > limit) step * (limit / step.getDistance()) else step
+            }
+        }
+    }
+    val pa = nearest(a, center); val pb = nearest(b, center)
+    if (!center.x.isFinite() || !center.y.isFinite() || ellipseImplicit(a, center) < 0f ||
+        ellipseImplicit(b, center) < 0f || dot(center - a.center, normal) * sign < 0f ||
+        kotlin.math.abs((center - pa).getDistance() - radius) > tolerance ||
+        kotlin.math.abs((center - pb).getDistance() - radius) > tolerance) return null
+    val startAngle = atan2(pa.y - center.y, pa.x - center.x)
+    val endAngle = atan2(pb.y - center.y, pb.x - center.x)
+    var delta = endAngle - startAngle
+    while (delta > Math.PI) delta -= (2.0 * Math.PI).toFloat()
+    while (delta < -Math.PI) delta += (2.0 * Math.PI).toFloat()
+    val k = (4f / 3f) * kotlin.math.tan(delta / 4f)
+    val va = pa - center; val vb = pb - center
+    val c1 = pa + Offset(-va.y, va.x) * k
+    val c2 = pb - Offset(-vb.y, vb.x) * k
+    fun local(point: Offset): Offset {
+        val v = point - a.center
+        return Offset(dot(v, direction), dot(v, normal))
+    }
+    return BridgeSide(local(pa), local(c1), local(c2), local(pb))
+}
+
 private data class JoinSection(val x: Float, val halfWidth: Float)
 private fun bezier(a: Float, b: Float, c: Float, d: Float, t: Float): Float {
     val u = 1f - t
@@ -409,8 +477,12 @@ internal fun OrganizationGraphArt(nodes: List<GraphNodeSurface>, edges: List<Ren
                     (supportPoint(a, separation.axis) + supportPoint(b, -separation.axis)) / 2f
                 val localCenter = dot(contactMidpoint - a.center, normal) * (1f - transition)
                 val opening = smooth(exposure / (halfEnd * 2f).coerceAtLeast(.001f))
-                val top = birthBridgeSide(a, b, direction, normal, topCrossing.takeIf { crossings.size >= 2 }, -1f, localCenter, halfEnd, opening, round) ?: return@forEach
-                val bottom = birthBridgeSide(a, b, direction, normal, bottomCrossing.takeIf { crossings.size >= 2 }, 1f, localCenter, halfEnd, opening, round) ?: return@forEach
+                val minimumFillet = surfaceGap / 2f + .25.dp.toPx() * inverseZoom
+                val fillet = maxOf(minOf(round, b.minor * .25f, exposure * .5f), minimumFillet)
+                val top = birthFilletSide(a, b, direction, normal, -1f, fillet, .01.dp.toPx() * inverseZoom)
+                    ?: birthBridgeSide(a, b, direction, normal, topCrossing.takeIf { crossings.size >= 2 }, -1f, localCenter, halfEnd, opening, round) ?: return@forEach
+                val bottom = birthFilletSide(a, b, direction, normal, 1f, fillet, .01.dp.toPx() * inverseZoom)
+                    ?: birthBridgeSide(a, b, direction, normal, bottomCrossing.takeIf { crossings.size >= 2 }, 1f, localCenter, halfEnd, opening, round) ?: return@forEach
                 val start = minOf(ellipseIntersection(a, direction, normal, -halfEnd, true),
                     ellipseIntersection(a, direction, normal, halfEnd, true)) - overlap
                 val end = distance + maxOf(ellipseIntersection(b, direction, normal, -halfEnd, false),
