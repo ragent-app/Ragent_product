@@ -35,6 +35,7 @@ function publicNode(node, edgeByChild = new Map(), display = {}) {
     id: node.id,
     parentId: edgeByChild.get(node.id) || null,
     role: node.nodeRole,
+    currentBinding: { sessionId: node.currentSessionId || null, generation: node.bindingGeneration },
     domain: typeof display.domain === 'string' && [...display.domain].length <= 160 ? display.domain : null,
     iconKey: typeof display.iconKey === 'string' && [...display.iconKey].length <= 64 ? display.iconKey : null,
     displayName: node.stableKey,

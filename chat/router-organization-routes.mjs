@@ -10,7 +10,7 @@ import { readBody as readRequestBody } from '../lib/utils.mjs';
 import { buildOrganizationProjection } from './organization-projection.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { provisionRootLeadershipRevision } from './organization-provisioning.mjs';
-import { getOrganization, getOrganizationByRootSession } from './organization-store.mjs';
+import { getOrganization, getOrganizationByRootSession, getNode } from './organization-store.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
@@ -33,9 +33,43 @@ export async function handleOrganizationRoutes({
   dispatchPhase = null,
 }) {
   const organizationMatch = /^\/api\/organizations\/([^/]+)(?:\/(projection|cancel|provision))?$/.exec(String(pathname || ''));
+  const conversationMatch = /^\/api\/organizations\/([^/]+)\/nodes\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const phaseDispatchMatch = /^\/api\/organizations\/([^/]+)\/phases\/([^/]+)\/dispatch$/.exec(String(pathname || ''));
   const rootSessionMatch = /^\/api\/sessions\/([^/]+)\/organization\/projection$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch) return false;
+  if (conversationMatch) {
+    if (!ORG_PROJECTION_V1_ENABLED && !ORG_PROJECTION_V2_ENABLED) return false;
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const organizationId = decodeURIComponent(conversationMatch[1]);
+      const nodeId = decodeURIComponent(conversationMatch[2]);
+      const org = await getOrganization(organizationId);
+      const node = await getNode(nodeId);
+      const available = (value) => value && value.organizationId === organizationId && value.retiredRevision === null
+        && !['retired', 'deleted'].includes(String(value.lifecycleState || '').toLowerCase());
+      if (!org || !available(node)) { writeJson(res, 404, { error: 'Node not found' }); return true; }
+      const sessionId = node.currentSessionId || null;
+      const generation = node.bindingGeneration;
+      let runtimeState = 'unknown';
+      if (ORG_PROJECTION_V2_ENABLED && sessionId) {
+        const projection = await buildOrganizationProjection(organizationId, { version: 2 });
+        const projected = projection?.nodes?.find((value) => value.id === nodeId);
+        if (projected?.currentBinding?.sessionId === sessionId && projected.currentBinding.generation === generation) {
+          runtimeState = projected.bindingRuntimeState || 'unknown';
+        }
+      }
+      // This fences observed node binding changes during the projection read, not later history reads.
+      const current = await getNode(nodeId);
+      if (!available(current)) { writeJson(res, 404, { error: 'Node not found' }); return true; }
+      if ((current.currentSessionId || null) !== sessionId || current.bindingGeneration !== generation) {
+        writeJson(res, 409, { error: 'Node binding changed; refresh and retry', code: 'ORGANIZATION_BINDING_CHANGED' }); return true;
+      }
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { organizationId, nodeId, currentBinding: { sessionId, generation }, runtimeState, observedAt: new Date().toISOString() });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
   if (phaseDispatchMatch) {
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }

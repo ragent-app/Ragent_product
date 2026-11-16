@@ -169,10 +169,26 @@ function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, ga
   const reviewState = node.nodeRole !== 'reviewer' ? 'not_applicable'
     : gate?.state === 'needs_changes' ? 'needs_changes'
       : ['passed', 'completed'].includes(gate?.state) ? 'passed' : 'pending';
+  // A recent task can belong to an older binding; never label it as the current session's state.
+  const bindingStateVerified = !!node.currentSessionId
+    && collaboration?.policy?.organizationId === organization.id
+    && collaboration?.policy?.organizationNodeId === node.id
+    && collaboration?.policy?.organizationBindingGeneration === node.bindingGeneration
+    && attempt?.sessionId === node.currentSessionId
+    && (!task?.sessionId || task.sessionId === node.currentSessionId)
+    && (!attempt?.runId || (run?.id === attempt.runId && run?.sessionId === node.currentSessionId));
+  // Node-wide events and gates are not binding-scoped; they cannot establish this session's state.
+  const bindingState = bindingStateVerified ? deriveNodeState({
+    node, collaboration, task, run,
+    blockers: deriveBlockers({ node, collaboration, task, attempt, run, events: [] }),
+    gate: null,
+  }) : 'unknown';
   return {
     id: node.id,
     parentId: node.parentNodeId || null,
     role: node.nodeRole,
+    currentBinding: { sessionId: node.currentSessionId || null, generation: node.bindingGeneration },
+    bindingRuntimeState: bindingState,
     domain: typeof display.domain === 'string' && [...display.domain].length <= 160 ? display.domain : null,
     iconKey: typeof display.iconKey === 'string' && [...display.iconKey].length <= 64 ? display.iconKey : null,
     displayName: node.stableKey,
