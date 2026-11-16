@@ -67,6 +67,8 @@ import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
+private data class NativeBirthFrame(val records: List<NativeDelegationDto>, val cues: List<BirthCue>)
+
 @Composable
 fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
@@ -105,9 +107,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
     val formalBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     val nativeBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
-    val latestRecords by rememberUpdatedState(records)
+    var nativeFrame by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(NativeBirthFrame(emptyList(), emptyList())) }
+    val latestRecords by rememberUpdatedState(nativeFrame.records)
     val latestMemberName by rememberUpdatedState(stringResource(R.string.organization_native_member))
-    var nativeBirthCues by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<BirthCue>>(emptyList()) }
     LaunchedEffect(scopeKey, cacheInvalidations) {
         val generation = projectionGeneration
         if (offlineScope != null && generation != null && !cache.isCurrent(offlineScope, generation)) {
@@ -350,16 +352,14 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             parents, root, null, emptyList(), nativeEvents, records)
         if (formal != null && rootNodeId != null && cues.isNotEmpty()) {
             organizationViewModel.applyProjection(formal.copy(nodes = formal.nodes + nativeNodes, edges = formal.edges + nativeDisplayEdges(nativeNodes)), birthCues = cues)
-        } else if (formal == null && cues.isNotEmpty()) {
-            nativeBirthCues = cues
-            androidx.compose.runtime.withFrameNanos { }
-            nativeBirthCues = emptyList()
         }
+        // The fallback graph must receive the snapshot and its cue together.
+        nativeFrame = NativeBirthFrame(records, if (formal == null) cues else emptyList())
     }
-    LaunchedEffect(baseProjection, records, rootNodeId, nativeMemberName) {
+    LaunchedEffect(baseProjection, nativeFrame.records, rootNodeId, nativeMemberName) {
         val projection = baseProjection ?: return@LaunchedEffect
         val root = rootNodeId ?: return@LaunchedEffect
-        val nativeNodes = nativeDisplayNodes(records, root, nativeMemberName)
+        val nativeNodes = nativeDisplayNodes(nativeFrame.records, root, nativeMemberName)
         organizationViewModel.applyProjection(projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes)))
     }
     LaunchedEffect(embedded, loaded, status, connection, lifecycleState) {
@@ -435,8 +435,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = programmaticOpen?.let { nativeNodeId(it.first, it.second) } ?: openNodeId, onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() })
             }
         }
-        else if (embedded && records.isNotEmpty()) {
-            NativeOrganizationGraph(transport, sessionId, records, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, birthCues = nativeBirthCues)
+        else if (embedded && nativeFrame.records.isNotEmpty()) {
+            NativeOrganizationGraph(transport, sessionId, nativeFrame.records, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, birthCues = nativeFrame.cues,
+                onBirthCuesConsumed = { consumed -> if (nativeFrame.cues == consumed) nativeFrame = nativeFrame.copy(cues = emptyList()) })
         }
         else if (!embedded) {
             val colors = LocalRagentColors.current

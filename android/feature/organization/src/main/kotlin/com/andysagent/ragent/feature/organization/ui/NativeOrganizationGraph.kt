@@ -34,6 +34,7 @@ fun NativeOrganizationGraph(
     sessionId: String,
     records: List<NativeDelegationDto>,
     birthCues: List<BirthCue> = emptyList(),
+    onBirthCuesConsumed: (List<BirthCue>) -> Unit = {},
     modifier: Modifier = Modifier,
     onRootClick: (Rect) -> Unit,
     onRootAnchorChanged: (Rect?) -> Unit = {},
@@ -66,6 +67,7 @@ fun NativeOrganizationGraph(
     LaunchedEffect(nodes, sessionId, birthCues) {
         // This projection is held only in this ViewModel; no formal organization is created.
         vm.applyProjection(OrganizationProjectionDto(organizationId = "native:$sessionId", rootSessionId = sessionId, nodes = nodes, edges = nativeDisplayEdges(nodes)), birthCues = birthCues)
+        if (birthCues.isNotEmpty()) onBirthCuesConsumed(birthCues)
     }
     OrganizationScreen(vm, modifier = modifier, embedded = true, embeddedRootId = rootId,
         onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged,
