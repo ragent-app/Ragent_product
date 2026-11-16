@@ -306,7 +306,7 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
         if (codexChildren.has(child)) continue;
         codexChildren.add(child);
         events.push(observation({ provider: 'codex', raw, context, providerDelegationId: child,
-          childSessionId: child, kind: 'spawned', state: 'spawned' }));
+          childSessionId: child, kind: 'spawned', state: 'spawned', facts: { birthActor: 'root_session' } }));
       }
     }
     if (bound && (successfulSpawn || ['wait', 'close'].includes(operation))) {

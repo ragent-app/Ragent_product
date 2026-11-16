@@ -49,6 +49,7 @@ data class DelegationEventDto(
     val state: String,
     val seq: Long,
     val timestamp: Long,
+    val birthActor: String? = null,
     val details: String? = null,
 )
 

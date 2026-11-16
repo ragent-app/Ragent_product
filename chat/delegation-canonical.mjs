@@ -226,11 +226,13 @@ function normalizeFacts(input) {
   const candidate = buildTerminalCandidate(input.candidate);
   const snapshot = buildDelegationSnapshot(input.snapshot);
   const recovery = buildRecoveryFacts(input.recovery);
-  if (!candidate && !snapshot && !recovery) return undefined;
+  const birthActor = input.birthActor === 'root_session' ? 'root_session' : null;
+  if (!candidate && !snapshot && !recovery && !birthActor) return undefined;
   return {
     ...(candidate ? { candidate } : {}),
     ...(snapshot ? { snapshot } : {}),
     ...(recovery ? { recovery } : {}),
+    ...(birthActor ? { birthActor } : {}),
   };
 }
 
@@ -296,6 +298,9 @@ export function validateDelegationEvent(input) {
 
   if (input.facts !== undefined && !normalizeFacts(input.facts)) {
     errors.push('facts must contain at least one valid bounded fact');
+  }
+  if (input.facts?.birthActor && (input.facts.birthActor !== 'root_session' || kind !== 'spawned' || input.provider !== 'codex' || input.parentDelegationId)) {
+    errors.push('root birth actor requires a top-level Codex spawned event');
   }
 
   const forbidden = collectForbiddenFields(input);

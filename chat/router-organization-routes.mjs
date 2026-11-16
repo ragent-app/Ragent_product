@@ -80,7 +80,7 @@ export async function handleOrganizationRoutes({
         : (delta.skippedLineCount || 0) + (delta.processedLineCount || 0);
       const events = delta.records.map((record) => record.json)
         .filter((value) => value?.type === 'ragent.delegation_event' && value.event?.parentSessionId === sessionId && value.event?.runId === runId)
-        .map(({ event }) => ({ id: event.id, runId: event.runId, parentSessionId: event.parentSessionId, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
+        .map(({ event }) => ({ id: event.id, runId: event.runId, parentSessionId: event.parentSessionId, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, birthActor: event.kind === 'spawned' && event.provider === 'codex' && !event.parentDelegationId && event.facts?.birthActor === 'root_session' ? 'root_session' : null, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
       writeJson(res, 200, { sessionId, runId, events, delegations, nextAfterLines, hasMore: delta.truncated === true,
         sourceAvailability: readable ? delta.readStatus : 'missing',
         gap: !readable || delta.readStatus !== 'verified', recoverability: readable ? 'unknown' : 'unavailable' });

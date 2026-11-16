@@ -35,6 +35,7 @@ class BirthEventTracker {
         sessionId: String,
         continuous: Boolean,
         graphParents: Map<String, String?>,
+        rootNodeId: String,
         organizationId: String?,
         organizationEvents: List<OrganizationActionDto>,
         nativeEvents: List<NativeBirthEvent>,
@@ -59,11 +60,15 @@ class BirthEventTracker {
         }
         for ((runId, event) in nativeEvents) {
             if (event.kind != "spawned" || event.runId != runId || event.parentSessionId != sessionId) continue
-            val parent = event.parentDelegationId ?: continue
             val childRecord = nativeById[runId to event.delegationId] ?: continue
-            if (childRecord.parentDelegationId != parent || nativeById[runId to parent] == null) continue
             fun nodeId(id: String) = "native:${runId.length}:$runId$id"
-            candidates += Candidate(BirthCue("native:$runId", event.id, nodeId(event.delegationId), nodeId(parent)), event.timestamp)
+            val parent = event.parentDelegationId
+            val actor = when {
+                parent != null && childRecord.parentDelegationId == parent && nativeById[runId to parent] != null -> nodeId(parent)
+                parent == null && childRecord.parentDelegationId == null && event.birthActor == "root_session" -> rootNodeId
+                else -> continue
+            }
+            candidates += Candidate(BirthCue("native:$runId", event.id, nodeId(event.delegationId), actor), event.timestamp)
         }
         for (candidate in candidates.sortedBy { it.timestamp }) {
             val cue = candidate.cue

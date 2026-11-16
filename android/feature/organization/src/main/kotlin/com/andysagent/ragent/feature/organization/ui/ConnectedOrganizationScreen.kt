@@ -267,6 +267,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         val scope = offlineScope ?: return@LaunchedEffect
         if (!ownerVerified || ownerGeneration != generation || connection != RuntimeConnectionState.Connected || cachedAt != null || lifecycleState != Lifecycle.State.RESUMED || demoOpen) return@LaunchedEffect
         val api = RealOrganizationApi(cachedTransport)
+        val actionApi = RealOrganizationApi(transport)
         var cursor = 0L
         var established = false
         while (true) {
@@ -276,7 +277,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             var complete = true
             var more: Boolean
             do {
-                val response = api.getSessionActions(sessionId, nextCursor)
+                val response = actionApi.getSessionActions(sessionId, nextCursor)
                 response.exceptionOrNull()?.let { if (it is CancellationException) throw it }
                 val page = response.getOrNull()
                 if (page == null || page.organizationId != id || page.rootSessionId != sessionId ||
@@ -288,14 +289,23 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 nextCursor = page.nextAfterId
                 more = page.hasMore
             } while (more)
-            val result = if (complete) api.getSessionOrganization(sessionId) else null
-            result?.exceptionOrNull()?.let { if (it is CancellationException) throw it }
-            val projection = result?.getOrNull()
+            val result = api.getSessionOrganization(sessionId)
+            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            val projection = result.getOrNull()
             if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
-            if (!complete || projection == null || projection.organizationId != id || projection.rootSessionId != sessionId) {
+            if (projection == null || projection.organizationId != id || projection.rootSessionId != sessionId) {
                 formalBirthTracker.reset()
                 cursor = 0L
                 established = false
+                delay(3_000)
+                continue
+            }
+            if (!complete) {
+                formalBirthTracker.reset()
+                cursor = 0L
+                established = false
+                baseProjection = projection
+                nodes = projection.nodes
                 delay(3_000)
                 continue
             }
@@ -312,7 +322,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             val nativeNodes = nativeDisplayNodes(latestRecords, root, latestMemberName)
             val graph = projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes))
             val cues = formalBirthTracker.observe("$scopeKey:$sessionId:$id", sessionId,
-                established && projection.nodes.size < 200, graph.nodes.associate { it.id to it.parentId }, id, batch, emptyList(), emptyList())
+                established && projection.nodes.size < 200, graph.nodes.associate { it.id to it.parentId }, root, id, batch, emptyList(), emptyList())
             organizationViewModel.applyProjection(graph, birthCues = cues)
             cursor = nextCursor
             established = projection.nodes.size < 200
@@ -337,7 +347,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         parents.putIfAbsent(root, null)
         val cues = nativeBirthTracker.observe("$scopeKey:$sessionId:${formal?.organizationId.orEmpty()}", sessionId,
             nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED && (formal == null || formal.nodes.size < 200),
-            parents, null, emptyList(), nativeEvents, records)
+            parents, root, null, emptyList(), nativeEvents, records)
         if (formal != null && rootNodeId != null && cues.isNotEmpty()) {
             organizationViewModel.applyProjection(formal.copy(nodes = formal.nodes + nativeNodes, edges = formal.edges + nativeDisplayEdges(nativeNodes)), birthCues = cues)
         } else if (formal == null && cues.isNotEmpty()) {
