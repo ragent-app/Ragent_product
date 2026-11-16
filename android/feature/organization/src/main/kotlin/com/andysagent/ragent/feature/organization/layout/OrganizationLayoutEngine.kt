@@ -84,9 +84,6 @@ class OrganizationLayoutEngine {
             ?: nodes.values.first()
 
         val rootId = rootNode.id
-        val centerX = viewportWidth * .5f
-        val rootY = viewportHeight * .46f
-
         val childrenByParent = nodes.values.groupBy { it.parentId }
         // Depth is based only on the actual parent chain, never on the visual center.
         fun managementDepth(node: OrganizationNodeModel): Int? {
@@ -120,18 +117,17 @@ class OrganizationLayoutEngine {
         val calculatedPositions = mutableMapOf<String, EdgePoint>()
         val clusterNodes = mutableMapOf<String, NodePosition>()
 
-        val rootPos = EdgePoint(centerX, rootY)
-        calculatedPositions[rootId] = rootPos
         val roleOrder = mapOf(NodeRole.MANAGER to 0, NodeRole.PHASE_LEAD to 1, NodeRole.WORKER to 2, NodeRole.WRITER to 3, NodeRole.EXPERT to 4, NodeRole.REVIEWER to 5, NodeRole.EXECUTIVE to 6, NodeRole.UNKNOWN to 7)
         val comparator = compareBy<OrganizationNodeModel>({ roleOrder[it.role] ?: 4 }, { it.domain.name }, { it.id })
-        val ordered = mutableListOf<String>()
+        val visibleChildren = mutableMapOf<String, MutableList<String>>()
+        val componentRoots = mutableListOf<String>()
         val visited = mutableSetOf(rootId)
         val clusteredChildren = mutableMapOf<String, List<String>>()
         fun visit(parent: String) {
             val children = childrenByParent[parent].orEmpty().sortedWith(comparator).filter { it.id !in visited }
-            if (children.size > clusterThreshold && focusNodeId != parent && parent !in collapsedClusterIds) {
+            if (children.size > clusterThreshold && parent !in collapsedClusterIds) {
                 val clusterId = "cluster_$parent"
-                ordered.add(clusterId)
+                visibleChildren.getOrPut(parent) { mutableListOf() }.add(clusterId)
                 val hidden = mutableListOf<String>()
                 fun hide(id: String) {
                     if (!visited.add(id)) return
@@ -143,42 +139,93 @@ class OrganizationLayoutEngine {
                 return
             }
             children.forEach { child ->
-                if (visited.add(child.id)) { ordered.add(child.id); visit(child.id) }
+                if (visited.add(child.id)) {
+                    visibleChildren.getOrPut(parent) { mutableListOf() }.add(child.id)
+                    visit(child.id)
+                }
             }
         }
         visit(rootId)
-        nodes.values.sortedWith(comparator).forEach { node ->
-            if (visited.add(node.id)) { ordered.add(node.id); visit(node.id) }
+        val stableNodes = nodes.values.sortedWith(comparator)
+        // Start orphaned components at their real boundary before handling cycles.
+        stableNodes.filter { node -> node.parentId == null || node.parentId !in nodes || node.parentId in visited }.forEach { node ->
+            if (visited.add(node.id)) { componentRoots.add(node.id); visit(node.id) }
+        }
+        // A component with no boundary is cyclic; choose a deterministic break.
+        stableNodes.forEach { node ->
+            if (visited.add(node.id)) { componentRoots.add(node.id); visit(node.id) }
         }
         val d = density.coerceAtLeast(.1f)
-        val maxOuterExtent = ordered.maxOfOrNull { id ->
-            val radiusDp = nodes[id]?.let(::nodeRadius) ?: 28f
-            val scale = if (id in clusteredChildren) 1f else 1.06f
-            max(radiusDp * scale, 32f) + 8f
-        } ?: 0f
-        val horizontalPadding = max(44f, maxOuterExtent) * d
-        val verticalPadding = max(40f, maxOuterExtent) * d
-        val radius = minOf(132f * d, (viewportWidth / 2f - horizontalPadding) / 1.08f, (min(rootY, viewportHeight - rootY) - verticalPadding) / 1.08f).coerceAtLeast(84f * d)
-        val factors = floatArrayOf(.88f, 1f, .92f, 1.08f)
-        val firstCount = min(ordered.size, 6)
-        ordered.forEachIndexed { index, id ->
-            val ring = if (index < 6) 0 else 1 + (index - 6) / 8
-            val slot = if (ring == 0) index else (index - 6) % 8
-            val angle = if (ring == 0 && firstCount <= 4) when (firstCount) {
-                1 -> floatArrayOf(35f)
-                2 -> floatArrayOf(-145f, 35f)
-                3 -> floatArrayOf(-125f, -15f, 110f)
-                else -> floatArrayOf(-155f, -37f, 100f, 160f)
-            }[slot] else if (ring == 0) -145f + slot * (360f / firstCount) + if (slot % 2 == 0) 5f else -5f
-                else -120f + slot * 45f
-            val radians = Math.toRadians(angle.toDouble())
-            val distance = (radius + ring * 100f * d) * factors[slot % 4] + if (id == focusNodeId) 10f * d else 0f
-            val point = EdgePoint(centerX + kotlin.math.cos(radians).toFloat() * distance, rootY + kotlin.math.sin(radians).toFloat() * distance)
-            calculatedPositions[id] = point
-            clusteredChildren[id]?.let { children ->
-                clusterNodes[id] = NodePosition(id, point.x, point.y, 28f, isCluster = true, clusterCount = children.count { nodes[it]?.parentId == id.removePrefix("cluster_") }, clusterChildIds = children,
-                    alpha = if (focusNodeId != null && focusNodeId != rootId && focusNodeId != id) .5f else 1f)
+        fun radiusOf(id: String): Float = nodes[id]?.let(::nodeRadius) ?: 28f
+        val spans = mutableMapOf<String, Float>()
+        fun span(id: String): Float = spans.getOrPut(id) {
+            val children = visibleChildren[id].orEmpty()
+            val own = max(radiusOf(id) * 2f, 64f) * d
+            if (children.isEmpty()) own else max(own, children.sumOf { span(it).toDouble() }.toFloat() + 16f * d * (children.size - 1))
+        }
+        val unitRoots = (visibleChildren[rootId].orEmpty() + componentRoots).sortedWith(
+            compareBy<String>({ roleOrder[nodes[it]?.role ?: nodes[it.removePrefix("cluster_")]?.role] ?: 4 },
+                { (nodes[it] ?: nodes[it.removePrefix("cluster_")])?.domain?.name.orEmpty() }, { it }),
+        )
+        val axes = mutableMapOf<String, EdgePoint>()
+        calculatedPositions[rootId] = EdgePoint(0f, 0f)
+        val tan35 = kotlin.math.tan(Math.toRadians(35.0)).toFloat()
+        val branchGap = floatArrayOf(30f, 42f, 24f, 36f)
+        val childFactors = floatArrayOf(.92f, 1.08f, 1f, .96f)
+        unitRoots.forEachIndexed { index, unit ->
+            val angle = when (unitRoots.size) {
+                1 -> floatArrayOf(-65f)[index]
+                2 -> floatArrayOf(-65f, 145f)[index]
+                3 -> floatArrayOf(-100f, 20f, 145f)[index]
+                4 -> floatArrayOf(-120f, -25f, 65f, 160f)[index]
+                else -> -110f + index * (360f / unitRoots.size) + if (index % 2 == 0) 4f else -4f
             }
+            val radians = Math.toRadians(angle.toDouble())
+            val axis = EdgePoint(kotlin.math.cos(radians).toFloat(), kotlin.math.sin(radians).toFloat())
+            val normal = EdgePoint(-axis.y, axis.x)
+            val unitAngle = min(35f, 140f / unitRoots.size)
+            val distance = max((radiusOf(rootId) + radiusOf(unit) + branchGap[index % branchGap.size]) * d,
+                span(unit) / 2f / kotlin.math.tan(Math.toRadians(unitAngle.toDouble())).toFloat())
+            fun place(id: String, forward: Float, cross: Float) {
+                axes[id] = axis
+                calculatedPositions[id] = EdgePoint(axis.x * forward + normal.x * cross, axis.y * forward + normal.y * cross)
+                val children = visibleChildren[id].orEmpty()
+                if (children.isEmpty()) return
+                val childrenSpan = children.sumOf { span(it).toDouble() }.toFloat() + 16f * d * (children.size - 1)
+                var cursor = cross - childrenSpan / 2f
+                children.forEachIndexed { slot, child ->
+                    val childSpan = span(child)
+                    val childCross = cursor + childSpan / 2f
+                    val step = max((radiusOf(id) + radiusOf(child) + 24f * childFactors[slot % childFactors.size]) * d,
+                        kotlin.math.abs(childCross - cross) / tan35)
+                    place(child, forward + step, childCross)
+                    cursor += childSpan + 16f * d
+                }
+            }
+            place(unit, distance, 0f)
+        }
+
+        // Center the unfocused graph once; focus never moves other nodes.
+        var left = Float.POSITIVE_INFINITY; var right = Float.NEGATIVE_INFINITY
+        var top = Float.POSITIVE_INFINITY; var bottom = Float.NEGATIVE_INFINITY
+        calculatedPositions.forEach { (id, point) ->
+            val extent = (max(radiusOf(id) * 1.06f, 32f) + 18f) * d
+            left = min(left, point.x - extent); right = max(right, point.x + extent)
+            top = min(top, point.y - extent); bottom = max(bottom, point.y + extent)
+        }
+        val translateX = viewportWidth * .5f - (left + right) / 2f
+        val translateY = viewportHeight * .48f - (top + bottom) / 2f
+        calculatedPositions.keys.toList().forEach { id ->
+            val point = calculatedPositions.getValue(id)
+            val axis = if (id == focusNodeId && id != rootId) axes[id] else null
+            calculatedPositions[id] = EdgePoint(point.x + translateX + (axis?.x ?: 0f) * 10f * d,
+                point.y + translateY + (axis?.y ?: 0f) * 10f * d)
+        }
+        clusteredChildren.forEach { (id, children) ->
+            val point = calculatedPositions.getValue(id)
+            clusterNodes[id] = NodePosition(id, point.x, point.y, 28f, isCluster = true,
+                clusterCount = children.count { nodes[it]?.parentId == id.removePrefix("cluster_") }, clusterChildIds = children,
+                alpha = if (focusNodeId != null && focusNodeId != rootId && focusNodeId != id) .5f else 1f)
         }
 
         // Build NodePosition objects
