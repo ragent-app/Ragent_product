@@ -165,7 +165,7 @@ internal fun OrganizationConversationIsland(
                 val body = measurables.single().measure(Constraints.fixed(
                     frame.width.roundToInt().coerceAtLeast(1), frame.height.roundToInt().coerceAtLeast(1)))
                 layout(constraints.maxWidth, constraints.maxHeight) {
-                    body.placeRelative((constraints.maxWidth - body.width) / 2, 0)
+                    body.placeRelative(0, 0)
                 }
             }
         }
@@ -226,7 +226,7 @@ private fun Modifier.organizationConversationForegroundReveal(
     val feather = minOf(24.dp.toPx() * (1f - p), visible)
     val height = size.height.coerceAtLeast(1f)
     val width = visibleWidth().coerceIn(0f, size.width)
-    val left = (size.width - width) / 2f
+    val left = 0f
     val horizontalFeather = minOf(32.dp.toPx() * (1f - p), width / 2f)
     val fraction = if (width > 0f) horizontalFeather / width else .5f
     val horizontalMask = Brush.horizontalGradient(0f to Color.Transparent, fraction to Color.White,
