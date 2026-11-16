@@ -73,15 +73,21 @@ class BirthEventTracker {
         for (candidate in candidates.sortedBy { it.timestamp }) {
             val cue = candidate.cue
             val key = cue.sourceId to cue.eventId
-            if (!seenEvents.add(key) || cue.nodeId in knownNodes || cue.actorNodeId !in knownNodes) continue
+            if (!seenEvents.add(key) || cue.nodeId in knownNodes) continue
             pending[key] = candidate
         }
         val result = mutableListOf<BirthCue>()
+        // A node may dispatch a later birth in this batch only after its own
+        // creation has passed the same actor and ancestry checks.
+        val establishedActors = knownNodes.toMutableSet()
         val iterator = pending.iterator()
         while (iterator.hasNext()) {
             val cue = iterator.next().value.cue
             if (cue.nodeId !in graphParents) continue
-            if (cue.nodeId !in knownNodes && isAncestor(cue.actorNodeId, cue.nodeId, graphParents)) result += cue
+            if (cue.nodeId !in knownNodes && cue.actorNodeId in establishedActors && isAncestor(cue.actorNodeId, cue.nodeId, graphParents)) {
+                result += cue
+                establishedActors.add(cue.nodeId)
+            }
             iterator.remove()
         }
         knownNodes.addAll(graphParents.keys)
