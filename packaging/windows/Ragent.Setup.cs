@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -127,7 +128,13 @@ internal static class RagentSetup {
             if (arg.Equals("/passive", StringComparison.OrdinalIgnoreCase) || arg.Equals("/qb", StringComparison.OrdinalIgnoreCase)) command.Append(" /qn");
             else if (arg.Equals("/norestart", StringComparison.OrdinalIgnoreCase) || arg.Equals("/quiet", StringComparison.OrdinalIgnoreCase) || arg.Equals("/q", StringComparison.OrdinalIgnoreCase) || arg.Equals("/qn", StringComparison.OrdinalIgnoreCase) || arg.StartsWith("DESKTOPINSTALLDIR=", StringComparison.OrdinalIgnoreCase)) command.Append(' ').Append(Quote(arg));
         }
-        return Run(command.ToString(), machine);
+        if (machine) return Run(command.ToString(), true);
+        string cancelEventName = @"Local\Ragent.Setup.Cancel." + Guid.NewGuid().ToString("N");
+        using (var cancelEvent = new EventWaitHandle(false, EventResetMode.ManualReset, cancelEventName)) {
+            command.Append(' ').Append(Quote("RAGENT_CANCEL_EVENT=" + cancelEventName));
+            int result = Run(command.ToString(), false);
+            return result != 0 && result != 3010 && cancelEvent.WaitOne(0) ? 1602 : result;
+        }
     }
     private static int RemoveRelated(string msi, bool machine) {
         var products = new List<string>(); string upgrade = Property(msi, "UpgradeCode");

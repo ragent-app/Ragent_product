@@ -244,7 +244,7 @@ void SetPage(Page page) {
     }
     if (g.welcomeButton) ShowWindow(g.welcomeButton, page == Page::Welcome ? SW_SHOW : SW_HIDE);
     if (g.backButton) ShowWindow(g.backButton, page == Page::Location ? SW_SHOW : SW_HIDE);
-    if (g.browseButton) ShowWindow(g.browseButton, SW_HIDE);
+    if (g.browseButton) ShowWindow(g.browseButton, page == Page::Location && !g.updating ? SW_SHOW : SW_HIDE);
     if (g.installButton) ShowWindow(g.installButton, page == Page::Location ? SW_SHOW : SW_HIDE);
     if (g.cancelButton) ShowWindow(g.cancelButton, (page == Page::Location || page == Page::Installing) ? SW_SHOW : SW_HIDE);
     if (g.finishButton) ShowWindow(g.finishButton, (page == Page::Complete || page == Page::Cancelled || page == Page::Failed) ? SW_SHOW : SW_HIDE);
@@ -271,7 +271,7 @@ void LayoutControls() {
     Position(g.languageSelect, right - Px(170), Px(35), Px(170), Px(250), true);
 
     Position(g.pathEdit, left + margin, Px(270), width - left - margin * 2 - Px(120), Px(46), g.page == Page::Location);
-    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), false);
+    Position(g.browseButton, right - Px(108), Px(270), Px(108), Px(46), g.page == Page::Location && !g.updating);
     Position(g.launchOption, left + margin, Px(334), width - left - margin * 2, Px(28), false);
     Position(g.welcomeButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Welcome);
     Position(g.installButton, right - buttonW, footerY, buttonW, buttonH, g.page == Page::Location);
@@ -704,7 +704,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(kButtonLaunchOption)), gModule, nullptr);
         if (g.pathEdit) {
             SetWindowTextW(g.pathEdit, g.installPath.c_str());
-            EnableWindow(g.pathEdit, FALSE);
+            EnableWindow(g.pathEdit, !g.updating);
         }
         g.languageSelect = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
             0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(kLanguageSelect)), gModule, nullptr);
@@ -776,6 +776,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         if (id == kButtonCancel) {
             if (g.page == Page::Welcome || g.page == Page::Location) {
+                gCancelRequested.store(true);
                 g.closing = true;
                 SetEvent(gExitEvent);
                 DestroyWindow(window);
@@ -863,6 +864,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return 0;
         }
         if (g.page == Page::Complete || g.page == Page::Cancelled || g.page == Page::Failed || g.page == Page::Welcome || g.page == Page::Location) {
+            if (g.page == Page::Welcome || g.page == Page::Location) gCancelRequested.store(true);
             g.closing = true;
             SetEvent(gExitEvent);
             DestroyWindow(window);
@@ -960,30 +962,6 @@ void ClearEvents() {
     }
 }
 
-// Resolve the installed directory from MSI's registered component, rather than
-// assuming the default Program Files location for an existing installation.
-bool FindInstalledFolder(MSIHANDLE install, const wchar_t* productCode, std::wstring& folder) {
-    MSIHANDLE database = MsiGetActiveDatabase(install), view = 0, record = 0;
-    if (!database) return false;
-    const wchar_t* sql = L"SELECT `ComponentId` FROM `Component` WHERE `Component` = 'ManagedServiceHost'";
-    bool ok = MsiDatabaseOpenViewW(database, sql, &view) == ERROR_SUCCESS &&
-        MsiViewExecute(view, 0) == ERROR_SUCCESS && MsiViewFetch(view, &record) == ERROR_SUCCESS;
-    wchar_t component[64]{}; DWORD componentLength = static_cast<DWORD>(std::size(component));
-    if (ok) ok = MsiRecordGetStringW(record, 1, component, &componentLength) == ERROR_SUCCESS;
-    if (record) MsiCloseHandle(record);
-    if (view) MsiCloseHandle(view);
-    MsiCloseHandle(database);
-    if (!ok) return false;
-    std::vector<wchar_t> file(32768, L'\0'); DWORD fileLength = static_cast<DWORD>(file.size());
-    if (MsiGetComponentPathW(productCode, component, file.data(), &fileLength) != INSTALLSTATE_LOCAL) return false;
-    std::filesystem::path service(file.data());
-    if (_wcsicmp(service.filename().c_str(), L"Ragent.ServiceHost.exe") != 0) return false;
-    folder = service.parent_path().wstring();
-    if (folder.empty()) return false;
-    if (folder.back() != L'\\') folder += L'\\';
-    return true;
-}
-
 // Find the installed predecessor before MSI's UI sequence runs. Never choose
 // arbitrarily if registration contains multiple installed related products.
 bool FindRelatedInstallation(MSIHANDLE install, std::wstring& product) {
@@ -1024,15 +1002,13 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     const bool installed = MsiQueryProductStateW(productCode) == INSTALLSTATE_DEFAULT;
     wchar_t remove[32]{}; DWORD removeLength = static_cast<DWORD>(std::size(remove));
     wchar_t updateAllowed[8]{}; DWORD updateAllowedLength = static_cast<DWORD>(std::size(updateAllowed));
-    wchar_t majorAllowed[8]{}; DWORD majorAllowedLength = static_cast<DWORD>(std::size(majorAllowed));
     if (MsiGetPropertyW(install, L"REMOVE", remove, &removeLength) != ERROR_SUCCESS ||
-        MsiGetPropertyW(install, L"RAGENT_INPLACE_UPDATE", updateAllowed, &updateAllowedLength) != ERROR_SUCCESS ||
-        MsiGetPropertyW(install, L"RAGENT_MAJOR_UPDATE_UI", majorAllowed, &majorAllowedLength) != ERROR_SUCCESS)
+        MsiGetPropertyW(install, L"RAGENT_INPLACE_UPDATE", updateAllowed, &updateAllowedLength) != ERROR_SUCCESS)
         return ERROR_INSTALL_FAILURE;
     if (installed && (_wcsicmp(remove, L"ALL") == 0 || wcscmp(updateAllowed, L"1") != 0))
         return (*uiLevel & 7);
     std::wstring previousProduct;
-    if (!installed && wcscmp(majorAllowed, L"1") == 0 && !FindRelatedInstallation(install, previousProduct))
+    if (!installed && !FindRelatedInstallation(install, previousProduct))
         return ERROR_INSTALL_FAILURE;
     g.minorUpdate = installed;
     g.updating = installed || !previousProduct.empty();
@@ -1048,6 +1024,14 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
     case LANG_SPANISH: gLanguage.store(6); break;
     default: gLanguage.store(0); break;
     }
+    wchar_t cancelEventName[128]{}; DWORD cancelEventLength = static_cast<DWORD>(std::size(cancelEventName));
+    if (MsiGetPropertyW(install, L"RAGENT_CANCEL_EVENT", cancelEventName, &cancelEventLength) != ERROR_SUCCESS)
+        return ERROR_INSTALL_FAILURE;
+    auto signalCancel = [&]() {
+        if (!gCancelRequested.load() || !cancelEventName[0]) return;
+        HANDLE event = OpenEventW(EVENT_MODIFY_STATE, FALSE, cancelEventName);
+        if (event) { SetEvent(event); CloseHandle(event); }
+    };
     gResourceDirectory = resourcePath ? resourcePath : L"";
     gCancelRequested.store(false);
     gInstallEnded.store(false);
@@ -1073,6 +1057,12 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
             userFolder[fallback.size()] = L'\0';
         }
     }
+    if (g.updating) {
+        DWORD bytes = sizeof(userFolder);
+        if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\Ragent\\DesktopInstaller", L"InstallLocation",
+                RRF_RT_REG_SZ, nullptr, userFolder, &bytes) != ERROR_SUCCESS || !userFolder[0])
+            return ERROR_INSTALL_FAILURE;
+    }
     g.installPath = userFolder;
     g.recoverySource.clear();
     g.closing = false;
@@ -1091,6 +1081,7 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
         CloseHandle(gUiThread);
         gUiThread = nullptr;
         ClearEvents();
+        signalCancel();
         return ERROR_INSTALL_USEREXIT;
     }
     if (wait != WAIT_OBJECT_0) {
@@ -1110,6 +1101,7 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
         CloseHandle(gUiThread);
         gUiThread = nullptr;
         ClearEvents();
+        signalCancel();
         return ERROR_INSTALL_USEREXIT;
     }
     if (wait != WAIT_OBJECT_0 + 1) {
@@ -1127,10 +1119,6 @@ extern "C" __declspec(dllexport) UINT __stdcall InitializeEmbeddedUI(MSIHANDLE i
         propertyResult = MsiSetPropertyW(install, L"REINSTALL", L"ALL");
     if (propertyResult == ERROR_SUCCESS)
         propertyResult = MsiSetPropertyW(install, L"DESKTOPINSTALLDIR", g.installPath.c_str());
-    const UINT recoveryPropertyResult = MsiSetPropertyW(install, L"RAGENT_RECOVERY_SOURCE", g.recoverySource.c_str());
-    if (propertyResult == ERROR_SUCCESS && recoveryPropertyResult != ERROR_SUCCESS) propertyResult = recoveryPropertyResult;
-    const UINT launchPropertyResult = MsiSetPropertyW(install, L"RAGENT_LAUNCH", L"");
-    if (propertyResult == ERROR_SUCCESS && launchPropertyResult != ERROR_SUCCESS) propertyResult = launchPropertyResult;
     if (propertyResult != ERROR_SUCCESS) {
         PostUiText(3, Text(L"Windows Installer could not apply the selected setup options.", L"Windows Installer 无法应用所选安装选项。"));
         g.closing = true;
