@@ -459,13 +459,13 @@ internal fun OrganizationGraphArt(nodes: List<GraphNodeSurface>, edges: List<Ren
             val ra = ellipseIntersection(a, direction, normal, 0f, true)
             val rb = -ellipseIntersection(b, direction, normal, 0f, false)
             val isBirth = b.birthSourceId == a.id || a.birthSourceId == b.id
-            if (isBirth) {
-                val separation = surfaceSeparation(a, b)
+            val separation = if (isBirth) surfaceSeparation(a, b) else null
+            val gateDistance = 6.dp.toPx() * inverseZoom
+            if (separation != null && separation.gap < gateDistance) {
                 val surfaceGap = separation.gap
                 // Even before a bridge has nonzero area, touching/contained
                 // parent and child must share one fill and not double-blend.
                 if (surfaceGap <= .0001f) touchingBridges += Triple(a.id, b.id, Path())
-                val gateDistance = 6.dp.toPx() * inverseZoom
                 val transition = smooth(surfaceGap / gateDistance.coerceAtLeast(.001f))
                 val halfEnd = minOf(requestedHalfEnd, a.minor * .7f, b.minor * .7f)
                 val crossings = if (surfaceGap <= .0001f) ellipseCrossings(a, b) else emptyList()
@@ -477,7 +477,7 @@ internal fun OrganizationGraphArt(nodes: List<GraphNodeSurface>, edges: List<Ren
                     (supportPoint(a, separation.axis) + supportPoint(b, -separation.axis)) / 2f
                 val localCenter = dot(contactMidpoint - a.center, normal) * (1f - transition)
                 val opening = smooth(exposure / (halfEnd * 2f).coerceAtLeast(.001f))
-                val minimumFillet = surfaceGap / 2f + .25.dp.toPx() * inverseZoom
+                val minimumFillet = if (surfaceGap > .0001f) surfaceGap / 2f + .25.dp.toPx() * inverseZoom else 0f
                 val fillet = maxOf(minOf(round, b.minor * .25f, exposure * .5f), minimumFillet)
                 val top = birthFilletSide(a, b, direction, normal, -1f, fillet, .01.dp.toPx() * inverseZoom)
                     ?: birthBridgeSide(a, b, direction, normal, topCrossing.takeIf { crossings.size >= 2 }, -1f, localCenter, halfEnd, opening, round) ?: return@forEach
