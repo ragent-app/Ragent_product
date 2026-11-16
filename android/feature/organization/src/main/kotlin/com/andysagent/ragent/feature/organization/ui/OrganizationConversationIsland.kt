@@ -99,7 +99,7 @@ internal fun OrganizationConversationIsland(
     val shellHeight = frame.radius * 2f + (frame.height - frame.radius * 2f) * p.pow(1.15f)
     val center = frame.center + (frame.targetCenter - frame.center) * p
     val cornerPx = minOf(shellWidth, shellHeight) / 2f + (with(density) { 22.dp.toPx() } - minOf(shellWidth, shellHeight) / 2f) * islandSmooth(p, .10f, .80f)
-    val contentAlpha = islandSmooth(p, .45f, .90f)
+    val contentAlpha = islandSmooth(p, .75f, 1f)
     val closeReady = !expanded && expansion <= .001f && (liveCenter - (anchor.center - screenOrigin)).getDistance() < .5f && kotlin.math.abs(liveRadius - anchor.radius) < .5f
     LaunchedEffect(closeReady, deleted, deletionAlpha) {
         if ((deleted && deletionAlpha <= .001f) || (!deleted && closeReady)) onClosed()
