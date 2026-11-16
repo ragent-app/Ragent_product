@@ -13,7 +13,8 @@ import { buildOrganizationProjection } from './organization-projection.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { provisionRootLeadershipRevision } from './organization-provisioning.mjs';
 import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
-import { listOrganizationEvents, hasCreatedOrganizationSubordinate, getInternalEnvelope } from './organization-messaging.mjs';
+import { listOrganizationEvents, getInternalEnvelope } from './organization-messaging.mjs';
+import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
 import { getCollaboration } from './collaboration-store.mjs';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
@@ -117,7 +118,7 @@ export async function handleOrganizationRoutes({
       res.setHeader?.('Cache-Control', 'private, no-store');
       writeJson(res, 200, {
         rootSessionId, organizationId: org.id,
-        hasCreatedSubordinate: await hasCreatedOrganizationSubordinate(org.id) || nodes.some((node) => node.parentNodeId && node.currentSessionId && node.currentSessionId !== rootSessionId && node.retiredRevision == null && !['retired', 'deleted'].includes(String(node.lifecycleState || '').toLowerCase())),
+        hasCreatedSubordinate: await organizationHasCreatedSubordinate(org, nodes),
         actions,
         nextAfterId: page.at(-1)?.id || afterId,
         hasMore: rows.length > limit,

@@ -80,6 +80,7 @@ data class OrganizationProjectionDto(
     val schemaVersion: Int = 1,
     val organizationId: String,
     val rootSessionId: String? = null,
+    val hasCreatedSubordinate: Boolean = false,
     val revision: OrganizationRevisionDto? = null,
     val objective: String = "",
     val state: String = "idle",

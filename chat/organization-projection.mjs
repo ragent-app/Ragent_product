@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { canonicalJson } from './execution-scope.mjs';
 import { getOrganization, getRevision, listOrganizationNodes, listOrganizationEdges, listOrganizationGates } from './organization-store.mjs';
 import { listOrganizationEvents, listInternalEnvelopes } from './organization-messaging.mjs';
+import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
 import { getBudgetCounter } from './organization-governor.mjs';
 import { collectOrganizationStatus } from './organization-status-projection.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
@@ -146,6 +147,7 @@ async function buildOrganizationProjectionUncached(organizationId, {
     schemaVersion: v2 ? ORGANIZATION_PROJECTION_V2_SCHEMA_VERSION : ORGANIZATION_PROJECTION_SCHEMA_VERSION,
     organizationId: org.id,
     rootSessionId: org.rootSessionId,
+    hasCreatedSubordinate: await organizationHasCreatedSubordinate(org, nodes),
     revision: revision ? { number: revision.revision, digest: revision.digest, state: revision.state } : null,
     objective: text(compiled.objective || revision?.proposal?.objective || ''),
     state: status?.state || org.state,
