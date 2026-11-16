@@ -161,53 +161,56 @@ class OrganizationLayoutEngine {
         fun span(id: String): Float = spans.getOrPut(id) {
             val children = visibleChildren[id].orEmpty()
             val own = max(radiusOf(id) * 2f, 64f) * d
-            if (children.isEmpty()) own else max(own, children.sumOf { span(it).toDouble() }.toFloat() + 16f * d * (children.size - 1))
+            if (children.isEmpty()) own else max(own, children.sumOf { span(it).toDouble() }.toFloat() + 24f * d * (children.size - 1) + 16f * d)
         }
-        val unitRoots = (visibleChildren[rootId].orEmpty() + componentRoots).sortedWith(
-            compareBy<String>({ roleOrder[nodes[it]?.role ?: nodes[it.removePrefix("cluster_")]?.role] ?: 4 },
-                { (nodes[it] ?: nodes[it.removePrefix("cluster_")])?.domain?.name.orEmpty() }, { it }),
-        )
         val axes = mutableMapOf<String, EdgePoint>()
         calculatedPositions[rootId] = EdgePoint(0f, 0f)
-        val tan35 = kotlin.math.tan(Math.toRadians(35.0)).toFloat()
-        val branchGap = floatArrayOf(30f, 42f, 24f, 36f)
-        val childFactors = floatArrayOf(.92f, 1.08f, 1f, .96f)
-        unitRoots.forEachIndexed { index, unit ->
-            val angle = when (unitRoots.size) {
-                1 -> floatArrayOf(-65f)[index]
-                2 -> floatArrayOf(-65f, 55f)[index]
-                3 -> floatArrayOf(-100f, 20f, 145f)[index]
-                4 -> floatArrayOf(-120f, -25f, 65f, 160f)[index]
-                else -> -110f + index * (360f / unitRoots.size) + if (index % 2 == 0) 4f else -4f
+        val tan40 = kotlin.math.tan(Math.toRadians(40.0)).toFloat()
+        val childFactors = floatArrayOf(.94f, 1.08f, 1f, .98f)
+        fun placeChildren(parent: String, inheritedDrift: Float?) {
+            val children = visibleChildren[parent].orEmpty()
+            if (children.isEmpty()) return
+            val parentPosition = calculatedPositions.getValue(parent)
+            val childrenSpan = children.sumOf { span(it).toDouble() }.toFloat() + 24f * d * (children.size - 1)
+            var cursor = parentPosition.x - childrenSpan / 2f
+            children.forEachIndexed { index, child ->
+                val childSpan = span(child)
+                val drift = inheritedDrift ?: if (children.size == 1) -8f * d
+                    else 8f * d * (2f * index / (children.size - 1) - 1f)
+                val childX = cursor + childSpan / 2f + drift
+                val deltaX = childX - parentPosition.x
+                val deltaY = max((radiusOf(parent) + radiusOf(child) + 28f * childFactors[index % childFactors.size]) * d,
+                    kotlin.math.abs(deltaX) / tan40)
+                val length = hypot(deltaX, deltaY)
+                calculatedPositions[child] = EdgePoint(childX, parentPosition.y + deltaY)
+                axes[child] = EdgePoint(deltaX / length, deltaY / length)
+                placeChildren(child, drift)
+                cursor += childSpan + 24f * d
             }
-            val radians = Math.toRadians(angle.toDouble())
-            val axis = EdgePoint(kotlin.math.cos(radians).toFloat(), kotlin.math.sin(radians).toFloat())
-            val normal = EdgePoint(-axis.y, axis.x)
-            val unitAngle = min(35f, 140f / unitRoots.size)
-            val distance = max((radiusOf(rootId) + radiusOf(unit) + branchGap[index % branchGap.size]) * d,
-                span(unit) / 2f / kotlin.math.tan(Math.toRadians(unitAngle.toDouble())).toFloat())
-            fun place(id: String, forward: Float, cross: Float) {
-                axes[id] = axis
-                calculatedPositions[id] = EdgePoint(axis.x * forward + normal.x * cross, axis.y * forward + normal.y * cross)
-                val children = visibleChildren[id].orEmpty()
-                if (children.isEmpty()) return
-                val childrenSpan = children.sumOf { span(it).toDouble() }.toFloat() + 16f * d * (children.size - 1)
-                var cursor = cross - childrenSpan / 2f
-                children.forEachIndexed { slot, child ->
-                    val childSpan = span(child)
-                    val childCross = cursor + childSpan / 2f
-                    val step = max((radiusOf(id) + radiusOf(child) + 24f * childFactors[slot % childFactors.size]) * d,
-                        kotlin.math.abs(childCross - cross) / tan35)
-                    place(child, forward + step, childCross)
-                    cursor += childSpan + 16f * d
-                }
-            }
-            place(unit, distance, 0f)
+        }
+        placeChildren(rootId, null)
+
+        // Independent components retain their own roots; placement adds no relationship.
+        var componentLeft = span(rootId) / 2f + 32f * d
+        componentRoots.forEach { component ->
+            val componentSpan = span(component)
+            calculatedPositions[component] = EdgePoint(componentLeft + componentSpan / 2f,
+                max((radiusOf(rootId) + radiusOf(component) + 32f) * d, 96f * d))
+            axes[component] = EdgePoint(0f, 1f)
+            placeChildren(component, null)
+            componentLeft += componentSpan + 32f * d
         }
 
-        // Keep the layout anchor at the viewport center regardless of branch bounds.
-        val translateX = viewportWidth * .5f
-        val translateY = viewportHeight * .5f
+        // Center the unfocused graph while keeping the real layout anchor near the middle.
+        var left = Float.POSITIVE_INFINITY
+        var right = Float.NEGATIVE_INFINITY
+        calculatedPositions.forEach { (id, point) ->
+            val extent = (max(radiusOf(id), 32f) + 8f) * d
+            left = min(left, point.x - extent)
+            right = max(right, point.x + extent)
+        }
+        val translateX = (viewportWidth * .5f - (left + right) / 2f).coerceIn(viewportWidth * .38f, viewportWidth * .62f)
+        val translateY = (viewportHeight * .18f).coerceIn(56f * d, 84f * d)
         calculatedPositions.keys.toList().forEach { id ->
             val point = calculatedPositions.getValue(id)
             val axis = if (id == focusNodeId && id != rootId) axes[id] else null
