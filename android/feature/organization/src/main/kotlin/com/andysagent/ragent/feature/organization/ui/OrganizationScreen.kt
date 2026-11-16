@@ -45,6 +45,7 @@ fun OrganizationScreen(
     onRootClick: (Rect) -> Unit = {},
     onRootAnchorChanged: (Rect?) -> Unit = {},
     embedded: Boolean = false,
+    revealRoot: Boolean = false,
 ) {
     val uiState by viewModel.uiState.collectAsState()
     OrganizationScreenContent(
@@ -56,7 +57,7 @@ fun OrganizationScreen(
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
         onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels,
-        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded,
+        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot,
     )
 }
 
@@ -88,6 +89,7 @@ fun OrganizationScreenContent(
     onRootClick: (Rect) -> Unit = {},
     onRootAnchorChanged: (Rect?) -> Unit = {},
     embedded: Boolean = false,
+    revealRoot: Boolean = false,
 ) {
     val colors = LocalRagentColors.current
     if (uiState.activeDetailNode != null) {
@@ -167,6 +169,17 @@ fun OrganizationScreenContent(
                     Spacer(Modifier.fillMaxWidth().height(graphHeight))
                 }
                 if (!embedded) OrganizationActivityFeed(uiState.activityFeed, uiState.isActivityFeedExpanded, onToggleActivityFeed, Modifier.onSizeChanged { activityHeight = it.height }.padding(top = 12.dp, bottom = 16.dp), reduceMotion = uiState.reduceMotion)
+            }
+        }
+        val rootAnchor = anchors[embeddedRootId]
+        LaunchedEffect(revealRoot, rootAnchor, viewport) {
+            val a = rootAnchor
+            val bounds = viewport
+            if (embedded && revealRoot && a != null && bounds != null && bounds.width > 0f && bounds.height > 0f) {
+                val margin = a.radius.coerceAtMost(minOf(bounds.width, bounds.height) / 2f)
+                val correction = Offset(a.center.x.coerceIn(bounds.left + margin, bounds.right - margin) - a.center.x,
+                    a.center.y.coerceIn(bounds.top + margin, bounds.bottom - margin) - a.center.y)
+                if (correction.getDistance() > .5f) onPan(correction)
             }
         }
         val rememberedNode = selectedNode

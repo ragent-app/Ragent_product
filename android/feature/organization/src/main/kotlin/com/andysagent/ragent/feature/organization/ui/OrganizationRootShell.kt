@@ -55,22 +55,27 @@ fun OrganizationRootShell(
         MotionPreference.None -> tween(0)
     }, label = "root-conversation-shell")
     val p = animated.coerceIn(0f, 1f)
-    var rootOrigin by remember { mutableStateOf(Offset.Zero) }
+    var rootOrigin by remember { mutableStateOf<Offset?>(null) }
     val width = (origin.width + (target.width - origin.width) * p).coerceAtLeast(1f)
     val height = (origin.height + (target.height - origin.height) * p.pow(1.15f)).coerceAtLeast(1f)
-    val center = origin.center + (target.center - origin.center) * p - rootOrigin
+    val center = origin.center + (target.center - origin.center) * p - (rootOrigin ?: Offset.Zero)
     val corner = if (sourceIsCircle) minOf(width, height) / 2f +
-        (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * p else with(density) { 22.dp.toPx() }
+        (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
     val color = if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor.copy(alpha = 1f)
     Box(modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.localToRoot(Offset.Zero) }) {
-        Box(Modifier.align(AbsoluteAlignment.TopLeft)
+        if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) Box(Modifier.align(AbsoluteAlignment.TopLeft)
             .absoluteOffset { IntOffset((center.x - width / 2f).roundToInt(), (center.y - height / 2f).roundToInt()) }
             .size(with(density) { width.toDp() }, with(density) { height.toDp() })
             .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).background(color)) {
             Layout(content = { content(p) }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
-                layout(constraints.maxWidth, constraints.maxHeight) { child.place(0, constraints.maxHeight - child.height) }
+                layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, constraints.maxHeight - child.height) }
             }
         }
     }
+}
+
+private fun smoothRoot(p: Float, start: Float, end: Float): Float {
+    val u = ((p - start) / (end - start)).coerceIn(0f, 1f)
+    return u * u * (3f - 2f * u)
 }
