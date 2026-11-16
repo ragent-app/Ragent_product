@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
@@ -48,14 +49,10 @@ internal fun OrganizationGraph(
     hiddenNodeId: String? = null,
     onAnchorsChanged: (Map<String, OrganizationNodeAnchor>, Rect?) -> Unit = { _, _ -> },
     onAdvancePhysicsFrame: (Long) -> Unit = {},
+    onReportBirthSurfaceGaps: (Map<String, Float>) -> Unit = {},
 ) {
     val density = LocalDensity.current.density
     val preference = if (uiState.reduceMotion && motionPolicy().preference == MotionPreference.Full) MotionPreference.Reduced else motionPolicy().preference
-    LaunchedEffect(uiState.physicsRunning, preference) {
-        if (uiState.physicsRunning && preference == MotionPreference.Full) {
-            while (true) withFrameNanos { onAdvancePhysicsFrame(it) }
-        }
-    }
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.nodes.isNotEmpty()) { if (uiState.nodes.isNotEmpty()) shown = true }
     val opacity by animateFloatAsState(if (shown) 1f else 0f,
@@ -75,10 +72,28 @@ internal fun OrganizationGraph(
         GraphNodeSurface(node.id, Offset(frame?.centerX ?: node.x, frame?.centerY ?: node.y),
             radiusDp * density * (presses[node.id] ?: 1f),
             nodeAccent(nodeVisual(node), dark), node.alpha, node.id == hiddenNodeId,
-            frame?.birthSourceId, frame?.birthProgress ?: 1f, frame?.birthVisible ?: true,
+            frame?.birthSourceId, frame?.birthProgress ?: 1f, frame?.separationMaterialProgress ?: 1f, frame?.birthVisible ?: true,
             frame?.sourceDeformation ?: 0f, Offset(frame?.deformationDirectionX ?: 0f, frame?.deformationDirectionY ?: 1f))
     }
     val surfacesById = surfaces.associateBy { it.id }
+    val currentSurfaces by rememberUpdatedState(surfaces)
+    val currentZoom by rememberUpdatedState(uiState.zoomScale)
+    val reportGaps by rememberUpdatedState(onReportBirthSurfaceGaps)
+    val advanceFrame by rememberUpdatedState(onAdvancePhysicsFrame)
+    LaunchedEffect(uiState.physicsRunning, preference, density) {
+        if (uiState.physicsRunning && preference == MotionPreference.Full) {
+            while (true) withFrameNanos { frameNanos ->
+                val byId = currentSurfaces.associateBy { it.id }
+                val gaps = currentSurfaces.mapNotNull { child ->
+                    val source = child.birthSourceId?.let(byId::get) ?: return@mapNotNull null
+                    if (!child.visible || !source.visible) return@mapNotNull null
+                    child.id to (graphSurfaceGap(source, child) * currentZoom / density)
+                }.toMap()
+                if (gaps.isNotEmpty()) reportGaps(gaps)
+                advanceFrame(frameNanos)
+            }
+        }
+    }
     val transform = rememberTransformableState { zoom, pan, _ -> onZoom(zoom); onPan(pan) }
     var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var viewportOrigin by remember { mutableStateOf(Offset.Unspecified) }

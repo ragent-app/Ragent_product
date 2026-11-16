@@ -64,7 +64,7 @@ fun OrganizationScreen(
         onCloseDetail = viewModel::onCloseAgentDetail, onToggleActivityFeed = viewModel::onToggleActivityFeed,
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
-        onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels, onAdvancePhysicsFrame = viewModel::advancePhysicsFrame,
+        onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels, onAdvancePhysicsFrame = viewModel::advancePhysicsFrame, onReportBirthSurfaceGaps = viewModel::reportBirthSurfaceGaps,
         onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged, rootHidden = rootHidden, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed,
     )
 }
@@ -85,6 +85,7 @@ fun OrganizationScreenContent(
     onRejectBlocker: (String) -> Unit,
     onSizeChanged: (Int, Int, Float) -> Unit = { _, _, _ -> },
     onAdvancePhysicsFrame: (Long) -> Unit = {},
+    onReportBirthSurfaceGaps: (Map<String, Float>) -> Unit = {},
     onSendRootInstruction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     showNodeLabels: Boolean = false,
@@ -183,7 +184,7 @@ fun OrganizationScreenContent(
                             selectedId = id; selectedNode = node; deleted = false; expanded = true
                         }
                     }, onNodeDoubleTap, onSizeChanged, modifier = Modifier.fillMaxWidth().height(graphHeight).clip(AgentoShapes.SurfaceLargeShape),
-                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAdvancePhysicsFrame = onAdvancePhysicsFrame, onAnchorsChanged = { latest, bounds ->
+                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAdvancePhysicsFrame = onAdvancePhysicsFrame, onReportBirthSurfaceGaps = onReportBirthSurfaceGaps, onAnchorsChanged = { latest, bounds ->
                             if (anchors != latest) anchors = latest
                             if (embedded) {
                                 val root = latest[embeddedRootId]
