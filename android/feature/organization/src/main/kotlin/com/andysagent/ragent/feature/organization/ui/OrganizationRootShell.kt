@@ -5,6 +5,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +28,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -32,6 +38,8 @@ import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.core.designsystem.motionPolicy
 import kotlin.math.pow
 import kotlin.math.roundToInt
+
+data class OrganizationRootVisual(val icon: Int, val colors: List<Color>, val radiusDp: Float)
 
 /** A single, fixed-layout chat surface revealed inside a reversible moving shell.
  * Rectangles are physical pixel coordinates in the Compose root. The caller keeps
@@ -45,9 +53,11 @@ fun OrganizationRootShell(
     sourceIsCircle: Boolean,
     modifier: Modifier = Modifier,
     surfaceColor: Color = Color.Unspecified,
+    sourceVisual: OrganizationRootVisual? = null,
     content: @Composable (progress: Float) -> Unit,
 ) {
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val preference = motionPolicy().preference
     val animated by animateFloatAsState(if (expanded) 1f else 0f, animationSpec = when (preference) {
         MotionPreference.Full -> spring(dampingRatio = 1f, stiffness = 220f, visibilityThreshold = .002f)
@@ -66,10 +76,23 @@ fun OrganizationRootShell(
         if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) Box(Modifier.align(AbsoluteAlignment.TopLeft)
             .absoluteOffset { IntOffset((center.x - width / 2f).roundToInt(), (center.y - height / 2f).roundToInt()) }
             .size(with(density) { width.toDp() }, with(density) { height.toDp() })
-            .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).background(color)) {
+            .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).background(
+                if (sourceIsCircle && sourceVisual != null && sourceVisual.colors.size >= 3) Brush.linearGradient(sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) })
+                else Brush.linearGradient(listOf(color, color)))) {
             Layout(content = { content(p) }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
                 layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, constraints.maxHeight - child.height) }
+            }
+            if (sourceIsCircle && sourceVisual != null) {
+                val glyphMotion = smoothRoot(p, .15f, .90f)
+                val glyphSize = nodeIconSize(sourceVisual.radiusDp).dp * (1f - glyphMotion) + 20.dp * glyphMotion
+                val glyphTargetX = if (layoutDirection == LayoutDirection.Ltr) with(density) { 32.dp.toPx() } else width - with(density) { 32.dp.toPx() }
+                val x = width / 2f + (glyphTargetX - width / 2f) * glyphMotion
+                val y = height / 2f + (with(density) { 32.dp.toPx() } - height / 2f) * glyphMotion
+                Icon(painterResource(sourceVisual.icon), contentDescription = null, tint = color,
+                    modifier = Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset {
+                        IntOffset((x - glyphSize.toPx() / 2f).roundToInt(), (y - glyphSize.toPx() / 2f).roundToInt())
+                    }.size(glyphSize))
             }
         }
     }

@@ -62,7 +62,7 @@ import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 @Composable
-fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
+fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
@@ -318,7 +318,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                             Text(stringResource(R.string.organization_conversation_unavailable), contentModifier.padding(20.dp), color = LocalRagentColors.current.secondaryContent)
                         }
                     }, conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second },
-                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot)
+                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged)
             }
         }
         else if (!embedded) {
@@ -357,9 +357,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
 fun ConnectedOrganizationGraph(
     transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null,
     modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit,
-    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onHasCollaboratorsChanged: (Boolean) -> Unit,
+    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit,
 ) {
     ConnectedOrganizationScreen(transport, sessionId, targetId, offlineScope, onBack = {}, embedded = true,
-        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot,
+        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged,
         onHasCollaboratorsChanged = onHasCollaboratorsChanged)
 }

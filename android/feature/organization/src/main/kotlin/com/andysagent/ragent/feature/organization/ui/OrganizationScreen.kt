@@ -17,6 +17,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +47,7 @@ fun OrganizationScreen(
     onRootAnchorChanged: (Rect?) -> Unit = {},
     embedded: Boolean = false,
     revealRoot: Boolean = false,
+    onRootVisualChanged: (OrganizationRootVisual) -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     OrganizationScreenContent(
@@ -57,7 +59,7 @@ fun OrganizationScreen(
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
         onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels,
-        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot,
+        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged,
     )
 }
 
@@ -90,8 +92,15 @@ fun OrganizationScreenContent(
     onRootAnchorChanged: (Rect?) -> Unit = {},
     embedded: Boolean = false,
     revealRoot: Boolean = false,
+    onRootVisualChanged: (OrganizationRootVisual) -> Unit = {},
 ) {
     val colors = LocalRagentColors.current
+    val rootVisualNode = uiState.nodes.firstOrNull { it.id == embeddedRootId }
+    if (embedded && rootVisualNode != null) {
+        val visual = nodeVisual(rootVisualNode)
+        val palette = nodeAccent(visual, colors.canvas.luminance() < .5f)
+        SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.radiusDp)) }
+    }
     if (uiState.activeDetailNode != null) {
         AgentDetailScreen(node = uiState.activeDetailNode, onBack = onCloseDetail)
         return
