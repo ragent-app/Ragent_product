@@ -122,6 +122,8 @@ fun TurnTimelineView(
     runWaitingApproval: Boolean = false,
     activeAction: (@Composable () -> Unit)? = null,
     onEditAdditional: ((String, String) -> Unit)? = null,
+    collaborationActions: Map<String, CollaborationActionPresentation> = emptyMap(),
+    onOpenCollaborator: (CollaborationActionPresentation) -> Unit = {},
 ) {
     Column(
         modifier = modifier
@@ -174,7 +176,11 @@ fun TurnTimelineView(
                     is TimelineItem.Operation -> {
                         if (item.isReasoning) ThinkingRow(item) else ProcessOperationRow(item)
                     }
-                    is TimelineItem.Notice -> if (item.text.isNotBlank()) Text(item.text)
+                    is TimelineItem.Notice -> {
+                        val action = collaborationActions[item.id]
+                        if (action != null) CollaborationActionRow(item.text, action, onOpenCollaborator)
+                        else if (item.text.isNotBlank()) Text(item.text)
+                    }
                 }
             } }
             if (processEntries.isNotEmpty() || runActive || runDuration != null) {
@@ -190,12 +196,14 @@ fun TurnTimelineView(
                     if (canExpand) AgentoWebIcon(if (expanded) AgentoWebGlyph.ChevronDown else AgentoWebGlyph.ChevronRight,
                         null, Modifier.size(14.dp), tint = LocalRagentColors.current.secondaryContent)
                 }
-                AnimatedVisibility(expanded) {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        processEntries.forEach { renderEntry(it) }
-                        activeAction?.invoke()
+                processEntries.forEach { entry ->
+                    if (entry is TimelineItem.Notice && entry.id.startsWith("collaboration:")) {
+                        renderEntry(entry)
+                    } else {
+                        AnimatedVisibility(expanded) { renderEntry(entry) }
                     }
                 }
+                if (activeAction != null) AnimatedVisibility(expanded) { activeAction() }
             }
             outsideEntries.forEach { renderEntry(it) }
             return@Column
@@ -885,5 +893,22 @@ fun StreamingResultBlock(
             streaming = true,
             smoothCatchUp = !message.completed && message.lastEventSeq == 0L,
         )
+    }
+}
+
+
+@Composable
+private fun CollaborationActionRow(label: String, action: CollaborationActionPresentation, onOpen: (CollaborationActionPresentation) -> Unit) {
+    var expanded by rememberSaveable(action.id) { mutableStateOf(false) }
+    val details = listOfNotNull(action.summary, action.details, action.status).filter { it.isNotBlank() }.distinct()
+    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 4.dp)) {
+        Text(listOfNotNull(label, action.displayName?.takeIf { it.isNotBlank() }).joinToString(" · "),
+            style = MaterialTheme.typography.labelMedium, color = LocalRagentColors.current.secondaryContent)
+        if (expanded) {
+            details.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = LocalRagentColors.current.secondaryContent) }
+            if (action.nodeId != null) androidx.compose.material3.TextButton(onClick = { onOpen(action) }) {
+                Text(stringResource(R.string.collaboration_open_member))
+            }
+        }
     }
 }

@@ -116,7 +116,10 @@ internal fun splitTurnEntries(
     if (finalIndex < 0) return if (allowTerminalFallback) entries to emptyList() else emptyList<TimelineItem>() to entries
     // Late-arriving entries still belong to the run's process, even if a
     // finalized snapshot was projected before them.
-    return (entries.take(finalIndex) + entries.drop(finalIndex + 1)) to listOf(entries[finalIndex])
+    val afterFinal = entries.drop(finalIndex + 1)
+    val lateCollaboration = afterFinal.filter { it is TimelineItem.Notice && it.id.startsWith("collaboration:") }
+    return (entries.take(finalIndex) + afterFinal.filterNot { it in lateCollaboration }) to
+        (listOf(entries[finalIndex]) + lateCollaboration)
 }
 
 internal fun activeRunTurnIndex(turns: List<TurnGroup>, runId: String?, requestId: String?): Int {
