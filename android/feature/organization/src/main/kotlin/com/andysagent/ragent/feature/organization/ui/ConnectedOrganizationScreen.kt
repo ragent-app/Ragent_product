@@ -50,6 +50,7 @@ import com.andysagent.ragent.feature.organization.data.OrganizationOfflineCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -95,6 +96,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     }
     val transportKey = remember(transport) { java.util.UUID.randomUUID().toString() }
     val organizationViewModel: OrganizationViewModel = viewModel(key = "organization:${targetId.orEmpty()}:$sessionId:$scopeKey:$transportKey", factory = factory)
+    val localDemoReplay = LocalOrganizationDemoBirthReplay.current
+    val localDemoReplaySequence = localDemoReplay?.sequence
+
     var status by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf("Loading organization…") }
     var loaded by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var refresh by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(0) }
@@ -332,6 +336,19 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             nodes = projection.nodes
             delay(3_000)
         }
+    }
+    LaunchedEffect(localDemoReplay, localDemoReplaySequence, loaded, baseProjection) {
+        val replay = localDemoReplay ?: return@LaunchedEffect
+        val requested = localDemoReplaySequence ?: return@LaunchedEffect
+        if (!embedded || !loaded || baseProjection?.organizationId != "demo_only" ||
+            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0 ||
+            !replay.consume(requested)) return@LaunchedEffect
+        organizationViewModel.uiState.first { state ->
+            state.nodes.any { it.id == "planning" && it.physicsFrame != null } &&
+                state.nodes.any { it.id == "android" && it.physicsFrame != null } &&
+                state.nodes.any { it.id == "backend" && it.physicsFrame != null }
+        }
+        organizationViewModel.replayLocalDemoBirths()
     }
     val rootSession = rootSessionId?.takeIf { it.isNotBlank() } ?: sessionId
     val rootMatches = nodes.filter { it.sessionId == rootSession }
