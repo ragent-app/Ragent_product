@@ -9,7 +9,7 @@
 import { execFile as execFileCallback } from 'child_process';
 import { chmod, chown, mkdir, rm, readFile } from 'fs/promises';
 import { createServer } from 'net';
-import { dirname, isAbsolute, join, resolve } from 'path';
+import { dirname, isAbsolute, join } from 'path';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 
@@ -38,16 +38,13 @@ import {
   RUNNER_LIFECYCLE_SOCKET_UNIT,
   inheritedSocketFd,
 } from '../lib/systemd-socket-activation.mjs';
-import {
-  grantRunnerWorkspaceAccess,
-  revokeRunnerWorkspaceAccess,
-  createRunnerWorkspaceCleanupSweep,
-} from './runner-workspace-access.mjs';
+import { createRunnerWorkspaceCleanupSweep } from './runner-workspace-access.mjs';
 import { normalizeRunnerInheritedGroups, RUNNER_DENIED_GROUPS } from '../lib/runner-user-groups.mjs';
 import { buildRunnerGroupDropCommand, isTrustedSetpriv, resolveAllowedRunnerGroupIds,
   resolveRestrictedRunnerGroupIds, verifyDroppedRunnerProcess } from '../lib/linux-runner-group-drop.mjs';
 import { resolveRunnerProxyEnvironment } from '../lib/network-proxy.mjs';
 import { grantExistingRunnerFiles } from '../lib/linux-runner-file-access.mjs';
+import { readOnlyWorkspaceForRun } from '../chat/read-only-run-sandbox.mjs';
 import { registerLinuxRunContext, renewLinuxRunContext, revokeLinuxRunContext } from './linux-run-context-store.mjs';
 
 const execFileAsync = promisify(execFileCallback);
@@ -343,13 +340,8 @@ export function buildLifecycleSystemdArgs(runId, {
   serviceUser = 'ragent',
   serviceGroup = serviceUser,
   unitName = buildDetachedRunnerUnitName(runId),
-  workspaceAccessGroup = '',
-  workspaceAccessRunId = runId,
   launchAttempt = 0,
-  runCwd = '',
-  isCodexRun = false,
   inheritedGroups = [],
-  workspaceAccessScript = join(projectRoot, 'scripts', 'runner-workspace-access.mjs'),
   resourceProfile = RESOURCE_PROFILES.default,
   groupDrop = null,
   scopeProtection = false,
@@ -380,8 +372,7 @@ export function buildLifecycleSystemdArgs(runId, {
     // The config directory itself (not its parent) is masked so the managed
     // work root /var/lib/ragent/workspace stays reachable when a Run's
     // execution scope points there: masking /var/lib/ragent made the default
-    // workspace unreadable inside the unit namespace even though the ACL/grant
-    // layer had explicitly allowed it.
+    // workspace unreadable inside the unit namespace despite existing access.
     // Prefix the optional executor socket with `-`: systemd treats a missing
     // path as non-fatal when the executor has not created its RuntimeDirectory.
     '--property', `InaccessiblePaths=/etc/ragent ${buildControlPlaneMaskPaths(environment).join(' ')} /run/ragent -/run/ragent-privileged-executor`,
@@ -417,50 +408,16 @@ export function buildLifecycleSystemdArgs(runId, {
     // from preventing a non-GUI Run from starting.
     args.push('--property', `BindReadOnlyPaths=${guiBindPaths.map((path) => `-${path}`).join(' ')}`);
   }
-  // Codex treats <cwd>/.codex/config.toml as a project configuration even
-  // when CODEX_HOME points at Ragent's managed provider home.  A user-owned
-  // file there must never become part of a managed Run (and may be unreadable
-  // to the runner, producing a misleading Permission denied).  Mount an
-  // empty read-only directory over that one project-config subtree.  This is
-  // per-Run and leaves the user's workspace untouched after the unit exits.
-  const normalizedRunCwd = trimString(runCwd);
-  if (isCodexRun && normalizedRunCwd && isAbsolute(normalizedRunCwd)
-    && !normalizedRunCwd.includes('\0') && !/[\r\n]/.test(normalizedRunCwd)) {
-    const projectCodexHome = resolve(join(normalizedRunCwd, '.codex'));
-    const externalCodexHome = trimString(environment?.RAGENT_CODEX_HOME_DIR);
-    // Native Codex OAuth always uses the prepared machine-local provider home.
-    // Keep this compatibility check for older non-native launch envelopes,
-    // but do not let a user-owned ~/.codex path disable the project guard.
-    if (!externalCodexHome || resolve(externalCodexHome) !== projectCodexHome) {
-      args.push('--property', `TemporaryFileSystem=${join(normalizedRunCwd, '.codex')}:ro`);
-    }
-  }
-  const supplementaryGroups = normalizeRunnerInheritedGroups([
-    ...inheritedGroups,
-    workspaceAccessGroup,
-  ]);
+  const supplementaryGroups = normalizeRunnerInheritedGroups(inheritedGroups);
   if (!groupDrop && supplementaryGroups.length > 0) {
     args.push('--property', `SupplementaryGroups=${supplementaryGroups.join(' ')}`);
-  }
-  if (workspaceAccessGroup) {
-    // '+' makes this cleanup command run with root privileges even though the
-    // transient service itself runs as ragent-runner.  It restores the ACL
-    // snapshot and removes the one-Run supplementary group on every exit.
-    args.push('--property', `ExecStopPost=+"${processExecPath}" "${workspaceAccessScript}" revoke --run-id ${workspaceAccessRunId}`);
-    // The recursive ACL revoke walks the workspace (which can be a large repo).
-    // TimeoutStopSec bounds the whole stop transition including ExecStopPost, so
-    // give the cleanup headroom beyond the 90s default without touching the
-    // sidecar's own runtime behaviour.
-    args.push('--property', 'TimeoutStopSec=300');
   }
   // Only pass the shared runner allowlist plus HOME (launchLifecycleRunner
   // overrides HOME to the resolved runner home).  Production config/socket
   // paths are not allowlisted and the strip gate below drops them even if the
   // broker environment carries them.  Secrets remain inherited from the
   // broker's EnvironmentFile and are never placed in argv.
-  // ExecStopPost must use the same root-owned state store as the broker when
-  // an operator overrides it. This value is a path, not an authorization token.
-  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME', 'RAGENT_RUNNER_ACCESS_DIR'];
+  const inheritedKeys = [...RUNNER_ENV_ALLOWLIST, 'HOME'];
   const inheritedEnv = stripDeniedRunnerEnvKeys(
     Object.fromEntries(
       inheritedKeys
@@ -554,6 +511,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   serviceGroup = null,
   serviceHome = null,
   controlUser = null,
+  requireDistinctUid = false,
   resolveRunnerOwnershipImpl = resolveRunnerOwnership,
   verifyRunnerSystemGroupsImpl = verifyRunnerSystemGroups,
   resolveRestrictedGroupsImpl = resolveRestrictedRunnerGroupIds,
@@ -564,8 +522,6 @@ async function launchLifecycleRunnerUnlocked(runId, {
   resolveInheritedGroupsImpl = resolveRunnerInheritedGroups,
   readManifestImpl = readRunManifest,
   readRunStatusImpl = readRunStatus,
-  grantWorkspaceAccessImpl = grantRunnerWorkspaceAccess,
-  revokeWorkspaceAccessImpl = revokeRunnerWorkspaceAccess,
   prepareNativeRunProviderHomeImpl = null,
   readUnitStateImpl = readLifecycleSystemdUnitState,
   guiEnvironment = {},
@@ -588,6 +544,9 @@ async function launchLifecycleRunnerUnlocked(runId, {
     const error = new Error('Cannot launch or reuse a Run without a verified non-root runner identity and group');
     error.code = 'RUNNER_IDENTITY_INVALID';
     throw error;
+  }
+  if (requireDistinctUid && isSameUserRunnerMode(environment)) {
+    throw Object.assign(new Error('Lifecycle broker is not configured for a distinct runner identity'), { code: 'RUNNER_IDENTITY_INVALID' });
   }
   let resolvedControlUser = controlUser;
   let controlOwnership = null;
@@ -627,6 +586,10 @@ async function launchLifecycleRunnerUnlocked(runId, {
       error.code = 'RUNNER_IDENTITY_INVALID';
       throw error;
     }
+    if (requireDistinctUid && !useGroupDrop) {
+      restrictedIds ||= await resolveRestrictedGroupsImpl();
+      await verifyDroppedRunnerProcessImpl(existingUnit.pid, { uid: runnerOwnership.uid, gid: runnerOwnership.gid, restrictedIds });
+    }
     return {
       pid: existingUnit.pid,
       unitName: resolvedUnitName,
@@ -665,6 +628,64 @@ async function launchLifecycleRunnerUnlocked(runId, {
   const manifest = await readManifestImpl(normalized);
   const resourceProfile = resolveRunnerResourceProfile(manifest, environment);
   const workspaceScope = readWorkspaceAccessScope(manifest);
+  if (distinctIdentity && !workspaceScope) {
+    throw Object.assign(new Error('Runner workspace path is missing; cannot verify existing access'),
+      { code: 'RUNNER_WORKSPACE_ACCESS_DENIED', launchDefinitelyNotSubmitted: true });
+  }
+  let allowedGroupIds = null;
+  if (distinctIdentity || useGroupDrop) {
+    if (!isTrustedSetprivImpl()) {
+      throw Object.assign(new Error('Trusted group-drop executable unavailable'), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    restrictedIds ||= await resolveRestrictedGroupsImpl();
+    if (restrictedIds.has(runnerOwnership.gid)) {
+      throw Object.assign(new Error('Runner primary group is restricted'), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    allowedGroupIds = await resolveAllowedGroupsImpl(normalizeRunnerInheritedGroups(inheritedGroups), { restrictedIds });
+    if (!useGroupDrop) {
+      // systemd initializes the user's supplementary groups and adds the
+      // explicitly configured groups. Require the selected primary GID to
+      // match NSS so id -G and systemd's initialized group set agree.
+      let primary, groups;
+      try {
+        primary = (await execFileImpl('/usr/bin/id', ['-g', resolvedServiceUser], { timeout: 2_000, maxBuffer: 16 * 1024 })).stdout.trim();
+        groups = (await execFileImpl('/usr/bin/id', ['-G', resolvedServiceUser], { timeout: 2_000, maxBuffer: 16 * 1024 })).stdout.trim().split(/\s+/);
+      } catch {
+        throw Object.assign(new Error('Cannot verify runner supplementary groups'), { code: 'RUNNER_IDENTITY_INVALID' });
+      }
+      if (!/^\d+$/.test(primary) || Number(primary) !== runnerOwnership.gid || !groups.length
+          || groups.some(id => !/^\d+$/.test(id) || !Number.isSafeInteger(Number(id))
+            || Number(id) < 1 || Number(id) > 0xfffffffe || restrictedIds.has(Number(id)))) {
+        throw Object.assign(new Error('Cannot verify safe runner supplementary groups'), { code: 'RUNNER_IDENTITY_INVALID' });
+      }
+      allowedGroupIds = [...new Set([...allowedGroupIds, ...groups.map(Number)])];
+    }
+  }
+  if (distinctIdentity) {
+    const readOnlyRequested = manifest?.executionScope?.accessMode === 'read'
+      || manifest?.options?.readOnlyRequired === true;
+    if (readOnlyRequested) readOnlyWorkspaceForRun(manifest, workspaceScope.cwd);
+    const cwdChecks = readOnlyRequested
+      ? 'test -d "$1" && test -r "$1" && test -x "$1"'
+      : 'test -d "$1" && test -r "$1" && test -w "$1" && test -x "$1"';
+    const paths = [
+      { path: workspaceScope.workspaceRoot, checks: 'test -d "$1" && test -x "$1"', required: 'traverse' },
+      { path: workspaceScope.cwd, checks: cwdChecks, required: readOnlyRequested ? 'read and traverse' : 'read, write, and traverse' },
+    ];
+    for (const { path, checks, required } of paths) {
+      if (!isAbsolute(path) || path.includes('\0') || /[\r\n]/.test(path)) {
+        throw Object.assign(new Error('Runner workspace path is invalid'), { code: 'RUNNER_WORKSPACE_ACCESS_DENIED', launchDefinitelyNotSubmitted: true });
+      }
+      const check = buildRunnerGroupDropCommand({ uid: runnerOwnership.uid, gid: runnerOwnership.gid,
+        supplementaryGids: allowedGroupIds, command: '/bin/sh', args: ['-c', checks, 'sh', path] });
+      try {
+        await execFileImpl(check.command, check.args, { timeout: 5_000, maxBuffer: 16 * 1024 });
+      } catch {
+        throw Object.assign(new Error(`Runner user ${resolvedServiceUser} lacks existing ${required} access to the workspace path; grant access outside Ragent before retrying`),
+          { code: 'RUNNER_WORKSPACE_ACCESS_DENIED', launchDefinitelyNotSubmitted: true });
+      }
+    }
+  }
   // Provider selection must match the canonical resolver in
   // chat/run-launcher.mjs exactly: both codex and claude scoped model ids
   // (`model@providerId`) select the provider. A broker-local copy that only
@@ -805,29 +826,6 @@ async function launchLifecycleRunnerUnlocked(runId, {
       finishedAt: new Date().toISOString(),
     }));
   }
-  let workspaceAccess = null;
-  const workspaceAccessRunId = normalizedAttempt > 0
-    ? `${normalized}_a${normalizedAttempt}`
-    : normalized;
-  if (workspaceScope) {
-    try {
-      // The runner identity is intentionally usable outside the recommended
-      // workspace. This per-Run grant is only a temporary access assist for a
-      // workspace whose owner permissions do not reach ragent-runner; its
-      // failure must not turn an otherwise valid ordinary Run into a hard
-      // denial. Sensitive/control-plane targets remain gated by the semantic
-      // policy and executor boundaries.
-      workspaceAccess = await grantWorkspaceAccessImpl({
-        runId: workspaceAccessRunId,
-        cwd: workspaceScope.cwd,
-        workspaceRoot: workspaceScope.workspaceRoot,
-      });
-    } catch (error) {
-      console.error(
-        `[runner-lifecycle] workspace access assist unavailable for ${normalized}: ${error?.message || String(error)}`,
-      );
-    }
-  }
   // RAGENT_RUN_SPOOL_DIR is the controlled write-back channel: the sidecar
   // writes run results here (control-plane chat-runs) without being told the
   // production RAGENT_CONFIG_DIR.  It rides the allowlist inheritedKeys.
@@ -860,25 +858,14 @@ async function launchLifecycleRunnerUnlocked(runId, {
   };
   let groupDrop = null;
   if (useGroupDrop) {
-    try {
-      const allowedGroups = normalizeRunnerInheritedGroups([...inheritedGroups, workspaceAccess?.group || '']);
-      const groupIds = await resolveAllowedGroupsImpl(allowedGroups, { restrictedIds });
-      groupDrop = buildRunnerGroupDropCommand({ uid: runnerOwnership.uid, gid: runnerOwnership.gid,
-        supplementaryGids: groupIds, command: NODE_RUNTIME, args: [RUNNER_ENTRY, normalized] });
-    } catch (error) {
-      if (workspaceAccess) await revokeWorkspaceAccessImpl({ runId: workspaceAccessRunId }).catch(() => {});
-      throw error;
-    }
+    groupDrop = buildRunnerGroupDropCommand({ uid: runnerOwnership.uid, gid: runnerOwnership.gid,
+      supplementaryGids: allowedGroupIds, command: NODE_RUNTIME, args: [RUNNER_ENTRY, normalized] });
   }
   const args = buildLifecycleSystemdArgs(normalized, {
     serviceUser: resolvedServiceUser,
     serviceGroup: resolvedServiceGroup,
     unitName: resolvedUnitName,
-    workspaceAccessGroup: workspaceAccess?.group || '',
-    workspaceAccessRunId,
     launchAttempt: normalizedAttempt,
-    runCwd: workspaceScope?.cwd || '',
-    isCodexRun: isCodex,
     inheritedGroups,
     resourceProfile,
     groupDrop,
@@ -903,16 +890,6 @@ async function launchLifecycleRunnerUnlocked(runId, {
     // observability; failure there must not release a live Run's lock.
     nativeOAuthLockHandedOff = true;
   } catch (error) {
-    // The transient unit never started, so ExecStopPost will not run.  Roll
-    // back the temporary group + ACLs we just granted, then surface the launch
-    // failure.
-    if (workspaceAccess) {
-      await revokeWorkspaceAccessImpl({ runId: workspaceAccessRunId }).catch((revokeError) => {
-        console.error(
-          `[runner-lifecycle] workspace access rollback failed for ${normalized}: ${revokeError?.message || String(revokeError)}`,
-        );
-      });
-    }
     throw error;
   }
   const pid = await readSystemdMainPid(resolvedUnitName, { execFileImpl });
@@ -939,7 +916,6 @@ async function launchLifecycleRunnerUnlocked(runId, {
     unitScope: 'system',
     launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
     launchAttempt: normalizedAttempt,
-    workspaceAccessGroup: workspaceAccess?.group || null,
     ...(scopeGrant ? { privilegedContextRegistered } : {}),
   };
   } finally {
@@ -956,7 +932,12 @@ export async function launchLifecycleRunner(runId, options = {}) {
   const unitName = trimString(options.unitName)
     || buildDetachedRunnerUnitName(normalized, { launchAttempt });
   const existing = lifecycleLaunchPromises.get(unitName);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.requireDistinctUid !== (options.requireDistinctUid === true)) {
+      throw Object.assign(new Error('Conflicting runner identity requirements for the same launch'), { code: 'RUNNER_IDENTITY_INVALID' });
+    }
+    return existing.promise;
+  }
 
   // systemctl preflight and systemd-run are not an atomic pair. Coalesce all
   // requests for the same launch generation so two simultaneous clients can
@@ -967,11 +948,11 @@ export async function launchLifecycleRunner(runId, options = {}) {
     launchAttempt,
     unitName,
   }).finally(() => {
-    if (lifecycleLaunchPromises.get(unitName) === promise) {
+    if (lifecycleLaunchPromises.get(unitName)?.promise === promise) {
       lifecycleLaunchPromises.delete(unitName);
     }
   });
-  lifecycleLaunchPromises.set(unitName, promise);
+  lifecycleLaunchPromises.set(unitName, { promise, requireDistinctUid: options.requireDistinctUid === true });
   return promise;
 }
 
@@ -1019,73 +1000,91 @@ export async function createRunnerLifecycleServer({
     socket.setEncoding('utf8');
     let buffer = '';
     let handled = false;
+    let capabilitiesNegotiated = false;
     socket.on('data', (chunk) => {
       if (handled) return;
       buffer += chunk;
-      if (Buffer.byteLength(buffer, 'utf8') > MAX_REQUEST_BYTES) {
+      while (!handled) {
+        if (Buffer.byteLength(buffer, 'utf8') > MAX_REQUEST_BYTES) {
+          handled = true;
+          sendResponse(socket, { ok: false, error: 'Request too large' });
+          return;
+        }
+        const newlineIndex = buffer.indexOf('\n');
+        if (newlineIndex < 0) return;
+        let request;
+        try { request = JSON.parse(buffer.slice(0, newlineIndex)); } catch {
+          handled = true;
+          sendResponse(socket, { ok: false, error: 'Invalid JSON request' });
+          return;
+        }
+        buffer = buffer.slice(newlineIndex + 1);
+        if (request?.type === 'capabilities' && !capabilitiesNegotiated) {
+          capabilitiesNegotiated = true;
+          socket.write(`${JSON.stringify({ ok: true, protocol: 'ragent-runner-lifecycle-v2', strictDistinctUid: true })}\n`);
+          continue;
+        }
         handled = true;
-        sendResponse(socket, { ok: false, error: 'Request too large' });
-        return;
-      }
-      const newlineIndex = buffer.indexOf('\n');
-      if (newlineIndex < 0) return;
-      handled = true;
-      let request;
-      try { request = JSON.parse(buffer.slice(0, newlineIndex)); } catch {
-        sendResponse(socket, { ok: false, error: 'Invalid JSON request' });
-        return;
-      }
-      if (request?.type === 'health') {
-        sendResponse(socket, { ok: true, status: 'ready' });
-        return;
-      }
-      const runId = normalizeRunId(request?.runId);
-      const requestedLaunchAttempt = Number(request?.launchAttempt ?? 0);
-      if (!['launch', 'revoke-scope', 'renew-scope'].includes(request?.type) || !runId
-          || !Number.isSafeInteger(requestedLaunchAttempt)
-          || requestedLaunchAttempt < 0
-          || requestedLaunchAttempt > 10_000) {
-        sendResponse(socket, { ok: false, code: 'RUNNER_LAUNCH_REQUEST_INVALID', error: 'Invalid runner launch request' });
-        return;
-      }
-      if (request.type === 'revoke-scope') {
-        if (!runScopeRegistration) {
-          sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope registration is unavailable' });
+        if (request?.type === 'health') {
+          sendResponse(socket, { ok: true, status: 'ready' });
           return;
         }
-        void revokeRunContextImpl({ directory: runScopeRegistration.directory, runId, launchAttempt: requestedLaunchAttempt })
-          .then(() => sendResponse(socket, { ok: true }))
-          .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_REVOCATION_FAILED', error: 'Run scope revocation failed' }));
-        return;
-      }
-      if (request.type === 'renew-scope') {
-        if (!runScopeRegistration || !request.scopeGrant || typeof request.scopeGrant !== 'object' || Array.isArray(request.scopeGrant)) {
-          sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope renewal is unavailable' });
+        const runId = normalizeRunId(request?.runId);
+        const requestedLaunchAttempt = Number(request?.launchAttempt ?? 0);
+        if (!['launch', 'revoke-scope', 'renew-scope'].includes(request?.type) || !runId
+            || !Number.isSafeInteger(requestedLaunchAttempt)
+            || requestedLaunchAttempt < 0
+            || requestedLaunchAttempt > 10_000) {
+          sendResponse(socket, { ok: false, code: 'RUNNER_LAUNCH_REQUEST_INVALID', error: 'Invalid runner launch request' });
           return;
         }
-        void renewRunContextImpl({ directory: runScopeRegistration.directory, pinDirectory: runScopeRegistration.pinDirectory,
-          runId, launchAttempt: requestedLaunchAttempt, grant: request.scopeGrant })
-          .then(() => sendResponse(socket, { ok: true }))
-          .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_RENEWAL_FAILED', error: 'Run scope renewal failed' }));
-        return;
+        if (request.type === 'revoke-scope') {
+          if (!runScopeRegistration) {
+            sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope registration is unavailable' });
+            return;
+          }
+          void revokeRunContextImpl({ directory: runScopeRegistration.directory, runId, launchAttempt: requestedLaunchAttempt })
+            .then(() => sendResponse(socket, { ok: true }))
+            .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_REVOCATION_FAILED', error: 'Run scope revocation failed' }));
+          return;
+        }
+        if (request.type === 'renew-scope') {
+          if (!runScopeRegistration || !request.scopeGrant || typeof request.scopeGrant !== 'object' || Array.isArray(request.scopeGrant)) {
+            sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_UNAVAILABLE', error: 'Run scope renewal is unavailable' });
+            return;
+          }
+          void renewRunContextImpl({ directory: runScopeRegistration.directory, pinDirectory: runScopeRegistration.pinDirectory,
+            runId, launchAttempt: requestedLaunchAttempt, grant: request.scopeGrant })
+            .then(() => sendResponse(socket, { ok: true }))
+            .catch(() => sendResponse(socket, { ok: false, code: 'RUNNER_SCOPE_RENEWAL_FAILED', error: 'Run scope renewal failed' }));
+          return;
+        }
+        if (request.requireDistinctUid !== undefined && typeof request.requireDistinctUid !== 'boolean'
+            || (request.requireDistinctUid === true && !capabilitiesNegotiated)) {
+          sendResponse(socket, { ok: false, code: 'RUNNER_LAUNCH_REQUEST_INVALID', error: 'Invalid runner identity requirement' });
+          return;
+        }
+        const requestedGuiEnvironment = pickRunnerGuiEnvironment(request?.guiEnvironment);
+        void launchRunner(runId, {
+          serviceUser: resolvedServiceUser,
+          serviceGroup: resolvedServiceGroup,
+          controlUser: resolvedControlUser,
+          requireDistinctUid: request.requireDistinctUid === true,
+          launchAttempt: requestedLaunchAttempt,
+          ...(runScopeRegistration && request?.scopeGrant ? { scopeGrant: request.scopeGrant, runScopeRegistration } : {}),
+          ...(Object.keys(requestedGuiEnvironment).length > 0
+            ? { guiEnvironment: requestedGuiEnvironment }
+            : {}),
+        })
+          .then((result) => sendResponse(socket, { ok: true, ...result }))
+          .catch((error) => sendResponse(socket, {
+            ok: false,
+            code: error?.code || 'RUNNER_LAUNCH_FAILED',
+            error: error?.message || String(error),
+            ...(error?.code === 'RUNNER_WORKSPACE_ACCESS_DENIED' && error?.launchDefinitelyNotSubmitted === true
+              ? { launchDefinitelyNotSubmitted: true } : {}),
+          }));
       }
-      const requestedGuiEnvironment = pickRunnerGuiEnvironment(request?.guiEnvironment);
-      void launchRunner(runId, {
-        serviceUser: resolvedServiceUser,
-        serviceGroup: resolvedServiceGroup,
-        controlUser: resolvedControlUser,
-        launchAttempt: requestedLaunchAttempt,
-        ...(runScopeRegistration && request?.scopeGrant ? { scopeGrant: request.scopeGrant, runScopeRegistration } : {}),
-        ...(Object.keys(requestedGuiEnvironment).length > 0
-          ? { guiEnvironment: requestedGuiEnvironment }
-          : {}),
-      })
-        .then((result) => sendResponse(socket, { ok: true, ...result }))
-        .catch((error) => sendResponse(socket, {
-          ok: false,
-          code: error?.code || 'RUNNER_LAUNCH_FAILED',
-          error: error?.message || String(error),
-        }));
     });
     socket.on('error', () => {});
   });
@@ -1143,23 +1142,17 @@ async function main() {
   // them. The feature remains inactive until both protected stores are set up.
   const runScopeRegistration = directory && pinDirectory ? { directory, pinDirectory } : null;
   const server = await createRunnerLifecycleServer({ runScopeRegistration });
-  const sweepWorkspaceCleanup = createRunnerWorkspaceCleanupSweep();
-  let cleanupPending = false;
-  const retryWorkspaceCleanup = () => {
-    if (cleanupPending) return;
-    cleanupPending = true;
-    void sweepWorkspaceCleanup()
-      .then(({ failed }) => { if (failed) console.warn(`[runner-lifecycle] ${failed} workspace ACL cleanups remain pending`); })
-      .catch(error => console.warn(`[runner-lifecycle] workspace cleanup scan failed: ${error.message}`))
-      .finally(() => { cleanupPending = false; });
-  };
-  retryWorkspaceCleanup();
-  const cleanupTimer = setInterval(retryWorkspaceCleanup, 60_000);
-  cleanupTimer.unref?.();
+  // Historical grants are never changed automatically. Only report that
+  // records need an operator's review once when the broker starts.
+  try {
+    const result = await createRunnerWorkspaceCleanupSweep()();
+    if (result.manualReviewRequired) console.warn(`[runner-lifecycle] ${result.manualReviewRequired} historical workspace access records require manual review`);
+  } catch (error) {
+    console.warn(`[runner-lifecycle] historical workspace access review unavailable: ${error.message}`);
+  }
   const shutdown = async () => {
     process.removeListener('SIGTERM', shutdown);
     process.removeListener('SIGINT', shutdown);
-    clearInterval(cleanupTimer);
     await server.close();
     process.exit(0);
   };

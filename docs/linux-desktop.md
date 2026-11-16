@@ -54,9 +54,47 @@ For a separate unprivileged runner, set `RAGENT_RUNNER_SAME_USER=0`,
 environment, then restart the lifecycle broker and service. Run publication
 files and capability tokens use file ACLs for the designated runner; older
 versions of those files are repaired on launch.
-On a physical Ubuntu 24.04 x86-64 host, an OAuth Codex Run completed after
-the managed Codex home was migrated from the previous runner identity. Other
-providers, upgrades and security boundaries still need release acceptance.
+
+Ragent does not automatically change workspace ACLs or create temporary
+workspace groups. A separate runner needs access provisioned explicitly by an
+administrator. For a separate-UID Run, the workspace root must be traversable;
+the execution directory must be readable and traversable for a read-only Run,
+and readable, writable and traversable for other Runs. These directory checks
+do not establish access to every file inside the workspace. Existing temporary
+workspace-access records and groups from older builds are retained for manual review; do not delete a group or remove
+numeric ACL entries until their identity, active users, and original permissions
+have been established. Automatic restoration cannot safely reconstruct a prior
+ACL mask or default ACL from those records.
+
+Codex can read the project's existing `.codex` configuration according to its
+own project-trust rules and the runner's filesystem permissions. Only run it in
+projects whose configuration you trust, and review any requested permissions
+before authorizing them. Ragent does not hide or modify that project directory;
+read-only and other restricted modes still apply their own access rules.
+
+A same-user Run has the service user's UID, while a separately configured
+runner has its own UID. Neither choice by itself guarantees isolation from
+other processes or files. The systemd restrictions and optional runner sandbox
+have distinct boundaries; use the required isolation and authorization for the
+work being performed.
+
+Before upgrading or restarting an older lifecycle broker and its workspace
+helper, confirm that no Runs or workspace ACL cleanup processes are still
+active; wait for them to finish before replacing or restarting those components.
+A process that already loaded the older helper can still execute its old
+cleanup logic after files are replaced. Preserve legacy records, groups, and
+user data for review; the new helper does not automatically alter them.
+
+If a Codex launch reports `CODEX_BROKER_STATE_UNCERTAIN`, first inspect active
+Runs, the broker process and the socket's actual owner. Do not kill a process or
+remove a socket merely because the probe timed out. Once an administrator has
+confirmed that no active Run or broker holds the endpoint and established its
+ownership, handle that specific stale endpoint in a controlled way before
+retrying.
+A separate-UID Linux Run cannot use the shared Codex OAuth broker: Ragent
+refuses that path because the broker's process identity cannot be verified as
+the runner. Configure a supported execution path for the chosen identity;
+historical successful Runs do not establish current compatibility.
 The packaged `RAGENT_RUNNER_DROP_GROUPS=auto` setting uses this path for
 same-user Runs; a separate runner uses the systemd group-membership check.
 Setting it to `0` retains that check for all Runs, so an account in a restricted
@@ -88,10 +126,12 @@ host filesystem, including the runner home, is mounted read-only. Codex and
 Claude receive a private temporary home seeded from selected managed provider
 files; changes there do not persist. Native OAuth credentials are refused for
 this mode to avoid consuming or rotating shared refresh tokens from a copy.
-Other providers and configurations may still be incompatible. This is a
-filesystem boundary, not a complete network or inter-process isolation claim;
-real provider compatibility and remaining security boundaries require separate
-acceptance.
+On Linux, Codex provider-native read-only execution is currently unavailable:
+Ragent refuses it when the provider-reported policy cannot prove the required
+process isolation. Other providers and configurations may also be incompatible.
+The sandbox is a filesystem boundary, not a complete network or inter-process
+isolation claim; real provider compatibility and remaining security boundaries
+require separate acceptance.
 
 ## Maintain and remove
 

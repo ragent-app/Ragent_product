@@ -46,6 +46,11 @@ export function codexBrokerPolicyDigest(policy = WORKBENCH_EXECUTION_POLICY) {
   return createHash('sha256').update(JSON.stringify(Object.fromEntries(keys.map(key => [key, policy[key]])))).digest('hex');
 }
 
+// Bind the absence of a workbench policy as well as an active policy.
+export function codexBrokerPolicyBindingDigest(policy = WORKBENCH_EXECUTION_POLICY) {
+  return codexBrokerPolicyDigest(policy) || createHash('sha256').update('null').digest('hex');
+}
+
 function codexAuthAccountId(tokens) {
   for (const key of ['account_id', 'accountId', 'account_uuid', 'accountUuid', 'user_id', 'userId']) {
     if (typeof tokens?.[key] === 'string' && tokens[key].trim()) return tokens[key].trim();
@@ -181,7 +186,7 @@ function writeLine(socket, value) {
   }
 }
 
-async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied = false, expectedPolicyDigest = '' } = {}) {
+async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied = false, expectedPolicyDigest = '', expectedAccountDigest = '', expectedUid = null, requireConclusive = false, pendingMayWait = false } = {}) {
   const normalized = normalizeSocketPath(socketPath);
   if (!normalized) return false;
   return new Promise((resolve, reject) => {
@@ -195,7 +200,16 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
       socket.destroy();
       resolve(ready === true);
     };
-    const timer = setTimeout(() => finish(false), Math.max(100, timeoutMs));
+    const uncertain = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      const error = new Error('Cannot establish whether the existing Codex broker is active; do not remove its socket or restart it until active Runs and the broker process have been verified');
+      error.code = 'CODEX_BROKER_STATE_UNCERTAIN';
+      reject(error);
+    };
+    const timer = setTimeout(() => requireConclusive ? uncertain() : finish(false), Math.max(100, timeoutMs));
     timer.unref?.();
     socket.on('error', (error) => {
       if (failOnAccessDenied && ['EACCES', 'EPERM'].includes(error?.code)) {
@@ -208,8 +222,10 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
         reject(denied);
         return;
       }
+      if (requireConclusive && error?.code !== 'ENOENT') return uncertain();
       finish(false);
     });
+    socket.on('end', () => { if (requireConclusive) uncertain(); else finish(false); });
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8');
       let newline;
@@ -218,19 +234,25 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
         buffer = buffer.slice(newline + 1);
         try {
           const message = JSON.parse(line);
+          if (message?.type === BROKER_PONG && message.ready === false && pendingMayWait) {
+            finish(false);
+            return;
+          }
           if (message?.type === BROKER_PONG && message.ready === true) {
-            if (expectedPolicyDigest && message.policyDigest !== expectedPolicyDigest) {
+            if ((expectedPolicyDigest && message.policyDigest !== expectedPolicyDigest)
+                || (expectedAccountDigest && message.accountMatches !== true)
+                || (expectedUid !== null && message.uid !== expectedUid)) {
               if (settled) return;
               settled = true; clearTimeout(timer); socket.destroy();
-              const error = new Error('The existing Codex broker does not enforce the required workbench policy');
-              error.code = 'CODEX_BROKER_POLICY_MISMATCH'; reject(error); return;
+              const error = new Error('The existing Codex broker does not match the required account, policy, or service identity. Verify its process and ensure no Runs are active before a controlled restart');
+              error.code = 'CODEX_BROKER_BINDING_MISMATCH'; reject(error); return;
             }
             finish(true);
           }
         } catch {}
       }
     });
-    socket.once('connect', () => writeLine(socket, { type: BROKER_PING }));
+    socket.once('connect', () => writeLine(socket, { type: BROKER_PING, ...(expectedAccountDigest ? { expectedAccountDigest } : {}) }));
   });
 }
 
@@ -264,10 +286,10 @@ export async function spawnCodexAppServerProcess({
   });
 }
 
-async function waitForBroker(socketPath, timeoutMs = BROKER_READY_TIMEOUT_MS, expectedPolicyDigest = '') {
+async function waitForBroker(socketPath, timeoutMs = BROKER_READY_TIMEOUT_MS, binding = {}) {
   const deadline = Date.now() + Math.max(1_000, timeoutMs);
   while (Date.now() < deadline) {
-    if (await probeBroker(socketPath, 1_500, { expectedPolicyDigest })) return true;
+    if (await probeBroker(socketPath, 1_500, binding)) return true;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -291,8 +313,11 @@ export async function ensureCodexAppServerBroker({
   spawnImpl = spawn,
   acquireLockImpl = acquireNativeOAuthLock,
   assertLaunchBoundary = null,
-  expectedPolicyDigest = '',
+  expectedPolicyDigest = codexBrokerPolicyBindingDigest(),
+  expectedAccountDigest = '',
+  expectedUid = process.platform === 'linux' ? process.getuid?.() ?? null : null,
 } = {}) {
+  const binding = { expectedPolicyDigest, expectedAccountDigest, expectedUid };
   const normalizedSocket = normalizeSocketPath(socketPath);
   const file = trimString(upstreamFile);
   if (!normalizedSocket || !file || !Array.isArray(upstreamArgs)) {
@@ -301,7 +326,7 @@ export async function ensureCodexAppServerBroker({
     throw error;
   }
   if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-  if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, expectedPolicyDigest })) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
+  if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, requireConclusive: true, pendingMayWait: true, ...binding })) return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
 
   if (!isWindowsNamedPipePath(normalizedSocket)) {
     await mkdir(dirname(normalizedSocket), { recursive: true, mode: 0o770 });
@@ -315,12 +340,11 @@ export async function ensureCodexAppServerBroker({
       pollMs: 50,
     });
     if (trimString(env.CODEX_HOME)) await assertCodexHomeNotFenced(dirname(env.CODEX_HOME));
-    if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, expectedPolicyDigest })) {
+    if (await probeBroker(normalizedSocket, 1_500, { failOnAccessDenied: true, requireConclusive: true, ...binding })) {
       return { ok: true, socketPath: normalizedSocket, reused: true, pid: null };
     }
-    // A refused connection means the previous broker is gone. Only remove the
-    // exact provider-scoped socket path; never use a broad glob or directory.
-    await unlink(normalizedSocket).catch(() => {});
+    // Only ENOENT permits a new owner. An existing socket, including a
+    // refused or unresponsive endpoint, requires verified manual handoff.
     const childEnv = {
       ...toSpawnEnvironment(env),
       RAGENT_CODEX_BROKER_SOCKET: normalizedSocket,
@@ -341,7 +365,7 @@ export async function ensureCodexAppServerBroker({
     // Keep creation serialized through initialize. A second caller otherwise
     // sees an unready socket, unlinks it, and starts a second refresh owner.
     let ready;
-    try { ready = await waitForBroker(normalizedSocket, waitMs, expectedPolicyDigest); }
+    try { ready = await waitForBroker(normalizedSocket, waitMs, binding); }
     catch (error) { try { brokerChild?.kill?.('SIGTERM'); } catch {} throw error; }
     if (!ready) {
       try { brokerChild?.kill?.('SIGTERM'); } catch {}
@@ -720,7 +744,8 @@ function runBroker() {
     }
     if (stopping) return;
     if (message.type === BROKER_PING) {
-      sendClient(client, { type: BROKER_PONG, ready: upstreamReady, policyDigest: codexBrokerPolicyDigest(),
+      sendClient(client, { type: BROKER_PONG, ready: upstreamReady, policyDigest: codexBrokerPolicyBindingDigest(),
+        uid: process.platform === 'linux' ? process.getuid?.() ?? null : null,
         ...(typeof message.expectedAccountDigest === 'string'
           ? { accountMatches: Boolean(accountDigest && message.expectedAccountDigest === accountDigest) } : {}) });
       return;
@@ -913,7 +938,7 @@ function runBroker() {
   };
 
   void (async () => {
-    await unlink(socketPath).catch(() => {});
+    // Never unlink an endpoint here: another broker may still own it.
     server = createServer(attachClient);
     server.listen(socketPath, async () => {
       await chmod(socketPath, 0o660).catch(() => {});
@@ -954,7 +979,9 @@ function runBroker() {
       await waitForUpstreamExit();
       try { upstream?.stdin?.end(); } catch {}
       server?.close();
-      await unlink(socketPath).catch(() => {});
+      // Node's Unix server.close() removes its own socket pathname. Never
+      // explicitly unlink it: bind may have failed or another process may
+      // have replaced the pathname.
     })();
     return shutdownPromise;
   };

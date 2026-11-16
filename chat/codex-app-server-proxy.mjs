@@ -17,6 +17,7 @@ const accountIndex = process.argv.indexOf('--account-digest');
 const expectedAccountDigest = accountIndex >= 0 ? String(process.argv[accountIndex + 1] || '') : '';
 const policyIndex = process.argv.indexOf('--policy-digest');
 const expectedPolicyDigest = policyIndex >= 0 ? String(process.argv[policyIndex + 1] || '') : '';
+const expectedUid = process.platform === 'linux' ? process.getuid?.() ?? null : null;
 if (!socketPath) {
   console.error('Codex app-server proxy socket is required');
   process.exit(1);
@@ -73,7 +74,8 @@ socket.on('data', (chunk) => {
       try { reply = JSON.parse(line); } catch { failHandshake(); return; }
       if (reply?.type !== 'ragent-codex-broker-pong' || reply.ready !== true
           || (expectedAccountDigest && reply.accountMatches !== true)
-          || (expectedPolicyDigest && reply.policyDigest !== expectedPolicyDigest)) {
+          || (expectedPolicyDigest && reply.policyDigest !== expectedPolicyDigest)
+          || (expectedUid !== null && reply.uid !== expectedUid)) {
         failHandshake();
         return;
       }

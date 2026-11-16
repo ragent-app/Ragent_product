@@ -22,6 +22,7 @@ import {
   codexAppServerBrokerLockPath,
   codexAppServerBrokerSocketPath,
   codexBrokerAccountDigest,
+  codexBrokerPolicyBindingDigest,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
 import { buildSharedCodexWindowsHook } from './codex-shared-windows-hook.mjs';
@@ -130,8 +131,10 @@ async function requestCodexModelListFromBroker(socketPath, {
   timeoutMs = DEFAULT_MODEL_LIST_TIMEOUT_MS,
   pageSize = DEFAULT_MODEL_LIST_PAGE_SIZE,
   includeHidden = false,
+  expectedAccountId = '',
   connectImpl = connect,
 } = {}) {
+  const expectedDigest = codexBrokerAccountDigest(expectedAccountId);
   return new Promise((resolve, reject) => {
     let settled = false;
     let buffer = '';
@@ -143,6 +146,8 @@ async function requestCodexModelListFromBroker(socketPath, {
     const seenCursors = new Set();
     const initializeId = buildCodexAppServerInitializeMessage().id;
     const socket = connectImpl(socketPath);
+    let checkingBinding = true;
+    const expectedUid = process.platform === 'linux' ? process.getuid?.() ?? null : null;
 
     const finish = (error, value = null) => {
       if (settled) return;
@@ -211,6 +216,18 @@ async function requestCodexModelListFromBroker(socketPath, {
         } catch {
           continue;
         }
+        if (checkingBinding) {
+          if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true
+              || message.policyDigest !== codexBrokerPolicyBindingDigest()
+              || (expectedDigest && message.accountMatches !== true)
+              || (expectedUid !== null && message.uid !== expectedUid)) {
+            finish(new Error('The Codex broker policy or service identity does not match'));
+            return;
+          }
+          checkingBinding = false;
+          writeMessage(buildCodexAppServerInitializeMessage());
+          continue;
+        }
         if (message?.id === initializeId) {
           if (message.error) {
             finish(new Error(readErrorMessage(message.error)));
@@ -257,7 +274,8 @@ async function requestCodexModelListFromBroker(socketPath, {
       }
     });
     socket.once('connect', () => {
-      writeMessage(buildCodexAppServerInitializeMessage());
+      writeMessage({ type: 'ragent-codex-broker-ping',
+        ...(expectedDigest ? { expectedAccountDigest: expectedDigest } : {}) });
     });
   });
 }
@@ -269,6 +287,7 @@ export async function listCodexAppServerModels({
   timeoutMs = DEFAULT_MODEL_LIST_TIMEOUT_MS,
   pageSize = DEFAULT_MODEL_LIST_PAGE_SIZE,
   includeHidden = false,
+  expectedAccountId = '',
   upstreamFile = '',
   upstreamArgs = null,
   environment = null,
@@ -304,12 +323,14 @@ export async function listCodexAppServerModels({
     cwd: trimString(cwd) || process.cwd(),
     env: spawnSpec.env,
     waitMs: Math.max(1_000, timeoutMs),
+    expectedAccountDigest: codexBrokerAccountDigest(expectedAccountId),
   });
   const remainingMs = Math.max(1_000, Math.max(1_000, timeoutMs) - (Date.now() - startedAt));
   return requestCodexModelListFromBroker(socketPath, {
     timeoutMs: remainingMs,
     pageSize,
     includeHidden,
+    expectedAccountId,
     connectImpl,
   });
 }
@@ -333,7 +354,8 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
     const requestId = 101;
     const socket = connectImpl(socketPath);
     const expectedDigest = codexBrokerAccountDigest(expectedAccountId);
-    let checkingAccount = Boolean(expectedDigest);
+    let checkingAccount = true;
+    const expectedUid = process.platform === 'linux' ? process.getuid?.() ?? null : null;
     const finish = (error, value = null) => {
       if (settled) return;
       settled = true;
@@ -376,7 +398,10 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
         let message;
         try { message = JSON.parse(line); } catch { continue; }
         if (checkingAccount) {
-          if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true || message.accountMatches !== true) {
+          if (message?.type !== 'ragent-codex-broker-pong' || message.ready !== true
+              || (expectedDigest && message.accountMatches !== true)
+              || message.policyDigest !== codexBrokerPolicyBindingDigest()
+              || (expectedUid !== null && message.uid !== expectedUid)) {
             finish(new Error('The Codex broker could not verify the selected account'));
             return;
           }
@@ -404,9 +429,8 @@ async function requestCodexCapabilityCatalogFromBroker(socketPath, method, param
         finish(new Error(`Codex app-server response line exceeded ${MAX_APP_SERVER_JSON_LINE_BYTES} bytes`));
       }
     });
-    socket.once('connect', () => writeMessage(checkingAccount
-      ? { type: 'ragent-codex-broker-ping', expectedAccountDigest: expectedDigest }
-      : buildCodexAppServerInitializeMessage()));
+    socket.once('connect', () => writeMessage({ type: 'ragent-codex-broker-ping',
+      ...(expectedDigest ? { expectedAccountDigest: expectedDigest } : {}) }));
   });
 }
 
@@ -459,6 +483,7 @@ export async function listCodexAppServerCapabilities({
       cwd: workingDirectory,
       env: spawnSpec.env,
       waitMs: Math.max(1_000, timeoutMs),
+      expectedAccountDigest: codexBrokerAccountDigest(expectedAccountId),
     });
   }
   const entries = Object.entries(CODEX_CAPABILITY_METHODS);

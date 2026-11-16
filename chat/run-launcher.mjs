@@ -577,6 +577,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
   launchAttempt = 0,
   issueScopeGrant = null,
   timeoutMs = runnerLifecycleTimeoutMs,
+  requireDistinctUid = process.platform === 'linux' && String(process.env.RAGENT_RUNNER_SAME_USER ?? '1').trim() === '0',
 } = {}) {
   const normalizedSocketPath = normalizeSupervisorSocketPath(socketPath);
   if (!normalizedSocketPath) {
@@ -603,6 +604,7 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
   return new Promise((resolve, reject) => {
     let settled = false;
     let submitted = false;
+    let awaitingCapabilities = requireDistinctUid;
     let buffer = '';
     const socket = connectImpl(normalizedSocketPath);
     const finish = (error, result = null) => {
@@ -611,7 +613,8 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
       clearTimeout(timer);
       socket.destroy();
       if (error) {
-        if (submitted) error.launchMayHaveBeenAccepted = true;
+        if (submitted && error.launchDefinitelyNotSubmitted !== true) error.launchMayHaveBeenAccepted = true;
+        else if (!submitted) error.launchDefinitelyNotSubmitted = true;
         reject(error);
       }
       else resolve(result);
@@ -621,11 +624,11 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
     }, timeoutMs);
     timer.unref?.();
 
-    socket.setEncoding('utf8');
-    socket.once('connect', () => {
+    const submitLaunch = () => {
       submitted = true;
       socket.write(`${JSON.stringify({
         type: 'launch',
+        ...(requireDistinctUid ? { requireDistinctUid: true } : {}),
         runId,
         launchAttempt: Number.isSafeInteger(Number(launchAttempt)) && Number(launchAttempt) >= 0
           ? Math.floor(Number(launchAttempt))
@@ -633,33 +636,53 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
         ...(scopeGrant ? { scopeGrant } : {}),
         ...(Object.keys(guiEnvironment).length > 0 ? { guiEnvironment } : {}),
       })}\n`);
+    };
+    socket.setEncoding('utf8');
+    socket.once('connect', () => {
+      if (awaitingCapabilities) socket.write(`${JSON.stringify({ type: 'capabilities' })}\n`);
+      else submitLaunch();
     });
     socket.on('data', (chunk) => {
       buffer += chunk;
-      const newlineIndex = buffer.indexOf('\n');
-      if (newlineIndex < 0) return;
-      let response;
-      try {
-        response = JSON.parse(buffer.slice(0, newlineIndex));
-      } catch (error) {
-        finish(unavailableError(`Invalid runner lifecycle response: ${error.message}`));
-        return;
+      let newlineIndex;
+      while (!settled && (newlineIndex = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        let response;
+        try {
+          response = JSON.parse(line);
+        } catch (error) {
+          finish(unavailableError(`Invalid runner lifecycle response: ${error.message}`));
+          return;
+        }
+        if (awaitingCapabilities) {
+          if (response?.ok !== true || response.protocol !== 'ragent-runner-lifecycle-v2'
+              || response.strictDistinctUid !== true) {
+            finish(unavailableError('Runner lifecycle broker does not support required separate identity'));
+            return;
+          }
+          awaitingCapabilities = false;
+          submitLaunch();
+          continue;
+        }
+        if (response?.ok !== true) {
+          const error = new Error(response?.error || 'Runner lifecycle broker rejected launch request');
+          error.code = response?.code || 'RUNNER_LAUNCH_REJECTED';
+          if (response?.ok === false && response.launchDefinitelyNotSubmitted === true
+              && error.code === 'RUNNER_WORKSPACE_ACCESS_DENIED') error.launchDefinitelyNotSubmitted = true;
+          finish(error);
+          return;
+        }
+        finish(null, {
+          pid: Number.isInteger(response.pid) && response.pid > 0 ? response.pid : null,
+          unitName: response.unitName || null,
+          unitScope: response.unitScope || 'system',
+          supervisorSocket: null,
+          launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
+          launchAttempt: Number.isSafeInteger(response.launchAttempt) ? response.launchAttempt : 0,
+          ...(scopeGrant ? { privilegedContextRegistered: response.privilegedContextRegistered === true } : {}),
+        });
       }
-      if (!response?.ok) {
-        const error = new Error(response?.error || 'Runner lifecycle broker rejected launch request');
-        error.code = response?.code || 'RUNNER_LAUNCH_REJECTED';
-        finish(error);
-        return;
-      }
-      finish(null, {
-        pid: Number.isInteger(response.pid) && response.pid > 0 ? response.pid : null,
-        unitName: response.unitName || null,
-        unitScope: response.unitScope || 'system',
-        supervisorSocket: null,
-        launchMode: DETACHED_RUNNER_LIFECYCLE_LAUNCH_MODE,
-        launchAttempt: Number.isSafeInteger(response.launchAttempt) ? response.launchAttempt : 0,
-        ...(scopeGrant ? { privilegedContextRegistered: response.privilegedContextRegistered === true } : {}),
-      });
     });
     socket.once('error', (error) => {
       error.code = 'RUNNER_BROKER_UNAVAILABLE';
@@ -995,6 +1018,16 @@ export function createDetachedRunnerSpawner({
     try { await assertExecutionBoundaryImpl(runId); }
     catch (error) { error.launchDefinitelyNotSubmitted = true; throw error; }
     const launch = async () => {
+    // Separate Linux runner identities are enforced only by the lifecycle
+    // broker. Legacy supervisor, systemd, and process paths cannot substitute.
+    const lifecycleRequired = process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED === '1'
+      || (platform === 'linux' && String(process.env.RAGENT_RUNNER_SAME_USER ?? '1').trim() === '0');
+    if (lifecycleRequired && !shouldUseRunnerLifecycleBroker()) {
+      const error = new Error('Runner lifecycle broker is required but its socket is not configured');
+      error.code = 'RUNNER_BROKER_UNAVAILABLE';
+      error.launchDefinitelyNotSubmitted = true;
+      throw error;
+    }
     if (shouldUseRunnerLifecycleBroker()) {
       try {
         return await launchDetachedRunnerViaLifecycleBroker(runId, { connectImpl, launchAttempt });
@@ -1005,8 +1038,8 @@ export function createDetachedRunnerSpawner({
         // These are authoritative safety refusals, not transport outages.
         // Retrying through another launcher could bypass identity checks or
         // start a second copy while a previous unit is still draining.
-        if (['RUNNER_IDENTITY_INVALID', 'RUNNER_UNIT_STATUS_UNAVAILABLE', 'RUNNER_UNIT_DRAINING'].includes(error?.code)) throw error;
-        if (process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED === '1') {
+        if (['RUNNER_IDENTITY_INVALID', 'RUNNER_UNIT_STATUS_UNAVAILABLE', 'RUNNER_UNIT_DRAINING', 'RUNNER_WORKSPACE_ACCESS_DENIED', 'READ_ONLY_RUNTIME_REFUSED'].includes(error?.code)) throw error;
+        if (lifecycleRequired) {
           if (error?.code !== 'RUNNER_BROKER_UNAVAILABLE') throw error;
           const unavailable = new Error(`Required runner lifecycle broker is unavailable: ${error?.message || String(error)}`);
           unavailable.code = 'RUNNER_BROKER_UNAVAILABLE';

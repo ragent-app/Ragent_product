@@ -452,140 +452,41 @@ export function buildGrantPlan({ runId, cwd, workspaceRoot, group } = {}) {
   };
 }
 
-export async function grantRunnerWorkspaceAccess({
-  runId,
-  cwd,
-  workspaceRoot,
-  accessRoot = RUNNER_ACCESS_ROOT,
-  legacyRoot = legacyRootFor(accessRoot),
-  execImpl = execFileAsync,
-  validateImpl = validateWorkspaceScope,
-  bootIdImpl = currentBootId,
-} = {}) {
+// Legacy records do not contain a trusted numeric GID, original ACL masks,
+// default ACL baselines, or stable inode identities. Automatically applying or
+// undoing those grants can change a user's permissions or delete another group.
+// Retain the entry points used by already-running units, but never mutate the
+// filesystem or group database through them.
+export async function grantRunnerWorkspaceAccess() {
+  throw Object.assign(new Error('Automatic workspace ACL grants are disabled; configure access for the runner identity'), {
+    code: 'RUNNER_WORKSPACE_ACCESS_DISABLED',
+  });
+}
+
+export async function revokeRunnerWorkspaceAccess({ runId } = {}) {
   const normalized = normalizeRunId(runId);
   if (!normalized) throw new Error('Invalid Run id');
-  return withStoreLock(async () => {
-    const validated = await validateImpl({ cwd, workspaceRoot });
-    const states = await listStates(accessRoot);
-    if (states.some((state) => state.runId === normalized && state.released === true)) {
-      throw new Error('Runner workspace cleanup is pending');
+  console.warn(`[runner-workspace-access] Automatic ACL cleanup is disabled; retain and review legacy state for ${normalized}`);
+  return { runId: normalized, revoked: false, manualReviewRequired: true };
+}
+
+export function createRunnerWorkspaceCleanupSweep({ accessRoot = RUNNER_ACCESS_ROOT, legacyRoot = legacyRootFor(accessRoot) } = {}) {
+  let reported = false;
+  return async () => {
+    const roots = [...new Set([accessRoot, legacyRoot].filter(Boolean))];
+    const states = (await Promise.all(roots.map(root => listStates(root)))).flat();
+    if (states.length && !reported) {
+      console.warn(`[runner-workspace-access] ${states.length} legacy ACL records require manual review; no ACLs or groups were changed`);
+      reported = true;
     }
-    const existing = states.find((state) => state.released !== true &&
-      resolve(state.workspaceRoot || '') === validated.workspaceRoot
-      && resolve(state.cwd || '') === validated.cwd
-      && GROUP_NAME_RE.test(state.group || ''));
-    const group = existing?.group || runnerAccessGroupForRun(normalized);
-    const plan = { ...buildGrantPlan({ runId: normalized, ...validated, group }), bootId: await bootIdImpl() };
-    await ensureGroup(group, execImpl);
-    await writeState(plan, { accessRoot });
-    if (existing) return plan;
-    try {
-      // The ancestor ACL only grants traversal.  Existing directories get
-      // read/write/traverse access and a default ACL for descendants. Existing
-      // executable files are deliberately split from ordinary files: the
-      // runner must retain the full read/write/execute access granted by the
-      // runner identity while ordinary files need no execute bit.
-      await setAcl(plan.ancestors, `g:${group}:--x`, execImpl);
-      await runFind(plan.grantRoot, `g:${group}:rwx,d:g:${group}:rwx`, { type: 'd' }, execImpl);
-      await runFind(plan.grantRoot, `g:${group}:rwx`, {
-        type: 'f',
-        predicates: ['-perm', '/111'],
-      }, execImpl);
-      await runFind(plan.grantRoot, `g:${group}:rw-`, {
-        type: 'f',
-        predicates: ['!', '-perm', '/111'],
-      }, execImpl);
-      return plan;
-    } catch (error) {
-      // Persist a retryable cleanup before trying to undo a partial grant.
-      await writeState({ ...plan, released: true }, { accessRoot });
-      await cleanupReleasedGroup([{ ...plan, released: true }], { accessRoot, execImpl }).catch(() => {});
-      throw new Error(`Failed to grant runner workspace access: ${error?.message || String(error)}`);
-    }
-  }, { accessRoot, legacyRoot });
-}
-
-async function removeAclFromWorkspace(state, execImpl, { timeoutMs = ACL_COMMAND_TIMEOUT_MS } = {}) {
-  const root = state.grantRoot || state.cwd || state.workspaceRoot;
-  // Revoke without the sensitive-directory prune. Older versions could have
-  // granted the group through .codex/.ssh/etc.; cleanup must remove those
-  // legacy ACLs too, even though new grants never enter them.
-  await runFind(root, `g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
-  await runFind(root, `d:g:${state.group}`, { type: 'd', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
-  await runFind(root, `g:${state.group}`, { type: 'f', remove: true, timeoutMs, excludeSensitive: false }, execImpl);
-  await setAcl(state.ancestors || ancestorPaths(state.workspaceRoot), `g:${state.group}`, execImpl, { remove: true, timeoutMs });
-}
-
-async function cleanupReleasedGroup(states, {
-  accessRoot = RUNNER_ACCESS_ROOT,
-  execImpl = execFileAsync,
-  timeoutMs = ACL_COMMAND_TIMEOUT_MS,
-} = {}) {
-  if (!states.length || states.some(state => state.released !== true || state.group !== states[0].group)) {
-    throw new Error('Runner workspace group is still in use');
-  }
-  for (const state of states) {
-    if (!state.cleanupComplete) await removeAclFromWorkspace(state, execImpl, { timeoutMs });
-  }
-  // Record completion for every reference before deleting the group. If the
-  // process dies after groupdel, retry must not need the now-missing name to
-  // remove ACLs that have already been removed.
-  for (const state of states) await writeState({ ...state, cleanupComplete: true }, { accessRoot });
-  await removeGroup(states[0].group, execImpl);
-  for (const state of states) await rm(statePath(state.runId, accessRoot), { force: true });
-}
-
-export async function revokeRunnerWorkspaceAccess({
-  runId,
-  accessRoot = RUNNER_ACCESS_ROOT,
-  legacyRoot = legacyRootFor(accessRoot),
-  execImpl = execFileAsync,
-  releasedOnly = false,
-} = {}) {
-  const normalized = normalizeRunId(runId);
-  if (!normalized) throw new Error('Invalid Run id');
-  return withStoreLock(async () => {
-    const state = await readState(normalized, { accessRoot });
-    if (!state) return { runId: normalized, revoked: false };
-    if (releasedOnly && state.released !== true) return { runId: normalized, revoked: false };
-    if (!state.released) await writeState({ ...state, released: true }, { accessRoot });
-    const references = (await listStates(accessRoot)).filter((candidate) => candidate.group === state.group);
-    if (!references.some((candidate) => !candidate.released)) await cleanupReleasedGroup(references, { accessRoot, execImpl });
-    return { runId: normalized, revoked: true, group: state.group };
-  }, { accessRoot, legacyRoot });
-}
-
-export function createRunnerWorkspaceCleanupSweep({ accessRoot = RUNNER_ACCESS_ROOT, legacyRoot = legacyRootFor(accessRoot),
-  execImpl = execFileAsync, bootIdImpl = currentBootId } = {}) {
-  let cursor = 0;
-  return async ({ limit = 8 } = {}) => {
-    const pending = await withStoreLock(async () => {
-      const bootId = await bootIdImpl();
-      const states = await listStates(accessRoot);
-      for (const state of states) {
-        // A task cannot survive a reboot. Old records without a boot identity
-        // remain untouched because their launch provenance is unknown.
-        if (bootId && state.bootId && state.bootId !== bootId && !state.released) {
-          state.released = true;
-          await writeState(state, { accessRoot });
-        }
-      }
-      return states.filter(state => state.released === true);
-    }, { accessRoot, legacyRoot });
-    const count = Math.min(pending.length, Math.max(1, Math.min(100, Math.floor(limit) || 8)));
-    const batch = Array.from({ length: count }, (_, i) => pending[(cursor + i) % pending.length]);
-    if (pending.length) cursor = (cursor + count) % pending.length;
-    let failed = 0;
-    for (const state of batch) {
-      try { await revokeRunnerWorkspaceAccess({ runId: state.runId, accessRoot, legacyRoot, execImpl, releasedOnly: true }); }
-      catch { failed++; }
-    }
-    return { attempted: count, failed };
+    return { attempted: 0, failed: 0, manualReviewRequired: states.length };
   };
 }
 
 export async function listRunnerWorkspaceAccess({ accessRoot = RUNNER_ACCESS_ROOT, legacyRoot = legacyRootFor(accessRoot) } = {}) {
-  return withStoreLock(async () => (await listStates(accessRoot)).map(state => state.runId), { accessRoot, legacyRoot });
+  const roots = [...new Set([accessRoot, legacyRoot].filter(Boolean))];
+  const states = (await Promise.all(roots.map(root => listStates(root)))).flat();
+  return [...new Set(states.map(state => state.runId))];
 }
 
 async function main() {

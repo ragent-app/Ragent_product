@@ -1063,6 +1063,7 @@ async function discoverOfficialCodexCatalog(provider) {
   try {
     models = await listCodexAppServerModels({
       codexHomeDir: prepared.codexHomeDir,
+      expectedAccountId: prepared.oauthAccountId || '',
       timeoutMs: PROVIDER_MODEL_LIST_FETCH_TIMEOUT_MS,
     });
   } catch (cause) {

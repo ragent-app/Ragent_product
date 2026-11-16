@@ -21,7 +21,7 @@ import {
   codexAppServerBrokerLockPath,
   codexAppServerBrokerSocketPath,
   codexBrokerAccountDigest,
-  codexBrokerPolicyDigest,
+  codexBrokerPolicyBindingDigest,
   ensureCodexAppServerBroker,
 } from './codex-app-server-broker.mjs';
 import {
@@ -4265,6 +4265,13 @@ async function main() {
   const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
     && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1';
+  if (providerReadOnly && process.platform === 'linux') {
+    // A provider-reported policy cannot attest the kernel restrictions of the
+    // process that executes commands for a shared broker.
+    throw Object.assign(new Error('Codex provider read-only execution cannot prove the required process isolation'), {
+      code: 'CODEX_READONLY_ISOLATION_UNVERIFIED',
+    });
+  }
   if (readOnlyRequested) {
     for (const key of Object.keys(spawnEnv)) {
       if (key.startsWith('RAGENT_APPROVED_ACTIONS_') || key.startsWith('RAGENT_BROWSER_')) delete spawnEnv[key];
@@ -4858,6 +4865,14 @@ async function main() {
   }
   if (isCodexAppServerFamily && codexOAuthRuntime && !runSpecificCodexMcp
       && (!sandboxRequired || sharedSandboxCodex)) {
+    // The broker's application-level identity response is not kernel peer
+    // attestation. Separate-identity Runs must not infer a security boundary
+    // from a shared process whose provenance cannot be proven here.
+    if (process.platform === 'linux' && process.env.RAGENT_RUNNER_DISTINCT_IDENTITY === '1') {
+      throw Object.assign(new Error('Shared Codex broker cannot prove the required separate runner identity'), {
+        code: 'CODEX_BROKER_IDENTITY_UNVERIFIED',
+      });
+    }
     const expectedAccountDigest = codexBrokerAccountDigest(codexRolloutAccountId(runtimeAuth));
     if (!expectedAccountDigest) {
       throw Object.assign(new Error('A verified Codex account identity is required'), { code: 'CODEX_ACCOUNT_UNVERIFIED' });
@@ -4869,7 +4884,7 @@ async function main() {
       const brokerCommand = appServerState?.ragentApprovalGate || sharedHook
         ? await resolveCommandSpawnSpec(initialCommand, [...initialArgs, ...(sharedHook?.args || [])], { cwd: resolvedFolder.cwd, env: spawnEnv })
         : resolvedCommand;
-      await ensureCodexAppServerBroker({
+      const brokerBinding = await ensureCodexAppServerBroker({
         socketPath: brokerSocketPath,
         lockPath: codexAppServerBrokerLockPath(runnerCodexHomeDir),
         upstreamFile: brokerCommand.file,
@@ -4881,7 +4896,14 @@ async function main() {
           RAGENT_CODEX_BROKER_SERVICE_MODE: process.platform === 'win32' && process.env.RAGENT_RUNNER_LAUNCH_MODE === 'runner-supervisor' ? '1' : '0' },
         scriptPath: CODEX_APP_SERVER_BROKER_SCRIPT,
         assertLaunchBoundary: () => assertRunLaunchBoundary(runId),
-        expectedPolicyDigest: codexBrokerPolicyDigest(WORKBENCH_EXECUTION_POLICY),
+        expectedPolicyDigest: codexBrokerPolicyBindingDigest(WORKBENCH_EXECUTION_POLICY),
+        expectedAccountDigest,
+      });
+      await logSidecarDiagnostic(runId, 'Codex broker connected', {
+        reused: brokerBinding.reused === true,
+        brokerPid: brokerBinding.pid || null,
+        runnerUid: process.platform === 'linux' ? process.getuid?.() ?? null : null,
+        executionBoundary: sharedSandboxCodex ? 'external-executor' : 'shared-broker',
       });
       spawnCommand = process.execPath;
       spawnArgs = [
@@ -4890,7 +4912,7 @@ async function main() {
         brokerSocketPath,
       ];
       spawnArgs.push('--account-digest', expectedAccountDigest);
-      if (WORKBENCH_EXECUTION_POLICY) spawnArgs.push('--policy-digest', codexBrokerPolicyDigest(WORKBENCH_EXECUTION_POLICY));
+      spawnArgs.push('--policy-digest', codexBrokerPolicyBindingDigest(WORKBENCH_EXECUTION_POLICY));
       spawnShell = false;
       spawnWindowsVerbatimArguments = false;
       codexAppServerBrokered = true;
