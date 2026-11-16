@@ -175,7 +175,7 @@ class OrganizationLayoutEngine {
         unitRoots.forEachIndexed { index, unit ->
             val angle = when (unitRoots.size) {
                 1 -> floatArrayOf(-65f)[index]
-                2 -> floatArrayOf(-65f, 145f)[index]
+                2 -> floatArrayOf(-65f, 55f)[index]
                 3 -> floatArrayOf(-100f, 20f, 145f)[index]
                 4 -> floatArrayOf(-120f, -25f, 65f, 160f)[index]
                 else -> -110f + index * (360f / unitRoots.size) + if (index % 2 == 0) 4f else -4f
