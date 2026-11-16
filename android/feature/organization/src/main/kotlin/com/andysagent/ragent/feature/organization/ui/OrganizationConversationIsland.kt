@@ -105,9 +105,12 @@ internal fun OrganizationConversationIsland(
             .graphicsLayer { alpha = deletionAlpha }.clip(shape)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                 onClick = { if (closingRequested && !deleted) onReopen() })) {
-            AgentoFrostedGlassBox(Modifier.matchParentSize().graphicsLayer { alpha = geometry.bodyAlpha },
-                shape = shape, surface = AgentoGlassSurface.Neutral, material = AgentoGlassMaterial.LiquidClear,
-                backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = false) {}
+            Box(Modifier.matchParentSize().graphicsLayer { alpha = geometry.bodyAlpha }
+                .background(colors.canvas.copy(alpha = 1f), shape)) {
+                AgentoFrostedGlassBox(Modifier.matchParentSize(),
+                    shape = shape, surface = AgentoGlassSurface.Neutral, material = AgentoGlassMaterial.LiquidClear,
+                    backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = false) {}
+            }
             Layout(modifier = Modifier.fillMaxSize(), content = {
             Column(Modifier.organizationConversationForegroundReveal(
                     progress = { geometry.bodyProgress }, visibleWidth = { shellWidth }, visibleHeight = { shellHeight })
