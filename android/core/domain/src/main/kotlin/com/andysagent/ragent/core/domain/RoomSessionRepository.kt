@@ -221,6 +221,7 @@ class RoomSessionRepository(
     private val liveSyncLock = Any()
     private val liveSyncJobs = mutableMapOf<String, Job>()
     private var liveSyncCoordinatorJob: Job? = null
+    private val retiredLiveSyncJobs = mutableListOf<Job>()
     private val liveProjectors = mutableMapOf<String, LiveTimelineProjector>()
     private val liveFeedCursors = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Long>>()
     private val liveFeedMuted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -317,13 +318,42 @@ class RoomSessionRepository(
         }
     }
 
+    override suspend fun activeBackgroundSessionIds(): Set<String> {
+        val sessions = observeSessions().first()
+        val ids = sessions.mapTo(mutableSetOf()) { it.id }
+        val active = sessions.filter { it.status == SessionStatus.Working || it.status == SessionStatus.WaitingApproval }
+            .mapTo(mutableSetOf()) { it.id }
+        observeRows(dao.observeAllPendingApprovals()).first()
+            .filter { !it.runId.isNullOrBlank() && it.sessionId in ids }
+            .mapTo(active) { it.sessionId }
+        dao.pendingOperations().filter { it.state == "sending" && it.kind in setOf("send_message", "send_message_with_attachments") }
+            .map { sessionIdFromPath(it.path) }.filter { it in ids }.forEach(active::add)
+        return active
+    }
+
+    override suspend fun reconcileBackgroundSession(sessionId: String) {
+        while (dao.pendingOperations().any { it.state == "sending" &&
+                it.kind in setOf("send_message", "send_message_with_attachments") && sessionIdFromPath(it.path) == sessionId }) {
+            delay(1_000L)
+        }
+        reconcileDurableSessionUntilSettled(sessionId, background = true)
+    }
+
     override fun stopLiveSync() {
         synchronized(liveSyncLock) {
-            liveSyncCoordinatorJob?.cancel()
+            retiredLiveSyncJobs.removeAll { it.isCompleted }
+            liveSyncCoordinatorJob?.let { it.cancel(); retiredLiveSyncJobs.add(it) }
             liveSyncCoordinatorJob = null
-            liveSyncJobs.values.forEach { it.cancel() }
+            liveSyncJobs.values.forEach { it.cancel(); retiredLiveSyncJobs.add(it) }
             liveSyncJobs.clear()
         }
+    }
+
+    override suspend fun stopLiveSyncAndJoin() {
+        stopLiveSync()
+        val jobs = synchronized(liveSyncLock) { retiredLiveSyncJobs.toList() }
+        try { jobs.forEach { it.join() } }
+        finally { synchronized(liveSyncLock) { retiredLiveSyncJobs.removeAll { it.isCompleted } } }
     }
 
     override suspend fun close() = withContext(NonCancellable) {
@@ -411,7 +441,7 @@ class RoomSessionRepository(
         return true
     }
 
-    private suspend fun reconcileDurableSessionUntilSettled(sessionId: String) {
+    private suspend fun reconcileDurableSessionUntilSettled(sessionId: String, background: Boolean = false) {
         var retryDelayMs = 1_000L
         var lastDetailRefresh = 0L
         while (liveSyncScope.isActive) {
@@ -445,7 +475,7 @@ class RoomSessionRepository(
                     continue
                 }
                 retryDelayMs = 1_000L
-                delay(if (sessionId in dedicatedLiveSessions) 1_000L else if (sessionId in liveFeedCapable) 200L else retryDelayMs)
+                delay(if (background) 5_000L else if (sessionId in dedicatedLiveSessions) 1_000L else if (sessionId in liveFeedCapable) 200L else retryDelayMs)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: ApiException) {

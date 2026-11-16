@@ -108,6 +108,7 @@ class ConnectivitySupervisor(
 
     private var probeJob: Job? = null
     private val probeMutex = Mutex()
+    private val carrierHealthProbeMutex = Mutex()
     private val handlingCarrierClose = AtomicBoolean(false)
     private var wasConnected = false
     private var retryCount = 0
@@ -264,6 +265,40 @@ class ConnectivitySupervisor(
                 recoverOrRetry("carrier-unavailable", "Computer connection is unavailable")
             }
         }
+    }
+
+    /** Check the existing carrier after foregrounding without replacing a healthy session. */
+    suspend fun verifyForegroundCarrier(stillForeground: () -> Boolean) {
+        if (!stillForeground() || stopped || _state.value.status != ConnectionStatus.Connected) return
+        val turn = turnSession
+        val session = p2pSession ?: turn ?: return
+        val isTurn = session === turn
+        val credential = credentialProvider()?.takeIf { it.isNotBlank() }
+        val previousGeneration = session.successfulResponseGeneration
+        if (!carrierHealthProbeMutex.tryLock()) return
+        val response = try {
+            withTimeoutOrNull(5_000L) {
+                val headers = credential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+                session.request(P2PHttpRequest(id = UUID.randomUUID().toString(), method = "GET",
+                    path = "/api/auth/me", headers = headers)).getOrNull()
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
+        finally { carrierHealthProbeMutex.unlock() }
+        if (!stillForeground() || stopped || (if (isTurn) turnSession !== session else p2pSession !== session)) return
+        if (credentialProvider()?.takeIf { it.isNotBlank() } != credential) return
+        if (response?.error == null && response?.status in listOf(401, 403)) {
+            handleAuthenticationRequired(requireNotNull(response).status, credential) {
+                if (isTurn) turnSession === session else p2pSession === session
+            }
+            return
+        }
+        // A slow response alone is not proof of a dead carrier. Preserve it and
+        // let the existing health policy confirm a failure; explicit closure is
+        // sufficient to start recovery immediately.
+        if (response != null || session.successfulResponseGeneration != previousGeneration || session.isOpen) return
+        if (isTurn) handleUnexpectedTurnClose(session, "foreground-probe-failed")
+        else handleUnexpectedP2PClose(session, "foreground-probe-failed")
     }
 
     fun recheck() {
@@ -782,10 +817,12 @@ class ConnectivitySupervisor(
                 if (stopped || turnSession !== session) return@launch
                 val attemptedCredential = credentialProvider()?.takeIf { it.isNotBlank() }
                 val answer = try {
-                    withTimeoutOrNull(CARRIER_HEALTH_TIMEOUT_MS) {
-                        val headers = attemptedCredential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
-                        session.request(P2PHttpRequest(id = UUID.randomUUID().toString(), method = "GET",
-                            path = "/api/auth/me", headers = headers)).getOrNull()
+                    carrierHealthProbeMutex.withLock {
+                        withTimeoutOrNull(CARRIER_HEALTH_TIMEOUT_MS) {
+                            val headers = attemptedCredential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+                            session.request(P2PHttpRequest(id = UUID.randomUUID().toString(), method = "GET",
+                                path = "/api/auth/me", headers = headers)).getOrNull()
+                        }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { null }

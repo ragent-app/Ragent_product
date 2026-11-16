@@ -23,6 +23,7 @@ internal interface TargetConnectionController : TargetConnectionResource {
     val connectivityState: kotlinx.coroutines.flow.StateFlow<ConnectionState>? get() = null
     fun applyVerifiedBootstrap(plan: BootstrapConnectionPlan)
     fun refresh()
+    suspend fun verifyForegroundCarrier(stillForeground: () -> Boolean) {}
 }
 
 /** Wake an unhealthy selected connection when foreground network access returns. */
@@ -249,6 +250,10 @@ internal class BoundTargetConnection(
             supervisor.applyBootstrap(plan)
             reportSelected(plan)
         }
+    }
+
+    override suspend fun verifyForegroundCarrier(stillForeground: () -> Boolean) {
+        if (started && !authenticationRequired) supervisor.verifyForegroundCarrier(stillForeground)
     }
 
     fun carrierRequestFailed(failed: P2PSession?) = supervisor.carrierRequestFailed(failed)

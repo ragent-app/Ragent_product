@@ -272,6 +272,12 @@ class AndroidRuntimeGraph internal constructor(
     @Volatile private var pendingFcmToken: String? = null
     @Volatile private var foreground = false
     @Volatile private var retainUiConnections = false
+    @Volatile private var foregroundSyncReady = false
+    private var backgroundSyncJob: Job? = null
+    private var foregroundProbeJob: Job? = null
+    private var foregroundStartJob: Job? = null
+    private val lifecycleGeneration = java.util.concurrent.atomic.AtomicLong()
+    private val backgroundSyncLimitMs = 2 * 60_000L
     @Volatile private var maximumConcurrentAccountConnections = 1
     @Volatile private var accountCapacityRefreshNeeded = true
     @Volatile private var accountCapacityLastSuccessMs: Long? = null
@@ -1747,7 +1753,7 @@ class AndroidRuntimeGraph internal constructor(
             }
         }
         controlWorkbench?.let { control ->
-            if (foreground) {
+            if (foreground && foregroundSyncReady) {
                 control.sessions.startLiveSync()
             } else control.sessions.stopLiveSync()
             return@withLock
@@ -1766,15 +1772,18 @@ class AndroidRuntimeGraph internal constructor(
         mutableBackgroundTargetSummaries.update { summaries ->
             summaries.filterKeys { it in uiBackgroundTargetIds }
         }
-        val uiTargets = if (foreground || retainUiConnections) (listOfNotNull(recoveryPlan.primaryInstanceId) +
-            recoveryPlan.backgroundInstanceIds).toSet() else emptySet()
+        val uiTargets = when {
+            foreground -> (listOfNotNull(recoveryPlan.primaryInstanceId) + recoveryPlan.backgroundInstanceIds).toSet()
+            retainUiConnections -> setOfNotNull(recoveryPlan.primaryInstanceId)
+            else -> emptySet()
+        }
         connectionUses.setOwnerTargets("foreground-ui", uiTargets)
         (uiBackgroundTargetIds - previousBackgroundIds).forEach { id ->
             targetRuntimes[id]?.takeIf { it.transport.connectionState.value == RuntimeConnectionState.Connected }?.let {
                 scope.launch { refreshBackgroundSummary(it) }
             }
         }
-        if (foreground) {
+        if (foreground && foregroundSyncReady) {
             runtime?.sessions?.startLiveSync()
             tabletChatTargetId?.let { targetRuntimes[it]?.sessions?.startLiveSync() }
         } else targetRuntimes.values.forEach { it.sessions.stopLiveSync() }
@@ -1791,7 +1800,7 @@ class AndroidRuntimeGraph internal constructor(
             if (previous != null && previous != target && previous != activeInstanceId) {
                 targetRuntimes[previous]?.sessions?.stopLiveSync()
             }
-            if (foreground) target?.let { targetRuntimes[it]?.sessions?.startLiveSync() }
+            if (foreground && foregroundSyncReady) target?.let { targetRuntimes[it]?.sessions?.startLiveSync() }
         }
     }
 
@@ -1826,10 +1835,32 @@ class AndroidRuntimeGraph internal constructor(
     override fun onStart(owner: LifecycleOwner) {
         foreground = true
         retainUiConnections = true
-        scope.launch {
+        val generation = lifecycleGeneration.incrementAndGet()
+        val previousBackgroundSync = backgroundSyncJob
+        previousBackgroundSync?.cancel()
+        foregroundProbeJob?.cancel()
+        foregroundStartJob?.cancel()
+        foregroundSyncReady = false
+        foregroundStartJob = scope.launch {
+            previousBackgroundSync?.join()
             initialized.await()
-            if (foreground) retryUnhealthyForegroundConnection(activeTargetRuntime()?.controller)
+            if (!foreground || lifecycleGeneration.get() != generation) return@launch
+            targetRuntimes.values.toList().forEach { it.sessions.stopLiveSyncAndJoin() }
+            if (!foreground || lifecycleGeneration.get() != generation) return@launch
+            foregroundSyncReady = true
             synchronizeDirectory()
+            configurationMutex.withLock {
+                if (foreground && lifecycleGeneration.get() == generation) {
+                    connectionUses.setOwnerTargets("background-runs", emptySet())
+                }
+            }
+            if (foreground && lifecycleGeneration.get() == generation) {
+                val controller = activeTargetRuntime()?.controller
+                retryUnhealthyForegroundConnection(controller)
+                foregroundProbeJob = scope.launch {
+                    controller?.verifyForegroundCarrier { foreground && lifecycleGeneration.get() == generation }
+                }
+            }
             // Foregrounding can lift shortcut throttling. Retry deferred publication;
             // an already published directory is a no-op inside the publisher.
             synchronizeCaptureShortcuts(configStore.directory.first())
@@ -2254,13 +2285,70 @@ class AndroidRuntimeGraph internal constructor(
 
     override fun onStop(owner: LifecycleOwner) {
         foreground = false
+        foregroundSyncReady = false
+        val generation = lifecycleGeneration.incrementAndGet()
+        foregroundProbeJob?.cancel()
+        foregroundStartJob?.cancel()
+        val previousBackgroundSync = backgroundSyncJob
+        previousBackgroundSync?.cancel()
         accountCapacityRetry.cancel()
         accountRestoreJob?.cancel()
         uiBackgroundTargetIds = emptySet()
         mutableBackgroundTargetSummaries.value = emptyMap()
         targetRuntimes.values.forEach { it.sessions.stopLiveSync() }
-        // Keep the selected carriers leased while the process is alive. A
-        // background transition must not disconnect an ongoing connection.
+        backgroundSyncJob = scope.launch {
+            try {
+                withTimeoutOrNull(backgroundSyncLimitMs) {
+                    previousBackgroundSync?.join()
+                    initialized.await()
+                    if (foreground || lifecycleGeneration.get() != generation) return@withTimeoutOrNull
+                    targetRuntimes.values.toList().forEach { it.sessions.stopLiveSyncAndJoin() }
+                    val active = configurationMutex.withLock {
+                        if (foreground || lifecycleGeneration.get() != generation) return@withLock emptyMap()
+                        val snapshots = targetRuntimes.values.toList().associateWith { runtime ->
+                            try { runtime.sessions.activeBackgroundSessionIds() }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { emptySet() }
+                        }.filterValues { it.isNotEmpty() }
+                        connectionUses.setOwnerTargets("background-runs", snapshots.keys.mapTo(mutableSetOf()) { it.instanceId })
+                        connectionUses.setOwnerTargets("foreground-ui", setOfNotNull(activeInstanceId))
+                        snapshots
+                    }
+                    val remainingTargets = active.keys.mapTo(mutableSetOf()) { it.instanceId }
+                    coroutineScope {
+                        active.forEach { (runtime, ids) -> launch {
+                            try {
+                                coroutineScope { ids.forEach { id -> launch {
+                                    try { runtime.sessions.reconcileBackgroundSession(id) }
+                                    catch (cancelled: CancellationException) { throw cancelled }
+                                    catch (_: Exception) { /* Other sessions continue independently. */ }
+                                } } }
+                            } finally {
+                                withContext(NonCancellable) {
+                                    configurationMutex.withLock {
+                                        if (!foreground && lifecycleGeneration.get() == generation) {
+                                            remainingTargets.remove(runtime.instanceId)
+                                            connectionUses.setOwnerTargets("background-runs", remainingTargets.toSet())
+                                        }
+                                    }
+                                }
+                            }
+                        } }
+                    }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Keep lifecycle cleanup independent of a failed target. */ }
+            finally {
+                withContext(NonCancellable) {
+                    configurationMutex.withLock {
+                        if (!foreground && lifecycleGeneration.get() == generation) {
+                            connectionUses.setOwnerTargets("background-runs", emptySet())
+                            connectionUses.setOwnerTargets("foreground-ui", setOfNotNull(activeInstanceId))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     internal suspend fun awaitLifecycleUpdate() { initialized.await(); synchronizeDirectory() }
@@ -2318,7 +2406,7 @@ class AndroidRuntimeGraph internal constructor(
             else mutableBackgroundTargetSummaries.update { it - runtime.instanceId }
             if (state == RuntimeConnectionState.Connected && foreground && activeInstanceId == runtime.instanceId) {
                 retryAccountCapacity(runtime.instanceId)
-                runtime.sessions.startLiveSync()
+                if (foregroundSyncReady) runtime.sessions.startLiveSync()
                 runCatching { runtime.sessions.resumePendingOperations() }
             }
         }.launchIn(childScope)

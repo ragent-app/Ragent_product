@@ -296,6 +296,11 @@ interface SessionRepository {
     /** Starts foreground-only reconciliation for endpoint-less carriers. */
     fun startLiveSync() {}
     fun stopLiveSync() {}
+    suspend fun stopLiveSyncAndJoin() { stopLiveSync() }
+    /** Snapshot only locally known active work; no directory polling is started. */
+    suspend fun activeBackgroundSessionIds(): Set<String> = emptySet()
+    /** Reconcile one known active session until it settles or the caller cancels. */
+    suspend fun reconcileBackgroundSession(sessionId: String) {}
     /** Terminal repository teardown; wait for owned jobs before its database closes. */
     suspend fun close() { stopLiveSync() }
     suspend fun sendMessage(sessionId: String, text: String, requestId: String = newRequestId())
