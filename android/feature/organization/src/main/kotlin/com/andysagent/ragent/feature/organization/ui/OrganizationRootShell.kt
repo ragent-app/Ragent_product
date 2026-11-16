@@ -61,6 +61,7 @@ fun OrganizationRootShell(
     sourceIsCircle: Boolean,
     modifier: Modifier = Modifier,
     surfaceColor: Color = Color.Unspecified,
+    collapsedSurfaceColor: Color = Color.Unspecified,
     sourceVisual: OrganizationRootVisual? = null,
     snapToTarget: Boolean = false,
     onVisibleSizeChanged: (width: Float, height: Float) -> Unit = { _, _ -> },
@@ -96,7 +97,8 @@ fun OrganizationRootShell(
     val center = liveOrigin.center + (target.center - liveOrigin.center) * p - (rootOrigin ?: Offset.Zero)
     val corner = if (sourceIsCircle) minOf(width, height) / 2f +
         (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
-    val color = if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor.copy(alpha = 1f)
+    val color = (if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor).copy(alpha = 1f)
+    val collapsedColor = if (collapsedSurfaceColor == Color.Unspecified) color else collapsedSurfaceColor.copy(alpha = 1f)
     Box(modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.localToRoot(Offset.Zero) }) {
         Box(Modifier.align(AbsoluteAlignment.TopLeft)
             .graphicsLayer { alpha = if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) 1f else 0f }
@@ -104,7 +106,11 @@ fun OrganizationRootShell(
             .size(with(density) { width.toDp() }, with(density) { height.toDp() })
             .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).drawWithCache {
                 val palette = if (sourceIsCircle && sourceVisual != null && sourceVisual.colors.size >= 3)
-                    sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) } else listOf(color, color, color)
+                    sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) }
+                    else {
+                        val surface = if (sourceIsCircle) color else lerp(collapsedColor, color, p)
+                        listOf(surface, surface, surface)
+                    }
                 val brush = Brush.linearGradient(0f to palette[0], .55f to palette[1], 1f to palette[2],
                     start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
                 onDrawBehind { drawRect(brush) }
