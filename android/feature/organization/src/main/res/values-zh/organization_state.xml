@@ -10,6 +10,9 @@
     <string name="organization_offline_snapshot">离线快照 · 只读</string>
     <string name="organization_retry">重试</string>
     <string name="organization_demo_open">查看演示</string>
+    <string name="organization_conversation_close">收起会话</string>
+    <string name="organization_conversation_unavailable">当前没有可用的实时会话。</string>
+    <string name="organization_conversation_demo">这是演示成员，没有真实会话。</string>
     <string name="organization_member_count">%1$d 位成员</string>
     <string name="organization_menu">团队菜单</string>
     <string name="organization_work">查看任务</string>

@@ -10,6 +10,9 @@
     <string name="organization_offline_snapshot">Offline snapshot · read-only</string>
     <string name="organization_retry">Try again</string>
     <string name="organization_demo_open">View demonstration</string>
+    <string name="organization_conversation_close">Close conversation</string>
+    <string name="organization_conversation_unavailable">No live conversation is available.</string>
+    <string name="organization_conversation_demo">Demonstration only. There is no real conversation for this member.</string>
     <string name="organization_member_count">%1$d members</string>
     <string name="organization_menu">Team menu</string>
     <string name="organization_work">View tasks</string>

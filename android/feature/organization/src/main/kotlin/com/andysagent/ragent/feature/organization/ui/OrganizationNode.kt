@@ -25,6 +25,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -40,7 +41,7 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap: () -> Unit = {}, modifier: Modifier = Modifier, showLabel: Boolean = true) {
+fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap: () -> Unit = {}, modifier: Modifier = Modifier, showLabel: Boolean = true, morphHidden: Boolean = false) {
     val colors = LocalRagentColors.current
     val density = LocalDensity.current
     val dark = colors.canvas.luminance() < .5f
@@ -88,8 +89,8 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
         modifier = modifier.offset {
             val half = with(density) { touchSize.toPx() / 2f }
             IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
-        }.size(touchSize).semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") }
-            .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = node.alpha }
+        }.size(touchSize).then(if (morphHidden) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") })
+            .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = if (morphHidden) 0f else node.alpha }
             .combinedClickable(interactionSource = interaction, indication = null, onClick = onClick, onDoubleClick = onDoubleTap),
         contentAlignment = Alignment.Center,
     ) {

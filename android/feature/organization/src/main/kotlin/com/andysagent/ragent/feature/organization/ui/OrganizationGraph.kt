@@ -16,11 +16,15 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.core.designsystem.motionPolicy
@@ -28,6 +32,8 @@ import com.andysagent.ragent.feature.organization.domain.NodeRole
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
 import kotlin.math.hypot
+
+internal data class OrganizationNodeAnchor(val center: Offset, val radius: Float, val baseRadiusDp: Float)
 
 @Composable
 internal fun OrganizationGraph(
@@ -38,6 +44,8 @@ internal fun OrganizationGraph(
     onNodeDoubleTap: (String) -> Unit,
     onSizeChanged: (Int, Int, Float) -> Unit,
     modifier: Modifier = Modifier,
+    hiddenNodeId: String? = null,
+    onAnchorsChanged: (Map<String, OrganizationNodeAnchor>, Rect?) -> Unit = { _, _ -> },
 ) {
     val density = LocalDensity.current.density
     val preference = if (uiState.reduceMotion && motionPolicy().preference == MotionPreference.Full) MotionPreference.Reduced else motionPolicy().preference
@@ -90,7 +98,22 @@ internal fun OrganizationGraph(
         }
     }
     val transform = rememberTransformableState { zoom, pan, _ -> onZoom(zoom); onPan(pan) }
-    Box(modifier.clipToBounds().onSizeChanged { onSizeChanged(it.width, it.height, density) }) {
+    var viewportCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var viewportOrigin by remember { mutableStateOf(Offset.Unspecified) }
+    val viewport = viewportCoordinates?.takeIf { it.isAttached && viewportOrigin != Offset.Unspecified }?.let {
+        Rect(viewportOrigin, androidx.compose.ui.geometry.Size(it.size.width.toFloat(), it.size.height.toFloat()))
+    }
+    val actualCoordinates = viewportCoordinates?.takeIf { it.isAttached && viewportOrigin != Offset.Unspecified }
+    val anchors = if (actualCoordinates == null) emptyMap() else uiState.nodes.mapNotNull { node ->
+        val position = positions[node.id] ?: return@mapNotNull null
+        val radius = radii[node.id] ?: return@mapNotNull null
+        val layerCenter = Offset(actualCoordinates.size.width / 2f, actualCoordinates.size.height / 2f)
+        val transformed = layerCenter + (position - layerCenter) * uiState.zoomScale + uiState.panOffset
+        node.id to OrganizationNodeAnchor(actualCoordinates.localToRoot(transformed),
+            radius * density * (scales[node.id] ?: node.scale) * uiState.zoomScale, radius)
+    }.toMap()
+    SideEffect { onAnchorsChanged(anchors, viewport) }
+    Box(modifier.clipToBounds().onSizeChanged { onSizeChanged(it.width, it.height, density) }.onGloballyPositioned { viewportCoordinates = it; viewportOrigin = it.localToRoot(Offset.Zero) }) {
         Box(Modifier.fillMaxSize().graphicsLayer { alpha = opacity }.transformable(state = transform).graphicsLayer {
             translationX = uiState.panOffset.x; translationY = uiState.panOffset.y
             scaleX = uiState.zoomScale; scaleY = uiState.zoomScale
@@ -101,7 +124,8 @@ internal fun OrganizationGraph(
                 val position = positions[node.id]
                 OrganizationNode(node.copy(x = position?.x ?: node.x, y = position?.y ?: node.y, radiusDp = radii[node.id] ?: node.radiusDp,
                     scale = scales[node.id] ?: node.scale, alpha = alphas[node.id] ?: node.alpha),
-                    onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) })
+                    onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
+                    morphHidden = node.id == hiddenNodeId)
             }
         }
     }

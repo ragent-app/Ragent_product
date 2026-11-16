@@ -24,6 +24,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
@@ -34,6 +36,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
@@ -43,6 +47,8 @@ import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.feature.organization.data.OrganizationOfflineCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -52,17 +58,21 @@ import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
+import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 @Composable
 fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
+    val uiScope = rememberCoroutineScope()
     val connection by transport.connectionState.collectAsState()
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val scopeKey = remember(offlineScope) { offlineScope?.let { scope -> MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) } }.orEmpty() }
     val workStateHolder = rememberSaveableStateHolder()
     var ownerVerified by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var ownerGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
+    var conversationRuntime by remember(transport, targetId, sessionId, scopeKey, ownerGeneration) { mutableStateOf<Pair<String, String?>?>(null) }
     var projectionGeneration by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
     val cacheInvalidations by cache.invalidations.collectAsState()
     var cachedAt by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<Long?>(null) }
@@ -99,34 +109,43 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         }
     }
     LaunchedEffect(transport, targetId, sessionId, scopeKey, refresh, connection) {
-        loaded = false
-        ownerVerified = false
-        ownerGeneration = null
-        projectionGeneration = null
-        cachedAt = null
+        val retained = loaded && ownerVerified && offlineScope != null && projectionGeneration != null &&
+            ownerGeneration == projectionGeneration && cache.isCurrent(offlineScope, projectionGeneration!!)
+        if (retained && connection != RuntimeConnectionState.Connected && connection != RuntimeConnectionState.AuthenticationRequired) return@LaunchedEffect
+        if (!retained || connection == RuntimeConnectionState.AuthenticationRequired) {
+            loaded = false
+            ownerVerified = false
+            ownerGeneration = null
+            projectionGeneration = null
+            cachedAt = null
+            organizationId = null
+            nodes = emptyList()
+            status = "Loading organization…"
+        }
         if (connection == RuntimeConnectionState.AuthenticationRequired && offlineScope != null) {
             cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
         }
-        organizationId = null
-        nodes = emptyList()
-        status = "Loading organization…"
         val requestGeneration = offlineScope?.let { cache.generation(it) }
         val online = connection == RuntimeConnectionState.Connected
         val cacheAllowed = offlineScope != null && connection != RuntimeConnectionState.AuthenticationRequired
         val body: String? = if (online) {
-            val ownerResponse = if (cacheAllowed) try {
+            val ownerResponse: Boolean? = if (cacheAllowed) try {
                 val response = transport.execute(ApiRequest("GET", "/api/auth/me"))
                 val info = JSONObject(response.body)
                 response.isSuccessful && info.optString("role") == "owner" && info.optString("principalKind") == "owner"
             } catch (error: CancellationException) {
                 throw error
+            } catch (error: ApiException) {
+                if (error.statusCode == 401 || error.statusCode == 403) false else null
             } catch (_: Exception) {
-                false
+                null
             } else false
-            val owner = ownerResponse && (offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration)))
-            ownerVerified = owner
-            ownerGeneration = if (owner) requestGeneration else null
-            if (!owner && offlineScope != null) cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+            val owner = ownerResponse == true && (offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration)))
+            if (ownerResponse != null) {
+                ownerVerified = owner
+                ownerGeneration = if (owner) requestGeneration else null
+                if (!owner && offlineScope != null) cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+            }
             val response = try {
                 transport.execute(ApiRequest("GET", "/api/sessions/${android.net.Uri.encode(sessionId)}/organization/projection"))
             } catch (error: ApiException) {
@@ -213,6 +232,28 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
     }
+    LaunchedEffect(transport, targetId, sessionId, scopeKey, organizationId, ownerVerified, ownerGeneration, projectionGeneration, connection, cachedAt, lifecycleState, demoOpen) {
+        val id = organizationId ?: return@LaunchedEffect
+        val generation = projectionGeneration ?: return@LaunchedEffect
+        val scope = offlineScope ?: return@LaunchedEffect
+        if (!ownerVerified || ownerGeneration != generation || connection != RuntimeConnectionState.Connected || cachedAt != null || lifecycleState != Lifecycle.State.RESUMED || demoOpen) return@LaunchedEffect
+        while (true) {
+            delay(3_000)
+            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
+            val projection = try {
+                RealOrganizationApi(cachedTransport).getSessionOrganization(sessionId).getOrNull()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                null
+            }
+            if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
+            if (projection != null && projection.organizationId == id) {
+                organizationViewModel.applyProjection(projection)
+                nodes = projection.nodes
+            }
+        }
+    }
     CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(LocalRagentColors.current.canvas).then(
@@ -234,10 +275,39 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
         else if (loaded && connection == RuntimeConnectionState.Connected && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })
-        else if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && (connection == RuntimeConnectionState.Connected || cachedAt != null)) {
-            if (cachedAt != null) Text(stringResource(R.string.organization_offline_snapshot), Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = LocalRagentColors.current.secondaryContent)
-            OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
-                onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true })
+        else if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && (connection == RuntimeConnectionState.Connected || cachedAt != null || ownerVerified)) {
+            if (connection != RuntimeConnectionState.Connected || cachedAt != null) Text(stringResource(R.string.organization_offline_snapshot), Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = LocalRagentColors.current.secondaryContent)
+            key(scopeKey, transportKey, ownerGeneration, projectionGeneration, organizationId) {
+                OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
+                    onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true },
+                    conversationContent = { nodeId, contentModifier ->
+                        if (ownerVerified &&
+                            ownerGeneration != null && ownerGeneration == projectionGeneration && organizationId != null) {
+                            val requestGeneration = ownerGeneration
+                            val requestOrganization = organizationId
+                            OrganizationConversationContent(transport, organizationId!!, nodeId, targetId,
+                                identityScope = "$scopeKey:$transportKey:$ownerGeneration", modifier = contentModifier,
+                                onRuntimeState = { state -> conversationRuntime = nodeId to state },
+                                onAuthorizationDenied = {
+                                    if (ownerGeneration == requestGeneration && organizationId == requestOrganization) {
+                                        ownerVerified = false
+                                        ownerGeneration = null
+                                        projectionGeneration = null
+                                        loaded = false
+                                        organizationId = null
+                                        nodes = emptyList()
+                                        cachedAt = null
+                                        status = "Organization access changed. Refresh to check current authorization."
+                                        if (offlineScope != null) uiScope.launch {
+                                            cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
+                                        }
+                                    }
+                                })
+                        } else {
+                            Text(stringResource(R.string.organization_conversation_unavailable), contentModifier.padding(20.dp), color = LocalRagentColors.current.secondaryContent)
+                        }
+                    }, conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second })
+            }
         }
         else {
             val colors = LocalRagentColors.current

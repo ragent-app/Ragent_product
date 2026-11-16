@@ -6,6 +6,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.andysagent.ragent.feature.organization.R
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -67,7 +72,8 @@ internal fun OrganizationDemoScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().background(colors.canvas).clickable(
             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {},
         )) {
-            OrganizationScreen(model, modifier = Modifier.weight(1f), onBack = onBack, isDemo = true)
+            OrganizationScreen(model, modifier = Modifier.weight(1f), onBack = onBack, isDemo = true,
+                conversationContent = { _, modifier -> Text(stringResource(R.string.organization_conversation_demo), modifier.padding(20.dp), color = colors.secondaryContent) })
         }
     }
     }
