@@ -1685,6 +1685,7 @@ private fun ChatSurface(
     var organizationVisibleHeight by remember { mutableFloatStateOf(0f) }
     var organizationFromRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var organizationHostBounds by remember { mutableStateOf<Rect?>(null) }
+    var organizationHeaderBottom by remember { mutableFloatStateOf(0f) }
     val organizationCollapsed = organizationHasCollaborators && !organizationExpanded
     val organizationFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
     LaunchedEffect(organizationCollapsed) {
@@ -2248,7 +2249,7 @@ private fun ChatSurface(
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
     val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
         if (organizationCollapsed) androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
-        else dockGeometry.padding(density, top = if (organizationHasCollaborators) 8.dp else topControlsHeight + 8.dp, extraBottom = 16.dp)
+        else dockGeometry.padding(density, top = if (organizationHasCollaborators) 56.dp else topControlsHeight + 8.dp, extraBottom = 16.dp)
     }
     val jumpPadding = remember(dockGeometry, density) {
         dockGeometry.padding(density, extraBottom = 12.dp)
@@ -3005,13 +3006,17 @@ private fun ChatSurface(
                     }
                 },
     ) {
+        val measuredHeaderInset = organizationHostBounds?.let {
+            with(density) { (organizationHeaderBottom - it.top).coerceAtLeast(0f).toDp() }
+        } ?: 0.dp
+        val organizationGraphTop = maxOf(topControlsHeight, measuredHeaderInset) + 8.dp
         if (organizationTransport != null && state.sessionId != null) {
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
                 transport = organizationTransport,
                 sessionId = state.sessionId,
                 targetId = state.chatTargetId ?: state.activeRemoteTargetId,
                 offlineScope = organizationOfflineScope,
-                modifier = Modifier.fillMaxSize().padding(top = topControlsHeight + 8.dp, bottom = 176.dp),
+                modifier = Modifier.fillMaxSize().padding(top = organizationGraphTop, bottom = 176.dp),
                 onRootClick = { anchor ->
                     organizationRootAnchor = anchor
                     organizationFromRoot = true
@@ -3047,7 +3052,7 @@ private fun ChatSurface(
         val hostBounds = organizationHostBounds
         val cardInset = with(density) { 12.dp.toPx() }
         val cardHeight = with(density) { 176.dp.toPx() }
-        val cardTopInset = with(density) { (topControlsHeight + 8.dp).toPx() }
+        val cardTopInset = with(density) { organizationGraphTop.toPx() }
         val bottomCard = hostBounds?.let { Rect(it.left + cardInset, (it.bottom - cardHeight).coerceAtLeast(it.top), it.right - cardInset, it.bottom) }
         val expandedCard = hostBounds?.let { Rect(it.left + cardInset, (it.top + cardTopInset).coerceAtMost(it.bottom), it.right - cardInset, it.bottom) }
         val normalCard = hostBounds ?: Rect.Zero
@@ -3058,6 +3063,7 @@ private fun ChatSurface(
             target = if (organizationHasCollaborators && !organizationFirstCollapse) expandedCard ?: normalCard else normalCard,
             sourceIsCircle = organizationHasCollaborators && organizationFromRoot && organizationRootAnchor != null,
             sourceVisual = organizationRootVisual,
+            collapsedSurfaceColor = colors.quietSurface,
             snapToTarget = organizationHydrating,
             onVisibleSizeChanged = { _, height -> organizationVisibleHeight = height },
             onSettled = { expanded ->
@@ -3215,7 +3221,7 @@ private fun ChatSurface(
                             onRetryPendingTurn = { onEvent(WorkbenchEvent.RetryPendingTurn) },
                             onOpenFileDiff = { diff -> onSetSelectedDiffFile(diff) },
                             onReport = { text -> onEvent(WorkbenchEvent.ReportAgentContent(text)) },
-                            showMessageActions = canMessageAction,
+                            showMessageActions = canMessageAction && !organizationCollapsed,
                             runDuration = if (turn.runId?.let(state.runDurations::containsKey) == true || (isRunTurn && (showActiveRunAction || runElapsedSeconds >= 0L ||
                                 (currentRunId != null && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A")))) {{
                                 val seconds = if (isRunTurn && showActiveRunAction) runElapsedSeconds else
@@ -3386,6 +3392,25 @@ private fun ChatSurface(
                 )
             }
         }
+        if (organizationHasCollaborators && organizationExpanded) {
+            androidx.compose.material3.IconButton(
+                onClick = {
+                    organizationFocusManager.clearFocus()
+                    if (organizationFromRoot && !organizationRootVisible) organizationRevealRoot = true
+                    else organizationExpanded = false
+                },
+                modifier = Modifier.align(Alignment.TopEnd).size(48.dp).zIndex(4f)
+                    .graphicsLayer { alpha = ((shellProgress - .88f) / .12f).coerceIn(0f, 1f) },
+            ) {
+                AgentoWebIcon(
+                    AgentoWebGlyph.Close,
+                    contentDescription = stringResource(com.andysagent.ragent.feature.organization.R.string.organization_conversation_close),
+                    modifier = Modifier.size(20.dp),
+                    tint = colors.secondaryContent,
+                )
+            }
+        }
+        }
         }
         }
 
@@ -3484,7 +3509,9 @@ private fun ChatSurface(
                     .fillMaxWidth()
                     .statusBarsPadding(),
             ) {
-                Box(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned {
+                    organizationHeaderBottom = it.boundsInRoot().bottom
+                }) {
                     FloatingTopChrome(
                         sessionTitle = state.sessionTitle,
                         projectTitle = currentProjectName,
@@ -3708,8 +3735,6 @@ private fun ChatSurface(
                 leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Close, contentDescription = null, tint = colors.error) },
                 textColor = colors.error,
             )
-        }
-
         }
     }
 
