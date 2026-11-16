@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
@@ -38,6 +39,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,6 +68,7 @@ internal fun OrganizationConversationIsland(
     content: @Composable (String, Modifier) -> Unit,
 ) {
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     val preference = motionPolicy().preference
     val followSpec = if (preference == MotionPreference.Full) spring<Offset>(dampingRatio = 1f, stiffness = 420f) else snap()
     val radiusSpec = if (preference == MotionPreference.Full) spring<Float>(dampingRatio = 1f, stiffness = 420f) else snap()
@@ -114,7 +117,7 @@ internal fun OrganizationConversationIsland(
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = groupAlpha }) {
         Box(Modifier.matchParentSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
         val shape = RoundedCornerShape(with(density) { cornerPx.coerceAtLeast(0f).toDp() })
-        Box(Modifier.offset { IntOffset((center.x - shellWidth / 2f).roundToInt(), (center.y - shellHeight / 2f).roundToInt()) }
+        Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((center.x - shellWidth / 2f).roundToInt(), (center.y - shellHeight / 2f).roundToInt()) }
             .size(with(density) { shellWidth.coerceAtLeast(1f).toDp() }, with(density) { shellHeight.coerceAtLeast(1f).toDp() })
             .clip(shape)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
@@ -170,20 +173,21 @@ internal fun OrganizationConversationIsland(
             }
         }
         val glyphMotion = islandSmooth(p, .15f, .90f)
-        val glyphX = center.x + (center.x - shellWidth / 2f + with(density) { 32.dp.toPx() } - center.x) * glyphMotion
+        val glyphTargetX = if (layoutDirection == LayoutDirection.Ltr) center.x - shellWidth / 2f + with(density) { 32.dp.toPx() } else center.x + shellWidth / 2f - with(density) { 32.dp.toPx() }
+        val glyphX = center.x + (glyphTargetX - center.x) * glyphMotion
         val glyphY = center.y + (center.y - shellHeight / 2f + with(density) { 32.dp.toPx() } - center.y) * glyphMotion
         val sourceScale = frame.radius / (frame.baseRadiusDp.coerceAtLeast(1f) * density.density)
         val glyphSize = with(density) { nodeIconSize(frame.baseRadiusDp).dp.toPx() } * sourceScale * (1f - glyphMotion) + with(density) { 20.dp.toPx() } * glyphMotion
         val badgeAlpha = islandSmooth(p, .15f, .50f)
         val badgeSize = with(density) { 32.dp.toPx() }
-        Box(Modifier.offset { IntOffset((glyphX - badgeSize / 2f).roundToInt(), (glyphY - badgeSize / 2f).roundToInt()) }
+        Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((glyphX - badgeSize / 2f).roundToInt(), (glyphY - badgeSize / 2f).roundToInt()) }
             .size(32.dp).graphicsLayer { alpha = badgeAlpha }.clip(CircleShape).drawWithCache {
                 val brush = Brush.linearGradient(0f to accent[0], .55f to accent[1], 1f to accent[2],
                     start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
                 onDrawBehind { drawRect(brush) }
             })
         Icon(painterResource(visual.icon), contentDescription = null, tint = colors.canvas,
-            modifier = Modifier.offset { IntOffset((glyphX - glyphSize / 2f).roundToInt(), (glyphY - glyphSize / 2f).roundToInt()) }
+            modifier = Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((glyphX - glyphSize / 2f).roundToInt(), (glyphY - glyphSize / 2f).roundToInt()) }
                 .size(with(density) { glyphSize.toDp() })
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (closingRequested && !deleted) onReopen() }.clearAndSetSemantics {})
         if (node.runtimeState != NodeRuntimeState.IDLE) {
@@ -197,7 +201,7 @@ internal fun OrganizationConversationIsland(
                 NodeRuntimeState.DONE -> colors.success
                 else -> colors.secondaryContent
             }
-            Box(Modifier.offset { IntOffset((dotX - dotSize / 2f).roundToInt(), (dotY - dotSize / 2f).roundToInt()) }
+            Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((dotX - dotSize / 2f).roundToInt(), (dotY - dotSize / 2f).roundToInt()) }
                 .size(with(density) { dotSize.toDp() }).graphicsLayer { alpha = dotAlpha }.clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxSize(7f / 11f).clip(CircleShape).background(dotColor))
             }
@@ -226,7 +230,7 @@ private fun Modifier.organizationConversationForegroundReveal(
     val feather = minOf(24.dp.toPx() * (1f - p), visible)
     val height = size.height.coerceAtLeast(1f)
     val width = visibleWidth().coerceIn(0f, size.width)
-    val left = 0f
+    val left = if (layoutDirection == LayoutDirection.Rtl) size.width - width else 0f
     val horizontalFeather = minOf(32.dp.toPx() * (1f - p), width / 2f)
     val fraction = if (width > 0f) horizontalFeather / width else .5f
     val horizontalMask = Brush.horizontalGradient(0f to Color.Transparent, fraction to Color.White,

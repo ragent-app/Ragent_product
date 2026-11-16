@@ -74,7 +74,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     val touchSize = maxOf(diameter, 64.dp)
     val iconSize = nodeIconSize(node.radiusDp).dp
     Box(
-        modifier = modifier.offset {
+        modifier = modifier.absoluteOffset {
             val half = with(density) { touchSize.toPx() / 2f }
             IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
         }.size(touchSize).then(if (morphHidden) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") })
@@ -104,7 +104,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
             else -> colors.secondaryContent
         }
         if (node.runtimeState != NodeRuntimeState.IDLE) {
-            Box(Modifier.align(Alignment.Center).offset(x = (node.radiusDp * .70710678f).dp, y = (node.radiusDp * .70710678f).dp)
+            Box(Modifier.align(Alignment.Center).absoluteOffset(x = (node.radiusDp * .70710678f).dp, y = (node.radiusDp * .70710678f).dp)
                 .size(11.dp).clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(stateColor))
             }

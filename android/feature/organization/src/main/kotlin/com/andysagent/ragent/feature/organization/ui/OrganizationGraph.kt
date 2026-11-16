@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
@@ -125,6 +126,7 @@ internal fun OrganizationGraph(
                 OrganizationNode(node.copy(x = position?.x ?: node.x, y = position?.y ?: node.y, radiusDp = radii[node.id] ?: node.radiusDp,
                     scale = scales[node.id] ?: node.scale, alpha = alphas[node.id] ?: node.alpha),
                     onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
+                    modifier = Modifier.align(Alignment.Absolute.TopLeft),
                     morphHidden = node.id == hiddenNodeId)
             }
         }
