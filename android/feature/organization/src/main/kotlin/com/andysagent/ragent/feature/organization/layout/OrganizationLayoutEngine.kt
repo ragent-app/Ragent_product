@@ -88,6 +88,35 @@ class OrganizationLayoutEngine {
         val rootY = viewportHeight * .46f
 
         val childrenByParent = nodes.values.groupBy { it.parentId }
+        // Depth is based only on the actual parent chain, never on the visual center.
+        fun managementDepth(node: OrganizationNodeModel): Int? {
+            val seen = mutableSetOf<String>()
+            var current = node
+            var depth = 0
+            while (true) {
+                if (!seen.add(current.id)) return null
+                val parentId = current.parentId ?: return depth
+                current = nodes[parentId] ?: return null
+                depth++
+            }
+        }
+        fun nodeRadius(node: OrganizationNodeModel): Float {
+            if (node.role == NodeRole.EXECUTIVE) return 36f
+            val manages = node.role == NodeRole.MANAGER || node.role == NodeRole.PHASE_LEAD ||
+                childrenByParent[node.id].orEmpty().any { it.id != node.id }
+            if (!manages) return 24f
+            return when (managementDepth(node)) {
+                0 -> 36f
+                1 -> 32f
+                2 -> 28f
+                null -> when (node.role) {
+                    NodeRole.MANAGER -> 32f
+                    NodeRole.PHASE_LEAD -> 28f
+                    else -> 24f
+                }
+                else -> 26f
+            }
+        }
         val calculatedPositions = mutableMapOf<String, EdgePoint>()
         val clusterNodes = mutableMapOf<String, NodePosition>()
 
@@ -122,7 +151,14 @@ class OrganizationLayoutEngine {
             if (visited.add(node.id)) { ordered.add(node.id); visit(node.id) }
         }
         val d = density.coerceAtLeast(.1f)
-        val radius = minOf(132f * d, (viewportWidth / 2f - 44f * d) / 1.08f, (min(rootY, viewportHeight - rootY) - 40f * d) / 1.08f).coerceAtLeast(84f * d)
+        val maxOuterExtent = ordered.maxOfOrNull { id ->
+            val radiusDp = nodes[id]?.let(::nodeRadius) ?: 28f
+            val scale = if (id in clusteredChildren) 1f else 1.06f
+            max(radiusDp * scale, 32f) + 8f
+        } ?: 0f
+        val horizontalPadding = max(44f, maxOuterExtent) * d
+        val verticalPadding = max(40f, maxOuterExtent) * d
+        val radius = minOf(132f * d, (viewportWidth / 2f - horizontalPadding) / 1.08f, (min(rootY, viewportHeight - rootY) - verticalPadding) / 1.08f).coerceAtLeast(84f * d)
         val factors = floatArrayOf(.88f, 1f, .92f, 1.08f)
         val firstCount = min(ordered.size, 6)
         ordered.forEachIndexed { index, id ->
@@ -152,7 +188,7 @@ class OrganizationLayoutEngine {
             val isFocused = (node.id == focusNodeId)
             val isDimmed = (focusNodeId != null && focusNodeId != rootId && node.id != focusNodeId)
 
-            val radius = if (node.role == NodeRole.EXECUTIVE) 32f else 28f
+            val radius = nodeRadius(node)
 
             // If node is hidden because it's in a cluster
             val isHiddenInCluster = clusterNodes.values.any { it.clusterChildIds.contains(node.id) }
@@ -207,10 +243,11 @@ class OrganizationLayoutEngine {
         var maxY = Float.NEGATIVE_INFINITY
 
         nodePositions.values.forEach { pos ->
-            minX = min(minX, pos.x - 40f * d)
-            maxX = max(maxX, pos.x + 40f * d)
-            minY = min(minY, pos.y - 40f * d)
-            maxY = max(maxY, pos.y + 40f * d)
+            val extent = (max(pos.radius * max(pos.scale, 1f), 32f) + 8f) * d
+            minX = min(minX, pos.x - extent)
+            maxX = max(maxX, pos.x + extent)
+            minY = min(minY, pos.y - extent)
+            maxY = max(maxY, pos.y + extent)
         }
 
         if (minX == Float.MAX_VALUE) {
