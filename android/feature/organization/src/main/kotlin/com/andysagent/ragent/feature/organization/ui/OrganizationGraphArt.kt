@@ -234,7 +234,7 @@ internal fun OrganizationGraphArt(nodes: List<GraphNodeSurface>, edges: List<Ren
                 }
             }
             if (indices.isNotEmpty()) {
-                val mesh = Vertices(VertexMode.Triangles, positions, textureCoordinates = emptyList(), colors = vertexColors, indices = indices)
+                val mesh = Vertices(VertexMode.Triangles, positions, textureCoordinates = positions, colors = vertexColors, indices = indices)
                 drawIntoCanvas { canvas -> canvas.drawVertices(mesh, BlendMode.Modulate, meshPaint) }
             }
         }
