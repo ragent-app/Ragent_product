@@ -106,6 +106,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             projectionGeneration = null
             loaded = false
             organizationId = null
+            baseProjection = null
             nodes = emptyList()
             cachedAt = null
             status = "Organization access changed. Refresh to check current authorization."
@@ -123,6 +124,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             projectionGeneration = null
             cachedAt = null
             organizationId = null
+            baseProjection = null
             nodes = emptyList()
             status = "Loading organization…"
         }
@@ -208,6 +210,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                         projectionGeneration = null
                         loaded = false
                         organizationId = null
+                        baseProjection = null
                         nodes = emptyList()
                         cachedAt = null
                         status = "Organization access changed. Refresh to check current authorization."
@@ -221,6 +224,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     projectionGeneration = null
                     loaded = false
                     organizationId = null
+                    baseProjection = null
                     nodes = emptyList()
                     cachedAt = null
                     status = "Organization access changed. Refresh to check current authorization."
@@ -272,8 +276,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             refresh++
         }
     }
-    LaunchedEffect(nodes, rootNodeId, loaded, records) {
-        onHasCollaboratorsChanged(records.isNotEmpty() || (loaded && rootNodeId != null && nodes.any { it.id != rootNodeId && !it.sessionId.isNullOrBlank() }))
+    LaunchedEffect(baseProjection, loaded, records) {
+        onHasCollaboratorsChanged(records.isNotEmpty() || (loaded && baseProjection?.hasCreatedSubordinate == true))
     }
     CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
     Box(modifier.fillMaxSize()) {
@@ -318,6 +322,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                                         projectionGeneration = null
                                         loaded = false
                                         organizationId = null
+                                        baseProjection = null
                                         nodes = emptyList()
                                         cachedAt = null
                                         status = "Organization access changed. Refresh to check current authorization."
