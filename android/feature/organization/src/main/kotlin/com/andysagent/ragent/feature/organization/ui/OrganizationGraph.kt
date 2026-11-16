@@ -50,6 +50,7 @@ internal fun OrganizationGraph(
     )
     val positions = mutableMapOf<String, Offset>()
     val scales = mutableMapOf<String, Float>()
+    val radii = mutableMapOf<String, Float>()
     val alphas = mutableMapOf<String, Float>()
     uiState.nodes.forEach { node ->
         key(node.id) {
@@ -61,27 +62,30 @@ internal fun OrganizationGraph(
             scales[node.id] = animateFloatAsState(node.scale,
                 animationSpec = if (preference == MotionPreference.Full) spring(dampingRatio = .88f, stiffness = 320f) else snap(),
                 label = "organization-scale-${node.id}").value
+            radii[node.id] = animateFloatAsState(node.radiusDp,
+                animationSpec = if (preference == MotionPreference.Full) spring(dampingRatio = .88f, stiffness = 320f) else snap(),
+                label = "organization-radius-${node.id}").value
             alphas[node.id] = animateFloatAsState(node.alpha,
                 animationSpec = when (preference) { MotionPreference.Full -> tween(120); MotionPreference.Reduced -> tween(100); MotionPreference.None -> snap() },
                 label = "organization-alpha-${node.id}").value
         }
     }
     val nodesById = uiState.nodes.associateBy { it.id }
-    fun radius(id: String): Float {
-        val node = nodesById[id] ?: return 28f * density
-        return (if (node.role == NodeRole.EXECUTIVE) 32f else 28f) * density * (scales[id] ?: node.scale)
-    }
     val edges = uiState.edges.mapNotNull { edge ->
         val from = positions[edge.fromNodeId]
         val to = positions[edge.toNodeId]
-        if (from == null || to == null) {
+        val fromNode = nodesById[edge.fromNodeId]
+        val toNode = nodesById[edge.toNodeId]
+        val fromRadius = radii[edge.fromNodeId]
+        val toRadius = radii[edge.toNodeId]
+        if (from == null || to == null || fromNode == null || toNode == null || fromRadius == null || toRadius == null) {
             null
         } else {
             val delta = to - from
             val length = hypot(delta.x, delta.y).coerceAtLeast(1f)
             val unit = delta / length
-            val start = from + unit * radius(edge.fromNodeId)
-            val end = to - unit * radius(edge.toNodeId)
+            val start = from + unit * (fromRadius * density * (scales[edge.fromNodeId] ?: fromNode.scale))
+            val end = to - unit * (toRadius * density * (scales[edge.toNodeId] ?: toNode.scale))
             edge.copy(start = EdgePoint(start.x, start.y), end = EdgePoint(end.x, end.y), control1 = null, control2 = null, isCurved = false)
         }
     }
@@ -95,7 +99,7 @@ internal fun OrganizationGraph(
             OrganizationCanvas(edges, emptyList())
             uiState.nodes.forEach { node ->
                 val position = positions[node.id]
-                OrganizationNode(node.copy(x = position?.x ?: node.x, y = position?.y ?: node.y,
+                OrganizationNode(node.copy(x = position?.x ?: node.x, y = position?.y ?: node.y, radiusDp = radii[node.id] ?: node.radiusDp,
                     scale = scales[node.id] ?: node.scale, alpha = alphas[node.id] ?: node.alpha),
                     onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) })
             }

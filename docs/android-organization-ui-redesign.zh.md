@@ -21,15 +21,15 @@
 
 ## 2. 节点参数
 
-- 中心负责人直径 64dp，其余节点 56dp；触摸容器统一 64dp，中心与布局坐标一致。
-- 单层线性微渐变圆面，无描边、额外高光、纹理、光晕或投影。中心使用 Google Material Symbols Rounded 图标，画布色呈镂空观感，负责人 28dp，其余 24dp；数字簇仍为 20sp。圆外不追加文字。
+- 节点半径根据真实管理层级取 36/32/28/26dp（直径 72/64/56/52dp），更深管理层维持 26dp；普通叶子半径 24dp（直径 48dp），聚合簇半径 28dp。管理者指明确管理职责或有真实 MANAGES 子节点的成员，沿 parentId 计算深度；普通叶子和仅因布局位于中心的成员不升级。缺父或存在循环时保守按明确职责回退。触摸容器为直径与 64dp 的较大值，中心与布局坐标一致。
+- 单层线性微渐变圆面，无描边、额外高光、纹理、光晕或投影。中心使用 Google Material Symbols Rounded 图标，画布色呈镂空观感；半径与图标的静态锚点为 24→22、26→24、28→24、32→28、36→32dp，过渡按第 4 节连续插值；数字簇仍为 20sp。圆外不追加文字。
 - 图内所有节点下方、旁边均不显示姓名、角色、状态文字。无障碍仍读完整名字、状态、任务和阻塞信息。
 - 职责优先：组织负责人 explore、规划管理 route、阶段负责人 flag、审核 find_in_page；专家/执行者/编写者及未知职责优先使用可识别的专业图标，否则分别回退 psychology/construction/edit_note/person。簇显示 +n。
 - 专业图标键共有32个有限视觉类别，不是专业白名单：backend=dns、mobile=smartphone、web=web、runtime=terminal、architecture=schema、database=database、data=analytics、ai=auto_awesome、cloud=cloud、network=hub、hardware=memory、security=shield、testing=bug_report、design=palette、product=category、research=science、writing=edit_note、translation=translate、education=school、business=work、finance=account_balance、legal=balance、health=medical_services、marketing=campaign、sales=storefront、people=groups、operations=settings_suggest、logistics=local_shipping、media=movie、environment=eco、engineering=precision_manufacturing、general=person。android/ios 图标键别名为 mobile。
 - 负责人可自由指定任意语言的专业名称。领导 Agent 可在原有分工输出中附加可选 iconKey，不额外调用模型；客户端仅识别明确键，不从名称关键词猜测。未知键回退职责或通用图标，详情和无障碍保留真实名称。图标与许可证来源见 Android 模块 third_party/material-symbols-rounded。
 - 三色 stop 为 0、0.55、1，起点 `(0.12W, 0.08H)`，终点 `(0.88W, 0.92H)`；按尺寸缓存画刷。色族浅色 / 深色色表：紫 `#657AA5 #6E76A6 #7B73A1` / `#ADC1E5 #BAC1E9 #C5BEE5`；蓝灰 `#6F8997 #798696 #838293` / `#95B2BE #9EB0BC #A8ADBB`；蓝 `#6487A8 #6E84A6 #7A80A1` / `#92B6D5 #9FB2D4 #AEAED0`；绿 `#64887F #6E887C #7A8A78` / `#98BCAF #A6BCAB #B2BCA8`；暖 `#958263 #9B846C #A08776` / `#C5B58F #CBB69B #D0B7A8`。以 canvas 的相对亮度判断深浅；其他主题不据此宣称对比度全面达标。
 - 上述五组依次称紫、蓝灰、蓝、绿、暖色；专业视觉色族为蓝：mobile/web/data/ai/hardware/cloud/network/backend/runtime；紫：architecture/security/design/product/education/legal；绿：database/people/operations/logistics/environment/engineering/general；蓝灰：research/writing/translation/business；暖：testing/finance/health/marketing/sales/media。职责优先或回退时，负责人/专家用紫、管理/阶段负责人用蓝灰、执行者/未知用绿、编写者用蓝、审核用暖色。
-- 状态点直径 7dp，外侧画布色隔离环 2dp，圆心在本节点半径的右下 45° 位置。IDLE 不显示；WORKING/REVIEWING 使用主题 running；WAITING/PROVISIONING/PAUSED 用 secondaryContent；BLOCKED/FAILED 用 error；DONE 用 success。静态状态点，不无限闪烁。
+- 状态点直径 7dp，外侧画布色隔离环 2dp，圆心位于圆心右下方 (r/√2, r/√2) 处。IDLE 不显示；WORKING/REVIEWING 使用主题 running；WAITING/PROVISIONING/PAUSED 用 secondaryContent；BLOCKED/FAILED 用 error；DONE 用 success。静态状态点，不无限闪烁。
 - 按压复用原聊天页 `rememberAgentoPressScale`；不叠加第二套按压动画。
 - 单击打开成员详情 sheet，双击保留聚焦；簇点击展开。聚焦尺度 1.06，其他节点透明度 0.50；聚焦中心节点时全体维持 1.0。无焦点默认 1.0。
 
@@ -41,7 +41,7 @@
 - 先保留真实节点、真实边和既有簇展开语义，再为可见非中心节点稳定排序：层级前序，兄弟按 role 次序（manager、worker、expert、reviewer）再按 domain 与 id；同一投影反复刷新不随机排位。遍历需 visited 防循环，孤立成员仍可见。
 - 非中心可见数 1：角度 [35°]；2：[-145°,35°]；3：[-125°,-15°,110°]；4：[-155°,-37°,100°,160°]。角度 0 在右，90 在下。
 - 对应半径倍数循环 [0.88,1.00,0.92,1.08]。
-- 第一圈基础半径 `R = min(132dp, (W/2-44dp)/1.08, (min(centerY,H-centerY)-40dp)/1.08)`。正常手机最小图高280dp时保证可读；极端小宽度由可平移画布容纳，R 下限 84dp，绝不缩小节点字。
+- 第一圈基础半径按可用宽高、132dp 上限及各可见非中心节点的最大预留留白计算：横向留白取 max(原 44dp，max(节点半径×1.06, 32dp 触摸半径)+8dp)，纵向取 max(原 40dp，同一节点留白)，再按 1.08 的最大半径倍数约束。预留始终固定包含 1.06 聚焦尺度，避免聚焦令其他节点挪动。正常手机最小图高280dp时保证可读；极端小宽度由可平移画布容纳，R 下限 84dp，绝不缩小节点图标。
 - 5–6 个非中心成员第一圈均分角度，从 -145° 开始，偶数槽 +5°、奇数槽 -5°；保持上述半径倍数。超过6个时按第一圈6个、后续每圈8个，第二圈基础半径 R+100dp，后续每圈+100dp；第二圈起始角 -120°，与内圈错开。保持已有平移缩放供查看外圈。
 - 不把所有兄弟摆成同一水平线，不强制层级等距。连线仍显示真实关系，不为外观伪造中心到所有人的关系。
 - 聚焦非中心成员时，该成员沿本身中心射线外移 10dp，其他成员目标不变；取消聚焦回原位。选中 sheet 不改变图布局。
@@ -51,6 +51,8 @@
 
 - 成员位置弹簧：归一化质量 1，刚度 k=140，阻尼比 ζ=0.74（等效 c≈17.51）。中心：质量1，k=260，ζ=0.92（c≈29.67）。Compose 使用 stiffness/dampingRatio，不把 c 填成阻尼比。
 - 节点中途换目标承接当前位置和速度；以 node.id 保留状态，不按列表索引重建。无需持续物理循环；到达目标后静止。
+- 层级导致的基础半径变化与连线裁边共用同一动画半径：Full 使用 stiffness320、dampingRatio0.88；Reduced/None 即时到位。
+- 图标大小按半径锚点 24→22、26→24、28→24、32→28、36→32dp 分段线性插值，超出范围钳制，避免尺寸过渡中跳变；簇文字保持 20sp。
 - 边端点每帧取同一份动画节点坐标。起终点裁至节点当前可见圆周，包含焦点缩放；不能另建不同步 tween。
 - 边为连接真实关系的直线，起终点裁至当前动画节点的圆周；不再进行曲线候选搜索或弯曲偏移动画。
 - 当前五节点静态几何检查仅覆盖该布局，不能证明任意拓扑均不穿越无关节点，也不能代表真机动画性能。

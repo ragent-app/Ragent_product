@@ -75,11 +75,20 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     })
     val interaction = remember { MutableInteractionSource() }
     val press by rememberAgentoPressScale(interaction)
-    val diameter = if (node.role == NodeRole.EXECUTIVE) 64.dp else 56.dp
+    val diameter = (node.radiusDp * 2f).dp
+    val touchSize = maxOf(diameter, 64.dp)
+    val radius = node.radiusDp.coerceIn(24f, 36f)
+    val iconSize = when {
+        radius < 26f -> 22f + (radius - 24f)
+        radius < 28f -> 24f
+        radius < 32f -> 24f + (radius - 28f)
+        else -> 28f + (radius - 32f)
+    }.dp
     Box(
         modifier = modifier.offset {
-            IntOffset((node.x - with(density) { 32.dp.toPx() }).roundToInt(), (node.y - with(density) { 32.dp.toPx() }).roundToInt())
-        }.size(64.dp).semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") }
+            val half = with(density) { touchSize.toPx() / 2f }
+            IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
+        }.size(touchSize).semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") }
             .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = node.alpha }
             .combinedClickable(interactionSource = interaction, indication = null, onClick = onClick, onDoubleClick = onDoubleTap),
         contentAlignment = Alignment.Center,
@@ -96,7 +105,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
                 Text("+${node.clusterCount}", color = colors.canvas, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             } else {
                 Icon(painterResource(visual.icon), contentDescription = null, tint = colors.canvas,
-                    modifier = Modifier.size(if (node.role == NodeRole.EXECUTIVE) 28.dp else 24.dp))
+                    modifier = Modifier.size(iconSize))
             }
         }
         val stateColor = when (node.runtimeState) {
@@ -106,7 +115,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
             else -> colors.secondaryContent
         }
         if (node.runtimeState != NodeRuntimeState.IDLE) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(if (node.role == NodeRole.EXECUTIVE) 4.dp else 6.dp)
+            Box(Modifier.align(Alignment.Center).offset(x = (node.radiusDp * .70710678f).dp, y = (node.radiusDp * .70710678f).dp)
                 .size(11.dp).clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(stateColor))
             }
