@@ -3064,6 +3064,7 @@ private fun ChatSurface(
             sourceIsCircle = organizationHasCollaborators && organizationFromRoot && organizationRootAnchor != null,
             sourceVisual = organizationRootVisual,
             collapsedSurfaceColor = colors.quietSurface,
+            cardMaterialEnabled = organizationHasCollaborators,
             snapToTarget = organizationHydrating,
             onVisibleSizeChanged = { _, height -> organizationVisibleHeight = height },
             onSettled = { expanded ->
