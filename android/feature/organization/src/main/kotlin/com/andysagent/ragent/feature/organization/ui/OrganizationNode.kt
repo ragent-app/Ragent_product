@@ -7,6 +7,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +26,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +46,7 @@ fun OrganizationNode(
     onClick: () -> Unit,
     onDoubleTap: () -> Unit = {},
     modifier: Modifier = Modifier,
+    showLabel: Boolean = false,
 ) {
     val colors = LocalRagentColors.current
     val clock = LocalOrganizationAnimationClock.current
@@ -229,6 +234,18 @@ fun OrganizationNode(
                     modifier = Modifier.size((node.radiusDp * 0.9f).dp),
                 )
             }
+        }
+        if (showLabel && !node.isCluster) {
+            Text(
+                text = node.displayName,
+                color = colors.primaryContent,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter).offset(y = 22.dp)
+                    .wrapContentSize(unbounded = true).width(100.dp),
+            )
         }
     }
 }

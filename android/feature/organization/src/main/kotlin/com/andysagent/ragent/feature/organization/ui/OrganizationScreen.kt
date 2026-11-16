@@ -44,6 +44,7 @@ fun OrganizationScreen(
     viewModel: OrganizationViewModel,
     modifier: Modifier = Modifier,
     onSendRootInstruction: (() -> Unit)? = null,
+    showNodeLabels: Boolean = false,
 ) {
     val uiState = viewModel.uiState.collectAsState().value
     OrganizationScreenContent(
@@ -61,6 +62,7 @@ fun OrganizationScreen(
         onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h -> viewModel.updateViewportSize(w.toFloat(), h.toFloat()) },
         onSendRootInstruction = onSendRootInstruction,
+        showNodeLabels = showNodeLabels,
         modifier = modifier,
     )
 }
@@ -82,6 +84,7 @@ fun OrganizationScreenContent(
     onSizeChanged: (Int, Int) -> Unit = { _, _ -> },
     onSendRootInstruction: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    showNodeLabels: Boolean = false,
 ) {
     val colors = LocalRagentColors.current
 
@@ -130,6 +133,7 @@ fun OrganizationScreenContent(
                     node = node,
                     onClick = { onNodeClick(node.id) },
                     onDoubleTap = { onNodeDoubleTap(node.id) },
+                    showLabel = showNodeLabels,
                 )
             }
         }

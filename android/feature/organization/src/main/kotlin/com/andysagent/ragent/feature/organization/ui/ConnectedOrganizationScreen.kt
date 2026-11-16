@@ -1,10 +1,13 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.Composable
@@ -15,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -39,6 +43,7 @@ import com.andysagent.ragent.core.designsystem.LocalRagentColors
 @Composable
 fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit) {
     val context = LocalContext.current
+    var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
     val connection by transport.connectionState.collectAsState()
     val scopeKey = remember(offlineScope) { offlineScope?.let { scope -> MessageDigest.getInstance("SHA-256").digest(scope.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) } }.orEmpty() }
@@ -195,9 +200,16 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
     }
-    Column(Modifier.fillMaxSize().background(LocalRagentColors.current.canvas)) {
+    CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
+    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(LocalRagentColors.current.canvas).then(
+        if (demoOpen) Modifier.clearAndSetSemantics {} else Modifier,
+    )) {
         if (!(loaded && workOpen && connection == RuntimeConnectionState.Connected && cachedAt == null && organizationId != null)) {
             TextButton(onClick = onBack) { Text("Back") }
+        }
+        if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 && !workOpen && !messagesOpen) {
+            TextButton(onClick = { demoOpen = true }) { Text("查看演示组织图") }
         }
         if (cacheClearFailed) Text("Offline data could not be removed. Offline snapshots are disabled for this app session.")
         if (cachedAt != null && connection != RuntimeConnectionState.AuthenticationRequired) Text("Offline snapshot from ${Instant.ofEpochMilli(cachedAt!!)}. Read-only; reconnect to refresh.")
@@ -233,5 +245,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             Text(status)
             TextButton(onClick = { refresh++ }) { Text("Retry") }
         }
+    }
+    if (demoOpen) OrganizationDemoScreen(onBack = { demoOpen = false })
+    }
     }
 }
