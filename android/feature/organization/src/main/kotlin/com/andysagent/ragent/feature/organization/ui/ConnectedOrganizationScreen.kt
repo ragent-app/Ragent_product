@@ -96,6 +96,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     var rootSessionId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
     var workOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(selectedResponsibilityId != null) }
     var messagesOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    var organizationNotFound by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var baseProjection by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<OrganizationProjectionDto?>(null) }
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
     LaunchedEffect(scopeKey, cacheInvalidations) {
@@ -107,6 +108,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             loaded = false
             organizationId = null
             baseProjection = null
+            organizationNotFound = false
             nodes = emptyList()
             cachedAt = null
             status = "Organization access changed. Refresh to check current authorization."
@@ -125,6 +127,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             cachedAt = null
             organizationId = null
             baseProjection = null
+            organizationNotFound = false
             nodes = emptyList()
             status = "Loading organization…"
         }
@@ -134,6 +137,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         val requestGeneration = offlineScope?.let { cache.generation(it) }
         val online = connection == RuntimeConnectionState.Connected
         val cacheAllowed = offlineScope != null && connection != RuntimeConnectionState.AuthenticationRequired
+        var confirmedNotFound = false
         val body: String? = if (online) {
             val ownerResponse: Boolean? = if (cacheAllowed) try {
                 val response = transport.execute(ApiRequest("GET", "/api/auth/me"))
@@ -155,6 +159,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             val response = try {
                 transport.execute(ApiRequest("GET", "/api/sessions/${android.net.Uri.encode(sessionId)}/organization/projection"))
             } catch (error: ApiException) {
+                confirmedNotFound = error.statusCode == 404 && error.code == "ORGANIZATION_NOT_FOUND" &&
+                    (offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration)))
                 if (error.statusCode in listOf(401, 403, 404, 405, 410, 501) && offlineScope != null) {
                     ownerVerified = false
                     ownerGeneration = null
@@ -165,6 +171,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 throw error
             } catch (_: Exception) {
                 null
+            }
+            if (response?.statusCode == 404 && runCatching { JSONObject(response.body).optString("code") }.getOrNull() == "ORGANIZATION_NOT_FOUND") {
+                confirmedNotFound = offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration))
             }
             if (response != null && response.statusCode in listOf(401, 403, 404, 405, 410, 501) && offlineScope != null) {
                 ownerVerified = false
@@ -182,7 +191,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             saved?.first
         } else null
         if (body == null) {
-            status = if (online) "Organization unavailable." else "Offline: no authorized cached organization is available."
+            organizationNotFound = confirmedNotFound
+            status = if (confirmedNotFound) "No organization is available for this session." else if (online) "Organization unavailable." else "Offline: no authorized cached organization is available."
         } else {
             val responseTransport = object : RagentTransport by transport {
                 override suspend fun execute(request: ApiRequest): ApiResponse = ApiResponse(200, body)
@@ -211,6 +221,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                         loaded = false
                         organizationId = null
                         baseProjection = null
+                        organizationNotFound = false
                         nodes = emptyList()
                         cachedAt = null
                         status = "Organization access changed. Refresh to check current authorization."
@@ -225,6 +236,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     loaded = false
                     organizationId = null
                     baseProjection = null
+                    organizationNotFound = false
                     nodes = emptyList()
                     cachedAt = null
                     status = "Organization access changed. Refresh to check current authorization."
@@ -278,7 +290,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     }
     val hasCollaborators = records.isNotEmpty() || (loaded && baseProjection?.hasCreatedSubordinate == true)
     val snapshotResolved = loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected
-    val snapshotDefinitive = loaded && baseProjection != null
+    val snapshotDefinitive = (loaded && baseProjection != null) || organizationNotFound
     LaunchedEffect(snapshotResolved, snapshotDefinitive, hasCollaborators, transport, targetId, sessionId, scopeKey) {
         onCollaboratorSnapshot(snapshotResolved, snapshotDefinitive, hasCollaborators)
         onHasCollaboratorsChanged(hasCollaborators)
@@ -327,6 +339,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                                         loaded = false
                                         organizationId = null
                                         baseProjection = null
+                                        organizationNotFound = false
                                         nodes = emptyList()
                                         cachedAt = null
                                         status = "Organization access changed. Refresh to check current authorization."
