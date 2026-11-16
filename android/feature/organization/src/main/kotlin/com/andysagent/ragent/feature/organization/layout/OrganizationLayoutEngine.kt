@@ -205,16 +205,9 @@ class OrganizationLayoutEngine {
             place(unit, distance, 0f)
         }
 
-        // Center the unfocused graph once; focus never moves other nodes.
-        var left = Float.POSITIVE_INFINITY; var right = Float.NEGATIVE_INFINITY
-        var top = Float.POSITIVE_INFINITY; var bottom = Float.NEGATIVE_INFINITY
-        calculatedPositions.forEach { (id, point) ->
-            val extent = (max(radiusOf(id) * 1.06f, 32f) + 18f) * d
-            left = min(left, point.x - extent); right = max(right, point.x + extent)
-            top = min(top, point.y - extent); bottom = max(bottom, point.y + extent)
-        }
-        val translateX = viewportWidth * .5f - (left + right) / 2f
-        val translateY = viewportHeight * .48f - (top + bottom) / 2f
+        // Keep the layout anchor at the viewport center regardless of branch bounds.
+        val translateX = viewportWidth * .5f
+        val translateY = viewportHeight * .5f
         calculatedPositions.keys.toList().forEach { id ->
             val point = calculatedPositions.getValue(id)
             val axis = if (id == focusNodeId && id != rootId) axes[id] else null
