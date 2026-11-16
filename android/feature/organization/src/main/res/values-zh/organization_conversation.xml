@@ -11,4 +11,6 @@
     <string name="org_conversation_output">输出</string>
     <string name="org_conversation_exit">退出码</string>
     <string name="org_conversation_latest">回到最新</string>
+    <string name="org_conversation_error_retained">刷新失败，显示之前核实的消息</string>
+    <string name="org_conversation_offline_empty">连接已中断，暂无可显示的消息</string>
 </resources>

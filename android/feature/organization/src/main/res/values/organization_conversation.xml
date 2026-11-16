@@ -11,4 +11,6 @@
     <string name="org_conversation_output">Output</string>
     <string name="org_conversation_exit">Exit code</string>
     <string name="org_conversation_latest">Back to latest</string>
+    <string name="org_conversation_error_retained">Couldn’t refresh · showing previously verified messages</string>
+    <string name="org_conversation_offline_empty">Connection interrupted · no messages available</string>
 </resources>
