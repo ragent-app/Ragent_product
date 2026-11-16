@@ -152,7 +152,7 @@ function deriveNodeState({ node, collaboration, task, run, blockers, gate }) {
   return node.currentSessionId ? 'idle' : 'unbound';
 }
 
-function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, gate, organization, events = [], runtime }) {
+function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, gate, organization, events = [], runtime, display = {} }) {
   const tasks = Array.isArray(collaboration?.tasks) ? collaboration.tasks : [];
   const completed = tasks.filter((entry) => entry.state === 'succeeded').length;
   const blockers = deriveBlockers({ node, collaboration, task, attempt, run, events });
@@ -173,6 +173,8 @@ function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, ga
     id: node.id,
     parentId: node.parentNodeId || null,
     role: node.nodeRole,
+    domain: typeof display.domain === 'string' && [...display.domain].length <= 160 ? display.domain : null,
+    iconKey: typeof display.iconKey === 'string' && [...display.iconKey].length <= 64 ? display.iconKey : null,
     displayName: node.stableKey,
     phaseId: phaseId || null,
     sessionClass: node.sessionClass || '',
@@ -321,6 +323,7 @@ export async function collectOrganizationStatus({
       organization,
       events: eventsByNode.get(text(node.id)) || [],
       runtime: compiledNode.runtime || task?.runtime,
+      display: revision?.state === 'frozen' ? compiledNode : {},
     });
   });
   const statusById = new Map(statuses.map((entry) => [entry.id, entry]));

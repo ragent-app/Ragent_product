@@ -30,11 +30,13 @@ function clone(value, fallback = null) { try { return JSON.parse(JSON.stringify(
 function digest(value) { return `sha256:${createHash('sha256').update(canonicalJson(value), 'utf8').digest('hex')}`; }
 function bounded(list) { return Array.isArray(list) ? list.slice(0, MAX_ITEMS) : []; }
 
-function publicNode(node, edgeByChild = new Map()) {
+function publicNode(node, edgeByChild = new Map(), display = {}) {
   return {
     id: node.id,
     parentId: edgeByChild.get(node.id) || null,
     role: node.nodeRole,
+    domain: typeof display.domain === 'string' && [...display.domain].length <= 160 ? display.domain : null,
+    iconKey: typeof display.iconKey === 'string' && [...display.iconKey].length <= 64 ? display.iconKey : null,
     displayName: node.stableKey,
     sessionClass: node.sessionClass || '',
     status: node.lifecycleState,
@@ -107,7 +109,8 @@ async function buildOrganizationProjectionUncached(organizationId, {
   const envelopes = await listInternalEnvelopes(org.id, { limit: Math.min(MAX_ITEMS, Math.max(1, integer(maxItems, MAX_ITEMS))) });
   const counter = org.currentRevision ? await getBudgetCounter(org.id, org.currentRevision) : null;
   const edgeByChild = new Map(edges.filter((edge) => edge.edgeType === 'MANAGES').map((edge) => [edge.childNodeId, edge.parentNodeId]));
-  const safeNodes = bounded(nodes).map((node) => publicNode(node, edgeByChild));
+  const displayNodes = new Map((revision?.state === 'frozen' && Array.isArray(compiled.nodes) ? compiled.nodes : []).map((node) => [node.stableKey, node]));
+  const safeNodes = bounded(nodes).map((node) => publicNode(node, edgeByChild, displayNodes.get(node.stableKey)));
   const safeEdges = bounded(edges).map((edge) => ({
     id: edge.id, type: edge.edgeType, parentId: edge.parentNodeId, childId: edge.childNodeId, revision: edge.organizationRevision,
   }));

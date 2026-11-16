@@ -200,7 +200,16 @@ export function compileRevision(proposal = {}, budget = null) {
       : [];
     const scope = raw.scope && typeof raw.scope === 'object' && !Array.isArray(raw.scope) ? sanitizeJson(raw.scope, {}) : {};
     const scopes = raw.scopes && typeof raw.scopes === 'object' && !Array.isArray(raw.scopes) ? sanitizeJson(raw.scopes, {}) : {};
-    const node = { stableKey, role, capabilities, dependsOn, scope, scopes };
+    const display = {};
+    for (const [field, limit] of [['domain', 160], ['iconKey', 64]]) {
+      if (!Object.hasOwn(raw, field)) continue;
+      const value = raw[field];
+      if (value !== null && (typeof value !== 'string' || [...value.trim()].length > limit)) {
+        throw compileError('REVISION_COMPILE_FAILED', `node ${stableKey} ${field} must be a string of at most ${limit} characters or null`, { reason: 'invalid_display_metadata', stableKey, field });
+      }
+      display[field] = value === null ? null : value.trim() || null;
+    }
+    const node = { stableKey, role, capabilities, dependsOn, scope, scopes, ...display };
     byKey.set(stableKey, node);
     normalized.push(node);
   }
@@ -261,6 +270,8 @@ export function compileRevision(proposal = {}, budget = null) {
     return {
       stableKey: node.stableKey,
       role: node.role,
+      ...(Object.hasOwn(node, 'domain') ? { domain: node.domain } : {}),
+      ...(Object.hasOwn(node, 'iconKey') ? { iconKey: node.iconKey } : {}),
       capabilities: [...node.capabilities].sort(),
       dependsOn: [...node.dependsOn].sort(),
       effectiveGrants,

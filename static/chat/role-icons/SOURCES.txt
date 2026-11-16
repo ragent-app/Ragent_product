@@ -1,0 +1,50 @@
+Google material-design-icons
+Commit: 10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7
+Rounded 24px filenames with no fill/wght/grade suffix (repository default).
+Axis naming is a repository convention; no explicit per-file metadata.
+License: https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/LICENSE
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/explore/materialsymbolsrounded/explore_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/hub/materialsymbolsrounded/hub_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/route/materialsymbolsrounded/route_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/alt_route/materialsymbolsrounded/alt_route_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/smartphone/materialsymbolsrounded/smartphone_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/dns/materialsymbolsrounded/dns_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/find_in_page/materialsymbolsrounded/find_in_page_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/manage_search/materialsymbolsrounded/manage_search_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/person/materialsymbolsrounded/person_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/web/materialsymbolsrounded/web_24px.svg
+PNG generated with Pillow gradient and flat official path render; nested selection SVG was not used for PNG rendering.
+
+Additional fixed-commit official assets:
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/flag/materialsymbolsrounded/flag_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/psychology/materialsymbolsrounded/psychology_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/construction/materialsymbolsrounded/construction_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/edit_note/materialsymbolsrounded/edit_note_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/terminal/materialsymbolsrounded/terminal_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/shield/materialsymbolsrounded/shield_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/bug_report/materialsymbolsrounded/bug_report_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/schema/materialsymbolsrounded/schema_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/database/materialsymbolsrounded/database_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/science/materialsymbolsrounded/science_24px.svg
+
+Additional fixed-commit professional assets:
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/analytics/materialsymbolsrounded/analytics_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/auto_awesome/materialsymbolsrounded/auto_awesome_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/cloud/materialsymbolsrounded/cloud_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/memory/materialsymbolsrounded/memory_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/palette/materialsymbolsrounded/palette_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/category/materialsymbolsrounded/category_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/translate/materialsymbolsrounded/translate_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/school/materialsymbolsrounded/school_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/work/materialsymbolsrounded/work_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/account_balance/materialsymbolsrounded/account_balance_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/balance/materialsymbolsrounded/balance_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/medical_services/materialsymbolsrounded/medical_services_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/campaign/materialsymbolsrounded/campaign_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/storefront/materialsymbolsrounded/storefront_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/groups/materialsymbolsrounded/groups_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/settings_suggest/materialsymbolsrounded/settings_suggest_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/local_shipping/materialsymbolsrounded/local_shipping_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/movie/materialsymbolsrounded/movie_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/eco/materialsymbolsrounded/eco_24px.svg
+https://raw.githubusercontent.com/google/material-design-icons/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web/precision_manufacturing/materialsymbolsrounded/precision_manufacturing_24px.svg

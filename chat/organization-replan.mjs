@@ -72,8 +72,12 @@ function applyAmendmentToProposal(baseProposal, amendment) {
       if (!nodes.has(operation.stableKey)) throw error(ORG_REPLAN_INVALID, `cannot replace unknown node ${operation.stableKey}`, 422);
       const contract = object(operation.contract);
       if (Object.keys(contract).length > 0) nodes.set(operation.stableKey, { ...nodes.get(operation.stableKey), ...contract, stableKey: operation.stableKey });
-    } else if (!nodes.has(operation.stableKey)) {
-      throw error(ORG_REPLAN_INVALID, `cannot retain unknown node ${operation.stableKey}`, 422);
+    } else {
+      if (!nodes.has(operation.stableKey)) throw error(ORG_REPLAN_INVALID, `cannot retain unknown node ${operation.stableKey}`, 422);
+      const contract = object(operation.contract);
+      const displayPatch = {};
+      for (const field of ['domain', 'iconKey']) if (Object.hasOwn(contract, field)) displayPatch[field] = contract[field];
+      if (Object.keys(displayPatch).length) nodes.set(operation.stableKey, { ...nodes.get(operation.stableKey), ...displayPatch });
     }
   }
   for (const key of removed) nodes.delete(key);

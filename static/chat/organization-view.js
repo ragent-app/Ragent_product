@@ -26,44 +26,55 @@
   const NodeRole = Object.freeze({
     EXECUTIVE: "EXECUTIVE",
     MANAGER: "MANAGER",
+    PHASE_LEAD: "PHASE_LEAD",
     WORKER: "WORKER",
+    WRITER: "WRITER",
     REVIEWER: "REVIEWER",
     EXPERT: "EXPERT",
+    UNKNOWN: "UNKNOWN",
 
     fromString(role) {
       const r = String(role || "").toLowerCase();
       if (r === "root" || r === "executive" || r === "lead") return NodeRole.EXECUTIVE;
       if (r === "manager" || r === "lead_worker") return NodeRole.MANAGER;
+      if (r === "phase_lead") return NodeRole.PHASE_LEAD;
+      if (r === "worker") return NodeRole.WORKER;
+      if (r === "writer") return NodeRole.WRITER;
       if (r === "reviewer") return NodeRole.REVIEWER;
-      if (r === "expert" || r === "consultant") return NodeRole.EXPERT;
-      return NodeRole.WORKER;
+      if (r === "expert" || r === "consultant" || r === "specialist") return NodeRole.EXPERT;
+      return NodeRole.UNKNOWN;
     },
   });
 
   const AgentDomain = Object.freeze({
     BACKEND: "BACKEND",
-    ANDROID: "ANDROID",
+    MOBILE: "MOBILE",
+    WEB: "WEB",
     RUNTIME: "RUNTIME",
     SECURITY: "SECURITY",
     TESTING: "TESTING",
     ARCHITECTURE: "ARCHITECTURE",
     DATABASE: "DATABASE",
     RESEARCH: "RESEARCH",
+    DATA: "DATA", AI: "AI", CLOUD: "CLOUD", NETWORK: "NETWORK", HARDWARE: "HARDWARE",
+    DESIGN: "DESIGN", PRODUCT: "PRODUCT", WRITING: "WRITING", TRANSLATION: "TRANSLATION",
+    EDUCATION: "EDUCATION", BUSINESS: "BUSINESS", FINANCE: "FINANCE", LEGAL: "LEGAL",
+    HEALTH: "HEALTH", MARKETING: "MARKETING", SALES: "SALES", PEOPLE: "PEOPLE",
+    OPERATIONS: "OPERATIONS", LOGISTICS: "LOGISTICS", MEDIA: "MEDIA", ENVIRONMENT: "ENVIRONMENT",
+    ENGINEERING: "ENGINEERING",
     GENERAL: "GENERAL",
 
-    infer(displayName, domainHint) {
-      const text = `${domainHint || ""} ${displayName || ""}`.toLowerCase();
-      if (text.includes("android") || text.includes("ui") || text.includes("frontend")) return AgentDomain.ANDROID;
-      if (text.includes("runtime") || text.includes("protocol") || text.includes("stream")) return AgentDomain.RUNTIME;
-      if (text.includes("security") || text.includes("permission") || text.includes("auth")) return AgentDomain.SECURITY;
-      if (text.includes("test") || text.includes("qa") || text.includes("benchmark")) return AgentDomain.TESTING;
-      if (text.includes("arch")) return AgentDomain.ARCHITECTURE;
-      if (text.includes("db") || text.includes("database") || text.includes("sqlite") || text.includes("room")) return AgentDomain.DATABASE;
-      if (text.includes("research") || text.includes("doc")) return AgentDomain.RESEARCH;
-      if (text.includes("backend") || text.includes("server") || text.includes("api")) return AgentDomain.BACKEND;
-      return AgentDomain.GENERAL;
+    fromExplicit(domain, iconKey) {
+      const raw = iconKey == null ? domain : iconKey;
+      let key = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+      if (iconKey != null && (key === "ANDROID" || key === "IOS")) key = "MOBILE";
+      return Object.hasOwn(AgentDomain, key) && typeof AgentDomain[key] === "string" ? AgentDomain[key] : null;
     },
   });
+
+  function escapeDisplayText(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
 
   const NodeRuntimeState = Object.freeze({
     PROVISIONING: "PROVISIONING",
@@ -114,69 +125,23 @@
 
   // --- 2. Minimal Monochrome Domain Glyphs ---
 
+  const domainIcons = Object.freeze({
+    BACKEND:'dns', MOBILE:'smartphone', WEB:'web', RUNTIME:'terminal', ARCHITECTURE:'schema', DATABASE:'database',
+    DATA:'analytics', AI:'auto_awesome', CLOUD:'cloud', NETWORK:'hub', HARDWARE:'memory', SECURITY:'shield',
+    TESTING:'bug_report', DESIGN:'palette', PRODUCT:'category', RESEARCH:'science', WRITING:'edit_note',
+    TRANSLATION:'translate', EDUCATION:'school', BUSINESS:'work', FINANCE:'account_balance', LEGAL:'balance',
+    HEALTH:'medical_services', MARKETING:'campaign', SALES:'storefront', PEOPLE:'groups', OPERATIONS:'settings_suggest',
+    LOGISTICS:'local_shipping', MEDIA:'movie', ENVIRONMENT:'eco', ENGINEERING:'precision_manufacturing', GENERAL:'person',
+  });
+  const roleIcons = Object.freeze({ executive:'explore', manager:'route', phase_lead:'flag', reviewer:'find_in_page',
+    expert:'psychology', specialist:'psychology', worker:'construction', writer:'edit_note' });
   function renderDomainGlyph(role, domain) {
-    if (role === NodeRole.REVIEWER) {
-      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="m5 13 4 4L19 7"/>
-      </svg>`;
-    }
-
-    switch (domain) {
-      case AgentDomain.BACKEND:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="16 18 22 12 16 6"/>
-          <polyline points="8 6 2 12 8 18"/>
-        </svg>`;
-
-      case AgentDomain.ANDROID:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
-          <circle cx="12" cy="18" r="1" fill="currentColor"/>
-        </svg>`;
-
-      case AgentDomain.RUNTIME:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-        </svg>`;
-
-      case AgentDomain.SECURITY:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>`;
-
-      case AgentDomain.TESTING:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M10 2v7.31L4.89 18.5a2 2 0 0 0 1.73 3h10.76a2 2 0 0 0 1.73-3L14 9.31V2"/>
-          <line x1="8.5" y1="2" x2="15.5" y2="2"/>
-          <line x1="7" y1="14" x2="17" y2="14"/>
-        </svg>`;
-
-      case AgentDomain.DATABASE:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <ellipse cx="12" cy="5" rx="9" ry="3"/>
-          <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-          <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-        </svg>`;
-
-      case AgentDomain.ARCHITECTURE:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="7" height="7"/>
-          <rect x="14" y="3" width="7" height="7"/>
-          <rect x="14" y="14" width="7" height="7"/>
-          <rect x="3" y="14" width="7" height="7"/>
-        </svg>`;
-
-      case AgentDomain.RESEARCH:
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-          <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-        </svg>`;
-
-      default:
-        return `<svg viewBox="0 0 24 24" fill="currentColor">
-          <circle cx="12" cy="12" r="3.5"/>
-        </svg>`;
-    }
+    const priority = role.toLowerCase();
+    const roleIcon = Object.hasOwn(roleIcons, priority) ? roleIcons[priority] : null;
+    const roleFirst = ['executive', 'manager', 'phase_lead', 'reviewer'].includes(priority);
+    const icon = (roleFirst && roleIcon) || domainIcons[domain] || roleIcon || domainIcons.GENERAL;
+    // The filename is selected exclusively from the fixed maps above; the mask follows currentColor.
+    return `<span aria-hidden="true" style="display:block;width:100%;height:100%;background:currentColor;mask:url('/chat/role-icons/${icon}.svg') center / contain no-repeat;-webkit-mask:url('/chat/role-icons/${icon}.svg') center / contain no-repeat"></span>`;
   }
 
   // --- 3. Layout Algorithms (Radial Fan + Focus Tree + Edge Routing) ---
@@ -379,7 +344,7 @@
 
         let radius = 16;
         if (node.role === NodeRole.EXECUTIVE) radius = 24;
-        else if (node.role === NodeRole.MANAGER) radius = 20;
+        else if (node.role === NodeRole.MANAGER || node.role === NodeRole.PHASE_LEAD) radius = 20;
         else if (node.role === NodeRole.EXPERT) radius = 18;
 
         const isHiddenInCluster = Object.values(clusterNodes).some((cl) => cl.clusterChildIds.includes(node.id));
@@ -1911,7 +1876,8 @@
       rawNodes.forEach((n) => {
         const id = n.id || n.stableKey;
         const role = NodeRole.fromString(n.nodeRole || n.role || n.sessionClass);
-        const domain = AgentDomain.infer(n.displayName || n.stableKey || id, n.domainHint);
+        const domain = typeof n.domain === "string" ? n.domain : null;
+        const iconDomain = AgentDomain.fromExplicit(n.domain, n.iconKey);
         const hasBlocker = Boolean(n.blocker || n.status === "blocked");
         const runtimeState = NodeRuntimeState.fromString(n.status, n.currentActivity, hasBlocker);
 
@@ -1920,6 +1886,7 @@
           parentId: n.parentNodeId || n.parentId || null,
           role,
           domain,
+          iconDomain,
           displayName: n.displayName || n.stableKey || id,
           phaseId: n.phaseId || null,
           runtimeState,
@@ -2014,7 +1981,7 @@
                 ${nodeModel.role === NodeRole.EXECUTIVE ? '<div class="org-node-inner-ring"></div>' : ""}
                 ${nodeModel.role === NodeRole.REVIEWER && nodeModel.runtimeState === NodeRuntimeState.REVIEWING ? '<div class="org-reviewer-sweep"></div>' : ""}
                 <div class="org-domain-glyph">
-                  ${renderDomainGlyph(nodeModel.role, nodeModel.domain)}
+                  ${renderDomainGlyph(nodeModel.role, nodeModel.iconDomain)}
                 </div>
               </div>
               <div class="org-node-label">${nodeModel.displayName}</div>
@@ -2108,7 +2075,7 @@
       if (!sheet || !backdrop) return;
 
       const role = node.role || NodeRole.fromString(node.nodeRole || node.sessionClass);
-      const domain = node.domain || AgentDomain.infer(node.displayName, node.domainHint);
+      const domain = typeof node.domain === "string" ? node.domain : "";
       const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, Boolean(node.blocker));
       const stateName = String(runtimeState).toLowerCase();
       const statusText = tr(`organization.${stateName === "failed" ? "failedStatus" : stateName}`) || runtimeState;
@@ -2119,7 +2086,7 @@
         <div class="org-sheet-header">
           <div>
             <div class="org-sheet-name">${displayName}</div>
-            <div class="org-sheet-subtitle">${role} · ${domain}</div>
+            <div class="org-sheet-subtitle">${escapeDisplayText(role)}${domain ? ` · ${escapeDisplayText(domain)}` : ""}</div>
           </div>
           <div class="org-status-pill org-status-pill--${stateName}">
             <span class="org-status-pill-dot"></span>
@@ -2220,7 +2187,7 @@
       if (!screen) return;
 
       const role = node.role || NodeRole.fromString(node.nodeRole || node.sessionClass);
-      const domain = node.domain || AgentDomain.infer(node.displayName, node.domainHint);
+      const domain = typeof node.domain === "string" ? node.domain : "";
       const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, Boolean(node.blocker));
       const stateName = String(runtimeState).toLowerCase();
       const statusText = tr(`organization.${stateName === "failed" ? "failedStatus" : stateName}`) || runtimeState;
@@ -2238,7 +2205,7 @@
         <div class="org-detail-content">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <div>
-              <div style="font-size:12px;color:var(--text-secondary);">${role} · ${domain}</div>
+              <div style="font-size:12px;color:var(--text-secondary);">${escapeDisplayText(role)}${domain ? ` · ${escapeDisplayText(domain)}` : ""}</div>
               ${node.sessionId ? `<div style="font-size:11px;font-family:monospace;color:var(--text-tertiary);">Session: ${node.sessionId}</div>` : ""}
             </div>
             <div class="org-status-pill org-status-pill--${stateName}">

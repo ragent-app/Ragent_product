@@ -88,11 +88,19 @@ function normalizeRole(value, label) {
   return role;
 }
 
+function displayMetadata(value, label, maxLength) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || [...value.trim()].length > maxLength) {
+    throw plannerError(PLANNER_ERROR, `${label} must be a string of at most ${maxLength} characters or null`, { reason: 'invalid_display_metadata', field: label });
+  }
+  return value.trim() || null;
+}
+
 function normalizeNode(raw, index) {
   const value = assertPlainObject(raw, `nodes[${index}]`);
   assertNoUnknownKeys(value, new Set([
     'stableKey', 'role', 'agentId', 'capabilities', 'dependsOn', 'phaseId', 'parentKey',
-    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent',
+    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey',
   ]), `nodes[${index}]`);
   const stableKey = text(value.stableKey);
   if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key' });
@@ -114,6 +122,8 @@ function normalizeNode(raw, index) {
     stableKey,
     role,
     agentId,
+    ...(Object.hasOwn(value, 'domain') ? { domain: displayMetadata(value.domain, `nodes[${index}].domain`, 160) } : {}),
+    ...(Object.hasOwn(value, 'iconKey') ? { iconKey: displayMetadata(value.iconKey, `nodes[${index}].iconKey`, 64) } : {}),
     capabilities: list(value.capabilities).map((entry) => entry.toLowerCase()),
     dependsOn: list(value.dependsOn),
     phaseId,
