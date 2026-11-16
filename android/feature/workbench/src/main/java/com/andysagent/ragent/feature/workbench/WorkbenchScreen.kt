@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
@@ -93,6 +94,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -478,6 +480,13 @@ fun WorkbenchScreen(
         return
     }
 
+    val organizationAccount = accountsViewModel?.state?.collectAsState()?.value
+    val organizationOfflineScope = organizationAccount?.takeIf {
+        it.hasVerifiedAccountSession && !verifiedOrganizationTargetId.isNullOrBlank() &&
+            !verifiedOrganizationAccountId.isNullOrBlank() && it.accountId == verifiedOrganizationAccountId &&
+            !it.accountId.isNullOrBlank() && !it.credentialId.isNullOrBlank() && !it.deviceId.isNullOrBlank() &&
+            state.sessionId != null
+    }?.let { org.json.JSONArray(listOf(it.accountId, it.credentialId, it.deviceId, verifiedOrganizationTargetId, state.sessionId)).toString() }
     var organizationOpen by remember(state.sessionId, state.chatTargetId) { mutableStateOf(false) }
     var responsibilitySelection by remember(state.sessionId, state.chatTargetId) { mutableStateOf<String?>(null) }
     BackHandler(enabled = organizationOpen) { organizationOpen = false }
@@ -723,6 +732,8 @@ fun WorkbenchScreen(
                     onChatParityEvent = detailParityEvent,
                     onEvent = stableOnEvent,
                     onOpenOrganization = if (state.chatOpen && state.sessionId != null && organizationTransport != null) ({ organizationOpen = true }) else null,
+                    organizationTransport = organizationTransport,
+                    organizationOfflineScope = organizationOfflineScope,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     backProgress = backProgress,
                     composerActionSheetOpen = composerActionSheetOpen,
@@ -782,6 +793,8 @@ fun WorkbenchScreen(
                         onParityEvent = detailParityEvent,
                         onEvent = stableOnEvent,
                         onOpenOrganization = if (state.chatOpen && state.sessionId != null && organizationTransport != null) ({ organizationOpen = true }) else null,
+                        organizationTransport = organizationTransport,
+                        organizationOfflineScope = organizationOfflineScope,
                         modifier = Modifier.fillMaxSize(),
                         composerActionSheetOpen = composerActionSheetOpen,
                         onSetComposerActionSheetOpen = { composerActionSheetOpen = it },
@@ -994,6 +1007,8 @@ private fun TabletDetailSurface(
     onChatParityEvent: (WebParityEvent) -> Unit,
     onEvent: (WorkbenchEvent) -> Unit,
     onOpenOrganization: (() -> Unit)?,
+    organizationTransport: com.andysagent.ragent.core.network.RagentTransport?,
+    organizationOfflineScope: String?,
     modifier: Modifier,
     backProgress: Float,
     composerActionSheetOpen: Boolean,
@@ -1054,6 +1069,8 @@ private fun TabletDetailSurface(
                 onParityEvent = onChatParityEvent,
                 onEvent = { event -> onEvent(if (event == WorkbenchEvent.Retry) WorkbenchEvent.RetryChat else event) },
                 onOpenOrganization = onOpenOrganization,
+                organizationTransport = organizationTransport,
+                organizationOfflineScope = organizationOfflineScope,
                 modifier = Modifier.fillMaxSize(),
                 composerActionSheetOpen = composerActionSheetOpen,
                 onSetComposerActionSheetOpen = onSetComposerActionSheetOpen,
@@ -1588,6 +1605,8 @@ private fun ChatSurface(
     state: WorkbenchUiState,
     onEvent: (WorkbenchEvent) -> Unit,
     onOpenOrganization: (() -> Unit)? = null,
+    organizationTransport: com.andysagent.ragent.core.network.RagentTransport? = null,
+    organizationOfflineScope: String? = null,
     modifier: Modifier,
     parityState: WebParityUiState = WebParityUiState(),
     onParityEvent: (WebParityEvent) -> Unit = {},
@@ -1614,11 +1633,57 @@ private fun ChatSurface(
     planMode: Boolean = false,
     onSetPlanMode: (Boolean) -> Unit = {},
 ) {
+    var organizationHasCollaborators by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationExpanded by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationRootAnchor by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<Rect?>(null) }
+    var organizationRootVisible by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationRevealRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationRootVisual by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<com.andysagent.ragent.feature.organization.ui.OrganizationRootVisual?>(null) }
+    var organizationFirstCollapse by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationOpeningRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationFormalNode by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<String?>(null) }
+    var organizationTimelineTop by remember { mutableFloatStateOf(0f) }
+    var organizationVisibleHeight by remember { mutableFloatStateOf(0f) }
+    var organizationFromRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationHostBounds by remember { mutableStateOf<Rect?>(null) }
+    val organizationCollapsed = organizationHasCollaborators && !organizationExpanded
+    val organizationFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    LaunchedEffect(organizationCollapsed) {
+        if (organizationCollapsed) organizationFocusManager.clearFocus()
+    }
+    val (formalActions, nativeRecords, nativeNodes) = rememberCollaborationActions(organizationTransport, state.sessionId,
+        state.chatTargetId ?: state.activeRemoteTargetId, organizationOfflineScope, state.chatOpen)
+    val collaborationActions = remember(formalActions, nativeRecords) {
+        formalActions + nativeRecords.map { record ->
+            val event = record.event
+            CollaborationActionPresentation("collaboration:native:${record.runId}:${event.id}", event.timestamp,
+                "native.${event.kind}", details = event.details, status = event.state,
+                nodeId = "${record.runId}\u0000${event.delegationId}", native = true)
+        }
+    }
+    var organizationOpenNode by remember(state.sessionId, state.chatTargetId, organizationOfflineScope) { mutableStateOf<Pair<String, String>?>(null) }
+    val collaborationLabels = mapOf(
+        "node.created" to stringResource(R.string.collaboration_node_created),
+        "task.dispatch_requested" to stringResource(R.string.collaboration_dispatch_requested),
+        "task.delegated" to stringResource(R.string.collaboration_task_delegated),
+        "result.available" to stringResource(R.string.collaboration_result_available),
+        "organization.cancel_requested" to stringResource(R.string.collaboration_cancel_requested),
+        "native.spawned" to stringResource(R.string.collaboration_native_spawned),
+        "native.running" to stringResource(R.string.collaboration_native_running),
+        "native.waiting" to stringResource(R.string.collaboration_native_waiting),
+        "native.completed" to stringResource(R.string.collaboration_native_completed),
+        "native.failed" to stringResource(R.string.collaboration_native_failed),
+        "native.cancelled" to stringResource(R.string.collaboration_native_cancelled),
+        "native.interrupted" to stringResource(R.string.collaboration_native_interrupted),
+        "native.lost" to stringResource(R.string.collaboration_native_lost),
+        "native.recovered" to stringResource(R.string.collaboration_native_recovered),
+        "native.snapshot" to stringResource(R.string.collaboration_native_snapshot),
+    )
     val turnGroupProjector = remember(state.sessionId) { TurnGroupProjector() }
-    val turnGroups = remember(state.timelineItems, state.pendingTurn, state.acceptedTurns, state.runStatus, state.runMetrics) {
+    val turnGroups = remember(state.timelineItems, collaborationActions, collaborationLabels, state.pendingTurn, state.acceptedTurns, state.runStatus, state.runMetrics) {
         val terminal = latestTurnHasTerminalRun(state.timelineItems, state.pendingTurn, state.runStatus, state.runMetrics)
         val items = com.andysagent.ragent.core.timeline.settleLatestTurnMessages(state.timelineItems, terminal)
-        turnGroupProjector.project(items, state.pendingTurn, state.acceptedTurns)
+        turnGroupProjector.project(mergeCollaborationActions(items, collaborationActions, collaborationLabels), state.pendingTurn, state.acceptedTurns)
     }
     val lastAgentEntryIndex = remember(turnGroups) {
         turnGroups.indexOfLast { it.finalAnswer?.completed == true }
@@ -1724,6 +1789,11 @@ private fun ChatSurface(
     val timelineContentItemCount = turnGroups.size + (if (activeDecision != null) 1 else 0) +
         (if (turnGroups.isEmpty() && state.timelineItems.isEmpty() && state.error == null) 1 else 0)
     val latestContentItemCount = rememberUpdatedState(timelineContentItemCount)
+    LaunchedEffect(organizationCollapsed, state.sessionId) {
+        if (organizationCollapsed && timelineContentItemCount > 0) {
+            listState.scrollToItem(timelineContentItemCount - 1)
+        }
+    }
     val latestSessionId = rememberUpdatedState(state.sessionId)
     val latestChatOpen = rememberUpdatedState(state.chatOpen)
     val latestHistoryLoading = rememberUpdatedState(state.historyLoading)
@@ -2113,8 +2183,9 @@ private fun ChatSurface(
     }
     var taskSettingsOpen by rememberSaveable { mutableStateOf(false) }
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
-    val conversationPadding = remember(dockGeometry, density, topControlsHeight) {
-        dockGeometry.padding(density, top = topControlsHeight + 8.dp, extraBottom = 16.dp)
+    val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
+        if (organizationCollapsed) androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
+        else dockGeometry.padding(density, top = if (organizationHasCollaborators) 8.dp else topControlsHeight + 8.dp, extraBottom = 16.dp)
     }
     val jumpPadding = remember(dockGeometry, density) {
         dockGeometry.padding(density, extraBottom = 12.dp)
@@ -2161,6 +2232,11 @@ private fun ChatSurface(
     }
 
     val imeInsets = WindowInsets.ime
+    val organizationImeVisible = imeInsets.getBottom(density) > 0
+    BackHandler(enabled = organizationHasCollaborators && organizationExpanded && !organizationImeVisible) {
+        if (organizationFromRoot && !organizationRootVisible) organizationRevealRoot = true
+        else organizationExpanded = false
+    }
     // The dock is excluded from the list viewport below. Retain only a small
     // in-list breathing space so its own inset is not counted twice.
     val targetBottomPadding = 24.dp
@@ -2806,13 +2882,18 @@ private fun ChatSurface(
             modifier = modifier
                 .fillMaxSize()
                 .background(
-                    brush = if (colors.canvas.red < 0.5f) {
+                    brush = if (organizationHasCollaborators) {
+                        Brush.verticalGradient(listOf(colors.canvas, colors.canvas))
+                    } else if (colors.canvas.red < 0.5f) {
                         com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
                     } else {
                         com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight
                     },
                 )
-                .onGloballyPositioned { chatCoordinates = it }
+                .onGloballyPositioned {
+                    chatCoordinates = it
+                    organizationHostBounds = it.boundsInRoot()
+                }
                 .pointerInput(
                     composerExpanded,
                     composerFullscreenActive,
@@ -2861,25 +2942,93 @@ private fun ChatSurface(
                     }
                 },
     ) {
+        if (organizationTransport != null && state.sessionId != null) {
+            com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
+                transport = organizationTransport,
+                sessionId = state.sessionId,
+                targetId = state.chatTargetId ?: state.activeRemoteTargetId,
+                offlineScope = organizationOfflineScope,
+                modifier = Modifier.fillMaxSize().padding(top = topControlsHeight + 8.dp, bottom = 176.dp),
+                onRootClick = { anchor ->
+                    organizationRootAnchor = anchor
+                    organizationFromRoot = true
+                    organizationOpeningRoot = true
+                    scope.launch { withFrameNanos { }; organizationExpanded = true; organizationOpeningRoot = false }
+                },
+                onRootAnchorChanged = {
+                    organizationRootVisible = it != null
+                    if (it != null) {
+                        organizationRootAnchor = it
+                        if (organizationRevealRoot) {
+                            organizationRevealRoot = false
+                            organizationExpanded = false
+                        }
+                    }
+                },
+                revealRoot = organizationRevealRoot,
+                rootHidden = organizationFromRoot,
+                openNodeId = organizationFormalNode,
+                onOpenNodeConsumed = { organizationFormalNode = null },
+                onRootVisualChanged = { organizationRootVisual = it },
+                records = nativeNodes,
+                programmaticOpen = organizationOpenNode,
+                onProgrammaticOpenConsumed = { organizationOpenNode = null },
+                onHasCollaboratorsChanged = { hasCollaborators ->
+                    if (hasCollaborators && !organizationHasCollaborators) organizationFirstCollapse = true
+                    organizationHasCollaborators = hasCollaborators
+                    if (!hasCollaborators) { organizationExpanded = false; organizationFirstCollapse = false }
+                },
+            )
+        }
+        val hostBounds = organizationHostBounds
+        val cardInset = with(density) { 12.dp.toPx() }
+        val cardHeight = with(density) { 176.dp.toPx() }
+        val cardTopInset = with(density) { (topControlsHeight + 8.dp).toPx() }
+        val bottomCard = hostBounds?.let { Rect(it.left + cardInset, (it.bottom - cardHeight).coerceAtLeast(it.top), it.right - cardInset, it.bottom) }
+        val expandedCard = hostBounds?.let { Rect(it.left + cardInset, (it.top + cardTopInset).coerceAtMost(it.bottom), it.right - cardInset, it.bottom) }
+        val normalCard = hostBounds ?: Rect.Zero
+        val sourceCard = if (organizationFromRoot) organizationRootAnchor ?: bottomCard else bottomCard
+        com.andysagent.ragent.feature.organization.ui.OrganizationRootShell(
+            expanded = !organizationHasCollaborators || organizationExpanded,
+            origin = if (organizationHasCollaborators) sourceCard ?: normalCard else normalCard,
+            target = if (organizationHasCollaborators && !organizationFirstCollapse) expandedCard ?: normalCard else normalCard,
+            sourceIsCircle = organizationHasCollaborators && organizationFromRoot && organizationRootAnchor != null,
+            sourceVisual = organizationRootVisual,
+            onVisibleSizeChanged = { _, height -> organizationVisibleHeight = height },
+            onSettled = { expanded ->
+                if (!expanded && organizationFirstCollapse) organizationFirstCollapse = false
+                if (!expanded && organizationFromRoot && !organizationOpeningRoot) organizationFromRoot = false
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) { shellProgress ->
+        Box(Modifier.fillMaxSize()) {
         // Record the complete live chat frame before temporary controls are
         // composed. Sheets remain siblings of this box, which prevents their
         // own pixels or dim scrim from feeding back into the sampled layer.
         ChatReadingDockLayout(
             geometry = dockGeometry,
             retainReadingGeometry = composerFullscreenActive,
-            dock = dockContent,
+            dock = { measurement ->
+                val alpha = if (!organizationHasCollaborators) 1f else ((shellProgress - .88f) / .12f).coerceIn(0f, 1f)
+                dockContent(measurement
+                    .clipToBounds()
+                    .layout { measurable, constraints ->
+                        val child = measurable.measure(constraints)
+                        val visibleHeight = (child.height * alpha).roundToInt().coerceAtLeast(0)
+                        layout(child.width, visibleHeight) { child.placeRelative(0, visibleHeight - child.height) }
+                    }
+                    .graphicsLayer { this.alpha = alpha }
+                    .then(if (organizationCollapsed) Modifier.clearAndSetSemantics { } else Modifier))
+            },
             modifier = Modifier
                 .fillMaxSize()
                 .drawWithContent {
                     recordToLayer(chatModalBackdrop)
                 }
-                .background(
-                    brush = if (colors.canvas.red < 0.5f) {
-                        com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
-                    } else {
-                        com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight
-                    },
-                ),
+                 .then(if (organizationHasCollaborators) Modifier else Modifier.background(
+                    brush = if (colors.canvas.red < 0.5f) com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
+                    else com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight,
+                )),
         ) {
         // Layer 1: Conversation Canvas with Edge-to-Edge Frosted Backdrop
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
@@ -2909,19 +3058,30 @@ private fun ChatSurface(
                         presentationAlpha = if (readingPreparing) 0f else
                             chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress),
                     )
-                    .background(
-                        brush = if (colors.canvas.red < 0.5f) {
-                            com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
-                        } else {
-                            com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight
-                        },
-                    ),
+                    .then(if (organizationHasCollaborators) Modifier else Modifier.background(
+                        brush = if (colors.canvas.red < 0.5f) com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasDark
+                        else com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens.AtmosphericCanvasLight,
+                    )),
             ) {
                 Column(Modifier.fillMaxSize()) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier
                             .testTag("chat-timeline")
+                            .onGloballyPositioned { organizationTimelineTop = it.positionInRoot().y }
+                            .graphicsLayer { alpha = if (organizationFromRoot) ((shellProgress - .75f) / .25f).coerceIn(0f, 1f) else 1f }
+                            .then(if (organizationHasCollaborators) Modifier
+                                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                                .drawWithContent {
+                                    drawContent()
+                                    drawRect(
+                                        brush = Brush.verticalGradient(
+                                            (((bottomCard?.bottom ?: 0f) - organizationVisibleHeight - organizationTimelineTop).coerceAtLeast(0f) / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f) to Color.Black.copy(alpha = shellProgress),
+                                            (((bottomCard?.bottom ?: 0f) - organizationVisibleHeight - organizationTimelineTop + with(density) { 24.dp.toPx() }).coerceAtLeast(0f) / size.height.coerceAtLeast(1f)).coerceIn(0f, 1f) to Color.Black,
+                                        ),
+                                        blendMode = androidx.compose.ui.graphics.BlendMode.DstIn,
+                                    )
+                                } else Modifier)
                             .nestedScroll(jumpGestureConnection)
                             .weight(1f)
                             .widthIn(max = RagentSizes.ContentMaxWidth)
@@ -2950,6 +3110,19 @@ private fun ChatSurface(
                     val rowContent: @Composable () -> Unit = {
                         TurnTimelineView(
                             turn = turn,
+                            collaborationActions = collaborationActions.associateBy { it.id },
+                            onOpenCollaborator = { action ->
+                                if (action.native) {
+                                    val parts = action.nodeId?.split('\u0000', limit = 2)
+                                    if (parts?.size == 2) {
+                                        organizationExpanded = false
+                                        organizationOpenNode = parts[0] to parts[1]
+                                    }
+                                } else if (action.nodeId != null) {
+                                    organizationExpanded = false
+                                    organizationFormalNode = action.nodeId
+                                }
+                            },
                             isLastTurn = isLastTurn,
                             onBranch = if (canMessageAction) {
                                 { anchorSeq, mode ->
@@ -3120,6 +3293,29 @@ private fun ChatSurface(
             }
         }
 
+        if (organizationCollapsed) {
+            Box(
+                modifier = Modifier.fillMaxSize().clickable {
+                    organizationFromRoot = false
+                    organizationExpanded = true
+                },
+            )
+            val currentActionLabel = state.currentAction?.let(::presentRunAction)
+                ?: nativeNodes.asSequence().filter { it.state in setOf("spawned", "running", "waiting") }
+                    .maxByOrNull { it.updatedAt ?: it.startedAt ?: 0L }?.currentAction
+            currentActionLabel?.let { action ->
+                Text(
+                    text = action,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 8.dp),
+                    color = colors.secondaryContent,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+            }
+        }
+        }
+        }
+
         // Layer 1.5: Pure Gradient Blur Masks (ChatGPT app style)
         val measuredDockHeight = with(density) { dockGeometry.visualHeightPx.toDp() }
         val fallbackDockHeight = with(density) { readingNavigationInsets.getBottom(density).toDp() } +
@@ -3128,6 +3324,7 @@ private fun ChatSurface(
         val maskPresentationAlpha = if (readingPreparing) 0f else
             chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress)
 
+        if (!organizationHasCollaborators) {
         ChatTopGradientMask(
             topControlsHeight = topControlsHeight,
             canvasColor = colors.canvas,
@@ -3150,7 +3347,8 @@ private fun ChatSurface(
                 .zIndex(1.8f),
         )
 
-        if (readingPreparing || chatPreparingAlpha(readingReveal) > 0f) {
+        }
+        if (!organizationCollapsed && (readingPreparing || chatPreparingAlpha(readingReveal) > 0f)) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3312,7 +3510,7 @@ private fun ChatSurface(
         // This transient control deliberately sits outside the measured dock:
         // it may float while reading, but never changes the transcript's safe
         // viewport or competes with the composer for vertical space.
-        Box(
+        if (!organizationCollapsed) Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
@@ -3367,10 +3565,10 @@ private fun ChatSurface(
         ) {
             if (onOpenOrganization != null && state.sessionId != null) {
                 AgentoDropdownMenuItem(
-                    text = stringResource(R.string.workbench_session_team),
+                    text = stringResource(R.string.collaboration_settings),
                     onClick = {
                         onEvent(WorkbenchEvent.CloseSessionMenu)
-                        onOpenOrganization()
+                        taskSettingsOpen = true
                     },
                     leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null) },
                 )
