@@ -69,7 +69,7 @@ fun OrganizationRootShell(
             .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).background(color)) {
             Layout(content = { content(p) }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
-                layout(constraints.maxWidth, constraints.maxHeight) { child.place(0, 0) }
+                layout(constraints.maxWidth, constraints.maxHeight) { child.place(0, constraints.maxHeight - child.height) }
             }
         }
     }
