@@ -9,11 +9,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.absoluteOffset
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +44,7 @@ import com.andysagent.ragent.core.designsystem.motionPolicy
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-data class OrganizationRootVisual(val icon: Int, val colors: List<Color>, val radiusDp: Float)
+data class OrganizationRootVisual(val icon: Int, val colors: List<Color>, val radiusDp: Float, val runtimeState: NodeRuntimeState)
 
 /** A single, fixed-layout chat surface revealed inside a reversible moving shell.
  * Rectangles are physical pixel coordinates in the Compose root. The caller keeps
@@ -54,6 +59,8 @@ fun OrganizationRootShell(
     modifier: Modifier = Modifier,
     surfaceColor: Color = Color.Unspecified,
     sourceVisual: OrganizationRootVisual? = null,
+    onVisibleSizeChanged: (width: Float, height: Float) -> Unit = { _, _ -> },
+    onSettled: (expanded: Boolean) -> Unit = {},
     content: @Composable (progress: Float) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -65,34 +72,62 @@ fun OrganizationRootShell(
         MotionPreference.None -> tween(0)
     }, label = "root-conversation-shell")
     val p = animated.coerceIn(0f, 1f)
+    androidx.compose.runtime.LaunchedEffect(expanded, p) {
+        if ((expanded && p >= .999f) || (!expanded && p <= .001f)) onSettled(expanded)
+    }
     var rootOrigin by remember { mutableStateOf<Offset?>(null) }
     val width = (origin.width + (target.width - origin.width) * p).coerceAtLeast(1f)
     val height = (origin.height + (target.height - origin.height) * p.pow(1.15f)).coerceAtLeast(1f)
+    androidx.compose.runtime.SideEffect { onVisibleSizeChanged(width, height) }
     val center = origin.center + (target.center - origin.center) * p - (rootOrigin ?: Offset.Zero)
     val corner = if (sourceIsCircle) minOf(width, height) / 2f +
         (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
     val color = if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor.copy(alpha = 1f)
     Box(modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.localToRoot(Offset.Zero) }) {
-        if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) Box(Modifier.align(AbsoluteAlignment.TopLeft)
+        Box(Modifier.align(AbsoluteAlignment.TopLeft)
+            .graphicsLayer { alpha = if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) 1f else 0f }
             .absoluteOffset { IntOffset((center.x - width / 2f).roundToInt(), (center.y - height / 2f).roundToInt()) }
             .size(with(density) { width.toDp() }, with(density) { height.toDp() })
-            .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).background(
-                if (sourceIsCircle && sourceVisual != null && sourceVisual.colors.size >= 3) Brush.linearGradient(sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) })
-                else Brush.linearGradient(listOf(color, color)))) {
+            .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).drawWithCache {
+                val palette = if (sourceIsCircle && sourceVisual != null && sourceVisual.colors.size >= 3)
+                    sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) } else listOf(color, color, color)
+                val brush = Brush.linearGradient(0f to palette[0], .55f to palette[1], 1f to palette[2],
+                    start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
+                onDrawBehind { drawRect(brush) }
+            }) {
             Layout(content = { content(p) }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
                 layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, constraints.maxHeight - child.height) }
             }
             if (sourceIsCircle && sourceVisual != null) {
                 val glyphMotion = smoothRoot(p, .15f, .90f)
-                val glyphSize = nodeIconSize(sourceVisual.radiusDp).dp * (1f - glyphMotion) + 20.dp * glyphMotion
+                val scale = origin.width / 2f / with(density) { sourceVisual.radiusDp.dp.toPx().coerceAtLeast(1f) }
+                val glyphSize = nodeIconSize(sourceVisual.radiusDp).dp * scale * (1f - glyphMotion) + 20.dp * glyphMotion
                 val glyphTargetX = if (layoutDirection == LayoutDirection.Ltr) with(density) { 32.dp.toPx() } else width - with(density) { 32.dp.toPx() }
                 val x = width / 2f + (glyphTargetX - width / 2f) * glyphMotion
                 val y = height / 2f + (with(density) { 32.dp.toPx() } - height / 2f) * glyphMotion
                 Icon(painterResource(sourceVisual.icon), contentDescription = null, tint = color,
                     modifier = Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset {
                         IntOffset((x - glyphSize.toPx() / 2f).roundToInt(), (y - glyphSize.toPx() / 2f).roundToInt())
-                    }.size(glyphSize))
+                    }.size(glyphSize).graphicsLayer { alpha = 1f - smoothRoot(p, .55f, .85f) })
+                if (sourceVisual.runtimeState != NodeRuntimeState.IDLE) {
+                    val dotSize = 11.dp * scale
+                    val dotCenter = width / 2f + origin.width / 2f * .70710678f
+                    val dotY = height / 2f + origin.height / 2f * .70710678f
+                    val colors = LocalRagentColors.current
+                    val dotColor = when (sourceVisual.runtimeState) {
+                        NodeRuntimeState.WORKING, NodeRuntimeState.REVIEWING -> colors.running
+                        NodeRuntimeState.BLOCKED, NodeRuntimeState.FAILED -> colors.error
+                        NodeRuntimeState.DONE -> colors.success
+                        else -> colors.secondaryContent
+                    }
+                    Box(Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset {
+                        IntOffset((dotCenter - dotSize.toPx() / 2f).roundToInt(), (dotY - dotSize.toPx() / 2f).roundToInt())
+                    }.size(dotSize).graphicsLayer { alpha = 1f - smoothRoot(p, 0f, .18f) }.clip(CircleShape).background(color),
+                        contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxSize(7f / 11f).clip(CircleShape).background(dotColor))
+                    }
+                }
             }
         }
     }

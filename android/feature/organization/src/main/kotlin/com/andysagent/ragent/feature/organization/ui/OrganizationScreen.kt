@@ -48,6 +48,9 @@ fun OrganizationScreen(
     embedded: Boolean = false,
     revealRoot: Boolean = false,
     onRootVisualChanged: (OrganizationRootVisual) -> Unit = {},
+    rootHidden: Boolean = false,
+    openNodeId: String? = null,
+    onOpenNodeConsumed: () -> Unit = {},
 ) {
     val uiState by viewModel.uiState.collectAsState()
     OrganizationScreenContent(
@@ -59,7 +62,7 @@ fun OrganizationScreen(
         onApproveBlocker = viewModel::onApproveBlocker, onRejectBlocker = viewModel::onRejectBlocker,
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
         onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels,
-        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged,
+        onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged, rootHidden = rootHidden, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed,
     )
 }
 
@@ -93,13 +96,16 @@ fun OrganizationScreenContent(
     embedded: Boolean = false,
     revealRoot: Boolean = false,
     onRootVisualChanged: (OrganizationRootVisual) -> Unit = {},
+    rootHidden: Boolean = false,
+    openNodeId: String? = null,
+    onOpenNodeConsumed: () -> Unit = {},
 ) {
     val colors = LocalRagentColors.current
     val rootVisualNode = uiState.nodes.firstOrNull { it.id == embeddedRootId }
     if (embedded && rootVisualNode != null) {
         val visual = nodeVisual(rootVisualNode)
         val palette = nodeAccent(visual, colors.canvas.luminance() < .5f)
-        SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.radiusDp)) }
+        SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.radiusDp, rootVisualNode.runtimeState)) }
     }
     if (uiState.activeDetailNode != null) {
         AgentDetailScreen(node = uiState.activeDetailNode, onBack = onCloseDetail)
@@ -116,6 +122,14 @@ fun OrganizationScreenContent(
     val currentCluster = selectedId?.let { id -> uiState.nodes.firstOrNull { it.isCluster && id in it.clusterChildIds } }
     val anchorId = currentNode?.id ?: currentCluster?.id
     val anchor = anchorId?.let { anchors[it] }
+    LaunchedEffect(openNodeId, uiState.nodes, anchors, selectedId) {
+        val requested = openNodeId ?: return@LaunchedEffect
+        val node = uiState.nodes.firstOrNull { it.id == requested }
+        if (node != null && anchors[requested] != null && selectedId == null && requested != embeddedRootId) {
+            selectedId = requested; selectedNode = node; deleted = false; expanded = true
+            onOpenNodeConsumed()
+        }
+    }
     LaunchedEffect(uiState.nodes, selectedId) {
         if (selectedId != null) {
             if (currentNode != null) selectedNode = currentNode
@@ -165,7 +179,7 @@ fun OrganizationScreenContent(
                             selectedId = id; selectedNode = node; deleted = false; expanded = true
                         }
                     }, onNodeDoubleTap, onSizeChanged, modifier = Modifier.fillMaxWidth().height(graphHeight).clip(AgentoShapes.SurfaceLargeShape),
-                        hiddenNodeId = anchorId, onAnchorsChanged = { latest, bounds ->
+                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAnchorsChanged = { latest, bounds ->
                             if (anchors != latest) anchors = latest
                             if (embedded) {
                                 val root = latest[embeddedRootId]

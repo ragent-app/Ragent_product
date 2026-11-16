@@ -118,3 +118,8 @@
 根圆和底卡共享根会话，但记录各自来源并返回对应实时位置。节点圆入口使用节点渐变向实底变化、圆角变为 22dp、单 glyph 运动；正文在 progress 的 .75–1、输入框在 .88–1 平滑显露。底卡入口保留消息连接，不清空或重播。内容以最终宽度排版并裁切显露，不缩放文字。Full 弹簧 stiffness 220、dampingRatio 1、threshold .002；Reduced 160ms FastOutSlowIn；None 立即。进度限定 0–1，位置和宽度按进度、高度按进度的 1.15 次方变化。几何使用 Compose root 物理像素，关闭期间跟踪来源；RTL 使用物理坐标定位，文字仍按逻辑方向排版。
 
 实现接口：`ConnectedOrganizationGraph` 提供根节点点击矩形、持续可见锚点和真实关联成员状态；不可见锚点为 null。`OrganizationRootShell` 接收实测来源、目标、来源类型与唯一内容 slot，提供连续进度，宿主负责消息遮罩、输入框、来源状态和可见性恢复。首次渲染 expanded=true，真实成员出现后向底卡折叠；关闭未完成前固定来源类型。子会话保留已有鉴权和只读内容。高级设置继续使用现有真实参数。
+
+
+### 真实委派与宿主接口
+
+宿主订阅授权的 native delegation 快照并传给 `ConnectedOrganizationGraph(records)`；正式组织存在时将真实委派作为只读展示节点合并，不存在时仍显示委派树。节点依据 runId、delegationId 和 parentDelegationId 建立层次；没有可靠姓名或角色时使用通用成员编号。没有可验证的成员会话读取绑定时明确显示不可用，不推测会话。正式节点与 native 节点分别使用 `openNodeId` 和 `programmaticOpen` 打开。根图视觉、圆入口隐藏和恢复由 `onRootVisualChanged`、`rootHidden`、`revealRoot` 协调；壳提供可视尺寸和到达端点回调，消息遮罩应用在消息层。高级设置复用聊天已有的真实任务设置组件；工作项预算只在具体合同上下文中提供。

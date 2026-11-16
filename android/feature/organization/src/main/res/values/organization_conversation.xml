@@ -13,4 +13,7 @@
     <string name="org_conversation_latest">Back to latest</string>
     <string name="org_conversation_error_retained">Couldn’t refresh · showing previously verified messages</string>
     <string name="org_conversation_offline_empty">Connection interrupted · no messages available</string>
+    <string name="organization_native_root">Root conversation</string>
+    <string name="organization_native_member">Member</string>
+    <string name="organization_native_conversation_unavailable">This member’s conversation is not available.</string>
 </resources>

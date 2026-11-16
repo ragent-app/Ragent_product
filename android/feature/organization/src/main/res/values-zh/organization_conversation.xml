@@ -13,4 +13,7 @@
     <string name="org_conversation_latest">回到最新</string>
     <string name="org_conversation_error_retained">刷新失败，显示之前核实的消息</string>
     <string name="org_conversation_offline_empty">连接已中断，暂无可显示的消息</string>
+    <string name="organization_native_root">根会话</string>
+    <string name="organization_native_member">成员</string>
+    <string name="organization_native_conversation_unavailable">此成员的会话不可用。</string>
 </resources>

@@ -56,13 +56,15 @@ import java.security.MessageDigest
 import com.andysagent.ragent.feature.organization.data.RealOrganizationApi
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
+import com.andysagent.ragent.feature.organization.data.NativeDelegationDto
+import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 @Composable
-fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
+fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
@@ -94,6 +96,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     var rootSessionId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
     var workOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(selectedResponsibilityId != null) }
     var messagesOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    var baseProjection by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<OrganizationProjectionDto?>(null) }
     var nodes by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<List<OrganizationNodeDto>>(emptyList()) }
     LaunchedEffect(scopeKey, cacheInvalidations) {
         val generation = projectionGeneration
@@ -187,7 +190,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     val stillCurrent = offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration))
                     if (!stillCurrent) status = "Organization access changed. Refresh to check current authorization."
                     else if (projection == null) status = "No organization is available for this session."
-                    else { organizationViewModel.applyProjection(projection); organizationId = projection.organizationId; rootSessionId = projection.rootSessionId; nodes = projection.nodes; projectionGeneration = requestGeneration; loaded = true }
+                    else { baseProjection = projection; organizationId = projection.organizationId; rootSessionId = projection.rootSessionId; nodes = projection.nodes; projectionGeneration = requestGeneration; loaded = true }
                 },
                 onFailure = { status = "Organization unavailable: ${it.message ?: "request failed"}" },
             )
@@ -250,20 +253,27 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
             if (!cache.isCurrent(scope, generation)) return@LaunchedEffect
             if (projection != null && projection.organizationId == id) {
-                organizationViewModel.applyProjection(projection)
+                baseProjection = projection
                 nodes = projection.nodes
             }
         }
     }
     val rootNodeId = nodes.filter { it.parentId == null }.singleOrNull()?.id
+    val nativeMemberName = stringResource(R.string.organization_native_member)
+    LaunchedEffect(baseProjection, records, rootNodeId, nativeMemberName) {
+        val projection = baseProjection ?: return@LaunchedEffect
+        val root = rootNodeId ?: return@LaunchedEffect
+        val nativeNodes = nativeDisplayNodes(records, root, nativeMemberName)
+        organizationViewModel.applyProjection(projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes)))
+    }
     LaunchedEffect(embedded, loaded, status, connection, lifecycleState) {
         if (embedded && !loaded && status != "Loading organization…" && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED) {
             delay(3_000)
             refresh++
         }
     }
-    LaunchedEffect(nodes, rootNodeId, loaded) {
-        onHasCollaboratorsChanged(loaded && rootNodeId != null && nodes.any { it.id != rootNodeId && !it.sessionId.isNullOrBlank() })
+    LaunchedEffect(nodes, rootNodeId, loaded, records) {
+        onHasCollaboratorsChanged(records.isNotEmpty() || (loaded && rootNodeId != null && nodes.any { it.id != rootNodeId && !it.sessionId.isNullOrBlank() }))
     }
     CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
     Box(modifier.fillMaxSize()) {
@@ -292,7 +302,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
                     onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true },
                     conversationContent = { nodeId, contentModifier ->
-                        if (ownerVerified &&
+                        if (nodeId.startsWith("native:")) {
+                            Text(stringResource(R.string.organization_native_conversation_unavailable), contentModifier.padding(20.dp))
+                        } else if (ownerVerified &&
                             ownerGeneration != null && ownerGeneration == projectionGeneration && organizationId != null) {
                             val requestGeneration = ownerGeneration
                             val requestOrganization = organizationId
@@ -318,8 +330,11 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                             Text(stringResource(R.string.organization_conversation_unavailable), contentModifier.padding(20.dp), color = LocalRagentColors.current.secondaryContent)
                         }
                     }, conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second },
-                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged)
+                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = programmaticOpen?.let { nativeNodeId(it.first, it.second) } ?: openNodeId, onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() })
             }
+        }
+        else if (embedded && records.isNotEmpty()) {
+            NativeOrganizationGraph(transport, sessionId, records, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed)
         }
         else if (!embedded) {
             val colors = LocalRagentColors.current
@@ -357,9 +372,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
 fun ConnectedOrganizationGraph(
     transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null,
     modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit,
-    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit,
+    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit,
 ) {
     ConnectedOrganizationScreen(transport, sessionId, targetId, offlineScope, onBack = {}, embedded = true,
-        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged,
+        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed,
         onHasCollaboratorsChanged = onHasCollaboratorsChanged)
 }
