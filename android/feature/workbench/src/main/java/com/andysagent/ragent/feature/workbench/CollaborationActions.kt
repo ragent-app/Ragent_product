@@ -150,7 +150,7 @@ internal fun mergeCollaborationActions(items: List<TimelineItem>, actions: List<
     val merged = items.toMutableList()
     actions.sortedBy { it.timestamp }.forEach { action ->
         val label = labels[action.kind] ?: return@forEach
-        val index = merged.indexOfFirst { it is TimelineItem.Message && it.timestamp != null && it.timestamp > action.timestamp }
+        val index = merged.indexOfFirst { it is TimelineItem.Message && (it.timestamp?.let { timestamp -> timestamp > action.timestamp } == true) }
             .let { if (it < 0) merged.size else it }
         val seq = merged.getOrNull(index - 1)?.seq ?: merged.getOrNull(index)?.seq ?: 0L
         merged.add(index, TimelineItem.Notice(id = action.id, seq = seq, text = label))

@@ -3371,7 +3371,7 @@ private fun ChatSurface(
             val latestCollaborationAction = collaborationActions.asSequence()
                 .filter { it.kind in collaborationLabels }
                 .maxByOrNull { it.timestamp }
-            val currentActionLabel = currentNativeAction ?: state.currentAction?.let(::presentRunAction)
+            val currentActionLabel = currentNativeAction ?: state.currentAction?.let { presentRunAction(it) }
                 ?: latestCollaborationAction?.let { action ->
                     listOfNotNull(collaborationLabels[action.kind], action.displayName?.takeIf { it.isNotBlank() })
                         .joinToString(" · ")
