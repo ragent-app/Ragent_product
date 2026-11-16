@@ -24,8 +24,8 @@ fun OrganizationCanvas(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRagentColors.current
-    val strokeColor = colors.secondaryContent.copy(alpha = 0.25f)
-    val reviewStrokeColor = colors.waiting.copy(alpha = 0.40f)
+    val strokeColor = colors.secondaryContent.copy(alpha = 0.22f)
+    val reviewStrokeColor = colors.secondaryContent.copy(alpha = 0.28f)
 
     // Using drawWithCache to avoid allocating Path objects every frame for static paths
     Canvas(
@@ -67,9 +67,9 @@ fun OrganizationCanvas(
                             path = path,
                             color = color,
                             style = Stroke(
-                                width = if (isReview) 1.25.dp.toPx() else 1.5.dp.toPx(),
+                                width = 1.25.dp.toPx(),
                                 cap = StrokeCap.Round,
-                                pathEffect = if (isReview) PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f) else null,
+                                pathEffect = if (isReview) PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 5.dp.toPx()), 0f) else null,
                             ),
                         )
                     }

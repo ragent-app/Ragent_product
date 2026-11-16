@@ -2,6 +2,12 @@ package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
@@ -18,6 +24,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -32,13 +42,16 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.time.Instant
 import java.security.MessageDigest
 import com.andysagent.ragent.feature.organization.data.RealOrganizationApi
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.designsystem.AgentoIconButton
+import com.andysagent.ragent.core.designsystem.AgentoWebIcon
+import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
+import com.andysagent.ragent.feature.organization.R
 
 @Composable
 fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit) {
@@ -205,29 +218,14 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     Column(Modifier.fillMaxSize().background(LocalRagentColors.current.canvas).then(
         if (demoOpen) Modifier.clearAndSetSemantics {} else Modifier,
     )) {
-        if (!(loaded && workOpen && connection == RuntimeConnectionState.Connected && cachedAt == null && organizationId != null)) {
-            TextButton(onClick = onBack) { Text("Back") }
-        }
-        if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0 && !workOpen && !messagesOpen) {
-            TextButton(onClick = { demoOpen = true }) { Text("查看演示组织图") }
-        }
-        if (cacheClearFailed) Text("Offline data could not be removed. Offline snapshots are disabled for this app session.")
-        if (cachedAt != null && connection != RuntimeConnectionState.AuthenticationRequired) Text("Offline snapshot from ${Instant.ofEpochMilli(cachedAt!!)}. Read-only; reconnect to refresh.")
-        if (connection != RuntimeConnectionState.Connected && (cachedAt == null || connection == RuntimeConnectionState.AuthenticationRequired)) {
-            Text("Offline: authorized snapshot unavailable.")
-        }
-        else if (loaded && cachedAt != null && offlineScope != null) {
+        if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && cachedAt != null && offlineScope != null && (workOpen || messagesOpen)) {
             when {
                 workOpen && organizationId != null -> OfflineOrganizationItems(cache, offlineScope, organizationId!!, null) { workOpen = false }
                 messagesOpen && organizationId != null -> OfflineOrganizationItems(cache, offlineScope, organizationId!!, nodes) { messagesOpen = false }
-                else -> {
-                    TextButton(onClick = { workOpen = true }) { Text("Cached work items") }
-                    TextButton(onClick = { messagesOpen = true }) { Text("Cached team messages") }
-                    nodes.forEach { node -> Text("${node.displayName.ifBlank { node.id }} · ${node.status}") }
-                }
+                else -> Unit
             }
         }
-        else if (loaded && workOpen && organizationId != null) {
+        else if (loaded && connection == RuntimeConnectionState.Connected && workOpen && organizationId != null) {
             // Without a verified account/target scope, never restore another
             // transport's pending owner request after a change of identity.
             val workScope = "${targetId.orEmpty()}:${scopeKey.ifBlank { transportKey }}:$sessionId:${organizationId.orEmpty()}"
@@ -235,15 +233,37 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, rootSessionId, scopeKey.isNotBlank(), onBack = { workOpen = false })
             }
         }
-        else if (loaded && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })
-        else if (loaded) {
-            TextButton(onClick = { workOpen = true }) { Text("Work items") }
-            TextButton(onClick = { messagesOpen = true }) { Text("Team messages") }
-            OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f))
+        else if (loaded && connection == RuntimeConnectionState.Connected && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })
+        else if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && (connection == RuntimeConnectionState.Connected || cachedAt != null)) {
+            if (cachedAt != null) Text(stringResource(R.string.organization_offline_snapshot), Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = LocalRagentColors.current.secondaryContent)
+            OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
+                onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true })
         }
         else {
-            Text(status)
-            TextButton(onClick = { refresh++ }) { Text("Retry") }
+            val colors = LocalRagentColors.current
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                AgentoIconButton(onClick = onBack, contentDescription = stringResource(R.string.organization_back)) {
+                    AgentoWebIcon(AgentoWebGlyph.Back, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
+                }
+                Text(stringResource(R.string.organization_title), Modifier.weight(1f).padding(start = 12.dp), color = colors.primaryContent, fontSize = 17.sp)
+            }
+            Column(Modifier.fillMaxWidth().padding(24.dp).background(colors.quietSurface, RoundedCornerShape(26.dp)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val message = when {
+                    cacheClearFailed -> R.string.organization_cache_unavailable
+                    connection == RuntimeConnectionState.AuthenticationRequired -> R.string.organization_auth_required
+                    connection != RuntimeConnectionState.Connected -> R.string.organization_reconnecting
+                    status == "Loading organization…" -> R.string.organization_loading
+                    status == "No organization is available for this session." -> R.string.organization_not_found
+                    else -> R.string.organization_unavailable
+                }
+                Text(stringResource(message), color = colors.primaryContent)
+                if (connection == RuntimeConnectionState.Connected && status != "Loading organization…") {
+                    TextButton(onClick = { refresh++ }) { Text(stringResource(R.string.organization_retry)) }
+                }
+                if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                    TextButton(onClick = { demoOpen = true }) { Text(stringResource(R.string.organization_demo_open)) }
+                }
+            }
         }
     }
     if (demoOpen) OrganizationDemoScreen(onBack = { demoOpen = false })

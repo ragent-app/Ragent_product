@@ -149,7 +149,7 @@ object OrganizationUiMapper {
         val feedItems = state.recentActivity.take(15).map { act ->
             ActivityFeedItemUiState(
                 id = act.id,
-                timeAgo = "Just now",
+                timeAgo = "",
                 message = act.message,
                 type = act.type,
             )
@@ -194,18 +194,18 @@ object OrganizationUiMapper {
             domain = node.domain,
             runtimeState = node.runtimeState,
             sessionId = node.sessionId,
-            currentTaskSummary = node.currentTaskSummary ?: "No active task",
-            currentTaskDetail = node.currentTaskDetail ?: "Standard delegated contract execution.",
-            currentActivity = node.currentActivity ?: "Idle",
+            currentTaskSummary = node.currentTaskSummary,
+            currentTaskDetail = node.currentTaskDetail,
+            currentActivity = node.currentActivity,
             progressCompleted = node.progressCompleted,
             progressTotal = node.progressTotal,
-            latestUpdateText = "Checkpoint available",
+            latestUpdateText = null,
             testsPassed = node.testsPassed,
             testsTotal = node.testsTotal,
             blockerText = node.blockerText,
             reviewState = node.reviewState,
             attemptCount = node.attemptCount,
-            changedFiles = node.changedFiles.ifEmpty { listOf("lib/runtime.mjs", "tests/integration.mjs") },
+            changedFiles = node.changedFiles,
             resultPacketSummary = node.resultPacketSummary,
             isRootLeader = (node.role == NodeRole.EXECUTIVE),
         )

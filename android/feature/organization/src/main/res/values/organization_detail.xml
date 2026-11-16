@@ -1,0 +1,28 @@
+<resources>
+    <string name="org_detail_back">Back to team</string>
+    <string name="org_detail_task">Current task</string>
+    <string name="org_detail_no_task">No task available</string>
+    <string name="org_detail_activity">Activity</string>
+    <string name="org_detail_progress">Progress</string>
+    <string name="org_detail_progress_value">%1$d / %2$d</string>
+    <string name="org_detail_checks">Checks</string>
+    <string name="org_detail_files">Changed files</string>
+    <string name="org_detail_result">Result</string>
+    <string name="org_detail_blocker">Blocker</string>
+    <string name="org_detail_update">Latest update</string>
+    <string name="org_detail_review">Review</string>
+    <string name="org_detail_role_lead">Team lead</string>
+    <string name="org_detail_role_manager">Manager</string>
+    <string name="org_detail_role_worker">Team member</string>
+    <string name="org_detail_role_reviewer">Reviewer</string>
+    <string name="org_detail_role_expert">Expert</string>
+    <string name="org_detail_state_preparing">Preparing</string>
+    <string name="org_detail_state_idle">Idle</string>
+    <string name="org_detail_state_working">Working</string>
+    <string name="org_detail_state_waiting">Waiting</string>
+    <string name="org_detail_state_blocked">Blocked</string>
+    <string name="org_detail_state_reviewing">Reviewing</string>
+    <string name="org_detail_state_done">Done</string>
+    <string name="org_detail_state_failed">Failed</string>
+    <string name="org_detail_state_paused">Paused</string>
+</resources>

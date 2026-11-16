@@ -55,11 +55,7 @@ data class LayoutResult(
     val rootId: String?,
 )
 
-class OrganizationLayoutEngine(
-    private val minimumFanRadius: Float = 180f,
-    private val childVerticalSpacing: Float = 110f,
-    private val childHorizontalSpacing: Float = 90f,
-) {
+class OrganizationLayoutEngine {
 
     // Threshold for automatic clustering (> 5 direct children)
     val clusterThreshold = 5
@@ -72,6 +68,7 @@ class OrganizationLayoutEngine(
         focusNodeId: String? = null,
         collapsedClusterIds: Set<String> = emptySet(),
         previousPositions: Map<String, EdgePoint> = emptyMap(),
+        density: Float = 1f,
     ): LayoutResult {
         if (nodes.isEmpty()) {
             return LayoutResult(
@@ -87,86 +84,64 @@ class OrganizationLayoutEngine(
             ?: nodes.values.first()
 
         val rootId = rootNode.id
-        val centerX = viewportWidth / 2f
-        val rootY = max(120f, viewportHeight * 0.18f)
+        val centerX = viewportWidth * .5f
+        val rootY = viewportHeight * .46f
 
         val childrenByParent = nodes.values.groupBy { it.parentId }
         val calculatedPositions = mutableMapOf<String, EdgePoint>()
         val clusterNodes = mutableMapOf<String, NodePosition>()
 
-        // 1. Position Root Executive
-        val rootPos = previousPositions[rootId] ?: EdgePoint(centerX, rootY)
+        val rootPos = EdgePoint(centerX, rootY)
         calculatedPositions[rootId] = rootPos
-
-        // 2. Direct leads of Root (Level 1)
-        val level1Nodes = childrenByParent[rootId].orEmpty()
-        val level1Count = level1Nodes.size
-
-        if (level1Count > 0) {
-            val fanRadius = max(minimumFanRadius, 60f + level1Count * 30f)
-            val idealPoints = RadialLayout.calculateFanPositions(
-                centerX = rootPos.x,
-                centerY = rootPos.y,
-                radius = fanRadius,
-                count = level1Count,
-                arcDegrees = min(170f, max(90f, level1Count * 35f)),
-                centerAngleDegrees = 90f,
-            )
-
-            level1Nodes.forEachIndexed { index, node ->
-                val prev = previousPositions[node.id]
-                val point = prev ?: idealPoints[index]
-                calculatedPositions[node.id] = point
-            }
-        }
-
-        // 3. Level 2+ Workers / Subtrees
-        for (lead in level1Nodes) {
-            val leadPos = calculatedPositions[lead.id] ?: continue
-            val children = childrenByParent[lead.id].orEmpty()
-            if (children.isEmpty()) continue
-
-            val isFocused = (focusNodeId == lead.id)
-            val shouldCluster = (children.size > clusterThreshold && !isFocused && !collapsedClusterIds.contains(lead.id))
-
-            if (shouldCluster) {
-                // Group into cluster
-                val clusterId = "cluster_${lead.id}"
-                val clusterY = leadPos.y + 110f
-                val clusterPos = EdgePoint(leadPos.x, clusterY)
-                calculatedPositions[clusterId] = clusterPos
-                clusterNodes[clusterId] = NodePosition(
-                    id = clusterId,
-                    x = clusterPos.x,
-                    y = clusterPos.y,
-                    radius = 20f,
-                    isVisible = true,
-                    isCluster = true,
-                    clusterCount = children.size,
-                    clusterChildIds = children.map { it.id },
-                    alpha = if (focusNodeId != null && focusNodeId != lead.id && focusNodeId != rootId) 0.45f else 1.0f,
-                )
-            } else {
-                // Expanded children layout
-                val childPositions = FocusTreeLayout.layoutChildren(
-                    parentPoint = leadPos,
-                    children = children,
-                    verticalSpacing = childVerticalSpacing,
-                    horizontalSpacing = childHorizontalSpacing,
-                )
-                childPositions.forEach { (childId, pt) ->
-                    val pos = previousPositions[childId] ?: pt
-                    calculatedPositions[childId] = pos
+        val roleOrder = mapOf(NodeRole.MANAGER to 0, NodeRole.WORKER to 1, NodeRole.EXPERT to 2, NodeRole.REVIEWER to 3, NodeRole.EXECUTIVE to 4)
+        val comparator = compareBy<OrganizationNodeModel>({ roleOrder[it.role] ?: 4 }, { it.domain.name }, { it.id })
+        val ordered = mutableListOf<String>()
+        val visited = mutableSetOf(rootId)
+        val clusteredChildren = mutableMapOf<String, List<String>>()
+        fun visit(parent: String) {
+            val children = childrenByParent[parent].orEmpty().sortedWith(comparator).filter { it.id !in visited }
+            if (children.size > clusterThreshold && focusNodeId != parent && parent !in collapsedClusterIds) {
+                val clusterId = "cluster_$parent"
+                ordered.add(clusterId)
+                val hidden = mutableListOf<String>()
+                fun hide(id: String) {
+                    if (!visited.add(id)) return
+                    hidden.add(id)
+                    childrenByParent[id].orEmpty().forEach { hide(it.id) }
                 }
+                children.forEach { hide(it.id) }
+                clusteredChildren[clusterId] = hidden
+                return
+            }
+            children.forEach { child ->
+                if (visited.add(child.id)) { ordered.add(child.id); visit(child.id) }
             }
         }
-
-        // Position any remaining unassigned nodes
-        nodes.values.forEach { node ->
-            if (!calculatedPositions.containsKey(node.id)) {
-                val parentPt = node.parentId?.let { calculatedPositions[it] } ?: rootPos
-                val offset = (node.id.hashCode() % 60).toFloat()
-                calculatedPositions[node.id] = EdgePoint(parentPt.x + offset, parentPt.y + 100f)
+        visit(rootId)
+        nodes.values.sortedWith(comparator).forEach { node ->
+            if (visited.add(node.id)) { ordered.add(node.id); visit(node.id) }
+        }
+        val d = density.coerceAtLeast(.1f)
+        val radius = minOf(132f * d, (viewportWidth / 2f - 44f * d) / 1.08f, (min(rootY, viewportHeight - rootY) - 40f * d) / 1.08f).coerceAtLeast(84f * d)
+        val factors = floatArrayOf(.88f, 1f, .92f, 1.08f)
+        val firstCount = min(ordered.size, 6)
+        ordered.forEachIndexed { index, id ->
+            val ring = if (index < 6) 0 else 1 + (index - 6) / 8
+            val slot = if (ring == 0) index else (index - 6) % 8
+            val angle = if (ring == 0 && firstCount <= 4) when (firstCount) {
+                1 -> floatArrayOf(35f)
+                2 -> floatArrayOf(-145f, 35f)
+                3 -> floatArrayOf(-125f, -15f, 110f)
+                else -> floatArrayOf(-145f, -38f, 53f, 151f)
+            }[slot] else if (ring == 0) -145f + slot * (360f / firstCount) + if (slot % 2 == 0) 5f else -5f
+                else -120f + slot * 45f
+            val radians = Math.toRadians(angle.toDouble())
+            val distance = (radius + ring * 100f * d) * factors[slot % 4] + if (id == focusNodeId) 10f * d else 0f
+            val point = EdgePoint(centerX + kotlin.math.cos(radians).toFloat() * distance, rootY + kotlin.math.sin(radians).toFloat() * distance)
+            calculatedPositions[id] = point
+            clusteredChildren[id]?.let { children ->
+                clusterNodes[id] = NodePosition(id, point.x, point.y, 28f, isCluster = true, clusterCount = children.count { nodes[it]?.parentId == id.removePrefix("cluster_") }, clusterChildIds = children,
+                    alpha = if (focusNodeId != null && focusNodeId != rootId && focusNodeId != id) .5f else 1f)
             }
         }
 
@@ -175,15 +150,9 @@ class OrganizationLayoutEngine(
         nodes.values.forEach { node ->
             val pt = calculatedPositions[node.id] ?: return@forEach
             val isFocused = (node.id == focusNodeId)
-            val isDimmed = (focusNodeId != null && focusNodeId != rootId && node.id != focusNodeId && node.parentId != focusNodeId)
+            val isDimmed = (focusNodeId != null && focusNodeId != rootId && node.id != focusNodeId)
 
-            val radius = when (node.role) {
-                NodeRole.EXECUTIVE -> 24f
-                NodeRole.MANAGER -> 20f
-                NodeRole.REVIEWER -> 16f
-                NodeRole.EXPERT -> 18f
-                NodeRole.WORKER -> 16f
-            }
+            val radius = if (node.role == NodeRole.EXECUTIVE) 32f else 28f
 
             // If node is hidden because it's in a cluster
             val isHiddenInCluster = clusterNodes.values.any { it.clusterChildIds.contains(node.id) }
@@ -196,8 +165,8 @@ class OrganizationLayoutEngine(
                     isVisible = true,
                     isCluster = false,
                     clusterCount = 0,
-                    alpha = if (isDimmed) 0.4f else 1.0f,
-                    scale = if (isFocused) 1.08f else 1.0f,
+                    alpha = if (isDimmed) 0.5f else 1.0f,
+                    scale = if (isFocused && node.id != rootId) 1.06f else 1.0f,
                     isFocused = isFocused,
                 )
             }
@@ -208,24 +177,21 @@ class OrganizationLayoutEngine(
 
         // 4. Edge routing
         val edgePaths = mutableListOf<EdgePathModel>()
-        edges.forEach { edge ->
-            val fromPos = calculatedPositions[edge.fromNodeId]
-            var toPos = calculatedPositions[edge.toNodeId]
-
-            // If target is inside a cluster, point edge to the cluster node
-            val containingCluster = clusterNodes.values.firstOrNull { it.clusterChildIds.contains(edge.toNodeId) }
-            if (containingCluster != null) {
-                toPos = EdgePoint(containingCluster.x, containingCluster.y)
-            }
-
-            if (fromPos != null && toPos != null) {
-                val isReview = (edge.type == EdgeType.REVIEWS)
-                val alpha = if (focusNodeId != null && edge.fromNodeId != focusNodeId && edge.toNodeId != focusNodeId) 0.3f else 0.85f
+        val clusterByChild = clusterNodes.values.flatMap { cluster -> cluster.clusterChildIds.map { it to cluster.id } }.toMap()
+        val emittedEdges = mutableSetOf<Triple<String, String, EdgeType>>()
+        edges.sortedBy { it.id }.forEach { edge ->
+            val fromId = clusterByChild[edge.fromNodeId] ?: edge.fromNodeId
+            val toId = clusterByChild[edge.toNodeId] ?: edge.toNodeId
+            val fromPos = calculatedPositions[fromId]
+            val toPos = calculatedPositions[toId]
+            val aggregated = fromId != edge.fromNodeId || toId != edge.toNodeId
+            if (fromId != toId && fromPos != null && toPos != null && (!aggregated || emittedEdges.add(Triple(fromId, toId, edge.type)))) {
+                val alpha = if (focusNodeId != null && focusNodeId != rootId && edge.fromNodeId != focusNodeId && edge.toNodeId != focusNodeId) 0.5f else 1f
                 edgePaths.add(
                     EdgeRouter.routeEdge(
                         edgeId = edge.id,
-                        fromNodeId = edge.fromNodeId,
-                        toNodeId = if (containingCluster != null) containingCluster.id else edge.toNodeId,
+                        fromNodeId = fromId,
+                        toNodeId = toId,
                         from = fromPos,
                         to = toPos,
                         alpha = alpha,
@@ -234,35 +200,17 @@ class OrganizationLayoutEngine(
             }
         }
 
-        // Also add edges from leads to their cluster nodes
-        clusterNodes.forEach { (clusterId, clusterNode) ->
-            val leadId = clusterId.removePrefix("cluster_")
-            val leadPos = calculatedPositions[leadId]
-            if (leadPos != null) {
-                edgePaths.add(
-                    EdgeRouter.routeEdge(
-                        edgeId = "edge_$clusterId",
-                        fromNodeId = leadId,
-                        toNodeId = clusterId,
-                        from = leadPos,
-                        to = EdgePoint(clusterNode.x, clusterNode.y),
-                        alpha = 0.85f,
-                    )
-                )
-            }
-        }
-
         // 5. Calculate Bounds
         var minX = Float.MAX_VALUE
         var minY = Float.MAX_VALUE
-        var maxX = Float.MIN_VALUE
-        var maxY = Float.MIN_VALUE
+        var maxX = Float.NEGATIVE_INFINITY
+        var maxY = Float.NEGATIVE_INFINITY
 
         nodePositions.values.forEach { pos ->
-            minX = min(minX, pos.x - 48f)
-            maxX = max(maxX, pos.x + 48f)
-            minY = min(minY, pos.y - 48f)
-            maxY = max(maxY, pos.y + 48f)
+            minX = min(minX, pos.x - 40f * d)
+            maxX = max(maxX, pos.x + 40f * d)
+            minY = min(minY, pos.y - 40f * d)
+            maxY = max(maxY, pos.y + 40f * d)
         }
 
         if (minX == Float.MAX_VALUE) {

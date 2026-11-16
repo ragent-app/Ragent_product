@@ -1,0 +1,28 @@
+<resources>
+    <string name="org_detail_back">返回团队</string>
+    <string name="org_detail_task">当前任务</string>
+    <string name="org_detail_no_task">暂无任务</string>
+    <string name="org_detail_activity">正在做</string>
+    <string name="org_detail_progress">进度</string>
+    <string name="org_detail_progress_value">%1$d / %2$d</string>
+    <string name="org_detail_checks">检查</string>
+    <string name="org_detail_files">变更文件</string>
+    <string name="org_detail_result">结果</string>
+    <string name="org_detail_blocker">遇到的问题</string>
+    <string name="org_detail_update">最新进展</string>
+    <string name="org_detail_review">审核</string>
+    <string name="org_detail_role_lead">团队负责人</string>
+    <string name="org_detail_role_manager">管理成员</string>
+    <string name="org_detail_role_worker">团队成员</string>
+    <string name="org_detail_role_reviewer">审核成员</string>
+    <string name="org_detail_role_expert">专家</string>
+    <string name="org_detail_state_preparing">准备中</string>
+    <string name="org_detail_state_idle">空闲</string>
+    <string name="org_detail_state_working">工作中</string>
+    <string name="org_detail_state_waiting">等待中</string>
+    <string name="org_detail_state_blocked">遇到问题</string>
+    <string name="org_detail_state_reviewing">审核中</string>
+    <string name="org_detail_state_done">已完成</string>
+    <string name="org_detail_state_failed">未完成</string>
+    <string name="org_detail_state_paused">已暂停</string>
+</resources>

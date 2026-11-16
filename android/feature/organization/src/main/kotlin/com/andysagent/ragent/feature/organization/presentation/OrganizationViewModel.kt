@@ -12,6 +12,7 @@ import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.domain.OrganizationState
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.layout.LayoutResult
+import com.andysagent.ragent.feature.organization.layout.LayoutBounds
 import com.andysagent.ragent.feature.organization.layout.OrganizationLayoutEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,13 @@ private data class ViewportAnimationBundle(
     val pan: Offset,
     val zoom: Float,
     val focus: String?,
+)
+
+private data class OrganizationInteractionState(
+    val selectedSheetNodeId: String?,
+    val activeDetailNodeId: String?,
+    val isActivityFeedExpanded: Boolean,
+    val reduceMotion: Boolean,
 )
 
 class OrganizationViewModel(
@@ -48,8 +56,10 @@ class OrganizationViewModel(
     private val isActivityFeedExpanded = MutableStateFlow(false)
     private val reduceMotion = MutableStateFlow(false)
 
-    private var viewportWidth = 1080f
-    private var viewportHeight = 1920f
+    private var viewportWidth = 0f
+    private var viewportHeight = 0f
+    private var viewportDensity = 1f
+    private var layoutGeneration = 0L
 
     private val layoutResult = MutableStateFlow<LayoutResult?>(null)
     private val previousPositions = mutableMapOf<String, EdgePoint>()
@@ -81,40 +91,47 @@ class OrganizationViewModel(
         ) { nodeAnims, particles, pan, zoom, focus ->
             ViewportAnimationBundle(nodeAnims, particles, pan, zoom, focus)
         }
+        val interactionFlow = combine(
+            selectedSheetNodeId,
+            activeDetailNodeId,
+            isActivityFeedExpanded,
+            reduceMotion,
+        ) { selected, detail, expanded, reduced ->
+            OrganizationInteractionState(selected, detail, expanded, reduced)
+        }
 
         viewModelScope.launch {
             combine(
                 repository.state,
                 layoutResult,
                 bundleFlow,
-            ) { state, layout, bundle ->
-                if (layout != null) {
-                    OrganizationUiMapper.mapToUiState(
+                interactionFlow,
+            ) { state, layout, bundle, interaction ->
+                OrganizationUiMapper.mapToUiState(
                         state = state,
-                        layout = layout,
+                        layout = layout ?: LayoutResult(emptyMap(), emptyList(), LayoutBounds(0f, 0f, 0f, 0f), null),
                         nodeAnimations = bundle.nodeAnims,
                         activeParticles = bundle.particles,
                         panOffset = bundle.pan,
                         zoomScale = bundle.zoom,
                         focusNodeId = bundle.focus,
-                        selectedSheetNodeId = selectedSheetNodeId.value,
-                        activeDetailNodeId = activeDetailNodeId.value,
-                        isActivityFeedExpanded = isActivityFeedExpanded.value,
-                        reduceMotion = reduceMotion.value,
+                        selectedSheetNodeId = interaction.selectedSheetNodeId,
+                        activeDetailNodeId = interaction.activeDetailNodeId,
+                        isActivityFeedExpanded = interaction.isActivityFeedExpanded,
+                        reduceMotion = interaction.reduceMotion,
                     )
-                } else {
-                    _uiState.value
-                }
             }.collect { mapped ->
                 _uiState.value = mapped
             }
         }
     }
 
-    fun updateViewportSize(width: Float, height: Float) {
-        if (width > 0 && height > 0 && (width != viewportWidth || height != viewportHeight)) {
+    fun updateViewportSize(width: Float, height: Float, density: Float = 1f) {
+        if (width.isFinite() && height.isFinite() && density.isFinite() && width > 0 && height > 0 && density > 0 &&
+            (width != viewportWidth || height != viewportHeight || density != viewportDensity)) {
             viewportWidth = width
             viewportHeight = height
+            viewportDensity = density
             computeLayoutAsync(repository.state.value, focusNodeId.value, collapsedClusterIds.value)
         }
     }
@@ -124,19 +141,28 @@ class OrganizationViewModel(
         focus: String?,
         collapsed: Set<String>,
     ) {
+        if (viewportWidth <= 0f || viewportHeight <= 0f) return
+        val generation = ++layoutGeneration
+        val width = viewportWidth
+        val height = viewportHeight
+        val density = viewportDensity
+        val positions = previousPositions.toMap()
         viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
                 layoutEngine.computeLayout(
                     nodes = state.nodes,
                     edges = state.edges,
-                    viewportWidth = viewportWidth,
-                    viewportHeight = viewportHeight,
+                    viewportWidth = width,
+                    viewportHeight = height,
+                    density = density,
                     focusNodeId = focus,
                     collapsedClusterIds = collapsed,
-                    previousPositions = previousPositions,
+                    previousPositions = positions,
                 )
             }
+            if (generation != layoutGeneration) return@launch
             // Update previous positions cache for stable layout diffs
+            previousPositions.clear()
             result.nodePositions.forEach { (id, pos) ->
                 previousPositions[id] = EdgePoint(pos.x, pos.y)
             }
