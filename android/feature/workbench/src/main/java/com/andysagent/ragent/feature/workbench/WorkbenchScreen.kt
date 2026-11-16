@@ -129,6 +129,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.SaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -487,6 +489,17 @@ fun WorkbenchScreen(
             !it.accountId.isNullOrBlank() && !it.credentialId.isNullOrBlank() && !it.deviceId.isNullOrBlank() &&
             state.sessionId != null
     }?.let { org.json.JSONArray(listOf(it.accountId, it.credentialId, it.deviceId, verifiedOrganizationTargetId, state.sessionId)).toString() }
+    val organizationStateHolder = rememberSaveableStateHolder()
+    val unverifiedOrganizationOwner = remember(organizationTransport, organizationAccount?.accountId,
+        organizationAccount?.credentialId, organizationAccount?.deviceId) { java.util.UUID.randomUUID().toString() }
+    val organizationStateIdentity = org.json.JSONArray(listOf(
+        organizationOfflineScope ?: unverifiedOrganizationOwner,
+        state.chatTargetId ?: state.activeRemoteTargetId, state.sessionId,
+    )).toString()
+    val organizationStateKey = remember(organizationStateIdentity) {
+        java.security.MessageDigest.getInstance("SHA-256").digest(organizationStateIdentity.toByteArray())
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
     var organizationOpen by remember(state.sessionId, state.chatTargetId) { mutableStateOf(false) }
     var responsibilitySelection by remember(state.sessionId, state.chatTargetId) { mutableStateOf<String?>(null) }
     BackHandler(enabled = organizationOpen) { organizationOpen = false }
@@ -734,6 +747,8 @@ fun WorkbenchScreen(
                     onOpenOrganization = if (state.chatOpen && state.sessionId != null && organizationTransport != null) ({ organizationOpen = true }) else null,
                     organizationTransport = organizationTransport,
                     organizationOfflineScope = organizationOfflineScope,
+                    organizationStateHolder = organizationStateHolder,
+                    organizationStateKey = organizationStateKey,
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     backProgress = backProgress,
                     composerActionSheetOpen = composerActionSheetOpen,
@@ -787,6 +802,7 @@ fun WorkbenchScreen(
                     )
                 },
                 childContent = {
+                    organizationStateHolder.SaveableStateProvider(organizationStateKey) {
                     ChatSurface(
                         state = state,
                         parityState = detailParityState,
@@ -823,6 +839,7 @@ fun WorkbenchScreen(
                         planMode = planMode,
                         onSetPlanMode = { planMode = it },
                     )
+                    }
                 },
             )
             }
@@ -1009,6 +1026,8 @@ private fun TabletDetailSurface(
     onOpenOrganization: (() -> Unit)?,
     organizationTransport: com.andysagent.ragent.core.network.RagentTransport?,
     organizationOfflineScope: String?,
+    organizationStateHolder: SaveableStateHolder,
+    organizationStateKey: String,
     modifier: Modifier,
     backProgress: Float,
     composerActionSheetOpen: Boolean,
@@ -1063,6 +1082,7 @@ private fun TabletDetailSurface(
             }
         },
         childContent = {
+            organizationStateHolder.SaveableStateProvider(organizationStateKey) {
             ChatSurface(
                 state = chatState,
                 parityState = chatParityState,
@@ -1095,6 +1115,7 @@ private fun TabletDetailSurface(
                 planMode = planMode,
                 onSetPlanMode = onSetPlanMode,
             )
+            }
         },
     )
 }
@@ -1633,8 +1654,26 @@ private fun ChatSurface(
     planMode: Boolean = false,
     onSetPlanMode: (Boolean) -> Unit = {},
 ) {
-    var organizationHasCollaborators by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationExpanded by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationHasCollaborators by rememberSaveable { mutableStateOf(false) }
+    var organizationExpanded by rememberSaveable { mutableStateOf(false) }
+    var organizationKnown by rememberSaveable { mutableStateOf(false) }
+    var organizationSnapshotReady by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) {
+        mutableStateOf(organizationKnown || organizationTransport == null || state.sessionId == null)
+    }
+    var organizationInitialSnapshotSeen by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationHydrating by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) {
+        if (!organizationSnapshotReady) {
+            delay(500)
+            organizationSnapshotReady = true
+        }
+    }
+    LaunchedEffect(organizationInitialSnapshotSeen) {
+        if (organizationInitialSnapshotSeen) {
+            withFrameNanos { }
+            organizationHydrating = false
+        }
+    }
     var organizationRootAnchor by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<Rect?>(null) }
     var organizationRootVisible by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var organizationRevealRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
@@ -1651,8 +1690,32 @@ private fun ChatSurface(
     LaunchedEffect(organizationCollapsed) {
         if (organizationCollapsed) organizationFocusManager.clearFocus()
     }
-    val (formalActions, nativeRecords, nativeNodes) = rememberCollaborationActions(organizationTransport, state.sessionId,
+    val (formalActions, nativeRecords, nativeNodes, nativeResolved, nativeDefinitive) = rememberCollaborationActions(organizationTransport, state.sessionId,
         state.chatTargetId ?: state.activeRemoteTargetId, organizationOfflineScope, state.chatOpen)
+    var formalResolved by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var formalDefinitive by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var formalHasCollaborators by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(formalResolved, formalDefinitive, formalHasCollaborators, nativeResolved, nativeDefinitive, nativeNodes) {
+        if (formalResolved && nativeResolved) organizationSnapshotReady = true
+        val hasCollaborators = formalHasCollaborators || nativeNodes.isNotEmpty()
+        val definitive = hasCollaborators || (formalDefinitive && nativeDefinitive)
+        if (definitive) {
+            if (!organizationInitialSnapshotSeen) {
+                organizationHydrating = true
+                organizationHasCollaborators = hasCollaborators
+                if (!hasCollaborators) organizationExpanded = false
+                organizationFirstCollapse = false
+                organizationKnown = true
+                organizationInitialSnapshotSeen = true
+                organizationSnapshotReady = true
+            } else {
+                if (hasCollaborators && !organizationHasCollaborators) organizationFirstCollapse = true
+                organizationHasCollaborators = hasCollaborators
+                if (!hasCollaborators) { organizationExpanded = false; organizationFirstCollapse = false }
+                organizationKnown = true
+            }
+        }
+    }
     val collaborationActions = remember(formalActions, nativeRecords) {
         formalActions + nativeRecords.map { record ->
             val event = record.event
@@ -2973,11 +3036,12 @@ private fun ChatSurface(
                 records = nativeNodes,
                 programmaticOpen = organizationOpenNode,
                 onProgrammaticOpenConsumed = { organizationOpenNode = null },
-                onHasCollaboratorsChanged = { hasCollaborators ->
-                    if (hasCollaborators && !organizationHasCollaborators) organizationFirstCollapse = true
-                    organizationHasCollaborators = hasCollaborators
-                    if (!hasCollaborators) { organizationExpanded = false; organizationFirstCollapse = false }
+                onCollaboratorSnapshot = { resolved, definitive, hasCollaborators ->
+                    formalResolved = resolved
+                    formalDefinitive = definitive
+                    formalHasCollaborators = hasCollaborators
                 },
+                onHasCollaboratorsChanged = {},
             )
         }
         val hostBounds = organizationHostBounds
@@ -2989,17 +3053,18 @@ private fun ChatSurface(
         val normalCard = hostBounds ?: Rect.Zero
         val sourceCard = if (organizationFromRoot) organizationRootAnchor ?: bottomCard else bottomCard
         com.andysagent.ragent.feature.organization.ui.OrganizationRootShell(
-            expanded = !organizationHasCollaborators || organizationExpanded,
+            expanded = if (!organizationSnapshotReady) organizationExpanded else !organizationHasCollaborators || organizationExpanded,
             origin = if (organizationHasCollaborators) sourceCard ?: normalCard else normalCard,
             target = if (organizationHasCollaborators && !organizationFirstCollapse) expandedCard ?: normalCard else normalCard,
             sourceIsCircle = organizationHasCollaborators && organizationFromRoot && organizationRootAnchor != null,
             sourceVisual = organizationRootVisual,
+            snapToTarget = organizationHydrating,
             onVisibleSizeChanged = { _, height -> organizationVisibleHeight = height },
             onSettled = { expanded ->
                 if (!expanded && organizationFirstCollapse) organizationFirstCollapse = false
                 if (!expanded && organizationFromRoot && !organizationOpeningRoot) organizationFromRoot = false
             },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (organizationSnapshotReady) 1f else 0f },
         ) { shellProgress ->
         Box(Modifier.fillMaxSize()) {
         // Record the complete live chat frame before temporary controls are
@@ -3322,6 +3387,14 @@ private fun ChatSurface(
             }
         }
         }
+        }
+
+        if (!organizationSnapshotReady) {
+            CircularProgressIndicator(
+                modifier = Modifier.align(Alignment.Center).size(22.dp),
+                strokeWidth = 2.dp,
+                color = colors.secondaryContent,
+            )
         }
 
         // Layer 1.5: Pure Gradient Blur Masks (ChatGPT app style)

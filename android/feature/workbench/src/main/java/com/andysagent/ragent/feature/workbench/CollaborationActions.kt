@@ -22,6 +22,10 @@ data class CollaborationActionPresentation(
 )
 
 data class NativeDelegationRecord(val runId: String, val event: DelegationEventDto)
+internal data class CollaborationData(
+    val actions: List<CollaborationActionPresentation>, val events: List<NativeDelegationRecord>,
+    val nodes: List<NativeDelegationDto>, val nativeResolved: Boolean, val nativeDefinitive: Boolean,
+)
 private class NativePollState {
     val cursors = mutableMapOf<String, Long>()
     val finished = mutableMapOf<String, String>()
@@ -31,10 +35,12 @@ private class NativePollState {
 @Composable
 internal fun rememberCollaborationActions(
     transport: RagentTransport?, sessionId: String?, targetId: String?, ownerScope: String?, active: Boolean,
-): Triple<List<CollaborationActionPresentation>, List<NativeDelegationRecord>, List<NativeDelegationDto>> {
+): CollaborationData {
     var actions by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(emptyList<CollaborationActionPresentation>()) }
     var nativeEvents by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(emptyList<NativeDelegationRecord>()) }
     var nativeNodes by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(emptyList<NativeDelegationDto>()) }
+    var nativeResolved by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(transport == null || sessionId == null) }
+    var nativeDefinitive by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(false) }
     val nativePoll = remember(transport, sessionId, targetId, ownerScope) { NativePollState() }
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val connection = transport?.connectionState?.collectAsState()?.value
@@ -75,19 +81,27 @@ internal fun rememberCollaborationActions(
         }
     }
     LaunchedEffect(transport, sessionId, targetId, ownerScope, active, lifecycle, connection) {
-        if (connection == RuntimeConnectionState.AuthenticationRequired) { nativeEvents = emptyList(); nativeNodes = emptyList(); nativePoll.cursors.clear(); nativePoll.finished.clear(); nativePoll.scannedAt.clear(); return@LaunchedEffect }
-        if (transport == null || sessionId == null || !active || lifecycle != Lifecycle.State.RESUMED || connection != RuntimeConnectionState.Connected) return@LaunchedEffect
+        if (connection == RuntimeConnectionState.AuthenticationRequired) { nativeEvents = emptyList(); nativeNodes = emptyList(); nativePoll.cursors.clear(); nativePoll.finished.clear(); nativePoll.scannedAt.clear(); nativeResolved = true; nativeDefinitive = false; return@LaunchedEffect }
+        if (transport == null || sessionId == null || !active || lifecycle != Lifecycle.State.RESUMED || connection != RuntimeConnectionState.Connected) {
+            nativeResolved = true
+            nativeDefinitive = false
+            return@LaunchedEffect
+        }
+        nativeResolved = false
+        nativeDefinitive = false
         val api = RealOrganizationApi(transport)
         val cursors = nativePoll.cursors
         while (true) {
             val runs = api.getDelegationRuns(sessionId)
             val failure = runs.exceptionOrNull()
             if (failure is CancellationException) throw failure
+            if (failure != null) { nativeResolved = true; nativeDefinitive = false }
             if (failure is ApiException && failure.statusCode in listOf(401, 403)) {
                 nativeEvents = emptyList(); nativeNodes = emptyList(); cursors.clear(); nativePoll.finished.clear()
                 delay(3_000); continue
             }
             var authorizationDenied = false
+            var incomplete = false
             runs.getOrNull()?.runs?.forEach { run ->
                 if (authorizationDenied) return@forEach
                 val version = "${run.state}:${run.updatedAt.orEmpty()}"
@@ -105,12 +119,15 @@ internal fun rememberCollaborationActions(
                         authorizationDenied = true
                         break
                     }
-                    val page = response.getOrNull() ?: break
+                    val page = response.getOrNull()
+                    if (page == null) { incomplete = true; break }
+                    if (page.gap || page.sourceAvailability != "verified") incomplete = true
                     if (!page.gap) nativeNodes = nativeNodes.filterNot { it.runId == run.id } + page.delegations
                     nativeEvents = (nativeEvents + page.events.map { NativeDelegationRecord(run.id, it) })
                         .distinctBy { it.runId to it.event.id }
                     cursors[run.id] = maxOf(cursor, page.nextAfterLines)
                     more = page.hasMore && page.nextAfterLines > cursor
+                    if (page.hasMore && !more) incomplete = true
                     reachedTail = !page.hasMore && !page.gap
                 }
                 if (reachedTail && run.state.lowercase() in setOf("completed", "failed", "cancelled", "interrupted")) {
@@ -118,10 +135,14 @@ internal fun rememberCollaborationActions(
                     nativePoll.scannedAt[run.id] = android.os.SystemClock.elapsedRealtime()
                 } else nativePoll.finished.remove(run.id)
             }
+            if (runs.isSuccess) {
+                nativeResolved = true
+                nativeDefinitive = !authorizationDenied && !incomplete
+            }
             delay(3_000)
         }
     }
-    return Triple(actions, nativeEvents, nativeNodes)
+    return CollaborationData(actions, nativeEvents, nativeNodes, nativeResolved, nativeDefinitive)
 }
 
 internal fun mergeCollaborationActions(items: List<TimelineItem>, actions: List<CollaborationActionPresentation>, labels: Map<String, String>): List<TimelineItem> {
