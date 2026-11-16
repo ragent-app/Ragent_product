@@ -2,6 +2,9 @@ package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateOffsetAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.runtime.key
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -72,14 +75,24 @@ fun OrganizationRootShell(
         MotionPreference.None -> tween(0)
     }, label = "root-conversation-shell")
     val p = animated.coerceIn(0f, 1f)
-    androidx.compose.runtime.LaunchedEffect(expanded, p) {
-        if ((expanded && p >= .999f) || (!expanded && p <= .001f)) onSettled(expanded)
+    val follow = if (preference == MotionPreference.Full) spring<Offset>(dampingRatio = 1f, stiffness = 420f) else snap()
+    val sizeFollow = if (preference == MotionPreference.Full) spring<Float>(dampingRatio = 1f, stiffness = 420f) else snap()
+    val liveOrigin = key(sourceIsCircle) {
+        val center by animateOffsetAsState(origin.center, animationSpec = follow, label = "root-origin-center")
+        val width by animateFloatAsState(origin.width, animationSpec = sizeFollow, label = "root-origin-width")
+        val height by animateFloatAsState(origin.height, animationSpec = sizeFollow, label = "root-origin-height")
+        Rect(center.x - width / 2f, center.y - height / 2f, center.x + width / 2f, center.y + height / 2f)
+    }
+    val originSettled = (liveOrigin.center - origin.center).getDistance() < .5f &&
+        kotlin.math.abs(liveOrigin.width - origin.width) < .5f && kotlin.math.abs(liveOrigin.height - origin.height) < .5f
+    androidx.compose.runtime.LaunchedEffect(expanded, p, originSettled) {
+        if ((expanded && p >= .999f) || (!expanded && p <= .001f && originSettled)) onSettled(expanded)
     }
     var rootOrigin by remember { mutableStateOf<Offset?>(null) }
-    val width = (origin.width + (target.width - origin.width) * p).coerceAtLeast(1f)
-    val height = (origin.height + (target.height - origin.height) * p.pow(1.15f)).coerceAtLeast(1f)
+    val width = (liveOrigin.width + (target.width - liveOrigin.width) * p).coerceAtLeast(1f)
+    val height = (liveOrigin.height + (target.height - liveOrigin.height) * p.pow(1.15f)).coerceAtLeast(1f)
     androidx.compose.runtime.SideEffect { onVisibleSizeChanged(width, height) }
-    val center = origin.center + (target.center - origin.center) * p - (rootOrigin ?: Offset.Zero)
+    val center = liveOrigin.center + (target.center - liveOrigin.center) * p - (rootOrigin ?: Offset.Zero)
     val corner = if (sourceIsCircle) minOf(width, height) / 2f +
         (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
     val color = if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor.copy(alpha = 1f)
@@ -101,7 +114,7 @@ fun OrganizationRootShell(
             }
             if (sourceIsCircle && sourceVisual != null) {
                 val glyphMotion = smoothRoot(p, .15f, .90f)
-                val scale = origin.width / 2f / with(density) { sourceVisual.radiusDp.dp.toPx().coerceAtLeast(1f) }
+                val scale = liveOrigin.width / 2f / with(density) { sourceVisual.radiusDp.dp.toPx().coerceAtLeast(1f) }
                 val glyphSize = nodeIconSize(sourceVisual.radiusDp).dp * scale * (1f - glyphMotion) + 20.dp * glyphMotion
                 val glyphTargetX = if (layoutDirection == LayoutDirection.Ltr) with(density) { 32.dp.toPx() } else width - with(density) { 32.dp.toPx() }
                 val x = width / 2f + (glyphTargetX - width / 2f) * glyphMotion
@@ -112,8 +125,8 @@ fun OrganizationRootShell(
                     }.size(glyphSize).graphicsLayer { alpha = 1f - smoothRoot(p, .55f, .85f) })
                 if (sourceVisual.runtimeState != NodeRuntimeState.IDLE) {
                     val dotSize = 11.dp * scale
-                    val dotCenter = width / 2f + origin.width / 2f * .70710678f
-                    val dotY = height / 2f + origin.height / 2f * .70710678f
+                    val dotCenter = width / 2f + liveOrigin.width / 2f * .70710678f
+                    val dotY = height / 2f + liveOrigin.height / 2f * .70710678f
                     val colors = LocalRagentColors.current
                     val dotColor = when (sourceVisual.runtimeState) {
                         NodeRuntimeState.WORKING, NodeRuntimeState.REVIEWING -> colors.running
