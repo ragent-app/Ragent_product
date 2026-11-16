@@ -9,7 +9,7 @@ import { getOrganization, getRevision, listOrganizationNodes } from './organizat
 import { getSession } from './session-manager.mjs';
 import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { createHash } from 'crypto';
-import { appendOrganizationEvent } from './organization-messaging.mjs';
+import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 
 function text(value, max = 512) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -197,6 +197,7 @@ export async function dispatchOrganizationPhase({
       ...list(nodePlan?.acceptance),
     ];
     const writablePaths = list(nodePlan?.scope?.writablePaths);
+    const eventKey = `phase-dispatch:${createHash('sha256').update(`${normalizedKey}:${node.stableKey}`).digest('hex')}`;
     const policy = {
       role: 'manager',
       canDelegate: true,
@@ -218,6 +219,7 @@ export async function dispatchOrganizationPhase({
       organizationId: organization.id,
       organizationNodeId: node.id,
       organizationBindingGeneration: node.bindingGeneration,
+      organizationPhaseDispatch: { eventKey, phaseId: normalizedPhaseId, revision: targetRevision, taskId },
     };
     const result = await runtimeOrchestrator.dispatch({
       rootSessionId: organization.rootSessionId,
@@ -244,12 +246,10 @@ export async function dispatchOrganizationPhase({
         }],
       },
     });
-    await appendOrganizationEvent({
-      organizationId: organization.id,
-      eventKey: `phase-dispatch:${createHash('sha256').update(`${normalizedKey}:${node.stableKey}`).digest('hex')}`,
-      type: 'task.dispatch_requested', organizationRevision: targetRevision,
-      phaseId: normalizedPhaseId, nodeId: node.id, taskId,
-      payload: { objective: text(nodePlan?.objective || phase.objective || organization.id, 4000) },
+    // The committed collaboration plan is authoritative; a failed mirror can
+    // be recovered on the next projection read without re-dispatching work.
+    await recoverOrganizationDispatchEvents(organization).catch((error) => {
+      console.warn('[organization] dispatch event mirror deferred:', error?.message || error);
     });
     dispatched.push({ stableKey: node.stableKey, sessionId: session.id, runtime, collaboration: result });
     await ensurePhaseExecution(organization, phase, targetRevision, {

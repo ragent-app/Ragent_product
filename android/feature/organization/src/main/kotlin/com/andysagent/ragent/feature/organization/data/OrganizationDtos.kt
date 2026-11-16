@@ -7,7 +7,7 @@ import kotlinx.serialization.Serializable
 data class DelegationRunsDto(val sessionId: String, val runs: List<DelegationRunDto> = emptyList())
 
 @Serializable
-data class DelegationRunDto(val id: String, val state: String = "")
+data class DelegationRunDto(val id: String, val state: String = "", val updatedAt: String? = null)
 
 @Serializable
 data class DelegationEventsDto(

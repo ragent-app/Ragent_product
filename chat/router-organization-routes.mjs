@@ -15,6 +15,7 @@ import { provisionRootLeadershipRevision } from './organization-provisioning.mjs
 import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
 import { listOrganizationEvents, hasCreatedOrganizationSubordinate, getInternalEnvelope } from './organization-messaging.mjs';
 import { getCollaboration } from './collaboration-store.mjs';
+import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
 
@@ -52,7 +53,7 @@ export async function handleOrganizationRoutes({
       const runs = await listDurableSessionRunIndexEntries(sessionId);
       res.setHeader?.('Cache-Control', 'private, no-store');
       if (!nativeMatch[2]) {
-        writeJson(res, 200, { sessionId, runs: runs.map((run) => ({ id: run.id, state: run.state })) });
+        writeJson(res, 200, { sessionId, runs: runs.map((run) => ({ id: run.id, state: run.state, updatedAt: run.updatedAt || null })) });
         return true;
       }
       const runId = decodeURIComponent(nativeMatch[2]);
@@ -99,6 +100,7 @@ export async function handleOrganizationRoutes({
         writeJson(res, 400, { error: 'Invalid action cursor or limit' }); return true;
       }
       const nodes = await listOrganizationNodes(org.id);
+      await recoverOrganizationDispatchEvents(org);
       const rows = await listOrganizationEvents(org.id, { afterId, limit: limit + 1 });
       const page = rows.slice(0, limit);
       const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -106,7 +108,7 @@ export async function handleOrganizationRoutes({
         const envelope = event.envelopeId ? await getInternalEnvelope(event.envelopeId) : null;
         const collaboration = event.type === 'task.delegated' && event.payload?.collaborationId ? await getCollaboration(event.payload.collaborationId) : null;
         const task = collaboration?.rootSessionId === rootSessionId ? collaboration.tasks?.find((item) => item.id === event.taskId) : null;
-        return { id: event.id, type: event.type, nodeId: event.nodeId || null, taskId: event.taskId || null, attemptId: event.attemptId || null, createdAt: event.createdAt,
+        return { id: event.id, type: event.type, nodeId: event.nodeId || null, taskId: event.taskId || null, attemptId: event.attemptId || null, createdAt: event.type === 'task.dispatch_requested' ? (event.payload?.requestedAt || event.createdAt) : event.createdAt,
           displayName: nodeById.get(event.nodeId)?.stableKey || null,
           summary: task?.objective || (event.type === 'task.dispatch_requested' ? event.payload?.objective : null) || (envelope?.organizationId === org.id ? envelope.subject : null),
           details: event.type === 'organization.cancel_requested' && typeof event.payload?.reason === 'string' ? event.payload.reason : null,
