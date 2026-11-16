@@ -196,7 +196,8 @@ internal class OrganizationPhysicsSolver {
                     b.radius = 2f + (b.targetRadius * .35f - 2f).coerceAtLeast(0f) * budding
                     b.radiusVelocity = 0f
                     val distance = (actor.radius + (-.7f + .9f * budding) * b.radius).coerceAtLeast(0f) * density
-                    b.x = actor.x + dx / length * distance; b.y = actor.y + dy / length * distance
+                    b.x = actor.x + actor.recoilX + dx / length * distance - b.recoilX
+                    b.y = actor.y + actor.recoilY + dy / length * distance - b.recoilY
                     b.vx = 0f; b.vy = 0f
                 }
             } else {
