@@ -109,7 +109,7 @@ fun OrganizationRootShell(
                     start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
                 onDrawBehind { drawRect(brush) }
             }) {
-            Layout(content = { content(p) }) { measurables, constraints ->
+            Layout(content = { Box(Modifier.fillMaxSize(), propagateMinConstraints = true) { content(p) } }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
                 layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, constraints.maxHeight - child.height) }
             }
