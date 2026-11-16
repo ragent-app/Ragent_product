@@ -42,6 +42,12 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
+import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
+import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
+import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
+import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.core.designsystem.motionPolicy
 import kotlin.math.pow
@@ -62,6 +68,7 @@ fun OrganizationRootShell(
     modifier: Modifier = Modifier,
     surfaceColor: Color = Color.Unspecified,
     collapsedSurfaceColor: Color = Color.Unspecified,
+    cardMaterialEnabled: Boolean = false,
     sourceVisual: OrganizationRootVisual? = null,
     snapToTarget: Boolean = false,
     onVisibleSizeChanged: (width: Float, height: Float) -> Unit = { _, _ -> },
@@ -99,12 +106,20 @@ fun OrganizationRootShell(
         (with(density) { 22.dp.toPx() } - minOf(width, height) / 2f) * smoothRoot(p, .10f, .80f) else with(density) { 22.dp.toPx() }
     val color = (if (surfaceColor == Color.Unspecified) LocalRagentColors.current.canvas else surfaceColor).copy(alpha = 1f)
     val collapsedColor = if (collapsedSurfaceColor == Color.Unspecified) color else collapsedSurfaceColor.copy(alpha = 1f)
+    val shape = RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })
+    val materialAlpha = if (sourceIsCircle) smoothRoot(p, .15f, .85f) else 1f
+    val isDark = LocalRagentColors.current.canvas.red < .5f
     Box(modifier.fillMaxSize().onGloballyPositioned { rootOrigin = it.localToRoot(Offset.Zero) }) {
         Box(Modifier.align(AbsoluteAlignment.TopLeft)
             .graphicsLayer { alpha = if (rootOrigin != null && origin.width > 0f && origin.height > 0f && target.width > 0f && target.height > 0f) 1f else 0f }
             .absoluteOffset { IntOffset((center.x - width / 2f).roundToInt(), (center.y - height / 2f).roundToInt()) }
             .size(with(density) { width.toDp() }, with(density) { height.toDp() })
-            .clip(RoundedCornerShape(with(density) { corner.coerceAtLeast(0f).toDp() })).drawWithCache {
+            .then(if (cardMaterialEnabled) Modifier.ragentComposerShadow(
+                shape = shape, ambientBlur = 22.dp, keyBlur = 8.dp, offsetY = 2.dp,
+                ambientLightAlpha = .040f * materialAlpha, keyLightAlpha = .022f * materialAlpha,
+                ambientDarkAlpha = .16f * materialAlpha, keyDarkAlpha = .11f * materialAlpha,
+            ) else Modifier)
+            .clip(shape).drawWithCache {
                 val palette = if (sourceIsCircle && sourceVisual != null && sourceVisual.colors.size >= 3)
                     sourceVisual.colors.map { lerp(it, color, smoothRoot(p, .15f, .85f)) }
                     else {
@@ -115,6 +130,16 @@ fun OrganizationRootShell(
                     start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
                 onDrawBehind { drawRect(brush) }
             }) {
+            if (cardMaterialEnabled) {
+                AgentoFrostedGlassBox(
+                    modifier = Modifier.matchParentSize().graphicsLayer { alpha = materialAlpha },
+                    shape = shape, surface = AgentoGlassSurface.Neutral,
+                    material = AgentoGlassMaterial.LiquidClear, blurRadius = AgentoFrostedTokens.BlurNavigation,
+                    backdropTone = AgentoBackdropTone.QuietHeader,
+                    specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+                    showTopHairline = false, hasShadow = false,
+                ) {}
+            }
             Layout(content = { Box(Modifier.fillMaxSize(), propagateMinConstraints = true) { content(p) } }) { measurables, constraints ->
                 val child = measurables.single().measure(Constraints.fixed(target.width.roundToInt().coerceAtLeast(1), target.height.roundToInt().coerceAtLeast(1)))
                 layout(constraints.maxWidth, constraints.maxHeight) { child.placeRelative(0, constraints.maxHeight - child.height) }
