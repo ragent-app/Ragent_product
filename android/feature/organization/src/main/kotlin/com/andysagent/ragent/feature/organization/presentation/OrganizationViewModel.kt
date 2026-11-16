@@ -336,17 +336,26 @@ class OrganizationViewModel(
     fun setMotionPreference(preference: MotionPreference) {
         if (motionPreference == preference) return
         motionPreference = preference
-        if (preference != MotionPreference.Full) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
+        physics.setMaterialDuration(if (preference == MotionPreference.Reduced) .12f else .22f)
+        if (preference != MotionPreference.Full) renderState.value = renderState.value.copy(
+            physics = physics.snapToTargets(preserveMaterial = preference == MotionPreference.Reduced, wakeMaterial = preference == MotionPreference.Reduced))
     }
 
     fun advancePhysicsFrame(frameNanos: Long) {
-        if (motionPreference == MotionPreference.Full && !reduceMotion.value && renderState.value.physics.running) {
+        if (motionPreference != MotionPreference.None && renderState.value.physics.running) {
             renderState.value = renderState.value.copy(physics = physics.advance(frameNanos))
         }
     }
 
+    fun reportBirthSurfaceGaps(gapsDp: Map<String, Float>) {
+        if (gapsDp.isNotEmpty()) renderState.value = renderState.value.copy(physics = physics.reportBirthSurfaceGaps(gapsDp))
+    }
+
     fun setReduceMotion(reduce: Boolean) {
         reduceMotion.value = reduce
-        if (reduce) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
+        if (reduce) {
+            physics.setMaterialDuration(.12f)
+            renderState.value = renderState.value.copy(physics = physics.snapToTargets(preserveMaterial = true, wakeMaterial = true))
+        }
     }
 }

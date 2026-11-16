@@ -15,6 +15,7 @@ data class NodePhysicsFrame(
     val radiusDp: Float,
     val birthProgress: Float = 1f,
     val birthSourceId: String? = null,
+    val separationMaterialProgress: Float = 1f,
     val birthVisible: Boolean = true,
     val clickable: Boolean = true,
     val iconAlpha: Float = 1f,
