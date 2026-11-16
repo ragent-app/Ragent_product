@@ -64,7 +64,7 @@ import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 @Composable
-fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
+fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
@@ -276,8 +276,12 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             refresh++
         }
     }
-    LaunchedEffect(baseProjection, loaded, records) {
-        onHasCollaboratorsChanged(records.isNotEmpty() || (loaded && baseProjection?.hasCreatedSubordinate == true))
+    val hasCollaborators = records.isNotEmpty() || (loaded && baseProjection?.hasCreatedSubordinate == true)
+    val snapshotResolved = loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected
+    val snapshotDefinitive = loaded && baseProjection != null
+    LaunchedEffect(snapshotResolved, snapshotDefinitive, hasCollaborators, transport, targetId, sessionId, scopeKey) {
+        onCollaboratorSnapshot(snapshotResolved, snapshotDefinitive, hasCollaborators)
+        onHasCollaboratorsChanged(hasCollaborators)
     }
     CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
     Box(modifier.fillMaxSize()) {
@@ -377,9 +381,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
 fun ConnectedOrganizationGraph(
     transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null,
     modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit,
-    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onHasCollaboratorsChanged: (Boolean) -> Unit,
+    onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit,
 ) {
     ConnectedOrganizationScreen(transport, sessionId, targetId, offlineScope, onBack = {}, embedded = true,
-        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed,
+        modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, onCollaboratorSnapshot = onCollaboratorSnapshot,
         onHasCollaboratorsChanged = onHasCollaboratorsChanged)
 }

@@ -62,6 +62,7 @@ fun OrganizationRootShell(
     modifier: Modifier = Modifier,
     surfaceColor: Color = Color.Unspecified,
     sourceVisual: OrganizationRootVisual? = null,
+    snapToTarget: Boolean = false,
     onVisibleSizeChanged: (width: Float, height: Float) -> Unit = { _, _ -> },
     onSettled: (expanded: Boolean) -> Unit = {},
     content: @Composable (progress: Float) -> Unit,
@@ -69,7 +70,7 @@ fun OrganizationRootShell(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val preference = motionPolicy().preference
-    val animated by animateFloatAsState(if (expanded) 1f else 0f, animationSpec = when (preference) {
+    val animated by animateFloatAsState(if (expanded) 1f else 0f, animationSpec = if (snapToTarget) tween(0) else when (preference) {
         MotionPreference.Full -> spring(dampingRatio = 1f, stiffness = 220f, visibilityThreshold = .002f)
         MotionPreference.Reduced -> tween(160, easing = FastOutSlowInEasing)
         MotionPreference.None -> tween(0)
