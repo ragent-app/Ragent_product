@@ -22,10 +22,13 @@
 ## 2. 节点参数
 
 - 中心负责人直径 64dp，其余节点 56dp；触摸容器统一 64dp，中心与布局坐标一致。
-- 单层线性微渐变圆面，无描边、额外高光、纹理、光晕或投影。中心文字为镂空视觉，颜色为画布背景，使用项目字体 Bold，负责人 28sp，成员 26sp；数字簇 20sp。文字不随圆外追加说明。
+- 单层线性微渐变圆面，无描边、额外高光、纹理、光晕或投影。中心使用 Google Material Symbols Rounded 图标，画布色呈镂空观感，负责人 28dp，其余 24dp；数字簇仍为 20sp。圆外不追加文字。
 - 图内所有节点下方、旁边均不显示姓名、角色、状态文字。无障碍仍读完整名字、状态、任务和阻塞信息。
-- 角色字：负责人“领”、规划“规”、Android“前”、后端“后”、审核“审”、其它“员”；英文语言分别 L/P/A/B/R/M。簇显示 +n。
-- 三色 stop 为 0、0.55、1，起点 `(0.12W, 0.08H)`，终点 `(0.88W, 0.92H)`；按尺寸缓存画刷。角色浅色 / 深色色表：负责人 `#657AA5 #6E76A6 #7B73A1` / `#ADC1E5 #BAC1E9 #C5BEE5`；规划 `#6F8997 #798696 #838293` / `#95B2BE #9EB0BC #A8ADBB`；Android `#6487A8 #6E84A6 #7A80A1` / `#92B6D5 #9FB2D4 #AEAED0`；后端及其它 `#64887F #6E887C #7A8A78` / `#98BCAF #A6BCAB #B2BCA8`；审核 `#958263 #9B846C #A08776` / `#C5B58F #CBB69B #D0B7A8`。以 canvas 的相对亮度判断深浅；其他主题不据此宣称对比度全面达标。
+- 职责优先：组织负责人 explore、规划管理 route、阶段负责人 flag、审核 find_in_page；专家/执行者/编写者及未知职责优先使用可识别的专业图标，否则分别回退 psychology/construction/edit_note/person。簇显示 +n。
+- 专业图标键共有32个有限视觉类别，不是专业白名单：backend=dns、mobile=smartphone、web=web、runtime=terminal、architecture=schema、database=database、data=analytics、ai=auto_awesome、cloud=cloud、network=hub、hardware=memory、security=shield、testing=bug_report、design=palette、product=category、research=science、writing=edit_note、translation=translate、education=school、business=work、finance=account_balance、legal=balance、health=medical_services、marketing=campaign、sales=storefront、people=groups、operations=settings_suggest、logistics=local_shipping、media=movie、environment=eco、engineering=precision_manufacturing、general=person。android/ios 图标键别名为 mobile。
+- 负责人可自由指定任意语言的专业名称。领导 Agent 可在原有分工输出中附加可选 iconKey，不额外调用模型；客户端仅识别明确键，不从名称关键词猜测。未知键回退职责或通用图标，详情和无障碍保留真实名称。图标与许可证来源见 Android 模块 third_party/material-symbols-rounded。
+- 三色 stop 为 0、0.55、1，起点 `(0.12W, 0.08H)`，终点 `(0.88W, 0.92H)`；按尺寸缓存画刷。色族浅色 / 深色色表：紫 `#657AA5 #6E76A6 #7B73A1` / `#ADC1E5 #BAC1E9 #C5BEE5`；蓝灰 `#6F8997 #798696 #838293` / `#95B2BE #9EB0BC #A8ADBB`；蓝 `#6487A8 #6E84A6 #7A80A1` / `#92B6D5 #9FB2D4 #AEAED0`；绿 `#64887F #6E887C #7A8A78` / `#98BCAF #A6BCAB #B2BCA8`；暖 `#958263 #9B846C #A08776` / `#C5B58F #CBB69B #D0B7A8`。以 canvas 的相对亮度判断深浅；其他主题不据此宣称对比度全面达标。
+- 上述五组依次称紫、蓝灰、蓝、绿、暖色；专业视觉色族为蓝：mobile/web/data/ai/hardware/cloud/network/backend/runtime；紫：architecture/security/design/product/education/legal；绿：database/people/operations/logistics/environment/engineering/general；蓝灰：research/writing/translation/business；暖：testing/finance/health/marketing/sales/media。职责优先或回退时，负责人/专家用紫、管理/阶段负责人用蓝灰、执行者/未知用绿、编写者用蓝、审核用暖色。
 - 状态点直径 7dp，外侧画布色隔离环 2dp，圆心在本节点半径的右下 45° 位置。IDLE 不显示；WORKING/REVIEWING 使用主题 running；WAITING/PROVISIONING/PAUSED 用 secondaryContent；BLOCKED/FAILED 用 error；DONE 用 success。静态状态点，不无限闪烁。
 - 按压复用原聊天页 `rememberAgentoPressScale`；不叠加第二套按压动画。
 - 单击打开成员详情 sheet，双击保留聚焦；簇点击展开。聚焦尺度 1.06，其他节点透明度 0.50；聚焦中心节点时全体维持 1.0。无焦点默认 1.0。

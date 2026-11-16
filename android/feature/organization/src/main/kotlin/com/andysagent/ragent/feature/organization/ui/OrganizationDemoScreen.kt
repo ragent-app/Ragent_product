@@ -37,8 +37,8 @@ internal fun OrganizationDemoScreen(onBack: () -> Unit) {
                         nodes = listOf(
                             OrganizationNodeDto(id = "lead", role = "executive", domain = "architecture", displayName = "负责人"),
                             OrganizationNodeDto(id = "planning", parentId = "lead", role = "manager", domain = "architecture", displayName = "规划"),
-                            OrganizationNodeDto(id = "android", parentId = "planning", role = "worker", domain = "android", displayName = "Android开发"),
-                            OrganizationNodeDto(id = "backend", parentId = "planning", role = "worker", domain = "backend", displayName = "后端开发"),
+                            OrganizationNodeDto(id = "android", parentId = "planning", role = "worker", domain = "android", iconKey = "mobile", displayName = "Android开发"),
+                            OrganizationNodeDto(id = "backend", parentId = "planning", role = "worker", domain = "backend", iconKey = "backend", displayName = "后端开发"),
                             OrganizationNodeDto(id = "review", parentId = "planning", role = "reviewer", domain = "security", displayName = "质量审核"),
                         ),
                         edges = listOf(
