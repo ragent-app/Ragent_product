@@ -19,6 +19,7 @@ foreach ($root in @([IO.Path]::GetPathRoot($staging), [IO.Path]::GetPathRoot($ou
 $node = Get-Command node.exe -ErrorAction Stop
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm.cmd is required for the desktop build.' }
 New-Item -ItemType Directory -Force $staging | Out-Null
+$buildFailed = $false
 try {
     $machine = Join-Path $staging 'Ragent.Machine.msi'
     $desktop = Join-Path $staging 'Ragent.Desktop.msi'
@@ -46,6 +47,14 @@ try {
     if ((& git.exe -C $source rev-parse HEAD).Trim() -cne $revision -or @(& git.exe -C $source status --porcelain=v1 --untracked-files=all).Count -ne 0) { throw 'BUNDLE_SOURCE_CHANGED_DURING_BUILD' }
     & (Join-Path $source 'packaging\windows\build-setup-exe.ps1') -MsiPath $machine -DesktopMsiPath $desktop -IconPath (Join-Path $brand 'ragent.ico') -OutputPath $output
     if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Setup build failed.' }
+} catch {
+    $buildFailed = $true
+    throw
 } finally {
-    if (Test-Path -LiteralPath $staging -PathType Container) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    try {
+        if (Test-Path -LiteralPath $staging -PathType Container) { Remove-Item -LiteralPath $staging -Recurse -Force }
+    } catch {
+        if ($buildFailed) { Write-Warning ('Bundle staging cleanup failed: ' + $_.Exception.Message) }
+        else { throw }
+    }
 }

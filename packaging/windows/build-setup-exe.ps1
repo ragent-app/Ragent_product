@@ -15,14 +15,32 @@ $buildRecord = $msi + '.build.json'
 $desktopRecordPath = $desktopMsi + '.build.json'
 $publicVersion = $null
 function Read-MsiProductVersion([string]$Path) {
-    $installer = New-Object -ComObject WindowsInstaller.Installer
-    $db = $installer.OpenDatabase($Path, 0)
-    $view = $db.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''ProductVersion''')
+    $installer = $null; $db = $null; $view = $null; $row = $null
+    $readFailed = $false
     try {
-        $view.Execute(); $row = $view.Fetch()
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $db = $installer.OpenDatabase($Path, 0)
+        $view = $db.OpenView('SELECT `Value` FROM `Property` WHERE `Property` = ''ProductVersion''')
+        [void]$view.Execute(); $row = $view.Fetch()
         if (-not $row) { throw 'SETUP_MSI_VERSION_MISSING' }
-        return $row.StringData(1)
-    } finally { $view.Close() }
+        return [string]$row.StringData(1)
+    } catch {
+        $readFailed = $true
+        throw
+    } finally {
+        $cleanupErrors = @()
+        if ($view) { try { [void]$view.Close() } catch { $cleanupErrors += $_.Exception.Message } }
+        foreach ($item in @($row, $view, $db, $installer)) {
+            if ($item -and [Runtime.InteropServices.Marshal]::IsComObject($item)) {
+                try { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($item) }
+                catch { $cleanupErrors += $_.Exception.Message }
+            }
+        }
+        if ($cleanupErrors.Count) {
+            $message = 'MSI metadata cleanup failed: ' + ($cleanupErrors -join '; ')
+            if ($readFailed) { Write-Warning $message } else { throw $message }
+        }
+    }
 }
 if ((Read-MsiProductVersion $msi) -cne (Read-MsiProductVersion $desktopMsi)) { throw 'SETUP_MSI_VERSION_MISMATCH' }
 if (Test-Path -LiteralPath $buildRecord -PathType Leaf) {
