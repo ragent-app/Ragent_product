@@ -21,6 +21,7 @@ import com.andysagent.ragent.core.agentui.*
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.SwitchingRagentTransport
 import com.andysagent.ragent.core.protocol.*
@@ -50,7 +51,7 @@ import kotlinx.serialization.json.contentOrNull
 
 @Serializable private data class ConversationBinding(val sessionId: String? = null, val generation: Long)
 @Serializable private data class ConversationDescriptor(val organizationId: String, val nodeId: String, val currentBinding: ConversationBinding, val runtimeState: String = "unknown")
-private class ConversationDenied : Exception()
+private class ConversationDenied(val authorizationDenied: Boolean = false) : Exception()
 private class BindingChanged : Exception()
 private class ConversationReset : Exception()
 
@@ -76,8 +77,16 @@ private class ConversationReader(private val transport: RagentTransport, private
     var runtimeState by mutableStateOf("unknown"); private set
     private fun enc(value: String) = Uri.encode(value)
     private suspend fun get(path: String): String {
-        val response = transport.execute(ApiRequest("GET", path))
-        if (response.statusCode == 401 || response.statusCode == 403 || response.statusCode == 404) throw ConversationDenied()
+        val response = try {
+            transport.execute(ApiRequest("GET", path))
+        } catch (e: ApiException) {
+            if (e.statusCode == 401 || e.statusCode == 403) throw ConversationDenied(authorizationDenied = true)
+            if (e.statusCode == 404) throw ConversationDenied()
+            if (e.statusCode == 409) throw BindingChanged()
+            throw e
+        }
+        if (response.statusCode == 401 || response.statusCode == 403) throw ConversationDenied(authorizationDenied = true)
+        if (response.statusCode == 404) throw ConversationDenied()
         if (response.statusCode == 409) throw BindingChanged()
         if (!response.isSuccessful) error("Read failed")
         return response.body
@@ -237,13 +246,14 @@ private class ConversationReader(private val transport: RagentTransport, private
 private enum class ConversationStatus { Loading, Ready, Offline, Denied, Unbound, Error }
 
 @Composable
-fun OrganizationConversationContent(transport: RagentTransport, organizationId: String, nodeId: String, targetId: String?, identityScope: String, modifier: Modifier = Modifier, onRuntimeState: (String?) -> Unit = {}) {
+fun OrganizationConversationContent(transport: RagentTransport, organizationId: String, nodeId: String, targetId: String?, identityScope: String, modifier: Modifier = Modifier, onRuntimeState: (String?) -> Unit = {}, onAuthorizationDenied: () -> Unit = {}) {
     val delegate = (transport as? SwitchingRagentTransport)?.delegate?.collectAsState()?.value
     val reader = remember(transport, targetId, identityScope, organizationId, nodeId) { ConversationReader(transport, organizationId, nodeId) }
     val connection by transport.connectionState.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val currentCallback by rememberUpdatedState(onRuntimeState)
+    val authorizationDeniedCallback by rememberUpdatedState(onAuthorizationDenied)
     LaunchedEffect(reader, reader.runtimeState, reader.status) {
         currentCallback(reader.runtimeState.takeIf { reader.status == ConversationStatus.Ready && it != "unknown" })
     }
@@ -260,7 +270,7 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
             while (true) {
                 try { reader.open(); while (true) reader.waitForUpdates() }
                 catch (e: CancellationException) { throw e }
-                catch (_: ConversationDenied) { reader.denied(); break }
+                catch (e: ConversationDenied) { reader.denied(); if (e.authorizationDenied) authorizationDeniedCallback(); break }
                 catch (_: BindingChanged) { reader.reset(); delay(250) }
                 catch (_: ConversationReset) { reader.reset(); delay(250) }
                 catch (_: Exception) { reader.offline(); delay(2000) }
@@ -292,9 +302,9 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
             ConversationStatus.Error -> ConversationLabel(R.string.org_conversation_error)
             ConversationStatus.Ready -> if (reader.items.isEmpty()) ConversationLabel(R.string.org_conversation_empty)
         }
-        if (newContent || reader.unseen) TextButton(onClick = { scope.launch { try { if (reader.browsingHistory) reader.newest(); val count = reader.items.size + if (reader.hasOlder) 1 else 0; if (count > 0) { withFrameNanos { }; snapshotFlow { list.layoutInfo.totalItemsCount }.first { it >= count }; list.scrollToItem(count - 1) }; newContent = false } catch (_: ConversationDenied) { reader.denied(); restart++ } catch (e: CancellationException) { throw e } catch (_: Exception) { reader.reset(); restart++ } } }) { Text(androidx.compose.ui.res.stringResource(if (reader.browsingHistory) R.string.org_conversation_latest else R.string.org_conversation_new)) }
+        if (newContent || reader.unseen) TextButton(onClick = { scope.launch { try { if (reader.browsingHistory) reader.newest(); val count = reader.items.size + if (reader.hasOlder) 1 else 0; if (count > 0) { withFrameNanos { }; snapshotFlow { list.layoutInfo.totalItemsCount }.first { it >= count }; list.scrollToItem(count - 1) }; newContent = false } catch (e: ConversationDenied) { reader.denied(); if (e.authorizationDenied) authorizationDeniedCallback(); restart++ } catch (e: CancellationException) { throw e } catch (_: Exception) { reader.reset(); restart++ } } }) { Text(androidx.compose.ui.res.stringResource(if (reader.browsingHistory) R.string.org_conversation_latest else R.string.org_conversation_new)) }
         LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            if (reader.hasOlder) item(key = "older") { TextButton(enabled = !reader.loadingOlder, onClick = { scope.launch { try { reader.older() } catch (_: ConversationDenied) { reader.denied(); restart++ } catch (_: BindingChanged) { reader.reset(); restart++ } catch (_: ConversationReset) { reader.reset(); restart++ } catch (e: CancellationException) { throw e } catch (_: Exception) { reader.offline() } } }) { Text(androidx.compose.ui.res.stringResource(R.string.org_conversation_older)) } }
+            if (reader.hasOlder) item(key = "older") { TextButton(enabled = !reader.loadingOlder, onClick = { scope.launch { try { reader.older() } catch (e: ConversationDenied) { reader.denied(); if (e.authorizationDenied) authorizationDeniedCallback(); restart++ } catch (_: BindingChanged) { reader.reset(); restart++ } catch (_: ConversationReset) { reader.reset(); restart++ } catch (e: CancellationException) { throw e } catch (_: Exception) { reader.offline() } } }) { Text(androidx.compose.ui.res.stringResource(R.string.org_conversation_older)) } }
             items(reader.items, key = { it.id }) { ConversationItem(it) }
         }
     }
