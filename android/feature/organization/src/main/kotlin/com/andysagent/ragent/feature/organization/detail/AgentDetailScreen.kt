@@ -38,6 +38,7 @@ fun AgentDetailScreen(node: NodeDetailUiState, onBack: () -> Unit, modifier: Mod
             }
             Text(stringResource(roleLabel(node.role)) + " · " + stringResource(stateLabel(node.runtimeState)), color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp, modifier = Modifier.padding(top = 8.dp))
             Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+                node.professionName?.let { value -> DetailSection(stringResource(R.string.org_detail_profession)) { DetailText(value) } }
                 DetailSection(stringResource(R.string.org_detail_task)) {
                     DetailText(node.currentTaskSummary?.takeIf { it.isNotBlank() } ?: stringResource(R.string.org_detail_no_task))
                     node.currentTaskDetail?.takeIf { it.isNotBlank() }?.let { DetailText(it) }
@@ -72,9 +73,12 @@ private fun DetailText(value: String) {
 private fun roleLabel(role: NodeRole): Int = when (role) {
     NodeRole.EXECUTIVE -> R.string.org_detail_role_lead
     NodeRole.MANAGER -> R.string.org_detail_role_manager
+    NodeRole.PHASE_LEAD -> R.string.org_detail_role_phase_lead
     NodeRole.WORKER -> R.string.org_detail_role_worker
+    NodeRole.WRITER -> R.string.org_detail_role_writer
     NodeRole.REVIEWER -> R.string.org_detail_role_reviewer
     NodeRole.EXPERT -> R.string.org_detail_role_expert
+    NodeRole.UNKNOWN -> R.string.org_detail_role_unknown
 }
 
 private fun stateLabel(state: NodeRuntimeState): Int = when (state) {

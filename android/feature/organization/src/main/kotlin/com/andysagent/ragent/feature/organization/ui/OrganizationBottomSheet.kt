@@ -41,9 +41,12 @@ fun OrganizationBottomSheet(node: NodeDetailUiState, onDismiss: () -> Unit, onVi
                 val role = when (node.role) {
                     NodeRole.EXECUTIVE -> R.string.organization_role_lead
                     NodeRole.MANAGER -> R.string.organization_role_manager
+                    NodeRole.PHASE_LEAD -> R.string.org_detail_role_phase_lead
                     NodeRole.REVIEWER -> R.string.organization_role_reviewer
                     NodeRole.EXPERT -> R.string.organization_role_expert
                     NodeRole.WORKER -> R.string.organization_role_member
+                    NodeRole.WRITER -> R.string.org_detail_role_writer
+                    NodeRole.UNKNOWN -> R.string.org_detail_role_unknown
                 }
                 val state = when (node.runtimeState) {
                     NodeRuntimeState.WORKING -> R.string.organization_node_working
@@ -57,6 +60,7 @@ fun OrganizationBottomSheet(node: NodeDetailUiState, onDismiss: () -> Unit, onVi
                     NodeRuntimeState.IDLE -> R.string.organization_node_idle
                 }
                 Text(stringResource(role) + " · " + stringResource(state), Modifier.padding(top = 4.dp), color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp)
+                node.professionName?.let { DetailSection(stringResource(R.string.org_detail_profession), it) }
                 DetailSection(stringResource(R.string.organization_task_label), node.currentTaskSummary?.takeIf { it.isNotBlank() } ?: stringResource(R.string.organization_no_task))
                 if (!node.currentActivity.isNullOrBlank()) DetailSection(stringResource(R.string.organization_activity_label), node.currentActivity)
                 if (node.progressTotal > 0) DetailSection(stringResource(R.string.organization_progress), "${node.progressCompleted} / ${node.progressTotal}")

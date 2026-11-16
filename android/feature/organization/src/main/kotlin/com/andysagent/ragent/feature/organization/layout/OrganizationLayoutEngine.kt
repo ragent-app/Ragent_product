@@ -93,7 +93,7 @@ class OrganizationLayoutEngine {
 
         val rootPos = EdgePoint(centerX, rootY)
         calculatedPositions[rootId] = rootPos
-        val roleOrder = mapOf(NodeRole.MANAGER to 0, NodeRole.WORKER to 1, NodeRole.EXPERT to 2, NodeRole.REVIEWER to 3, NodeRole.EXECUTIVE to 4)
+        val roleOrder = mapOf(NodeRole.MANAGER to 0, NodeRole.PHASE_LEAD to 1, NodeRole.WORKER to 2, NodeRole.WRITER to 3, NodeRole.EXPERT to 4, NodeRole.REVIEWER to 5, NodeRole.EXECUTIVE to 6, NodeRole.UNKNOWN to 7)
         val comparator = compareBy<OrganizationNodeModel>({ roleOrder[it.role] ?: 4 }, { it.domain.name }, { it.id })
         val ordered = mutableListOf<String>()
         val visited = mutableSetOf(rootId)

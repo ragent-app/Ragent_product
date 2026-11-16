@@ -47,7 +47,7 @@ object OrganizationUiMapper {
             } else {
                 val node = state.nodes[pos.id]
                 val anim = nodeAnimations[pos.id]
-                val role = node?.role ?: NodeRole.WORKER
+                val role = node?.role ?: NodeRole.UNKNOWN
                 val domain = node?.domain ?: com.andysagent.ragent.feature.organization.domain.AgentDomain.GENERAL
                 val name = node?.displayName ?: pos.id
                 val runtimeState = node?.runtimeState ?: NodeRuntimeState.IDLE
@@ -87,6 +87,8 @@ object OrganizationUiMapper {
                     radiusDp = pos.radius,
                     role = role,
                     domain = domain,
+                    hasRecognizedDomain = node?.hasRecognizedDomain == true,
+                    professionName = node?.professionName,
                     displayName = name,
                     runtimeState = runtimeState,
                     isCluster = false,
@@ -192,6 +194,7 @@ object OrganizationUiMapper {
             displayName = node.displayName,
             role = node.role,
             domain = node.domain,
+            professionName = node.professionName,
             runtimeState = node.runtimeState,
             sessionId = node.sessionId,
             currentTaskSummary = node.currentTaskSummary,

@@ -13,6 +13,10 @@
     <string name="org_detail_review">审核</string>
     <string name="org_detail_role_lead">团队负责人</string>
     <string name="org_detail_role_manager">管理成员</string>
+    <string name="org_detail_role_phase_lead">阶段负责人</string>
+    <string name="org_detail_role_writer">编写成员</string>
+    <string name="org_detail_role_unknown">职责未提供</string>
+    <string name="org_detail_profession">专业</string>
     <string name="org_detail_role_worker">团队成员</string>
     <string name="org_detail_role_reviewer">审核成员</string>
     <string name="org_detail_role_expert">专家</string>

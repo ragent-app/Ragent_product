@@ -44,8 +44,9 @@ data class OrganizationProgressDto(
 data class OrganizationNodeDto(
     val id: String,
     val parentId: String? = null,
-    val role: String = "worker",
+    val role: String = "",
     val domain: String? = null,
+    val iconKey: String? = null,
     val displayName: String = "",
     val phaseId: String? = null,
     val sessionClass: String = "",

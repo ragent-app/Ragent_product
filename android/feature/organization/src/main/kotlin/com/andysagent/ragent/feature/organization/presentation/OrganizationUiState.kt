@@ -32,6 +32,8 @@ data class RenderedNodeUiState(
     val testsPassed: Int = 0,
     val testsTotal: Int = 0,
     val accessibilityText: String = "",
+    val hasRecognizedDomain: Boolean = false,
+    val professionName: String? = null,
 )
 
 data class RenderedEdgeUiState(
@@ -94,6 +96,7 @@ data class NodeDetailUiState(
     val changedFiles: List<String> = emptyList(),
     val resultPacketSummary: String? = null,
     val isRootLeader: Boolean = false,
+    val professionName: String? = null,
 )
 
 data class ActivityFeedItemUiState(

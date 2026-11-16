@@ -49,7 +49,7 @@ private fun preview3NodeState(): OrganizationUiState {
         y = 650f,
         radiusDp = 20f,
         role = NodeRole.MANAGER,
-        domain = AgentDomain.ANDROID,
+        domain = AgentDomain.MOBILE,
         displayName = "Android Lead",
         runtimeState = NodeRuntimeState.IDLE,
     )

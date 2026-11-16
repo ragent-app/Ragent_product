@@ -3,46 +3,67 @@ package com.andysagent.ragent.feature.organization.domain
 enum class NodeRole {
     EXECUTIVE,
     MANAGER,
+    PHASE_LEAD,
     WORKER,
+    WRITER,
     REVIEWER,
-    EXPERT;
+    EXPERT,
+    UNKNOWN;
 
     companion object {
         fun fromString(role: String?): NodeRole = when (role?.lowercase()) {
             "root", "executive", "lead" -> EXECUTIVE
             "manager", "lead_worker" -> MANAGER
+            "phase_lead" -> PHASE_LEAD
+            "worker" -> WORKER
+            "writer" -> WRITER
             "reviewer" -> REVIEWER
-            "expert", "consultant" -> EXPERT
-            else -> WORKER
+            "expert", "consultant", "specialist" -> EXPERT
+            else -> UNKNOWN
         }
     }
 }
 
+// Visual icon categories only. The original, unrestricted specialty is kept separately.
 enum class AgentDomain {
     BACKEND,
-    ANDROID,
+    MOBILE,
+    WEB,
     RUNTIME,
-    SECURITY,
-    TESTING,
     ARCHITECTURE,
     DATABASE,
+    DATA,
+    AI,
+    CLOUD,
+    NETWORK,
+    HARDWARE,
+    SECURITY,
+    TESTING,
+    DESIGN,
+    PRODUCT,
     RESEARCH,
+    WRITING,
+    TRANSLATION,
+    EDUCATION,
+    BUSINESS,
+    FINANCE,
+    LEGAL,
+    HEALTH,
+    MARKETING,
+    SALES,
+    PEOPLE,
+    OPERATIONS,
+    LOGISTICS,
+    MEDIA,
+    ENVIRONMENT,
+    ENGINEERING,
     GENERAL;
 
     companion object {
-        fun infer(displayName: String, domainHint: String? = null): AgentDomain {
-            val text = "${domainHint.orEmpty()} $displayName".lowercase()
-            return when {
-                text.contains("android") || text.contains("ui") || text.contains("frontend") -> ANDROID
-                text.contains("runtime") || text.contains("protocol") || text.contains("stream") -> RUNTIME
-                text.contains("security") || text.contains("permission") || text.contains("auth") -> SECURITY
-                text.contains("test") || text.contains("qa") || text.contains("benchmark") -> TESTING
-                text.contains("arch") -> ARCHITECTURE
-                text.contains("db") || text.contains("database") || text.contains("sqlite") || text.contains("room") -> DATABASE
-                text.contains("research") || text.contains("doc") -> RESEARCH
-                text.contains("backend") || text.contains("server") || text.contains("api") -> BACKEND
-                else -> GENERAL
-            }
+        fun fromExplicit(domain: String?, iconKey: String?): AgentDomain? {
+            val key = (iconKey ?: domain)?.trim()?.lowercase() ?: return null
+            if (iconKey != null && (key == "android" || key == "ios")) return MOBILE
+            return entries.firstOrNull { it.name.lowercase() == key }
         }
     }
 }
@@ -129,8 +150,10 @@ data class ConsultationState(
 data class OrganizationNodeModel(
     val id: String,
     val parentId: String? = null,
-    val role: NodeRole = NodeRole.WORKER,
+    val role: NodeRole = NodeRole.UNKNOWN,
     val domain: AgentDomain = AgentDomain.GENERAL,
+    val hasRecognizedDomain: Boolean = false,
+    val professionName: String? = null,
     val displayName: String = "",
     val phaseId: String? = null,
     val sessionClass: String = "",

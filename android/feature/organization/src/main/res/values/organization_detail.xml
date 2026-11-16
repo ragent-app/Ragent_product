@@ -13,6 +13,10 @@
     <string name="org_detail_review">Review</string>
     <string name="org_detail_role_lead">Team lead</string>
     <string name="org_detail_role_manager">Manager</string>
+    <string name="org_detail_role_phase_lead">Phase lead</string>
+    <string name="org_detail_role_writer">Writer</string>
+    <string name="org_detail_role_unknown">Role unavailable</string>
+    <string name="org_detail_profession">Specialty</string>
     <string name="org_detail_role_worker">Team member</string>
     <string name="org_detail_role_reviewer">Reviewer</string>
     <string name="org_detail_role_expert">Expert</string>

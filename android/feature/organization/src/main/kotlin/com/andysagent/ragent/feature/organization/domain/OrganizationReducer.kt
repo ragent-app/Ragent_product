@@ -19,19 +19,7 @@ object OrganizationReducer {
             mapNode(nodeDto, blocker)
         }
 
-        // Fix roles if root executive is not explicitly set and there is a manager/worker root candidate
-        val nodesWithExecutive = if (rawNodes.none { it.role == NodeRole.EXECUTIVE } && rawNodes.isNotEmpty()) {
-            val rootCandidate = rawNodes.firstOrNull { it.parentId == null && it.role != NodeRole.REVIEWER && it.role != NodeRole.EXPERT }
-            if (rootCandidate != null) {
-                rawNodes.map { node ->
-                    if (node.id == rootCandidate.id) node.copy(role = NodeRole.EXECUTIVE) else node
-                }
-            } else {
-                rawNodes
-            }
-        } else {
-            rawNodes
-        }
+        val nodesWithExecutive = rawNodes
 
         // Calculate parent-child relationships and directChildCount
         val childrenByParent = nodesWithExecutive.groupBy { it.parentId }
@@ -118,7 +106,7 @@ object OrganizationReducer {
 
     private fun mapNode(dto: OrganizationNodeDto, blocker: OrganizationBlockerDto?): OrganizationNodeModel {
         val role = NodeRole.fromString(dto.role)
-        val domain = AgentDomain.infer(dto.displayName, dto.domain)
+        val domain = AgentDomain.fromExplicit(dto.domain, dto.iconKey)
         val hasBlocker = (blocker != null)
         val runtimeState = NodeRuntimeState.fromString(dto.status, dto.currentActivity, hasBlocker)
 
@@ -126,7 +114,9 @@ object OrganizationReducer {
             id = dto.id,
             parentId = dto.parentId,
             role = role,
-            domain = domain,
+            domain = domain ?: AgentDomain.GENERAL,
+            hasRecognizedDomain = domain != null,
+            professionName = dto.domain?.trim()?.takeIf { it.isNotEmpty() },
             displayName = dto.displayName.ifEmpty { dto.id },
             phaseId = dto.phaseId,
             sessionClass = dto.sessionClass,
