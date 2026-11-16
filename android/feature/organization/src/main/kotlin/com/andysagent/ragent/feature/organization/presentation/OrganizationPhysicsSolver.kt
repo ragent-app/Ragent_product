@@ -29,9 +29,7 @@ internal class OrganizationPhysicsSolver {
     private var density = 1f
     private var lastFrameNanos: Long? = null
     private var moving = false
-    private var materialDuration = .22f
-
-    fun setMaterialDuration(seconds: Float) { materialDuration = seconds.coerceAtLeast(0f) }
+    private val materialDuration = .22f
 
     fun reportBirthSurfaceGaps(gapsDp: Map<String, Float>): PhysicsSnapshot {
         gapsDp.forEach { (id, gap) ->
@@ -99,14 +97,14 @@ internal class OrganizationPhysicsSolver {
         return updateTargets(layout, parents, density, births, animate = true)
     }
 
-    fun snapToTargets(preserveMaterial: Boolean = false, wakeMaterial: Boolean = false): PhysicsSnapshot {
+    fun snapToTargets(preserveMaterial: Boolean = false): PhysicsSnapshot {
         bodies.values.forEach { b ->
             b.x = b.targetX; b.y = b.targetY; b.vx = 0f; b.vy = 0f
             b.radius = b.targetRadius; b.radiusVelocity = 0f
             if (preserveMaterial && b.source != null) b.birthSettled = true else b.source = null
             b.recoilX = 0f; b.recoilY = 0f; b.recoilVx = 0f; b.recoilVy = 0f
         }
-        moving = preserveMaterial && wakeMaterial && bodies.values.any { it.source != null && (!it.materialStarted || it.materialElapsed < materialDuration) }
+        moving = false
         lastFrameNanos = null
         return snapshot()
     }

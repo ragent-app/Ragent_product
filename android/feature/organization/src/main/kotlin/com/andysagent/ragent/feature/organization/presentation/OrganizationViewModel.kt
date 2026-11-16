@@ -336,13 +336,11 @@ class OrganizationViewModel(
     fun setMotionPreference(preference: MotionPreference) {
         if (motionPreference == preference) return
         motionPreference = preference
-        physics.setMaterialDuration(if (preference == MotionPreference.Reduced) .12f else .22f)
-        if (preference != MotionPreference.Full) renderState.value = renderState.value.copy(
-            physics = physics.snapToTargets(preserveMaterial = preference == MotionPreference.Reduced, wakeMaterial = preference == MotionPreference.Reduced))
+        if (preference != MotionPreference.Full) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
     }
 
     fun advancePhysicsFrame(frameNanos: Long) {
-        if (motionPreference != MotionPreference.None && renderState.value.physics.running) {
+        if (motionPreference == MotionPreference.Full && !reduceMotion.value && renderState.value.physics.running) {
             renderState.value = renderState.value.copy(physics = physics.advance(frameNanos))
         }
     }
@@ -353,9 +351,6 @@ class OrganizationViewModel(
 
     fun setReduceMotion(reduce: Boolean) {
         reduceMotion.value = reduce
-        if (reduce) {
-            physics.setMaterialDuration(.12f)
-            renderState.value = renderState.value.copy(physics = physics.snapToTargets(preserveMaterial = true, wakeMaterial = true))
-        }
+        if (reduce) renderState.value = renderState.value.copy(physics = physics.snapToTargets())
     }
 }
