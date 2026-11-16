@@ -1,6 +1,11 @@
 package com.andysagent.ragent
 
 import android.os.Bundle
+import android.view.KeyEvent
+import android.widget.Toast
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -41,6 +46,22 @@ import kotlinx.coroutines.delay
 
 /** Local, offline visual fixture. Never included in release builds or persisted. */
 class ComposerPickerQaActivity : ComponentActivity() {
+    private var organizationDemoTransport: LocalOrganizationDemoTransport? = null
+    private var organizationDemoSwitch: Job? = null
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        val transport = organizationDemoTransport
+        if (transport != null && event.repeatCount == 0 &&
+            (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            val visible = keyCode == KeyEvent.KEYCODE_VOLUME_UP
+            organizationDemoSwitch?.cancel()
+            organizationDemoSwitch = lifecycleScope.launch { transport.showMembers(visible) }
+            Toast.makeText(this, if (visible) "本地演示 · 五成员" else "本地演示 · 空协作", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val oldHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -55,6 +76,11 @@ class ComposerPickerQaActivity : ComponentActivity() {
         val page = intent.getStringExtra("page") ?: "chat"
         val projectSessionCount = intent.getIntExtra("project_session_count", 3).coerceIn(1, 60)
         val mixedProjectSessions = intent.getBooleanExtra("mixed_project_sessions", false)
+        if (intent.getBooleanExtra("organization_demo", false)) {
+            val demoSessionId = if (mixedProjectSessions) "qa-session-4" else "composer-visual-qa"
+            organizationDemoTransport = LocalOrganizationDemoTransport(demoSessionId)
+            Toast.makeText(this, "本地演示 · 音量上键显示协作，音量下键还原", Toast.LENGTH_LONG).show()
+        }
         val longPreviewTitles = intent.getBooleanExtra("long_preview_titles", false)
         val qaFontScale = intent.getFloatExtra("font_scale", 1f)
         val panel = intent.getStringExtra("panel")
@@ -364,7 +390,8 @@ class ComposerPickerQaActivity : ComponentActivity() {
                             attention.copy(error = "Local preview: no real action was dispatched. Try again.")
                         else -> attention
                     }
-                }, onAttentionOpenSession = { attention = AttentionUiState() })
+                }, onAttentionOpenSession = { attention = AttentionUiState() },
+                    organizationTransport = organizationDemoTransport)
             }
         }
     }
