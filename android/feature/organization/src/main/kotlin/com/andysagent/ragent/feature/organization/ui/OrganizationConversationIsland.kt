@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,7 +118,7 @@ internal fun OrganizationConversationIsland(
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = groupAlpha }) {
         Box(Modifier.matchParentSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
         val shape = RoundedCornerShape(with(density) { cornerPx.coerceAtLeast(0f).toDp() })
-        Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((center.x - shellWidth / 2f).roundToInt(), (center.y - shellHeight / 2f).roundToInt()) }
+        Box(Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset((center.x - shellWidth / 2f).roundToInt(), (center.y - shellHeight / 2f).roundToInt()) }
             .size(with(density) { shellWidth.coerceAtLeast(1f).toDp() }, with(density) { shellHeight.coerceAtLeast(1f).toDp() })
             .clip(shape)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
@@ -180,14 +181,14 @@ internal fun OrganizationConversationIsland(
         val glyphSize = with(density) { nodeIconSize(frame.baseRadiusDp).dp.toPx() } * sourceScale * (1f - glyphMotion) + with(density) { 20.dp.toPx() } * glyphMotion
         val badgeAlpha = islandSmooth(p, .15f, .50f)
         val badgeSize = with(density) { 32.dp.toPx() }
-        Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((glyphX - badgeSize / 2f).roundToInt(), (glyphY - badgeSize / 2f).roundToInt()) }
+        Box(Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset((glyphX - badgeSize / 2f).roundToInt(), (glyphY - badgeSize / 2f).roundToInt()) }
             .size(32.dp).graphicsLayer { alpha = badgeAlpha }.clip(CircleShape).drawWithCache {
                 val brush = Brush.linearGradient(0f to accent[0], .55f to accent[1], 1f to accent[2],
                     start = Offset(size.width * .12f, size.height * .08f), end = Offset(size.width * .88f, size.height * .92f))
                 onDrawBehind { drawRect(brush) }
             })
         Icon(painterResource(visual.icon), contentDescription = null, tint = colors.canvas,
-            modifier = Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((glyphX - glyphSize / 2f).roundToInt(), (glyphY - glyphSize / 2f).roundToInt()) }
+            modifier = Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset((glyphX - glyphSize / 2f).roundToInt(), (glyphY - glyphSize / 2f).roundToInt()) }
                 .size(with(density) { glyphSize.toDp() })
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { if (closingRequested && !deleted) onReopen() }.clearAndSetSemantics {})
         if (node.runtimeState != NodeRuntimeState.IDLE) {
@@ -201,7 +202,7 @@ internal fun OrganizationConversationIsland(
                 NodeRuntimeState.DONE -> colors.success
                 else -> colors.secondaryContent
             }
-            Box(Modifier.align(Alignment.Absolute.TopLeft).absoluteOffset { IntOffset((dotX - dotSize / 2f).roundToInt(), (dotY - dotSize / 2f).roundToInt()) }
+            Box(Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset((dotX - dotSize / 2f).roundToInt(), (dotY - dotSize / 2f).roundToInt()) }
                 .size(with(density) { dotSize.toDp() }).graphicsLayer { alpha = dotAlpha }.clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
                 Box(Modifier.fillMaxSize(7f / 11f).clip(CircleShape).background(dotColor))
             }
