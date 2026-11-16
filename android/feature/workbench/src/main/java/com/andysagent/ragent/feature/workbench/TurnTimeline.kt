@@ -121,6 +121,7 @@ fun TurnTimelineView(
     runActive: Boolean = false,
     runWaitingApproval: Boolean = false,
     activeAction: (@Composable () -> Unit)? = null,
+    onEditAdditional: ((String, String) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -139,11 +140,10 @@ fun TurnTimelineView(
             )
         }
 
-        if (turn.entries.isNotEmpty() || runActive) {
-            // Keep every conversation entry visible in chronological order;
-            // reasoning and tool activity remain available in Run Details.
-            val processEntries = emptyList<TimelineItem>()
-            val outsideEntries = turn.entries.filterNot { it is TimelineItem.Operation }
+        if (turn.entries.isNotEmpty() || runActive || runDuration != null) {
+            // Keep the run's process in chronological order, with its final reply outside.
+            val (processEntries, outsideEntries) = if (runActive) turn.entries to emptyList()
+                else splitTurnEntries(turn.entries, allowTerminalFallback = runDuration != null && !turn.isLive)
             var expanded by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(runActive) }
             var userToggled by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(false) }
             LaunchedEffect(runActive) { if (!runActive && !userToggled) expanded = false }
@@ -151,7 +151,18 @@ fun TurnTimelineView(
             val renderEntry: @Composable (TimelineItem) -> Unit = { item -> key(item.id) {
                 when (item) {
                     is TimelineItem.Message -> {
-                        ResultBlock(item,
+                        if (item.role == com.andysagent.ragent.core.timeline.TimelineRole.User) {
+                            UserPromptBlock(
+                                prompt = TurnUserPrompt(id = item.id, text = item.text, seq = item.seq, requestId = item.requestId,
+                                    attachments = item.attachments.mapIndexed { idx, att -> ComposerAttachment(
+                                        id = att.assetId ?: "att-$idx", name = att.originalName ?: att.filename ?: "attachment",
+                                        mimeType = att.mimeType ?: "application/octet-stream", sizeBytes = att.sizeBytes ?: 0L,
+                                        previewUrl = att.downloadUrl ?: att.url) }),
+                                onBranch = onBranch?.takeIf { item.seq > 0L }?.let { branch -> { branch(item.seq, "user-continue") } },
+                                onEditResend = { item.requestId?.let { onEditAdditional?.invoke(it, item.text) } }, onRetry = onRetryPendingTurn,
+                                showMessageActions = showMessageActions && item.requestId != null && onEditAdditional != null,
+                            )
+                        } else ResultBlock(item,
                             isLastTurn && item.id == turn.agentMessages.lastOrNull { it.completed }?.id,
                             onBranch?.takeIf { item.lastEventSeq > 0L }?.let { branch -> { branch(item.lastEventSeq, "assistant-continue") } },
                             item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
@@ -186,7 +197,7 @@ fun TurnTimelineView(
                     }
                 }
             }
-            outsideEntries.filterNot { it is TimelineItem.Operation }.forEach { renderEntry(it) }
+            outsideEntries.forEach { renderEntry(it) }
             return@Column
         }
 

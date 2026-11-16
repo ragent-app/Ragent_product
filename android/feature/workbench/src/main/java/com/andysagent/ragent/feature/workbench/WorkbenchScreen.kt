@@ -2969,6 +2969,10 @@ private fun ChatSurface(
                                 onSetEditingTurn(msgId, text)
                                 onEvent(WorkbenchEvent.ComposerChanged(text))
                             },
+                            onEditAdditional = { requestId, text ->
+                                onSetEditingTurn(requestId, text)
+                                onEvent(WorkbenchEvent.ComposerChanged(text))
+                            },
                             onPlanAction = { planId, action -> onEvent(WorkbenchEvent.PlanAction(planId, action)) },
                             onRetryPendingTurn = { onEvent(WorkbenchEvent.RetryPendingTurn) },
                             onOpenFileDiff = { diff -> onSetSelectedDiffFile(diff) },

@@ -101,33 +101,26 @@ internal fun splitTurnEntries(
     entries: List<TimelineItem>,
     allowTerminalFallback: Boolean = false,
 ): Pair<List<TimelineItem>, List<TimelineItem>> {
-    val explicitIndex = entries.indexOfFirst {
+    val explicitIndex = entries.indexOfLast {
         it is TimelineItem.Message && it.role == TimelineRole.Agent && it.messagePhase == "final_answer"
     }
     val finalIndex = if (explicitIndex >= 0) explicitIndex else if (allowTerminalFallback) {
         // Durable reasoning blocks can be emitted after a finalized assistant
         // snapshot even though they belong to its process. They must not hide
         // the actual reply when the turn is complete.
-        val last = entries.indexOfLast { it !is TimelineItem.Notice && !(it is TimelineItem.Operation && it.isReasoning) }
-        val reply = entries.getOrNull(last) as? TimelineItem.Message
-        if (reply?.let {
-                it.role == TimelineRole.Agent && it.completed &&
-                    it.messagePhase?.lowercase() in setOf(null, "commentary")
-            } == true
-        ) last else -1
+        entries.indexOfLast { entry ->
+            entry is TimelineItem.Message && entry.role == TimelineRole.Agent && entry.completed &&
+                entry.messagePhase?.lowercase() in setOf(null, "commentary")
+        }
     } else -1
-    if (finalIndex < 0) return emptyList<TimelineItem>() to entries
-    if (explicitIndex < 0) {
-        val trailing = entries.drop(finalIndex + 1)
-        val lateReasoning = trailing.filter { it is TimelineItem.Operation && it.isReasoning }
-        return (entries.take(finalIndex) + lateReasoning) to
-            (listOf(entries[finalIndex]) + trailing.filterNot { it is TimelineItem.Operation && it.isReasoning })
-    }
-    return entries.take(finalIndex) to entries.drop(finalIndex)
+    if (finalIndex < 0) return if (allowTerminalFallback) entries to emptyList() else emptyList<TimelineItem>() to entries
+    // Late-arriving entries still belong to the run's process, even if a
+    // finalized snapshot was projected before them.
+    return (entries.take(finalIndex) + entries.drop(finalIndex + 1)) to listOf(entries[finalIndex])
 }
 
 internal fun activeRunTurnIndex(turns: List<TurnGroup>, runId: String?, requestId: String?): Int {
-    val match = turns.indexOfLast { turn ->
+    val match = turns.indexOfFirst { turn ->
         (!runId.isNullOrBlank() && turn.runId == runId) ||
             (!requestId.isNullOrBlank() && turn.requestId == requestId)
     }
@@ -304,11 +297,13 @@ class TurnGroupProjector {
                 !item.requestId.isNullOrBlank() && !currentRequestId.isNullOrBlank() &&
                 item.requestId != currentRequestId &&
                 (item.runId.isNullOrBlank() || item.runId != currentRunId)) flushTurn()
-            if (item !is TimelineItem.Message || item.role != TimelineRole.User) currentEntries += item
+            if (item !is TimelineItem.Message || item.role != TimelineRole.User ||
+                (currentUserPrompt != null && !item.runId.isNullOrBlank() && item.runId == currentRunId)) currentEntries += item
             when (item) {
                 is TimelineItem.Message -> {
                     if (item.role == TimelineRole.User) {
-                        // User message marks start of a new turn
+                        // Additional input for the same run is part of its process.
+                        if (currentUserPrompt != null && !item.runId.isNullOrBlank() && item.runId == currentRunId) continue
                         flushTurn()
                         currentRequestId = item.requestId ?: item.runId
                         currentRunId = item.runId
@@ -379,13 +374,14 @@ class TurnGroupProjector {
     /** Arrival order cannot attach a late reply to a newer queued user turn. */
     private fun pairAnchoredItems(items: List<TimelineItem>): List<TimelineItem> {
         val messages = items.filterIsInstance<TimelineItem.Message>()
-        if (messages.mapNotNull { it.requestId }.distinct().size < 2) return items
-        val requestByRun = messages.filter { !it.runId.isNullOrBlank() && !it.requestId.isNullOrBlank() }
-            .associate { requireNotNull(it.runId) to requireNotNull(it.requestId) }
+        // A run can accept multiple request IDs. Resolve each request to its run,
+        // rather than letting the most recent request claim the run's entries.
+        val runByRequest = messages.filter { !it.runId.isNullOrBlank() && !it.requestId.isNullOrBlank() }
+            .associate { requireNotNull(it.requestId) to requireNotNull(it.runId) }
         fun requestAnchor(requestId: String?, runId: String?): String? = when {
-            !requestId.isNullOrBlank() -> "request:$requestId"
-            runId != null && runId in requestByRun -> "request:${requestByRun[runId]}"
             !runId.isNullOrBlank() -> "run:$runId"
+            requestId != null && requestId in runByRequest -> "run:${runByRequest[requestId]}"
+            !requestId.isNullOrBlank() -> "request:$requestId"
             else -> null
         }
         val groups = linkedMapOf<String, MutableList<TimelineItem>>()
@@ -398,11 +394,15 @@ class TurnGroupProjector {
                 is TimelineItem.Notice -> requestAnchor(item.requestId, item.runId)
             }
             if (item is TimelineItem.Message && item.role == TimelineRole.User) current = anchor ?: "user:${item.id}"
-            groups.getOrPut(anchor ?: current) { mutableListOf() }.add(item)
+            val resolvedItem = if (item is TimelineItem.Message && item.runId.isNullOrBlank()) {
+                item.requestId?.let(runByRequest::get)?.let { item.copy(runId = it) } ?: item
+            } else item
+            groups.getOrPut(anchor ?: current) { mutableListOf() }.add(resolvedItem)
         }
         return groups.values.flatMap { group ->
-            group.filter { it is TimelineItem.Message && it.role == TimelineRole.User } +
-                group.filterNot { it is TimelineItem.Message && it.role == TimelineRole.User }
+            val firstUser = group.indexOfFirst { it is TimelineItem.Message && it.role == TimelineRole.User }
+            if (firstUser > 0) listOf(group[firstUser]) + group.take(firstUser) + group.drop(firstUser + 1)
+            else group
         }
     }
 }
@@ -415,7 +415,8 @@ fun resolveTurnDockAnchorIndex(turns: List<TurnGroup>, requestId: String): Int {
     val pendingIndex = turns.indexOfFirst { it.id == "turn-pending-$requestId" || it.id == "pending-$requestId" }
     if (pendingIndex >= 0) return pendingIndex
     return turns.indexOfFirst { turn ->
-        turn.requestId == requestId || turn.userPrompt?.requestId == requestId
+        turn.requestId == requestId || turn.userPrompt?.requestId == requestId ||
+            turn.entries.any { it is TimelineItem.Message && it.role == TimelineRole.User && it.requestId == requestId }
     }
 }
 
