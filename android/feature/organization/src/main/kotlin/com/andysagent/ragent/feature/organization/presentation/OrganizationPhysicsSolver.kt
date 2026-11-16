@@ -85,7 +85,7 @@ internal class OrganizationPhysicsSolver {
                 if (canBirth) moving = true
             }
         }
-        if (!animate) snapToTargets(preserveMaterial = true) else if (moving) lastFrameNanos = null
+        if (!animate) snapToTargets() else if (moving) lastFrameNanos = null
         return snapshot()
     }
 
@@ -191,7 +191,8 @@ internal class OrganizationPhysicsSolver {
                 if (actor != null) {
                     val dx = b.targetX - actor.targetX; val dy = b.targetY - actor.targetY
                     val length = hypot(dx, dy).coerceAtLeast(1f)
-                    val budding = (emergence / .14f).coerceIn(0f, 1f)
+                    val t = (emergence / .14f).coerceIn(0f, 1f)
+                    val budding = t * t * (3f - 2f * t)
                     b.radius = 2f + (b.targetRadius * .35f - 2f).coerceAtLeast(0f) * budding
                     b.radiusVelocity = 0f
                     val distance = (actor.radius + (-.7f + .9f * budding) * b.radius).coerceAtLeast(0f) * density
