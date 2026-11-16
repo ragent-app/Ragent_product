@@ -132,7 +132,7 @@ class OrganizationLayoutEngine {
                 1 -> floatArrayOf(35f)
                 2 -> floatArrayOf(-145f, 35f)
                 3 -> floatArrayOf(-125f, -15f, 110f)
-                else -> floatArrayOf(-145f, -38f, 53f, 151f)
+                else -> floatArrayOf(-155f, -37f, 100f, 160f)
             }[slot] else if (ring == 0) -145f + slot * (360f / firstCount) + if (slot % 2 == 0) 5f else -5f
                 else -120f + slot * 45f
             val radians = Math.toRadians(angle.toDouble())

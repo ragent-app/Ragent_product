@@ -28,7 +28,6 @@ import com.andysagent.ragent.feature.organization.domain.NodeRole
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
 import kotlin.math.hypot
-import kotlin.math.min
 
 @Composable
 internal fun OrganizationGraph(
@@ -68,85 +67,22 @@ internal fun OrganizationGraph(
         }
     }
     val nodesById = uiState.nodes.associateBy { it.id }
-    fun radius(id: String, animated: Boolean = false): Float {
+    fun radius(id: String): Float {
         val node = nodesById[id] ?: return 28f * density
-        return (if (node.role == NodeRole.EXECUTIVE) 32f else 28f) * density * (if (animated) scales[id] ?: node.scale else node.scale)
+        return (if (node.role == NodeRole.EXECUTIVE) 32f else 28f) * density * (scales[id] ?: node.scale)
     }
-    // Candidate search depends on target layout, not animated positions.
-    val targetGeometry = uiState.nodes.map { listOf(it.id, it.x, it.y, it.scale, it.role) }
-    val edgeGeometry = uiState.edges.map { Triple(it.id, it.fromNodeId, it.toNodeId) }
-    val targetBends = remember(targetGeometry, edgeGeometry, density) {
-      val targetPositions = uiState.nodes.associate { it.id to Offset(it.x, it.y) }
-      uiState.edges.associate { edge ->
-        val from = targetPositions[edge.fromNodeId]
-        val to = targetPositions[edge.toNodeId]
-        val bend = if (from == null || to == null) 0f else {
+    val edges = uiState.edges.mapNotNull { edge ->
+        val from = positions[edge.fromNodeId]
+        val to = positions[edge.toNodeId]
+        if (from == null || to == null) {
+            null
+        } else {
             val delta = to - from
             val length = hypot(delta.x, delta.y).coerceAtLeast(1f)
             val unit = delta / length
             val start = from + unit * radius(edge.fromNodeId)
             val end = to - unit * radius(edge.toNodeId)
-            val line = end - start
-            val lineLength = hypot(line.x, line.y).coerceAtLeast(1f)
-            val normal = Offset(-line.y / lineLength, line.x / lineLength)
-            val sign = if ((edge.id.hashCode() and 1) == 0) 1f else -1f
-            val candidates = listOf(min(18f * density, lineLength * .08f) * sign) +
-                listOf(32f, 48f, 64f, 80f).flatMap { listOf(it * density * sign, -it * density * sign) }
-            fun controls(bend: Float): Pair<Offset, Offset> =
-                (start + line / 3f + normal * bend) to (start + line * (2f / 3f) + normal * bend)
-            fun crossings(bend: Float): Int {
-                val (a, b) = controls(bend)
-                val points = (0..24).map { index ->
-                    val t = index / 24f
-                    val u = 1f - t
-                    start * (u * u * u) + a * (3f * u * u * t) + b * (3f * u * t * t) + end * (t * t * t)
-                }
-                return uiState.nodes.count { other ->
-                    if (other.id == edge.fromNodeId || other.id == edge.toNodeId) false else {
-                        val center = targetPositions[other.id] ?: return@count false
-                        val limit = radius(other.id) + 8f * density
-                        points.zipWithNext().any { (p, q) ->
-                            val segment = q - p
-                            val length2 = segment.x * segment.x + segment.y * segment.y
-                            val t = if (length2 == 0f) 0f else (((center.x - p.x) * segment.x + (center.y - p.y) * segment.y) / length2).coerceIn(0f, 1f)
-                            val nearest = p + segment * t
-                            hypot(center.x - nearest.x, center.y - nearest.y) < limit
-                        }
-                    }
-                }
-            }
-            var selected = candidates.first()
-            var bestCrossings = Int.MAX_VALUE
-            for (candidate in candidates) {
-                val count = crossings(candidate)
-                if (count < bestCrossings) { selected = candidate; bestCrossings = count }
-                if (count == 0) break
-            }
-            selected
-        }
-        edge.id to bend
-      }
-    }
-    val edges = uiState.edges.map { edge ->
-        key(edge.id) {
-            val bend by animateFloatAsState(targetBends[edge.id] ?: 0f,
-                animationSpec = if (preference == MotionPreference.Full) spring(dampingRatio = .74f, stiffness = 140f) else snap(),
-                label = "organization-bend-${edge.id}")
-            val from = positions[edge.fromNodeId]
-            val to = positions[edge.toNodeId]
-            if (from == null || to == null) edge else {
-            val delta = to - from
-            val length = hypot(delta.x, delta.y).coerceAtLeast(1f)
-            val unit = delta / length
-            val start = from + unit * radius(edge.fromNodeId, animated = true)
-            val end = to - unit * radius(edge.toNodeId, animated = true)
-            val line = end - start
-            val lineLength = hypot(line.x, line.y).coerceAtLeast(1f)
-            val normal = Offset(-line.y / lineLength, line.x / lineLength)
-            val c1 = start + line / 3f + normal * bend
-            val c2 = start + line * (2f / 3f) + normal * bend
-            edge.copy(start = EdgePoint(start.x, start.y), end = EdgePoint(end.x, end.y), control1 = EdgePoint(c1.x, c1.y), control2 = EdgePoint(c2.x, c2.y), isCurved = true)
-            }
+            edge.copy(start = EdgePoint(start.x, start.y), end = EdgePoint(end.x, end.y), control1 = null, control2 = null, isCurved = false)
         }
     }
     val transform = rememberTransformableState { zoom, pan, _ -> onZoom(zoom); onPan(pan) }
