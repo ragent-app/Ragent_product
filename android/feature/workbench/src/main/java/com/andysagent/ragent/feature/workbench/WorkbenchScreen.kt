@@ -3300,9 +3300,17 @@ private fun ChatSurface(
                     organizationExpanded = true
                 },
             )
-            val currentActionLabel = state.currentAction?.let(::presentRunAction)
-                ?: nativeNodes.asSequence().filter { it.state in setOf("spawned", "running", "waiting") }
-                    .maxByOrNull { it.updatedAt ?: it.startedAt ?: 0L }?.currentAction
+            val currentNativeAction = nativeNodes.asSequence()
+                .filter { it.state in setOf("spawned", "running", "waiting") && !it.currentAction.isNullOrBlank() }
+                .maxByOrNull { it.updatedAt ?: it.startedAt ?: 0L }?.currentAction
+            val latestCollaborationAction = collaborationActions.asSequence()
+                .filter { it.kind in collaborationLabels }
+                .maxByOrNull { it.timestamp }
+            val currentActionLabel = currentNativeAction ?: state.currentAction?.let(::presentRunAction)
+                ?: latestCollaborationAction?.let { action ->
+                    listOfNotNull(collaborationLabels[action.kind], action.displayName?.takeIf { it.isNotBlank() })
+                        .joinToString(" · ")
+                }
             currentActionLabel?.let { action ->
                 Text(
                     text = action,
