@@ -2,13 +2,16 @@ package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -48,9 +51,6 @@ import com.andysagent.ragent.feature.organization.data.RealOrganizationRepositor
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
-import com.andysagent.ragent.core.designsystem.AgentoIconButton
-import com.andysagent.ragent.core.designsystem.AgentoWebIcon
-import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
 import com.andysagent.ragent.feature.organization.R
 
 @Composable
@@ -241,13 +241,10 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         }
         else {
             val colors = LocalRagentColors.current
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                AgentoIconButton(onClick = onBack, contentDescription = stringResource(R.string.organization_back)) {
-                    AgentoWebIcon(AgentoWebGlyph.Back, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
-                }
-                Text(stringResource(R.string.organization_title), Modifier.weight(1f).padding(start = 12.dp), color = colors.primaryContent, fontSize = 17.sp)
-            }
-            Column(Modifier.fillMaxWidth().padding(24.dp).background(colors.quietSurface, RoundedCornerShape(26.dp)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.widthIn(max = 600.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            OrganizationNavigation(onBack = onBack, memberCount = null)
+            Column(Modifier.fillMaxWidth().padding(top = 20.dp).background(colors.quietSurface, RoundedCornerShape(26.dp)).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 val message = when {
                     cacheClearFailed -> R.string.organization_cache_unavailable
                     connection == RuntimeConnectionState.AuthenticationRequired -> R.string.organization_auth_required
@@ -256,13 +253,15 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     status == "No organization is available for this session." -> R.string.organization_not_found
                     else -> R.string.organization_unavailable
                 }
-                Text(stringResource(message), color = colors.primaryContent)
+                Text(stringResource(message), color = colors.primaryContent, fontSize = 16.sp, lineHeight = 24.sp)
                 if (connection == RuntimeConnectionState.Connected && status != "Loading organization…") {
                     TextButton(onClick = { refresh++ }) { Text(stringResource(R.string.organization_retry)) }
                 }
                 if ((context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
                     TextButton(onClick = { demoOpen = true }) { Text(stringResource(R.string.organization_demo_open)) }
                 }
+            }
+            }
             }
         }
     }

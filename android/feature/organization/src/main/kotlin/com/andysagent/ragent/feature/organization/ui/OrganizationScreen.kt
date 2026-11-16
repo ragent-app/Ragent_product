@@ -78,7 +78,6 @@ fun OrganizationScreenContent(
         AgentDetailScreen(node = uiState.activeDetailNode, onBack = onCloseDetail)
         return
     }
-    var menuOpen by remember { mutableStateOf(false) }
     BoxWithConstraints(modifier.fillMaxSize().background(colors.canvas).statusBarsPadding().navigationBarsPadding()) {
         val density = LocalDensity.current
         var navigationHeight by remember { mutableIntStateOf(0) }
@@ -91,30 +90,8 @@ fun OrganizationScreenContent(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Column(Modifier.widthIn(max = 600.dp).fillMaxWidth().padding(horizontal = 20.dp)) {
-                Row(Modifier.fillMaxWidth().onSizeChanged { navigationHeight = it.height }.padding(vertical = 8.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AgentoIconButton(onClick = { onBack?.invoke() }, contentDescription = stringResource(R.string.organization_back), modifier = Modifier.size(48.dp).background(colors.quietSurface, CircleShape)) {
-                        AgentoWebIcon(AgentoWebGlyph.Back, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
-                    }
-                    Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    AgentoFrostedGlassBox(modifier = Modifier.height(48.dp).widthIn(max = 216.dp), shape = CircleShape, hasShadow = false, contentAlignment = Alignment.Center) {
-                        Column(Modifier.padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(stringResource(R.string.organization_title), color = colors.primaryContent, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                            val members = uiState.nodes.flatMap { if (it.isCluster) it.clusterChildIds else listOf(it.id) }.toSet().size
-                            Text(stringResource(R.string.organization_member_count, members), color = colors.secondaryContent, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1)
-                        }
-                    }
-                    }
-                    Box {
-                        AgentoIconButton(onClick = { menuOpen = true }, contentDescription = stringResource(R.string.organization_menu), modifier = Modifier.size(48.dp).background(colors.quietSurface, CircleShape)) {
-                            AgentoWebIcon(AgentoWebGlyph.More, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
-                        }
-                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            if (onOpenWorkItems != null) DropdownMenuItem(text = { Text(stringResource(R.string.organization_work)) }, onClick = { menuOpen = false; onOpenWorkItems() })
-                            if (onOpenTeamMessages != null) DropdownMenuItem(text = { Text(stringResource(R.string.organization_messages)) }, onClick = { menuOpen = false; onOpenTeamMessages() })
-                            DropdownMenuItem(text = { Text(stringResource(R.string.organization_reset)) }, onClick = { menuOpen = false; onReset() })
-                        }
-                    }
-                }
+                val members = uiState.nodes.flatMap { if (it.isCluster) it.clusterChildIds else listOf(it.id) }.toSet().size
+                OrganizationNavigation(onBack, members, onOpenWorkItems, onOpenTeamMessages, onReset, Modifier.onSizeChanged { navigationHeight = it.height })
                 Column(Modifier.fillMaxWidth().onSizeChanged { taskHeight = it.height }.padding(top = 20.dp, bottom = 12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(stringResource(R.string.organization_current_task), color = colors.secondaryContent, fontSize = 12.sp, lineHeight = 18.sp)
@@ -144,5 +121,43 @@ fun OrganizationScreenContent(
     }
     uiState.selectedSheetNode?.let { node ->
         OrganizationBottomSheet(node, onDismissSheet, { onOpenDetail(node.id) }, onSendRootInstruction)
+    }
+}
+
+@Composable
+internal fun OrganizationNavigation(
+    onBack: (() -> Unit)?,
+    memberCount: Int?,
+    onOpenWorkItems: (() -> Unit)? = null,
+    onOpenTeamMessages: (() -> Unit)? = null,
+    onReset: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRagentColors.current
+    var menuOpen by remember { mutableStateOf(false) }
+    Row(modifier.fillMaxWidth().padding(vertical = 8.dp).height(56.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AgentoIconButton(onClick = { onBack?.invoke() }, contentDescription = stringResource(R.string.organization_back), modifier = Modifier.size(48.dp).background(colors.quietSurface, CircleShape)) {
+            AgentoWebIcon(AgentoWebGlyph.Back, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
+        }
+        Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+            AgentoFrostedGlassBox(modifier = Modifier.height(48.dp).widthIn(max = 216.dp), shape = CircleShape, hasShadow = false, contentAlignment = Alignment.Center) {
+                Column(Modifier.padding(horizontal = 18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(stringResource(R.string.organization_title), color = colors.primaryContent, fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    if (memberCount != null) Text(stringResource(R.string.organization_member_count, memberCount), color = colors.secondaryContent, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1)
+                }
+            }
+        }
+        if (onOpenWorkItems != null || onOpenTeamMessages != null || onReset != null) {
+            Box {
+                AgentoIconButton(onClick = { menuOpen = true }, contentDescription = stringResource(R.string.organization_menu), modifier = Modifier.size(48.dp).background(colors.quietSurface, CircleShape)) {
+                    AgentoWebIcon(AgentoWebGlyph.More, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.primaryContent)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (onOpenWorkItems != null) DropdownMenuItem(text = { Text(stringResource(R.string.organization_work)) }, onClick = { menuOpen = false; onOpenWorkItems() })
+                    if (onOpenTeamMessages != null) DropdownMenuItem(text = { Text(stringResource(R.string.organization_messages)) }, onClick = { menuOpen = false; onOpenTeamMessages() })
+                    if (onReset != null) DropdownMenuItem(text = { Text(stringResource(R.string.organization_reset)) }, onClick = { menuOpen = false; onReset() })
+                }
+            }
+        } else Spacer(Modifier.size(48.dp))
     }
 }
