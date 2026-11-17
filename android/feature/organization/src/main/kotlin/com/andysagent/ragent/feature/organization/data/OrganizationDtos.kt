@@ -35,6 +35,17 @@ data class NativeDelegationDto(
     val startedAt: Long? = null,
     val updatedAt: Long? = null,
     val completedAt: Long? = null,
+    val activity: NodeActivityDto? = null,
+)
+
+@Serializable
+data class NodeActivityDto(
+    val state: String = "unknown",
+    val kind: String? = null,
+    val actionRequired: Boolean = false,
+    val observedAt: String? = null,
+    val runId: String? = null,
+    val sourceSeq: Long? = null,
 )
 
 @Serializable
@@ -129,6 +140,9 @@ data class OrganizationNodeDto(
     val sessionClass: String = "",
     val status: String = "idle",
     val sessionId: String? = null,
+    val currentBinding: OrganizationBindingDto? = null,
+    val bindingRuntimeState: String? = null,
+    val activity: NodeActivityDto? = null,
     val currentActivity: String? = null,
     val currentTask: OrganizationTaskDto? = null,
     val attempt: OrganizationAttemptDto? = null,
@@ -142,6 +156,9 @@ data class OrganizationNodeDto(
     val blockedChildCount: Int = 0,
     val isCollapsedRecommended: Boolean = false,
 )
+
+@Serializable
+data class OrganizationBindingDto(val sessionId: String? = null, val generation: Long = 0L)
 
 @Serializable
 data class OrganizationTaskDto(

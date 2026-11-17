@@ -9,7 +9,8 @@ import {
   ORG_PROJECTION_V2_ENABLED,
 } from '../lib/config.mjs';
 import { readBody as readRequestBody } from '../lib/utils.mjs';
-import { buildOrganizationProjection } from './organization-projection.mjs';
+import { buildOrganizationProjection, projectionDigest } from './organization-projection.mjs';
+import { attachOrganizationNodeActivities, nativeDelegationActivity } from './organization-node-activity.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { provisionRootLeadershipRevision } from './organization-provisioning.mjs';
 import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
@@ -74,7 +75,8 @@ export async function handleOrganizationRoutes({
           .map((entry) => ({ delegationId: entry.delegationId, parentDelegationId: entry.parentDelegationId || null,
             parentSessionId: sessionId, childSessionId: entry.childSessionId || entry.providerRefs?.childSessionId || null,
             provider: entry.provider || null, runId, state: entry.state, currentAction: entry.currentAction || null,
-            startedAt: entry.startedAt || null, updatedAt: entry.updatedAt || null, completedAt: entry.completedAt || null })) : [];
+            startedAt: entry.startedAt || null, updatedAt: entry.updatedAt || null, completedAt: entry.completedAt || null,
+            activity: nativeDelegationActivity(entry, run, readable && delta.readStatus === 'verified') })) : [];
       const nextAfterLines = delta.nextOffset === 0
         ? Math.max(afterLines, delta.processedLineCount || 0)
         : (delta.skippedLineCount || 0) + (delta.processedLineCount || 0);
@@ -195,10 +197,13 @@ export async function handleOrganizationRoutes({
     if (req.method === 'GET' && (action === '' || action === 'projection')) {
       const requestUrl = req.url ? new URL(req.url, `http://${req.headers?.host || 'localhost'}`) : null;
       const sinceEventId = requestUrl ? Number(requestUrl.searchParams.get('sinceEventId') || 0) : 0;
-      const projection = await buildOrganizationProjection(org.id, {
+      const cachedProjection = await buildOrganizationProjection(org.id, {
         version: ORG_PROJECTION_V2_ENABLED ? 2 : 1,
         sinceEventId: Number.isInteger(sinceEventId) && sinceEventId >= 0 ? sinceEventId : 0,
       });
+      const projection = await attachOrganizationNodeActivities(cachedProjection, org.id);
+      projection.digest = projectionDigest(projection);
+      if (projection.asOf) projection.asOf = { ...projection.asOf, projectionDigest: projection.digest };
       const etag = `"${createHash('sha256').update(JSON.stringify(projection)).digest('hex')}"`;
       if (req.headers?.['if-none-match'] === etag) { res.writeHead(304, { ETag: etag }); res.end(); return true; }
       res.setHeader?.('ETag', etag);
