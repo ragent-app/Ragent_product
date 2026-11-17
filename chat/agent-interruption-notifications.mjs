@@ -64,7 +64,9 @@ async function resolveBinding(session, run) {
     // Generic delegated Sessions are bound by server-created session metadata.
     // Do not fall back from a failed organization lookup to a guessed parent.
     if (text(session.organizationId) || text(session.organizationNodeId)) return null;
-    const parentSessionId = text(session.delegatedFromSessionId);
+    if (text(session.delegatedFromSessionId) && text(session.parentSessionId)
+        && text(session.delegatedFromSessionId) !== text(session.parentSessionId)) return null;
+    const parentSessionId = text(session.delegatedFromSessionId || session.parentSessionId);
     if (!parentSessionId || parentSessionId === session.id || !await sessionById(parentSessionId)) return null;
     const parentRef = await getLiveOrganizationSessionReference(parentSessionId);
     if (parentRef) {
@@ -121,7 +123,7 @@ export async function observeAgentInterruption({ sessionId, runId } = {}) {
   if (run.state !== 'failed') return { applicable: false, reason: 'not_failed' };
   const session = await sessionById(run.sessionId);
   if (!session) throw Object.assign(new Error('Run session unavailable'), { code: 'INCIDENT_EVIDENCE_PENDING' });
-  if (!text(session.organizationId) && !text(session.organizationNodeId) && !text(session.delegatedFromSessionId)) return { applicable: false, reason: 'not_delegated' };
+  if (!text(session.organizationId) && !text(session.organizationNodeId) && !text(session.delegatedFromSessionId) && !text(session.parentSessionId)) return { applicable: false, reason: 'not_delegated' };
   const superseded = await withDatabase(db => {
     schema(db);
     const rows = db.prepare(`SELECT a.attempt_number,t.current_attempt FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.run_id=? AND a.session_id=?`).all(run.id,session.id);
