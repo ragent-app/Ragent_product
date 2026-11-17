@@ -1,3 +1,4 @@
+import { scopeContainsPath } from './execution-scope.mjs';
 // Server-owned phase dispatch for a provisioned Organization Revision.
 //
 // Provisioning creates the managed Sessions, but does not itself inject work.
@@ -6,6 +7,7 @@
 // only controlled input channel, so managed-input enforcement still applies.
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
 import { getOrganization, getRevision, listOrganizationNodes } from './organization-store.mjs';
+import { verifyOrganizationDelegation } from './organization-delegation-authorization.mjs';
 import { getSession } from './session-manager.mjs';
 import { getModelsForTool } from './models.mjs';
 import { getToolDefinitionAsync } from '../lib/tools.mjs';
@@ -150,6 +152,8 @@ export async function dispatchOrganizationPhase({
   revision = null,
   idempotencyKey,
   orchestrator = null,
+  organizationDelegation = null,
+  childNodeId = null,
 } = {}) {
   const normalizedOrganizationId = text(organizationId, 160);
   const normalizedPhaseId = text(phaseId, 160);
@@ -170,12 +174,14 @@ export async function dispatchOrganizationPhase({
   await phaseDependenciesCompleted(organization.id, compiled, phase);
 
   const nodes = await listOrganizationNodes(organization.id);
+  const delegationFacts = organizationDelegation
+    ? await verifyOrganizationDelegation({ organizationId: organization.id, childNodeId, delegation: organizationDelegation }) : null;
   const phaseNodes = nodes
     .map((node) => ({ node, compiled: compiledNodeFor(compiled, node.stableKey) }))
-    .filter(({ compiled: node }) => text(node?.phaseId) === normalizedPhaseId);
+    .filter(({ node, compiled: plan }) => text(plan?.phaseId) === normalizedPhaseId && (!organizationDelegation || node.id === childNodeId));
   if (phaseNodes.length === 0) throw dispatchError('ORG_PHASE_NO_NODES', `phase ${normalizedPhaseId} has no compiled nodes`, 409);
 
-  await ensurePhaseExecution(organization, phase, targetRevision, {
+  if (!organizationDelegation) await ensurePhaseExecution(organization, phase, targetRevision, {
     stage: 'dispatching',
     nodeKeys: phaseNodes.map(({ node }) => node.stableKey),
   });
@@ -236,16 +242,25 @@ export async function dispatchOrganizationPhase({
       ...list(nodePlan?.acceptance),
     ];
     const writablePaths = list(nodePlan?.scope?.writablePaths);
+    if (delegationFacts) {
+      const grant = delegationFacts.grant;
+      const allowedPaths = list(grant.scope?.writablePaths);
+      const allowed = (await Promise.all(writablePaths.map(async (path) =>
+        (await Promise.all(allowedPaths.map((root) => scopeContainsPath(root, path)))).some(Boolean)))).every(Boolean);
+      if (grant.executionIsolation !== 'shared' || !allowed || (grant.accessMode === 'read_only' && writablePaths.length > 0)) {
+        throw dispatchError('ORG_DELEGATION_SCOPE_DENIED', 'Frozen task exceeds the child delegation scope', 403);
+      }
+    }
     const eventKey = `phase-dispatch:${createHash('sha256').update(`${normalizedKey}:${node.stableKey}`).digest('hex')}`;
     const policy = {
       role: 'manager',
       canDelegate: true,
-      canWrite: true,
+      canWrite: delegationFacts ? delegationFacts.grant.accessMode !== 'read_only' : true,
       canReview: true,
       maxChildren: 1,
       maxConcurrent: 1,
       workspacePolicy: 'shared-exclusive',
-      accessMode: 'write',
+      accessMode: delegationFacts?.grant.accessMode === 'read_only' ? 'read' : 'write',
       executionIsolation: 'shared',
       allowedAgentIds: [agentId],
       allowedRoles: [taskRole],
@@ -258,11 +273,12 @@ export async function dispatchOrganizationPhase({
       organizationId: organization.id,
       organizationRuntimeConstraints: currentConstraints,
       ...(nodePlan?.runtimeDecision ? { organizationRuntimeDecision: nodePlan.runtimeDecision } : {}),
+      ...(organizationDelegation ? { organizationDelegation } : {}),
       organizationNodeId: node.id,
       organizationBindingGeneration: node.bindingGeneration,
       organizationPhaseDispatch: { eventKey, phaseId: normalizedPhaseId, revision: targetRevision, taskId },
     };
-    const result = await runtimeOrchestrator.dispatch({
+    const result = await (organizationDelegation ? runtimeOrchestrator.dispatchDelegated : runtimeOrchestrator.dispatch)({
       rootSessionId: organization.rootSessionId,
       title: `Organization phase ${normalizedPhaseId}: ${node.stableKey}`,
       projectId: organization.projectId || '',
@@ -281,7 +297,7 @@ export async function dispatchOrganizationPhase({
           projectId: organization.projectId || '',
           runtime,
           managedSessionId: session.id,
-          accessMode: 'write',
+          accessMode: delegationFacts?.grant.accessMode === 'read_only' ? 'read' : 'write',
           executionIsolation: 'shared',
           retry: { maxAttempts: 1, retryOn: [] },
         }],
@@ -293,13 +309,13 @@ export async function dispatchOrganizationPhase({
       console.warn('[organization] dispatch event mirror deferred:', error?.message || error);
     });
     dispatched.push({ stableKey: node.stableKey, sessionId: session.id, runtime, collaboration: result });
-    await ensurePhaseExecution(organization, phase, targetRevision, {
+    if (!organizationDelegation) await ensurePhaseExecution(organization, phase, targetRevision, {
       stage: 'dispatching',
       lastNodeKey: node.stableKey,
       dispatchedCollaborationIds: dispatched.map((entry) => entry.collaboration?.id).filter(Boolean),
     });
   }
-  await ensurePhaseExecution(organization, phase, targetRevision, {
+  if (!organizationDelegation) await ensurePhaseExecution(organization, phase, targetRevision, {
     stage: 'dispatched',
     dispatchedCollaborationIds: dispatched.map((entry) => entry.collaboration?.id).filter(Boolean),
   });

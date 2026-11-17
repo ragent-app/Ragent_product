@@ -13954,6 +13954,8 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   const organizationExecutionContext = session.sessionPlane === 'organization'
     ? await buildOrganizationExecutionContext({ sessionId, runId: nextRunId, requestId,
       internalOperation: options.internalOperation, capabilities: collaborationCapabilitySet?.capabilities,
+      organizationToolScope: sessionControlChannel?.token && options.accessMode !== 'read' && options.readOnlyRequired !== true
+        && options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily) ? messageScope : null,
       selectedRuntime: { tool: effectiveTool, provider: effectiveProviderProfile || null,
         model: trimString(options.model || session.model) || null, effort: trimString(options.effort || session.effort) || null,
         runtimeFamily: effectiveRuntimeFamily || null } }) : '';

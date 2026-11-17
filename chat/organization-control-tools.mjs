@@ -53,6 +53,21 @@ export async function executeOrganizationControlTool({ authSession, action, args
   if (!node || node.organizationId !== scope.organizationId || node.bindingGeneration !== scope.bindingGeneration) throw fail();
   const role = ({ MANAGER: 'manager', PHASE_LEAD: 'manager', WORKER: 'worker', REVIEWER: 'reviewer', EXECUTIVE: 'root' })[String(node.sessionClass || '').toUpperCase()];
   const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) || (!!role && id === `ragent:builtin:${role}`);
+  if (action === 'node.dispatch') {
+    const childNodeId = typeof args.childNodeId === 'string' ? args.childNodeId.trim() : '';
+    if (!childNodeId || childNodeId.length > 160) throw Object.assign(new Error('Child node is required'), { statusCode: 400 });
+    const delegation = { parentNodeId: node.id, parentSessionId: authSession.sessionId, parentRunId: authSession.runId,
+      revision: scope.organizationRevision, bindingGeneration: scope.bindingGeneration };
+    const { verifyOrganizationDelegation } = await import('./organization-delegation-authorization.mjs');
+    const { child, organization } = await verifyOrganizationDelegation({ organizationId: scope.organizationId, childNodeId, delegation });
+    const { getRevision } = await import('./organization-store.mjs');
+    const revision = await getRevision(organization.id, organization.currentRevision);
+    const plan = revision?.compiled?.nodes?.find((entry) => entry.stableKey === child.stableKey);
+    if (!plan?.phaseId) throw fail();
+    const { dispatchOrganizationPhase } = await import('./organization-phase-dispatch.mjs');
+    return dispatchOrganizationPhase({ organizationId: organization.id, revision: organization.currentRevision,
+      phaseId: plan.phaseId, idempotencyKey: `manager:${node.id}:revision:${organization.currentRevision}:child:${child.id}`, childNodeId, organizationDelegation: delegation });
+  }
   if (action === 'state.get') {
     const { getSession } = await import('./session-manager.mjs');
     const session = await getSession(authSession.sessionId);
