@@ -3028,10 +3028,11 @@ private fun ChatSurface(
         val measuredHeaderInset = organizationHostBounds?.let {
             with(density) { (organizationHeaderBottom - it.top).coerceAtLeast(0f).toDp() }
         } ?: 0.dp
-        val graphCardHeight = with(density) {
-            ((organizationHostBounds?.height ?: 0f) * .27f)
-                .coerceIn(208.dp.toPx(), 300.dp.toPx()).toDp()
-        }
+        val hostBounds = organizationHostBounds
+        val imeBottom = imeInsets.getBottom(density).toFloat()
+        val availableCardHeight = ((hostBounds?.height ?: 0f) - imeBottom).coerceAtLeast(0f)
+        val cardHeight = (availableCardHeight * .27f).coerceIn(with(density) { 208.dp.toPx() }, with(density) { 300.dp.toPx() }).coerceAtMost(availableCardHeight)
+        val graphCardHeight = with(density) { (imeBottom + cardHeight).toDp() }
         val organizationGraphTop = maxOf(topControlsHeight, measuredHeaderInset) + 8.dp
         if (organizationTransport != null && state.sessionId != null) {
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
@@ -3076,13 +3077,10 @@ private fun ChatSurface(
                 onHasCollaboratorsChanged = {},
             )
         }
-        val hostBounds = organizationHostBounds
         val cardInset = with(density) { 12.dp.toPx() }
-        val availableCardHeight = ((hostBounds?.height ?: 0f) - imeInsets.getBottom(density)).coerceAtLeast(0f)
-        val cardHeight = (availableCardHeight * .27f).coerceIn(with(density) { 208.dp.toPx() }, with(density) { 300.dp.toPx() }).coerceAtMost(availableCardHeight)
         val cardTopInset = with(density) { organizationGraphTop.toPx() }
         val bottomCard = hostBounds?.let {
-            val bottom = (it.bottom - imeInsets.getBottom(density)).coerceAtLeast(it.top)
+            val bottom = (it.bottom - imeBottom).coerceAtLeast(it.top)
             Rect(it.left + cardInset, (bottom - cardHeight).coerceAtLeast(it.top), it.right - cardInset, bottom)
         }
         val expandedCard = hostBounds?.let { Rect(it.left + cardInset, (it.top + cardTopInset).coerceAtMost(it.bottom), it.right - cardInset, it.bottom) }
