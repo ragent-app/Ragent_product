@@ -360,8 +360,9 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
     val scope = rememberCoroutineScope()
     val currentCallback by rememberUpdatedState(onRuntimeState)
     val authorizationDeniedCallback by rememberUpdatedState(onAuthorizationDenied)
-    LaunchedEffect(reader, reader.runtimeState, reader.status) {
-        currentCallback(reader.runtimeState.takeIf { reader.status == ConversationStatus.Ready && it != "unknown" })
+    LaunchedEffect(reader, reader.runtimeState, reader.memberActivity, reader.status) {
+        val state = if (memberRef != null) reader.memberActivity else reader.runtimeState
+        currentCallback(state?.takeIf { reader.status == ConversationStatus.Ready && it != "unknown" })
     }
     DisposableEffect(reader) { onDispose { currentCallback(null) } }
     val list = rememberLazyListState()

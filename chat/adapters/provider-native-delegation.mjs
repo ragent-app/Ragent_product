@@ -498,7 +498,8 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
         continue;
       }
       events.push(event);
-      if (normalizedProvider === 'claude' && claudeRequestedIds.has(event.providerDelegationId) && !event.parentDelegationId) {
+      if (normalizedProvider === 'claude' && Object.hasOwn(raw, 'parent_tool_use_id') && raw.parent_tool_use_id === null &&
+          claudeRequestedIds.has(event.providerDelegationId) && !event.parentDelegationId) {
         claudeRootRequests.add(event.providerDelegationId);
       }
     }
@@ -506,9 +507,9 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
       events,
       memberEvents: [...events.map((event) => {
         const member = memberEventFromDelegation(event, {
-        requested: claudeRequestedIds.has(event.providerDelegationId),
-        memberIds,
-        operationId: normalizedProvider === 'claude' ? event.providerDelegationId : text(readCodexItem(raw).id),
+          requested: claudeRequestedIds.has(event.providerDelegationId),
+          memberIds,
+          operationId: normalizedProvider === 'claude' ? event.providerDelegationId : text(readCodexItem(raw).id),
         });
         if (normalizedProvider === 'claude' && claudeRequestedIds.has(event.providerDelegationId) && claudeRootRequests.has(event.providerDelegationId)) {
           member.parent = member.actor = { kind: 'root_session', id: context.parentSessionId };
@@ -568,12 +569,15 @@ export function createMemberReader(options = {}) {
   const add = (event) => {
     if (!event?.id || event.rootSessionId !== options.parentSessionId || event.runId !== options.runId) return;
     const previous = byId.get(event.id);
-    if (previous && previous.phase !== 'unknown') {
+    if (previous) {
       // A persisted normalized event may predate adapter evidence retained in
       // the raw frame. Enrich only the identical event, never infer a parent.
-      if (previous.parent?.kind === 'unknown' && ['member', 'root_session'].includes(event.parent?.kind)) {
-        byId.set(event.id, { ...previous, parent: event.parent, ...(event.actor ? { actor: event.actor } : {}) });
-      }
+      const preferred = previous.phase === 'unknown' && event.phase !== 'unknown' ? event : previous;
+      const other = preferred === previous ? event : previous;
+      const enriched = !['member', 'root_session'].includes(preferred.parent?.kind) &&
+        ['member', 'root_session'].includes(other.parent?.kind)
+        ? { ...preferred, parent: other.parent, ...(other.actor ? { actor: other.actor } : {}) } : preferred;
+      byId.set(event.id, enriched);
       return;
     }
     if (!previous && byId.size >= limit) { gap = true; return; }
