@@ -367,6 +367,7 @@ function runIndexSummary(run) {
     updatedAt: normalizeRunIndexValue(run?.updatedAt, 64),
     completedAt: normalizeRunIndexValue(run?.completedAt, 64),
     cancelRequested: run?.cancelRequested === true,
+    agentInterruptionPending: run?.agentInterruptionPending === true,
     linuxScopeRevocationPending: run?.linuxScopeRevocationPending === true,
     ...(run?.appApiMessageVersion === 1 ? { appApiMessageVersion: 1,
       appApiMessageQueue: run.appApiMessageQueue === true } : {}),

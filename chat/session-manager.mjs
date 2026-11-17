@@ -9177,7 +9177,14 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
   const finalizedRun = await updateRun(run.id, (current) => ({
     ...current,
     finalizedAt: current.finalizedAt || nowIso(),
+    ...(!compacting && current.state === 'failed' && !current.finalizedAt &&
+      (finalizedMeta.meta?.sessionPlane === 'organization' || finalizedMeta.meta?.parentSessionId || finalizedMeta.meta?.delegatedFromSessionId)
+      ? { agentInterruptionPending: true } : {}),
   })) || run;
+  if (finalizedRun.agentInterruptionPending === true) {
+    void observePendingAgentInterruption(finalizedRun).catch((error) =>
+      console.warn(`[runs] interruption observation deferred: ${error?.message || error}`));
+  }
 
   // Wake durable follow-up messages once the active Run pointer, continuity
   // checkpoint, provider cursor, and finalizedAt marker are all durable.
@@ -9609,6 +9616,39 @@ function scheduleDetachedRunMemoryWriteback(sessionId, session, finalizedRun, ma
   return true;
 }
 
+async function observePendingAgentInterruption(run) {
+  if (!run?.id || !run.sessionId || run.agentInterruptionPending !== true || run.state !== 'failed' || !run.finalizedAt) return;
+  const { observeAgentInterruption } = await import('./agent-interruption-notifications.mjs');
+  const outcome = await observeAgentInterruption({ sessionId: run.sessionId, runId: run.id });
+  if (!outcome || (outcome.applicable !== false && !outcome.incidentId)) return;
+  await updateRun(run.id, (current) => current.agentInterruptionPending === true && current.state === 'failed'
+    ? { ...current, agentInterruptionPending: false,
+      ...(outcome.applicable === false ? { agentInterruptionSkippedReason: outcome.reason || 'not_applicable' }
+        : { agentInterruptionIncidentId: outcome.incidentId }) } : current);
+}
+
+let interruptionRecoveryPromise = null;
+let interruptionRecoveryEntries = [];
+let interruptionRecoveryCursor = 0;
+async function recoverPendingAgentInterruptions() {
+  if (interruptionRecoveryPromise) return interruptionRecoveryPromise;
+  interruptionRecoveryPromise = (async () => {
+    // Read status files in bounded slices: the index update may lag the atomic
+    // finalization write if the process crashes between the two writes.
+    if (interruptionRecoveryCursor >= interruptionRecoveryEntries.length) {
+      interruptionRecoveryEntries = await listRunIndexEntries();
+      interruptionRecoveryCursor = 0;
+    }
+    const batch = interruptionRecoveryEntries.slice(interruptionRecoveryCursor, interruptionRecoveryCursor + STARTUP_RECOVERY_BATCH_SIZE);
+    interruptionRecoveryCursor += batch.length;
+    for (const entry of batch) {
+      const run = await getRun(entry.id).catch(() => null);
+      await observePendingAgentInterruption(run).catch(() => {});
+    }
+  })().finally(() => { interruptionRecoveryPromise = null; });
+  return interruptionRecoveryPromise;
+}
+
 async function reconcileOrphanDetachedRuns() {
   if (orphanRunSweepPromise) return orphanRunSweepPromise;
   orphanRunSweepPromise = (async () => {
@@ -9825,6 +9865,7 @@ export async function startDetachedRunObservers() {
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
+      void recoverPendingAgentInterruptions().catch(() => {});
       void reconcileOrphanDetachedRuns().catch((error) => {
         console.error(`[runs] orphan sweep failed: ${error.message}`);
       });
@@ -9833,6 +9874,7 @@ export async function startDetachedRunObservers() {
   }
   // If no compact session metadata advertises completion targets, avoid
   // scanning every historical run directory at boot.
+  await recoverPendingAgentInterruptions();
   await resumePendingCompletionTargets({ targetSessionIds: completionTargetSessionIds });
 
   // DS-07: retire runtime state / generation entries of sessions idle past the
