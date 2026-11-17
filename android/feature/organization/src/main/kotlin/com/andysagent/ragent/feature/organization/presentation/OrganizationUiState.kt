@@ -8,6 +8,11 @@ import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.layout.LayoutBounds
 
+enum class NodeActionKind {
+    RESPONDING, READING, SEARCHING, EDITING, EXECUTING, INSPECTING, DELEGATING, SENDING,
+    WAITING, WAITING_SUBORDINATES, NEEDS_USER, BLOCKED, FAILED,
+}
+
 /** One shared graph frame, in graph-local physical pixels and unzoomed dp. */
 data class NodePhysicsFrame(
     val centerX: Float,
@@ -33,6 +38,7 @@ data class RenderedNodeUiState(
     val domain: AgentDomain,
     val displayName: String,
     val runtimeState: NodeRuntimeState,
+    val action: NodeActionKind? = null,
     val isCluster: Boolean = false,
     val clusterCount: Int = 0,
     val clusterChildIds: List<String> = emptyList(),

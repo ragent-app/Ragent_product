@@ -77,6 +77,9 @@ class OrganizationViewModel(
     private val activeDetailNodeId = MutableStateFlow<String?>(null)
     private val isActivityFeedExpanded = MutableStateFlow(false)
     private val reduceMotion = MutableStateFlow(false)
+    private val nodeActions = MutableStateFlow<Map<String, NodeActionKind>>(emptyMap())
+
+    fun setNodeActions(actions: Map<String, NodeActionKind>) { nodeActions.value = actions }
 
     private var viewportWidth = 0f
     private var viewportHeight = 0f
@@ -127,7 +130,8 @@ class OrganizationViewModel(
                 renderState,
                 bundleFlow,
                 interactionFlow,
-            ) { state, render, bundle, interaction ->
+                nodeActions,
+            ) { state, render, bundle, interaction, actions ->
                 val layout = render.layout
                 val physicsFrame = render.physics
                 val mapped = OrganizationUiMapper.mapToUiState(
@@ -146,8 +150,8 @@ class OrganizationViewModel(
                 mapped.copy(
                     nodes = mapped.nodes.map { node ->
                         val frame = physicsFrame.frames[node.id]
-                        if (frame == null) node else node.copy(x = frame.centerX, y = frame.centerY,
-                            radiusDp = frame.radiusDp, scale = 1f, physicsFrame = frame)
+                        if (frame == null) node.copy(action = actions[node.id]) else node.copy(x = frame.centerX, y = frame.centerY,
+                            radiusDp = frame.radiusDp, scale = 1f, physicsFrame = frame, action = actions[node.id])
                     },
                     physicsRunning = physicsFrame.running,
                 )

@@ -22,6 +22,7 @@ import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.data.RealOrganizationApi
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
+import com.andysagent.ragent.feature.organization.presentation.NodeActionKind
 
 internal fun nativeNodeId(runId: String, delegationId: String) = "native:${runId.length}:$runId$delegationId"
 
@@ -33,6 +34,9 @@ fun NativeOrganizationGraph(
     transport: RagentTransport,
     sessionId: String,
     records: List<NativeDelegationDto>,
+    rootAction: NodeActionKind? = null,
+    nativeActionsFresh: Boolean = false,
+    nativeReceiptElapsed: Long = 0L,
     birthCues: List<BirthCue> = emptyList(),
     onBirthCuesConsumed: (List<BirthCue>) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -54,6 +58,19 @@ fun NativeOrganizationGraph(
     }
     val vm: OrganizationViewModel = viewModel(key = key, factory = factory)
     val rootId = remember(sessionId) { "native-root:$sessionId" }
+    LaunchedEffect(vm, rootId, rootAction, records, nativeActionsFresh, nativeReceiptElapsed) {
+        while (true) {
+            val actions = mutableMapOf<String, NodeActionKind>()
+            if (nativeActionsFresh && nativeReceiptElapsed > 0L && android.os.SystemClock.elapsedRealtime() - nativeReceiptElapsed in 0L..15_000L) records.forEach { record ->
+                com.andysagent.ragent.feature.organization.presentation.nodeAction(record.activity)?.let {
+                    actions[nativeNodeId(record.runId, record.delegationId)] = it
+                }
+            }
+            if (rootAction != null) actions[rootId] = rootAction
+            vm.setNodeActions(actions)
+            kotlinx.coroutines.delay(3_000)
+        }
+    }
     val rootName = stringResource(R.string.organization_native_root)
     val memberName = stringResource(R.string.organization_native_member)
     val distinct = remember(records) {
@@ -90,7 +107,7 @@ internal fun nativeDisplayNodes(records: List<NativeDelegationDto>, rootId: Stri
         OrganizationNodeDto(id = nativeNodeId(item.runId, item.delegationId),
             parentId = if (parent != null && parent in keys) nativeNodeId(parent.first, parent.second) else rootId,
             role = "worker", displayName = "$memberName ${index + 1}", status = item.state,
-            sessionId = item.childSessionId, currentActivity = item.currentAction)
+            sessionId = item.childSessionId, currentActivity = item.currentAction, activity = item.activity)
     }
 }
 

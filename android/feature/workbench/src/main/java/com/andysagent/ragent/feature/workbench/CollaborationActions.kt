@@ -25,6 +25,7 @@ data class NativeDelegationRecord(val runId: String, val event: DelegationEventD
 internal data class CollaborationData(
     val actions: List<CollaborationActionPresentation>, val events: List<NativeDelegationRecord>,
     val nodes: List<NativeDelegationDto>, val nativeResolved: Boolean, val nativeDefinitive: Boolean,
+    val nativeReceiptElapsed: Long,
 )
 private class NativePollState {
     val cursors = mutableMapOf<String, Long>()
@@ -41,6 +42,7 @@ internal fun rememberCollaborationActions(
     var nativeNodes by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(emptyList<NativeDelegationDto>()) }
     var nativeResolved by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(transport == null || sessionId == null) }
     var nativeDefinitive by remember(transport, sessionId, targetId, ownerScope) { mutableStateOf(false) }
+    var nativeReceiptElapsed by remember(transport, sessionId, targetId, ownerScope) { mutableLongStateOf(0L) }
     val nativePoll = remember(transport, sessionId, targetId, ownerScope) { NativePollState() }
     val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val connection = transport?.connectionState?.collectAsState()?.value
@@ -95,7 +97,7 @@ internal fun rememberCollaborationActions(
             val runs = api.getDelegationRuns(sessionId)
             val failure = runs.exceptionOrNull()
             if (failure is CancellationException) throw failure
-            if (failure != null) { nativeResolved = true; nativeDefinitive = false }
+            if (failure != null) { nativeResolved = true; nativeDefinitive = false; nativeReceiptElapsed = 0L }
             if (failure is ApiException && failure.statusCode in listOf(401, 403)) {
                 nativeEvents = emptyList(); nativeNodes = emptyList(); cursors.clear(); nativePoll.finished.clear()
                 delay(3_000); continue
@@ -143,6 +145,7 @@ internal fun rememberCollaborationActions(
             if (runs.isSuccess) {
                 nativeResolved = true
                 nativeDefinitive = !authorizationDenied && !incomplete
+                nativeReceiptElapsed = if (nativeDefinitive) android.os.SystemClock.elapsedRealtime() else 0L
                 if (!authorizationDenied) {
                     nativeNodes = nextNodes
                     nativeEvents = nextEvents
@@ -156,7 +159,7 @@ internal fun rememberCollaborationActions(
             delay(3_000)
         }
     }
-    return CollaborationData(actions, nativeEvents, nativeNodes, nativeResolved, nativeDefinitive)
+    return CollaborationData(actions, nativeEvents, nativeNodes, nativeResolved, nativeDefinitive, nativeReceiptElapsed)
 }
 
 internal fun mergeCollaborationActions(items: List<TimelineItem>, actions: List<CollaborationActionPresentation>, labels: Map<String, String>): List<TimelineItem> {

@@ -1691,7 +1691,7 @@ private fun ChatSurface(
     LaunchedEffect(organizationCollapsed) {
         if (organizationCollapsed) organizationFocusManager.clearFocus()
     }
-    val (formalActions, nativeRecords, nativeNodes, nativeResolved, nativeDefinitive) = rememberCollaborationActions(organizationTransport, state.sessionId,
+    val (formalActions, nativeRecords, nativeNodes, nativeResolved, nativeDefinitive, nativeReceiptElapsed) = rememberCollaborationActions(organizationTransport, state.sessionId,
         state.chatTargetId ?: state.activeRemoteTargetId, organizationOfflineScope, state.chatOpen)
     var formalResolved by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var formalDefinitive by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
@@ -3014,6 +3014,7 @@ private fun ChatSurface(
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
                 transport = organizationTransport,
                 sessionId = state.sessionId,
+                rootAction = organizationRootAction(state),
                 targetId = state.chatTargetId ?: state.activeRemoteTargetId,
                 offlineScope = organizationOfflineScope,
                 modifier = Modifier.fillMaxSize().padding(top = organizationGraphTop, bottom = 176.dp),
@@ -3041,6 +3042,7 @@ private fun ChatSurface(
                 records = nativeNodes,
                 nativeEvents = nativeRecords.map { com.andysagent.ragent.feature.organization.data.NativeBirthEvent(it.runId, it.event) },
                 nativeContinuous = nativeDefinitive,
+                nativeReceiptElapsed = nativeReceiptElapsed,
                 programmaticOpen = organizationOpenNode,
                 onProgrammaticOpenConsumed = { organizationOpenNode = null },
                 onCollaboratorSnapshot = { resolved, definitive, hasCollaborators ->
