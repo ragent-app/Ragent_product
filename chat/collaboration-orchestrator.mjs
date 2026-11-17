@@ -118,7 +118,9 @@ function runLifecycleObservation(run) {
     runState: trim(run?.state),
     runnerStartedAt: trim(run?.runnerStartedAt),
     approvalWaiting: run?.state === 'awaiting_approval'
-      || !!(run?.approvedActionPending?.batchId && run?.actionPause?.state === 'waiting_user'),
+      || !!(run?.approvedActionPending?.batchId && run?.actionPause?.state === 'waiting_user')
+      || !!(run?.privilegedShimPending?.batchId && run?.privilegedShimResult?.batchId !== run.privilegedShimPending.batchId),
+    approvalDeadline: trim(run?.approvedActionPending?.expiresAt || run?.privilegedShimPending?.expiresAt),
   };
 }
 
@@ -896,7 +898,29 @@ export function createCollaborationOrchestrator(options = {}) {
     let staging = null;
     let worktreeRef = '';
     let child = null;
+    let unstartedAdmissionFailure = '';
+    let readOnlyCapability = null;
+    const reviewerReadOnlyRequired = reviewerEnabled && task.role === 'reviewer';
+    const effectiveTaskAccessMode = reviewerReadOnlyRequired ? 'read' : taskAccessMode;
+    const requestedRunnerId = reviewerReadOnlyRequired
+      ? (trim(task.runnerId) || REVIEWER_RUNTIME_ID)
+      : (trim(task.runnerId) || null);
     try {
+      // This pure local capability gate runs before workspace or Session
+      // creation and before dispatch. Only this explicit refusal can produce
+      // an unstarted receipt; a broad catch cannot prove absence of effects.
+      if (effectiveTaskAccessMode === 'read' && typeof deps.resolveRuntimeReadOnlyCapability === 'function') {
+        readOnlyCapability = await deps.resolveRuntimeReadOnlyCapability({
+          toolId: childTool, runnerId: requestedRunnerId, envOverrides: null,
+          runnerUnitScope: trim(task.runnerUnitScope) || null, platform: process.platform,
+        });
+        if (!readOnlyCapability || readOnlyCapability.supportsReadOnlyFilesystem !== true) {
+          unstartedAdmissionFailure = 'read_only_runtime_unavailable';
+          throw Object.assign(new Error(`Read-only runtime is unavailable for task ${task.id}`), {
+            code: reviewerReadOnlyRequired ? 'READ_ONLY_RUNTIME_REFUSED' : 'READ_ONLY_RUNTIME_UNAVAILABLE',
+          });
+        }
+      }
       if (!validationWorkspace && managedWriter && typeof deps.createStagingWorkspace === 'function') {
         if (collaboration.policy?.factoryExecution) {
           const { preflightFactoryWorkspace } = await import('./factory-candidates.mjs');
@@ -986,11 +1010,6 @@ export function createCollaborationOrchestrator(options = {}) {
     // certified read-only runtime — its workspace must be mounted read-only.
     // The access mode is forced to 'read' regardless of the policy projection
     // so a reviewer can never silently become a writer.
-    const reviewerReadOnlyRequired = reviewerEnabled && task.role === 'reviewer';
-    const effectiveTaskAccessMode = reviewerReadOnlyRequired ? 'read' : taskAccessMode;
-    const requestedRunnerId = reviewerReadOnlyRequired
-      ? (trim(task.runnerId) || REVIEWER_RUNTIME_ID)
-      : (trim(task.runnerId) || null);
       // S6/S12 reader certification: a read task must be backed by a runtime
       // that declares supportsReadOnlyFilesystem (S4 runtime-adapter). Role,
       // prompt or empty writablePaths never constitute a read-only guarantee;
@@ -1001,11 +1020,8 @@ export function createCollaborationOrchestrator(options = {}) {
       // downgraded; S6 readers keep READ_ONLY_RUNTIME_UNAVAILABLE (409).
       if (effectiveTaskAccessMode === 'read' && typeof deps.resolveRuntimeReadOnlyCapability === 'function') {
         const capability = await deps.resolveRuntimeReadOnlyCapability({
-          toolId: childTool,
-          runnerId: requestedRunnerId,
-          envOverrides: null,
-          runnerUnitScope: trim(task.runnerUnitScope) || null,
-          platform: process.platform,
+          toolId: childTool, runnerId: requestedRunnerId, envOverrides: null,
+          runnerUnitScope: trim(task.runnerUnitScope) || null, platform: process.platform,
         });
         if (!capability || capability.supportsReadOnlyFilesystem !== true) {
           const errorCode = reviewerReadOnlyRequired ? 'READ_ONLY_RUNTIME_REFUSED' : 'READ_ONLY_RUNTIME_UNAVAILABLE';
@@ -1114,6 +1130,7 @@ export function createCollaborationOrchestrator(options = {}) {
           failureKind,
           failureReason: error.message || String(error),
           retry,
+          ...(unstartedAdmissionFailure ? { serverAdmissionFailure: unstartedAdmissionFailure } : {}),
           envelope: { taskId: task.id, sessionId: child?.id || '', attempt: reserved.attemptNumber },
           report: { summary: '', risks: [], blockers: [error.message || String(error)], acceptanceNotes: [] },
         }).catch(() => {});

@@ -218,6 +218,11 @@ export function openDatabase() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS collaboration_replay_receipts (
+      attempt_id TEXT PRIMARY KEY REFERENCES collaboration_attempts(id), task_id TEXT NOT NULL,
+      collaboration_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, plan_version INTEGER NOT NULL,
+      source TEXT NOT NULL, effective_attempt_budget INTEGER NOT NULL, created_at TEXT NOT NULL, consumed_at TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_collab_tasks_ready ON collaboration_tasks(collaboration_id, state);
     CREATE INDEX IF NOT EXISTS idx_collab_attempts_run ON collaboration_attempts(run_id);
     CREATE INDEX IF NOT EXISTS idx_collab_events_collab ON collaboration_events(collaboration_id, id);
@@ -281,6 +286,8 @@ export function openDatabase() {
   if (!attemptColumns.has('approval_wait_started_at')) {
     db.exec('ALTER TABLE collaboration_attempts ADD COLUMN approval_wait_started_at TEXT');
   }
+  if (!attemptColumns.has('approval_deadline')) db.exec('ALTER TABLE collaboration_attempts ADD COLUMN approval_deadline TEXT');
+  if (!attemptColumns.has('approval_state')) db.exec('ALTER TABLE collaboration_attempts ADD COLUMN approval_state TEXT');
   if (!attemptColumns.has('queued_at')) {
     db.exec('ALTER TABLE collaboration_attempts ADD COLUMN queued_at TEXT');
   }
@@ -384,6 +391,8 @@ function rowAttempt(row) {
     queueDeadline: row.queue_deadline || '',
     executionDeadline: row.execution_deadline || '',
     approvalWaitStartedAt: row.approval_wait_started_at || '',
+    approvalDeadline: row.approval_deadline || '',
+    approvalState: row.approval_state || '',
     heartbeatAt: row.heartbeat_at || '',
     startedAt: row.started_at || '',
     queuedAt: row.queued_at || '',
@@ -925,6 +934,7 @@ export async function observeAttemptRun(attemptId, {
   runState = '',
   runnerStartedAt = '',
   approvalWaiting = false,
+  approvalDeadline = '',
   observedAt = new Date(),
 } = {}) {
   const observedDate = observedAt instanceof Date && !Number.isNaN(observedAt.getTime())
@@ -945,8 +955,11 @@ export async function observeAttemptRun(attemptId, {
         return null;
       }
       if (approvalWaiting === true) {
+        const deadlineMs = Date.parse(approvalDeadline);
+        const deadline = Number.isFinite(deadlineMs) ? new Date(deadlineMs).toISOString() : null;
+        const approvalState = !deadline ? 'deadline_unknown' : observedDate.getTime() >= deadlineMs ? 'deadline_elapsed' : 'waiting';
         db.prepare(`UPDATE collaboration_attempts SET approval_wait_started_at=COALESCE(approval_wait_started_at,?),
-          last_observed_at=?,updated_at=? WHERE id=? AND state='running'`).run(observedText,observedText,observedText,attemptId);
+          approval_deadline=?,approval_state=?,last_observed_at=?,updated_at=? WHERE id=? AND state='running'`).run(observedText,deadline,approvalState,observedText,observedText,attemptId);
         db.exec('COMMIT');
         return rowAttempt(db.prepare(`SELECT a.*,t.collaboration_id FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?`).get(attemptId));
       }
@@ -956,7 +969,7 @@ export async function observeAttemptRun(attemptId, {
         for (const column of ['dispatch_deadline','queue_deadline','execution_deadline','lease_until']) {
           if (row[column] && Number.isFinite(Date.parse(row[column]))) row[column] = new Date(Date.parse(row[column]) + elapsed).toISOString();
         }
-        db.prepare(`UPDATE collaboration_attempts SET approval_wait_started_at=NULL,dispatch_deadline=?,queue_deadline=?,execution_deadline=?,lease_until=?,updated_at=? WHERE id=? AND state='running'`)
+        db.prepare(`UPDATE collaboration_attempts SET approval_wait_started_at=NULL,approval_deadline=NULL,approval_state=NULL,dispatch_deadline=?,queue_deadline=?,execution_deadline=?,lease_until=?,updated_at=? WHERE id=? AND state='running'`)
           .run(row.dispatch_deadline,row.queue_deadline,row.execution_deadline,row.lease_until,observedText,attemptId);
       }
       const wasRunning = row.lifecycle_phase === 'running' || !!row.runner_started_at;
@@ -1034,9 +1047,29 @@ export async function completeAttempt(attemptId, result = {}, now = new Date()) 
         db.exec('COMMIT');
         return null;
       }
+      const safeAdmissionRetry = false;
+      if (result.serverAdmissionFailure === 'read_only_runtime_unavailable'
+          && result.failureKind === 'deterministic_failure' && result.state === 'failed' && !attempt.run_id
+          && attempt.lifecycle_phase === 'dispatching' && Number(task?.current_attempt) === Number(attempt.attempt_number)
+          && !db.prepare('SELECT 1 FROM collaboration_dispatch_commands WHERE attempt_id=?').get(attemptId)) {
+        const collaboration = db.prepare('SELECT plan_version,policy_json,state FROM collaborations WHERE id=?').get(task.collaboration_id);
+        const policy = parseJson(collaboration?.policy_json, {});
+        const retryPolicy = parseJson(task.retry_json, { maxAttempts: 1, retryOn: [] });
+        const budget = Math.max(1, Math.min(Number(retryPolicy.maxAttempts) || 1, 5));
+        let bindingAvailable = false;
+        try { bindingAvailable = managedAttemptBindingAvailable(db,task.collaboration_id,task.id); } catch { /* No receipt without binding evidence. */ }
+        if (collaboration && !['completed','cancelled'].includes(collaboration.state) && !policy.factoryExecution
+            && Number(attempt.attempt_number) < budget && Array.isArray(retryPolicy.retryOn)
+            && retryPolicy.retryOn.includes('deterministic_failure') && bindingAvailable) {
+          db.prepare(`INSERT OR IGNORE INTO collaboration_replay_receipts
+            (attempt_id,task_id,collaboration_id,attempt_number,plan_version,source,effective_attempt_budget,created_at,consumed_at)
+            VALUES(?,?,?,?,?,?,?,?,?)`).run(attemptId,task.id,task.collaboration_id,attempt.attempt_number,
+            collaboration.plan_version,'read_only_runtime_unavailable_pre_dispatch',budget,timestamp,null);
+        }
+      }
       const nextTaskState = result.state === 'succeeded'
         ? 'succeeded'
-        : result.retry === true && !attempt.run_id && result.failureKind === 'transient' && result.state !== 'cancelled' ? 'retrying'
+        : safeAdmissionRetry ? 'retrying'
           : result.state === 'cancelled' ? 'cancelled' : 'failed';
       const taskChanged = db.prepare(`UPDATE collaboration_tasks SET state = ?, updated_at = ?
         WHERE id = ? AND current_attempt = ? AND state = ?`)
@@ -1047,6 +1080,7 @@ export async function completeAttempt(attemptId, result = {}, now = new Date()) 
       }
       appendEvent(db, task.collaboration_id, recoveringExpiredSuccess ? 'attempt_recovered' : 'attempt_completed', {
         ...result,
+        retry: safeAdmissionRetry,
         recovered: recoveringExpiredSuccess,
       }, attempt.task_id, attemptId);
       db.prepare('UPDATE collaborations SET updated_at = ? WHERE id = ?').run(timestamp, task.collaboration_id);
@@ -1342,12 +1376,9 @@ export async function requeueExpiredAttempt(attemptId, {
         db.exec('COMMIT');
         return null;
       }
-      const task = db.prepare('SELECT * FROM collaboration_tasks WHERE id = ?').get(attempt.task_id);
-      const retryPolicy = parseJson(task?.retry_json, { maxAttempts: 1, retryOn: [] });
-      const shouldRetry = retry === true && !attempt.run_id && failureKind === 'transient'
-        && Number(attempt.attempt_number) < Number(retryPolicy.maxAttempts || 1)
-        && Array.isArray(retryPolicy.retryOn)
-        && retryPolicy.retryOn.includes(failureKind);
+      // A deadline is not proof that dispatch or external effects did not
+      // occur. Only the separately receipted admission path can retry.
+      const shouldRetry = false;
       db.prepare(`UPDATE collaboration_attempts SET state = 'failed', completed_at = ?, failure_kind = ?, failure_reason = ?,
         lease_until = NULL, updated_at = ? WHERE id = ? AND state = 'running'`)
         .run(timestamp, failureKind, reason, timestamp, attemptId);
@@ -1401,10 +1432,19 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
         db.exec('COMMIT');
         return null;
       }
-      const retry = parseJson(row.retry_json, { maxAttempts: 1, retryOn: [] });
-      const allowed = !row.run_id && row.failure_kind === 'transient'
-        && Number(row.attempt_number) < Number(retry.maxAttempts || 1)
-        && Array.isArray(retry.retryOn) && retry.retryOn.includes(row.failure_kind || 'unknown_outcome');
+      const receipt = db.prepare('SELECT * FROM collaboration_replay_receipts WHERE attempt_id=? AND consumed_at IS NULL').get(attemptId);
+      const collaboration = db.prepare('SELECT plan_version,policy_json FROM collaborations WHERE id=?').get(row.collaboration_id);
+      const retryPolicy = parseJson(row.retry_json, { maxAttempts: 1, retryOn: [] });
+      const policy = parseJson(collaboration?.policy_json, {});
+      const allowed = !!receipt && receipt.source === 'read_only_runtime_unavailable_pre_dispatch'
+        && row.failure_kind === 'deterministic_failure' && !row.run_id && Number(row.current_attempt) === Number(row.attempt_number)
+        && !db.prepare('SELECT 1 FROM collaboration_dispatch_commands WHERE attempt_id=?').get(attemptId)
+        && !policy.factoryExecution && collaboration?.plan_version === receipt.plan_version
+        && receipt.task_id === row.task_id && receipt.collaboration_id === row.collaboration_id
+        && receipt.attempt_number === row.attempt_number && Number(row.attempt_number) < receipt.effective_attempt_budget
+        && Number(retryPolicy.maxAttempts) === receipt.effective_attempt_budget
+        && Array.isArray(retryPolicy.retryOn) && retryPolicy.retryOn.includes('deterministic_failure')
+        && managedAttemptBindingAvailable(db,row.collaboration_id,row.task_id);
       if (!allowed) {
         db.exec('COMMIT');
         return null;
@@ -1415,12 +1455,17 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
         db.exec('COMMIT');
         return null;
       }
+      if (db.prepare('UPDATE collaboration_replay_receipts SET consumed_at=? WHERE attempt_id=? AND consumed_at IS NULL').run(timestamp,attemptId).changes !== 1) {
+        db.exec('ROLLBACK'); return null;
+      }
       db.prepare("UPDATE collaborations SET state = CASE WHEN state = 'failed' THEN 'ready' ELSE state END, updated_at = ? WHERE id = ?")
         .run(timestamp, row.collaboration_id);
       appendEvent(db, row.collaboration_id, 'attempt_retry_requested', {
         reason,
         failureKind: row.failure_kind || 'unknown_outcome',
         attemptNumber: row.attempt_number,
+        effectiveAttemptBudget: receipt.effective_attempt_budget,
+        reconciliation: receipt.source,
       }, row.task_id, row.id);
       db.exec('COMMIT');
       return rowAttempt(db.prepare(`SELECT a.*, t.collaboration_id FROM collaboration_attempts a

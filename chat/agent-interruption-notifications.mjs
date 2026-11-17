@@ -2,7 +2,7 @@ import { withDatabase } from './collaboration-store.mjs';
 import { getRun } from './runs.mjs';
 import { getNode, getOrganization } from './organization-store.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
-import { createTrigger, getTrigger } from './triggers.mjs';
+import { createTrigger, getTrigger, listTriggers } from './triggers.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 const stamp = () => new Date().toISOString();
@@ -185,6 +185,15 @@ export async function reconcileAgentInterruptions() {
   for (const row of rows) {
     try {
       if (!row.trigger_id && Number(row.escalation_index) === 0) {
+        const legacy = (await listTriggers({ sessionId: row.parent_session_id })).find(trigger =>
+          trigger.dedupeKey === `delegated-child-terminal:${row.parent_session_id}:${row.session_id}`
+          && (trigger.pendingEventKey === `run_terminal:${row.run_id}`
+            || trigger.deliveredEventKeys?.includes(`run_terminal:${row.run_id}`)));
+        if (legacy) {
+          const delivery = legacy.deliveredEventKeys?.includes(`run_terminal:${row.run_id}`) ? 'delivered' : 'queued';
+          await withDatabase(db => { schema(db); db.prepare("UPDATE agent_interruption_incidents SET trigger_id=?,delivery_state=?,updated_at=? WHERE id=? AND trigger_id='' AND resolved_at IS NULL").run(legacy.id,delivery,stamp(),row.id); }, { mutate: true });
+          continue;
+        }
         const liveParent = row.organization_id ? await getLiveOrganizationSessionReference(row.parent_session_id) : null;
         const parentValid = !!row.parent_session_id && !!await sessionById(row.parent_session_id) && (!row.organization_id || (liveParent?.organizationId === row.organization_id
           && (row.parent_node_id ? liveParent.kind === 'node' && liveParent.nodeId === row.parent_node_id && liveParent.bindingGeneration === JSON.parse(row.ancestors_json)[0]?.bindingGeneration : liveParent.kind === 'root')));

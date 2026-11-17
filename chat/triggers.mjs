@@ -1226,7 +1226,7 @@ async function attemptEventTriggerDelivery(triggerId, eventContext) {
   }
 }
 
-export async function emitTriggerEvent(type, payload = {}) {
+export async function emitTriggerEvent(type, payload = {}, { suppressDelegatedChildWake = false } = {}) {
   const eventType = normalizeEventType(type);
   if (!eventType) throw new Error(`Unsupported trigger event type: ${type}`);
   const eventPayload = clipEventPayload(payload);
@@ -1236,6 +1236,12 @@ export async function emitTriggerEvent(type, payload = {}) {
   for (const trigger of sortTriggers(triggers)) {
     if (trigger.triggerType !== TRIGGER_TYPE_EVENT || trigger.eventType !== eventType
         || !eventFilterMatches(trigger.eventFilter, eventPayload)) continue;
+    // Only the server's automatically created delegated-child wake is
+    // suppressed after an incident for this exact terminal Run is durable.
+    // Owner-created event subscriptions are never filtered here.
+    if (suppressDelegatedChildWake === true && eventType === 'run_terminal'
+        && trimString(eventPayload.runId) && eventPayload.eventId === eventPayload.runId
+        && trigger.dedupeKey === `delegated-child-terminal:${trigger.sessionId}:${eventPayload.sessionId}`) continue;
     const result = await attemptEventTriggerDelivery(trigger.id, context);
     if (result?.deliveredEventKeys?.includes(context.eventKey)) delivered += 1;
   }
