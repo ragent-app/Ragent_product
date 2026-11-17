@@ -14,6 +14,7 @@
     <string name="collaboration_native_snapshot">Sub-agent status</string>
     <string name="collaboration_open_member">Open member</string>
     <string name="collaboration_settings">Collaboration settings</string>
+    <string name="task_settings">Task settings</string>
     <string name="collaboration_node_created">Member created</string>
     <string name="collaboration_dispatch_requested">Task dispatch requested</string>
 </resources>

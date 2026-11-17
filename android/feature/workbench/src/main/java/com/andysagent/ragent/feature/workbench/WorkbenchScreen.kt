@@ -1654,15 +1654,18 @@ private fun ChatSurface(
     planMode: Boolean = false,
     onSetPlanMode: (Boolean) -> Unit = {},
 ) {
-    var organizationHasCollaborators by rememberSaveable { mutableStateOf(false) }
-    var organizationExpanded by rememberSaveable { mutableStateOf(false) }
-    var organizationKnown by rememberSaveable { mutableStateOf(false) }
-    var organizationSnapshotReady by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) {
+    var organizationHasCollaborators by rememberSaveable(organizationOfflineScope, state.chatTargetId, state.activeRemoteTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationExpanded by rememberSaveable(organizationOfflineScope, state.chatTargetId, state.activeRemoteTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationKnown by rememberSaveable(organizationOfflineScope, state.chatTargetId, state.activeRemoteTargetId, state.sessionId) { mutableStateOf(false) }
+    val organizationUiScope = remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.activeRemoteTargetId, state.sessionId) {
+        listOf(organizationTransport, organizationOfflineScope, state.chatTargetId, state.activeRemoteTargetId, state.sessionId)
+    }
+    var organizationSnapshotReady by remember(organizationUiScope) {
         mutableStateOf(organizationKnown || organizationTransport == null || state.sessionId == null)
     }
-    var organizationInitialSnapshotSeen by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationHydrating by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    LaunchedEffect(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) {
+    var organizationInitialSnapshotSeen by remember(organizationUiScope) { mutableStateOf(false) }
+    var organizationHydrating by remember(organizationUiScope) { mutableStateOf(false) }
+    LaunchedEffect(organizationUiScope) {
         if (!organizationSnapshotReady) {
             delay(500)
             organizationSnapshotReady = true
@@ -1674,16 +1677,16 @@ private fun ChatSurface(
             organizationHydrating = false
         }
     }
-    var organizationRootAnchor by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<Rect?>(null) }
-    var organizationRootVisible by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationRevealRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationRootVisual by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<com.andysagent.ragent.feature.organization.ui.OrganizationRootVisual?>(null) }
-    var organizationFirstCollapse by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationOpeningRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var organizationFormalNode by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf<String?>(null) }
+    var organizationRootAnchor by remember(organizationUiScope) { mutableStateOf<Rect?>(null) }
+    var organizationRootVisible by remember(organizationUiScope) { mutableStateOf(false) }
+    var organizationRevealRoot by remember(organizationUiScope) { mutableStateOf(false) }
+    var organizationRootVisual by remember(organizationUiScope) { mutableStateOf<com.andysagent.ragent.feature.organization.ui.OrganizationRootVisual?>(null) }
+    var organizationFirstCollapse by remember(organizationUiScope) { mutableStateOf(false) }
+    var organizationOpeningRoot by remember(organizationUiScope) { mutableStateOf(false) }
+    var organizationFormalNode by remember(organizationUiScope) { mutableStateOf<String?>(null) }
     var organizationTimelineTop by remember { mutableFloatStateOf(0f) }
     var organizationVisibleHeight by remember { mutableFloatStateOf(0f) }
-    var organizationFromRoot by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var organizationFromRoot by remember(organizationUiScope) { mutableStateOf(false) }
     var organizationHostBounds by remember { mutableStateOf<Rect?>(null) }
     var organizationHeaderBottom by remember { mutableFloatStateOf(0f) }
     val organizationCollapsed = organizationHasCollaborators && !organizationExpanded
@@ -1693,9 +1696,9 @@ private fun ChatSurface(
     }
     val (formalActions, nativeRecords, nativeNodes, nativeResolved, nativeDefinitive, nativeReceiptElapsed) = rememberCollaborationActions(organizationTransport, state.sessionId,
         state.chatTargetId ?: state.activeRemoteTargetId, organizationOfflineScope, state.chatOpen)
-    var formalResolved by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var formalDefinitive by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    var formalHasCollaborators by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
+    var formalResolved by remember(organizationUiScope) { mutableStateOf(false) }
+    var formalDefinitive by remember(organizationUiScope) { mutableStateOf(false) }
+    var formalHasCollaborators by remember(organizationUiScope) { mutableStateOf(false) }
     LaunchedEffect(formalResolved, formalDefinitive, formalHasCollaborators) {
         if (formalResolved) organizationSnapshotReady = true
         val hasCollaborators = formalHasCollaborators
@@ -2245,7 +2248,8 @@ private fun ChatSurface(
             ?: state.remoteTargets.firstOrNull()?.label
             ?: state.computers.firstOrNull()?.name
     }
-    var taskSettingsOpen by rememberSaveable { mutableStateOf(false) }
+    var taskSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
+    var collaborationSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
     val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
         if (organizationCollapsed) androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
@@ -3675,16 +3679,22 @@ private fun ChatSurface(
                 .padding(top = 56.dp, end = AgentoSpacing.ComposerMargin)
                 .zIndex(10f),
         ) {
-            if (onOpenOrganization != null && state.sessionId != null) {
-                AgentoDropdownMenuItem(
-                    text = stringResource(R.string.collaboration_settings),
-                    onClick = {
-                        onEvent(WorkbenchEvent.CloseSessionMenu)
-                        taskSettingsOpen = true
-                    },
-                    leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null) },
-                )
-            }
+            AgentoDropdownMenuItem(
+                text = stringResource(R.string.collaboration_settings),
+                onClick = {
+                    onEvent(WorkbenchEvent.CloseSessionMenu)
+                    collaborationSettingsOpen = true
+                },
+                leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null) },
+            )
+            AgentoDropdownMenuItem(
+                text = stringResource(R.string.task_settings),
+                onClick = {
+                    onEvent(WorkbenchEvent.CloseSessionMenu)
+                    taskSettingsOpen = true
+                },
+                leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Settings, contentDescription = null) },
+            )
             AgentoDropdownMenuItem(
                 text = stringResource(R.string.workbench_session_run_details),
                 onClick = {
@@ -3849,6 +3859,15 @@ private fun ChatSurface(
                 path = diffFile.path,
                 state = parityState,
                 onDismiss = { onSetSelectedDiffFile(null) },
+            )
+        }
+
+        if (collaborationSettingsOpen) {
+            CollaborationSettingsSheet(
+                transport = organizationTransport,
+                sessionId = state.sessionId,
+                onDismiss = { collaborationSettingsOpen = false },
+                backdropLayer = chatModalBackdrop,
             )
         }
 

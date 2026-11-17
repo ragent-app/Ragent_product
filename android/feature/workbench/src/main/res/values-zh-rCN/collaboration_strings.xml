@@ -14,6 +14,7 @@
     <string name="collaboration_native_snapshot">下属状态</string>
     <string name="collaboration_open_member">查看成员</string>
     <string name="collaboration_settings">协作设置</string>
+    <string name="task_settings">任务设置</string>
     <string name="collaboration_node_created">已创建成员</string>
     <string name="collaboration_dispatch_requested">已请求派发任务</string>
 </resources>
