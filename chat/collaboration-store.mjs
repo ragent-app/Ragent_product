@@ -226,6 +226,9 @@ export function openDatabase() {
     CREATE TABLE IF NOT EXISTS collaboration_dispatch_notices (
       command_id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL DEFAULT '', next_check_at TEXT NOT NULL DEFAULT ''
     );
+    CREATE TABLE IF NOT EXISTS collaboration_receipt_notices (
+      attempt_id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL DEFAULT '', next_check_at TEXT NOT NULL DEFAULT ''
+    );
     CREATE INDEX IF NOT EXISTS idx_collab_tasks_ready ON collaboration_tasks(collaboration_id, state);
     CREATE INDEX IF NOT EXISTS idx_collab_attempts_run ON collaboration_attempts(run_id);
     CREATE INDEX IF NOT EXISTS idx_collab_events_collab ON collaboration_events(collaboration_id, id);
@@ -423,10 +426,12 @@ function rowCollaboration(db, row, {
   const planTasks = new Map((frozenPlan.tasks || []).map((task) => [task.id, task]));
   for (const task of tasks) task.managedSessionId = planTasks.get(task.id)?.managedSessionId || '';
   const attempts = db.prepare(`
-    SELECT a.* FROM collaboration_attempts a
+    SELECT a.*, r.source AS receipt_source, r.consumed_at AS receipt_consumed_at FROM collaboration_attempts a
     JOIN collaboration_tasks t ON t.id = a.task_id
+    LEFT JOIN collaboration_replay_receipts r ON r.attempt_id = a.id
     WHERE t.collaboration_id = ? ORDER BY a.created_at, a.attempt_number
-  `).all(row.id).map((attempt) => rowAttempt({ ...attempt, collaboration_id: row.id }));
+  `).all(row.id).map((attempt) => ({ ...rowAttempt({ ...attempt, collaboration_id: row.id }),
+    recoveryReceipt: attempt.receipt_source ? { source: attempt.receipt_source, consumed: !!attempt.receipt_consumed_at } : null }));
   const result = {
     id: row.id,
     rootSessionId: row.root_session_id,
@@ -944,6 +949,18 @@ export async function updateDispatchNotice(commandId, triggerId = '') {
     .run(triggerId,isoAfter(nowIso(),30000),commandId).changes > 0, { mutate: true });
 }
 
+export async function listPendingReceiptNotices() {
+  return withDatabase(db => db.prepare(`SELECT n.attempt_id,t.id AS task_id,c.id AS collaboration_id,c.root_session_id
+    FROM collaboration_receipt_notices n JOIN collaboration_attempts a ON a.id=n.attempt_id
+    JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id WHERE n.trigger_id='' AND n.next_check_at<=?
+    ORDER BY n.next_check_at,n.attempt_id LIMIT 50`).all(nowIso()));
+}
+
+export async function updateReceiptNotice(attemptId, triggerId = '') {
+  return withDatabase(db => db.prepare("UPDATE collaboration_receipt_notices SET trigger_id=?,next_check_at=? WHERE attempt_id=? AND trigger_id=''")
+    .run(triggerId,isoAfter(nowIso(),30000),attemptId).changes > 0, { mutate: true });
+}
+
 export async function findAttemptByRunId(runId) {
   return withDatabase((db) => rowAttempt(db.prepare(`SELECT a.*, t.collaboration_id FROM collaboration_attempts a
     JOIN collaboration_tasks t ON t.id = a.task_id WHERE a.run_id = ?`).get(runId)));
@@ -1117,6 +1134,7 @@ export async function completeAttempt(attemptId, result = {}, now = new Date()) 
         db.exec('ROLLBACK');
         return null;
       }
+      if (result.state === 'failed' && !attempt.run_id) db.prepare('INSERT OR IGNORE INTO collaboration_receipt_notices(attempt_id) VALUES(?)').run(attemptId);
       appendEvent(db, task.collaboration_id, recoveringExpiredSuccess ? 'attempt_recovered' : 'attempt_completed', {
         ...result,
         retry: safeAdmissionRetry,

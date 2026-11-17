@@ -308,8 +308,8 @@ export async function getAgentInterruption(input) {
   const incident = await updateDisposition(input, 'read');
   const run = await getRun(incident.runId);
   const receipt = incident.attemptId ? await withDatabase(db => {
-    const row = db.prepare('SELECT source,consumed_at FROM collaboration_replay_receipts WHERE attempt_id=?').get(incident.attemptId);
-    return row ? { source: row.source, consumed: !!row.consumed_at } : null;
+    const row = db.prepare('SELECT collaboration_id,source,consumed_at FROM collaboration_replay_receipts WHERE attempt_id=?').get(incident.attemptId);
+    return row ? { collaborationId: row.collaboration_id, source: row.source, consumed: !!row.consumed_at } : null;
   }) : null;
   return { ...incident, reconciliation: {
     runState: text(run?.state) || 'unavailable', finalizedAt: text(run?.finalizedAt) || null,

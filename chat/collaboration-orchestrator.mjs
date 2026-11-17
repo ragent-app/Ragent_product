@@ -444,7 +444,7 @@ export function createCollaborationOrchestrator(options = {}) {
             if (typeof ledger.observeCommandState === 'function') {
               const observedState = command.state === 'completed'
                 ? 'completed'
-                : command.state === 'cancelled' ? 'cancelled' : 'pending';
+                : command.state === 'cancelled' ? 'cancelled' : command.state === 'blocked' ? 'dead_letter' : 'pending';
               await ledger.observeCommandState(projected.id, {
                 state: observedState,
                 externalEffectId: command.runId || '',
@@ -1503,6 +1503,22 @@ export function createCollaborationOrchestrator(options = {}) {
           console.warn(`[collaboration] dispatch notice unavailable: ${error?.code || 'unknown'}`);
         } finally {
           await store.updateDispatchNotice(notice.command_id, triggerId);
+        }
+      }
+    }
+    if (typeof store.listPendingReceiptNotices === 'function') {
+      for (const notice of await store.listPendingReceiptNotices()) {
+        let triggerId = '';
+        try {
+          const { createTrigger } = await import('./triggers.mjs');
+          const trigger = await createTrigger({ sessionId: notice.root_session_id, scheduledAt: new Date().toISOString(),
+            dedupeKey: `collaboration-unbound-failure:${notice.attempt_id}`, title: 'Collaboration attempt needs review',
+            text: `Task ${notice.task_id}, attempt ${notice.attempt_id} failed without a bound run. Review collaboration ${notice.collaboration_id}, reconcile any prior dispatch, and inspect its recovery receipt before retrying.` });
+          triggerId = trigger?.id || '';
+        } catch (error) {
+          console.warn(`[collaboration] attempt notice unavailable: ${error?.code || 'unknown'}`);
+        } finally {
+          await store.updateReceiptNotice(notice.attempt_id, triggerId);
         }
       }
     }
