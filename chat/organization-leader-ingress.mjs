@@ -201,6 +201,7 @@ export async function processRootLeadershipProposal({
   apps = null,
   getApps = null,
   getTool = undefined,
+  afterValidation = null,
 } = {}) {
   if (!leaderEnabled()) return { attempted: false, skipped: ORGANIZATION_LEADER_DISABLED };
   if (!isRootLeadershipSession(session)) return { attempted: false, skipped: 'not_root_leadership' };
@@ -252,6 +253,8 @@ export async function processRootLeadershipProposal({
   } catch (error) {
     return { ...errorResult(error), sideEffects: 'none' };
   }
+
+  if (afterValidation) await afterValidation();
 
   const rootSessionId = text(session.id);
   const organizationKey = `root-leadership:${rootSessionId}`;
