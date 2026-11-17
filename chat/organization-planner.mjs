@@ -100,7 +100,7 @@ function normalizeNode(raw, index) {
   const value = assertPlainObject(raw, `nodes[${index}]`);
   assertNoUnknownKeys(value, new Set([
     'stableKey', 'role', 'agentId', 'capabilities', 'dependsOn', 'phaseId', 'parentKey',
-    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey',
+    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility',
   ]), `nodes[${index}]`);
   const stableKey = text(value.stableKey);
   if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key' });
@@ -122,6 +122,8 @@ function normalizeNode(raw, index) {
     stableKey,
     role,
     agentId,
+    ...(Object.hasOwn(value, 'displayName') ? { displayName: displayMetadata(value.displayName, `nodes[${index}].displayName`, 160) } : {}),
+    ...(Object.hasOwn(value, 'responsibility') ? { responsibility: displayMetadata(value.responsibility, `nodes[${index}].responsibility`, 1000) } : {}),
     ...(Object.hasOwn(value, 'domain') ? { domain: displayMetadata(value.domain, `nodes[${index}].domain`, 160) } : {}),
     ...(Object.hasOwn(value, 'iconKey') ? { iconKey: displayMetadata(value.iconKey, `nodes[${index}].iconKey`, 64) } : {}),
     capabilities: list(value.capabilities).map((entry) => entry.toLowerCase()),
