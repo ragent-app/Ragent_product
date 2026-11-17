@@ -89,6 +89,8 @@ const CLAUDE_BIDI_MCP_TOOL_PREFIX = 'mcp__';
 const CLAUDE_BIDI_MANAGED_MCP_TOOLS = new Set([
   'ragent_request_actions',
   'ragent_create_agent',
+  'ragent_organization_read',
+  'ragent_organization_action',
   // Accept approvals for runs started before the name migration.
   'ragent_request_actions',
   'ragent_create_agent',
