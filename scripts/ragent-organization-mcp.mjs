@@ -12,7 +12,7 @@ const endpoint = process.env.RAGENT_ORGANIZATION_TOOL_SCOPE === 'node' ? 'tools'
 const valid = !!(sessionId && token && runId && turnId);
 const readTool = { name: 'ragent_organization_read', description: 'List or read authorized Ragent skills. The server validates this Run on every call.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
-    action: { type: 'string', enum: ['skills.list', 'skills.read', 'incidents.list', 'incident.get'] },
+    action: { type: 'string', enum: ['skills.list', 'skills.read', 'state.get', 'incidents.list', 'incident.get'] },
     args: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, expectedHash: { type: 'string' }, incidentId: { type: 'string' }, limit: { type: 'integer' } } },
   }, required: ['action'] } };
 const actionTool = { name: 'ragent_organization_action', description: 'Acknowledge or resolve an assigned incident; resolution reports a handling decision, not proof that the Run recovered.',
@@ -32,7 +32,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     else if (request.method === 'ping') result = {};
     else if (request.method === 'tools/list') result = { tools: valid ? [readTool, actionTool] : [] };
     else if (request.method === 'tools/call' && valid &&
-        ((request.params?.name === readTool.name && ['skills.list', 'skills.read', 'incidents.list', 'incident.get'].includes(request.params?.arguments?.action)) ||
+        ((request.params?.name === readTool.name && ['skills.list', 'skills.read', 'state.get', 'incidents.list', 'incident.get'].includes(request.params?.arguments?.action)) ||
          (request.params?.name === actionTool.name && ['incident.ack', 'incident.resolve'].includes(request.params?.arguments?.action)))) {
       const response = await client.request(`/api/sessions/${encodeURIComponent(sessionId)}/organization/${endpoint}`, { method: 'POST', body: request.params.arguments || {} });
       result = { content: [{ type: 'text', text: JSON.stringify(response.json || { error: 'Organization request failed' }) }], ...(response.response.ok ? {} : { isError: true }) };

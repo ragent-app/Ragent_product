@@ -460,7 +460,9 @@ import {
 import { extractTaggedBlock } from './session-text-parsing.mjs';
 import { buildTurnContextHook } from './turn-context-hook.mjs';
 import { buildOrganizationIdentityContext } from './organization-identity-context.mjs';
+import { buildOrganizationExecutionContext } from './organization-execution-context.mjs';
 const BUILTIN_SKILL_READ_AVAILABLE = Symbol('builtinSkillReadAvailable');
+const ORGANIZATION_EXECUTION_CONTEXT = Symbol('organizationExecutionContext');
 import {
   buildDelegationResultFromRun,
   normalizeDelegationResult,
@@ -8300,6 +8302,7 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
     : '';
   const perMessageInstruction = [
     ...(promptMode === 'bare-user' && requiredOrganizationIdentity ? [requiredOrganizationIdentity] : []),
+    options[ORGANIZATION_EXECUTION_CONTEXT] || '',
     await resolveAgentMessagePrompt(session),
     typeof options.harnessInstructions === 'string' ? options.harnessInstructions.trim() : '',
   ].filter(Boolean).join('\n\n---\n\n');
@@ -8409,6 +8412,15 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
     }
   };
   requireIdentityCarrier(rendered);
+  const requiredExecution = options[ORGANIZATION_EXECUTION_CONTEXT];
+  const requireExecutionCarrier = (result) => {
+    if (!requiredExecution) return;
+    const normalized = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    if (!normalized([result.prompt, result.developerInstructions, result.systemPrefix].join('\n')).includes(normalized(requiredExecution))) {
+      throw Object.assign(new Error('Runtime cannot carry the required organization execution context'), { code: 'ORG_EXECUTION_CARRIER_UNAVAILABLE' });
+    }
+  };
+  requireExecutionCarrier(rendered);
   if (contextPlanError) {
     rendered.metadata = {
       ...(rendered.metadata || {}),
@@ -8438,6 +8450,7 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
       options: compilerOptions,
     });
     requireIdentityCarrier(freshRecovery);
+    requireExecutionCarrier(freshRecovery);
   }
   if (providerContextReceipt) {
     const receiptRefs = [
@@ -13903,6 +13916,18 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   );
   const primaryResponseId = publicationResponseIds[0] || responseId;
   const replyPublicationRootRunId = trimString(options.replyPublicationRootRunId);
+  const { createSessionRunCollaborationCapabilities } = await import('./collaboration-capability.mjs');
+  const collaborationCapabilitySet = await createSessionRunCollaborationCapabilities({
+    runId: nextRunId, sessionId, turnId: requestId, session,
+    internalOperation: options.internalOperation, collaborationCapability: options.collaborationCapability,
+    getAppImpl: getApp, getSessionImpl: getSession,
+  });
+  const organizationExecutionContext = session.sessionPlane === 'organization'
+    ? await buildOrganizationExecutionContext({ sessionId, runId: nextRunId, requestId,
+      internalOperation: options.internalOperation, capabilities: collaborationCapabilitySet?.capabilities,
+      selectedRuntime: { tool: effectiveTool, provider: effectiveProviderProfile || null,
+        model: trimString(options.model || session.model) || null, effort: trimString(options.effort || session.effort) || null,
+        runtimeFamily: effectiveRuntimeFamily || null } }) : '';
   const serverBuiltinSkillReadAvailable = !!sessionControlChannel?.token && !!sessionControlChannel?.runId &&
     !!sessionControlChannel?.sessionId && options.accessMode !== 'read' && options.readOnlyRequired !== true &&
     options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily);
@@ -13923,6 +13948,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
           providerCapabilities: effectiveProviderContract.providerCapabilities || null,
           productAgentCreateEligible,
           [BUILTIN_SKILL_READ_AVAILABLE]: serverBuiltinSkillReadAvailable,
+          [ORGANIZATION_EXECUTION_CONTEXT]: organizationExecutionContext,
         },
       );
     } finally {
@@ -13948,6 +13974,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
           providerCapabilities: effectiveProviderContract.providerCapabilities || null,
           productAgentCreateEligible,
           [BUILTIN_SKILL_READ_AVAILABLE]: serverBuiltinSkillReadAvailable,
+          [ORGANIZATION_EXECUTION_CONTEXT]: organizationExecutionContext,
         },
       ),
     );
@@ -13989,21 +14016,6 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ? { agentTemplateId: requestedRunTemplateId }
       : {}),
   };
-  // Issue a narrow, server-signed control capability from server-resolved
-  // Session/Agent policy. The runner never receives owner credentials or the
-  // owner CLI socket. Specialist workers get only read access to their exact
-  // collaboration; a manager Agent with canDelegate gets the control surface.
-  const { createSessionRunCollaborationCapabilities } = await import('./collaboration-capability.mjs');
-  const collaborationCapabilitySet = await createSessionRunCollaborationCapabilities({
-    runId: nextRunId,
-    sessionId,
-    turnId: requestId,
-    session,
-    internalOperation: options.internalOperation,
-    collaborationCapability: options.collaborationCapability,
-    getAppImpl: getApp,
-    getSessionImpl: getSession,
-  });
   const manifest = {
     sessionId,
     requestId,

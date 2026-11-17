@@ -14,6 +14,11 @@ export async function executeOrganizationControlTool({ authSession, action, args
     if (!session || session.sessionPlane === 'organization') throw fail();
     const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) ||
       (session.sessionClass === 'ROOT_LEADERSHIP' && id === 'ragent:builtin:root');
+    if (action === 'state.get') {
+      if (session.sessionClass !== 'ROOT_LEADERSHIP') throw fail();
+      const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
+      return { projection: await buildOrganizationContextProjection({ session }) };
+    }
     if (action === 'skills.list') return { skills: await listBuiltinSkills({ authorize }) };
     if (action === 'skills.read') {
       if (typeof args.id !== 'string' || !/^[a-f0-9]{64}$/.test(args.expectedHash || '')) throw Object.assign(new Error('Skill id and current content hash are required'), { statusCode: 400 });
@@ -35,6 +40,13 @@ export async function executeOrganizationControlTool({ authSession, action, args
   if (!node || node.organizationId !== scope.organizationId || node.bindingGeneration !== scope.bindingGeneration) throw fail();
   const role = ({ MANAGER: 'manager', PHASE_LEAD: 'manager', WORKER: 'worker', REVIEWER: 'reviewer', EXECUTIVE: 'root' })[String(node.sessionClass || '').toUpperCase()];
   const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) || (!!role && id === `ragent:builtin:${role}`);
+  if (action === 'state.get') {
+    const { getSession } = await import('./session-manager.mjs');
+    const session = await getSession(authSession.sessionId);
+    if (!session || session.organizationId !== scope.organizationId || session.organizationNodeId !== scope.nodeId) throw fail();
+    const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
+    return { projection: await buildOrganizationContextProjection({ session }) };
+  }
   if (action === 'skills.list') return { skills: await listBuiltinSkills({ authorize }) };
   if (action === 'skills.read') {
     if (typeof args.id !== 'string' || !/^[a-f0-9]{64}$/.test(args.expectedHash || '')) throw Object.assign(new Error('Skill id and current content hash are required'), { statusCode: 400 });
