@@ -9,6 +9,7 @@ import { canonicalJson } from './execution-scope.mjs';
 import { resolveDelegatedRuntimeSelection } from './agent-resolver.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
 import { normalizeRuntimeSelection } from './organization-runtime-selection.mjs';
+import { createRuntimeSelectionRecord, filterRuntimeCandidates, normalizeUserRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { deriveOrganizationGrant } from './organization-role-contract.mjs';
 
 export const ORGANIZATION_PROPOSAL_SCHEMA_VERSION = 1;
@@ -455,6 +456,29 @@ export async function compileOrganizationProposal(input, options = {}) {
           getProviders: options.getProviders,
         });
       }
+      // This option is supplied by the server, never by the model proposal.
+      const decision = object(options.runtimeDecisionByNode?.[node.stableKey]);
+      const constraints = normalizeUserRuntimeConstraints(decision.constraints);
+      if (!runtime && Object.values(constraints).some((entry) => entry.mode === 'locked')) {
+        throw plannerError(PLANNER_RESOLVER_REJECTED, 'a locked runtime requires an explicit node runtime', { reason: 'runtime_locked' });
+      }
+      let runtimeDecision = null;
+      if (runtime) {
+        let selectedEvidence = null;
+        let selectedCost = null;
+        if (Array.isArray(decision.candidates)) {
+          const candidates = filterRuntimeCandidates(decision.candidates, { constraints, budget: decision.budget });
+          const selected = candidates.find((candidate) => {
+            const tuple = candidate.runtime || {};
+            return ['tool', 'model', 'effort'].every((field) => tuple[field] === runtime[field])
+              && (tuple.provider || tuple.providerProfile) === runtime.provider;
+          });
+          if (!selected) throw plannerError(PLANNER_RESOLVER_REJECTED, 'selected runtime is not an eligible candidate', { reason: 'runtime_candidate_ineligible' });
+          selectedEvidence = selected.evidence;
+          selectedCost = selected.cost;
+        }
+        runtimeDecision = createRuntimeSelectionRecord({ runtime, constraints, evidence: selectedEvidence, cost: selectedCost, rationale: decision.rationale });
+      }
       const resolved = {
         selectedAgentId: profile.agentId,
         profile,
@@ -465,6 +489,7 @@ export async function compileOrganizationProposal(input, options = {}) {
           parentGrantSubset: true,
         },
         runtime,
+        runtimeDecision,
       };
       profileByNode.set(node.stableKey, resolved);
       grantByNode.set(node.stableKey, grant);
@@ -487,6 +512,7 @@ export async function compileOrganizationProposal(input, options = {}) {
       ...node,
       grant: grantByNode.get(node.stableKey),
       ...(profileByNode.get(node.stableKey)?.runtime ? { runtime: profileByNode.get(node.stableKey).runtime } : {}),
+      ...(profileByNode.get(node.stableKey)?.runtimeDecision ? { runtimeDecision: profileByNode.get(node.stableKey).runtimeDecision } : {}),
       resolver: { selectedAgentId: profileByNode.get(node.stableKey)?.selectedAgentId || node.agentId, proof: profileByNode.get(node.stableKey)?.proof || null },
     })),
     phases: proposal.phases,

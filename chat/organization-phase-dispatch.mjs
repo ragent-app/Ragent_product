@@ -7,7 +7,8 @@
 import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrator.mjs';
 import { getOrganization, getRevision, listOrganizationNodes } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
-import { getToolDefinitionAsync } from '../lib/tools.mjs';
+import { getModelsForTool } from './models.mjs';
+import { assertRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { createHash } from 'crypto';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 
@@ -41,25 +42,35 @@ function runtimeForSession(session) {
   const tool = text(session?.tool, 80).toLowerCase();
   const model = text(session?.model, 240);
   const effort = text(session?.effort, 80).toLowerCase();
-  if (!tool || !model || !effort) {
+  if (!tool || !model) {
     throw dispatchError(
       'ORG_PHASE_RUNTIME_INCOMPLETE',
-      `managed Session ${text(session?.id)} is missing tool/model/effort; refusing to start an unverified Run`,
+      `managed Session ${text(session?.id)} is missing tool/model; refusing to start an unverified Run`,
       409,
     );
   }
-  return { tool, model, effort };
+  return { tool, model, ...(effort ? { effort } : {}) };
 }
 
 function runtimeMatches(compiledRuntime, actualRuntime) {
   const expected = object(compiledRuntime);
-  for (const key of ['tool', 'provider', 'providerProfile', 'model', 'effort']) {
-    const wanted = text(expected[key]).toLowerCase();
+  for (const key of ['tool', 'provider', 'model', 'effort']) {
+    const wanted = text(key === 'provider' ? expected.provider || expected.providerProfile : expected[key]);
     if (!wanted) continue;
-    const actual = text(actualRuntime[key]).toLowerCase();
-    if (wanted !== actual) return false;
+    const actual = text(key === 'provider' ? actualRuntime.provider || actualRuntime.providerProfile : actualRuntime[key]);
+    if (['tool', 'effort'].includes(key) ? wanted.toLowerCase() !== actual.toLowerCase() : wanted !== actual) return false;
   }
   return true;
+}
+
+async function validateSessionEffort(runtime) {
+  if (runtime.effort) return;
+  const catalog = await getModelsForTool(runtime.tool).catch(() => null);
+  const entry = catalog?.models?.find((model) => model.id === runtime.model);
+  const levels = entry?.effortLevels || catalog?.effortLevels;
+  if (Array.isArray(levels) && levels.length > 0) {
+    throw dispatchError('ORG_PHASE_RUNTIME_INCOMPLETE', 'Session requires a supported effort selection', 409);
+  }
 }
 
 async function phaseDependenciesCompleted(organizationId, compiled, phase) {
@@ -177,9 +188,16 @@ export async function dispatchOrganizationPhase({
       throw dispatchError('ORG_PHASE_SESSION_INVALID', `node ${node.stableKey} is not bound to a managed Session`, 409, { stableKey: node.stableKey });
     }
     const actualRuntime = runtimeForSession(session);
-    const providerDefinition = await getToolDefinitionAsync(actualRuntime.tool).catch(() => null);
-    const provider = text(session.providerProfile || providerDefinition?.provider, 160);
+    await validateSessionEffort(actualRuntime);
+    const provider = text(session.providerProfile, 160);
     const runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
+    // Recheck the trusted constraints frozen in this revision at admission.
+    if (nodePlan?.runtimeDecision) {
+      assertRuntimeConstraints(runtime, nodePlan.runtimeDecision.requestedConstraints);
+      if (!runtimeMatches(nodePlan.runtimeDecision.selected, runtime)) {
+        throw dispatchError('ORG_PHASE_RUNTIME_MISMATCH', `node ${node.stableKey} Session runtime differs from the frozen decision`, 409);
+      }
+    }
     if (!runtimeMatches(nodePlan?.runtime, runtime)) {
       throw dispatchError('ORG_PHASE_RUNTIME_MISMATCH', `node ${node.stableKey} Session runtime differs from the frozen plan`, 409, {
         stableKey: node.stableKey,
@@ -214,7 +232,7 @@ export async function dispatchOrganizationPhase({
         allowedTools: [runtime.tool],
         allowedProviders: provider ? [provider] : [],
         allowedModels: [runtime.model],
-        allowedEfforts: [runtime.effort],
+        allowedEfforts: runtime.effort ? [runtime.effort] : [],
       },
       organizationId: organization.id,
       organizationNodeId: node.id,

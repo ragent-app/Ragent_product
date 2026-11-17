@@ -68,6 +68,15 @@ function intersect(left, right) {
   return left.filter((entry) => allowed.has(entry));
 }
 
+// Null means no constraint; an empty array means two real ceilings conflict.
+function policyIntersection(left, right) {
+  if (!left.length && !right.length) return null;
+  if (!left.length) return [...right];
+  if (!right.length) return [...left];
+  const allowed = new Set(right);
+  return left.filter((entry) => allowed.has(entry));
+}
+
 function scopedValues(policy, key, tool) {
   const values = policy?.[key] && typeof policy[key] === 'object'
     ? policy[key][tool]
@@ -221,7 +230,7 @@ function effortLevels(catalog, model, provider = '') {
 }
 
 function assertAllowed(value, allowed, code, label, details = {}) {
-  if (value && allowed.length > 0 && !allowed.includes(value)) {
+  if (value && allowed !== null && !allowed.includes(value)) {
     throw runtimeError(code, `${label} is outside the delegated runtime policy`, {
       reason: 'runtime_policy_denied',
       field: label,
@@ -232,7 +241,7 @@ function assertAllowed(value, allowed, code, label, details = {}) {
 }
 
 function assertModelAllowed(value, allowed, details = {}) {
-  if (!value || allowed.length === 0) return;
+  if (!value || allowed === null) return;
   const requested = bareModel(value);
   if (allowed.some((entry) => entry === value || bareModel(entry) === requested)) return;
   throw runtimeError('ORG_RUNTIME_MODEL_DENIED', 'runtime.model is outside the delegated runtime policy', {
@@ -258,7 +267,7 @@ export async function resolveRuntimeSelection({
   const selection = normalizeRuntimeSelection(requested);
   const childPolicy = runtimePolicyForProfile(profile);
   const parentPolicy = runtimePolicyForGrant(parentGrant);
-  const allowedTools = intersect(childPolicy.allowedTools, parentPolicy.allowedTools);
+  const allowedTools = policyIntersection(childPolicy.allowedTools, parentPolicy.allowedTools);
   const requestedTool = selection.tool
     || childPolicy.default?.tool
     || text(profile.runtimeProfile?.toolId || profile.toolId || profile.tool, 80).toLowerCase();
@@ -283,9 +292,11 @@ export async function resolveRuntimeSelection({
     ...parentPolicy.allowedProviders,
     ...scopedValues(parentPolicy, 'allowedProvidersByTool', requestedTool),
   ];
-  const providerCeiling = childProviders.length > 0 && parentProviders.length > 0
-    ? intersect(childProviders, parentProviders)
-    : (childProviders.length > 0 ? childProviders : parentProviders);
+  const providerCeiling = policyIntersection(childProviders, parentProviders);
+
+  if (providerCeiling?.length === 0) {
+    throw runtimeError('ORG_RUNTIME_PROVIDER_DENIED', 'parent and child runtime provider policies have no permitted intersection', { reason: 'runtime_policy_denied', field: 'runtime.provider' });
+  }
 
   const childModels = intersect(
     [...childPolicy.allowedModels, ...scopedValues(childPolicy, 'allowedModelsByTool', requestedTool)],
@@ -299,15 +310,17 @@ export async function resolveRuntimeSelection({
   // a real ceiling; use the intersection only when both layers constrain it.
   const childModelCeiling = childModels.length > 0 ? childModels : [];
   const parentModelCeiling = parentModels.length > 0 ? parentModels : [];
-  const modelCeiling = childModelCeiling.length > 0 && parentModelCeiling.length > 0
-    ? intersect(childModelCeiling, parentModelCeiling)
-    : (childModelCeiling.length > 0 ? childModelCeiling : parentModelCeiling);
+  const modelCeiling = policyIntersection(childModelCeiling, parentModelCeiling);
+  if (modelCeiling?.length === 0) {
+    throw runtimeError('ORG_RUNTIME_MODEL_DENIED', 'parent and child runtime model policies have no permitted intersection', { reason: 'runtime_policy_denied', field: 'runtime.model' });
+  }
+
   const requestedModel = selection.model || childPolicy.default?.model || '';
   const modelProvider = providerFromModel(requestedModel);
   const requestedProvider = selection.provider
     || childPolicy.default?.provider
     || modelProvider
-    || (providerCeiling.length === 1 ? providerCeiling[0] : '');
+    || (providerCeiling?.length === 1 ? providerCeiling[0] : '');
   if (modelProvider && requestedProvider && modelProvider !== requestedProvider) {
     throw runtimeError('ORG_RUNTIME_PROVIDER_MODEL_CONFLICT', 'runtime.model provider scope does not match runtime.provider', {
       reason: 'provider_model_conflict',
@@ -363,9 +376,11 @@ export async function resolveRuntimeSelection({
     [...parentPolicy.allowedEfforts, ...scopedValues(parentPolicy, 'allowedEffortsByTool', requestedTool)],
     [],
   ).map((effort) => effort.toLowerCase());
-  const effortPolicy = childEfforts.length > 0 && parentEfforts.length > 0
-    ? intersect(childEfforts, parentEfforts)
-    : (childEfforts.length > 0 ? childEfforts : parentEfforts);
+  const effortPolicy = policyIntersection(childEfforts, parentEfforts);
+  if (effortPolicy?.length === 0) {
+    throw runtimeError('ORG_RUNTIME_EFFORT_DENIED', 'parent and child runtime effort policies have no permitted intersection', { reason: 'runtime_policy_denied', field: 'runtime.effort' });
+  }
+
   const requestedEffort = selection.effort || childPolicy.default?.effort || '';
   assertAllowed(requestedEffort, effortPolicy, 'ORG_RUNTIME_EFFORT_DENIED', 'runtime.effort', { tool: requestedTool });
   const catalogEfforts = effortLevels(catalog, requestedModel, requestedProvider);
