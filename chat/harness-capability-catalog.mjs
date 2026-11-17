@@ -17,6 +17,7 @@ import { nativeOAuthAccountId, resolveDefaultProviderProfileId, resolveNativeSel
 import { managedCodexMcpAccountBinding } from '../lib/provider-runtime/codex-mcp-config.mjs';
 import { codexSkillId, listCodexSkillPreferences } from '../lib/provider-runtime/codex-skill-preferences.mjs';
 import { recordCodexCapabilitySyncResult } from './codex-capability-sync.mjs';
+import { listBuiltinSkills, readBuiltinSkill } from './builtin-skills.mjs';
 
 const MAX_SKILL_FILES = 500;
 const MAX_SKILL_DESCRIPTION = 400;
@@ -465,6 +466,12 @@ export async function listHarnessCapabilities({
       Object.assign(errors, catalog.errors);
     } catch { errors.claude = 'Claude capability catalog is unavailable.'; }
   }
+  // The route authorizes access to the session; selection is revalidated before use.
+  const builtins = await listBuiltinSkills({ authorize: async () => true });
+  items.push(...builtins.map((skill) => normalizeCapability({
+    id: skill.id, kind: 'skill', source: 'ragent', title: skill.name,
+    description: skill.description, enabled: true, state: { contentHash: skill.contentHash },
+  })).filter(Boolean));
   if (platformSkillsDir) {
     try {
       const managed = await listPlatformSkillCapabilities(platformSkillsDir);
@@ -545,6 +552,11 @@ export async function resolveHarnessCapabilityInstructions({
       throw capabilityResolutionError('A selected harness capability is no longer available. Refresh the slash menu and try again.');
     }
     if (item.source === 'ragent' && item.kind === 'skill') {
+      if (id.startsWith('ragent:builtin:')) {
+        const skill = await readBuiltinSkill({ id, expectedHash: item.state?.contentHash, authorize: async () => true });
+        sections.push(`### Ragent skill: ${item.title}\n${skill.content.trim()}`);
+        continue;
+      }
       const markdown = await readPlatformSkillById(platformSkillsDir, id);
       if (!markdown.trim()) {
         throw capabilityResolutionError('A selected Ragent skill could not be read. Refresh the slash menu and try again.');
