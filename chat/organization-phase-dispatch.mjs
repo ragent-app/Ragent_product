@@ -78,13 +78,17 @@ async function validateSessionEffort(runtime) {
   }
 }
 
-async function phaseDependenciesCompleted(organizationId, compiled, phase) {
+async function phaseDependenciesCompleted(organizationId, revision, phase) {
   const dependencies = list(phase?.dependsOn);
   if (dependencies.length === 0) return;
-  const events = await import('./organization-messaging.mjs').then(({ listOrganizationEvents }) => listOrganizationEvents(organizationId, { limit: 5000 }));
+  const { withDatabase } = await import('./collaboration-store.mjs');
+  const { ensureOrganizationMessageEnvelopeSchema } = await import('./organization-messaging.mjs');
   for (const dependency of dependencies) {
-    const complete = events.some((event) => event.phaseId === dependency
-      && ['phase.completed', 'phase_completed'].includes(event.type));
+    const complete = await withDatabase(db => {
+      ensureOrganizationMessageEnvelopeSchema(db);
+      return !!db.prepare(`SELECT 1 FROM organization_events
+        WHERE organization_id=? AND organization_revision=? AND phase_id=? AND type IN ('phase.completed','phase_completed') LIMIT 1`).get(organizationId,revision,dependency);
+    }, { mutate: true });
     if (!complete) {
       throw dispatchError('ORG_PHASE_DEPENDENCY_BLOCKED', `phase ${phase.phaseId} depends on incomplete phase ${dependency}`, 409, {
         phaseId: phase.phaseId,
@@ -171,7 +175,7 @@ export async function dispatchOrganizationPhase({
   const compiled = revisionRow.compiled || {};
   const phase = phaseFor(compiled, normalizedPhaseId);
   if (!phase) throw dispatchError('ORG_PHASE_NOT_FOUND', `phase ${normalizedPhaseId} not found`, 404);
-  await phaseDependenciesCompleted(organization.id, compiled, phase);
+  await phaseDependenciesCompleted(organization.id, targetRevision, phase);
 
   const nodes = await listOrganizationNodes(organization.id);
   const delegationFacts = organizationDelegation

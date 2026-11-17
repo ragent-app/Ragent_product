@@ -6,7 +6,9 @@ import { listBuiltinSkills, readBuiltinSkill } from './builtin-skills.mjs';
 import { acknowledgeAgentInterruption, resolveAgentInterruption, getAgentInterruption, listAgentInterruptions } from './agent-interruption-notifications.mjs';
 
 function stateResponse(projection, previousDigest) {
-  const digest = createHash('sha256').update(canonicalJson(projection)).digest('hex');
+  const stable = projection && typeof projection === 'object' ? { ...projection } : projection;
+  if (stable && typeof stable === 'object') delete stable.generatedAt;
+  const digest = createHash('sha256').update(canonicalJson(stable)).digest('hex');
   return previousDigest === digest ? { unchanged: true, digest } : { unchanged: false, digest, projection };
 }
 

@@ -92,6 +92,8 @@ function ensurePhaseGateSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_org_events_org ON organization_events(organization_id, id);
     CREATE INDEX IF NOT EXISTS idx_org_events_org_phase ON organization_events(organization_id, phase_id, id);
   `);
+  const columns = new Set(db.prepare('PRAGMA table_info(organization_events)').all().map(column => column.name));
+  if (!columns.has('organization_revision')) db.exec('ALTER TABLE organization_events ADD COLUMN organization_revision INTEGER');
 }
 
 function rowEvent(row) {
@@ -192,6 +194,7 @@ export async function decideGate({
       },
       decidedByNodeId: trimString(decidedByNodeId),
       packetId: trimString(packetId),
+      bindCurrentRevision: true,
     });
     publishOrganizationInvalidation({ organizationId: normalizedOrg });
     return gate;
@@ -249,6 +252,10 @@ export async function completePhase({
           });
         }
         const decision = parseJson(gate.decision_json, {});
+        const revision = db.prepare('SELECT state FROM organization_revisions WHERE organization_id=? AND revision=?').get(normalizedOrg,org.current_revision);
+        if (revision?.state !== 'frozen' || decision.organizationRevision !== org.current_revision) {
+          throw gateError(PHASE_ACCEPTANCE_INCOMPLETE, 'Gate decision is not bound to the current frozen revision', 409, { reason: 'gate_revision_mismatch' });
+        }
         const acceptance = Array.isArray(decision?.acceptance) ? decision.acceptance : [];
         if (!acceptanceSatisfied(acceptance)) {
           throw gateError(PHASE_ACCEPTANCE_INCOMPLETE, `phase ${normalizedPhase} acceptance is not complete`, 409, {
@@ -273,9 +280,10 @@ export async function completePhase({
         }
         const nextEpoch = currentEpoch + 1;
         const eventId = db.prepare(`INSERT INTO organization_events
-          (organization_id, type, phase_id, gate_generation, payload_json, created_at)
-          VALUES (?, 'phase_completed', ?, ?, ?, ?)`).run(
+          (organization_id, organization_revision, type, phase_id, gate_generation, payload_json, created_at)
+          VALUES (?, ?, 'phase_completed', ?, ?, ?, ?)`).run(
           normalizedOrg,
+          org.current_revision,
           normalizedPhase,
           gate.generation,
           json({

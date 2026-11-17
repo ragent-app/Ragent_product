@@ -1102,12 +1102,20 @@ export async function advanceGateGeneration(organizationId, phaseId, {
   decidedByNodeId = '',
   packetId = '',
   decidedAt = '',
+  bindCurrentRevision = false,
 } = {}) {
   return withDatabase((db) => {
     requireOrganization(db, organizationId);
     const timestamp = nowIso();
     db.exec('BEGIN IMMEDIATE');
     try {
+      let boundDecision = decision;
+      if (bindCurrentRevision) {
+        const org = db.prepare('SELECT current_revision FROM organizations WHERE id=?').get(organizationId);
+        const revision = db.prepare("SELECT state FROM organization_revisions WHERE organization_id=? AND revision=?").get(organizationId,org?.current_revision);
+        if (!org || revision?.state !== 'frozen') throw orgError('REVISION_NOT_FROZEN', 'A frozen current revision is required for a gate decision');
+        boundDecision = { ...(decision || {}), organizationRevision: org.current_revision };
+      }
       const latest = db.prepare('SELECT generation FROM organization_gates WHERE organization_id = ? AND phase_id = ? ORDER BY generation DESC LIMIT 1').get(organizationId, phaseId);
       const currentGeneration = latest ? latest.generation : 0;
       if (currentGeneration !== fromGeneration) {
@@ -1118,7 +1126,7 @@ export async function advanceGateGeneration(organizationId, phaseId, {
         (id, organization_id, phase_id, generation, state, decision_json, decided_by_node_id, decided_at, packet_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(id('gate'), organizationId, phaseId, nextGeneration, state,
-          decision !== null ? json(decision, null) : null, decidedByNodeId || null, decidedAt || timestamp, packetId || null);
+          boundDecision !== null ? json(boundDecision, null) : null, decidedByNodeId || null, decidedAt || timestamp, packetId || null);
       db.exec('COMMIT');
       return rowGate(db.prepare('SELECT * FROM organization_gates WHERE organization_id = ? AND phase_id = ? AND generation = ?').get(organizationId, phaseId, nextGeneration));
     } catch (error) {
