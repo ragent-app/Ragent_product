@@ -66,6 +66,19 @@ function managedAttemptBindingAvailable(db, collaborationId, taskId) {
   if (!policy || typeof policy!=='object' || Array.isArray(policy)) throw Object.assign(new Error('Collaboration policy is unavailable; reconcile before dispatch'),{code:'COLLABORATION_MANAGED_BINDING_CONFLICT',statusCode:409});
   const org=typeof policy.organizationId==='string' ? policy.organizationId.trim() : '';
   const nodeId=typeof policy.organizationNodeId==='string' ? policy.organizationNodeId.trim() : '';
+  const delegation=policy.organizationDelegation;
+  if (delegation) {
+    const orgRow=db.prepare('SELECT current_revision,state FROM organizations WHERE id=?').get(org);
+    const parent=db.prepare('SELECT current_session_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(delegation.parentNodeId,org);
+    const child=db.prepare('SELECT parent_node_id,binding_generation,retired_revision,lifecycle_state FROM organization_nodes WHERE id=? AND organization_id=?').get(nodeId,org);
+    const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,delegation.revision,delegation.parentNodeId,nodeId);
+    const grants=db.prepare('SELECT generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? ORDER BY generation DESC').all(org,delegation.revision,delegation.parentNodeId,nodeId);
+    const grant=grants[0] && grants[0].lifecycle_state==='active' && (!grants[1] || grants[1].generation!==grants[0].generation);
+    if (!orgRow || ['archived','lifecycle_pending'].includes(orgRow.state) || orgRow.current_revision!==delegation.revision || !parent || parent.retired_revision!==null || parent.lifecycle_state!=='active'
+        || parent.current_session_id!==delegation.parentSessionId || parent.binding_generation!==delegation.bindingGeneration || parseJson(parent.grant_json,{})?.canDelegate!==true
+        || !child || child.retired_revision!==null || child.lifecycle_state!=='active' || child.parent_node_id!==delegation.parentNodeId
+        || child.binding_generation!==policy.organizationBindingGeneration || !edge || !grant) return false;
+  }
   if (!org && !nodeId && policy.organizationBindingGeneration===undefined && !policy.factoryExecution) return true;
   if (org && !nodeId && policy.organizationBindingGeneration===undefined && !policy.factoryExecution) {
     const plan=parseJson(db.prepare('SELECT plan_json FROM collaboration_plans WHERE collaboration_id=? AND version=?').get(collaborationId,raw.plan_version)?.plan_json,null);
@@ -506,8 +519,49 @@ export async function createCollaborationRecord({ id: collaborationId = id('coll
       if (idempotencyKey) {
         const existing = db.prepare('SELECT * FROM collaborations WHERE root_session_id = ? AND idempotency_key = ?').get(rootSessionId, idempotencyKey);
         if (existing) {
+          const existingPolicy = parseJson(existing.policy_json, {});
+          if (JSON.stringify(existingPolicy.organizationDelegation || null) !== JSON.stringify(policy?.organizationDelegation || null)
+              || (policy?.organizationDelegation && (existingPolicy.organizationId !== policy.organizationId || existingPolicy.organizationNodeId !== policy.organizationNodeId))) {
+            throw Object.assign(new Error('Delegation idempotency binding changed'), { code: 'ORG_DELEGATION_FORBIDDEN', statusCode: 403 });
+          }
           db.exec('COMMIT');
           return rowCollaboration(db, existing);
+        }
+      }
+      if (policy?.organizationDelegation) {
+        const d=policy.organizationDelegation, org=policy.organizationId, childId=policy.organizationNodeId;
+        const organization=db.prepare('SELECT current_revision,root_session_id,state FROM organizations WHERE id=?').get(org);
+        const revision=db.prepare('SELECT state FROM organization_revisions WHERE organization_id=? AND revision=?').get(org,d.revision);
+        const parent=db.prepare('SELECT current_session_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(d.parentNodeId,org);
+        const child=db.prepare('SELECT parent_node_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(childId,org);
+        const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,d.revision,d.parentNodeId,childId);
+        const grants=db.prepare('SELECT max_concurrent,generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? ORDER BY generation DESC').all(org,d.revision,d.parentNodeId,childId);
+        const grant=grants[0]?.lifecycle_state==='active' && (!grants[1] || grants[1].generation!==grants[0].generation) ? grants[0] : null;
+        // Failed or aggregating work may still have an unresolved external
+        // effect. Do not release its admission slot without a terminal fence.
+        const active=db.prepare("SELECT COUNT(*) AS n FROM collaborations c JOIN organization_nodes n ON n.id=json_extract(c.policy_json,'$.organizationNodeId') AND n.organization_id=? WHERE c.state<>'completed' AND json_extract(c.policy_json,'$.organizationId')=? AND n.parent_node_id=?").get(org,org,d.parentNodeId).n;
+        const childActive=db.prepare("SELECT COUNT(*) AS n FROM collaborations WHERE state<>'completed' AND json_extract(policy_json,'$.organizationId')=? AND json_extract(policy_json,'$.organizationNodeId')=?").get(org,childId).n;
+        const childCount=db.prepare("SELECT COUNT(*) AS n FROM organization_nodes WHERE organization_id=? AND parent_node_id=? AND retired_revision IS NULL AND lifecycle_state='active'").get(org,d.parentNodeId).n;
+        const parentGrant=parseJson(parent?.grant_json,{}), childGrant=parseJson(child?.grant_json,{});
+        if (!organization || ['archived','lifecycle_pending'].includes(organization.state) || organization.root_session_id!==rootSessionId || organization.current_revision!==d.revision || revision?.state!=='frozen'
+            || !parent || parent.retired_revision!==null || parent.lifecycle_state!=='active' || parent.current_session_id!==d.parentSessionId || parent.binding_generation!==d.bindingGeneration || parentGrant.canDelegate!==true
+            || !child || child.retired_revision!==null || child.lifecycle_state!=='active' || child.parent_node_id!==d.parentNodeId || child.binding_generation!==policy.organizationBindingGeneration
+            || !edge || !grant || !Number.isInteger(parentGrant.maxConcurrent) || Number(active)>=parentGrant.maxConcurrent
+            || !Number.isInteger(parentGrant.maxChildren) || Number(childCount)>parentGrant.maxChildren
+            || Number(childActive)>=Number(grant.max_concurrent)
+            || (Number.isInteger(childGrant.maxConcurrent) && Number(childActive)>=childGrant.maxConcurrent)) throw Object.assign(new Error('Delegation admission changed or concurrency exhausted'),{code:'ORG_DELEGATION_FORBIDDEN',statusCode:403});
+      }
+      if (policy?.organizationId && policy?.organizationNodeId && !policy.organizationDelegation) {
+        const child=db.prepare('SELECT parent_node_id,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(policy.organizationNodeId,policy.organizationId);
+        if (child?.parent_node_id) {
+          const parent=db.prepare('SELECT grant_json FROM organization_nodes WHERE id=? AND organization_id=? AND retired_revision IS NULL AND lifecycle_state=\'active\'').get(child.parent_node_id,policy.organizationId);
+          const parentGrant=parseJson(parent?.grant_json,{}), childGrant=parseJson(child.grant_json,{});
+          const active=db.prepare("SELECT COUNT(*) AS n FROM collaborations c JOIN organization_nodes n ON n.id=json_extract(c.policy_json,'$.organizationNodeId') AND n.organization_id=? WHERE c.state<>'completed' AND json_extract(c.policy_json,'$.organizationId')=? AND n.parent_node_id=?").get(policy.organizationId,policy.organizationId,child.parent_node_id).n;
+          const childActive=db.prepare("SELECT COUNT(*) AS n FROM collaborations WHERE state<>'completed' AND json_extract(policy_json,'$.organizationId')=? AND json_extract(policy_json,'$.organizationNodeId')=?").get(policy.organizationId,policy.organizationNodeId).n;
+          if (!Number.isInteger(parentGrant.maxConcurrent) || Number(active)>=parentGrant.maxConcurrent
+              || (Number.isInteger(childGrant.maxConcurrent) && Number(childActive)>=childGrant.maxConcurrent)) {
+            throw Object.assign(new Error('Organization parent or child concurrency exhausted'),{code:'ORG_DELEGATION_FORBIDDEN',statusCode:403});
+          }
         }
       }
       db.prepare(`INSERT INTO collaborations
@@ -913,7 +967,7 @@ export async function deferAttemptDispatch(commandId, {
   return changed;
 }
 
-export async function blockAttemptDispatch(commandId, { claimToken } = {}) {
+export async function blockAttemptDispatch(commandId, { claimToken, code = 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED' } = {}) {
   const outcome = await withDatabase(db => {
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -923,12 +977,14 @@ export async function blockAttemptDispatch(commandId, { claimToken } = {}) {
       const task = attempt && db.prepare('SELECT current_attempt,state FROM collaboration_tasks WHERE id=?').get(command.task_id);
       if (!attempt || attempt.state !== 'running' || !task || task.state !== 'running' || Number(task.current_attempt) !== Number(attempt.attempt_number)) { db.exec('COMMIT'); return false; }
       const now = nowIso();
-      const reason = 'Runtime constraints changed. Reconcile any prior dispatch and revise the frozen plan before dispatching again.';
+      const reason = code === 'ORG_DELEGATION_FORBIDDEN'
+        ? 'Delegation is no longer authorized. Reconcile any prior dispatch and revise the frozen plan before dispatching again.'
+        : 'Runtime constraints changed. Reconcile any prior dispatch and revise the frozen plan before dispatching again.';
       db.prepare("UPDATE collaboration_dispatch_commands SET state='blocked',claim_token=NULL,lease_until=NULL,failure_reason=?,updated_at=? WHERE id=?").run(reason,now,commandId);
       db.prepare("UPDATE collaboration_attempts SET state='failed',completed_at=?,failure_kind='unknown_outcome',failure_reason=?,lease_until=NULL,updated_at=? WHERE id=?").run(now,reason,now,attempt.id);
       db.prepare("UPDATE collaboration_tasks SET state='failed',updated_at=? WHERE id=?").run(now,command.task_id);
       db.prepare("UPDATE collaborations SET state='failed',updated_at=? WHERE id=? AND state NOT IN ('completed','cancelled')").run(now,command.collaboration_id);
-      appendEvent(db,command.collaboration_id,'attempt_dispatch_blocked',{ commandId, code:'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', reason },command.task_id,attempt.id);
+      appendEvent(db,command.collaboration_id,'attempt_dispatch_blocked',{ commandId, code, reason },command.task_id,attempt.id);
       db.prepare('INSERT OR IGNORE INTO collaboration_dispatch_notices(command_id) VALUES(?)').run(commandId);
       db.exec('COMMIT'); return { attemptId: attempt.id };
     } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -938,7 +994,7 @@ export async function blockAttemptDispatch(commandId, { claimToken } = {}) {
 }
 
 export async function listPendingDispatchNotices() {
-  return withDatabase(db => db.prepare(`SELECT n.command_id,d.task_id,d.attempt_id,d.failure_reason,c.root_session_id
+  return withDatabase(db => db.prepare(`SELECT n.command_id,d.task_id,d.attempt_id,d.failure_reason,c.root_session_id,c.policy_json
     FROM collaboration_dispatch_notices n JOIN collaboration_dispatch_commands d ON d.id=n.command_id
     JOIN collaborations c ON c.id=d.collaboration_id
     WHERE n.trigger_id='' AND n.next_check_at<=? ORDER BY n.next_check_at,n.command_id LIMIT 50`).all(nowIso()));
@@ -950,7 +1006,7 @@ export async function updateDispatchNotice(commandId, triggerId = '') {
 }
 
 export async function listPendingReceiptNotices() {
-  return withDatabase(db => db.prepare(`SELECT n.attempt_id,t.id AS task_id,c.id AS collaboration_id,c.root_session_id
+  return withDatabase(db => db.prepare(`SELECT n.attempt_id,t.id AS task_id,c.id AS collaboration_id,c.root_session_id,c.policy_json
     FROM collaboration_receipt_notices n JOIN collaboration_attempts a ON a.id=n.attempt_id
     JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id WHERE n.trigger_id='' AND n.next_check_at<=?
     ORDER BY n.next_check_at,n.attempt_id LIMIT 50`).all(nowIso()));

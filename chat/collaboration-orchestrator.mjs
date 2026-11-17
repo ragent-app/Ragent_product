@@ -314,6 +314,7 @@ function buildDefaultDependencies(overrides = {}) {
 }
 
 export function createCollaborationOrchestrator(options = {}) {
+  const delegatedAdmission = Symbol('server-delegated-admission');
   const deps = buildDefaultDependencies(options.dependencies);
   const pollMs = Number.isInteger(options.pollMs) && options.pollMs >= 250
     ? options.pollMs
@@ -552,9 +553,16 @@ export function createCollaborationOrchestrator(options = {}) {
   // Compile every user/LLM plan through one side-effect-free gate first. The
   // same gate powers validation and real dispatch, so a plan cannot pass a
   // preview then fail later because it was interpreted differently.
-  async function prepareRecord(input = {}) {
+  async function prepareRecord(input = {}, admission = null) {
     const root = await loadRoot({ rootSessionId: input.rootSessionId });
     const policy = input.policy || resolveSessionCollaborationPolicy(root, await deps.getApp(root.templateId));
+    if (policy.organizationDelegation && admission !== delegatedAdmission) {
+      throw Object.assign(new Error('Organization delegation requires server-scoped admission'), { code: 'ORG_DELEGATION_FORBIDDEN', statusCode: 403 });
+    }
+    if (policy.organizationDelegation) {
+      const { verifyOrganizationDelegation } = await import('./organization-delegation-authorization.mjs');
+      await verifyOrganizationDelegation({ organizationId: policy.organizationId, childNodeId: policy.organizationNodeId, delegation: policy.organizationDelegation });
+    }
     const runtimeConstraints = await directRuntimeConstraints(root, policy);
     if (policy.organizationId && JSON.stringify(runtimeConstraints) !== JSON.stringify(policy.organizationRuntimeConstraints || {})) {
       throw Object.assign(new Error('Organization runtime constraints changed after phase admission'), { code: 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', statusCode: 409 });
@@ -703,8 +711,8 @@ export function createCollaborationOrchestrator(options = {}) {
     };
   }
 
-  async function createRecord(input = {}, internalContext = null, factoryExecution = null, factoryConsultation = null) {
-    const prepared = await prepareRecord(input);
+  async function createRecord(input = {}, internalContext = null, factoryExecution = null, factoryConsultation = null, admission = null) {
+    const prepared = await prepareRecord(input, admission);
     const existing = await store.listCollaborationRecords({ activeOnly: false });
     const usedTaskIds = new Set(existing.flatMap((record) => record.tasks.map((task) => task.id)));
     const plan = namespacePlanTaskIds(prepared.plan, usedTaskIds);
@@ -763,6 +771,10 @@ export function createCollaborationOrchestrator(options = {}) {
       try {
         const owner = await store.getCollaboration(collaborationId);
         if (owner) {
+          if (owner.policy?.organizationDelegation) {
+            const { verifyOrganizationDelegation } = await import('./organization-delegation-authorization.mjs');
+            await verifyOrganizationDelegation({ organizationId: owner.policy.organizationId, childNodeId: owner.policy.organizationNodeId, delegation: owner.policy.organizationDelegation, requireActiveRun: false });
+          }
           const root = await loadRoot(owner);
           const currentConstraints = await directRuntimeConstraints(root, owner.policy);
           const contract = owner.policy?.agentContracts?.[command.taskId];
@@ -793,8 +805,8 @@ export function createCollaborationOrchestrator(options = {}) {
         // Do not turn that benign race into a task failure.
         if (bound) delivered += 1;
       } catch (error) {
-        if (error?.code === 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED' && typeof store.blockAttemptDispatch === 'function') {
-          await store.blockAttemptDispatch(command.id, { claimToken: command.claimToken });
+        if (['COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', 'ORG_DELEGATION_FORBIDDEN'].includes(error?.code) && typeof store.blockAttemptDispatch === 'function') {
+          await store.blockAttemptDispatch(command.id, { claimToken: command.claimToken, code: error.code });
           continue;
         }
         await store.deferAttemptDispatch(command.id, {
@@ -816,6 +828,10 @@ export function createCollaborationOrchestrator(options = {}) {
       throw error;
     }
     const contract = collaboration.policy?.agentContracts?.[task.id];
+    if (collaboration.policy?.organizationDelegation) {
+      const { verifyOrganizationDelegation } = await import('./organization-delegation-authorization.mjs');
+      await verifyOrganizationDelegation({ organizationId: collaboration.policy.organizationId, childNodeId: collaboration.policy.organizationNodeId, delegation: collaboration.policy.organizationDelegation, requireActiveRun: false });
+    }
     const currentConstraints = await directRuntimeConstraints(root, collaboration.policy);
     if (JSON.stringify(currentConstraints) !== JSON.stringify(contract?.runtimeConstraints || {})) {
       throw Object.assign(new Error('Runtime constraints changed after plan freeze'), { code: 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', statusCode: 409 });
@@ -1489,15 +1505,24 @@ export function createCollaborationOrchestrator(options = {}) {
     // lifecycle; completed collaborations can still have pending notices.
     const { reconcileAgentInterruptions } = await import('./agent-interruption-notifications.mjs');
     await reconcileAgentInterruptions().catch(() => {});
+    const noticeRecipient = async notice => {
+      let policy; try { policy = JSON.parse(notice.policy_json || '{}'); } catch { return notice.root_session_id; }
+      if (!policy.organizationDelegation) return notice.root_session_id;
+      try {
+        const { verifyOrganizationDelegation } = await import('./organization-delegation-authorization.mjs');
+        const { parent } = await verifyOrganizationDelegation({ organizationId: policy.organizationId, childNodeId: policy.organizationNodeId, delegation: policy.organizationDelegation, requireActiveRun: false });
+        return parent.currentSessionId || notice.root_session_id;
+      } catch { return notice.root_session_id; }
+    };
     if (typeof store.listPendingDispatchNotices === 'function') {
       for (const notice of await store.listPendingDispatchNotices()) {
         let triggerId = '';
         try {
           const { createTrigger } = await import('./triggers.mjs');
-          const trigger = await createTrigger({ sessionId: notice.root_session_id, scheduledAt: new Date().toISOString(),
+          const trigger = await createTrigger({ sessionId: await noticeRecipient(notice), scheduledAt: new Date().toISOString(),
             dedupeKey: `collaboration-dispatch-blocked:${notice.attempt_id}`,
             title: 'Collaboration dispatch needs review',
-            text: `Task ${notice.task_id}, attempt ${notice.attempt_id}: runtime constraints changed. Reconcile prior dispatch and revise the plan before retrying.` });
+            text: `Task ${notice.task_id}, attempt ${notice.attempt_id}: ${notice.failure_reason}` });
           triggerId = trigger?.id || '';
         } catch (error) {
           console.warn(`[collaboration] dispatch notice unavailable: ${error?.code || 'unknown'}`);
@@ -1511,7 +1536,7 @@ export function createCollaborationOrchestrator(options = {}) {
         let triggerId = '';
         try {
           const { createTrigger } = await import('./triggers.mjs');
-          const trigger = await createTrigger({ sessionId: notice.root_session_id, scheduledAt: new Date().toISOString(),
+          const trigger = await createTrigger({ sessionId: await noticeRecipient(notice), scheduledAt: new Date().toISOString(),
             dedupeKey: `collaboration-unbound-failure:${notice.attempt_id}`, title: 'Collaboration attempt needs review',
             text: `Task ${notice.task_id}, attempt ${notice.attempt_id} failed without a bound run. Review collaboration ${notice.collaboration_id}, reconcile any prior dispatch, and inspect its recovery receipt before retrying.` });
           triggerId = trigger?.id || '';
@@ -1586,6 +1611,14 @@ export function createCollaborationOrchestrator(options = {}) {
       ? await store.getCollaboration(input.id)
       : await createRecord(input);
     if (!collaboration) return null;
+    await dispatchReady(collaboration.id);
+    await publishCollaborationTerminal(collaboration.id);
+    return store.getCollaboration(collaboration.id, { includeEvents: true });
+  }
+
+  async function dispatchDelegated(input) {
+    if (!input?.policy?.organizationDelegation || input?.id) throw Object.assign(new Error('Scoped delegation is required'), { code: 'ORG_DELEGATION_FORBIDDEN', statusCode: 403 });
+    const collaboration = await createRecord(input, null, null, null, delegatedAdmission);
     await dispatchReady(collaboration.id);
     await publishCollaborationTerminal(collaboration.id);
     return store.getCollaboration(collaboration.id, { includeEvents: true });
@@ -1672,6 +1705,7 @@ export function createCollaborationOrchestrator(options = {}) {
     completeRun,
     createRecord,
     dispatch,
+    dispatchDelegated,
     dispatchFactory,
     dispatchFactoryConsultation,
     dispatchReady,
