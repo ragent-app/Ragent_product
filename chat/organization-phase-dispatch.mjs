@@ -68,8 +68,10 @@ async function validateSessionEffort(runtime) {
   if (runtime.effort) return;
   const catalog = await getModelsForTool(runtime.tool).catch(() => null);
   const entry = catalog?.models?.find((model) => model.id === runtime.model);
-  const levels = entry?.effortLevels || catalog?.effortLevels;
-  if (Array.isArray(levels) && levels.length > 0) {
+  const reasoning = entry?.reasoning;
+  const levels = reasoning?.kind === 'enum' ? reasoning.levels : entry?.effortLevels;
+  if (reasoning?.kind !== 'none' && reasoning?.kind !== 'toggle'
+      && Array.isArray(levels) && levels.length > 0) {
     throw dispatchError('ORG_PHASE_RUNTIME_INCOMPLETE', 'Session requires a supported effort selection', 409);
   }
 }

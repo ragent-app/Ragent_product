@@ -80,6 +80,21 @@ function policyIntersection(left, right) {
   return left.filter((entry) => allowed.has(entry));
 }
 
+function modelPolicyIntersection(left, right) {
+  if (!left.length && !right.length) return null;
+  if (!left.length) return [...right];
+  if (!right.length) return [...left];
+  const result = [];
+  for (const a of left) for (const b of right) {
+    if (bareModel(a) !== bareModel(b)) continue;
+    const ap = providerFromModel(a), bp = providerFromModel(b);
+    if (ap && bp && ap !== bp) continue;
+    const matched = ap ? a : bp ? b : a;
+    if (!result.includes(matched)) result.push(matched);
+  }
+  return result;
+}
+
 function scopedValues(policy, key, tool) {
   const values = policy?.[key] && typeof policy[key] === 'object'
     ? policy[key][tool]
@@ -246,7 +261,12 @@ function assertAllowed(value, allowed, code, label, details = {}) {
 function assertModelAllowed(value, allowed, details = {}) {
   if (!value || allowed === null) return;
   const requested = bareModel(value);
-  if (allowed.some((entry) => entry === value || bareModel(entry) === requested)) return;
+  if (allowed.some((entry) => {
+    if (bareModel(entry) !== requested) return false;
+    const requiredProvider = providerFromModel(entry);
+    const actualProvider = providerFromModel(value) || details.provider || '';
+    return !requiredProvider || requiredProvider === actualProvider;
+  })) return;
   throw runtimeError('ORG_RUNTIME_MODEL_DENIED', 'runtime.model is outside the delegated runtime policy', {
     reason: 'runtime_policy_denied',
     field: 'runtime.model',
@@ -313,7 +333,7 @@ export async function resolveRuntimeSelection({
   // a real ceiling; use the intersection only when both layers constrain it.
   const childModelCeiling = childModels.length > 0 ? childModels : [];
   const parentModelCeiling = parentModels.length > 0 ? parentModels : [];
-  const modelCeiling = policyIntersection(childModelCeiling, parentModelCeiling);
+  const modelCeiling = modelPolicyIntersection(childModelCeiling, parentModelCeiling);
   if (modelCeiling?.length === 0) {
     throw runtimeError('ORG_RUNTIME_MODEL_DENIED', 'parent and child runtime model policies have no permitted intersection', { reason: 'runtime_policy_denied', field: 'runtime.model' });
   }
@@ -357,7 +377,7 @@ export async function resolveRuntimeSelection({
       provider: requestedProvider,
     });
   }
-  assertModelAllowed(requestedModel, modelCeiling, { tool: requestedTool });
+  assertModelAllowed(requestedModel, modelCeiling, { tool: requestedTool, provider: requestedProvider });
 
   const availableModels = modelIds(catalog);
   const availableBareModels = availableModels.map(bareModel);
