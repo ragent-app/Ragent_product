@@ -1691,9 +1691,6 @@ private fun ChatSurface(
     var organizationHeaderBottom by remember { mutableFloatStateOf(0f) }
     val organizationCollapsed = organizationHasCollaborators && !organizationExpanded
     val organizationFocusManager = androidx.compose.ui.platform.LocalFocusManager.current
-    LaunchedEffect(organizationCollapsed) {
-        if (organizationCollapsed) organizationFocusManager.clearFocus()
-    }
     val (formalActions, nativeRecords, nativeNodes, nativeResolved, nativeDefinitive, nativeReceiptElapsed) = rememberCollaborationActions(organizationTransport, state.sessionId,
         state.chatTargetId ?: state.activeRemoteTargetId, organizationOfflineScope, state.chatOpen)
     var formalResolved by remember(organizationUiScope) { mutableStateOf(false) }
@@ -1856,9 +1853,17 @@ private fun ChatSurface(
     val timelineContentItemCount = turnGroups.size + (if (activeDecision != null) 1 else 0) +
         (if (turnGroups.isEmpty() && state.timelineItems.isEmpty() && state.error == null) 1 else 0)
     val latestContentItemCount = rememberUpdatedState(timelineContentItemCount)
-    LaunchedEffect(organizationCollapsed, state.sessionId) {
-        if (organizationCollapsed && timelineContentItemCount > 0) {
-            listState.scrollToItem(timelineContentItemCount - 1)
+    LaunchedEffect(organizationCollapsed, state.sessionId, listState) {
+        if (organizationCollapsed) {
+            snapshotFlow {
+                val layout = listState.layoutInfo
+                val tail = layout.visibleItemsInfo.lastOrNull { it.index == latestContentItemCount.value - 1 }
+                listOf(latestContentItemCount.value, layout.viewportEndOffset, layout.afterContentPadding,
+                    tail?.offset ?: Int.MIN_VALUE, tail?.size ?: 0)
+            }.collectLatest {
+                val index = latestContentItemCount.value - 1
+                if (index >= 0) listState.scrollToTimelineTail(index, animate = false)
+            }
         }
     }
     val latestSessionId = rememberUpdatedState(state.sessionId)
@@ -1989,7 +1994,9 @@ private fun ChatSurface(
         state.loadingOlder,
         state.hasOlder,
         olderTimelineAnchor?.itemId,
+        organizationCollapsed,
     ) {
+        if (organizationCollapsed) return@LaunchedEffect
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
             val first = layoutInfo.visibleItemsInfo.firstOrNull()
@@ -2037,7 +2044,11 @@ private fun ChatSurface(
         }
     }
 
-    LaunchedEffect(turnGroups, state.loadingOlder) {
+    LaunchedEffect(turnGroups, state.loadingOlder, organizationCollapsed) {
+        if (organizationCollapsed) {
+            olderTimelineAnchor = null
+            return@LaunchedEffect
+        }
         val anchor = olderTimelineAnchor ?: return@LaunchedEffect
         if (state.loadingOlder) return@LaunchedEffect
         val restoredIndex = turnGroups.indexOfFirst { it.id == anchor.itemId }
@@ -2252,7 +2263,7 @@ private fun ChatSurface(
     var collaborationSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
     val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
-        if (organizationCollapsed) androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)
+        if (organizationCollapsed) dockGeometry.padding(density, extraBottom = 32.dp)
         else dockGeometry.padding(density, top = if (organizationHasCollaborators) 56.dp else topControlsHeight + 8.dp, extraBottom = 16.dp)
     }
     val jumpPadding = remember(dockGeometry, density) {
@@ -2319,7 +2330,11 @@ private fun ChatSurface(
     // 发送飞顶武装：本端发送产生的 pending turn 出现时，建立视口顶停靠并起飞。
     // Retry（Failed→Sending 同 requestId）不重武装：停靠若还活着就继续用。
     val dockMotion = motionPolicy()
-    LaunchedEffect(state.sessionId, state.pendingTurn?.requestId) {
+    LaunchedEffect(state.sessionId, state.pendingTurn?.requestId, organizationCollapsed) {
+        if (organizationCollapsed) {
+            armedSendComposerTopPx = null
+            return@LaunchedEffect
+        }
         val pending = state.pendingTurn ?: return@LaunchedEffect
         val sessionId = state.sessionId ?: return@LaunchedEffect
         if (pending.state != PendingTurnState.Sending) return@LaunchedEffect
@@ -2354,7 +2369,8 @@ private fun ChatSurface(
     // 停靠执行器：把 turn 顶边压到视口顶 24dp；尾随 spacer 提供精确滚动余量
     // （web 的 turn runway 零余量不变量）。内容在下方生长时锚点不动、只收缩
     // spacer；turn 高过一屏（spacer 归零仍放不下）时交还 Following 滚到底。
-    LaunchedEffect(turnDock) {
+    LaunchedEffect(turnDock, organizationCollapsed) {
+        if (organizationCollapsed) return@LaunchedEffect
         val dock = turnDock ?: return@LaunchedEffect
         val requestId = dock.requestId
         val topGapPx = with(density) { TurnDockTopMargin.roundToPx() }
@@ -2611,7 +2627,7 @@ private fun ChatSurface(
                 // in the OS status area; keep the canvas outside this clip.
                 .then(if (composerFullscreenActive) Modifier.clipToBounds() else Modifier)
                 .navigationBarsPadding()
-                .imePadding()
+                .then(if (organizationCollapsed) Modifier else Modifier.imePadding())
                 .padding(
                     start = AgentoSpacing.ComposerMargin * (1f - composerFullscreenProgress),
                     end = AgentoSpacing.ComposerMargin * (1f - composerFullscreenProgress),
@@ -3013,6 +3029,10 @@ private fun ChatSurface(
         val measuredHeaderInset = organizationHostBounds?.let {
             with(density) { (organizationHeaderBottom - it.top).coerceAtLeast(0f).toDp() }
         } ?: 0.dp
+        val graphCardHeight = with(density) {
+            ((organizationHostBounds?.height ?: 0f) * .27f)
+                .coerceIn(208.dp.toPx(), 300.dp.toPx()).toDp()
+        }
         val organizationGraphTop = maxOf(topControlsHeight, measuredHeaderInset) + 8.dp
         if (organizationTransport != null && state.sessionId != null) {
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
@@ -3021,7 +3041,7 @@ private fun ChatSurface(
                 rootAction = organizationRootAction(state, currentRunId),
                 targetId = state.chatTargetId ?: state.activeRemoteTargetId,
                 offlineScope = organizationOfflineScope,
-                modifier = Modifier.fillMaxSize().padding(top = organizationGraphTop, bottom = 176.dp),
+                modifier = Modifier.fillMaxSize().padding(top = organizationGraphTop, bottom = graphCardHeight),
                 onRootClick = { anchor ->
                     organizationRootAnchor = anchor
                     organizationFromRoot = true
@@ -3059,9 +3079,13 @@ private fun ChatSurface(
         }
         val hostBounds = organizationHostBounds
         val cardInset = with(density) { 12.dp.toPx() }
-        val cardHeight = with(density) { 176.dp.toPx() }
+        val availableCardHeight = ((hostBounds?.height ?: 0f) - imeInsets.getBottom(density)).coerceAtLeast(0f)
+        val cardHeight = (availableCardHeight * .27f).coerceIn(with(density) { 208.dp.toPx() }, with(density) { 300.dp.toPx() }).coerceAtMost(availableCardHeight)
         val cardTopInset = with(density) { organizationGraphTop.toPx() }
-        val bottomCard = hostBounds?.let { Rect(it.left + cardInset, (it.bottom - cardHeight).coerceAtLeast(it.top), it.right - cardInset, it.bottom) }
+        val bottomCard = hostBounds?.let {
+            val bottom = (it.bottom - imeInsets.getBottom(density)).coerceAtLeast(it.top)
+            Rect(it.left + cardInset, (bottom - cardHeight).coerceAtLeast(it.top), it.right - cardInset, bottom)
+        }
         val expandedCard = hostBounds?.let { Rect(it.left + cardInset, (it.top + cardTopInset).coerceAtMost(it.bottom), it.right - cardInset, it.bottom) }
         val normalCard = hostBounds ?: Rect.Zero
         val sourceCard = if (organizationFromRoot) organizationRootAnchor ?: bottomCard else bottomCard
@@ -3089,16 +3113,9 @@ private fun ChatSurface(
             geometry = dockGeometry,
             retainReadingGeometry = composerFullscreenActive,
             dock = { measurement ->
-                val alpha = if (!organizationHasCollaborators) 1f else ((shellProgress - .88f) / .12f).coerceIn(0f, 1f)
-                dockContent(measurement
-                    .clipToBounds()
-                    .layout { measurable, constraints ->
-                        val child = measurable.measure(constraints)
-                        val visibleHeight = (child.height * alpha).roundToInt().coerceAtLeast(0)
-                        layout(child.width, visibleHeight) { child.placeRelative(0, visibleHeight - child.height) }
-                    }
-                    .graphicsLayer { this.alpha = alpha }
-                    .then(if (organizationCollapsed) Modifier.clearAndSetSemantics { } else Modifier))
+                val alpha = if (organizationHasCollaborators && organizationFromRoot)
+                    ((shellProgress - .88f) / .12f).coerceIn(0f, 1f) else 1f
+                dockContent(measurement.graphicsLayer { this.alpha = alpha })
             },
             modifier = Modifier
                 .fillMaxSize()
@@ -3159,6 +3176,7 @@ private fun ChatSurface(
             ) {
                 Column(Modifier.fillMaxSize()) {
                     LazyColumn(
+                        userScrollEnabled = !organizationCollapsed,
                         state = listState,
                         modifier = Modifier
                             .testTag("chat-timeline")
@@ -3181,7 +3199,9 @@ private fun ChatSurface(
                             .widthIn(max = RagentSizes.ContentMaxWidth)
                             .align(Alignment.CenterHorizontally)
                             .padding(horizontal = AgentoSpacing.ConversationGutter),
-                        verticalArrangement = Arrangement.spacedBy(AgentoSpacing.Block),
+                        verticalArrangement = if (organizationCollapsed)
+                            Arrangement.spacedBy(AgentoSpacing.Block, Alignment.Bottom)
+                        else Arrangement.spacedBy(AgentoSpacing.Block),
                         contentPadding = conversationPadding,
                     ) {
                 itemsIndexed(
@@ -3347,7 +3367,7 @@ private fun ChatSurface(
                 // 也会因 spacedBy 改变内容尾距，不能留在非停靠路径上。高度与滚动
                 // 由停靠执行器同帧配对，不做动画（web 移除 height transition 的
                 // 同一结论）。
-                if (turnDock != null) {
+                if (turnDock != null && !organizationCollapsed) {
                     item(key = TurnDockSpacerKey) {
                         Spacer(
                             modifier = Modifier
@@ -3389,10 +3409,12 @@ private fun ChatSurface(
 
         if (organizationCollapsed) {
             Box(
-                modifier = Modifier.fillMaxSize().clickable {
-                    organizationFromRoot = false
-                    organizationExpanded = true
-                },
+                modifier = Modifier.fillMaxSize()
+                    .padding(bottom = with(density) { dockGeometry.heightPx.toDp() })
+                    .clickable {
+                        organizationFromRoot = false
+                        organizationExpanded = true
+                    },
             )
             val currentNativeAction = nativeNodes.asSequence()
                 .filter { it.state in setOf("spawned", "running", "waiting") && !it.currentAction.isNullOrBlank() }
@@ -3408,7 +3430,9 @@ private fun ChatSurface(
             currentActionLabel?.let { action ->
                 Text(
                     text = action,
-                    modifier = Modifier.align(Alignment.BottomStart).padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.align(Alignment.BottomStart)
+                        .padding(bottom = with(density) { dockGeometry.heightPx.toDp() })
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     color = colors.secondaryContent,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
