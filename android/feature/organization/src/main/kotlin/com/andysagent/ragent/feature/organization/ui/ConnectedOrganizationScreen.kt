@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import kotlinx.serialization.json.contentOrNull
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -70,6 +71,7 @@ import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.OrganizationConversationContent
 
 private data class NativeBirthFrame(val records: List<NativeDelegationDto>, val cues: List<BirthCue>)
+private data class UnifiedMemberFrame(val page: com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto? = null, val cues: List<BirthCue> = emptyList())
 
 @Composable
 fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}, rootAction: com.andysagent.ragent.feature.organization.presentation.NodeActionKind? = null, nativeReceiptElapsed: Long = 0L) {
@@ -115,7 +117,50 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     val formalBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     val nativeBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     var nativeFrame by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(NativeBirthFrame(emptyList(), emptyList())) }
+    var rawUnifiedMembers by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto?>(null) }
+    var unifiedFrame by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(UnifiedMemberFrame()) }
+    val unifiedMembers = unifiedFrame.page
+    val unifiedBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
+    var unifiedReceipt by remember(transport, targetId, sessionId, scopeKey) { mutableLongStateOf(0L) }
+    var unifiedResolved by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    LaunchedEffect(transport, targetId, sessionId, scopeKey, connection, lifecycleState) {
+        unifiedReceipt = 0L
+        if (connection == RuntimeConnectionState.AuthenticationRequired) { rawUnifiedMembers = null; unifiedFrame = UnifiedMemberFrame(); unifiedResolved = true; return@LaunchedEffect }
+        if (connection != RuntimeConnectionState.Connected || lifecycleState != Lifecycle.State.RESUMED) { unifiedResolved = true; return@LaunchedEffect }
+        val api = RealOrganizationApi(transport)
+        while (true) {
+            val result = api.getSessionMembers(sessionId)
+            result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+            val page = result.getOrNull()
+            unifiedResolved = true
+            if (page != null && page.rootSessionId == sessionId && page.members.map { it.canonicalId }.distinct().size == page.members.size) {
+                val previous = rawUnifiedMembers?.takeIf { it.rootCanonicalId == page.rootCanonicalId }
+                val trustedComplete = page.membersComplete && page.sourceCoverage?.gap == false
+                rawUnifiedMembers = if (trustedComplete || previous == null) page else {
+                    val merged = previous.members.associateBy { it.canonicalId }.mapValues { it.value.copy(activity = null) }.toMutableMap()
+                    page.members.forEach { member ->
+                        val old = merged[member.canonicalId]
+                        merged[member.canonicalId] = if (old == null) member else member.copy(
+                            aliases = (old.aliases + member.aliases).distinct(),
+                            parentCanonicalId = if (member.relationKnown) member.parentCanonicalId else old.parentCanonicalId,
+                            relationKnown = member.relationKnown || old.relationKnown,
+                            birth = member.birth ?: old.birth,
+                        )
+                    }
+                    page.copy(members = merged.values.toList())
+                }
+                unifiedReceipt = if (page.sourceCoverage?.gap == false) android.os.SystemClock.elapsedRealtime() else 0L
+            } else {
+                unifiedReceipt = 0L
+                val error = result.exceptionOrNull()
+                if (error is ApiException && error.statusCode in setOf(401, 403)) { rawUnifiedMembers = null; unifiedFrame = UnifiedMemberFrame() }
+            }
+            delay(3_000)
+        }
+    }
     val latestRecords by rememberUpdatedState(nativeFrame.records)
+    val latestUnifiedMembers by rememberUpdatedState(unifiedMembers)
+    val latestRootChildren by rememberUpdatedState(confirmedRootChildren(nativeEvents, sessionId))
     val latestMemberName by rememberUpdatedState(stringResource(R.string.organization_native_member))
     LaunchedEffect(scopeKey, cacheInvalidations) {
         val generation = projectionGeneration
@@ -334,8 +379,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 formalBirthTracker.reset(); established = false; cursor = 0L
                 delay(3_000); continue
             }
-            val nativeNodes = nativeDisplayNodes(latestRecords, root, latestMemberName)
-            val graph = projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes))
+            val nativeNodes = nativeDisplayNodes(latestRecords, root, latestMemberName, latestRootChildren)
+            val graphNodes = latestUnifiedMembers?.let { unifiedMemberNodes(it, root, projection.nodes, latestMemberName) } ?: projection.nodes
+            val graph = projection.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, projection.edges))
             val cues = formalBirthTracker.observe("$scopeKey:$sessionId:$id", sessionId,
                 established && projection.nodes.size < 200, graph.nodes.associate { it.id to it.parentId }, root, id, batch, emptyList(), emptyList())
             organizationViewModel.applyProjection(graph, birthCues = cues)
@@ -368,7 +414,35 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         1 -> rootMatches.single().id
         else -> null
     }
-    LaunchedEffect(organizationViewModel, rootNodeId, rootAction, baseProjection, nativeFrame.records, nativeContinuous, nativeReceiptElapsed, connection, lifecycleState, cachedAt, formalActivityAvailable, formalReceiptElapsed) {
+    val nativeMemberName = stringResource(R.string.organization_native_member)
+    LaunchedEffect(rawUnifiedMembers, unifiedReceipt, connection, lifecycleState, rootNodeId, baseProjection, nativeMemberName) {
+        val page = rawUnifiedMembers
+        if (page == null || unifiedReceipt == 0L || connection != RuntimeConnectionState.Connected || lifecycleState != Lifecycle.State.RESUMED) {
+            unifiedBirthTracker.reset()
+            unifiedFrame = UnifiedMemberFrame(page)
+            return@LaunchedEffect
+        }
+        val root = rootNodeId ?: page.rootCanonicalId
+        val formal = baseProjection
+        val graphNodes = unifiedMemberNodes(page, root, formal?.nodes.orEmpty(), nativeMemberName)
+        val parents = graphNodes.associate { it.id to it.parentId }.toMutableMap()
+        parents.putIfAbsent(root, null)
+        val births = page.members.mapNotNull { member ->
+            val birth = member.birth ?: return@mapNotNull null
+            val child = unifiedDisplayId(page, member.canonicalId, root, formal?.nodes.orEmpty()) ?: return@mapNotNull null
+            val actor = unifiedDisplayId(page, birth.actorCanonicalId, root, formal?.nodes.orEmpty()) ?: return@mapNotNull null
+            val rawTime = (birth.timestamp as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+            val timestamp = rawTime?.toLongOrNull() ?: rawTime?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: 0L
+            com.andysagent.ragent.feature.organization.data.UnifiedBirthEvent(birth.id, child, actor, timestamp)
+        }
+        val cues = unifiedBirthTracker.observe("$scopeKey:$sessionId:${page.rootCanonicalId}:$root", sessionId,
+            page.sourceCoverage?.gap == false, parents, root, null, emptyList(), emptyList(), emptyList(), births)
+        if (formal != null && rootNodeId != null) {
+            organizationViewModel.applyProjection(formal.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, formal.edges)), birthCues = cues)
+            unifiedFrame = UnifiedMemberFrame(page)
+        } else unifiedFrame = UnifiedMemberFrame(page, cues)
+    }
+    LaunchedEffect(organizationViewModel, rootNodeId, rootAction, baseProjection, nativeFrame.records, nativeContinuous, nativeReceiptElapsed, unifiedMembers, unifiedReceipt, connection, lifecycleState, cachedAt, formalActivityAvailable, formalReceiptElapsed) {
         while (true) {
             val actions = mutableMapOf<String, com.andysagent.ragent.feature.organization.presentation.NodeActionKind>()
             if (connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED) {
@@ -379,6 +453,10 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 if (nativeContinuous && nativeReceiptElapsed > 0L && now - nativeReceiptElapsed in 0L..15_000L) nativeFrame.records.forEach { record ->
                     com.andysagent.ragent.feature.organization.presentation.nodeAction(record.activity)?.let { actions[nativeNodeId(record.runId, record.delegationId)] = it }
                 }
+                if (unifiedReceipt > 0L && now - unifiedReceipt in 0L..15_000L) unifiedMembers?.members?.forEach { member ->
+                    val id = unifiedMembers?.let { page -> unifiedDisplayId(page, member.canonicalId, rootNodeId ?: page.rootCanonicalId, nodes) }
+                    if (id != null) com.andysagent.ragent.feature.organization.presentation.nodeAction(member.activity)?.let { actions[id] = it }
+                }
                 if (rootNodeId != null) {
                     if (rootAction != null) actions[rootNodeId] = rootAction else actions.remove(rootNodeId)
                 }
@@ -387,27 +465,28 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             delay(3_000)
         }
     }
-    val nativeMemberName = stringResource(R.string.organization_native_member)
-    LaunchedEffect(records, nativeEvents, nativeContinuous, connection, lifecycleState, rootNodeId, baseProjection) {
+    LaunchedEffect(records, nativeEvents, nativeContinuous, connection, lifecycleState, rootNodeId, baseProjection, unifiedMembers) {
         val root = rootNodeId ?: "native-root:$sessionId"
-        val nativeNodes = nativeDisplayNodes(records, root, nativeMemberName)
+        val nativeNodes = nativeDisplayNodes(records, root, nativeMemberName, confirmedRootChildren(nativeEvents, sessionId))
         val formal = baseProjection
-        val parents = (formal?.nodes.orEmpty() + nativeNodes).associate { it.id to it.parentId }.toMutableMap()
+        val graphNodes = unifiedMembers?.let { unifiedMemberNodes(it, root, formal?.nodes.orEmpty(), nativeMemberName) } ?: formal?.nodes.orEmpty()
+        val parents = graphNodes.associate { it.id to it.parentId }.toMutableMap()
         parents.putIfAbsent(root, null)
         val cues = nativeBirthTracker.observe("$scopeKey:$sessionId:${formal?.organizationId.orEmpty()}", sessionId,
             nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED && (formal == null || formal.nodes.size < 200),
             parents, root, null, emptyList(), nativeEvents, records)
         if (formal != null && rootNodeId != null && cues.isNotEmpty()) {
-            organizationViewModel.applyProjection(formal.copy(nodes = formal.nodes + nativeNodes, edges = formal.edges + nativeDisplayEdges(nativeNodes)), birthCues = cues)
+            organizationViewModel.applyProjection(formal.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, formal.edges)), birthCues = cues.filter { it.nodeId in parents })
         }
         // The fallback graph must receive the snapshot and its cue together.
         nativeFrame = NativeBirthFrame(records, if (formal == null) cues else emptyList())
     }
-    LaunchedEffect(baseProjection, nativeFrame.records, rootNodeId, nativeMemberName) {
+    LaunchedEffect(baseProjection, nativeFrame.records, rootNodeId, nativeMemberName, nativeEvents, unifiedMembers) {
         val projection = baseProjection ?: return@LaunchedEffect
         val root = rootNodeId ?: return@LaunchedEffect
-        val nativeNodes = nativeDisplayNodes(nativeFrame.records, root, nativeMemberName)
-        organizationViewModel.applyProjection(projection.copy(nodes = projection.nodes + nativeNodes, edges = projection.edges + nativeDisplayEdges(nativeNodes)))
+        val nativeNodes = nativeDisplayNodes(nativeFrame.records, root, nativeMemberName, confirmedRootChildren(nativeEvents, sessionId))
+        val graphNodes = unifiedMembers?.let { unifiedMemberNodes(it, root, projection.nodes, nativeMemberName) } ?: projection.nodes
+        organizationViewModel.applyProjection(projection.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, projection.edges)))
     }
     LaunchedEffect(embedded, loaded, status, connection, lifecycleState) {
         if (embedded && !loaded && status != "Loading organization…" && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED) {
@@ -415,9 +494,9 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             refresh++
         }
     }
-    val hasCollaborators = records.isNotEmpty() || (loaded && baseProjection?.hasCreatedSubordinate == true)
-    val snapshotResolved = loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected
-    val snapshotDefinitive = (loaded && baseProjection != null) || organizationNotFound
+    val hasCollaborators = unifiedMembers?.members?.isNotEmpty() == true || (loaded && baseProjection?.hasCreatedSubordinate == true)
+    val snapshotResolved = unifiedResolved && (loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected)
+    val snapshotDefinitive = hasCollaborators || (((loaded && baseProjection != null) || organizationNotFound) && unifiedMembers?.membersComplete == true)
     LaunchedEffect(snapshotResolved, snapshotDefinitive, hasCollaborators, transport, targetId, sessionId, scopeKey) {
         onCollaboratorSnapshot(snapshotResolved, snapshotDefinitive, hasCollaborators)
         onHasCollaboratorsChanged(hasCollaborators)
@@ -449,14 +528,18 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
                     onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true },
                     conversationContent = { nodeId, contentModifier ->
-                        if (nodeId.startsWith("native:")) {
-                            Text(stringResource(R.string.organization_native_conversation_unavailable), contentModifier.padding(20.dp))
-                        } else if (ownerVerified &&
+                        val member = nodes.firstOrNull { it.id == nodeId }
+                        val descriptor = member?.member ?: unifiedMembers?.members?.firstOrNull { unifiedUiId(it.canonicalId) == nodeId }
+                        val conversationRef = descriptor?.conversation?.takeUnless {
+                            it.scope == "full" && member?.currentBinding?.sessionId != null
+                        }?.ref
+                        if ((member != null || conversationRef != null) && ownerVerified &&
                             ownerGeneration != null && ownerGeneration == projectionGeneration && organizationId != null) {
                             val requestGeneration = ownerGeneration
                             val requestOrganization = organizationId
                             OrganizationConversationContent(transport, organizationId!!, nodeId, targetId,
                                 identityScope = "$scopeKey:$transportKey:$ownerGeneration", modifier = contentModifier,
+                                rootSessionId = sessionId.takeIf { conversationRef != null }, memberRef = conversationRef,
                                 onRuntimeState = { state -> conversationRuntime = nodeId to state },
                                 onAuthorizationDenied = {
                                     if (ownerGeneration == requestGeneration && organizationId == requestOrganization) {
@@ -479,12 +562,12 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                             Text(stringResource(R.string.organization_conversation_unavailable), contentModifier.padding(20.dp), color = LocalRagentColors.current.secondaryContent)
                         }
                     }, conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second },
-                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = programmaticOpen?.let { nativeNodeId(it.first, it.second) } ?: openNodeId, onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() })
+                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = programmaticOpen?.let { memberIdForLegacy(unifiedMembers, it.first, it.second, nodes) } ?: openNodeId, onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() })
             }
         }
-        else if (embedded && nativeFrame.records.isNotEmpty()) {
-            NativeOrganizationGraph(transport, sessionId, nativeFrame.records, rootAction = rootAction.takeIf { connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED }, nativeActionsFresh = nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED, nativeReceiptElapsed = nativeReceiptElapsed, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, birthCues = nativeFrame.cues,
-                onBirthCuesConsumed = { consumed -> if (nativeFrame.cues == consumed) nativeFrame = nativeFrame.copy(cues = emptyList()) })
+        else if (embedded && unifiedMembers?.members?.isNotEmpty() == true) {
+            UnifiedOrganizationGraph(transport, sessionId, identityScope = "$scopeKey:$transportKey:${targetId.orEmpty()}", records = nativeFrame.records, nativeEvents = nativeEvents, unifiedMembers = unifiedMembers, unifiedReceiptElapsed = unifiedReceipt, unifiedActionsFresh = connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED, rootAction = rootAction.takeIf { connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED }, nativeActionsFresh = nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED, nativeReceiptElapsed = nativeReceiptElapsed, modifier = Modifier.weight(1f), onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, birthCues = unifiedFrame.cues,
+                onBirthCuesConsumed = { consumed -> if (unifiedFrame.cues == consumed) unifiedFrame = unifiedFrame.copy(cues = emptyList()) })
         }
         else if (!embedded) {
             val colors = LocalRagentColors.current

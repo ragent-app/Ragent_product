@@ -51,12 +51,49 @@ import kotlinx.serialization.json.contentOrNull
 
 @Serializable private data class ConversationBinding(val sessionId: String? = null, val generation: Long)
 @Serializable private data class ConversationDescriptor(val organizationId: String, val nodeId: String, val currentBinding: ConversationBinding, val runtimeState: String = "unknown")
+@Serializable private data class MemberConversationPage(
+    val scope: String = "unavailable", val generation: Long? = null, val revision: Long? = null,
+    val entries: List<SessionEventDto> = emptyList(), val nextBeforeSeq: Long? = null,
+    val nextAfterSeq: Long? = null, val hasMoreBefore: Boolean = false, val hasMoreAfter: Boolean = false,
+    val reset: Boolean = false, val gap: Boolean? = null, val coverage: String? = null,
+    val activity: com.andysagent.ragent.feature.organization.data.NodeActivityDto? = null,
+)
 private class ConversationDenied(val authorizationDenied: Boolean = false) : Exception()
 private class BindingChanged : Exception()
 private class ConversationReset : Exception()
 
+/** The reader owns validation and rendering; sources only supply authorized routes. */
+private interface ConversationSource {
+    fun descriptorPath(): String
+    fun snapshotPath(sessionId: String): String
+    fun olderPath(sessionId: String, before: Long): String
+    fun updatesPath(sessionId: String, after: Long, liveCursor: Long, liveStream: String?): String
+}
+
+private class OrganizationConversationSource(private val organizationId: String, private val nodeId: String) : ConversationSource {
+    private fun enc(value: String) = Uri.encode(value)
+    override fun descriptorPath() = "/api/organizations/${enc(organizationId)}/nodes/${enc(nodeId)}/conversation"
+    override fun snapshotPath(sessionId: String) = "/api/sessions/${enc(sessionId)}/snapshot?limit=50"
+    override fun olderPath(sessionId: String, before: Long) = "/api/sessions/${enc(sessionId)}/events?filter=visible&limit=50&direction=before&beforeSeq=$before"
+    override fun updatesPath(sessionId: String, after: Long, liveCursor: Long, liveStream: String?): String {
+        val stream = liveStream?.let { "&liveStreamId=${enc(it)}" }.orEmpty()
+        return "/api/sessions/${enc(sessionId)}/events/wait?filter=all&limit=200&direction=forward&compact=1&afterSeq=$after&timeoutMs=15000&includeLive=1&liveAfterCursor=$liveCursor$stream"
+    }
+}
+
 /** Ephemeral, owner-authorized reader. It never mutates the shared chat repository. */
-private class ConversationReader(private val transport: RagentTransport, private val org: String, private val node: String) {
+private class MemberConversationSource(rootSessionId: String, memberRef: String) : ConversationSource {
+    private val path = "/api/sessions/${Uri.encode(rootSessionId)}/organization/members/${Uri.encode(memberRef)}/conversation"
+    override fun descriptorPath() = "$path?limit=50"
+    override fun snapshotPath(sessionId: String) = "$path?limit=50"
+    override fun olderPath(sessionId: String, before: Long) = "$path?beforeSeq=$before&limit=50"
+    override fun updatesPath(sessionId: String, after: Long, liveCursor: Long, liveStream: String?) = "$path?afterSeq=$after&limit=200"
+}
+
+private class ConversationReader(private val transport: RagentTransport, private val org: String, private val node: String,
+    rootSessionId: String? = null, private val memberRef: String? = null) {
+    private val source: ConversationSource = if (rootSessionId != null && memberRef != null)
+        MemberConversationSource(rootSessionId, memberRef) else OrganizationConversationSource(org, node)
     private val mutex = Mutex()
     private var binding: ConversationBinding? = null
     private var events = emptyList<SessionEventDto>()
@@ -75,7 +112,10 @@ private class ConversationReader(private val transport: RagentTransport, private
     var loadingOlder by mutableStateOf(false); private set
     var status by mutableStateOf(ConversationStatus.Loading); private set
     var runtimeState by mutableStateOf("unknown"); private set
-    private fun enc(value: String) = Uri.encode(value)
+    var memberScope by mutableStateOf<String?>(null); private set
+    var memberGap by mutableStateOf<Boolean?>(null); private set
+    var memberCoverage by mutableStateOf<String?>(null); private set
+    var memberActivity by mutableStateOf<String?>(null); private set
     private suspend fun get(path: String): String {
         val response = try {
             transport.execute(ApiRequest("GET", path))
@@ -92,7 +132,13 @@ private class ConversationReader(private val transport: RagentTransport, private
         return response.body
     }
     private suspend fun descriptor(): ConversationBinding {
-        val d = RagentProtocol.json.decodeFromString<ConversationDescriptor>(get("/api/organizations/${enc(org)}/nodes/${enc(node)}/conversation"))
+        if (memberRef != null) {
+            val page = memberPage(get(source.descriptorPath()))
+            memberScope = page.scope
+            memberActivity = page.activity?.state
+            return ConversationBinding(if (page.scope == "unavailable") null else memberRef, page.generation ?: throw ConversationReset())
+        }
+        val d = RagentProtocol.json.decodeFromString<ConversationDescriptor>(get(source.descriptorPath()))
         if (d.organizationId != org || d.nodeId != node || d.currentBinding.generation < 0) throw ConversationDenied()
         runtimeState = d.runtimeState
         return d.currentBinding
@@ -100,7 +146,17 @@ private class ConversationReader(private val transport: RagentTransport, private
     private suspend fun check(expected: ConversationBinding) {
         if (descriptor() != expected) throw BindingChanged()
     }
-    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
+    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; memberScope = null; memberGap = null; memberCoverage = null; memberActivity = null; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
+    private fun memberPage(body: String): MemberConversationPage =
+        RagentProtocol.json.decodeFromString<MemberConversationPage>(body).also {
+            if (it.reset || it.generation == null || it.generation < 0 || it.scope !in setOf("full", "captured_only", "activity_only", "unavailable")) throw ConversationReset()
+        }
+    private fun checkedMemberPage(body: String, expected: ConversationBinding): MemberConversationPage {
+        val page = memberPage(body)
+        if (page.generation != expected.generation || page.scope != memberScope) throw BindingChanged()
+        if (historyRevision != null && page.revision != null && page.revision < historyRevision!!) throw ConversationReset()
+        return page
+    }
     private fun reconcileLive() {
         val messages = linkedMapOf<String, ProjectedMessage>()
         events.filter { it.isTimelineMessage() }.forEach { event ->
@@ -127,8 +183,22 @@ private class ConversationReader(private val transport: RagentTransport, private
     private fun ordered(input: List<SessionEventDto>) = input.filter { it.boundarySeq() > 0 }.distinctBy { it.dedupeKey() ?: it.sessionEventFingerprint() }.sortedBy { it.boundarySeq() }
     private suspend fun latestPage(expected: ConversationBinding, preserve: Boolean) {
         val sid = expected.sessionId ?: return
+        if (memberRef != null) {
+            val p = checkedMemberPage(get(source.snapshotPath(sid)), expected)
+            memberGap = p.gap
+            memberCoverage = p.coverage
+            memberActivity = p.activity?.state
+            historyRevision = p.revision
+            val fresh = ordered(p.entries)
+            val newLatest = p.nextAfterSeq ?: fresh.maxOfOrNull { it.boundarySeq() } ?: 0L
+            if (preserve && newLatest < latest) throw ConversationReset()
+            if (preserve && events.isNotEmpty() && newLatest > latest) return
+            events = fresh.takeLast(1000); latest = newLatest
+            before = p.nextBeforeSeq; more = p.hasMoreBefore && before != null; hasOlder = more
+            reconcileLive(); render(); return
+        }
         check(expected)
-        val body = get("/api/sessions/${enc(sid)}/snapshot?limit=50")
+        val body = get(source.snapshotPath(sid))
         val consistency = RagentProtocol.json.parseToJsonElement(body).jsonObject["consistency"]?.jsonObject ?: throw ConversationReset()
         if (consistency["stable"]?.jsonPrimitive?.booleanOrNull != true) throw ConversationReset()
         val revision = consistency["revision"]?.jsonPrimitive?.longOrNull ?: throw ConversationReset()
@@ -155,10 +225,15 @@ private class ConversationReader(private val transport: RagentTransport, private
         render()
     }
     suspend fun open() = mutex.withLock {
+        val previousScope = memberScope
         val next = descriptor()
         val observedRuntime = runtimeState
-        if (binding != next) clear()
+        val observedScope = memberScope
+        val observedActivity = memberActivity
+        if (binding != next || (memberRef != null && previousScope != null && previousScope != observedScope)) clear()
         runtimeState = observedRuntime
+        memberScope = observedScope
+        memberActivity = observedActivity
         binding = next
         if (next.sessionId == null) { status = ConversationStatus.Unbound; return@withLock }
         latestPage(next, preserve = events.isNotEmpty())
@@ -171,8 +246,20 @@ private class ConversationReader(private val transport: RagentTransport, private
         if (!more || loadingOlder) return@withLock
         loadingOlder = true
         try {
+            if (memberRef != null) {
+                val p = checkedMemberPage(get(source.olderPath(sid, cursor)), expected)
+                memberGap = p.gap
+                memberCoverage = p.coverage
+                memberActivity = p.activity?.state
+                historyRevision = p.revision ?: historyRevision
+                val combined = ordered(events + p.entries)
+                if (combined.size > 1000) { browsingHistory = true; unseen = true }
+                events = combined.take(1000)
+                before = p.nextBeforeSeq; more = p.hasMoreBefore && before != null && before!! < cursor
+                hasOlder = more; render(); return@withLock
+            }
             check(expected)
-            val p = page(get("/api/sessions/${enc(sid)}/events?filter=visible&limit=50&direction=before&beforeSeq=$cursor"), sid)
+            val p = page(get(source.olderPath(sid, cursor)), sid)
             check(expected)
             val combined = ordered(events + p.events)
             if (combined.size > 1000) { browsingHistory = true; unseen = true }
@@ -195,10 +282,29 @@ private class ConversationReader(private val transport: RagentTransport, private
     suspend fun waitForUpdates() {
         val expected = binding ?: run { delay(3000); return }
         val sid = expected.sessionId ?: run { delay(3000); check(expected); return }
+        if (memberRef != null) {
+            delay(3_000)
+            val requestEpoch = epoch
+            val responseBody = get(source.updatesPath(sid, latest, 0L, null))
+            mutex.withLock {
+                if (epoch != requestEpoch) return@withLock
+                if (binding != expected) throw BindingChanged()
+                val p = checkedMemberPage(responseBody, expected)
+                memberGap = p.gap
+                memberCoverage = p.coverage
+                memberActivity = p.activity?.state
+                historyRevision = p.revision ?: historyRevision
+                val incoming = ordered(p.entries)
+                val next = p.nextAfterSeq ?: incoming.maxOfOrNull { it.boundarySeq() } ?: latest
+                if (next < latest || (p.hasMoreAfter && next <= latest)) throw ConversationReset()
+                if (browsingHistory && incoming.isNotEmpty()) unseen = true else events = ordered(events + incoming).takeLast(1000)
+                latest = next; reconcileLive(); render()
+            }
+            return
+        }
         check(expected)
         val requestEpoch = epoch
-        val stream = liveStream?.let { "&liveStreamId=${enc(it)}" }.orEmpty()
-        val p = page(get("/api/sessions/${enc(sid)}/events/wait?filter=all&limit=200&direction=forward&compact=1&afterSeq=$latest&timeoutMs=15000&includeLive=1&liveAfterCursor=$liveCursor$stream"), sid)
+        val p = page(get(source.updatesPath(sid, latest, liveCursor, liveStream)), sid)
         check(expected)
         mutex.withLock {
             if (epoch != requestEpoch) return@withLock
@@ -246,9 +352,9 @@ private class ConversationReader(private val transport: RagentTransport, private
 private enum class ConversationStatus { Loading, Ready, Offline, Denied, Unbound, Error }
 
 @Composable
-fun OrganizationConversationContent(transport: RagentTransport, organizationId: String, nodeId: String, targetId: String?, identityScope: String, modifier: Modifier = Modifier, onRuntimeState: (String?) -> Unit = {}, onAuthorizationDenied: () -> Unit = {}) {
+fun OrganizationConversationContent(transport: RagentTransport, organizationId: String, nodeId: String, targetId: String?, identityScope: String, modifier: Modifier = Modifier, onRuntimeState: (String?) -> Unit = {}, onAuthorizationDenied: () -> Unit = {}, rootSessionId: String? = null, memberRef: String? = null) {
     val delegate = (transport as? SwitchingRagentTransport)?.delegate?.collectAsState()?.value
-    val reader = remember(transport, targetId, identityScope, organizationId, nodeId) { ConversationReader(transport, organizationId, nodeId) }
+    val reader = remember(transport, targetId, identityScope, organizationId, nodeId, rootSessionId, memberRef) { ConversationReader(transport, organizationId, nodeId, rootSessionId, memberRef) }
     val connection by transport.connectionState.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -294,13 +400,28 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
         }
     }
     Column(modifier.fillMaxWidth()) {
+        if (reader.memberScope == "activity_only") ConversationLabel(R.string.org_conversation_activity_only)
+        if (reader.memberScope == "activity_only" && reader.status == ConversationStatus.Ready && reader.memberGap == false) {
+            val activityLabel = when (reader.memberActivity) {
+                "working" -> R.string.org_member_state_working
+                "waiting" -> R.string.org_member_state_waiting
+                "failed" -> R.string.org_member_state_failed
+                "blocked" -> R.string.org_member_state_blocked
+                "idle" -> R.string.org_member_state_idle
+                else -> R.string.org_member_state_unknown
+            }
+            if (activityLabel != null) ConversationLabel(activityLabel)
+        }
+        if (reader.memberScope == "captured_only" || reader.memberCoverage == "partial") ConversationLabel(R.string.org_conversation_captured_only)
+        if (reader.memberScope == "full" && reader.memberCoverage in setOf(null, "unknown")) ConversationLabel(R.string.org_conversation_coverage_unknown)
+        if (reader.memberGap == true) ConversationLabel(R.string.org_conversation_gap)
         when (reader.status) {
             ConversationStatus.Loading -> ConversationLabel(R.string.org_conversation_loading)
-            ConversationStatus.Unbound -> ConversationLabel(R.string.org_conversation_unbound)
+            ConversationStatus.Unbound -> ConversationLabel(if (reader.memberScope == "unavailable") R.string.org_conversation_member_unavailable else R.string.org_conversation_unbound)
             ConversationStatus.Denied -> ConversationLabel(R.string.org_conversation_denied)
             ConversationStatus.Offline -> ConversationLabel(if (reader.items.isEmpty()) R.string.org_conversation_offline_empty else R.string.org_conversation_offline)
             ConversationStatus.Error -> ConversationLabel(if (reader.items.isEmpty()) R.string.org_conversation_error else R.string.org_conversation_error_retained)
-            ConversationStatus.Ready -> if (reader.items.isEmpty()) ConversationLabel(R.string.org_conversation_empty)
+            ConversationStatus.Ready -> if (reader.items.isEmpty() && reader.memberScope != "activity_only") ConversationLabel(R.string.org_conversation_empty)
         }
         if (newContent || reader.unseen) TextButton(onClick = { scope.launch { try { if (reader.browsingHistory) reader.newest(); val count = reader.items.size + if (reader.hasOlder) 1 else 0; if (count > 0) { withFrameNanos { }; snapshotFlow { list.layoutInfo.totalItemsCount }.first { it >= count }; list.scrollToItem(count - 1) }; newContent = false } catch (e: ConversationDenied) { reader.denied(); if (e.authorizationDenied) authorizationDeniedCallback(); restart++ } catch (_: BindingChanged) { reader.reset(); restart++ } catch (_: ConversationReset) { reader.reset(); restart++ } catch (e: CancellationException) { throw e } catch (_: Exception) { reader.readFailed() } } }) { Text(androidx.compose.ui.res.stringResource(if (reader.browsingHistory) R.string.org_conversation_latest else R.string.org_conversation_new)) }
         LazyColumn(state = list, modifier = Modifier.fillMaxWidth().weight(1f, fill = false), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {

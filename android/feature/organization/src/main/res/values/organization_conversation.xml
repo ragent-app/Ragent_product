@@ -5,6 +5,17 @@
     <string name="org_conversation_offline">Offline · showing last verified messages</string>
     <string name="org_conversation_error">Conversation unavailable.</string>
     <string name="org_conversation_empty">No messages yet.</string>
+    <string name="org_conversation_activity_only">Available activity and results only</string>
+    <string name="org_conversation_captured_only">Only content captured by the parent run is shown.</string>
+    <string name="org_conversation_member_unavailable">This member’s conversation is unavailable.</string>
+    <string name="org_conversation_gap">Some activity may be unavailable.</string>
+    <string name="org_conversation_coverage_unknown">The extent of available content is unknown.</string>
+    <string name="org_member_state_working">Member is working</string>
+    <string name="org_member_state_waiting">Member is waiting</string>
+    <string name="org_member_state_failed">Member failed</string>
+    <string name="org_member_state_blocked">Member is blocked</string>
+    <string name="org_member_state_idle">Member is idle</string>
+    <string name="org_member_state_unknown">Member status is unknown</string>
     <string name="org_conversation_new">New messages</string>
     <string name="org_conversation_older">Load earlier messages</string>
     <string name="org_conversation_input">Input</string>

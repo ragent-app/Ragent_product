@@ -131,6 +131,7 @@ data class OrganizationProgressDto(
 @Serializable
 data class OrganizationNodeDto(
     val id: String,
+    val member: UnifiedMemberDto? = null,
     val parentId: String? = null,
     val role: String = "",
     val domain: String? = null,
@@ -156,6 +157,28 @@ data class OrganizationNodeDto(
     val blockedChildCount: Int = 0,
     val isCollapsedRecommended: Boolean = false,
 )
+
+@Serializable
+data class UnifiedMemberDto(
+    val canonicalId: String,
+    val sourceTag: String? = null,
+    val executionHarnessId: String? = null,
+    val parentCanonicalId: String? = null,
+    val relationKnown: Boolean = false,
+    val aliases: List<MemberAliasDto> = emptyList(),
+    val conversation: MemberConversationRefDto? = null,
+    val activity: NodeActivityDto? = null,
+    val birth: MemberBirthDto? = null,
+)
+
+@Serializable data class MemberAliasDto(val kind: String, val id: String, val runId: String? = null)
+@Serializable data class MemberBirthDto(val id: String, val actorCanonicalId: String, val operationId: String? = null, val timestamp: kotlinx.serialization.json.JsonElement? = null)
+@Serializable data class MemberConversationRefDto(val ref: String? = null, val generation: Long? = null, val scope: String = "unavailable")
+@Serializable data class UnifiedMembersPageDto(
+    val rootSessionId: String, val rootCanonicalId: String, val members: List<UnifiedMemberDto> = emptyList(),
+    val membersComplete: Boolean = false, val sourceCoverage: MemberSourceCoverageDto? = null,
+)
+@Serializable data class MemberSourceCoverageDto(val harness: String? = null, val gap: Boolean? = null)
 
 @Serializable
 data class OrganizationBindingDto(val sessionId: String? = null, val generation: Long = 0L)

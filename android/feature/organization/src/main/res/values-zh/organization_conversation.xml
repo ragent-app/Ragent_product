@@ -5,6 +5,17 @@
     <string name="org_conversation_offline">已离线，显示最近核实的消息</string>
     <string name="org_conversation_error">会话暂不可用</string>
     <string name="org_conversation_empty">暂无消息</string>
+    <string name="org_conversation_activity_only">仅显示可用的活动和结果</string>
+    <string name="org_conversation_captured_only">仅显示父运行中捕获的内容</string>
+    <string name="org_conversation_member_unavailable">此成员的会话暂不可用</string>
+    <string name="org_conversation_gap">部分活动可能不可用</string>
+    <string name="org_conversation_coverage_unknown">可用内容的完整范围未知</string>
+    <string name="org_member_state_working">成员正在工作</string>
+    <string name="org_member_state_waiting">成员正在等待</string>
+    <string name="org_member_state_failed">成员执行失败</string>
+    <string name="org_member_state_blocked">成员受阻</string>
+    <string name="org_member_state_idle">成员空闲</string>
+    <string name="org_member_state_unknown">成员状态未知</string>
     <string name="org_conversation_new">有新消息</string>
     <string name="org_conversation_older">查看更多消息</string>
     <string name="org_conversation_input">输入</string>

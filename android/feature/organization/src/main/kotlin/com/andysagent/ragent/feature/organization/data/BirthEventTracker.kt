@@ -6,6 +6,7 @@ import java.time.Instant
 data class BirthCue(val sourceId: String, val eventId: String, val nodeId: String, val actorNodeId: String)
 
 data class NativeBirthEvent(val runId: String, val event: DelegationEventDto)
+data class UnifiedBirthEvent(val eventId: String, val nodeId: String, val actorNodeId: String, val timestamp: Long)
 
 private data class Candidate(val cue: BirthCue, val timestamp: Long)
 
@@ -40,6 +41,7 @@ class BirthEventTracker {
         organizationEvents: List<OrganizationActionDto>,
         nativeEvents: List<NativeBirthEvent>,
         nativeRecords: List<NativeDelegationDto>,
+        unifiedEvents: List<UnifiedBirthEvent> = emptyList(),
     ): List<BirthCue> {
         if (scope != scopeId || !continuous || !baseline) {
             reset()
@@ -51,6 +53,9 @@ class BirthEventTracker {
         val nativeById = nativeRecords.filter { it.parentSessionId == sessionId }
             .associateBy { it.runId to it.delegationId }
         val candidates = mutableListOf<Candidate>()
+        unifiedEvents.forEach { event ->
+            candidates += Candidate(BirthCue("members:$scopeId", event.eventId, event.nodeId, event.actorNodeId), event.timestamp)
+        }
         if (organizationId != null) for (event in organizationEvents) {
             val actor = event.actorNodeId ?: continue
             val node = event.nodeId ?: continue

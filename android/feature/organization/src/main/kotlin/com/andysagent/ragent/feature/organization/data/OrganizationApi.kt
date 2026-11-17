@@ -11,6 +11,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 interface OrganizationApi {
     suspend fun getProjection(organizationId: String, version: Int = 2, sinceEventId: Long = 0L): Result<OrganizationProjectionDto>
     suspend fun getSessionOrganization(sessionId: String): Result<OrganizationProjectionDto?>
+    suspend fun getSessionMembers(sessionId: String): Result<UnifiedMembersPageDto> = Result.failure(UnsupportedOperationException())
     suspend fun getSessionActions(sessionId: String, afterId: Long = 0L, limit: Int = 100): Result<OrganizationActionsDto?> =
         Result.failure(UnsupportedOperationException("Organization actions unavailable"))
     suspend fun getDelegationRuns(sessionId: String): Result<DelegationRunsDto> = Result.failure(UnsupportedOperationException())
@@ -25,6 +26,12 @@ class RealOrganizationApi(
         coerceInputValues = true
     },
 ) : OrganizationApi {
+
+    override suspend fun getSessionMembers(sessionId: String): Result<UnifiedMembersPageDto> = runCatching {
+        val response = transport.execute(ApiRequest("GET", "/api/sessions/${Uri.encode(sessionId)}/organization/members"))
+        if (!response.isSuccessful) throw ApiException(response.statusCode, null, "Failed to load members: ${response.statusCode}")
+        json.decodeFromJsonElement(json.parseToJsonElement(response.body))
+    }
 
     override suspend fun getDelegationRuns(sessionId: String): Result<DelegationRunsDto> = runCatching {
         val response = transport.execute(ApiRequest("GET", "/api/sessions/${Uri.encode(sessionId)}/delegation-runs"))

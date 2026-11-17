@@ -1696,10 +1696,10 @@ private fun ChatSurface(
     var formalResolved by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var formalDefinitive by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
     var formalHasCollaborators by remember(organizationTransport, organizationOfflineScope, state.chatTargetId, state.sessionId) { mutableStateOf(false) }
-    LaunchedEffect(formalResolved, formalDefinitive, formalHasCollaborators, nativeResolved, nativeDefinitive, nativeNodes) {
-        if (formalResolved && nativeResolved) organizationSnapshotReady = true
-        val hasCollaborators = formalHasCollaborators || nativeNodes.isNotEmpty()
-        val definitive = hasCollaborators || (formalDefinitive && nativeDefinitive)
+    LaunchedEffect(formalResolved, formalDefinitive, formalHasCollaborators) {
+        if (formalResolved) organizationSnapshotReady = true
+        val hasCollaborators = formalHasCollaborators
+        val definitive = hasCollaborators || formalDefinitive
         if (definitive) {
             if (!organizationInitialSnapshotSeen) {
                 organizationHydrating = true
