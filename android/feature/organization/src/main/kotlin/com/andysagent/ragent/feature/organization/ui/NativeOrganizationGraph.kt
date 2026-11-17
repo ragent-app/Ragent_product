@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.res.stringResource
@@ -65,6 +68,7 @@ fun UnifiedOrganizationGraph(
         }
     }
     val vm: OrganizationViewModel = viewModel(key = key, factory = factory)
+    var conversationRuntime by remember(transport, sessionId, identityScope) { mutableStateOf<Pair<String, String?>?>(null) }
     val rootId = unifiedMembers?.rootCanonicalId ?: "native-root:$sessionId"
     LaunchedEffect(vm, rootId, rootAction, records, nativeActionsFresh, nativeReceiptElapsed, unifiedMembers, unifiedReceiptElapsed, unifiedActionsFresh) {
         while (true) {
@@ -98,11 +102,16 @@ fun UnifiedOrganizationGraph(
         onRootVisualChanged = onRootVisualChanged, revealRoot = revealRoot, rootHidden = rootHidden,
         openNodeId = programmaticOpen?.let { memberIdForLegacy(unifiedMembers, it.first, it.second) },
         onOpenNodeConsumed = onProgrammaticOpenConsumed,
+        conversationRuntimeState = { nodeId ->
+            conversationRuntime?.takeIf { it.first == nodeId }?.second
+                ?: nodes.firstOrNull { it.id == nodeId }?.member?.activity?.state?.takeIf { unifiedActionsFresh }
+        },
         conversationContent = { nodeId, contentModifier ->
             val ref = nodes.firstOrNull { it.id == nodeId }?.member?.conversation?.ref
             if (ref == null) Text(stringResource(R.string.organization_native_conversation_unavailable), contentModifier.padding(20.dp))
             else OrganizationConversationContent(transport, "", nodeId, null, identityScope, modifier = contentModifier,
-                rootSessionId = sessionId, memberRef = ref)
+                rootSessionId = sessionId, memberRef = ref,
+                onRuntimeState = { state -> conversationRuntime = nodeId to state })
         })
 }
 
