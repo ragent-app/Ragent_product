@@ -5593,7 +5593,7 @@ function scheduleRunAuthRecoveryLaunch(runId) {
     }
 
     const recoverySession = await getSession(run.sessionId);
-    if (!recoverySession || recoverySession.sessionPlane === 'organization'
+    if (manifest?.options?.providerFailover === false || !recoverySession || recoverySession.sessionPlane === 'organization'
         || recoverySession.organizationId || recoverySession.parentSessionId
         || recoverySession.delegatedFromSessionId
         || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation)) {
@@ -5762,6 +5762,10 @@ export async function recoverRunAuthFailure({
         || !Number.isSafeInteger(Number(failureAttempt))
         || Number(failureAttempt) < 0) {
       throw runAuthRecoveryError('RUN_AUTH_RECOVERY_REQUEST_INVALID', 'Only an explicit auth-expired signal is recoverable');
+    }
+
+    if (manifest?.options?.providerFailover === false) {
+      return { ok: false, retry: false, status: 'stopped', reason: 'automatic-recovery-disabled' };
     }
 
     // Authentication errors are classified from provider output; they do not
@@ -12694,6 +12698,7 @@ function buildPreparingRunRecord({
   const manifestOptions = {
     images: attachmentInputStage.stagedAttachments,
     thinking: options.thinking === true,
+    ...(typeof options.providerFailover === 'boolean' ? { providerFailover: options.providerFailover } : {}),
     model: options.model || undefined,
     effort: options.effort || undefined,
     serviceTier: effectiveServiceTier,
@@ -14509,7 +14514,7 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
       && options.providerFailoverReason.trim()) {
     manifestOptions.providerFailoverReason = options.providerFailoverReason.trim();
   }
-  if (options.providerFailover === true) manifestOptions.providerFailover = true;
+  if (typeof options.providerFailover === 'boolean') manifestOptions.providerFailover = options.providerFailover;
   delete manifestOptions.claudeSessionId;
   delete manifestOptions.codexThreadId;
   delete manifestOptions.codexResume;

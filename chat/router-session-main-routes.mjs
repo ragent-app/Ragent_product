@@ -1329,6 +1329,9 @@ export async function handleSessionMainRoutes({
           ...(authSession?.role === 'visitor' ? {} : { tool: requestedTool }),
           ...(authSession?.role === 'visitor' || !requestedProviderProfile ? {} : { providerProfile: requestedProviderProfile }),
           ...(harnessInstructions ? { harnessInstructions } : {}),
+          // false disables both provider replacement and automatic authentication relaunch.
+          ...(authSession?.role === 'owner' && typeof payload.providerFailover === 'boolean'
+            ? { providerFailover: payload.providerFailover } : {}),
           thinking: authSession?.role === 'visitor' ? false : !!payload.thinking,
           model: authSession?.role === 'visitor' ? undefined : payload.model || undefined,
           effort: authSession?.role === 'visitor' ? undefined : payload.effort || undefined,
