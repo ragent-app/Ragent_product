@@ -1462,6 +1462,10 @@ export function createCollaborationOrchestrator(options = {}) {
   }
 
   async function reconcile() {
+    // Durable interruption delivery is independent of a collaboration's
+    // lifecycle; completed collaborations can still have pending notices.
+    const { reconcileAgentInterruptions } = await import('./agent-interruption-notifications.mjs');
+    await reconcileAgentInterruptions().catch(() => {});
     const active = await store.listCollaborationRecords({ activeOnly: true });
     // Read expiring Attempts once per sweep. The previous per-collaboration
     // query multiplied SQLite work by the number of active collaborations and
