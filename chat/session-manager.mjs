@@ -9196,9 +9196,12 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
       (finalizedMeta.meta?.sessionPlane === 'organization' || finalizedMeta.meta?.parentSessionId || finalizedMeta.meta?.delegatedFromSessionId)
       ? { agentInterruptionPending: true } : {}),
   })) || run;
+  let interruptionIncidentId = finalizedRun.agentInterruptionIncidentId || '';
   if (finalizedRun.agentInterruptionPending === true) {
-    void observePendingAgentInterruption(finalizedRun).catch((error) =>
-      console.warn(`[runs] interruption observation deferred: ${error?.message || error}`));
+    interruptionIncidentId = await observePendingAgentInterruption(finalizedRun).catch((error) => {
+      console.warn(`[runs] interruption observation deferred: ${error?.message || error}`);
+      return '';
+    });
   }
 
   // Wake durable follow-up messages once the active Run pointer, continuity
@@ -9231,7 +9234,7 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
       state: finalizedRun.state,
       completedAt: finalizedRun.completedAt || finalizedRun.finalizedAt || nowIso(),
       failureReason: finalizedRun.failureReason || '',
-    })).catch((error) => {
+    }, { suppressDelegatedChildWake: Boolean(interruptionIncidentId) })).catch((error) => {
       console.error(`[runs] terminal wake publication failed for ${finalizedRun.id}: ${error.message}`);
     });
   }
@@ -9632,14 +9635,15 @@ function scheduleDetachedRunMemoryWriteback(sessionId, session, finalizedRun, ma
 }
 
 async function observePendingAgentInterruption(run) {
-  if (!run?.id || !run.sessionId || run.agentInterruptionPending !== true || run.state !== 'failed' || !run.finalizedAt) return;
+  if (!run?.id || !run.sessionId || run.agentInterruptionPending !== true || run.state !== 'failed' || !run.finalizedAt) return '';
   const { observeAgentInterruption } = await import('./agent-interruption-notifications.mjs');
   const outcome = await observeAgentInterruption({ sessionId: run.sessionId, runId: run.id });
-  if (!outcome || (outcome.applicable !== false && !outcome.incidentId)) return;
+  if (!outcome || (outcome.applicable !== false && !outcome.incidentId)) return '';
   await updateRun(run.id, (current) => current.agentInterruptionPending === true && current.state === 'failed'
     ? { ...current, agentInterruptionPending: false,
       ...(outcome.applicable === false ? { agentInterruptionSkippedReason: outcome.reason || 'not_applicable' }
         : { agentInterruptionIncidentId: outcome.incidentId }) } : current);
+  return outcome.applicable === true ? outcome.incidentId : '';
 }
 
 let interruptionRecoveryPromise = null;

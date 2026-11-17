@@ -250,7 +250,7 @@ export async function processRootLeadershipProposal({
       ...(typeof getTool === 'function' ? { getTool } : {}),
     });
   } catch (error) {
-    return errorResult(error);
+    return { ...errorResult(error), sideEffects: 'none' };
   }
 
   const rootSessionId = text(session.id);

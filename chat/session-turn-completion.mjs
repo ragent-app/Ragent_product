@@ -771,20 +771,28 @@ export function createSessionTurnCompletionHelpers(services) {
           loadSessionHistory: services.loadRecentTurnHistory || loadHistory,
         });
         const assistantText = turnContext?.assistantControlText || turnContext?.assistantTurnText || '';
-        const orchestration = classifyOrchestrationOutput(assistantText);
+        const planIngress = finalizedRun.organizationPlanIngress;
+        const orchestration = planIngress ? { mode: 'tool_claimed' } : classifyOrchestrationOutput(assistantText);
         if (orchestration.error) {
           const status = orchestration.error.code === 'ORCHESTRATION_MODE_CONFLICT'
             ? 'Root Leadership turn rejected: choose exactly one orchestration mode; no organization or collaboration was started.'
             : `Root Leadership control block rejected: ${orchestration.error.message}.`;
           await appendEvent(sessionId, statusEvent(status));
           broadcastSessionInvalidation(sessionId);
+        } else if (orchestration.mode === 'tool_claimed') {
+          if (['claimed', 'pending'].includes(planIngress.state)) {
+            const { inspectOrganizationPlan } = await import('./organization-plan-tool.mjs');
+            const status = await inspectOrganizationPlan({ sessionId, runId: finalizedRun.id });
+            await appendEvent(sessionId, statusEvent(status.state === 'completed'
+              ? `Organization revision ${status.result.revision} was confirmed; provisioning status requires a separate check.`
+              : 'Organization proposal processing needs reconciliation; no second proposal was started.'));
+            broadcastSessionInvalidation(sessionId);
+          }
         } else if (orchestration.mode === 'organization' && typeof processRootLeadershipProposal === 'function') {
-          const proposalResult = await processRootLeadershipProposal({
-            session,
-            assistantText,
-            projectId: session?.projectId || '',
-            turnId: finalizedRun.id,
-          });
+          const { extractOrganizationProposal } = await import('./organization-leader-ingress.mjs');
+          const { processOrganizationPlan } = await import('./organization-plan-tool.mjs');
+          const proposalResult = await processOrganizationPlan({ session, runId: finalizedRun.id,
+            proposal: extractOrganizationProposal(assistantText), source: 'marker', processor: processRootLeadershipProposal });
           if (proposalResult?.attempted) {
             const provisioning = proposalResult.provisioning || {};
             const status = proposalResult.state === 'frozen' && provisioning.state === 'provisioned'

@@ -15,9 +15,18 @@ export async function executeOrganizationControlTool({ authSession, action, args
     const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) ||
       (session.sessionClass === 'ROOT_LEADERSHIP' && id === 'ragent:builtin:root');
     if (action === 'state.get') {
-      if (session.sessionClass !== 'ROOT_LEADERSHIP') throw fail();
+      if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' ||
+          session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail();
       const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
       return { projection: await buildOrganizationContextProjection({ session }) };
+    }
+    if (action === 'plan.submit') {
+      const { submitOrganizationPlan } = await import('./organization-plan-tool.mjs');
+      return submitOrganizationPlan({ authSession, proposal: args.proposal });
+    }
+    if (action === 'plan.status') {
+      const { getOrganizationPlanStatus } = await import('./organization-plan-tool.mjs');
+      return getOrganizationPlanStatus({ authSession });
     }
     if (action === 'skills.list') return { skills: await listBuiltinSkills({ authorize }) };
     if (action === 'skills.read') {
