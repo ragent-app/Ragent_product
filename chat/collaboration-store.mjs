@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { CHAT_COLLABORATIONS_DB, CHAT_COLLABORATIONS_DIR } from '../lib/config.mjs';
 import { createSerialTaskQueue } from './fs-utils.mjs';
 import { publishOrganizationInvalidation } from './organization-invalidation.mjs';
+import { ROLE_CONTRACTS } from './organization-role-contract.mjs';
 
 const runStoreMutation = createSerialTaskQueue();
 // A collaboration Attempt used to have one 20 minute lease which started
@@ -552,14 +553,17 @@ export async function createCollaborationRecord({ id: collaborationId = id('coll
             || (Number.isInteger(childGrant.maxConcurrent) && Number(childActive)>=childGrant.maxConcurrent)) throw Object.assign(new Error('Delegation admission changed or concurrency exhausted'),{code:'ORG_DELEGATION_FORBIDDEN',statusCode:403});
       }
       if (policy?.organizationId && policy?.organizationNodeId && !policy.organizationDelegation) {
-        const child=db.prepare('SELECT parent_node_id,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(policy.organizationNodeId,policy.organizationId);
+        const child=db.prepare('SELECT parent_node_id,node_role,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(policy.organizationNodeId,policy.organizationId);
         if (child?.parent_node_id) {
-          const parent=db.prepare('SELECT grant_json FROM organization_nodes WHERE id=? AND organization_id=? AND retired_revision IS NULL AND lifecycle_state=\'active\'').get(child.parent_node_id,policy.organizationId);
+          const parent=db.prepare('SELECT node_role,grant_json FROM organization_nodes WHERE id=? AND organization_id=? AND retired_revision IS NULL AND lifecycle_state=\'active\'').get(child.parent_node_id,policy.organizationId);
           const parentGrant=parseJson(parent?.grant_json,{}), childGrant=parseJson(child.grant_json,{});
+          const phasePresent=db.prepare("SELECT 1 FROM collaborations c JOIN organization_nodes n ON n.id=json_extract(c.policy_json,'$.organizationNodeId') AND n.organization_id=? WHERE c.state<>'completed' AND json_extract(c.policy_json,'$.organizationId')=? AND n.parent_node_id=? AND json_type(c.policy_json,'$.organizationPhaseDispatch')='object' LIMIT 1").get(policy.organizationId,policy.organizationId,child.parent_node_id);
           const active=db.prepare("SELECT COUNT(*) AS n FROM collaborations c JOIN organization_nodes n ON n.id=json_extract(c.policy_json,'$.organizationNodeId') AND n.organization_id=? WHERE c.state<>'completed' AND json_extract(c.policy_json,'$.organizationId')=? AND n.parent_node_id=?").get(policy.organizationId,policy.organizationId,child.parent_node_id).n;
           const childActive=db.prepare("SELECT COUNT(*) AS n FROM collaborations WHERE state<>'completed' AND json_extract(policy_json,'$.organizationId')=? AND json_extract(policy_json,'$.organizationNodeId')=?").get(policy.organizationId,policy.organizationNodeId).n;
-          if (!Number.isInteger(parentGrant.maxConcurrent) || Number(active)>=parentGrant.maxConcurrent
-              || (Number.isInteger(childGrant.maxConcurrent) && Number(childActive)>=childGrant.maxConcurrent)) {
+          const parentLimit=Number.isInteger(parentGrant.maxConcurrent) ? parentGrant.maxConcurrent : ROLE_CONTRACTS[parent?.node_role]?.maxConcurrent;
+          const childLimit=Number.isInteger(childGrant.maxConcurrent) ? childGrant.maxConcurrent : ROLE_CONTRACTS[child.node_role]?.maxConcurrent;
+          if ((policy.organizationPhaseDispatch || phasePresent) && (!Number.isInteger(parentLimit) || !Number.isInteger(childLimit)
+              || Number(active)>=parentLimit || Number(childActive)>=childLimit)) {
             throw Object.assign(new Error('Organization parent or child concurrency exhausted'),{code:'ORG_DELEGATION_FORBIDDEN',statusCode:403});
           }
         }

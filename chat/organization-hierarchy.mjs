@@ -316,7 +316,7 @@ export async function delegateHierarchicalTask(input = {}, {
   const taskCollaboration = await createCollaborationRecord({
     rootSessionId: text(input.rootSessionId || parent.currentSessionId || input.fromSessionId),
     title: `Organization task: ${objective}`,
-    policy: { organizationId, organizationNodeId: node.id, role },
+    policy: { organizationId, organizationNodeId: node.id, organizationBindingGeneration: node.bindingGeneration, role },
     idempotencyKey: `${idempotencyKey}:collaboration`,
     plan: {
       version: 1,
