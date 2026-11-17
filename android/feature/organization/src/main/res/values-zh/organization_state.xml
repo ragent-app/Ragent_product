@@ -56,4 +56,14 @@
     <string name="organization_files">文件</string>
     <string name="organization_send_instruction">发送指令</string>
     <string name="organization_details">查看详情</string>
+    <string name="organization_action_responding">正在回复</string>
+    <string name="organization_action_reading">正在读取</string>
+    <string name="organization_action_searching">正在搜索</string>
+    <string name="organization_action_editing">正在编辑</string>
+    <string name="organization_action_executing">正在执行</string>
+    <string name="organization_action_inspecting">正在检查</string>
+    <string name="organization_action_delegating">正在委派</string>
+    <string name="organization_action_sending">正在发送</string>
+    <string name="organization_action_waiting_subordinates">等待成员</string>
+    <string name="organization_action_needs_user">需要你的处理</string>
 </resources>

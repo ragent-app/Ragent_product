@@ -1,6 +1,9 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -20,6 +23,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,6 +53,8 @@ import androidx.compose.ui.unit.sp
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
+import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
+import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
 import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.feature.organization.presentation.NodeActionKind
 import com.andysagent.ragent.core.designsystem.rememberAgentoPressScale
@@ -98,13 +104,30 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     val interaction = interactionSource ?: internalInteraction
     val press = externalPressScale ?: rememberAgentoPressScale(interaction).value
     val diameter = (node.radiusDp * 2f).dp
-    val touchSize = maxOf(diameter, minimumTouchSize)
+    val badgeSizeDp = (node.radiusDp * 2f * .28f).coerceIn(18f, 24f)
+    val badgeExtent = (node.radiusDp * 2f + badgeSizeDp * 2f / 3f).dp
+    val touchSize = maxOf(diameter, minimumTouchSize, badgeExtent)
     val iconSize = nodeIconSize(node.radiusDp).dp
+    val actionDescription = node.action?.let { stringResource(when (it) {
+        NodeActionKind.RESPONDING -> R.string.organization_action_responding
+        NodeActionKind.READING -> R.string.organization_action_reading
+        NodeActionKind.SEARCHING -> R.string.organization_action_searching
+        NodeActionKind.EDITING -> R.string.organization_action_editing
+        NodeActionKind.EXECUTING -> R.string.organization_action_executing
+        NodeActionKind.INSPECTING -> R.string.organization_action_inspecting
+        NodeActionKind.DELEGATING -> R.string.organization_action_delegating
+        NodeActionKind.SENDING -> R.string.organization_action_sending
+        NodeActionKind.WAITING -> R.string.organization_node_waiting
+        NodeActionKind.WAITING_SUBORDINATES -> R.string.organization_action_waiting_subordinates
+        NodeActionKind.NEEDS_USER -> R.string.organization_action_needs_user
+        NodeActionKind.BLOCKED -> R.string.organization_node_blocked
+        NodeActionKind.FAILED -> R.string.organization_node_failed
+    }) }
     Box(
         modifier = modifier.absoluteOffset {
             val half = with(density) { touchSize.toPx() / 2f }
             IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
-        }.size(touchSize).then(if (morphHidden || !clickable) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, node.taskSummary, node.blockerText).joinToString("，") })
+        }.size(touchSize).then(if (morphHidden || !clickable) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, actionDescription, node.taskSummary, node.blockerText).joinToString("，") })
             .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = if (morphHidden) 0f else node.alpha }
             .drawWithContent {
                 val offset = occluderOffset
@@ -146,16 +169,25 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
             }
         }
         val action = node.action
-        if (action != null && actionVisible) {
-            val badgeSize = (node.radiusDp * 2f * .28f).coerceIn(18f, 24f)
-            val badgeRadius = badgeSize / 2f
-            val distance = node.radiusDp - badgeRadius / 3f
-            val angle = Math.toRadians(badgeAngleDegrees.toDouble())
-            Box(Modifier.align(Alignment.Center).absoluteOffset(
+        val retained = remember { mutableStateOf(action) }
+        if (action != null) retained.value = action
+        val duration = if (motionPreference == MotionPreference.None) 0 else 160
+        val badgeRadius = badgeSizeDp / 2f
+        val distance = node.radiusDp - badgeRadius / 3f
+        val angle = Math.toRadians(badgeAngleDegrees.toDouble())
+        AnimatedVisibility(visible = action != null && actionVisible,
+            modifier = Modifier.align(Alignment.Center).absoluteOffset(
                 x = (distance * kotlin.math.cos(angle).toFloat()).dp,
                 y = (distance * kotlin.math.sin(angle).toFloat()).dp,
-            ).size(badgeSize.dp), contentAlignment = Alignment.Center) {
-                OrganizationActionBadge(action, motionPreference, badgeSize)
+            ),
+            enter = fadeIn(tween(duration, easing = FastOutSlowInEasing)) +
+                scaleIn(tween(duration, easing = FastOutSlowInEasing), initialScale = if (motionPreference == MotionPreference.Full) .94f else 1f),
+            exit = fadeOut(tween(duration, easing = FastOutSlowInEasing)) +
+                scaleOut(tween(duration, easing = FastOutSlowInEasing), targetScale = if (motionPreference == MotionPreference.Full) .94f else 1f)) {
+            retained.value?.let { current ->
+                Box(Modifier.size(badgeSizeDp.dp), contentAlignment = Alignment.Center) {
+                    OrganizationActionBadge(current, motionPreference, badgeSizeDp, action != null && actionVisible)
+                }
             }
         }
     }
@@ -235,15 +267,16 @@ internal fun nodeVisual(node: RenderedNodeUiState): NodeVisual {
 }
 
 @Composable
-private fun OrganizationActionBadge(action: NodeActionKind, motion: MotionPreference, diameter: Float) {
+private fun OrganizationActionBadge(action: NodeActionKind, motion: MotionPreference, diameter: Float, ringEnabled: Boolean) {
     val colors = LocalRagentColors.current
     val active = action in setOf(NodeActionKind.RESPONDING, NodeActionKind.READING, NodeActionKind.SEARCHING,
         NodeActionKind.EDITING, NodeActionKind.EXECUTING, NodeActionKind.INSPECTING,
         NodeActionKind.DELEGATING, NodeActionKind.SENDING)
     AgentoFrostedGlassBox(modifier = Modifier.fillMaxSize(), shape = CircleShape,
-        backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = true, shadowElevation = 2.dp,
+        surface = AgentoGlassSurface.Neutral, material = AgentoGlassMaterial.LiquidClear,
+        showTopHairline = false, backdropLayer = null, backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = true, shadowElevation = 2.dp,
         contentAlignment = Alignment.Center) {
-        if (active && motion == MotionPreference.Full) {
+        if (ringEnabled && active && motion == MotionPreference.Full) {
             val transition = rememberInfiniteTransition(label = "action-ring")
             val angle by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "action-ring-angle")
             Canvas(Modifier.fillMaxSize().padding(1.dp)) {
