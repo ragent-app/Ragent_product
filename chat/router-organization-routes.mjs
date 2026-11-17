@@ -32,6 +32,11 @@ function writeError(res, writeJson, error) {
 }
 
 
+function memberActivityState(state) {
+  return ['spawned', 'running'].includes(state) ? 'working' : state === 'waiting' ? 'waiting' :
+    state === 'failed' ? 'failed' : ['completed', 'cancelled', 'interrupted'].includes(state) ? 'idle' : 'unknown';
+}
+
 async function projectHarnessMembers(rootSessionId, rootMember = null) {
   const memberEvents = await listMemberEvents(rootSessionId);
   const rootCanonicalId = rootMember || `root:${rootSessionId}`;
@@ -56,8 +61,7 @@ async function projectHarnessMembers(rootSessionId, rootMember = null) {
     const birth = births.get(event.memberId);
     const actor = birth?.actor?.kind === 'member' ? birth.actor.id :
       birth?.actor?.kind === 'root_session' && birth.actor.id === rootSessionId ? rootCanonicalId : null;
-    const state = ['spawned', 'running'].includes(event.state) ? 'working' : event.state === 'waiting' ? 'waiting' :
-      event.state === 'failed' ? 'failed' : ['completed', 'cancelled', 'interrupted'].includes(event.state) ? 'idle' : 'unknown';
+    const state = memberActivityState(event.state);
     return { canonicalId: event.memberId, sourceTag: event.sourceTag || null, executionHarnessId: event.executionHarnessId || null,
       parentCanonicalId: parent || null, relationKnown: Boolean(parent), aliases: [...(aliasesByMember.get(event.memberId)?.values() || [])],
       birth: birth && actor ? { id: birth.id, actorCanonicalId: actor, operationId: birth.operationId || null, timestamp: birth.timestamp || null } : null,
@@ -173,7 +177,7 @@ export async function handleOrganizationRoutes({
       writeJson(res, 200, { scope: all.length ? 'full' : 'activity_only', coverage: 'partial',
         availability: captured.availability, generation: captured.generation, revision: null, reset: false,
         gap: memberEvents.gap || captured.gap, oldestSeq, latestSeq,
-        activity: { state: latest?.state || 'unknown', kind: null, actionRequired: false }, entries: page,
+        activity: { state: memberActivityState(latest?.state), kind: null, actionRequired: false }, entries: page,
         nextBeforeSeq: page[0]?.seq ?? null, nextAfterSeq: (page.at(-1)?.seq ?? afterSeq) || null,
         hasMoreBefore: !!page.length && page[0].seq > oldestSeq,
         hasMoreAfter: !!page.length && page.at(-1).seq < latestSeq });
