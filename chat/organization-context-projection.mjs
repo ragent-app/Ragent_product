@@ -3,7 +3,7 @@
 // role filtering and size/forbidden-field checks stay in one place.
 import { buildContextProjection } from './context-projector.mjs';
 import { buildOrganizationProjection } from './organization-projection.mjs';
-import { getOrganizationByRootSession } from './organization-store.mjs';
+import { getOrganizationByRootSession, getRevision, listOrganizationNodes } from './organization-store.mjs';
 import { listTeamMessages } from './organization-team-messages.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
 
@@ -41,8 +41,25 @@ export async function buildOrganizationContextProjection({
 } = {}) {
   const resolvedOrganizationId = text(organizationId)
     || text((session.id ? (await getOrganizationByRootSession(session.id))?.id : null));
-  const projection = await buildOrganizationProjection(resolvedOrganizationId, { version: 2, maxItems: 128 });
-  if (!projection) return null;
+  const sourceProjection = await buildOrganizationProjection(resolvedOrganizationId, { version: 2, maxItems: 128 });
+  if (!sourceProjection) return null;
+  const projection = { ...sourceProjection, nodes: sourceProjection.nodes.map((node) => ({ ...node })) };
+  // Frozen task descriptions are plans, not evidence that work has started.
+  const revisionNumber = projection.revision?.number;
+  const [revision, durableNodes] = revisionNumber
+    ? await Promise.all([getRevision(resolvedOrganizationId, revisionNumber), listOrganizationNodes(resolvedOrganizationId)])
+    : [null, []];
+  if (revision?.state === 'frozen') {
+    const keyById = new Map(durableNodes.map((node) => [node.id, node.stableKey]));
+    const plans = new Map((revision.compiled?.nodes || []).map((node) => [node.stableKey, node]));
+    for (const node of projection.nodes) {
+      const plan = plans.get(keyById.get(node.id));
+      if (plan) {
+        node.phaseId = plan.phaseId || '';
+        node.plannedTask = { objective: plan.objective || '', acceptance: plan.acceptance || [], scope: plan.scope || {}, dependencies: plan.dependencies || [] };
+      }
+    }
+  }
   const target = projection.nodes.find((node) => node.id === nodeId) || null;
   const role = text(targetRole).toUpperCase() || roleForSession(session);
   const facts = {

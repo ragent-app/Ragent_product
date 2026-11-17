@@ -118,6 +118,7 @@ function projectionNode(node, includeTask = false) {
   if (text(node.taskId || node.currentTask?.taskId)) result.taskId = text(node.taskId || node.currentTask.taskId);
   if (includeTask && node.progress !== undefined) result.progress = cloneBounded(node.progress);
   if (includeTask && plain(node.currentTask)) result.currentTask = cloneBounded(node.currentTask);
+  if (includeTask && plain(node.plannedTask)) result.plannedTask = cloneBounded(node.plannedTask);
   if (includeTask && plain(node.blocker)) result.blocker = cloneBounded(node.blocker);
   return result.id ? result : null;
 }

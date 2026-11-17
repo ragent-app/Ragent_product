@@ -1,7 +1,14 @@
+import { createHash } from 'node:crypto';
+import { canonicalJson } from './execution-scope.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
 import { getNode } from './organization-store.mjs';
 import { listBuiltinSkills, readBuiltinSkill } from './builtin-skills.mjs';
 import { acknowledgeAgentInterruption, resolveAgentInterruption, getAgentInterruption, listAgentInterruptions } from './agent-interruption-notifications.mjs';
+
+function stateResponse(projection, previousDigest) {
+  const digest = createHash('sha256').update(canonicalJson(projection)).digest('hex');
+  return previousDigest === digest ? { unchanged: true, digest } : { unchanged: false, digest, projection };
+}
 
 const fail = () => Object.assign(new Error('A current scoped organization Run is required'), { statusCode: 403, code: 'ORG_TOOL_FORBIDDEN' });
 
@@ -22,7 +29,7 @@ export async function executeOrganizationControlTool({ authSession, action, args
       if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' ||
           session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail();
       const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
-      return { projection: await buildOrganizationContextProjection({ session }) };
+      return stateResponse(await buildOrganizationContextProjection({ session }), args.ifDigest);
     }
     if (action === 'plan.submit') {
       const { submitOrganizationPlan } = await import('./organization-plan-tool.mjs');
@@ -73,7 +80,7 @@ export async function executeOrganizationControlTool({ authSession, action, args
     const session = await getSession(authSession.sessionId);
     if (!session || session.organizationId !== scope.organizationId || session.organizationNodeId !== scope.nodeId) throw fail();
     const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
-    return { projection: await buildOrganizationContextProjection({ session }) };
+    return stateResponse(await buildOrganizationContextProjection({ session }), args.ifDigest);
   }
   if (action === 'skills.list') return { skills: await listBuiltinSkills({ authorize }) };
   if (action === 'skills.read') {
