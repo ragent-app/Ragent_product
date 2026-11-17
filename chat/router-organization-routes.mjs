@@ -23,6 +23,7 @@ import { getCollaboration } from './collaboration-store.mjs';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
+import { readSessionCollaborationSettings, writeSessionCollaborationSettings } from './session-collaboration-settings.mjs';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function writeError(res, writeJson, error) {
@@ -88,11 +89,34 @@ export async function handleOrganizationRoutes({
   const conversationMatch = /^\/api\/organizations\/([^/]+)\/nodes\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const phaseDispatchMatch = /^\/api\/organizations\/([^/]+)\/phases\/([^/]+)\/dispatch$/.exec(String(pathname || ''));
   const rootSessionMatch = /^\/api\/sessions\/([^/]+)\/organization\/projection$/.exec(String(pathname || ''));
+  const collaborationSettingsMatch = /^\/api\/sessions\/([^/]+)\/collaboration-policy$/.exec(String(pathname || ''));
   const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
   const membersMatch = /^\/api\/sessions\/([^/]+)\/organization\/members$/.exec(String(pathname || ''));
   const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !collaborationSettingsMatch) return false;
+  if (collaborationSettingsMatch) {
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (!['GET', 'PUT', 'DELETE'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const sessionId = decodeURIComponent(collaborationSettingsMatch[1]);
+      let result;
+      if (req.method === 'GET') result = await readSessionCollaborationSettings(sessionId);
+      else if (req.method === 'PUT') {
+        const body = JSON.parse((await readBody(req, 16 * 1024)) || '{}');
+        result = await writeSessionCollaborationSettings(sessionId, body);
+      } else {
+        const url = new URL(req.url, `http://${req.headers?.host || 'localhost'}`);
+        const raw = url.searchParams.get('expectedRevision');
+        result = await writeSessionCollaborationSettings(sessionId, {
+          expectedRevision: raw !== null && /^\d+$/.test(raw) ? Number(raw) : NaN, override: null,
+        });
+      }
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, result);
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
   if (membersMatch) {
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }

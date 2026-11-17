@@ -135,11 +135,32 @@ export function defaultRootLeadershipPolicy() {
   return normalizeCollaborationPolicy({ role: 'manager', canDelegate: true });
 }
 
+export function normalizeSessionCollaborationOverrides(value, { strict = false } = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    if (strict) throw Object.assign(new Error('Overrides must be an object'), { statusCode: 400 });
+    return {};
+  }
+  const limits = { maxChildren: [1, 200], maxConcurrent: [1, 64], maxDepth: [0, 8] };
+  const result = {};
+  for (const [key, input] of Object.entries(value)) {
+    if (key === 'canDelegate' && typeof input === 'boolean') {
+      if (!input) result.canDelegate = false;
+    } else if (limits[key] && Number.isInteger(input) && input >= limits[key][0] && input <= limits[key][1]) {
+      result[key] = input;
+    } else if (strict) {
+      throw Object.assign(new Error(`Invalid collaboration override: ${key}`), { statusCode: 400 });
+    }
+  }
+  return result;
+}
+
 export function resolveSessionCollaborationPolicy(session, app) {
-  return normalizeCollaborationPolicy(app?.collaborationPolicy)
+  const base = normalizeCollaborationPolicy(app?.collaborationPolicy)
     || normalizeCollaborationPolicy(session?.collaborationPolicy)
     || (isRootLeadershipSession(session) ? defaultRootLeadershipPolicy() : null)
     || defaultSpecialistPolicy();
+  const overrides = normalizeSessionCollaborationOverrides(session?.collaborationPolicyOverrides);
+  return { ...base, ...overrides };
 }
 
 export function assertManagerCanDelegate(policy, { childCount = 0, depth = 0 } = {}) {
