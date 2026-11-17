@@ -9,6 +9,7 @@ import {
   reconcileProviderNativeDelegationRun,
 } from '../chat/provider-native-delegation-runtime.mjs';
 import { createClaudeAdapter } from '../chat/adapters/claude.mjs';
+import { barrierEventFromMember } from '../chat/adapters/provider-native-delegation.mjs';
 import { createRunProjectionService } from '../chat/run-projection.mjs';
 import { createDetachedRunReconciler } from '../chat/run-reconciler.mjs';
 
@@ -312,7 +313,9 @@ const codexRecords = await fixture('codex/native-delegations.jsonl');
   assert.equal(completed.decision, 'complete');
   assert.equal(run.state, 'completed');
   assert.equal(resultFile.exitCode, 0);
-  assert.ok(spool.some((record) => record.json?.type === 'ragent.delegation_event'));
+  const memberRecord = spool.find((record) => record.json?.type === 'ragent.member_event');
+  assert.ok(memberRecord);
+  assert.equal(barrierEventFromMember(memberRecord.json.event)?.id, memberRecord.json.event.id);
 }
 
 // Terminal replay uses the full spool stream without materializing ordinary
@@ -384,7 +387,10 @@ const codexRecords = await fixture('codex/native-delegations.jsonl');
   assert.equal(run.providerNativeDelegation.delegationSummary.total, 1);
   assert.equal(run.providerNativeDelegation.canonicalEventCount, 2);
   assert.equal(resultFile.exitCode, 0);
-  assert.equal(appended.length, 0, 'streamed canonical evidence is already durable');
+  assert.equal(appended.length, 2, 'raw evidence is materialized as durable member events');
+  assert.deepEqual(appended.map((record) => record.json?.type), ['ragent.member_event', 'ragent.member_event']);
+  assert.deepEqual(appended.map((record) => barrierEventFromMember(record.json.event)?.id),
+    appended.map((record) => record.json.event.id));
 }
 
 // Detached-run startup recovery uses the same replay decision and therefore

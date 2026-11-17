@@ -11,6 +11,7 @@
 import { createHash } from 'crypto';
 
 import { createProviderNativeDelegationMapper } from './provider-native-delegation-mapper.mjs';
+import { barrierEventFromMember, memberEventFromDelegation } from './adapters/provider-native-delegation.mjs';
 import {
   createJoinBarrier,
 } from './provider-native-delegation-barrier.mjs';
@@ -86,6 +87,7 @@ function readRawFrame(record) {
 
 function readCanonicalEvent(record) {
   const payload = object(record?.json);
+  if (payload?.type === 'ragent.member_event') return barrierEventFromMember(payload.event);
   if (payload?.type !== 'ragent.delegation_event') return null;
   return object(payload.event);
 }
@@ -189,6 +191,8 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     parentThreadId: codexParentThreadId(run),
   });
   const records = [];
+  const memberEvents = new Map();
+  const persistedEventIds = new Set();
   const seenRawKeys = new Set();
   const rawKeyOrder = [];
   const errors = [];
@@ -218,10 +222,24 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     records.push(canonicalDelegationSpoolRecord(event));
     return true;
   };
+  const rememberMember = (member) => {
+    if (!member?.id) return;
+    if (!memberEvents.has(member.id) && memberEvents.size >= MAX_NATIVE_REPLAY_EVIDENCE_EVENTS) {
+      truncated = true;
+      return;
+    }
+    if (!memberEvents.has(member.id) || memberEvents.get(member.id).phase === 'unknown') memberEvents.set(member.id, member);
+  };
 
   for await (const record of streamRunSpoolRecords(run.id || run.runId)) {
+    const payload = object(record?.json);
+    if (payload?.type === 'ragent.member_event' && payload.event?.id) {
+      persistedEventIds.add(payload.event.id);
+      rememberMember(payload.event);
+    }
     const canonical = readCanonicalEvent(record);
     if (canonical) {
+      if (canonical.id) persistedEventIds.add(canonical.id);
       if (!appendEvidence(canonical)) break;
       continue;
     }
@@ -230,6 +248,9 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     const serialized = stableJson(raw);
     if (serialized && !rememberRawKey(hash(serialized))) continue;
     const mapped = mapper.map(raw);
+    for (const member of mapped.memberEvents || []) {
+      rememberMember(member);
+    }
     recognized = recognized || mapped.recognized === true;
     for (const error of mapped.errors || []) addError(error);
     for (const event of mapped.events || []) {
@@ -238,7 +259,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     if (truncated) break;
   }
   if (truncated) addError(`provider delegation replay exceeded ${MAX_NATIVE_REPLAY_EVIDENCE_EVENTS} evidence events`);
-  return { records, recognized, errors };
+  return { records, recognized, errors, memberEvents, persistedEventIds };
 }
 
 /**
@@ -604,10 +625,10 @@ export async function reconcileProviderNativeDelegationRun({
   const current = await getRun(runId);
   if (!current) return { handled: false, run: null, reason: 'run_not_found' };
   const provider = resolveProvider(current);
-  const streamed = typeof streamRunSpoolRecords === 'function' && provider;
-  const evidence = streamed
-    ? await collectStreamedDelegationEvidence(streamRunSpoolRecords, current, provider)
-    : null;
+  const sourceStream = typeof streamRunSpoolRecords === 'function'
+    ? streamRunSpoolRecords
+    : async function* () { yield* await readRunSpoolRecords(runId); };
+  const evidence = provider ? await collectStreamedDelegationEvidence(sourceStream, current, provider) : null;
   const spoolRecords = evidence?.records || await readRunSpoolRecords(runId);
   const projected = projectProviderNativeDelegation({
     run: current,
@@ -631,7 +652,7 @@ export async function reconcileProviderNativeDelegationRun({
     }));
   }
 
-  const existingCanonicalIds = new Set(
+  const existingCanonicalIds = evidence?.persistedEventIds || new Set(
     (Array.isArray(spoolRecords) ? spoolRecords : [])
       .map(readCanonicalEvent)
       .filter(Boolean)
@@ -641,11 +662,21 @@ export async function reconcileProviderNativeDelegationRun({
   if (typeof appendRunSpoolRecord === 'function') {
     for (const event of projected.canonicalEvents) {
       if (existingCanonicalIds.has(event.id)) continue;
+      const member = evidence?.memberEvents.get(event.id) || memberEventFromDelegation(event);
       await appendRunSpoolRecord(runId, {
         ts: isoFromMs(event.timestamp),
-        ...canonicalDelegationSpoolRecord(event),
+        stream: 'stdout',
+        json: { type: 'ragent.member_event', event: member },
       });
       existingCanonicalIds.add(event.id);
+    }
+    for (const member of evidence?.memberEvents.values() || []) {
+      if (existingCanonicalIds.has(member.id)) continue;
+      await appendRunSpoolRecord(runId, {
+        ts: isoFromMs(member.timestamp), stream: 'stdout',
+        json: { type: 'ragent.member_event', event: member },
+      });
+      existingCanonicalIds.add(member.id);
     }
   }
 

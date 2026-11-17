@@ -852,6 +852,31 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
       }
       break;
 
+    case 'collabAgentToolCall': {
+      const tool = typeof item.tool === 'string' ? item.tool.toLowerCase().replace(/[_-]/g, '') : '';
+      const name = ({ spawn: 'spawn_agent', spawnagent: 'spawn_agent', send: 'send_input', sendinput: 'send_input',
+        wait: 'wait_agent', waitagent: 'wait_agent', resume: 'resume_agent', resumeagent: 'resume_agent',
+        close: 'close_agent', closeagent: 'close_agent' })[tool];
+      if (!name) break;
+      const input = JSON.stringify({
+        ...(typeof item.prompt === 'string' ? { prompt: item.prompt } : {}),
+        ...(typeof item.message === 'string' ? { message: item.message } : {}),
+        ...(Array.isArray(item.receiverThreadIds) ? { receiverThreadIds: item.receiverThreadIds } : {}),
+      });
+      const status = typeof item.status === 'string' ? item.status.toLowerCase() : '';
+      const terminal = lifecycle === 'completed' && ['completed', 'failed', 'error'].includes(status);
+      const failed = status === 'failed' || status === 'error';
+      events.push(toolUseEvent(name, input, buildOperationFields(params, item,
+        terminal ? (failed ? 'failed' : 'completed') : 'started', sharedOperationFields)));
+      if (terminal) {
+        const states = item.agentsStates && typeof item.agentsStates === 'object'
+          ? Object.fromEntries(Object.entries(item.agentsStates).map(([id, value]) => [id, { status: value?.status || null }])) : {};
+        events.push(toolResultEvent(name, JSON.stringify(states), failed ? 1 : 0,
+          buildOperationFields(params, item, failed ? 'failed' : 'completed', sharedOperationFields)));
+      }
+      break;
+    }
+
     case 'mcpToolCall': {
       const toolName = `${item.server}/${item.tool}`;
       const operationLifecycle = ['completed', 'failed'].includes(item.status)
