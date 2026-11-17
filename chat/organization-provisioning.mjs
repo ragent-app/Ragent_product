@@ -269,6 +269,7 @@ export async function provisionFrozenRevision({
           organizationNodeId: node.id,
           roleInstanceId: roleInstance.id,
           stableKey,
+          name: text(def.displayName),
           role: def.role,
           agentId,
           sessionClass: sessionClassForRole(def.role),

@@ -9,6 +9,7 @@ import { loadSessionsMeta } from './session-meta-store.mjs';
 import { buildRootLeadershipTurnContext } from './organization-leader-ingress.mjs';
 import { buildCollaborationLeaderTurnContext } from './collaboration-leader-ingress.mjs';
 import { buildOrganizationRoleTurnContext } from './organization-role-prompts.mjs';
+import { buildOrganizationIdentityContext } from './organization-identity-context.mjs';
 import { ORG_PROJECTION_V2_ENABLED } from '../lib/config.mjs';
 import { buildOrganizationContextProjection, renderOrganizationContextProjection } from './organization-context-projection.mjs';
 
@@ -39,6 +40,7 @@ export async function buildTurnContextHook(session = {}) {
     buildSessionAgreementsPromptBlock(session?.activeAgreements || []),
     buildTaskCardPromptBlock(session?.taskCard),
     sessionLabels,
+    await buildOrganizationIdentityContext(session),
     buildOrganizationRoleTurnContext(session),
     await buildRootLeadershipTurnContext(session),
     await buildCollaborationLeaderTurnContext({ session }),
