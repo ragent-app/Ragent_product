@@ -53,7 +53,7 @@ export async function writeSessionRuntimeConstraints(sessionId, { expectedRevisi
     throw failure('Unknown runtime constraint field', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
   const requested = {};
   for (const [field, value] of Object.entries(raw)) {
-    if (!value || typeof value !== 'object' || !['root', 'organization'].includes(value.scope) &&
+    if (!value || typeof value !== 'object' || !['root', 'organization', 'collaboration'].includes(value.scope) &&
         !(typeof value.scope === 'string' && /^node:[A-Za-z0-9_.-]{1,160}$/.test(value.scope)))
       throw failure('Invalid runtime constraint scope', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
     requested[field] = { value: value.value, mode: value.mode, scope: value.scope, source: 'owner', version: expectedRevision + 1 };
