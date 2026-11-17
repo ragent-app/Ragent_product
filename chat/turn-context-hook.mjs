@@ -15,7 +15,7 @@ import { buildOrganizationContextProjection, renderOrganizationContextProjection
 
 const TURN_CONTEXT_HOOK_ASSET = 'turn/context-hook.md';
 
-export async function buildTurnContextHook(session = {}) {
+export async function buildTurnContextHook(session = {}, { organizationIdentity } = {}) {
   await ensureDir(MODEL_CONTEXT_DIR);
   let sessionLabels = buildSessionLabelsPromptBlock(session);
   if (sessionLabels) {
@@ -40,7 +40,7 @@ export async function buildTurnContextHook(session = {}) {
     buildSessionAgreementsPromptBlock(session?.activeAgreements || []),
     buildTaskCardPromptBlock(session?.taskCard),
     sessionLabels,
-    await buildOrganizationIdentityContext(session),
+    organizationIdentity === undefined ? await buildOrganizationIdentityContext(session) : organizationIdentity,
     buildOrganizationRoleTurnContext(session),
     await buildRootLeadershipTurnContext(session),
     await buildCollaborationLeaderTurnContext({ session }),

@@ -143,6 +143,8 @@ export async function buildRootLeadershipTurnContext(session, options = {}) {
   const capabilities = getOrganizationRuntimeCapabilities({ publicOnly: true });
   const catalog = options.catalog || await buildOrganizationAgentCatalog(options);
   const visibleProfiles = catalogProfiles(catalog).map(promptProfile);
+  const ownerConstraints = await import('./session-collaboration-settings.mjs')
+    .then(({ readSessionRuntimeConstraints }) => readSessionRuntimeConstraints(session.id)).catch(() => null);
   const runtimeCatalog = await buildOrganizationRuntimeCatalog().catch(() => null);
   const catalogInstruction = visibleProfiles.length > 0
     ? 'Use only the selectable Agent ids listed below. A profile role is an Agent fact; the Proposal role is an Organization assignment.'
@@ -155,6 +157,8 @@ export async function buildRootLeadershipTurnContext(session, options = {}) {
 Autonomous organization planning is enabled for this Root Leadership Session. First clarify the objective, acceptance criteria, constraints and evidence required. Then choose exactly one orchestration mode: Organization Proposal for a staged hierarchy with phase gates, or Durable Collaboration for a persistent task graph. You may reason in natural language, but you must not claim that internal Sessions, Runs, Reviewers or results exist until the Runtime confirms them. When the objective is concrete enough for a bounded team plan, emit exactly one machine-readable block for the selected mode in addition to your normal explanation:
 
 ${proposalContract}
+
+Owner-authored runtime constraints (scope and revision are authoritative; absent fields are not locked): ${JSON.stringify(ownerConstraints?.constraints || {})}
 
 A node may include displayName (a readable name in any language, up to 160 characters) and responsibility (its assigned responsibility in any language, up to 1000 characters). These are descriptive facts, not identity credentials or grants; stableKey remains the machine identity.
 
@@ -234,8 +238,17 @@ export async function processRootLeadershipProposal({
   }
   let planned;
   try {
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const saved = await readSessionRuntimeConstraints(session.id);
+    const runtimeDecisionByNode = Object.fromEntries((Array.isArray(proposal.nodes) ? proposal.nodes : []).map((node) => {
+      const stableKey = text(node?.stableKey);
+      const constraints = Object.fromEntries(Object.entries(saved.constraints).filter(([, item]) =>
+        item.scope === 'organization' || item.scope === `node:${stableKey}`));
+      return [stableKey, { constraints }];
+    }));
     planned = await compileOrganizationProposal(proposal, {
       profiles: agentProfiles,
+      runtimeDecisionByNode,
       ...(typeof getTool === 'function' ? { getTool } : {}),
     });
   } catch (error) {

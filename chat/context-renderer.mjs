@@ -350,13 +350,10 @@ function renderLegacyPrompt(context) {
     if (visitorGuardrail) {
       prompt = `${prompt}\n\n---\n\n${visitorGuardrail}`;
     }
-  } else if (flattenPrompt) {
-    const flatMessage = prompt.replace(/\s+/g, ' ').trim();
-    if (continuationContext) {
-      prompt = `${continuationContext}\n\n---\n\n${flatMessage}`;
-    } else {
-      prompt = flatMessage;
-    }
+  } else {
+    if (perMessageBlock) prompt = `${perMessageBlock}\n\n---\n\n${prompt}`;
+    if (flattenPrompt) prompt = prompt.replace(/\s+/g, ' ').trim();
+    if (flattenPrompt && continuationContext) prompt = `${continuationContext}\n\n---\n\n${prompt}`;
   }
 
   if (flattenPrompt && promptMode === 'default') {
@@ -376,6 +373,7 @@ function renderLegacyContext(context) {
 
   if (promptMode === 'bare-user') {
     addCarrier(carriers, 'continuationContext', 'prompt', sections.continuationContext);
+    addCarrier(carriers, 'perMessageInstruction', 'prompt', sections.perMessageInstruction);
     addCarrier(carriers, 'userText', 'prompt', context?.userText);
   } else {
     addCarrier(carriers, 'continuationContext', 'prompt', sections.continuationContext);

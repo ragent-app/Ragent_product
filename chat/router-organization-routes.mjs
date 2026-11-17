@@ -23,7 +23,7 @@ import { getCollaboration } from './collaboration-store.mjs';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
-import { readSessionCollaborationSettings, writeSessionCollaborationSettings } from './session-collaboration-settings.mjs';
+import { readSessionCollaborationSettings, writeSessionCollaborationSettings, readSessionRuntimeConstraints, writeSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function writeError(res, writeJson, error) {
@@ -90,11 +90,24 @@ export async function handleOrganizationRoutes({
   const phaseDispatchMatch = /^\/api\/organizations\/([^/]+)\/phases\/([^/]+)\/dispatch$/.exec(String(pathname || ''));
   const rootSessionMatch = /^\/api\/sessions\/([^/]+)\/organization\/projection$/.exec(String(pathname || ''));
   const collaborationSettingsMatch = /^\/api\/sessions\/([^/]+)\/collaboration-policy$/.exec(String(pathname || ''));
+  const runtimeConstraintsMatch = /^\/api\/sessions\/([^/]+)\/organization\/runtime-constraints$/.exec(String(pathname || ''));
   const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
   const membersMatch = /^\/api\/sessions\/([^/]+)\/organization\/members$/.exec(String(pathname || ''));
   const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !collaborationSettingsMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
+  if (runtimeConstraintsMatch) {
+    if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (!['GET', 'PUT'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const sessionId = decodeURIComponent(runtimeConstraintsMatch[1]);
+      const result = req.method === 'GET' ? await readSessionRuntimeConstraints(sessionId)
+        : await writeSessionRuntimeConstraints(sessionId, JSON.parse((await readBody(req, 16 * 1024)) || '{}'));
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, result);
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
   if (collaborationSettingsMatch) {
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (!['GET', 'PUT', 'DELETE'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }

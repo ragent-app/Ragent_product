@@ -459,6 +459,7 @@ import {
 } from './project-memory-engine.mjs';
 import { extractTaggedBlock } from './session-text-parsing.mjs';
 import { buildTurnContextHook } from './turn-context-hook.mjs';
+import { buildOrganizationIdentityContext } from './organization-identity-context.mjs';
 import {
   buildDelegationResultFromRun,
   normalizeDelegationResult,
@@ -7629,8 +7630,8 @@ async function findAssistantAttachmentMessageForRun(sessionId, runId) {
     && getMessageAttachments(event).length > 0);
 }
 
-async function buildManagerTurnContextText(session, _text = '') {
-  return buildTurnContextHook(session);
+async function buildManagerTurnContextText(session, _text = '', organizationIdentity = undefined) {
+  return buildTurnContextHook(session, { organizationIdentity });
 }
 
 function resolveProviderContextKey(toolId, options = {}) {
@@ -8291,10 +8292,13 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
   }
   continuationContext = [continuityCheckpointContext, continuationContext].filter(Boolean).join('\n\n---\n\n');
 
+  const requiredOrganizationIdentity = session?.sessionPlane === 'organization'
+    ? await buildOrganizationIdentityContext(session) : '';
   const managerTurnContext = promptMode === 'default'
-    ? await buildManagerTurnContextText(session, text)
+    ? await buildManagerTurnContextText(session, text, requiredOrganizationIdentity || undefined)
     : '';
   const perMessageInstruction = [
+    ...(promptMode === 'bare-user' && requiredOrganizationIdentity ? [requiredOrganizationIdentity] : []),
     await resolveAgentMessagePrompt(session),
     typeof options.harnessInstructions === 'string' ? options.harnessInstructions.trim() : '',
   ].filter(Boolean).join('\n\n---\n\n');
@@ -8394,6 +8398,15 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
     runtimeFamily: options.runtimeFamily,
     options: compilerOptions,
   });
+  const requireIdentityCarrier = (result) => {
+    if (!requiredOrganizationIdentity) return;
+    const normalized = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const carrier = normalized([result.prompt, result.developerInstructions, result.systemPrefix].join('\n'));
+    if (!carrier.includes(normalized(requiredOrganizationIdentity))) {
+      throw Object.assign(new Error('Runtime cannot carry the required organization identity'), { code: 'ORG_IDENTITY_CARRIER_UNAVAILABLE' });
+    }
+  };
+  requireIdentityCarrier(rendered);
   if (contextPlanError) {
     rendered.metadata = {
       ...(rendered.metadata || {}),
@@ -8422,6 +8435,7 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
       runtimeFamily: options.runtimeFamily,
       options: compilerOptions,
     });
+    requireIdentityCarrier(freshRecovery);
   }
   if (providerContextReceipt) {
     const receiptRefs = [
@@ -9365,6 +9379,15 @@ async function runDetachedRunPostFinalizationEffects(sessionId, finalizedRun, ma
 
 async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifest, fullNormalizedEvents = []) {
   if (finalizedRun?.state !== 'failed') return null;
+  // A managed organization's frozen selection cannot be silently changed by
+  // provider failover. A future authorized revision may select another runtime.
+  const failedSession = await getSession(sessionId);
+  let preventProviderSwitch = failedSession?.sessionPlane === 'organization' || !!failedSession?.organizationId;
+  if (failedSession?.sessionClass === 'ROOT_LEADERSHIP') {
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { constraints } = await readSessionRuntimeConstraints(sessionId);
+    preventProviderSwitch ||= ['provider', 'model'].some((key) => constraints[key]?.scope === 'root' && constraints[key]?.mode === 'locked');
+  }
   if (manifest?.internalOperation === 'context_compaction'
       || manifest?.internalOperation === 'context_compaction_worker') {
     return null;
@@ -9449,7 +9472,7 @@ async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifes
       const replacement = await regenerateSessionReply(sessionId, finalizedRun.requestId || manifest.requestId, {
         requestId: createInternalRequestId('external-oauth-reload'),
         providerProfile: currentProviderId,
-        model: currentModel,
+        model: modelFromManifest || currentModel,
         providerFailoverAttempt: attempt + 1,
         providerFailoverFromProvider: currentProviderId,
         providerFailoverReason: 'external-oauth-rotation',
@@ -9469,6 +9492,7 @@ async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifes
         || trimString(currentProfile.modelPolicy?.defaultModel),
       );
     if (!currentModel) return null;
+    if (preventProviderSwitch) return null;
     const candidates = [];
 
     for (const profile of profiles) {
@@ -13556,6 +13580,14 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       readFileImpl: readFile,
       rotationStore: createAgyRotationStore({ configDir: CONFIG_DIR }),
     });
+  }
+  if (session.sessionClass === 'ROOT_LEADERSHIP' && (session.sessionPlane || 'user') === 'user') {
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { assertRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
+    const { constraints } = await readSessionRuntimeConstraints(sessionId);
+    const rootConstraints = Object.fromEntries(Object.entries(constraints).filter(([, item]) => item.scope === 'root'));
+    assertRuntimeConstraints({ tool: effectiveTool, provider: effectiveProviderProfile,
+      model: trimString(options.model || session.model), effort: trimString(options.effort || session.effort) }, rootConstraints);
   }
   const requestedPermissionMode = normalizeProviderPermissionMode(effectiveRuntimeFamily, options.permissionMode);
   // Gated modes (design §13–§14 Path G + 统一风险门控计划 phase 3): a per-session
