@@ -496,7 +496,12 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     }
     val hasCollaborators = unifiedMembers?.members?.isNotEmpty() == true || (loaded && baseProjection?.hasCreatedSubordinate == true)
     val snapshotResolved = unifiedResolved && (loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected)
-    val snapshotDefinitive = hasCollaborators || (((loaded && baseProjection != null) || organizationNotFound) && unifiedMembers?.membersComplete == true)
+    // A successful gap-free observation establishes the current display baseline;
+    // it does not assert that the historical member source is complete.
+    val observedBaseline = unifiedReceipt > 0L && unifiedMembers?.sourceCoverage?.gap == false &&
+        connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED &&
+        ((loaded && baseProjection != null && formalActivityAvailable) || organizationNotFound)
+    val snapshotDefinitive = hasCollaborators || observedBaseline
     LaunchedEffect(snapshotResolved, snapshotDefinitive, hasCollaborators, transport, targetId, sessionId, scopeKey) {
         onCollaboratorSnapshot(snapshotResolved, snapshotDefinitive, hasCollaborators)
         onHasCollaboratorsChanged(hasCollaborators)
