@@ -139,6 +139,8 @@ Ragent 正式组织和 Codex/Claude 等 harness 内部 subagent 的真实生命�
 
 manager 的 `node.dispatch` 仅可请求冻结版本中已存在且获授权的直属子节点，同一版本与子节点一次；不能动态创建节点，也不能以接受派发表示实际运行完成。未知副作用保持待对账状态，不能盲目重跑；目前不提供安全的跨 provider 状态重放。以上均尚待真实端到端验收。
 
+真实审阅后，源码 `dfdf8fba` 修正阶段依赖与状态摘要：阶段完成决策及完成事件绑定服务端当前冻结 revision，依赖查询只接受该 revision 的完成事实，不猜测历史空版本事件；`state.get` 的条件摘要排除生成时间，仍覆盖收件箱及其他状态。相关既有 `test-phase-gates.mjs` 的旧 fixture 创建了冻结 revision 1 但没有将组织当前 revision 更新为 1，因此在新的版本绑定校验处失败，不能计为通过。该修复尚未经过真实端到端复验。MCP 工具枚举在 root 与成员之间共享，成员不支持的操作仍由服务端拒绝；这属于当前工具发现和角色能力覆盖限制。
+
 Linux 真实任务首次提交在模型准入阶段被拒绝，没有创建 Run，也没有模型调用、技能读取或工具验收证据，费用仍未知。提交使用 `claude-bidi`、provider `glm-68f6bd41` 和 `sonnet@glm-68f6bd41`；先前查询使用 `providerProfile` 参数，而当时已部署的模型路由只识别 `provider`，返回的通用 tier 回退误标为 fresh，不能作为该 provider 的可用模型证据。改用规范 `provider` 和 `refresh=1` 后，专属目录列出 GLM 系列且不含 sonnet。源码修复 `f7caa69f` 处理 provider 参数兼容及回退证据状态；该修复部署后的真实任务仍待执行和验收。目录中 effort 的 builtin 值并非 provider 实际支持证明。
 Linux 真实审阅：在部署 `f7caa69f` 后，单次 Run `run_f035682d4a6afa34d30cefd8` 使用 `claude-bidi`、`glm-5.3@glm-68f6bd41`，未显式指定 effort，2026-11-17 18:18:03 至 18:24:44 UTC 完成；runner 和 provider 实际活动有事件证据。MCP 预检显示 ready，模型发现组织工具，但六次 read 调用均被 full-auto 授权门拒绝，原因是工具定义与授权绑定不可用；未成功读取技能及哈希、候选或组织状态，不能视为工具链验收通过。源码修复 `09ea2fa1` 已提交，修复后的真实调用尚未验证。Run 状态中的 `contextInputTokens` 为 7,038,353、`contextWindowTokens` 为 128,000；这是运行时上下文统计，未证实为账单用量。Run 的 usage 字段无值，实际费用及币种未知，不记为零。模型审阅提出的其他问题须独立核对。
 ## 参考资料
