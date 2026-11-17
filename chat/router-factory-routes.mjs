@@ -82,6 +82,19 @@ function mutationSourceAllowed(req) {
 }
 
 export async function handleFactoryRoutes({ req, res, pathname, authSession, writeJson }) {
+  const organizationTools = /^\/api\/sessions\/([^/]+)\/organization\/(tools|tools-root)$/.exec(String(pathname || ''));
+  if (organizationTools) {
+    if (req.method !== 'POST' || authSession?.principalKind !== 'run_capability' ||
+        authSession.capabilityOperation !== (organizationTools[2] === 'tools' ? 'organization.tools' : 'session.organization.tools') || decodeURIComponent(organizationTools[1]) !== authSession.sessionId) {
+      writeJson(res, 403, { error: 'Scoped organization Run required' }); return true;
+    }
+    try {
+      const body = JSON.parse((await readBody(req, 32 * 1024)) || '{}');
+      const { executeOrganizationControlTool } = await import('./organization-control-tools.mjs');
+      writeJson(res, 200, await executeOrganizationControlTool({ authSession, action: body.action, args: body.args }));
+    } catch (error) { writeJson(res, error?.statusCode || 400, { error: error?.message || 'Organization tool failed', code: error?.code || undefined }); }
+    return true;
+  }
   const ownerReport = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/owner-report-authorization$/.exec(String(pathname || ''));
   const ownerProposal = /^\/api\/factory\/organization-proposals\/(preview|commit|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const steer = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/steer$/.exec(String(pathname || ''));

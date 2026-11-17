@@ -80,7 +80,15 @@ export async function buildOrganizationIdentityContext(session = {}) {
       current.organizationRevision !== ref.organizationRevision || current.attemptId !== ref.attemptId ||
       currentOrg?.currentRevision !== org.currentRevision || currentOrg?.rootSessionId !== org.rootSessionId ||
       ['archived', 'lifecycle_pending'].includes(currentOrg?.state)) return unavailable();
+  let reviewerSkill = '';
+  if (target?.sessionClass === 'REVIEWER') {
+    // Read-only harnesses cannot safely mount arbitrary MCP servers. Supply the
+    // role's trusted built-in guidance directly, without granting tool access.
+    const { readBuiltinSkill } = await import('./builtin-skills.mjs');
+    const skill = await readBuiltinSkill({ id: 'ragent:builtin:reviewer', authorize: async ({ id }) => id === 'ragent:builtin:reviewer' });
+    reviewerSkill = `<organization-role-skill id="${skill.id}" sha256="${skill.contentHash}">\n${skill.content}\n</organization-role-skill>`;
+  }
   return ['<organization-identity>', JSON.stringify(identity),
     'Identity is server-derived; null means unknown. Role and display names do not grant permissions. Follow only capabilities actually issued to this Run. Report task results and blockers to the authorized parent through the available channel.',
-    '</organization-identity>'].join('\n');
+    '</organization-identity>', reviewerSkill].filter(Boolean).join('\n');
 }

@@ -4550,6 +4550,12 @@ async function main() {
     && browserChannel?.enabled === true
     && browserChannel?.endpoint,
   );
+  const organizationMcpRequested = !readOnlyRequested && acp !== true && Boolean(
+    spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&
+    spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID &&
+    ['codex-app-server-json', 'claude-stream-json-bidi'].includes(runtimeFamily),
+  );
+  if (organizationMcpRequested) spawnEnv.RAGENT_ORGANIZATION_TOOL_SCOPE = manifest.options?.sessionControlChannel?.scope ? 'node' : 'root';
   let managedMcpOverlay = null;
   let acpMcpServers = [];
   if (managedActionMcpRequested) {
@@ -4581,7 +4587,7 @@ async function main() {
     spawnEnv.RAGENT_WINDOWS_BROKER_TURN_ID = windowsBrokerChannel.turnId || manifest.requestId || runId;
   }
 
-  if (managedActionMcpRequested || windowsBrokerMcpRequested || (browserMcpRequested && acp !== true)) {
+  if (managedActionMcpRequested || windowsBrokerMcpRequested || organizationMcpRequested || (browserMcpRequested && acp !== true)) {
     const preparingMcp = {
       state: 'preparing',
       stage: 'preflight',
@@ -4605,6 +4611,12 @@ async function main() {
     })).catch(() => null);
     try {
       const managedMcpServers = [];
+      if (organizationMcpRequested) {
+        managedMcpServers.push({ kind: 'organization', scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-organization-mcp.mjs'),
+          envKeys: ['RAGENT_CHAT_BASE_URL', 'RAGENT_ORGANIZATION_TOOL_SCOPE', 'RAGENT_SESSION_CONTROL_TOKEN',
+            'RAGENT_SESSION_CONTROL_RUN_ID', 'RAGENT_SESSION_CONTROL_SESSION_ID', 'RAGENT_SESSION_CONTROL_TURN_ID',
+            'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN', 'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE'] });
+      }
       if (managedActionMcpRequested) {
         managedMcpServers.push({
           // Keep the established server name stable for Codex/Claude readiness
@@ -4687,6 +4699,7 @@ async function main() {
           managedMcpServers.map((server, index) => [server.kind, managedMcpOverlay.serverNames[index]]),
         );
         const requiredServers = [];
+        if (organizationMcpRequested) requiredServers.push({ name: serverNamesByKind.get('organization'), requiredToolNames: ['ragent_organization_read', 'ragent_organization_action'] });
         if (managedActionMcpRequested) {
           const requiredToolNames = ['ragent_request_actions'];
           if (approvedActionChannel.productAgentCreate === true) requiredToolNames.push('ragent_create_agent');
@@ -4718,7 +4731,8 @@ async function main() {
         runtimeState.mcpAutoApproveServerNames = new Set(
           requiredServers.filter((server) =>
             server.name === serverNamesByKind.get('actions')
-            || server.name === serverNamesByKind.get('broker')).map((server) => server.name),
+            || server.name === serverNamesByKind.get('broker')
+            || server.name === serverNamesByKind.get('organization')).map((server) => server.name),
         );
         runtimeState.mcpExpectedServerName = requiredServers[0]?.name || '';
         // Keep the legacy fields populated for older helper paths and fixtures.

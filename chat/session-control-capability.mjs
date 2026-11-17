@@ -42,8 +42,9 @@ const OPERATIONS = Object.freeze([
   'session.consultation.manage',
   'session.asset.publish',
   'session.assistant_message.publish',
+  'session.organization.tools',
 ]);
-const NODE_MESSAGE_OPERATIONS = Object.freeze(['organization.message.ack', 'organization.message.reply']);
+const NODE_MESSAGE_OPERATIONS = Object.freeze(['organization.message.ack', 'organization.message.reply', 'organization.tools']);
 const REVIEW_OPERATION = 'factory.review.submit';
 const BLOCKER_OPERATION = 'factory.blocker.propose';
 const NODE_OPERATIONS = Object.freeze([...NODE_MESSAGE_OPERATIONS, REVIEW_OPERATION, BLOCKER_OPERATION]);
@@ -183,6 +184,8 @@ function renewalPayload({ runId, sessionId, turnId, issuedAtMs, expiresAtMs, sco
 export function sessionControlOperation(pathname, method) {
   const parts = String(pathname || '').split('/').filter(Boolean);
   const normalizedMethod = text(method).toUpperCase();
+  if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'tools' && normalizedMethod === 'POST') return 'organization.tools';
+  if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'tools-root' && normalizedMethod === 'POST') return 'session.organization.tools';
   if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'factory' && parts[4] === 'blocker-proposal' && normalizedMethod === 'POST') return BLOCKER_OPERATION;
   if (parts.length === 5 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'factory' && parts[4] === 'review-opinion' && normalizedMethod === 'POST') return REVIEW_OPERATION;
   if (parts.length === 7 && parts[0] === 'api' && parts[1] === 'sessions' && parts[3] === 'organization' && parts[4] === 'messages' && normalizedMethod === 'POST') {
@@ -402,7 +405,7 @@ async function authenticateSessionControlDetailed(req, {
         || JSON.stringify(channel.scope) !== JSON.stringify(payload.organizationMessageScope)
         || (operation === REVIEW_OPERATION && payload.organizationMessageScope.reviewOpinionAllowed !== true)
         || (operation === BLOCKER_OPERATION && payload.organizationMessageScope.blockerProposalAllowed !== true)) return invalidResult();
-  } else if (operation === 'session.delegate' || operation === 'session.process.create') {
+  } else if (operation === 'session.delegate' || operation === 'session.process.create' || operation === 'session.organization.tools') {
     if (decodeURIComponent(parts[2] || '') !== rootSessionId) return invalidResult();
   } else if ([
     'session.auth.read',
