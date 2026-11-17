@@ -3,7 +3,7 @@
 import { getRunManifest } from './runs.mjs';
 import { getApp } from './apps.mjs';
 import { buildAgentCapabilityProfile } from './agent-capability-registry.mjs';
-import { assertAgentAllowed, assertManagerCanDelegate, resolveSessionCollaborationPolicy } from './collaboration-policy.mjs';
+import { assertAgentAllowed, assertManagerCanDelegate, resolveSessionCollaborationPolicy, ROLES } from './collaboration-policy.mjs';
 import { buildOrganizationRuntimeCatalog, resolveRuntimeSelection } from './organization-runtime-selection.mjs';
 import { applyRuntimeConstraints, queryRuntimeCandidates } from './organization-runtime-decision.mjs';
 import { readSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
@@ -28,7 +28,9 @@ export async function queryAuthorizedRuntimeCandidates({ authSession, session, a
   const parentApp = session.templateId ? await getApp(session.templateId) : null;
   const parentPolicy = resolveSessionCollaborationPolicy(session, parentApp);
   assertManagerCanDelegate(parentPolicy, { depth: session.delegationDepth || 0 });
-  assertAgentAllowed(parentPolicy, agentId, profile.role);
+  const taskRole = args.taskRole === undefined ? profile.role : text(args.taskRole).toLowerCase();
+  if (!ROLES.has(taskRole)) throw Object.assign(new Error('Invalid collaboration task role'), { code: 'ORG_CANDIDATES_INVALID', statusCode: 400 });
+  assertAgentAllowed(parentPolicy, agentId, taskRole);
   const requirements = args.requirements && typeof args.requirements === 'object' && !Array.isArray(args.requirements) ? args.requirements : {};
   if (Object.keys(requirements).some((key) => !['tools', 'environment', 'minimumContextTokens', 'advancedRequired', 'qualityFloor'].includes(key))
       || (requirements.tools !== undefined && (!Array.isArray(requirements.tools) || requirements.tools.length > 32 || requirements.tools.some((v) => typeof v !== 'string' || !v.trim() || v.length > 120)))

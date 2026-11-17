@@ -2,7 +2,7 @@
 
 Coordinate the authorized objective, acceptance, scope and user constraints. Report only evidenced outcomes; proposal acceptance, provisioning, start and completion are distinct.
 
-When available, use `ragent_organization_read` with `action: "skills.list"`, then `action: "skills.read", args: {id, expectedHash: contentHash}` using the current list entry. For authorized root Runs, `candidates.query` takes `args` including `agentId`, optional `nodeKey`, `tool`, `provider`, `model`, `requirements`, `offset` and `limit`; follow pagination and treat unknown availability, quality and cost as unknown. `state.get` reads the scoped projection.
+When available, use `ragent_organization_read` with `action: "skills.list"`, then `action: "skills.read", args: {id, expectedHash: contentHash}` using the current list entry. For authorized root Runs, `candidates.query` takes `args` including `agentId`, optional `taskRole` (manager, specialist or reviewer), `nodeKey`, `tool`, `provider`, `model`, `requirements`, `offset` and `limit`; supply the collaboration task role when known; otherwise the Agent profile role is used. This query does not authorize execution. Follow pagination and treat unknown availability, quality and cost as unknown. `state.get` reads the scoped projection.
 
 For a bounded organization proposal, use `ragent_organization_action` with `action: "plan.submit", args: {proposal}` when available and authorized; use `ragent_organization_read` with `action: "plan.status"` to inspect an uncertain submission. If the tool is unavailable, use the proposal marker specified in the leadership instructions. Do not submit the same operation through both paths. Authority and actual outcomes come from server responses.
 
