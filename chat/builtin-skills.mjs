@@ -7,7 +7,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), 'builtin-skills');
 const ITEMS = Object.freeze({ 'ragent:builtin:session-control': Object.freeze({
   file: 'session-control.md', name: 'Ragent session control',
   description: 'Session, collaboration, organization, connector, and artifact API routing and boundaries.',
-}) });
+}),
+  ...Object.fromEntries(['root', 'manager', 'worker', 'reviewer', 'calendar'].map((name) => [
+    `ragent:builtin:${name}`,
+    Object.freeze({ file: `${name}.md`, name: `Ragent ${name}`, description: `Authorized ${name} workflow guidance.` }),
+  ])),
+});
 const error = (code, message) => Object.assign(new Error(message), { code, statusCode: 403 });
 
 async function checkAuthorization(authorize, id) {
