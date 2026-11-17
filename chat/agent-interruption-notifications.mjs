@@ -23,6 +23,9 @@ function schema(db) {
     next_check_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS agent_interruption_audit (
       run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, reason TEXT NOT NULL, observed_at TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS agent_interruption_reads (
+      incident_id TEXT NOT NULL, session_id TEXT NOT NULL, first_read_at TEXT NOT NULL,
+      PRIMARY KEY (incident_id, session_id));
     CREATE INDEX IF NOT EXISTS agent_interruption_pending ON agent_interruption_incidents(delivery_state, resolved_at);`);
 }
 async function sessionById(id) {
@@ -272,6 +275,7 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
       }
     }
     const now = stamp();
+    if (action === 'read') db.prepare('INSERT OR IGNORE INTO agent_interruption_reads (incident_id,session_id,first_read_at) VALUES(?,?,?)').run(row.id,sessionId,now);
     if (action === 'ack') db.prepare('UPDATE agent_interruption_incidents SET acknowledged_at=COALESCE(acknowledged_at,?),updated_at=? WHERE id=?').run(now,now,row.id);
     else if (action === 'resolve') db.prepare('UPDATE agent_interruption_incidents SET resolved_at=COALESCE(resolved_at,?),resolution_summary=COALESCE(resolution_summary,?),resolution_evidence=COALESCE(resolution_evidence,?),updated_at=? WHERE id=?').run(now,text(summary).slice(0,1000),text(evidence).slice(0,1000),now,row.id);
     db.exec('COMMIT');
@@ -281,6 +285,7 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
       bindingGeneration: row.binding_generation, organizationRevision: row.organization_revision,
       category: row.category, source: row.source, confidence: row.confidence, evidenceRef: row.evidence_ref,
       sideEffects: row.side_effects, occurredAt: row.occurred_at, deliveryState: row.delivery_state,
+      readAt: db.prepare('SELECT first_read_at FROM agent_interruption_reads WHERE incident_id=? AND session_id=?').get(row.id,sessionId)?.first_read_at || now,
       acknowledgedAt: row.acknowledged_at, resolvedAt: row.resolved_at,
       resolutionSummary: row.resolution_summary, resolutionEvidence: row.resolution_evidence, recoveryVerified: false,
     };
