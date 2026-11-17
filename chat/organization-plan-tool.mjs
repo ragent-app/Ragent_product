@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { getRun, updateRun } from './runs.mjs';
+import { getRun, getRunManifest, updateRun } from './runs.mjs';
+import { getApp } from './apps.mjs';
+import { assertManagerCanDelegate, resolveSessionCollaborationPolicy } from './collaboration-policy.mjs';
 import { processRootLeadershipProposal, ORGANIZATION_PROPOSAL_START, ORGANIZATION_PROPOSAL_END } from './organization-leader-ingress.mjs';
 import { getOrganizationByRootSession, listRevisions } from './organization-store.mjs';
 import { canonicalJson } from './execution-scope.mjs';
@@ -48,6 +50,14 @@ export async function processOrganizationPlan({ session, runId, proposal, source
   if (!session || session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' || session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) {
     return { attempted: false, skipped: 'not_root_leadership' };
   }
+  const manifest = await getRunManifest(runId);
+  const granted = manifest?.sessionId === session.id && (manifest?.options?.collaborationCapabilities || []).some((cap) =>
+    cap.operation === 'collaboration.create' && cap.resource?.type === 'session' && cap.resource.id === session.id
+    && cap.selection?.runId === runId && cap.selection?.turnId === manifest.requestId
+    && Date.parse(cap.expiresAt || '') > Date.now());
+  if (!granted) throw Object.assign(new Error('Organization planning is not authorized for this Run'), { code: 'ORG_PLAN_FORBIDDEN', statusCode: 403 });
+  const app = session.templateId ? await getApp(session.templateId) : null;
+  assertManagerCanDelegate(resolveSessionCollaborationPolicy(session, app), { depth: session.delegationDepth || 0 });
   if (!proposal || typeof proposal !== 'object' || Array.isArray(proposal)) throw Object.assign(new Error('Proposal is required'), { statusCode: 400 });
   const encoded = canonicalJson(proposal);
   if (Buffer.byteLength(encoded, 'utf8') > 128 * 1024) throw Object.assign(new Error('Proposal is too large'), { statusCode: 413 });
