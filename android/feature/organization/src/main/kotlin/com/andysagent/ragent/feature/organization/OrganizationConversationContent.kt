@@ -413,9 +413,7 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
             }
             if (activityLabel != null) ConversationLabel(activityLabel)
         }
-        if (reader.memberScope == "captured_only" || reader.memberCoverage == "partial") ConversationLabel(R.string.org_conversation_captured_only)
         if (reader.memberScope == "full" && reader.memberCoverage in setOf(null, "unknown")) ConversationLabel(R.string.org_conversation_coverage_unknown)
-        if (reader.memberGap == true) ConversationLabel(R.string.org_conversation_gap)
         when (reader.status) {
             ConversationStatus.Loading -> ConversationLabel(R.string.org_conversation_loading)
             ConversationStatus.Unbound -> ConversationLabel(if (reader.memberScope == "unavailable") R.string.org_conversation_member_unavailable else R.string.org_conversation_unbound)
