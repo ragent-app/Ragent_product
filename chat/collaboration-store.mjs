@@ -905,6 +905,29 @@ export async function deferAttemptDispatch(commandId, {
   return changed;
 }
 
+export async function blockAttemptDispatch(commandId, { claimToken } = {}) {
+  const outcome = await withDatabase(db => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const command = db.prepare("SELECT * FROM collaboration_dispatch_commands WHERE id=? AND state='claimed' AND claim_token=?").get(commandId,claimToken);
+      if (!command) { db.exec('COMMIT'); return false; }
+      const attempt = db.prepare('SELECT * FROM collaboration_attempts WHERE id=?').get(command.attempt_id);
+      const task = attempt && db.prepare('SELECT current_attempt,state FROM collaboration_tasks WHERE id=?').get(command.task_id);
+      if (!attempt || attempt.state !== 'running' || !task || task.state !== 'running' || Number(task.current_attempt) !== Number(attempt.attempt_number)) { db.exec('COMMIT'); return false; }
+      const now = nowIso();
+      const reason = 'Runtime constraints changed. Reconcile any prior dispatch and revise the frozen plan before dispatching again.';
+      db.prepare("UPDATE collaboration_dispatch_commands SET state='blocked',claim_token=NULL,lease_until=NULL,failure_reason=?,updated_at=? WHERE id=?").run(reason,now,commandId);
+      db.prepare("UPDATE collaboration_attempts SET state='failed',completed_at=?,failure_kind='unknown_outcome',failure_reason=?,lease_until=NULL,updated_at=? WHERE id=?").run(now,reason,now,attempt.id);
+      db.prepare("UPDATE collaboration_tasks SET state='failed',updated_at=? WHERE id=?").run(now,command.task_id);
+      db.prepare("UPDATE collaborations SET state='failed',updated_at=? WHERE id=? AND state NOT IN ('completed','cancelled')").run(now,command.collaboration_id);
+      appendEvent(db,command.collaboration_id,'attempt_dispatch_blocked',{ commandId, code:'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', reason },command.task_id,attempt.id);
+      db.exec('COMMIT'); return { attemptId: attempt.id };
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }, { mutate: true });
+  if (outcome) await publishAttemptInvalidation(outcome.attemptId);
+  return !!outcome;
+}
+
 export async function findAttemptByRunId(runId) {
   return withDatabase((db) => rowAttempt(db.prepare(`SELECT a.*, t.collaboration_id FROM collaboration_attempts a
     JOIN collaboration_tasks t ON t.id = a.task_id WHERE a.run_id = ?`).get(runId)));

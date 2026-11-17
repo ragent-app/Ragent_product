@@ -793,6 +793,10 @@ export function createCollaborationOrchestrator(options = {}) {
         // Do not turn that benign race into a task failure.
         if (bound) delivered += 1;
       } catch (error) {
+        if (error?.code === 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED' && typeof store.blockAttemptDispatch === 'function') {
+          await store.blockAttemptDispatch(command.id, { claimToken: command.claimToken });
+          continue;
+        }
         await store.deferAttemptDispatch(command.id, {
           claimToken: command.claimToken,
           reason: error?.message || String(error),
