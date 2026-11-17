@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">用于本会话之后由 Ragent 派发的任务，不改变已运行任务和已有组织；Codex、Claude 自行创建的子 agent 使用各自设置。</string>
+    <string name="collaboration_policy_need_session">请先开始会话，再设置协作。</string>
+    <string name="collaboration_policy_delegate">允许委派</string>
+    <string name="collaboration_policy_delegate_locked">当前 Agent 设置不允许委派。</string>
+    <string name="collaboration_policy_concurrent">最多同时运行的子 agent</string>
+    <string name="collaboration_policy_children">最多子 agent 数量</string>
+    <string name="collaboration_policy_depth">最大委派层级</string>
+    <string name="collaboration_policy_load_error">无法加载协作设置。</string>
+    <string name="collaboration_policy_unsupported">当前实例暂不支持协作设置。</string>
+    <string name="collaboration_policy_retry">重试</string>
+    <string name="collaboration_policy_reload">重新加载当前设置</string>
+    <string name="collaboration_policy_conflict">设置已在其他地方更改。重新加载后才能继续，当前输入将被替换。</string>
+    <string name="collaboration_policy_save_error">无法保存设置，当前输入已保留，请重试。</string>
+    <string name="collaboration_policy_reset">恢复默认</string>
+    <string name="collaboration_policy_save">保存</string>
+    <string name="collaboration_policy_offline">连接实例后才能设置协作。</string>
+    <string name="collaboration_policy_forbidden">当前会话或账号无权编辑协作设置。</string>
+</resources>
