@@ -994,27 +994,27 @@ export async function blockAttemptDispatch(commandId, { claimToken, code = 'COLL
 }
 
 export async function listPendingDispatchNotices() {
-  return withDatabase(db => db.prepare(`SELECT n.command_id,d.task_id,d.attempt_id,d.failure_reason,c.root_session_id,c.policy_json
+  return withDatabase(db => db.prepare(`SELECT n.command_id,n.trigger_id,d.task_id,d.attempt_id,d.failure_reason,c.root_session_id,c.policy_json
     FROM collaboration_dispatch_notices n JOIN collaboration_dispatch_commands d ON d.id=n.command_id
     JOIN collaborations c ON c.id=d.collaboration_id
-    WHERE n.trigger_id='' AND n.next_check_at<=? ORDER BY n.next_check_at,n.command_id LIMIT 50`).all(nowIso()));
+    WHERE n.next_check_at<=? ORDER BY n.next_check_at,n.command_id LIMIT 50`).all(nowIso()));
 }
 
-export async function updateDispatchNotice(commandId, triggerId = '') {
-  return withDatabase(db => db.prepare("UPDATE collaboration_dispatch_notices SET trigger_id=?,next_check_at=? WHERE command_id=? AND trigger_id=''")
-    .run(triggerId,isoAfter(nowIso(),30000),commandId).changes > 0, { mutate: true });
+export async function updateDispatchNotice(commandId, previousId, triggerId, done = false) {
+  return withDatabase(db => db.prepare('UPDATE collaboration_dispatch_notices SET trigger_id=?,next_check_at=? WHERE command_id=? AND trigger_id=?')
+    .run(triggerId,done ? '9999-12-31T23:59:59.999Z' : isoAfter(nowIso(),30000),commandId,previousId).changes > 0, { mutate: true });
 }
 
 export async function listPendingReceiptNotices() {
-  return withDatabase(db => db.prepare(`SELECT n.attempt_id,t.id AS task_id,c.id AS collaboration_id,c.root_session_id,c.policy_json
+  return withDatabase(db => db.prepare(`SELECT n.attempt_id,n.trigger_id,t.id AS task_id,c.id AS collaboration_id,c.root_session_id,c.policy_json
     FROM collaboration_receipt_notices n JOIN collaboration_attempts a ON a.id=n.attempt_id
-    JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id WHERE n.trigger_id='' AND n.next_check_at<=?
+    JOIN collaboration_tasks t ON t.id=a.task_id JOIN collaborations c ON c.id=t.collaboration_id WHERE n.next_check_at<=?
     ORDER BY n.next_check_at,n.attempt_id LIMIT 50`).all(nowIso()));
 }
 
-export async function updateReceiptNotice(attemptId, triggerId = '') {
-  return withDatabase(db => db.prepare("UPDATE collaboration_receipt_notices SET trigger_id=?,next_check_at=? WHERE attempt_id=? AND trigger_id=''")
-    .run(triggerId,isoAfter(nowIso(),30000),attemptId).changes > 0, { mutate: true });
+export async function updateReceiptNotice(attemptId, previousId, triggerId, done = false) {
+  return withDatabase(db => db.prepare('UPDATE collaboration_receipt_notices SET trigger_id=?,next_check_at=? WHERE attempt_id=? AND trigger_id=?')
+    .run(triggerId,done ? '9999-12-31T23:59:59.999Z' : isoAfter(nowIso(),30000),attemptId,previousId).changes > 0, { mutate: true });
 }
 
 export async function findAttemptByRunId(runId) {

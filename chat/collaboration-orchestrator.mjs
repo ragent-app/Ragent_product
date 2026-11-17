@@ -1514,37 +1514,40 @@ export function createCollaborationOrchestrator(options = {}) {
         return parent.currentSessionId || notice.root_session_id;
       } catch { return notice.root_session_id; }
     };
+    const reconcileNotice = async (notice, key, title, message, update) => {
+      const previousId = notice.trigger_id || '';
+      let triggerId = previousId, done = false;
+      try {
+        const { createTrigger, getTrigger } = await import('./triggers.mjs');
+        const previous = previousId ? await getTrigger(previousId) : null;
+        if (previous?.status === 'delivered') done = true;
+        else if (!previousId || !previous || ['failed','cancelled'].includes(previous.status)) {
+          if (previousId && previous?.sessionId === notice.root_session_id) done = true;
+          else {
+            const recipient = previousId ? notice.root_session_id : await noticeRecipient(notice);
+            const trigger = await createTrigger({ sessionId: recipient, scheduledAt: new Date().toISOString(),
+              dedupeKey: `${key}:${recipient === notice.root_session_id ? 'root' : 'parent'}`, title, text: message });
+            triggerId = trigger?.id || previousId;
+          }
+        }
+      } catch (error) {
+        console.warn(`[collaboration] notice unavailable: ${error?.code || 'unknown'}`);
+      } finally {
+        await update(previousId, triggerId, done);
+      }
+    };
     if (typeof store.listPendingDispatchNotices === 'function') {
       for (const notice of await store.listPendingDispatchNotices()) {
-        let triggerId = '';
-        try {
-          const { createTrigger } = await import('./triggers.mjs');
-          const trigger = await createTrigger({ sessionId: await noticeRecipient(notice), scheduledAt: new Date().toISOString(),
-            dedupeKey: `collaboration-dispatch-blocked:${notice.attempt_id}`,
-            title: 'Collaboration dispatch needs review',
-            text: `Task ${notice.task_id}, attempt ${notice.attempt_id}: ${notice.failure_reason}` });
-          triggerId = trigger?.id || '';
-        } catch (error) {
-          console.warn(`[collaboration] dispatch notice unavailable: ${error?.code || 'unknown'}`);
-        } finally {
-          await store.updateDispatchNotice(notice.command_id, triggerId);
-        }
+        await reconcileNotice(notice, `collaboration-dispatch-blocked:${notice.attempt_id}`, 'Collaboration dispatch needs review',
+          `Task ${notice.task_id}, attempt ${notice.attempt_id}: ${notice.failure_reason}`,
+          (previous, current, done) => store.updateDispatchNotice(notice.command_id, previous, current, done));
       }
     }
     if (typeof store.listPendingReceiptNotices === 'function') {
       for (const notice of await store.listPendingReceiptNotices()) {
-        let triggerId = '';
-        try {
-          const { createTrigger } = await import('./triggers.mjs');
-          const trigger = await createTrigger({ sessionId: await noticeRecipient(notice), scheduledAt: new Date().toISOString(),
-            dedupeKey: `collaboration-unbound-failure:${notice.attempt_id}`, title: 'Collaboration attempt needs review',
-            text: `Task ${notice.task_id}, attempt ${notice.attempt_id} failed without a bound run. Review collaboration ${notice.collaboration_id}, reconcile any prior dispatch, and inspect its recovery receipt before retrying.` });
-          triggerId = trigger?.id || '';
-        } catch (error) {
-          console.warn(`[collaboration] attempt notice unavailable: ${error?.code || 'unknown'}`);
-        } finally {
-          await store.updateReceiptNotice(notice.attempt_id, triggerId);
-        }
+        await reconcileNotice(notice, `collaboration-unbound-failure:${notice.attempt_id}`, 'Collaboration attempt needs review',
+          `Task ${notice.task_id}, attempt ${notice.attempt_id} failed without a bound run. Review collaboration ${notice.collaboration_id}, reconcile any prior dispatch, and inspect its recovery receipt before retrying.`,
+          (previous, current, done) => store.updateReceiptNotice(notice.attempt_id, previous, current, done));
       }
     }
     const active = await store.listCollaborationRecords({ activeOnly: true });
