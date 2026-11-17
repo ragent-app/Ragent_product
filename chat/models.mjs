@@ -476,6 +476,7 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
       models.push({
         id: `${id}${supportsLongContext ? '[1m]' : ''}@${profile.id}`,
         label: label || id,
+        catalogSource: Array.isArray(discovered) && discovered.length > 0 ? 'discovered' : 'configured',
         ...(window !== null ? { contextWindow: window } : {}),
         capabilities: publicModelCapabilities({ effort: capabilities.effort }),
         ...(reasoning ? {
@@ -498,7 +499,7 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
     }
     // A provider without any model env (OAuth official rows import bare) still
     // needs selectable tiers; expose the raw aliases so the CLI resolves them.
-    if (seen.size === 0) {
+    if (seen.size === 0 && authProfile?.authType !== 'api-key') {
       for (const tier of ['sonnet', 'opus', 'haiku']) pushModel(tier, tier);
     }
   }
@@ -782,7 +783,8 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
     for (const [groupKey, entries] of providerGroups) {
       const official = officialStates.get(groupKey);
       const discoveryError = official?.errorCode || (!official?.fetchedAt && official ? 'MODEL_LIST_UNAVAILABLE' : '');
-      const stale = Boolean(official?.fetchedAt && (official.failedAt || now - official.fetchedAt >= PROVIDER_MODEL_LIST_TTL_MS));
+      const stale = Boolean(official?.fetchedAt && (official.failedAt || now - official.fetchedAt >= PROVIDER_MODEL_LIST_TTL_MS))
+        || (['claude', 'claude-bidi'].includes(tool) && providerOrigins.get(groupKey)?.every((origin) => origin === 'configured'));
       catalogs.set(groupKey, normalizeModelCatalog({
         providerProfileId: groupKey,
         entries,

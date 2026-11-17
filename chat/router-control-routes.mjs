@@ -2449,26 +2449,33 @@ export async function handleControlRoutes({
 
   if (pathname === '/api/models' && req.method === 'GET') {
     const toolId = parsedUrl.query ? parsedUrl.query.tool || '' : '';
-    const providerProfileId = parsedUrl.query ? String(parsedUrl.query.provider || '').trim() : '';
+    const providerId = String(parsedUrl.query?.provider || '').trim();
+    const providerProfile = String(parsedUrl.query?.providerProfile || '').trim();
+    if (providerId && providerProfile && providerId !== providerProfile) {
+      writeJson(res, 400, { error: 'Conflicting provider and providerProfile values' });
+      return true;
+    }
+    const providerProfileId = providerId || providerProfile;
     const refreshRequested = ['1', 'true', 'yes'].includes(
       String(parsedUrl.query?.refresh || '').trim().toLowerCase(),
     );
     // Model-picker reads must stay responsive even when an upstream
     // /models endpoint is slow or offline. The fast path serves configured or
     // previously cached rows and lets models.mjs refresh upstream catalogs in
-    // the background; the client adds refresh=1 after a Provider selection
-    // when it needs the authoritative upstream catalog for that profile.
+    // the background. A provider-specific selection resolves the same catalog
+    // used by run admission before it is shown as selectable.
+    const fastCatalog = !refreshRequested && !providerProfileId;
     const result = await getModelsForTool(toolId, {
       providerProfile: providerProfileId,
-      fast: !refreshRequested,
+      fast: fastCatalog,
     });
     // Provider-scoped catalog metadata (cross-device model catalog contract):
     // per-provider entries carry providerProfileId, source, catalogVersion,
     // and status. Legacy fields (models/effortLevels/defaultModel/reasoning)
     // stay byte-compatible for existing consumers.
     try {
-      const catalog = await getToolModelCatalog(toolId, providerProfileId, { fast: !refreshRequested });
-      const catalogs = await getToolModelCatalogs(toolId, providerProfileId, { fast: !refreshRequested });
+      const catalog = await getToolModelCatalog(toolId, providerProfileId, { fast: fastCatalog });
+      const catalogs = await getToolModelCatalogs(toolId, providerProfileId, { fast: fastCatalog });
       const serializeCatalog = (value) => ({
         providerProfileId: value.providerProfileId,
         catalogVersion: value.catalogVersion,
