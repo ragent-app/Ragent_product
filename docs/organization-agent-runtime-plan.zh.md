@@ -137,3 +137,5 @@ Ragent 正式组织和 Codex/Claude 等 harness 内部 subagent 的真实生命�
 - [OpenAI Model Selection](https://developers.openai.com/api/docs/guides/model-selection)、[Reasoning](https://developers.openai.com/api/docs/guides/reasoning)
 - [Designing failover across OpenAI model providers](https://developers.openai.com/blog/designing-failover-across-openai-model-providers)
 - [Claude API Errors](https://platform.claude.com/docs/en/api/errors)
+
+当前候选查询在服务端重新核验活跃 run、现有 session-control 通道、根会话策略及原始签名 grant，并沿用原 grantId 的使用记录；延长的是服务端受控检查时限，不签发新的 bearer，也不增加一次性额度。计划提交接入同一使用记录仍在进行；终态 marker 不刷新授权。grant 使用记录与计划记录分属不同持久对象，跨对象中断不能声称完全原子恢复，必须保守对账且不得重复执行。授权撤销以现有 run/通道状态为准，未新增独立 grant 撤销实体。以上尚未经真实长任务端到端验收。
