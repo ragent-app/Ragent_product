@@ -1016,7 +1016,7 @@ export async function completeAttempt(attemptId, result = {}, now = new Date()) 
       }
       const nextTaskState = result.state === 'succeeded'
         ? 'succeeded'
-        : result.retry === true ? 'retrying'
+        : result.retry === true && !attempt.run_id && result.failureKind === 'transient' && result.state !== 'cancelled' ? 'retrying'
           : result.state === 'cancelled' ? 'cancelled' : 'failed';
       const taskChanged = db.prepare(`UPDATE collaboration_tasks SET state = ?, updated_at = ?
         WHERE id = ? AND current_attempt = ? AND state = ?`)
@@ -1324,7 +1324,7 @@ export async function requeueExpiredAttempt(attemptId, {
       }
       const task = db.prepare('SELECT * FROM collaboration_tasks WHERE id = ?').get(attempt.task_id);
       const retryPolicy = parseJson(task?.retry_json, { maxAttempts: 1, retryOn: [] });
-      const shouldRetry = retry === true
+      const shouldRetry = retry === true && !attempt.run_id && failureKind === 'transient'
         && Number(attempt.attempt_number) < Number(retryPolicy.maxAttempts || 1)
         && Array.isArray(retryPolicy.retryOn)
         && retryPolicy.retryOn.includes(failureKind);
@@ -1382,7 +1382,8 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
         return null;
       }
       const retry = parseJson(row.retry_json, { maxAttempts: 1, retryOn: [] });
-      const allowed = Number(row.attempt_number) < Number(retry.maxAttempts || 1)
+      const allowed = !row.run_id && row.failure_kind === 'transient'
+        && Number(row.attempt_number) < Number(retry.maxAttempts || 1)
         && Array.isArray(retry.retryOn) && retry.retryOn.includes(row.failure_kind || 'unknown_outcome');
       if (!allowed) {
         db.exec('COMMIT');

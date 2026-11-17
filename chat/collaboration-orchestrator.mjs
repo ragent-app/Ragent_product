@@ -1069,9 +1069,7 @@ export function createCollaborationOrchestrator(options = {}) {
         const policyAllows = (kind) => reserved.attemptNumber < Number(task.retry?.maxAttempts || 1)
           && Array.isArray(task.retry?.retryOn)
           && task.retry.retryOn.includes(kind);
-        const retry = failureKind === 'unknown_outcome'
-          ? policyAllows('unknown_outcome')
-          : failureKind === 'transient' ? policyAllows('transient') : false;
+        const retry = failureKind === 'transient' ? policyAllows('transient') : false;
         await store.completeAttempt(reserved.id, {
           state: 'failed',
           failureKind,
@@ -1193,9 +1191,15 @@ export function createCollaborationOrchestrator(options = {}) {
       const recoverableExpiredAttempt = currentAttempt.state === 'failed'
         && currentAttempt.failureKind === 'unknown_outcome';
       if (currentAttempt.state !== 'running' && !recoverableExpiredAttempt) return false;
-      const task = taskById(taskCollaboration, currentAttempt.taskId);
+      const freshCollaboration = await store.getCollaboration(taskCollaboration.id);
+      const task = taskById(freshCollaboration, currentAttempt.taskId);
       const run = await deps.getRunState(runId) || await deps.getRun(runId);
       if (!run) return false;
+      // Do not publish or commit effects from a Run bound to another session
+      // or from an attempt superseded by a newer task generation.
+      if (!task || Number(task.currentAttempt) !== Number(currentAttempt.attemptNumber)
+          || trim(run.id) !== trim(runId)
+          || trim(run.sessionId) !== trim(currentAttempt.sessionId)) return false;
       if (!isTerminal(run.state)) {
         if (currentAttempt.state === 'running' && typeof store.observeAttemptRun === 'function') {
           await store.observeAttemptRun(currentAttempt.id, runLifecycleObservation(run));
@@ -1242,7 +1246,7 @@ export function createCollaborationOrchestrator(options = {}) {
       // surface the committed files on the envelope. A MANAGED_WRITE_ESCAPE
       // (409) fails the attempt deterministically and never reaches a packet.
       const managedWriter = session?.sourceContext?.managedWriter || null;
-      if (managedWriter && !taskCollaboration.policy?.factoryExecution) {
+      if (managedWriter && outcome.state === 'succeeded' && !taskCollaboration.policy?.factoryExecution) {
         let committed = null;
         try {
           committed = await deps.commitStagingToCanonical({
@@ -1440,18 +1444,10 @@ export function createCollaborationOrchestrator(options = {}) {
       }
       const expired = expiredByCollaboration.get(collaboration.id) || [];
       for (const attempt of expired) {
-        const fresh = await store.getCollaboration(collaboration.id);
-        const task = taskById(fresh, attempt.taskId);
-        // The store remains the single authority for frozen retry policy.  A
-        // timeout never creates a second child unless that policy explicitly
-        // permits an unknown outcome; otherwise the exact Run remains eligible
-        // for bounded late-success recovery below.
-        const retry = !!task
-          && attempt.attemptNumber < Number(task.retry?.maxAttempts || 1)
-          && Array.isArray(task.retry?.retryOn)
-          && task.retry.retryOn.includes('unknown_outcome');
+        // A deadline does not prove effects absent. Keep the original Run
+        // eligible for late-success recovery, but never replay it blindly.
         await store.requeueExpiredAttempt(attempt.id, {
-          retry,
+          retry: false,
           failureKind: 'unknown_outcome',
           reason: `Attempt ${attempt.lifecyclePhase || 'running'} deadline expired before a terminal result was observed`,
         }).catch(() => {});

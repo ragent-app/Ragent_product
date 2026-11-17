@@ -162,18 +162,21 @@ export function compileCollaborationPlan(input = {}, policy) {
 }
 
 export function classifyAttemptOutcome(run, result = null) {
-  if (run?.state === 'completed') return { state: 'succeeded', failureKind: null, retryable: false };
   if (run?.state === 'cancelled' || run?.cancelRequested === true) return { state: 'cancelled', failureKind: 'cancelled', retryable: false };
-  if (!result || result?.synthesized !== true && !run?.failureReason) {
-    return { state: 'failed', failureKind: 'unknown_outcome', retryable: true };
+  if (run?.state === 'completed') return { state: 'succeeded', failureKind: null, retryable: false };
+  // A failed terminal Run is distinct from an ordinary tool error in a live
+  // Run. Text supplied by a provider or model is not a trusted error code.
+  // Even a known failure does not establish that external effects are safe
+  // to repeat, so recovery must reconcile them before any new attempt.
+  if (run?.state === 'failed' && result && result.synthesized !== true) {
+    if (typeof result.signal === 'string' && result.signal.trim()) {
+      return { state: 'failed', failureKind: 'process_signal', retryable: false };
+    }
+    if (Number.isInteger(result.exitCode) && result.exitCode !== 0) {
+      return { state: 'failed', failureKind: 'process_exit', retryable: false };
+    }
   }
-  const reason = String(run?.failureReason || result?.error || '').toLowerCase();
-  const transient = /timeout|temporar|rate|busy|econnreset|network|unavailable|429|502|503|504/.test(reason);
-  return {
-    state: 'failed',
-    failureKind: transient ? 'transient' : 'deterministic_failure',
-    retryable: transient,
-  };
+  return { state: 'failed', failureKind: 'unknown_outcome', retryable: false };
 }
 
 export { pathOverlaps };
