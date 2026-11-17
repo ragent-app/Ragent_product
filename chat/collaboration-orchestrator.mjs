@@ -117,6 +117,8 @@ function runLifecycleObservation(run) {
   return {
     runState: trim(run?.state),
     runnerStartedAt: trim(run?.runnerStartedAt),
+    approvalWaiting: run?.state === 'awaiting_approval'
+      || !!(run?.approvedActionPending?.batchId && run?.actionPause?.state === 'waiting_user'),
   };
 }
 

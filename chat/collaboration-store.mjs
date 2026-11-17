@@ -278,6 +278,9 @@ export function openDatabase() {
   if (!attemptColumns.has('execution_deadline')) {
     db.exec('ALTER TABLE collaboration_attempts ADD COLUMN execution_deadline TEXT');
   }
+  if (!attemptColumns.has('approval_wait_started_at')) {
+    db.exec('ALTER TABLE collaboration_attempts ADD COLUMN approval_wait_started_at TEXT');
+  }
   if (!attemptColumns.has('queued_at')) {
     db.exec('ALTER TABLE collaboration_attempts ADD COLUMN queued_at TEXT');
   }
@@ -380,6 +383,7 @@ function rowAttempt(row) {
     dispatchDeadline: row.dispatch_deadline || '',
     queueDeadline: row.queue_deadline || '',
     executionDeadline: row.execution_deadline || '',
+    approvalWaitStartedAt: row.approval_wait_started_at || '',
     heartbeatAt: row.heartbeat_at || '',
     startedAt: row.started_at || '',
     queuedAt: row.queued_at || '',
@@ -920,6 +924,7 @@ export async function heartbeatAttempt(attemptId, leaseMs = LEASE_MS) {
 export async function observeAttemptRun(attemptId, {
   runState = '',
   runnerStartedAt = '',
+  approvalWaiting = false,
   observedAt = new Date(),
 } = {}) {
   const observedDate = observedAt instanceof Date && !Number.isNaN(observedAt.getTime())
@@ -938,6 +943,21 @@ export async function observeAttemptRun(attemptId, {
       if (!row || row.state !== 'running') {
         db.exec('COMMIT');
         return null;
+      }
+      if (approvalWaiting === true) {
+        db.prepare(`UPDATE collaboration_attempts SET approval_wait_started_at=COALESCE(approval_wait_started_at,?),
+          last_observed_at=?,updated_at=? WHERE id=? AND state='running'`).run(observedText,observedText,observedText,attemptId);
+        db.exec('COMMIT');
+        return rowAttempt(db.prepare(`SELECT a.*,t.collaboration_id FROM collaboration_attempts a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?`).get(attemptId));
+      }
+      if (row.approval_wait_started_at) {
+        const started = Date.parse(row.approval_wait_started_at);
+        const elapsed = Number.isFinite(started) ? Math.max(0, observedDate.getTime() - started) : 0;
+        for (const column of ['dispatch_deadline','queue_deadline','execution_deadline','lease_until']) {
+          if (row[column] && Number.isFinite(Date.parse(row[column]))) row[column] = new Date(Date.parse(row[column]) + elapsed).toISOString();
+        }
+        db.prepare(`UPDATE collaboration_attempts SET approval_wait_started_at=NULL,dispatch_deadline=?,queue_deadline=?,execution_deadline=?,lease_until=?,updated_at=? WHERE id=? AND state='running'`)
+          .run(row.dispatch_deadline,row.queue_deadline,row.execution_deadline,row.lease_until,observedText,attemptId);
       }
       const wasRunning = row.lifecycle_phase === 'running' || !!row.runner_started_at;
       const observedRunning = wasRunning || !!explicitRunnerStart || ['accepted', 'running'].includes(normalizedRunState);
@@ -1259,7 +1279,7 @@ export async function listExpiredAttempts(now = new Date()) {
   return withDatabase((db) => db.prepare(`SELECT a.*, t.collaboration_id
     FROM collaboration_attempts a
     JOIN collaboration_tasks t ON t.id = a.task_id
-    WHERE a.state = 'running' AND (
+    WHERE a.state = 'running' AND a.approval_wait_started_at IS NULL AND (
       (a.lifecycle_phase = 'dispatching' AND COALESCE(a.dispatch_deadline, a.lease_until) < ?)
       OR (a.lifecycle_phase = 'queued' AND COALESCE(a.queue_deadline, a.lease_until) < ?)
       OR (a.lifecycle_phase = 'running' AND COALESCE(a.execution_deadline, a.lease_until) < ?)
@@ -1318,7 +1338,7 @@ export async function requeueExpiredAttempt(attemptId, {
       const attempt = db.prepare(`SELECT a.*, t.collaboration_id FROM collaboration_attempts a
         JOIN collaboration_tasks t ON t.id = a.task_id WHERE a.id = ?`).get(attemptId);
       const deadline = phaseDeadline(attempt);
-      if (!attempt || attempt.state !== 'running' || !deadline || deadline >= checkNowText) {
+      if (!attempt || attempt.state !== 'running' || attempt.approval_wait_started_at || !deadline || deadline >= checkNowText) {
         db.exec('COMMIT');
         return null;
       }
