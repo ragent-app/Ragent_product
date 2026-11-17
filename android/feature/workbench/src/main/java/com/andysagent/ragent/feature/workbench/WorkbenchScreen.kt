@@ -3108,6 +3108,20 @@ private fun ChatSurface(
         ) {
         // Layer 1: Conversation Canvas with Edge-to-Edge Frosted Backdrop
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            if (!organizationHasCollaborators) {
+                val measuredDockHeight = with(density) { dockGeometry.visualHeightPx.toDp() }
+                val fallbackDockHeight = with(density) { readingNavigationInsets.getBottom(density).toDp() } +
+                    composerBottomSpacing + 68.dp
+                ChatBottomGradientMask(
+                    dockHeight = if (measuredDockHeight > 0.dp) measuredDockHeight else fallbackDockHeight,
+                    canvasColor = colors.canvas,
+                    backdropLayer = chatBackdropForControls,
+                    backdropOrigin = chatBackdropOrigin,
+                    presentationAlpha = if (readingPreparing) 0f else
+                        chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress),
+                    modifier = Modifier.align(Alignment.BottomCenter).zIndex(1.8f),
+                )
+            }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -3428,10 +3442,6 @@ private fun ChatSurface(
         }
 
         // Layer 1.5: Pure Gradient Blur Masks (ChatGPT app style)
-        val measuredDockHeight = with(density) { dockGeometry.visualHeightPx.toDp() }
-        val fallbackDockHeight = with(density) { readingNavigationInsets.getBottom(density).toDp() } +
-            composerBottomSpacing + 68.dp
-        val activeDockHeight = if (measuredDockHeight > 0.dp) measuredDockHeight else fallbackDockHeight
         val maskPresentationAlpha = if (readingPreparing) 0f else
             chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress)
 
@@ -3445,17 +3455,6 @@ private fun ChatSurface(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .zIndex(1.5f),
-        )
-
-        ChatBottomGradientMask(
-            dockHeight = activeDockHeight,
-            canvasColor = colors.canvas,
-            backdropLayer = chatBackdropForControls,
-            backdropOrigin = chatBackdropOrigin,
-            presentationAlpha = maskPresentationAlpha,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .zIndex(1.8f),
         )
 
         }

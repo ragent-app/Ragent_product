@@ -494,7 +494,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             refresh++
         }
     }
-    val hasCollaborators = unifiedMembers?.members?.isNotEmpty() == true || (loaded && baseProjection?.hasCreatedSubordinate == true)
+    val hasCollaborators = unifiedMembers?.let { page -> page.members.any { it.canonicalId != page.rootCanonicalId } } == true ||
+        (loaded && baseProjection?.hasCreatedSubordinate == true)
     val snapshotResolved = unifiedResolved && (loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected)
     // A successful gap-free observation establishes the current display baseline;
     // it does not assert that the historical member source is complete.
