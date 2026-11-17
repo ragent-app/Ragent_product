@@ -460,6 +460,7 @@ import {
 import { extractTaggedBlock } from './session-text-parsing.mjs';
 import { buildTurnContextHook } from './turn-context-hook.mjs';
 import { buildOrganizationIdentityContext } from './organization-identity-context.mjs';
+const BUILTIN_SKILL_READ_AVAILABLE = Symbol('builtinSkillReadAvailable');
 import {
   buildDelegationResultFromRun,
   normalizeDelegationResult,
@@ -8312,6 +8313,7 @@ export async function buildPromptEnvelope(sessionId, session, text, previousTool
       sessionId,
       ...(isDelegatedChild ? { includeSessionSpawn: false } : {}),
       productAgentCreateEligible: options.productAgentCreateEligible === true,
+      serverBuiltinSkillReadAvailable: options[BUILTIN_SKILL_READ_AVAILABLE] === true,
     });
     sourceRuntimePrompt = buildSourceRuntimePrompt(session);
     if (shouldIncludeSessionTemplateInstructions(session)) {
@@ -9645,7 +9647,12 @@ async function recoverPendingAgentInterruptions() {
       const run = await getRun(entry.id).catch(() => null);
       await observePendingAgentInterruption(run).catch(() => {});
     }
-  })().finally(() => { interruptionRecoveryPromise = null; });
+  })().finally(() => {
+    interruptionRecoveryPromise = null;
+    if (interruptionRecoveryCursor < interruptionRecoveryEntries.length) {
+      setImmediate(() => { void recoverPendingAgentInterruptions().catch(() => {}); }).unref?.();
+    }
+  });
   return interruptionRecoveryPromise;
 }
 
@@ -13896,6 +13903,9 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   );
   const primaryResponseId = publicationResponseIds[0] || responseId;
   const replyPublicationRootRunId = trimString(options.replyPublicationRootRunId);
+  const serverBuiltinSkillReadAvailable = !!sessionControlChannel?.token && !!sessionControlChannel?.runId &&
+    !!sessionControlChannel?.sessionId && options.accessMode !== 'read' && options.readOnlyRequired !== true &&
+    options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily);
   let promptEnvelope;
   if (options.backgroundPreparation === true) {
     const promptStartedHr = process.hrtime.bigint();
@@ -13912,6 +13922,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
           provider: effectiveProviderContract.provider || null,
           providerCapabilities: effectiveProviderContract.providerCapabilities || null,
           productAgentCreateEligible,
+          [BUILTIN_SKILL_READ_AVAILABLE]: serverBuiltinSkillReadAvailable,
         },
       );
     } finally {
@@ -13936,6 +13947,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
           provider: effectiveProviderContract.provider || null,
           providerCapabilities: effectiveProviderContract.providerCapabilities || null,
           productAgentCreateEligible,
+          [BUILTIN_SKILL_READ_AVAILABLE]: serverBuiltinSkillReadAvailable,
         },
       ),
     );

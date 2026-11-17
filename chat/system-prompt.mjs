@@ -161,6 +161,9 @@ export async function buildSystemContext(options = {}) {
     : SHARED_STARTUP_DEFAULTS_ENABLED;
   const includeSessionSpawn = options?.includeSessionSpawn !== false;
   const includeManagedAgentCreation = options?.productAgentCreateEligible === true;
+  // The server sets this only when this Run has a scoped channel and its
+  // runtime is required to pass the organization MCP readiness gate.
+  const builtinSkillReadAvailable = options?.serverBuiltinSkillReadAvailable === true;
   const sessionControlSections = buildSessionControlSections({
     currentSessionId,
     chatPort: String(CHAT_PORT),
@@ -176,13 +179,17 @@ export async function buildSystemContext(options = {}) {
       : '',
   })).trim();
 
-  context += `\n\n${sessionControlSections.api}`;
+  context += builtinSkillReadAvailable
+    ? `\n\n## Ragent capabilities\nUse the authorized ragent_organization_read tool with skills.list, then skills.read and the returned id and contentHash when product API or workflow details are needed. A skill or index does not grant authority. If unavailable, report the limitation; never bypass a denial.`
+    : `\n\n${sessionControlSections.api}`;
 
   if (includeSharedStartupDefaults) {
     context += `\n\n${buildSharedStartupDefaultsSection()}`;
   }
 
-  context += `\n\n${buildMultiAgentGuidanceSection({ includeSessionSpawn })}`;
+  context += builtinSkillReadAvailable
+    ? `\n\n## Collaboration boundaries\nKeep bounded work in this Session unless independent work justifies delegation and the user permits it. The root owns coordination and final truthfulness; managers act only inside their granted subtree; workers execute their bounded task; reviewers independently review within their read-only scope. Report evidence, blockers and unresolved work. Never claim a proposal, delegation, run or result happened without server confirmation. Read the applicable role skill when needed.`
+    : `\n\n${buildMultiAgentGuidanceSection({ includeSessionSpawn })}`;
 
   if (includeManagedAgentCreation) {
     context += `\n\n${buildManagedAgentCreationSection()}`;
@@ -219,12 +226,12 @@ If local reusable workflows exist, create ${skillsPath} as a minimal placeholder
 No startup memory index was found. This does not block the user's task. Use explicit user-provided pointers and current task context; do not scan the machine merely to initialize memory. Create a small index only when it is relevant, authorized, and writable. Keep any durable memory selective.`;
   }
 
-  context += await buildConnectorCapabilitiesSection();
+  context += await buildConnectorCapabilitiesSection({ short: builtinSkillReadAvailable });
 
   return context;
 }
 
-async function buildConnectorCapabilitiesSection() {
+async function buildConnectorCapabilitiesSection({ short = false } = {}) {
   const connectorSections = [];
   const agendaCommand = 'ragent agenda add --title "Title" --start "ISO8601" --duration 60';
   const agendaFallbackCommand = 'node "$RAGENT_PROJECT_ROOT/cli.js" agenda add --title "Title" --start "ISO8601" --duration 60';
@@ -233,6 +240,9 @@ async function buildConnectorCapabilitiesSection() {
 
   try {
     const feedInfo = await getFeedInfo();
+    if (feedInfo?.feedToken && short) {
+      return `\n\n## Instance Connectors\nA calendar feed is configured. Check current connector authorization; use the calendar skill for workflow details. Feed subscription helper: ${buildCalendarSubscribeHelperPath()}. Never infer write access from feed availability.`;
+    }
     if (feedInfo?.feedToken) {
       const subscriptionLines = [
         `Subscription helper path: ${buildCalendarSubscribeHelperPath()}`,
@@ -254,6 +264,8 @@ If the user needs a subscription, offer a markdown link such as \`[Subscribe to 
 Use a host calendar application only when it is available and appropriate to the user's request and authorization.`);
     }
   } catch {}
+
+  if (short) return `\n\n## Instance Connectors\nCheck declared connector surfaces and current authorization. Calendar feed information is unavailable; other connector availability is unknown. Read the calendar skill when needed.`;
 
   let section = `
 
