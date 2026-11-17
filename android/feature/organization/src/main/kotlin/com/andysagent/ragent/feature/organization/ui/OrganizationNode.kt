@@ -1,11 +1,20 @@
 package com.andysagent.ragent.feature.organization.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.Text
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -24,6 +33,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
@@ -37,6 +47,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
+import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
+import com.andysagent.ragent.core.designsystem.MotionPreference
+import com.andysagent.ragent.feature.organization.presentation.NodeActionKind
 import com.andysagent.ragent.core.designsystem.rememberAgentoPressScale
 import com.andysagent.ragent.feature.organization.domain.AgentDomain
 import com.andysagent.ragent.feature.organization.domain.NodeRole
@@ -52,7 +66,8 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
     drawSurface: Boolean = true, clickable: Boolean = true, iconAlpha: Float = 1f,
     occluderOffset: Offset? = null, occluderRadius: Float = 0f,
     occluderMajor: Float = occluderRadius, occluderMinor: Float = occluderRadius,
-    occluderAxis: Offset = Offset(0f, 1f), minimumTouchSize: Dp = 64.dp) {
+    occluderAxis: Offset = Offset(0f, 1f), minimumTouchSize: Dp = 64.dp,
+    actionVisible: Boolean = true, badgeAngleDegrees: Float = 45f, motionPreference: MotionPreference = MotionPreference.Full) {
     val colors = LocalRagentColors.current
     val density = LocalDensity.current
     val dark = colors.canvas.luminance() < .5f
@@ -130,16 +145,17 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
                     modifier = Modifier.size(iconSize).graphicsLayer { alpha = iconAlpha })
             }
         }
-        val stateColor = when (node.runtimeState) {
-            NodeRuntimeState.WORKING, NodeRuntimeState.REVIEWING -> colors.running
-            NodeRuntimeState.BLOCKED, NodeRuntimeState.FAILED -> colors.error
-            NodeRuntimeState.DONE -> colors.success
-            else -> colors.secondaryContent
-        }
-        if (node.runtimeState != NodeRuntimeState.IDLE && iconAlpha >= 1f) {
-            Box(Modifier.align(Alignment.Center).absoluteOffset(x = (node.radiusDp * .70710678f).dp, y = (node.radiusDp * .70710678f).dp)
-                .size(11.dp).clip(CircleShape).background(colors.canvas), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(7.dp).clip(CircleShape).background(stateColor))
+        val action = node.action
+        if (action != null && actionVisible) {
+            val badgeSize = (node.radiusDp * 2f * .28f).coerceIn(18f, 24f)
+            val badgeRadius = badgeSize / 2f
+            val distance = node.radiusDp - badgeRadius / 3f
+            val angle = Math.toRadians(badgeAngleDegrees.toDouble())
+            Box(Modifier.align(Alignment.Center).absoluteOffset(
+                x = (distance * kotlin.math.cos(angle).toFloat()).dp,
+                y = (distance * kotlin.math.sin(angle).toFloat()).dp,
+            ).size(badgeSize.dp), contentAlignment = Alignment.Center) {
+                OrganizationActionBadge(action, motionPreference, badgeSize)
             }
         }
     }
@@ -215,5 +231,47 @@ internal fun nodeVisual(node: RenderedNodeUiState): NodeVisual {
         AgentDomain.ENVIRONMENT -> NodeVisual(R.drawable.org_domain_eco, NodeColorFamily.GREEN)
         AgentDomain.ENGINEERING -> NodeVisual(R.drawable.org_domain_precision_manufacturing, NodeColorFamily.GREEN)
         AgentDomain.GENERAL -> NodeVisual(R.drawable.org_domain_person, NodeColorFamily.GREEN)
+    }
+}
+
+@Composable
+private fun OrganizationActionBadge(action: NodeActionKind, motion: MotionPreference, diameter: Float) {
+    val colors = LocalRagentColors.current
+    val active = action in setOf(NodeActionKind.RESPONDING, NodeActionKind.READING, NodeActionKind.SEARCHING,
+        NodeActionKind.EDITING, NodeActionKind.EXECUTING, NodeActionKind.INSPECTING,
+        NodeActionKind.DELEGATING, NodeActionKind.SENDING)
+    AgentoFrostedGlassBox(modifier = Modifier.fillMaxSize(), shape = CircleShape,
+        backdropTone = AgentoBackdropTone.QuietHeader, hasShadow = true, shadowElevation = 2.dp,
+        contentAlignment = Alignment.Center) {
+        if (active && motion == MotionPreference.Full) {
+            val transition = rememberInfiniteTransition(label = "action-ring")
+            val angle by transition.animateFloat(0f, 360f, infiniteRepeatable(tween(1600, easing = LinearEasing)), label = "action-ring-angle")
+            Canvas(Modifier.fillMaxSize().padding(1.dp)) {
+                drawArc(colors.primaryContent.copy(alpha = .28f), angle, 90f, false, style = Stroke(1.dp.toPx()))
+            }
+        }
+        AnimatedContent(targetState = action, transitionSpec = {
+            val duration = if (motion == MotionPreference.None) 0 else 160
+            (fadeIn(tween(duration, easing = FastOutSlowInEasing)) +
+                androidx.compose.animation.scaleIn(tween(duration, easing = FastOutSlowInEasing), initialScale = if (motion == MotionPreference.Full) .94f else 1f))
+                .togetherWith(fadeOut(tween(duration, easing = FastOutSlowInEasing)))
+        }, label = "action-glyph") { current ->
+            val icon = when (current) {
+                NodeActionKind.RESPONDING -> Icons.Outlined.ChatBubbleOutline
+                NodeActionKind.READING -> Icons.Outlined.Description
+                NodeActionKind.SEARCHING -> Icons.Outlined.Search
+                NodeActionKind.EDITING -> Icons.Outlined.Edit
+                NodeActionKind.EXECUTING -> Icons.Outlined.Terminal
+                NodeActionKind.INSPECTING -> Icons.Outlined.FindInPage
+                NodeActionKind.DELEGATING -> Icons.Outlined.AccountTree
+                NodeActionKind.SENDING -> Icons.AutoMirrored.Outlined.Send
+                NodeActionKind.WAITING, NodeActionKind.WAITING_SUBORDINATES -> Icons.Outlined.Schedule
+                NodeActionKind.NEEDS_USER -> Icons.Outlined.PanTool
+                NodeActionKind.BLOCKED, NodeActionKind.FAILED -> Icons.Outlined.ErrorOutline
+            }
+            Icon(icon, contentDescription = null,
+                tint = if (current == NodeActionKind.BLOCKED || current == NodeActionKind.FAILED) colors.error else colors.primaryContent,
+                modifier = Modifier.size((diameter * .625f).coerceIn(12f, 15f).dp))
+        }
     }
 }
