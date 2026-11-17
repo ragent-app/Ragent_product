@@ -27,6 +27,8 @@ function schema(db) {
       incident_id TEXT NOT NULL, session_id TEXT NOT NULL, first_read_at TEXT NOT NULL,
       PRIMARY KEY (incident_id, session_id));
     CREATE INDEX IF NOT EXISTS agent_interruption_pending ON agent_interruption_incidents(delivery_state, resolved_at);`);
+  const columns = new Set(db.prepare('PRAGMA table_info(agent_interruption_incidents)').all().map(column => column.name));
+  if (!columns.has('reported_code')) db.exec("ALTER TABLE agent_interruption_incidents ADD COLUMN reported_code TEXT NOT NULL DEFAULT ''");
 }
 async function sessionById(id) {
   const { getSession } = await import('./session-manager.mjs');
@@ -141,6 +143,11 @@ export async function observeAgentInterruption({ sessionId, runId } = {}) {
   const now = stamp();
   const category = typeof run.result?.signal === 'string' && run.result.signal.trim() ? 'process_signal'
     : Number.isInteger(run.result?.exitCode) && run.result.exitCode !== 0 ? 'process_exit' : 'unknown_outcome';
+  // The launch path persists a bounded code separately from its free-form
+  // error message. Report it as unverified detail, never as a replay decision.
+  const reportedCode = new Set(['REVISION_CONFLICT', 'REQUEST_EXPIRED', 'REQUEST_CANCELLED',
+    'RESTRICTED_EXECUTION_UNAVAILABLE', 'RUN_EXECUTION_INPUT_UNAVAILABLE']).has(run.result?.errorCode)
+    ? run.result.errorCode : '';
   const saved = await withDatabase(db => {
     schema(db);
     db.exec('BEGIN IMMEDIATE');
@@ -168,6 +175,7 @@ export async function observeAgentInterruption({ sessionId, runId } = {}) {
       binding.ref.bindingGeneration ?? null,binding.ref.organizationRevision ?? null,text(attemptRows[0]?.id),text(attemptRows[0]?.task_id),text(attemptRows[0]?.objective).slice(0,1000),binding.parentSessionId,
       binding.parentNodeId,binding.org.rootSessionId,category,'run_status','authoritative_terminal',`run:${run.id}`,'unknown',text(run.completedAt) || now,JSON.stringify(binding.ancestors),now,now);
     const savedRow = db.prepare('SELECT session_id,run_id FROM agent_interruption_incidents WHERE id=?').get(id);
+    if (reportedCode) db.prepare("UPDATE agent_interruption_incidents SET reported_code=? WHERE id=? AND reported_code=''").run(reportedCode,id);
     db.exec('COMMIT');
     return savedRow?.session_id === session.id && savedRow?.run_id === run.id;
     } catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -284,6 +292,7 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
       nodeId: row.node_id || null, taskId: row.task_id || null, taskObjective: row.task_objective || null, attemptId: row.attempt_id || null,
       bindingGeneration: row.binding_generation, organizationRevision: row.organization_revision,
       category: row.category, source: row.source, confidence: row.confidence, evidenceRef: row.evidence_ref,
+      reportedCode: row.reported_code || null, reportedCodeVerified: false,
       sideEffects: row.side_effects, occurredAt: row.occurred_at, deliveryState: row.delivery_state,
       readAt: db.prepare('SELECT first_read_at FROM agent_interruption_reads WHERE incident_id=? AND session_id=?').get(row.id,sessionId)?.first_read_at || now,
       acknowledgedAt: row.acknowledged_at, resolvedAt: row.resolved_at,
@@ -295,7 +304,19 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
 }
 export const acknowledgeAgentInterruption = input => updateDisposition(input, 'ack');
 export const resolveAgentInterruption = input => updateDisposition(input, 'resolve');
-export const getAgentInterruption = input => updateDisposition(input, 'read');
+export async function getAgentInterruption(input) {
+  const incident = await updateDisposition(input, 'read');
+  const run = await getRun(incident.runId);
+  const receipt = incident.attemptId ? await withDatabase(db => {
+    const row = db.prepare('SELECT source,consumed_at FROM collaboration_replay_receipts WHERE attempt_id=?').get(incident.attemptId);
+    return row ? { source: row.source, consumed: !!row.consumed_at } : null;
+  }) : null;
+  return { ...incident, reconciliation: {
+    runState: text(run?.state) || 'unavailable', finalizedAt: text(run?.finalizedAt) || null,
+    sideEffects: 'unknown', receipt,
+    nextStep: receipt && !receipt.consumed ? 'review_receipt_and_request_retry' : 'inspect_original_run_evidence',
+  } };
+}
 export async function listAgentInterruptions({ authSession, limit = 50 } = {}) {
   if (authSession?.principalKind !== 'run_capability' || !text(authSession.sessionId)) throw Object.assign(new Error('Run capability required'), { code: 'FORBIDDEN' });
   const bounded = Math.max(1, Math.min(Number.isInteger(limit) ? limit : 50, 100));
