@@ -5592,6 +5592,16 @@ function scheduleRunAuthRecoveryLaunch(runId) {
       return run;
     }
 
+    const recoverySession = await getSession(run.sessionId);
+    if (!recoverySession || recoverySession.sessionPlane === 'organization'
+        || recoverySession.organizationId || recoverySession.parentSessionId
+        || recoverySession.delegatedFromSessionId
+        || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation)) {
+      return updateRun(normalizedRunId, (current) => ({
+        ...current,
+        authRecovery: { ...normalizeRunAuthRecovery(current.authRecovery), authRetryState: 'reauth_required' },
+      }));
+    }
     // The failing sidecar is awaiting the HTTP acknowledgement that schedules
     // this work. Launching synchronously deadlocks that hand-off and reuses its
     // still-loaded systemd unit. Wait for the predecessor process to consume
@@ -5754,6 +5764,15 @@ export async function recoverRunAuthFailure({
       throw runAuthRecoveryError('RUN_AUTH_RECOVERY_REQUEST_INVALID', 'Only an explicit auth-expired signal is recoverable');
     }
 
+    // Authentication errors are classified from provider output; they do not
+    // prove that a delegated request had no effects or is safe to resume.
+    const recoverySession = await getSession(sessionId);
+    if (!recoverySession || recoverySession.sessionPlane === 'organization'
+        || recoverySession.organizationId || recoverySession.parentSessionId
+        || recoverySession.delegatedFromSessionId
+        || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation)) {
+      return { ok: false, retry: false, status: 'stopped', reason: 'reconciliation-required' };
+    }
     const currentRecovery = normalizeRunAuthRecovery(run.authRecovery);
     const attempt = Math.floor(Number(failureAttempt));
     if (attempt < currentRecovery.resumeAttempt) {
@@ -9407,7 +9426,13 @@ async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifes
   // A managed organization's frozen selection cannot be silently changed by
   // provider failover. A future authorized revision may select another runtime.
   const failedSession = await getSession(sessionId);
-  let preventProviderSwitch = failedSession?.sessionPlane === 'organization' || !!failedSession?.organizationId;
+  // A replacement run may repeat remote effects; delegated runs require
+  // reconciliation until a provider supplies a verifiable safe-resume proof.
+  if (!failedSession || failedSession.sessionPlane === 'organization'
+      || failedSession.organizationId || failedSession.parentSessionId
+      || failedSession.delegatedFromSessionId
+      || ['collaboration_task', 'collaboration_resume'].includes(manifest?.internalOperation)) return null;
+  let preventProviderSwitch = false;
   if (failedSession?.sessionClass === 'ROOT_LEADERSHIP') {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
     const { constraints } = await readSessionRuntimeConstraints(sessionId);
