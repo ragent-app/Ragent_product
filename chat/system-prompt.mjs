@@ -174,13 +174,13 @@ export async function buildSystemContext(options = {}) {
     MANAGER_RUNTIME_BOUNDARY_SECTION,
     CURRENT_SESSION_ID_SUFFIX: currentSessionId ? ` (current: ${currentSessionId})` : '',
     CHAT_PORT: String(CHAT_PORT),
-    SESSION_SPAWN_SECTION: includeSessionSpawn
-      ? sessionControlSections.spawn
-      : '',
+    SESSION_SPAWN_SECTION: !includeSessionSpawn ? '' : builtinSkillReadAvailable
+      ? '## Parallel Session Spawning\nSplit only independent work when useful and authorized; respect a user request to remain in this session. Use `ragent session-spawn` for a bounded task and confirm the result. Read the session-control skill for details; a skill does not grant authority.'
+      : sessionControlSections.spawn,
   })).trim();
 
   context += builtinSkillReadAvailable
-    ? `\n\n## Ragent capabilities\nUse the authorized ragent_organization_read tool with skills.list, then skills.read and the returned id and contentHash when product API or workflow details are needed. A skill or index does not grant authority. If unavailable, report the limitation; never bypass a denial.`
+    ? `\n\n## Ragent capabilities\nUse the authorized ragent_organization_read tool with action skills.list; when details are needed, call action skills.read with args {id, expectedHash: index.contentHash} using the selected index entry. A skill or index does not grant authority. If unavailable, report the limitation; never bypass a denial.`
     : `\n\n${sessionControlSections.api}`;
 
   if (includeSharedStartupDefaults) {
