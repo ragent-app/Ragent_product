@@ -5,6 +5,17 @@ const text = (v) => typeof v === 'string' ? v.trim() : '';
 const obj = (v) => v && typeof v === 'object' && !Array.isArray(v) ? v : {};
 const fail = (code, message) => Object.assign(new Error(message), { code, statusCode: 422 });
 const canonical = (field, value) => ['tool', 'effort'].includes(field) ? text(value).toLowerCase() : text(value);
+function matchesConstraint(field, value, expected, runtime) {
+  const actual = canonical(field, value);
+  const wanted = canonical(field, expected);
+  if (actual === wanted) return true;
+  if (field !== 'model') return false;
+  const provider = text(runtime?.provider || runtime?.providerProfile);
+  if (!provider) return false;
+  const suffix = `@${provider}`;
+  const unscoped = (model) => model.endsWith(suffix) ? model.slice(0, -suffix.length) : model;
+  return unscoped(actual) === unscoped(wanted);
+}
 
 export function normalizeUserRuntimeConstraints(value = {}) {
   const source = obj(value);
@@ -28,7 +39,7 @@ export function applyRuntimeConstraints(runtime = {}, constraints = {}) {
   for (const [field, constraint] of Object.entries(normalizeUserRuntimeConstraints(constraints))) {
     if (constraint.mode !== 'locked') continue;
     const existing = field === 'provider' ? result.provider || result.providerProfile : result[field];
-    if (text(existing) && canonical(field, existing) !== constraint.value) {
+    if (text(existing) && !matchesConstraint(field, existing, constraint.value, result)) {
       throw fail('ORG_RUNTIME_USER_LOCKED', `Requested ${field} conflicts with the user's locked constraint`);
     }
     if (!text(existing)) result[field] = constraint.value;
@@ -40,7 +51,7 @@ export function assertRuntimeConstraints(runtime, constraints = {}) {
   const normalized = normalizeUserRuntimeConstraints(constraints);
   for (const [field, constraint] of Object.entries(normalized)) {
     const actual = field === 'provider' ? runtime?.provider || runtime?.providerProfile : runtime?.[field];
-    if (constraint.mode === 'locked' && canonical(field, actual) !== constraint.value) {
+    if (constraint.mode === 'locked' && !matchesConstraint(field, actual, constraint.value, runtime)) {
       throw fail('ORG_RUNTIME_USER_LOCKED', `Selected ${field} conflicts with the user's locked constraint`);
     }
   }
