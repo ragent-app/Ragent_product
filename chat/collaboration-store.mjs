@@ -223,6 +223,9 @@ export function openDatabase() {
       collaboration_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, plan_version INTEGER NOT NULL,
       source TEXT NOT NULL, effective_attempt_budget INTEGER NOT NULL, created_at TEXT NOT NULL, consumed_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS collaboration_dispatch_notices (
+      command_id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL DEFAULT '', next_check_at TEXT NOT NULL DEFAULT ''
+    );
     CREATE INDEX IF NOT EXISTS idx_collab_tasks_ready ON collaboration_tasks(collaboration_id, state);
     CREATE INDEX IF NOT EXISTS idx_collab_attempts_run ON collaboration_attempts(run_id);
     CREATE INDEX IF NOT EXISTS idx_collab_events_collab ON collaboration_events(collaboration_id, id);
@@ -921,11 +924,24 @@ export async function blockAttemptDispatch(commandId, { claimToken } = {}) {
       db.prepare("UPDATE collaboration_tasks SET state='failed',updated_at=? WHERE id=?").run(now,command.task_id);
       db.prepare("UPDATE collaborations SET state='failed',updated_at=? WHERE id=? AND state NOT IN ('completed','cancelled')").run(now,command.collaboration_id);
       appendEvent(db,command.collaboration_id,'attempt_dispatch_blocked',{ commandId, code:'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', reason },command.task_id,attempt.id);
+      db.prepare('INSERT OR IGNORE INTO collaboration_dispatch_notices(command_id) VALUES(?)').run(commandId);
       db.exec('COMMIT'); return { attemptId: attempt.id };
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }, { mutate: true });
   if (outcome) await publishAttemptInvalidation(outcome.attemptId);
   return !!outcome;
+}
+
+export async function listPendingDispatchNotices() {
+  return withDatabase(db => db.prepare(`SELECT n.command_id,d.task_id,d.attempt_id,d.failure_reason,c.root_session_id
+    FROM collaboration_dispatch_notices n JOIN collaboration_dispatch_commands d ON d.id=n.command_id
+    JOIN collaborations c ON c.id=d.collaboration_id
+    WHERE n.trigger_id='' AND n.next_check_at<=? ORDER BY n.next_check_at,n.command_id LIMIT 50`).all(nowIso()));
+}
+
+export async function updateDispatchNotice(commandId, triggerId = '') {
+  return withDatabase(db => db.prepare("UPDATE collaboration_dispatch_notices SET trigger_id=?,next_check_at=? WHERE command_id=? AND trigger_id=''")
+    .run(triggerId,isoAfter(nowIso(),30000),commandId).changes > 0, { mutate: true });
 }
 
 export async function findAttemptByRunId(runId) {

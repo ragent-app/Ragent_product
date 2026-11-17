@@ -1489,6 +1489,23 @@ export function createCollaborationOrchestrator(options = {}) {
     // lifecycle; completed collaborations can still have pending notices.
     const { reconcileAgentInterruptions } = await import('./agent-interruption-notifications.mjs');
     await reconcileAgentInterruptions().catch(() => {});
+    if (typeof store.listPendingDispatchNotices === 'function') {
+      for (const notice of await store.listPendingDispatchNotices()) {
+        let triggerId = '';
+        try {
+          const { createTrigger } = await import('./triggers.mjs');
+          const trigger = await createTrigger({ sessionId: notice.root_session_id, scheduledAt: new Date().toISOString(),
+            dedupeKey: `collaboration-dispatch-blocked:${notice.attempt_id}`,
+            title: 'Collaboration dispatch needs review',
+            text: `Task ${notice.task_id}, attempt ${notice.attempt_id}: runtime constraints changed. Reconcile prior dispatch and revise the plan before retrying.` });
+          triggerId = trigger?.id || '';
+        } catch (error) {
+          console.warn(`[collaboration] dispatch notice unavailable: ${error?.code || 'unknown'}`);
+        } finally {
+          await store.updateDispatchNotice(notice.command_id, triggerId);
+        }
+      }
+    }
     const active = await store.listCollaborationRecords({ activeOnly: true });
     // Read expiring Attempts once per sweep. The previous per-collaboration
     // query multiplied SQLite work by the number of active collaborations and
