@@ -1,0 +1,20 @@
+<resources>
+    <string name="organization_state_active">活動中</string>
+    <string name="organization_state_done">完了</string>
+    <string name="organization_state_paused">一時停止</string>
+    <string name="organization_state_failed">失敗</string>
+    <string name="organization_state_unknown">状態の更新を待機中</string>
+    <string name="organization_state_idle">待機状態</string>
+    <string name="organization_state_waiting">待機中</string>
+    <string name="organization_state_blocked">ブロック中</string>
+    <string name="organization_node_working">作業中</string>
+    <string name="organization_node_waiting">待機中</string>
+    <string name="organization_node_blocked">ブロック中</string>
+    <string name="organization_node_reviewing">確認中</string>
+    <string name="organization_node_done">完了</string>
+    <string name="organization_node_failed">失敗</string>
+    <string name="organization_node_provisioning">準備中</string>
+    <string name="organization_node_paused">一時停止</string>
+    <string name="organization_node_idle">待機状態</string>
+    <string name="organization_conversation_close">会話を閉じる</string>
+</resources>

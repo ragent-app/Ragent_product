@@ -1,0 +1,20 @@
+<resources>
+    <string name="organization_state_active">활동 중</string>
+    <string name="organization_state_done">완료</string>
+    <string name="organization_state_paused">일시 중지</string>
+    <string name="organization_state_failed">실패</string>
+    <string name="organization_state_unknown">상태 업데이트 대기 중</string>
+    <string name="organization_state_idle">유휴</string>
+    <string name="organization_state_waiting">대기 중</string>
+    <string name="organization_state_blocked">차단됨</string>
+    <string name="organization_node_working">작업 중</string>
+    <string name="organization_node_waiting">대기 중</string>
+    <string name="organization_node_blocked">차단됨</string>
+    <string name="organization_node_reviewing">검토 중</string>
+    <string name="organization_node_done">완료</string>
+    <string name="organization_node_failed">실패</string>
+    <string name="organization_node_provisioning">준비 중</string>
+    <string name="organization_node_paused">일시 중지</string>
+    <string name="organization_node_idle">유휴</string>
+    <string name="organization_conversation_close">대화 닫기</string>
+</resources>

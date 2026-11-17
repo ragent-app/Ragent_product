@@ -1,0 +1,30 @@
+<resources>
+    <string name="org_conversation_loading">Chargement de la conversation…</string>
+    <string name="org_conversation_unbound">Aucune conversation de travail pour le moment.</string>
+    <string name="org_conversation_denied">Cette conversation est indisponible.</string>
+    <string name="org_conversation_offline">Hors ligne · affichage des derniers messages vérifiés</string>
+    <string name="org_conversation_error">Conversation indisponible.</string>
+    <string name="org_conversation_empty">Aucun message pour le moment.</string>
+    <string name="org_conversation_activity_only">Activités et résultats disponibles uniquement</string>
+    <string name="org_conversation_captured_only">Seul le contenu capturé par l’exécution parente est affiché.</string>
+    <string name="org_conversation_member_unavailable">La conversation de ce membre est indisponible.</string>
+    <string name="org_conversation_gap">Certaines activités peuvent être indisponibles.</string>
+    <string name="org_conversation_coverage_unknown">L’étendue du contenu disponible est inconnue.</string>
+    <string name="org_member_state_working">Le membre travaille</string>
+    <string name="org_member_state_waiting">Le membre attend</string>
+    <string name="org_member_state_failed">Le membre a échoué</string>
+    <string name="org_member_state_blocked">Le membre est bloqué</string>
+    <string name="org_member_state_idle">Le membre est inactif</string>
+    <string name="org_member_state_unknown">L’état du membre est inconnu</string>
+    <string name="org_conversation_new">Nouveaux messages</string>
+    <string name="org_conversation_older">Charger les messages précédents</string>
+    <string name="org_conversation_input">Entrée</string>
+    <string name="org_conversation_output">Sortie</string>
+    <string name="org_conversation_exit">Code de sortie</string>
+    <string name="org_conversation_latest">Revenir aux derniers messages</string>
+    <string name="org_conversation_error_retained">Actualisation impossible · affichage des messages vérifiés précédemment</string>
+    <string name="org_conversation_offline_empty">Connexion interrompue · aucun message disponible</string>
+    <string name="organization_native_root">Conversation racine</string>
+    <string name="organization_native_member">Membre</string>
+    <string name="organization_native_conversation_unavailable">La conversation de ce membre est indisponible.</string>
+</resources>

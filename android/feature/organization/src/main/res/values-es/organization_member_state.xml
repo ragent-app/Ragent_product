@@ -1,0 +1,20 @@
+<resources>
+    <string name="organization_state_active">Activo</string>
+    <string name="organization_state_done">Completado</string>
+    <string name="organization_state_paused">En pausa</string>
+    <string name="organization_state_failed">Error</string>
+    <string name="organization_state_unknown">Esperando actualización de estado</string>
+    <string name="organization_state_idle">Inactivo</string>
+    <string name="organization_state_waiting">En espera</string>
+    <string name="organization_state_blocked">Bloqueado</string>
+    <string name="organization_node_working">Trabajando</string>
+    <string name="organization_node_waiting">En espera</string>
+    <string name="organization_node_blocked">Bloqueado</string>
+    <string name="organization_node_reviewing">En revisión</string>
+    <string name="organization_node_done">Completado</string>
+    <string name="organization_node_failed">Error</string>
+    <string name="organization_node_provisioning">Preparando</string>
+    <string name="organization_node_paused">En pausa</string>
+    <string name="organization_node_idle">Inactivo</string>
+    <string name="organization_conversation_close">Cerrar conversación</string>
+</resources>

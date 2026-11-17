@@ -1,0 +1,20 @@
+<resources>
+    <string name="organization_state_active">進行中</string>
+    <string name="organization_state_done">已完成</string>
+    <string name="organization_state_paused">已暫停</string>
+    <string name="organization_state_failed">失敗</string>
+    <string name="organization_state_unknown">等待狀態更新</string>
+    <string name="organization_state_idle">閒置</string>
+    <string name="organization_state_waiting">等待中</string>
+    <string name="organization_state_blocked">受阻</string>
+    <string name="organization_node_working">工作中</string>
+    <string name="organization_node_waiting">等待中</string>
+    <string name="organization_node_blocked">受阻</string>
+    <string name="organization_node_reviewing">審核中</string>
+    <string name="organization_node_done">已完成</string>
+    <string name="organization_node_failed">失敗</string>
+    <string name="organization_node_provisioning">準備中</string>
+    <string name="organization_node_paused">已暫停</string>
+    <string name="organization_node_idle">閒置</string>
+    <string name="organization_conversation_close">關閉對話</string>
+</resources>

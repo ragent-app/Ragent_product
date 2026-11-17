@@ -1,0 +1,30 @@
+<resources>
+    <string name="org_conversation_loading">Cargando conversación…</string>
+    <string name="org_conversation_unbound">Aún no hay conversación de trabajo.</string>
+    <string name="org_conversation_denied">Esta conversación no está disponible.</string>
+    <string name="org_conversation_offline">Sin conexión · se muestran los últimos mensajes verificados</string>
+    <string name="org_conversation_error">Conversación no disponible.</string>
+    <string name="org_conversation_empty">Aún no hay mensajes.</string>
+    <string name="org_conversation_activity_only">Solo actividad y resultados disponibles</string>
+    <string name="org_conversation_captured_only">Solo se muestra el contenido capturado por la ejecución principal.</string>
+    <string name="org_conversation_member_unavailable">La conversación de este miembro no está disponible.</string>
+    <string name="org_conversation_gap">Es posible que alguna actividad no esté disponible.</string>
+    <string name="org_conversation_coverage_unknown">Se desconoce el alcance del contenido disponible.</string>
+    <string name="org_member_state_working">El miembro está trabajando</string>
+    <string name="org_member_state_waiting">El miembro está esperando</string>
+    <string name="org_member_state_failed">El miembro falló</string>
+    <string name="org_member_state_blocked">El miembro está bloqueado</string>
+    <string name="org_member_state_idle">El miembro está inactivo</string>
+    <string name="org_member_state_unknown">Se desconoce el estado del miembro</string>
+    <string name="org_conversation_new">Mensajes nuevos</string>
+    <string name="org_conversation_older">Cargar mensajes anteriores</string>
+    <string name="org_conversation_input">Entrada</string>
+    <string name="org_conversation_output">Salida</string>
+    <string name="org_conversation_exit">Código de salida</string>
+    <string name="org_conversation_latest">Volver a los últimos mensajes</string>
+    <string name="org_conversation_error_retained">No se pudo actualizar · se muestran mensajes verificados anteriormente</string>
+    <string name="org_conversation_offline_empty">Conexión interrumpida · no hay mensajes disponibles</string>
+    <string name="organization_native_root">Conversación raíz</string>
+    <string name="organization_native_member">Miembro</string>
+    <string name="organization_native_conversation_unavailable">La conversación de este miembro no está disponible.</string>
+</resources>

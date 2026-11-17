@@ -1,0 +1,30 @@
+<resources>
+    <string name="org_conversation_loading">会話を読み込み中…</string>
+    <string name="org_conversation_unbound">作業の会話はまだありません。</string>
+    <string name="org_conversation_denied">この会話は利用できません。</string>
+    <string name="org_conversation_offline">オフライン · 最後に確認したメッセージを表示</string>
+    <string name="org_conversation_error">会話を利用できません。</string>
+    <string name="org_conversation_empty">メッセージはまだありません。</string>
+    <string name="org_conversation_activity_only">利用可能な活動と結果のみ</string>
+    <string name="org_conversation_captured_only">親の実行で取得された内容のみ表示されます。</string>
+    <string name="org_conversation_member_unavailable">このメンバーの会話は利用できません。</string>
+    <string name="org_conversation_gap">一部の活動を利用できない場合があります。</string>
+    <string name="org_conversation_coverage_unknown">利用可能な内容の範囲は不明です。</string>
+    <string name="org_member_state_working">メンバーは作業中です</string>
+    <string name="org_member_state_waiting">メンバーは待機中です</string>
+    <string name="org_member_state_failed">メンバーは失敗しました</string>
+    <string name="org_member_state_blocked">メンバーはブロックされています</string>
+    <string name="org_member_state_idle">メンバーは待機状態です</string>
+    <string name="org_member_state_unknown">メンバーの状態は不明です</string>
+    <string name="org_conversation_new">新しいメッセージ</string>
+    <string name="org_conversation_older">以前のメッセージを読み込む</string>
+    <string name="org_conversation_input">入力</string>
+    <string name="org_conversation_output">出力</string>
+    <string name="org_conversation_exit">終了コード</string>
+    <string name="org_conversation_latest">最新に戻る</string>
+    <string name="org_conversation_error_retained">更新できませんでした · 以前確認したメッセージを表示</string>
+    <string name="org_conversation_offline_empty">接続が中断されました · 利用できるメッセージはありません</string>
+    <string name="organization_native_root">ルート会話</string>
+    <string name="organization_native_member">メンバー</string>
+    <string name="organization_native_conversation_unavailable">このメンバーの会話は利用できません。</string>
+</resources>

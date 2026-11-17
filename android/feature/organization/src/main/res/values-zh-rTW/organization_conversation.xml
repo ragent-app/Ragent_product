@@ -1,0 +1,30 @@
+<resources>
+    <string name="org_conversation_loading">正在載入對話…</string>
+    <string name="org_conversation_unbound">尚無工作對話。</string>
+    <string name="org_conversation_denied">此對話無法使用。</string>
+    <string name="org_conversation_offline">離線 · 顯示上次驗證的訊息</string>
+    <string name="org_conversation_error">對話無法使用。</string>
+    <string name="org_conversation_empty">尚無訊息。</string>
+    <string name="org_conversation_activity_only">僅顯示可用的活動與結果</string>
+    <string name="org_conversation_captured_only">僅顯示父執行期間擷取的內容。</string>
+    <string name="org_conversation_member_unavailable">此成員的對話無法使用。</string>
+    <string name="org_conversation_gap">部分活動可能無法使用。</string>
+    <string name="org_conversation_coverage_unknown">可用內容的涵蓋範圍未知。</string>
+    <string name="org_member_state_working">成員正在工作</string>
+    <string name="org_member_state_waiting">成員正在等待</string>
+    <string name="org_member_state_failed">成員執行失敗</string>
+    <string name="org_member_state_blocked">成員受阻</string>
+    <string name="org_member_state_idle">成員閒置</string>
+    <string name="org_member_state_unknown">成員狀態未知</string>
+    <string name="org_conversation_new">新訊息</string>
+    <string name="org_conversation_older">載入較早訊息</string>
+    <string name="org_conversation_input">輸入</string>
+    <string name="org_conversation_output">輸出</string>
+    <string name="org_conversation_exit">結束代碼</string>
+    <string name="org_conversation_latest">返回最新訊息</string>
+    <string name="org_conversation_error_retained">無法重新整理 · 顯示先前驗證的訊息</string>
+    <string name="org_conversation_offline_empty">連線中斷 · 沒有可用訊息</string>
+    <string name="organization_native_root">根對話</string>
+    <string name="organization_native_member">成員</string>
+    <string name="organization_native_conversation_unavailable">此成員的對話無法使用。</string>
+</resources>
