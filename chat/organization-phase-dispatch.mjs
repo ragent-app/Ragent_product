@@ -8,6 +8,7 @@ import { getDefaultCollaborationOrchestrator } from './collaboration-orchestrato
 import { getOrganization, getRevision, listOrganizationNodes } from './organization-store.mjs';
 import { getSession } from './session-manager.mjs';
 import { getModelsForTool } from './models.mjs';
+import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { assertRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { createHash } from 'crypto';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
@@ -189,10 +190,17 @@ export async function dispatchOrganizationPhase({
     }
     const actualRuntime = runtimeForSession(session);
     await validateSessionEffort(actualRuntime);
-    const provider = text(session.providerProfile, 160);
+    // Preserve the legacy default only when the frozen selection did not pin a
+    // provider. It is a routing fallback, not a provider-reported actual value.
+    const frozenProvider = text(nodePlan?.runtime?.provider || nodePlan?.runtime?.providerProfile
+      || nodePlan?.runtimeDecision?.selected?.provider || nodePlan?.runtimeDecision?.selected?.providerProfile, 160);
+    const fallbackProvider = !frozenProvider && !session.providerProfile
+      ? await getToolDefinitionAsync(actualRuntime.tool).catch(() => null) : null;
+    const provider = text(session.providerProfile || fallbackProvider?.provider, 160);
     const runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
     const rootSession = await getSession(organization.rootSessionId);
+    if (!rootSession) throw dispatchError('ORG_PHASE_ROOT_SESSION_MISSING', 'Root session is unavailable for runtime constraint validation', 409);
     const currentSettings = rootSession?.sessionClass === 'ROOT_LEADERSHIP'
       ? await readSessionRuntimeConstraints(organization.rootSessionId) : { constraints: {} };
     const currentConstraints = Object.fromEntries(Object.entries(currentSettings.constraints).filter(([, constraint]) =>
@@ -247,6 +255,7 @@ export async function dispatchOrganizationPhase({
       },
       organizationId: organization.id,
       organizationRuntimeConstraints: currentConstraints,
+      ...(nodePlan?.runtimeDecision ? { organizationRuntimeDecision: nodePlan.runtimeDecision } : {}),
       organizationNodeId: node.id,
       organizationBindingGeneration: node.bindingGeneration,
       organizationPhaseDispatch: { eventKey, phaseId: normalizedPhaseId, revision: targetRevision, taskId },

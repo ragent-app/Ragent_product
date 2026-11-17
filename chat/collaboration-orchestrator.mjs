@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'crypto';
-import { applyRuntimeConstraints, assertRuntimeConstraints } from './organization-runtime-decision.mjs';
+import { applyRuntimeConstraints, assertRuntimeConstraints, createRuntimeSelectionRecord } from './organization-runtime-decision.mjs';
 import { compileCollaborationPlan, classifyAttemptOutcome } from './collaboration-plan.mjs';
 import {
   assertManagerCanDelegate,
@@ -673,7 +673,8 @@ export function createCollaborationOrchestrator(options = {}) {
           canWrite: effective.canWrite,
           canReview: effective.canReview,
         },
-        ...(runtime ? { runtime } : {}),
+        ...(runtime ? { runtime, runtimeDecision: policy.organizationRuntimeDecision
+          || createRuntimeSelectionRecord({ runtime, constraints: runtimeConstraints }) } : {}),
         runtimeConstraints,
       };
       if (runtime) assertRuntimeConstraints(runtime, runtimeConstraints);
