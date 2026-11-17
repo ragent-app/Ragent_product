@@ -70,6 +70,9 @@ export function filterRuntimeCandidates(candidates = [], { constraints = {}, bud
     const capabilities = obj(candidate.capabilities);
     if (Array.isArray(requirements.tools) && requirements.tools.some((tool) => !Array.isArray(capabilities.tools) || !capabilities.tools.includes(tool))) return [];
     if (text(requirements.environment) && text(capabilities.environment) !== text(requirements.environment)) return [];
+    if (Number.isSafeInteger(requirements.minimumContextTokens) && requirements.minimumContextTokens > 0
+        && (!Number.isFinite(candidate.contextWindow) || candidate.contextWindow < requirements.minimumContextTokens)) return [];
+    if (requirements.advancedRequired === true && capabilities.advanced === false) return [];
     const evidence = obj(candidate.evidence);
     const expires = Date.parse(evidence.expiresAt || '');
     const fresh = Number.isFinite(expires) && expires > now;
@@ -91,7 +94,7 @@ export function createRuntimeSelectionRecord({ runtime, constraints = {}, eviden
   return { schemaVersion: 1, requestedConstraints, selected: { ...runtime },
     evidence: evidence && typeof evidence === 'object' ? structuredClone(evidence) : null,
     cost: cost && typeof cost === 'object' ? structuredClone(cost) : { kind: 'unknown' },
-    rationale: text(rationale).slice(0, 2000), actual: null };
+    rationale: text(rationale).slice(0, 2000), rationaleSource: text(rationale) ? 'leader' : null, actual: null };
 }
 
 // Compact provider-scoped catalog facts: effort lists remain per model and
@@ -101,17 +104,89 @@ export function runtimeCandidatesFromCatalog(catalog = []) {
   return catalog.flatMap((entry) => (entry.providerCatalogs || []).flatMap((provider) =>
     (provider.models || []).map((model) => ({ tool: entry.tool,
       provider: provider.providerProfileId, model: model.id, modelBare: model.model,
-      effortLevels: model.capabilities?.effort?.levels || [],
+      effortLevels: model.capabilities?.effort?.levels || [], contextWindow: model.contextWindow ?? null,
       catalog: { source: provider.source, status: provider.status, version: provider.catalogVersion,
         fetchedAt: provider.fetchedAt, expiresAt: provider.expiresAt },
       quota: provider.quota, health: 'unknown', pricing: model.pricing, capabilities: model.capabilities,
     }))));
 }
 
-export function queryRuntimeCandidates(catalog, { tool = '', provider = '', model = '', offset = 0, limit = 40 } = {}) {
+// The assessment separates verified exclusion from unknown evidence. It is a
+// recommendation aid, not a claim about a model's quality or availability.
+export function assessRuntimeCandidate(candidate, { requirements = {}, constraints = {}, budget = null, now = Date.now() } = {}) {
+  const normalized = normalizeUserRuntimeConstraints(constraints);
+  const unmet = [], unknown = [];
+  const runtime = { tool: candidate.tool, provider: candidate.provider, model: candidate.model };
+  for (const [field, constraint] of Object.entries(normalized)) {
+    if (constraint.mode !== 'locked') continue;
+    if (field === 'effort') {
+      if (!candidate.effortLevels?.length) unknown.push('effort');
+      else if (!candidate.effortLevels.includes(constraint.value)) unmet.push('effort');
+    } else if (!matchesConstraint(field, runtime[field], constraint.value, runtime)) unmet.push(field);
+  }
+  const capabilities = obj(candidate.capabilities);
+  for (const required of Array.isArray(requirements.tools) ? requirements.tools : []) {
+    if (!Array.isArray(capabilities.tools)) unknown.push(`tool:${required}`);
+    else if (!capabilities.tools.includes(required)) unmet.push(`tool:${required}`);
+  }
+  if (text(requirements.environment)) {
+    if (!text(capabilities.environment)) unknown.push('environment');
+    else if (capabilities.environment !== requirements.environment) unmet.push('environment');
+  }
+  if (Number.isSafeInteger(requirements.minimumContextTokens) && requirements.minimumContextTokens > 0) {
+    if (!Number.isFinite(candidate.contextWindow)) unknown.push('context_window');
+    else if (candidate.contextWindow < requirements.minimumContextTokens) unmet.push('context_window');
+  }
+  if (requirements.advancedRequired === true) {
+    if (typeof capabilities.advanced !== 'boolean') unknown.push('advanced_capability');
+    else if (!capabilities.advanced) unmet.push('advanced_capability');
+  }
+  const rawExpiry = candidate.catalog?.expiresAt;
+  const expires = typeof rawExpiry === 'number' ? rawExpiry : Date.parse(rawExpiry || '');
+  if (candidate.catalog?.status !== 'fresh' || !Number.isFinite(expires) || expires <= now) unknown.push('catalog_freshness');
+  // A model catalog and a quota snapshot do not establish runtime health.
+  unknown.push('runtime_health');
+  const quotaTime = Date.parse(candidate.quota?.fetchedAt || '');
+  const freshQuota = candidate.quota?.status === 'ok' && Number.isFinite(quotaTime) && now - quotaTime >= 0 && now - quotaTime <= 120000;
+  if (!freshQuota) unknown.push('quota');
+  else if ((candidate.quota?.windows || []).some((window) => window.remainingPercent === 0 && Date.parse(window.resetsAt || '') > now)) unmet.push('quota_exhausted');
+  // Comparable total estimates must come from a server-provided, time-bounded
+  // source. Static per-token prices do not meet that requirement.
+  const estimate = obj(candidate.totalCost);
+  const costExpires = Date.parse(estimate.expiresAt || '');
+  const costKnown = Number.isFinite(estimate.amount) && estimate.amount >= 0 && text(estimate.currency)
+    && text(estimate.source) && estimate.coverage === 'total' && Number.isFinite(costExpires) && costExpires > now;
+  if (!costKnown) unknown.push('total_cost');
+  else if (budget && Number.isFinite(budget.remaining) && text(budget.currency) === text(estimate.currency) && estimate.amount > budget.remaining) unmet.push('budget');
+  const preferredMatches = Object.entries(normalized).filter(([field, entry]) => entry.mode === 'preferred'
+    && (field === 'effort' ? candidate.effortLevels?.includes(entry.value) : matchesConstraint(field, runtime[field], entry.value, runtime))).length;
+  return { status: unmet.length ? 'ineligible' : unknown.length ? 'needs_evidence' : 'eligible',
+    unmet, unknown, preferredMatches, advancedRequired: requirements.advancedRequired === true,
+    qualityFloor: text(requirements.qualityFloor).slice(0, 500) || null,
+    comparableCost: costKnown ? { amount: estimate.amount, currency: estimate.currency, source: estimate.source, expiresAt: estimate.expiresAt } : null };
+}
+
+export function queryRuntimeCandidates(catalog, { tool = '', provider = '', model = '', offset = 0, limit = 40,
+  requirements = {}, constraints = {}, budget = null, now = Date.now() } = {}) {
   const all = runtimeCandidatesFromCatalog(catalog).filter((candidate) =>
     (!tool || candidate.tool === tool) && (!provider || candidate.provider === provider)
-      && (!model || candidate.model === model));
+      && (!model || candidate.model === model))
+    .map((candidate) => ({ ...candidate, assessment: assessRuntimeCandidate(candidate, { requirements, constraints, budget, now }) }));
+  const rank = { eligible: 0, needs_evidence: 1, ineligible: 2 };
+  const currencies = [...new Set(all.map((entry) => entry.assessment.comparableCost?.currency).filter(Boolean))];
+  const considered = all.filter((entry) => entry.assessment.status !== 'ineligible');
+  const comparableCurrency = currencies.length === 1 && considered.length > 0
+    && considered.every((entry) => entry.assessment.comparableCost) ? currencies[0] : '';
+  all.sort((a, b) => {
+    const status = rank[a.assessment.status] - rank[b.assessment.status];
+    if (status) return status;
+    const preference = b.assessment.preferredMatches - a.assessment.preferredMatches;
+    if (preference) return preference;
+    const ac = a.assessment.comparableCost, bc = b.assessment.comparableCost;
+    if (ac && bc && comparableCurrency && ac.currency === comparableCurrency && bc.currency === comparableCurrency && ac.amount !== bc.amount) return ac.amount - bc.amount;
+    return a.assessment.unknown.length - b.assessment.unknown.length
+      || a.tool.localeCompare(b.tool) || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model);
+  });
   const start = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
   const size = Number.isSafeInteger(limit) ? Math.max(1, Math.min(limit, 80)) : 40;
   const items = all.slice(start, start + size);
@@ -125,7 +200,7 @@ export function candidateForRuntime(catalog, runtime) {
     && (entry.model === runtime.model || entry.modelBare === runtime.model));
   if (!selected) return null;
   if (runtime.effort && selected.effortLevels.length && !selected.effortLevels.includes(runtime.effort)) return null;
-  return { runtime: { ...runtime }, capabilities: selected.capabilities || {},
+  return { runtime: { ...runtime }, capabilities: selected.capabilities || {}, contextWindow: selected.contextWindow,
     evidence: { availability: 'unknown', source: selected.catalog.source, catalog: selected.catalog, quota: selected.quota },
     cost: selected.pricing || { kind: 'unknown' } };
 }

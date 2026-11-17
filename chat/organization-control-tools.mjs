@@ -14,6 +14,10 @@ export async function executeOrganizationControlTool({ authSession, action, args
     if (!session || session.sessionPlane === 'organization') throw fail();
     const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) ||
       (session.sessionClass === 'ROOT_LEADERSHIP' && id === 'ragent:builtin:root');
+    if (action === 'candidates.query') {
+      const { queryAuthorizedRuntimeCandidates } = await import('./organization-candidate-query.mjs');
+      return queryAuthorizedRuntimeCandidates({ authSession, session, args });
+    }
     if (action === 'state.get') {
       if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' ||
           session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail();

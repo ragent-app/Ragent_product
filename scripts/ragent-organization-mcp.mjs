@@ -10,10 +10,10 @@ const runId = String(process.env.RAGENT_SESSION_CONTROL_RUN_ID || '').trim();
 const turnId = String(process.env.RAGENT_SESSION_CONTROL_TURN_ID || '').trim();
 const endpoint = process.env.RAGENT_ORGANIZATION_TOOL_SCOPE === 'node' ? 'tools' : 'tools-root';
 const valid = !!(sessionId && token && runId && turnId);
-const readTool = { name: 'ragent_organization_read', description: 'List or read authorized Ragent skills. The server validates this Run on every call.',
+const readTool = { name: 'ragent_organization_read', description: 'Read authorized skills, organization state and runtime candidates. The server validates this Run on every call.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
-    action: { type: 'string', enum: ['skills.list', 'skills.read', 'state.get', 'plan.status', 'incidents.list', 'incident.get'] },
-    args: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, expectedHash: { type: 'string' }, incidentId: { type: 'string' }, limit: { type: 'integer' } } },
+    action: { type: 'string', enum: ['skills.list', 'skills.read', 'candidates.query', 'state.get', 'plan.status', 'incidents.list', 'incident.get'] },
+    args: { type: 'object', additionalProperties: false, properties: { id: { type: 'string' }, expectedHash: { type: 'string' }, incidentId: { type: 'string' }, limit: { type: 'integer' }, offset: { type: 'integer' }, agentId: { type: 'string' }, nodeKey: { type: 'string' }, tool: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, requirements: { type: 'object', additionalProperties: false, properties: { tools: { type: 'array', items: { type: 'string' } }, environment: { type: 'string' }, minimumContextTokens: { type: 'integer' }, advancedRequired: { type: 'boolean' }, qualityFloor: { type: 'string' } } } } },
   }, required: ['action'] } };
 const actionTool = { name: 'ragent_organization_action', description: 'Submit one root organization proposal, or acknowledge or resolve an assigned incident. A proposal is not a dispatched Run; incident resolution is not proof that a Run recovered.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
@@ -32,7 +32,7 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     else if (request.method === 'ping') result = {};
     else if (request.method === 'tools/list') result = { tools: valid ? [readTool, actionTool] : [] };
     else if (request.method === 'tools/call' && valid &&
-        ((request.params?.name === readTool.name && ['skills.list', 'skills.read', 'state.get', 'plan.status', 'incidents.list', 'incident.get'].includes(request.params?.arguments?.action)) ||
+        ((request.params?.name === readTool.name && ['skills.list', 'skills.read', 'candidates.query', 'state.get', 'plan.status', 'incidents.list', 'incident.get'].includes(request.params?.arguments?.action)) ||
          (request.params?.name === actionTool.name && ['incident.ack', 'incident.resolve', 'plan.submit'].includes(request.params?.arguments?.action)))) {
       const response = await client.request(`/api/sessions/${encodeURIComponent(sessionId)}/organization/${endpoint}`, { method: 'POST', body: request.params.arguments || {} });
       result = { content: [{ type: 'text', text: JSON.stringify(response.json || { error: 'Organization request failed' }) }], ...(response.response.ok ? {} : { isError: true }) };

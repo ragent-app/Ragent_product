@@ -471,6 +471,7 @@ export async function buildOrganizationRuntimeCatalog({
           const pricing = getPricingMetadataForModel(model.model, { tool });
           return { id: model.id, model: model.model, providerProfileId: model.providerProfileId,
             capabilities: model.capabilities || null,
+            contextWindow: Number.isFinite(model.contextWindow) ? model.contextWindow : null,
             pricing: pricing ? { ...pricing, kind: 'estimate', source: 'static_table', asOf: null } : { kind: 'unknown' } };
         }),
       };

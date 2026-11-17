@@ -101,7 +101,7 @@ function normalizeNode(raw, index) {
   const value = assertPlainObject(raw, `nodes[${index}]`);
   assertNoUnknownKeys(value, new Set([
     'stableKey', 'role', 'agentId', 'capabilities', 'dependsOn', 'phaseId', 'parentKey',
-    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility', 'runtimeRequirements',
+    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility', 'runtimeRequirements', 'runtimeRationale',
   ]), `nodes[${index}]`);
   const stableKey = text(value.stableKey);
   if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key' });
@@ -116,13 +116,22 @@ function normalizeNode(raw, index) {
   }
   const acceptance = normalizeAcceptance(value.acceptance, `nodes[${index}].acceptance`, { allowEmpty: true });
   const requirements = value.runtimeRequirements === undefined ? {} : assertPlainObject(value.runtimeRequirements, `nodes[${index}].runtimeRequirements`);
-  assertNoUnknownKeys(requirements, new Set(['tools', 'environment']), `nodes[${index}].runtimeRequirements`);
+  assertNoUnknownKeys(requirements, new Set(['tools', 'environment', 'minimumContextTokens', 'advancedRequired', 'qualityFloor']), `nodes[${index}].runtimeRequirements`);
   if (requirements.tools !== undefined && (!Array.isArray(requirements.tools) || requirements.tools.length > 32
       || requirements.tools.some((tool) => typeof tool !== 'string' || !tool.trim() || tool.length > 120))) {
     throw plannerError(PLANNER_ERROR, 'runtimeRequirements.tools must be a bounded list of tool names');
   }
   if (requirements.environment !== undefined && (typeof requirements.environment !== 'string' || requirements.environment.length > 120)) {
     throw plannerError(PLANNER_ERROR, 'runtimeRequirements.environment must be a bounded string');
+  }
+  if (requirements.minimumContextTokens !== undefined && (!Number.isSafeInteger(requirements.minimumContextTokens) || requirements.minimumContextTokens < 1)) {
+    throw plannerError(PLANNER_ERROR, 'runtimeRequirements.minimumContextTokens must be a positive integer');
+  }
+  if (requirements.advancedRequired !== undefined && typeof requirements.advancedRequired !== 'boolean') {
+    throw plannerError(PLANNER_ERROR, 'runtimeRequirements.advancedRequired must be boolean');
+  }
+  if (requirements.qualityFloor !== undefined && (typeof requirements.qualityFloor !== 'string' || requirements.qualityFloor.length > 500)) {
+    throw plannerError(PLANNER_ERROR, 'runtimeRequirements.qualityFloor must be a bounded string');
   }
   const runtime = value.runtime === undefined ? {} : normalizeRuntimeSelection(value.runtime);
   const runtimePolicy = value.runtimePolicy === undefined
@@ -143,8 +152,9 @@ function normalizeNode(raw, index) {
     scope: clone(value.scope, {}),
     scopes: clone(value.scopes, {}),
     ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
-    ...(Object.keys(requirements).length > 0 ? { runtimeRequirements: { tools: list(requirements.tools), environment: text(requirements.environment) } } : {}),
+    ...(Object.keys(requirements).length > 0 ? { runtimeRequirements: { tools: list(requirements.tools), environment: text(requirements.environment), ...(requirements.minimumContextTokens ? { minimumContextTokens: requirements.minimumContextTokens } : {}), ...(requirements.advancedRequired === true ? { advancedRequired: true } : {}), ...(text(requirements.qualityFloor) ? { qualityFloor: text(requirements.qualityFloor) } : {}) } } : {}),
     ...(runtimePolicy ? { runtimePolicy: clone(runtimePolicy, {}) } : {}),
+    ...(Object.hasOwn(value, 'runtimeRationale') ? { runtimeRationale: displayMetadata(value.runtimeRationale, `nodes[${index}].runtimeRationale`, 2000) } : {}),
     acceptance,
     reviewRequired: value.reviewRequired === true,
     maxChildren: boundedInteger(value.maxChildren, null, { min: 0, max: 10000 }),
@@ -473,7 +483,7 @@ export async function compileOrganizationProposal(input, options = {}) {
       const requirements = node.runtimeRequirements || decision.requirements || {};
       const matchedCandidate = runtime && Array.isArray(decision.catalog) ? candidateForRuntime(decision.catalog, runtime) : null;
       const suppliedCandidates = Array.isArray(decision.candidates) ? decision.candidates : matchedCandidate ? [matchedCandidate] : null;
-      if ((requirements.tools?.length || requirements.environment) && (!runtime || !suppliedCandidates)) {
+      if ((requirements.tools?.length || requirements.environment || requirements.minimumContextTokens) && (!runtime || !suppliedCandidates)) {
         throw plannerError(PLANNER_RESOLVER_REJECTED, 'runtime requirements need verified candidate evidence', { reason: 'runtime_evidence_unknown' });
       }
       let runtimeDecision = null;
@@ -491,7 +501,7 @@ export async function compileOrganizationProposal(input, options = {}) {
           selectedEvidence = selected.evidence;
           selectedCost = selected.cost;
         }
-        runtimeDecision = createRuntimeSelectionRecord({ runtime, constraints, evidence: selectedEvidence, cost: selectedCost, rationale: decision.rationale });
+        runtimeDecision = createRuntimeSelectionRecord({ runtime, constraints, evidence: selectedEvidence, cost: selectedCost, rationale: node.runtimeRationale || decision.rationale });
       }
       const resolved = {
         selectedAgentId: profile.agentId,
