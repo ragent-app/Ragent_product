@@ -3160,8 +3160,11 @@ private fun ChatSurface(
                             // insets already. Do not reserve that strip twice.
                             val remaining = readingSystemInsets.getBottom(density)
                             val consumed = (readingNavigationInsets.getBottom(density) - remaining).coerceAtLeast(0)
-                            maxOf(remaining, imeInsets.getBottom(density) - consumed).toFloat() +
-                                with(density) { composerBottomSpacing.toPx() }
+                            // The collapsed shell already sits above the IME. Applying
+                            // the window IME inset here would hide its message tail twice.
+                            val bottomInset = if (organizationCollapsed) remaining
+                                else maxOf(remaining, imeInsets.getBottom(density) - consumed)
+                            bottomInset.toFloat() + with(density) { composerBottomSpacing.toPx() }
                         },
                         presentationAlpha = if (readingPreparing) 0f else
                             chatReadingAlpha(readingReveal) * chatWritingContextAlpha(composerFullscreenProgress),
