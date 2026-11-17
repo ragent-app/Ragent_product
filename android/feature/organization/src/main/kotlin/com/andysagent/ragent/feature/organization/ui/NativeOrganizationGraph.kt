@@ -69,6 +69,20 @@ fun UnifiedOrganizationGraph(
     }
     val vm: OrganizationViewModel = viewModel(key = key, factory = factory)
     var conversationRuntime by remember(transport, sessionId, identityScope) { mutableStateOf<Pair<String, String?>?>(null) }
+    var knownMemberStates by remember(transport, sessionId, identityScope) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(unifiedMembers, unifiedActionsFresh) {
+        if (unifiedMembers == null) {
+            knownMemberStates = emptyMap()
+        } else if (unifiedActionsFresh) {
+            val currentRefs = unifiedMembers.members.mapNotNull { it.conversation?.ref }.toSet()
+            val observed = unifiedMembers.members.mapNotNull { member ->
+                val ref = member.conversation?.ref ?: return@mapNotNull null
+                val state = member.activity?.state?.takeUnless { it == "unknown" } ?: return@mapNotNull null
+                ref to state
+            }.toMap()
+            knownMemberStates = knownMemberStates.filterKeys { it in currentRefs } + observed
+        }
+    }
     val rootId = unifiedMembers?.rootCanonicalId ?: "native-root:$sessionId"
     LaunchedEffect(vm, rootId, rootAction, records, nativeActionsFresh, nativeReceiptElapsed, unifiedMembers, unifiedReceiptElapsed, unifiedActionsFresh) {
         while (true) {
@@ -104,7 +118,7 @@ fun UnifiedOrganizationGraph(
         onOpenNodeConsumed = onProgrammaticOpenConsumed,
         conversationRuntimeState = { nodeId ->
             conversationRuntime?.takeIf { it.first == nodeId }?.second
-                ?: nodes.firstOrNull { it.id == nodeId }?.member?.activity?.state?.takeIf { unifiedActionsFresh }
+                ?: nodes.firstOrNull { it.id == nodeId }?.member?.conversation?.ref?.let { knownMemberStates[it] }
         },
         conversationContent = { nodeId, contentModifier ->
             val ref = nodes.firstOrNull { it.id == nodeId }?.member?.conversation?.ref
