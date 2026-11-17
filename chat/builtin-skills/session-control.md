@@ -3,6 +3,10 @@ name: Ragent session control
 description: Session, collaboration, organization, connector, and artifact API routing and boundaries.
 ---
 
+## Parallel Session Spawning
+
+Split only independent work when useful and authorized; respect a user request to remain in the current session. Use `ragent session-spawn --task "<focused task>" --json`; add `--wait` when the result is needed and `--final-only` for a bounded summary. If the CLI is unavailable, use `node "$RAGENT_PROJECT_ROOT/cli.js" session-spawn` in a POSIX shell or `node "$env:RAGENT_PROJECT_ROOT/cli.js" session-spawn` in PowerShell. Confirm dispatch and results from actual responses; a handoff is not proof of execution.
+
 ## Session Control API
 This is a product route index, not a grant of authority. Availability depends on the current run's principal, capability, feature flags and server authorization. Use only operations actually granted to this run; do not attempt to bypass a denial.
 
