@@ -1,12 +1,11 @@
 // Bounded, owner-only activity supplement for the organization projection.
 // Never return tool arguments, results, labels, or inferred roles.
 import { listOrganizationNodes } from './organization-store.mjs';
-import { buildSessionDisplayEvents } from './session-display-events.mjs';
-import { buildRunActivityProjection } from './run-activity-projection.mjs';
+import { readIncrementalActivity } from './organization-run-activity.mjs';
 
 const TOOL_KINDS = new Set(['read', 'list', 'search', 'inspect', 'edit', 'delete', 'move', 'execute', 'mcp', 'subagent',
   'task_create', 'task_update', 'task_read', 'task_list', 'task_stop', 'message', 'wait', 'question', 'web', 'fetch',
-  'click', 'input', 'scroll', 'capture', 'generate', 'switch_mode', 'other']);
+  'click', 'input', 'scroll', 'capture', 'generate', 'switch_mode', 'other', 'responding']);
 const IDLE = new Set(['idle', 'completed', 'cancelled', 'replaced', 'unbound']);
 
 function base(state, extra = {}) { return { state, kind: null, actionRequired: false, ...extra }; }
@@ -53,29 +52,16 @@ async function readCurrentActivity(node) {
     const { getSessionReadSnapshot, getSessionEventsPage } = await import('./session-manager.mjs');
     const first = await getSessionReadSnapshot(binding.sessionId);
     if (!first || first.activeRunId !== runId || first.run?.id !== runId || first.run?.sessionId !== binding.sessionId) return base('unknown');
-    const page = await getSessionEventsPage(binding.sessionId, { limit: 32, direction: 'latest', strict: true, historyMeta: first.historyMeta });
+    const activity = await readIncrementalActivity(binding.sessionId, runId, first, getSessionEventsPage);
     const last = await getSessionReadSnapshot(binding.sessionId);
     if (!last || last.activeRunId !== runId || last.run?.id !== runId || last.run?.sessionId !== binding.sessionId ||
-      last.historyMeta?.historyRevision !== first.historyMeta?.historyRevision || last.historyMeta?.latestSeq !== first.historyMeta?.latestSeq ||
-      last.run?.state !== first.run?.state || last.run?.updatedAt !== first.run?.updatedAt) return base('unknown');
+      (last.historyMeta?.latestSeq || 0) < (first.historyMeta?.latestSeq || 0)) return base('unknown');
     const running = first.run.state === 'running';
     const waitingUser = first.run.actionPause?.state === 'waiting_user' || ['awaiting_approval', 'waiting_approval'].includes(first.run.state);
-    const rawEvents = page.events || [];
-    // Missing run identity on a lifecycle-closing event can make an isolated
-    // start look active. In that case retain only the verified run state.
-    const ambiguous = rawEvents.some((event) => !event?.runId && ['tool_result', 'approval_response', 'privileged_batch_response', 'approved_action_state'].includes(event?.type));
-    const display = buildSessionDisplayEvents(rawEvents.filter((event) => event?.runId === runId));
-    const activity = buildRunActivityProjection(display, { sessionRunning: running || waitingUser, run: first.run });
-    const latest = [...display].reverse().find((event) => event?.type === 'operation' && event.runId === runId && ['running', 'waiting_approval'].includes(event.state));
-    const actionRequired = waitingUser || (!ambiguous && activity.actionRequired === true);
-    const state = actionRequired ? 'waiting' : running ? 'working' : 'unknown';
-    // Only an active operation supplies a tool kind. A completed trailing tool
-    // or an incomplete 32-event window cannot create a misleading tool icon.
-    const semantic = latest?.presentation?.labelKind;
-    const rawKind = TOOL_KINDS.has(semantic) ? semantic : latest?.toolCall?.kind;
-    const kind = !ambiguous && !actionRequired && TOOL_KINDS.has(rawKind) ? rawKind : null;
-    return base(state, { kind, actionRequired, runId, sourceSeq: Number.isSafeInteger(activity.sourceSeq) ? activity.sourceSeq : null,
-      _runUpdatedAt: first.run.updatedAt || '' });
+    const state = waitingUser ? 'waiting' : running ? 'working' : 'unknown';
+    const kind = !waitingUser && TOOL_KINDS.has(activity.kind) ? activity.kind : null;
+    return base(state, { kind, actionRequired: waitingUser, runId, sourceSeq: activity.sourceSeq,
+      _runUpdatedAt: first.run.updatedAt || '', _executionHarnessId: first.run.provider || null });
   } catch {
     return base('unknown');
   }
@@ -90,14 +76,21 @@ export async function attachOrganizationNodeActivities(projection, organizationI
   const actualNodes = new Map((await listOrganizationNodes(organizationId)).map((node) => [node.id, node]));
   const { getSessionMeta } = await import('./session-manager.mjs');
   const { getRun } = await import('./runs.mjs');
+  const boundSessions = [...new Set(nodes.map((node) => {
+    const actual = actualNodes.get(node.id);
+    return actual?.organizationId === organizationId && actual.currentSessionId === node.currentBinding?.sessionId &&
+      actual.bindingGeneration === node.currentBinding?.generation ? actual.currentSessionId : null;
+  }).filter(Boolean))];
+  const metadata = new Map(await mapBounded(boundSessions, async (id) => [id, await getSessionMeta(id).catch(() => null)]));
   const checked = await mapBounded(unique, async (node) => {
     const activity = byNode.get(node.id);
     if (!activity?.runId) return [node.id, base('unknown')];
     try {
-      const [session, run] = await Promise.all([getSessionMeta(node.currentBinding.sessionId), getRun(activity.runId)]);
-      if (session?.activeRunId !== activity.runId || run?.sessionId !== node.currentBinding.sessionId || (run.updatedAt || '') !== activity._runUpdatedAt) return [node.id, base('unknown')];
-      const { _runUpdatedAt, ...safe } = activity;
-      return [node.id, safe];
+      const session = metadata.get(node.currentBinding.sessionId);
+      const run = await getRun(activity.runId);
+      if (session?.activeRunId !== activity.runId || run?.sessionId !== node.currentBinding.sessionId || !['running', 'awaiting_approval', 'waiting_approval'].includes(run.state)) return [node.id, base('unknown')];
+      const { _runUpdatedAt, _executionHarnessId, ...safe } = activity;
+      return [node.id, { ...safe, _executionHarnessId }];
     } catch { return [node.id, base('unknown')]; }
   });
   const checkedByNode = new Map(checked);
@@ -105,7 +98,10 @@ export async function attachOrganizationNodeActivities(projection, organizationI
     const actual = actualNodes.get(node.id);
     const bound = actual && actual.organizationId === organizationId && actual.currentSessionId &&
       actual.currentSessionId === node.currentBinding?.sessionId && actual.bindingGeneration === node.currentBinding?.generation;
-    const activity = !bound ? base('unknown') : checkedByNode.get(node.id) || nodeState(node);
-    return { ...node, activity };
+    const checkedActivity = !bound ? base('unknown') : checkedByNode.get(node.id) || nodeState(node);
+    const { _executionHarnessId, ...activity } = checkedActivity;
+    const session = bound ? metadata.get(actual.currentSessionId) : null;
+    const configured = session?.provider || session?.tool || null;
+    return { ...node, activity, executionHarnessId: _executionHarnessId || configured };
   }) };
 }

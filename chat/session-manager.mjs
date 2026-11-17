@@ -285,6 +285,7 @@ import { continueScopedMessageRun, admitScopedMessageLaunch } from './message-co
 import { publishSessionRun } from './session-run-admission.mjs';
 import { currentMessageExecution, withoutMessageExecution, applyMessageExecutionConfiguration } from './message-execution-context.mjs';
 import { appendRetainedMessageEvent } from './history.mjs';
+import { observeLiveActivity } from './organization-run-activity.mjs';
 import { createRunProjectionService } from './run-projection.mjs';
 import {
   createDetachedRunReconciler,
@@ -6184,6 +6185,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   const projection = await collectNormalizedRunEventDelta(run, manifest);
   const messageTimeline = await prepareLiveMessageTimeline(sessionId, projection.normalizedEvents);
   const normalizedEvents = messageTimeline.events;
+  observeLiveActivity(sessionId, runId, normalizedEvents);
   if (!run.firstTextDeltaAt && normalizedEvents.some((event) => (
     event?.type === 'text_delta'
     && typeof event.text === 'string'

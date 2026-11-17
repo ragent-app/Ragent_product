@@ -1,6 +1,8 @@
 // S24 owner-only organization API. Android/Web consume the projection; the
 // explicit provisioning command is the only Runtime-owned mutation exposed.
 import { createHash } from 'crypto';
+import { formalMemberDescriptor, makeMemberRef, parseMemberRef } from './organization-member-reference.mjs';
+import { capturedMember, listMemberEvents } from './organization-member-aggregation.mjs';
 import { access } from 'fs/promises';
 import { constants as fsConstants } from 'fs';
 import {
@@ -29,6 +31,43 @@ function writeError(res, writeJson, error) {
   writeJson(res, status, { error: error?.message || 'Organization request failed', ...(code ? { code } : {}) });
 }
 
+
+async function projectHarnessMembers(rootSessionId, rootMember = null) {
+  const memberEvents = await listMemberEvents(rootSessionId);
+  const rootCanonicalId = rootMember || `root:${rootSessionId}`;
+  const latestByMember = new Map();
+  const births = new Map();
+  const aliasesByMember = new Map();
+  for (const event of memberEvents.events) {
+    const old = latestByMember.get(event.memberId);
+    const aliases = aliasesByMember.get(event.memberId) || new Map();
+    for (const alias of event.aliases || []) {
+      if (alias.kind === 'legacy_delegation' && alias.runId && alias.id) aliases.set(`${alias.runId}\0${alias.id}`, alias);
+    }
+    aliasesByMember.set(event.memberId, aliases);
+    if (event.phase === 'confirmed' && !births.has(event.memberId)) births.set(event.memberId, event);
+    if (!old && event.phase === 'confirmed') latestByMember.set(event.memberId, event);
+    else if (old && (event.runId !== old.runId || (event.seq || 0) >= (old.seq || 0))) {
+      latestByMember.set(event.memberId, event.parent?.kind === 'unknown' ? { ...event, parent: old.parent } : event);
+    }
+  }
+  const members = [...latestByMember.values()].map((event) => {
+    const parent = event.parent?.kind === 'member' ? event.parent.id : event.parent?.kind === 'root_session' && event.parent.id === rootSessionId ? rootCanonicalId : null;
+    const birth = births.get(event.memberId);
+    const actor = birth?.actor?.kind === 'member' ? birth.actor.id :
+      birth?.actor?.kind === 'root_session' && birth.actor.id === rootSessionId ? rootCanonicalId : null;
+    const state = ['spawned', 'running'].includes(event.state) ? 'working' : event.state === 'waiting' ? 'waiting' :
+      event.state === 'failed' ? 'failed' : ['completed', 'cancelled', 'interrupted'].includes(event.state) ? 'idle' : 'unknown';
+    return { canonicalId: event.memberId, sourceTag: event.sourceTag || null, executionHarnessId: event.executionHarnessId || null,
+      parentCanonicalId: parent || null, relationKnown: Boolean(parent), aliases: [...(aliasesByMember.get(event.memberId)?.values() || [])],
+      birth: birth && actor ? { id: birth.id, actorCanonicalId: actor, operationId: birth.operationId || null, timestamp: birth.timestamp || null } : null,
+      activity: { state, kind: null, actionRequired: false, runId: event.runId, sourceSeq: event.seq ?? null },
+      conversation: { ref: makeMemberRef({ kind: 'member', root: rootSessionId, id: event.memberId, runId: event.runId, generation: event._generation }),
+        generation: event._generation, scope: 'activity_only' } };
+  });
+  return { rootCanonicalId, members, membersComplete: false, sourceCoverage: { harness: memberEvents.availability, gap: memberEvents.gap } };
+}
+
 export async function handleOrganizationRoutes({
   req,
   res,
@@ -46,8 +85,101 @@ export async function handleOrganizationRoutes({
   const phaseDispatchMatch = /^\/api\/organizations\/([^/]+)\/phases\/([^/]+)\/dispatch$/.exec(String(pathname || ''));
   const rootSessionMatch = /^\/api\/sessions\/([^/]+)\/organization\/projection$/.exec(String(pathname || ''));
   const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
+  const membersMatch = /^\/api\/sessions\/([^/]+)\/organization\/members$/.exec(String(pathname || ''));
+  const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch) return false;
+  if (membersMatch) {
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(membersMatch[1]);
+      const { getSessionMeta } = await import('./session-manager.mjs');
+      if (!await getSessionMeta(root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const org = await getOrganizationByRootSession(root);
+      let rootMember = null;
+      if (org) {
+        const nodes = await listOrganizationNodes(org.id);
+        const candidates = nodes.filter((node) => node.currentSessionId === root);
+        if (candidates.length === 1) rootMember = `formal:${candidates[0].id}`;
+      }
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, ...(await projectHarnessMembers(root, rootMember)) });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (memberConversationMatch) {
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(memberConversationMatch[1]);
+      const ref = parseMemberRef(memberConversationMatch[2]);
+      if (!ref || ref.root !== root) { writeJson(res, 404, { error: 'Member not found' }); return true; }
+      const url = new URL(req.url, `http://${req.headers?.host || 'localhost'}`);
+      const beforeSeq = Number(url.searchParams.get('beforeSeq') || 0);
+      const afterSeq = Number(url.searchParams.get('afterSeq') || 0);
+      const limit = Number(url.searchParams.get('limit') || 50);
+      if (![beforeSeq, afterSeq].every((n) => Number.isSafeInteger(n) && n >= 0) || (beforeSeq && afterSeq) ||
+          !Number.isInteger(limit) || limit < 1 || limit > 200) { writeJson(res, 400, { error: 'Invalid cursor' }); return true; }
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      if (ref.kind === 'formal') {
+        const org = await getOrganizationByRootSession(root);
+        const node = await getNode(ref.id);
+        if (!org || !node || node.organizationId !== org.id || node.retiredRevision !== null ||
+            ['retired', 'deleted'].includes(String(node.lifecycleState || '').toLowerCase())) {
+          writeJson(res, 404, { error: 'Member not found' }); return true;
+        }
+        if (node.bindingGeneration !== ref.generation) {
+          writeJson(res, 409, { code: 'ORGANIZATION_BINDING_CHANGED', reset: true }); return true;
+        }
+        if (!node.currentSessionId) {
+          writeJson(res, 200, { scope: 'unavailable', generation: ref.generation, revision: null, entries: [],
+            nextBeforeSeq: null, nextAfterSeq: null, hasMoreBefore: false, hasMoreAfter: false }); return true;
+        }
+        const { getSessionTimelinePage, getSessionReadSnapshot } = await import('./session-manager.mjs');
+        const first = await getSessionReadSnapshot(node.currentSessionId);
+        if (!first) { writeJson(res, 200, { scope: 'unavailable', generation: ref.generation, revision: null, entries: [], nextBeforeSeq: null, nextAfterSeq: null, hasMoreBefore: false, hasMoreAfter: false }); return true; }
+        const page = await getSessionTimelinePage(node.currentSessionId, { beforeSeq, afterSeq, limit, strict: true,
+          historyMeta: first.historyMeta, sessionMeta: first.sessionMeta, run: first.run });
+        const [current, last] = await Promise.all([getNode(ref.id), getSessionReadSnapshot(node.currentSessionId)]);
+        if (!current || current.organizationId !== org.id || current.bindingGeneration !== ref.generation || current.currentSessionId !== node.currentSessionId) {
+          writeJson(res, 409, { code: 'ORGANIZATION_BINDING_CHANGED', reset: true }); return true;
+        }
+        const revision = first.historyMeta?.historyRevision ?? null;
+        if (!last || (last.historyMeta?.latestSeq ?? 0) < (first.historyMeta?.latestSeq ?? 0)) {
+          writeJson(res, 409, { code: 'MEMBER_HISTORY_CHANGED', reset: true }); return true;
+        }
+        const pagination = page.pagination || {};
+        writeJson(res, 200, { scope: 'full', generation: ref.generation, revision, reset: false, gap: null,
+          oldestSeq: pagination.oldestSeq ?? null, latestSeq: pagination.totalLatestSeq ?? null, entries: page.events || [],
+          nextBeforeSeq: pagination.nextBeforeSeq || null, nextAfterSeq: pagination.latestSeq || afterSeq || null,
+          hasMoreBefore: pagination.hasMoreBefore === true, hasMoreAfter: pagination.hasMoreAfter === true });
+        return true;
+      }
+      const memberEvents = await listMemberEvents(root);
+      const observed = memberEvents.events.filter((event) => event.memberId === ref.id && event.runId === ref.runId);
+      const confirmed = observed.some((event) => event.phase === 'confirmed');
+      if (!confirmed) { writeJson(res, 404, { error: 'Member not found' }); return true; }
+      const latest = observed.at(-1);
+      // External provider references are not authorized Ragent sessions. Only
+      // child frames explicitly captured and normalized by the adapter are read.
+      const captured = capturedMember(root, ref.runId, ref.id);
+      if (captured.generation !== ref.generation) { writeJson(res, 409, { code: 'MEMBER_SOURCE_CHANGED', reset: true }); return true; }
+      const all = captured.entries || [];
+      const matching = all.filter((event) => (!beforeSeq || event.seq < beforeSeq) && (!afterSeq || event.seq > afterSeq));
+      const page = afterSeq ? matching.slice(0, limit) : matching.slice(-limit);
+      const oldestSeq = all[0]?.seq ?? null;
+      const latestSeq = all.at(-1)?.seq ?? null;
+      writeJson(res, 200, { scope: all.length ? 'full' : 'activity_only', coverage: 'partial',
+        availability: captured.availability, generation: captured.generation, revision: null, reset: false,
+        gap: memberEvents.gap || captured.gap, oldestSeq, latestSeq,
+        activity: { state: latest?.state || 'unknown', kind: null, actionRequired: false }, entries: page,
+        nextBeforeSeq: page[0]?.seq ?? null, nextAfterSeq: (page.at(-1)?.seq ?? afterSeq) || null,
+        hasMoreBefore: !!page.length && page[0].seq > oldestSeq,
+        hasMoreAfter: !!page.length && page.at(-1).seq < latestSeq });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
   if (nativeMatch) {
     if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
@@ -202,6 +334,10 @@ export async function handleOrganizationRoutes({
         sinceEventId: Number.isInteger(sinceEventId) && sinceEventId >= 0 ? sinceEventId : 0,
       });
       const projection = await attachOrganizationNodeActivities(cachedProjection, org.id);
+      projection.nodes = projection.nodes.map((node) => ({ ...node, member: formalMemberDescriptor(org.rootSessionId, node) }));
+      const rootCandidates = projection.nodes.filter((node) => node.currentBinding?.sessionId === org.rootSessionId);
+      const rootMember = rootCandidates.length === 1 ? rootCandidates[0].member?.canonicalId : null;
+      Object.assign(projection, await projectHarnessMembers(org.rootSessionId, rootMember));
       projection.digest = projectionDigest(projection);
       if (projection.asOf) projection.asOf = { ...projection.asOf, projectionDigest: projection.digest };
       const etag = `"${createHash('sha256').update(JSON.stringify(projection)).digest('hex')}"`;
