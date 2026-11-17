@@ -139,6 +139,7 @@ Ragent 正式组织和 Codex/Claude 等 harness 内部 subagent 的真实生命�
 
 manager 的 `node.dispatch` 仅可请求冻结版本中已存在且获授权的直属子节点，同一版本与子节点一次；不能动态创建节点，也不能以接受派发表示实际运行完成。未知副作用保持待对账状态，不能盲目重跑；目前不提供安全的跨 provider 状态重放。以上均尚待真实端到端验收。
 
+Linux 真实任务首次提交在模型准入阶段被拒绝，没有创建 Run，也没有模型调用、技能读取或工具验收证据，费用仍未知。提交使用 `claude-bidi`、provider `glm-68f6bd41` 和 `sonnet@glm-68f6bd41`；先前查询使用 `providerProfile` 参数，而当时已部署的模型路由只识别 `provider`，返回的通用 tier 回退误标为 fresh，不能作为该 provider 的可用模型证据。改用规范 `provider` 和 `refresh=1` 后，专属目录列出 GLM 系列且不含 sonnet。源码修复 `f7caa69f` 处理 provider 参数兼容及回退证据状态；该修复部署后的真实任务仍待执行和验收。目录中 effort 的 builtin 值并非 provider 实际支持证明。
 ## 参考资料
 
 以下链接于 2026-11-17 查阅，用于设计参考；实际 provider 能力、账户权限与版本以运行时验证为准。
