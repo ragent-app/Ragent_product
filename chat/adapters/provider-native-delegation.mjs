@@ -343,6 +343,7 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
   const nestedSeq = new Map();
   const nestedStates = new Map();
   const claudeConfirmed = new Set();
+  const claudeRootRequests = new Set();
 
   function mapModernCodex(raw) {
     const item = readCodexItem(raw);
@@ -435,6 +436,7 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
           parentDelegationId: nestedChildren.get(claudeParent) || '', kind: 'running', state: 'running' });
         const event = normalizeDelegationEvent(candidate, { seq: 2, timestamp: candidate.timestamp });
         const member = memberEventFromDelegation(event, { requested: false, memberIds, operationId: claudeParent });
+        if (claudeRootRequests.has(claudeParent)) member.parent = member.actor = { kind: 'root_session', id: context.parentSessionId };
         member.id = `member_confirm_${createHash('sha256').update(JSON.stringify([context.runId, claudeParent])).digest('hex').slice(0, 24)}`;
         member.phase = 'confirmed';
         member.barrierParticipation = false;
@@ -496,14 +498,23 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
         continue;
       }
       events.push(event);
+      if (normalizedProvider === 'claude' && claudeRequestedIds.has(event.providerDelegationId) && !event.parentDelegationId) {
+        claudeRootRequests.add(event.providerDelegationId);
+      }
     }
     return {
       events,
-      memberEvents: [...events.map((event) => memberEventFromDelegation(event, {
+      memberEvents: [...events.map((event) => {
+        const member = memberEventFromDelegation(event, {
         requested: claudeRequestedIds.has(event.providerDelegationId),
         memberIds,
         operationId: normalizedProvider === 'claude' ? event.providerDelegationId : text(readCodexItem(raw).id),
-      })), ...(mapped.memberEvents || [])],
+        });
+        if (normalizedProvider === 'claude' && claudeRequestedIds.has(event.providerDelegationId) && claudeRootRequests.has(event.providerDelegationId)) {
+          member.parent = member.actor = { kind: 'root_session', id: context.parentSessionId };
+        }
+        return member;
+      }), ...(mapped.memberEvents || [])],
       controls: mapped.controls,
       recognized: mapped.recognized,
       ok: errors.length === 0 && projector.isValid(),
@@ -557,7 +568,14 @@ export function createMemberReader(options = {}) {
   const add = (event) => {
     if (!event?.id || event.rootSessionId !== options.parentSessionId || event.runId !== options.runId) return;
     const previous = byId.get(event.id);
-    if (previous && previous.phase !== 'unknown') return;
+    if (previous && previous.phase !== 'unknown') {
+      // A persisted normalized event may predate adapter evidence retained in
+      // the raw frame. Enrich only the identical event, never infer a parent.
+      if (previous.parent?.kind === 'unknown' && ['member', 'root_session'].includes(event.parent?.kind)) {
+        byId.set(event.id, { ...previous, parent: event.parent, ...(event.actor ? { actor: event.actor } : {}) });
+      }
+      return;
+    }
     if (!previous && byId.size >= limit) { gap = true; return; }
     byId.set(event.id, event);
   };
