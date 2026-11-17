@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.designsystem.AgentoFrostedModalBottomSheet
 import com.andysagent.ragent.core.designsystem.AgentoSwitch
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.ApiRequest
 import com.andysagent.ragent.core.network.RagentTransport
 import kotlinx.coroutines.CancellationException
@@ -42,6 +43,11 @@ private suspend fun readCollaborationPolicy(transport: RagentTransport, method: 
     )
 }
 private class CollaborationPolicyException(val status: Int) : Exception()
+private fun collaborationErrorStatus(error: Exception): Int = when (error) {
+    is ApiException -> error.statusCode
+    is CollaborationPolicyException -> error.status
+    else -> -1
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,7 +82,7 @@ fun CollaborationSettingsSheet(
         loading = true; errorStatus = null
         try { apply(readCollaborationPolicy(transport, "GET", path)) }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { errorStatus = (e as? CollaborationPolicyException)?.status ?: -1 }
+        catch (e: Exception) { errorStatus = collaborationErrorStatus(e) }
         finally { loading = false }
     }
     LaunchedEffect(transport, sessionId) { load() }
@@ -119,7 +125,7 @@ fun CollaborationSettingsSheet(
                         loading = true; errorStatus = null
                         try { apply(readCollaborationPolicy(transport, "DELETE", "$path?expectedRevision=${current.revision}")) }
                         catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { errorStatus = (e as? CollaborationPolicyException)?.status ?: -1 }
+                        catch (e: Exception) { errorStatus = collaborationErrorStatus(e) }
                         finally { loading = false }
                     } }) { Text(stringResource(R.string.collaboration_policy_reset)) }
                     Button(enabled = !loading && valid && dirty.isNotEmpty(), onClick = { scope.launch {
@@ -132,7 +138,7 @@ fun CollaborationSettingsSheet(
                         val body = buildJsonObject { put("expectedRevision", current.revision); put("override", JsonObject(updates)) }.toString()
                         try { readCollaborationPolicy(transport, "PUT", path, body); onDismiss() }
                         catch (e: CancellationException) { throw e }
-                        catch (e: Exception) { errorStatus = (e as? CollaborationPolicyException)?.status ?: -1 }
+                        catch (e: Exception) { errorStatus = collaborationErrorStatus(e) }
                         finally { loading = false }
                     } }) { Text(stringResource(R.string.collaboration_policy_save)) }
                 }
