@@ -22,8 +22,8 @@ import {
   buildOrganizationCapabilityPrompt,
   getOrganizationRuntimeCapabilities,
 } from './organization-runtime-capabilities.mjs';
-import { buildOrganizationRuntimeCatalog, normalizeRuntimeSelection } from './organization-runtime-selection.mjs';
-import { applyRuntimeConstraints, candidateForRuntime, queryRuntimeCandidates } from './organization-runtime-decision.mjs';
+import { buildOrganizationRuntimeCatalog } from './organization-runtime-selection.mjs';
+import { queryRuntimeCandidates } from './organization-runtime-decision.mjs';
 
 export const ORGANIZATION_LEADER_DISABLED = 'ORG_LEADER_DISABLED';
 export const ORGANIZATION_PROPOSAL_NOT_FOUND = 'ORG_PROPOSAL_NOT_FOUND';
@@ -242,9 +242,7 @@ export async function processRootLeadershipProposal({
       const stableKey = text(node?.stableKey);
       const constraints = Object.fromEntries(Object.entries(saved.constraints).filter(([, item]) =>
         item.scope === 'organization' || item.scope === `node:${stableKey}`));
-      const runtime = applyRuntimeConstraints(normalizeRuntimeSelection(node?.runtime), constraints);
-      const candidate = runtimeCatalog && candidateForRuntime(runtimeCatalog, runtime);
-      return [stableKey, { constraints, ...(candidate ? { candidates: [candidate] } : {}) }];
+      return [stableKey, { constraints, ...(runtimeCatalog ? { catalog: runtimeCatalog } : {}) }];
     }));
     planned = await compileOrganizationProposal(proposal, {
       profiles: agentProfiles,

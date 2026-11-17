@@ -9,7 +9,7 @@ import { canonicalJson } from './execution-scope.mjs';
 import { resolveDelegatedRuntimeSelection } from './agent-resolver.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
 import { normalizeRuntimeSelection } from './organization-runtime-selection.mjs';
-import { applyRuntimeConstraints, createRuntimeSelectionRecord, filterRuntimeCandidates, normalizeUserRuntimeConstraints } from './organization-runtime-decision.mjs';
+import { applyRuntimeConstraints, candidateForRuntime, createRuntimeSelectionRecord, filterRuntimeCandidates, normalizeUserRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { deriveOrganizationGrant } from './organization-role-contract.mjs';
 
 export const ORGANIZATION_PROPOSAL_SCHEMA_VERSION = 1;
@@ -471,15 +471,17 @@ export async function compileOrganizationProposal(input, options = {}) {
         });
       }
       const requirements = node.runtimeRequirements || decision.requirements || {};
-      if ((requirements.tools?.length || requirements.environment) && (!runtime || !Array.isArray(decision.candidates))) {
+      const matchedCandidate = runtime && Array.isArray(decision.catalog) ? candidateForRuntime(decision.catalog, runtime) : null;
+      const suppliedCandidates = Array.isArray(decision.candidates) ? decision.candidates : matchedCandidate ? [matchedCandidate] : null;
+      if ((requirements.tools?.length || requirements.environment) && (!runtime || !suppliedCandidates)) {
         throw plannerError(PLANNER_RESOLVER_REJECTED, 'runtime requirements need verified candidate evidence', { reason: 'runtime_evidence_unknown' });
       }
       let runtimeDecision = null;
       if (runtime) {
         let selectedEvidence = null;
         let selectedCost = null;
-        if (Array.isArray(decision.candidates)) {
-          const candidates = filterRuntimeCandidates(decision.candidates, { constraints, budget: decision.budget, requirements });
+        if (suppliedCandidates) {
+          const candidates = filterRuntimeCandidates(suppliedCandidates, { constraints, budget: decision.budget, requirements });
           const selected = candidates.find((candidate) => {
             const tuple = candidate.runtime || {};
             return ['tool', 'model', 'effort'].every((field) => tuple[field] === runtime[field])
