@@ -117,41 +117,43 @@ internal fun OrganizationGraph(
             uiState.nodes.forEach { node ->
                 val frame = node.physicsFrame
                 val surface = surfacesById[node.id] ?: return@forEach
-                val press = presses[node.id] ?: 1f
-                val radiusDp = surface.radius / density / press.coerceAtLeast(.001f)
-                val source = frame?.birthSourceId?.let(surfacesById::get)?.takeIf { it.visible && !it.hidden }
-                val badgeAngle = remember(node.id) {
-                    val directions = uiState.edges.mapNotNull { edge ->
-                        val otherId = when (node.id) {
-                            edge.fromNodeId -> edge.toNodeId
-                            edge.toNodeId -> edge.fromNodeId
-                            else -> null
+                key(node.id) {
+                    val press = presses[node.id] ?: 1f
+                    val radiusDp = surface.radius / density / press.coerceAtLeast(.001f)
+                    val source = frame?.birthSourceId?.let(surfacesById::get)?.takeIf { it.visible && !it.hidden }
+                    val badgeAngle = remember(node.id) {
+                        val directions = uiState.edges.mapNotNull { edge ->
+                            val otherId = when (node.id) {
+                                edge.fromNodeId -> edge.toNodeId
+                                edge.toNodeId -> edge.fromNodeId
+                                else -> null
+                            }
+                            otherId?.let(surfacesById::get)?.let { it.center - surface.center }
+                                ?.takeIf { it.getDistance() > .001f }
                         }
-                        otherId?.let(surfacesById::get)?.let { it.center - surface.center }
-                            ?.takeIf { it.getDistance() > .001f }
+                        val candidates = listOf(45f, 135f, 315f, 225f)
+                        fun clearance(angle: Float): Float {
+                            val radians = Math.toRadians(angle.toDouble())
+                            val v = Offset(kotlin.math.cos(radians).toFloat(), kotlin.math.sin(radians).toFloat())
+                            return directions.minOfOrNull { d ->
+                                kotlin.math.acos(((v.x * d.x + v.y * d.y) / d.getDistance()).coerceIn(-1f, 1f)) * 180f / Math.PI.toFloat()
+                            } ?: 180f
+                        }
+                        val best = candidates.maxByOrNull(::clearance) ?: 45f
+                        if (clearance(best) - clearance(45f) < 15f) 45f else best
                     }
-                    val candidates = listOf(45f, 135f, 315f, 225f)
-                    fun clearance(angle: Float): Float {
-                        val radians = Math.toRadians(angle.toDouble())
-                        val v = Offset(kotlin.math.cos(radians).toFloat(), kotlin.math.sin(radians).toFloat())
-                        return directions.minOfOrNull { d ->
-                            kotlin.math.acos(((v.x * d.x + v.y * d.y) / d.getDistance()).coerceIn(-1f, 1f)) * 180f / Math.PI.toFloat()
-                        } ?: 180f
-                    }
-                    val best = candidates.maxByOrNull(::clearance) ?: 45f
-                    if (clearance(best) - clearance(45f) < 15f) 45f else best
+                    val badgeVisible = (frame?.birthProgress ?: 1f) >= .85f &&
+                        (source == null || graphSurfaceGap(source, surface) > 0f)
+                    OrganizationNode(node.copy(x = surface.center.x, y = surface.center.y, radiusDp = radiusDp, scale = 1f),
+                        onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
+                        modifier = Modifier.align(AbsoluteAlignment.TopLeft), morphHidden = node.id == hiddenNodeId || !surface.visible,
+                        interactionSource = interactions[node.id], externalPressScale = press, drawSurface = false,
+                        clickable = surface.visible && (frame?.clickable ?: true), iconAlpha = frame?.iconAlpha ?: 1f,
+                        occluderOffset = source?.let { it.center - surface.center }, occluderRadius = source?.radius ?: 0f,
+                        occluderMajor = source?.major ?: 0f, occluderMinor = source?.minor ?: 0f, occluderAxis = source?.axis ?: Offset(0f, 1f),
+                        minimumTouchSize = 64.dp / (uiState.zoomScale * press).coerceAtLeast(.001f),
+                        actionVisible = badgeVisible, badgeAngleDegrees = badgeAngle, motionPreference = preference)
                 }
-                val badgeVisible = (frame?.birthProgress ?: 1f) >= .85f &&
-                    (source == null || graphSurfaceGap(source, surface) > 0f)
-                OrganizationNode(node.copy(x = surface.center.x, y = surface.center.y, radiusDp = radiusDp, scale = 1f),
-                    onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
-                    modifier = Modifier.align(AbsoluteAlignment.TopLeft), morphHidden = node.id == hiddenNodeId || !surface.visible,
-                    interactionSource = interactions[node.id], externalPressScale = press, drawSurface = false,
-                    clickable = surface.visible && (frame?.clickable ?: true), iconAlpha = frame?.iconAlpha ?: 1f,
-                    occluderOffset = source?.let { it.center - surface.center }, occluderRadius = source?.radius ?: 0f,
-                    occluderMajor = source?.major ?: 0f, occluderMinor = source?.minor ?: 0f, occluderAxis = source?.axis ?: Offset(0f, 1f),
-                    minimumTouchSize = 64.dp / (uiState.zoomScale * press).coerceAtLeast(.001f),
-                    actionVisible = badgeVisible, badgeAngleDegrees = badgeAngle, motionPreference = preference)
             }
         }
     }
