@@ -1,6 +1,6 @@
 // Scoped, read-only runtime recommendation for an authorized root Run.
 // Task requirements narrow results; they never confer capabilities or policy.
-import { getRunManifest } from './runs.mjs';
+import { authorizeRootOrganizationCreate } from './collaboration-capability.mjs';
 import { getApp } from './apps.mjs';
 import { buildAgentCapabilityProfile } from './agent-capability-registry.mjs';
 import { assertAgentAllowed, assertManagerCanDelegate, resolveSessionCollaborationPolicy, ROLES } from './collaboration-policy.mjs';
@@ -14,12 +14,7 @@ export async function queryAuthorizedRuntimeCandidates({ authSession, session, a
   if (authSession?.principalKind !== 'run_capability' || authSession.capabilityOperation !== 'session.organization.tools'
       || !session || session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user'
       || session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail('A user root Run is required');
-  const manifest = await getRunManifest(authSession.runId);
-  const granted = (manifest?.options?.collaborationCapabilities || []).some((cap) => cap.operation === 'collaboration.create'
-    && cap.resource?.type === 'session' && cap.resource.id === session.id
-    && cap.selection?.runId === authSession.runId && cap.selection?.turnId === authSession.turnId
-    && Date.parse(cap.expiresAt || '') > Date.now());
-  if (!granted) throw fail('This Run cannot create a collaboration');
+  await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId });
   const agentId = text(args.agentId);
   if (!agentId || agentId.length > 200) throw fail('An authorized Agent is required');
   const app = await getApp(agentId);

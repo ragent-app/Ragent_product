@@ -148,6 +148,19 @@ function createCollaborationCapabilityUsageStore({ dir = COLLABORATION_USAGE_DIR
     }
   };
   return {
+    async inspectGrant({ grantId, usageMax } = {}) {
+      const id = text(grantId);
+      if (closed || !validGrantId(id) || !Number.isInteger(usageMax) || usageMax < 1 || usageMax > USAGE_MAX) return { ok: false };
+      return runSerialized(id, async () => {
+        let release;
+        try {
+          release = await acquireUsageLock(dir, id);
+          const state = await readUsageState(usageStatePath(dir, id));
+          return { ok: !!state && state.consumed < usageMax };
+        } catch { return { ok: false }; }
+        finally { if (release) await release().catch(() => {}); }
+      });
+    },
     async claimGrant({ grantId, useNonce, usageMax, expiresAt, now = Date.now() } = {}) {
       const id = text(grantId);
       const nonce = text(useNonce);
@@ -544,6 +557,48 @@ export function createCollaborationCapabilityAuthenticator({
 }
 
 export const authenticateCollaborationCapability = createCollaborationCapabilityAuthenticator();
+
+const organizationGrantUsage = createCollaborationCapabilityUsageStore();
+
+// Server-side renewal remains bound to the original signed grant and usage
+// ledger. It does not mint a second bearer or reset the one-use allowance.
+export async function authorizeRootOrganizationCreate({ session, runId, turnId, consume = false, marker = false } = {}) {
+  const { withLockedRunAuthorization } = await import('./runs.mjs');
+  const { getApp } = await import('./apps.mjs');
+  const { getSession } = await import('./session-manager.mjs');
+  const deny = () => Object.assign(new Error('Organization planning is not authorized for this Run'), { code: 'ORG_PLAN_FORBIDDEN', statusCode: 403 });
+  return withLockedRunAuthorization(runId, async (run, manifest) => {
+    const now = Date.now();
+    const terminal = ['completed', 'failed', 'cancelled'].includes(text(run?.state));
+    if (!run || !manifest || run.sessionId !== session?.id || manifest.sessionId !== session.id ||
+        text(manifest.requestId) !== text(turnId) || (terminal && !(marker && run.state === 'completed'))) throw deny();
+    const channel = manifest.options?.sessionControlChannel;
+    if (!terminal && (!channel || text(channel.runId) !== runId || text(channel.sessionId) !== session.id ||
+        text(channel.turnId) !== text(turnId) || !text(channel.tokenHash) || now >= nowMs(channel.expiresAt))) throw deny();
+    const currentSession = await getSession(session.id);
+    if (!currentSession || currentSession.sessionClass !== 'ROOT_LEADERSHIP' || (currentSession.sessionPlane || 'user') !== 'user' ||
+        currentSession.userAddressable === false || currentSession.parentSessionId || currentSession.delegatedFromSessionId) throw deny();
+    const app = currentSession.templateId ? await getApp(currentSession.templateId) : null;
+    const policy = resolveSessionCollaborationPolicy(currentSession, app);
+    if (!collaborationCapabilityOperationsForRun({ policy }).includes('collaboration.create') ||
+        Number(currentSession.delegationDepth || 0) > Number(policy.maxDepth)) throw deny();
+    const record = (manifest.options?.collaborationCapabilities || []).find((cap) => cap.operation === 'collaboration.create');
+    const signed = record && parseToken(record.token, process.env.RAGENT_AUTH_SESSION_SECRET || '');
+    const issued = nowMs(signed?.issuedAt);
+    if (!signed || !validatePayload(signed, { operation: 'collaboration.create', now: issued }) ||
+        !constantTimeHexEqual(record.tokenHash, hashToken(record.token)) || signed.grantId !== record.grantId ||
+        signed.runnerSessionId !== session.id || signed.resource?.type !== 'session' || signed.resource.id !== session.id || signed.resource.rootSessionId !== session.id ||
+        signed.selection?.runId !== runId || signed.selection?.turnId !== turnId || signed.usageMax !== 1) throw deny();
+    // A completed marker may use only its original unexpired authorization.
+    const expiry = terminal ? nowMs(signed.expiresAt) : nowMs(channel.expiresAt);
+    if (!Number.isFinite(expiry) || now >= expiry) throw deny();
+    const result = consume
+      ? await organizationGrantUsage.claimGrant({ grantId: signed.grantId, useNonce: makeUseNonce(), usageMax: signed.usageMax, expiresAt: expiry, now })
+      : await organizationGrantUsage.inspectGrant({ grantId: signed.grantId, usageMax: signed.usageMax });
+    if (!result.ok) throw deny();
+    return { grantId: signed.grantId };
+  });
+}
 
 export function buildCapabilityUseNonce() {
   return makeUseNonce();

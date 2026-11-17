@@ -2097,6 +2097,12 @@ export async function updateRunManifest(runId, updater) {
   }));
 }
 
+// Serialize authorization decisions with Run state and channel mutations.
+export async function withLockedRunAuthorization(runId, callback) {
+  return runMutationQueue(runId, () => withRunMutationLock(runId, async () =>
+    callback(await getRunUnlocked(runId), await getRunManifestUnlocked(runId))));
+}
+
 export async function getRunManifest(runId) {
   return getRunManifestUnlocked(runId);
 }
