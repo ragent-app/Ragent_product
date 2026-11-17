@@ -137,6 +137,7 @@ export function assessRuntimeCandidate(candidate, { requirements = {}, constrain
     if (!Number.isFinite(candidate.contextWindow)) unknown.push('context_window');
     else if (candidate.contextWindow < requirements.minimumContextTokens) unmet.push('context_window');
   }
+  if (text(requirements.qualityFloor)) unknown.push('quality_floor');
   if (requirements.advancedRequired === true) {
     if (typeof capabilities.advanced !== 'boolean') unknown.push('advanced_capability');
     else if (!capabilities.advanced) unmet.push('advanced_capability');

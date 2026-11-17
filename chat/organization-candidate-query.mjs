@@ -71,6 +71,10 @@ export async function queryAuthorizedRuntimeCandidates({ authSession, session, a
   const limit = Number.isSafeInteger(args.limit) ? Math.max(1, Math.min(80, args.limit)) : 40;
   const items = valid.slice(start, start + limit);
   const nextOffset = start + items.length < valid.length ? start + items.length : null;
-  return { items, total: valid.length, nextOffset, truncated: nextOffset !== null, constraintsRevision: saved.revision,
-    guidance: 'Unknown health, quality or cost is not proof of availability or suitability. Verify task needs and use actual granted capabilities.' };
+  const catalogStatus = catalog.some((entry) => (entry.providerCatalogs || []).some((provider) => (provider.models || []).length))
+    ? 'present' : 'unknown';
+  return { items, total: valid.length, nextOffset, truncated: nextOffset !== null, constraintsRevision: saved.revision, catalogStatus,
+    guidance: catalogStatus === 'unknown'
+      ? 'No provider-scoped catalog facts are available; refresh before concluding there are no candidates.'
+      : 'Unknown health, quality or cost is not proof of availability or suitability. Verify task needs and use actual granted capabilities.' };
 }
