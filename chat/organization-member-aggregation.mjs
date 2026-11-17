@@ -26,7 +26,7 @@ async function readRun(rootSessionId, run) {
   const sourceIdentity = source ? `${index}:${source.dev}:${source.ino}:${source.birthtimeMs}` : '';
   const fingerprint = source ? `${sourceIdentity}:${source.size}:${source.mtimeMs}` : '';
   let entry = readers.get(key);
-  if (entry && !entry.pending && (entry.identity !== identity || entry.gap ||
+  if (entry && !entry.pending && (entry.identity !== identity || entry.resetRequired ||
       entry.sourceIdentity !== sourceIdentity || (source && source.size < entry.sourceSize))) {
     readers.delete(key); entry = null;
   }
@@ -34,7 +34,7 @@ async function readRun(rootSessionId, run) {
     entry = { reader: createMemberReader({ provider, runId: run.id, parentSessionId: rootSessionId, parentThreadId }),
       identity, sourceIdentity, sourceSize: source?.size || 0,
       generation: createHash('sha256').update(`${key}:${sourceIdentity}`).digest().readUInt32BE(0) & 0x7fffffff,
-      fingerprint: '', offset: 0, lines: 0, snapshot: [], gap: false, pending: null, complete: false };
+      fingerprint: '', offset: 0, lines: 0, snapshot: [], gap: false, resetRequired: false, pending: null, complete: false };
     readers.set(key, entry);
     while (readers.size > MAX_READERS) readers.delete(readers.keys().next().value);
   }
@@ -50,17 +50,17 @@ async function readRun(rootSessionId, run) {
       const projection = await entry.reader.consume(result.records, { sourceVerified: verified });
       entry.snapshot = projection.snapshot;
       entry.gap ||= projection.gap || !verified;
-      if (!verified) { more = true; break; }
+      if (!verified) { entry.resetRequired = true; more = true; break; }
       const previousOffset = entry.offset;
       const previousLines = entry.lines;
-      if (previousOffset > 0 && result.nextOffset > 0 && result.nextOffset < previousOffset) { entry.gap = true; more = true; break; }
+      if (previousOffset > 0 && result.nextOffset > 0 && result.nextOffset < previousOffset) { entry.gap = true; entry.resetRequired = true; more = true; break; }
       entry.offset = result.nextOffset || 0;
       entry.lines = result.nextOffset === 0 ? (result.processedLineCount || 0) : previousLines + (result.processedLineCount || 0);
       more = result.truncated === true;
       if (!more) break;
-      if (entry.offset === previousOffset && entry.lines <= previousLines) { entry.gap = true; break; }
+      if (entry.offset === previousOffset && entry.lines <= previousLines) { entry.gap = true; entry.resetRequired = true; break; }
     }
-    entry.complete = !more && !entry.gap;
+    entry.complete = !more && !entry.resetRequired;
     entry.fingerprint = fingerprint;
     entry.sourceSize = source?.size || 0;
     return { events: entry.snapshot.map((event) => ({ ...event, _generation: entry.generation })), gap: entry.gap, pending: more };
