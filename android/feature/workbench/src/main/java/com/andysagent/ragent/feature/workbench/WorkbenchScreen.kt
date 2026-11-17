@@ -3014,7 +3014,7 @@ private fun ChatSurface(
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
                 transport = organizationTransport,
                 sessionId = state.sessionId,
-                rootAction = organizationRootAction(state),
+                rootAction = organizationRootAction(state, currentRunId),
                 targetId = state.chatTargetId ?: state.activeRemoteTargetId,
                 offlineScope = organizationOfflineScope,
                 modifier = Modifier.fillMaxSize().padding(top = organizationGraphTop, bottom = 176.dp),

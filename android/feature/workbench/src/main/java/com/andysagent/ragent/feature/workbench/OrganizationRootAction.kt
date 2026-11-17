@@ -10,13 +10,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /** Only structured, current run state is used; provider prose is never classified. */
-internal fun organizationRootAction(state: WorkbenchUiState): NodeActionKind? {
+internal fun organizationRootAction(state: WorkbenchUiState, currentRunId: String?): NodeActionKind? {
     if (state.connection != AgentConnectionStatus.Connected) return null
     if (state.runStatus == AgentRunStatus.WaitingApproval) return NodeActionKind.NEEDS_USER
     if (state.runStatus == AgentRunStatus.Failed) return NodeActionKind.FAILED
     if (state.runStatus != AgentRunStatus.Working) return null
     val userIndex = state.timelineItems.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
-    val currentRunId = (state.timelineItems.getOrNull(userIndex) as? TimelineItem.Message)?.runId
     val currentTurn = state.timelineItems.drop(userIndex + 1)
     val operation = currentTurn.filterIsInstance<TimelineItem.Operation>().lastOrNull {
         it.status == TimelineOperationStatus.InProgress && !it.isReasoning &&
@@ -30,7 +29,8 @@ internal fun organizationRootAction(state: WorkbenchUiState): NodeActionKind? {
     val kind = state.currentAction?.kind?.lowercase()
     val serverState = activityValue("operationState")
     val serverKind = activityValue("labelKind") ?: activityValue("kind")
-    val currentServerRun = currentRunId != null && activityValue("runId") == currentRunId.lowercase()
+    val serverRunId = (state.serverRunActivity?.get("runId") as? JsonPrimitive)?.contentOrNull
+    val currentServerRun = currentRunId != null && serverRunId == currentRunId
     val serverActive = currentServerRun && serverState in setOf("running", "started", "in_progress") && serverKind == kind
     if (kind == "responding") {
         val streaming = currentTurn.filterIsInstance<TimelineItem.Message>().lastOrNull { it.role == TimelineRole.Agent }
