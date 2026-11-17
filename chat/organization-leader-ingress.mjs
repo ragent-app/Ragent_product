@@ -22,8 +22,8 @@ import {
   buildOrganizationCapabilityPrompt,
   getOrganizationRuntimeCapabilities,
 } from './organization-runtime-capabilities.mjs';
-import { buildOrganizationRuntimeCatalog } from './organization-runtime-selection.mjs';
-import { runtimeCandidatesFromCatalog } from './organization-runtime-decision.mjs';
+import { buildOrganizationRuntimeCatalog, normalizeRuntimeSelection } from './organization-runtime-selection.mjs';
+import { applyRuntimeConstraints, candidateForRuntime, queryRuntimeCandidates } from './organization-runtime-decision.mjs';
 
 export const ORGANIZATION_LEADER_DISABLED = 'ORG_LEADER_DISABLED';
 export const ORGANIZATION_PROPOSAL_NOT_FOUND = 'ORG_PROPOSAL_NOT_FOUND';
@@ -160,7 +160,7 @@ ${proposalContract}
 
 Owner-authored runtime constraints (scope and revision are authoritative; absent fields are not locked): ${JSON.stringify(ownerConstraints?.constraints || {})}
 
-A node may include displayName (a readable name in any language, up to 160 characters) and responsibility (its assigned responsibility in any language, up to 1000 characters). These are descriptive facts, not identity credentials or grants; stableKey remains the machine identity.
+A node may specify runtimeRequirements with a bounded tools list and environment; these are task needs, not grants. Unknown evidence cannot satisfy a hard requirement. A node may include displayName (a readable name in any language, up to 160 characters) and responsibility (its assigned responsibility in any language, up to 1000 characters). These are descriptive facts, not identity credentials or grants; stableKey remains the machine identity.
 
 The block must contain valid JSON and must satisfy the OrganizationProposal contract: every node needs stableKey, role, agentId, phaseId, and acceptance where applicable; every phase needs objective, non-empty acceptance, and an independent reviewer; dependencies and MANAGES edges must be acyclic; include a bounded budget and writable boundary when useful. A node may optionally include domain (a free-form specialty name in any language, at most 160 characters) and iconKey (a display icon key, at most 64 characters). For iconKey choose the closest visual category for the assigned work: backend, mobile, web, runtime, architecture, database, data, ai, cloud, network, hardware, security, testing, design, product, research, writing, translation, education, business, finance, legal, health, marketing, sales, people, operations, logistics, media, environment, engineering, general. For interdisciplinary work choose the primary direction; use a broader category when needed. Do not rename or reject a specialty because it is absent from this icon list. These fields are presentation metadata, not capabilities or grants; an unknown iconKey falls back to the structural role icon. A node may declare runtime: { "tool": "codex|codex-cli|claude|claude-bidi|agy", "provider": "provider-profile-id", "model": "model-id", "effort": "a supported level from the selected model catalog" }. The provider selects a non-secret provider profile/account id and is persisted as providerProfile; it is not a credential. The Runtime derives the Organization Grant from the node role and intersects it with Agent capabilities and parent Grant. Never invent an Agent id, provider, model or effort absent from the catalog or declared Agent facts. ${catalogInstruction} The Runtime validates, compiles and freezes the revision, then automatically provisions Managed Sessions when the enabled automatic provisioning capability is true. Do not report any of those facts before the Runtime response.
 
@@ -177,10 +177,7 @@ Available Agent capability facts:
 ${JSON.stringify(visibleProfiles, null, 2)}
 
 Runtime catalog (provider ids are non-secret profile identifiers; catalog presence does not establish account health or available quota). Missing or failed discovery is unknown, never proof of availability. Select effort only from the selected model's listed levels; do not assume levels are equivalent across providers:
-${runtimeCatalog === null ? 'Unknown: runtime catalog discovery failed.' : JSON.stringify(runtimeCatalog, null, 2)}
-
-Candidate tuples derived from known provider/model associations (availability, quota and cost remain unknown until independently confirmed):
-${runtimeCatalog === null ? 'Unknown.' : JSON.stringify(runtimeCandidatesFromCatalog(runtimeCatalog), null, 2)}`;
+${runtimeCatalog === null ? 'Unknown: runtime catalog discovery failed.' : JSON.stringify(queryRuntimeCandidates(runtimeCatalog), null, 2)}`;
 }
 
 function errorResult(error, attempted = true) {
@@ -240,11 +237,14 @@ export async function processRootLeadershipProposal({
   try {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
     const saved = await readSessionRuntimeConstraints(session.id);
+    const runtimeCatalog = await buildOrganizationRuntimeCatalog().catch(() => null);
     const runtimeDecisionByNode = Object.fromEntries((Array.isArray(proposal.nodes) ? proposal.nodes : []).map((node) => {
       const stableKey = text(node?.stableKey);
       const constraints = Object.fromEntries(Object.entries(saved.constraints).filter(([, item]) =>
         item.scope === 'organization' || item.scope === `node:${stableKey}`));
-      return [stableKey, { constraints }];
+      const runtime = applyRuntimeConstraints(normalizeRuntimeSelection(node?.runtime), constraints);
+      const candidate = runtimeCatalog && candidateForRuntime(runtimeCatalog, runtime);
+      return [stableKey, { constraints, ...(candidate ? { candidates: [candidate] } : {}) }];
     }));
     planned = await compileOrganizationProposal(proposal, {
       profiles: agentProfiles,

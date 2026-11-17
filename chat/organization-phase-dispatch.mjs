@@ -191,6 +191,17 @@ export async function dispatchOrganizationPhase({
     await validateSessionEffort(actualRuntime);
     const provider = text(session.providerProfile, 160);
     const runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const rootSession = await getSession(organization.rootSessionId);
+    const currentSettings = rootSession?.sessionClass === 'ROOT_LEADERSHIP'
+      ? await readSessionRuntimeConstraints(organization.rootSessionId) : { constraints: {} };
+    const currentConstraints = Object.fromEntries(Object.entries(currentSettings.constraints).filter(([, constraint]) =>
+      constraint.scope === 'organization' || constraint.scope === `node:${node.stableKey}`));
+    const frozenConstraints = nodePlan?.runtimeDecision?.requestedConstraints || {};
+    if (JSON.stringify(currentConstraints) !== JSON.stringify(frozenConstraints)) {
+      throw dispatchError('ORG_PHASE_RUNTIME_CONSTRAINT_CHANGED', `node ${node.stableKey} runtime constraints changed; recompile the revision`, 409);
+    }
+    assertRuntimeConstraints(runtime, currentConstraints);
     // Recheck the trusted constraints frozen in this revision at admission.
     if (nodePlan?.runtimeDecision) {
       assertRuntimeConstraints(runtime, nodePlan.runtimeDecision.requestedConstraints);
@@ -235,6 +246,7 @@ export async function dispatchOrganizationPhase({
         allowedEfforts: runtime.effort ? [runtime.effort] : [],
       },
       organizationId: organization.id,
+      organizationRuntimeConstraints: currentConstraints,
       organizationNodeId: node.id,
       organizationBindingGeneration: node.bindingGeneration,
       organizationPhaseDispatch: { eventKey, phaseId: normalizedPhaseId, revision: targetRevision, taskId },

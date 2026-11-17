@@ -23,6 +23,19 @@ export function normalizeUserRuntimeConstraints(value = {}) {
   return result;
 }
 
+export function applyRuntimeConstraints(runtime = {}, constraints = {}) {
+  const result = { ...runtime };
+  for (const [field, constraint] of Object.entries(normalizeUserRuntimeConstraints(constraints))) {
+    if (constraint.mode !== 'locked') continue;
+    const existing = field === 'provider' ? result.provider || result.providerProfile : result[field];
+    if (text(existing) && canonical(field, existing) !== constraint.value) {
+      throw fail('ORG_RUNTIME_USER_LOCKED', `Requested ${field} conflicts with the user's locked constraint`);
+    }
+    if (!text(existing)) result[field] = constraint.value;
+  }
+  return result;
+}
+
 export function assertRuntimeConstraints(runtime, constraints = {}) {
   const normalized = normalizeUserRuntimeConstraints(constraints);
   for (const [field, constraint] of Object.entries(normalized)) {
@@ -36,13 +49,16 @@ export function assertRuntimeConstraints(runtime, constraints = {}) {
 
 // Candidate evidence is observational. Unknown/stale is retained as unknown;
 // it never becomes a free price, a healthy provider, or proof of availability.
-export function filterRuntimeCandidates(candidates = [], { constraints = {}, budget = null, now = Date.now() } = {}) {
+export function filterRuntimeCandidates(candidates = [], { constraints = {}, budget = null, requirements = {}, now = Date.now() } = {}) {
   const normalized = normalizeUserRuntimeConstraints(constraints);
   if (!Array.isArray(candidates)) throw fail('ORG_RUNTIME_CANDIDATES_INVALID', 'Candidates must be an array');
   return candidates.flatMap((candidate) => {
     const runtime = obj(candidate?.runtime);
     if (['tool', 'provider', 'model'].some((field) => !canonical(field, field === 'provider' ? runtime.provider || runtime.providerProfile : runtime[field]))) return [];
     try { assertRuntimeConstraints(runtime, normalized); } catch { return []; }
+    const capabilities = obj(candidate.capabilities);
+    if (Array.isArray(requirements.tools) && requirements.tools.some((tool) => !Array.isArray(capabilities.tools) || !capabilities.tools.includes(tool))) return [];
+    if (text(requirements.environment) && text(capabilities.environment) !== text(requirements.environment)) return [];
     const evidence = obj(candidate.evidence);
     const expires = Date.parse(evidence.expiresAt || '');
     const fresh = Number.isFinite(expires) && expires > now;
@@ -67,24 +83,38 @@ export function createRuntimeSelectionRecord({ runtime, constraints = {}, eviden
     rationale: text(rationale).slice(0, 2000), actual: null };
 }
 
-// Expand only provider associations actually present in the catalog; do not
-// invent a provider/model combination or infer health from a configured entry.
+// Compact provider-scoped catalog facts: effort lists remain per model and
+// are not expanded into a potentially enormous model × effort product.
 export function runtimeCandidatesFromCatalog(catalog = []) {
   if (!Array.isArray(catalog)) return [];
-  const result = [];
-  for (const entry of catalog) {
-    for (const model of Array.isArray(entry?.models) ? entry.models : []) {
-      const modelId = text(model?.id);
-      if (!modelId) continue;
-      const separator = modelId.lastIndexOf('@');
-      const scoped = separator > 0 ? modelId.slice(separator + 1) : '';
-      const providers = scoped ? [scoped] : (entry.providers?.length === 1 ? entry.providers : []);
-      const levels = Array.isArray(model.effortLevels) && model.effortLevels.length ? model.effortLevels : entry.effortLevels;
-      for (const provider of providers) for (const effort of Array.isArray(levels) && levels.length ? levels : ['']) {
-        result.push({ runtime: { tool: entry.tool, provider, model: modelId, ...(effort ? { effort } : {}) },
-          evidence: { availability: 'unknown', source: 'runtime_catalog' }, cost: { kind: 'unknown' } });
-      }
-    }
-  }
-  return result;
+  return catalog.flatMap((entry) => (entry.providerCatalogs || []).flatMap((provider) =>
+    (provider.models || []).map((model) => ({ tool: entry.tool,
+      provider: provider.providerProfileId, model: model.id, modelBare: model.model,
+      effortLevels: model.capabilities?.effort?.levels || [],
+      catalog: { source: provider.source, status: provider.status, version: provider.catalogVersion,
+        fetchedAt: provider.fetchedAt, expiresAt: provider.expiresAt },
+      quota: provider.quota, health: 'unknown', pricing: model.pricing, capabilities: model.capabilities,
+    }))));
+}
+
+export function queryRuntimeCandidates(catalog, { tool = '', provider = '', model = '', offset = 0, limit = 40 } = {}) {
+  const all = runtimeCandidatesFromCatalog(catalog).filter((candidate) =>
+    (!tool || candidate.tool === tool) && (!provider || candidate.provider === provider)
+      && (!model || candidate.model === model));
+  const start = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+  const size = Number.isSafeInteger(limit) ? Math.max(1, Math.min(limit, 80)) : 40;
+  const items = all.slice(start, start + size);
+  const nextOffset = start + items.length < all.length ? start + items.length : null;
+  return { items, total: all.length, nextOffset, truncated: nextOffset !== null };
+}
+
+export function candidateForRuntime(catalog, runtime) {
+  const selected = runtimeCandidatesFromCatalog(catalog).find((entry) => entry.tool === runtime.tool
+    && entry.provider === (runtime.provider || runtime.providerProfile)
+    && (entry.model === runtime.model || entry.modelBare === runtime.model));
+  if (!selected) return null;
+  if (runtime.effort && selected.effortLevels.length && !selected.effortLevels.includes(runtime.effort)) return null;
+  return { runtime: { ...runtime }, capabilities: selected.capabilities || {},
+    evidence: { availability: 'unknown', source: selected.catalog.source, catalog: selected.catalog, quota: selected.quota },
+    cost: selected.pricing || { kind: 'unknown' } };
 }

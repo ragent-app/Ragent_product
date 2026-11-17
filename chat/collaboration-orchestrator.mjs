@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'crypto';
+import { applyRuntimeConstraints, assertRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { compileCollaborationPlan, classifyAttemptOutcome } from './collaboration-plan.mjs';
 import {
   assertManagerCanDelegate,
@@ -529,12 +530,31 @@ export function createCollaborationOrchestrator(options = {}) {
     }
   }
 
+  async function directRuntimeConstraints(root, policy) {
+    if (root?.sessionClass !== 'ROOT_LEADERSHIP') return {};
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const saved = await readSessionRuntimeConstraints(root.id);
+    if (policy?.organizationId) {
+      const node = await getNode(policy.organizationNodeId);
+      if (!node || node.organizationId !== policy.organizationId) {
+        throw Object.assign(new Error('Organization node binding is unavailable'), { code: 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID', statusCode: 409 });
+      }
+      return Object.fromEntries(Object.entries(saved.constraints).filter(([, value]) =>
+        value.scope === 'organization' || value.scope === `node:${node.stableKey}`));
+    }
+    return Object.fromEntries(Object.entries(saved.constraints).filter(([, value]) => value.scope === 'collaboration'));
+  }
+
   // Compile every user/LLM plan through one side-effect-free gate first. The
   // same gate powers validation and real dispatch, so a plan cannot pass a
   // preview then fail later because it was interpreted differently.
   async function prepareRecord(input = {}) {
     const root = await loadRoot({ rootSessionId: input.rootSessionId });
     const policy = input.policy || resolveSessionCollaborationPolicy(root, await deps.getApp(root.templateId));
+    const runtimeConstraints = await directRuntimeConstraints(root, policy);
+    if (policy.organizationId && JSON.stringify(runtimeConstraints) !== JSON.stringify(policy.organizationRuntimeConstraints || {})) {
+      throw Object.assign(new Error('Organization runtime constraints changed after phase admission'), { code: 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', statusCode: 409 });
+    }
     // The policy helper checks the number already present before adding one;
     // the compiler below separately bounds the complete submitted plan.
     const proposedChildren = Array.isArray(input.plan?.tasks) ? input.plan.tasks.length : 0;
@@ -623,7 +643,7 @@ export function createCollaborationOrchestrator(options = {}) {
         throw error;
       }
       let runtime = null;
-      const requestedRuntime = task.runtime || {};
+      const requestedRuntime = applyRuntimeConstraints(task.runtime || {}, runtimeConstraints);
       const policyRuntime = policy.runtimePolicy || {};
       const childTool = trim(app.tool);
       const shouldResolveRuntime = Object.keys(requestedRuntime).length > 0
@@ -654,7 +674,9 @@ export function createCollaborationOrchestrator(options = {}) {
           canReview: effective.canReview,
         },
         ...(runtime ? { runtime } : {}),
+        runtimeConstraints,
       };
+      if (runtime) assertRuntimeConstraints(runtime, runtimeConstraints);
     }
     plan = Object.freeze({
       ...plan,
@@ -735,6 +757,15 @@ export function createCollaborationOrchestrator(options = {}) {
     for (const command of commands) {
       try {
         const owner = await store.getCollaboration(collaborationId);
+        if (owner) {
+          const root = await loadRoot(owner);
+          const currentConstraints = await directRuntimeConstraints(root, owner.policy);
+          const contract = owner.policy?.agentContracts?.[command.taskId];
+          if (JSON.stringify(currentConstraints) !== JSON.stringify(contract?.runtimeConstraints || {})) {
+            throw Object.assign(new Error('Runtime constraints changed before dispatch'), { code: 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', statusCode: 409 });
+          }
+          if (contract?.runtime) assertRuntimeConstraints(contract.runtime, currentConstraints);
+        }
         if (owner?.policy?.factoryExecution) {
           const { assertFactoryExecutionFence } = await import('./factory-execution-adapter.mjs');
           await assertFactoryExecutionFence(owner.policy.factoryExecution, { requireWorkspace: true });
@@ -776,6 +807,11 @@ export function createCollaborationOrchestrator(options = {}) {
       throw error;
     }
     const contract = collaboration.policy?.agentContracts?.[task.id];
+    const currentConstraints = await directRuntimeConstraints(root, collaboration.policy);
+    if (JSON.stringify(currentConstraints) !== JSON.stringify(contract?.runtimeConstraints || {})) {
+      throw Object.assign(new Error('Runtime constraints changed after plan freeze'), { code: 'COLLABORATION_RUNTIME_CONSTRAINT_CHANGED', statusCode: 409 });
+    }
+    if (contract?.runtime) assertRuntimeConstraints(contract.runtime, currentConstraints);
     const livePolicy = resolveSessionCollaborationPolicy(null, app);
     if (contract && (contract.agentRevision !== livePolicy.revision || contract.role !== livePolicy.role)) {
       const error = new Error(`Agent policy revision changed after plan freeze: ${task.agentId}`);

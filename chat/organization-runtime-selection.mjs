@@ -5,7 +5,10 @@
 // of the child Agent policy, the parent delegation grant and the server-known
 // tool/model catalog. The returned value is safe to freeze into a plan or a
 // Session creation request.
-import { getModelsForTool } from './models.mjs';
+import { getModelsForTool, getToolModelCatalogs } from './models.mjs';
+import { getPricingMetadataForModel } from '../lib/model-pricing.mjs';
+import { createProviderQuotaStore } from '../lib/provider-runtime/quota.mjs';
+import { CONFIG_DIR } from '../lib/config.mjs';
 import { getToolDefinitionAsync } from '../lib/tools.mjs';
 
 export const ORGANIZATION_RUNTIME_SELECTION_SCHEMA_VERSION = 1;
@@ -409,6 +412,8 @@ export async function buildOrganizationRuntimeCatalog({
   getTool = getToolDefinitionAsync,
   getModels = getModelsForTool,
   getProviders = discoverRuntimeProviders,
+  getCatalogs = getToolModelCatalogs,
+  quotaStore = createProviderQuotaStore({ configDir: CONFIG_DIR }),
 } = {}) {
   const catalog = [];
   for (const rawTool of list(tools)) {
@@ -426,8 +431,33 @@ export async function buildOrganizationRuntimeCatalog({
       if (discoveredProviders.length > 0) providers = discoveredProviders;
     }
     if (providers.length === 0) providers = list((models?.models || []).map((entry) => providerFromModel(entry?.id)));
+    const providerCatalogs = typeof getCatalogs === 'function'
+      ? await getCatalogs(tool, '', { fast: true }).catch(() => []) : [];
+    const evidence = await Promise.all(providerCatalogs.map(async (entry) => {
+      const quota = entry.providerProfileId && quotaStore
+        ? await quotaStore.get(entry.providerProfileId).catch(() => null) : null;
+      return {
+        providerProfileId: entry.providerProfileId, source: entry.source,
+        status: entry.status, catalogVersion: entry.catalogVersion,
+        fetchedAt: entry.fetchedAt || null, expiresAt: entry.expiresAt || null,
+        quota: quota ? { status: quota.status, checkedAt: quota.checkedAt || null,
+          fetchedAt: quota.fetchedAt || null, mode: quota.mode || null,
+          windows: (Array.isArray(quota.windows) ? quota.windows : []).slice(0, 8).map((window) => ({
+            id: window.id, remainingPercent: window.remainingPercent, resetsAt: window.resetsAt || null,
+          })),
+          ...(quota.balance ? { balance: { remaining: quota.balance.remaining, currency: quota.balance.currency } } : {}),
+        } : { status: 'unknown' },
+        models: (entry.models || []).map((model) => {
+          const pricing = getPricingMetadataForModel(model.model, { tool });
+          return { id: model.id, model: model.model, providerProfileId: model.providerProfileId,
+            capabilities: model.capabilities || null,
+            pricing: pricing ? { ...pricing, kind: 'estimate', source: 'static_table', asOf: null } : { kind: 'unknown' } };
+        }),
+      };
+    }));
     catalog.push({
       tool,
+      providerCatalogs: evidence,
       ...(text(definition?.runtimeFamily) ? { runtimeFamily: text(definition.runtimeFamily, 120) } : {}),
       ...(providers.length > 0 ? { providers } : {}),
       models: (Array.isArray(models?.models) ? models.models : []).slice(0, 128).map((entry) => ({

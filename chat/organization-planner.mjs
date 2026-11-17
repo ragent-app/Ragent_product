@@ -9,7 +9,7 @@ import { canonicalJson } from './execution-scope.mjs';
 import { resolveDelegatedRuntimeSelection } from './agent-resolver.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
 import { normalizeRuntimeSelection } from './organization-runtime-selection.mjs';
-import { createRuntimeSelectionRecord, filterRuntimeCandidates, normalizeUserRuntimeConstraints } from './organization-runtime-decision.mjs';
+import { applyRuntimeConstraints, createRuntimeSelectionRecord, filterRuntimeCandidates, normalizeUserRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { deriveOrganizationGrant } from './organization-role-contract.mjs';
 
 export const ORGANIZATION_PROPOSAL_SCHEMA_VERSION = 1;
@@ -101,7 +101,7 @@ function normalizeNode(raw, index) {
   const value = assertPlainObject(raw, `nodes[${index}]`);
   assertNoUnknownKeys(value, new Set([
     'stableKey', 'role', 'agentId', 'capabilities', 'dependsOn', 'phaseId', 'parentKey',
-    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility',
+    'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility', 'runtimeRequirements',
   ]), `nodes[${index}]`);
   const stableKey = text(value.stableKey);
   if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key' });
@@ -115,6 +115,15 @@ function normalizeNode(raw, index) {
     throw plannerError(PLANNER_CYCLE, `node ${stableKey} cannot manage itself`, { stableKey });
   }
   const acceptance = normalizeAcceptance(value.acceptance, `nodes[${index}].acceptance`, { allowEmpty: true });
+  const requirements = value.runtimeRequirements === undefined ? {} : assertPlainObject(value.runtimeRequirements, `nodes[${index}].runtimeRequirements`);
+  assertNoUnknownKeys(requirements, new Set(['tools', 'environment']), `nodes[${index}].runtimeRequirements`);
+  if (requirements.tools !== undefined && (!Array.isArray(requirements.tools) || requirements.tools.length > 32
+      || requirements.tools.some((tool) => typeof tool !== 'string' || !tool.trim() || tool.length > 120))) {
+    throw plannerError(PLANNER_ERROR, 'runtimeRequirements.tools must be a bounded list of tool names');
+  }
+  if (requirements.environment !== undefined && (typeof requirements.environment !== 'string' || requirements.environment.length > 120)) {
+    throw plannerError(PLANNER_ERROR, 'runtimeRequirements.environment must be a bounded string');
+  }
   const runtime = value.runtime === undefined ? {} : normalizeRuntimeSelection(value.runtime);
   const runtimePolicy = value.runtimePolicy === undefined
     ? null
@@ -134,6 +143,7 @@ function normalizeNode(raw, index) {
     scope: clone(value.scope, {}),
     scopes: clone(value.scopes, {}),
     ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
+    ...(Object.keys(requirements).length > 0 ? { runtimeRequirements: { tools: list(requirements.tools), environment: text(requirements.environment) } } : {}),
     ...(runtimePolicy ? { runtimePolicy: clone(runtimePolicy, {}) } : {}),
     acceptance,
     reviewRequired: value.reviewRequired === true,
@@ -444,10 +454,14 @@ export async function compileOrganizationProposal(input, options = {}) {
         maxConcurrent: node.maxConcurrent,
         runtimePolicy: node.runtimePolicy,
       });
+      // Only server-supplied constraints may fill an omitted requested field.
+      const decision = object(options.runtimeDecisionByNode?.[node.stableKey]);
+      const constraints = normalizeUserRuntimeConstraints(decision.constraints);
+      const requestedRuntime = applyRuntimeConstraints(node.runtime || {}, constraints);
       let runtime = null;
-      if (node.runtime && Object.keys(node.runtime).length > 0) {
+      if (Object.keys(requestedRuntime).length > 0) {
         runtime = await resolveDelegatedRuntimeSelection({
-          request: { runtime: node.runtime },
+          request: { runtime: requestedRuntime },
           parentProfile,
           parentGrant,
           childProfile: profile,
@@ -456,18 +470,16 @@ export async function compileOrganizationProposal(input, options = {}) {
           getProviders: options.getProviders,
         });
       }
-      // This option is supplied by the server, never by the model proposal.
-      const decision = object(options.runtimeDecisionByNode?.[node.stableKey]);
-      const constraints = normalizeUserRuntimeConstraints(decision.constraints);
-      if (!runtime && Object.values(constraints).some((entry) => entry.mode === 'locked')) {
-        throw plannerError(PLANNER_RESOLVER_REJECTED, 'a locked runtime requires an explicit node runtime', { reason: 'runtime_locked' });
+      const requirements = node.runtimeRequirements || decision.requirements || {};
+      if ((requirements.tools?.length || requirements.environment) && (!runtime || !Array.isArray(decision.candidates))) {
+        throw plannerError(PLANNER_RESOLVER_REJECTED, 'runtime requirements need verified candidate evidence', { reason: 'runtime_evidence_unknown' });
       }
       let runtimeDecision = null;
       if (runtime) {
         let selectedEvidence = null;
         let selectedCost = null;
         if (Array.isArray(decision.candidates)) {
-          const candidates = filterRuntimeCandidates(decision.candidates, { constraints, budget: decision.budget });
+          const candidates = filterRuntimeCandidates(decision.candidates, { constraints, budget: decision.budget, requirements });
           const selected = candidates.find((candidate) => {
             const tuple = candidate.runtime || {};
             return ['tool', 'model', 'effort'].every((field) => tuple[field] === runtime[field])
