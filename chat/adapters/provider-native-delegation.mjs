@@ -342,6 +342,7 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
   const nestedChildren = new Map();
   const nestedSeq = new Map();
   const nestedStates = new Map();
+  const claudeConfirmed = new Set();
 
   function mapModernCodex(raw) {
     const item = readCodexItem(raw);
@@ -429,6 +430,19 @@ export function createProviderNativeDelegationMapper({ provider, runId, parentSe
     const nestedClaudeEvents = [];
     if (claudeParent && memberIds.has(buildDelegationIdentity({ provider: 'claude', runId: context.runId, providerDelegationId: claudeParent }).id)) {
       const parentId = buildDelegationIdentity({ provider: 'claude', runId: context.runId, providerDelegationId: claudeParent }).id;
+      if (!claudeConfirmed.has(claudeParent)) {
+        const candidate = observation({ provider: 'claude', raw, context, providerDelegationId: claudeParent,
+          parentDelegationId: nestedChildren.get(claudeParent) || '', kind: 'running', state: 'running' });
+        const event = normalizeDelegationEvent(candidate, { seq: 2, timestamp: candidate.timestamp });
+        const member = memberEventFromDelegation(event, { requested: false, memberIds, operationId: claudeParent });
+        member.id = `member_confirm_${createHash('sha256').update(JSON.stringify([context.runId, claudeParent])).digest('hex').slice(0, 24)}`;
+        member.phase = 'confirmed';
+        member.barrierParticipation = false;
+        delete member.barrier;
+        if (nestedChildren.has(claudeParent)) delete member.aliases;
+        claudeConfirmed.add(claudeParent);
+        nestedClaudeEvents.push(member);
+      }
       for (const block of readContentBlocks(raw)) {
         const resultId = lower(block?.type) === 'tool_result' ? text(block.tool_use_id) : '';
         if (resultId && nestedChildren.get(resultId) === parentId && !TERMINAL_STATES.has(nestedStates.get(resultId))) {
