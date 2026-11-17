@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_task_delegated">タスクを委任しました</string>
+    <string name="collaboration_result_available">協力者の結果を利用できます</string>
+    <string name="collaboration_cancel_requested">協力のキャンセルをリクエストしました</string>
+    <string name="collaboration_native_spawned">サブエージェントを作成しました</string>
+    <string name="collaboration_native_running">サブエージェントが作業中</string>
+    <string name="collaboration_native_waiting">サブエージェントが待機中</string>
+    <string name="collaboration_native_completed">サブエージェントが完了しました</string>
+    <string name="collaboration_native_failed">サブエージェントが失敗しました</string>
+    <string name="collaboration_native_cancelled">サブエージェントをキャンセルしました</string>
+    <string name="collaboration_native_interrupted">サブエージェントが中断されました</string>
+    <string name="collaboration_native_lost">サブエージェントの接続が切れました</string>
+    <string name="collaboration_native_recovered">サブエージェントが復帰しました</string>
+    <string name="collaboration_native_snapshot">サブエージェントの状態</string>
+    <string name="collaboration_open_member">メンバーを開く</string>
+    <string name="collaboration_settings">協力設定</string>
+    <string name="collaboration_node_created">メンバーを作成しました</string>
+    <string name="collaboration_dispatch_requested">タスクの割り当てをリクエストしました</string>
+</resources>

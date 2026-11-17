@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">S’applique aux futures tâches déléguées par Ragent dans cette session. Les tâches en cours et les organisations existantes restent inchangées ; Codex et Claude gèrent leurs propres sous-agents.</string>
+    <string name="collaboration_policy_need_session">Démarrez une session pour configurer la collaboration.</string>
+    <string name="collaboration_policy_delegate">Autoriser la délégation</string>
+    <string name="collaboration_policy_delegate_locked">La délégation est indisponible avec les paramètres actuels de l’agent.</string>
+    <string name="collaboration_policy_concurrent">Nombre maximal de sous-agents simultanés</string>
+    <string name="collaboration_policy_children">Nombre maximal de sous-agents</string>
+    <string name="collaboration_policy_depth">Profondeur maximale de délégation</string>
+    <string name="collaboration_policy_load_error">Impossible de charger les paramètres de collaboration.</string>
+    <string name="collaboration_policy_unsupported">Les paramètres de collaboration ne sont pas disponibles sur cette instance.</string>
+    <string name="collaboration_policy_retry">Réessayer</string>
+    <string name="collaboration_policy_reload">Recharger les paramètres actuels</string>
+    <string name="collaboration_policy_conflict">Les paramètres ont été modifiés ailleurs. Rechargez pour continuer ; votre saisie actuelle sera remplacée.</string>
+    <string name="collaboration_policy_save_error">Impossible d’enregistrer les paramètres. Votre saisie est conservée ; réessayez.</string>
+    <string name="collaboration_policy_reset">Rétablir les valeurs par défaut</string>
+    <string name="collaboration_policy_save">Enregistrer</string>
+    <string name="collaboration_policy_offline">Connectez-vous à l’instance pour configurer la collaboration.</string>
+    <string name="collaboration_policy_forbidden">Les paramètres de collaboration ne peuvent pas être modifiés pour cette session ou ce compte.</string>
+</resources>

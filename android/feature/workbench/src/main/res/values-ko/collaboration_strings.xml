@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_task_delegated">작업 위임됨</string>
+    <string name="collaboration_result_available">협업자의 결과가 준비됨</string>
+    <string name="collaboration_cancel_requested">협업 취소 요청됨</string>
+    <string name="collaboration_native_spawned">하위 에이전트 생성됨</string>
+    <string name="collaboration_native_running">하위 에이전트 작업 중</string>
+    <string name="collaboration_native_waiting">하위 에이전트 대기 중</string>
+    <string name="collaboration_native_completed">하위 에이전트 완료</string>
+    <string name="collaboration_native_failed">하위 에이전트 실패</string>
+    <string name="collaboration_native_cancelled">하위 에이전트 취소됨</string>
+    <string name="collaboration_native_interrupted">하위 에이전트 중단됨</string>
+    <string name="collaboration_native_lost">하위 에이전트 연결 끊김</string>
+    <string name="collaboration_native_recovered">하위 에이전트 복구됨</string>
+    <string name="collaboration_native_snapshot">하위 에이전트 상태</string>
+    <string name="collaboration_open_member">멤버 열기</string>
+    <string name="collaboration_settings">협업 설정</string>
+    <string name="collaboration_node_created">멤버 생성됨</string>
+    <string name="collaboration_dispatch_requested">작업 배정 요청됨</string>
+</resources>

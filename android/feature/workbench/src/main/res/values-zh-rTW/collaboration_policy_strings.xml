@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">適用於此工作階段中 Ragent 後續委派的任務。執行中的任務與現有組織不受影響；Codex 和 Claude 會自行管理子代理。</string>
+    <string name="collaboration_policy_need_session">請先開始工作階段，再設定協作。</string>
+    <string name="collaboration_policy_delegate">允許委派</string>
+    <string name="collaboration_policy_delegate_locked">目前的代理設定不允許委派。</string>
+    <string name="collaboration_policy_concurrent">最多同時執行的子代理數</string>
+    <string name="collaboration_policy_children">子代理數量上限</string>
+    <string name="collaboration_policy_depth">最大委派層級</string>
+    <string name="collaboration_policy_load_error">無法載入協作設定。</string>
+    <string name="collaboration_policy_unsupported">此執行個體不支援協作設定。</string>
+    <string name="collaboration_policy_retry">重試</string>
+    <string name="collaboration_policy_reload">重新載入目前設定</string>
+    <string name="collaboration_policy_conflict">設定已在其他地方變更。請重新載入以繼續；目前輸入將被取代。</string>
+    <string name="collaboration_policy_save_error">無法儲存設定。已保留輸入，請重試。</string>
+    <string name="collaboration_policy_reset">還原預設值</string>
+    <string name="collaboration_policy_save">儲存</string>
+    <string name="collaboration_policy_offline">請連線至執行個體以設定協作。</string>
+    <string name="collaboration_policy_forbidden">此工作階段或帳戶無權編輯協作設定。</string>
+</resources>

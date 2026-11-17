@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_task_delegated">已委派任務</string>
+    <string name="collaboration_result_available">協作者的結果已就緒</string>
+    <string name="collaboration_cancel_requested">已要求取消協作</string>
+    <string name="collaboration_native_spawned">已建立子代理</string>
+    <string name="collaboration_native_running">子代理執行中</string>
+    <string name="collaboration_native_waiting">子代理等待中</string>
+    <string name="collaboration_native_completed">子代理已完成</string>
+    <string name="collaboration_native_failed">子代理失敗</string>
+    <string name="collaboration_native_cancelled">子代理已取消</string>
+    <string name="collaboration_native_interrupted">子代理已中斷</string>
+    <string name="collaboration_native_lost">子代理已斷線</string>
+    <string name="collaboration_native_recovered">子代理已恢復</string>
+    <string name="collaboration_native_snapshot">子代理狀態</string>
+    <string name="collaboration_open_member">開啟成員</string>
+    <string name="collaboration_settings">協作設定</string>
+    <string name="collaboration_node_created">已建立成員</string>
+    <string name="collaboration_dispatch_requested">已要求派發任務</string>
+</resources>

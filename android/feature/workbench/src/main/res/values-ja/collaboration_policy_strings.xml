@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">このセッションで今後 Ragent が委任するタスクに適用されます。実行中のタスクと既存の組織は変更されず、Codex と Claude は独自のサブエージェントを管理します。</string>
+    <string name="collaboration_policy_need_session">協力を設定するにはセッションを開始してください。</string>
+    <string name="collaboration_policy_delegate">委任を許可</string>
+    <string name="collaboration_policy_delegate_locked">現在のエージェント設定では委任できません。</string>
+    <string name="collaboration_policy_concurrent">同時に実行できるサブエージェントの最大数</string>
+    <string name="collaboration_policy_children">サブエージェントの最大数</string>
+    <string name="collaboration_policy_depth">委任の最大階層</string>
+    <string name="collaboration_policy_load_error">協力設定を読み込めませんでした。</string>
+    <string name="collaboration_policy_unsupported">このインスタンスでは協力設定を利用できません。</string>
+    <string name="collaboration_policy_retry">再試行</string>
+    <string name="collaboration_policy_reload">現在の設定を再読み込み</string>
+    <string name="collaboration_policy_conflict">設定が別の場所で変更されました。続行するには再読み込みしてください。現在の入力は置き換えられます。</string>
+    <string name="collaboration_policy_save_error">設定を保存できませんでした。入力は保持されています。もう一度お試しください。</string>
+    <string name="collaboration_policy_reset">デフォルトに戻す</string>
+    <string name="collaboration_policy_save">保存</string>
+    <string name="collaboration_policy_offline">協力を設定するにはインスタンスに接続してください。</string>
+    <string name="collaboration_policy_forbidden">このセッションまたはアカウントでは協力設定を編集できません。</string>
+</resources>

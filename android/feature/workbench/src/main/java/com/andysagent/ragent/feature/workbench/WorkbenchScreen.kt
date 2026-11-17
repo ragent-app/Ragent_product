@@ -2259,7 +2259,6 @@ private fun ChatSurface(
             ?: state.remoteTargets.firstOrNull()?.label
             ?: state.computers.firstOrNull()?.name
     }
-    var taskSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
     var collaborationSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
     val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
@@ -3712,14 +3711,6 @@ private fun ChatSurface(
                 leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Agent, contentDescription = null) },
             )
             AgentoDropdownMenuItem(
-                text = stringResource(R.string.task_settings),
-                onClick = {
-                    onEvent(WorkbenchEvent.CloseSessionMenu)
-                    taskSettingsOpen = true
-                },
-                leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Settings, contentDescription = null) },
-            )
-            AgentoDropdownMenuItem(
                 text = stringResource(R.string.workbench_session_run_details),
                 onClick = {
                     onEvent(WorkbenchEvent.CloseSessionMenu)
@@ -3895,25 +3886,7 @@ private fun ChatSurface(
             )
         }
 
-        if (taskSettingsOpen) {
-            TaskSettingsSheet(
-                onDismiss = { taskSettingsOpen = false },
-                runtimeCatalog = state.runtimeCatalog,
-                runtimeTool = state.runtimeTool,
-                onSelectRuntime = { onEvent(WorkbenchEvent.SelectRuntime(it)) },
-                runtimeModel = state.runtimeModel,
-                onSelectModel = { onEvent(WorkbenchEvent.SelectModel(it)) },
-                effort = state.thinkingEffort,
-                onEffortChange = { onEvent(WorkbenchEvent.EffortChanged(it)) },
-                goalMode = state.goalMode,
-                goalText = state.goalText,
-                onToggleGoalMode = { onEvent(WorkbenchEvent.ToggleGoalMode(it)) },
-                onGoalChange = { onEvent(WorkbenchEvent.SaveGoal(it)) },
-                serviceTier = state.serviceTier,
-                onSelectServiceTier = { onEvent(WorkbenchEvent.SelectServiceTier(it)) },
-                backdropLayer = chatModalBackdrop,
-            )
-        }
+
     }
 
     if (state.chatOpen && state.runtimeUnavailable) {

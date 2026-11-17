@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">Se aplica a las futuras tareas que Ragent delegue en esta sesión. Las tareas en curso y las organizaciones existentes no cambian; Codex y Claude gestionan sus propios subagentes.</string>
+    <string name="collaboration_policy_need_session">Inicia una sesión para configurar la colaboración.</string>
+    <string name="collaboration_policy_delegate">Permitir delegación</string>
+    <string name="collaboration_policy_delegate_locked">La delegación no está disponible con la configuración actual del agente.</string>
+    <string name="collaboration_policy_concurrent">Máximo de subagentes simultáneos</string>
+    <string name="collaboration_policy_children">Máximo de subagentes</string>
+    <string name="collaboration_policy_depth">Profundidad máxima de delegación</string>
+    <string name="collaboration_policy_load_error">No se pudo cargar la configuración de colaboración.</string>
+    <string name="collaboration_policy_unsupported">La configuración de colaboración no está disponible en esta instancia.</string>
+    <string name="collaboration_policy_retry">Reintentar</string>
+    <string name="collaboration_policy_reload">Volver a cargar la configuración actual</string>
+    <string name="collaboration_policy_conflict">La configuración cambió en otro lugar. Vuelve a cargarla para continuar; se reemplazará lo que hayas introducido.</string>
+    <string name="collaboration_policy_save_error">No se pudo guardar la configuración. Se conservó lo que introdujiste; inténtalo de nuevo.</string>
+    <string name="collaboration_policy_reset">Restaurar valores predeterminados</string>
+    <string name="collaboration_policy_save">Guardar</string>
+    <string name="collaboration_policy_offline">Conéctate a la instancia para configurar la colaboración.</string>
+    <string name="collaboration_policy_forbidden">No se puede editar la configuración de colaboración para esta sesión o cuenta.</string>
+</resources>

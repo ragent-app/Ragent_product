@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_task_delegated">Tâche déléguée</string>
+    <string name="collaboration_result_available">Un résultat du collaborateur est disponible</string>
+    <string name="collaboration_cancel_requested">Annulation de la collaboration demandée</string>
+    <string name="collaboration_native_spawned">Sous-agent créé</string>
+    <string name="collaboration_native_running">Sous-agent en cours</string>
+    <string name="collaboration_native_waiting">Sous-agent en attente</string>
+    <string name="collaboration_native_completed">Sous-agent terminé</string>
+    <string name="collaboration_native_failed">Échec du sous-agent</string>
+    <string name="collaboration_native_cancelled">Sous-agent annulé</string>
+    <string name="collaboration_native_interrupted">Sous-agent interrompu</string>
+    <string name="collaboration_native_lost">Sous-agent déconnecté</string>
+    <string name="collaboration_native_recovered">Sous-agent rétabli</string>
+    <string name="collaboration_native_snapshot">État du sous-agent</string>
+    <string name="collaboration_open_member">Ouvrir le membre</string>
+    <string name="collaboration_settings">Paramètres de collaboration</string>
+    <string name="collaboration_node_created">Membre créé</string>
+    <string name="collaboration_dispatch_requested">Répartition de la tâche demandée</string>
+</resources>

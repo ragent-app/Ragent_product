@@ -1,0 +1,19 @@
+<resources>
+    <string name="collaboration_policy_scope">이 세션에서 Ragent가 앞으로 위임할 작업에 적용됩니다. 실행 중인 작업과 기존 조직은 변경되지 않으며, Codex와 Claude는 자체 하위 에이전트를 관리합니다.</string>
+    <string name="collaboration_policy_need_session">협업을 설정하려면 세션을 시작하세요.</string>
+    <string name="collaboration_policy_delegate">위임 허용</string>
+    <string name="collaboration_policy_delegate_locked">현재 에이전트 설정에서는 위임할 수 없습니다.</string>
+    <string name="collaboration_policy_concurrent">동시에 실행할 최대 하위 에이전트 수</string>
+    <string name="collaboration_policy_children">최대 하위 에이전트 수</string>
+    <string name="collaboration_policy_depth">최대 위임 깊이</string>
+    <string name="collaboration_policy_load_error">협업 설정을 불러오지 못했습니다.</string>
+    <string name="collaboration_policy_unsupported">이 인스턴스에서는 협업 설정을 사용할 수 없습니다.</string>
+    <string name="collaboration_policy_retry">다시 시도</string>
+    <string name="collaboration_policy_reload">현재 설정 다시 불러오기</string>
+    <string name="collaboration_policy_conflict">다른 곳에서 설정이 변경되었습니다. 계속하려면 다시 불러오세요. 현재 입력은 대체됩니다.</string>
+    <string name="collaboration_policy_save_error">설정을 저장하지 못했습니다. 입력 내용이 유지되었으니 다시 시도하세요.</string>
+    <string name="collaboration_policy_reset">기본값 복원</string>
+    <string name="collaboration_policy_save">저장</string>
+    <string name="collaboration_policy_offline">협업을 설정하려면 인스턴스에 연결하세요.</string>
+    <string name="collaboration_policy_forbidden">이 세션 또는 계정에서는 협업 설정을 편집할 수 없습니다.</string>
+</resources>
