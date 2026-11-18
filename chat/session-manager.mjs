@@ -14130,6 +14130,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       : {}),
   };
   const manifest = {
+    protectedDelegatedRun: Boolean(session.sessionPlane === 'organization' || session.organizationId || session.parentSessionId || session.delegatedFromSessionId || ['collaboration_task', 'collaboration_resume'].includes(options.internalOperation)),
     sessionId,
     requestId,
     responseId: primaryResponseId || null,
@@ -14630,6 +14631,7 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
 
   const manifest = {
     ...manifestForDerivedRun(parentManifest),
+    protectedDelegatedRun: Boolean(parentManifest?.protectedDelegatedRun === true || parentManifest?.options?.sessionControlChannel?.scope?.kind === 'organization_message' || ['collaboration_task', 'collaboration_resume'].includes(parentManifest?.internalOperation) || session.sessionPlane === 'organization' || session.organizationId || session.parentSessionId || session.delegatedFromSessionId),
     sessionId,
     requestId,
     responseId,
@@ -14941,6 +14943,7 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
 
   const manifest = {
     ...manifestForDerivedRun(parentManifest),
+    protectedDelegatedRun: Boolean(parentManifest?.protectedDelegatedRun === true || parentManifest?.options?.sessionControlChannel?.scope?.kind === 'organization_message' || ['collaboration_task', 'collaboration_resume'].includes(parentManifest?.internalOperation) || session.sessionPlane === 'organization' || session.organizationId || session.parentSessionId || session.delegatedFromSessionId),
     sessionId,
     requestId,
     responseId,

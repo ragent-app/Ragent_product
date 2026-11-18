@@ -4060,6 +4060,11 @@ async function main() {
   // Direct starts and recovery must not adopt an OAuth lock or execute a
   // temporary task through the ordinary sidecar.
   const { run, manifest } = await assertRunLaunchBoundary(runId);
+  // Server-derived session classification, with durable legacy bindings as a
+  // conservative fallback for already-created organization/collaboration Runs.
+  const protectedDelegatedRun = manifest.protectedDelegatedRun === true
+    || manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message'
+    || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation);
   if (isLinuxPeerResultRunner()) {
     const attempt = run.runnerLaunchAttempt ?? 0;
     if (!Number.isSafeInteger(attempt) || attempt < 0 || attempt > 10000) throw new Error('Invalid protected Run launch attempt');
@@ -5763,9 +5768,11 @@ async function main() {
       return;
     }
     if (appServerState && parsed && isCodexAppServerStaleResumeError(parsed, appServerState)) {
-      if (factoryBudget) {
-        await updateRun(runId, current => ({ ...current, factoryBudgetRecoveryRequired: true }));
-        markCodexAppServerFailure(appServerState, { error: { code: 'FACTORY_BUDGET_RECONCILIATION_REQUIRED', message: 'Budgeted Run cannot replace its provider thread' } });
+      if (factoryBudget || protectedDelegatedRun) {
+        if (factoryBudget) await updateRun(runId, current => ({ ...current, factoryBudgetRecoveryRequired: true }));
+        markCodexAppServerFailure(appServerState, { error: factoryBudget
+          ? { code: 'FACTORY_BUDGET_RECONCILIATION_REQUIRED', message: 'Budgeted Run cannot replace its provider thread' }
+          : { code: 'RUN_RECONCILIATION_REQUIRED', message: 'Delegated Run cannot replace its provider thread without reconciliation' } });
         await terminateManagedProcess();
         return;
       }
@@ -6116,7 +6123,7 @@ async function main() {
           // 客户端 400 形态不自动重试）→ 自动重发该 turn，避免用户看到 systemError。
           const retryCount = Number(appServerState.turnRetryCount) || 0;
           if (
-            !factoryBudget && retryCount < CODEX_APP_SERVER_TURN_RETRY_LIMIT
+            !factoryBudget && !protectedDelegatedRun && retryCount < CODEX_APP_SERVER_TURN_RETRY_LIMIT
             && /stream[_ ]truncated|no output was produced|finish_reason[\"':\s]*null|upstream_error/i.test(appServerState.failureReason)
           ) {
             appServerState.turnRetryCount = retryCount + 1;
@@ -7071,7 +7078,7 @@ async function main() {
           providerProtocolErrorPreview: providerProtocolErrorPreview || null,
         });
       }
-      if (appServerState?.freshRecoveryRequested && current.cancelRequested !== true) {
+      if (!protectedDelegatedRun && appServerState?.freshRecoveryRequested && current.cancelRequested !== true) {
         const handedOff = await handoffToFreshCodexSidecar(current);
         if (handedOff) {
           // The replacement sidecar owns terminalization. This process must
@@ -7084,7 +7091,7 @@ async function main() {
       let terminalSignal = signal;
       let fallbackFailureReason = '';
       let fallbackUsed = false;
-      if (staleClaudeResumeDetected && current.cancelRequested !== true) {
+      if (staleClaudeResumeDetected && !protectedDelegatedRun && current.cancelRequested !== true) {
         try {
           fallbackUsed = true;
           const fallbackResult = await runClaudeClassicFallback({ freshRecovery: true });
@@ -7099,7 +7106,7 @@ async function main() {
           terminalSignal = null;
           fallbackFailureReason = normalizeErrorMessage(error, 'Claude fresh recovery failed');
         }
-      } else if (claudeBidiState && shouldFallbackClaudeBidi(claudeBidiState, current)) {
+      } else if (!staleClaudeResumeDetected && claudeBidiState && shouldFallbackClaudeBidi(claudeBidiState, current)) {
         try {
           fallbackUsed = true;
           const fallbackResult = await runClaudeClassicFallback();
