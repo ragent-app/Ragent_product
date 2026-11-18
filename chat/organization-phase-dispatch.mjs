@@ -56,6 +56,12 @@ function runtimeForSession(session) {
   return { tool, model, ...(effort ? { effort } : {}) };
 }
 
+function runtimeTuple(value) {
+  return Object.fromEntries(['tool', 'provider', 'model', 'effort']
+    .filter((key) => typeof value?.[key] === 'string' && value[key].trim())
+    .map((key) => [key, value[key]]));
+}
+
 function runtimeMatches(compiledRuntime, actualRuntime) {
   const expected = object(compiledRuntime);
   for (const key of ['tool', 'provider', 'model', 'effort']) {
@@ -223,10 +229,15 @@ export async function dispatchOrganizationPhase({
     const { resolveSessionCollaborationPolicy } = await import('./collaboration-policy.mjs');
     const rootApp = rootSession.templateId ? await getApp(rootSession.templateId) : null;
     const rootPolicy = resolveSessionCollaborationPolicy(rootSession, rootApp);
-    runtime = await resolveRuntimeSelection({ requested: applyRuntimeConstraints(runtime, currentConstraints),
-      profile: agentProfile, parentGrant: { runtimePolicy: rootPolicy.runtimePolicy } });
-    if (resolvedParent) runtime = await resolveRuntimeSelection({ requested: runtime, profile: agentProfile, parentGrant: resolvedParent.grant || {} });
-    runtime = await resolveRuntimeSelection({ requested: runtime, profile: agentProfile, parentGrant: node.grant || {} });
+    let resolvedRuntimeMetadata = null;
+    const resolveTuple = async (requested, parentGrant) => {
+      const resolved = await resolveRuntimeSelection({ requested, profile: agentProfile, parentGrant });
+      resolvedRuntimeMetadata = { schemaVersion: resolved.schemaVersion, ...(resolved.runtimeFamily ? { runtimeFamily: resolved.runtimeFamily } : {}) };
+      return runtimeTuple(resolved);
+    };
+    runtime = await resolveTuple(applyRuntimeConstraints(runtime, currentConstraints), { runtimePolicy: rootPolicy.runtimePolicy });
+    if (resolvedParent) runtime = await resolveTuple(runtime, resolvedParent.grant || {});
+    runtime = await resolveTuple(runtime, node.grant || {});
 
     const frozenConstraints = nodePlan?.runtimeDecision?.requestedConstraints || {};
     if (JSON.stringify(currentConstraints) !== JSON.stringify(frozenConstraints)) {
@@ -294,6 +305,7 @@ export async function dispatchOrganizationPhase({
       organizationRuntimeResolution: {
         requestedEffort: actualRuntime.effort || null,
         resolvedEffort: runtime.effort || null,
+        ...(resolvedRuntimeMetadata ? { resolver: resolvedRuntimeMetadata } : {}),
         source: actualRuntime.effort ? 'session' : currentConstraints.effort?.mode === 'locked' ? 'owner_constraint'
           : runtime.effort ? 'catalog_or_policy_default' : 'provider_default_unknown',
       },
