@@ -28,6 +28,21 @@ function list(value) {
   return Array.isArray(value) ? [...new Set(value.map((entry) => text(entry)).filter(Boolean))] : [];
 }
 
+function acceptanceCriteria(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw dispatchError('ORG_PHASE_ACCEPTANCE_INVALID', 'Frozen acceptance criteria are invalid', 409);
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || typeof entry.criterion !== 'string' || !entry.criterion.trim()
+        || typeof entry.evidenceRequired !== 'boolean'
+        || (entry.description !== undefined && typeof entry.description !== 'string')) {
+      throw dispatchError('ORG_PHASE_ACCEPTANCE_INVALID', 'Frozen acceptance criterion is invalid', 409);
+    }
+    const description = entry.description?.trim() || '';
+    return `${entry.criterion.trim()}${description ? `: ${description}` : ''}${entry.evidenceRequired ? ' (evidence required)' : ''}`;
+  });
+}
+
 function dispatchError(code, message, statusCode = 409, details = {}) {
   return Object.assign(new Error(message), { code, statusCode, ...details });
 }
@@ -260,8 +275,8 @@ export async function dispatchOrganizationPhase({
     const taskId = `org:${organization.id}:${targetRevision}:${normalizedPhaseId}:${node.stableKey}`;
     const taskRole = text(node.nodeRole).toLowerCase() === 'reviewer' ? 'reviewer' : 'specialist';
     const acceptance = [
-      ...list(phase.acceptance),
-      ...list(nodePlan?.acceptance),
+      ...acceptanceCriteria(phase.acceptance),
+      ...acceptanceCriteria(nodePlan?.acceptance),
     ];
     const writablePaths = list(nodePlan?.scope?.writablePaths);
     const grantedAccess = node.grant?.accessMode;

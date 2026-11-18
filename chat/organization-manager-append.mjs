@@ -83,7 +83,10 @@ export async function appendManagerSubtree({ authSession, scope, args = {} }) {
     const taskRole = node.role === 'reviewer' ? 'reviewer' : ['manager', 'phase_lead', 'executive'].includes(node.role) ? 'manager' : 'specialist';
     assertAgentAllowed(rootPolicy, node.agentId, taskRole);
     assertAgentAllowed(managerPolicy, node.agentId, taskRole);
-    await resolveRuntimeSelection({ requested: node.runtimeDecision.selected, profile, parentGrant: parent.grant });
+    const requested = Object.fromEntries(['tool', 'provider', 'model', 'effort']
+      .filter((field) => typeof node.runtimeDecision.selected[field] === 'string' && node.runtimeDecision.selected[field].trim())
+      .map((field) => [field, node.runtimeDecision.selected[field]]));
+    await resolveRuntimeSelection({ requested, profile, parentGrant: parent.grant });
   }
   planned.digest = createHash('sha256').update(canonicalJson(planned.compiled)).digest('hex');
   const recheck = async () => {
