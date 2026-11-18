@@ -237,12 +237,12 @@ export async function processRootLeadershipProposal({
   let planned;
   try {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const saved = await readSessionRuntimeConstraints(session.id);
     const runtimeCatalog = await buildOrganizationRuntimeCatalog().catch(() => null);
     const runtimeDecisionByNode = Object.fromEntries((Array.isArray(proposal.nodes) ? proposal.nodes : []).map((node) => {
       const stableKey = text(node?.stableKey);
-      const constraints = Object.fromEntries(Object.entries(saved.constraints).filter(([, item]) =>
-        item.scope === 'organization' || item.scope === `node:${stableKey}`));
+      const constraints = selectRuntimeConstraints(saved.constraints, ['organization', `node:${stableKey}`]);
       return [stableKey, { constraints, ...(runtimeCatalog ? { catalog: runtimeCatalog } : {}) }];
     }));
     planned = await compileOrganizationProposal(proposal, {

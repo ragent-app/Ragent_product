@@ -211,12 +211,12 @@ export async function dispatchOrganizationPhase({
     const provider = text(session.providerProfile || fallbackProvider?.provider, 160);
     const runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const rootSession = await getSession(organization.rootSessionId);
     if (!rootSession) throw dispatchError('ORG_PHASE_ROOT_SESSION_MISSING', 'Root session is unavailable for runtime constraint validation', 409);
     const currentSettings = rootSession?.sessionClass === 'ROOT_LEADERSHIP'
       ? await readSessionRuntimeConstraints(organization.rootSessionId) : { constraints: {} };
-    const currentConstraints = Object.fromEntries(Object.entries(currentSettings.constraints).filter(([, constraint]) =>
-      constraint.scope === 'organization' || constraint.scope === `node:${node.stableKey}`));
+    const currentConstraints = selectRuntimeConstraints(currentSettings.constraints, ['organization', `node:${node.stableKey}`]);
     const frozenConstraints = nodePlan?.runtimeDecision?.requestedConstraints || {};
     if (JSON.stringify(currentConstraints) !== JSON.stringify(frozenConstraints)) {
       throw dispatchError('ORG_PHASE_RUNTIME_CONSTRAINT_CHANGED', `node ${node.stableKey} runtime constraints changed; recompile the revision`, 409);

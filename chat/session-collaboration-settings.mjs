@@ -41,7 +41,20 @@ export async function readSessionRuntimeConstraints(sessionId) {
   const session = await findSessionMeta(sessionId);
   assertRoot(session);
   return { sessionId, revision: Number.isSafeInteger(session.runtimeConstraintsRevision) ? session.runtimeConstraintsRevision : 0,
-    constraints: normalizeUserRuntimeConstraints(session.runtimeConstraints || {}) };
+    constraints: normalizeScopedConstraints(session.runtimeConstraints || {}) };
+}
+
+function normalizeScopedConstraints(value) {
+  const result = {};
+  for (const [field, raw] of Object.entries(value || {})) {
+    if (!['tool', 'provider', 'model', 'effort'].includes(field)) throw failure('Unknown runtime constraint field', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
+    const entries = Array.isArray(raw) ? raw : [raw];
+    if (!entries.length || entries.length > 128) throw failure('Invalid runtime constraints', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
+    const normalized = entries.map((entry) => normalizeUserRuntimeConstraints({ [field]: entry })[field]);
+    if (new Set(normalized.map((entry) => entry.scope)).size !== normalized.length) throw failure('Duplicate runtime constraint scope', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
+    result[field] = Array.isArray(raw) ? normalized : normalized[0];
+  }
+  return result;
 }
 
 export async function writeSessionRuntimeConstraints(sessionId, { expectedRevision, constraints } = {}) {
@@ -53,17 +66,27 @@ export async function writeSessionRuntimeConstraints(sessionId, { expectedRevisi
     throw failure('Unknown runtime constraint field', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
   const requested = {};
   for (const [field, value] of Object.entries(raw)) {
-    if (!value || typeof value !== 'object' || !['root', 'organization', 'collaboration'].includes(value.scope) &&
-        !(typeof value.scope === 'string' && /^node:[A-Za-z0-9_.-]{1,160}$/.test(value.scope)))
-      throw failure('Invalid runtime constraint scope', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
-    requested[field] = { value: value.value, mode: value.mode, scope: value.scope, source: 'owner', version: expectedRevision + 1 };
+    const entries = Array.isArray(value) ? value : [value];
+    const mapped = entries.map((entry) => {
+      if (!entry || typeof entry !== 'object' || !['root', 'organization', 'collaboration'].includes(entry.scope) &&
+          !(typeof entry.scope === 'string' && /^node:[A-Za-z0-9_.-]{1,160}$/.test(entry.scope)))
+        throw failure('Invalid runtime constraint scope', 400, 'ORG_RUNTIME_CONSTRAINT_INVALID');
+      return { value: entry.value, mode: entry.mode, scope: entry.scope, source: 'owner', version: expectedRevision + 1 };
+    });
+    requested[field] = Array.isArray(value) ? mapped : mapped[0];
   }
-  const normalized = normalizeUserRuntimeConstraints(requested);
+  const normalized = normalizeScopedConstraints(requested);
   const result = await mutateSessionMeta(sessionId, (draft) => {
     assertRoot(draft);
     const revision = Number.isSafeInteger(draft.runtimeConstraintsRevision) ? draft.runtimeConstraintsRevision : 0;
     if (revision !== expectedRevision) throw failure('Runtime constraints changed', 409, 'ORG_RUNTIME_CONSTRAINT_CONFLICT');
-    draft.runtimeConstraints = normalized;
+    const previous = normalizeScopedConstraints(draft.runtimeConstraints || {});
+    // An unrelated scope edit must not rewrite another lock's provenance.
+    draft.runtimeConstraints = Object.fromEntries(Object.entries(normalized).map(([field, value]) => {
+      const old = previous[field] === undefined ? [] : Array.isArray(previous[field]) ? previous[field] : [previous[field]];
+      const preserve = (entry) => old.find((item) => item.scope === entry.scope && item.value === entry.value && item.mode === entry.mode) || entry;
+      return [field, Array.isArray(value) ? value.map(preserve) : preserve(value)];
+    }));
     draft.runtimeConstraintsRevision = revision + 1;
     draft.updatedAt = new Date().toISOString();
     return true;

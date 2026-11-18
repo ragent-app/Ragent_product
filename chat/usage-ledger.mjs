@@ -320,12 +320,13 @@ function resolveCostFields({
   estimatedCostUsd,
   estimatedCostModel,
   costSource,
+  allowFallbackEstimate = true,
 } = {}) {
   const explicitCostUsd = pickMeaningfulCost(costUsd);
   const explicitEstimatedCostUsd = pickMeaningfulCost(estimatedCostUsd);
   const normalizedEstimatedCostModel = trimString(estimatedCostModel);
   const normalizedCostSource = trimString(costSource);
-  const fallbackEstimate = explicitCostUsd === null && explicitEstimatedCostUsd === null
+  const fallbackEstimate = allowFallbackEstimate && inputTokens !== null && outputTokens !== null && explicitCostUsd === null && explicitEstimatedCostUsd === null
     ? estimateUsageCost({
       tool,
       model,
@@ -362,22 +363,24 @@ export function buildUsageLedgerRecord({
   if (!session || !run || !usageEvent) return null;
 
   const timestampMs = normalizeTimestampMs(run.finalizedAt || run.completedAt || recordedAt.toISOString());
-  const inputTokens = pickNonNegativeInt(usageEvent.inputTokens);
-  const outputTokens = pickNonNegativeInt(usageEvent.outputTokens);
-  const cachedInputTokens = pickNonNegativeInt(usageEvent.cachedInputTokens);
-  const reasoningTokens = pickNonNegativeInt(usageEvent.reasoningTokens);
+  // Neither a cumulative thread total nor its last provider turn is a Run total.
+  const accounting = usageEvent.usageScope === 'provider_thread_total' ? {} : usageEvent;
+  const inputTokens = pickNonNegativeInt(accounting.inputTokens);
+  const outputTokens = pickNonNegativeInt(accounting.outputTokens);
+  const cachedInputTokens = pickNonNegativeInt(accounting.cachedInputTokens);
+  const reasoningTokens = pickNonNegativeInt(accounting.reasoningTokens ?? accounting.reasoningOutputTokens);
   const contextTokens = pickNonNegativeInt(usageEvent.contextTokens);
   const contextWindowTokens = pickNonNegativeInt(usageEvent.contextWindowTokens);
   const tool = trimString(run.tool || session.tool);
-  const model = trimString(run.model || session.model);
+  const model = trimString(usageEvent.reportedModel || run.model || session.model);
   const resolvedCostFields = resolveCostFields({
     tool,
     model,
     inputTokens,
     cachedInputTokens,
     outputTokens,
-    costUsd: usageEvent.costUsd,
-    estimatedCostUsd: usageEvent.estimatedCostUsd,
+    costUsd: usageEvent.usageScope === 'provider_thread_total' ? undefined : usageEvent.costUsd,
+    estimatedCostUsd: usageEvent.usageScope === 'provider_thread_total' ? undefined : usageEvent.estimatedCostUsd,
     estimatedCostModel: usageEvent.estimatedCostModel,
     costSource: usageEvent.costSource,
   });
@@ -400,7 +403,7 @@ export function buildUsageLedgerRecord({
   const effort = trimString(run.effort || session.effort);
   const state = trimString(run.state) || 'completed';
   const timestampIso = new Date(timestampMs).toISOString();
-  const totalTokens = (inputTokens || 0) + (outputTokens || 0);
+  const totalTokens = inputTokens === null || outputTokens === null ? null : inputTokens + outputTokens;
 
   return {
     type: 'run_usage',
@@ -421,11 +424,15 @@ export function buildUsageLedgerRecord({
     ...(principal.visitorName ? { visitorName: principal.visitorName } : {}),
     tool,
     ...(model ? { model } : {}),
+    ...(trimString(usageEvent.reportedModel) ? { reportedModel: trimString(usageEvent.reportedModel), modelSource: 'provider_event' } : { modelSource: 'requested' }),
+    ...(trimString(usageEvent.usageScope) ? { usageScope: trimString(usageEvent.usageScope) } : {}),
+    usageStatus: inputTokens === null && outputTokens === null ? 'unknown' : inputTokens === null || outputTokens === null ? 'partial' : 'reported',
+    costStatus: Number.isFinite(resolvedCostFields.costUsd) ? 'reported' : Number.isFinite(resolvedCostFields.estimatedCostUsd) ? 'estimated' : 'unknown',
     ...(effort ? { effort } : {}),
     state,
     totalTokens,
-    inputTokens: inputTokens || 0,
-    outputTokens: outputTokens || 0,
+    inputTokens,
+    outputTokens,
     ...(cachedInputTokens !== null ? { cachedInputTokens } : {}),
     ...(reasoningTokens !== null ? { reasoningTokens } : {}),
     ...(contextTokens !== null ? { contextTokens } : {}),
@@ -587,6 +594,7 @@ function normalizeLedgerRecord(record) {
     estimatedCostUsd: record.estimatedCostUsd,
     estimatedCostModel: record.estimatedCostModel,
     costSource: record.costSource,
+    allowFallbackEstimate: !['unknown', 'partial'].includes(record.usageStatus),
   });
   const recordedAtMs = normalizeTimestampMs(record.recordedAt);
   const principalType = ['owner', 'user', 'visitor'].includes(trimString(record.principalType))
@@ -619,6 +627,16 @@ function normalizeLedgerRecord(record) {
     tool,
     model,
     effort: trimString(record.effort),
+    ...(trimString(record.modelSource) ? { modelSource: trimString(record.modelSource) } : {}),
+    ...(trimString(record.reportedModel) ? { reportedModel: trimString(record.reportedModel) } : {}),
+    ...(trimString(record.usageScope) ? { usageScope: trimString(record.usageScope) } : {}),
+    ...(trimString(record.usageStatus) ? { usageStatus: trimString(record.usageStatus) } : {}),
+    ...(trimString(record.costStatus) ? { costStatus: trimString(record.costStatus) } : {}),
+    reportedUsage: {
+      inputTokens: pickNonNegativeInt(record.inputTokens),
+      outputTokens: pickNonNegativeInt(record.outputTokens),
+      totalTokens: pickNonNegativeInt(record.totalTokens),
+    },
     state: trimString(record.state) || 'completed',
     totalTokens,
     inputTokens,

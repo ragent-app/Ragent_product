@@ -6330,6 +6330,22 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     ...(Array.isArray(projection.autoApprovedIds) ? projection.autoApprovedIds : []),
   ].filter((id) => typeof id === 'string' && id.trim()))].slice(-2048);
   const latestUsage = [...normalizedEvents].reverse().find((event) => event.type === 'usage');
+  // Only adapter-emitted provider facts are actuals; requested settings and
+  // runner configuration are not provider reports.
+  const reportedModel = [...normalizedEvents].reverse().map((event) => typeof event?.reportedModel === 'string' ? event.reportedModel.trim() : '').find(Boolean) || '';
+  const accountingUsage = latestUsage?.usageScope === 'provider_thread_total' ? {} : latestUsage;
+  const usageProjection = latestUsage ? {
+    source: latestUsage.contextSource || 'provider_event',
+    scope: latestUsage.usageScope || 'unknown',
+    ...(latestUsage.usageScope === 'provider_thread_total' && latestUsage.providerLastUsage ? { providerLastUsage: latestUsage.providerLastUsage } : {}),
+    ...(Number.isFinite(accountingUsage.inputTokens) ? { inputTokens: accountingUsage.inputTokens } : {}),
+    ...(Number.isFinite(accountingUsage.outputTokens) ? { outputTokens: accountingUsage.outputTokens } : {}),
+    ...(Number.isFinite(accountingUsage.cachedInputTokens) ? { cachedInputTokens: accountingUsage.cachedInputTokens } : {}),
+    ...(Number.isFinite(accountingUsage.reasoningTokens ?? accountingUsage.reasoningOutputTokens) ? { reasoningTokens: accountingUsage.reasoningTokens ?? accountingUsage.reasoningOutputTokens } : {}),
+    ...(latestUsage.usageScope !== 'provider_thread_total' && Number.isFinite(latestUsage.costUsd) ? { costUsd: latestUsage.costUsd } : {}),
+    ...(latestUsage.usageScope !== 'provider_thread_total' && Number.isFinite(latestUsage.estimatedCostUsd) ? { estimatedCostUsd: latestUsage.estimatedCostUsd } : {}),
+    costStatus: latestUsage.usageScope === 'provider_thread_total' ? 'unknown' : Number.isFinite(latestUsage.costUsd) ? 'reported' : Number.isFinite(latestUsage.estimatedCostUsd) ? 'estimated' : 'unknown',
+  } : null;
   const contextInputTokens = Number.isInteger(latestUsage?.contextTokens)
     ? latestUsage.contextTokens
     : null;
@@ -6390,6 +6406,8 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
       } : {}),
       ...(Number.isInteger(contextInputTokens) ? { contextInputTokens } : {}),
       ...(Number.isInteger(contextWindowTokens) ? { contextWindowTokens } : {}),
+      ...(usageProjection ? { usage: usageProjection } : {}),
+      ...(reportedModel ? { actualRuntime: { harness: null, provider: null, effort: null, ...(current.actualRuntime || {}), model: reportedModel, modelSource: 'provider_event' } } : {}),
       ...(hasSpoolCompletion && !current.spoolCompletionDetectedAt
         ? { spoolCompletionDetectedAt: nowIso() }
         : {}),
@@ -9439,8 +9457,10 @@ async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifes
   let preventProviderSwitch = false;
   if (failedSession?.sessionClass === 'ROOT_LEADERSHIP') {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const { constraints } = await readSessionRuntimeConstraints(sessionId);
-    preventProviderSwitch ||= ['provider', 'model'].some((key) => constraints[key]?.scope === 'root' && constraints[key]?.mode === 'locked');
+    const rootConstraints = selectRuntimeConstraints(constraints, ['root']);
+    preventProviderSwitch ||= ['provider', 'model'].some((key) => rootConstraints[key]?.mode === 'locked');
   }
   if (manifest?.internalOperation === 'context_compaction'
       || manifest?.internalOperation === 'context_compaction_worker') {
@@ -13679,9 +13699,9 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   }
   if (session.sessionClass === 'ROOT_LEADERSHIP' && (session.sessionPlane || 'user') === 'user') {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
-    const { assertRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
+    const { assertRuntimeConstraints, selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const { constraints } = await readSessionRuntimeConstraints(sessionId);
-    const rootConstraints = Object.fromEntries(Object.entries(constraints).filter(([, item]) => item.scope === 'root'));
+    const rootConstraints = selectRuntimeConstraints(constraints, ['root']);
     assertRuntimeConstraints({ tool: effectiveTool, provider: effectiveProviderProfile,
       model: trimString(options.model || session.model), effort: trimString(options.effort || session.effort) }, rootConstraints);
   }

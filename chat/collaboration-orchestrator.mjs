@@ -538,16 +538,16 @@ export function createCollaborationOrchestrator(options = {}) {
   async function directRuntimeConstraints(root, policy) {
     if (root?.sessionClass !== 'ROOT_LEADERSHIP') return {};
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const { selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const saved = await readSessionRuntimeConstraints(root.id);
     if (policy?.organizationId) {
       const node = await getNode(policy.organizationNodeId);
       if (!node || node.organizationId !== policy.organizationId) {
         throw Object.assign(new Error('Organization node binding is unavailable'), { code: 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID', statusCode: 409 });
       }
-      return Object.fromEntries(Object.entries(saved.constraints).filter(([, value]) =>
-        value.scope === 'organization' || value.scope === `node:${node.stableKey}`));
+      return selectRuntimeConstraints(saved.constraints, ['organization', `node:${node.stableKey}`]);
     }
-    return Object.fromEntries(Object.entries(saved.constraints).filter(([, value]) => value.scope === 'collaboration'));
+    return selectRuntimeConstraints(saved.constraints, ['collaboration']);
   }
 
   // Compile every user/LLM plan through one side-effect-free gate first. The

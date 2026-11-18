@@ -34,6 +34,27 @@ export function normalizeUserRuntimeConstraints(value = {}) {
   return result;
 }
 
+// Storage may contain one entry or several independently scoped entries per
+// field. Resolve only scopes applicable to this operation; incompatible hard
+// locks fail closed rather than silently choosing a winner.
+export function selectRuntimeConstraints(value = {}, scopes = []) {
+  const selected = {};
+  const allowed = new Set(scopes);
+  for (const field of FIELDS) {
+    const raw = value?.[field];
+    const entries = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+      .filter((entry) => allowed.has(entry?.scope))
+      .map((entry) => normalizeUserRuntimeConstraints({ [field]: entry })[field]);
+    const locked = entries.filter((entry) => entry.mode === 'locked');
+    if (locked.some((entry) => entry.value !== locked[0].value)) {
+      throw fail('ORG_RUNTIME_USER_LOCKED', `Conflicting user locks for ${field}`);
+    }
+    const applicable = locked.length ? locked : entries;
+    if (applicable.length) selected[field] = [...applicable].sort((a, b) => b.version - a.version)[0];
+  }
+  return selected;
+}
+
 export function applyRuntimeConstraints(runtime = {}, constraints = {}) {
   const result = { ...runtime };
   for (const [field, constraint] of Object.entries(normalizeUserRuntimeConstraints(constraints))) {

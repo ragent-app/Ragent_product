@@ -315,6 +315,7 @@ export function createClaudeAdapter() {
               textBlockOrdinal += 1;
               events.push(messageEvent('assistant', text, undefined, frameProviderFields({
                 ...(providerMessageId ? { providerMessageId } : {}),
+                ...(upstreamModel ? { reportedModel: upstreamModel } : {}),
                 ...(stopReason === 'end_turn' ? { messagePhase: 'final_answer' }
                   : stopReason === 'tool_use' ? { messagePhase: 'commentary' } : {}),
                 providerSnapshotKind: 'finalized-assistant',
@@ -435,11 +436,11 @@ export function createClaudeAdapter() {
             const u = obj.usage || {};
             const totalIn = Number.isFinite(u.context_tokens)
               ? u.context_tokens
-              : (
+              : (['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens'].some((field) => Number.isFinite(u[field])) ? (
               (u.input_tokens || 0) +
               (u.cache_creation_input_tokens || 0) +
               (u.cache_read_input_tokens || 0)
-            );
+            ) : undefined);
             const providerCostUsd = Number.isFinite(obj.total_cost_usd)
               ? obj.total_cost_usd
               : (Number.isFinite(obj.cost_usd) ? obj.cost_usd : undefined);
@@ -451,8 +452,9 @@ export function createClaudeAdapter() {
             const contextWindowTokens = lookupModelContextWindowTokens(resultModel);
             events.push(usageEvent({
               contextTokens: totalIn,
-              inputTokens: u.input_tokens || 0,
-              outputTokens: u.output_tokens || 0,
+              ...(Number.isFinite(u.input_tokens) ? { inputTokens: u.input_tokens } : {}),
+              ...(Number.isFinite(u.output_tokens) ? { outputTokens: u.output_tokens } : {}),
+              ...(resultModel ? { reportedModel: resultModel } : {}),
               ...(Number.isFinite(u.cached_input_tokens) ? { cachedInputTokens: u.cached_input_tokens } : {}),
               ...(Number.isFinite(u.reasoning_output_tokens) ? { reasoningTokens: u.reasoning_output_tokens } : {}),
               ...(Number.isFinite(providerCostUsd) ? { costUsd: providerCostUsd } : {}),
