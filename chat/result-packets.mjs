@@ -286,7 +286,7 @@ function normalizeProvenance(value) {
   };
   const report=provenance.assistantReport;
   if (report && report.source==='persisted_assistant_final' && Number.isSafeInteger(report.eventSeq) && report.eventSeq>0
-      && typeof report.providerMessageId==='string' && report.providerMessageId.length>0 && report.providerMessageId.length<=256
+      && typeof report.providerMessageId==='string' && report.providerMessageId.length<=256
       && /^[a-f0-9]{64}$/.test(report.contentHash || '')) {
     normalized.assistantReport={source:'persisted_assistant_final',eventSeq:report.eventSeq,providerMessageId:report.providerMessageId,contentHash:report.contentHash};
   }
@@ -490,8 +490,8 @@ export async function deriveExecutionPacketFromRun({
   if (assistantReport) {
     if (run.state!=='completed' || !run.finalizedAt || !assertRunPublication(run,manifest)
         || assistantReport.runId!==normalizedRunId || assistantReport.sessionId!==run.sessionId || assistantReport.requestId!==run.requestId
-        || !Number.isSafeInteger(assistantReport.eventSeq) || assistantReport.eventSeq<1 || typeof assistantReport.providerMessageId!=='string' || !assistantReport.providerMessageId || assistantReport.providerMessageId.length>256
-        || typeof assistantReport.content!=='string' || !assistantReport.content.trim() || Buffer.byteLength(assistantReport.content,'utf8')>32768
+        || !Number.isSafeInteger(assistantReport.eventSeq) || assistantReport.eventSeq<1 || typeof assistantReport.providerMessageId!=='string' || (!organizationId && !assistantReport.providerMessageId) || assistantReport.providerMessageId.length>256
+        || typeof assistantReport.content!=='string' || !assistantReport.content.trim() || Buffer.byteLength(assistantReport.content,'utf8')>(organizationId ? 4 * 1024 * 1024 : 32768)
         || createHash('sha256').update(assistantReport.content).digest('hex')!==assistantReport.contentHash) {
       throw createWorkflowError('Final assistant report identity is invalid','FACTORY_REPORT_HISTORY_PENDING',409);
     }
