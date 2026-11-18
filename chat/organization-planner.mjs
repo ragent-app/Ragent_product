@@ -532,7 +532,7 @@ export async function compileOrganizationProposal(input, options = {}) {
       resolverResults.push({ stableKey: node.stableKey, selectedAgentId: resolved.selectedAgentId, proof: resolved.proof, effective: grant, ...(resolved.runtime ? { runtime: resolved.runtime } : {}) });
       return resolved;
     } catch (cause) {
-      throw plannerError(PLANNER_RESOLVER_REJECTED, `resolver rejected node ${node.stableKey}`, { reason: 'resolver_rejected', stableKey: node.stableKey, cause: { code: cause?.code || '', message: cause?.message || String(cause) } });
+      throw plannerError(PLANNER_RESOLVER_REJECTED, `resolver rejected node ${node.stableKey}`, { reason: 'resolver_rejected', stableKey: node.stableKey, cause: { code: cause?.code || '', reason: cause?.reason || '', field: cause?.field || '' } });
     } finally {
       compiling.delete(node.stableKey);
     }

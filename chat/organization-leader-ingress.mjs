@@ -180,13 +180,30 @@ Runtime catalog (provider ids are non-secret profile identifiers; catalog presen
 ${runtimeCatalog === null ? 'Unknown: runtime catalog discovery failed.' : JSON.stringify(queryRuntimeCandidates(runtimeCatalog), null, 2)}`;
 }
 
+const SAFE_RESOLVER_CODES = new Set([
+  'ORG_PLAN_RESOLVER_REJECTED', 'ORG_CAPABILITY_ESCALATION', 'ORG_ROLE_NOT_ALLOWED',
+  'ORG_RUNTIME_USER_LOCKED', 'ORG_RUNTIME_SELECTION_INVALID', 'ORG_RUNTIME_TOOL_DENIED',
+  'ORG_RUNTIME_TOOL_REQUIRED', 'ORG_RUNTIME_TOOL_UNSUPPORTED', 'ORG_RUNTIME_PROVIDER_CONFLICT',
+  'ORG_RUNTIME_PROVIDER_DENIED', 'ORG_RUNTIME_PROVIDER_MODEL_CONFLICT', 'ORG_RUNTIME_PROVIDER_UNAVAILABLE',
+  'ORG_RUNTIME_MODEL_DENIED', 'ORG_RUNTIME_MODEL_UNAVAILABLE', 'ORG_RUNTIME_EFFORT_DENIED', 'ORG_RUNTIME_EFFORT_UNAVAILABLE',
+]);
+const SAFE_RESOLVER_REASONS = new Set(['runtime_evidence_unknown', 'runtime_candidate_ineligible', 'runtime_policy_denied', 'tool_required']);
+const SAFE_RESOLVER_FIELDS = new Set(['runtime.tool', 'runtime.provider', 'runtime.model', 'runtime.effort']);
+
 function errorResult(error, attempted = true) {
+  const inner = error?.cause;
+  const detail = inner && SAFE_RESOLVER_CODES.has(inner.code) ? {
+    code: inner.code,
+    ...(SAFE_RESOLVER_REASONS.has(inner.reason) ? { reason: inner.reason } : {}),
+    ...(SAFE_RESOLVER_FIELDS.has(inner.field) ? { field: inner.field } : {}),
+  } : null;
   return {
     attempted,
     state: 'rejected',
     code: text(error?.code) || ORGANIZATION_PROPOSAL_REJECTED,
     reason: text(error?.reason) || 'compile_failed',
     message: text(error?.message) || 'organization proposal was rejected',
+    ...(detail ? { detail } : {}),
   };
 }
 
