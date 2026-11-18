@@ -42,7 +42,7 @@ import {
 } from './runtime-adapter.mjs';
 import { isBwrapPresent } from '../lib/runner-sandbox.mjs';
 import { getProject } from './projects.mjs';
-import { getOrganization, getNode } from './organization-store.mjs';
+import { getOrganization, getNode, isOrganizationRevisionCompatible } from './organization-store.mjs';
 import { MANAGED_WRITER_ENABLED, REVIEWER_ENABLED } from '../lib/config.mjs';
 import {
   createStagingWorkspace,
@@ -881,7 +881,8 @@ export function createCollaborationOrchestrator(options = {}) {
         || node.currentSessionId !== managedSessionId
         || (Number.isInteger(collaboration.policy?.organizationBindingGeneration)
           && node.bindingGeneration !== collaboration.policy.organizationBindingGeneration)
-        || Number(managedTarget.organizationRevision) !== Number((collaboration.policy?.factoryConsultation || collaboration.policy?.factoryExecution) ? node.createdRevision : organization.currentRevision)
+        || Number(managedTarget.organizationRevision) !== Number(node.createdRevision)
+        || !await isOrganizationRevisionCompatible(expectedOrganizationId, node.createdRevision, organization.currentRevision)
         || trim(managedTarget.organizationNodeId) !== expectedNodeId) {
         const error = new Error(`Managed Session target is not bound to this Organization task: ${task.id}`);
         error.code = 'COLLABORATION_MANAGED_SESSION_BINDING_INVALID';

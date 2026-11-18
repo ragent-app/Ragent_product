@@ -1,3 +1,4 @@
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 import { withDatabase } from './collaboration-store.mjs';
 import { createHash } from 'node:crypto';
 
@@ -189,14 +190,14 @@ export async function getFactoryMessageScope(sessionId, requestId) {
     let policy; try { policy = JSON.parse(rows[0].policy_json || '{}'); } catch { return null; }
     const f = policy.factoryExecution;
     if (!f || !f.organizationId || !f.workItemId || !f.managedSessionId || !Number.isInteger(f.executionEpoch) || !Number.isInteger(f.bindingGeneration)) return null;
-    const row = db.prepare(`SELECT n.id,w.kind AS work_kind FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id
+    const row = db.prepare(`SELECT n.id,w.kind AS work_kind,o.current_revision FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id
       JOIN organization_nodes n ON n.id=w.assignee_node_id AND n.organization_id=w.organization_id
       JOIN organizations o ON o.id=w.organization_id
       WHERE w.id=? AND w.organization_id=? AND w.execution_epoch=? AND w.binding_generation=?
         AND b.execution_epoch=w.execution_epoch AND b.binding_generation=w.binding_generation AND b.dispatch_key=?
         AND w.state IN ('claimed','running') AND w.control_state='none' AND b.status IN ('intent','running')
-        AND n.current_session_id=? AND n.binding_generation=w.binding_generation AND n.retired_revision IS NULL AND o.state<>'archived' AND o.current_revision=?`).get(f.workItemId,f.organizationId,f.executionEpoch,f.bindingGeneration,f.dispatchKey,f.managedSessionId,f.organizationRevision);
-    if (!row) return null;
+        AND n.current_session_id=? AND n.binding_generation=w.binding_generation AND n.retired_revision IS NULL AND o.state<>'archived'`).get(f.workItemId,f.organizationId,f.executionEpoch,f.bindingGeneration,f.dispatchKey,f.managedSessionId);
+    if (!row || !isAppendOnlyRevisionCompatible(db, f.organizationId, f.organizationRevision, row.current_revision)) return null;
     let reviewCandidate;
     if (row.work_kind === 'review') {
       const candidates=db.prepare(`SELECT p.id,p.candidate_digest,p.contract_revision,p.execution_epoch FROM factory_dependencies d

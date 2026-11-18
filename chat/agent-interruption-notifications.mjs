@@ -1,11 +1,14 @@
+import { createHash } from 'node:crypto';
 import { withDatabase } from './collaboration-store.mjs';
 import { getRun } from './runs.mjs';
 import { getNode, getOrganization } from './organization-store.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
 import { createTrigger, getTrigger, listTriggers } from './triggers.mjs';
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 
 const text = value => typeof value === 'string' ? value.trim() : '';
 const stamp = () => new Date().toISOString();
+const nativeId = event => `native:${createHash('sha256').update(JSON.stringify([event.runId,event.memberId,event.id])).digest('hex')}`;
 const escalationDelay = () => {
   const value = Number(process.env.RAGENT_INCIDENT_ESCALATION_MS);
   return Number.isInteger(value) && value >= 60000 ? value : 3600000;
@@ -26,13 +29,63 @@ function schema(db) {
     CREATE TABLE IF NOT EXISTS agent_interruption_reads (
       incident_id TEXT NOT NULL, session_id TEXT NOT NULL, first_read_at TEXT NOT NULL,
       PRIMARY KEY (incident_id, session_id));
+    CREATE TABLE IF NOT EXISTS native_member_interruptions (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, host_session_id TEXT NOT NULL,
+      member_id TEXT NOT NULL, parent_kind TEXT NOT NULL, parent_member_id TEXT NOT NULL,
+      provider TEXT NOT NULL, event_id TEXT NOT NULL, state TEXT NOT NULL, occurred_at TEXT NOT NULL,
+      organization_id TEXT NOT NULL, node_id TEXT NOT NULL, binding_generation INTEGER,
+      organization_revision INTEGER, root_session_id TEXT NOT NULL, trigger_id TEXT NOT NULL DEFAULT '',
+      delivery_state TEXT NOT NULL DEFAULT 'pending', next_check_at TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL, acknowledged_at TEXT, resolved_at TEXT, resolution_summary TEXT, resolution_evidence TEXT,
+      UNIQUE(run_id,member_id,event_id));
     CREATE INDEX IF NOT EXISTS agent_interruption_pending ON agent_interruption_incidents(delivery_state, resolved_at);`);
   const columns = new Set(db.prepare('PRAGMA table_info(agent_interruption_incidents)').all().map(column => column.name));
   if (!columns.has('reported_code')) db.exec("ALTER TABLE agent_interruption_incidents ADD COLUMN reported_code TEXT NOT NULL DEFAULT ''");
+  const nativeColumns = new Set(db.prepare('PRAGMA table_info(native_member_interruptions)').all().map(column => column.name));
+  if (!nativeColumns.has('recipient_session_id')) db.exec("ALTER TABLE native_member_interruptions ADD COLUMN recipient_session_id TEXT NOT NULL DEFAULT ''");
 }
 async function sessionById(id) {
   const { getSession } = await import('./session-manager.mjs');
   return getSession(id);
+}
+
+// The caller is the server's provider reconciler, after it has parsed and
+// persisted the canonical member event in the host Run spool. A native member
+// is never represented as a Ragent Run or independently addressable Session.
+export async function observeNativeMemberInterruptions({ runId, events = [] } = {}) {
+  const run = await getRun(text(runId));
+  if (!run || !text(run.sessionId)) throw Object.assign(new Error('Host Run unavailable'), { code: 'INCIDENT_EVIDENCE_PENDING' });
+  const live = await getLiveOrganizationSessionReference(run.sessionId);
+  const hostSession = await sessionById(run.sessionId);
+  if (!hostSession) throw Object.assign(new Error('Host Session unavailable'), { code: 'INCIDENT_EVIDENCE_PENDING' });
+  const organized = !!live?.organizationId && ['root','node'].includes(live.kind);
+  if (!organized && (text(hostSession.organizationId) || text(hostSession.organizationNodeId))) throw Object.assign(new Error('Organization binding unavailable'), { code:'INCIDENT_BINDING_PENDING' });
+  const org = organized ? await getOrganization(live.organizationId) : null;
+  if (organized && (!org || org.state === 'archived')) return { applicable: false };
+  let count = 0;
+  for (const event of events) {
+    if (event?.runId !== run.id || event.rootSessionId !== run.sessionId || event.phase !== 'terminal'
+        || !['failed','interrupted','lost'].includes(event.state) || !['codex','claude'].includes(event.sourceTag)
+        || !text(event.id) || !text(event.memberId)) continue;
+    const parentKind = ['member','root_session'].includes(event.parent?.kind) ? event.parent.kind : 'unknown';
+    const parentId = parentKind === 'member' ? text(event.parent.id).slice(0,200) : '';
+    const id = nativeId(event), now = stamp();
+    count += await withDatabase(db => {
+      schema(db); db.exec('BEGIN IMMEDIATE');
+      try {
+        const currentOrg = organized ? db.prepare('SELECT current_revision,root_session_id,state FROM organizations WHERE id=?').get(live.organizationId) : null;
+        const node = organized && live.kind === 'node' ? db.prepare('SELECT current_session_id,binding_generation,retired_revision FROM organization_nodes WHERE id=? AND organization_id=?').get(live.nodeId,live.organizationId) : null;
+        if (organized && (!currentOrg || currentOrg.state === 'archived' || currentOrg.root_session_id !== org.rootSessionId
+            || (live.kind === 'root' && currentOrg.root_session_id !== run.sessionId)
+            || (live.kind === 'node' && (!node || node.retired_revision !== null || node.current_session_id !== run.sessionId || node.binding_generation !== live.bindingGeneration || currentOrg.current_revision !== live.organizationRevision)))) { db.exec('ROLLBACK'); return 0; }
+        const inserted = db.prepare(`INSERT OR IGNORE INTO native_member_interruptions
+          (id,run_id,host_session_id,member_id,parent_kind,parent_member_id,provider,event_id,state,occurred_at,organization_id,node_id,binding_generation,organization_revision,root_session_id,created_at)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,run.id,run.sessionId,text(event.memberId).slice(0,200),parentKind,parentId,event.sourceTag,text(event.id).slice(0,200),event.state,text(event.timestamp) || now,organized ? live.organizationId : '',organized && live.kind === 'node' ? live.nodeId : '',organized ? live.bindingGeneration ?? null : null,organized ? live.organizationRevision ?? null : null,organized ? org.rootSessionId : run.sessionId,now).changes;
+        db.exec('COMMIT'); return inserted;
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
+    }, { mutate: true });
+  }
+  return { applicable: true, inserted: count };
 }
 async function persistedFactoryScope(sessionId, runId) {
   return withDatabase(db => {
@@ -189,6 +242,7 @@ export async function observeAgentInterruption({ sessionId, runId } = {}) {
 // Trigger delivery and incident acknowledgement are separate facts. A trigger
 // is durable and deduplicated; repeated sweeps may safely recover an enqueue.
 export async function reconcileAgentInterruptions() {
+  await reconcileNativeMemberInterruptions();
   const rows = await withDatabase(db => { schema(db); return db.prepare(`SELECT * FROM agent_interruption_incidents
     WHERE resolved_at IS NULL AND next_check_at<=? AND (delivery_state IN ('pending','queued','escalated') OR
       (json_array_length(ancestors_json)>escalation_index+1 AND (delivery_state='unreachable' OR COALESCE(escalation_at,created_at)<=?)))
@@ -252,11 +306,39 @@ export async function reconcileAgentInterruptions() {
   }
 }
 
+async function reconcileNativeMemberInterruptions() {
+  const rows = await withDatabase(db => { schema(db); return db.prepare("SELECT * FROM native_member_interruptions WHERE resolved_at IS NULL AND next_check_at<=? ORDER BY next_check_at,created_at LIMIT 100").all(stamp()); });
+  for (const row of rows) {
+    try {
+      if (!row.trigger_id) {
+        const live = await getLiveOrganizationSessionReference(row.host_session_id);
+        const hostValid = !row.organization_id || (live?.organizationId === row.organization_id && (row.node_id
+          ? live.kind === 'node' && live.nodeId === row.node_id && live.bindingGeneration === row.binding_generation
+          : live.kind === 'root'));
+        const recipient = hostValid ? row.host_session_id : row.root_session_id;
+        const trigger = await createTrigger({ sessionId: recipient, scheduledAt: stamp(), dedupeKey: `${row.id}:host`,
+          title: 'Native member interrupted', text: `A ${row.provider} member ${row.member_id} reported ${row.state}. Native parent: ${row.parent_kind === 'member' ? row.parent_member_id : row.parent_kind}. This notice is delivered to the host session; inspect incident ${row.id}.` });
+        await withDatabase(db => { schema(db); db.prepare("UPDATE native_member_interruptions SET trigger_id=?,recipient_session_id=?,delivery_state=? WHERE id=? AND trigger_id='' AND resolved_at IS NULL").run(trigger.id,recipient,recipient===row.host_session_id ? 'queued' : 'escalated',row.id); }, { mutate: true });
+      } else {
+        const trigger = await getTrigger(row.trigger_id);
+        const timedOut = !row.acknowledged_at && Date.now()-Date.parse(row.created_at)>=escalationDelay();
+        if ((['failed','cancelled'].includes(trigger?.status) || timedOut) && trigger?.sessionId !== row.root_session_id && row.host_session_id !== row.root_session_id) {
+          const fallback = await createTrigger({ sessionId: row.root_session_id, scheduledAt: stamp(), dedupeKey: `${row.id}:root`, title: 'Native member interruption needs review', text: `Incident ${row.id} remains unacknowledged or host delivery was unavailable; inspect the original Run and native member evidence.` });
+          await withDatabase(db => { schema(db); db.prepare("UPDATE native_member_interruptions SET trigger_id=?,recipient_session_id=?,delivery_state='escalated' WHERE id=? AND trigger_id=?").run(fallback.id,row.root_session_id,row.id,row.trigger_id); }, { mutate: true });
+        } else if (trigger?.status === 'delivered') await withDatabase(db => { schema(db); db.prepare("UPDATE native_member_interruptions SET delivery_state='delivered' WHERE id=? AND trigger_id=?").run(row.id,row.trigger_id); }, { mutate: true });
+        else if (['failed','cancelled'].includes(trigger?.status)) await withDatabase(db => { schema(db); db.prepare("UPDATE native_member_interruptions SET delivery_state='unreachable' WHERE id=? AND trigger_id=?").run(row.id,row.trigger_id); }, { mutate: true });
+      }
+    } catch { /* Preserve pending evidence for the next bounded sweep. */ }
+    finally { await withDatabase(db => { schema(db); db.prepare('UPDATE native_member_interruptions SET next_check_at=? WHERE id=? AND resolved_at IS NULL').run(new Date(Date.now()+30000).toISOString(),row.id); }, { mutate: true }); }
+  }
+}
+
 // The router must first authenticate the run capability; a claimed session ID
 // by itself is not an authorization credential.
 async function updateDisposition({ incidentId, authSession, summary, evidence }, action) {
   if (authSession?.principalKind !== 'run_capability') throw Object.assign(new Error('Run capability required'), { code: 'FORBIDDEN' });
   if (action === 'resolve' && (!text(summary) || !text(evidence))) throw Object.assign(new Error('Resolution summary and evidence are required'), { code: 'BAD_REQUEST' });
+  if (text(incidentId).startsWith('native:')) return updateNativeDisposition({ incidentId,authSession,summary,evidence },action);
   const scope = authSession.organizationMessageScope;
   const sessionId = text(authSession.sessionId);
   const live = sessionId && await getLiveOrganizationSessionReference(sessionId);
@@ -272,11 +354,11 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
       const validRoot = live?.kind === 'root' && live.organizationId === row.organization_id && !recipient.nodeId;
       const validNode = live?.kind === 'node' && scope && live.organizationId === row.organization_id && scope.organizationId === live.organizationId
         && live.nodeId === recipient.nodeId && live.nodeId === scope.nodeId && live.bindingGeneration === recipient.bindingGeneration
-        && live.bindingGeneration === scope.bindingGeneration && live.organizationRevision === scope.organizationRevision;
+        && live.bindingGeneration === scope.bindingGeneration;
       if (!validRoot && !validNode) throw Object.assign(new Error('Live binding required'), { code: 'FORBIDDEN' });
       const currentOrg = db.prepare('SELECT root_session_id,current_revision,state FROM organizations WHERE id=?').get(row.organization_id);
       if (!currentOrg || currentOrg.state === 'archived' || (validRoot && currentOrg.root_session_id !== sessionId)
-          || (validNode && currentOrg.current_revision !== scope.organizationRevision)) throw Object.assign(new Error('Binding changed'), { code: 'FORBIDDEN' });
+          || (validNode && !isAppendOnlyRevisionCompatible(db,row.organization_id,scope.organizationRevision,currentOrg.current_revision))) throw Object.assign(new Error('Binding changed'), { code: 'FORBIDDEN' });
       if (validNode) {
         const current = db.prepare('SELECT current_session_id,binding_generation,retired_revision FROM organization_nodes WHERE id=? AND organization_id=?').get(recipient.nodeId,row.organization_id);
         if (!current || current.current_session_id !== sessionId || current.binding_generation !== recipient.bindingGeneration || current.retired_revision !== null) throw Object.assign(new Error('Binding changed'), { code: 'FORBIDDEN' });
@@ -302,6 +384,41 @@ async function updateDisposition({ incidentId, authSession, summary, evidence },
     } catch (error) { db.exec('ROLLBACK'); throw error; }
   }, { mutate: true });
 }
+
+async function updateNativeDisposition({ incidentId,authSession,summary,evidence },action) {
+  const sessionId=text(authSession.sessionId), live=await getLiveOrganizationSessionReference(sessionId), scope=authSession.organizationMessageScope;
+  return withDatabase(db => {
+    schema(db); db.exec('BEGIN IMMEDIATE');
+    try {
+      const row=db.prepare('SELECT * FROM native_member_interruptions WHERE id=?').get(text(incidentId));
+      const org=row && db.prepare('SELECT root_session_id,current_revision,state FROM organizations WHERE id=?').get(row.organization_id);
+      const host=!!row && sessionId===row.host_session_id && (row.node_id
+        ? live?.kind==='node' && live.nodeId===row.node_id && live.bindingGeneration===row.binding_generation && scope?.nodeId===row.node_id && scope.bindingGeneration===row.binding_generation
+        : live?.kind==='root');
+      const root=!!row && sessionId===row.root_session_id && live?.kind==='root' && (row.recipient_session_id===sessionId || row.host_session_id===sessionId);
+      const hostOnly=!!row && !row.organization_id && sessionId===row.host_session_id;
+      if (!row || (!hostOnly && (!org || org.state==='archived' || org.root_session_id!==row.root_session_id || live?.organizationId!==row.organization_id
+          || (!host && !root)))) throw Object.assign(new Error('Incident unavailable'),{code:'FORBIDDEN'});
+      if (host && row.node_id) {
+        const node=db.prepare('SELECT current_session_id,binding_generation,retired_revision FROM organization_nodes WHERE id=? AND organization_id=?').get(row.node_id,row.organization_id);
+        if (!node || node.current_session_id!==sessionId || node.binding_generation!==row.binding_generation || node.retired_revision!==null || !isAppendOnlyRevisionCompatible(db,row.organization_id,scope.organizationRevision,org.current_revision)) throw Object.assign(new Error('Binding changed'),{code:'FORBIDDEN'});
+      }
+      const now=stamp();
+      if (action==='read') db.prepare('INSERT OR IGNORE INTO agent_interruption_reads VALUES(?,?,?)').run(row.id,sessionId,now);
+      if (action==='ack') db.prepare('UPDATE native_member_interruptions SET acknowledged_at=COALESCE(acknowledged_at,?) WHERE id=?').run(now,row.id);
+      if (action==='resolve') db.prepare('UPDATE native_member_interruptions SET resolved_at=COALESCE(resolved_at,?),resolution_summary=COALESCE(resolution_summary,?),resolution_evidence=COALESCE(resolution_evidence,?) WHERE id=?').run(now,text(summary).slice(0,1000),text(evidence).slice(0,1000),row.id);
+      db.exec('COMMIT');
+      if (action!=='read') return {id:row.id,action,recoveryVerified:false};
+      return { id:row.id, kind:'native_member', runId:row.run_id, sessionId:row.host_session_id, memberId:row.member_id,
+        nativeParent:{kind:row.parent_kind,...(row.parent_member_id ? {memberId:row.parent_member_id} : {})}, recipientSessionId:sessionId,
+        provider:row.provider, category:row.state, source:'provider_native_event', confidence:'provider_reported', evidenceRef:`run:${row.run_id}:event:${row.event_id}`,
+        controlCapabilities:{individualControl:'unknown', nativeParentDelivery:'unavailable'},
+        sideEffects:'unknown',occurredAt:row.occurred_at,deliveryState:row.delivery_state,acknowledgedAt:row.acknowledged_at,resolvedAt:row.resolved_at,
+        resolutionSummary:row.resolution_summary,resolutionEvidence:row.resolution_evidence,recoveryVerified:false,
+        readAt:db.prepare('SELECT first_read_at FROM agent_interruption_reads WHERE incident_id=? AND session_id=?').get(row.id,sessionId)?.first_read_at || now };
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  },{mutate:true});
+}
 export const acknowledgeAgentInterruption = input => updateDisposition(input, 'ack');
 export const resolveAgentInterruption = input => updateDisposition(input, 'resolve');
 export async function getAgentInterruption(input) {
@@ -322,9 +439,11 @@ export async function listAgentInterruptions({ authSession, limit = 50 } = {}) {
   const bounded = Math.max(1, Math.min(Number.isInteger(limit) ? limit : 50, 100));
   const ids = await withDatabase(db => {
     schema(db);
-    return db.prepare(`SELECT i.id FROM agent_interruption_incidents i, json_each(i.ancestors_json) a
+    const regular = db.prepare(`SELECT i.id,i.created_at FROM agent_interruption_incidents i, json_each(i.ancestors_json) a
       WHERE json_extract(a.value,'$.sessionId')=? AND CAST(a.key AS INTEGER)<=i.escalation_index
-      ORDER BY i.created_at DESC LIMIT ?`).all(authSession.sessionId,bounded).map(row => row.id);
+      ORDER BY i.created_at DESC LIMIT ?`).all(authSession.sessionId,bounded);
+    const native = db.prepare('SELECT id,created_at FROM native_member_interruptions WHERE host_session_id=? OR recipient_session_id=? ORDER BY created_at DESC LIMIT ?').all(authSession.sessionId,authSession.sessionId,bounded);
+    return [...regular,...native].sort((a,b)=>b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id)).slice(0,bounded).map(row=>row.id);
   });
   const records = [];
   for (const incidentId of ids) {

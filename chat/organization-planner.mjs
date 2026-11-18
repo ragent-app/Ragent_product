@@ -442,6 +442,17 @@ export async function compileOrganizationProposal(input, options = {}) {
     }
     compiling.add(node.stableKey);
     try {
+      const frozen = options.frozenNodeByKey?.[node.stableKey];
+      if (frozen) {
+        const profile = profileByAgentId.get(node.agentId) || { agentId: node.agentId, capabilities: [], runtimePolicy: frozen.grant?.runtimePolicy || {} };
+        const resolved = { selectedAgentId: node.agentId, profile, effective: frozen.grant || {},
+          proof: frozen.resolver?.proof || {}, runtime: frozen.runtime || null, runtimeDecision: frozen.runtimeDecision || null };
+        profileByNode.set(node.stableKey, resolved);
+        grantByNode.set(node.stableKey, resolved.effective);
+        resolverResults.push({ stableKey: node.stableKey, selectedAgentId: node.agentId, proof: resolved.proof, effective: resolved.effective,
+          ...(resolved.runtime ? { runtime: resolved.runtime } : {}) });
+        return resolved;
+      }
       const profile = profileByAgentId.get(node.agentId);
       if (!profile) {
         throw plannerError(PLANNER_RESOLVER_REJECTED, `resolver found no catalog Agent for ${node.stableKey}`, {
@@ -532,7 +543,7 @@ export async function compileOrganizationProposal(input, options = {}) {
     proposalId: proposal.proposalId,
     idempotencyKey: proposal.idempotencyKey,
     objective: proposal.objective,
-    nodes: proposal.nodes.map((node) => ({
+    nodes: proposal.nodes.map((node) => options.frozenNodeByKey?.[node.stableKey] || ({
       ...node,
       grant: grantByNode.get(node.stableKey),
       ...(profileByNode.get(node.stableKey)?.runtime ? { runtime: profileByNode.get(node.stableKey).runtime } : {}),

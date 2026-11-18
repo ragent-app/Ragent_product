@@ -5,27 +5,54 @@ import { getApp } from './apps.mjs';
 import { buildAgentCapabilityProfile } from './agent-capability-registry.mjs';
 import { assertAgentAllowed, assertManagerCanDelegate, resolveSessionCollaborationPolicy, ROLES } from './collaboration-policy.mjs';
 import { buildOrganizationRuntimeCatalog, resolveRuntimeSelection } from './organization-runtime-selection.mjs';
-import { applyRuntimeConstraints, queryRuntimeCandidates } from './organization-runtime-decision.mjs';
+import { applyRuntimeConstraints, queryRuntimeCandidates, selectRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { readSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
+import { getOrganization, getRevision, getNode, listOrganizationNodes, isOrganizationRevisionCompatible } from './organization-store.mjs';
 
 const fail = (message) => Object.assign(new Error(message), { code: 'ORG_CANDIDATES_FORBIDDEN', statusCode: 403 });
 const text = (value) => typeof value === 'string' ? value.trim() : '';
 export async function queryAuthorizedRuntimeCandidates({ authSession, session, args = {} } = {}) {
-  if (authSession?.principalKind !== 'run_capability' || authSession.capabilityOperation !== 'session.organization.tools'
-      || !session || session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user'
-      || session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail('A user root Run is required');
-  await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId });
+  if (authSession?.principalKind !== 'run_capability' || !session) throw fail('A scoped Run is required');
+  let rootSession = session;
+  let nodeGrant = null;
+  let managerNode = null;
+  if (authSession.capabilityOperation === 'session.organization.tools') {
+    if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user'
+        || session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail('A user root Run is required');
+    await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId });
+  } else if (authSession.capabilityOperation === 'organization.tools') {
+    const scope = authSession.organizationMessageScope;
+    const node = scope && await getNode(scope.nodeId);
+    const org = node && await getOrganization(node.organizationId);
+    const revision = org && await getRevision(org.id, org.currentRevision);
+    if (!scope || !node || !org || revision?.state !== 'frozen' || !await isOrganizationRevisionCompatible(org.id, scope.organizationRevision, org.currentRevision)
+        || node.organizationId !== scope.organizationId || node.currentSessionId !== authSession.sessionId
+        || node.bindingGeneration !== scope.bindingGeneration || node.lifecycleState !== 'active' || node.retiredRevision !== null
+        || node.grant?.canDelegate !== true || !Number.isInteger(node.grant.maxDepth) || node.grant.maxDepth < 1
+        || !Number.isInteger(node.grant.maxChildren) || node.grant.maxChildren < 1) throw fail('Current manager delegation is unavailable');
+    const { getSession } = await import('./session-manager.mjs');
+    rootSession = await getSession(org.rootSessionId);
+    if (!rootSession) throw fail('Owner policy is unavailable');
+    nodeGrant = node.grant;
+    managerNode = node;
+  } else throw fail('A scoped Run is required');
   const agentId = text(args.agentId);
   if (!agentId || agentId.length > 200) throw fail('An authorized Agent is required');
   const app = await getApp(agentId);
   if (!app) throw fail('Agent is unavailable');
   const profile = await buildAgentCapabilityProfile(app);
-  const parentApp = session.templateId ? await getApp(session.templateId) : null;
-  const parentPolicy = resolveSessionCollaborationPolicy(session, parentApp);
-  assertManagerCanDelegate(parentPolicy, { depth: session.delegationDepth || 0 });
+  const parentApp = rootSession.templateId ? await getApp(rootSession.templateId) : null;
+  const parentPolicy = resolveSessionCollaborationPolicy(rootSession, parentApp);
+  assertManagerCanDelegate(parentPolicy, { depth: rootSession.delegationDepth || 0 });
   const taskRole = args.taskRole === undefined ? profile.role : text(args.taskRole).toLowerCase();
   if (!ROLES.has(taskRole)) throw Object.assign(new Error('Invalid collaboration task role'), { code: 'ORG_CANDIDATES_INVALID', statusCode: 400 });
   assertAgentAllowed(parentPolicy, agentId, taskRole);
+  if (nodeGrant) {
+    const managerApp = session.templateId ? await getApp(session.templateId) : null;
+    const managerPolicy = resolveSessionCollaborationPolicy(session, managerApp);
+    assertManagerCanDelegate(managerPolicy, { depth: session.delegationDepth || 0 });
+    assertAgentAllowed(managerPolicy, agentId, taskRole);
+  }
   const requirements = args.requirements && typeof args.requirements === 'object' && !Array.isArray(args.requirements) ? args.requirements : {};
   if (Object.keys(requirements).some((key) => !['tools', 'environment', 'minimumContextTokens', 'advancedRequired', 'qualityFloor'].includes(key))
       || (requirements.tools !== undefined && (!Array.isArray(requirements.tools) || requirements.tools.length > 32 || requirements.tools.some((v) => typeof v !== 'string' || !v.trim() || v.length > 120)))
@@ -37,9 +64,23 @@ export async function queryAuthorizedRuntimeCandidates({ authSession, session, a
   }
   const stableKey = text(args.nodeKey);
   if (stableKey && !/^[A-Za-z0-9_.-]{1,160}$/.test(stableKey)) throw Object.assign(new Error('Invalid node key'), { statusCode: 400 });
-  const saved = await readSessionRuntimeConstraints(session.id);
-  const constraints = Object.fromEntries(Object.entries(saved.constraints).filter(([, value]) =>
-    value.scope === 'organization' || (stableKey && value.scope === `node:${stableKey}`)));
+  if (managerNode && stableKey) {
+    const nodes = await listOrganizationNodes(managerNode.organizationId);
+    const existing = nodes.find((entry) => entry.stableKey === stableKey && entry.retiredRevision === null);
+    if (existing) {
+      const byId = new Map(nodes.map((entry) => [entry.id, entry]));
+      let cursor = existing, allowed = false;
+      const visited = new Set();
+      while (cursor?.parentNodeId && !visited.has(cursor.id)) {
+        visited.add(cursor.id);
+        if (cursor.parentNodeId === managerNode.id) { allowed = true; break; }
+        cursor = byId.get(cursor.parentNodeId);
+      }
+      if (!allowed) throw fail('Node is outside the delegated subtree');
+    }
+  }
+  const saved = await readSessionRuntimeConstraints(rootSession.id);
+  const constraints = selectRuntimeConstraints(saved.constraints, ['organization', ...(stableKey ? [`node:${stableKey}`] : [])]);
   const catalog = await buildOrganizationRuntimeCatalog();
   // Intersect the catalog with the same parent/child runtime policy compiler.
   // Reuse this snapshot; do not call an upstream once per candidate.
@@ -55,6 +96,9 @@ export async function queryAuthorizedRuntimeCandidates({ authSession, session, a
       try {
         const requested = applyRuntimeConstraints({ tool: candidate.tool, provider: candidate.provider, model: candidate.model }, constraints);
         await resolveRuntimeSelection({ requested, profile, parentGrant: { runtimePolicy: parentPolicy.runtimePolicy },
+          getModels: async () => ({ models: [{ id: candidate.model, effortLevels: candidate.effortLevels }] }),
+          getProviders: async () => [candidate.provider], getTool: async () => null });
+        if (nodeGrant) await resolveRuntimeSelection({ requested, profile, parentGrant: nodeGrant,
           getModels: async () => ({ models: [{ id: candidate.model, effortLevels: candidate.effortLevels }] }),
           getProviders: async () => [candidate.provider], getTool: async () => null });
         valid.push(candidate);

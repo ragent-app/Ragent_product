@@ -1,5 +1,5 @@
 // Identity is derived from current server bindings, never from a model's text.
-import { getOrganization, getOrganizationByRootSession, getRevision, listOrganizationNodes, listOrganizationEdges } from './organization-store.mjs';
+import { getOrganization, getOrganizationByRootSession, getRevision, listOrganizationNodes, listOrganizationEdges, isOrganizationRevisionCompatible } from './organization-store.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
 
 const text = (value) => typeof value === 'string' ? value.trim() : '';
@@ -18,7 +18,7 @@ export async function buildOrganizationIdentityContext(session = {}) {
   if (!org || ['archived', 'lifecycle_pending'].includes(org.state)) return unavailable();
   const revision = await getRevision(org.id, org.currentRevision);
   if (!revision || revision.state !== 'frozen') return managed ? unavailable() : '';
-  if (ref.organizationRevision != null && ref.organizationRevision !== org.currentRevision) return unavailable();
+  if (ref.organizationRevision != null && !await isOrganizationRevisionCompatible(org.id, ref.organizationRevision, org.currentRevision)) return unavailable();
   if ((text(session.organizationId) && session.organizationId !== org.id) ||
       (text(session.organizationNodeId) && session.organizationNodeId !== ref.nodeId)) return unavailable();
   const nodes = (await listOrganizationNodes(org.id)).filter((node) => node.retiredRevision == null);

@@ -1,3 +1,4 @@
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 import { scopeContainsPath } from './execution-scope.mjs';
 // Server-owned phase dispatch for a provisioned Organization Revision.
 //
@@ -86,8 +87,9 @@ async function phaseDependenciesCompleted(organizationId, revision, phase) {
   for (const dependency of dependencies) {
     const complete = await withDatabase(db => {
       ensureOrganizationMessageEnvelopeSchema(db);
-      return !!db.prepare(`SELECT 1 FROM organization_events
-        WHERE organization_id=? AND organization_revision=? AND phase_id=? AND type IN ('phase.completed','phase_completed') LIMIT 1`).get(organizationId,revision,dependency);
+      const events = db.prepare(`SELECT organization_revision FROM organization_events
+        WHERE organization_id=? AND organization_revision<=? AND phase_id=? AND type IN ('phase.completed','phase_completed') ORDER BY organization_revision DESC`).all(organizationId,revision,dependency);
+      return events.some((event) => isAppendOnlyRevisionCompatible(db, organizationId, event.organization_revision, revision));
     }, { mutate: true });
     if (!complete) {
       throw dispatchError('ORG_PHASE_DEPENDENCY_BLOCKED', `phase ${phase.phaseId} depends on incomplete phase ${dependency}`, 409, {

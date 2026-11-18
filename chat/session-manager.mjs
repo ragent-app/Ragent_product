@@ -6483,6 +6483,12 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     if (delegationReconciliation.handled) {
       run = delegationReconciliation.run || await getRun(runId) || run;
       result = await getRunResult(runId);
+      if (delegationReconciliation.observedMembers?.length) {
+        await updateRun(runId,current=>({...current,nativeMemberInterruptionPending:true}));
+        const { observeNativeMemberInterruptions } = await import('./agent-interruption-notifications.mjs');
+        const observed = await observeNativeMemberInterruptions({ runId, events: delegationReconciliation.observedMembers }).then(()=>true).catch(()=>false);
+        if (observed) await updateRun(runId,current=>({...current,nativeMemberInterruptionPending:false}));
+      }
     }
   }
   // A reconciliation transition writes its synthetic result into status.json
@@ -9233,10 +9239,12 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
   const finalizedRun = await updateRun(run.id, (current) => ({
     ...current,
     finalizedAt: current.finalizedAt || nowIso(),
+    ...(!current.finalizedAt && current.providerNativeDelegation ? { nativeMemberInterruptionPending:true } : {}),
     ...(!compacting && current.state === 'failed' && !current.finalizedAt &&
       (finalizedMeta.meta?.sessionPlane === 'organization' || finalizedMeta.meta?.parentSessionId || finalizedMeta.meta?.delegatedFromSessionId)
       ? { agentInterruptionPending: true } : {}),
   })) || run;
+  if (finalizedRun.nativeMemberInterruptionPending) await recoverPendingNativeMemberInterruptions(finalizedRun).catch(() => {});
   let interruptionIncidentId = finalizedRun.agentInterruptionIncidentId || '';
   if (finalizedRun.agentInterruptionPending === true) {
     interruptionIncidentId = await observePendingAgentInterruption(finalizedRun).catch((error) => {
@@ -9695,6 +9703,42 @@ async function observePendingAgentInterruption(run) {
   return outcome.applicable === true ? outcome.incidentId : '';
 }
 
+async function recoverPendingNativeMemberInterruptions(run) {
+  if (!run?.nativeMemberInterruptionPending || !run.id || !run.sessionId) return;
+  const { resolveProvider } = await import('./provider-native-delegation-runtime.mjs');
+  const provider=resolveProvider(run);
+  if (!provider) return;
+  const appThread=run.appServerThreadId || '', codexThread=run.codexThreadId || '';
+  const parentThreadId=appThread && codexThread && appThread!==codexThread ? '' : appThread || codexThread;
+  const { createMemberReader } = await import('./adapters/provider-native-delegation.mjs');
+  const { readRunSpoolDelta } = await import('./runs.mjs');
+  const reader=createMemberReader({provider,runId:run.id,parentSessionId:run.sessionId,parentThreadId});
+  let offset=0, lines=0, complete=false;
+  for (let page=0;page<40;page++) {
+    const result=await readRunSpoolDelta(run.id,{startOffset:offset,skipLines:lines,maxRecords:200,strictStatus:true});
+    if (result.readStatus!=='verified') return;
+    const rawRecords=result.records.filter(record=>{
+      let payload=record?.json;
+      if (!payload && typeof record?.line==='string') { try { payload=JSON.parse(record.line); } catch { return true; } }
+      return !['ragent.member_event','ragent.delegation_event'].includes(payload?.type);
+    });
+    const projection=await reader.consume(rawRecords,{sourceVerified:true});
+    if (projection.gap) return;
+    const previousOffset=offset, previousLines=lines;
+    offset=result.nextOffset || 0;
+    lines=offset===0 ? (result.processedLineCount || 0) : previousLines + (result.processedLineCount || 0);
+    if (!result.truncated) { complete=true; break; }
+    if (offset===previousOffset && lines<=previousLines) return;
+  }
+  if (!complete) {
+    await updateRun(run.id,current=>({...current,nativeMemberInterruptionPending:false,nativeMemberInterruptionRecoveryState:'coverage_gap'}));
+    return;
+  }
+  const { observeNativeMemberInterruptions } = await import('./agent-interruption-notifications.mjs');
+  await observeNativeMemberInterruptions({runId:run.id,events:reader.snapshot().events});
+  await updateRun(run.id,current=>({...current,nativeMemberInterruptionPending:false}));
+}
+
 let interruptionRecoveryPromise = null;
 let interruptionRecoveryEntries = [];
 let interruptionRecoveryCursor = 0;
@@ -9712,6 +9756,7 @@ async function recoverPendingAgentInterruptions() {
     for (const entry of batch) {
       const run = await getRun(entry.id).catch(() => null);
       await observePendingAgentInterruption(run).catch(() => {});
+      await recoverPendingNativeMemberInterruptions(run).catch(() => {});
     }
   })().finally(() => {
     interruptionRecoveryPromise = null;

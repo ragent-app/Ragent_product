@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from './execution-scope.mjs';
 import { getLiveOrganizationSessionReference, getFactoryMessageScope } from './organization-session-lifecycle.mjs';
-import { getNode } from './organization-store.mjs';
+import { getNode, isOrganizationRevisionCompatible } from './organization-store.mjs';
 import { listBuiltinSkills, readBuiltinSkill } from './builtin-skills.mjs';
 import { acknowledgeAgentInterruption, resolveAgentInterruption, getAgentInterruption, listAgentInterruptions } from './agent-interruption-notifications.mjs';
 
@@ -56,12 +56,23 @@ export async function executeOrganizationControlTool({ authSession, action, args
   const direct = await getLiveOrganizationSessionReference(authSession.sessionId);
   const current = direct?.kind === 'node' ? direct : await getFactoryMessageScope(authSession.sessionId, '');
   if (!current || current.organizationId !== scope.organizationId || current.nodeId !== scope.nodeId ||
-      current.bindingGeneration !== scope.bindingGeneration || current.organizationRevision !== scope.organizationRevision ||
+      current.bindingGeneration !== scope.bindingGeneration ||
+      (current.organizationRevision !== scope.organizationRevision && !await isOrganizationRevisionCompatible(scope.organizationId, scope.organizationRevision, current.organizationRevision)) ||
       (scope.attemptId && current.attemptId !== scope.attemptId)) throw fail();
   const node = await getNode(scope.nodeId);
   if (!node || node.organizationId !== scope.organizationId || node.bindingGeneration !== scope.bindingGeneration) throw fail();
   const role = ({ MANAGER: 'manager', PHASE_LEAD: 'manager', WORKER: 'worker', REVIEWER: 'reviewer', EXECUTIVE: 'root' })[String(node.sessionClass || '').toUpperCase()];
   const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) || (!!role && id === `ragent:builtin:${role}`);
+  if (action === 'candidates.query') {
+    const { getSession } = await import('./session-manager.mjs');
+    const session = await getSession(authSession.sessionId);
+    const { queryAuthorizedRuntimeCandidates } = await import('./organization-candidate-query.mjs');
+    return queryAuthorizedRuntimeCandidates({ authSession, session, args });
+  }
+  if (action === 'subtree.append') {
+    const { appendManagerSubtree } = await import('./organization-manager-append.mjs');
+    return appendManagerSubtree({ authSession, scope, args });
+  }
   if (action === 'node.dispatch') {
     const childNodeId = typeof args.childNodeId === 'string' ? args.childNodeId.trim() : '';
     if (!childNodeId || childNodeId.length > 160) throw Object.assign(new Error('Child node is required'), { statusCode: 400 });

@@ -1,3 +1,4 @@
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 import { randomBytes } from 'crypto';
 import { mkdirSync } from 'fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -72,10 +73,10 @@ function managedAttemptBindingAvailable(db, collaborationId, taskId) {
     const orgRow=db.prepare('SELECT current_revision,state FROM organizations WHERE id=?').get(org);
     const parent=db.prepare('SELECT current_session_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(delegation.parentNodeId,org);
     const child=db.prepare('SELECT parent_node_id,binding_generation,retired_revision,lifecycle_state FROM organization_nodes WHERE id=? AND organization_id=?').get(nodeId,org);
-    const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,delegation.revision,delegation.parentNodeId,nodeId);
-    const grants=db.prepare('SELECT generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? ORDER BY generation DESC').all(org,delegation.revision,delegation.parentNodeId,nodeId);
-    const grant=grants[0] && grants[0].lifecycle_state==='active' && (!grants[1] || grants[1].generation!==grants[0].generation);
-    if (!orgRow || ['archived','lifecycle_pending'].includes(orgRow.state) || orgRow.current_revision!==delegation.revision || !parent || parent.retired_revision!==null || parent.lifecycle_state!=='active'
+    const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision<=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,orgRow?.current_revision,delegation.parentNodeId,nodeId);
+    const grants=db.prepare('SELECT organization_revision,generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision<=? AND parent_node_id=? AND child_node_id=? ORDER BY organization_revision DESC,generation DESC').all(org,orgRow?.current_revision,delegation.parentNodeId,nodeId);
+    const grant=grants[0] && grants[0].lifecycle_state==='active' && (!grants[1] || grants[1].organization_revision!==grants[0].organization_revision || grants[1].generation!==grants[0].generation);
+    if (!orgRow || ['archived','lifecycle_pending'].includes(orgRow.state) || !isAppendOnlyRevisionCompatible(db,org,delegation.revision,orgRow.current_revision) || !parent || parent.retired_revision!==null || parent.lifecycle_state!=='active'
         || parent.current_session_id!==delegation.parentSessionId || parent.binding_generation!==delegation.bindingGeneration || parseJson(parent.grant_json,{})?.canDelegate!==true
         || !child || child.retired_revision!==null || child.lifecycle_state!=='active' || child.parent_node_id!==delegation.parentNodeId
         || child.binding_generation!==policy.organizationBindingGeneration || !edge || !grant) return false;
@@ -236,6 +237,10 @@ export function openDatabase() {
       attempt_id TEXT PRIMARY KEY REFERENCES collaboration_attempts(id), task_id TEXT NOT NULL,
       collaboration_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, plan_version INTEGER NOT NULL,
       source TEXT NOT NULL, effective_attempt_budget INTEGER NOT NULL, created_at TEXT NOT NULL, consumed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS collaboration_recovery_budgets (
+      task_id TEXT PRIMARY KEY, max_attempts INTEGER NOT NULL, deadline TEXT NOT NULL,
+      next_allowed_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS collaboration_dispatch_notices (
       command_id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL DEFAULT '', next_check_at TEXT NOT NULL DEFAULT ''
@@ -535,16 +540,16 @@ export async function createCollaborationRecord({ id: collaborationId = id('coll
         const revision=db.prepare('SELECT state FROM organization_revisions WHERE organization_id=? AND revision=?').get(org,d.revision);
         const parent=db.prepare('SELECT current_session_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(d.parentNodeId,org);
         const child=db.prepare('SELECT parent_node_id,binding_generation,retired_revision,lifecycle_state,grant_json FROM organization_nodes WHERE id=? AND organization_id=?').get(childId,org);
-        const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,d.revision,d.parentNodeId,childId);
-        const grants=db.prepare('SELECT max_concurrent,generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision=? AND parent_node_id=? AND child_node_id=? ORDER BY generation DESC').all(org,d.revision,d.parentNodeId,childId);
-        const grant=grants[0]?.lifecycle_state==='active' && (!grants[1] || grants[1].generation!==grants[0].generation) ? grants[0] : null;
+        const edge=db.prepare("SELECT 1 FROM organization_edges WHERE organization_id=? AND organization_revision<=? AND parent_node_id=? AND child_node_id=? AND edge_type='MANAGES'").get(org,organization?.current_revision,d.parentNodeId,childId);
+        const grants=db.prepare('SELECT organization_revision,max_concurrent,generation,lifecycle_state FROM delegation_grants WHERE organization_id=? AND organization_revision<=? AND parent_node_id=? AND child_node_id=? ORDER BY organization_revision DESC,generation DESC').all(org,organization?.current_revision,d.parentNodeId,childId);
+        const grant=grants[0]?.lifecycle_state==='active' && (!grants[1] || grants[1].organization_revision!==grants[0].organization_revision || grants[1].generation!==grants[0].generation) ? grants[0] : null;
         // Failed or aggregating work may still have an unresolved external
         // effect. Do not release its admission slot without a terminal fence.
         const active=db.prepare("SELECT COUNT(*) AS n FROM collaborations c JOIN organization_nodes n ON n.id=json_extract(c.policy_json,'$.organizationNodeId') AND n.organization_id=? WHERE c.state<>'completed' AND json_extract(c.policy_json,'$.organizationId')=? AND n.parent_node_id=?").get(org,org,d.parentNodeId).n;
         const childActive=db.prepare("SELECT COUNT(*) AS n FROM collaborations WHERE state<>'completed' AND json_extract(policy_json,'$.organizationId')=? AND json_extract(policy_json,'$.organizationNodeId')=?").get(org,childId).n;
         const childCount=db.prepare("SELECT COUNT(*) AS n FROM organization_nodes WHERE organization_id=? AND parent_node_id=? AND retired_revision IS NULL AND lifecycle_state='active'").get(org,d.parentNodeId).n;
         const parentGrant=parseJson(parent?.grant_json,{}), childGrant=parseJson(child?.grant_json,{});
-        if (!organization || ['archived','lifecycle_pending'].includes(organization.state) || organization.root_session_id!==rootSessionId || organization.current_revision!==d.revision || revision?.state!=='frozen'
+        if (!organization || ['archived','lifecycle_pending'].includes(organization.state) || organization.root_session_id!==rootSessionId || !isAppendOnlyRevisionCompatible(db,org,d.revision,organization.current_revision) || revision?.state!=='frozen'
             || !parent || parent.retired_revision!==null || parent.lifecycle_state!=='active' || parent.current_session_id!==d.parentSessionId || parent.binding_generation!==d.bindingGeneration || parentGrant.canDelegate!==true
             || !child || child.retired_revision!==null || child.lifecycle_state!=='active' || child.parent_node_id!==d.parentNodeId || child.binding_generation!==policy.organizationBindingGeneration
             || !edge || !grant || !Number.isInteger(parentGrant.maxConcurrent) || Number(active)>=parentGrant.maxConcurrent
@@ -659,6 +664,11 @@ export async function claimTaskAttempt(taskId, {
       if (!current || !['ready', 'retrying'].includes(current.state)) {
         db.exec('COMMIT');
         return null;
+      }
+      const recovery = db.prepare('SELECT * FROM collaboration_recovery_budgets WHERE task_id=?').get(taskId);
+      if (recovery && Number(current.current_attempt) > 0
+          && (Number(current.current_attempt) >= recovery.max_attempts || timestamp < recovery.next_allowed_at || timestamp >= recovery.deadline)) {
+        db.exec('COMMIT'); return null;
       }
       if (!managedAttemptBindingAvailable(db,current.collaboration_id,taskId)) { db.exec('COMMIT'); return null; }
       const nextAttempt = Number(current.current_attempt || 0) + 1;
@@ -1221,7 +1231,14 @@ export async function markReadyTasks(collaborationId) {
       const tasks = db.prepare('SELECT * FROM collaboration_tasks WHERE collaboration_id = ?').all(collaborationId);
       const states = new Map(tasks.map((task) => [task.id, task.state]));
       for (const task of tasks) {
+        const recovery = ['retrying','ready'].includes(task.state) ? db.prepare('SELECT * FROM collaboration_recovery_budgets WHERE task_id=?').get(task.id) : null;
+        if (recovery && timestamp >= recovery.deadline) {
+          db.prepare("UPDATE collaboration_tasks SET state='failed',updated_at=? WHERE id=? AND state IN ('retrying','ready')").run(timestamp,task.id);
+          appendEvent(db,collaborationId,'recovery_deadline_expired',{ deadline: recovery.deadline },task.id);
+          continue;
+        }
         if (task.state !== 'planned' && task.state !== 'retrying') continue;
+        if (recovery && timestamp < recovery.next_allowed_at) continue;
         const deps = parseJson(task.depends_on_json, []);
         if (deps.every((dependency) => states.get(dependency) === 'succeeded')) {
           db.prepare("UPDATE collaboration_tasks SET state = 'ready', updated_at = ? WHERE id = ?").run(timestamp, task.id);
@@ -1539,7 +1556,7 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
     db.exec('BEGIN IMMEDIATE');
     try {
       const row = db.prepare(`SELECT a.*, t.collaboration_id, t.state AS task_state, t.current_attempt,
-          t.retry_json, c.state AS collaboration_state
+          t.retry_json, t.timeout_ms, c.state AS collaboration_state
         FROM collaboration_attempts a
         JOIN collaboration_tasks t ON t.id = a.task_id
         JOIN collaborations c ON c.id = t.collaboration_id
@@ -1553,6 +1570,10 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
       const collaboration = db.prepare('SELECT plan_version,policy_json FROM collaborations WHERE id=?').get(row.collaboration_id);
       const retryPolicy = parseJson(row.retry_json, { maxAttempts: 1, retryOn: [] });
       const policy = parseJson(collaboration?.policy_json, {});
+      const first = db.prepare('SELECT created_at FROM collaboration_attempts WHERE task_id=? ORDER BY attempt_number LIMIT 1').get(row.task_id);
+      const deadline = first?.created_at && Number.isInteger(row.timeout_ms) ? isoAfter(first.created_at,row.timeout_ms) : '';
+      const backoffMs = Math.min(30000, 1000 * (2 ** Math.min(Number(row.attempt_number) - 1, 5)));
+      const nextAllowed = isoAfter(timestamp,backoffMs);
       const allowed = !!receipt && receipt.source === 'read_only_runtime_unavailable_pre_dispatch'
         && row.failure_kind === 'deterministic_failure' && !row.run_id && Number(row.current_attempt) === Number(row.attempt_number)
         && !db.prepare('SELECT 1 FROM collaboration_dispatch_commands WHERE attempt_id=?').get(attemptId)
@@ -1561,7 +1582,7 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
         && receipt.attempt_number === row.attempt_number && Number(row.attempt_number) < receipt.effective_attempt_budget
         && Number(retryPolicy.maxAttempts) === receipt.effective_attempt_budget
         && Array.isArray(retryPolicy.retryOn) && retryPolicy.retryOn.includes('deterministic_failure')
-        && managedAttemptBindingAvailable(db,row.collaboration_id,row.task_id);
+        && !!deadline && nextAllowed < deadline && managedAttemptBindingAvailable(db,row.collaboration_id,row.task_id);
       if (!allowed) {
         db.exec('COMMIT');
         return null;
@@ -1575,6 +1596,10 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
       if (db.prepare('UPDATE collaboration_replay_receipts SET consumed_at=? WHERE attempt_id=? AND consumed_at IS NULL').run(timestamp,attemptId).changes !== 1) {
         db.exec('ROLLBACK'); return null;
       }
+      const budgetChanged = db.prepare(`INSERT INTO collaboration_recovery_budgets(task_id,max_attempts,deadline,next_allowed_at,updated_at)
+        VALUES(?,?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET next_allowed_at=excluded.next_allowed_at,updated_at=excluded.updated_at
+        WHERE max_attempts=excluded.max_attempts AND deadline=excluded.deadline`).run(row.task_id,receipt.effective_attempt_budget,deadline,nextAllowed,timestamp).changes;
+      if (budgetChanged !== 1) { db.exec('ROLLBACK'); return null; }
       db.prepare("UPDATE collaborations SET state = CASE WHEN state = 'failed' THEN 'ready' ELSE state END, updated_at = ? WHERE id = ?")
         .run(timestamp, row.collaboration_id);
       appendEvent(db, row.collaboration_id, 'attempt_retry_requested', {
@@ -1582,6 +1607,7 @@ export async function retryFailedAttempt(attemptId, { reason = 'manual retry req
         failureKind: row.failure_kind || 'unknown_outcome',
         attemptNumber: row.attempt_number,
         effectiveAttemptBudget: receipt.effective_attempt_budget,
+        recoveryDeadline: deadline, nextAllowedAt: nextAllowed,
         reconciliation: receipt.source,
       }, row.task_id, row.id);
       db.exec('COMMIT');

@@ -1,3 +1,4 @@
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 // Owner messages have a separate body record and an atomic typed-envelope
 // reference. OWNER_MESSAGE's from_node_id is a protocol sentinel, not an agent.
 import { createHash, randomUUID } from 'node:crypto';
@@ -64,12 +65,12 @@ export async function recordAcceptedTeamMessageInputs({ sessionId, runId, manife
       let count = 0;
       for (const input of included) {
         if (typeof input?.body !== 'string' || !trim(input.messageId) || !trim(input.organizationId)) continue;
-        const row = db.prepare(`SELECT m.*,e.delivery_state,n.binding_generation AS node_binding FROM organization_team_messages m
+        const row = db.prepare(`SELECT m.*,e.delivery_state,n.binding_generation AS node_binding,o.current_revision FROM organization_team_messages m
           JOIN internal_envelopes e ON e.envelope_id=m.envelope_id
           JOIN organization_nodes n ON n.id=m.recipient_node_id AND n.organization_id=m.organization_id
           JOIN organizations o ON o.id=n.organization_id
-          WHERE m.message_id=? AND m.organization_id=? AND m.recipient_node_id=? AND n.current_session_id=? AND n.binding_generation=? AND n.retired_revision IS NULL AND o.state<>'archived' AND o.current_revision=?`).get(input.messageId,scope.organizationId,scope.nodeId,scope.managedSessionId || sessionId,scope.bindingGeneration,scope.organizationRevision);
-        if (!row || row.body !== input.body || !['pending','delivered','acknowledged'].includes(row.delivery_state)) continue;
+          WHERE m.message_id=? AND m.organization_id=? AND m.recipient_node_id=? AND n.current_session_id=? AND n.binding_generation=? AND n.retired_revision IS NULL AND o.state<>'archived'`).get(input.messageId,scope.organizationId,scope.nodeId,scope.managedSessionId || sessionId,scope.bindingGeneration);
+        if (!row || !isAppendOnlyRevisionCompatible(db, scope.organizationId, scope.organizationRevision, row.current_revision) || row.body !== input.body || !['pending','delivered','acknowledged'].includes(row.delivery_state)) continue;
         let epoch = null;
         const workItemId = scope.workItemId || row.work_item_id;
         if (scope.workItemId && row.work_item_id && scope.workItemId !== row.work_item_id) continue;
@@ -187,14 +188,14 @@ export async function respondToTeamMessage({ messageId, action, body, idempotenc
   return withDatabase(db => {
     schema(db); db.exec('BEGIN IMMEDIATE');
     try {
-      const row = db.prepare(`SELECT m.*,e.delivery_state,r.execution_epoch,r.binding_generation,r.work_item_id AS receipt_work_item_id FROM organization_team_messages m
+      const row = db.prepare(`SELECT m.*,e.delivery_state,r.execution_epoch,r.binding_generation,r.work_item_id AS receipt_work_item_id,o.current_revision FROM organization_team_messages m
         JOIN internal_envelopes e ON e.envelope_id=m.envelope_id
         JOIN organization_team_delivery_receipts r ON r.message_id=m.message_id AND r.run_id=? AND r.session_id=?
         JOIN organization_nodes n ON n.id=m.recipient_node_id AND n.organization_id=m.organization_id
         JOIN organizations o ON o.id=n.organization_id
         WHERE m.message_id=? AND m.organization_id=? AND m.recipient_node_id=? AND n.current_session_id=?
-          AND n.binding_generation=? AND n.retired_revision IS NULL AND r.binding_generation=n.binding_generation AND o.state<>'archived' AND o.current_revision=?`).get(principal.runId,principal.sessionId,messageId,scope.organizationId,scope.nodeId,scope.managedSessionId || principal.sessionId,scope.bindingGeneration,scope.organizationRevision);
-      if (!row) throw fail('Message was not delivered to this current node binding and Run',403);
+          AND n.binding_generation=? AND n.retired_revision IS NULL AND r.binding_generation=n.binding_generation AND o.state<>'archived'`).get(principal.runId,principal.sessionId,messageId,scope.organizationId,scope.nodeId,scope.managedSessionId || principal.sessionId,scope.bindingGeneration);
+      if (!row || !isAppendOnlyRevisionCompatible(db, scope.organizationId, scope.organizationRevision, row.current_revision)) throw fail('Message was not delivered to this current node binding and Run',403);
       if (row.receipt_work_item_id && !db.prepare(`SELECT 1 FROM factory_work_items w JOIN factory_execution_bindings b ON b.work_item_id=w.id AND b.execution_epoch=w.execution_epoch JOIN collaboration_attempts a ON a.id=b.attempt_id AND a.task_id=b.task_id WHERE w.id=? AND w.organization_id=? AND w.assignee_node_id=? AND w.execution_epoch=? AND w.state='running' AND w.control_state='none' AND b.status='running' AND b.run_id=? AND b.binding_generation=? AND a.run_id=? AND a.session_id=? AND (? IS NULL OR a.id=?)`).get(row.receipt_work_item_id,scope.organizationId,scope.nodeId,row.execution_epoch,principal.runId,scope.bindingGeneration,principal.runId,principal.sessionId,scope.attemptId || null,scope.attemptId || null)) throw fail('Work execution changed',409);
       let reply = null;
       if (action === 'reply') {

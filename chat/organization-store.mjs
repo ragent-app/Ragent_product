@@ -3,6 +3,7 @@ import { openDatabase as openCollaborationDatabase } from './collaboration-store
 import { createSerialTaskQueue } from './fs-utils.mjs';
 import { CHAT_COLLABORATIONS_DB, ORG_SHADOW_PROJECTION } from '../lib/config.mjs';
 import { invalidateOrganizationProjectionCache } from './organization-projection-cache.mjs';
+import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
 
 // Organization Runtime data layer (S8). The six organization tables live in the
 // same Collaboration SQLite file (WAL, foreign keys ON) so organization
@@ -619,6 +620,85 @@ export async function createRevisionAtHead(organizationId, {
       db.exec('ROLLBACK');
       throw error;
     }
+  }, { mutate: true });
+}
+
+export async function isOrganizationRevisionCompatible(organizationId, fromRevision, toRevision) {
+  return withDatabase((db) => isAppendOnlyRevisionCompatible(db, organizationId, fromRevision, toRevision));
+}
+
+// Freeze an already validated append-only proposal and advance the head in one
+// transaction. The caller must verify the run-scoped actor and current owner
+// constraints before invoking this internal operation.
+export async function appendFrozenManagerRevision({ organizationId, expectedRevision, parentNodeId, parentSessionId,
+  bindingGeneration, proposal, compiled, digest, idempotencyKey, constraintsRevision, requestDigest } = {}) {
+  if (!organizationId || !parentNodeId || !parentSessionId || !Number.isInteger(expectedRevision)
+      || !Number.isInteger(bindingGeneration) || !Number.isSafeInteger(constraintsRevision) || constraintsRevision < 0
+      || !digest || !/^[a-f0-9]{64}$/.test(requestDigest || '') || !String(idempotencyKey || '').startsWith('manager-append:'))
+    throw orgError('ORG_APPEND_INVALID', 'Invalid manager append request');
+  return withDatabase((db) => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS organization_manager_append_operations (
+        organization_id TEXT NOT NULL, operation_key TEXT NOT NULL, parent_node_id TEXT NOT NULL,
+        revision INTEGER NOT NULL, constraints_revision INTEGER NOT NULL, state TEXT NOT NULL,
+        new_node_keys_json TEXT NOT NULL, request_digest TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(organization_id,operation_key))`);
+      const org = db.prepare('SELECT * FROM organizations WHERE id=?').get(organizationId);
+      const replay = db.prepare('SELECT * FROM organization_revisions WHERE organization_id=? AND idempotency_key=?').get(organizationId, idempotencyKey);
+      if (replay) {
+        const operation = db.prepare('SELECT request_digest FROM organization_manager_append_operations WHERE organization_id=? AND operation_key=?').get(organizationId,idempotencyKey);
+        if (replay.digest !== digest || operation?.request_digest !== requestDigest) throw orgError('ORG_APPEND_CONFLICT', 'Operation key belongs to a different proposal');
+        db.exec('COMMIT'); return rowRevision(replay);
+      }
+      const pending = db.prepare("SELECT 1 FROM organization_manager_append_operations WHERE organization_id=? AND state IN ('frozen','provisioned','dispatching') LIMIT 1").get(organizationId);
+      if (pending) throw orgError('ORG_APPEND_PENDING', 'An earlier append must be reconciled first');
+      const parent = db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(parentNodeId, organizationId);
+      const grant = parseJson(parent?.grant_json, {});
+      if (!org || org.current_revision !== expectedRevision || ['archived', 'lifecycle_pending'].includes(org.state)
+          || !parent || parent.current_session_id !== parentSessionId || parent.binding_generation !== bindingGeneration
+          || parent.retired_revision !== null || parent.lifecycle_state !== 'active' || grant.canDelegate !== true
+          || !Number.isInteger(grant.maxDepth) || grant.maxDepth < 1 || !Number.isInteger(grant.maxChildren) || grant.maxChildren < 1)
+        throw orgError('ORG_APPEND_CONFLICT', 'Organization head or parent authorization changed');
+      const prior = db.prepare("SELECT compiled_json FROM organization_revisions WHERE organization_id=? AND revision=? AND state='frozen'").get(organizationId, expectedRevision);
+      const previous = parseJson(prior?.compiled_json, null);
+      if (!previous || !compiled || !Array.isArray(compiled.nodes) || !Array.isArray(compiled.manages)) throw orgError('ORG_APPEND_INVALID', 'Frozen plan unavailable');
+      const oldKeys = new Set((previous.nodes || []).map((node) => node.stableKey));
+      const additions = compiled.nodes.filter((node) => !oldKeys.has(node.stableKey));
+      const parentByChild = new Map(compiled.manages.map((edge) => [edge.childKey, edge.parentKey]));
+      const direct = additions.filter((node) => parentByChild.get(node.stableKey) === parent.stable_key);
+      const existingCount = db.prepare("SELECT count(*) AS n FROM organization_nodes WHERE organization_id=? AND parent_node_id=? AND retired_revision IS NULL AND lifecycle_state='active'").get(organizationId, parentNodeId).n;
+      if (!additions.length || !direct.length || existingCount + direct.length > grant.maxChildren) throw orgError('ORG_APPEND_LIMIT', 'Direct child limit exceeded');
+      for (const node of additions) {
+        let key = node.stableKey, depth = 0; const visited = new Set();
+        while (key !== parent.stable_key && !visited.has(key)) { visited.add(key); key = parentByChild.get(key); depth++; if (!key || (key !== parent.stable_key && oldKeys.has(key))) break; }
+        if (key !== parent.stable_key || depth > grant.maxDepth) throw orgError('ORG_APPEND_SCOPE', 'New node is outside the authorized subtree or depth');
+      }
+      const revision = expectedRevision + 1, timestamp = nowIso();
+      db.prepare("INSERT INTO organization_revisions (organization_id,revision,proposal_json,compiled_json,digest,state,idempotency_key,created_at) VALUES (?,?,?,?,?,'frozen',?,?)")
+        .run(organizationId, revision, json(proposal, {}), json(compiled, {}), digest, idempotencyKey, timestamp);
+      if (!isAppendOnlyRevisionCompatible(db, organizationId, expectedRevision, revision)) throw orgError('ORG_APPEND_INVALID', 'Existing frozen facts changed');
+      db.prepare('INSERT INTO organization_manager_append_operations VALUES (?,?,?,?,?,?,?,?,?)')
+        .run(organizationId,idempotencyKey,parentNodeId,revision,constraintsRevision,'frozen',json(additions.map((node) => node.stableKey),[]),requestDigest,timestamp);
+      db.prepare('UPDATE organizations SET current_revision=?,version=version+1,updated_at=? WHERE id=? AND current_revision=?').run(revision,timestamp,organizationId,expectedRevision);
+      db.exec('COMMIT'); return rowRevision(db.prepare('SELECT * FROM organization_revisions WHERE organization_id=? AND revision=?').get(organizationId, revision));
+    } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
+  }, { mutate: true });
+}
+
+export async function getManagerAppendOperation(organizationId, operationKey) {
+  return withDatabase((db) => {
+    if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_manager_append_operations'").get()) return null;
+    const row = db.prepare('SELECT * FROM organization_manager_append_operations WHERE organization_id=? AND operation_key=?').get(organizationId, operationKey);
+    return row ? { organizationId, operationKey, parentNodeId: row.parent_node_id, revision: row.revision,
+      constraintsRevision: row.constraints_revision, state: row.state, newNodeKeys: parseJson(row.new_node_keys_json, []), requestDigest: row.request_digest, updatedAt: row.updated_at } : null;
+  });
+}
+
+export async function updateManagerAppendOperation(organizationId, operationKey, state) {
+  if (!['frozen','provisioned','dispatching','completed','conflict'].includes(state)) throw orgError('ORG_APPEND_INVALID', 'Invalid operation state');
+  return withDatabase((db) => {
+    db.prepare('UPDATE organization_manager_append_operations SET state=?,updated_at=? WHERE organization_id=? AND operation_key=?').run(state,nowIso(),organizationId,operationKey);
+    return { organizationId, operationKey, state };
   }, { mutate: true });
 }
 

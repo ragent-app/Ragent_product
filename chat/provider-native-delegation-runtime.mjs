@@ -66,11 +66,12 @@ function hash(value) {
   return createHash('sha256').update(String(value || '')).digest('hex');
 }
 
-function resolveProvider(run = {}, explicit = '') {
-  const value = text(explicit || run.provider || run.providerCapabilities?.provider || run.runtimeFamily);
-  const lower = value.toLowerCase();
-  if (lower.includes('claude')) return 'claude';
-  if (lower.includes('codex')) return 'codex';
+export function resolveProvider(run = {}, explicit = '') {
+  for (const value of [explicit,run.runtimeFamily,run.providerCapabilities?.provider,run.provider]) {
+    const lower = text(value).toLowerCase();
+    if (lower.includes('claude')) return 'claude';
+    if (lower.includes('codex')) return 'codex';
+  }
   return '';
 }
 
@@ -192,6 +193,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
   });
   const records = [];
   const memberEvents = new Map();
+  const adapterMemberEvents = new Map();
   const persistedEventIds = new Set();
   const seenRawKeys = new Set();
   const rawKeyOrder = [];
@@ -250,6 +252,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     const mapped = mapper.map(raw);
     for (const member of mapped.memberEvents || []) {
       rememberMember(member);
+      if (member?.id && adapterMemberEvents.size < MAX_NATIVE_REPLAY_EVIDENCE_EVENTS) adapterMemberEvents.set(member.id,member);
     }
     recognized = recognized || mapped.recognized === true;
     for (const error of mapped.errors || []) addError(error);
@@ -259,7 +262,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
     if (truncated) break;
   }
   if (truncated) addError(`provider delegation replay exceeded ${MAX_NATIVE_REPLAY_EVIDENCE_EVENTS} evidence events`);
-  return { records, recognized, errors, memberEvents, persistedEventIds };
+  return { records, recognized, errors, memberEvents, adapterMemberEvents, persistedEventIds };
 }
 
 /**
@@ -659,10 +662,11 @@ export async function reconcileProviderNativeDelegationRun({
       .map((event) => event.id)
       .filter(Boolean),
   );
+  const observedMembers = new Map(evidence?.adapterMemberEvents || []);
   if (typeof appendRunSpoolRecord === 'function') {
     for (const event of projected.canonicalEvents) {
-      if (existingCanonicalIds.has(event.id)) continue;
       const member = evidence?.memberEvents.get(event.id) || memberEventFromDelegation(event);
+      if (existingCanonicalIds.has(event.id)) continue;
       await appendRunSpoolRecord(runId, {
         ts: isoFromMs(event.timestamp),
         stream: 'stdout',
@@ -705,7 +709,7 @@ export async function reconcileProviderNativeDelegationRun({
     if (!providerExited) throw new Error('Protected delegation cannot finish before the provider exits');
     if (typeof writeRunResult !== 'function') throw new Error('Protected delegation result handoff unavailable');
     await writeRunResult(runId, terminalResult);
-    return { ...projected, run: current, result: terminalResult };
+    return { ...projected, run: current, result: terminalResult, observedMembers: [...observedMembers.values()] };
   }
 
   const updated = await updateRun(runId, (latest) => {
@@ -751,5 +755,6 @@ export async function reconcileProviderNativeDelegationRun({
     ...projected,
     run: updated || await getRun(runId),
     result: terminalResult,
+    observedMembers: [...observedMembers.values()],
   };
 }

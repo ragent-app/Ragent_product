@@ -38,6 +38,7 @@ import {
   getOrganization,
   getNode,
   getRevision,
+  isOrganizationRevisionCompatible,
   listOrganizationNodes,
   materializeFrozenNodeGrants,
 } from './organization-store.mjs';
@@ -85,6 +86,7 @@ export async function provisionFrozenRevision({
   revision,
   createManagedSession,
   idempotencyKey = '',
+  beforeNode = null,
 } = {}) {
   if (!ORG_SCHEMA_ENABLED) {
     throw provisioningError('organization schema is disabled', 'ORGANIZATION_SCHEMA_DISABLED', 503);
@@ -197,6 +199,16 @@ export async function provisionFrozenRevision({
       );
     }
 
+    const priorNode = nodeByKey.get(stableKey);
+    if (priorNode && Number(priorNode.createdRevision) !== Number(revision)) {
+      if (!priorNode.currentSessionId || priorNode.retiredRevision !== null || priorNode.lifecycleState !== 'active'
+          || !await isOrganizationRevisionCompatible(org.id, priorNode.createdRevision, revision)) {
+        throw provisioningError(`existing node ${stableKey} cannot be safely reused`, 'ORG_PROVISIONING_NODE_REVISION_CONFLICT', 409);
+      }
+      materialized.add(stableKey);
+      return;
+    }
+    if (beforeNode) await beforeNode({ stableKey, definition: def });
     const opKey = `${baseKey}:${stableKey}`;
     const agentId = text(def.resolver?.selectedAgentId || def.agentId);
     const grant = organizationGrantForNode(def, parentNode?.grant || {});
