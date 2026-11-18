@@ -62,7 +62,7 @@ export async function buildOrganizationIdentityContext(session = {}) {
     }
   }
   const identity = {
-    organizationId: org.id, nodeId: target?.id || null, sessionId,
+    organizationId: org.id, nodeId: target?.id || null, nodeStableKey: text(target?.stableKey) || null, sessionId,
     rootSessionId: org.rootSessionId, rootNodeId: rootNode?.id || null,
     parentNodeId: parent?.id || null, parentSessionId, parentDisplayName: text(parentDefinition?.displayName) || null,
     displayName: text(definition?.displayName) || null, structuralRole: target?.nodeRole || (ref.kind === 'root' ? 'root' : null),

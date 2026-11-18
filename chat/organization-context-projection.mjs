@@ -53,7 +53,9 @@ export async function buildOrganizationContextProjection({
     const keyById = new Map(durableNodes.map((node) => [node.id, node.stableKey]));
     const plans = new Map((revision.compiled?.nodes || []).map((node) => [node.stableKey, node]));
     for (const node of projection.nodes) {
-      const plan = plans.get(keyById.get(node.id));
+      const stableKey = keyById.get(node.id);
+      if (typeof stableKey === 'string' && stableKey.trim()) node.stableKey = stableKey;
+      const plan = plans.get(stableKey);
       if (plan) {
         node.phaseId = plan.phaseId || '';
         node.plannedTask = { objective: plan.objective || '', acceptance: plan.acceptance || [], scope: plan.scope || {}, dependencies: plan.dependencies || [] };

@@ -112,6 +112,7 @@ function projectionNode(node, includeTask = false) {
     role: text(node.role || node.nodeRole).toUpperCase(),
     status: text(node.status || node.lifecycleState || 'unknown'),
   };
+  if (text(node.stableKey)) result.stableKey = text(node.stableKey);
   if (text(node.phaseId)) result.phaseId = text(node.phaseId);
   if (text(node.sessionId)) result.sessionId = text(node.sessionId);
   if (text(node.currentActivity)) result.currentActivity = text(node.currentActivity);
