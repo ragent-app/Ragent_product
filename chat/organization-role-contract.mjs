@@ -120,7 +120,7 @@ export function deriveOrganizationGrant({
       && (parentAccess === 'read_only' || agentAccess !== 'writer' || (agentProfile && !profile.includes('write')))) {
     throw fail('Requested write access exceeds the Agent or parent grant');
   }
-  const accessMode = contract.accessMode === 'read_only' || requestedAccess === 'read_only' || agentAccess === 'read_only'
+  const accessMode = contract.accessMode === 'read_only' || requestedAccess === 'read_only' || parentAccess === 'read_only' || agentAccess === 'read_only'
     || (agentProfile && !profile.includes('write'))
     ? 'read_only'
     : 'writer';
