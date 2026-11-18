@@ -273,7 +273,9 @@ export async function dispatchOrganizationPhase({
       });
     }
     const taskId = `org:${organization.id}:${targetRevision}:${normalizedPhaseId}:${node.stableKey}`;
-    const taskRole = text(node.nodeRole).toLowerCase() === 'reviewer' ? 'reviewer' : 'specialist';
+    const organizationRole = text(node.nodeRole).toLowerCase();
+    const taskRole = organizationRole === 'reviewer' ? 'reviewer'
+      : ['manager', 'phase_lead', 'executive'].includes(organizationRole) ? 'manager' : 'specialist';
     const acceptance = [
       ...acceptanceCriteria(phase.acceptance),
       ...acceptanceCriteria(nodePlan?.acceptance),
