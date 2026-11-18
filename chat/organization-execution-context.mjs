@@ -24,22 +24,36 @@ export async function buildOrganizationExecutionContext({ sessionId, runId, requ
   let canDelegate = false;
   let remainingDepth = 0;
   if (organizationToolScope?.nodeId) {
-    const { getNode, getOrganization, listDelegationGrants } = await import('./organization-store.mjs');
+    const { getNode, getOrganization, getRevision } = await import('./organization-store.mjs');
     const node = await getNode(organizationToolScope.nodeId);
     const org = node && await getOrganization(node.organizationId);
+    const revision = org && await getRevision(org.id, org.currentRevision);
     if (node?.currentSessionId === sessionId && node.bindingGeneration === organizationToolScope.bindingGeneration
         && node.organizationId === organizationToolScope.organizationId && org?.currentRevision === organizationToolScope.organizationRevision
+        && !['archived', 'lifecycle_pending'].includes(org.state) && revision?.state === 'frozen'
+        && ['MANAGER', 'PHASE_LEAD', 'EXECUTIVE'].includes(String(node.sessionClass || '').toUpperCase())
         && node.lifecycleState === 'active' && node.retiredRevision === null && node.grant?.canDelegate === true
-        && Number.isInteger(node.grant.maxDepth) && node.grant.maxDepth > 0) {
-      const grants = await listDelegationGrants(node.organizationId, { parentNodeId: node.id, revision: org.currentRevision });
-      const childIds = [...new Set(grants.map((grant) => grant.childNodeId).filter(Boolean))];
-      canDelegate = childIds.some((childId) => {
-        const entries = grants.filter((grant) => grant.childNodeId === childId);
-        const generation = Math.max(...entries.map((grant) => grant.generation));
-        const latest = entries.filter((grant) => grant.generation === generation);
-        return latest.length === 1 && latest[0].lifecycleState === 'active';
-      });
-      if (canDelegate) remainingDepth = node.grant.maxDepth;
+        && Number.isInteger(node.grant.maxDepth) && node.grant.maxDepth > 0
+        && Number.isInteger(node.grant.maxChildren) && node.grant.maxChildren > 0) {
+      const { getSession } = await import('./session-manager.mjs');
+      const { getApp } = await import('./apps.mjs');
+      const { resolveSessionCollaborationPolicy, assertManagerCanDelegate } = await import('./collaboration-policy.mjs');
+      const manager = await getSession(sessionId);
+      const root = await getSession(org.rootSessionId);
+      if (manager && root) {
+        const [managerApp, rootApp] = await Promise.all([
+          manager.templateId ? getApp(manager.templateId) : null,
+          root.templateId ? getApp(root.templateId) : null,
+        ]);
+        try {
+          assertManagerCanDelegate(resolveSessionCollaborationPolicy(manager, managerApp), { depth: manager.delegationDepth || 0 });
+          assertManagerCanDelegate(resolveSessionCollaborationPolicy(root, rootApp), { depth: root.delegationDepth || 0 });
+          canDelegate = true;
+          remainingDepth = node.grant.maxDepth;
+        } catch {
+          // A missing or disabled policy is not delegation authority.
+        }
+      }
     }
   }
   return ['<organization-execution>', JSON.stringify({ sessionId, runId, task,
