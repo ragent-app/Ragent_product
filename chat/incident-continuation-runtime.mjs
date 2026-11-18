@@ -161,7 +161,7 @@ export async function validateIncidentContinuationRuntime(context, session, tupl
   for (const grant of [{ runtimePolicy: rootPolicy.runtimePolicy }, ...(parent ? [parent.grant] : []), ...(context.node ? [context.node.grant] : [])]) {
     const resolved = await resolveRuntimeSelection({ requested: selected, profile, parentGrant: grant || {} });
     for (const field of ['tool','provider','model','effort']) {
-      if (selected[field] && selected[field] !== resolved[field]) throw new Error(`Continuation ${field} no longer matches current policy`);
+      if (selected[field] && selected[field] !== resolved[field]) throw Object.assign(new Error(`Continuation ${field} no longer matches current policy`), { code: 'ORG_RUNTIME_POLICY_DENIED' });
     }
     selected = { tool: resolved.tool, provider: resolved.provider, model: resolved.model, effort: resolved.effort };
   }
@@ -177,16 +177,21 @@ export async function resolveAggregationContinuationRuntime(collaboration, sessi
   const org = await getOrganization(policy.organizationId);
   const node = await getNode(policy.organizationNodeId);
   const sourceRevision = policy.organizationPhaseDispatch?.revision;
-  if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || org.rootSessionId !== session.id
-      || !node || node.organizationId !== org.id || node.bindingGeneration !== policy.organizationBindingGeneration
-      || node.retiredRevision !== null || !Number.isInteger(sourceRevision)
-      || !await isOrganizationRevisionCompatible(org.id, sourceRevision, org.currentRevision)) {
-    throw new Error('Aggregation organization binding or revision is unavailable');
-  }
+  const invalidBinding = (message) => Object.assign(new Error(message), { code: 'AGGREGATION_BINDING_INVALID' });
+  // Missing records and lifecycle transitions can be temporary. Only observed
+  // contradictory or revoked bindings are terminal for this frozen work.
+  if (!org || !node || org.state === 'lifecycle_pending')
+    throw new Error('Aggregation organization binding is temporarily unavailable');
+  if (org.state === 'archived' || org.rootSessionId !== session.id || node.organizationId !== org.id
+      || node.bindingGeneration !== policy.organizationBindingGeneration || node.retiredRevision !== null
+      || !Number.isInteger(sourceRevision)
+      || !await isOrganizationRevisionCompatible(org.id, sourceRevision, org.currentRevision))
+    throw invalidBinding('Aggregation organization binding or revision was revoked or changed');
   const frozen = await getRevision(org.id, sourceRevision);
-  if (frozen?.state !== 'frozen' || !frozen.compiled?.nodes?.some((entry) =>
+  if (!frozen) throw new Error('Aggregation frozen revision is temporarily unavailable');
+  if (frozen.state !== 'frozen' || !frozen.compiled?.nodes?.some((entry) =>
     entry.stableKey === node.stableKey && entry.phaseId === policy.organizationPhaseDispatch?.phaseId))
-    throw new Error('Aggregation frozen task binding is unavailable');
+    throw invalidBinding('Aggregation frozen task binding is no longer valid');
   const manifest = await trustedRootContinuationManifest(org, session.id, sourceRevision);
   const source = manifest ? { tool: manifest.tool, model: manifest.options?.model,
     provider: manifest.options?.providerProfile, effort: manifest.options?.effort } : {};

@@ -1309,6 +1309,13 @@ export async function claimAggregation(collaborationId) {
   return generation;
 }
 
+export async function getAggregationDeferral(collaborationId) {
+  return withDatabase((db) => {
+    const row = db.prepare("SELECT payload_json FROM collaboration_events WHERE collaboration_id = ? AND type = 'aggregation_deferred' ORDER BY id DESC LIMIT 1").get(collaborationId);
+    return row ? parseJson(row.payload_json, {}) : null;
+  });
+}
+
 // A manager aggregation is an internal control-plane command, never an owner
 // follow-up.  If the root Session is occupied, release the claim without
 // advancing the aggregation generation so reconciliation can safely claim the
@@ -1318,6 +1325,7 @@ export async function deferAggregation(collaborationId, {
   generation,
   reason = 'Root session is busy',
   retryAfterMs = 0,
+  authorizationFingerprint = '',
 } = {}) {
   const normalizedId = typeof collaborationId === 'string' ? collaborationId.trim() : '';
   const normalizedGeneration = Number(generation);
@@ -1345,6 +1353,7 @@ export async function deferAggregation(collaborationId, {
       if (updated) {
         appendEvent(db, normalizedId, 'aggregation_deferred', {
           generation: normalizedGeneration,
+          ...(authorizationFingerprint ? { authorizationFingerprint } : {}),
           reason: typeof reason === 'string' ? reason.slice(0, 500) : String(reason).slice(0, 500),
         });
       }
@@ -1404,10 +1413,13 @@ export async function setAggregationRun(collaborationId, runId) {
   return changed;
 }
 
-export async function finishCollaboration(collaborationId, state, reason = '') {
+export async function finishCollaboration(collaborationId, state, reason = '', { aggregationGeneration = null } = {}) {
   const changed = await withDatabase((db) => {
-    const changed = db.prepare("UPDATE collaborations SET state = ?, aggregation_lease_until = NULL, updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'failed', 'cancelled')")
-      .run(state, nowIso(), collaborationId).changes;
+    const changed = aggregationGeneration === null
+      ? db.prepare("UPDATE collaborations SET state = ?, aggregation_lease_until = NULL, updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'failed', 'cancelled')")
+        .run(state, nowIso(), collaborationId).changes
+      : db.prepare("UPDATE collaborations SET state = ?, aggregation_lease_until = NULL, updated_at = ? WHERE id = ? AND state = 'aggregating' AND aggregation_run_id IS NULL AND aggregation_generation = ? AND aggregation_claimed_generation = ?")
+        .run(state, nowIso(), collaborationId, aggregationGeneration, aggregationGeneration).changes;
     if (changed) appendEvent(db, collaborationId, 'collaboration_finished', { state, reason });
     return changed > 0;
   }, { mutate: true });

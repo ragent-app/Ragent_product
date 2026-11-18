@@ -1445,13 +1445,35 @@ export function createCollaborationOrchestrator(options = {}) {
     return completed;
   }
 
+  async function aggregationAuthorizationFingerprint(collaboration, root) {
+    const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
+    const org = await getOrganization(collaboration.policy.organizationId);
+    const node = await getNode(collaboration.policy.organizationNodeId);
+    const app = root.templateId ? await deps.getApp(root.templateId) : null;
+    if (!org || !node || (root.templateId && !app)) throw new Error('Authorization inputs unavailable');
+    const settings = await readSessionRuntimeConstraints(root.id);
+    return createHash('sha256').update(JSON.stringify({ organization: { state: org.state, rootSessionId: org.rootSessionId, currentRevision: org.currentRevision },
+      node: { organizationId: node.organizationId, bindingGeneration: node.bindingGeneration, retiredRevision: node.retiredRevision },
+      app, constraints: settings.constraints,
+      runtime: { tool: root.tool, model: root.model, provider: root.providerProfile, effort: root.effort } })).digest('hex');
+  }
+
   async function maybeAggregate(collaborationId) {
     const collaboration = await store.getCollaboration(collaborationId);
     if (!collaboration || collaboration.aggregationRunId || !['waiting_aggregation', 'aggregating'].includes(collaboration.state)) return null;
+    if (collaboration.policy?.organizationId && collaboration.state === 'waiting_aggregation') {
+      const deferred = await store.getAggregationDeferral(collaborationId);
+      if (deferred?.authorizationFingerprint && deferred.generation === collaboration.aggregationGeneration) {
+        try {
+          const root = await loadRoot(collaboration);
+          if (await aggregationAuthorizationFingerprint(collaboration, root) === deferred.authorizationFingerprint) return null;
+        } catch { return null; }
+      }
+    }
     const generation = await store.claimAggregation(collaborationId);
     if (generation === null || generation === undefined) return null;
-    const root = await loadRoot(collaboration);
     try {
+      const root = await loadRoot(collaboration);
       const requestId = `collaboration:${collaboration.id}:aggregation:${generation}`;
       const existingRun = await deps.findRunByRequest(root.id, requestId);
       if (existingRun) {
@@ -1472,12 +1494,22 @@ export function createCollaborationOrchestrator(options = {}) {
       }
       let continuationRuntime = null;
       if (collaboration.policy?.organizationId) {
+        let authorizationFingerprint = '';
+        try { authorizationFingerprint = await aggregationAuthorizationFingerprint(collaboration, root); } catch {}
         try {
           const { resolveAggregationContinuationRuntime } = await import('./incident-continuation-runtime.mjs');
           continuationRuntime = await resolveAggregationContinuationRuntime(collaboration, root);
         } catch (error) {
-          await store.deferAggregation(collaboration.id, { generation, retryAfterMs: 60000,
-            reason: `Aggregation runtime pending: ${error.message || 'current authorization unavailable'}` });
+          if (error?.code === 'AGGREGATION_BINDING_INVALID') {
+            const finished = await store.finishCollaboration(collaboration.id, 'failed', `Aggregation binding invalid: ${error.message}`, { aggregationGeneration: generation });
+            if (finished) await publishCollaborationTerminal(collaboration.id);
+            return null;
+          }
+          const denied = ['ORG_RUNTIME_TOOL_DENIED', 'ORG_RUNTIME_PROVIDER_DENIED',
+            'ORG_RUNTIME_MODEL_DENIED', 'ORG_RUNTIME_EFFORT_DENIED', 'ORG_RUNTIME_POLICY_DENIED', 'ORG_RUNTIME_USER_LOCKED'].includes(error?.code);
+          await store.deferAggregation(collaboration.id, { generation, retryAfterMs: denied && authorizationFingerprint ? 0 : 60000,
+            ...(denied && authorizationFingerprint ? { authorizationFingerprint } : {}),
+            reason: `Aggregation runtime ${denied ? 'authorization denied' : 'pending'}: ${error.message || 'current authorization unavailable'}` });
           return null;
         }
       }
