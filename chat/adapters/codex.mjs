@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   messageEvent, toolUseEvent, toolResultEvent,
   fileChangeEvent, reasoningEvent, statusEvent, usageEvent, textDeltaEvent, planEvent,
@@ -42,6 +43,7 @@ export { DEFAULT_CODEX_DEVELOPER_INSTRUCTIONS } from '../runtime-policy.mjs';
  *   error              — { id, type, message }
  */
 export function createCodexAdapter() {
+  let terminalCandidates = new Map();
   const adapter = {
     capabilities: getProviderCapabilities('codex-json'),
 
@@ -67,13 +69,18 @@ export function createCodexAdapter() {
           break;
 
         case 'turn.started':
+          terminalCandidates = new Map();
           events.push(statusEvent('thinking'));
           break;
 
         case 'turn.completed':
           // Codex stdout usage is cumulative across the agent loop, so
           // Ragent injects a later ragent.context_metrics line instead.
-          events.push(statusEvent('completed'));
+          {
+            const candidate = terminalCandidates.size === 1 ? [...terminalCandidates.entries()][0] : null;
+            events.push(statusEvent('completed', candidate ? { provider: 'codex', providerLifecycle: 'completed', runState: 'completed', deliveryProviderMessageId: candidate[0], deliveryContentHash: createHash('sha256').update(candidate[1], 'utf8').digest('hex') } : {}));
+            terminalCandidates.clear();
+          }
           break;
 
         case 'ragent.context_metrics':
@@ -121,6 +128,7 @@ export function createCodexAdapter() {
           break;
 
         case 'item.completed':
+          if (obj.item?.type === 'agent_message' && obj.item.phase === 'final_answer' && typeof obj.item.id === 'string' && obj.item.id && typeof obj.item.text === 'string' && obj.item.text) terminalCandidates.set(obj.item.id, obj.item.text);
           if (obj.item) {
             events.push(...parseItem(obj.item, obj.type));
           }
@@ -199,7 +207,7 @@ function parseItem(item, lifecycle = 'item.completed') {
 
   switch (item.type) {
     case 'agent_message':
-      events.push(messageEvent('assistant', item.text || '', undefined, messageFields));
+      events.push(messageEvent('assistant', item.text || '', undefined, { ...messageFields, ...(['commentary', 'final_answer'].includes(item.phase) ? { messagePhase: item.phase } : {}) }));
       break;
 
     case 'reasoning':

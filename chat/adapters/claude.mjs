@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   messageEvent, toolUseEvent, toolResultEvent,
   fileChangeEvent, reasoningEvent, statusEvent, usageEvent,
@@ -512,6 +513,8 @@ export function createClaudeAdapter() {
             events.push(statusEvent('completed', frameProviderFields({
               providerLifecycle: 'completed',
               runState: 'completed',
+              ...(typeof obj.result === 'string' && obj.result.length > 0
+                ? { deliveryContentHash: createHash('sha256').update(obj.result, 'utf8').digest('hex') } : {}),
               ...(resultClassification.terminalReason
                 ? { providerTerminalReason: resultClassification.terminalReason }
                 : {}),

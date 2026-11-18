@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   approvalRequestEvent,
   approvalResponseEvent,
@@ -48,6 +49,7 @@ export function buildCodexAppServerArgs({ cwd, ragentApprovalGate = false, permi
 
 export function createCodexAppServerAdapter() {
   const planTextByItemId = new Map();
+  const terminalCandidates = new Map();
   // An app-server agentMessage completion can carry only its item id. Keep
   // the live text by item so that completion still produces a durable reply.
   // Without this, text_delta is visible while streaming but vanishes as soon
@@ -83,6 +85,7 @@ export function createCodexAppServerAdapter() {
 
       return parseAppServerMessage(obj, {
         planTextByItemId,
+        terminalCandidates,
         agentMessageTextByItemId,
         reasoningTextByItemId,
         autoApprovedIds,
@@ -169,7 +172,7 @@ function parseAppServerMessage(message, state = {}) {
       return [statusEvent('thinking')];
 
     case 'turn/completed':
-      return parseTurnCompleted(message.params);
+      return parseTurnCompleted(message.params, state);
 
     case 'turn/plan/updated':
       return [parseTurnPlanUpdated(message.params)];
@@ -724,6 +727,11 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
         // item text is a protocol shape used by some app-server versions, so
         // recover the exact text that was already streamed for this item.
         const content = declaredText || streamedText;
+        if (content && lifecycle === 'completed' && item.phase === 'final_answer' && providerItemId && params?.turnId) {
+          const candidates = state.terminalCandidates?.get(params.turnId) || new Map();
+          candidates.set(providerItemId, content);
+          state.terminalCandidates?.set(params.turnId, candidates);
+        }
         if (content) {
           events.push(messageEvent('assistant', content, undefined, {
           // Codex replays the completed agentMessage during recovery. Keep
@@ -976,7 +984,7 @@ function parseTokenUsage(tokenUsage) {
   }];
 }
 
-function parseTurnCompleted(params) {
+function parseTurnCompleted(params, state = {}) {
   const status = typeof params?.turn?.status === 'string' ? params.turn.status.trim() : '';
   const providerThreadId = typeof params?.threadId === 'string' ? params.threadId.trim() : '';
   const providerTurnId = typeof params?.turn?.id === 'string'
@@ -984,12 +992,22 @@ function parseTurnCompleted(params) {
     : typeof params?.turnId === 'string'
       ? params.turnId.trim()
       : '';
+  const candidates = new Map(state.terminalCandidates?.get(providerTurnId) || []);
+  if (status === 'completed' && Array.isArray(params?.turn?.items)) {
+    for (const item of params.turn.items) {
+      if (item?.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.id === 'string' && item.id && typeof item.text === 'string' && item.text) candidates.set(item.id, item.text);
+    }
+  }
+  state.terminalCandidates?.delete(providerTurnId);
+  const candidate = status === 'completed' && candidates.size === 1 ? [...candidates.entries()][0] : null;
   const providerFields = {
     provider: 'codex',
     runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
     ...(providerThreadId ? { providerThreadId } : {}),
     ...(providerTurnId ? { providerTurnId } : {}),
     providerLifecycle: status || 'unknown',
+    ...(status === 'completed' ? { runState: 'completed' } : {}),
+    ...(candidate ? { deliveryProviderMessageId: candidate[0], deliveryContentHash: createHash('sha256').update(candidate[1], 'utf8').digest('hex') } : {}),
   };
   const content = status === 'failed'
     ? `error: ${readErrorMessage(params?.turn?.error)}`
