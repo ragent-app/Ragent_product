@@ -11,7 +11,7 @@ const turnId = String(process.env.RAGENT_SESSION_CONTROL_TURN_ID || '').trim();
 const endpoint = process.env.RAGENT_ORGANIZATION_TOOL_SCOPE === 'node' ? 'tools' : 'tools-root';
 const valid = !!(sessionId && token && runId && turnId);
 const rootScope = endpoint === 'tools-root';
-const readActions = ['skills.list', 'skills.read', 'candidates.query', 'state.get', 'incidents.list', 'incident.get', ...(rootScope ? ['plan.status', 'result.read'] : [])];
+const readActions = ['skills.list', 'skills.read', 'candidates.query', 'state.get', 'incidents.list', 'incident.get', ...(rootScope ? ['plan.status', 'phase.list', 'result.read'] : [])];
 const writeActions = ['incident.ack', 'incident.resolve', ...(rootScope ? ['plan.submit', 'phase.dispatch'] : ['node.dispatch', 'subtree.append'])];
 const readTool = { name: 'ragent_organization_read', description: 'Read authorized skills, organization state and runtime candidates. The server validates this Run on every call.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
@@ -33,7 +33,20 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     let result;
     if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'ragent-organization', version: '1.0.0' } };
     else if (request.method === 'ping') result = {};
-    else if (request.method === 'tools/list') result = { tools: valid ? [readTool, actionTool] : [] };
+    else if (request.method === 'tools/list') {
+      if (!valid) result = { tools: [] };
+      else {
+        const response = await client.request(`/api/sessions/${encodeURIComponent(sessionId)}/organization/${endpoint}`, { method: 'POST', body: { action: 'capabilities.get' } });
+        const capabilities = response.response.ok ? response.json : {};
+        const permittedReads = readActions.filter((action) => !['plan.status', 'phase.list', 'result.read'].includes(action) || (capabilities.root && (action !== 'phase.list' || capabilities.canDispatch)));
+        const permittedWrites = writeActions.filter((action) => ['incident.ack', 'incident.resolve'].includes(action) ||
+          (rootScope ? capabilities.root && capabilities.canDispatch : capabilities.canDelegate));
+        result = { tools: [
+          { ...readTool, inputSchema: { ...readTool.inputSchema, properties: { ...readTool.inputSchema.properties, action: { type: 'string', enum: permittedReads } } } },
+          { ...actionTool, inputSchema: { ...actionTool.inputSchema, properties: { ...actionTool.inputSchema.properties, action: { type: 'string', enum: permittedWrites } } } },
+        ] };
+      }
+    }
     else if (request.method === 'tools/call' && valid &&
         ((request.params?.name === readTool.name && readActions.includes(request.params?.arguments?.action)) ||
          (request.params?.name === actionTool.name && writeActions.includes(request.params?.arguments?.action)))) {

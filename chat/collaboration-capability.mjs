@@ -562,7 +562,7 @@ const organizationGrantUsage = createCollaborationCapabilityUsageStore();
 
 // Server-side renewal remains bound to the original signed grant and usage
 // ledger. It does not mint a second bearer or reset the one-use allowance.
-export async function authorizeRootOrganizationCreate({ session, runId, turnId, consume = false, marker = false } = {}) {
+export async function authorizeRootOrganizationCreate({ session, runId, turnId, consume = false, marker = false, dispatch = false } = {}) {
   const { withLockedRunAuthorization } = await import('./runs.mjs');
   const { getApp } = await import('./apps.mjs');
   const { getSession } = await import('./session-manager.mjs');
@@ -582,16 +582,20 @@ export async function authorizeRootOrganizationCreate({ session, runId, turnId, 
     const policy = resolveSessionCollaborationPolicy(currentSession, app);
     if (!collaborationCapabilityOperationsForRun({ policy }).includes('collaboration.create') ||
         Number(currentSession.delegationDepth || 0) > Number(policy.maxDepth)) throw deny();
-    const record = (manifest.options?.collaborationCapabilities || []).find((cap) => cap.operation === 'collaboration.create');
+    const operation = dispatch ? 'collaboration.dispatch' : 'collaboration.create';
+    const record = (manifest.options?.collaborationCapabilities || []).find((cap) => cap.operation === operation);
     const signed = record && parseToken(record.token, process.env.RAGENT_AUTH_SESSION_SECRET || '');
     const issued = nowMs(signed?.issuedAt);
-    if (!signed || !validatePayload(signed, { operation: 'collaboration.create', now: issued }) ||
+    if (!signed || !validatePayload(signed, { operation, now: issued }) ||
         !constantTimeHexEqual(record.tokenHash, hashToken(record.token)) || signed.grantId !== record.grantId ||
         signed.runnerSessionId !== session.id || signed.resource?.type !== 'session' || signed.resource.id !== session.id || signed.resource.rootSessionId !== session.id ||
         signed.selection?.runId !== runId || signed.selection?.turnId !== turnId || signed.usageMax !== 1) throw deny();
     // A completed marker may use only its original unexpired authorization.
     const expiry = terminal ? nowMs(signed.expiresAt) : nowMs(channel.expiresAt);
     if (!Number.isFinite(expiry) || now >= expiry) throw deny();
+    // Dispatch is repeatable across distinct frozen phases; the Run-bound signed
+    // grant proves authority while the phase dispatcher owns idempotency.
+    if (dispatch) return { grantId: signed.grantId };
     const result = consume
       ? await organizationGrantUsage.claimGrant({ grantId: signed.grantId, useNonce: makeUseNonce(), usageMax: signed.usageMax, expiresAt: expiry, now })
       : await organizationGrantUsage.inspectGrant({ grantId: signed.grantId, usageMax: signed.usageMax });

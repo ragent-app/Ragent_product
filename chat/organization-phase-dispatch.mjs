@@ -88,7 +88,7 @@ function runtimeMatches(compiledRuntime, actualRuntime) {
   return true;
 }
 
-async function phaseDependenciesCompleted(organizationId, revision, phase) {
+export async function phaseDependenciesCompleted(organizationId, revision, phase) {
   const dependencies = list(phase?.dependsOn);
   if (dependencies.length === 0) return;
   const { withDatabase } = await import('./collaboration-store.mjs');
@@ -165,6 +165,7 @@ export async function dispatchOrganizationPhase({
   organizationId,
   phaseId,
   revision = null,
+  requireCurrentRevision = false,
   idempotencyKey,
   orchestrator = null,
   organizationDelegation = null,
@@ -180,6 +181,7 @@ export async function dispatchOrganizationPhase({
   if (!organization) throw dispatchError('ORGANIZATION_NOT_FOUND', 'organization not found', 404);
   if (['archived','lifecycle_pending'].includes(organization.state)) throw dispatchError('ORGANIZATION_ARCHIVED', 'organization cannot dispatch during archive or rebind', 409);
   const targetRevision = Number.isInteger(revision) ? revision : organization.currentRevision;
+  if (requireCurrentRevision && targetRevision !== organization.currentRevision) throw dispatchError('ORG_PHASE_REVISION_CHANGED', 'organization revision changed; inspect the current phase list', 409);
   const revisionRow = await getRevision(organization.id, targetRevision);
   if (!revisionRow) throw dispatchError('REVISION_NOT_FOUND', 'organization revision not found', 404);
   if (revisionRow.state !== 'frozen') throw dispatchError('ORG_PHASE_REVISION_NOT_FROZEN', 'only a frozen revision can dispatch work', 409);

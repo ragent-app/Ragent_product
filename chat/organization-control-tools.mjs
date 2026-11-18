@@ -13,12 +13,37 @@ function stateResponse(projection, previousDigest) {
 }
 
 
+async function listRootPhases(organization, revision) {
+  const { listOrganizationNodes } = await import('./organization-store.mjs');
+  const { phaseDependenciesCompleted } = await import('./organization-phase-dispatch.mjs');
+  const { listCollaborationRecords } = await import('./collaboration-store.mjs');
+  const [nodes, collaborations] = await Promise.all([listOrganizationNodes(organization.id), listCollaborationRecords()]);
+  return Promise.all((revision.compiled?.phases || []).map(async (phase) => {
+    let state = 'ready_for_admission';
+    let reason = null;
+    try { await phaseDependenciesCompleted(organization.id, revision.revision, phase); }
+    catch (error) {
+      if (error?.code !== 'ORG_PHASE_DEPENDENCY_BLOCKED') throw error;
+      state = 'blocked'; reason = error.code;
+    }
+    const plans = (revision.compiled?.nodes || []).filter((node) => node.phaseId === phase.phaseId);
+    if (!plans.length || plans.some((plan) => !nodes.find((node) => node.stableKey === plan.stableKey)?.currentSessionId)) {
+      state = 'not_provisioned'; reason = 'ORG_PHASE_SESSION_MISSING';
+    }
+    if (collaborations.some((entry) => entry.policy?.organizationId === organization.id &&
+        entry.policy?.organizationPhaseDispatch?.revision === revision.revision && entry.policy?.organizationPhaseDispatch?.phaseId === phase.phaseId)) {
+      state = 'dispatch_recorded'; reason = 'RECONCILE_EXISTING_DISPATCH';
+    }
+    return { phaseId: phase.phaseId, objective: phase.objective, dependsOn: phase.dependsOn || [], state, reason };
+  }));
+}
+
 async function withPlanPhases(result) {
   if (result?.state !== 'frozen' || !result.organizationId || !Number.isInteger(result.revision)) return result;
-  const { getRevision } = await import('./organization-store.mjs');
-  const revision = await getRevision(result.organizationId, result.revision);
-  if (revision?.state !== 'frozen') return result;
-  return { ...result, phases: (revision.compiled?.phases || []).map(({ phaseId, objective, dependsOn }) => ({ phaseId, objective, dependsOn: dependsOn || [] })) };
+  const { getOrganization, getRevision } = await import('./organization-store.mjs');
+  const [organization, revision] = await Promise.all([getOrganization(result.organizationId), getRevision(result.organizationId, result.revision)]);
+  if (!organization || revision?.state !== 'frozen') return result;
+  return { ...result, phases: await listRootPhases(organization, revision) };
 }
 
 const fail = () => Object.assign(new Error('A current scoped organization Run is required'), { statusCode: 403, code: 'ORG_TOOL_FORBIDDEN' });
@@ -32,6 +57,16 @@ export async function executeOrganizationControlTool({ authSession, action, args
     if (!session || session.sessionPlane === 'organization') throw fail();
     const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) ||
       (session.sessionClass === 'ROOT_LEADERSHIP' && id === 'ragent:builtin:root');
+    if (action === 'capabilities.get') {
+      const root = session.sessionClass === 'ROOT_LEADERSHIP' && (session.sessionPlane || 'user') === 'user' &&
+        session.userAddressable !== false && !session.parentSessionId && !session.delegatedFromSessionId;
+      let canDispatch = false;
+      if (root) {
+        const { authorizeRootOrganizationCreate } = await import('./collaboration-capability.mjs');
+        canDispatch = await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId, dispatch: true }).then(() => true, () => false);
+      }
+      return { root, canDispatch };
+    }
     if (action === 'candidates.query') {
       const { queryAuthorizedRuntimeCandidates } = await import('./organization-candidate-query.mjs');
       return queryAuthorizedRuntimeCandidates({ authSession, session, args });
@@ -46,24 +81,23 @@ export async function executeOrganizationControlTool({ authSession, action, args
       const { readCollaborationResult } = await import('./collaboration-orchestrator.mjs');
       return readCollaborationResult({ sessionId: authSession.sessionId, runId: authSession.runId, collaborationId: args.collaborationId, packetId: args.packetId, offset: args.offset });
     }
-    if (action === 'phase.dispatch') {
+    if (action === 'phase.list' || action === 'phase.dispatch') {
       if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' ||
           session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail();
+      const { getOrganizationByRootSession, getRevision } = await import('./organization-store.mjs');
+      const { authorizeRootOrganizationCreate } = await import('./collaboration-capability.mjs');
+      await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId, dispatch: true });
+      const organization = await getOrganizationByRootSession(session.id);
+      if (!organization || organization.rootSessionId !== session.id || ['archived', 'lifecycle_pending'].includes(organization.state)) throw fail();
+      const revision = await getRevision(organization.id, organization.currentRevision);
+      if (revision?.state !== 'frozen') throw Object.assign(new Error('Current organization revision is not frozen'), { statusCode: 409, code: 'ORG_PHASE_REVISION_NOT_FROZEN' });
+      if (action === 'phase.list') return { organizationId: organization.id, revision: revision.revision, phases: await listRootPhases(organization, revision) };
       const phaseId = typeof args.phaseId === 'string' ? args.phaseId.trim() : '';
       if (!phaseId || phaseId.length > 160) throw Object.assign(new Error('Phase id is required'), { statusCode: 400 });
-      const { getRun } = await import('./runs.mjs');
-      const { getOrganizationByRootSession, getRevision } = await import('./organization-store.mjs');
-      const run = await getRun(authSession.runId);
-      const result = run?.organizationPlanIngress?.result;
-      const organization = await getOrganizationByRootSession(authSession.sessionId);
-      if (!run || run.sessionId !== authSession.sessionId || ['failed', 'completed', 'cancelled'].includes(run.state) ||
-          run.organizationPlanIngress?.state !== 'completed' || result?.state !== 'frozen' ||
-          !organization || result.organizationId !== organization.id || result.revision !== organization.currentRevision) throw fail();
-      const revision = await getRevision(organization.id, result.revision);
-      if (revision?.state !== 'frozen' || !(revision.compiled?.phases || []).some((phase) => phase.phaseId === phaseId)) throw fail();
+      if (!(revision.compiled?.phases || []).some((phase) => phase.phaseId === phaseId)) throw fail();
       const { dispatchOrganizationPhase } = await import('./organization-phase-dispatch.mjs');
-      return dispatchOrganizationPhase({ organizationId: organization.id, revision: result.revision, phaseId,
-        idempotencyKey: `root:${organization.id}:revision:${result.revision}:phase:${phaseId}` });
+      return dispatchOrganizationPhase({ organizationId: organization.id, revision: revision.revision, requireCurrentRevision: true, phaseId,
+        idempotencyKey: `root:${organization.id}:revision:${revision.revision}:phase:${phaseId}` });
     }
     if (action === 'plan.submit') {
       const { submitOrganizationPlan } = await import('./organization-plan-tool.mjs');
@@ -97,6 +131,7 @@ export async function executeOrganizationControlTool({ authSession, action, args
   if (!node || node.organizationId !== scope.organizationId || node.bindingGeneration !== scope.bindingGeneration) throw fail();
   const role = ({ MANAGER: 'manager', PHASE_LEAD: 'manager', WORKER: 'worker', REVIEWER: 'reviewer', EXECUTIVE: 'root' })[String(node.sessionClass || '').toUpperCase()];
   const authorize = async ({ id }) => ['ragent:builtin:session-control', 'ragent:builtin:calendar'].includes(id) || (!!role && id === `ragent:builtin:${role}`);
+  if (action === 'capabilities.get') return { canDelegate: ['MANAGER', 'PHASE_LEAD'].includes(String(node.sessionClass || '').toUpperCase()) && node.grant?.canDelegate === true };
   if (action === 'candidates.query') {
     const { getSession } = await import('./session-manager.mjs');
     const session = await getSession(authSession.sessionId);
