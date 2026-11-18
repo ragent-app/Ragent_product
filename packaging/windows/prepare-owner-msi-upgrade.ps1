@@ -154,6 +154,17 @@ function Restore-UpgradeReceipts($Journal){
   }elseif(-not(Test-OwnerServicePreparationPresence $sourcePath) -or (Get-UpgradeFileDigest $sourceName) -cne $row.sha256){throw 'OMU_ARCHIVE_MISSING'}
  }
 }
+function Assert-UpgradeReceiptRecovery($Journal){
+ foreach($row in @($Journal.archivedReceipts)){
+  $sourceName=[string]$row.name;$sourcePath=Join-Path $product $sourceName
+  $archivePath=Get-UpgradeArchivePath $sourceName ([string]$Journal.transactionId);$archiveName=[IO.Path]::GetFileName($archivePath)
+  $hasSource=Test-OwnerServicePreparationPresence $sourcePath
+  $hasArchive=Test-OwnerServicePreparationPresence $archivePath
+  if($hasSource){$sourceDigest=Get-UpgradeFileDigest $sourceName}else{$sourceDigest=''}
+  if($hasArchive){if((Get-UpgradeFileDigest $archiveName) -cne $row.sha256){throw 'OMU_ARCHIVE_DIGEST_MISMATCH'}}
+  elseif(-not $hasSource -or $sourceDigest -cne $row.sha256){throw 'OMU_ARCHIVE_MISSING'}
+ }
+}
 function Remove-UpgradeArchives($Journal){
  foreach($row in @($Journal.archivedReceipts)){
   $archivePath=Get-UpgradeArchivePath ([string]$row.name) ([string]$Journal.transactionId);$archiveName=[IO.Path]::GetFileName($archivePath)
@@ -164,10 +175,21 @@ function Remove-UpgradeArchives($Journal){
 function Invoke-UpgradeRollback {
  if(-not(Test-OwnerServicePreparationPresence $journalPath)){return @{ok=$true;rollbackCleaned=$false;reason='no-transaction';dataTouched=$false;identityRead=$false}}
  $journal=Assert-UpgradeJournal
+ Assert-UpgradeReceiptRecovery $journal
  $metadataAclsRestored=Restore-OwnerMetadataAclMigration $journal
  # Only the fixed, MSI-owned receipt names can be removed. ProgramData identity,
  # session files, install policy, Broker state and all other files are retained.
- foreach($name in @('owner-msi.prepared.json','owner-msi.prepared.activated.json','owner-msi.policy.json','owner-msi.policy.activated.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-activation.prepare-lock','owner-activation.committed-lock','owner-msi.prepare-lock','owner-policy.prepare-lock')){Remove-UpgradeFile $name}
+ foreach($name in @('owner-msi.prepared.json','owner-msi.prepared.activated.json','owner-msi.policy.json','owner-msi.policy.activated.json','owner-msi.activated.json','owner-msi.activation-health.json','owner-activation.prepare-lock','owner-activation.committed-lock','owner-msi.prepare-lock','owner-policy.prepare-lock')){
+  $archived=@($journal.archivedReceipts | Where-Object {$_.name -ceq $name})
+  if($archived.Count){
+   $archivePath=Get-UpgradeArchivePath $name ([string]$journal.transactionId);$archiveName=[IO.Path]::GetFileName($archivePath)
+   $sourcePath=Join-Path $product $name
+   if((Test-OwnerServicePreparationPresence $sourcePath) -and (Get-UpgradeFileDigest $name) -ceq $archived[0].sha256){continue}
+   if(-not(Test-OwnerServicePreparationPresence $archivePath)){throw 'OMU_ARCHIVE_MISSING'}
+   if((Get-UpgradeFileDigest $archiveName) -cne $archived[0].sha256){throw 'OMU_ARCHIVE_DIGEST_MISMATCH'}
+  }
+  Remove-UpgradeFile $name
+ }
  Restore-UpgradeReceipts $journal
  Remove-UpgradeFile 'owner-msi.upgrade-transaction.json'
  return @{ok=$true;rollbackCleaned=$true;dataTouched=$false;metadataAclsRestored=$metadataAclsRestored;identityRead=$false}
