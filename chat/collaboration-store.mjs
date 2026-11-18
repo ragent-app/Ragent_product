@@ -1264,7 +1264,11 @@ export async function claimAggregation(collaborationId) {
     db.exec('BEGIN IMMEDIATE');
     try {
       const row = db.prepare('SELECT * FROM collaborations WHERE id = ?').get(collaborationId);
-      if (!row || row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled') {
+      if (!row || row.aggregation_run_id || row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled') {
+        db.exec('COMMIT');
+        return null;
+      }
+      if (row.state === 'waiting_aggregation' && row.aggregation_lease_until && row.aggregation_lease_until > timestamp) {
         db.exec('COMMIT');
         return null;
       }
@@ -1313,6 +1317,7 @@ export async function claimAggregation(collaborationId) {
 export async function deferAggregation(collaborationId, {
   generation,
   reason = 'Root session is busy',
+  retryAfterMs = 0,
 } = {}) {
   const normalizedId = typeof collaborationId === 'string' ? collaborationId.trim() : '';
   const normalizedGeneration = Number(generation);
@@ -1332,10 +1337,10 @@ export async function deferAggregation(collaborationId, {
       }
       const updated = db.prepare(`UPDATE collaborations
         SET state = 'waiting_aggregation', aggregation_claimed_generation = ?,
-            aggregation_lease_until = NULL, updated_at = ?
+            aggregation_lease_until = ?, updated_at = ?
         WHERE id = ? AND state = 'aggregating' AND aggregation_generation = ?
           AND aggregation_claimed_generation = ? AND aggregation_run_id IS NULL`)
-        .run(Math.max(0, normalizedGeneration - 1), timestamp, normalizedId,
+        .run(Math.max(0, normalizedGeneration - 1), retryAfterMs > 0 ? new Date(Date.now() + Math.min(retryAfterMs, 300000)).toISOString() : null, timestamp, normalizedId,
           normalizedGeneration, normalizedGeneration).changes === 1;
       if (updated) {
         appendEvent(db, normalizedId, 'aggregation_deferred', {
@@ -1372,7 +1377,7 @@ export async function refreshBarrier(collaborationId) {
         db.prepare("UPDATE collaborations SET state = 'completed', updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'cancelled')")
           .run(timestamp, collaborationId);
       } else
-      if (succeeded && !['aggregating', 'waiting_aggregation', 'completed', 'cancelled'].includes(row.state)) {
+      if (succeeded && !row.aggregation_run_id && !['aggregating', 'waiting_aggregation', 'completed', 'cancelled'].includes(row.state)) {
         db.prepare(`UPDATE collaborations SET aggregation_generation = aggregation_generation + 1,
           state = 'waiting_aggregation', updated_at = ? WHERE id = ? AND state NOT IN ('completed', 'cancelled', 'waiting_aggregation', 'aggregating')`)
           .run(timestamp, collaborationId);

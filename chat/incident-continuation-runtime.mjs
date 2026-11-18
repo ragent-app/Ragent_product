@@ -1,5 +1,5 @@
 import { withDatabase } from './collaboration-store.mjs';
-import { getOrganization, getNode, listRevisions, isOrganizationRevisionCompatible } from './organization-store.mjs';
+import { getOrganization, getNode, getRevision, listRevisions, isOrganizationRevisionCompatible } from './organization-store.mjs';
 import { getRun, getRunManifest } from './runs.mjs';
 import { getLiveOrganizationSessionReference } from './organization-session-lifecycle.mjs';
 import { verifyOrganizationDelegation } from './organization-delegation-authorization.mjs';
@@ -111,23 +111,28 @@ export async function incidentContinuationRuntime(trigger, session, eventContext
 
   // A root's plan ingress and the frozen revision must independently agree on
   // the exact source Run and proposal key; a key by itself grants nothing.
+  const manifest = await trustedRootContinuationManifest(org, session.id, incident.organization_revision);
+  return manifest ? { ...context, manifest } : context;
+}
+
+export async function trustedRootContinuationManifest(org, sessionId, sourceRevision) {
   const revisions = (await listRevisions(org.id)).reverse();
   for (const revision of revisions) {
-    if (revision.state !== 'frozen' || revision.revision > incident.organization_revision
-        || !await isOrganizationRevisionCompatible(org.id, revision.revision, incident.organization_revision)) continue;
-    const prefix = `leader:${session.id}:turn:`;
+    if (revision.state !== 'frozen' || revision.revision > sourceRevision
+        || !await isOrganizationRevisionCompatible(org.id, revision.revision, sourceRevision)) continue;
+    const prefix = `leader:${sessionId}:turn:`;
     if (!revision.idempotencyKey.startsWith(prefix)) continue;
     const runId = revision.idempotencyKey.slice(prefix.length).split(':', 1)[0];
     if (!/^run_[a-zA-Z0-9_-]+$/.test(runId)) continue;
     const run = await getRun(runId);
     const result = run?.organizationPlanIngress?.result;
-    if (run?.sessionId !== session.id || run.organizationPlanIngress?.state !== 'completed'
+    if (run?.sessionId !== sessionId || run.organizationPlanIngress?.state !== 'completed'
         || result?.state !== 'frozen' || result.organizationId !== org.id || result.revision !== revision.revision
         || result.idempotencyKey !== revision.idempotencyKey || result.digest !== revision.digest) continue;
     const manifest = await getRunManifest(runId);
-    if (manifest?.sessionId === session.id) return { ...context, manifest };
+    if (manifest?.sessionId === sessionId) return manifest;
   }
-  return context;
+  return null;
 }
 
 export async function validateIncidentContinuationRuntime(context, session, tuple) {
@@ -162,4 +167,50 @@ export async function validateIncidentContinuationRuntime(context, session, tupl
   }
   assertRuntimeConstraints(selected, constraints);
   return selected;
+}
+
+// Resolve only from the collaboration's frozen organization binding and its
+// verified root plan Run; a child Run is never a source of root credentials.
+export async function resolveAggregationContinuationRuntime(collaboration, session) {
+  const policy = collaboration?.policy || {};
+  if (!policy.organizationId) return null;
+  const org = await getOrganization(policy.organizationId);
+  const node = await getNode(policy.organizationNodeId);
+  const sourceRevision = policy.organizationPhaseDispatch?.revision;
+  if (!org || ['archived', 'lifecycle_pending'].includes(org.state) || org.rootSessionId !== session.id
+      || !node || node.organizationId !== org.id || node.bindingGeneration !== policy.organizationBindingGeneration
+      || node.retiredRevision !== null || !Number.isInteger(sourceRevision)
+      || !await isOrganizationRevisionCompatible(org.id, sourceRevision, org.currentRevision)) {
+    throw new Error('Aggregation organization binding or revision is unavailable');
+  }
+  const frozen = await getRevision(org.id, sourceRevision);
+  if (frozen?.state !== 'frozen' || !frozen.compiled?.nodes?.some((entry) =>
+    entry.stableKey === node.stableKey && entry.phaseId === policy.organizationPhaseDispatch?.phaseId))
+    throw new Error('Aggregation frozen task binding is unavailable');
+  const manifest = await trustedRootContinuationManifest(org, session.id, sourceRevision);
+  const source = manifest ? { tool: manifest.tool, model: manifest.options?.model,
+    provider: manifest.options?.providerProfile, effort: manifest.options?.effort } : {};
+  const { parseScopedCodexModel } = await import('./models.mjs');
+  const current = { tool: session.tool, model: session.model, provider: session.providerProfile, effort: session.effort };
+  const tuple = Object.fromEntries(Object.entries(current).filter(([, value]) => typeof value === 'string' && value.trim()));
+  const currentProvider = tuple.provider || (tuple.model ? parseScopedCodexModel(tuple.model).providerId : '');
+  const sourceProvider = source.provider || (source.model ? parseScopedCodexModel(source.model).providerId : '');
+  if (!tuple.model) {
+    if (!source.model || !source.tool || (tuple.tool && tuple.tool !== source.tool)
+        || (currentProvider && sourceProvider && currentProvider !== sourceProvider))
+      throw new Error('Aggregation root model has no compatible verified source');
+    tuple.tool ||= source.tool; tuple.model = source.model;
+    tuple.provider ||= sourceProvider || undefined; tuple.effort ||= source.effort || undefined;
+  }
+  if (!tuple.tool || (!tuple.provider && !currentProvider)) {
+    const compatible = source.tool && source.model && tuple.model === source.model
+      && (!tuple.tool || tuple.tool === source.tool)
+      && (!currentProvider || !sourceProvider || currentProvider === sourceProvider);
+    if (compatible) {
+      tuple.tool ||= source.tool;
+      tuple.provider ||= sourceProvider || undefined;
+    }
+  }
+  if (!tuple.tool || !tuple.model) throw new Error('Aggregation root runtime is incomplete');
+  return validateIncidentContinuationRuntime({ organization: org, node: null }, session, tuple);
 }

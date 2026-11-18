@@ -26,6 +26,7 @@ import {
   getRunManifest,
   getRunResult,
   getRunAcceptanceEvidence,
+  findRunByRequest,
   listRunIds,
   requestRunCancel,
 } from './runs.mjs';
@@ -277,6 +278,7 @@ function buildDefaultDependencies(overrides = {}) {
     getApp,
     getRun,
     getRunManifest,
+    findRunByRequest,
     getRunResult,
     listRunIds,
     loadHistory,
@@ -1445,11 +1447,20 @@ export function createCollaborationOrchestrator(options = {}) {
 
   async function maybeAggregate(collaborationId) {
     const collaboration = await store.getCollaboration(collaborationId);
-    if (!collaboration || collaboration.state !== 'waiting_aggregation') return null;
+    if (!collaboration || collaboration.aggregationRunId || !['waiting_aggregation', 'aggregating'].includes(collaboration.state)) return null;
     const generation = await store.claimAggregation(collaborationId);
     if (generation === null || generation === undefined) return null;
     const root = await loadRoot(collaboration);
     try {
+      const requestId = `collaboration:${collaboration.id}:aggregation:${generation}`;
+      const existingRun = await deps.findRunByRequest(root.id, requestId);
+      if (existingRun) {
+        if (existingRun.sessionId !== root.id || existingRun.requestId !== requestId || !trim(existingRun.id))
+          throw new Error('Aggregation existing Run binding does not match');
+        await store.setAggregationRun(collaboration.id, existingRun.id);
+        if (isTerminal(existingRun.state)) await completeAggregation(existingRun.id);
+        return existingRun.id;
+      }
       const packetProjections = await mapWithResultPacketConcurrency(collaboration.attempts, async (attempt) => {
         if (!attempt.resultPacketId || typeof deps.getResultPacket !== 'function') return null;
         const packet = await deps.getResultPacket(attempt.resultPacketId).catch(() => null);
@@ -1459,8 +1470,21 @@ export function createCollaborationOrchestrator(options = {}) {
       if (missingProjectPackets) {
         throw new Error('Project-bound collaboration is missing a canonical ResultPacket');
       }
+      let continuationRuntime = null;
+      if (collaboration.policy?.organizationId) {
+        try {
+          const { resolveAggregationContinuationRuntime } = await import('./incident-continuation-runtime.mjs');
+          continuationRuntime = await resolveAggregationContinuationRuntime(collaboration, root);
+        } catch (error) {
+          await store.deferAggregation(collaboration.id, { generation, retryAfterMs: 60000,
+            reason: `Aggregation runtime pending: ${error.message || 'current authorization unavailable'}` });
+          return null;
+        }
+      }
       const outcome = await deps.sendMessage(root.id, buildAggregationPrompt(collaboration, packetProjections.filter(Boolean)), [], {
-        requestId: `collaboration:${collaboration.id}:aggregation:${generation}`,
+        ...(continuationRuntime ? { tool: continuationRuntime.tool, model: continuationRuntime.model,
+          providerProfile: continuationRuntime.provider, effort: continuationRuntime.effort, providerFailover: false } : {}),
+        requestId,
         recordUserMessage: false,
         internalOperation: 'collaboration_resume',
         // Never put a manager aggregation behind owner follow-ups.  A busy
