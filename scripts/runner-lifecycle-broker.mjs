@@ -345,6 +345,7 @@ export function buildLifecycleSystemdArgs(runId, {
   resourceProfile = RESOURCE_PROFILES.default,
   groupDrop = null,
   scopeProtection = false,
+  verifiedReadOnlySandbox = false,
   environment = process.env,
 } = {}) {
   const args = [
@@ -387,7 +388,11 @@ export function buildLifecycleSystemdArgs(runId, {
     '--property', 'LockPersonality=true',
     '--property', 'RestrictRealtime=true',
     '--property', 'RestrictSUIDSGID=true',
-    '--property', 'ProtectKernelTunables=true',
+    // A verified read-only bwrap Run needs a fresh proc mount. Protect its
+    // sidecar from proc/sys writes without masking proc submounts. Unlike
+    // ProtectKernelTunables, this does not hide kcore or kallsyms from reads.
+    '--property', `ProtectKernelTunables=${verifiedReadOnlySandbox ? 'false' : 'true'}`,
+    ...(verifiedReadOnlySandbox ? ['--property', 'ReadOnlyPaths=/proc /sys'] : []),
     '--property', 'ProtectKernelModules=true',
     '--property', 'ProtectControlGroups=true',
     '--property', 'PrivateDevices=false',
@@ -628,6 +633,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
   const manifest = await readManifestImpl(normalized);
   const resourceProfile = resolveRunnerResourceProfile(manifest, environment);
   const workspaceScope = readWorkspaceAccessScope(manifest);
+  const verifiedReadOnlySandbox = Boolean(readOnlyWorkspaceForRun(manifest, workspaceScope?.cwd));
   if (distinctIdentity && !workspaceScope) {
     throw Object.assign(new Error('Runner workspace path is missing; cannot verify existing access'),
       { code: 'RUNNER_WORKSPACE_ACCESS_DENIED', launchDefinitelyNotSubmitted: true });
@@ -870,6 +876,7 @@ async function launchLifecycleRunnerUnlocked(runId, {
     resourceProfile,
     groupDrop,
     scopeProtection: scopeRegistrationEligible,
+    verifiedReadOnlySandbox,
     environment: runEnvironment,
   });
   try {
