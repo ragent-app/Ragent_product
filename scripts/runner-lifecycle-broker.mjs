@@ -388,11 +388,12 @@ export function buildLifecycleSystemdArgs(runId, {
     '--property', 'LockPersonality=true',
     '--property', 'RestrictRealtime=true',
     '--property', 'RestrictSUIDSGID=true',
-    // A verified read-only bwrap Run needs a fresh proc mount. Protect its
-    // sidecar from proc/sys writes without masking proc submounts. Unlike
-    // ProtectKernelTunables, this does not hide kcore or kallsyms from reads.
+    // A verified read-only bwrap Run needs writable proc for uid-map setup.
+    // Its sidecar relies on the existing non-root UID and kernel permissions
+    // for proc access; kcore and kallsyms are not separately masked here.
+    // The sandbox's own fresh proc is remounted read-only after setup.
     '--property', `ProtectKernelTunables=${verifiedReadOnlySandbox ? 'false' : 'true'}`,
-    ...(verifiedReadOnlySandbox ? ['--property', 'ReadOnlyPaths=/proc /sys'] : []),
+    ...(verifiedReadOnlySandbox ? ['--property', 'ReadOnlyPaths=/sys'] : []),
     '--property', 'ProtectKernelModules=true',
     '--property', 'ProtectControlGroups=true',
     '--property', 'PrivateDevices=false',
