@@ -6,8 +6,8 @@
 
 - `chat/system-prompt.mjs` 和 `chat/prompt-assets/system/startup-context.md` 当前注入较长的产品 API、协作、记忆和工作流说明；`chat/runtime-context-compiler.mjs` 对 Codex、Claude 恢复和其他运行时使用不同载体，不能假设每轮都传完整相同内容。`chat/harness-capability-catalog.mjs` 已能发现并在用户明确选择时注入 Ragent 托管技能全文；Codex 和 Claude 原生技能发现路径不同。Agent 的 `skills` 当前仅是标签，见 `chat/approved-agent-create.mjs`，不证明能力存在或授权。
 - 组织成员现有稳定身份、关系和只读会话投影见 `chat/organization-member-aggregation.mjs` 及 Android `feature/organization`。组织提案已有 `stableKey`、角色和节点结构；名称和职责需作为明确字段补齐，不能把 stableKey 当展示名，也不能按名字猜角色、父子关系或权限。已有不同来源成员归并证据和 native 委派投影，但不能将其误述为所有 harness 均有相同控制能力。
-- `chat/organization-runtime-selection.mjs` 已按部分父子策略及目录解析 tool/provider/model/effort，`chat/organization-planner.mjs` 处理节点 runtime，托管会话与派发分别见 `chat/organization-managed-session-factory.mjs` 和 `chat/organization-phase-dispatch.mjs`。静态审查发现：两个非空约束集合的空交集可能被当作无限制；这是待核实和修复的风险，尚非动态复现结论。组织目录不完整涵盖价格、配额及健康；目录查询为空时部分检查跳过。`chat/session-manager.mjs` 的部分目录异常也按 skipped 处理，不能将目录存在视为已验证可运行。
-- 当前 Ragent MCP 业务读取面只有四个只读查询；`chat/runner-sidecar.mjs` 还会按授权注入其他专用 actions、browser 或 broker MCP，不应混为组织业务写入工具。当前 manager 自主委派尚未全链路接通。现有部分重试依赖错误文本，成员失败也不保证通知上级；不能声称本文的可靠中断机制已经实现。
+- `chat/organization-runtime-selection.mjs` 按父子策略及目录解析 tool/provider/model/effort，`chat/organization-planner.mjs` 处理节点 runtime，托管会话与派发见 `chat/organization-managed-session-factory.mjs` 和 `chat/organization-phase-dispatch.mjs`。已接入对非空约束集合空交集的拒绝；组织目录仍不完整覆盖价格、配额及健康，目录存在不代表已验证可运行。
+- Ragent 的组织工具以当前 Run capability 和作用域核验读取及受控操作；`chat/runner-sidecar.mjs` 还会按授权注入其他专用 actions、browser 或 broker MCP，不应混为组织业务写入工具。manager 受控委派与中断反馈已有源码接入，仍须真实验收；未知副作用不作为安全重试证明。
 - `lib/model-pricing.mjs` 是有限静态估价表，`chat/usage-ledger.mjs` 区分实际与估计；`lib/provider-runtime/quota.mjs` 有状态和时间戳并可能保留 stale 快照；`chat/models.mjs` 的目录带来源、版本及新鲜度。它们不构成统一、实时、完整的选型证据。
 
 ## 身份、结构与委派
@@ -123,9 +123,9 @@ Ragent 正式组织和 Codex/Claude 等 harness 内部 subagent 的真实生命�
 | --- | --- |
 | 1 身份约束 | 服务端绑定、范围与约束复核部分接入；真实组织层级及运行事实仍待验收。 |
 | 2 候选选型 | 候选、锁定和派发前复核部分接入；真实可用性、账单与实际配置回填仍待验收。 |
-| 3 工具技能 | 受控技能、root 提案及既有直属节点派发已接入；动态新建子树、native 成员独立控制未实现，真实模型链路待验。 |
-| 4 中断反馈 | 通知、无 Run 失败、去重与升级有源码实现；实际送达与故障链路待验。 |
-| 5 受控恢复 | 需对账并保留未知结果；跨 provider 安全重放未实现，完整费用及真实恢复待验。 |
+| 3 工具技能 | 受控技能、root 提案及既有直属节点派发已接入；manager 候选与动态子树已有源码接入（99b6407e），native 成员独立控制能力不可假定，真实模型链路待验。 |
+| 4 中断反馈 | 已有 Run 与无绑定 Run 失败通知；native 成员事件通知已有源码接入（99b6407e），来源、native 父级与宿主收件人分开记录。实际送达、重启补投及故障链路待验。 |
+| 5 受控恢复 | 未知结果先对账，安全前置拒绝的 receipt 重试账本已有源码接入（99b6407e）；跨 provider 安全重放、SDK 内不可见重试的统一硬上限尚未实现。真实恢复待验。 |
 | 6 验收与成本 | 九项既有检查通过；代表性真实任务及完整成本尚未验收。 |
 所有阶段按 Evidence First 复用可信现有检查和用户已授权真实任务；不为证明进度使用自造案例或新增付费探针；用户授权的真实模型任务可用于验收，新增测试须先获许可。
 
@@ -133,16 +133,24 @@ Ragent 正式组织和 Codex/Claude 等 harness 内部 subagent 的真实生命�
 
 ## 2026-11-18 实施进度与证据
 
-阶段 1–3 已有部分代码接入，仍未完成本规划：组织身份按当前服务端绑定和冻结版本核验，缺失字段保持未知；reviewer 角色说明在可信只读路径注入。执行上下文根据当前通道、节点绑定、授权和直属子授权报告 `canDelegate` 与剩余深度；未能核实的身份或运行时事实保持未知。用户 runtime 约束由 owner 会话设置携带来源、单字段单作用域与版本；组织及独立 collaboration 在冻结、派发/尝试阶段复核，锁定字段可补缺但不可静默替换。该存储尚不支持同一字段同时为多个节点分别配置。空交集拒绝已接入，受限候选与目录摘要有源码实现；目录、配额和静态估价仍有未知或过期可能，非运行成功或账单证明。实际 provider 报告尚未完整回填决策记录，不能把已选配置写作实际执行事实。
+阶段 1–3 已有部分代码接入，仍未完成本规划：组织身份按当前服务端绑定和冻结版本核验，缺失字段保持未知；reviewer 角色说明在可信只读路径注入。执行上下文根据当前通道、节点绑定、授权和直属子授权报告 `canDelegate` 与剩余深度；未能核实的身份或运行时事实保持未知。用户 runtime 约束由 owner 会话设置携带来源、多个作用域与版本；组织及独立 collaboration 在冻结、派发/尝试阶段复核，锁定字段可补缺但不可静默替换。多作用域 selector 及候选/manager 接线已有源码接入，完整链路仍待验证。空交集拒绝已接入，受限候选与目录摘要有源码实现；目录、配额和静态估价仍有未知或过期可能，非运行成功或账单证明。Claude 明确报告的实际 model 可写入 Run，未报告的实际字段保持未知；其他 harness 的实际字段和真实账单仍待验证，不能把已选配置写作实际执行事实。
 
-内置 session-control 和角色/日历技能已进入受控读取与显式选择目录；Codex app-server 和 Claude bidi 有按 run 授权的 MCP 读取路径及预检，符合条件时使用短常驻指引，其他运行时及只读路径保留原说明。工具实际可用性、就绪回退与真实模型调用仍待整合验收，不能因源码存在就声称所有 harness 能调用。任务候选可按可核验的工具、环境、上下文需求、owner 锁定和新鲜配额事实分层，记录未知高级能力、健康和费用；静态无有效日期估价不用于精确成本排序，领导者的选择理由是声明而非模型质量证明。root 候选查询须持有效的当前 run 委派能力并与父、子策略求交；下级 manager 的候选工具尚未授权接通。预算/实际用量与完整候选推荐的真实链路尚待验收。后台已有中断通知持久化、去重、直属上级通知与必要升级，无绑定 Run 的失败也有通知；恢复要求对账并保留未知结果。送达、升级、无 Run 故障和恢复仍未完成真实端到端验收。近期九项既有检查通过：协作授权、会话控制授权与续签、提示词构建、组织领导入口、编排入口、协作计划、provisioning（51 项）及 hierarchy（40 项）。S25 旧 fixture 缺少绑定代次，仍被安全拒绝，不能算通过。既有 `test-organization-runtime-selection.mjs` 在本机未发现 Claude 时，其预期 runtimeFamily 的断言失败；这不是通过证据，须在正确工具环境复核。尚未进行代表性真实模型任务或费用验证，不宣称六阶段完成。
+本轮源码基线包括 `3db3993e`（多作用域约束及 provider 报告用量）、`99b6407e`（受控 manager 子树与中断恢复）和 `fccaf005`（只读 manager 的 scoped 组织工具）；这些提交为实现证据，不能代替部署后的多层委派、通知或恢复验收。
 
-manager 的 `node.dispatch` 仅可请求冻结版本中已存在且获授权的直属子节点，同一版本与子节点一次；不能动态创建节点，也不能以接受派发表示实际运行完成。未知副作用保持待对账状态，不能盲目重跑；目前不提供安全的跨 provider 状态重放。以上均尚待真实端到端验收。
+内置 session-control 和角色/日历技能已进入受控读取与显式选择目录；Codex app-server 和 Claude bidi 有按 run 授权的 MCP 读取路径及预检，符合条件时使用短常驻指引，其他运行时及只读路径保留原说明。工具实际可用性、就绪回退与真实模型调用仍待整合验收，不能因源码存在就声称所有 harness 能调用。任务候选可按可核验的工具、环境、上下文需求、owner 锁定和新鲜配额事实分层，记录未知高级能力、健康和费用；静态无有效日期估价不用于精确成本排序，领导者的选择理由是声明而非模型质量证明。root 候选查询须持有效的当前 run 委派能力并与父、子策略求交；下级 manager 候选与当前 run 授权已有源码接入，仍待真实调用验收。预算/实际用量与完整候选推荐的真实链路尚待验收。后台已有中断通知持久化、去重、直属上级通知与必要升级，无绑定 Run 的失败也有通知；native 成员事件通知与受限 receipt 重试预算已有源码接入（99b6407e），恢复要求对账并保留未知结果。送达、升级、无 Run 故障和恢复仍未完成真实端到端验收。近期九项既有检查通过：协作授权、会话控制授权与续签、提示词构建、组织领导入口、编排入口、协作计划、provisioning（51 项）及 hierarchy（40 项）。S25 旧 fixture 缺少绑定代次，仍被安全拒绝，不能算通过。既有 `test-organization-runtime-selection.mjs` 在本机未发现 Claude 时，其预期 runtimeFamily 的断言失败；这不是通过证据，须在正确工具环境复核。尚未进行代表性真实模型任务或费用验证，不宣称六阶段完成。
 
-真实审阅后，源码 `dfdf8fba` 修正阶段依赖与状态摘要：阶段完成决策及完成事件绑定服务端当前冻结 revision，依赖查询只接受该 revision 的完成事实，不猜测历史空版本事件；`state.get` 的条件摘要排除生成时间，仍覆盖收件箱及其他状态。相关既有 `test-phase-gates.mjs` 的旧 fixture 创建了冻结 revision 1 但没有将组织当前 revision 更新为 1，因此在新的版本绑定校验处失败，不能计为通过。该修复尚未经过真实端到端复验。MCP 工具枚举在 root 与成员之间共享，成员不支持的操作仍由服务端拒绝；这属于当前工具发现和角色能力覆盖限制。
+此前 `node.dispatch` 只支持冻结版本中已存在且获授权的直属子节点；manager 动态子树及追加版本兼容能力已有源码接入（99b6407e），不能把代码接入视为真实验收通过或授权任意子树。接受派发不表示运行完成。未知副作用保持待对账状态，不能盲目重跑；目前不提供安全的跨 provider 状态重放。以上均尚待真实端到端验收。
+
+native 成员中断记录区分 provider、真实 native parent 与宿主 Run/session 收件人；不能把宿主冒充可独立寻址的 native 父级，也不构造子 Run。重启补偿对单个待处理 Run 最多读取 8000 条，超限标记 coverage gap；不会声称完整历史均已覆盖。receipt 恢复预算只约束已证实安全的服务端前置拒绝重试，SDK 内部不可见重试、跨 harness 状态迁移和外部副作用均未因此获得保证。
+
+既有 native delegation mapper 与 runtime 两项检查通过；它们不覆盖新 incident 的持久化、权限、通知或恢复预算。既有 collaboration-store 检查仍期待对已绑定 Run 的调用方自报 transient 自动重试，与当前要求服务端提供安全证据的规则不符，不能计为通过。
+
+历史审阅记录：源码 `dfdf8fba` 修正阶段依赖与状态摘要：阶段完成决策及完成事件绑定服务端当前冻结 revision，依赖查询只接受该 revision 的完成事实，不猜测历史空版本事件；`state.get` 的条件摘要排除生成时间，仍覆盖收件箱及其他状态。相关既有 `test-phase-gates.mjs` 的旧 fixture 创建了冻结 revision 1 但没有将组织当前 revision 更新为 1，因此在新的版本绑定校验处失败，不能计为通过。该修复尚未经过真实端到端复验。MCP 工具枚举在 root 与成员之间共享，成员不支持的操作仍由服务端拒绝；这属于当前工具发现和角色能力覆盖限制。
 
 Linux 真实任务首次提交在模型准入阶段被拒绝，没有创建 Run，也没有模型调用、技能读取或工具验收证据，费用仍未知。提交使用 `claude-bidi`、provider `glm-68f6bd41` 和 `sonnet@glm-68f6bd41`；先前查询使用 `providerProfile` 参数，而当时已部署的模型路由只识别 `provider`，返回的通用 tier 回退误标为 fresh，不能作为该 provider 的可用模型证据。改用规范 `provider` 和 `refresh=1` 后，专属目录列出 GLM 系列且不含 sonnet。源码修复 `f7caa69f` 处理 provider 参数兼容及回退证据状态；该修复部署后的真实任务仍待执行和验收。目录中 effort 的 builtin 值并非 provider 实际支持证明。
-Linux 真实审阅：在部署 `f7caa69f` 后，单次 Run `run_f035682d4a6afa34d30cefd8` 使用 `claude-bidi`、`glm-5.3@glm-68f6bd41`，未显式指定 effort，2026-11-17 18:18:03 至 18:24:44 UTC 完成；runner 和 provider 实际活动有事件证据。MCP 预检显示 ready，模型发现组织工具，但六次 read 调用均被 full-auto 授权门拒绝，原因是工具定义与授权绑定不可用；未成功读取技能及哈希、候选或组织状态，不能视为工具链验收通过。源码修复 `09ea2fa1` 已提交，修复后的真实调用尚未验证。Run 状态中的 `contextInputTokens` 为 7,038,353、`contextWindowTokens` 为 128,000；这是运行时上下文统计，未证实为账单用量。Run 的 usage 字段无值，实际费用及币种未知，不记为零。模型审阅提出的其他问题须独立核对。
+Linux 历史审阅：在部署 `f7caa69f` 后，单次 Run `run_f035682d4a6afa34d30cefd8` 使用 `claude-bidi`、`glm-5.3@glm-68f6bd41`，未显式指定 effort，2026-11-17 18:18:03 至 18:24:44 UTC 完成；runner 和 provider 实际活动有事件证据。MCP 预检显示 ready，模型发现组织工具，但六次 read 调用均被 full-auto 授权门拒绝，原因是工具定义与授权绑定不可用；未成功读取技能及哈希、候选或组织状态，不能视为工具链验收通过。源码修复 `09ea2fa1` 当时尚未真实验证，后续只读调用结果见下一段。Run 状态中的 `contextInputTokens` 为 7,038,353、`contextWindowTokens` 为 128,000；这是运行时上下文统计，未证实为账单用量。Run 的 usage 字段无值，实际费用及币种未知，不记为零。模型审阅提出的其他问题须独立核对。
+
+Windows 既有只读样本：根会话 `0ce369d426fc0f62518e58b53bdcdf34` 的成员接口报告 Claude native 成员 `member_51aa52a060f541f67d923007` 为 failed，真实父关系指向宿主会话；对应宿主 Run `run_8fd5453cec0d08a4b09a50ee` 自身为 cancelled，二者是不同事实，不能将宿主取消当作成员失败原因。现有 delegation 接口显示该成员 failed、来源 verified，首屏仍有后续记录；成员总体覆盖 partial 且有 gap。该历史 Run 早于新通知实现，正常成员读取只做投影、旧 Run 不带新 pending 标记，因此它证明历史成员状态可观察，不证明新版通知、补投或故障恢复通过。
 最终 Linux 部署 `dfdf8fba3c814f80372191c9a2a910a55eb9a668`（1.0.7）后，第二且最后一次真实 Run `run_2d33b5d9d48c541bc2beed9d` 使用同一 Claude bidi / GLM provider 与 `glm-5.3`，effort 未显式指定，2026-11-17 18:36:16–18:37:10 UTC 完成。原始工具结果证实 `skills.list` 返回索引，`skills.read` 使用索引哈希成功读取 root 技能；`candidates.query` 返回成功但 `items=[]`、`total=0`、`catalogStatus=present`，不能据此证明候选选型成功。只读复核该实例快照：`chat` Agent 默认约束为 Codex，当前 Codex 模型目录为空，而有模型的 GLM 目录属于 Claude，不满足该 Agent 的工具约束；`catalogStatus=present` 表示全目录中存在模型，不表示目标 Agent 有可用候选。这不代表其他实例或账号均不可用；`state.get` 返回 null 投影，带 digest 再读返回 unchanged，`plan.status` 为 not_submitted。此验证覆盖 Claude 工具发现、授权与上述只读调用，不证明组织派发、非空候选、故障恢复或整体方案通过。两次真实 Run 之前另有一次准入拒绝，未创建 Run。第二次 Run 的 usage 和 cost 均未提供；`contextInputTokens=160715` 是上下文统计而非账单，实际费用未知。Windows 仍为较旧部署，受安装确认与空间限制尚待更新，不能把 Linux 结果扩展为 Windows 通过。
 ## 参考资料
 
