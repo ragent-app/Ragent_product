@@ -12,6 +12,15 @@ function stateResponse(projection, previousDigest) {
   return previousDigest === digest ? { unchanged: true, digest } : { unchanged: false, digest, projection };
 }
 
+
+async function withPlanPhases(result) {
+  if (result?.state !== 'frozen' || !result.organizationId || !Number.isInteger(result.revision)) return result;
+  const { getRevision } = await import('./organization-store.mjs');
+  const revision = await getRevision(result.organizationId, result.revision);
+  if (revision?.state !== 'frozen') return result;
+  return { ...result, phases: (revision.compiled?.phases || []).map(({ phaseId, objective, dependsOn }) => ({ phaseId, objective, dependsOn: dependsOn || [] })) };
+}
+
 const fail = () => Object.assign(new Error('A current scoped organization Run is required'), { statusCode: 403, code: 'ORG_TOOL_FORBIDDEN' });
 
 export async function executeOrganizationControlTool({ authSession, action, args = {} }) {
@@ -33,13 +42,38 @@ export async function executeOrganizationControlTool({ authSession, action, args
       const { buildOrganizationContextProjection } = await import('./organization-context-projection.mjs');
       return stateResponse(await buildOrganizationContextProjection({ session }), args.ifDigest);
     }
+    if (action === 'result.read') {
+      const { readCollaborationResult } = await import('./collaboration-orchestrator.mjs');
+      return readCollaborationResult({ sessionId: authSession.sessionId, runId: authSession.runId, collaborationId: args.collaborationId, packetId: args.packetId, offset: args.offset });
+    }
+    if (action === 'phase.dispatch') {
+      if (session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' ||
+          session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) throw fail();
+      const phaseId = typeof args.phaseId === 'string' ? args.phaseId.trim() : '';
+      if (!phaseId || phaseId.length > 160) throw Object.assign(new Error('Phase id is required'), { statusCode: 400 });
+      const { getRun } = await import('./runs.mjs');
+      const { getOrganizationByRootSession, getRevision } = await import('./organization-store.mjs');
+      const run = await getRun(authSession.runId);
+      const result = run?.organizationPlanIngress?.result;
+      const organization = await getOrganizationByRootSession(authSession.sessionId);
+      if (!run || run.sessionId !== authSession.sessionId || ['failed', 'completed', 'cancelled'].includes(run.state) ||
+          run.organizationPlanIngress?.state !== 'completed' || result?.state !== 'frozen' ||
+          !organization || result.organizationId !== organization.id || result.revision !== organization.currentRevision) throw fail();
+      const revision = await getRevision(organization.id, result.revision);
+      if (revision?.state !== 'frozen' || !(revision.compiled?.phases || []).some((phase) => phase.phaseId === phaseId)) throw fail();
+      const { dispatchOrganizationPhase } = await import('./organization-phase-dispatch.mjs');
+      return dispatchOrganizationPhase({ organizationId: organization.id, revision: result.revision, phaseId,
+        idempotencyKey: `root:${organization.id}:revision:${result.revision}:phase:${phaseId}` });
+    }
     if (action === 'plan.submit') {
       const { submitOrganizationPlan } = await import('./organization-plan-tool.mjs');
-      return submitOrganizationPlan({ authSession, proposal: args.proposal });
+      const result = await submitOrganizationPlan({ authSession, proposal: args.proposal });
+      return withPlanPhases(result);
     }
     if (action === 'plan.status') {
       const { getOrganizationPlanStatus } = await import('./organization-plan-tool.mjs');
-      return getOrganizationPlanStatus({ authSession });
+      const status = await getOrganizationPlanStatus({ authSession });
+      return status.result ? { ...status, result: await withPlanPhases(status.result) } : status;
     }
     if (action === 'skills.list') return { skills: await listBuiltinSkills({ authorize }) };
     if (action === 'skills.read') {
