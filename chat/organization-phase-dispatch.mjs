@@ -67,18 +67,6 @@ function runtimeMatches(compiledRuntime, actualRuntime) {
   return true;
 }
 
-async function validateSessionEffort(runtime) {
-  if (runtime.effort) return;
-  const catalog = await getModelsForTool(runtime.tool).catch(() => null);
-  const entry = catalog?.models?.find((model) => model.id === runtime.model);
-  const reasoning = entry?.reasoning;
-  const levels = reasoning?.kind === 'enum' ? reasoning.levels : entry?.effortLevels;
-  if (reasoning?.kind !== 'none' && reasoning?.kind !== 'toggle'
-      && Array.isArray(levels) && levels.length > 0) {
-    throw dispatchError('ORG_PHASE_RUNTIME_INCOMPLETE', 'Session requires a supported effort selection', 409);
-  }
-}
-
 async function phaseDependenciesCompleted(organizationId, revision, phase) {
   const dependencies = list(phase?.dependsOn);
   if (dependencies.length === 0) return;
@@ -203,7 +191,6 @@ export async function dispatchOrganizationPhase({
       throw dispatchError('ORG_PHASE_SESSION_INVALID', `node ${node.stableKey} is not bound to a managed Session`, 409, { stableKey: node.stableKey });
     }
     const actualRuntime = runtimeForSession(session);
-    await validateSessionEffort(actualRuntime);
     // Preserve the legacy default only when the frozen selection did not pin a
     // provider. It is a routing fallback, not a provider-reported actual value.
     const frozenProvider = text(nodePlan?.runtime?.provider || nodePlan?.runtime?.providerProfile
@@ -211,7 +198,7 @@ export async function dispatchOrganizationPhase({
     const fallbackProvider = !frozenProvider && !session.providerProfile
       ? await getToolDefinitionAsync(actualRuntime.tool).catch(() => null) : null;
     const provider = text(session.providerProfile || fallbackProvider?.provider, 160);
-    const runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
+    let runtime = { ...actualRuntime, ...(provider ? { provider } : {}) };
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
     const { selectRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
     const rootSession = await getSession(organization.rootSessionId);
@@ -219,6 +206,28 @@ export async function dispatchOrganizationPhase({
     const currentSettings = rootSession?.sessionClass === 'ROOT_LEADERSHIP'
       ? await readSessionRuntimeConstraints(organization.rootSessionId) : { constraints: {} };
     const currentConstraints = selectRuntimeConstraints(currentSettings.constraints, ['organization', `node:${node.stableKey}`]);
+    const agentId = text(nodePlan?.resolver?.selectedAgentId || nodePlan?.agentId || session.templateId, 160);
+    if (text(session.templateId) && agentId !== text(session.templateId)) {
+      throw dispatchError('ORG_PHASE_AGENT_MISMATCH', `node ${node.stableKey} Session Agent differs from the frozen plan`, 409, { stableKey: node.stableKey });
+    }
+    const { getApp } = await import('./apps.mjs');
+    const { buildAgentCapabilityProfile } = await import('./agent-capability-registry.mjs');
+    const agent = await getApp(agentId);
+    if (!agent) throw dispatchError('ORG_PHASE_AGENT_MISSING', 'Bound Agent policy is unavailable', 409);
+    const agentProfile = await buildAgentCapabilityProfile(agent);
+    const parentNode = node.parentNodeId ? (await import('./organization-store.mjs')).getNode(node.parentNodeId) : null;
+    const resolvedParent = parentNode ? await parentNode : null;
+    if (node.parentNodeId && !resolvedParent) throw dispatchError('ORG_PHASE_PARENT_MISSING', 'Parent grant is unavailable', 409);
+    const { resolveRuntimeSelection } = await import('./organization-runtime-selection.mjs');
+    const { applyRuntimeConstraints } = await import('./organization-runtime-decision.mjs');
+    const { resolveSessionCollaborationPolicy } = await import('./collaboration-policy.mjs');
+    const rootApp = rootSession.templateId ? await getApp(rootSession.templateId) : null;
+    const rootPolicy = resolveSessionCollaborationPolicy(rootSession, rootApp);
+    runtime = await resolveRuntimeSelection({ requested: applyRuntimeConstraints(runtime, currentConstraints),
+      profile: agentProfile, parentGrant: { runtimePolicy: rootPolicy.runtimePolicy } });
+    if (resolvedParent) runtime = await resolveRuntimeSelection({ requested: runtime, profile: agentProfile, parentGrant: resolvedParent.grant || {} });
+    runtime = await resolveRuntimeSelection({ requested: runtime, profile: agentProfile, parentGrant: node.grant || {} });
+
     const frozenConstraints = nodePlan?.runtimeDecision?.requestedConstraints || {};
     if (JSON.stringify(currentConstraints) !== JSON.stringify(frozenConstraints)) {
       throw dispatchError('ORG_PHASE_RUNTIME_CONSTRAINT_CHANGED', `node ${node.stableKey} runtime constraints changed; recompile the revision`, 409);
@@ -237,10 +246,6 @@ export async function dispatchOrganizationPhase({
         runtime,
       });
     }
-    const agentId = text(nodePlan?.resolver?.selectedAgentId || nodePlan?.agentId || session.templateId, 160);
-    if (text(session.templateId) && agentId !== text(session.templateId)) {
-      throw dispatchError('ORG_PHASE_AGENT_MISMATCH', `node ${node.stableKey} Session Agent differs from the frozen plan`, 409, { stableKey: node.stableKey });
-    }
     const taskId = `org:${organization.id}:${targetRevision}:${normalizedPhaseId}:${node.stableKey}`;
     const taskRole = text(node.nodeRole).toLowerCase() === 'reviewer' ? 'reviewer' : 'specialist';
     const acceptance = [
@@ -248,11 +253,6 @@ export async function dispatchOrganizationPhase({
       ...list(nodePlan?.acceptance),
     ];
     const writablePaths = list(nodePlan?.scope?.writablePaths);
-    const { getApp } = await import('./apps.mjs');
-    const { buildAgentCapabilityProfile } = await import('./agent-capability-registry.mjs');
-    const agent = await getApp(agentId);
-    if (!agent) throw dispatchError('ORG_PHASE_AGENT_MISSING', 'Bound Agent policy is unavailable', 409);
-    const agentProfile = await buildAgentCapabilityProfile(agent);
     const grantedAccess = node.grant?.accessMode;
     if (!['read_only', 'writer'].includes(grantedAccess)
         || !['read_only', 'writer'].includes(agentProfile.accessMode)
@@ -291,6 +291,12 @@ export async function dispatchOrganizationPhase({
       },
       organizationId: organization.id,
       organizationRuntimeConstraints: currentConstraints,
+      organizationRuntimeResolution: {
+        requestedEffort: actualRuntime.effort || null,
+        resolvedEffort: runtime.effort || null,
+        source: actualRuntime.effort ? 'session' : currentConstraints.effort?.mode === 'locked' ? 'owner_constraint'
+          : runtime.effort ? 'catalog_or_policy_default' : 'provider_default_unknown',
+      },
       ...(nodePlan?.runtimeDecision ? { organizationRuntimeDecision: nodePlan.runtimeDecision } : {}),
       ...(organizationDelegation ? { organizationDelegation } : {}),
       organizationNodeId: node.id,

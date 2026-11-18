@@ -357,7 +357,7 @@ export async function resolveRuntimeSelection({
     provider: requestedProvider,
   });
 
-  const catalog = await getModels(requestedTool).catch(() => null);
+  const catalog = await getModels(requestedTool, { providerProfile: requestedProvider }).catch(() => null);
   let availableProviders = Array.isArray(catalog?.providers)
     ? list(catalog.providers.map((entry) => (typeof entry === 'string' ? entry : entry?.id)))
     : [];
@@ -404,9 +404,27 @@ export async function resolveRuntimeSelection({
     throw runtimeError('ORG_RUNTIME_EFFORT_DENIED', 'parent and child runtime effort policies have no permitted intersection', { reason: 'runtime_policy_denied', field: 'runtime.effort' });
   }
 
-  const requestedEffort = selection.effort || childPolicy.default?.effort || '';
-  assertAllowed(requestedEffort, effortPolicy, 'ORG_RUNTIME_EFFORT_DENIED', 'runtime.effort', { tool: requestedTool });
   const catalogEfforts = effortLevels(catalog, requestedModel, requestedProvider);
+  const entry = modelEntry(catalog, requestedModel, requestedProvider);
+  const defaultEffort = text(entry?.defaultEffort || entry?.reasoning?.default || entry?.capabilities?.effort?.default).toLowerCase();
+  const entryEfforts = [entry?.effortLevels, entry?.reasoning?.levels, entry?.capabilities?.effort?.levels]
+    .map((levels) => list(levels).map((effort) => effort.toLowerCase())).find((levels) => levels.length > 0) || [];
+  const sameProvider = !requestedProvider || providerFromModel(text(entry?.id)) === requestedProvider
+    || text(entry?.providerProfileId) === requestedProvider;
+  // A default is usable only when it belongs to this exact model/provider's
+  // advertised list and the delegated policy. An absent default stays unknown.
+  const catalogDefault = sameProvider && defaultEffort && entryEfforts.includes(defaultEffort)
+    && (effortPolicy === null || effortPolicy.includes(defaultEffort)) ? defaultEffort : '';
+  const policyDefault = text(childPolicy.default?.effort).toLowerCase();
+  const allowedPolicyDefault = sameProvider && policyDefault && entryEfforts.includes(policyDefault)
+    && (effortPolicy === null || effortPolicy.includes(policyDefault)) ? policyDefault : '';
+  const requestedEffort = selection.effort || allowedPolicyDefault || catalogDefault || '';
+  if (!requestedEffort && effortPolicy !== null) {
+    throw runtimeError('ORG_RUNTIME_EFFORT_UNAVAILABLE', 'No verified default satisfies the delegated effort policy', {
+      reason: 'effort_default_unknown', field: 'runtime.effort',
+    });
+  }
+  assertAllowed(requestedEffort, effortPolicy, 'ORG_RUNTIME_EFFORT_DENIED', 'runtime.effort', { tool: requestedTool });
   if (requestedEffort && catalogEfforts.length > 0 && !catalogEfforts.includes(requestedEffort)) {
     throw runtimeError('ORG_RUNTIME_EFFORT_UNAVAILABLE', `effort ${requestedEffort} is not available for ${requestedTool}/${requestedModel || 'default model'}`, {
       reason: 'effort_unavailable',

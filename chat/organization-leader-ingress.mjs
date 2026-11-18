@@ -187,7 +187,7 @@ const SAFE_RESOLVER_CODES = new Set([
   'ORG_RUNTIME_PROVIDER_DENIED', 'ORG_RUNTIME_PROVIDER_MODEL_CONFLICT', 'ORG_RUNTIME_PROVIDER_UNAVAILABLE',
   'ORG_RUNTIME_MODEL_DENIED', 'ORG_RUNTIME_MODEL_UNAVAILABLE', 'ORG_RUNTIME_EFFORT_DENIED', 'ORG_RUNTIME_EFFORT_UNAVAILABLE',
 ]);
-const SAFE_RESOLVER_REASONS = new Set(['runtime_evidence_unknown', 'runtime_candidate_ineligible', 'runtime_policy_denied', 'tool_required']);
+const SAFE_RESOLVER_REASONS = new Set(['runtime_evidence_unknown', 'runtime_candidate_ineligible', 'runtime_policy_denied', 'tool_required', 'effort_default_unknown', 'effort_unavailable']);
 const SAFE_RESOLVER_FIELDS = new Set(['runtime.tool', 'runtime.provider', 'runtime.model', 'runtime.effort']);
 
 function errorResult(error, attempted = true) {
