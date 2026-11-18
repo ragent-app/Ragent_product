@@ -19,9 +19,11 @@ const text = (value) => typeof value === 'string' ? value.trim() : '';
 // Entry is reachable only after organization.tools verifies the current Run.
 export async function appendManagerSubtree({ authSession, scope, args = {} }) {
   const key = text(args.operationKey);
-  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(key) || !Number.isInteger(args.expectedRevision)
-      || !Array.isArray(args.nodes) || !args.nodes.length || args.nodes.length > 16
-      || !Array.isArray(args.manages) || !Array.isArray(args.phases || [])) throw error('Invalid bounded append', 'ORG_APPEND_INVALID');
+  if (!/^[A-Za-z0-9_.-]{1,100}$/.test(key)) throw error('operationKey must be 1-100 characters using only ASCII letters, digits, underscore, period, or hyphen', 'ORG_APPEND_INVALID');
+  if (!Number.isInteger(args.expectedRevision)) throw error('expectedRevision must be an integer identifying the current frozen revision', 'ORG_APPEND_INVALID');
+  if (!Array.isArray(args.nodes) || !args.nodes.length || args.nodes.length > 16) throw error('nodes must be an array of 1-16 new nodes', 'ORG_APPEND_INVALID');
+  if (!Array.isArray(args.manages)) throw error('manages must be an array of parentKey/childKey edges', 'ORG_APPEND_INVALID');
+  if (args.phases != null && !Array.isArray(args.phases)) throw error('phases must be an array when provided', 'ORG_APPEND_INVALID');
   const parent = await getNode(scope.nodeId);
   const organization = parent && await getOrganization(parent.organizationId);
   if (!parent || !organization || parent.organizationId !== scope.organizationId || parent.currentSessionId !== authSession.sessionId
