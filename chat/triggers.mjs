@@ -964,7 +964,10 @@ async function markTriggerDeliveryFailure(triggerId, error, attemptCount = 1) {
   const normalizedTriggerId = trimString(triggerId);
   if (!normalizedTriggerId) return null;
   const failedAt = nowIso();
-  const exhausted = isPermanentTriggerError(error) || attemptCount >= MAX_DELIVERY_ATTEMPTS;
+  // An incident may still be acquiring its durable binding, or its authorized
+  // continuation configuration may later become available. Keep it queued.
+  const waitingForRuntime = error?.code === 'TRIGGER_INCIDENT_RUNTIME_PENDING';
+  const exhausted = !waitingForRuntime && (isPermanentTriggerError(error) || attemptCount >= MAX_DELIVERY_ATTEMPTS);
   const retryDelayMs = resolveRetryDelayMs(attemptCount);
 
   let updatedTrigger = null;
@@ -1054,11 +1057,63 @@ async function deliverTrigger(trigger, eventContext = null) {
   }
 
   const internalContinuation = inputMode === TRIGGER_INPUT_MODE_INTERNAL_CONTINUATION;
+  let selectedTool = trigger.tool || undefined;
+  const sameSessionTool = !trigger.tool || trigger.tool === session.tool;
+  let selectedModel = trigger.model || undefined;
+  let selectedProvider;
+  let selectedEffort = trigger.effort || undefined;
+  let boundContinuation = false;
+  const incidentWake = trigger.dedupeKey?.startsWith('agent-interruption:');
+  const childWake = eventContext?.type === 'run_terminal' && trigger.dedupeKey?.startsWith('delegated-child-terminal:');
+  const nativeWake = trigger.dedupeKey?.startsWith('native:');
+  if (incidentWake || childWake || nativeWake) {
+    const { incidentContinuationRuntime, validateIncidentContinuationRuntime } = await import('./incident-continuation-runtime.mjs');
+    const context = await incidentContinuationRuntime(trigger, session, eventContext);
+    if (context?.ordinary) {
+      selectedTool = trigger.tool || undefined;
+      selectedModel = trigger.model || undefined;
+      selectedProvider = undefined;
+      selectedEffort = trigger.effort || undefined;
+    } else {
+      selectedTool = trigger.tool || session.tool || undefined;
+      selectedModel = trigger.model || (sameSessionTool ? session.model : undefined) || undefined;
+      selectedProvider = !trigger.model && sameSessionTool ? session.providerProfile || undefined : undefined;
+      selectedEffort = trigger.effort || (!trigger.model && sameSessionTool && session.model ? session.effort : undefined) || undefined;
+      const manifest = context?.manifest;
+      const sourceTool = manifest?.tool;
+      const sourceModel = manifest?.options?.model;
+      const sourceProvider = manifest?.options?.providerProfile;
+      const { parseScopedCodexModel } = await import('./models.mjs');
+      const scopedProvider = parseScopedCodexModel(sourceModel).providerId;
+      if (!context || (!selectedModel && (!sourceModel || (selectedTool && selectedTool !== sourceTool)
+          || (sourceProvider && scopedProvider && sourceProvider !== scopedProvider)
+          || (selectedProvider && selectedProvider !== (sourceProvider || scopedProvider))))) {
+        throw Object.assign(new Error('Incident continuation runtime is unavailable; notification remains pending'), { code: 'TRIGGER_INCIDENT_RUNTIME_PENDING' });
+      }
+      if (!selectedModel) {
+        selectedTool = sourceTool;
+        selectedModel = sourceModel;
+        selectedProvider = selectedProvider || sourceProvider || scopedProvider || undefined;
+        selectedEffort = selectedEffort || manifest.options.effort || undefined;
+      }
+      try {
+        const validated = await validateIncidentContinuationRuntime(context, session, { tool: selectedTool,
+          model: selectedModel, provider: selectedProvider || parseScopedCodexModel(selectedModel).providerId || undefined, effort: selectedEffort });
+        selectedTool = validated.tool; selectedModel = validated.model;
+        selectedProvider = validated.provider || undefined; selectedEffort = validated.effort || undefined;
+      } catch {
+        throw Object.assign(new Error('Incident continuation runtime no longer meets current policy; notification remains pending'), { code: 'TRIGGER_INCIDENT_RUNTIME_PENDING' });
+      }
+      boundContinuation = true;
+    }
+  }
   const outcome = await submitHttpMessage(session.id, renderTriggerText(trigger, eventContext), [], {
     requestId,
-    tool: trigger.tool || undefined,
-    model: trigger.model || undefined,
-    effort: trigger.effort || undefined,
+    tool: selectedTool,
+    model: selectedModel,
+    providerProfile: selectedProvider,
+    effort: selectedEffort,
+    ...(boundContinuation ? { providerFailover: false } : {}),
     thinking: trigger.thinking === true,
     internalOperation: internalContinuation ? 'trigger_internal_continuation' : 'trigger_delivery',
     ...(internalContinuation ? {
@@ -1142,7 +1197,7 @@ async function attemptTriggerDelivery(triggerId) {
     if (terminal) { error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL'; error.runId = run.id; }
     await recordDeliveryResult(trigger.id, requestId, {
       runId: trimString(run?.id), executionState: trimString(run?.state) || 'unknown',
-      deliveryState: terminal || isPermanentTriggerError(error) || trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS ? 'unknown' : 'pending',
+      deliveryState: terminal || isPermanentTriggerError(error) || (sourceCode !== 'TRIGGER_INCIDENT_RUNTIME_PENDING' && trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS) ? 'unknown' : 'pending',
       lastError: trimString(error?.message), errorCode: sourceCode,
       causeCode: trimString(error?.causeCode || error?.providerPreparation?.causeCode),
       stage: trimString(error?.launchStage || error?.stage), attempts: trigger.deliveryAttempts,
@@ -1215,7 +1270,7 @@ async function attemptEventTriggerDelivery(triggerId, eventContext) {
     if (terminal) { error.code = published === null ? 'TRIGGER_RESULT_UNCERTAIN' : 'TRIGGER_RUN_TERMINAL'; error.runId = run.id; }
     await recordDeliveryResult(trigger.id, requestId, {
       runId: trimString(run?.id), executionState: trimString(run?.state) || 'unknown',
-      deliveryState: terminal || isPermanentTriggerError(error) || trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS ? 'unknown' : 'pending',
+      deliveryState: terminal || isPermanentTriggerError(error) || (sourceCode !== 'TRIGGER_INCIDENT_RUNTIME_PENDING' && trigger.deliveryAttempts >= MAX_DELIVERY_ATTEMPTS) ? 'unknown' : 'pending',
       lastError: trimString(error?.message), errorCode: sourceCode,
       causeCode: trimString(error?.causeCode || error?.providerPreparation?.causeCode),
       stage: trimString(error?.launchStage || error?.stage), attempts: trigger.deliveryAttempts,
