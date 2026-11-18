@@ -25,6 +25,7 @@ function object(value) {
 }
 
 function integer(value, fallback, max = 1_000_000) {
+  if (value === null || value === undefined || value === '') return fallback;
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? Math.min(number, max) : fallback;
 }
@@ -64,6 +65,7 @@ export function deriveOrganizationGrant({
   role,
   capabilities = [],
   profileCapabilities = [],
+  agentProfile = null,
   parentGrant = {},
   scope = {},
   scopes = {},
@@ -111,8 +113,15 @@ export function deriveOrganizationGrant({
   }
 
   const parentAccess = text(parentGrant.accessMode).toLowerCase() || 'writer';
+  const agentAccess = agentProfile ? (text(agentProfile.accessMode).toLowerCase() || 'read_only') : 'writer';
+  if (agentProfile && !['read_only', 'writer'].includes(agentAccess)) throw fail('Agent access mode denies execution');
   const requestedAccess = text(requestedScope.accessMode).toLowerCase();
-  const accessMode = contract.accessMode === 'read_only' || requestedAccess === 'read_only'
+  if (['writer', 'write'].includes(requestedAccess)
+      && (parentAccess === 'read_only' || agentAccess !== 'writer' || (agentProfile && !profile.includes('write')))) {
+    throw fail('Requested write access exceeds the Agent or parent grant');
+  }
+  const accessMode = contract.accessMode === 'read_only' || requestedAccess === 'read_only' || agentAccess === 'read_only'
+    || (agentProfile && !profile.includes('write'))
     ? 'read_only'
     : 'writer';
   if (parentAccess === 'read_only' && accessMode !== 'read_only') {
@@ -128,17 +137,21 @@ export function deriveOrganizationGrant({
   const defaultDepth = parentGrant && Object.keys(parentGrant).length > 0
     ? Math.max(0, parentMaxDepth - 1)
     : contract.maxDepth;
-  const effectiveMaxDepth = integer(maxDepth, defaultDepth, 16);
-  if (effectiveMaxDepth > defaultDepth) throw fail('organization role raises delegation depth');
+  const agentMaxDepth = agentProfile ? integer(agentProfile.maxDepth, 0, 16) : defaultDepth;
+  const effectiveMaxDepth = integer(maxDepth, Math.min(defaultDepth, agentMaxDepth), 16);
+  if (effectiveMaxDepth > defaultDepth || effectiveMaxDepth > agentMaxDepth) throw fail('organization role raises delegation depth');
   const parentMaxChildren = integer(parentGrant.maxChildren, 16, 200);
   const parentMaxConcurrent = integer(parentGrant.maxConcurrent, 4, 64);
-  const effectiveMaxChildren = integer(maxChildren, contract.canDelegate ? Math.min(parentMaxChildren, 16) : contract.maxChildren, 200);
-  const effectiveMaxConcurrent = integer(maxConcurrent, contract.canDelegate ? Math.min(parentMaxConcurrent, 4) : contract.maxConcurrent, 64);
-  if (effectiveMaxChildren > parentMaxChildren || effectiveMaxConcurrent > parentMaxConcurrent) {
+  const agentMaxChildren = agentProfile ? integer(agentProfile.maxChildren, 0, 200) : parentMaxChildren;
+  const agentMaxConcurrent = agentProfile ? integer(agentProfile.maxConcurrent, 0, 64) : parentMaxConcurrent;
+  const effectiveMaxChildren = integer(maxChildren, contract.canDelegate ? Math.min(parentMaxChildren, agentMaxChildren, 16) : contract.maxChildren, 200);
+  const effectiveMaxConcurrent = integer(maxConcurrent, contract.canDelegate ? Math.min(parentMaxConcurrent, agentMaxConcurrent, 4) : Math.min(contract.maxConcurrent, agentMaxConcurrent), 64);
+  if (effectiveMaxChildren > parentMaxChildren || effectiveMaxChildren > agentMaxChildren || effectiveMaxConcurrent > parentMaxConcurrent || effectiveMaxConcurrent > agentMaxConcurrent) {
     throw fail('organization role raises child or concurrency quota');
   }
 
-  const canDelegate = contract.canDelegate && parentGrant.canDelegate !== false;
+  const canDelegate = contract.canDelegate && parentGrant.canDelegate !== false
+    && (!agentProfile || agentProfile.canDelegate === true);
   return {
     organizationRole: contract.role,
     allowedCapabilities: selected,

@@ -463,11 +463,12 @@ export async function compileOrganizationProposal(input, options = {}) {
       const parent = parentKey ? nodeByKey.get(parentKey) : null;
       if (parent) await compileNode(parent);
       const parentProfile = parent ? profileByNode.get(parent.stableKey)?.profile : null;
-      const parentGrant = parent ? (grantByNode.get(parent.stableKey) || {}) : {};
+      const parentGrant = parent ? (grantByNode.get(parent.stableKey) || {}) : object(options.rootGrant);
       const grant = deriveOrganizationGrant({
         role: node.role,
         capabilities: node.capabilities,
         profileCapabilities: profile.capabilities,
+        agentProfile: profile,
         parentGrant,
         scope: node.scope,
         scopes: node.scopes,

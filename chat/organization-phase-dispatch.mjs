@@ -248,12 +248,25 @@ export async function dispatchOrganizationPhase({
       ...list(nodePlan?.acceptance),
     ];
     const writablePaths = list(nodePlan?.scope?.writablePaths);
+    const { getApp } = await import('./apps.mjs');
+    const { buildAgentCapabilityProfile } = await import('./agent-capability-registry.mjs');
+    const agent = await getApp(agentId);
+    if (!agent) throw dispatchError('ORG_PHASE_AGENT_MISSING', 'Bound Agent policy is unavailable', 409);
+    const agentProfile = await buildAgentCapabilityProfile(agent);
+    const grantedAccess = node.grant?.accessMode;
+    if (!['read_only', 'writer'].includes(grantedAccess)
+        || !['read_only', 'writer'].includes(agentProfile.accessMode)
+        || (grantedAccess === 'writer' && (agentProfile.accessMode !== 'writer' || !agentProfile.capabilities.includes('write')))
+        || (grantedAccess === 'read_only' && writablePaths.length > 0)) {
+      throw dispatchError('ORG_PHASE_ACCESS_DENIED', 'Frozen task exceeds the Agent access policy', 403);
+    }
+    const readOnly = grantedAccess === 'read_only';
     if (delegationFacts) {
       const grant = delegationFacts.grant;
       const allowedPaths = list(grant.scope?.writablePaths);
       const allowed = (await Promise.all(writablePaths.map(async (path) =>
         (await Promise.all(allowedPaths.map((root) => scopeContainsPath(root, path)))).some(Boolean)))).every(Boolean);
-      if (grant.executionIsolation !== 'shared' || !allowed || (grant.accessMode === 'read_only' && writablePaths.length > 0)) {
+      if (grant.executionIsolation !== 'shared' || !allowed || (grant.accessMode === 'read_only' && (!readOnly || writablePaths.length > 0))) {
         throw dispatchError('ORG_DELEGATION_SCOPE_DENIED', 'Frozen task exceeds the child delegation scope', 403);
       }
     }
@@ -261,12 +274,12 @@ export async function dispatchOrganizationPhase({
     const policy = {
       role: 'manager',
       canDelegate: true,
-      canWrite: delegationFacts ? delegationFacts.grant.accessMode !== 'read_only' : true,
+      canWrite: !readOnly,
       canReview: true,
       maxChildren: 1,
       maxConcurrent: 1,
       workspacePolicy: 'shared-exclusive',
-      accessMode: delegationFacts?.grant.accessMode === 'read_only' ? 'read' : 'write',
+      accessMode: readOnly ? 'read' : 'write',
       executionIsolation: 'shared',
       allowedAgentIds: [agentId],
       allowedRoles: [taskRole],
@@ -303,7 +316,7 @@ export async function dispatchOrganizationPhase({
           projectId: organization.projectId || '',
           runtime,
           managedSessionId: session.id,
-          accessMode: delegationFacts?.grant.accessMode === 'read_only' ? 'read' : 'write',
+          accessMode: readOnly ? 'read' : 'write',
           executionIsolation: 'shared',
           retry: { maxAttempts: 1, retryOn: [] },
         }],

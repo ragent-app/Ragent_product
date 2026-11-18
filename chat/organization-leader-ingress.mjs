@@ -154,7 +154,7 @@ export async function buildRootLeadershipTurnContext(session, options = {}) {
     : 'No Organization Proposal block is permitted while the Agent Catalog has no selectable Agent.';
   return `## Root Leadership Organization Proposal
 
-Autonomous organization planning is enabled for this Root Leadership Session. First clarify the objective, acceptance criteria, constraints and evidence required. Then choose exactly one orchestration mode: Organization Proposal for a staged hierarchy with phase gates, or Durable Collaboration for a persistent task graph. You may reason in natural language, but you must not claim that internal Sessions, Runs, Reviewers or results exist until the Runtime confirms them. When the objective is concrete enough for a bounded team plan, use plan.submit if that tool is available and authorized; use plan.status to inspect an uncertain submission. If the tool is unavailable, emit one machine-readable block for the selected mode in addition to your normal explanation. Do not submit the same plan through both paths. Availability does not itself grant authority; follow the tool response:
+Autonomous organization planning is enabled for this Root Leadership Session. First clarify the objective, acceptance criteria, constraints and evidence required. Then choose exactly one orchestration mode: Organization Proposal for a staged hierarchy with phase gates, or Durable Collaboration for a persistent task graph. Every node in an accepted initial proposal is intended for actual provisioning, not a placeholder; follow the user's requested order for initial and later creation, leaving later manager-created nodes out of the initial proposal. A phase setting reviewRequired=false does not remove an independent review obligation. If the current contract cannot preserve both the requested order and required review, report the constraint rather than weakening review. You may reason in natural language, but you must not claim that internal Sessions, Runs, Reviewers or results exist until the Runtime confirms them. When the objective is concrete enough for a bounded team plan, use plan.submit if that tool is available and authorized; use plan.status to inspect an uncertain submission. If the tool is unavailable, emit one machine-readable block for the selected mode in addition to your normal explanation. Do not submit the same plan through both paths. Availability does not itself grant authority; follow the tool response:
 
 ${proposalContract}
 
@@ -245,8 +245,16 @@ export async function processRootLeadershipProposal({
       const constraints = selectRuntimeConstraints(saved.constraints, ['organization', `node:${stableKey}`]);
       return [stableKey, { constraints, ...(runtimeCatalog ? { catalog: runtimeCatalog } : {}) }];
     }));
+    const { getApp } = await import('./apps.mjs');
+    const { resolveSessionCollaborationPolicy } = await import('./collaboration-policy.mjs');
+    const rootApp = session.templateId ? await getApp(session.templateId) : null;
+    const rootPolicy = resolveSessionCollaborationPolicy(session, rootApp);
+    const explicitRootPolicy = rootApp?.collaborationPolicy || session.collaborationPolicy || session.collaborationPolicyOverrides;
+    const rootGrant = explicitRootPolicy
+      ? { ...rootPolicy, accessMode: rootPolicy.canWrite === false ? 'read_only' : rootPolicy.accessMode } : {};
     planned = await compileOrganizationProposal(proposal, {
       profiles: agentProfiles,
+      rootGrant,
       runtimeDecisionByNode,
       ...(typeof getTool === 'function' ? { getTool } : {}),
     });

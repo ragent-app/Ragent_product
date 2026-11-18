@@ -88,7 +88,9 @@ export function normalizeCapabilityProfile(profile = {}) {
     writablePaths: list(profile.writablePaths || policy.writablePaths),
     workspaceScope: text(profile.workspaceScope || policy.workspaceScope),
     projectId: text(profile.projectId || policy.projectId),
-    accessMode: normalizeAccessMode(profile.accessMode || policy.accessMode, role === 'reviewer' ? 'read_only' : 'writer'),
+    accessMode: profile.accessMode === 'none' || policy.accessMode === 'none' ? 'none'
+      : profile.canWrite === false || policy.canWrite === false ? 'read_only'
+        : normalizeAccessMode(profile.accessMode || policy.accessMode, role === 'reviewer' ? 'read_only' : 'writer'),
     executionIsolation: normalizeIsolation(profile.executionIsolation || policy.executionIsolation),
     canDelegate,
     maxDepth: bounded(profile.maxDepth ?? profile.policy?.maxDepth ?? DEFAULT_MAX_DEPTH, DEFAULT_MAX_DEPTH, DEFAULT_MAX_DEPTH),
@@ -125,6 +127,7 @@ export async function buildAgentCapabilityProfile(agentTemplate, { toolDefinitio
     workspaceScope: template.workspaceScope || policy.workspaceScope,
     projectId: template.projectId || policy.projectId,
     accessMode: template.accessMode || policy.accessMode,
+    canWrite: template.canWrite === false || policy.canWrite === false ? false : undefined,
     executionIsolation: template.executionIsolation || policy.executionIsolation,
     canDelegate: role === 'manager' && policy.canDelegate === true,
     maxDepth: policy.maxDepth,

@@ -63,7 +63,10 @@ export async function appendManagerSubtree({ authSession, scope, args = {} }) {
   }]));
   const profiles = await buildOrganizationAgentProfiles();
   const frozenNodeByKey = Object.fromEntries(revision.compiled.nodes.map((node) => [node.stableKey, node]));
-  const planned = await compileOrganizationProposal(proposal, { profiles, runtimeDecisionByNode, frozenNodeByKey });
+  const explicitRootPolicy = rootApp?.collaborationPolicy || rootSession.collaborationPolicy || rootSession.collaborationPolicyOverrides;
+  const rootGrant = explicitRootPolicy
+    ? { ...rootPolicy, accessMode: rootPolicy.canWrite === false ? 'read_only' : rootPolicy.accessMode } : {};
+  const planned = await compileOrganizationProposal(proposal, { profiles, runtimeDecisionByNode, frozenNodeByKey, rootGrant });
   const oldCompiled = new Map(revision.compiled.nodes.map((node) => [node.stableKey, node]));
   planned.compiled.nodes = planned.compiled.nodes.map((node) => oldCompiled.get(node.stableKey) || node);
   const parentCapabilities = parent.grant.allowedCapabilities || [];
