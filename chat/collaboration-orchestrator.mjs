@@ -29,12 +29,15 @@ import {
   findRunByRequest,
   listRunIds,
   requestRunCancel,
+  streamRunSpoolRecords,
+  materializeRunSpoolLine,
 } from './runs.mjs';
 import { loadHistory, findLatestAssistantMessage, forEachStoredEvent, readEventsRange } from './history.mjs';
 import { assertRunPublication } from './run-publication-contract.mjs';
 import { createGitWorktree, validateWorkspacePlan } from './collaboration-workspace.mjs';
 import { createExecutionPacket, getResultPacket, listExecutionPacketsForRuns } from './result-packets.mjs';
 import { resultPacketPrompt } from './delegation-result.mjs';
+import { prepareHarnessEventForPersistence } from './harness-event-policy.mjs';
 import { decideGate, completePhase } from './phase-gates.mjs';
 import {
   resolveRuntimeReadOnlyCapability,
@@ -203,6 +206,38 @@ async function finalOrganizationReport(run, manifest) {
     if (providerMessageId.length > 256) throw unavailable('message_identity');
     if (report && report.content !== message.content) throw unavailable('conflicting_messages');
     report = { sessionId: run.sessionId, runId: run.id, requestId: run.requestId, eventSeq: event.seq, providerMessageId, contentHash: expected, content: message.content };
+  }
+  if (!report && candidates.some(event => event.contentTruncated)) {
+    // The chat projection deliberately clips large messages. Recover only a
+    // terminal-hash-matching delivery from this Run's private provider spool,
+    // and bind it back to the stored clipped message before packetizing it.
+    let recovered = '';
+    for await (const record of streamRunSpoolRecords(run.id)) {
+      const line = await materializeRunSpoolLine(run.id, record);
+      if (Buffer.byteLength(line, 'utf8') > 32 * 1024 * 1024) continue;
+      let frame; try { frame = JSON.parse(line); } catch { continue; }
+      const values = [];
+      if (frame?.type === 'result' && frame.subtype === 'success' && typeof frame.result === 'string') values.push(frame.result);
+      if (frame?.type === 'item.completed' && frame.item?.type === 'agent_message') values.push(frame.item.text);
+      if (frame?.method === 'item/completed' && frame.params?.item?.type === 'agentMessage') values.push(frame.params.item.text);
+      for (const value of values) {
+        if (typeof value !== 'string' || createHash('sha256').update(value).digest('hex') !== expected) continue;
+        if (Buffer.byteLength(value, 'utf8') > 4 * 1024 * 1024) throw Object.assign(new Error('Final delivery exceeds the supported size limit'), { code: 'RESULT_DELIVERY_TOO_LARGE' });
+        recovered = value;
+      }
+    }
+    if (recovered) {
+      const clipped = prepareHarnessEventForPersistence({ type: 'message', content: recovered }).content;
+      for (const event of candidates) {
+        if (!event.contentTruncated) continue;
+        const [message] = await readEventsRange(run.sessionId, event.seq, event.seq, { strict: true, includeBodies: true });
+        if (message?.runId === run.id && message?.requestId === run.requestId && message?.content === clipped) {
+          report = { sessionId: run.sessionId, runId: run.id, requestId: run.requestId, eventSeq: event.seq,
+            providerMessageId: typeof message.providerMessageId === 'string' ? message.providerMessageId : '', contentHash: expected, content: recovered };
+          break;
+        }
+      }
+    }
   }
   if (!report) {
     const finalizedAt = Date.parse(run.finalizedAt);

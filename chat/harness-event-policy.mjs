@@ -153,9 +153,9 @@ export function limitHarnessDurableEvents(events = [], policy = null) {
   const important = [];
   const progress = [];
   for (const event of source) {
-    (IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) ? important : progress).push(event);
+    ((IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) || (event?.type === 'status' && event?.providerLifecycle === 'completed' && event?.runState === 'completed' && /^[a-f0-9]{64}$/.test(event?.deliveryContentHash || ''))) ? important : progress).push(event);
   }
   const room = Math.max(0, limit - important.length);
-  const selected = [...progress.slice(-room), ...important];
+  const selected = [...(room > 0 ? progress.slice(-room) : []), ...important];
   return selected.map((event) => prepareHarnessEventForPersistence(event, resolved));
 }

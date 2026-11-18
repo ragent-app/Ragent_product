@@ -2637,6 +2637,7 @@ async function sanitizeStructuredRecord(runId, value) {
   const next = clone(value);
   if (!next || typeof next !== 'object') return next;
 
+  if (next.type === 'result' && next.subtype === 'success') await externalizeStringField(runId, next, 'result', 'terminal_result');
   if (next.item && typeof next.item === 'object') {
     await externalizeStringField(runId, next.item, 'aggregated_output', 'aggregated_output');
     await externalizeStringField(runId, next.item, 'text', 'item_text');
@@ -2670,6 +2671,8 @@ async function hydrateStructuredRecord(runId, value) {
     if (!container?.[artifactKey]) return;
     container[field] = await readRunArtifactText(runId, container[artifactKey]);
   };
+
+  if (next.type === 'result' && next.subtype === 'success') await restoreField(next, 'result');
 
   if (next.item && typeof next.item === 'object') {
     await restoreField(next.item, 'aggregated_output');
