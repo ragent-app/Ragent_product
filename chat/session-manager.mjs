@@ -14021,16 +14021,28 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     internalOperation: options.internalOperation, collaborationCapability: options.collaborationCapability,
     getAppImpl: getApp, getSessionImpl: getSession,
   });
+  let readOnlyOrganizationManagerMcp = false;
+  if ((options.accessMode === 'read' || options.readOnlyRequired === true) && messageScope?.kind === 'organization_message'
+      && effectiveRuntimeFamily === 'claude-stream-json-bidi' && sessionControlChannel?.token
+      && ['MANAGER', 'PHASE_LEAD'].includes(String(session.sessionClass || '').toUpperCase())) {
+    const { getNode, getOrganization } = await import('./organization-store.mjs');
+    const node = await getNode(messageScope.nodeId);
+    const org = node && await getOrganization(node.organizationId);
+    readOnlyOrganizationManagerMcp = !!(node && org && node.currentSessionId === sessionId && node.organizationId === messageScope.organizationId
+      && node.bindingGeneration === messageScope.bindingGeneration && org.currentRevision === messageScope.organizationRevision
+      && !['archived', 'lifecycle_pending'].includes(org.state) && node.lifecycleState === 'active' && node.retiredRevision === null
+      && ['MANAGER', 'PHASE_LEAD'].includes(String(node.sessionClass || '').toUpperCase()) && node.grant?.canDelegate === true);
+  }
   const organizationExecutionContext = session.sessionPlane === 'organization'
     ? await buildOrganizationExecutionContext({ sessionId, runId: nextRunId, requestId,
       internalOperation: options.internalOperation, capabilities: collaborationCapabilitySet?.capabilities,
-      organizationToolScope: sessionControlChannel?.token && options.accessMode !== 'read' && options.readOnlyRequired !== true
+      organizationToolScope: sessionControlChannel?.token && (readOnlyOrganizationManagerMcp || (options.accessMode !== 'read' && options.readOnlyRequired !== true))
         && options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily) ? messageScope : null,
       selectedRuntime: { tool: effectiveTool, provider: effectiveProviderProfile || null,
         model: trimString(options.model || session.model) || null, effort: trimString(options.effort || session.effort) || null,
         runtimeFamily: effectiveRuntimeFamily || null } }) : '';
   const serverBuiltinSkillReadAvailable = !!sessionControlChannel?.token && !!sessionControlChannel?.runId &&
-    !!sessionControlChannel?.sessionId && options.accessMode !== 'read' && options.readOnlyRequired !== true &&
+    !!sessionControlChannel?.sessionId && (readOnlyOrganizationManagerMcp || (options.accessMode !== 'read' && options.readOnlyRequired !== true)) &&
     options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily);
   let promptEnvelope;
   if (options.backgroundPreparation === true) {
@@ -14225,6 +14237,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(approvedActionChannel ? { approvedActionChannel } : {}),
       ...(windowsBrokerChannel ? { windowsBrokerChannel } : {}),
       ...(sessionControlChannel ? { sessionControlChannel } : {}),
+      ...(readOnlyOrganizationManagerMcp ? { readOnlyOrganizationManagerMcp: true } : {}),
       ...(collaborationCapabilitySet
         ? { collaborationCapabilities: collaborationCapabilitySet.capabilities }
         : {}),

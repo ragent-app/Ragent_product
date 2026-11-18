@@ -4550,7 +4550,9 @@ async function main() {
     && browserChannel?.enabled === true
     && browserChannel?.endpoint,
   );
-  const organizationMcpRequested = !readOnlyRequested && acp !== true && Boolean(
+  const readOnlyManagerOrganizationMcp = readOnlyRequested && manifest.options?.readOnlyOrganizationManagerMcp === true
+    && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
+  const organizationMcpRequested = (!readOnlyRequested || readOnlyManagerOrganizationMcp) && acp !== true && Boolean(
     spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&
     spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID &&
     ['codex-app-server-json', 'claude-stream-json-bidi'].includes(runtimeFamily),
@@ -5009,6 +5011,7 @@ async function main() {
           ...buildRunnerGuiBindPaths(guiEnvironment),
           ...(privilegedShimChannel?.socketBindDir ? [privilegedShimChannel.socketBindDir] : []),
           ...(readOnlyWorkspace ? [readOnlyWorkspace] : []),
+          ...(readOnlyManagerOrganizationMcp && managedMcpOverlay?.root ? [managedMcpOverlay.root] : []),
         ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
         readOnlyProviderSeeds: providerSeeds?.seeds || [],

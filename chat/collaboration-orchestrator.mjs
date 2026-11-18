@@ -923,7 +923,9 @@ export function createCollaborationOrchestrator(options = {}) {
     let readOnlyCapability = null;
     const reviewerReadOnlyRequired = reviewerEnabled && task.role === 'reviewer';
     const effectiveTaskAccessMode = reviewerReadOnlyRequired ? 'read' : taskAccessMode;
-    const requestedRunnerId = reviewerReadOnlyRequired
+    const readOnlyOrganizationManager = effectiveTaskAccessMode === 'read' && managedTarget?.sessionPlane === 'organization'
+      && ['MANAGER', 'PHASE_LEAD'].includes(String(managedTarget.sessionClass || '').toUpperCase());
+    const requestedRunnerId = reviewerReadOnlyRequired || readOnlyOrganizationManager
       ? (trim(task.runnerId) || REVIEWER_RUNTIME_ID)
       : (trim(task.runnerId) || null);
     try {
