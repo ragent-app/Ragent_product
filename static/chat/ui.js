@@ -1476,15 +1476,58 @@ function applyEditedUserMessageContent(requestId, prompt, images = []) {
   const node = Array.from(messagesInner.querySelectorAll(".msg-user[data-request-id]"))
     .find((candidate) => candidate.dataset?.requestId === requestId) || null;
   if (!node) return false;
+  const nextImages = Array.isArray(images) ? images : [];
   const replacement = createUserMessageNode(
-    { requestId, content: prompt, images: Array.isArray(images) ? images : [] },
+    {
+      requestId,
+      runId: node.dataset?.runId || "",
+      content: prompt,
+      images: nextImages,
+    },
     {},
   );
   if (!replacement) return false;
+  const wasEditable = node.classList?.contains?.("is-editable") === true;
+  if (typeof node.replaceChildren === "function") {
+    node.replaceChildren(...Array.from(replacement.childNodes || replacement.children || []));
+    delete node.dataset.bodyPending;
+    delete node.dataset.bodyRender;
+    delete node.dataset.preview;
+    for (const [key, value] of Object.entries(replacement.dataset || {})) {
+      if (!(key in node.dataset)) node.dataset[key] = value;
+    }
+    if (typeof syncEditableMessageActions === "function") {
+      syncEditableMessageActions();
+    } else if (wasEditable) {
+      node.classList?.add?.("is-editable");
+      node.querySelectorAll?.(".msg-action-btn--edit")?.forEach?.((button) => {
+        button.hidden = false;
+      });
+    }
+    if (typeof attachMessageLongPressMenu === "function") {
+      attachMessageLongPressMenu(node, {
+        requestId,
+        runId: node.dataset?.runId || "",
+        content: prompt,
+        images: nextImages,
+      }, "user");
+    }
+    return true;
+  }
   for (const key of Object.keys(node.dataset || {})) {
+    if (key === "bodyPending" || key === "bodyRender" || key === "preview") continue;
     replacement.dataset[key] = node.dataset[key];
   }
+  if (wasEditable) {
+    replacement.classList?.add?.("is-editable");
+    replacement.querySelectorAll?.(".msg-action-btn--edit")?.forEach?.((button) => {
+      button.hidden = false;
+    });
+  }
   node.replaceWith(replacement);
+  if (typeof syncEditableMessageActions === "function") {
+    syncEditableMessageActions();
+  }
   return true;
 }
 
@@ -1889,7 +1932,7 @@ function syncRegenerateActions() {
   for (const node of Array.from(previous)) {
     node.classList.remove("is-regenerable");
   }
-  if (sessionStatus === "running") return;
+  if (typeof sessionStatus !== "undefined" && sessionStatus === "running") return;
   const candidates = Array.from(messagesInner.querySelectorAll(".msg-assistant[data-request-id]"))
     .filter((node) => !isNodeInsideVersionRail(node) && !node.classList.contains("is-live"));
   const last = candidates[candidates.length - 1] || null;

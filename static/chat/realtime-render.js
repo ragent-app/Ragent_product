@@ -1427,26 +1427,43 @@ function markHistoryEntryNodes(previousChildren = [], { index = 0 } = {}) {
 // user message (up to the next user message) into a collapsible version rail.
 // Repeated regenerations keep stacking into the same rail, so v1/v2/v3 all
 // stay auditable under the original request.
-function foldAssistantRepliesIntoVersionRail(parentRequestId) {
-  if (!messagesInner || !parentRequestId) return null;
-  const userNode = Array.from(messagesInner.querySelectorAll(".msg-user[data-request-id]"))
-    .find((node) => node.dataset.requestId === parentRequestId) || null;
-  if (!userNode || userNode.parentNode !== messagesInner) return null;
-
-  let rail = userNode.nextElementSibling?.classList?.contains("msg-version-rail")
-    ? userNode.nextElementSibling
-    : null;
-  const toFold = [];
-  let node = userNode.nextElementSibling;
-  while (node && node !== emptyState && !node.classList?.contains("msg-user")) {
-    if (node.classList?.contains("msg-version-rail")) {
-      node = node.nextElementSibling;
-      continue;
-    }
-    toFold.push(node);
-    node = node.nextElementSibling;
+function findVersionRailForUserNode(userNode, parentRequestId = "") {
+  const container = userNode?.parentNode;
+  if (!userNode || !container) return null;
+  if (userNode.nextElementSibling?.classList?.contains?.("msg-version-rail")) {
+    return userNode.nextElementSibling;
   }
-  if (toFold.length === 0 && !rail) return null;
+  const normalizedParentId = typeof parentRequestId === "string" ? parentRequestId.trim() : "";
+  if (normalizedParentId && typeof container.querySelectorAll === "function") {
+    const rails = Array.from(container.querySelectorAll(".msg-version-rail"));
+    const byParent = rails.find((rail) => rail?.dataset?.parentRequestId === normalizedParentId);
+    if (byParent) return byParent;
+  }
+  return null;
+}
+
+function reconcileVersionRailForUserNode(userNode, nodesToFold = [], {
+  parentRequestId = "",
+  append = false,
+} = {}) {
+  const container = userNode?.parentNode;
+  if (!userNode || !container) return null;
+  const resolvedParentId = typeof parentRequestId === "string" && parentRequestId.trim()
+    ? parentRequestId.trim()
+    : (userNode.dataset?.requestId || "");
+  const foldList = Array.isArray(nodesToFold) ? nodesToFold.filter(Boolean) : [];
+  let rail = findVersionRailForUserNode(userNode, resolvedParentId);
+
+  if (foldList.length === 0) {
+    if (!append && rail) {
+      rail.remove?.();
+      if (typeof syncRegenerateActions === "function") {
+        syncRegenerateActions();
+      }
+      return null;
+    }
+    if (!rail) return null;
+  }
 
   if (!rail) {
     rail = document.createElement("div");
@@ -1455,7 +1472,10 @@ function foldAssistantRepliesIntoVersionRail(parentRequestId) {
     toggle.type = "button";
     toggle.className = "msg-version-rail__toggle";
     toggle.setAttribute("aria-expanded", "false");
-    toggle.innerHTML = `${renderRealtimeIcon("refresh", "msg-version-rail__icon")}<span class="msg-version-rail__label"></span>`;
+    const iconHtml = typeof renderRealtimeIcon === "function"
+      ? renderRealtimeIcon("refresh", "msg-version-rail__icon")
+      : "";
+    toggle.innerHTML = `${iconHtml}<span class="msg-version-rail__label"></span>`;
     const body = document.createElement("div");
     body.className = "msg-version-rail__body";
     toggle.addEventListener("click", () => {
@@ -1465,14 +1485,46 @@ function foldAssistantRepliesIntoVersionRail(parentRequestId) {
     rail.appendChild(toggle);
     rail.appendChild(body);
     userNode.after(rail);
+  } else if (userNode.nextElementSibling !== rail && typeof userNode.after === "function") {
+    userNode.after(rail);
   }
 
-  const body = rail.querySelector(".msg-version-rail__body");
-  const previousCount = Number(rail.dataset.foldedCount) || 0;
-  for (const child of toFold) {
-    body.appendChild(child);
+  if (resolvedParentId && rail.dataset) {
+    rail.dataset.parentRequestId = resolvedParentId;
   }
-  const totalCount = previousCount + toFold.length;
+  const body = rail.querySelector(".msg-version-rail__body");
+  if (!body) return rail;
+
+  let totalCount;
+  if (append) {
+    const previousCount = Number(rail.dataset.foldedCount) || 0;
+    for (const child of foldList) {
+      body.appendChild(child);
+    }
+    totalCount = previousCount + foldList.length;
+  } else {
+    const wanted = new Set(foldList);
+    for (const existingChild of Array.from(body.children || [])) {
+      if (!wanted.has(existingChild)) {
+        existingChild.remove?.();
+      }
+    }
+    let cursor = body.firstElementChild || null;
+    for (const child of foldList) {
+      if (child === cursor) {
+        cursor = child.nextElementSibling || null;
+        continue;
+      }
+      if (typeof body.insertBefore === "function") {
+        body.insertBefore(child, cursor);
+        cursor = child.nextElementSibling || null;
+      } else {
+        body.appendChild(child);
+      }
+    }
+    totalCount = foldList.length;
+  }
+
   rail.dataset.foldedCount = String(totalCount);
   const label = rail.querySelector(".msg-version-rail__label");
   if (label) {
@@ -1484,6 +1536,27 @@ function foldAssistantRepliesIntoVersionRail(parentRequestId) {
     syncRegenerateActions();
   }
   return rail;
+}
+
+function foldAssistantRepliesIntoVersionRail(parentRequestId) {
+  if (!messagesInner || !parentRequestId) return null;
+  const userNode = Array.from(messagesInner.querySelectorAll(".msg-user[data-request-id]"))
+    .find((node) => node.dataset.requestId === parentRequestId) || null;
+  if (!userNode || userNode.parentNode !== messagesInner) return null;
+
+  const rail = findVersionRailForUserNode(userNode, parentRequestId);
+  const toFold = [];
+  let node = userNode.nextElementSibling;
+  while (node && node !== emptyState && !node.classList?.contains("msg-user")) {
+    if (node.classList?.contains("msg-version-rail")) {
+      node = node.nextElementSibling;
+      continue;
+    }
+    toFold.push(node);
+    node = node.nextElementSibling;
+  }
+  if (toFold.length === 0 && !rail) return null;
+  return reconcileVersionRailForUserNode(userNode, toFold, { parentRequestId, append: true });
 }
 
 function renderEvent(

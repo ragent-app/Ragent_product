@@ -74,7 +74,8 @@
 
   function normalizedRole(event) {
     const role = typeof event?.role === "string" ? event.role.trim().toLowerCase() : "";
-    return role === "user" || role === "system" ? role : "assistant";
+    if (role === "user" || role === "system" || role === "assistant") return role;
+    return normalizedType(event) === "user_message" ? "user" : "assistant";
   }
 
   function textValue(event) {
@@ -324,6 +325,66 @@
       || ["completed", "complete", "done", "finished", "failed", "cancelled", "canceled", "denied"].includes(state);
   }
 
+  function normalizeRegenerationEntry(event, source, startSeq = 0, revision = 0) {
+    const parentRequestId = typeof event?.parentRequestId === "string"
+      ? event.parentRequestId.trim()
+      : "";
+    if (!parentRequestId) return null;
+    const requestId = typeof event?.requestId === "string" ? event.requestId.trim() : "";
+    const runId = typeof event?.runId === "string" ? event.runId.trim() : "";
+    const parentRunId = typeof event?.parentRunId === "string" ? event.parentRunId.trim() : "";
+    const editResend = event?.editResend === true;
+    const prompt = editResend && typeof event?.prompt === "string" ? event.prompt : "";
+    const images = editResend && Array.isArray(event?.images) ? [...event.images] : [];
+    const attachments = editResend && Array.isArray(event?.attachments) ? [...event.attachments] : [];
+    const seq = positiveInteger(startSeq) || getEventStartSeq(event);
+    const rev = positiveInteger(revision) || positiveInteger(event?.revision) || seq || 1;
+    const key = requestId || runId || `seq:${seq || "live"}`;
+    return {
+      key,
+      parentRequestId,
+      requestId,
+      runId,
+      parentRunId,
+      seq,
+      revision: rev,
+      source: source === "durable" ? "durable" : "live",
+      editResend,
+      prompt,
+      images,
+      attachments,
+      signature: stableStringify({
+        seq,
+        requestId,
+        runId,
+        parentRunId,
+        editResend,
+        prompt,
+        images,
+        attachments,
+      }),
+    };
+  }
+
+  function compareRegenerationEntries(left, right) {
+    const seqOrder = (left?.seq || 0) - (right?.seq || 0);
+    if (seqOrder !== 0) return seqOrder;
+    const revOrder = (left?.revision || 0) - (right?.revision || 0);
+    if (revOrder !== 0) return revOrder;
+    const leftDurable = left?.source === "durable" ? 1 : 0;
+    const rightDurable = right?.source === "durable" ? 1 : 0;
+    if (leftDurable !== rightDurable) return leftDurable - rightDurable;
+    return String(left?.key || "").localeCompare(String(right?.key || ""));
+  }
+
+  function regenerationMatches(left, right) {
+    if (!left || !right) return false;
+    if (left.key && right.key && left.key === right.key) return true;
+    if (left.requestId && right.requestId && left.requestId === right.requestId) return true;
+    if (left.runId && right.runId && left.runId === right.runId) return true;
+    return false;
+  }
+
   function mergePagination(current, incoming, mode) {
     const previous = current && typeof current === "object" ? current : {};
     const next = incoming && typeof incoming === "object" ? incoming : {};
@@ -355,6 +416,8 @@
       this.liveSegments = new Map();
       this.liveTouchedAt = new Map();
       this.liveTouchClock = 0;
+      this.durableRegenerations = new Map();
+      this.liveRegenerations = new Map();
       this.sealedOperationIds = new Set();
       this.seen = new Map();
       this.pagination = {};
@@ -382,6 +445,8 @@
       this.liveSegments.clear();
       this.liveTouchedAt.clear();
       this.liveTouchClock = 0;
+      this.durableRegenerations.clear();
+      this.liveRegenerations.clear();
       this.sealedOperationIds.clear();
       this.seen.clear();
       this.pagination = {};
@@ -425,6 +490,21 @@
       this._itemsCache = null;
       const accepted = [];
       for (const event of Array.isArray(events) ? events : []) {
+        if (getEventBoundarySeq(event) <= 0 && normalizedType(event) === "run_regenerate") {
+          const key = sourceKeyFor(event);
+          const identity = stableStringify(event);
+          const priorIdentity = this.seen.get(key);
+          if (priorIdentity === identity) continue;
+          if (priorIdentity && priorIdentity !== identity) continue;
+          this.seen.set(key, identity);
+          const seq = this.liveSeqCursor = Math.max(this.liveSeqCursor, this.durableCursor) + 1;
+          const entry = normalizeRegenerationEntry(event, "live", seq, positiveInteger(event?.revision) || seq);
+          if (entry && !this.hasDurableRegeneration(entry)) {
+            this.storeRegeneration(this.liveRegenerations, entry, MAX_LIVE_ENTITIES);
+            accepted.push({ ...event, seq });
+          }
+          continue;
+        }
         if (!isEphemeral(event)) continue;
         const key = sourceKeyFor(event);
         const identity = stableStringify(event);
@@ -597,6 +677,9 @@
         this.durable.set(entityId, next);
         this.indexMessageRecord(this.durableMessageScopeIndex, next);
         this.liveSeqCursor = Math.max(this.liveSeqCursor, next.endSeq);
+        if (next.kind === "control" && normalizedType(next.event) === "run_regenerate") {
+          this.recordDurableRegeneration(next.event, next.startSeq, next.revision);
+        }
         // Android reconciles a durable advance by removing its live overlay.
         // Providers often do not expose the same message id for the final
         // persisted message, so run/request scope is the explicit fallback.
@@ -789,31 +872,198 @@
       while (this.seen.size > this.maxSeenKeys) this.seen.delete(this.seen.keys().next().value);
     }
 
+    storeRegeneration(targetMap, entry, maxParents = this.maxDurableItems) {
+      if (!entry?.parentRequestId) return;
+      let group = targetMap.get(entry.parentRequestId);
+      if (!group) {
+        if (targetMap.size >= maxParents) {
+          targetMap.delete(targetMap.keys().next().value);
+        }
+        group = new Map();
+      } else {
+        targetMap.delete(entry.parentRequestId);
+      }
+      targetMap.set(entry.parentRequestId, group);
+      group.set(entry.key, entry);
+    }
+
+    hasDurableRegeneration(entry) {
+      if (!entry) return false;
+      for (const group of this.durableRegenerations.values()) {
+        for (const candidate of group.values()) {
+          if (regenerationMatches(candidate, entry)) return true;
+        }
+      }
+      return false;
+    }
+
+    recordDurableRegeneration(event, startSeq, revision) {
+      const entry = normalizeRegenerationEntry(event, "durable", startSeq, revision);
+      if (!entry) return;
+      this.storeRegeneration(this.durableRegenerations, entry, this.maxDurableItems);
+      for (const [parentId, liveGroup] of this.liveRegenerations) {
+        for (const [key, liveEntry] of liveGroup) {
+          if (regenerationMatches(liveEntry, entry)) {
+            liveGroup.delete(key);
+          }
+        }
+        if (liveGroup.size === 0) this.liveRegenerations.delete(parentId);
+      }
+    }
+
+    buildTurnRegenerationStateMap() {
+      if (this.durableRegenerations.size === 0 && this.liveRegenerations.size === 0) {
+        return null;
+      }
+      const allEntries = [];
+      const childToParent = new Map();
+      for (const group of this.durableRegenerations.values()) {
+        for (const entry of group.values()) {
+          allEntries.push(entry);
+          if (entry.requestId && entry.parentRequestId && entry.requestId !== entry.parentRequestId) {
+            childToParent.set(entry.requestId, entry.parentRequestId);
+          }
+        }
+      }
+      for (const group of this.liveRegenerations.values()) {
+        for (const entry of group.values()) {
+          if (allEntries.some((existing) => regenerationMatches(existing, entry))) continue;
+          allEntries.push(entry);
+          if (entry.requestId && entry.parentRequestId && entry.requestId !== entry.parentRequestId) {
+            childToParent.set(entry.requestId, entry.parentRequestId);
+          }
+        }
+      }
+      if (allEntries.length === 0) return null;
+
+      const resolveRootParent = (parentId) => {
+        let current = parentId;
+        const visited = new Set();
+        while (childToParent.has(current) && !visited.has(current)) {
+          visited.add(current);
+          current = childToParent.get(current);
+        }
+        return current;
+      };
+
+      const grouped = new Map();
+      for (const entry of allEntries) {
+        const rootParent = resolveRootParent(entry.parentRequestId);
+        let list = grouped.get(rootParent);
+        if (!list) {
+          list = [];
+          grouped.set(rootParent, list);
+        }
+        list.push(entry);
+      }
+
+      const states = new Map();
+      for (const [parentRequestId, list] of grouped) {
+        list.sort(compareRegenerationEntries);
+        const latestRegen = list[list.length - 1];
+        let latestEdit = null;
+        const supersededRequestIds = new Set([parentRequestId]);
+        const supersededRunIds = new Set();
+        for (const entry of list) {
+          if (entry.editResend) latestEdit = entry;
+          if (entry.requestId) supersededRequestIds.add(entry.requestId);
+          if (entry.parentRequestId) supersededRequestIds.add(entry.parentRequestId);
+          if (entry.parentRunId) supersededRunIds.add(entry.parentRunId);
+          if (entry.runId) supersededRunIds.add(entry.runId);
+        }
+        if (latestRegen.requestId) supersededRequestIds.delete(latestRegen.requestId);
+        if (latestRegen.runId) supersededRunIds.delete(latestRegen.runId);
+        states.set(parentRequestId, {
+          parentRequestId,
+          latestRegen,
+          latestEdit,
+          supersededRequestIds,
+          supersededRunIds,
+        });
+      }
+      return states;
+    }
+
+    isRecordSupersededInTurn(record, turnState) {
+      if (!turnState?.latestRegen) return false;
+      const latest = turnState.latestRegen;
+      const reqId = typeof record?.event?.requestId === "string" ? record.event.requestId.trim() : "";
+      const runId = typeof record?.event?.runId === "string" ? record.event.runId.trim() : "";
+      if ((latest.requestId && reqId === latest.requestId) || (latest.runId && runId === latest.runId)) {
+        return false;
+      }
+      if ((reqId && turnState.supersededRequestIds.has(reqId))
+        || (runId && turnState.supersededRunIds.has(runId))) {
+        return true;
+      }
+      if (latest.seq > 0) {
+        return record.startSeq <= latest.seq;
+      }
+      return false;
+    }
+
     items() {
       if (this._itemsCache) return this._itemsCache;
       const entities = new Map(this.durable);
       for (const [id, record] of this.live) if (!entities.has(id)) entities.set(id, record);
-      this._itemsCache = [...entities.values()]
+      const regenStates = this.buildTurnRegenerationStateMap();
+      const sortedRecords = [...entities.values()]
         .filter((record) => record.kind !== "metadata" && record.kind !== "control")
-        .sort(compareTimelineRecords)
-        .map((record) => {
-          const cached = this._itemCacheByRecord.get(record);
-          if (cached) return cached;
-          const item = {
-            id: record.id,
-            kind: record.kind,
-            seq: record.startSeq,
-            startSeq: record.startSeq,
-            endSeq: record.endSeq,
-            revision: record.revision,
-            completed: record.completed,
-            source: record.source,
-            event: { ...record.event },
-            sourceEvent: { ...record.event },
-          };
-          this._itemCacheByRecord.set(record, item);
-          return item;
-        });
+        .sort(compareTimelineRecords);
+
+      let activeTurn = null;
+      this._itemsCache = sortedRecords.map((record) => {
+        const isUser = record.kind === "message" && normalizedRole(record.event) === "user";
+        let latestEdit = null;
+        let foldedParent = "";
+        if (isUser) {
+          const requestId = typeof record.event?.requestId === "string" ? record.event.requestId.trim() : "";
+          activeTurn = requestId && regenStates ? (regenStates.get(requestId) || null) : null;
+          latestEdit = activeTurn?.latestEdit || null;
+        } else if (activeTurn) {
+          if (this.isRecordSupersededInTurn(record, activeTurn)) {
+            foldedParent = activeTurn.parentRequestId;
+          }
+        }
+
+        const regenSignature = latestEdit
+          ? `edit:${latestEdit.signature}`
+          : (foldedParent ? `fold:${foldedParent}` : "");
+        const cached = this._itemCacheByRecord.get(record);
+        if (cached && cached.regenSignature === regenSignature) {
+          return cached.item;
+        }
+
+        const projectedEvent = { ...record.event };
+        let revision = record.revision;
+        if (latestEdit) {
+          projectedEvent.content = latestEdit.prompt;
+          projectedEvent.text = latestEdit.prompt;
+          projectedEvent.images = [...latestEdit.images];
+          projectedEvent.attachments = [...latestEdit.attachments];
+          projectedEvent.bodyAvailable = false;
+          projectedEvent.bodyLoaded = true;
+          delete projectedEvent.bodyPreview;
+          delete projectedEvent.bodyRef;
+          revision = Math.max(revision, latestEdit.revision || latestEdit.seq || 0);
+        }
+
+        const item = {
+          id: record.id,
+          kind: record.kind,
+          seq: record.startSeq,
+          startSeq: record.startSeq,
+          endSeq: record.endSeq,
+          revision,
+          completed: record.completed,
+          source: record.source,
+          ...(foldedParent ? { foldedParentRequestId: foldedParent } : {}),
+          event: projectedEvent,
+          sourceEvent: { ...record.event },
+        };
+        this._itemCacheByRecord.set(record, { regenSignature, item });
+        return item;
+      });
       return this._itemsCache;
     }
 

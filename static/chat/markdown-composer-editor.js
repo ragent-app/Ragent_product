@@ -650,8 +650,8 @@
       return true;
     }
 
-    function syncFromEditor() {
-      if (!instance.ready || instance.synchronizing || !instance.vditor) return;
+    function syncFromEditor({ emitIfUnchanged = true } = {}) {
+      if (!instance.ready || instance.synchronizing || !instance.vditor) return false;
       clearPendingMarkdownSync();
       const value = instance.vditor.getValue();
       const before = nativeValue(textarea);
@@ -659,7 +659,10 @@
       // Vditor may keep trailing empty paragraphs out of the serialized
       // Markdown source even though the visible document became taller.
       // Notify the composer anyway so its height/layout pass still runs.
-      if (value === before) textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      if (value === before && emitIfUnchanged) {
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return nativeValue(textarea) !== before;
     }
 
     function handleEditorKeydown(event) {
@@ -941,7 +944,11 @@
       // full-document Markdown conversion.
       if (instance.pendingLargePaste?.previewApplied) return true;
       const didSyncMarkdown = flushMarkdownSync();
-      return runPendingLargePaste(instance, syncFromEditor, true) || didSyncMarkdown;
+      const didPasteSync = runPendingLargePaste(instance, syncFromEditor, true);
+      const didSyncEditor = (!didPasteSync && instance.ready && instance.vditor && !instance.pendingLargePaste)
+        ? syncFromEditor({ emitIfUnchanged: false })
+        : false;
+      return didSyncMarkdown || didPasteSync || didSyncEditor;
     };
     instance.refresh = () => applyExternalValue(nativeValue(textarea));
     instance.setHeight = (height) => {

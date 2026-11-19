@@ -106,7 +106,10 @@
   function clearItemNodes({ removeDetached = false } = {}) {
     const container = messagesContainer();
     for (const node of itemNodes.values()) {
-      if (isRootNode(node, container)) node.remove?.();
+      if (isMountedItemNode(node, container)) node.remove?.();
+    }
+    for (const child of childrenOf(container)) {
+      if (child.classList?.contains?.("msg-version-rail")) child.remove?.();
     }
     itemNodes.clear();
     syntheticItemIds.clear();
@@ -197,13 +200,97 @@
     return Array.from(container?.children || []);
   }
 
-  function isRootNode(node, container = messagesContainer()) {
-    if (!node || !container) return null;
+  function isMountedItemNode(node, container = messagesContainer()) {
+    if (!node || !container || node === container) return null;
     let current = node;
-    while (current?.parentNode && current.parentNode !== container) {
+    while (current && current !== container) {
+      if (current.parentNode === container) return node;
       current = current.parentNode;
     }
-    return current?.parentNode === container ? current : null;
+    return null;
+  }
+
+  function findTimelineVersionRail(userNode, container, parentRequestId) {
+    if (!userNode || !container) return null;
+    if (userNode.nextElementSibling?.classList?.contains?.("msg-version-rail")) {
+      return userNode.nextElementSibling;
+    }
+    const targetParent = typeof parentRequestId === "string" ? parentRequestId.trim() : "";
+    if (targetParent) {
+      for (const child of childrenOf(container)) {
+        if (child.classList?.contains?.("msg-version-rail")
+          && child.dataset?.parentRequestId === targetParent) {
+          return child;
+        }
+      }
+    }
+    return null;
+  }
+
+  function reconcileTimelineVersionRail(container, userNode, foldedNodes = [], parentRequestId = "") {
+    if (!container || !userNode) return null;
+    if (typeof root.reconcileVersionRailForUserNode === "function") {
+      return root.reconcileVersionRailForUserNode(userNode, foldedNodes, {
+        parentRequestId,
+        append: false,
+      });
+    }
+    let rail = findTimelineVersionRail(userNode, container, parentRequestId);
+    if (!foldedNodes.length) {
+      rail?.remove?.();
+      return null;
+    }
+    const doc = documentObject();
+    if (!rail && doc?.createElement) {
+      rail = doc.createElement("div");
+      rail.className = "msg-version-rail";
+      const toggle = doc.createElement("button");
+      toggle.type = "button";
+      toggle.className = "msg-version-rail__toggle";
+      toggle.setAttribute?.("aria-expanded", "false");
+      const label = doc.createElement("span");
+      label.className = "msg-version-rail__label";
+      toggle.appendChild?.(label);
+      const body = doc.createElement("div");
+      body.className = "msg-version-rail__body";
+      toggle.addEventListener?.("click", () => {
+        const expanded = rail.classList?.toggle?.("is-expanded");
+        toggle.setAttribute?.("aria-expanded", expanded ? "true" : "false");
+      });
+      rail.appendChild?.(toggle);
+      rail.appendChild?.(body);
+      container.appendChild?.(rail);
+    }
+    if (!rail) return null;
+    if (rail.dataset && parentRequestId) rail.dataset.parentRequestId = parentRequestId;
+    const body = rail.querySelector?.(".msg-version-rail__body") || rail.children?.[1] || null;
+    if (!body) return rail;
+    const wanted = new Set(foldedNodes);
+    for (const child of childrenOf(body)) {
+      if (!wanted.has(child)) child.remove?.();
+    }
+    let cursor = body.firstElementChild || null;
+    for (const child of foldedNodes) {
+      if (child === cursor) {
+        cursor = child.nextElementSibling || null;
+        continue;
+      }
+      if (typeof body.insertBefore === "function") {
+        body.insertBefore(child, cursor);
+        cursor = child.nextElementSibling || null;
+      } else {
+        body.appendChild?.(child);
+      }
+    }
+    if (rail.dataset) rail.dataset.foldedCount = String(foldedNodes.length);
+    const label = rail.querySelector?.(".msg-version-rail__label");
+    if (label) {
+      const baseText = typeof root.t === "function" ? root.t("message.versionRail.folded") : "Previous versions";
+      label.textContent = foldedNodes.length > 1
+        ? `${baseText} · ${foldedNodes.length}`
+        : baseText;
+    }
+    return rail;
   }
 
   function operationId(event) {
@@ -291,8 +378,15 @@
     const committed = requestId && typeof root.findCommittedUserMessageNode === "function"
       ? root.findCommittedUserMessageNode(requestId)
       : null;
-    if (committed && isRootNode(committed, container)) {
+    if (committed && isMountedItemNode(committed, container)) {
+      const fresh = typeof root.createUserMessageNode === "function"
+        ? root.createUserMessageNode(event)
+        : null;
+      if (fresh) {
+        adoptVisual(committed, fresh);
+      }
       root.attachMessageLongPressMenu?.(committed, event, "user");
+      root.syncEditableMessageActions?.();
       return committed;
     }
 
@@ -301,7 +395,7 @@
     const localEcho = requestId && typeof root.findLocalEchoUserMessageNode === "function"
       ? root.findLocalEchoUserMessageNode(requestId)
       : null;
-    if (localEcho && isRootNode(localEcho, container)) {
+    if (localEcho && isMountedItemNode(localEcho, container)) {
       // Keep the optimistic node's position while replacing its contents. This
       // closes the ACK/WS/refresh race without letting the two bubbles paint
       // together for a frame.
@@ -355,8 +449,7 @@
     }
     if (shouldHideTimelineActivityItem(item)) return null;
     if (item.kind === "message" || item.kind === "attachment") {
-      const isUserMessage = item.kind === "message"
-        && String(item.role || event?.role || "").trim().toLowerCase() === "user";
+      const isUserMessage = isUserMessageItem(item, event);
       if (isUserMessage && typeof root.createUserMessageNode === "function") {
         visual = renderUserMessageVisual(event, staging);
       } else {
@@ -424,7 +517,7 @@
 
   function renderItem(item, event, options = {}) {
     if (shouldHideTimelineActivityItem(item)) return null;
-    const existing = isRootNode(itemNodes.get(item.id));
+    const existing = isMountedItemNode(itemNodes.get(item.id));
     if (item.kind === "operation" && existing && typeof root.renderOperationNodeContent === "function") {
       const expanded = existing.classList?.contains("is-expanded") === true
         || root.renderedEventState?.expandedOperationIds?.has?.(operationId(event));
@@ -447,7 +540,7 @@
       return null;
     }
 
-    const attachedFresh = isRootNode(fresh, messagesContainer());
+    const attachedFresh = isMountedItemNode(fresh, messagesContainer());
     if (attachedFresh) {
       return attachedFresh;
     }
@@ -471,7 +564,7 @@
   }
 
   function tagItemNode(node, item) {
-    const rootNode = isRootNode(node);
+    const rootNode = isMountedItemNode(node);
     if (!rootNode?.dataset) return null;
     rootNode.dataset.timelineId = item.id;
     rootNode.dataset.timelineRevision = String(item.revision || 0);
@@ -512,7 +605,7 @@
         itemNodes.delete(id);
         syntheticItemIds.delete(id);
         timelineMetrics.prunedRoots += 1;
-      } else if (!isRootNode(node)) {
+      } else if (!isMountedItemNode(node)) {
         itemNodes.delete(id);
         syntheticItemIds.delete(id);
       }
@@ -585,11 +678,14 @@
         node.remove?.();
         itemNodes.delete(id);
       }
+      for (const child of childrenOf(container)) {
+        if (child.classList?.contains?.("msg-version-rail")) child.remove?.();
+      }
       syntheticItemIds.clear();
       for (const item of selectVisibleItems(snapshot, { historyPrepend })) changed.add(item.id);
     } else {
       for (const item of selectVisibleItems(snapshot, { historyPrepend })) {
-        if (!isRootNode(itemNodes.get(item.id), container)) changed.add(item.id);
+        if (!isMountedItemNode(itemNodes.get(item.id), container)) changed.add(item.id);
       }
     }
 
@@ -600,7 +696,7 @@
         if (!changed.has(item.id)) continue;
         const event = item.event;
         root.reconcileComposerPendingSendWithEvent?.(event);
-        const existingBeforeRender = isRootNode(itemNodes.get(item.id), container);
+        const existingBeforeRender = isMountedItemNode(itemNodes.get(item.id), container);
         let node = null;
         try {
           node = renderItem(item, event, {
@@ -615,7 +711,7 @@
           continue;
         }
         if (!node) {
-          const stale = isRootNode(itemNodes.get(item.id), container);
+          const stale = isMountedItemNode(itemNodes.get(item.id), container);
           if (stale) {
             stale.remove?.();
             itemNodes.delete(item.id);
@@ -624,7 +720,7 @@
           continue;
         }
         if (isHistoryRestore) node.classList?.add("history-restored-node");
-        if (node.parentNode !== container) container.appendChild(node);
+        if (!isMountedItemNode(node, container)) container.appendChild(node);
         const rootNode = tagItemNode(node, item);
         if (rootNode) {
           itemNodes.set(item.id, rootNode);
@@ -639,13 +735,62 @@
     }
 
     removeMissingNodes(snapshot, visibleItems);
+
+    const foldedByParent = new Map();
+    const userNodeByRequestId = new Map();
+    for (const item of visibleItems) {
+      const node = isMountedItemNode(itemNodes.get(item.id), container);
+      if (!node) continue;
+      if (isUserMessageItem(item, item.event)) {
+        const reqId = typeof item.event?.requestId === "string" ? item.event.requestId.trim() : "";
+        if (reqId) userNodeByRequestId.set(reqId, node);
+      }
+      const foldedParent = typeof item?.foldedParentRequestId === "string"
+        ? item.foldedParentRequestId.trim()
+        : "";
+      if (foldedParent) {
+        let list = foldedByParent.get(foldedParent);
+        if (!list) {
+          list = [];
+          foldedByParent.set(foldedParent, list);
+        }
+        list.push(node);
+      }
+    }
+
+    const railsByParent = new Map();
+    const activeRails = new Set();
+    const foldedNodeSet = new Set();
+    for (const [parentRequestId, userNode] of userNodeByRequestId) {
+      const foldedNodes = foldedByParent.get(parentRequestId) || [];
+      const rail = reconcileTimelineVersionRail(container, userNode, foldedNodes, parentRequestId);
+      if (rail && foldedNodes.length > 0) {
+        railsByParent.set(parentRequestId, rail);
+        activeRails.add(rail);
+        for (const foldedNode of foldedNodes) foldedNodeSet.add(foldedNode);
+      }
+    }
+    for (const child of childrenOf(container)) {
+      if (child.classList?.contains?.("msg-version-rail") && !activeRails.has(child)) {
+        child.remove?.();
+      }
+    }
+
     const ordered = [];
     const orderedSet = new Set();
     for (const item of visibleItems) {
-      const node = isRootNode(itemNodes.get(item.id), container);
-      if (!node || orderedSet.has(node)) continue;
+      const node = isMountedItemNode(itemNodes.get(item.id), container);
+      if (!node || foldedNodeSet.has(node) || orderedSet.has(node)) continue;
       ordered.push(node);
       orderedSet.add(node);
+      if (isUserMessageItem(item, item.event)) {
+        const reqId = typeof item.event?.requestId === "string" ? item.event.requestId.trim() : "";
+        const rail = reqId ? railsByParent.get(reqId) : null;
+        if (rail && !orderedSet.has(rail)) {
+          ordered.push(rail);
+          orderedSet.add(rail);
+        }
+      }
     }
     let cursor = container.firstElementChild;
     for (const node of ordered) {
@@ -660,6 +805,8 @@
     root.clearSessionLoadError?.(snapshot.sessionId);
     root.syncComposerPendingTurnFeedback?.();
     syncState(snapshot, runState, pagination);
+    root.syncEditableMessageActions?.();
+    root.syncRegenerateActions?.();
     root.finishSessionContentTransition?.(snapshot.sessionId);
     if (isHistoryRestore) scheduleHistoryRestoreCleanup(container, restoreToken);
     const commitMs = Math.max(0, timelineNowMs() - commitStartedAt);
@@ -712,7 +859,7 @@
     if (changed.size === 0) return false;
     for (const item of snapshot?.items || []) {
       if (!changed.has(item.id) || shouldHideTimelineActivityItem(item)) continue;
-      if (!isRootNode(itemNodes.get(item.id))) return true;
+      if (!isMountedItemNode(itemNodes.get(item.id))) return true;
     }
     return false;
   }
@@ -897,15 +1044,6 @@
         if (decisionEventMatchesLive) root.RagentDecisions?.noteApprovedActionState?.(event, { sessionId });
       } else if (type === "approved_action_batch_response") {
         if (decisionEventMatchesLive) root.RagentDecisions?.noteApprovedActionResolution?.(event, { sessionId });
-      } else if (type === "run_regenerate") {
-        root.foldAssistantRepliesIntoVersionRail?.(event?.parentRequestId || "");
-        if (event?.editResend === true) {
-          root.applyEditedUserMessageContent?.(
-            event?.parentRequestId || "",
-            typeof event?.prompt === "string" ? event.prompt : "",
-            Array.isArray(event?.images) ? event.images : [],
-          );
-        }
       } else if (type === "plan" && !root.isCodexProgressPlanEvent?.(event)) {
         const planApprovalId = typeof root.planApprovalIdForPlanEvent === "function"
           ? root.planApprovalIdForPlanEvent(event)

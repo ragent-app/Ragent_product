@@ -23,17 +23,33 @@ func (output *ownerInspectionOutput) Write(p []byte) (int, error) {
 	return output.buffer.Write(p)
 }
 
-// Runs only the fixed metadata inspection program under the verified owner.
-func runOwnerInspection(ctx context.Context, token windows.Token, executable string, args, env []string, cwd string) ([]byte, error) {
+func runOwnerCommand(ctx context.Context, token windows.Token, executable string, args, env []string, cwd string, stdout io.Writer) error {
 	if ctx == nil || token == 0 || !filepath.IsAbs(executable) || !filepath.IsAbs(cwd) || env == nil {
-		return nil, errOwnerSessionUnavailable
+		return errOwnerSessionUnavailable
 	}
 	cmd := exec.CommandContext(ctx, executable, args...)
-	cmd.Dir, cmd.Env = cwd, env
+	cmd.Dir = cwd
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(token), HideWindow: true}
+	cmd.Stdout, cmd.Stderr = stdout, io.Discard
+	// SCM initializes SeAssignPrimaryTokenPrivilege and SeIncreaseQuotaPrivilege
+	// as disabled (0x0) on LocalSystem services; enable them only during Start.
+	var err error
+	if isLocalSystemProcess() {
+		err = withSystemThreadPrivileges([]string{"SeAssignPrimaryTokenPrivilege", "SeIncreaseQuotaPrivilege"}, cmd.Start)
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
+		return err
+	}
+	return cmd.Wait()
+}
+
+// Runs only the fixed metadata inspection program under the verified owner.
+func runOwnerInspection(ctx context.Context, token windows.Token, executable string, args, env []string, cwd string) ([]byte, error) {
 	var output ownerInspectionOutput
-	cmd.Stdout, cmd.Stderr = &output, io.Discard
-	if err := cmd.Run(); err != nil {
+	if err := runOwnerCommand(ctx, token, executable, args, env, cwd, &output); err != nil {
 		return nil, err
 	}
 	return output.buffer.Bytes(), nil
@@ -44,21 +60,16 @@ func runOwnerInspection(ctx context.Context, token windows.Token, executable str
 // never resolves an executable using PATH or inherits the service environment.
 // Cancellation after a process was started leaves the operation outcome unknown.
 func runOwnerProcess(ctx context.Context, token windows.Token, executable string, args, env []string, cwd string) (int, error) {
-	if ctx == nil || token == 0 || !filepath.IsAbs(executable) || !filepath.IsAbs(cwd) || env == nil {
-		return -1, errOwnerSessionUnavailable
-	}
-	cmd := exec.CommandContext(ctx, executable, args...)
-	cmd.Dir = cwd
-	cmd.Env = env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(token), HideWindow: true}
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	err := cmd.Run()
+	err := runOwnerCommand(ctx, token, executable, args, env, cwd, io.Discard)
 	if err == nil {
 		return 0, nil
 	}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		return exit.ExitCode(), err
+	}
+	if errors.Is(err, errOwnerSessionUnavailable) {
+		return -1, err
 	}
 	return -1, err
 }

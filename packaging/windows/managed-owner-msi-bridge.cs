@@ -11,6 +11,13 @@ static class ManagedOwnerMsiBridge {
  const string BrokerServiceName="Ragent-PrivilegedBroker";
  const uint ScManagerConnect=0x0001,ServiceQueryConfig=0x0001,ServiceChangeConfig=0x0002,ServiceReadControl=0x00020000;
  const uint ServiceConfigSidInfo=5,ServiceConfigRequiredPrivileges=6,ServiceSidUnrestricted=1;
+ const int ErrorInsufficientBuffer=122;
+ static readonly string[] BrokerRequiredPrivileges={
+  "SeAssignPrimaryTokenPrivilege",
+  "SeChangeNotifyPrivilege",
+  "SeIncreaseQuotaPrivilege",
+  "SeTcbPrivilege"
+ };
  const uint ServiceChangeConfigRight=0x0002,ServiceDeleteRight=0x00010000,ServiceStartRight=0x0010,ServiceStopRight=0x0020;
  const uint ServicePauseContinueRight=0x0040,ServiceUserControlRight=0x0100,WriteDacRight=0x00040000,WriteOwnerRight=0x00080000;
  const uint GenericWriteRight=0x40000000,GenericAllRight=0x10000000;
@@ -137,12 +144,46 @@ static class ManagedOwnerMsiBridge {
   try{Marshal.Copy(bytes,0,buffer,bytes.Length);Need(SetServiceObjectSecurity(service,7,buffer),"OMI_BROKER_SERVICE_ACL_APPLY_FAILED");}finally{Marshal.FreeHGlobal(buffer);}
  }
  static void SetBrokerServiceConfiguration(IntPtr service,uint level,IntPtr info){Need(ChangeServiceConfig2(service,level,info),"OMI_BROKER_SERVICE_CONFIG_APPLY_FAILED");}
+ internal static string BuildBrokerRequiredPrivilegesMultiSz(){
+  return String.Join("\0",BrokerRequiredPrivileges)+"\0\0";
+ }
+ internal static void VerifyBrokerRequiredPrivilegesMultiSz(IntPtr value,long maxBytes){
+  Need(value!=IntPtr.Zero&&maxBytes>=2&&maxBytes<=65536,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+  var seen=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+  long offset=0;
+  while(true){
+   Need(offset+2<=maxBytes,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+   long start=offset;int length=0;bool terminated=false;
+   while(offset+2<=maxBytes){
+    short codeUnit=Marshal.ReadInt16(value,(int)offset);offset+=2;
+    if(codeUnit==0){terminated=true;break;}
+    length++;
+   }
+   Need(terminated,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+   if(length==0)break;
+   string privilege=Marshal.PtrToStringUni(new IntPtr(value.ToInt64()+start),length);
+   Need(!String.IsNullOrEmpty(privilege)&&seen.Add(privilege),"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+  }
+  Need(seen.SetEquals(BrokerRequiredPrivileges),"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+ }
  static void VerifyBrokerServiceConfiguration(IntPtr service){
   var config=ReadBrokerServiceConfig(service);string binary=Marshal.PtrToStringUni(config.binaryPathName)??"";binary=binary.Trim();if(binary.Length>=2&&binary[0]=='"'&&binary[binary.Length-1]=='"')binary=binary.Substring(1,binary.Length-2);
   Need(config.serviceType==0x10&&config.startType==2&&String.Equals(Path.GetFullPath(binary),Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.exe"),StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_IDENTITY_REFUSED");
   string account=Marshal.PtrToStringUni(config.serviceStartName)??"";Need(String.Equals(account,"LocalSystem",StringComparison.OrdinalIgnoreCase)||String.Equals(account,@"NT AUTHORITY\LocalSystem",StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_ACCOUNT_REFUSED");
   IntPtr sidBuffer=Marshal.AllocHGlobal(4);try{uint needed;Need(QueryServiceConfig2(service,ServiceConfigSidInfo,sidBuffer,4,out needed),"OMI_BROKER_SERVICE_SID_QUERY_FAILED");Need((uint)Marshal.ReadInt32(sidBuffer)==ServiceSidUnrestricted,"OMI_BROKER_SERVICE_SID_REFUSED");}finally{Marshal.FreeHGlobal(sidBuffer);}
-  IntPtr requiredBuffer=Marshal.AllocHGlobal(IntPtr.Size+256);try{uint needed;Need(QueryServiceConfig2(service,ServiceConfigRequiredPrivileges,requiredBuffer,(uint)(IntPtr.Size+256),out needed),"OMI_BROKER_REQUIRED_PRIVILEGES_QUERY_FAILED");IntPtr value=Marshal.ReadIntPtr(requiredBuffer);string privilege=Marshal.PtrToStringUni(value)??"";Need(privilege=="SeChangeNotifyPrivilege"&&Marshal.ReadInt16(value,(privilege.Length+1)*2)==0,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");}finally{Marshal.FreeHGlobal(requiredBuffer);}
+  uint size=(uint)(IntPtr.Size+512),neededRequired=0;IntPtr requiredBuffer=Marshal.AllocHGlobal((int)size);
+  try{
+   if(!QueryServiceConfig2(service,ServiceConfigRequiredPrivileges,requiredBuffer,size,out neededRequired)){
+    Need(Marshal.GetLastWin32Error()==ErrorInsufficientBuffer&&neededRequired>size&&neededRequired<=65536,"OMI_BROKER_REQUIRED_PRIVILEGES_QUERY_FAILED");
+    Marshal.FreeHGlobal(requiredBuffer);requiredBuffer=IntPtr.Zero;size=neededRequired;requiredBuffer=Marshal.AllocHGlobal((int)size);
+    Need(QueryServiceConfig2(service,ServiceConfigRequiredPrivileges,requiredBuffer,size,out neededRequired),"OMI_BROKER_REQUIRED_PRIVILEGES_QUERY_FAILED");
+   }
+   IntPtr value=Marshal.ReadIntPtr(requiredBuffer);
+   Need(value!=IntPtr.Zero,"OMI_BROKER_REQUIRED_PRIVILEGES_REFUSED");
+   long baseAddress=requiredBuffer.ToInt64(),valueAddress=value.ToInt64(),endAddress=baseAddress+(long)size;
+   Need(valueAddress>=baseAddress+IntPtr.Size&&valueAddress<endAddress,"OMI_BROKER_REQUIRED_PRIVILEGES_QUERY_FAILED");
+   VerifyBrokerRequiredPrivilegesMultiSz(value,endAddress-valueAddress);
+  }finally{if(requiredBuffer!=IntPtr.Zero)Marshal.FreeHGlobal(requiredBuffer);}
   VerifyBrokerServiceDacl(service);
  }
  static void ConfigureBrokerService(string version,string expectedSha256){
@@ -159,7 +200,7 @@ static class ManagedOwnerMsiBridge {
      Need(config.serviceType==0x10&&config.startType==2&&String.Equals(Path.GetFullPath(serviceBinary),binary,StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_IDENTITY_REFUSED");
      string serviceAccount=Marshal.PtrToStringUni(config.serviceStartName)??"";Need(String.Equals(serviceAccount,"LocalSystem",StringComparison.OrdinalIgnoreCase)||String.Equals(serviceAccount,@"NT AUTHORITY\LocalSystem",StringComparison.OrdinalIgnoreCase),"OMI_BROKER_SERVICE_ACCOUNT_REFUSED");SetBrokerServiceDacl(service);VerifyBrokerServiceDacl(service);
      var sid=new ServiceSidInfo{serviceSidType=ServiceSidUnrestricted};IntPtr sidPointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(ServiceSidInfo)));try{Marshal.StructureToPtr(sid,sidPointer,false);SetBrokerServiceConfiguration(service,ServiceConfigSidInfo,sidPointer);}finally{Marshal.FreeHGlobal(sidPointer);}
-     string multi="SeChangeNotifyPrivilege\0\0";IntPtr multiPointer=Marshal.StringToHGlobalUni(multi);IntPtr requiredPointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(RequiredPrivilegesInfo)));try{Marshal.StructureToPtr(new RequiredPrivilegesInfo{requiredPrivileges=multiPointer},requiredPointer,false);SetBrokerServiceConfiguration(service,ServiceConfigRequiredPrivileges,requiredPointer);}finally{Marshal.FreeHGlobal(requiredPointer);Marshal.FreeHGlobal(multiPointer);}
+     byte[] multiBytes=Encoding.Unicode.GetBytes(BuildBrokerRequiredPrivilegesMultiSz());IntPtr multiPointer=Marshal.AllocHGlobal(multiBytes.Length);IntPtr requiredPointer=Marshal.AllocHGlobal(Marshal.SizeOf(typeof(RequiredPrivilegesInfo)));try{Marshal.Copy(multiBytes,0,multiPointer,multiBytes.Length);Marshal.StructureToPtr(new RequiredPrivilegesInfo{requiredPrivileges=multiPointer},requiredPointer,false);SetBrokerServiceConfiguration(service,ServiceConfigRequiredPrivileges,requiredPointer);}finally{Marshal.FreeHGlobal(requiredPointer);Marshal.FreeHGlobal(multiPointer);}
      VerifyBrokerServiceConfiguration(service);
     }finally{CloseServiceHandle(service);}
    }finally{CloseServiceHandle(manager);}

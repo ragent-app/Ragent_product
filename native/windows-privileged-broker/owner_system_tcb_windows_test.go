@@ -28,6 +28,33 @@ func TestSystemLinkedOwnerTokenRejectsNonSystemAndWrongOwner(t *testing.T) {
 	}
 }
 
+func TestEnableTokenPrivilegesAndSystemGuard(t *testing.T) {
+	current := windows.GetCurrentProcessToken()
+	if err := enableTokenPrivileges(0, "SeChangeNotifyPrivilege"); err == nil {
+		t.Fatal("accepted zero token handle")
+	}
+	if err := enableTokenPrivileges(current); err == nil {
+		t.Fatal("accepted empty privilege list")
+	}
+	if err := enableTokenPrivileges(current, "SeNoSuchPrivilegeRagentTest"); err == nil {
+		t.Fatal("accepted nonexistent privilege name")
+	}
+	if !isLocalSystemProcess() {
+		if err := withSystemThreadPrivileges([]string{"SeTcbPrivilege"}, func() error { return nil }); err == nil {
+			t.Fatal("non-LocalSystem caller allowed system thread privileges")
+		}
+		if err := enableTokenPrivileges(current, "SeTcbPrivilege"); err == nil {
+			t.Fatal("non-LocalSystem caller enabled SeTcbPrivilege")
+		}
+	}
+	if err := withSystemThreadPrivileges(nil, func() error { return nil }); err == nil {
+		t.Fatal("accepted empty system thread privilege slice")
+	}
+	if err := withSystemThreadPrivileges([]string{"SeChangeNotifyPrivilege"}, nil); err == nil {
+		t.Fatal("accepted nil action")
+	}
+}
+
 // An opt-in service-context probe never installs software. It verifies the
 // exact owner's active session and checks the token returned by Windows.
 func TestSystemLinkedOwnerTokenLive(t *testing.T) {

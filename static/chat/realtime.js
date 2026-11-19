@@ -1531,7 +1531,9 @@ function updateStatus(connState, session = getCurrentSession()) {
     } else {
       sendBtn.disabled = !currentSessionId || archived;
     }
-    sendBtn.title = t("action.send");
+    if (!sendBtn.classList?.contains?.("is-edit-resend")) {
+      sendBtn.title = t("action.send");
+    }
     if (typeof syncComposerSendButtonPendingState === "function") {
       syncComposerSendButtonPendingState(activePendingSend);
     }
@@ -1575,7 +1577,9 @@ function updateStatus(connState, session = getCurrentSession()) {
   } else {
     sendBtn.disabled = !hasSession || archived;
   }
-  sendBtn.title = inputBusy ? t("action.queueFollowUp") : t("action.send");
+  if (!sendBtn.classList?.contains?.("is-edit-resend")) {
+    sendBtn.title = inputBusy ? t("action.queueFollowUp") : t("action.send");
+  }
   if (typeof syncComposerSendButtonPendingState === "function") {
     syncComposerSendButtonPendingState(activePendingSend);
   }

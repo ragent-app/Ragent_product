@@ -152,7 +152,7 @@ try {
     $registered = $true
     & sc.exe sidtype $name unrestricted | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_SIDTYPE_FAILED' }
-    & sc.exe privs $name SeChangeNotifyPrivilege | Out-Null
+    & sc.exe privs $name 'SeAssignPrimaryTokenPrivilege/SeChangeNotifyPrivilege/SeIncreaseQuotaPrivilege/SeTcbPrivilege' | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'APB_QA_PRIVILEGES_FAILED' }
     $brokerSid = ([Security.Principal.NTAccount]::new('NT SERVICE', $name)).Translate([Security.Principal.SecurityIdentifier]).Value
     $expectedStateDacl = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;$brokerSid)"

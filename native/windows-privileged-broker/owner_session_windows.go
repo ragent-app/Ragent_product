@@ -59,6 +59,29 @@ func ownerTokenIntegritySID(token windows.Token) (string, error) {
 	return label.Label.Sid.String(), nil
 }
 
+func queryOwnerSessionUserToken(session uint32) (windows.Token, error) {
+	var token windows.Token
+	query := func() error {
+		return windows.WTSQueryUserToken(session, &token)
+	}
+	var err error
+	if isLocalSystemProcess() {
+		err = withSystemThreadPrivileges([]string{"SeTcbPrivilege"}, query)
+	} else {
+		err = query()
+	}
+	if err != nil || token == 0 {
+		if token != 0 {
+			_ = token.Close()
+		}
+		if err == nil {
+			err = errOwnerSessionUnavailable
+		}
+		return 0, err
+	}
+	return token, nil
+}
+
 // discoverOwnerSession reads current WTS sessions and obtains their actual
 // tokens. Any unreadable logged-on session prevents a false unique match.
 // A future execution path must query and verify the token again before use.
@@ -79,8 +102,8 @@ func discoverOwnerSession(ownerSID string) (uint32, error) {
 		if session.SessionID == 0 || (session.State != windows.WTSActive && session.State != windows.WTSDisconnected) {
 			continue
 		}
-		var token windows.Token
-		if windows.WTSQueryUserToken(session.SessionID, &token) != nil || token == 0 {
+		token, err := queryOwnerSessionUserToken(session.SessionID)
+		if err != nil || token == 0 {
 			return 0, errOwnerSessionUnavailable
 		}
 		user, err := token.GetTokenUser()
@@ -175,12 +198,8 @@ func tokenAuthenticationID(token windows.Token) (windows.LUID, error) {
 func windowsOwnerTokenSource() ownerTokenSource {
 	return ownerTokenSource{
 		discover: discoverOwnerSession,
-		query: func(session uint32) (windows.Token, error) {
-			var token windows.Token
-			err := windows.WTSQueryUserToken(session, &token)
-			return token, err
-		},
-		verify: verifyOwnerSessionToken,
+		query:    queryOwnerSessionUserToken,
+		verify:   verifyOwnerSessionToken,
 		sameLogon: func(a, b windows.Token) bool {
 			first, firstErr := tokenAuthenticationID(a)
 			second, secondErr := tokenAuthenticationID(b)
