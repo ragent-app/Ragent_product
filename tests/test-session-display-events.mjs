@@ -291,4 +291,38 @@ assert.equal(approved.actions[0].semanticProjection, undefined, 'semantic proof 
 const block = buildEventBlockEvents(history, 2, 6);
 assert.deepEqual(block.map((event) => event.type), ['reasoning', 'reasoning', 'message', 'tool_use', 'tool_result']);
 
+const regeneratedDisplay = buildSessionDisplayEvents([
+  { seq: 1, type: 'message', role: 'user', requestId: 'req-orig', runId: 'run-orig', content: 'Original prompt' },
+  { seq: 2, type: 'message', role: 'assistant', requestId: 'req-orig', runId: 'run-orig', content: 'Old answer' },
+  {
+    seq: 3,
+    type: 'run_regenerate',
+    timestamp: 1700000000123,
+    requestId: 'edit-1',
+    runId: 'run-edit-1',
+    parentRequestId: 'req-orig',
+    parentRunId: 'run-orig',
+    state: 'accepted',
+    editResend: true,
+    prompt: 'Edited prompt',
+    images: [{ filename: 'shot.png', originalName: 'shot.png', savedPath: 'C:/secret/shot.png' }],
+  },
+  { seq: 4, type: 'message', role: 'assistant', requestId: 'edit-1', runId: 'run-edit-1', content: 'New answer' },
+]);
+assert.deepEqual(
+  regeneratedDisplay.map((event) => [event.seq, event.type]),
+  [[1, 'message'], [2, 'message'], [3, 'run_regenerate'], [4, 'message']],
+  'run_regenerate markers must remain visible in session display projections',
+);
+assert.equal(regeneratedDisplay[2].parentRequestId, 'req-orig');
+assert.equal(regeneratedDisplay[2].parentRunId, 'run-orig');
+assert.equal(regeneratedDisplay[2].requestId, 'edit-1');
+assert.equal(regeneratedDisplay[2].runId, 'run-edit-1');
+assert.equal(regeneratedDisplay[2].editResend, true);
+assert.equal(regeneratedDisplay[2].prompt, 'Edited prompt');
+assert.equal(regeneratedDisplay[2].timestamp, 1700000000123);
+assert.equal(regeneratedDisplay[2].timelineEntityId, 'run_regenerate:3');
+assert.deepEqual(regeneratedDisplay[2].images, [{ filename: 'shot.png', originalName: 'shot.png' }]);
+assert.equal(regeneratedDisplay[2].images[0].savedPath, undefined, 'attachment savedPath must still be stripped');
+
 console.log('test-session-display-events: ok');

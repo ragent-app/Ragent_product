@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { chromium } from "@playwright/test";
+import { buildSessionDisplayEvents } from "../chat/session-display-events.mjs";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const source = (path) => readFileSync(join(repoRoot, path), "utf8");
@@ -133,6 +134,7 @@ async function createTimelinePage(browser) {
     };
     window.formatDecodedDisplayText = (value) => String(value ?? "");
     window.resolveUiProductPath = (value) => String(value ?? "");
+    window.messageTimeFormatter = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" });
     window.createMessageAttachmentNode = (img) => {
       const el = document.createElement("div");
       el.className = "msg-attachment";
@@ -616,11 +618,132 @@ async function testVditorComposerFlush(browser) {
   }
 }
 
+async function testServerBuildDisplayEventsToTimelineColdReload(browser) {
+  const rawHistory = [
+    {
+      seq: 1,
+      type: "message",
+      role: "user",
+      timestamp: 1700000000001,
+      requestId: "req-srv-1",
+      runId: "run-srv-1",
+      content: "Run 1 original prompt",
+    },
+    {
+      seq: 2,
+      type: "reasoning",
+      role: "assistant",
+      requestId: "req-srv-1",
+      runId: "run-srv-1",
+      content: "Thinking v1",
+      state: "completed",
+    },
+    {
+      seq: 3,
+      type: "message",
+      role: "assistant",
+      timestamp: 1700000000003,
+      requestId: "req-srv-1",
+      runId: "run-srv-1",
+      content: "Run 1 assistant reply",
+    },
+    {
+      seq: 4,
+      type: "status",
+      role: "system",
+      content: "completed",
+      runId: "run-srv-1",
+    },
+    {
+      seq: 7,
+      type: "run_regenerate",
+      timestamp: 1700000000007,
+      requestId: "edit-srv-2",
+      responseId: "resp-srv-2",
+      runId: "run-srv-2",
+      parentRequestId: "req-srv-1",
+      parentRunId: "run-srv-1",
+      state: "accepted",
+      editResend: true,
+      prompt: "Run 2 edited prompt",
+      images: [{ filename: "edited.png", originalName: "edited.png", savedPath: "C:/private/edited.png" }],
+    },
+    {
+      seq: 8,
+      type: "message",
+      role: "assistant",
+      timestamp: 1700000000008,
+      requestId: "edit-srv-2",
+      runId: "run-srv-2",
+      content: "Run 2 assistant reply",
+    },
+  ];
+
+  const displayEvents = buildSessionDisplayEvents(rawHistory, { sessionRunning: false });
+  const regenInDisplay = displayEvents.find((event) => event.type === "run_regenerate");
+  assert.ok(regenInDisplay, "server buildSessionDisplayEvents must keep run_regenerate in visible snapshot output");
+  assert.equal(regenInDisplay.parentRequestId, "req-srv-1");
+  assert.equal(regenInDisplay.editResend, true);
+  assert.equal(regenInDisplay.prompt, "Run 2 edited prompt");
+  assert.deepEqual(regenInDisplay.images, [{ filename: "edited.png", originalName: "edited.png" }]);
+  assert.equal(regenInDisplay.images[0].savedPath, undefined);
+
+  const { page, frontendErrors } = await createTimelinePage(browser);
+  try {
+    const rendered = await page.evaluate((events) => {
+      const container = document.getElementById("messagesInner");
+      window.RagentTimelineRuntime.renderBatch(events, {
+        sessionId: "edit-resend-sess",
+        runState: "idle",
+        reset: true,
+      });
+      const topClasses = Array.from(container.children)
+        .filter((el) => el.id !== "homeWorkspace" && el.id !== "emptyState")
+        .map((el) => {
+          if (el.classList.contains("msg-user")) return "msg-user";
+          if (el.classList.contains("msg-version-rail")) return "msg-version-rail";
+          if (el.classList.contains("msg-assistant")) return "msg-assistant";
+          return el.className;
+        });
+      const visibleAssistant = Array.from(container.children).find((el) => el.classList.contains("msg-assistant"));
+      return {
+        topClasses,
+        userText: container.querySelector(".msg-user .md-content")?.textContent?.trim() || "",
+        userEditable: container.querySelector(".msg-user")?.classList.contains("is-editable") || false,
+        userImageCount: container.querySelectorAll(".msg-user .msg-images > *").length,
+        railFoldedCount: container.querySelector(".msg-version-rail")?.dataset?.foldedCount || null,
+        foldedTexts: Array.from(container.querySelectorAll(".msg-version-rail__body .msg-assistant"))
+          .map((el) => (el.querySelector(".msg-assistant-body") || el).textContent?.trim() || ""),
+        foldedRegenerable: Array.from(container.querySelectorAll(".msg-version-rail__body .msg-assistant"))
+          .map((el) => el.classList.contains("is-regenerable")),
+        visibleAssistantText: visibleAssistant
+          ? ((visibleAssistant.querySelector(".msg-assistant-body") || visibleAssistant).textContent?.trim() || "")
+          : "",
+        visibleAssistantRegenerable: visibleAssistant?.classList.contains("is-regenerable") || false,
+      };
+    }, displayEvents);
+
+    assert.deepEqual(rendered.topClasses, ["msg-user", "msg-version-rail", "msg-assistant"]);
+    assert.equal(rendered.userText, "Run 2 edited prompt");
+    assert.equal(rendered.userEditable, true);
+    assert.equal(rendered.userImageCount, 1);
+    assert.equal(rendered.railFoldedCount, "1");
+    assert.deepEqual(rendered.foldedTexts, ["Run 1 assistant reply"]);
+    assert.deepEqual(rendered.foldedRegenerable, [false]);
+    assert.equal(rendered.visibleAssistantText, "Run 2 assistant reply");
+    assert.equal(rendered.visibleAssistantRegenerable, true);
+    assert.deepEqual(frontendErrors, []);
+  } finally {
+    await page.close();
+  }
+}
+
 testUpdateStatusPreservesEditResendTitle();
 
 const browser = await chromium.launch({ headless: true });
 try {
   await testTimelineEditResendAndColdReload(browser);
+  await testServerBuildDisplayEventsToTimelineColdReload(browser);
   await testVditorComposerFlush(browser);
   console.log("test-timeline-edit-resend: ok");
 } finally {

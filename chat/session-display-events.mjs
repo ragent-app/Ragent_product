@@ -65,6 +65,7 @@ function isVisible(event) {
     'plan', 'operation', 'attachment_delivery', 'approval_request', 'approval_response',
     'privileged_batch_request', 'privileged_batch_response', 'privileged_exec_result',
     'approved_action_batch_request', 'approved_action_batch_response', 'approved_action_state',
+    'run_regenerate',
     'context_barrier', 'context_operation', 'usage', 'status',
   ].includes(event.type);
 }
