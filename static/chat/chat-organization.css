@@ -749,3 +749,222 @@
   color: var(--text-secondary);
   flex-shrink: 0;
 }
+
+/* 8. Unified Member Provenance, Coverage & Read-Only Conversation Parity */
+.org-icon-btn[hidden] {
+  display: none !important;
+}
+
+#orgFactoryWorkBtn {
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.org-node--native .org-node-circle {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border));
+}
+
+.org-node--detached .org-node-circle {
+  border-style: dashed;
+}
+
+.org-node.is-paused {
+  opacity: 0.7;
+}
+
+.org-node.is-paused .org-node-circle {
+  --border-color: #9ca3af;
+  border-color: #9ca3af;
+}
+
+.org-node-subbadge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary) 85%, var(--text) 15%);
+}
+
+.org-status-pill--failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.org-status-pill--failed .org-status-pill-dot { background: #ef4444; }
+
+.org-status-pill--paused { background: rgba(156, 163, 175, 0.15); color: var(--text-secondary); }
+.org-status-pill--paused .org-status-pill-dot { background: var(--text-secondary); }
+
+.org-status-pill--reviewing { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.org-status-pill--reviewing .org-status-pill-dot { background: #f59e0b; }
+
+.org-status-pill--provisioning { background: rgba(148, 163, 184, 0.15); color: var(--text-secondary); }
+.org-status-pill--provisioning .org-status-pill-dot { background: var(--text-secondary); }
+
+.org-meta-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.org-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+  background: var(--sys-surface-container-highest, color-mix(in srgb, var(--bg-secondary) 84%, var(--text) 16%));
+  color: var(--text-secondary);
+}
+
+.org-meta-pill--coverage-full {
+  background: rgba(16, 185, 129, 0.14);
+  color: #10b981;
+}
+
+.org-meta-pill--coverage-partial {
+  background: rgba(59, 130, 246, 0.14);
+  color: #3b82f6;
+}
+
+.org-meta-pill--coverage-activity_only {
+  background: rgba(245, 158, 11, 0.14);
+  color: #f59e0b;
+}
+
+.org-meta-pill--coverage-unavailable {
+  background: rgba(156, 163, 175, 0.16);
+  color: var(--text-secondary);
+}
+
+.org-meta-pill--warning {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
+.org-meta-pill--readonly {
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+}
+
+.org-honesty-banner {
+  background: color-mix(in srgb, var(--bg-secondary) 88%, var(--text) 12%);
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.org-honesty-banner--warning {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--text);
+}
+
+.org-conv-section {
+  background: var(--sys-surface-container-high, color-mix(in srgb, var(--bg) 90%, var(--text) 10%));
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.org-conv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.org-conv-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.org-conv-actions .org-btn {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+.org-conv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.org-conv-item {
+  border-radius: 10px;
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.48;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.org-conv-item--user {
+  align-self: flex-end;
+  max-width: 88%;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--accent, #3b82f6) 20%);
+}
+
+.org-conv-item--assistant {
+  align-self: stretch;
+}
+
+.org-conv-item--operation {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  background: color-mix(in srgb, var(--bg-secondary) 92%, var(--text) 8%);
+}
+
+.org-conv-item--thinking {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg) 94%, var(--text) 6%);
+}
+
+.org-conv-item--notice,
+.org-conv-item--system {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border-style: dashed;
+}
+
+.org-conv-item-meta {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.org-conv-item-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.org-conv-empty {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 8px 2px;
+}

@@ -81,7 +81,8 @@ assert.equal(isAdapterCompatible('codex', '0.165.0', { compatibleVersions: ['*']
 assert.equal(isAdapterCompatible('claude', '2.1.200', { minimumVersion: '2.1.200' }), false,
   'a central minimum must not lower the local permission-mode requirement');
 assert.equal(isAdapterCompatible('claude', '2.1.311'), false);
-assert.equal(isAdapterCompatible('agy', '1.4.8'), false);
+assert.equal(isAdapterCompatible('agy', '1.5.12'), true, 'probed AgY 1.5.12 runtime must be admitted');
+assert.equal(isAdapterCompatible('agy', '1.5.13'), false, 'unreviewed AgY versions above observed 1.5.12 must fail closed');
 assert.equal(isAdapterCompatible('kimi-code', '0.38.0'), false,
   'Kimi 0.x cannot consume the 2.x provider config; require managed upgrade');
 for (const [id, version] of Object.entries({ pi: '1.4.0', 'deepseek-harness': '0.2.1-rc.2',
@@ -109,8 +110,9 @@ assert.equal(harnesses.find((harness) => harness.id === 'opencode').runtimeFamil
 assert.equal(harnesses.find((harness) => harness.id === 'kimi-code').package, '@moonshot-ai/kimi-code');
 assert.equal(await getHarnessDefinition('does-not-exist'), null);
 assert.equal((await getHarnessDefinition('kilo-code')).id, 'kilo');
+assert.equal((await getHarnessDefinition('antigravity')).id, 'agy');
 assert.equal(harnesses.find((harness) => harness.id === 'goose').integration, 'adapter-planned');
-assert.throws(() => assertHarnessInstallationVerified({ name: 'AgY', detectedVersion: '1.4.8',
+assert.throws(() => assertHarnessInstallationVerified({ name: 'AgY', detectedVersion: '1.5.13',
   compatibilityStatus: 'incompatible' }, 'latest'), { code: 'HARNESS_INSTALLED_VERSION_UNVERIFIED' },
   'a floating installer must not convert an unreviewed payload into an admitted runtime');
 assert.throws(() => assertHarnessInstallationVerified({ name: 'Codex', detectedVersion: '0.153.4',

@@ -59,7 +59,7 @@ try {
   assert.equal(await isToolValid('claude-bidi'), true, 'the exact Claude bidi tool must remain valid');
   const agy = tools.find((tool) => tool.id === 'agy');
   assert.equal(agy?.name, 'Antigravity CLI');
-  assert.equal(agy?.provider, 'antigravity');
+  assert.equal(agy?.provider, 'agy');
   assert.equal(agy?.runtimeFamily, 'agy-stream-json');
 } finally {
   rmSync(tempHome, { recursive: true, force: true });

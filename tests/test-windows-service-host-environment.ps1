@@ -18,7 +18,19 @@ if($LASTEXITCODE -ne 0){throw 'QA private root ACL failed'}
 $qaJs=@'
 import assert from 'node:assert/strict';
 const forbidden=/API_KEY|SECRET|TOKEN|CREDENTIAL|FIREBASE|^NODE_OPTIONS$|^NODE_PATH$|^CODEX_HOME$|^CLAUDE_CONFIG_DIR$|PROXY|NATIVE_REGISTRY/;
-assert.equal(Object.keys(process.env).some(name=>forbidden.test(name.toUpperCase())),false);
+const controlRolloutFlags=[
+  'RAGENT_ORG_SCHEMA_ENABLED','RAGENT_ORG_SHADOW_PROJECTION','RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED',
+  'RAGENT_MANAGED_INPUT_ENFORCEMENT','RAGENT_MANAGED_WRITER_ENABLED','RAGENT_REVIEWER_ENABLED',
+  'RAGENT_COLLABORATION_LEADER_ENABLED','RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED','RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED',
+  'RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED','RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED',
+  'RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED','RAGENT_ORG_DYNAMIC_REPLAN_ENABLED','RAGENT_ORG_STALL_GOVERNOR_ENABLED',
+  'RAGENT_ORG_PROJECTION_V1_ENABLED','RAGENT_ORG_PROJECTION_V2_ENABLED','RAGENT_ORG_RECOVERY_V1_ENABLED',
+  'RAGENT_CONSULTATION_V1_ENABLED'
+];
+assert.equal(Object.keys(process.env).some(name=>name !== 'NODE_USE_ENV_PROXY' && forbidden.test(name.toUpperCase())),false);
+assert.equal(process.env.NODE_USE_ENV_PROXY,'1');
+assert.equal(controlRolloutFlags.some(name=>Object.prototype.hasOwnProperty.call(process.env,name)),false);
+assert.equal(Object.prototype.hasOwnProperty.call(process.env,'RAGENT_CODEX_PROVIDER_READONLY'),false);
 assert.equal(process.env.RAGENT_WINDOWS_SERVICE_ROLE,'supervisor');
 assert.equal(process.env.RAGENT_WINDOWS_SERVICE_MODE,'1');
 assert.ok(process.env.SystemRoot && process.env.PATH && process.env.RAGENT_RUN_SPOOL_DIR);
@@ -30,7 +42,19 @@ $qaControlProbe=Join-Path $qaRoot 'control-probe.mjs'
 $qaControlJs=@'
 import assert from 'node:assert/strict';
 const forbidden=/API_KEY|SECRET|TOKEN|CREDENTIAL|FIREBASE|^NODE_OPTIONS$|^NODE_PATH$|^CODEX_HOME$|^CLAUDE_CONFIG_DIR$|PROXY|NATIVE_REGISTRY/;
-assert.equal(Object.keys(process.env).some(name=>name !== 'RAGENT_AUTH_SESSION_SECRET' && forbidden.test(name.toUpperCase())),false);
+const controlRolloutFlags=[
+  'RAGENT_ORG_SCHEMA_ENABLED','RAGENT_ORG_SHADOW_PROJECTION','RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED',
+  'RAGENT_MANAGED_INPUT_ENFORCEMENT','RAGENT_MANAGED_WRITER_ENABLED','RAGENT_REVIEWER_ENABLED',
+  'RAGENT_COLLABORATION_LEADER_ENABLED','RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED','RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED',
+  'RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED','RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED',
+  'RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED','RAGENT_ORG_DYNAMIC_REPLAN_ENABLED','RAGENT_ORG_STALL_GOVERNOR_ENABLED',
+  'RAGENT_ORG_PROJECTION_V1_ENABLED','RAGENT_ORG_PROJECTION_V2_ENABLED','RAGENT_ORG_RECOVERY_V1_ENABLED',
+  'RAGENT_CONSULTATION_V1_ENABLED'
+];
+assert.equal(Object.keys(process.env).some(name=>name !== 'RAGENT_AUTH_SESSION_SECRET' && name !== 'NODE_USE_ENV_PROXY' && forbidden.test(name.toUpperCase())),false);
+assert.equal(process.env.NODE_USE_ENV_PROXY,'1');
+for(const flag of controlRolloutFlags){assert.equal(process.env[flag],'1',`expected control ${flag}=1`);}
+assert.equal(Object.prototype.hasOwnProperty.call(process.env,'RAGENT_CODEX_PROVIDER_READONLY'),false);
 assert.equal(process.env.RAGENT_WINDOWS_SERVICE_ROLE,'control');
 assert.equal(process.env.RAGENT_TEMPORARY_PAIRING_ENABLED,'1');
 assert.equal(process.env.RAGENT_WINDOWS_SERVICE_MODE,'1');

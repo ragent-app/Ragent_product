@@ -21,6 +21,162 @@
     return key;
   }
 
+  function isZhLocale() {
+    const lang = String(
+      root.RagentI18n?.getActiveUiLanguage?.() ||
+      root.document?.documentElement?.lang ||
+      ""
+    ).toLowerCase();
+    return lang.startsWith("zh");
+  }
+
+  function trText(key, enFallback, zhFallback = enFallback, params = null) {
+    const resolved = tr(key, params);
+    if (resolved && resolved !== key) return resolved;
+    let template = isZhLocale() ? zhFallback : enFallback;
+    if (params && typeof params === "object") {
+      for (const [k, v] of Object.entries(params)) {
+        template = template.replaceAll(`{${k}}`, String(v ?? ""));
+      }
+    }
+    return template;
+  }
+
+  function unifiedUiId(canonicalId) {
+    const id = String(canonicalId || "");
+    return `member:${id.length}:${id}`;
+  }
+
+  function nativeNodeId(runId, delegationId) {
+    const r = String(runId || "");
+    const d = String(delegationId || "");
+    return `native:${r.length}:${r}${d}`;
+  }
+
+  function normalizeCoverage(rawScope, rawCoverage, isReadOnlyNative = false, availability = "") {
+    const scope = String(rawScope || "").trim().toLowerCase();
+    const cov = String(rawCoverage || "").trim().toLowerCase();
+    const avail = String(availability || "").trim().toLowerCase();
+    if (scope === "unavailable") return "unavailable";
+    if (scope === "activity_only") return "activity_only";
+    if (cov === "partial" || scope === "captured_only") return "partial";
+    if (avail === "unavailable" && scope !== "full") return "unavailable";
+    if (scope === "full") {
+      if (cov === "full") return "full";
+      if (avail === "partial" || isReadOnlyNative) return "partial";
+      return "full";
+    }
+    return "unavailable";
+  }
+
+  function coverageLabel(coverage) {
+    switch (coverage) {
+      case "full":
+        return trText("organization.coverage.full", "Full", "完整");
+      case "partial":
+        return trText("organization.coverage.partial", "Partial (captured)", "部分（已捕获）");
+      case "activity_only":
+        return trText("organization.coverage.activityOnly", "Activity only", "仅活动状态");
+      default:
+        return trText("organization.coverage.unavailable", "Unavailable", "不可用");
+    }
+  }
+
+  function coverageDescription(coverage, isReadOnlyNative) {
+    switch (coverage) {
+      case "partial":
+        return trText(
+          "organization.coverage.partialDesc",
+          "Only content captured by the parent run is shown; this is not a full private transcript.",
+          "仅显示父运行中捕获的内容，并非完整私有会话。"
+        );
+      case "activity_only":
+        return trText(
+          "organization.coverage.activityOnlyDesc",
+          "Available activity and results only; no child transcript was captured.",
+          "仅显示可用的活动和结果，未捕获子会话正文。"
+        );
+      case "full":
+        return isReadOnlyNative
+          ? trText(
+              "organization.coverage.partialDesc",
+              "Only content captured by the parent run is shown; this is not a full private transcript.",
+              "仅显示父运行中捕获的内容，并非完整私有会话。"
+            )
+          : trText(
+              "organization.coverage.fullDesc",
+              "Full managed session transcript (read-only view).",
+              "受控子会话完整记录（只读视图）。"
+            );
+      default:
+        return trText(
+          "organization.coverage.unavailableDesc",
+          "This member's conversation is unavailable.",
+          "此成员的会话暂不可用。"
+        );
+    }
+  }
+
+  function mapMemberRuntimeState(rawState, delegationState = "") {
+    const primary = String(delegationState || rawState || "").trim().toLowerCase();
+    const secondary = String(rawState || "").trim().toLowerCase();
+    const s = primary || secondary;
+    if (s === "spawned" || s === "running" || s === "working") return NodeRuntimeState.WORKING;
+    if (s === "waiting") return NodeRuntimeState.WAITING;
+    if (s === "completed" || s === "done" || s === "succeeded") return NodeRuntimeState.DONE;
+    if (s === "failed" || s === "lost" || s === "error") return NodeRuntimeState.FAILED;
+    if (s === "cancelled" || s === "canceled" || s === "interrupted" || s === "paused") return NodeRuntimeState.PAUSED;
+    if (s === "blocked") return NodeRuntimeState.BLOCKED;
+    if (s === "reviewing" || s === "waiting_review") return NodeRuntimeState.REVIEWING;
+    return NodeRuntimeState.IDLE;
+  }
+
+  function formatRuntimeStatusText(node) {
+    if (!node) return "";
+    if (node.stateUnknown) {
+      return trText("organization.stateUnknown", "Unknown", "状态未知");
+    }
+    const rawNative = String(node.rawNativeState || "").toLowerCase();
+    if (rawNative === "lost") return trText("organization.stateLost", "Lost", "已失联");
+    if (rawNative === "cancelled" || rawNative === "canceled") return trText("organization.stateCancelled", "Cancelled", "已取消");
+    if (rawNative === "interrupted") return trText("organization.stateInterrupted", "Interrupted", "已中断");
+    const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, Boolean(node.blocker));
+    const stateName = String(runtimeState).toLowerCase();
+    if (stateName === "paused") return trText("organization.paused", "Paused", "已暂停");
+    return tr(`organization.${stateName === "failed" ? "failedStatus" : stateName}`) || runtimeState;
+  }
+
+  function readableToolField(value, depth = 0) {
+    if (value == null) return "";
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (depth === 0 && (trimmed.startsWith("{") || trimmed.startsWith("["))) {
+        try {
+          return readableToolField(JSON.parse(trimmed), depth + 1);
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (depth >= 3) return typeof value === "object" ? "[…]" : String(value);
+    if (Array.isArray(value)) {
+      return value.slice(0, 20).map((item) => readableToolField(item, depth + 1)).filter(Boolean).join("\n");
+    }
+    if (typeof value === "object") {
+      return Object.entries(value)
+        .slice(0, 20)
+        .map(([k, v]) => {
+          const formatted = readableToolField(v, depth + 1);
+          return formatted ? `${k}: ${formatted}` : "";
+        })
+        .filter(Boolean)
+        .join("\n");
+    }
+    return "";
+  }
+
   // --- 1. Domain Types & Enums ---
 
   const NodeRole = Object.freeze({
@@ -249,7 +405,9 @@
         };
       }
 
-      const rootNode = nodeList.find((n) => n.role === NodeRole.EXECUTIVE)
+      const rootNode = nodeList.find((n) => n.isRootLeader)
+        || nodeList.find((n) => n.role === NodeRole.EXECUTIVE)
+        || nodeList.find((n) => !n.parentId && !n.parentUnknown)
         || nodeList.find((n) => !n.parentId)
         || nodeList[0];
 
@@ -259,20 +417,73 @@
 
       const childrenByParent = {};
       nodeList.forEach((n) => {
-        const p = n.parentId || "";
+        const p = n.parentId && nodes[n.parentId] && n.parentId !== n.id ? n.parentId : "";
         if (!childrenByParent[p]) childrenByParent[p] = [];
         childrenByParent[p].push(n);
       });
 
       const calculatedPositions = {};
       const clusterNodes = {};
+      const visited = new Set([rootId]);
+      const hiddenInClusterIds = new Set();
+
+      const collectDescendants = (startNodes, targetSet) => {
+        const queue = [...startNodes];
+        while (queue.length > 0) {
+          const item = queue.shift();
+          if (!item || targetSet.has(item.id)) continue;
+          targetSet.add(item.id);
+          visited.add(item.id);
+          for (const child of childrenByParent[item.id] || []) {
+            if (!targetSet.has(child.id)) queue.push(child);
+          }
+        }
+      };
+
+      const placeSubtree = (parentNode) => {
+        const parentPos = calculatedPositions[parentNode.id];
+        if (!parentPos) return;
+        const children = (childrenByParent[parentNode.id] || []).filter((c) => !visited.has(c.id));
+        if (children.length === 0) return;
+
+        const isFocused = focusNodeId === parentNode.id;
+        const shouldCluster = children.length > clusterThreshold && !isFocused && !collapsedClusterIds.has(parentNode.id);
+
+        if (shouldCluster) {
+          const clusterId = `cluster_${parentNode.id}`;
+          const clusterPos = { x: parentPos.x, y: parentPos.y + 110 };
+          calculatedPositions[clusterId] = clusterPos;
+          const hiddenIds = new Set();
+          collectDescendants(children, hiddenIds);
+          hiddenIds.forEach((hid) => hiddenInClusterIds.add(hid));
+          clusterNodes[clusterId] = {
+            id: clusterId,
+            x: clusterPos.x,
+            y: clusterPos.y,
+            radius: 20,
+            isVisible: true,
+            isCluster: true,
+            clusterCount: children.length,
+            clusterChildIds: Array.from(hiddenIds),
+            alpha: focusNodeId && focusNodeId !== parentNode.id && focusNodeId !== rootId ? 0.45 : 1.0,
+          };
+          return;
+        }
+
+        const childPositions = FocusTreeLayout.layoutChildren(parentPos, children, 110, 90);
+        for (const child of children) {
+          visited.add(child.id);
+          calculatedPositions[child.id] = previousPositions[child.id] || childPositions[child.id] || { x: parentPos.x, y: parentPos.y + 110 };
+          placeSubtree(child);
+        }
+      };
 
       // 1. Root Executive Position
       const rootPos = previousPositions[rootId] || { x: centerX, y: rootY };
       calculatedPositions[rootId] = rootPos;
 
       // 2. Direct leads of Root (Level 1)
-      const level1Nodes = childrenByParent[rootId] || [];
+      const level1Nodes = (childrenByParent[rootId] || []).filter((n) => !visited.has(n.id));
       const level1Count = level1Nodes.length;
 
       if (level1Count > 0) {
@@ -288,51 +499,41 @@
         );
 
         level1Nodes.forEach((node, index) => {
+          visited.add(node.id);
           calculatedPositions[node.id] = previousPositions[node.id] || idealPoints[index];
         });
       }
 
-      // 3. Level 2+ Workers / Subtrees
+      // 3. Level 2+ Workers / Subtrees (recursively)
       for (const lead of level1Nodes) {
-        const leadPos = calculatedPositions[lead.id];
-        if (!leadPos) continue;
-        const children = childrenByParent[lead.id] || [];
-        if (children.length === 0) continue;
-
-        const isFocused = focusNodeId === lead.id;
-        const shouldCluster = children.length > clusterThreshold && !isFocused && !collapsedClusterIds.has(lead.id);
-
-        if (shouldCluster) {
-          const clusterId = `cluster_${lead.id}`;
-          const clusterPos = { x: leadPos.x, y: leadPos.y + 110 };
-          calculatedPositions[clusterId] = clusterPos;
-          clusterNodes[clusterId] = {
-            id: clusterId,
-            x: clusterPos.x,
-            y: clusterPos.y,
-            radius: 20,
-            isVisible: true,
-            isCluster: true,
-            clusterCount: children.length,
-            clusterChildIds: children.map((c) => c.id),
-            alpha: focusNodeId && focusNodeId !== lead.id && focusNodeId !== rootId ? 0.45 : 1.0,
-          };
-        } else {
-          const childPositions = FocusTreeLayout.layoutChildren(leadPos, children, 110, 90);
-          for (const [childId, pt] of Object.entries(childPositions)) {
-            calculatedPositions[childId] = previousPositions[childId] || pt;
-          }
-        }
+        placeSubtree(lead);
       }
 
-      // Position any remaining unassigned nodes
-      nodeList.forEach((node) => {
-        if (!calculatedPositions[node.id]) {
-          const parentPt = node.parentId ? calculatedPositions[node.parentId] : rootPos;
-          const offset = ((node.id.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 60) - 30;
-          calculatedPositions[node.id] = { x: (parentPt ? parentPt.x : centerX) + offset, y: (parentPt ? parentPt.y : rootY) + 100 };
-        }
+      // 4. Independent / detached components (e.g., unknown parent or cyclic subgraphs)
+      const detachedRoots = nodeList.filter((n) => !visited.has(n.id) && (!n.parentId || !nodes[n.parentId]));
+      const remainingRoots = nodeList.filter((n) => !visited.has(n.id));
+      const componentRoots = [...detachedRoots];
+      for (const candidate of remainingRoots) {
+        if (!componentRoots.includes(candidate)) componentRoots.push(candidate);
+      }
+
+      let maxPlacedX = rootPos.x;
+      Object.entries(calculatedPositions).forEach(([, pt]) => {
+        if (pt && Number.isFinite(pt.x)) maxPlacedX = Math.max(maxPlacedX, pt.x);
       });
+      let detachedCursorX = Math.max(centerX + 160, maxPlacedX + 130);
+      const detachedBaseY = rootPos.y + 120;
+
+      for (const compRoot of componentRoots) {
+        if (visited.has(compRoot.id)) continue;
+        visited.add(compRoot.id);
+        const childrenCount = (childrenByParent[compRoot.id] || []).length;
+        const halfSpan = Math.max(55, (Math.min(childrenCount, 4) * 90) / 2);
+        const defaultPos = { x: detachedCursorX + halfSpan, y: detachedBaseY };
+        calculatedPositions[compRoot.id] = previousPositions[compRoot.id] || defaultPos;
+        placeSubtree(compRoot);
+        detachedCursorX += halfSpan * 2 + 40;
+      }
 
       // Build NodePosition objects
       const nodePositions = {};
@@ -347,8 +548,7 @@
         else if (node.role === NodeRole.MANAGER || node.role === NodeRole.PHASE_LEAD) radius = 20;
         else if (node.role === NodeRole.EXPERT) radius = 18;
 
-        const isHiddenInCluster = Object.values(clusterNodes).some((cl) => cl.clusterChildIds.includes(node.id));
-        if (!isHiddenInCluster) {
+        if (!hiddenInClusterIds.has(node.id)) {
           nodePositions[node.id] = {
             id: node.id,
             x: pt.x,
@@ -366,14 +566,16 @@
 
       Object.assign(nodePositions, clusterNodes);
 
-      // 4. Edge routing
+      // 5. Edge routing
       const edgePaths = [];
+      const clusterValues = Object.values(clusterNodes);
       edges.forEach((edge) => {
+        if (hiddenInClusterIds.has(edge.fromNodeId)) return;
         const fromPos = calculatedPositions[edge.fromNodeId];
         let toPos = calculatedPositions[edge.toNodeId];
         let targetId = edge.toNodeId;
 
-        const containingCluster = Object.values(clusterNodes).find((cl) => cl.clusterChildIds.includes(edge.toNodeId));
+        const containingCluster = clusterValues.find((cl) => cl.clusterChildIds.includes(edge.toNodeId));
         if (containingCluster) {
           toPos = { x: containingCluster.x, y: containingCluster.y };
           targetId = containingCluster.id;
@@ -381,16 +583,16 @@
 
         if (fromPos && toPos) {
           const alpha = focusNodeId && edge.fromNodeId !== focusNodeId && edge.toNodeId !== focusNodeId ? 0.3 : 0.85;
-          edgePaths.push(
-            EdgeRouter.routeEdge(
-              edge.id || `${edge.fromNodeId}-${targetId}`,
-              edge.fromNodeId,
-              targetId,
-              fromPos,
-              toPos,
-              alpha
-            )
+          const routed = EdgeRouter.routeEdge(
+            edge.id || `${edge.fromNodeId}-${targetId}`,
+            edge.fromNodeId,
+            targetId,
+            fromPos,
+            toPos,
+            alpha
           );
+          routed.isReview = String(edge.type || "").toUpperCase() === "REVIEWS";
+          edgePaths.push(routed);
         }
       });
 
@@ -399,13 +601,20 @@
         const leadId = clusterId.replace("cluster_", "");
         const leadPos = calculatedPositions[leadId];
         if (leadPos) {
-          edgePaths.push(
-            EdgeRouter.routeEdge(`edge_${clusterId}`, leadId, clusterId, leadPos, { x: clusterNode.x, y: clusterNode.y }, 0.85)
+          const routed = EdgeRouter.routeEdge(
+            `edge_${clusterId}`,
+            leadId,
+            clusterId,
+            leadPos,
+            { x: clusterNode.x, y: clusterNode.y },
+            0.85
           );
+          routed.isReview = false;
+          edgePaths.push(routed);
         }
       });
 
-      // 5. Bounds
+      // 6. Bounds
       let minX = Infinity;
       let minY = Infinity;
       let maxX = -Infinity;
@@ -542,7 +751,23 @@
       this.sessionId = null;
       this.projection = null;
       this.projectionEtag = null;
+      this.rawUnifiedMembers = null;
+      this.membersLoadedAt = 0;
+      this.delegationRuns = [];
+      this.delegationRecords = [];
+      this.delegationEvents = [];
+      this.delegationCursors = {};
+      this.delegationFinished = {};
+      this.delegationScannedAt = {};
+      this.delegationGap = false;
+      this.delegationSourceAvailability = "unknown";
       this.loading = false;
+      this.refreshInFlight = null;
+      this.lastRefreshAt = 0;
+      this.pollTimerId = null;
+      this.detailPollTimerId = null;
+      this.detailRequestEpoch = 0;
+      this.detailConversationState = null;
       this.active = false;
       this.pan = { x: 0, y: 0 };
       this.zoom = 1.0;
@@ -553,6 +778,7 @@
       this.detailNodeId = null;
       this.isActivityFeedExpanded = false;
       this.previousPositions = {};
+      this.previousParents = {};
       this.layoutResult = null;
       this.animationFrameId = null;
       this.communicationScheduler = new CommunicationVisualScheduler(3);
@@ -607,7 +833,7 @@
             <div class="org-radar-meta" id="orgRadarMeta">Revision #0 · 0 agents</div>
           </div>
           <div class="org-radar-top-actions">
-            <button type="button" class="org-icon-btn" id="orgFactoryWorkBtn" title="Work items">Tasks</button>
+            <button type="button" class="org-icon-btn" id="orgFactoryWorkBtn" title="Work items" hidden>Tasks</button>
             <button type="button" class="org-icon-btn" id="orgRadarResetBtn" title="${tr("organization.resetView")}" aria-label="${tr("organization.resetView")}">
               ${root.RagentIcons?.render?.("refresh") || "↺"}
             </button>
@@ -723,6 +949,9 @@
     async showFactoryWork(initialResponsibilityId = '') {
       const organizationId = this.projection?.organizationId;
       if (!organizationId || !this.dom.detailScreen) return;
+      this.stopDetailPolling();
+      this.detailNodeId = null;
+      this.detailConversationState = null;
       const screen = this.dom.detailScreen;
       screen.hidden = false;
       screen.replaceChildren();
@@ -1554,42 +1783,147 @@
 
     // --- Session & Realtime Hooks ---
 
+    getFetcher() {
+      if (typeof root.ragentFetch === "function") return root.ragentFetch;
+      if (typeof root.fetch === "function") return root.fetch;
+      if (typeof fetch === "function") return fetch;
+      return null;
+    }
+
+    stopPolling() {
+      if (this.pollTimerId) {
+        clearInterval(this.pollTimerId);
+        this.pollTimerId = null;
+      }
+    }
+
+    startPolling() {
+      this.stopPolling();
+      if (!this.active || !this.sessionId) return;
+      this.pollTimerId = setInterval(() => {
+        if (!this.active || !this.sessionId) {
+          this.stopPolling();
+          return;
+        }
+        void this.refreshOrganizationData({ force: false });
+      }, 3000);
+    }
+
+    stopDetailPolling() {
+      this.detailRequestEpoch += 1;
+      if (this.detailPollTimerId) {
+        clearInterval(this.detailPollTimerId);
+        this.detailPollTimerId = null;
+      }
+    }
+
     onSessionChanged(sessionId) {
-      if (this.sessionId === sessionId) return;
-      this.sessionId = sessionId;
+      const normalized = sessionId || null;
+      if (this.sessionId === normalized) {
+        if (normalized && !this.refreshInFlight && Date.now() - this.lastRefreshAt > 1500) {
+          void this.refreshOrganizationData({ force: false });
+        }
+        return;
+      }
+
+      this.sessionId = normalized;
       this.projection = null;
       this.projectionEtag = null;
+      this.rawUnifiedMembers = null;
+      this.membersLoadedAt = 0;
+      this.delegationRuns = [];
+      this.delegationRecords = [];
+      this.delegationEvents = [];
+      this.delegationCursors = {};
+      this.delegationFinished = {};
+      this.delegationScannedAt = {};
+      this.delegationGap = false;
+      this.delegationSourceAvailability = "unknown";
+      this.lastRefreshAt = 0;
       this.focusNodeId = null;
       this.selectedSheetNodeId = null;
       this.detailNodeId = null;
+      this.previousPositions = {};
+      this.previousParents = {};
+      this.activityEvents = [];
+      this.stopPolling();
       this.dismissBottomSheet();
       this.closeDetailScreen();
 
-      if (!sessionId) {
+      if (!normalized) {
         this.setRadarButtonVisibility(false);
         if (this.active) this.toggleOrganizationMode(false);
         return;
       }
 
-      this.fetchProjection().then((proj) => {
-        const hasOrg = Boolean(proj && proj.nodes && proj.nodes.length > 0);
-        this.setRadarButtonVisibility(hasOrg);
-        if (this.active && hasOrg) {
-          this.render();
-        } else if (this.active && !hasOrg) {
-          this.toggleOrganizationMode(false);
-        }
-        const url = new URL(root.location.href);
-        const responsibilityId = url.searchParams.get('responsibility');
-        if (responsibilityId && url.searchParams.get('session') === sessionId) {
-          url.searchParams.delete('responsibility'); root.history.replaceState(root.history.state, '', url);
-          this.openResponsibilityLink(sessionId, responsibilityId);
-        }
-      });
+      void this.refreshOrganizationData({ force: true, checkUrlParams: true });
+    }
+
+    hasCollaborators() {
+      const hasFormalNodes = Boolean(this.projection && Array.isArray(this.projection.nodes) && this.projection.nodes.length > 0);
+      if (hasFormalNodes) return true;
+      const membersPage = this.rawUnifiedMembers || (Array.isArray(this.projection?.members) ? this.projection : null);
+      const hasUnifiedSubagents = Boolean(
+        membersPage &&
+        Array.isArray(membersPage.members) &&
+        membersPage.members.some((m) => m && m.canonicalId && m.canonicalId !== membersPage.rootCanonicalId)
+      );
+      if (hasUnifiedSubagents) return true;
+      return Array.isArray(this.delegationRecords) && this.delegationRecords.length > 0;
+    }
+
+    async refreshOrganizationData({ force = false, checkUrlParams = false } = {}) {
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return null;
+      if (this.refreshInFlight && !force) return this.refreshInFlight;
+
+      const projectionPromise = this.fetchProjection(force);
+      const membersPromise = this.fetchUnifiedMembers(force);
+      const delegationsPromise = this.fetchDelegationRuns(force);
+
+      const run = Promise.all([projectionPromise, membersPromise, delegationsPromise])
+        .then(([proj]) => {
+          if (this.sessionId !== targetSessionId) return null;
+          this.lastRefreshAt = Date.now();
+          this.processProjectionEvents(this.projection || proj);
+          const hasOrgOrMembers = this.hasCollaborators();
+          this.setRadarButtonVisibility(hasOrgOrMembers);
+
+          if (this.active) {
+            if (hasOrgOrMembers) {
+              this.render();
+            } else if (!this.loading) {
+              this.toggleOrganizationMode(false);
+            }
+          }
+
+          if (checkUrlParams && root.location?.href) {
+            try {
+              const url = new URL(root.location.href);
+              const responsibilityId = url.searchParams.get("responsibility");
+              if (responsibilityId && url.searchParams.get("session") === targetSessionId) {
+                url.searchParams.delete("responsibility");
+                root.history?.replaceState?.(root.history.state, "", url);
+                void this.openResponsibilityLink(targetSessionId, responsibilityId);
+              }
+            } catch {
+              /* ignore invalid URL in partial environments */
+            }
+          }
+          return proj;
+        })
+        .finally(() => {
+          if (this.refreshInFlight === run) {
+            this.refreshInFlight = null;
+          }
+        });
+
+      this.refreshInFlight = run;
+      return run;
     }
 
     async openResponsibilityLink(sessionId, responsibilityId) {
-      if (!/^[A-Za-z0-9_-]{1,160}$/.test(String(responsibilityId || '')) || this.sessionId !== sessionId) return;
+      if (!/^[A-Za-z0-9_-]{1,160}$/.test(String(responsibilityId || "")) || this.sessionId !== sessionId) return;
       const projection = await this.fetchProjection(true);
       if (!projection?.organizationId || this.sessionId !== sessionId) return;
       this.toggleOrganizationMode(true);
@@ -1609,8 +1943,11 @@
     }
 
     async fetchProjection(force = false) {
-      if (!this.sessionId) return null;
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return null;
       if (this.loading && !force) return this.projection;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return this.projection;
       this.loading = true;
 
       try {
@@ -1618,27 +1955,29 @@
         if (this.projectionEtag && !force) {
           headers["If-None-Match"] = this.projectionEtag;
         }
-        const fetcher = root.ragentFetch || fetch;
-        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/projection?version=2`, {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/organization/projection?version=2`, {
           credentials: "same-origin",
           cache: "no-store",
           headers,
         });
+        if (this.sessionId !== targetSessionId) return null;
 
         if (res.status === 304) {
           return this.projection;
         }
 
         if (!res.ok) {
-          if (res.status === 404) {
+          if (res.status === 404 || res.status === 401 || res.status === 403) {
             this.projection = null;
+            this.projectionEtag = null;
             return null;
           }
           throw new Error(`Failed to load organization projection: ${res.status}`);
         }
 
-        this.projectionEtag = res.headers.get("ETag") || this.projectionEtag;
+        this.projectionEtag = res.headers?.get?.("ETag") || this.projectionEtag;
         const payload = await res.json();
+        if (this.sessionId !== targetSessionId) return null;
         const proj = payload?.projection || payload;
         this.projection = proj;
         this.hasLoadedEver = true;
@@ -1653,18 +1992,225 @@
       }
     }
 
+    async fetchUnifiedMembers(_force = false) {
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/organization/members`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (this.sessionId !== targetSessionId) return null;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            this.rawUnifiedMembers = null;
+          }
+          return null;
+        }
+        const page = await res.json();
+        if (this.sessionId !== targetSessionId) return null;
+        if (!page || page.rootSessionId !== targetSessionId || !Array.isArray(page.members)) {
+          return null;
+        }
+        const canonicalIds = page.members.map((m) => m?.canonicalId).filter(Boolean);
+        if (new Set(canonicalIds).size !== page.members.length) {
+          return null;
+        }
+
+        const previous =
+          this.rawUnifiedMembers &&
+          this.rawUnifiedMembers.rootSessionId === page.rootSessionId &&
+          this.rawUnifiedMembers.rootCanonicalId === page.rootCanonicalId
+            ? this.rawUnifiedMembers
+            : null;
+        const trustedComplete = Boolean(page.membersComplete) && page.sourceCoverage?.gap === false;
+
+        if (trustedComplete || !previous) {
+          this.rawUnifiedMembers = page;
+        } else {
+          const merged = new Map();
+          for (const prev of previous.members || []) {
+            if (!prev?.canonicalId) continue;
+            merged.set(prev.canonicalId, { ...prev, activity: null });
+          }
+          for (const member of page.members) {
+            const old = merged.get(member.canonicalId);
+            if (!old) {
+              merged.set(member.canonicalId, member);
+            } else {
+              const aliasMap = new Map();
+              for (const alias of [...(old.aliases || []), ...(member.aliases || [])]) {
+                if (!alias) continue;
+                aliasMap.set(`${alias.kind || ""}\0${alias.runId || ""}\0${alias.id || ""}`, alias);
+              }
+              merged.set(member.canonicalId, {
+                ...member,
+                sourceTag: member.sourceTag || old.sourceTag || null,
+                executionHarnessId: member.executionHarnessId || old.executionHarnessId || null,
+                aliases: Array.from(aliasMap.values()),
+                parentCanonicalId: member.relationKnown ? member.parentCanonicalId : old.parentCanonicalId,
+                relationKnown: Boolean(member.relationKnown || old.relationKnown),
+                birth: member.birth || old.birth || null,
+                conversation: member.conversation || old.conversation || null,
+              });
+            }
+          }
+          this.rawUnifiedMembers = {
+            ...page,
+            members: Array.from(merged.values()),
+          };
+        }
+
+        this.membersLoadedAt = Date.now();
+        return this.rawUnifiedMembers;
+      } catch (err) {
+        console.warn("[organization-view] Failed to fetch organization members:", err);
+        return null;
+      }
+    }
+
+    async fetchDelegationRuns(_force = false) {
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return [];
+      const fetcher = this.getFetcher();
+      if (!fetcher) return [];
+
+      try {
+        const runsRes = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/delegation-runs`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (this.sessionId !== targetSessionId) return [];
+        if (!runsRes.ok) {
+          if (runsRes.status === 401 || runsRes.status === 403) {
+            this.delegationRuns = [];
+            this.delegationRecords = [];
+            this.delegationEvents = [];
+            this.delegationCursors = {};
+            this.delegationFinished = {};
+          }
+          return [];
+        }
+
+        const runsPayload = await runsRes.json();
+        if (this.sessionId !== targetSessionId) return [];
+        const runs = Array.isArray(runsPayload?.runs) ? runsPayload.runs : [];
+        this.delegationRuns = runs;
+        if (runs.length === 0) {
+          this.delegationRecords = [];
+          this.delegationEvents = [];
+          this.delegationGap = false;
+          this.delegationSourceAvailability = "empty";
+          return [];
+        }
+
+        let nextRecords = [...this.delegationRecords];
+        let nextEvents = [...this.delegationEvents];
+        let anyGap = false;
+        let lastAvailability = "verified";
+        const nowMs = Date.now();
+        const terminalStates = new Set(["completed", "failed", "cancelled", "interrupted"]);
+
+        for (const run of runs.slice(-16)) {
+          if (!run?.id) continue;
+          const version = `${run.state || ""}:${run.updatedAt || ""}`;
+          const lastScan = this.delegationScannedAt[run.id] || 0;
+          if (this.delegationFinished[run.id] === version && (run.updatedAt || nowMs - lastScan < 60000)) {
+            continue;
+          }
+
+          let cursor = this.delegationCursors[run.id] || 0;
+          let more = true;
+          let reachedTail = false;
+          for (let pageIndex = 0; pageIndex < 10 && more; pageIndex += 1) {
+            const evRes = await fetcher(
+              `/api/sessions/${encodeURIComponent(targetSessionId)}/delegation-runs/${encodeURIComponent(run.id)}/events?afterLines=${cursor}`,
+              { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } }
+            );
+            if (this.sessionId !== targetSessionId) return [];
+            if (!evRes.ok) {
+              if (evRes.status === 401 || evRes.status === 403) {
+                this.delegationRecords = [];
+                this.delegationEvents = [];
+                return [];
+              }
+              anyGap = true;
+              break;
+            }
+            const page = await evRes.json();
+            if (this.sessionId !== targetSessionId) return [];
+            if (page?.sourceAvailability) lastAvailability = page.sourceAvailability;
+            if (page?.gap || page?.sourceAvailability !== "verified") anyGap = true;
+
+            if (Array.isArray(page?.delegations)) {
+              if (!page.gap) {
+                nextRecords = nextRecords.filter((rec) => rec.runId !== run.id).concat(page.delegations);
+              } else {
+                const byKey = new Map(nextRecords.map((rec) => [`${rec.runId}\0${rec.delegationId}`, rec]));
+                for (const rec of page.delegations) {
+                  if (rec?.runId && rec?.delegationId) {
+                    byKey.set(`${rec.runId}\0${rec.delegationId}`, rec);
+                  }
+                }
+                nextRecords = Array.from(byKey.values());
+              }
+            }
+
+            if (Array.isArray(page?.events) && page.events.length > 0) {
+              const evByKey = new Map(nextEvents.map((ev) => [`${ev.runId}\0${ev.id}`, ev]));
+              for (const ev of page.events) {
+                if (ev?.id) {
+                  evByKey.set(`${ev.runId || run.id}\0${ev.id}`, { ...ev, runId: ev.runId || run.id });
+                }
+              }
+              nextEvents = Array.from(evByKey.values()).slice(-500);
+            }
+
+            const nextCursor = Math.max(cursor, Number(page?.nextAfterLines || 0));
+            this.delegationCursors[run.id] = nextCursor;
+            more = page?.hasMore === true && nextCursor > cursor;
+            if (page?.hasMore === true && !more) anyGap = true;
+            cursor = nextCursor;
+            reachedTail = !page?.hasMore && !page?.gap;
+          }
+
+          if (reachedTail && terminalStates.has(String(run.state || "").toLowerCase())) {
+            this.delegationFinished[run.id] = version;
+            this.delegationScannedAt[run.id] = Date.now();
+          } else {
+            delete this.delegationFinished[run.id];
+          }
+        }
+
+        this.delegationRecords = nextRecords;
+        this.delegationEvents = nextEvents;
+        this.delegationGap = anyGap;
+        this.delegationSourceAvailability = lastAvailability;
+        return nextRecords;
+      } catch (err) {
+        console.warn("[organization-view] Failed to fetch delegation runs:", err);
+        return [];
+      }
+    }
+
     handleInvalidation(msg = {}) {
       if (!this.sessionId) return;
       if (msg.organizationId && this.projection?.organizationId && msg.organizationId !== this.projection.organizationId) {
         return;
       }
       const nextRev = Number(msg.revision || 0);
-      const currRev = Number(this.projection?.revision || this.projection?.asOf?.revision || 0);
+      const rawCurrRev = typeof this.projection?.revision === "object"
+        ? this.projection?.revision?.number
+        : this.projection?.revision;
+      const currRev = Number(rawCurrRev || this.projection?.asOf?.revision || 0);
       if (nextRev && currRev && nextRev < currRev) return;
 
-      this.fetchProjection(true).then((proj) => {
-        const hasOrg = Boolean(proj && proj.nodes && proj.nodes.length > 0);
-        this.setRadarButtonVisibility(hasOrg);
+      this.refreshOrganizationData({ force: true }).then(() => {
         if (this.active) {
           this.render();
         }
@@ -1672,52 +2218,70 @@
     }
 
     processProjectionEvents(proj) {
-      if (!proj) return;
-      // Synthesize communication and activity events
-      const nodes = proj.nodes || [];
-      const edges = proj.edges || [];
+      const activeProj = proj || this.projection;
+      const model = this.buildUnifiedGraphModel(activeProj);
 
       // A blocker is not an approval request; the old buttons had no command.
       this.approvalOverlay = null;
 
-      // Schedule particles for active nodes/edges
-      nodes.forEach((node) => {
-        if (node.status === "running" || node.status === "working") {
-          const parentEdge = edges.find((e) => e.childNodeId === node.id || e.toNodeId === node.id);
+      // Schedule particles for active formal/unified nodes & edges
+      const nodesList = Object.values(model.nodesMap);
+      const edgesList = model.edgesList;
+      nodesList.forEach((node) => {
+        if (node.isRootLeader) return;
+        if (node.runtimeState === NodeRuntimeState.WORKING) {
+          const parentEdge = edgesList.find((e) => e.toNodeId === node.id);
           if (parentEdge) {
             this.communicationScheduler.scheduleCommunication(
               `comm_${node.id}_${Date.now()}`,
               CommunicationType.TASK_ASSIGNED,
-              parentEdge.parentNodeId || parentEdge.fromNodeId,
+              parentEdge.fromNodeId,
               node.id
             );
           }
-        } else if (node.status === "waiting_review") {
-          const reviewerEdge = edges.find((e) => (e.edgeType === "REVIEWS" || e.type === "REVIEWS") && (e.fromNodeId === node.id || e.childNodeId === node.id));
+        } else if (node.runtimeState === NodeRuntimeState.REVIEWING) {
+          const reviewerEdge = edgesList.find((e) => String(e.type || "").toUpperCase() === "REVIEWS" && (e.fromNodeId === node.id || e.toNodeId === node.id));
           if (reviewerEdge) {
             this.communicationScheduler.scheduleCommunication(
               `comm_rev_${node.id}_${Date.now()}`,
               CommunicationType.REVIEW_REQUESTED,
               node.id,
-              reviewerEdge.toNodeId || reviewerEdge.parentNodeId
+              reviewerEdge.fromNodeId === node.id ? reviewerEdge.toNodeId : reviewerEdge.fromNodeId
             );
           }
         }
       });
 
-      // Update Activity Feed
+      // Update Activity Feed across formal + unified/native members
       const activities = [];
-      nodes.forEach((node) => {
+      nodesList.forEach((node) => {
         if (node.currentActivity) {
           activities.push({
             id: `act_${node.id}`,
-            dotClass: node.status === "blocked" ? "error" : node.status === "running" ? "running" : "waiting",
-            message: `${node.stableKey || node.id}: ${node.currentActivity}`,
+            dotClass:
+              node.runtimeState === NodeRuntimeState.BLOCKED || node.runtimeState === NodeRuntimeState.FAILED
+                ? "error"
+                : node.runtimeState === NodeRuntimeState.WORKING
+                  ? "running"
+                  : node.runtimeState === NodeRuntimeState.DONE
+                    ? "success"
+                    : "waiting",
+            message: `${node.displayName}: ${node.currentActivity}`,
             time: "now",
           });
         }
       });
-      this.activityEvents = activities;
+      for (const ev of (this.delegationEvents || []).slice(-10).reverse()) {
+        if (!ev?.kind) continue;
+        const source = ev.details ? `${ev.kind} (${ev.details})` : ev.kind;
+        activities.push({
+          id: `delg_ev_${ev.runId}_${ev.id}`,
+          dotClass: ev.state === "failed" || ev.state === "lost" ? "error" : ev.state === "completed" ? "success" : ev.state === "running" || ev.state === "spawned" ? "running" : "waiting",
+          message: `${ev.delegationId || "subagent"}: ${source}`,
+          time: "now",
+        });
+      }
+      this.activityEvents = activities.slice(0, 20);
     }
 
     // --- Mode Switching (Timeline <-> Organization Radar) ---
@@ -1748,7 +2312,12 @@
         this.render();
         this.resetView();
         this.startAnimationLoop();
+        if (this.sessionId) {
+          void this.refreshOrganizationData({ force: true });
+          this.startPolling();
+        }
       } else {
+        this.stopPolling();
         if (surface) surface.hidden = true;
         if (messages) messages.hidden = false;
         if (this.dom.radarBtn) {
@@ -1808,12 +2377,17 @@
       // 1. Draw Edges
       const edges = this.layoutResult.edges || [];
       edges.forEach((edge) => {
+        ctx.save();
         ctx.beginPath();
+        if (edge.isReview && typeof ctx.setLineDash === "function") {
+          ctx.setLineDash([5, 5]);
+        }
         ctx.moveTo(edge.start.x, edge.start.y);
         ctx.bezierCurveTo(edge.control1.x, edge.control1.y, edge.control2.x, edge.control2.y, edge.end.x, edge.end.y);
         ctx.strokeStyle = `rgba(148, 163, 184, ${edge.alpha || 0.6})`;
         ctx.lineWidth = 1.75;
         ctx.stroke();
+        ctx.restore();
       });
 
       // 2. Update & Draw Active Particles
@@ -1861,25 +2435,32 @@
       ctx.restore();
     }
 
-    // --- DOM Graph Rendering ---
+    // --- Unified Member & Formal Organization Graph Model ---
 
-    render() {
-      if (!this.active || !this.dom.surface) return;
-      this.updateViewportDimensions();
+    buildUnifiedGraphModel(explicitProj = null) {
+      const proj = explicitProj || this.projection || {};
+      const rawNodes = Array.isArray(proj.nodes) ? proj.nodes : [];
+      const rawEdges = Array.isArray(proj.edges) ? proj.edges : [];
+      const hasFormalOrg = rawNodes.length > 0;
 
-      const proj = this.projection || {};
-      const rawNodes = proj.nodes || [];
-      const rawEdges = proj.edges || [];
-
-      // Map raw nodes to models
       const nodesMap = {};
       rawNodes.forEach((n) => {
         const id = n.id || n.stableKey;
+        if (!id) return;
         const role = NodeRole.fromString(n.nodeRole || n.role || n.sessionClass);
         const domain = typeof n.domain === "string" ? n.domain : null;
         const iconDomain = AgentDomain.fromExplicit(n.domain, n.iconKey);
         const hasBlocker = Boolean(n.blocker || n.status === "blocked");
         const runtimeState = NodeRuntimeState.fromString(n.status, n.currentActivity, hasBlocker);
+        const memberDesc = n.member || null;
+        const boundSessionId = n.currentBinding?.sessionId || n.currentSessionId || n.sessionId || null;
+        const coverage = normalizeCoverage(
+          memberDesc?.conversation?.scope || (boundSessionId ? "full" : "unavailable"),
+          memberDesc?.conversation?.coverage || "",
+          false,
+          memberDesc?.conversation?.availability || ""
+        );
+        const resultPacketId = n.attempt?.resultPacketId || n.resultPacketId || null;
 
         nodesMap[id] = {
           id,
@@ -1890,38 +2471,432 @@
           displayName: n.displayName || n.stableKey || id,
           phaseId: n.phaseId || null,
           runtimeState,
-          sessionId: n.currentSessionId || n.sessionId || null,
-          currentActivity: n.currentActivity || null,
-          currentTaskSummary: n.task?.objective || n.currentTaskSummary || (n.progress ? `${tr("organization.working")} (${n.progress.completed}/${n.progress.total})` : null),
-          currentTaskDetail: n.task?.detail || n.currentTaskDetail || null,
+          sessionId: boundSessionId,
+          providerRef: null,
+          currentActivity: n.activity?.kind || n.currentActivity || null,
+          currentTaskSummary:
+            n.currentTask?.objective ||
+            n.task?.objective ||
+            n.currentTaskSummary ||
+            (n.progress && Number.isFinite(n.progress.total) && n.progress.total > 0
+              ? `${tr("organization.working")} (${n.progress.completed}/${n.progress.total})`
+              : null),
+          currentTaskDetail: n.task?.detail || n.currentTaskDetail || n.responsibility || null,
           progressCompleted: n.progress?.completed || 0,
           progressTotal: n.progress?.total || 0,
           blockerText: n.blocker?.reason || n.blocker?.reasonCode || (hasBlocker ? tr("organization.blocked") : null),
           testsPassed: n.testsPassed || 0,
           testsTotal: n.testsTotal || 0,
           changedFiles: n.changedFiles || [],
-          resultPacketSummary: n.resultPacketId ? `${tr("organization.resultPacket")}: ${n.resultPacketId}` : null,
+          resultPacketSummary: resultPacketId ? `${tr("organization.resultPacket")}: ${resultPacketId}` : null,
           isRootLeader: role === NodeRole.EXECUTIVE,
+          memberKind: "formal",
+          isNativeMember: false,
+          isReadOnlyNative: false,
+          canOpenInbox: Boolean(proj.organizationId),
+          canonicalId: memberDesc?.canonicalId || null,
+          sourceTag: memberDesc?.sourceTag || "ragent",
+          executionHarnessId: n.executionHarnessId || memberDesc?.executionHarnessId || n.runtime?.tool || n.runtime?.provider || null,
+          conversationDescriptor: memberDesc?.conversation || null,
+          coverage,
+          sourceGap: false,
+          relationKnown: true,
+          parentUnknown: false,
+          activity: n.activity || null,
+          stateUnknown: false,
+          rawNativeState: null,
         };
       });
 
-      // Map raw edges
+      const membersPage =
+        this.rawUnifiedMembers ||
+        (Array.isArray(proj.members) && proj.members.length > 0
+          ? {
+              rootSessionId: proj.rootSessionId || this.sessionId || "",
+              rootCanonicalId: proj.rootCanonicalId || "",
+              members: proj.members,
+              membersComplete: Boolean(proj.membersComplete),
+              sourceCoverage: proj.sourceCoverage || null,
+            }
+          : null);
+
+      const delegationByKey = new Map();
+      const sortedRecords = [...(this.delegationRecords || [])]
+        .filter((rec) => rec && rec.runId && rec.delegationId)
+        .sort((a, b) => (a.startedAt ?? Number.MAX_SAFE_INTEGER) - (b.startedAt ?? Number.MAX_SAFE_INTEGER) || String(a.runId).localeCompare(String(b.runId)) || String(a.delegationId).localeCompare(String(b.delegationId)));
+      for (const rec of sortedRecords) {
+        const key = `${rec.runId}\0${rec.delegationId}`;
+        const prev = delegationByKey.get(key);
+        const prevTime = prev ? (prev.updatedAt ?? prev.startedAt ?? 0) : -1;
+        const nextTime = rec.updatedAt ?? rec.startedAt ?? 0;
+        if (!prev || nextTime >= prevTime) {
+          delegationByKey.set(key, rec);
+        }
+      }
+
+      const confirmedRootChildren = new Set();
+      for (const ev of this.delegationEvents || []) {
+        if (
+          ev &&
+          ev.kind === "spawned" &&
+          !ev.parentDelegationId &&
+          ev.birthActor === "root_session" &&
+          ev.runId &&
+          ev.delegationId &&
+          (!this.sessionId || !ev.parentSessionId || ev.parentSessionId === this.sessionId)
+        ) {
+          confirmedRootChildren.add(`${ev.runId}\0${ev.delegationId}`);
+        }
+      }
+
+      // Determine root node ID
+      let rootId = null;
+      const formalValues = Object.values(nodesMap);
+      if (formalValues.length > 0) {
+        const sessionId = proj.rootSessionId || this.sessionId;
+        const sessionMatches = sessionId ? formalValues.filter((n) => n.sessionId === sessionId) : [];
+        if (sessionMatches.length === 1) {
+          rootId = sessionMatches[0].id;
+        } else if (sessionMatches.length === 0) {
+          const noParent = formalValues.filter((n) => !n.parentId);
+          rootId = noParent.length === 1
+            ? noParent[0].id
+            : (formalValues.find((n) => n.role === NodeRole.EXECUTIVE)?.id || formalValues[0].id);
+        } else {
+          rootId = formalValues.find((n) => n.role === NodeRole.EXECUTIVE)?.id || sessionMatches[0].id;
+        }
+      } else if ((membersPage?.members?.length || 0) > 0 || delegationByKey.size > 0) {
+        rootId = membersPage?.rootCanonicalId || `native-root:${this.sessionId || "session"}`;
+        nodesMap[rootId] = {
+          id: rootId,
+          parentId: null,
+          role: NodeRole.EXECUTIVE,
+          domain: null,
+          iconDomain: AgentDomain.GENERAL,
+          displayName: trText("organization.nativeRoot", "Root session", "根会话"),
+          phaseId: null,
+          runtimeState: NodeRuntimeState.IDLE,
+          sessionId: this.sessionId || null,
+          providerRef: null,
+          currentActivity: null,
+          currentTaskSummary: null,
+          currentTaskDetail: null,
+          progressCompleted: 0,
+          progressTotal: 0,
+          blockerText: null,
+          testsPassed: 0,
+          testsTotal: 0,
+          changedFiles: [],
+          resultPacketSummary: null,
+          isRootLeader: true,
+          isSyntheticRoot: true,
+          memberKind: "root_session",
+          isNativeMember: false,
+          isReadOnlyNative: false,
+          canOpenInbox: false,
+          canonicalId: rootId,
+          sourceTag: "ragent",
+          executionHarnessId: null,
+          conversationDescriptor: null,
+          coverage: "unavailable",
+          sourceGap: false,
+          relationKnown: true,
+          parentUnknown: false,
+          activity: null,
+          stateUnknown: false,
+          rawNativeState: null,
+        };
+      }
+
+      // Deduplicate formal members by verified canonical IDs and formal aliases
+      const formalByCanonical = new Map();
+      for (const node of formalValues) {
+        if (node.canonicalId) formalByCanonical.set(node.canonicalId, node.id);
+      }
+      const memberList = Array.isArray(membersPage?.members) ? membersPage.members : [];
+      for (const member of memberList) {
+        if (!member?.canonicalId) continue;
+        const formalMatches = Array.from(
+          new Set(
+            (member.aliases || [])
+              .filter((a) => a?.kind === "formal" && a.id && nodesMap[a.id])
+              .map((a) => a.id)
+          )
+        );
+        if (formalMatches.length === 1 && !formalByCanonical.has(member.canonicalId)) {
+          formalByCanonical.set(member.canonicalId, formalMatches[0]);
+        }
+        // Enrich matched formal or root node with non-empty provenance/activity
+        const matchedNodeId =
+          member.canonicalId === membersPage?.rootCanonicalId
+            ? rootId
+            : formalByCanonical.get(member.canonicalId);
+        if (matchedNodeId && nodesMap[matchedNodeId]) {
+          const target = nodesMap[matchedNodeId];
+          if (!target.executionHarnessId && member.executionHarnessId) {
+            target.executionHarnessId = member.executionHarnessId;
+          }
+          if (!target.sourceTag && member.sourceTag) {
+            target.sourceTag = member.sourceTag;
+          }
+          if (!target.conversationDescriptor && member.conversation) {
+            target.conversationDescriptor = member.conversation;
+            target.coverage = normalizeCoverage(
+              member.conversation.scope || "unavailable",
+              member.conversation.coverage || "",
+              target.isReadOnlyNative,
+              member.conversation.availability || ""
+            );
+          }
+        }
+      }
+
+      const knownCanonical = new Set(memberList.map((m) => m?.canonicalId).filter(Boolean));
+      const resolveDisplayId = (canonicalId) => {
+        if (!canonicalId) return null;
+        if (membersPage?.rootCanonicalId && canonicalId === membersPage.rootCanonicalId) return rootId;
+        if (formalByCanonical.has(canonicalId)) return formalByCanonical.get(canonicalId);
+        if (knownCanonical.has(canonicalId)) return unifiedUiId(canonicalId);
+        return null;
+      };
+
+      const legacyAliasToDisplay = new Map();
+      const ambiguousLegacyKeys = new Set();
+      for (const member of memberList) {
+        if (!member?.canonicalId) continue;
+        const targetId = resolveDisplayId(member.canonicalId);
+        if (!targetId) continue;
+        for (const alias of member.aliases || []) {
+          if (alias?.kind === "legacy_delegation" && alias.runId && alias.id) {
+            const key = `${alias.runId}\0${alias.id}`;
+            if (legacyAliasToDisplay.has(key) && legacyAliasToDisplay.get(key) !== targetId) {
+              ambiguousLegacyKeys.add(key);
+              legacyAliasToDisplay.delete(key);
+            } else if (!ambiguousLegacyKeys.has(key)) {
+              legacyAliasToDisplay.set(key, targetId);
+            }
+          }
+        }
+      }
+
+      const memberLabel = trText("organization.nativeMember", "Member", "成员");
+      const additionalMembers = memberList.filter(
+        (m) => m?.canonicalId && !formalByCanonical.has(m.canonicalId) && m.canonicalId !== membersPage?.rootCanonicalId
+      );
+
+      additionalMembers.forEach((member, index) => {
+        const uiId = unifiedUiId(member.canonicalId);
+        // Match against delegation records via verified legacy_delegation aliases
+        let matchingDelegation = null;
+        for (const alias of member.aliases || []) {
+          if (alias?.kind === "legacy_delegation" && alias.runId && alias.id) {
+            const candidate = delegationByKey.get(`${alias.runId}\0${alias.id}`);
+            if (candidate) {
+              const candTime = candidate.updatedAt ?? candidate.startedAt ?? 0;
+              const prevTime = matchingDelegation ? (matchingDelegation.updatedAt ?? matchingDelegation.startedAt ?? 0) : -1;
+              if (!matchingDelegation || candTime >= prevTime) matchingDelegation = candidate;
+            }
+          }
+        }
+
+        // Strict parent honesty: unknown parent stays detached (null), NEVER fabricated
+        const resolvedParentId =
+          member.relationKnown && member.parentCanonicalId
+            ? resolveDisplayId(member.parentCanonicalId)
+            : null;
+        const relationKnown = Boolean(member.relationKnown && resolvedParentId);
+        const parentUnknown = !relationKnown;
+
+        const activityState = member.activity?.state || matchingDelegation?.activity?.state || "unknown";
+        const delegationState = matchingDelegation?.state || "";
+        const runtimeState = mapMemberRuntimeState(activityState, delegationState);
+        const stateUnknown = !delegationState && (!activityState || activityState === "unknown");
+        const scope = member.conversation?.scope || "unavailable";
+        const coverage = normalizeCoverage(
+          scope,
+          member.conversation?.coverage || "",
+          true,
+          member.conversation?.availability || ""
+        );
+        const activityText =
+          matchingDelegation?.currentAction ||
+          member.activity?.kind ||
+          (activityState && activityState !== "unknown" ? activityState : null);
+
+        nodesMap[uiId] = {
+          id: uiId,
+          parentId: resolvedParentId,
+          role: NodeRole.WORKER,
+          domain: null,
+          iconDomain: AgentDomain.GENERAL,
+          displayName: `${memberLabel} ${index + 1}`,
+          phaseId: null,
+          runtimeState,
+          sessionId: null,
+          providerRef: matchingDelegation?.childSessionId || null,
+          currentActivity: activityText,
+          currentTaskSummary: null,
+          currentTaskDetail: null,
+          progressCompleted: 0,
+          progressTotal: 0,
+          blockerText: delegationState === "lost" ? trText("organization.delegationLost", "Subagent connection lost", "子代理连接已丢失") : null,
+          testsPassed: 0,
+          testsTotal: 0,
+          changedFiles: [],
+          resultPacketSummary: null,
+          isRootLeader: false,
+          memberKind: "unified_member",
+          isNativeMember: true,
+          isReadOnlyNative: true,
+          canOpenInbox: false,
+          canonicalId: member.canonicalId,
+          sourceTag: member.sourceTag || matchingDelegation?.provider || null,
+          executionHarnessId: member.executionHarnessId || matchingDelegation?.provider || null,
+          conversationDescriptor: member.conversation || null,
+          coverage,
+          sourceGap: Boolean(membersPage?.sourceCoverage?.gap),
+          relationKnown,
+          parentUnknown,
+          activity: member.activity || matchingDelegation?.activity || null,
+          birth: member.birth || null,
+          runId: member.activity?.runId || matchingDelegation?.runId || null,
+          stateUnknown,
+          rawNativeState: delegationState || activityState || "unknown",
+        };
+      });
+
+      // Fallback: fold any unmatched delegation-run records that do not yet have a unified member entry
+      let fallbackIndex = additionalMembers.length;
+      for (const [key, rec] of delegationByKey.entries()) {
+        if (legacyAliasToDisplay.has(key) || ambiguousLegacyKeys.has(key)) continue;
+        fallbackIndex += 1;
+        const uiId = nativeNodeId(rec.runId, rec.delegationId);
+        let parentId = null;
+        if (rec.parentDelegationId) {
+          const parentKey = `${rec.runId}\0${rec.parentDelegationId}`;
+          parentId = legacyAliasToDisplay.get(parentKey) || (delegationByKey.has(parentKey) ? nativeNodeId(rec.runId, rec.parentDelegationId) : null);
+        } else if (confirmedRootChildren.has(key)) {
+          parentId = rootId;
+        }
+        const relationKnown = Boolean(parentId && nodesMap[parentId]);
+        if (!relationKnown) parentId = null;
+
+        const activityState = rec.activity?.state || "unknown";
+        const runtimeState = mapMemberRuntimeState(activityState, rec.state);
+        const hasActivity = Boolean(rec.currentAction || (rec.activity?.state && rec.activity.state !== "unknown"));
+
+        nodesMap[uiId] = {
+          id: uiId,
+          parentId,
+          role: NodeRole.WORKER,
+          domain: null,
+          iconDomain: AgentDomain.GENERAL,
+          displayName: `${memberLabel} ${fallbackIndex}`,
+          phaseId: null,
+          runtimeState,
+          sessionId: null,
+          providerRef: rec.childSessionId || null,
+          currentActivity: rec.currentAction || (activityState !== "unknown" ? activityState : null),
+          currentTaskSummary: null,
+          currentTaskDetail: null,
+          progressCompleted: 0,
+          progressTotal: 0,
+          blockerText: rec.state === "lost" ? trText("organization.delegationLost", "Subagent connection lost", "子代理连接已丢失") : null,
+          testsPassed: 0,
+          testsTotal: 0,
+          changedFiles: [],
+          resultPacketSummary: null,
+          isRootLeader: false,
+          memberKind: "native_delegation",
+          isNativeMember: true,
+          isReadOnlyNative: true,
+          canOpenInbox: false,
+          canonicalId: null,
+          sourceTag: rec.provider || null,
+          executionHarnessId: rec.provider || null,
+          conversationDescriptor: null,
+          coverage: hasActivity ? "activity_only" : "unavailable",
+          sourceGap: this.delegationGap,
+          relationKnown,
+          parentUnknown: !relationKnown,
+          activity: rec.activity || null,
+          runId: rec.runId,
+          stateUnknown: !rec.state && activityState === "unknown",
+          rawNativeState: rec.state || activityState || "unknown",
+        };
+      }
+
+      // Build edges: formal edges + verified member edges (no edges for detached unknown-parent nodes)
       const edgesList = rawEdges.map((e, idx) => ({
         id: e.id || `edge-${idx}`,
-        fromNodeId: e.parentNodeId || e.fromNodeId,
-        toNodeId: e.childNodeId || e.toNodeId,
+        fromNodeId: e.parentNodeId || e.fromNodeId || e.parentId,
+        toNodeId: e.childNodeId || e.toNodeId || e.childId,
         type: e.edgeType || e.type || "MANAGES",
       }));
+      const formalChildIds = new Set(edgesList.map((e) => e.toNodeId));
+      Object.values(nodesMap).forEach((node) => {
+        if (node.parentId && nodesMap[node.parentId] && !formalChildIds.has(node.id)) {
+          edgesList.push({
+            id: `member-edge:${node.id}`,
+            fromNodeId: node.parentId,
+            toNodeId: node.id,
+            type: "MANAGES",
+          });
+        }
+      });
+
+      const rawRev = typeof proj.revision === "object" ? proj.revision?.number : proj.revision;
+      const revisionNumber = rawRev ?? proj.asOf?.revision ?? 0;
+
+      return {
+        hasFormalOrg,
+        objective: proj.objective || proj.proposal?.objective || (hasFormalOrg ? tr("organization.radar") : trText("organization.nativeWorkspace", "Session Agents", "会话协作成员")),
+        revisionNumber,
+        rootId,
+        nodesMap,
+        edgesList,
+        sourceCoverage: membersPage?.sourceCoverage || null,
+      };
+    }
+
+    // --- DOM Graph Rendering ---
+
+    render() {
+      if (!this.active || !this.dom.surface) return;
+      this.updateViewportDimensions();
+
+      const model = this.buildUnifiedGraphModel();
+      const { hasFormalOrg, objective, revisionNumber, nodesMap, edgesList } = model;
+
+      // Toggle Factory Work button strictly for formal organizations
+      if (this.dom.factoryWorkBtn) {
+        this.dom.factoryWorkBtn.hidden = !Boolean(this.projection?.organizationId);
+      }
 
       // Top Bar Text
       if (this.dom.objective) {
-        this.dom.objective.textContent = proj.objective || proj.proposal?.objective || tr("organization.radar");
+        this.dom.objective.textContent = objective;
       }
       if (this.dom.meta) {
-        const rev = proj.revision || proj.asOf?.revision || 0;
         const count = Object.keys(nodesMap).length;
-        this.dom.meta.textContent = `${tr("organization.revisionNumber", { revision: rev })} · ${count} ${tr("organization.agents")}`;
+        const parts = [];
+        if (hasFormalOrg) {
+          parts.push(tr("organization.revisionNumber", { revision: revisionNumber }));
+        }
+        parts.push(`${count} ${tr("organization.agents")}`);
+        if (model.sourceCoverage?.gap || this.delegationGap) {
+          parts.push(trText("organization.coverageGapShort", "partial coverage", "部分覆盖"));
+        }
+        this.dom.meta.textContent = parts.join(" · ");
       }
+
+      // Prune cached positions when parent topology changes (e.g. detached -> linked)
+      Object.entries(nodesMap).forEach(([id, node]) => {
+        if (Object.hasOwn(this.previousParents, id) && this.previousParents[id] !== node.parentId) {
+          delete this.previousPositions[id];
+        }
+        this.previousParents[id] = node.parentId;
+      });
 
       // Compute Layout
       this.layoutResult = OrganizationLayoutEngine.calculateLayout({
@@ -1956,7 +2931,7 @@
             nodeEl.style.opacity = pos.alpha;
             nodeEl.innerHTML = `
               <div class="org-node-circle" style="width:${pos.radius * 2}px;height:${pos.radius * 2}px;">
-                <span class="org-cluster-count">+${pos.clusterCount}</span>
+                <span class="org-cluster-count">+${escapeDisplayText(pos.clusterCount)}</span>
               </div>
             `;
             nodeEl.addEventListener("click", (e) => {
@@ -1968,15 +2943,24 @@
           } else if (nodeModel) {
             const roleClass = `org-node--${nodeModel.role.toLowerCase()}`;
             const stateClass = `is-${nodeModel.runtimeState.toLowerCase()}`;
+            const nativeClass = nodeModel.isNativeMember ? "org-node--native" : "";
+            const detachedClass = nodeModel.parentUnknown ? "org-node--detached" : "";
             const focusedClass = pos.isFocused ? "is-focused" : "";
             const dimmedClass = pos.alpha < 1.0 ? "is-dimmed" : "";
 
-            nodeEl.className = `org-node ${roleClass} ${stateClass} ${focusedClass} ${dimmedClass}`.trim();
+            nodeEl.className = `org-node ${roleClass} ${stateClass} ${nativeClass} ${detachedClass} ${focusedClass} ${dimmedClass}`.trim();
             nodeEl.style.left = `${pos.x}px`;
             nodeEl.style.top = `${pos.y}px`;
             nodeEl.style.opacity = pos.alpha;
 
-            let innerHtml = `
+            const subTags = [];
+            if (nodeModel.isNativeMember && nodeModel.sourceTag) subTags.push(nodeModel.sourceTag);
+            if (nodeModel.parentUnknown) subTags.push(trText("organization.detachedShort", "detached", "独立"));
+            const subBadgeHtml = subTags.length > 0
+              ? `<span class="org-node-subbadge">${escapeDisplayText(subTags.join(" · "))}</span>`
+              : "";
+
+            nodeEl.innerHTML = `
               <div class="org-node-circle" style="width:${pos.radius * 2}px;height:${pos.radius * 2}px;">
                 ${nodeModel.role === NodeRole.EXECUTIVE ? '<div class="org-node-inner-ring"></div>' : ""}
                 ${nodeModel.role === NodeRole.REVIEWER && nodeModel.runtimeState === NodeRuntimeState.REVIEWING ? '<div class="org-reviewer-sweep"></div>' : ""}
@@ -1984,10 +2968,8 @@
                   ${renderDomainGlyph(nodeModel.role, nodeModel.iconDomain)}
                 </div>
               </div>
-              <div class="org-node-label">${nodeModel.displayName}</div>
+              <div class="org-node-label">${escapeDisplayText(nodeModel.displayName)}${subBadgeHtml}</div>
             `;
-
-            nodeEl.innerHTML = innerHtml;
 
             // Single click opens Bottom Sheet
             nodeEl.addEventListener("click", (e) => {
@@ -2039,19 +3021,21 @@
       this.dom.activityBadge.textContent = `+${events.length} ${tr("organization.updates")}`;
 
       if (events.length === 0) {
-        this.dom.activityFeedList.innerHTML = `<div class="org-activity-row" style="color:var(--text-secondary);font-size:12px;">${tr("organization.noActivity")}</div>`;
+        this.dom.activityFeedList.innerHTML = `<div class="org-activity-row" style="color:var(--text-secondary);font-size:12px;">${escapeDisplayText(tr("organization.noActivity"))}</div>`;
         return;
       }
 
+      const allowedDotClasses = new Set(["running", "success", "waiting", "error"]);
       this.dom.activityFeedList.innerHTML = events
-        .map(
-          (e) => `
+        .map((e) => {
+          const dotClass = allowedDotClasses.has(e.dotClass) ? e.dotClass : "waiting";
+          return `
         <div class="org-activity-row">
-          <span class="org-activity-row-dot org-activity-row-dot--${e.dotClass}"></span>
-          <span class="org-activity-row-msg">${e.message}</span>
-          <span class="org-activity-row-time">${e.time}</span>
-        </div>`
-        )
+          <span class="org-activity-row-dot org-activity-row-dot--${dotClass}"></span>
+          <span class="org-activity-row-msg">${escapeDisplayText(e.message)}</span>
+          <span class="org-activity-row-time">${escapeDisplayText(e.time)}</span>
+        </div>`;
+        })
         .join("");
     }
 
@@ -2065,73 +3049,203 @@
       }
     }
 
+    // --- Member Metadata & Provenance Normalization ---
+
+    normalizeNodeForView(node) {
+      if (!node) return null;
+      const role = node.role || NodeRole.fromString(node.nodeRole || node.role || node.sessionClass);
+      const domain = typeof node.domain === "string" ? node.domain : null;
+      const hasBlocker = Boolean(node.blocker || node.status === "blocked" || node.blockerText);
+      const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, hasBlocker);
+      const isReadOnlyNative = Boolean(node.isReadOnlyNative || node.isNativeMember);
+      const memberKind = node.memberKind || (isReadOnlyNative ? "unified_member" : node.isSyntheticRoot ? "root_session" : "formal");
+      const memberDesc = node.member || null;
+      const conversationDescriptor = node.conversationDescriptor || memberDesc?.conversation || null;
+      const sessionId = isReadOnlyNative ? null : (node.currentSessionId || node.sessionId || null);
+      const coverage = node.coverage || normalizeCoverage(
+        conversationDescriptor?.scope || (sessionId && !node.isSyntheticRoot ? "full" : "unavailable"),
+        conversationDescriptor?.coverage || "",
+        isReadOnlyNative,
+        conversationDescriptor?.availability || ""
+      );
+      const sourceTag = node.sourceTag ?? memberDesc?.sourceTag ?? (memberKind === "formal" || memberKind === "root_session" ? "ragent" : null);
+      const executionHarnessId = node.executionHarnessId ?? memberDesc?.executionHarnessId ?? null;
+      const isRootLeader = Boolean(node.isRootLeader ?? (role === NodeRole.EXECUTIVE));
+      const canOpenInbox = Boolean(
+        node.canOpenInbox ?? (memberKind === "formal" && Boolean(this.projection?.organizationId) && !isReadOnlyNative)
+      );
+
+      return {
+        ...node,
+        id: node.id || node.stableKey,
+        role,
+        domain,
+        runtimeState,
+        displayName: node.displayName || node.stableKey || node.id,
+        sessionId,
+        isRootLeader,
+        memberKind,
+        isReadOnlyNative,
+        canOpenInbox,
+        sourceTag,
+        executionHarnessId,
+        conversationDescriptor,
+        coverage,
+        parentUnknown: Boolean(node.parentUnknown),
+        sourceGap: Boolean(node.sourceGap),
+        progressCompleted: node.progressCompleted ?? node.progress?.completed ?? 0,
+        progressTotal: node.progressTotal ?? node.progress?.total ?? 0,
+        currentTaskSummary: node.currentTaskSummary || node.currentTask?.objective || node.task?.objective || null,
+        currentTaskDetail: node.currentTaskDetail || node.task?.detail || null,
+        blockerText: node.blockerText || node.blocker?.reason || node.blocker?.reasonCode || null,
+        changedFiles: Array.isArray(node.changedFiles) ? node.changedFiles : [],
+      };
+    }
+
+    renderMetaPillsHtml(node, overrideCoverage = null, overrideGap = null) {
+      const effectiveCoverage = overrideCoverage || node.coverage || "unavailable";
+      const hasGap = overrideGap !== null ? Boolean(overrideGap) : Boolean(node.sourceGap);
+      const sourceText = node.sourceTag || trText("organization.unknown", "unknown", "未知");
+      const harnessText = node.executionHarnessId || trText("organization.unknown", "unknown", "未知");
+      const pills = [
+        `<span class="org-meta-pill org-meta-pill--source">${escapeDisplayText(trText("organization.sourceTag", "Source", "来源"))}: ${escapeDisplayText(sourceText)}</span>`,
+        `<span class="org-meta-pill org-meta-pill--harness">${escapeDisplayText(trText("organization.executionHarness", "Harness", "执行环境"))}: ${escapeDisplayText(harnessText)}</span>`,
+        `<span class="org-meta-pill org-meta-pill--coverage-${escapeDisplayText(effectiveCoverage)}">${escapeDisplayText(trText("organization.coverageLabel", "Coverage", "覆盖"))}: ${escapeDisplayText(coverageLabel(effectiveCoverage))}</span>`,
+      ];
+      if (node.isReadOnlyNative) {
+        pills.push(`<span class="org-meta-pill org-meta-pill--readonly">${escapeDisplayText(trText("organization.readOnly", "Read-only", "只读"))}</span>`);
+      }
+      if (node.parentUnknown) {
+        pills.push(`<span class="org-meta-pill org-meta-pill--warning">${escapeDisplayText(trText("organization.parentUnknown", "Parent unknown (detached)", "父级未知（独立节点）"))}</span>`);
+      }
+      if (hasGap) {
+        pills.push(`<span class="org-meta-pill org-meta-pill--warning">${escapeDisplayText(trText("organization.coverageGapBadge", "Partial / gap", "存在缺口"))}</span>`);
+      }
+      return pills.join("");
+    }
+
     // --- Organization Bottom Sheet ---
 
-    openBottomSheet(node) {
+    buildHonestyBannerText(node, overrideCoverage = null, overrideGap = null) {
+      if (!node) return "";
+      const effectiveCoverage = overrideCoverage || node.coverage || "unavailable";
+      const hasGap = overrideGap !== null ? Boolean(overrideGap) : Boolean(node.sourceGap);
+      if (node.isSyntheticRoot && !node.conversationDescriptor?.ref) {
+        return trText(
+          "organization.syntheticRootTranscriptNotice",
+          "Root session conversation is available in the main chat timeline.",
+          "根会话的对话内容请返回主聊天时间线查看。"
+        );
+      }
+      const lines = [coverageDescription(effectiveCoverage, node.isReadOnlyNative)];
+      if (hasGap) {
+        lines.push(
+          trText(
+            "organization.coverageGapDesc",
+            "Some activity may be unavailable due to a source gap.",
+            "部分活动或历史可能因来源缺口而不可用。"
+          )
+        );
+      }
+      if (node.isReadOnlyNative) {
+        lines.push(
+          trText(
+            "organization.readOnlyCapabilityNotice",
+            "Read-only observation: single-member control and messaging are unavailable.",
+            "只读观测视图：不支持单成员控制或发消息。"
+          )
+        );
+      }
+      return lines.join(" ");
+    }
+
+    openBottomSheet(rawNode) {
+      const node = this.normalizeNodeForView(rawNode);
       if (!node) return;
       this.selectedSheetNodeId = node.id;
       const sheet = this.dom.sheet;
       const backdrop = this.dom.sheetBackdrop;
       if (!sheet || !backdrop) return;
 
-      const role = node.role || NodeRole.fromString(node.nodeRole || node.sessionClass);
-      const domain = typeof node.domain === "string" ? node.domain : "";
-      const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, Boolean(node.blocker));
-      const stateName = String(runtimeState).toLowerCase();
-      const statusText = tr(`organization.${stateName === "failed" ? "failedStatus" : stateName}`) || runtimeState;
-      const isRootLeader = Boolean(node.isRootLeader ?? (role === NodeRole.EXECUTIVE));
-      const displayName = node.displayName || node.stableKey || node.id;
+      const stateName = String(node.runtimeState).toLowerCase();
+      const statusText = formatRuntimeStatusText(node);
+      const subtitleParts = [
+        node.isReadOnlyNative
+          ? trText("organization.nativeSubagent", "Native subagent", "原生子代理")
+          : node.isSyntheticRoot
+            ? trText("organization.nativeRoot", "Root session", "根会话")
+            : node.role,
+      ];
+      if (node.domain) subtitleParts.push(node.domain);
+      if (node.sourceTag) subtitleParts.push(node.sourceTag);
+
+      const hasConversationRef = Boolean(node.conversationDescriptor?.ref);
+      const detailsBtnLabel = hasConversationRef && node.isReadOnlyNative
+        ? trText("organization.viewConversation", "View Conversation", "查看会话")
+        : tr("organization.viewDetails");
 
       sheet.innerHTML = `
         <div class="org-sheet-header">
           <div>
-            <div class="org-sheet-name">${displayName}</div>
-            <div class="org-sheet-subtitle">${escapeDisplayText(role)}${domain ? ` · ${escapeDisplayText(domain)}` : ""}</div>
+            <div class="org-sheet-name">${escapeDisplayText(node.displayName)}</div>
+            <div class="org-sheet-subtitle">${escapeDisplayText(subtitleParts.join(" · "))}</div>
           </div>
-          <div class="org-status-pill org-status-pill--${stateName}">
+          <div class="org-status-pill org-status-pill--${escapeDisplayText(stateName)}">
             <span class="org-status-pill-dot"></span>
-            <span>${statusText}</span>
+            <span>${escapeDisplayText(statusText)}</span>
           </div>
         </div>
 
-        <div class="org-info-card">
-          <div class="org-info-card-label">${tr("organization.currentTask")}</div>
-          <div class="org-info-card-value">${node.currentTaskSummary || tr("organization.noTaskAssigned")}</div>
+        <div class="org-meta-pills">${this.renderMetaPillsHtml(node)}</div>
+
+        <div class="org-honesty-banner ${node.sourceGap || node.parentUnknown ? "org-honesty-banner--warning" : ""}">
+          ${escapeDisplayText(this.buildHonestyBannerText(node))}
         </div>
 
         ${
-          node.currentActivity
-            ? `
-          <div class="org-info-card">
-            <div class="org-info-card-label">${tr("organization.currentActivity")}</div>
-            <div class="org-info-card-value" style="font-family:monospace;font-size:12px;">${node.currentActivity}</div>
-          </div>`
+          !node.isReadOnlyNative
+            ? `<div class="org-info-card">
+                <div class="org-info-card-label">${escapeDisplayText(tr("organization.currentTask"))}</div>
+                <div class="org-info-card-value">${escapeDisplayText(node.currentTaskSummary || tr("organization.noTaskAssigned"))}</div>
+              </div>`
             : ""
         }
 
-        <div class="org-info-row">
-          <div class="org-info-card">
-            <div class="org-info-card-label">${tr("organization.acceptance")}</div>
-            <div class="org-info-card-value">${node.progressCompleted} / ${node.progressTotal} ${tr("organization.items")}</div>
-          </div>
-        </div>
+        ${
+          node.currentActivity
+            ? `<div class="org-info-card">
+                <div class="org-info-card-label">${escapeDisplayText(tr("organization.currentActivity"))}</div>
+                <div class="org-info-card-value" style="font-family:monospace;font-size:12px;">${escapeDisplayText(node.currentActivity)}</div>
+              </div>`
+            : ""
+        }
+
+        ${
+          !node.isReadOnlyNative && node.memberKind === "formal"
+            ? `<div class="org-info-row">
+                <div class="org-info-card">
+                  <div class="org-info-card-label">${escapeDisplayText(tr("organization.acceptance"))}</div>
+                  <div class="org-info-card-value">${escapeDisplayText(node.progressCompleted)} / ${escapeDisplayText(node.progressTotal)} ${escapeDisplayText(tr("organization.items"))}</div>
+                </div>
+              </div>`
+            : ""
+        }
 
         ${
           node.blockerText
-            ? `
-          <div class="org-blocker-card">
-            ${tr("organization.activeBlocker")}: ${node.blockerText}
-          </div>`
+            ? `<div class="org-blocker-card">
+                ${escapeDisplayText(tr("organization.activeBlocker"))}: ${escapeDisplayText(node.blockerText)}
+              </div>`
             : ""
         }
 
         <div class="org-sheet-actions">
           ${
             node.isRootLeader
-              ? `<button type="button" class="org-btn org-btn--primary" id="orgSendInstructionBtn">${tr("organization.sendInstruction")}</button>`
+              ? `<button type="button" class="org-btn org-btn--primary" id="orgSendInstructionBtn">${escapeDisplayText(tr("organization.sendInstruction"))}</button>`
               : ""
           }
-          <button type="button" class="org-btn ${node.isRootLeader ? "org-btn--secondary" : "org-btn--primary"}" id="orgViewDetailsBtn">${tr("organization.viewDetails")}</button>
+          <button type="button" class="org-btn ${node.isRootLeader ? "org-btn--secondary" : "org-btn--primary"}" id="orgViewDetailsBtn">${escapeDisplayText(detailsBtnLabel)}</button>
         </div>
       `;
 
@@ -2178,91 +3292,128 @@
       }, 200);
     }
 
-    // --- Agent Detail Screen ---
+    // --- Agent Detail Screen & Read-Only Conversation Loader ---
 
-    openDetailScreen(node) {
+    openDetailScreen(rawNode) {
+      const node = this.normalizeNodeForView(rawNode);
       if (!node) return;
+      this.stopDetailPolling();
       this.detailNodeId = node.id;
+      this.detailConversationState = null;
       const screen = this.dom.detailScreen;
       if (!screen) return;
 
-      const role = node.role || NodeRole.fromString(node.nodeRole || node.sessionClass);
-      const domain = typeof node.domain === "string" ? node.domain : "";
-      const runtimeState = node.runtimeState || NodeRuntimeState.fromString(node.status, node.currentActivity, Boolean(node.blocker));
-      const stateName = String(runtimeState).toLowerCase();
-      const statusText = tr(`organization.${stateName === "failed" ? "failedStatus" : stateName}`) || runtimeState;
-      const displayName = node.displayName || node.stableKey || node.id;
+      const stateName = String(node.runtimeState).toLowerCase();
+      const statusText = formatRuntimeStatusText(node);
       const changedFiles = node.changedFiles || [];
+      const subtitleText = node.isReadOnlyNative
+        ? trText("organization.nativeSubagent", "Native subagent", "原生子代理")
+        : node.isSyntheticRoot
+          ? trText("organization.nativeRoot", "Root session", "根会话")
+          : `${node.role}${node.domain ? ` · ${node.domain}` : ""}`;
 
       screen.innerHTML = `
         <div class="org-detail-top-bar">
-          <button type="button" class="org-icon-btn" id="orgDetailBackBtn" aria-label="${tr("organization.backToRadar")}">
+          <button type="button" class="org-icon-btn" id="orgDetailBackBtn" aria-label="${escapeDisplayText(tr("organization.backToRadar"))}">
             ${root.RagentIcons?.render?.("chevron-left") || "←"}
           </button>
-          <div class="org-detail-title">${displayName}</div>
+          <div class="org-detail-title">${escapeDisplayText(node.displayName)}</div>
         </div>
 
         <div class="org-detail-content">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
             <div>
-              <div style="font-size:12px;color:var(--text-secondary);">${escapeDisplayText(role)}${domain ? ` · ${escapeDisplayText(domain)}` : ""}</div>
-              ${node.sessionId ? `<div style="font-size:11px;font-family:monospace;color:var(--text-tertiary);">Session: ${node.sessionId}</div>` : ""}
+              <div style="font-size:12px;color:var(--text-secondary);">${escapeDisplayText(subtitleText)}</div>
+              ${node.sessionId ? `<div style="font-size:11px;font-family:monospace;color:var(--text-tertiary);">Session: ${escapeDisplayText(node.sessionId)}</div>` : ""}
+              ${node.providerRef ? `<div style="font-size:11px;font-family:monospace;color:var(--text-tertiary);">${escapeDisplayText(trText("organization.externalRef", "External provider ref", "外部运行时引用"))}: ${escapeDisplayText(node.providerRef)}</div>` : ""}
             </div>
-            <div class="org-status-pill org-status-pill--${stateName}">
+            <div class="org-status-pill org-status-pill--${escapeDisplayText(stateName)}">
               <span class="org-status-pill-dot"></span>
-              <span>${statusText}</span>
+              <span>${escapeDisplayText(statusText)}</span>
             </div>
           </div>
 
-          <div class="org-info-card" style="margin-bottom:12px;">
-            <div class="org-info-card-label">${tr("organization.currentTask")}</div>
-            <div class="org-info-card-value" style="font-weight:600;">${node.currentTaskSummary || tr("organization.noActiveTask")}</div>
-            ${node.currentTaskDetail ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${node.currentTaskDetail}</div>` : ""}
+          <div class="org-meta-pills" id="orgDetailMetaPills">${this.renderMetaPillsHtml(node)}</div>
+
+          <div class="org-honesty-banner ${node.sourceGap || node.parentUnknown ? "org-honesty-banner--warning" : ""}" id="orgDetailCoverageBanner">
+            ${escapeDisplayText(this.buildHonestyBannerText(node))}
           </div>
 
-          <div class="org-info-card" style="margin-bottom:12px;">
-            <div class="org-info-card-label">${tr("organization.currentActivity")}</div>
-            <div class="org-info-card-value" style="font-family:monospace;font-size:12px;">${node.currentActivity || tr("organization.idle")}</div>
-          </div>
-
-          <div class="org-info-card" style="margin-bottom:12px;">
-            <div class="org-info-card-label">${tr("organization.changedFiles")} (${changedFiles.length})</div>
-            <div class="org-file-list">
-              ${
-                changedFiles.length > 0
-                  ? changedFiles
-                      .map(
-                        (f) => `
-                    <div class="org-file-item">
-                      ${root.RagentIcons?.render?.("file") || "📄"}
-                      <span>${f}</span>
-                    </div>`
-                      )
-                      .join("")
-                  : `<div style="font-size:12px;color:var(--text-secondary);padding:4px 0;">No changed files</div>`
-              }
+          <div class="org-conv-section" id="orgDetailConversationSection">
+            <div class="org-conv-header">
+              <div class="org-info-card-label">${escapeDisplayText(trText("organization.memberConversation", "Read-only conversation", "只读会话视图"))}</div>
+              <div class="org-conv-actions">
+                <button type="button" class="org-btn org-btn--secondary" id="orgConvOlderBtn" hidden>${escapeDisplayText(trText("organization.loadEarlier", "Load earlier", "加载更早消息"))}</button>
+                <button type="button" class="org-btn org-btn--secondary" id="orgConvRefreshBtn">${escapeDisplayText(trText("organization.refresh", "Refresh", "刷新"))}</button>
+              </div>
             </div>
+            <div class="org-conv-empty" id="orgConvStatus"></div>
+            <div class="org-conv-list" id="orgConvList"></div>
           </div>
 
-          <div class="org-info-card" style="margin-bottom:12px;"><button type="button" class="org-btn org-btn--secondary" id="orgNodeInboxBtn">Messages</button></div>
+          ${
+            !node.isReadOnlyNative
+              ? `<div class="org-info-card">
+                  <div class="org-info-card-label">${escapeDisplayText(tr("organization.currentTask"))}</div>
+                  <div class="org-info-card-value" style="font-weight:600;">${escapeDisplayText(node.currentTaskSummary || tr("organization.noActiveTask"))}</div>
+                  ${node.currentTaskDetail ? `<div style="font-size:12px;color:var(--text-secondary);margin-top:4px;">${escapeDisplayText(node.currentTaskDetail)}</div>` : ""}
+                </div>`
+              : ""
+          }
+
+          ${
+            node.currentActivity || !node.isReadOnlyNative
+              ? `<div class="org-info-card">
+                  <div class="org-info-card-label">${escapeDisplayText(tr("organization.currentActivity"))}</div>
+                  <div class="org-info-card-value" style="font-family:monospace;font-size:12px;">${escapeDisplayText(node.currentActivity || tr("organization.idle"))}</div>
+                </div>`
+              : ""
+          }
+
+          ${
+            !node.isReadOnlyNative && node.memberKind === "formal"
+              ? `<div class="org-info-card">
+                  <div class="org-info-card-label">${escapeDisplayText(tr("organization.changedFiles"))} (${escapeDisplayText(changedFiles.length)})</div>
+                  <div class="org-file-list">
+                    ${
+                      changedFiles.length > 0
+                        ? changedFiles
+                            .map(
+                              (f) => `
+                          <div class="org-file-item">
+                            ${root.RagentIcons?.render?.("file") || "📄"}
+                            <span>${escapeDisplayText(f)}</span>
+                          </div>`
+                            )
+                            .join("")
+                        : `<div style="font-size:12px;color:var(--text-secondary);padding:4px 0;">${escapeDisplayText(trText("organization.noChangedFiles", "No changed files", "暂无变更文件"))}</div>`
+                    }
+                  </div>
+                </div>`
+              : ""
+          }
+
+          ${
+            node.canOpenInbox
+              ? `<div class="org-info-card"><button type="button" class="org-btn org-btn--secondary" id="orgNodeInboxBtn">${escapeDisplayText(trText("organization.messagesButton", "Messages", "成员消息"))}</button></div>`
+              : ""
+          }
 
           ${
             node.resultPacketSummary
-              ? `
-            <div class="org-info-card" style="margin-bottom:12px;">
-              <div class="org-info-card-label">${tr("organization.resultPacket")}</div>
-              <div class="org-info-card-value">${node.resultPacketSummary}</div>
-            </div>`
+              ? `<div class="org-info-card">
+                  <div class="org-info-card-label">${escapeDisplayText(tr("organization.resultPacket"))}</div>
+                  <div class="org-info-card-value">${escapeDisplayText(node.resultPacketSummary)}</div>
+                </div>`
               : ""
           }
 
           ${
             node.blockerText
-              ? `
-            <div class="org-blocker-card" style="margin-bottom:12px;">
-              <div style="font-weight:600;">${tr("organization.activeBlocker")}</div>
-              <div style="margin-top:4px;">${node.blockerText}</div>
-            </div>`
+              ? `<div class="org-blocker-card">
+                  <div style="font-weight:600;">${escapeDisplayText(tr("organization.activeBlocker"))}</div>
+                  <div style="margin-top:4px;">${escapeDisplayText(node.blockerText)}</div>
+                </div>`
               : ""
           }
         </div>
@@ -2272,15 +3423,324 @@
       if (backBtn) {
         backBtn.addEventListener("click", () => this.closeDetailScreen());
       }
-      screen.querySelector('#orgNodeInboxBtn')?.addEventListener('click', () => this.showNodeInbox(node));
+      if (node.canOpenInbox) {
+        screen.querySelector("#orgNodeInboxBtn")?.addEventListener("click", () => this.showNodeInbox(node));
+      }
+
+      const refreshBtn = screen.querySelector("#orgConvRefreshBtn");
+      const olderBtn = screen.querySelector("#orgConvOlderBtn");
+      if (node.conversationDescriptor?.ref && this.sessionId) {
+        if (refreshBtn) {
+          refreshBtn.addEventListener("click", () => {
+            void this.loadMemberConversation(node, { mode: "refresh" });
+          });
+        }
+        if (olderBtn) {
+          olderBtn.addEventListener("click", () => {
+            void this.loadMemberConversation(node, { mode: "older" });
+          });
+        }
+        void this.loadMemberConversation(node, { mode: "initial" });
+        this.detailPollTimerId = setInterval(() => {
+          if (!this.active || this.detailNodeId !== node.id || this.dom.detailScreen?.hidden) {
+            this.stopDetailPolling();
+            return;
+          }
+          if (this.detailConversationState && !this.detailConversationState.denied && !this.detailConversationState.loading) {
+            void this.loadMemberConversation(node, { mode: "delta" });
+          }
+        }, 3000);
+      } else {
+        if (refreshBtn) refreshBtn.hidden = true;
+        const convStatus = screen.querySelector("#orgConvStatus");
+        if (convStatus) {
+          if (node.isSyntheticRoot) {
+            convStatus.textContent = trText(
+              "organization.syntheticRootTranscriptNotice",
+              "Root session conversation is available in the main chat timeline.",
+              "根会话的对话内容请返回主聊天时间线查看。"
+            );
+          } else {
+            convStatus.textContent = node.coverage === "activity_only"
+              ? trText("organization.coverage.activityOnlyDesc", "Available activity and results only; no child transcript was captured.", "仅显示可用的活动和结果，未捕获子会话正文。")
+              : trText("organization.coverage.unavailableDesc", "This member's conversation is unavailable.", "此成员的会话暂不可用。");
+          }
+        }
+      }
 
       screen.hidden = false;
     }
 
-    async showNodeInbox(node) {
+    async loadMemberConversation(node, { mode = "initial" } = {}) {
+      const screen = this.dom.detailScreen;
+      const memberRef = node?.conversationDescriptor?.ref;
+      const targetSessionId = this.sessionId;
+      if (!screen || !memberRef || !targetSessionId) return;
+
+      const epoch = this.detailRequestEpoch;
+      const fetcher = this.getFetcher();
+      const statusEl = screen.querySelector("#orgConvStatus");
+      const listEl = screen.querySelector("#orgConvList");
+      const olderBtn = screen.querySelector("#orgConvOlderBtn");
+      const pillsEl = screen.querySelector("#orgDetailMetaPills");
+      const bannerEl = screen.querySelector("#orgDetailCoverageBanner");
+      if (!fetcher) {
+        if (statusEl) statusEl.textContent = trText("organization.conversationUnavailable", "Conversation unavailable.", "会话暂不可用。");
+        return;
+      }
+
+      const prevState = this.detailConversationState || {
+        generation: null,
+        scope: null,
+        revision: null,
+        entries: [],
+        nextBeforeSeq: null,
+        latestSeq: 0,
+        hasMoreBefore: false,
+        denied: false,
+        loading: false,
+      };
+      if (prevState.loading && mode === "delta") return;
+      prevState.loading = true;
+      this.detailConversationState = prevState;
+
+      if (mode === "initial" && statusEl) {
+        statusEl.textContent = trText("organization.loadingConversation", "Loading conversation…", "正在加载会话…");
+      }
+
+      const basePath = `/api/sessions/${encodeURIComponent(targetSessionId)}/organization/members/${encodeURIComponent(memberRef)}/conversation`;
+      let url = `${basePath}?limit=50`;
+      if (mode === "older" && prevState.nextBeforeSeq != null) {
+        url = `${basePath}?beforeSeq=${encodeURIComponent(prevState.nextBeforeSeq)}&limit=50`;
+      } else if (mode === "delta" && prevState.latestSeq > 0) {
+        url = `${basePath}?afterSeq=${encodeURIComponent(prevState.latestSeq)}&limit=200`;
+      }
+
+      try {
+        const res = await fetcher(url, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (this.detailRequestEpoch !== epoch || this.detailNodeId !== node.id || this.sessionId !== targetSessionId) return;
+
+        if (res.status === 401 || res.status === 403) {
+          prevState.denied = true;
+          prevState.entries = [];
+          if (listEl) listEl.replaceChildren();
+          if (olderBtn) olderBtn.hidden = true;
+          if (statusEl) statusEl.textContent = trText("organization.conversationDenied", "This conversation is not available.", "无法查看此会话。");
+          return;
+        }
+        if (res.status === 404) {
+          prevState.entries = [];
+          if (listEl) listEl.replaceChildren();
+          if (olderBtn) olderBtn.hidden = true;
+          if (statusEl) statusEl.textContent = trText("organization.coverage.unavailableDesc", "This member's conversation is unavailable.", "此成员的会话暂不可用。");
+          return;
+        }
+        if (res.status === 409) {
+          prevState.entries = [];
+          prevState.generation = null;
+          prevState.latestSeq = 0;
+          prevState.nextBeforeSeq = null;
+          if (listEl) listEl.replaceChildren();
+          if (olderBtn) olderBtn.hidden = true;
+          if (statusEl) statusEl.textContent = trText("organization.bindingChanged", "Member binding changed; refreshing…", "成员绑定已变更，正在刷新…");
+          void this.refreshOrganizationData({ force: true });
+          return;
+        }
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const page = await res.json();
+        if (this.detailRequestEpoch !== epoch || this.detailNodeId !== node.id || this.sessionId !== targetSessionId) return;
+
+        const validScopes = new Set(["full", "captured_only", "activity_only", "unavailable"]);
+        if (page?.reset || !Number.isSafeInteger(page?.generation) || page.generation < 0 || !validScopes.has(page?.scope)) {
+          prevState.entries = [];
+          prevState.generation = null;
+          prevState.latestSeq = 0;
+          if (listEl) listEl.replaceChildren();
+          if (statusEl) statusEl.textContent = trText("organization.conversationReset", "Conversation reset; click Refresh to reload.", "会话已重置，请点击刷新重新加载。");
+          return;
+        }
+
+        if (mode === "delta" || mode === "older") {
+          if (prevState.generation !== null && (page.generation !== prevState.generation || page.scope !== prevState.scope)) {
+            this.detailConversationState = null;
+            void this.loadMemberConversation(node, { mode: "refresh" });
+            return;
+          }
+          if (prevState.revision != null && page.revision != null && page.revision < prevState.revision) {
+            this.detailConversationState = null;
+            void this.loadMemberConversation(node, { mode: "refresh" });
+            return;
+          }
+        }
+
+        const effectiveCoverage = normalizeCoverage(page.scope, page.coverage, node.isReadOnlyNative, page.availability);
+        const hasGap = Boolean(page.gap || node.sourceGap);
+        if (pillsEl) {
+          pillsEl.innerHTML = this.renderMetaPillsHtml(node, effectiveCoverage, hasGap);
+        }
+        if (bannerEl) {
+          bannerEl.className = `org-honesty-banner ${hasGap || node.parentUnknown ? "org-honesty-banner--warning" : ""}`;
+          bannerEl.textContent = this.buildHonestyBannerText(node, effectiveCoverage, hasGap);
+        }
+
+        const incoming = Array.isArray(page.entries) ? page.entries : [];
+        let combined;
+        if (mode === "older") {
+          combined = [...incoming, ...prevState.entries];
+        } else if (mode === "delta") {
+          combined = [...prevState.entries, ...incoming];
+        } else {
+          combined = incoming;
+        }
+
+        // Deduplicate deterministically by eventId / id / seq and sort chronologically by seq
+        const seen = new Map();
+        for (const entry of combined) {
+          if (!entry || typeof entry !== "object") continue;
+          const seq = Number.isInteger(entry.seq) && entry.seq > 0 ? entry.seq : 0;
+          const key = entry.eventId || entry.id || `${entry.type || "event"}:${seq}:${entry.timelineEntityId || ""}`;
+          seen.set(key, entry);
+        }
+        const orderedEntries = Array.from(seen.values())
+          .sort((a, b) => (Number(a.seq) || 0) - (Number(b.seq) || 0))
+          .slice(-1000);
+
+        prevState.generation = page.generation;
+        prevState.scope = page.scope;
+        prevState.revision = page.revision ?? prevState.revision;
+        prevState.entries = orderedEntries;
+        if (mode !== "delta") {
+          prevState.nextBeforeSeq = page.nextBeforeSeq ?? null;
+          prevState.hasMoreBefore = Boolean(page.hasMoreBefore && page.nextBeforeSeq != null);
+        }
+        const maxIncomingSeq = orderedEntries.reduce((acc, ev) => Math.max(acc, Number(ev.seq) || 0), 0);
+        prevState.latestSeq = Math.max(prevState.latestSeq || 0, Number(page.nextAfterSeq) || 0, maxIncomingSeq);
+
+        if (olderBtn) {
+          olderBtn.hidden = !prevState.hasMoreBefore;
+        }
+        if (listEl) {
+          this.renderConversationEntries(listEl, orderedEntries);
+        }
+        if (statusEl) {
+          if (orderedEntries.length > 0) {
+            statusEl.textContent = "";
+          } else if (effectiveCoverage === "activity_only") {
+            const actState = page.activity?.state || node.rawNativeState || "unknown";
+            statusEl.textContent = `${trText("organization.coverage.activityOnlyDesc", "Available activity and results only; no child transcript was captured.", "仅显示可用的活动和结果，未捕获子会话正文。")} (${actState})`;
+          } else if (effectiveCoverage === "unavailable") {
+            statusEl.textContent = trText("organization.coverage.unavailableDesc", "This member's conversation is unavailable.", "此成员的会话暂不可用。");
+          } else {
+            statusEl.textContent = trText("organization.noMessages", "No messages yet.", "暂无消息。");
+          }
+        }
+      } catch (err) {
+        if (this.detailRequestEpoch !== epoch || this.detailNodeId !== node.id) return;
+        if (statusEl) {
+          statusEl.textContent = prevState.entries.length > 0
+            ? trText("organization.conversationRefreshFailedRetained", "Couldn't refresh · showing previously verified entries.", "刷新失败，保留显示已加载内容。")
+            : trText("organization.conversationUnavailable", "Conversation unavailable.", "会话暂不可用。");
+        }
+      } finally {
+        prevState.loading = false;
+      }
+    }
+
+    renderConversationEntries(container, entries) {
+      if (!container) return;
+      container.replaceChildren();
+      for (const entry of entries) {
+        const type = String(entry?.type || "notice").toLowerCase();
+        if (type === "usage" || type === "approval_request" || type === "run_terminal" || type === "run_regenerate") {
+          continue;
+        }
+        const card = document.createElement("div");
+        const role = String(entry?.role || "").toLowerCase();
+        let variant = "notice";
+        let metaTitle = type;
+        let bodyText = "";
+
+        if (type === "message") {
+          variant = role === "user" ? "user" : role === "system" ? "system" : "assistant";
+          metaTitle = role === "user"
+            ? trText("organization.roleUser", "User", "用户")
+            : role === "system"
+              ? trText("organization.roleSystem", "System", "系统")
+              : trText("organization.roleAssistant", "Assistant", "助手");
+          bodyText = typeof entry.content === "string"
+            ? entry.content
+            : (typeof entry.text === "string" ? entry.text : "");
+          if (!bodyText && Array.isArray(entry.attachments) && entry.attachments.length > 0) {
+            bodyText = entry.attachments.map((a) => a?.name || a?.filename || "attachment").join(", ");
+          }
+        } else if (type === "thinking_block" || type === "reasoning") {
+          variant = "thinking";
+          metaTitle = trText("organization.thinkingLabel", "Reasoning", "思考过程");
+          bodyText = typeof entry.content === "string"
+            ? entry.content
+            : (typeof entry.text === "string" ? entry.text : "");
+        } else if (type === "operation" || type === "tool_use" || type === "tool_result") {
+          variant = "operation";
+          metaTitle = entry.title || entry.toolName || trText("organization.operationLabel", "Tool call", "工具调用");
+          const parts = [];
+          if (entry.state) parts.push(`[${entry.state}]`);
+          if (entry.detail && entry.detail !== metaTitle) parts.push(entry.detail);
+          if (entry.summary && entry.summary !== metaTitle && entry.summary !== entry.detail) parts.push(entry.summary);
+          if (entry.command && entry.command !== entry.detail) parts.push(entry.command);
+          const inputText = readableToolField(entry.input ?? entry.toolInput);
+          if (inputText && inputText !== entry.detail && inputText !== entry.command) parts.push(`Input:\n${inputText}`);
+          const outputText = readableToolField(entry.outputPreview ?? entry.output);
+          if (outputText && outputText !== entry.detail) parts.push(`Output:\n${outputText}`);
+          if (entry.exitCode != null) parts.push(`Exit code: ${entry.exitCode}`);
+          bodyText = parts.join("\n");
+        } else if (type === "plan") {
+          variant = "plan";
+          metaTitle = entry.title || trText("organization.planLabel", "Plan", "计划");
+          const itemLines = Array.isArray(entry.items)
+            ? entry.items.map((it) => `- ${typeof it === "string" ? it : (it?.text || it?.step || it?.title || "")}`).filter(Boolean)
+            : [];
+          bodyText = [entry.bodyMarkdown || "", ...itemLines].filter(Boolean).join("\n");
+        } else {
+          bodyText = entry.content || entry.text || entry.detail || "";
+        }
+
+        if (!bodyText.trim()) continue;
+        card.className = `org-conv-item org-conv-item--${variant}`;
+
+        const meta = document.createElement("div");
+        meta.className = "org-conv-item-meta";
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = metaTitle;
+        meta.appendChild(labelSpan);
+        if (Number.isInteger(entry.seq) && entry.seq > 0) {
+          const seqSpan = document.createElement("span");
+          seqSpan.textContent = `#${entry.seq}`;
+          meta.appendChild(seqSpan);
+        }
+
+        const body = document.createElement("div");
+        body.className = "org-conv-item-body";
+        body.textContent = bodyText;
+
+        card.appendChild(meta);
+        card.appendChild(body);
+        container.appendChild(card);
+      }
+    }
+
+    async showNodeInbox(rawNode) {
+      const node = this.normalizeNodeForView(rawNode);
       const organizationId = this.projection?.organizationId;
       const screen = this.dom.detailScreen;
-      if (!organizationId || !screen) return;
+      if (!node || !organizationId || !screen || node.memberKind !== "formal" || node.isReadOnlyNative) return;
+      this.stopDetailPolling();
       screen.replaceChildren();
       const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; screen.appendChild(el); return el; };
       const button = (label, action) => { const el = add('button', label); el.type = 'button'; el.className = 'org-btn org-btn--secondary'; el.addEventListener('click', action); return el; };
@@ -2292,8 +3752,8 @@
       const task = document.createElement('input'); task.placeholder = 'Work item ID (optional)'; task.setAttribute('aria-label', 'Work item ID'); screen.appendChild(task);
       const receipt = add('p', 'Messages are queued for the node; delivery does not mean a reply.');
       const path = `/api/organizations/${encodeURIComponent(organizationId)}/factory/nodes/${encodeURIComponent(node.id)}/messages`;
-      const fetcher = root.ragentFetch || fetch;
-      const request = async (options, target = path) => { const res = await fetcher(target, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
+      const fetcher = this.getFetcher();
+      const request = async (options, target = path) => { if (!fetcher) throw new Error('Fetch unavailable'); const res = await fetcher(target, { credentials: 'same-origin', cache: 'no-store', ...options }); const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data; };
       const refresh = async () => {
         try { const data = await request(); list.replaceChildren(); for (const message of data.messages) { const p = document.createElement('p'); p.textContent = `${message.createdAt} · ${message.deliveryState === 'delivered' ? 'Delivered to Run' : message.deliveryState} · ${message.requestState || 'information'} · ${message.body}${message.reply ? ` · Reply: ${message.reply.body}` : ''}${message.escalation ? ` · Escalation: ${message.escalation.deliveryState}` : ''}`; list.appendChild(p);
           if(message.requestState==='overdue' && !message.escalation) { const action=document.createElement('button'); action.type='button'; action.className='org-btn org-btn--secondary'; action.textContent='Escalate to manager'; list.appendChild(action); let key=null; action.addEventListener('click',async()=>{ key ||= root.crypto.randomUUID(); action.disabled=true; try { const result=await request({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idempotencyKey:key})},`${path}/${encodeURIComponent(message.messageId)}/escalate`); receipt.textContent=`Escalation ${result.message.messageId}: ${result.message.deliveryState}; original request remains unanswered.`; await refresh(); } catch(error) { receipt.textContent=`Escalation not confirmed: ${error.message}. Retry uses the same request.`; action.disabled=false; } }); }
@@ -2315,7 +3775,9 @@
     }
 
     closeDetailScreen() {
+      this.stopDetailPolling();
       this.detailNodeId = null;
+      this.detailConversationState = null;
       if (this.dom.detailScreen) {
         this.dom.detailScreen.hidden = true;
       }

@@ -3,6 +3,7 @@ import assert from 'assert/strict';
 
 import {
   buildProviderContractFields,
+  canonicalizeProviderId,
   classifyProviderError,
   getGatedPermissionModeId,
   getProviderCapabilities,
@@ -121,9 +122,14 @@ assert.equal(kiloCapabilities.supportsToolEvents, true);
 assert.equal(kiloCapabilities.supportsApproval, false);
 
 const agyLegacyCapabilities = getProviderCapabilities('agy-json');
+assert.equal(agyLegacyCapabilities.provider, 'agy');
 assert.equal(agyLegacyCapabilities.supportsToolEvents, false);
 const agyStreamCapabilities = getProviderCapabilities('agy-stream-json');
-assert.equal(agyStreamCapabilities.provider, 'antigravity');
+assert.equal(agyStreamCapabilities.provider, 'agy');
+assert.equal(canonicalizeProviderId('antigravity'), 'agy');
+assert.equal(canonicalizeProviderId('Antigravity'), 'agy');
+assert.equal(canonicalizeProviderId('custom'), 'custom');
+assert.equal(buildProviderContractFields('missing-runtime', { provider: 'antigravity' }).provider, 'agy');
 assert.equal(agyStreamCapabilities.transport, 'process-jsonl');
 assert.equal(agyStreamCapabilities.supportsToolEvents, true);
 assert.equal(agyStreamCapabilities.supportsInterrupt, false);

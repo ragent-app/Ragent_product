@@ -83,6 +83,29 @@ assert.doesNotMatch(serviceHost, /catch\s*\([^)]*\)\s*when\s*\(/);
 assert.match(serviceHost, /RAGENT_RUNNER_SUPERVISOR_SOCKET/);
 assert.match(serviceHost, /RAGENT_HARNESS_ROOT/);
 assert.match(serviceHost, /RAGENT_WINDOWS_SERVICE_STOP_FILE/);
+assert.match(serviceHost, /RAGENT_CODEX_PROVIDER_READONLY/);
+for (const flag of [
+  'RAGENT_ORG_SCHEMA_ENABLED',
+  'RAGENT_ORG_SHADOW_PROJECTION',
+  'RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED',
+  'RAGENT_MANAGED_INPUT_ENFORCEMENT',
+  'RAGENT_MANAGED_WRITER_ENABLED',
+  'RAGENT_REVIEWER_ENABLED',
+  'RAGENT_COLLABORATION_LEADER_ENABLED',
+  'RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED',
+  'RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED',
+  'RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED',
+  'RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED',
+  'RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED',
+  'RAGENT_ORG_DYNAMIC_REPLAN_ENABLED',
+  'RAGENT_ORG_STALL_GOVERNOR_ENABLED',
+  'RAGENT_ORG_PROJECTION_V1_ENABLED',
+  'RAGENT_ORG_PROJECTION_V2_ENABLED',
+  'RAGENT_ORG_RECOVERY_V1_ENABLED',
+  'RAGENT_CONSULTATION_V1_ENABLED',
+]) {
+  assert.match(serviceHost, new RegExp(`"${flag}"`), `ServiceHost must carry Windows rollout flag ${flag}`);
+}
 assert.match(serviceHost, /File\.WriteAllText\(stopFilePath/);
 assert.match(serviceHost, /WaitForExit\(15000\)/);
 assert.match(installer, /Ragent-ControlPlane/);

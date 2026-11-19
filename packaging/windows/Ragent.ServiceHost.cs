@@ -717,6 +717,36 @@ namespace Ragent.ServiceHost
 
         // Also used by the compiled ordinary-user launch regression. Keeping
         // environment construction here exercises the same path as OnStart.
+        private static readonly string[] ControlOrganizationRolloutFlags = new[]
+        {
+            "RAGENT_ORG_SCHEMA_ENABLED",
+            "RAGENT_ORG_SHADOW_PROJECTION",
+            "RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED",
+            "RAGENT_MANAGED_INPUT_ENFORCEMENT",
+            "RAGENT_MANAGED_WRITER_ENABLED",
+            "RAGENT_REVIEWER_ENABLED",
+            "RAGENT_COLLABORATION_LEADER_ENABLED",
+            "RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED",
+            "RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED",
+            "RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED",
+            "RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED",
+            "RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED",
+            "RAGENT_ORG_DYNAMIC_REPLAN_ENABLED",
+            "RAGENT_ORG_STALL_GOVERNOR_ENABLED",
+            "RAGENT_ORG_PROJECTION_V1_ENABLED",
+            "RAGENT_ORG_PROJECTION_V2_ENABLED",
+            "RAGENT_ORG_RECOVERY_V1_ENABLED",
+            "RAGENT_CONSULTATION_V1_ENABLED",
+        };
+        private static string ResolvePackagedOptOutFlagValue(string name)
+        {
+            var raw = Environment.GetEnvironmentVariable(name);
+            if (String.IsNullOrWhiteSpace(raw)) return "1";
+            var normalized = raw.Trim().ToLowerInvariant();
+            if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off")
+                return "0";
+            return "1";
+        }
         internal ProcessStartInfo BuildChildStartInfo()
         {
             return BuildChildStartInfoCore(false);
@@ -748,6 +778,25 @@ namespace Ragent.ServiceHost
                 }
                 CopyPublicProxyEnvironment(info);
             }
+            // Match Linux packaged defaults (packaging/deb/ragent.env / packaging/rpm/postinst)
+            // for control plane startup only, preserving explicit opt-out ("0",
+            // "false", "no", "off") without forwarding arbitrary ambient values.
+            // Never pass rollout switches to the supervisor or identity initializer.
+            if (role == "control" && !initializing)
+            {
+                foreach (var flag in ControlOrganizationRolloutFlags)
+                    info.EnvironmentVariables[flag] = ResolvePackagedOptOutFlagValue(flag);
+            }
+            // Codex provider-negotiated read-only (`windowsSandbox/readiness`,
+            // enforcement: "provider-negotiated") is an explicit server opt-in on
+            // Windows rather than OS-level `bwrap` parity. Forward `"1"` cleanly
+            // to both control (`runtime-adapter.mjs`) and supervisor (passed to
+            // `runner-sidecar.mjs` via RUNNER_ENV_ALLOWLIST) only when explicitly
+            // enabled; never expose it to the identity initializer or inherit
+            // non-"1" values.
+            if ((role == "control" || role == "supervisor") && !initializing
+                && Environment.GetEnvironmentVariable("RAGENT_CODEX_PROVIDER_READONLY") == "1")
+                info.EnvironmentVariables["RAGENT_CODEX_PROVIDER_READONLY"] = "1";
             // An administrative service environment may explicitly enable
             // private temporary-control QA. Never send this feature switch to
             // the executor or identity initializer, or inherit arbitrary flags.

@@ -252,7 +252,7 @@ const PROVIDER_CAPABILITIES = {
     rawEventPersistence: true,
   },
   'agy-json': {
-    provider: 'antigravity',
+    provider: 'agy',
     runtimeFamily: 'agy-json',
     transport: 'process-jsonl',
     permissionModel: 'process-boundary',
@@ -273,7 +273,7 @@ const PROVIDER_CAPABILITIES = {
     rawEventPersistence: true,
   },
   'agy-stream-json': {
-    provider: 'antigravity',
+    provider: 'agy',
     runtimeFamily: 'agy-stream-json',
     transport: 'process-jsonl',
     permissionModel: 'process-boundary',
@@ -691,6 +691,17 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
   return mode ? cloneJson(mode) : null;
 }
 
+const PROVIDER_ID_ALIASES = Object.freeze({
+  antigravity: 'agy',
+  'kilo-code': 'kilo',
+});
+
+export function canonicalizeProviderId(provider) {
+  const trimmed = trimString(provider);
+  if (!trimmed) return '';
+  return PROVIDER_ID_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
+
 export function buildProviderContractFields(runtimeFamily, fallback = {}) {
   const fallbackCapabilities = fallback?.providerCapabilities && typeof fallback.providerCapabilities === 'object'
     ? cloneJson(fallback.providerCapabilities)
@@ -716,7 +727,7 @@ export function buildProviderContractFields(runtimeFamily, fallback = {}) {
   );
   const provider = trimString(
     capabilities?.provider
-      || fallback?.provider,
+      || canonicalizeProviderId(fallback?.provider),
   );
 
   return {

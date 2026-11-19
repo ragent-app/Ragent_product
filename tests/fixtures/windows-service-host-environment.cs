@@ -73,6 +73,47 @@ static class ServiceHostEnvironmentProbe {
       }
       Environment.SetEnvironmentVariable(featureFlag,null);
       checks.Add("temporary-feature-explicit-one-control-only-actual-node");
+      string[] rolloutFlags=new[]{
+        "RAGENT_ORG_SCHEMA_ENABLED","RAGENT_ORG_SHADOW_PROJECTION","RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED",
+        "RAGENT_MANAGED_INPUT_ENFORCEMENT","RAGENT_MANAGED_WRITER_ENABLED","RAGENT_REVIEWER_ENABLED",
+        "RAGENT_COLLABORATION_LEADER_ENABLED","RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED","RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED",
+        "RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED","RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED",
+        "RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED","RAGENT_ORG_DYNAMIC_REPLAN_ENABLED","RAGENT_ORG_STALL_GOVERNOR_ENABLED",
+        "RAGENT_ORG_PROJECTION_V1_ENABLED","RAGENT_ORG_PROJECTION_V2_ENABLED","RAGENT_ORG_RECOVERY_V1_ENABLED",
+        "RAGENT_CONSULTATION_V1_ENABLED"
+      };
+      string rolloutRoot=Path.Combine(root,"rollout-flags");
+      foreach(string name in rolloutFlags)Environment.SetEnvironmentVariable(name,null);
+      var rolloutControl=Info(rolloutRoot,node,probe,"control");
+      var rolloutSupervisor=Info(rolloutRoot,node,probe,"supervisor");
+      var rolloutInitService=new RagentService("Ragent-EnvironmentQA","control",node,probe,rolloutRoot,Path.Combine(rolloutRoot,"config"));
+      var rolloutInit=(ProcessStartInfo)typeof(RagentService).GetMethod("BuildChildStartInfoCore",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(rolloutInitService,new object[]{true});
+      foreach(string name in rolloutFlags){
+        Need(rolloutControl.EnvironmentVariables[name]=="1","control missing default rollout flag "+name);
+        Need(!rolloutSupervisor.EnvironmentVariables.ContainsKey(name),"supervisor inherited control rollout flag "+name);
+        Need(!rolloutInit.EnvironmentVariables.ContainsKey(name),"identity initializer inherited rollout flag "+name);
+      }
+      foreach(string optOut in new[]{"0","false","NO"," off "}){
+        Environment.SetEnvironmentVariable("RAGENT_ORG_PROJECTION_V2_ENABLED",optOut);
+        Need(Info(rolloutRoot,node,probe,"control").EnvironmentVariables["RAGENT_ORG_PROJECTION_V2_ENABLED"]=="0","control ignored rollout opt-out");
+        Need(!Info(rolloutRoot,node,probe,"supervisor").EnvironmentVariables.ContainsKey("RAGENT_ORG_PROJECTION_V2_ENABLED"),"supervisor inherited rollout opt-out");
+      }
+      Environment.SetEnvironmentVariable("RAGENT_ORG_SCHEMA_ENABLED","SYNTHETIC");
+      Need(Info(rolloutRoot,node,probe,"control").EnvironmentVariables["RAGENT_ORG_SCHEMA_ENABLED"]=="1","control forwarded ambient rollout string");
+      foreach(string name in rolloutFlags)Environment.SetEnvironmentVariable(name,null);
+      checks.Add("organization-rollout-flags-control-only-with-normalized-opt-out");
+      const string providerReadOnlyFlag="RAGENT_CODEX_PROVIDER_READONLY";
+      foreach(string value in new[]{"0","true","01","1 ","SYNTHETIC",null}){
+        Environment.SetEnvironmentVariable(providerReadOnlyFlag,value);
+        foreach(string role in new[]{"control","supervisor"})Need(!Info(rolloutRoot,node,probe,role).EnvironmentVariables.ContainsKey(providerReadOnlyFlag),"invalid or unset provider readonly inherited");
+      }
+      Environment.SetEnvironmentVariable(providerReadOnlyFlag,"1");
+      Need(Info(rolloutRoot,node,probe,"control").EnvironmentVariables[providerReadOnlyFlag]=="1","control lost explicit provider readonly");
+      Need(Info(rolloutRoot,node,probe,"supervisor").EnvironmentVariables[providerReadOnlyFlag]=="1","supervisor lost explicit provider readonly");
+      var readOnlyInit=(ProcessStartInfo)typeof(RagentService).GetMethod("BuildChildStartInfoCore",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance).Invoke(rolloutInitService,new object[]{true});
+      Need(!readOnlyInit.EnvironmentVariables.ContainsKey(providerReadOnlyFlag),"identity initializer inherited provider readonly");
+      Environment.SetEnvironmentVariable(providerReadOnlyFlag,null);
+      checks.Add("codex-provider-readonly-explicit-one-control-and-supervisor-only");
       string controlRoot=Path.Combine(root,"control"),controlConfig=Path.Combine(controlRoot,"config");Directory.CreateDirectory(controlConfig);
       string controlSecret=Path.Combine(controlConfig,"auth-session-secret");
       var first=Info(controlRoot,node,probe,"control");string persisted=File.ReadAllText(controlSecret);

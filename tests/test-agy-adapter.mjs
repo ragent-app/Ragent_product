@@ -21,7 +21,7 @@ const initEvents = parse({
   conversation_id: 'agy-conversation-1',
 });
 assert.equal(initEvents[0]?.type, 'status');
-assert.equal(initEvents[0]?.provider, 'antigravity');
+assert.equal(initEvents[0]?.provider, 'agy');
 assert.equal(initEvents[0]?.runtimeFamily, 'agy-json');
 
 const deltaEvents = parse({

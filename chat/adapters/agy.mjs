@@ -12,6 +12,7 @@ import { inferProviderFileChange } from '../provider-tool-normalization.mjs';
 
 export { buildAgyStreamInput } from '../../lib/agy-runtime.mjs';
 
+export const AGY_CANONICAL_PROVIDER = 'agy';
 export const AGY_RUNTIME_FAMILY = 'agy-json';
 export const AGY_STREAM_RUNTIME_FAMILY = 'agy-stream-json';
 // AgY's own print-mode default is 5 minutes.  A Run is durable and already
@@ -21,7 +22,7 @@ export const DEFAULT_AGY_PRINT_TIMEOUT = '24h';
 
 function providerFields(providerSessionId, runtimeFamily, extra = {}) {
   return {
-    provider: 'antigravity',
+    provider: AGY_CANONICAL_PROVIDER,
     runtimeFamily,
     ...(providerSessionId ? { providerSessionId } : {}),
     ...extra,
