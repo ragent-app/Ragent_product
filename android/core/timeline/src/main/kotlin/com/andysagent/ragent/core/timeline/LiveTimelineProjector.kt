@@ -174,7 +174,7 @@ class LiveTimelineProjector {
     }
 
     private fun upsertRenderedEvent(event: SessionEventDto, renderSeq: Long) {
-        if (event.source == "context_compaction_handoff" || event.type == "context_barrier") return
+        if (event.source == "context_compaction_handoff" || event.type in setOf("context_barrier", "run_terminal")) return
         val statusError = event.type?.lowercase() == "status" && event.role?.lowercase() == "system" &&
             event.textContent()?.trimStart()?.startsWith("error:", ignoreCase = true) == true
         if (statusError) {

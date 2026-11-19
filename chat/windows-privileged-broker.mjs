@@ -63,6 +63,12 @@ function validateRequest(request) {
   if (!isRecord(request) || request.version !== WINDOWS_BROKER_PROTOCOL_VERSION) {
     throw brokerError('BROKER_REQUEST_INVALID');
   }
+  if (request.type === 'codex_history.read') {
+    if (!hasOnlyKeys(request, ['version', 'type', 'sessionId', 'cursor']) ||
+        typeof request.sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(request.sessionId) ||
+        typeof request.cursor !== 'string' || !/^(?:0|[1-9][0-9]{0,18}:[0-9a-f]{64})$/.test(request.cursor)) throw brokerError('BROKER_REQUEST_INVALID');
+    return;
+  }
   if (request.type === 'health') {
     if (!hasOnlyKeys(request, ['version', 'type'])) throw brokerError('BROKER_REQUEST_INVALID');
     return;
@@ -404,6 +410,25 @@ export function createWindowsPrivilegedBrokerClient({
     }
   };
   return Object.freeze({
+    readCodexHistory: async ({ sessionId, cursor = '0' }) => {
+      const response = await rpc('request', { version: WINDOWS_BROKER_PROTOCOL_VERSION, type: 'codex_history.read', sessionId, cursor }, 30000);
+      if (response?.type === 'error') {
+        const code = ['OWNER_HISTORY_NOT_FOUND', 'OWNER_HISTORY_ACCESS_DENIED', 'OWNER_HISTORY_CHANGED', 'OWNER_HISTORY_UNAVAILABLE', 'RATE_LIMITED'].includes(response.code)
+          ? response.code : 'OWNER_HISTORY_UNAVAILABLE';
+        throw brokerError(code);
+      }
+      const page = response?.codexHistory;
+      const validCursor = typeof page?.nextCursor === 'string' && /^(?:0|[1-9][0-9]{0,18}:[0-9a-f]{64})$/.test(page.nextCursor);
+      if (response?.type !== 'codex_history' || !isRecord(page) || page.sessionId?.toLowerCase() !== sessionId.toLowerCase() ||
+          !Number.isSafeInteger(page.offset) || !Number.isSafeInteger(page.nextOffset) || !Number.isSafeInteger(page.size) ||
+          page.offset < 0 || page.nextOffset < page.offset || page.size < page.nextOffset || page.size > 128 * 1024 * 1024 ||
+          page.nextOffset - page.offset > 32768 || typeof page.complete !== 'boolean' ||
+          page.complete !== (page.nextOffset === page.size) || (!page.complete && (!validCursor || page.nextOffset === page.offset)) ||
+          typeof page.dataBase64 !== 'string' || !SIGNATURE_PATTERN.test(page.dataBase64)) throw brokerError('BROKER_RESPONSE_INVALID');
+      const bytes = Buffer.from(page.dataBase64, 'base64');
+      if (bytes.length !== page.nextOffset - page.offset || bytes.toString('base64') !== page.dataBase64) throw brokerError('BROKER_RESPONSE_INVALID');
+      return page;
+    },
     health: () => rpc('health', { version: WINDOWS_BROKER_PROTOCOL_VERSION, type: 'health' }),
     status: (requestId) => rpc('request', {
       version: WINDOWS_BROKER_PROTOCOL_VERSION, type: 'status', requestId,

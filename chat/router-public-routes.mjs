@@ -8,6 +8,7 @@ import {
   revokeSession,
   parseCookies,
   getAuthSession,
+  isLocalWebSessionEligible,
   setCookie,
   clearCookie,
   clearVisitorCookie,
@@ -231,6 +232,17 @@ if (pathname === '/login' && req.method === 'POST') {
 
 // Login — GET (show form)
 if (pathname === '/login') {
+  // A local desktop may already be on the login page when the service becomes
+  // ready. Return eligible local HTML navigation to the normal owner bootstrap
+  // rather than leaving the user on a form that does not issue that session.
+  if (req.method === 'GET' && isLocalWebSessionEligible(req)) {
+    res.writeHead(302, buildHeaders({
+      'Location': '/',
+      'Cache-Control': 'no-store, max-age=0, must-revalidate',
+    }));
+    res.end();
+    return true;
+  }
   const hasError = parsedUrl.query.error === '1';
   const mode = parsedUrl.query.mode === 'token' ? 'token' : 'pw';
   let loginHtml;

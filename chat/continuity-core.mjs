@@ -259,6 +259,12 @@ function applyProviderBinding(state, event) {
 
 function applyEvent(state, event) {
   const runId = text(event?.runId, 180);
+  // A late event from a superseded Run must not replace the current outcome.
+  const currentRunId = state.execution.activeRunId || state.execution.lastRunId;
+  if (['run_terminal', 'run_finished', 'run_completed'].includes(event?.type)
+      && runId && currentRunId && runId !== currentRunId) return state;
+  if (event?.type === 'run_terminal' && state.completion?.sourceRefs?.some((ref) => ref.runId === runId)
+      && ['cancelled', 'failed'].includes(state.completion.state)) return state;
   let next = state;
   let touched = false;
   const edit = (fields) => {
@@ -283,11 +289,9 @@ function applyEvent(state, event) {
       const content = text(event.content);
       if (event.role === 'user' && !state.task.goal && content) {
         edit({ task: { ...state.task, goal: { text: content, sourceRefs: [{ seq: event.seq }] } } });
-      } else if (event.role === 'assistant' && content) {
-        edit({ task: {
-          ...state.task,
-          nextAction: { text: content.slice(-2000), sourceRefs: [{ seq: event.seq }] },
-        } });
+      }
+      if (event.role === 'user' && runId) {
+        edit({ execution: { ...state.execution, activeRunId: runId, lastRunId: runId } });
       }
       break;
     }
@@ -311,7 +315,42 @@ function applyEvent(state, event) {
       if (update) edit({ task: applyWorkStateUpdate(state.task, update, { sourceSeq: event.seq }) });
       break;
     }
+    case 'run_regenerate': {
+      if (event.state !== 'accepted') break;
+      const parentRunId = text(event.parentRunId, 180);
+      edit({ task: {
+        ...state.task,
+        status: 'running',
+        blockers: state.task.blockers.map((blocker) => (
+          parentRunId && blocker.sourceRefs?.some((ref) => ref.runId === parentRunId)
+            ? { ...blocker, status: 'superseded' } : blocker
+        )),
+        nextAction: null,
+      }, execution: { ...state.execution, activeRunId: runId || null, lastRunId: runId || state.execution.lastRunId } });
+      break;
+    }
+    case 'run_terminal': {
+      const runState = text(event.state, 80).toLowerCase();
+      const outcome = text(event.outcome, 80).toLowerCase();
+      const status = ['completed', 'blocked', 'waiting', 'failed'].includes(outcome)
+        ? outcome : (runState === 'completed' ? 'ready' : runState || state.task.status);
+      const refs = [{ seq: event.seq, runId }];
+      let blockers = state.task.blockers.map((blocker) => (
+        blocker.recordedBy === 'system' && blocker.sourceRefs?.some((ref) => ref.runId === runId)
+          && runState === 'completed' ? { ...blocker, status: 'resolved' } : blocker
+      ));
+      for (const [index, item] of (Array.isArray(event.blockers) ? event.blockers : []).slice(0, 16).entries()) {
+        const message = text(item, 800);
+        if (message) blockers = upsertById(blockers, { id: `terminal:${runId}:${index}`, text: message, status: 'open', sourceRefs: refs, recordedBy: 'agent' }, 'blocker');
+      }
+      const nextAction = text(Array.isArray(event.unresolvedItems) ? event.unresolvedItems.join('\n') : '', 2000);
+      edit({ task: { ...state.task, status, blockers, nextAction: nextAction ? { text: nextAction, sourceRefs: refs } : null },
+        completion: { state: runState, outcome: outcome || undefined, sourceRefs: refs },
+        execution: { ...state.execution, activeRunId: null, lastRunId: runId || state.execution.lastRunId } });
+      break;
+    }
     case 'status': {
+      if (runId && state.execution.activeRunId && runId !== state.execution.activeRunId) return state;
       const content = text(event.content);
       let status = state.task.status;
       if (/error|failed/i.test(content)) status = 'failed';
@@ -368,7 +407,8 @@ function applyEvent(state, event) {
     default:
       break;
   }
-  if (runId && runId !== next.execution.lastRunId) {
+  if (runId && runId !== next.execution.lastRunId
+      && (!next.execution.activeRunId || next.execution.activeRunId === runId)) {
     edit({ execution: { ...next.execution, lastRunId: runId } });
   }
   return next;
@@ -396,8 +436,11 @@ export function createContinuityReducer(sessionId, options = {}, initialState = 
     if (seq !== expectedSeq) omittedRanges.push({ from: expectedSeq, to: seq - 1 });
     expectedSeq = seq + 1;
     latestSeq = Math.max(latestSeq, seq);
+    const currentRunId = state.execution.activeRunId || state.execution.lastRunId;
+    const staleTerminal = ['run_terminal', 'run_finished', 'run_completed'].includes(event?.type)
+      && event?.runId && currentRunId && event.runId !== currentRunId;
     state = applyEvent(state, event);
-    executionReducer.push(event);
+    if (!staleTerminal) executionReducer.push(event);
     digest.update(canonicalJson(event));
     return true;
   }
@@ -405,6 +448,12 @@ export function createContinuityReducer(sessionId, options = {}, initialState = 
   function finish() {
     const projected = executionReducer.finish(executionInput);
     const mergedProjection = mergeExecutionState(state.execution, projected);
+    // History-only replay uses the lifecycle-aware identity above. An explicit
+    // Run snapshot remains authoritative when the caller supplies one.
+    if (!executionInput.run && state.execution.lastRunId) {
+      mergedProjection.activeRunId = state.execution.activeRunId;
+      mergedProjection.lastRunId = state.execution.lastRunId;
+    }
     // The event reducer can carry an execution observation that is not present
     // in the event-derived projection's optional inputs. Preserve those facts
     // instead of letting the projection's null defaults erase them.

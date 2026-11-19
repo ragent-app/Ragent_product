@@ -1,3 +1,5 @@
+import { findLatestAssistantMessageForRun } from './session-assistant-followups.mjs';
+import { extractTaggedBlock, parseJsonObjectText } from './session-text-parsing.mjs';
 import { normalizeReplyPublicationResponseIds } from './reply-publication.mjs';
 import { withMessageTimelineIdentity } from './message-timeline.mjs';
 import { mutateSessionMeta } from './session-meta-store.mjs';
@@ -710,6 +712,21 @@ export function createSessionTurnCompletionHelpers(services) {
     if (isReplySelfRepairOperation(manifest)) {
       if (finalizedRun.state === 'completed') {
         await updateReplyPublication(finalizedRun, (current) => ({
+    const userReplacement = ['regenerate', 'editResend'].includes(manifest?.internalOperation);
+    // Persist the actual terminal state and bounded structured outcome for replay.
+    // A completed runner can still report that the user's task is blocked.
+    if ((allowCompletionEffects || userReplacement) && finalizedRun?.id) {
+      const assistant = finalizedRun.state === 'completed'
+        ? await findLatestAssistantMessageForRun(sessionId, finalizedRun.id) : null;
+      const packet = parseJsonObjectText(extractTaggedBlock(assistant?.content || '', 'ragent-result-packet'));
+      const outcome = ['completed', 'blocked', 'waiting', 'failed'].includes(packet?.state) ? packet.state : '';
+      const boundedList = (value) => Array.isArray(value)
+        ? value.filter((item) => typeof item === 'string').slice(0, 16).map((item) => item.slice(0, 800)) : [];
+      await appendEvent(sessionId, {
+        type: 'run_terminal', runId: finalizedRun.id, timestamp: Date.now(), state: finalizedRun.state,
+        ...(outcome ? { outcome } : {}), blockers: boundedList(packet?.blockers), unresolvedItems: boundedList(packet?.unresolvedItems),
+      });
+    }
           ...current,
           state: 'ready',
           resolution: 'auto_continued',
@@ -846,9 +863,9 @@ export function createSessionTurnCompletionHelpers(services) {
     // block is parsed from the raw durable message and applied before queues,
     // compaction, pushes, or Goal continuation can advance the session. This
     // replaces the former post-turn second-harness request entirely.
-    if (allowCompletionEffects
+    if ((allowCompletionEffects || userReplacement)
       && finalizedRun.state === 'completed'
-      && !manifest?.internalOperation
+      && (!manifest?.internalOperation || userReplacement)
       && typeof maybeApplyAssistantSessionLabels === 'function') {
       try {
         const labeledSession = await maybeApplyAssistantSessionLabels(

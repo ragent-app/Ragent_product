@@ -20,6 +20,8 @@ const (
 )
 
 var requestIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+var uuidPattern = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var historyCursorPattern = regexp.MustCompile(`^(0|[1-9][0-9]{0,18}:[0-9a-f]{64})$`)
 
 type brokerRequest struct {
 	Version          int                        `json:"version"`
@@ -99,6 +101,7 @@ type brokerResponse struct {
 	AutoInstall         *autoInstallGrant          `json:"autoInstall,omitempty"`
 	OwnerInstall        *ownerInstallGrant         `json:"ownerInstall,omitempty"`
 	OwnerIdentity       *ownerInstallIdentity      `json:"ownerIdentity,omitempty"`
+	CodexHistory        map[string]any             `json:"codexHistory,omitempty"`
 	SelectedInstaller   *selectedInstallerFacts    `json:"selectedInstaller,omitempty"`
 	ServiceFacts        *serviceInspectFacts       `json:"serviceFacts,omitempty"`
 	ServiceControl      *serviceControlGrant       `json:"serviceControl,omitempty"`
@@ -312,6 +315,12 @@ func validateRequest(request brokerRequest) error {
 		}
 	case "owner_install.identity":
 		if hasNonHealthFields(request) {
+			return errInvalidRequest
+		}
+	case "codex_history.read":
+		copy := request
+		copy.SessionID, copy.Cursor = "", ""
+		if !uuidPattern.MatchString(request.SessionID) || !historyCursorPattern.MatchString(request.Cursor) || hasNonHealthFields(copy) {
 			return errInvalidRequest
 		}
 	case "auto_install.inspect":

@@ -19,6 +19,7 @@
     "approved_action_batch_response",
     "approved_action_state",
     "run_regenerate",
+    "run_terminal",
   ]);
 
   const NOTICE_EVENT_TYPES = new Set([

@@ -147,6 +147,10 @@ func (brokerService) Execute(args []string, requests <-chan svc.ChangeRequest, c
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--owner-codex-history" {
+		runCodexHistoryReader(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 {
 		if err := runBrokerAdminCLI(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())

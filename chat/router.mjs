@@ -1610,7 +1610,7 @@ export async function handleRequest(req, res) {
   }
 
   if (await handleWindowsBrokerInternalRoutes({
-    req, res, pathname, writeJson, getRun, getRunManifest, getSession,
+    req, res, pathname, writeJson, getRun, getRunManifest, getSession, listSessions,
     resolveSessionRiskMode: resolveSessionRiskModeForRun,
   })) return;
 

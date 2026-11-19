@@ -501,11 +501,18 @@ export function readCodexAppServerMcpStartupStatus(message) {
   const name = trimString(params.name || params.serverName || params.server_name);
   const status = trimString(params.status).toLowerCase();
   if (!name || !CODEX_APP_SERVER_MCP_STARTUP_STATES.includes(status)) return null;
+  // Never persist provider-supplied error text: it can contain paths, tokens,
+  // or command arguments. Retain only recognized operating-system codes.
+  const candidateCode = typeof params.error === 'object' && params.error
+    ? trimString(params.error.code) : trimString(params.failureReason);
+  const causeCode = ['EACCES', 'EPERM', 'ENOENT', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE'].includes(candidateCode)
+    ? candidateCode : '';
   return {
     name,
     status,
     threadId: trimString(params.threadId),
     hasError: typeof params.error === 'string' && params.error.trim().length > 0,
+    ...(causeCode ? { causeCode } : {}),
   };
 }
 

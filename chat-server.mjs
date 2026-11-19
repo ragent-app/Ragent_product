@@ -503,7 +503,7 @@ function getCliTransportStatus() {
   // broken even though HTTP keeps serving, so /healthz must degrade.
   if (!cliSocketBound) return 'degraded';
   if (cliTransport.kind === 'windows-named-pipe') {
-    return ownerService ? (ownerService.snapshot().ready || ownerActivation.snapshot().ready ? 'ready' : 'degraded') : 'ready';
+    return ownerService ? (ownerActivation.snapshot().ready && ownerService.snapshot().activationReady ? 'ready' : 'degraded') : 'ready';
   }
   if (!cliSocketIdentity) return 'degraded';
   return shouldCleanupSocket(CLI_SOCKET_PATH, cliSocketIdentity) ? 'ready' : 'degraded';

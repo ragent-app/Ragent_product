@@ -998,6 +998,31 @@ func (s *brokerIPCServer) handleRequest(payload []byte, health bool) brokerRespo
 		response.OwnerIdentity = &ownerInstallIdentity{InstanceID: policy.InstanceID, OwnerSID: policy.OwnerSID}
 		return response
 	}
+	if request.Type == "codex_history.read" {
+		if s.ownerPolicy == nil || s.ownerAvailable == nil {
+			return newErrorResponse("OWNER_HISTORY_UNAVAILABLE")
+		}
+		policy, err := s.ownerPolicy()
+		state := s.store.Snapshot()
+		if err != nil || state.AutoInstallSigner == nil || state.AutoInstallSigner.KeyID != policy.InstanceID || !s.ownerAvailable(policy.OwnerSID) {
+			return newErrorResponse("OWNER_HISTORY_UNAVAILABLE")
+		}
+		data, err := readInstalledOwnerHistory(s.executionCtx, policy.OwnerSID, request.SessionID, request.Cursor)
+		if err != nil {
+			return newErrorResponse("OWNER_HISTORY_UNAVAILABLE")
+		}
+		if code, ok := data["errorCode"].(string); ok {
+			switch code {
+			case "OWNER_HISTORY_NOT_FOUND", "OWNER_HISTORY_ACCESS_DENIED", "OWNER_HISTORY_CHANGED", "OWNER_HISTORY_UNAVAILABLE":
+				return newErrorResponse(code)
+			default:
+				return newErrorResponse("OWNER_HISTORY_UNAVAILABLE")
+			}
+		}
+		response := newResponse("codex_history")
+		response.CodexHistory = data
+		return response
+	}
 	if request.Type == "owner_install.execute" {
 		s.autoMu.Lock()
 		defer s.autoMu.Unlock()
