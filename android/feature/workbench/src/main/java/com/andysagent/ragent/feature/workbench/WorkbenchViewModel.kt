@@ -218,6 +218,7 @@ sealed interface WorkbenchEvent {
     data class OpenSettingsPage(val page: SettingsPage) : WorkbenchEvent
     data object CloseSettingsPage : WorkbenchEvent
     data object OpenAppApiSettings : WorkbenchEvent
+    data object OpenPushDiagnostics : WorkbenchEvent
     data object ToggleVoiceInput : WorkbenchEvent
     data object CancelVoiceInput : WorkbenchEvent
     data object AcceptCloudVoiceConsent : WorkbenchEvent

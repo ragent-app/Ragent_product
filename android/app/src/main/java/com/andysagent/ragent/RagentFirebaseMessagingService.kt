@@ -27,6 +27,7 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
+        PushRegistrationSchedule.request(this)
         scope.launch {
             runCatching { (application as RagentApplication).runtime.registerFcmToken(token) }
         }
@@ -34,9 +35,25 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
+        val occurredAt = data["occurredAt"]?.toLongOrNull() ?: return
+        val expiresAt = data["expiresAt"]?.toLongOrNull() ?: return
+        if (occurredAt <= 0L || expiresAt <= occurredAt) return
         val title = message.notification?.title ?: data["title"] ?: "Ragent"
         val body = message.notification?.body ?: data["body"] ?: "Ragent needs your attention"
-        Publisher(this).publish(data, title, body, message.sentTime)
+        // Persist before waiting on graph startup or registration work: Android
+        // may stop this process at any point after FCM invokes the callback.
+        val store = PushRegistrationStore(this)
+        val queuedId = runCatching { store.enqueueMessage(data, title, body) }.getOrNull()
+        runCatching { PushRegistrationSchedule.request(this) }
+        // Never render content until the originating account and computer have
+        // been checked against the current local authority.
+        val completed = runCatching { kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.withTimeoutOrNull(2_000L) {
+                (application as RagentApplication).runtime.publishAuthorizedPush(data, title, body, occurredAt)
+                true
+            }
+        } }.getOrNull() == true
+        if (completed && queuedId != null) runCatching { store.removeMessage(queuedId) }
     }
 
     internal class Publisher(private val context: Context) {
@@ -47,27 +64,68 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             title: String,
             body: String,
             sentTimeMillis: Long = System.currentTimeMillis(),
-        ) {
+        ): Boolean {
+            synchronized(LIFECYCLE_LOCK) {
             val kind = data["kind"].orEmpty()
             val awaitingKey = data["awaitingKey"].orEmpty()
             val eventId = data["eventId"].orEmpty()
             val sessionId = data["sessionId"].orEmpty()
             val runId = data["runId"].orEmpty()
-            if (runId.length > MAX_RUN_ID_LENGTH || runId.any { it.code < 0x20 }) return
+            val generation = data["generation"].orEmpty()
+            if (generation.isNotEmpty() && !generation.matches(Regex("[1-9][0-9]{0,19}"))) return false
+            if (kind != "completion" && !(kind == "attention" && awaitingKey == "waiting_user") && generation.isEmpty()) return false
+            if (runId.length > MAX_RUN_ID_LENGTH || runId.any { it.code < 0x20 }) return false
             val version = data["notificationContractVersion"]
-            if (version != null && version != "1") return
+            if (version != null && version != "1") return false
             val target = data["instanceId"]
-            if (version != null && target.isNullOrEmpty()) return
-            val request = runCatching { SessionNavigationRequest(sessionId, target, kind, awaitingKey, eventId).validated() }.getOrNull() ?: return
+            if (version != null && target.isNullOrEmpty()) return false
+            val request = runCatching { SessionNavigationRequest(sessionId, target, kind, awaitingKey, eventId).validated() }.getOrNull() ?: return false
             val effectiveSentTime = sentTimeMillis.takeIf { it > 0L } ?: System.currentTimeMillis()
-            if (!acceptLifecycleEvent(target, sessionId, kind, runId, effectiveSentTime)) return
+            if (kind == "attention_resolved") {
+                if (target.isNullOrBlank() || awaitingKey.isBlank() || generation.isBlank()) return false
+                val key = resolvedKey(target, sessionId, "$awaitingKey\u0000$generation")
+                val editor = lifecyclePreferences.edit().putLong(key, max(lifecyclePreferences.getLong(key, 0L), effectiveSentTime))
+                if (runId.isNotBlank()) {
+                    val genericKey = resolvedKey(target, sessionId, "run:$runId:waiting_user")
+                    editor.putLong(genericKey, max(lifecyclePreferences.getLong(genericKey, 0L), effectiveSentTime))
+                }
+                editor.commit()
+                context.getSystemService(NotificationManager::class.java).activeNotifications
+                    .filter { item ->
+                        val extras = item.notification.extras
+                        item.notification.channelId == ATTENTION_CHANNEL_ID &&
+                            extras.getString(EXTRA_NOTIFICATION_INSTANCE_ID) == target &&
+                            extras.getString(EXTRA_NOTIFICATION_SESSION_ID) == sessionId &&
+                            ((extras.getString(EXTRA_NOTIFICATION_AWAITING_KEY) == awaitingKey &&
+                                extras.getString("ragent_push_generation").orEmpty() == generation) ||
+                                (runId.isNotBlank() && extras.getString(EXTRA_NOTIFICATION_AWAITING_KEY) == "waiting_user" &&
+                                    extras.getString(EXTRA_NOTIFICATION_RUN_ID) == runId)) &&
+                            extras.getLong("ragent_push_occurred_at") <= effectiveSentTime
+                    }.forEach { NotificationManagerCompat.from(context).cancel(it.tag, it.id) }
+                val records = lifecyclePreferences.all.entries.filter { it.key.startsWith("resolved:") && it.value is Long }
+                    .sortedByDescending { it.value as Long }
+                if (records.size > 500) lifecyclePreferences.edit().apply { records.drop(500).forEach { remove(it.key) } }.commit()
+                return false
+            }
+            if (!target.isNullOrBlank() && awaitingKey.isNotBlank() &&
+                effectiveSentTime <= lifecyclePreferences.getLong(resolvedKey(target, sessionId, "$awaitingKey\u0000$generation"), 0L)) return false
+            if (!target.isNullOrBlank() && awaitingKey == "waiting_user" && runId.isNotBlank() &&
+                effectiveSentTime <= lifecyclePreferences.getLong(resolvedKey(target, sessionId, "run:$runId:waiting_user"), 0L)) return false
+            if (!acceptLifecycleEvent(target, sessionId, kind, runId, effectiveSentTime)) return false
+            val now = System.currentTimeMillis()
+            val expiresAt = data["expiresAt"]?.toLongOrNull() ?: Long.MAX_VALUE
+            if (expiresAt <= now) return false
+            val remaining = expiresAt - now
             val channelId = channelFor(kind)
+            val accountIdentity = MessageDigest.getInstance("SHA-256").digest(data["accountId"].orEmpty().toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
             val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 action = Intent.ACTION_VIEW
-                setData(Uri.parse("ragent-internal://notification/${request.identity()}"))
+                setData(Uri.parse("ragent-internal://notification/$accountIdentity/${request.identity()}"))
                 putExtra(EXTRA_NOTIFICATION_SESSION_ID, sessionId)
                 putExtra(EXTRA_NOTIFICATION_INSTANCE_ID, target)
+                putExtra(EXTRA_NOTIFICATION_ACCOUNT_ID, data["accountId"])
                 putExtra(EXTRA_NOTIFICATION_VERSION, version)
                 putExtra(EXTRA_NOTIFICATION_KIND, kind)
                 putExtra(EXTRA_NOTIFICATION_AWAITING_KEY, awaitingKey)
@@ -88,12 +146,16 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setAutoCancel(true)
+                .setTimeoutAfter(remaining)
                 .setContentIntent(pendingIntent)
                 .addExtras(Bundle().apply {
                     putString(EXTRA_NOTIFICATION_INSTANCE_ID, target)
                     putString(EXTRA_NOTIFICATION_SESSION_ID, sessionId)
                     putString(EXTRA_NOTIFICATION_RUN_ID, runId)
                     putString(EXTRA_NOTIFICATION_EVENT_ID, eventId)
+                    putString(EXTRA_NOTIFICATION_AWAITING_KEY, awaitingKey)
+                    putString("ragent_push_generation", generation)
+                    putLong("ragent_push_occurred_at", effectiveSentTime)
                 })
                 .build()
             // A terminal run supersedes that run's "waiting for you" cards;
@@ -102,11 +164,17 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
                 cancelAttentionNotifications(context, target, sessionId, runId)
             }
             if (Build.VERSION.SDK_INT >= 33 &&
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return false
+            if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
+                (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && context.getSystemService(NotificationManager::class.java)
+                    .getNotificationChannel(channelId)?.importance == NotificationManager.IMPORTANCE_NONE)) return false
             try {
                 NotificationManagerCompat.from(context).notify(identity, 1, notification)
+                return true
             } catch (_: SecurityException) {
                 // Permission can be revoked between the check and publication.
+                return false
+            }
             }
         }
 
@@ -222,6 +290,10 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             .getInstance("SHA-256")
             .digest("$target\u0000$sessionId".toByteArray(Charsets.UTF_8))
             .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
+        private fun resolvedKey(target: String, sessionId: String, approvalId: String): String = "resolved:" + MessageDigest
+            .getInstance("SHA-256").digest("$target\u0000$sessionId\u0000$approvalId".toByteArray(Charsets.UTF_8))
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
     }
 
     companion object {
@@ -233,6 +305,7 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
         const val EXTRA_NOTIFICATION_EVENT_ID = "notification_event_id"
         const val EXTRA_NOTIFICATION_RUN_ID = "notification_run_id"
         const val EXTRA_NOTIFICATION_INSTANCE_ID = "notification_instance_id"
+        const val EXTRA_NOTIFICATION_ACCOUNT_ID = "notification_account_id"
         const val EXTRA_NOTIFICATION_VERSION = "notification_contract_version"
         private const val LIFECYCLE_PREFERENCES = "fcm-notification-lifecycle-v1"
         private const val MAX_RECORDED_TERMINAL_RUNS = 128

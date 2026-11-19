@@ -6,7 +6,7 @@ import kotlin.test.assertNotEquals
 
 /**
  * Contract tests for the FCM notification identity. The server producer
- * (chat/fcm.mjs) adds the durable source instance to its versioned data contract.
+ * (Accounts push delivery) adds the durable source instance to its versioned data contract.
  * Identity must also isolate target/session when a producer supplies an eventId.
  */
 class FcmNotificationIdentityTest {

@@ -41,8 +41,8 @@ import {
   importSessionMigrationBundle,
 } from './session-migration.mjs';
 import { getPublicKey, addSubscription } from './push.mjs';
+import { getAccountPushStatus } from './account-push-outbox.mjs';
 import { loadAccountPolicy, saveAccountPolicy } from '../lib/account-policy.mjs';
-import { registerFcmToken, unregisterFcmToken } from './fcm.mjs';
 import { backfillOwnerBootstrapSessions } from './bootstrap-sessions.mjs';
 import {
   cancelNativeOAuthLogin,
@@ -2955,33 +2955,13 @@ export async function handleControlRoutes({
     return true;
   }
 
-  if (pathname === '/api/push/fcm/register' && req.method === 'POST') {
+  if (pathname === '/api/push/status' && req.method === 'GET') {
     if (authSession?.role !== 'owner') {
       writeJson(res, 403, { error: 'Owner access required' });
       return true;
     }
-    try {
-      const payload = await readJsonRequestBody(req, 12 * 1024);
-      await registerFcmToken({ ...payload, platform: 'android' });
-      writeJson(res, 200, { ok: true, transport: 'fcm' });
-    } catch (error) {
-      writeJson(res, 400, { error: error?.message || 'Invalid FCM token' });
-    }
-    return true;
-  }
-
-  if (pathname === '/api/push/fcm/unregister' && req.method === 'POST') {
-    if (authSession?.role !== 'owner') {
-      writeJson(res, 403, { error: 'Owner access required' });
-      return true;
-    }
-    try {
-      const payload = await readJsonRequestBody(req, 8 * 1024);
-      await unregisterFcmToken(payload?.token);
-      writeJson(res, 200, { ok: true });
-    } catch (error) {
-      writeJson(res, 400, { error: error?.message || 'Invalid FCM token' });
-    }
+    try { writeJson(res, 200, { ok: true, ...(await getAccountPushStatus()) }); }
+    catch { writeJson(res, 503, { ok: false, error: 'push_status_unavailable' }); }
     return true;
   }
 

@@ -7,6 +7,8 @@
 // this module can be used by low-level history.mjs without creating an import
 // cycle. Debounced per approvalId so only the first live append notifies.
 import { createKeyedTaskQueue } from './fs-utils.mjs';
+import { createHash } from 'crypto';
+import { enqueueAccountPush } from './account-push-outbox.mjs';
 
 const notifyQueue = createKeyedTaskQueue();
 
@@ -47,6 +49,45 @@ function approvalEventId(event = {}) {
   return typeof value === 'string' && value.length <= 512 && !/[\u0000-\u001f]/.test(value) ? value.trim() : '';
 }
 
+// Prepare the durable intent before the canonical history write. The outbox
+// verifies this exact sequence and event before submitting it to Accounts.
+export async function prepareApprovalPush(sessionId, event, requestSeq = null) {
+  const request = ['approval_request', 'privileged_batch_request', 'approved_action_batch_request'].includes(event?.type);
+  const response = ['approval_response', 'privileged_batch_response', 'approved_action_batch_response'].includes(event?.type);
+  if ((!request && !response) || (request && isProgressPlan(event))) return;
+  const approvalId = approvalEventId(event);
+  if (!approvalId || !Number.isSafeInteger(event.seq)) return;
+  const generation = String(request ? event.seq : requestSeq || '');
+  if (!/^[1-9][0-9]*$/.test(generation)) return;
+  const eventId = `${response ? 'resolved' : 'approval'}-${createHash('sha256').update(JSON.stringify([sessionId, approvalId, generation, ...(response ? [event.seq] : [])])).digest('hex')}`;
+  await enqueueAccountPush({ sessionId, kind: response ? 'attention_resolved' : describeApproval(event).kind,
+    eventId, awaitingKey: approvalId, generation, runId: typeof event.runId === 'string' ? event.runId : '',
+    occurredAt: event.timestamp, historySource: { seq: event.seq, type: event.type } });
+}
+
+// A response with no run id is safe only when exactly one unresolved request
+// with that approval id exists. Never borrow the current session's run id.
+export function resolveApprovalRequestSeq(events, response) {
+  const id = approvalEventId(response);
+  if (!id) return null;
+  const pairs = { approval_response: 'approval_request', privileged_batch_response: 'privileged_batch_request', approved_action_batch_response: 'approved_action_batch_request' };
+  const requestType = pairs[response?.type];
+  if (!requestType) return null;
+  const open = [];
+  for (const event of events) {
+    if (approvalEventId(event) !== id) continue;
+    if (event.type === requestType) open.push(event);
+    else if (event.type === response.type) {
+      const run = String(event.runId || '').trim();
+      const matching = open.filter((item) => !run || String(item.runId || '').trim() === run);
+      if (matching.length === 1) open.splice(open.indexOf(matching[0]), 1);
+    }
+  }
+  const run = String(response.runId || '').trim();
+  const candidates = open.filter((item) => !run || String(item.runId || '').trim() === run);
+  return candidates.length === 1 && Number.isSafeInteger(candidates[0].seq) ? candidates[0].seq : null;
+}
+
 export async function maybeNotifyApprovalPending(sessionId, event) {
   if (!sessionId || !event) return false;
   if (event.type !== 'approval_request'
@@ -66,8 +107,10 @@ export async function maybeNotifyApprovalPending(sessionId, event) {
       if (!session?.id) return false;
       const detail = {
         ...describeApprovalEvent(event),
-        eventId: approvalId.length <= 256 ? approvalId : '',
+        eventId: `approval-${createHash('sha256').update(JSON.stringify([sessionId, approvalId, String(event.seq || '')])).digest('hex')}`,
         runId: typeof event.runId === 'string' && event.runId.length <= 256 ? event.runId : '',
+        occurredAt: event.timestamp,
+        webOnly: true,
       };
       await sendUserAttentionPush({ ...session, id: sessionId }, detail);
       return true;

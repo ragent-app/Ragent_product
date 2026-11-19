@@ -1,0 +1,17 @@
+<resources>
+    <string name="push_permission_title">Notifications are off</string>
+    <string name="push_permission_detail">Enable notifications in system settings to receive task updates and approval requests.</string>
+    <string name="push_open_settings">Open settings</string>
+    <string name="push_not_now">Not now</string>
+    <string name="push_status_title">Notification status</string>
+    <string name="push_status_enabled">System notifications: enabled</string>
+    <string name="push_status_disabled">System notifications: off</string>
+    <string name="push_status_registered">Cloud registration confirmed for %1$d computers.</string>
+    <string name="push_status_pending">Cloud registration is waiting for confirmation.</string>
+    <string name="push_status_explanation">A notification submitted to Android may still be hidden by channel or system settings.</string>
+    <string name="push_retry">Retry registration</string>
+    <string name="push_status_channel_off">One or more notification categories are off. Check system settings.</string>
+    <string name="push_status_scope">Notifications cover paired computers owned by this account. Shared workspace computers are not yet supported.</string>
+    <string name="push_status_computer_registered">%1$s: registered</string>
+    <string name="push_status_computer_unregistered">%1$s: not registered</string>
+</resources>

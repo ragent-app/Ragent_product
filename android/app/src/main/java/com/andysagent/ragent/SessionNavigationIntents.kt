@@ -10,6 +10,7 @@ internal fun readSessionNavigation(intent: Intent): SessionNavigationRequest? {
         return parseSessionNavigationUri(intent.data.toString())
     }
     if (!intent.hasExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_SESSION_ID)) return null
+    if (intent.getStringExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_ACCOUNT_ID).isNullOrBlank()) return null
     val version = intent.getStringExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_VERSION)
     if (version != null && version != "1") throw AppApiException(ApiError(ApiErrorCode.CAPABILITY_UNSUPPORTED, "Unknown notification contract"))
     val target = intent.getStringExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_INSTANCE_ID)

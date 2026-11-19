@@ -1,0 +1,17 @@
+<resources>
+    <string name="push_permission_title">通知已关闭</string>
+    <string name="push_permission_detail">请在系统设置中开启通知，以接收任务更新和审批请求。</string>
+    <string name="push_open_settings">打开设置</string>
+    <string name="push_not_now">暂不</string>
+    <string name="push_status_title">通知状态</string>
+    <string name="push_status_enabled">系统通知：已开启</string>
+    <string name="push_status_disabled">系统通知：已关闭</string>
+    <string name="push_status_registered">云端已确认注册 %1$d 台电脑。</string>
+    <string name="push_status_pending">云端注册等待确认。</string>
+    <string name="push_status_explanation">通知交给 Android 后，仍可能被通知类别或系统设置隐藏。</string>
+    <string name="push_retry">重试注册</string>
+    <string name="push_status_channel_off">一个或多个通知类别已关闭，请检查系统设置。</string>
+    <string name="push_status_scope">通知支持此账号拥有且已配对的电脑，暂不支持共享工作区电脑。</string>
+    <string name="push_status_computer_registered">%1$s：已注册</string>
+    <string name="push_status_computer_unregistered">%1$s：未注册</string>
+</resources>

@@ -125,6 +125,7 @@ class RagentApplication : Application(), com.andysagent.ragent.integration.appfu
             oldHandler?.uncaughtException(t, e)
         }
         if (isDocumentExportProcess()) return
+        PushRegistrationSchedule.ensure(this)
         // Background API/notification delivery must not spend Android's process
         // bind/start timeout loading the entire runtime on the main thread.
         // Lazy remains the single instance; only lifecycle registration is Main.
@@ -265,6 +266,7 @@ class AndroidRuntimeGraph internal constructor(
     private var otherDeviceProjectionEpoch = 0L
     private val accountCapacityMutex = Mutex()
     private val fcmRegistrationMutex = Mutex()
+    private val pushRegistrationStore = PushRegistrationStore(application)
     private val startGuard = java.util.concurrent.atomic.AtomicBoolean()
     @Volatile private var stopped = false
     @Volatile private var activeInstanceId: String? = null
@@ -1432,6 +1434,8 @@ class AndroidRuntimeGraph internal constructor(
     }
 
     suspend fun logoutAccountSession(): Boolean {
+        fencePushRegistration()
+        PushRegistrationSchedule.request(application)
         val localIds = localAccountLinks.instanceIds() + configStore.directory.first().computers.filter { it.localRuntime }.map { it.instanceId }
         localIds.forEach(localAccountLinks::invalidate)
         return localAccountLinkMutex.withLock {
@@ -1630,37 +1634,188 @@ class AndroidRuntimeGraph internal constructor(
         } finally { withContext(kotlinx.coroutines.NonCancellable) { backgroundDeliveryConsents.revokeAll(appApiOwner) } }
     }
 
-    /** Register with already connected paired PCs, each through its fixed authenticated carrier. */
+    /** Publish the current phone token and paired computers to Accounts. */
     suspend fun registerFcmToken(token: String, targetInstanceId: String? = null) {
         require(token.isNotBlank() && token.length <= 4096) { "Invalid notification token" }
         pendingFcmToken = token.trim().takeIf { it.isNotEmpty() }
         val normalizedToken = pendingFcmToken ?: return
-        val body = org.json.JSONObject()
-            .put("token", normalizedToken)
-            .put("deviceId", com.andysagent.ragent.core.auth.devicePublicKeyFingerprint(identityStore.publicKeyEncoded()))
-            .put("appVersion", application.packageManager.getPackageInfo(application.packageName, 0).versionName ?: "")
-            .toString()
         initialized.await()
         fcmRegistrationMutex.withLock {
             if (pendingFcmToken != normalizedToken) return@withLock
-            val paired = configStore.directory.first().computers.map { it.instanceId }.toSet()
-            val connected = targetRuntimes.values.toList().filter {
-                it.instanceId in paired && (targetInstanceId == null || it.instanceId == targetInstanceId) &&
-                    it.transport.connectionState.value == RuntimeConnectionState.Connected
+            val session = configStore.accountSession.first() ?: return@withLock
+            val accountId = session.accountId
+            if (pushRegistrationStore.read().optString("blockedCredentialId") == session.credentialId) return@withLock
+            if (pushRegistrationStore.read().optBoolean("refreshRequired")) return@withLock
+            accountSessions.ensureActiveCredential()
+            val allowedResponse = accountsDirectoryTransport.execute(ApiRequest("POST", "/v1/push/instances", "{}"))
+            val allowedBody = org.json.JSONObject(allowedResponse.body)
+            check(allowedBody.optBoolean("ok")) { "Notification computer list was not confirmed" }
+            val allowedArray = allowedBody.getJSONArray("instanceIds")
+            val allowed = (0 until allowedArray.length()).map { allowedArray.getString(it) }.toSet()
+            check(configStore.accountSession.first()?.credentialId == session.credentialId) { "Account changed during notification registration" }
+            val instanceIds = configStore.directory.first().computers.filterNot { it.localRuntime }.map { it.instanceId }
+                .filter { it in allowed }.sorted()
+            val version = application.packageManager.getPackageInfo(application.packageName, 0).versionName ?: ""
+            val enabled = androidx.core.app.NotificationManagerCompat.from(application).areNotificationsEnabled()
+            val state = pushRegistrationStore.read()
+            val previous = state.optJSONObject("current")
+            val same = previous != null && previous.optString("accountId") == accountId &&
+                previous.optString("token") == normalizedToken && previous.optString("appVersion") == version &&
+                previous.optBoolean("notificationsEnabled") == enabled &&
+                previous.optJSONArray("instanceIds")?.toString() == org.json.JSONArray(instanceIds).toString()
+            val registration = if (same) previous!! else pushRegistrationStore.newRegistration(normalizedToken, instanceIds, version, enabled, accountId)
+            if (!same) {
+                val revoke = state.optJSONArray("revoke") ?: org.json.JSONArray()
+                if (previous != null) revoke.put(org.json.JSONObject().put("registrationId", previous.getString("registrationId"))
+                    .put("revokeCapability", previous.getString("revokeCapability")))
+                state.put("revoke", revoke).put("current", registration).put("confirmed", false)
+                pushRegistrationStore.write(state)
             }
-            // Registration does not force otherwise disconnected PCs to connect. Keep
-            // the latest token so a later connection can register the same phone.
-            connected.forEach { runtime ->
-                if (pendingFcmToken != normalizedToken) return@forEach
-                try {
-                    withTargetRuntime(runtime.instanceId) { bound ->
-                        bound.transport.execute(ApiRequest("POST", "/api/push/fcm/register", body))
-                    }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { android.util.Log.w("RagentRuntime", "Notification registration deferred") }
+            val body = org.json.JSONObject(registration.toString()).apply { remove("accountId") }.toString()
+            val response = try {
+                accountsDirectoryTransport.execute(ApiRequest("POST", "/v1/push/devices/register", body))
+            } catch (error: com.andysagent.ragent.core.network.ApiException) {
+                if (error.statusCode == 409 && error.code == "push_registration_conflict") {
+                    val revoke = state.optJSONArray("revoke") ?: org.json.JSONArray()
+                    revoke.put(org.json.JSONObject().put("registrationId", registration.getString("registrationId"))
+                        .put("revokeCapability", registration.getString("revokeCapability")))
+                    state.remove("current")
+                    state.put("revoke", revoke).put("confirmed", false).put("refreshRequired", true)
+                    pushRegistrationStore.write(state)
+                    pendingFcmToken = null
+                    PushRegistrationSchedule.request(application)
+                }
+                throw error
+            }
+            val receipt = org.json.JSONObject(response.body)
+            check(receipt.optBoolean("ok") && receipt.optString("registrationId") == registration.getString("registrationId")) {
+                "Notification registration was not confirmed"
+            }
+            state.put("confirmed", true).put("confirmedAt", System.currentTimeMillis())
+            pushRegistrationStore.write(state)
+            reconcilePushRevocationsLocked()
+        }
+    }
+
+    private suspend fun reconcilePushRevocationsLocked() {
+        val state = pushRegistrationStore.read()
+        val pending = state.optJSONArray("revoke") ?: return
+        val remaining = org.json.JSONArray()
+        for (index in 0 until pending.length()) {
+            val item = pending.getJSONObject(index)
+            try { accountsAnonymousTransport.execute(ApiRequest("POST", "/v1/push/devices/revoke", item.toString())) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { remaining.put(item) }
+        }
+        state.put("revoke", remaining)
+        pushRegistrationStore.write(state)
+    }
+
+    internal suspend fun retryPushRevocations() = fcmRegistrationMutex.withLock { reconcilePushRevocationsLocked() }
+
+    internal suspend fun refreshPushTokenIfRequired() = fcmRegistrationMutex.withLock {
+        val state = pushRegistrationStore.read()
+        if (state.optBoolean("refreshRequired")) {
+            com.google.android.gms.tasks.Tasks.await(FirebaseMessaging.getInstance().deleteToken(), 30, java.util.concurrent.TimeUnit.SECONDS)
+            currentCoroutineContext().ensureActive()
+            state.put("refreshRequired", false)
+            pushRegistrationStore.write(state)
+        }
+    }
+
+    internal suspend fun retryPushReceipts() = fcmRegistrationMutex.withLock {
+        val currentAccount = configStore.accountSession.first()?.accountId
+        val items = pushRegistrationStore.pendingReceipts()
+        for (index in 0 until items.length()) {
+            val item = items.getJSONObject(index)
+            if (currentAccount == null || item.optString("accountId") != currentAccount) {
+                pushRegistrationStore.removeReceipt(item.getString("id"))
+                continue
+            }
+            accountSessions.ensureActiveCredential()
+            val body = org.json.JSONObject(item.toString()).apply { remove("id"); remove("accountId") }
+            try {
+                accountsDirectoryTransport.execute(ApiRequest("POST", "/v1/push/receipts", body.toString()))
+                pushRegistrationStore.removeReceipt(item.getString("id"))
+            } catch (error: com.andysagent.ragent.core.network.ApiException) {
+                if (error.statusCode == 400 || error.statusCode == 404) pushRegistrationStore.removeReceipt(item.getString("id"))
+                else throw error
             }
         }
     }
+
+    internal suspend fun retryPendingPushMessages() {
+        initialized.await()
+        val items = pushRegistrationStore.pendingMessages()
+        for (index in 0 until items.length()) {
+            val item = items.getJSONObject(index)
+            val json = item.getJSONObject("data")
+            val data = json.keys().asSequence().associateWith { json.getString(it) }
+            val occurredAt = data["occurredAt"]?.toLongOrNull() ?: 0L
+            val expiresAt = data["expiresAt"]?.toLongOrNull() ?: 0L
+            if (occurredAt > 0 && expiresAt > occurredAt)
+                publishAuthorizedPush(data, item.getString("title"), item.getString("body"), occurredAt)
+            pushRegistrationStore.removeMessage(item.getString("id"))
+        }
+    }
+
+    private suspend fun fencePushRegistration() = fcmRegistrationMutex.withLock {
+        val state = pushRegistrationStore.read()
+        configStore.accountSession.first()?.credentialId?.let { state.put("blockedCredentialId", it) }
+        state.put("confirmed", false)
+        runCatching { cancelSourcePushNotifications(null) }
+        val current = state.optJSONObject("current")
+        if (current == null) { pushRegistrationStore.write(state); return@withLock }
+        val pending = state.optJSONArray("revoke") ?: org.json.JSONArray()
+        pending.put(org.json.JSONObject().put("registrationId", current.getString("registrationId"))
+            .put("revokeCapability", current.getString("revokeCapability")))
+        state.remove("current")
+        state.put("revoke", pending)
+        pushRegistrationStore.write(state)
+    }
+
+    private fun cancelSourcePushNotifications(instanceId: String?) {
+        val manager = application.getSystemService(android.app.NotificationManager::class.java)
+        manager.activeNotifications.filter { item ->
+            item.notification.channelId in setOf(RagentFirebaseMessagingService.RUN_CHANNEL_ID, RagentFirebaseMessagingService.ATTENTION_CHANNEL_ID) &&
+                (instanceId == null || item.notification.extras.getString(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_INSTANCE_ID) == instanceId)
+        }.forEach { androidx.core.app.NotificationManagerCompat.from(application).cancel(it.tag, it.id) }
+    }
+
+    internal suspend fun mayDisplayPush(instanceId: String?, accountId: String?): Boolean {
+        initialized.await()
+        val session = configStore.accountSession.first() ?: return false
+        if (instanceId.isNullOrBlank() || accountId.isNullOrBlank() || session.accountId != accountId ||
+            pushRegistrationStore.read().optString("blockedCredentialId") == session.credentialId) return false
+        return configStore.directory.first().computers.any { it.instanceId == instanceId }
+    }
+
+    internal fun pushDiagnostics(): Triple<Boolean, List<String>, Long> {
+        val state = pushRegistrationStore.read()
+        val instances = state.optJSONObject("current")?.optJSONArray("instanceIds") ?: org.json.JSONArray()
+        return Triple(state.optBoolean("confirmed", false), (0 until instances.length()).map { instances.getString(it) },
+            state.optLong("confirmedAt", 0L))
+    }
+
+    internal suspend fun publishAuthorizedPush(data: Map<String, String>, title: String, body: String, occurredAt: Long): Boolean =
+        fcmRegistrationMutex.withLock {
+            val account = configStore.accountSession.first()?.accountId
+            val instance = data["instanceId"].orEmpty()
+            val event = data["eventId"].orEmpty()
+            val kind = data["kind"].orEmpty()
+            val canRecord = !account.isNullOrBlank() && account == data["accountId"] && instance.isNotBlank() && event.isNotBlank() && kind.isNotBlank()
+            if (canRecord && runCatching { pushRegistrationStore.wasProcessed(account!!, instance, kind, event) }.getOrDefault(false)) return@withLock false
+            if (canRecord) runCatching { pushRegistrationStore.enqueueReceipt(account!!, instance, event, kind, "received") }
+            val posted = (data["expiresAt"]?.toLongOrNull() ?: 0L) > System.currentTimeMillis() &&
+                mayDisplayPush(instance, data["accountId"]) &&
+                RagentFirebaseMessagingService.Publisher(application).publish(data, title, body, occurredAt)
+            if (canRecord) {
+                runCatching { pushRegistrationStore.markProcessed(account!!, instance, kind, event, data["expiresAt"]?.toLongOrNull() ?: 0L) }
+                runCatching { pushRegistrationStore.enqueueReceipt(account!!, instance, event, kind, if (posted) "posted" else "suppressed") }
+                runCatching { PushRegistrationSchedule.request(application) }
+            }
+            posted
+        }
 
     fun start() {
         if (!startGuard.compareAndSet(false, true)) return
@@ -1671,6 +1826,9 @@ class AndroidRuntimeGraph internal constructor(
                 try { reconcileSessionRevocations() }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* The encrypted queue is retried later. */ }
+                try { fcmRegistrationMutex.withLock { reconcilePushRevocationsLocked() } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { android.util.Log.w("RagentRuntime", "Notification revocation deferred") }
                 // The queue can contain detached credentials with no reliable instance identity.
                 mutableLocalSessionRevocationsPending.value = try { localSessionRevocations.ids().isNotEmpty() }
                 catch (_: Exception) { false }
@@ -1706,6 +1864,7 @@ class AndroidRuntimeGraph internal constructor(
                 configStore.directory.collect { directory ->
                     synchronizeDirectory()
                     synchronizeCaptureShortcuts(directory)
+                    registerFcmTokenWhenConnected("")
                 }
             } catch (cancelled: CancellationException) {
                 if (!initialized.isCompleted) initialized.completeExceptionally(cancelled)
@@ -1824,11 +1983,15 @@ class AndroidRuntimeGraph internal constructor(
         runCatching { FirebaseMessaging.getInstance().token }
             .onSuccess { task ->
                 task.addOnSuccessListener { token ->
-                    scope.launch { runCatching { registerFcmToken(pendingFcmToken ?: token, instanceId) } }
+                    scope.launch {
+                        runCatching { registerFcmToken(pendingFcmToken ?: token, instanceId) }
+                            .onFailure { PushRegistrationSchedule.request(application) }
+                    }
                 }
+                task.addOnFailureListener { PushRegistrationSchedule.request(application) }
             }
         pendingFcmToken?.let { token ->
-            scope.launch { runCatching { registerFcmToken(token, instanceId) } }
+            scope.launch { runCatching { registerFcmToken(token, instanceId) }.onFailure { PushRegistrationSchedule.request(application) } }
         }
     }
 
@@ -1918,11 +2081,14 @@ class AndroidRuntimeGraph internal constructor(
     }
 
     /** Owner UI navigation: verify against the fixed PC before changing any visible target. */
-    internal suspend fun navigateToSession(request: SessionNavigationRequest, open: suspend (String) -> Unit) {
+    internal suspend fun navigateToSession(request: SessionNavigationRequest, expectedAccountId: String? = null, open: suspend (String) -> Unit) {
         request.validated()
         val target = request.targetInstanceId
             ?: throw AppApiException(ApiError(ApiErrorCode.AMBIGUOUS_TARGET, "Choose the source computer"))
         initialized.await()
+        if (expectedAccountId != null && !mayDisplayPush(target, expectedAccountId)) {
+            throw AppApiException(ApiError(ApiErrorCode.PERMISSION_DENIED, "Notification account or computer changed"))
+        }
         if (configStore.directory.first().computers.none { it.instanceId == target }) {
             throw AppApiException(ApiError(ApiErrorCode.TARGET_NOT_FOUND, "Source computer is not paired"))
         }
@@ -1959,7 +2125,8 @@ class AndroidRuntimeGraph internal constructor(
                         .cancelAttentionNotifications(application, target, request.sessionId)
                 }
                 if (request.kind.lowercase() in setOf("approval", "question", "plan", "danger", "answer", "permission")) {
-                    val approvalId = request.eventId.ifBlank { request.awaitingKey }
+                    // Event IDs are delivery identities; the approval lookup uses the original awaiting key.
+                    val approvalId = request.awaitingKey
                     if (approvalId.isNotBlank()) {
                         val approval = runtime.sessions.findPendingApproval(request.sessionId, approvalId)
                         if (approval?.status != "pending") {
@@ -1977,6 +2144,9 @@ class AndroidRuntimeGraph internal constructor(
                 if (configStore.directory.first().computers.none { it.instanceId == target }) {
                     throw AppApiException(ApiError(ApiErrorCode.TARGET_NOT_FOUND, "Computer was unpaired"))
                 }
+                if (expectedAccountId != null && !mayDisplayPush(target, expectedAccountId)) {
+                    throw AppApiException(ApiError(ApiErrorCode.PERMISSION_DENIED, "Notification account or computer changed"))
+                }
                 try { configStore.selectTarget(target) }
                 catch (failure: IllegalArgumentException) {
                     if (configStore.directory.first().computers.none { it.instanceId == target }) {
@@ -1988,6 +2158,9 @@ class AndroidRuntimeGraph internal constructor(
                 withContext(Dispatchers.Main.immediate) {
                     if (configStore.directory.first().activeTargetId != target || sessions.delegate.value !== runtime.sessions) {
                         throw AppApiException(ApiError(ApiErrorCode.REVISION_CONFLICT, "Selected computer changed during navigation"))
+                    }
+                    if (expectedAccountId != null && !mayDisplayPush(target, expectedAccountId)) {
+                        throw AppApiException(ApiError(ApiErrorCode.PERMISSION_DENIED, "Notification account or computer changed"))
                     }
                     open(request.sessionId)
                 }
@@ -2011,7 +2184,10 @@ class AndroidRuntimeGraph internal constructor(
             appApiCallerGrants.revokeForTarget(appApiOwner, instanceId)
             assistantDelegations.revokeForTarget(appApiOwner, instanceId)
             backgroundDeliveryConsents.revokeAll(appApiOwner, instanceId)
-            try { configStore.removeTarget(instanceId) }
+            try { fcmRegistrationMutex.withLock {
+                configStore.removeTarget(instanceId)
+                runCatching { cancelSourcePushNotifications(instanceId) }
+            } }
             finally { withContext(kotlinx.coroutines.NonCancellable) {
                 appApiCallerGrants.revokeForTarget(appApiOwner, instanceId)
                 assistantDelegations.revokeForTarget(appApiOwner, instanceId)

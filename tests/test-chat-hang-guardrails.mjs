@@ -13,7 +13,6 @@ const history = readFileSync(join(repoRoot, 'chat/history.mjs'), 'utf8');
 const sessionManager = readFileSync(join(repoRoot, 'chat/session-manager.mjs'), 'utf8');
 const inspector = readFileSync(join(repoRoot, 'static/chat/workbench-inspector.js'), 'utf8');
 const push = readFileSync(join(repoRoot, 'chat/push.mjs'), 'utf8');
-const fcm = readFileSync(join(repoRoot, 'chat/fcm.mjs'), 'utf8');
 
 assert.match(server, /monitorEventLoopDelay/, 'chat server should expose event-loop health metrics');
 assert.match(server, /req\.method === 'GET' && req\.url === '\/healthz'/, 'chat server should expose a lightweight /healthz endpoint');
@@ -120,8 +119,6 @@ assert.match(
 
 assert.match(push, /PUSH_SEND_CONCURRENCY/, 'web push fan-out should expose a bounded concurrency budget');
 assert.match(push, /sendable\.length/, 'web push should schedule only active subscriptions');
-assert.match(fcm, /FCM_SEND_CONCURRENCY/, 'FCM fan-out should expose a bounded concurrency budget');
-assert.match(fcm, /Math\.min\(FCM_SEND_CONCURRENCY, tokens\.length\)/, 'FCM should cap in-flight sends');
 const sidecar = readFileSync(join(repoRoot, 'chat/runner-sidecar.mjs'), 'utf8');
 assert.match(sidecar, /DEFAULT_PROVIDER_STDOUT_LINE_MAX_BYTES/, 'runner sidecar should bound individual provider stdout lines');
 assert.match(sidecar, /provider-stdout-line-limit/, 'oversized provider frames should produce a durable diagnostic');

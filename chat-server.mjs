@@ -1086,6 +1086,8 @@ selfStopDetector = startSelfStopDetector({
 });
 
 server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
+  void import('./chat/account-push-outbox.mjs').then(({ startAccountPushOutbox }) => startAccountPushOutbox())
+    .catch(() => console.warn('[account-push] outbox startup unavailable'));
   console.log(`Chat server listening on http://${CHAT_BIND_HOST}:${CHAT_PORT}`);
   console.log(`Cookie mode: ${SECURE_COOKIES ? 'Secure (HTTPS)' : 'Non-secure (localhost)'}`);
   if (ownerService && !shuttingDown) {

@@ -28,7 +28,7 @@ import {
   ensureSessionAuditProjection,
   updateSessionAuditProjectionForEvents,
 } from './session-audit-projection.mjs';
-import { maybeNotifyApprovalPending } from './attention-push.mjs';
+import { maybeNotifyApprovalPending, prepareApprovalPush, resolveApprovalRequestSeq } from './attention-push.mjs';
 import { notifySessionEvents } from './session-event-waiter.mjs';
 import { mirrorApprovalEventsToOrchestration } from './orchestration-approval-bridge.mjs';
 import {
@@ -861,6 +861,17 @@ export async function readApprovedActionBatchRequestEvents(sessionId) {
 
 function eventPath(sessionId, seq) {
   return join(sessionEventsDir(sessionId), `${String(seq).padStart(EVENT_FILE_WIDTH, '0')}.json`);
+}
+
+// Read the canonical event file directly without recovering or rewriting the
+// session metadata while an append may still be in progress.
+export async function readPushSourceEvent(sessionId, seq) {
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(sessionId) || !Number.isSafeInteger(seq) || seq < 1) throw new Error('Invalid push history source');
+  try { return await readJsonStrict(eventPath(sessionId, seq)); }
+  catch (error) {
+    if (error?.code === 'JSON_NOT_FOUND') return null;
+    throw error;
+  }
 }
 
 function bodyPath(sessionId, ref) {
@@ -1937,6 +1948,25 @@ async function terminalRunApprovalReplacements(sessionId, event, runCache) {
   }];
 }
 
+const PUSH_APPROVAL_RESPONSE_TYPES = new Set(['approval_response', 'privileged_batch_response', 'approved_action_batch_response']);
+
+async function prepareHistoryApprovalPush(sessionId, event, priorEvents = null) {
+  try {
+    let requestSeq = null;
+    if (PUSH_APPROVAL_RESPONSE_TYPES.has(event?.type)) {
+      const history = priorEvents ?? await readAllRuntimeApprovalEvents(sessionId);
+      requestSeq = resolveApprovalRequestSeq(history, event);
+      if (!requestSeq) {
+        console.warn('[account-push] approval resolution generation unavailable');
+        return;
+      }
+    }
+    await prepareApprovalPush(sessionId, event, requestSeq);
+  } catch {
+    console.error('[account-push] approval intent persistence or correlation failed');
+  }
+}
+
 async function appendEventUnlocked(sessionId, event, options = {}) {
   if (options.skipTerminalApprovalGuard !== true) {
     const replacements = await terminalRunApprovalReplacements(sessionId, event, new Map());
@@ -1951,6 +1981,7 @@ async function appendEventUnlocked(sessionId, event, options = {}) {
   const seq = meta.latestSeq + 1;
   const normalized = await prepareStoredMessageIdentity(sessionId, normalizeStoredEvent({ ...event, seq }, seq));
   normalized.seq = seq;
+  await prepareHistoryApprovalPush(sessionId, normalized);
   const stored = await storeEvent(sessionId, annotateAttachmentsWithArtifactIds(normalized, sessionId));
   await commitStoredMessagePosition(sessionId, stored);
   const lastActivityAt = isSessionActivityEvent(stored)
@@ -1995,7 +2026,6 @@ async function appendEventUnlocked(sessionId, event, options = {}) {
     // the append path on a push attempt.
     maybeNotifyApprovalPending(sessionId, stored).catch(() => {});
   }
-
   if (stored?.type === 'approval_request'
     || stored?.type === 'approval_response'
     || stored?.type === 'privileged_batch_request'
@@ -2037,10 +2067,18 @@ async function appendEventsUnlocked(sessionId, events, options = {}) {
   let size = meta.size;
   let counts = meta.counts;
   const appended = [];
+  // Snapshot the compact approval index before writing any batch event; an
+  // index read mid-batch could otherwise recover a partially written tail.
+  let priorApprovalEvents = null;
+  if (events.some((event) => PUSH_APPROVAL_RESPONSE_TYPES.has(event?.type))) {
+    try { priorApprovalEvents = await readAllRuntimeApprovalEvents(sessionId); }
+    catch { console.error('[account-push] approval correlation unavailable'); priorApprovalEvents = []; }
+  }
   for (const event of events || []) {
     latestSeq += 1;
     const normalized = await prepareStoredMessageIdentity(sessionId, normalizeStoredEvent({ ...event, seq: latestSeq }, latestSeq));
     normalized.seq = latestSeq;
+    await prepareHistoryApprovalPush(sessionId, normalized, priorApprovalEvents ? [...priorApprovalEvents, ...appended] : null);
     const stored = await storeEvent(sessionId, annotateAttachmentsWithArtifactIds(normalized, sessionId));
     await commitStoredMessagePosition(sessionId, stored);
     appended.push(stored);

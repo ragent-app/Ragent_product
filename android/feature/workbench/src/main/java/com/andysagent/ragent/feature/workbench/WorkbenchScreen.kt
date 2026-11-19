@@ -5514,6 +5514,9 @@ private fun SettingsOverviewContent(
                     stringResource(appThemeLabelRes(state.appTheme)), "settings-theme") {
                     onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Theme))
                 }
+                AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Info) },
+                    title = stringResource(R.string.settings_push_diagnostics),
+                    modifier = Modifier.testTag("settings-push-diagnostics"), onClick = { onEvent(WorkbenchEvent.OpenPushDiagnostics) })
                 AgentoSettingRow(leadingIcon = { SettingsOverviewIcon(AgentoWebGlyph.Share) },
                     title = stringResource(R.string.settings_sharing_agents), showDivider = false,
                     modifier = Modifier.testTag("settings-sharing-agents"), onClick = { onEvent(WorkbenchEvent.OpenAppApiSettings) })

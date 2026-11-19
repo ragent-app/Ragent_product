@@ -316,6 +316,7 @@ class MainActivity : ComponentActivity() {
     private var pendingPairingScanFromWelcome by mutableStateOf<Boolean?>(null)
     private var computerConnectionError by mutableStateOf<ConnectionErrorCopy?>(null)
     private var pendingSessionNavigation by mutableStateOf<SessionNavigationRequest?>(null)
+    private var pendingNotificationAccountId by mutableStateOf<String?>(null)
     private var sessionNavigationError by mutableStateOf<ApiErrorCode?>(null)
     private var navigationIntakeKey: String? = null
     private var currentPhase3RFrame by mutableIntStateOf(0)
@@ -356,11 +357,14 @@ class MainActivity : ComponentActivity() {
         try {
             val request = readSessionNavigation(intent) ?: return
             if (request.identity() in consumedNotificationKeys) return
+            pendingNotificationAccountId = if (intent.hasExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_SESSION_ID))
+                intent.getStringExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_ACCOUNT_ID) else null
             navigationIntakeKey = request.identity()
             pendingSessionNavigation = request
             sessionNavigationError = null
         } catch (failure: Exception) {
             pendingSessionNavigation = null
+            pendingNotificationAccountId = null
             sessionNavigationError = (failure as? AppApiException)?.error?.code ?: ApiErrorCode.INVALID_ARGUMENT
         }
     }
@@ -407,6 +411,10 @@ class MainActivity : ComponentActivity() {
         navigationIntakeKey = savedInstanceState?.getString("ragent.navigation.intakeKey")
         pendingSessionNavigation = savedInstanceState?.getString("ragent.navigation.pending")?.let { payload ->
             if (payload.length > 4096) null else runCatching { AppApiJson.decodeFromString<SessionNavigationRequest>(payload).validated() }.getOrNull()
+        }
+        pendingNotificationAccountId = savedInstanceState?.getString("ragent.navigation.accountId")
+        if (intent?.hasExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_SESSION_ID) == true && pendingNotificationAccountId.isNullOrBlank()) {
+            pendingSessionNavigation = null
         }
         signInVoiceConsentPending = savedInstanceState?.getBoolean("ragent.signin.voiceConsentPending") == true
         restoreBrowserSignInRecovery(savedInstanceState?.getString("ragent.browser.signIn"))?.let { recovered ->
@@ -644,9 +652,12 @@ class MainActivity : ComponentActivity() {
                 val nativePasskeyHelper = remember(this@MainActivity) {
                     NativePasskeyHelper(this@MainActivity)
                 }
+                var showNotificationSettings by remember { mutableStateOf(false) }
+                var showPushDiagnostics by remember { mutableStateOf(false) }
+                var pushDiagnosticLabels by remember { mutableStateOf<List<String>>(emptyList()) }
                 val notificationPermissionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.RequestPermission(),
-                ) { }
+                ) { granted -> if (!granted) showNotificationSettings = true }
                 var notificationPermissionRequested by remember { mutableStateOf(false) }
                 val shell: AppShellViewModel = viewModel(factory = AppShellViewModelFactory(app.runtime.sessions))
                 val tabletChatBinding: TabletChatBinding = viewModel()
@@ -684,11 +695,11 @@ class MainActivity : ComponentActivity() {
                     ),
                 )
                 val attentionState by attention.state.collectAsStateWithLifecycle()
-                LaunchedEffect(pendingSessionNavigation) {
+                LaunchedEffect(pendingSessionNavigation, pendingNotificationAccountId) {
                     val request = pendingSessionNavigation ?: return@LaunchedEffect
                     if (request.targetInstanceId == null) return@LaunchedEffect // Legacy input requires an explicit computer choice.
                     try {
-                        app.runtime.navigateToSession(request) { sessionId ->
+                        app.runtime.navigateToSession(request, pendingNotificationAccountId) { sessionId ->
                             if (pendingSessionNavigation == request) {
                                 tabletChatBinding.bind(app.runtime.sessions.delegate.value, request.targetInstanceId, app.runtime.transport.delegate.value)
                                 if (pendingSessionNavigation == request) {
@@ -697,6 +708,7 @@ class MainActivity : ComponentActivity() {
                                     consumedNotificationKeys.add(request.identity())
                                     navigationIntakeKey?.let(consumedNotificationKeys::add)
                                     pendingSessionNavigation = null
+                                    pendingNotificationAccountId = null
                                     sessionNavigationError = null
                                 }
                             }
@@ -1195,6 +1207,51 @@ class MainActivity : ComponentActivity() {
                         notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                     }
                 }
+                if (showNotificationSettings) AlertDialog(
+                    onDismissRequest = { showNotificationSettings = false },
+                    title = { Text(getString(R.string.push_permission_title)) },
+                    text = { Text(getString(R.string.push_permission_detail)) },
+                    confirmButton = { TextButton(onClick = {
+                        showNotificationSettings = false
+                        startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+                    }) { Text(getString(R.string.push_open_settings)) } },
+                    dismissButton = { TextButton(onClick = { showNotificationSettings = false }) { Text(getString(R.string.push_not_now)) } },
+                )
+                if (showPushDiagnostics) {
+                    val status = runCatching { app.runtime.pushDiagnostics() }.getOrNull()
+                    LaunchedEffect(showPushDiagnostics) {
+                        val paired = app.runtime.configStore.directory.first().computers.filterNot { it.localRuntime }
+                        pushDiagnosticLabels = paired.map { computer ->
+                            val name = computer.label.ifBlank { computer.instanceId }
+                            val registered = status?.first == true && computer.instanceId in status.second
+                            getString(if (registered) R.string.push_status_computer_registered else R.string.push_status_computer_unregistered, name)
+                        }
+                    }
+                    val enabled = androidx.core.app.NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled()
+                    val manager = getSystemService(android.app.NotificationManager::class.java)
+                    val channelDisabled = listOf(RagentFirebaseMessagingService.RUN_CHANNEL_ID, RagentFirebaseMessagingService.ATTENTION_CHANNEL_ID)
+                        .any { manager.getNotificationChannel(it)?.importance == android.app.NotificationManager.IMPORTANCE_NONE }
+                    AlertDialog(
+                        onDismissRequest = { showPushDiagnostics = false },
+                        title = { Text(getString(R.string.push_status_title)) },
+                        text = { Column {
+                            Text(getString(if (enabled) R.string.push_status_enabled else R.string.push_status_disabled))
+                            Text(if (status?.first == true) getString(R.string.push_status_registered, status.second.size) else getString(R.string.push_status_pending))
+                            pushDiagnosticLabels.forEach { Text(it) }
+                            if (channelDisabled) Text(getString(R.string.push_status_channel_off))
+                            Text(getString(R.string.push_status_scope))
+                            Text(getString(R.string.push_status_explanation))
+                            TextButton(onClick = { PushRegistrationSchedule.request(this@MainActivity); showPushDiagnostics = false }) { Text(getString(R.string.push_retry)) }
+                        } },
+                        confirmButton = { TextButton(onClick = {
+                            showPushDiagnostics = false
+                            startActivity(Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName))
+                        }) { Text(getString(R.string.push_open_settings)) } },
+                        dismissButton = { TextButton(onClick = { showPushDiagnostics = false }) { Text(getString(R.string.push_not_now)) } },
+                    )
+                }
                 // A separate first() coroutine can finish before the state collector
                 // receives its value. Gate on the actual collected snapshot instead.
                 val localStartupFlow = remember(app) {
@@ -1596,7 +1653,7 @@ class MainActivity : ComponentActivity() {
                         error = sessionNavigationError,
                         computers = computerDirectory.computers,
                         choose = { target -> pendingSessionNavigation = pendingSessionNavigation?.copy(targetInstanceId = target); sessionNavigationError = null },
-                        dismiss = { pendingSessionNavigation = null; sessionNavigationError = null },
+                        dismiss = { pendingSessionNavigation = null; pendingNotificationAccountId = null; sessionNavigationError = null },
                     )
                 }
                 val signInBackdrop = rememberGraphicsLayer()
@@ -1805,6 +1862,7 @@ class MainActivity : ComponentActivity() {
                             }
                             WorkbenchEvent.CloseSettingsPage -> shell.onEvent(AppShellEvent.CloseSettingsPage)
                             WorkbenchEvent.OpenAppApiSettings -> startActivity(Intent(this@MainActivity, AppApiSettingsActivity::class.java))
+                            WorkbenchEvent.OpenPushDiagnostics -> showPushDiagnostics = true
                             WorkbenchEvent.ToggleVoiceInput -> {
                                 if (voiceState.recording || voiceState.processing) {
                                     voiceController.stopVoiceInput()
@@ -2330,6 +2388,7 @@ class MainActivity : ComponentActivity() {
         outState.putStringArrayList("ragent.navigation.consumed", ArrayList(consumedNotificationKeys))
         navigationIntakeKey?.let { outState.putString("ragent.navigation.intakeKey", it) }
         pendingSessionNavigation?.let { outState.putString("ragent.navigation.pending", AppApiJson.encodeToString(it)) }
+        pendingNotificationAccountId?.let { outState.putString("ragent.navigation.accountId", it) }
         val browserPurpose = browserSignInRequest
         val browserChallenge = browserSignInChallenge
         if (browserPurpose != null && browserChallenge != null) {

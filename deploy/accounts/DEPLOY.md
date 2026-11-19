@@ -18,6 +18,34 @@ cd /opt/ragent-accounts/current/app
 
 The migration runner uses `RAGENT_ACCOUNTS_DATABASE_URL`; keep that value in the protected environment file and never print it in command output or logs. After switching the release, verify `/healthz`, `/readyz`, and the account routes through the configured HTTPS base URL.
 
+## Android cloud notifications
+
+Migration `049_account_push` adds the cloud notification tables, including
+`account_push_delivery_outbox`. The earlier `036_account_fcm_push` deployment
+may already own a different `account_fcm_outbox`; leave that table and its data
+untouched. The existing admin console reports the historical table, not the new
+delivery queue. Until the console itself is upgraded, inspect the authenticated
+`POST /v1/push/status` endpoint and Accounts readiness for the new service.
+Before rollout,
+back up the Accounts database and the protected push encryption key together;
+do not print credentials or place them in desktop or mobile packages. Apply the
+additive migration with the release's existing migration runner before enabling
+the new feature. Preserve the previous immutable release for code rollback and
+leave the new tables intact when rolling back application code.
+
+The protected Accounts service environment requires
+`RAGENT_ACCOUNTS_PUSH_ENABLED=1`, a stable
+`RAGENT_ACCOUNTS_PUSH_ENCRYPTION_KEY` consisting of 64 hexadecimal characters,
+`RAGENT_FCM_SERVICE_ACCOUNT_FILE` pointing to a service-account JSON readable
+by the Accounts service user, and `RAGENT_FCM_PROJECT_ID` matching the Android
+Firebase project. Do not rotate or discard the encryption key without a reviewed
+data migration: it protects registered device tokens. Stage the Accounts
+release and migration first, verify readiness and configuration through the
+authorized administration channel, then roll out computer and Android
+clients. Cloud acceptance is not proof of phone delivery. Use existing real
+completion, approval and chat activity to verify the full path, and verify
+restarts and access revocation without exposing device tokens.
+
 ## Optional cloud speech recognition
 
 Cloud speech recognition is disabled unless both of these protected settings are present:

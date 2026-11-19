@@ -85,6 +85,7 @@ export function createSessionTurnCompletionHelpers(services) {
     sanitizeEmailCompletionTargets,
     scheduleQueuedFollowUpDispatch,
     scheduleSessionTaskCardSuggestion,
+    scheduleCompletionPushRecovery,
     sendCompletionPush,
     sendUserAttentionPush,
     sendMessage,
@@ -116,10 +117,10 @@ export function createSessionTurnCompletionHelpers(services) {
     return trimString(run?.replyPublicationRootRunId) || trimString(run?.id);
   }
 
-  async function updateReplyPublication(run, updater) {
+  async function updateReplyPublication(run, updater, { allowPush = true } = {}) {
     const rootRunId = getReplyPublicationRootRunId(run);
     if (!rootRunId || typeof updater !== 'function') return null;
-    return updateRun(rootRunId, (existing) => {
+    const updated = await updateRun(rootRunId, (existing) => {
       const current = existing?.replyPublication && typeof existing.replyPublication === 'object'
         ? existing.replyPublication
         : {
@@ -138,11 +139,21 @@ export function createSessionTurnCompletionHelpers(services) {
       if (!next || typeof next !== 'object') {
         return existing;
       }
+      const finalRunId = trimString(next.finalRunId || current.finalRunId);
+      const proposedReadyAt = trimString(next.readyAt || current.readyAt);
+      const readyAt = finalRunId && finalRunId !== trimString(current.finalRunId) && proposedReadyAt === trimString(current.readyAt)
+        ? nowIso() : proposedReadyAt;
+      const checkpoint = existing?.completionPushCheckpoint;
+      const publishReady = allowPush && trimString(next.state || current.state).toLowerCase() === 'ready' && finalRunId && readyAt;
       return {
         ...existing,
+        ...(publishReady && (!checkpoint || checkpoint.finalRunId !== finalRunId)
+          ? { completionPushCheckpoint: { state: 'publication_ready', rootRunId, finalRunId, readyAt } }
+          : {}),
         replyPublication: {
           ...current,
           ...next,
+          ...(publishReady ? { readyAt } : {}),
           responseIds: normalizeReplyPublicationResponseIds(
             next.responseIds,
             trimString(existing?.responseId || existing?.requestId || run?.responseId || run?.requestId),
@@ -151,6 +162,8 @@ export function createSessionTurnCompletionHelpers(services) {
         },
       };
     });
+    if (updated?.completionPushCheckpoint?.state === 'publication_ready') scheduleCompletionPushRecovery?.();
+    return updated;
   }
 
   async function queueSessionCompletionTargets(session, run, manifest) {
@@ -190,10 +203,8 @@ export function createSessionTurnCompletionHelpers(services) {
 
   async function maybeSendSessionCompletionPush(sessionId, fallbackSession = null, terminalRun = null) {
     const currentSession = await getSession(sessionId) || fallbackSession;
-    if (!currentSession?.id) return false;
-    if (isSessionRunning(currentSession)) return false;
-    if (getSessionQueueCount(currentSession) > 0) return false;
     const runId = String(terminalRun?.id || terminalRun?.runId || '').trim();
+    if (!runId || !currentSession?.id || isSessionRunning(currentSession) || getSessionQueueCount(currentSession) > 0) return false;
     // A run that landed in "waiting_user" has not finished from the user's
     // perspective: it is blocked on an approval or a question. Push that as an
     // attention notification instead of a completion, so the user knows they
@@ -201,10 +212,10 @@ export function createSessionTurnCompletionHelpers(services) {
     const normalizedWaiting = String(currentSession?.workflowState || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
     const isWaiting = ['waiting', 'waiting_user', 'waiting_for_user', 'waiting_on_user', 'needs_user', 'needs_input'].includes(normalizedWaiting);
     if (isWaiting && typeof sendUserAttentionPush === 'function') {
-      sendUserAttentionPush({ ...currentSession, id: sessionId }, { kind: 'attention', key: 'waiting_user', label: 'needs your attention', runId }).catch(() => {});
+      await sendUserAttentionPush({ ...currentSession, id: sessionId }, { kind: 'attention', key: 'waiting_user', label: 'needs your attention', runId, occurredAt: terminalRun?.completedAt, webOnly: true });
       return true;
     }
-    sendCompletionPush({ ...currentSession, id: sessionId }, { runId, eventId: runId }).catch(() => {});
+    await sendCompletionPush({ ...currentSession, id: sessionId }, { runId, eventId: runId, occurredAt: terminalRun?.completedAt, webOnly: true });
     return true;
   }
 
@@ -777,7 +788,7 @@ export function createSessionTurnCompletionHelpers(services) {
           failedAt: null,
           lastError: null,
         };
-      });
+      }, { allowPush: allowCompletionEffects });
     }
 
     if (allowCompletionEffects
@@ -920,7 +931,9 @@ export function createSessionTurnCompletionHelpers(services) {
     // Session labels are now already settled (or safely left provisional), so
     // completion delivery never waits for another provider process.
     if (allowCompletionEffects && !hasQueuedFollowUps) {
-      void maybeSendSessionCompletionPush(sessionId, session, finalizedRun);
+      if (finalizedRun.state === 'completed') {
+        await maybeSendSessionCompletionPush(sessionId, session, finalizedRun);
+      }
     }
 
     if (!hasQueuedFollowUps) {

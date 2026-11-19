@@ -17,6 +17,12 @@ applications menu. The manager connects to the service on `127.0.0.1:7690`.
 The package starts its system services during installation and after reboot.
 It does not require a separately installed Node runtime.
 
+Android notifications are submitted by the local service to the configured
+Accounts endpoint using the existing instance identity. The endpoint is public
+configuration; a Firebase service-account key is not needed on the computer.
+The local outbox is kept with the instance configuration and resumes after a
+service restart. A cloud acceptance confirms queueing, not device delivery.
+
 For an RPM candidate on an EL9 system, use
 `sudo dnf install ./Ragent-<version>-rhel9-x86_64.rpm`. Consult the
 [Linux acceptance record](linux-release-acceptance.md) and release notes for

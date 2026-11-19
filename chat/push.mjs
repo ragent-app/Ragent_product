@@ -3,7 +3,7 @@ import { dirname } from 'path';
 import { VAPID_KEYS_FILE, PUSH_SUBSCRIPTIONS_FILE } from '../lib/config.mjs';
 import { buildToolProcessEnv } from '../lib/user-shell-env.mjs';
 import { createSerialTaskQueue, ensureDir, readJson, writeJsonAtomic } from './fs-utils.mjs';
-import { sendFcm } from './fcm.mjs';
+import { enqueueAccountPush } from './account-push-outbox.mjs';
 import { createHash, timingSafeEqual } from 'crypto';
 
 let ready = false;
@@ -255,7 +255,7 @@ async function dispatchPush(payload) {
   return true;
 }
 
-export async function sendCompletionPush(session, { runId = '', eventId = '' } = {}) {
+export async function sendCompletionPush(session, { runId = '', eventId = '', occurredAt, webOnly = false } = {}) {
   const folder = (session?.folder || '').split('/').pop() || 'Session';
   const name = session?.name || folder;
   const rawTerminalRunId = String(runId || '').trim();
@@ -273,10 +273,7 @@ export async function sendCompletionPush(session, { runId = '', eventId = '' } =
     runId: terminalRunId,
   });
   const web = dispatchPush(payload);
-  const fcm = sendFcm({
-    title: 'Ragent', body: `${name} — task completed`, sessionId: session?.id || null, tab: 'sessions', kind: 'completion',
-    eventId: notificationEventId, runId: terminalRunId,
-  }).catch(() => false);
+  const fcm = webOnly ? false : enqueueAccountPush({ sessionId: session?.id, kind: 'completion', eventId: notificationEventId, runId: terminalRunId, occurredAt });
   const [webResult, fcmResult] = await Promise.all([web, fcm]);
   return webResult || fcmResult;
 }
@@ -291,7 +288,7 @@ export async function sendUserAttentionPush(session, detail = {}) {
   const body = `${name} — ${label}`;
   const rawEventId = String(detail?.eventId || '').trim();
   const eventId = rawEventId.length <= 256 ? rawEventId : '';
-  const rawRunId = String(detail?.runId || session?.activity?.run?.runId || session?.activity?.run?.id || session?.currentRunId || '').trim();
+  const rawRunId = String(detail?.runId || '').trim();
   const runId = rawRunId.length <= 256 ? rawRunId : '';
   const payload = JSON.stringify({
     title: 'Ragent',
@@ -305,10 +302,8 @@ export async function sendUserAttentionPush(session, detail = {}) {
     runId,
   });
   const web = dispatchPush(payload);
-  const fcm = sendFcm({
-    title: 'Ragent', body, sessionId: session?.id || null, tab: 'sessions', kind: detail?.kind || 'attention', awaitingKey: detail?.key || label,
-    eventId, runId,
-  }).catch(() => false);
+  const fcm = detail?.webOnly ? false : enqueueAccountPush({ sessionId: session?.id, kind: detail?.kind || 'attention', awaitingKey: detail?.key || label,
+    eventId, runId, occurredAt: detail?.occurredAt });
   const [webResult, fcmResult] = await Promise.all([web, fcm]);
   return webResult || fcmResult;
 }

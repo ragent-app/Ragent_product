@@ -32,6 +32,8 @@ import { ACCOUNT_ASR_MAX_AUDIO_BYTES } from './asr-audio.mjs';
 import { ACCOUNT_ASR_MODEL } from './asr-policy.mjs';
 import { createAttachmentRelay } from './attachment-relay.mjs';
 import { createAccountAsrPostgresStore } from './asr-postgres-store.mjs';
+import { createAccountPushService } from './push-service.mjs';
+import { handleAccountPushRoutes } from './push-routes.mjs';
 import { createAccountAsrService } from './asr-service.mjs';
 import { createOpenAiTranscriber } from './asr-openai.mjs';
 import { buildHarnessPolicyDocument } from '../lib/harness-policy.mjs';
@@ -266,6 +268,24 @@ export async function createAccountsServer({
     audit,
     clock,
   });
+  let pushService = null;
+  const pushEnabled = process.env.RAGENT_ACCOUNTS_PUSH_ENABLED === '1';
+  if (pushEnabled && typeof stateStore.accountAsrContext === 'function') {
+    try {
+      pushService = createAccountPushService({
+        ...stateStore.accountAsrContext(),
+        authenticateAccount: broker.authenticateAccountAsr,
+        encryptionKey: process.env.RAGENT_ACCOUNTS_PUSH_ENCRYPTION_KEY,
+        accountFile: process.env.RAGENT_FCM_SERVICE_ACCOUNT_FILE,
+        projectId: process.env.RAGENT_FCM_PROJECT_ID,
+        fetchImpl,
+        clock,
+      });
+      pushService.start();
+    } catch {
+      audit({ event: 'account_push.unavailable', code: 'push_configuration_unavailable' });
+    }
+  }
   const asrKey = text(openAiApiKey ?? process.env.OPENAI_API_KEY);
   const asrEnabled = (asrEnabledOverride ?? process.env.RAGENT_ACCOUNTS_ASR_ENABLED === '1') && Boolean(asrKey);
   let asrService = injectedAsrService || null;
@@ -355,6 +375,7 @@ export async function createAccountsServer({
     if (await handleTemporaryPairingRoutes({ req, res, pathname: strippedPathname, broker: temporaryBroker })) return true;
     if (await handleTemporaryControlRoutes({ req, res, pathname: strippedPathname, broker: temporaryControlBroker })) return true;
     if (await handleAccountPairingRoutes({ req, res, pathname: strippedPathname, broker: accountPairingBroker })) return true;
+    if (await handleAccountPushRoutes({ req, res, pathname: strippedPathname, service: pushService })) return true;
     const handledByLeases = await handleRefreshLeaseRoutes({
       req,
       res,
@@ -381,6 +402,8 @@ export async function createAccountsServer({
     temporaryBroker,
     temporaryControlBroker,
     accountPairingBroker,
+    pushService,
+    pushEnabled,
     contentReports,
     contentReportStatus,
     accountDeletion,
@@ -495,6 +518,7 @@ export async function startAccountsServer(options = {}) {
   fastify.addHook('onClose', async () => {
     await app.accountDeletion?.close();
     await app.asrService?.close?.();
+    await app.pushService?.close?.();
   });
   fastify.setErrorHandler((error, request, reply) => {
     const path = String(request.url).split(/[?#]/, 1)[0];
@@ -527,6 +551,14 @@ export async function startAccountsServer(options = {}) {
       if (app.asrStatus === 'ready' && typeof app.asrService?.checkReady === 'function') {
         await app.asrService.checkReady();
       }
+      if (app.pushEnabled) {
+        if (!app.pushService) return reply.code(503).send({ status: 'unavailable', push: 'unavailable' });
+        try {
+          await app.pushService.checkReady();
+        } catch {
+          return reply.code(503).send({ status: 'unavailable', push: 'unavailable' });
+        }
+      }
       return {
         status: 'ready',
         signingKey: Boolean(app.keyRecord),
@@ -534,6 +566,7 @@ export async function startAccountsServer(options = {}) {
         contentReporting: app.contentReportStatus,
         accountDeletion: app.accountDeletionStatus,
         speechRecognition: app.asrStatus,
+        push: app.pushEnabled ? 'ready' : 'disabled',
         ...(app.accountDeletion ? { accountDeletionWorker: app.accountDeletion.workerStatus() } : {}),
       };
     } catch (error) {

@@ -915,6 +915,122 @@ const synthesizeDetachedRunTermination = createDetachedRunReconciler({
   updateRun: async (runId, updater) => updateRun(runId, updater),
   writeRunResult,
 });
+// Record the final business decision on the Run before writing the separate
+// account outbox. A crash between those writes can then be repaired safely.
+async function checkpointCompletionPush(runId, decision, expected) {
+  const updated = await updateRun(runId, (current) => {
+    const checkpoint = current.completionPushCheckpoint;
+    if (!checkpoint || checkpoint.state !== 'publication_ready') return current;
+    if (expected && (checkpoint.finalRunId !== expected.finalRunId || checkpoint.readyAt !== expected.readyAt)) return current;
+    return { ...current, completionPushCheckpoint: decision
+      ? { ...checkpoint, state: 'decided', decision }
+      : { ...checkpoint, state: 'skipped' } };
+  });
+  if (!updated) throw new Error('Completion push Run unavailable');
+  const checkpoint = updated.completionPushCheckpoint;
+  if (expected && (checkpoint?.finalRunId !== expected.finalRunId || checkpoint?.readyAt !== expected.readyAt)) return;
+  if (checkpoint?.state !== 'decided') return;
+  const { enqueueAccountPush } = await import('./account-push-outbox.mjs');
+  const persisted = await enqueueAccountPush(checkpoint.decision);
+  if (persisted !== true) throw new Error('Completion push was not persisted');
+  await updateRun(runId, (current) => current.completionPushCheckpoint?.state === 'decided'
+    && current.completionPushCheckpoint.finalRunId === checkpoint.finalRunId
+    && current.completionPushCheckpoint.readyAt === checkpoint.readyAt
+    ? { ...current, completionPushCheckpoint: { ...checkpoint, state: 'committed' } }
+    : current);
+}
+
+let completionPushRecoveryRunning = false;
+const pendingPublicationWarnings = new Set();
+async function recoverCompletionPushCheckpoints() {
+  if (completionPushRecoveryRunning) return;
+  completionPushRecoveryRunning = true;
+  try {
+    const summaries = await listRunIndexEntries({ states: ['completed'], reverse: true });
+    const cutoff = Date.now() - 24 * 60 * 60_000;
+    for (const summary of summaries) {
+      const updatedAt = Date.parse(summary.updatedAt || summary.completedAt || '');
+      if (!Number.isFinite(updatedAt) || updatedAt < cutoff) continue;
+      if (runPostFinalizePromises.has(summary.id)) continue;
+      const run = await getRun(summary.id);
+      const checkpoint = run?.completionPushCheckpoint;
+      if (!checkpoint && run?.finalizedAt && run?.replyPublication
+        && run.replyPublication.state !== 'ready' && !pendingPublicationWarnings.has(run.id)) {
+        if (pendingPublicationWarnings.size >= 1000) pendingPublicationWarnings.clear();
+        pendingPublicationWarnings.add(run.id);
+        console.warn(`[account-push] pending_publication for run ${run.id}`);
+      }
+      if (!checkpoint || !['publication_ready', 'decided'].includes(checkpoint.state)) continue;
+      try {
+        if (checkpoint.state === 'decided') {
+          await checkpointCompletionPush(run.id, checkpoint.decision, checkpoint);
+          continue;
+        }
+        const publication = run.replyPublication;
+        if (checkpoint.rootRunId !== run.id || publication?.state !== 'ready'
+          || publication?.finalRunId !== checkpoint.finalRunId || publication?.readyAt !== checkpoint.readyAt) {
+          await checkpointCompletionPush(run.id, null, checkpoint);
+          continue;
+        }
+        const occurredAt = Date.parse(checkpoint.readyAt || '');
+        if (!Number.isFinite(occurredAt) || occurredAt + 24 * 60 * 60_000 <= Date.now()) {
+          await checkpointCompletionPush(run.id, null, checkpoint);
+          continue;
+        }
+        const finalRun = await getRun(checkpoint.finalRunId);
+        if (!finalRun || finalRun.sessionId !== run.sessionId || finalRun.state !== 'completed'
+          || (finalRun.id !== run.id && finalRun.replyPublicationRootRunId !== run.id)) continue;
+        const session = await getSession(run.sessionId);
+        if (!session || isSessionRunning(session) || getSessionQueueCount(session) > 0) continue;
+        // Only a later published user-visible reply supersedes this intent.
+        // While a later turn is unresolved, defer rather than notify the old one.
+        const createdAt = Date.parse(run.createdAt || '');
+        if (!Number.isFinite(createdAt)) continue;
+        const sessionRuns = await listRunIndexEntries({ sessionId: run.sessionId });
+        let superseded = false;
+        let unresolvedLater = false;
+        for (const candidate of sessionRuns) {
+          if (candidate.id === run.id) continue;
+          const candidateTime = Date.parse(candidate.createdAt || '');
+          if (!Number.isFinite(candidateTime)) { unresolvedLater = true; continue; }
+          if (candidateTime < createdAt) continue;
+          const laterManifest = await getRunManifest(candidate.id);
+          if (!laterManifest) { unresolvedLater = true; continue; }
+          if (laterManifest.internalOperation) continue;
+          if (candidateTime === createdAt) { unresolvedLater = true; continue; }
+          const laterRun = await getRun(candidate.id);
+          if (laterRun?.replyPublication?.state === 'ready' && laterRun.replyPublication.finalRunId) {
+            const laterFinal = await getRun(laterRun.replyPublication.finalRunId);
+            if (laterFinal?.sessionId === run.sessionId && laterFinal.state === 'completed'
+              && (laterFinal.id === laterRun.id || laterFinal.replyPublicationRootRunId === laterRun.id)) {
+              superseded = true;
+              break;
+            }
+          }
+          unresolvedLater = true;
+        }
+        if (superseded) {
+          await checkpointCompletionPush(run.id, null, checkpoint);
+          continue;
+        }
+        if (unresolvedLater) continue;
+        await checkpointCompletionPush(run.id, { sessionId: run.sessionId, kind: 'completion',
+          runId: finalRun.id, eventId: finalRun.id, awaitingKey: '', occurredAt: checkpoint.readyAt }, checkpoint);
+      } catch {
+        console.warn('[account-push] completion recovery deferred');
+      }
+    }
+  } finally {
+    completionPushRecoveryRunning = false;
+  }
+}
+
+function scheduleCompletionPushRecovery() {
+  void recoverCompletionPushCheckpoints().catch(() => {
+    console.warn('[account-push] completion recovery unavailable');
+  });
+}
+
 const {
   collectNormalizedRunEvents,
   collectNormalizedRunEventDelta,
@@ -6898,6 +7014,7 @@ const {
   appendAssistantMessage,
   appendEvent,
   broadcastSessionInvalidation,
+  scheduleCompletionPushRecovery,
   buildReplySelfCheckPrompt,
   buildReplySelfRepairPrompt,
   collectAssistantLocalMarkdownImageRewrites,
@@ -9349,6 +9466,7 @@ function scheduleDetachedRunPostFinalization(sessionId, finalizedRun, manifest, 
       if (runPostFinalizePromises.get(finalizedRun.id) === promise) {
         runPostFinalizePromises.delete(finalizedRun.id);
       }
+      scheduleCompletionPushRecovery();
       broadcastSessionInvalidation(sessionId);
     });
   runPostFinalizePromises.set(finalizedRun.id, promise);
@@ -9983,17 +10101,21 @@ export async function startDetachedRunObservers() {
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
-      void recoverPendingAgentInterruptions().catch(() => {});
       void reconcileOrphanDetachedRuns().catch((error) => {
         console.error(`[runs] orphan sweep failed: ${error.message}`);
       });
+      void recoverCompletionPushCheckpoints().catch(() => {
+        console.warn('[account-push] completion recovery unavailable');
+      });
+      void recoverPendingAgentInterruptions().catch(() => {});
     }, ORPHAN_RUN_SWEEP_INTERVAL_MS);
     if (typeof orphanRunSweepTimer.unref === 'function') orphanRunSweepTimer.unref();
   }
   // If no compact session metadata advertises completion targets, avoid
   // scanning every historical run directory at boot.
-  await recoverPendingAgentInterruptions();
   await resumePendingCompletionTargets({ targetSessionIds: completionTargetSessionIds });
+  await recoverCompletionPushCheckpoints();
+  await recoverPendingAgentInterruptions();
 
   // DS-07: retire runtime state / generation entries of sessions idle past the
   // TTL. Booted here (with the observers) so restart recovery is complete
