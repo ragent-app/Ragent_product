@@ -11,7 +11,11 @@
 import { createHash } from 'crypto';
 
 import { createProviderNativeDelegationMapper } from './provider-native-delegation-mapper.mjs';
-import { barrierEventFromMember, memberEventFromDelegation } from './adapters/provider-native-delegation.mjs';
+import {
+  barrierEventFromMember,
+  canonicalizeNativeDelegationProvider,
+  memberEventFromDelegation,
+} from './adapters/provider-native-delegation.mjs';
 import {
   createJoinBarrier,
 } from './provider-native-delegation-barrier.mjs';
@@ -24,7 +28,7 @@ import {
 
 export const PROVIDER_NATIVE_DELEGATION_RUNTIME_SCHEMA_VERSION = 1;
 
-const PROVIDERS = new Set(['claude', 'codex']);
+const PROVIDERS = new Set(['claude', 'codex', 'agy']);
 const TERMINAL_OUTCOMES = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'lost']);
 const MAX_NATIVE_REPLAY_EVIDENCE_EVENTS = 8192;
 const MAX_NATIVE_REPLAY_ERRORS = 128;
@@ -67,10 +71,9 @@ function hash(value) {
 }
 
 export function resolveProvider(run = {}, explicit = '') {
-  for (const value of [explicit,run.runtimeFamily,run.providerCapabilities?.provider,run.provider]) {
-    const lower = text(value).toLowerCase();
-    if (lower.includes('claude')) return 'claude';
-    if (lower.includes('codex')) return 'codex';
+  for (const value of [explicit, run.runtimeFamily, run.providerCapabilities?.provider, run.provider]) {
+    const resolved = canonicalizeNativeDelegationProvider(value);
+    if (resolved) return resolved;
   }
   return '';
 }
@@ -103,6 +106,7 @@ function hasExactString(value, needles, depth = 0, seen = new Set()) {
 }
 
 function buildTerminalCandidate(input = {}) {
+  if (!input || typeof input !== 'object') return null;
   const outcome = text(input.outcome);
   if (!TERMINAL_OUTCOMES.has(outcome)) return null;
   return {
@@ -246,7 +250,7 @@ async function collectStreamedDelegationEvidence(streamRunSpoolRecords, run, pro
       continue;
     }
     const raw = readRawFrame(record);
-    if (!raw) continue;
+    if (!raw || raw.ragent_intermediate === true) continue;
     const serialized = stableJson(raw);
     if (serialized && !rememberRawKey(hash(serialized))) continue;
     const mapped = mapper.map(raw);
@@ -318,7 +322,7 @@ export function projectProviderNativeDelegation({
       continue;
     }
     const raw = readRawFrame(record);
-    if (!raw) continue;
+    if (!raw || raw.ragent_intermediate === true) continue;
     const rawKey = stableJson(raw);
     if (rawKey && rawKeys.has(rawKey)) continue;
     if (rawKey) rawKeys.add(rawKey);
@@ -564,22 +568,41 @@ export function isProviderNativeChildFrame(raw, childSessionIds = []) {
 }
 
 export function isProviderNativeDelegationEvidence(raw, provider = '') {
-  const normalizedProvider = text(provider).toLowerCase();
+  if (!raw || typeof raw !== 'object' || raw.ragent_intermediate === true) return false;
+  const normalizedProvider = canonicalizeNativeDelegationProvider(provider);
   const serialized = stableJson(raw).toLowerCase();
   if (!serialized) return false;
-  if (normalizedProvider.includes('claude')) {
+  if (normalizedProvider === 'claude') {
     return serialized.includes('"name":"task"')
       || serialized.includes('"name":"agent"')
       || serialized.includes('"name":"subagent"')
       || serialized.includes('subagent_started')
       || serialized.includes('delegation_started');
   }
-  if (normalizedProvider.includes('codex')) {
+  if (normalizedProvider === 'codex') {
     return serialized.includes('collabagenttoolcall')
       || serialized.includes('spawn_agent')
       || serialized.includes('send_input')
       || serialized.includes('resume_agent')
       || serialized.includes('close_agent');
+  }
+  if (normalizedProvider === 'agy') {
+    const acpName = text(raw?.params?.update?.name).toLowerCase();
+    const stepToolName = text(
+      raw?.step_update?.tool_name || raw?.step_update?.name || raw?.step_update?.tool_info?.name,
+    ).toLowerCase();
+    if (['invoke_subagent', 'swarm', 'post_message', 'run_workflow'].includes(acpName)
+      || ['invoke_subagent', 'swarm', 'post_message', 'run_workflow'].includes(stepToolName)) {
+      return true;
+    }
+    return serialized.includes('"name":"invoke_subagent"')
+      || serialized.includes('"tool_name":"invoke_subagent"')
+      || serialized.includes('"name":"swarm"')
+      || serialized.includes('"tool_name":"swarm"')
+      || serialized.includes('"name":"post_message"')
+      || serialized.includes('"tool_name":"post_message"')
+      || serialized.includes('"name":"run_workflow"')
+      || serialized.includes('"tool_name":"run_workflow"');
   }
   return false;
 }
@@ -664,10 +687,11 @@ export async function reconcileProviderNativeDelegationRun({
   );
   const observedMembers = new Map(evidence?.adapterMemberEvents || []);
   if (typeof appendRunSpoolRecord === 'function') {
+    const pendingMembers = [];
     for (const event of projected.canonicalEvents) {
       const member = evidence?.memberEvents.get(event.id) || memberEventFromDelegation(event);
       if (existingCanonicalIds.has(event.id)) continue;
-      await appendRunSpoolRecord(runId, {
+      pendingMembers.push({
         ts: isoFromMs(event.timestamp),
         stream: 'stdout',
         json: { type: 'ragent.member_event', event: member },
@@ -676,11 +700,23 @@ export async function reconcileProviderNativeDelegationRun({
     }
     for (const member of evidence?.memberEvents.values() || []) {
       if (existingCanonicalIds.has(member.id)) continue;
-      await appendRunSpoolRecord(runId, {
-        ts: isoFromMs(member.timestamp), stream: 'stdout',
+      pendingMembers.push({
+        ts: isoFromMs(member.timestamp),
+        stream: 'stdout',
         json: { type: 'ragent.member_event', event: member },
       });
       existingCanonicalIds.add(member.id);
+    }
+    // Persist confirmation/lifecycle records before terminal records so replay
+    // sees confirmed birth before terminal transition even when both originate
+    // from one frame.
+    pendingMembers.sort((a, b) => {
+      const aTerm = a.json.event?.phase === 'terminal' ? 1 : 0;
+      const bTerm = b.json.event?.phase === 'terminal' ? 1 : 0;
+      return aTerm - bTerm;
+    });
+    for (const record of pendingMembers) {
+      await appendRunSpoolRecord(runId, record);
     }
   }
 

@@ -5,9 +5,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  AGY_ACP_RUNTIME_FAMILY,
   AGY_STREAM_RUNTIME_FAMILY,
+  buildAgyAcpArgs,
   buildAgyStreamInput,
   buildAgyArgs,
+  createAgyAcpAdapter,
   createAgyAdapter,
   createAgyStreamAdapter,
 } from '../chat/adapters/agy.mjs';
@@ -195,5 +198,85 @@ assert.equal(
   buildAgyArgs('Say OK.', { model: 'claude-opus-4-6-thinking', effort: 'high' }).includes('--effort'),
   false,
 );
+assert.equal(
+  buildAgyArgs('Say OK.', { model: 'gemini-4-neon-xhigh', effort: 'xhigh' }).includes('--effort'),
+  false,
+);
+assert.deepEqual(
+  buildAgyArgs('Say OK.', { model: 'gemini-4-neon', effort: 'xhigh' }).slice(-4),
+  ['--model', 'gemini-4-neon', '--effort', 'xhigh'],
+);
+
+// Controlled slash-command policy + --agent / --settings / --sandbox / --add-dir.
+const authorizedSlashArgs = buildAgyArgs('Say OK.', {
+  allowSlashCommands: true,
+  agent: 'probe-agent',
+  settings: { queuedMessages: 'send-immediately' },
+  sandbox: true,
+  addDirs: ['/extra-a', '/extra-a', '/extra-b'],
+});
+assert.equal(authorizedSlashArgs.includes('--disable-slash-commands'), false);
+assert.ok(authorizedSlashArgs.includes('--agent'));
+assert.equal(authorizedSlashArgs[authorizedSlashArgs.indexOf('--agent') + 1], 'probe-agent');
+assert.ok(authorizedSlashArgs.includes('--settings'));
+assert.equal(authorizedSlashArgs[authorizedSlashArgs.indexOf('--settings') + 1], '{"queuedMessages":"send-immediately"}');
+assert.ok(authorizedSlashArgs.includes('--sandbox'));
+assert.deepEqual(
+  authorizedSlashArgs.reduce((acc, arg, idx) => (arg === '--add-dir' ? [...acc, authorizedSlashArgs[idx + 1]] : acc), []),
+  ['/extra-a', '/extra-b'],
+);
+assert.equal(
+  buildAgyArgs('Say OK.', { allowSlashCommands: true, untrusted: true }).includes('--disable-slash-commands'),
+  true,
+  'untrusted runs must keep slash commands disabled even if allowSlashCommands is requested',
+);
+assert.equal(
+  buildAgyArgs('Say OK.', { allowSlashCommands: true, managed: true }).includes('--disable-slash-commands'),
+  true,
+  'managed runs must keep slash commands disabled by default',
+);
+
+// AgY ACP args and adapter contract.
+assert.equal(createAgyAcpAdapter().capabilities.runtimeFamily, AGY_ACP_RUNTIME_FAMILY);
+const acpArgs = buildAgyAcpArgs({
+  geminiDir: '/sandbox/.gemini',
+  appDataDir: 'sessions/s-1',
+  includeDefaultCustomizations: false,
+  sandbox: true,
+  addDirs: ['/ws-extra', '/ws-extra'],
+  agent: 'probe-reader',
+});
+assert.deepEqual(acpArgs, [
+  'acp', '--stdio', '--process-per-session',
+  '--gemini-dir', '/sandbox/.gemini',
+  '--app-data-dir', 'sessions/s-1',
+  '--include-default-customizations=false',
+  '--sandbox',
+  '--add-dir', '/ws-extra',
+  '--agent', 'probe-reader',
+]);
+assert.equal(acpArgs.includes('--dangerously-skip-permissions'), false);
+assert.throws(
+  () => buildAgyAcpArgs({ geminiDir: '/sandbox/.gemini', appDataDir: '/outside/abs' }),
+  /must stay inside --gemini-dir/,
+);
+assert.throws(
+  () => buildAgyAcpArgs({ geminiDir: '/sandbox/.gemini', appDataDir: '../escape' }),
+  /path traversal/,
+);
+
+// Multi-turn stream-json tool ids remain collision-free across turns.
+const multiTurn = createAgyStreamAdapter();
+const turn1Tool = multiTurn.parseLine(JSON.stringify({
+  event: 'step_update',
+  step_update: { step_index: 2, step_type: 'tool', state: 'ACTIVE', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'echo 1' } } },
+}));
+assert.equal(turn1Tool[0].providerToolUseId, 'step:2');
+multiTurn.parseLine(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'one' } }));
+const turn2Tool = multiTurn.parseLine(JSON.stringify({
+  event: 'step_update',
+  step_update: { step_index: 2, step_type: 'tool', state: 'ACTIVE', tool_name: 'run_command', tool_info: { parameters: { CommandLine: 'echo 2' } } },
+}));
+assert.equal(turn2Tool[0].providerToolUseId, 'turn:1:step:2');
 
 console.log('test-agy-adapter: ok');

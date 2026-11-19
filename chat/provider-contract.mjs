@@ -109,6 +109,40 @@ const CLAUDE_PERMISSION_MODES = [
   },
 ];
 
+const AGY_ACP_PERMISSION_MODES = [
+  {
+    id: 'default',
+    label: 'default',
+    acpModeId: 'default',
+    dangerouslySkipPermissions: false,
+  },
+  {
+    id: 'accept-edits',
+    label: 'accept-edits',
+    acpModeId: 'accept-edits',
+    dangerouslySkipPermissions: false,
+  },
+  {
+    id: 'auto',
+    label: 'auto',
+    acpModeId: 'auto',
+    dangerouslySkipPermissions: false,
+  },
+  {
+    id: 'plan',
+    label: 'plan',
+    acpModeId: 'plan',
+    dangerouslySkipPermissions: false,
+  },
+  {
+    id: 'bypass-permissions',
+    label: 'bypass permissions',
+    acpModeId: 'auto',
+    dangerouslySkipPermissions: true,
+    aliases: ['skip-permissions'],
+  },
+];
+
 const PROVIDER_CAPABILITIES = {
   'claude-stream-json': {
     provider: 'claude',
@@ -157,6 +191,8 @@ const PROVIDER_CAPABILITIES = {
     supportsSteer: true,
     supportsInterrupt: true,
     supportsManagedActionMcp: true,
+    supportsOrganizationControlMcp: true,
+    supportsServerBuiltinSkillRead: true,
     supportsExternalUsageProjection: false,
     rawEventPersistence: true,
   },
@@ -204,6 +240,8 @@ const PROVIDER_CAPABILITIES = {
     supportsSteer: true,
     supportsInterrupt: true,
     supportsManagedActionMcp: true,
+    supportsOrganizationControlMcp: true,
+    supportsServerBuiltinSkillRead: true,
     supportsExternalUsageProjection: false,
     rawEventPersistence: true,
   },
@@ -287,9 +325,40 @@ const PROVIDER_CAPABILITIES = {
     supportsRevise: false,
     supportsExecute: true,
     supportsQueuedMessageMutations: true,
-    supportsResume: false,
+    supportsMultiTurnStdin: true,
+    supportsResume: true,
     supportsSteer: false,
     supportsInterrupt: false,
+    supportsOrganizationControlMcp: true,
+    supportsServerBuiltinSkillRead: true,
+    supportsExternalUsageProjection: false,
+    rawEventPersistence: true,
+  },
+  'agy-acp': {
+    provider: 'agy',
+    runtimeFamily: 'agy-acp',
+    transport: 'json-rpc-stdio',
+    permissionModel: 'acp-permission-gate',
+    defaultPermissionMode: 'bypass-permissions',
+    planDefaultPermissionMode: 'plan',
+    permissionModes: AGY_ACP_PERMISSION_MODES,
+    supportsTextDelta: true,
+    supportsReasoningDelta: true,
+    supportsToolEvents: true,
+    supportsFileEvents: true,
+    supportsFileStats: false,
+    supportsPlanArtifact: false,
+    supportsStructuredPlanFallback: true,
+    supportsRevise: false,
+    supportsExecute: true,
+    supportsQueuedMessageMutations: true,
+    supportsResume: true,
+    supportsSteer: true,
+    supportsInterrupt: true,
+    supportsApproval: true,
+    supportsManagedActionMcp: true,
+    supportsOrganizationControlMcp: true,
+    supportsServerBuiltinSkillRead: true,
     supportsExternalUsageProjection: false,
     rawEventPersistence: true,
   },
@@ -549,7 +618,42 @@ function findPermissionModeByField(capabilities, field, value) {
 const PRIVILEGED_GATED_MODES = Object.freeze({
   'claude-stream-json-bidi': 'default',
   'codex-app-server-json': 'on-request-danger-full-access',
+  'agy-acp': 'default',
 });
+
+const ORGANIZATION_CONTROL_MCP_RUNTIME_FAMILIES = new Set([
+  'codex-app-server-json',
+  'claude-stream-json-bidi',
+  'agy-acp',
+  'agy-stream-json',
+]);
+
+const SERVER_BUILTIN_SKILL_READ_RUNTIME_FAMILIES = new Set([
+  'codex-app-server-json',
+  'claude-stream-json-bidi',
+  'agy-acp',
+  'agy-stream-json',
+]);
+
+export function supportsOrganizationControlMcp(input) {
+  const capabilities = resolveProviderCapabilities(input);
+  if (capabilities?.supportsOrganizationControlMcp === true) return true;
+  if (capabilities?.supportsOrganizationControlMcp === false) return false;
+  const runtimeFamily = trimString(
+    typeof input === 'string' ? input : (capabilities?.runtimeFamily || input?.runtimeFamily),
+  );
+  return ORGANIZATION_CONTROL_MCP_RUNTIME_FAMILIES.has(runtimeFamily);
+}
+
+export function supportsServerBuiltinSkillRead(input) {
+  const capabilities = resolveProviderCapabilities(input);
+  if (capabilities?.supportsServerBuiltinSkillRead === true) return true;
+  if (capabilities?.supportsServerBuiltinSkillRead === false) return false;
+  const runtimeFamily = trimString(
+    typeof input === 'string' ? input : (capabilities?.runtimeFamily || input?.runtimeFamily),
+  );
+  return SERVER_BUILTIN_SKILL_READ_RUNTIME_FAMILIES.has(runtimeFamily);
+}
 
 // The gated permission-mode id a runtime must run in for the privileged gate to
 // fire, or '' if the runtime cannot host privileged mode. Pure lookup.
@@ -618,6 +722,8 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
         ? (capabilities.runtimeFamily === 'codex-app-server-json'
           ? 'untrusted-workspace-write'
           : 'never-workspace-write')
+        : capabilities.runtimeFamily === 'agy-acp'
+          ? 'accept-edits'
         : capabilities.runtimeFamily === 'qwen-code-acp'
           ? 'auto'
         : capabilities.runtimeFamily === 'kimi-code-acp'
@@ -634,7 +740,8 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
     // harnesses explicit instead of silently claiming that bypass is gated.
     if ((options.platform || process.platform) === 'win32'
         || capabilities.runtimeFamily === 'claude-stream-json-bidi'
-        || capabilities.runtimeFamily === 'codex-app-server-json') {
+        || capabilities.runtimeFamily === 'codex-app-server-json'
+        || capabilities.runtimeFamily === 'agy-acp') {
       const gatedId = getProfileGatedPermissionModeId(capabilities.runtimeFamily);
       return gatedId ? cloneJson(findPermissionMode(capabilities, gatedId)) : null;
     }
@@ -675,7 +782,12 @@ export function resolveProviderPermissionPolicy(input, options = {}) {
     mode = findPermissionMode(capabilities, 'plan');
   }
 
-  if (!mode && capabilities.provider === 'claude'
+  if (!mode && capabilities.runtimeFamily === 'agy-acp'
+    && trimString(options.interactionMode) === 'plan') {
+    mode = findPermissionMode(capabilities, 'plan');
+  }
+
+  if (!mode && (capabilities.provider === 'claude' || capabilities.runtimeFamily === 'agy-acp')
     && Object.prototype.hasOwnProperty.call(options, 'dangerouslySkipPermissions')) {
     mode = capabilities.permissionModes.find((candidate) =>
       candidate?.dangerouslySkipPermissions === (options.dangerouslySkipPermissions === true),

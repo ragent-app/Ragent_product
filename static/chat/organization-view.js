@@ -783,6 +783,7 @@
       this.animationFrameId = null;
       this.communicationScheduler = new CommunicationVisualScheduler(3);
       this.activityEvents = [];
+      this.nativeBoard = null;
       this.approvalOverlay = null;
       this.hasLoadedEver = false;
 
@@ -1846,6 +1847,7 @@
       this.previousPositions = {};
       this.previousParents = {};
       this.activityEvents = [];
+      this.nativeBoard = null;
       this.stopPolling();
       this.dismissBottomSheet();
       this.closeDetailScreen();
@@ -2517,8 +2519,10 @@
               members: proj.members,
               membersComplete: Boolean(proj.membersComplete),
               sourceCoverage: proj.sourceCoverage || null,
+              board: proj.board || null,
             }
           : null);
+      this.nativeBoard = membersPage?.board || proj.board || null;
 
       const delegationByKey = new Map();
       const sortedRecords = [...(this.delegationRecords || [])]
@@ -2723,17 +2727,25 @@
           member.activity?.kind ||
           (activityState && activityState !== "unknown" ? activityState : null);
 
+        const rawName = typeof member.displayName === "string" && member.displayName.trim()
+          ? member.displayName.trim()
+          : (typeof member.name === "string" && member.name.trim() ? member.name.trim() : "");
+        const memberRole = member.role ? NodeRole.fromString(member.role) : NodeRole.WORKER;
+        const memberModel = typeof member.model === "string" && member.model.trim() ? member.model.trim() : null;
+
         nodesMap[uiId] = {
           id: uiId,
           parentId: resolvedParentId,
-          role: NodeRole.WORKER,
+          role: memberRole,
           domain: null,
           iconDomain: AgentDomain.GENERAL,
-          displayName: `${memberLabel} ${index + 1}`,
+          displayName: rawName || `${memberLabel} ${index + 1}`,
           phaseId: null,
           runtimeState,
           sessionId: null,
           providerRef: matchingDelegation?.childSessionId || null,
+          model: memberModel,
+          controlCapabilities: member.controlCapabilities || { readOnly: true, canControlMember: false, canMessageMember: false },
           currentActivity: activityText,
           currentTaskSummary: null,
           currentTaskDetail: null,
@@ -3018,15 +3030,19 @@
     renderActivityFeed() {
       if (!this.dom.activityFeedList || !this.dom.activityBadge) return;
       const events = this.activityEvents;
-      this.dom.activityBadge.textContent = `+${events.length} ${tr("organization.updates")}`;
+      const board = this.nativeBoard;
+      const boardMessages = Array.isArray(board?.messages) ? board.messages : [];
+      const boardChannels = Array.isArray(board?.channels) ? board.channels : [];
+      const totalUpdates = events.length + boardMessages.length;
+      this.dom.activityBadge.textContent = `+${totalUpdates} ${tr("organization.updates")}`;
 
-      if (events.length === 0) {
+      if (totalUpdates === 0) {
         this.dom.activityFeedList.innerHTML = `<div class="org-activity-row" style="color:var(--text-secondary);font-size:12px;">${escapeDisplayText(tr("organization.noActivity"))}</div>`;
         return;
       }
 
       const allowedDotClasses = new Set(["running", "success", "waiting", "error"]);
-      this.dom.activityFeedList.innerHTML = events
+      const rows = events
         .map((e) => {
           const dotClass = allowedDotClasses.has(e.dotClass) ? e.dotClass : "waiting";
           return `
@@ -3035,8 +3051,29 @@
           <span class="org-activity-row-msg">${escapeDisplayText(e.message)}</span>
           <span class="org-activity-row-time">${escapeDisplayText(e.time)}</span>
         </div>`;
-        })
-        .join("");
+        });
+      if (boardMessages.length > 0) {
+        const channelSummary = boardChannels
+          .map((ch) => `#${ch.name} (${ch.messageCount ?? 0})`)
+          .join(" · ");
+        const boardHeader = board.title
+          ? `${trText("organization.swarmBoardReadOnly", "Swarm Board (Read-Only)", "协作留言板（只读）")}: ${board.title}`
+          : trText("organization.swarmBoardReadOnly", "Swarm Board (Read-Only)", "协作留言板（只读）");
+        rows.push(`<div class="org-activity-row org-board-header" style="font-size:11px;color:var(--text-secondary);">${escapeDisplayText(boardHeader)}${channelSummary ? ` · ${escapeDisplayText(channelSummary)}` : ""}</div>`);
+        for (const msg of boardMessages.slice(-20)) {
+          const seqTag = Number.isInteger(msg.seq) ? `#${msg.seq}` : "";
+          const chTag = msg.channel ? `[#${msg.channel}] ` : "";
+          const replyTag = Number.isInteger(msg.replyToSeq) ? ` -> #${msg.replyToSeq}` : "";
+          const label = `${chTag}${seqTag}${replyTag} ${msg.sender || "member"}: ${msg.text || ""}`.trim();
+          rows.push(`
+        <div class="org-activity-row org-activity-row--board">
+          <span class="org-activity-row-dot org-activity-row-dot--waiting"></span>
+          <span class="org-activity-row-msg">${escapeDisplayText(label)}</span>
+          <span class="org-activity-row-time">${escapeDisplayText(msg.kind || "")}</span>
+        </div>`);
+        }
+      }
+      this.dom.activityFeedList.innerHTML = rows.join("");
     }
 
     toggleActivityFeed() {
@@ -3112,6 +3149,9 @@
         `<span class="org-meta-pill org-meta-pill--harness">${escapeDisplayText(trText("organization.executionHarness", "Harness", "执行环境"))}: ${escapeDisplayText(harnessText)}</span>`,
         `<span class="org-meta-pill org-meta-pill--coverage-${escapeDisplayText(effectiveCoverage)}">${escapeDisplayText(trText("organization.coverageLabel", "Coverage", "覆盖"))}: ${escapeDisplayText(coverageLabel(effectiveCoverage))}</span>`,
       ];
+      if (node.model) {
+        pills.push(`<span class="org-meta-pill">${escapeDisplayText(node.model)}</span>`);
+      }
       if (node.isReadOnlyNative) {
         pills.push(`<span class="org-meta-pill org-meta-pill--readonly">${escapeDisplayText(trText("organization.readOnly", "Read-only", "只读"))}</span>`);
       }

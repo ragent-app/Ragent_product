@@ -20,20 +20,21 @@ function check(label, condition) {
   passed += 1;
 }
 
-const callSites = [...source.matchAll(/(?:const gateDecision = await decideRunGate\(approval, state\);|:\s*await decideRunGate\(approval, state\);)/g)];
-check('both gate call sites route via decideRunGate', callSites.length === 2);
+const callSites = [...source.matchAll(/(?:(?:const|let) gateDecision = await decideRunGate\([^;]+,\s*state\);|:\s*await decideRunGate\([^;]+,\s*state\);)/g)];
+check('all three gate call sites route via decideRunGate', callSites.length === 3);
 check('decideRiskGate is imported', /decideRiskGate/.test(source));
-check('state carries riskMode (Codex + Claude state creators)',
-  (source.match(/riskMode: typeof options\.riskMode/g) || []).length === 2);
+check('state carries riskMode (Codex + Claude + ACP state creators)',
+  (source.match(/riskMode: typeof options\.riskMode/g) || []).length === 3);
 check('gate dispatch honors gated risk modes',
-  /riskMode === 'safe' \|\| riskMode === 'recommended'/.test(source));
+  /\['safe', 'recommended', 'full-auto', 'conservative-auto'\]\.includes\(riskMode\)/.test(source));
 check('decideRunGate keeps user-facing kinds on the review path',
   /isUserFacingGateKind\(approval\?\.kind \|\| ''\)/.test(source));
 check('decideRunGate routes gated permission modes through the classifier',
   /isGatedPermissionMode\(state\?\.permissionMode \|\| ''\)/.test(source));
 check('gated-mode fallback uses recommended semantics for legacy sessions',
-  /riskMode: riskMode === 'safe' \|\| riskMode === 'recommended' \? riskMode : 'recommended'/.test(source));
-check('Claude bidi state carries permissionMode',
-  /permissionMode: typeof options\.permissionMode === 'string' \? options\.permissionMode : ''/.test(source));
+  /riskMode:\s*\['safe', 'recommended', 'full-auto', 'conservative-auto'\]\.includes\(riskMode\) \? riskMode : 'recommended'/.test(source));
+check('Codex and Claude state creators carry permissionMode and ACP carries permissionMode',
+  (source.match(/permissionMode: typeof options\.permissionMode === 'string' \? options\.permissionMode : ''/g) || []).length === 2
+  && /createAcpRunState[\s\S]*?permissionMode:/.test(source));
 
 console.log(`runner-sidecar risk-gate routing: ${passed} checks passed`);

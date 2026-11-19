@@ -2,7 +2,7 @@ import { buildProviderContractFields, hasProviderCapability } from './provider-c
 import { registerCache, registerLruOrMap } from './memory-registry.mjs';
 import { getAdaptiveConcurrencyBudget } from './adaptive-concurrency-registry.mjs';
 import { createProviderNativeDelegationMapper } from './provider-native-delegation-mapper.mjs';
-import { isProviderNativeChildFrame } from './provider-native-delegation-runtime.mjs';
+import { isProviderNativeChildFrame, resolveProvider } from './provider-native-delegation-runtime.mjs';
 import { computeExecutionScopeDigest } from './execution-scope.mjs';
 import { classifyRisk } from './risk-classifier.mjs';
 import { BoundedLruMap } from './cache-utils.mjs';
@@ -70,12 +70,17 @@ function formatCommandValue(value) {
 function providerForApprovalPayload(payload, fallback = '') {
   const explicit = trimString(payload?.provider).toLowerCase();
   if (explicit === 'claude' || explicit === 'codex') return explicit;
-  if (trimString(fallback)) return trimString(fallback).toLowerCase();
+  if (explicit === 'agy' || explicit === 'antigravity') return 'agy';
+  const normalizedFallback = trimString(fallback).toLowerCase();
+  if (normalizedFallback) {
+    return normalizedFallback === 'antigravity' ? 'agy' : normalizedFallback;
+  }
   if (payload?.type === 'control_request') return 'claude';
   const method = trimString(payload?.method);
   if (method && Object.prototype.hasOwnProperty.call(APPROVAL_METHOD_KINDS, method)) return 'codex';
   const approvalId = trimString(payload?.approvalId);
   if (approvalId.startsWith('claude:')) return 'claude';
+  if (approvalId.startsWith('agy:')) return 'agy';
   if (approvalId.includes('Approval:') || approvalId.startsWith('item/')) return 'codex';
   return 'unknown';
 }
@@ -332,11 +337,11 @@ export function createRunProjectionService({
     // Only suppress a duplicate after this projection has actually seen its
     // leader. A stale pending record must never hide the only visible card.
     const visibleApprovalIds = new Set();
-    const nativeProvider = String(run?.provider || runtimeInvocation?.provider || '').toLowerCase().includes('claude')
-      ? 'claude'
-      : String(run?.provider || runtimeInvocation?.provider || '').toLowerCase().includes('codex')
-        ? 'codex'
-        : '';
+    const nativeProvider = resolveProvider({
+      provider: run?.provider || runtimeInvocation?.provider,
+      runtimeFamily: run?.runtimeFamily || runtimeInvocation?.runtimeFamily,
+      providerCapabilities: run?.providerCapabilities || runtimeInvocation?.capabilities,
+    });
     const nativeMapper = nativeProvider
       ? createProviderNativeDelegationMapper({
         provider: nativeProvider,
@@ -454,27 +459,35 @@ export function createRunProjectionService({
         }
       }
       let adapterLine = line;
+      let intermediateFrame = payload?.ragent_intermediate === true;
       if (nativeMapper) {
         let raw = record?.json && typeof record.json === 'object' ? record.json : null;
         if (!raw) {
           try { raw = JSON.parse(line); } catch { parseFailures += 1; }
         }
         if (raw && typeof raw === 'object') {
-          const mapped = nativeMapper.map(raw);
-          for (const event of mapped.events) {
-            if (event.childSessionId) childSessionIds.add(event.childSessionId);
-          }
-          const isSpawnFrame = mapped.events.some((event) => event.kind === 'spawned');
-          if (!isSpawnFrame && isProviderNativeChildFrame(raw, childSessionIds)) {
-            adapterLine = JSON.stringify({ ...raw, ragent_intermediate: true });
+          if (raw.ragent_intermediate === true) {
+            intermediateFrame = true;
+          } else {
+            const mapped = nativeMapper.map(raw);
+            for (const event of mapped.events) {
+              if (event.childSessionId) childSessionIds.add(event.childSessionId);
+            }
+            const isSpawnFrame = mapped.events.some((event) => event.kind === 'spawned');
+            if (!isSpawnFrame && isProviderNativeChildFrame(raw, childSessionIds)) {
+              intermediateFrame = true;
+              adapterLine = JSON.stringify({ ...raw, ragent_intermediate: true });
+            }
           }
         }
       }
-      let parsedEvents = decorateSpoolRecordEvents(
-        record,
-        adapter.parseLine(adapterLine),
-        stableTimestamp,
-      );
+      let parsedEvents = intermediateFrame && nativeProvider === 'agy'
+        ? []
+        : decorateSpoolRecordEvents(
+          record,
+          adapter.parseLine(adapterLine),
+          stableTimestamp,
+        );
       let normalized = normalizeRunEvents(projectionRun, parsedEvents);
       if (approvalRequestInfo?.approvalId) {
         const group = equivalentPendingApprovals(run, approvalRequestInfo.approvalId);
@@ -719,7 +732,12 @@ export function createRunProjectionService({
 
   function updateApprovalCounters(counters, field, provider, audit) {
     counters[field] += 1;
-    const normalizedProvider = provider === 'claude' || provider === 'codex' ? provider : 'unknown';
+    const rawProvider = trimString(provider).toLowerCase();
+    const normalizedProvider = rawProvider === 'claude' || rawProvider === 'codex'
+      ? rawProvider
+      : (rawProvider === 'agy' || rawProvider === 'antigravity')
+        ? 'agy'
+        : 'unknown';
     incrementMetricBucket(counters, 'byProvider', normalizedProvider, field);
     if (audit.tier) incrementMetricBucket(counters, 'byRiskTier', audit.tier, field);
     if (audit.policyVersion) incrementMetricBucket(counters, 'byPolicyVersion', audit.policyVersion, field);

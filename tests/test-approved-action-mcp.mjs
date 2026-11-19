@@ -8,10 +8,14 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
 import {
+  buildAgyAcpMcpServers,
+  prepareAgyAcpMcpOverlay,
   prepareApprovedActionMcpOverlay,
   prepareManagedMcpOverlay,
   prepareCodexThreadMcp,
 } from '../chat/approved-action-mcp-overlay.mjs';
+import { supportsManagedApprovedActions } from '../chat/approved-action-policy.mjs';
+import { supportsBrowserMcpRuntime } from '../chat/browser-capability.mjs';
 import { buildClaudeBidiArgs } from '../chat/adapters/claude-bidi.mjs';
 
 const repoRoot = join(import.meta.dirname, '..');
@@ -102,6 +106,8 @@ const child = spawn(process.execPath, [scriptPath], {
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 const request = readResponses(child);
+const discoverApproved = await request(0, 'server/discover');
+assert.deepEqual(discoverApproved.result, {});
 const initialize = await request(1, 'initialize');
 assert.equal(initialize.result.serverInfo.name, 'ragent-approved-actions');
 const tools = await request(2, 'tools/list');
@@ -410,5 +416,100 @@ const claudeArgs = buildClaudeBidiArgs({ mcpConfigPath: claudeOverlay.configPath
 assert.deepEqual(claudeArgs.slice(-2), ['--mcp-config', claudeOverlay.configPath]);
 assert.match(await readFile(claudeOverlay.configPath, 'utf8'), /ragent_actions_/);
 await claudeOverlay.cleanup();
+
+// Policy & browser capability runtime family admission for AgY
+for (const family of ['agy-acp', 'agy-stream-json']) {
+  assert.equal(supportsManagedApprovedActions({ runtimeFamily: family, supportsManagedActionMcp: true }), true);
+  assert.equal(supportsBrowserMcpRuntime(family), true);
+}
+
+// AgY ACP mcpServers array builder + overlay (with reserved/SSE filtering)
+const acpOverlay = await prepareAgyAcpMcpOverlay({
+  runId: 'r_agy_acp',
+  spawnEnv: {
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'agy-acp-token',
+    RAGENT_BROWSER_MCP_ENABLED: '1',
+    RAGENT_BROWSER_TOKEN: 'agy-browser-token',
+    UNRELATED_HOST_SECRET: 'must-not-appear',
+  },
+  servers: [
+    { kind: 'actions', scriptPath },
+    { kind: 'browser', scriptPath: join(repoRoot, 'scripts', 'ragent-browser-mcp-server.mjs') },
+  ],
+  externalServers: [
+    { name: 'docs', url: 'https://docs.example.invalid/mcp', headers: { Authorization: 'Bearer ok' } },
+    { name: 'ragent_spoof', command: 'node', args: ['evil.js'] },
+    { name: 'legacy_sse', type: 'sse', url: 'https://legacy.example.invalid/sse' },
+  ],
+});
+assert.ok(acpOverlay);
+assert.equal(acpOverlay.mcpServers.length, 3);
+const acpActions = acpOverlay.mcpServers[0];
+assert.match(acpActions.name, /^ragent_actions_/);
+assert.deepEqual(acpActions.args, [scriptPath]);
+assert.ok(Array.isArray(acpActions.env));
+assert.ok(acpActions.env.some((e) => e.name === 'RAGENT_APPROVED_ACTIONS_TOKEN' && e.value === 'agy-acp-token'));
+assert.ok(!acpActions.env.some((e) => e.name === 'UNRELATED_HOST_SECRET'));
+const acpDocs = acpOverlay.mcpServers.find((s) => s.name === 'docs');
+assert.equal(acpDocs?.type, 'http');
+assert.equal(acpDocs?.url, 'https://docs.example.invalid/mcp');
+assert.equal(acpOverlay.mcpServers.some((s) => s.name === 'ragent_spoof' || s.name === 'legacy_sse'), false);
+await acpOverlay.cleanup();
+
+// AgY stream-json isolated <agyHomeDir>/.gemini/config/mcp_config.json overlay
+const agyRunHome = join(root, 'agy-stream-home');
+await mkdir(join(agyRunHome, '.gemini', 'config'), { recursive: true });
+const externalOnlyDoc = JSON.stringify({
+  mcpServers: { userExt: { command: 'node', args: ['ext.mjs'], disabled: false } },
+}, null, 2) + '\n';
+await writeFile(join(agyRunHome, '.gemini', 'config', 'mcp_config.json'), externalOnlyDoc, 'utf8');
+
+const agyOverlay = await prepareManagedMcpOverlay({
+  runtimeFamily: 'agy-stream-json',
+  runId: 'r_agy_stream',
+  agyHomeDir: agyRunHome,
+  spawnEnv: {
+    RAGENT_APPROVED_ACTIONS_ENABLED: '1',
+    RAGENT_APPROVED_ACTIONS_TOKEN: 'agy-stream-token',
+    UNRELATED_HOST_SECRET: 'never-projected',
+  },
+  servers: [{ kind: 'actions', scriptPath }],
+});
+assert.ok(agyOverlay);
+const agyConfigParsed = JSON.parse(await readFile(agyOverlay.configPath, 'utf8'));
+assert.ok(agyConfigParsed.mcpServers.userExt, 'Existing authorized external MCP preserved in Run home');
+const managedAgyKey = agyOverlay.serverNames[0];
+assert.equal(agyConfigParsed.mcpServers[managedAgyKey].env.RAGENT_APPROVED_ACTIONS_TOKEN, 'agy-stream-token');
+assert.equal(agyConfigParsed.mcpServers[managedAgyKey].env.UNRELATED_HOST_SECRET, undefined);
+await agyOverlay.cleanup();
+assert.equal(await readFile(agyOverlay.configPath, 'utf8'), externalOnlyDoc, 'Cleanup restores Run home mcp_config.json without leaking Run tokens');
+
+await assert.rejects(
+  () => prepareManagedMcpOverlay({
+    runtimeFamily: 'agy-stream-json',
+    runId: 'r_agy_missing_home',
+    spawnEnv: {},
+    servers: [{ kind: 'actions', scriptPath }],
+  }),
+  (error) => error.code === 'MCP_PROVIDER_HOME_UNAVAILABLE',
+);
+
+// Verify server/discover returns immediate empty JSON-RPC result on org & browser MCP servers too
+for (const serverScript of ['scripts/ragent-organization-mcp.mjs', 'scripts/ragent-browser-mcp-server.mjs']) {
+  const srv = spawn(process.execPath, [join(repoRoot, serverScript)], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const rpc = readResponses(srv);
+  const res = await rpc(99, 'server/discover');
+  assert.deepEqual(res.result, {}, `${serverScript} must reply {} to server/discover`);
+  srv.stdin.end();
+  await new Promise((resolveExit) => srv.once('exit', resolveExit));
+}
+
+const directAcpList = buildAgyAcpMcpServers({
+  runId: 'r_direct',
+  spawnEnv: { RAGENT_SESSION_CONTROL_TOKEN: 'org-tok' },
+  servers: [{ kind: 'organization', scriptPath: join(repoRoot, 'scripts', 'ragent-organization-mcp.mjs') }],
+});
+assert.ok(directAcpList[0].env.some((e) => e.name === 'RAGENT_SESSION_CONTROL_TOKEN' && e.value === 'org-tok'));
 
 console.log('test-approved-action-mcp: ok');

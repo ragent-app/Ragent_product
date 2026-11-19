@@ -153,6 +153,8 @@ function createDOMContext() {
     cancelAnimationFrame(id) { clearTimeout(id); },
     setTimeout,
     clearTimeout,
+    setInterval,
+    clearInterval,
   };
   window.window = window;
   return { window, document, messages, homeWorkspace, radarBtn, overflowRadarBtn };
@@ -292,6 +294,70 @@ async function runTests() {
   };
   window.handleOrganizationInvalidation({ organizationId: 'org-cluster-test', revision: 2 });
   assert.ok(invalidationCalled, 'WebSocket organization_invalidated invokes fetchProjection');
+
+  // 8. AgY native swarm members, display names, XSS-safe read-only board summary, & detached honesty
+  orgView.sessionId = null;
+  orgView.projection = { rootSessionId: 'test-session-agy', nodes: [], edges: [] };
+  orgView.delegationRecords = [];
+  orgView.delegationEvents = [];
+  orgView.rawUnifiedMembers = {
+    rootSessionId: 'test-session-agy',
+    rootCanonicalId: 'root:test-session-agy',
+    sourceCoverage: { harness: 'partial', gap: false },
+    members: [
+      {
+        canonicalId: 'member_echoer',
+        displayName: 'echoer',
+        role: 'worker',
+        model: 'gemini-3.8-flash-low',
+        sourceTag: 'agy',
+        executionHarnessId: 'agy',
+        parentCanonicalId: 'root:test-session-agy',
+        relationKnown: true,
+        controlCapabilities: { readOnly: true, canControlMember: false, canMessageMember: false },
+        activity: { state: 'working', kind: null, actionRequired: false, runId: 'run-agy-1', sourceSeq: 1 },
+        conversation: { ref: 'ref-echoer', generation: 1, scope: 'activity_only' },
+      },
+      {
+        canonicalId: 'member_detached',
+        displayName: 'orphan-worker<script>',
+        sourceTag: 'agy',
+        executionHarnessId: 'agy',
+        parentCanonicalId: null,
+        relationKnown: false,
+        activity: { state: 'idle', kind: null, actionRequired: false, runId: 'run-agy-1', sourceSeq: 2 },
+      },
+    ],
+    board: {
+      schemaVersion: 1,
+      source: 'provider_native',
+      provider: 'agy',
+      readOnly: true,
+      title: 'Agy Swarm <img src=x>',
+      channels: [{ name: 'main', messageCount: 1, latestSeq: 1 }],
+      messages: [
+        { seq: 1, channel: 'main', sender: 'coordinator', text: '@echoer audit <script>alert(1)</script>', kind: 'brief' },
+      ],
+    },
+  };
+  orgView.toggleOrganizationMode(true);
+  orgView.render();
+  const agyModel = orgView.buildUnifiedGraphModel();
+  const echoerUiNode = Object.values(agyModel.nodesMap).find((n) => n.displayName === 'echoer');
+  const detachedUiNode = Object.values(agyModel.nodesMap).find((n) => n.displayName === 'orphan-worker<script>');
+  assert.ok(echoerUiNode, 'AgY member keeps verified displayName');
+  assert.equal(echoerUiNode.sourceTag, 'agy');
+  assert.equal(echoerUiNode.executionHarnessId, 'agy');
+  assert.equal(echoerUiNode.model, 'gemini-3.8-flash-low');
+  assert.equal(echoerUiNode.isReadOnlyNative, true);
+  assert.equal(echoerUiNode.coverage, 'activity_only');
+  assert.ok(detachedUiNode, 'Detached AgY member is retained');
+  assert.equal(detachedUiNode.parentId, null, 'Unverified parent stays detached');
+  assert.equal(detachedUiNode.parentUnknown, true);
+  assert.ok(orgView.dom.activityFeedList.innerHTML.includes('Swarm Board (Read-Only)'), 'Read-only board header rendered');
+  assert.equal(orgView.dom.activityFeedList.innerHTML.includes('<script>'), false, 'Board XSS payload must be escaped');
+  assert.ok(orgView.dom.activityFeedList.innerHTML.includes('&lt;script&gt;'), 'Escaped text survives cleanly');
+  orgView.toggleOrganizationMode(false);
 
   console.log('test-chat-organization-view: ok');
 }

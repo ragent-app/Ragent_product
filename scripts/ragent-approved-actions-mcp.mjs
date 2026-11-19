@@ -270,7 +270,7 @@ export async function handleRequest(request, config = readConfig()) {
       serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
     });
   }
-  if (request.method === 'ping') return jsonRpcResult(id, {});
+  if (request.method === 'ping' || request.method === 'server/discover') return jsonRpcResult(id, {});
   if (request.method === 'tools/list') {
     return jsonRpcResult(id, {
       tools: config.enabled

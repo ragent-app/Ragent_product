@@ -8,13 +8,17 @@ import {
   usageEvent,
 } from '../normalizer.mjs';
 import { annotateProviderError, getProviderCapabilities } from '../provider-contract.mjs';
+import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
 import { inferProviderFileChange } from '../provider-tool-normalization.mjs';
+import { createAcpEventParser } from './acp-stdio.mjs';
+import { normalizeAgyAppDataRelDir } from '../../lib/agy-runtime.mjs';
 
 export { buildAgyStreamInput } from '../../lib/agy-runtime.mjs';
 
 export const AGY_CANONICAL_PROVIDER = 'agy';
 export const AGY_RUNTIME_FAMILY = 'agy-json';
 export const AGY_STREAM_RUNTIME_FAMILY = 'agy-stream-json';
+export const AGY_ACP_RUNTIME_FAMILY = 'agy-acp';
 // AgY's own print-mode default is 5 minutes.  A Run is durable and already
 // has a separate finite idle watchdog, so give the provider enough wall-clock
 // time for genuinely long tasks without making the process unbounded.
@@ -166,6 +170,7 @@ export function createAgyAdapter({
 } = {}) {
   let providerSessionId = '';
   let textDeltaOrdinal = 0;
+  let turnOrdinal = 0;
   const toolNamesByStep = new Map();
   const toolInputsByStep = new Map();
   const startedToolSteps = new Set();
@@ -173,6 +178,8 @@ export function createAgyAdapter({
   const normalizedRuntimeFamily = String(runtimeFamily || AGY_RUNTIME_FAMILY).trim() || AGY_RUNTIME_FAMILY;
 
   return {
+    provider: AGY_CANONICAL_PROVIDER,
+    adapterCompatibility: getHarnessAdapterCompatibility('agy'),
     capabilities: getProviderCapabilities(normalizedRuntimeFamily),
 
     parseLine(line) {
@@ -204,17 +211,18 @@ export function createAgyAdapter({
         providerSessionId = readConversationId(payload, update, null) || providerSessionId;
         const stepType = String(update.step_type || '').trim();
         const stepId = Number.isInteger(update.step_index) ? String(update.step_index) : 'unknown';
+        const scopedStepKey = `${turnOrdinal}:${stepId}`;
 
         if (emitToolEvents && stepType === 'tool') {
-          const knownToolName = toolNamesByStep.get(stepId) || '';
+          const knownToolName = toolNamesByStep.get(scopedStepKey) || '';
           const toolName = readToolName(update, knownToolName) || 'unknown_tool';
-          const toolId = `step:${stepId}`;
+          const toolId = turnOrdinal === 0 ? `step:${stepId}` : `turn:${turnOrdinal}:step:${stepId}`;
           const state = String(update.state || '').trim().toUpperCase();
-          if (state === 'ACTIVE' && !startedToolSteps.has(stepId)) {
+          if (state === 'ACTIVE' && !startedToolSteps.has(scopedStepKey)) {
             const toolInput = readToolInput(update);
-            toolNamesByStep.set(stepId, toolName);
-            toolInputsByStep.set(stepId, toolInput);
-            startedToolSteps.add(stepId);
+            toolNamesByStep.set(scopedStepKey, toolName);
+            toolInputsByStep.set(scopedStepKey, toolInput);
+            startedToolSteps.add(scopedStepKey);
             events.push(toolUseEvent(
               toolName,
               stringifyToolValue(toolInput),
@@ -227,10 +235,10 @@ export function createAgyAdapter({
             ));
           } else if (
             ['DONE', 'ERROR', 'FAILED', 'CANCELLED', 'CANCELED'].includes(state)
-            && !completedToolSteps.has(stepId)
+            && !completedToolSteps.has(scopedStepKey)
           ) {
             const failed = isFailedToolUpdate(update);
-            completedToolSteps.add(stepId);
+            completedToolSteps.add(scopedStepKey);
             events.push(toolResultEvent(
               toolName,
               stringifyToolValue(readToolOutput(update)),
@@ -245,7 +253,7 @@ export function createAgyAdapter({
             if (!failed) {
               const change = inferProviderFileChange({
                 toolName,
-                toolInput: toolInputsByStep.get(stepId) || readToolInput(update),
+                toolInput: toolInputsByStep.get(scopedStepKey) || readToolInput(update),
               });
               if (change) events.push(fileChangeEvent(
                 change.filePath,
@@ -258,7 +266,7 @@ export function createAgyAdapter({
                 }),
               ));
             }
-            toolInputsByStep.delete(stepId);
+            toolInputsByStep.delete(scopedStepKey);
           }
         }
         if (stepType === 'agent_response' && typeof update.text_delta === 'string' && update.text_delta) {
@@ -313,6 +321,7 @@ export function createAgyAdapter({
             annotateProviderError(providerFields(providerSessionId, normalizedRuntimeFamily), errorText),
           ));
         }
+        turnOrdinal += 1;
         return events;
       }
 
@@ -327,6 +336,10 @@ export function createAgyAdapter({
     },
 
     flush() {
+      toolNamesByStep.clear();
+      toolInputsByStep.clear();
+      startedToolSteps.clear();
+      completedToolSteps.clear();
       return [];
     },
   };
@@ -339,6 +352,63 @@ export function createAgyStreamAdapter() {
   });
 }
 
+export function createAgyAcpAdapter() {
+  const parser = createAcpEventParser({
+    provider: AGY_CANONICAL_PROVIDER,
+    runtimeFamily: AGY_ACP_RUNTIME_FAMILY,
+  });
+  return {
+    provider: AGY_CANONICAL_PROVIDER,
+    adapterCompatibility: getHarnessAdapterCompatibility('agy'),
+    capabilities: getProviderCapabilities(AGY_ACP_RUNTIME_FAMILY),
+    parseLine(line) {
+      return parser.parseLine(line);
+    },
+    flush() {
+      parser.reset();
+      return [];
+    },
+  };
+}
+
+function normalizeAdditionalDirectories(dirs) {
+  if (!Array.isArray(dirs)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of dirs) {
+    const value = typeof entry === 'string' ? entry.trim() : '';
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    normalized.push(value);
+  }
+  return normalized;
+}
+
+export function buildAgyAcpArgs(options = {}) {
+  const args = ['acp', '--stdio', '--process-per-session'];
+  const geminiDir = typeof (options.geminiDir ?? options.agyGeminiDir) === 'string'
+    ? String(options.geminiDir ?? options.agyGeminiDir).trim()
+    : '';
+  if (geminiDir) args.push('--gemini-dir', geminiDir);
+  const rawAppDataDir = typeof (options.appDataDir ?? options.agyAppDataDir) === 'string'
+    ? String(options.appDataDir ?? options.agyAppDataDir).trim()
+    : '';
+  if (rawAppDataDir) {
+    args.push('--app-data-dir', normalizeAgyAppDataRelDir(rawAppDataDir, { geminiDir }));
+  }
+  if (typeof options.includeDefaultCustomizations === 'boolean') {
+    args.push(`--include-default-customizations=${options.includeDefaultCustomizations ? 'true' : 'false'}`);
+  }
+  if (options.sandbox === true) args.push('--sandbox');
+  for (const dir of normalizeAdditionalDirectories(options.addDirs ?? options.additionalDirectories)) {
+    args.push('--add-dir', dir);
+  }
+  const agent = typeof options.agent === 'string' ? options.agent.trim() : '';
+  if (agent) args.push('--agent', agent);
+  if (options.dangerouslySkipPermissions === true) args.push('--dangerously-skip-permissions');
+  return args;
+}
+
 function agyModelAcceptsEffortFlag(model) {
   const normalized = String(model || '').trim().toLowerCase();
   if (!normalized) return false;
@@ -346,11 +416,16 @@ function agyModelAcceptsEffortFlag(model) {
   // already carries a fixed level (including `-thinking`) must be passed as
   // is instead of receiving a second, incompatible effort flag.
   if (normalized.startsWith('claude-')) return false;
-  if (/(?:[-_](?:low|medium|high|thinking))$/.test(normalized)) return false;
+  if (/(?:[-_](?:low|medium|high|xhigh|max|thinking))$/.test(normalized)) return false;
   return true;
 }
 
 export function buildAgyArgs(_prompt, options = {}) {
+  const slashCommandsAllowed = (
+    options.allowSlashCommands === true
+    || options.enableSlashCommands === true
+    || options.disableSlashCommands === false
+  ) && options.untrusted !== true && options.managed !== true;
   const args = [
     '--input-format',
     'stream-json',
@@ -361,8 +436,8 @@ export function buildAgyArgs(_prompt, options = {}) {
     '--print=',
     '--print-timeout',
     String(options.printTimeout || DEFAULT_AGY_PRINT_TIMEOUT),
-    '--disable-slash-commands',
-    '--dangerously-skip-permissions',
+    ...(slashCommandsAllowed ? [] : ['--disable-slash-commands']),
+    ...(options.dangerouslySkipPermissions === false ? [] : ['--dangerously-skip-permissions']),
   ];
   // Session continuity: resume an existing agy conversation by id (preferred)
   // or fall back to --continue (most recent conversation) when no id is known
@@ -380,5 +455,17 @@ export function buildAgyArgs(_prompt, options = {}) {
     args.push('--effort', String(options.effort));
   }
   if (options.mode) args.push('--mode', String(options.mode));
+  const agent = typeof options.agent === 'string' ? options.agent.trim() : '';
+  if (agent) args.push('--agent', agent);
+  if (options.sandbox === true) args.push('--sandbox');
+  for (const dir of normalizeAdditionalDirectories(options.addDirs ?? options.additionalDirectories)) {
+    args.push('--add-dir', dir);
+  }
+  if (options.settings !== undefined && options.settings !== null && options.settings !== '') {
+    const serialized = typeof options.settings === 'string'
+      ? options.settings.trim()
+      : JSON.stringify(options.settings);
+    if (serialized) args.push('--settings', serialized);
+  }
   return args;
 }

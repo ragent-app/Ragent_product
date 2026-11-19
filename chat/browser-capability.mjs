@@ -18,6 +18,8 @@ export const BROWSER_CAPABILITY_TTL_MS = 24 * 60 * 60 * 1000;
 export const BROWSER_MCP_RUNTIME_FAMILIES = Object.freeze([
   'codex-app-server-json',
   'claude-stream-json-bidi',
+  'agy-acp',
+  'agy-stream-json',
 ]);
 
 function text(value) {

@@ -11,6 +11,8 @@ import {
   hasProviderCapability,
   resolveProviderPermissionPolicy,
   resolveProviderCapabilities,
+  supportsOrganizationControlMcp,
+  supportsServerBuiltinSkillRead,
 } from '../chat/provider-contract.mjs';
 import { buildRuntimeInvocation } from '../chat/process-runner.mjs';
 
@@ -141,7 +143,37 @@ assert.equal(codexContract.providerCapabilities.supportsSemanticHydrate, true);
 assert.equal(codexContract.providerCapabilities.contextCompiler, 'runtime-context-compiler-v1');
 const agyContract = buildProviderContractFields('agy-stream-json');
 assert.equal(agyContract.providerCapabilities.supportsSemanticHydrate, true);
-assert.equal(agyContract.providerCapabilities.supportsResume, false);
+assert.equal(agyContract.providerCapabilities.supportsResume, true);
+assert.equal(agyStreamCapabilities.supportsMultiTurnStdin, true);
+
+const agyAcpCapabilities = getProviderCapabilities('agy-acp');
+assert.equal(agyAcpCapabilities.provider, 'agy');
+assert.equal(agyAcpCapabilities.transport, 'json-rpc-stdio');
+assert.equal(agyAcpCapabilities.supportsResume, true);
+assert.equal(agyAcpCapabilities.supportsReasoningDelta, true);
+assert.equal(agyAcpCapabilities.supportsApproval, true);
+assert.equal(agyAcpCapabilities.supportsManagedActionMcp, true);
+assert.equal(agyAcpCapabilities.supportsInterrupt, true);
+assert.equal(agyAcpCapabilities.supportsSteer, true);
+assert.deepEqual(
+  getProviderPermissionModes('agy-acp').map((mode) => mode.id),
+  ['default', 'accept-edits', 'auto', 'plan', 'bypass-permissions'],
+);
+assert.equal(getGatedPermissionModeId('agy-acp'), 'default');
+assert.equal(resolveProviderPermissionPolicy('agy-acp', { riskMode: 'recommended' }).id, 'default');
+assert.equal(resolveProviderPermissionPolicy('agy-acp', { riskMode: 'full-auto' }).id, 'default');
+assert.equal(resolveProviderPermissionPolicy('agy-acp', { riskMode: 'conservative-auto' }).id, 'accept-edits');
+assert.equal(resolveProviderPermissionPolicy('agy-acp', { interactionMode: 'plan' }).id, 'plan');
+assert.equal(resolveProviderPermissionPolicy('agy-acp', { dangerouslySkipPermissions: true }).id, 'bypass-permissions');
+
+for (const family of ['codex-app-server-json', 'claude-stream-json-bidi', 'agy-acp', 'agy-stream-json']) {
+  assert.equal(supportsOrganizationControlMcp(family), true, `${family} org control MCP`);
+  assert.equal(supportsServerBuiltinSkillRead(family), true, `${family} builtin skill read`);
+}
+for (const family of ['claude-stream-json', 'codex-json', 'agy-json', 'hermes-acp']) {
+  assert.equal(supportsOrganizationControlMcp(family), false, `${family} must not advertise org control MCP`);
+  assert.equal(supportsServerBuiltinSkillRead(family), false, `${family} must not advertise builtin skill read`);
+}
 
 assert.equal(getProviderCapabilities('missing-runtime'), null);
 assert.deepEqual(

@@ -1,7 +1,9 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
+  AGY_CONTROL_HOME_DIR,
+  AGY_MANAGED_HOME_DIR,
   CLAUDE_MANAGED_HOME_DIR,
   CODEX_MANAGED_HOME_DIR,
   CODEX_CONTROL_HOME_DIR,
@@ -10,6 +12,7 @@ import {
 } from '../lib/config.mjs';
 import { listCodexAppServerCapabilities } from './codex-app-server-client.mjs';
 import { listClaudeMcpServers } from '../lib/claude-mcp-manager.mjs';
+import { isReservedRagentMcpName, listAgyMcpServers, resolveAgyMcpHomeDir } from '../lib/agy-mcp-manager.mjs';
 import { createNativeProviderRegistry } from '../lib/provider-runtime/registry.mjs';
 import { createSecretStore } from '../lib/provider-runtime/secret-store.mjs';
 import { nativeProviderHomeRoot, resolveCodexAccountHomeRoot } from '../lib/provider-runtime/provider-home.mjs';
@@ -70,9 +73,14 @@ function opaqueFileId(value) {
   return createHash('sha256').update(String(value)).digest('hex').slice(0, 20);
 }
 
+function contentHashHex(value) {
+  return createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
+}
+
 function nativeProfileFamily(tool) {
   if (['codex', 'codex-cli', 'ragent-codex-app-server'].includes(tool)) return 'codex';
   if (['claude', 'claude-bidi'].includes(tool)) return 'claude';
+  if (['agy', 'agy-acp', 'agy-json', 'agy-stream-json', 'agy-stream-json-bidi'].includes(tool)) return 'agy';
   return '';
 }
 
@@ -84,7 +92,11 @@ async function resolveNativeProfileHome(providerProfileId, tool) {
   if (!profile || profile.agentType !== family) {
     throw capabilityResolutionError('The selected provider profile is not available for this harness.');
   }
-  const homeRoot = family === 'codex' ? CODEX_MANAGED_HOME_DIR : CLAUDE_MANAGED_HOME_DIR;
+  const homeRoot = family === 'codex'
+    ? CODEX_MANAGED_HOME_DIR
+    : family === 'claude'
+      ? CLAUDE_MANAGED_HOME_DIR
+      : AGY_MANAGED_HOME_DIR;
   return nativeProviderHomeRoot(dirname(homeRoot), profile.agentType, profile.id);
 }
 
@@ -114,7 +126,7 @@ function normalizeCapability({ id, kind, source, title, description = '', invoca
   };
 }
 
-async function listMarkdownCapabilities({ root, source, namespace, type, invocationPrefix }) {
+async function listMarkdownCapabilities({ root, source, namespace, type, invocationPrefix, includeHash = false, provenance = '' }) {
   const skillMode = type === 'skill';
   const files = await collectMarkdownFiles(root, skillMode ? 'SKILL.md' : 'commands.md');
   const result = [];
@@ -130,6 +142,13 @@ async function listMarkdownCapabilities({ root, source, namespace, type, invocat
     const description = text(fields.description || fields['short-description'] || fields['short_description'], MAX_SKILL_DESCRIPTION);
     const commandName = `${namespace ? `${namespace}:` : ''}${name}`;
     const disabled = /^(true|yes|1)$/i.test(text(fields['disable-model-invocation'] || fields.disable_model_invocation));
+    const state = includeHash || provenance
+      ? {
+        ...(includeHash ? { contentHash: contentHashHex(markdown) } : {}),
+        ...(provenance ? { provenance } : {}),
+        ...(namespace ? { plugin: namespace } : {}),
+      }
+      : null;
     result.push(normalizeCapability({
       id: `${source}:${type}:${opaqueFileId(rel)}`,
       kind: type,
@@ -139,6 +158,7 @@ async function listMarkdownCapabilities({ root, source, namespace, type, invocat
       invocationText: disabled ? '' : `${invocationPrefix}${commandName} `,
       enabled: !disabled,
       reason: disabled ? 'This item is not available for direct invocation.' : '',
+      ...(state ? { state } : {}),
     }));
   }
   return result.filter(Boolean);
@@ -370,11 +390,37 @@ async function listClaudeCapabilities({ cwd, configDir, listMcpServers = listCla
   return { items, errors };
 }
 
-function normalizeMcpNames(servers, { source, kind = 'mcp' }) {
+function normalizeMcpNames(servers, { source, kind = 'mcp', includeHash = false, provenance = '' }) {
   return (Array.isArray(servers) ? servers : []).map((server) => {
     const name = text(server?.name, 120);
     if (!name) return null;
-    const capabilitySource = kind === 'mcp' && name.toLowerCase() === 'ragent' ? 'ragent' : source;
+    const isRagent = kind === 'mcp' && (name.toLowerCase() === 'ragent' || isReservedRagentMcpName(name));
+    const capabilitySource = isRagent ? 'ragent' : source;
+    const disabled = server?.disabled === true;
+    const unsupported = server?.unsupported === true;
+    const enabled = !disabled && !unsupported;
+    const state = includeHash || provenance || server?.type
+      ? {
+        discovery: 'discovered',
+        ...(server?.type ? { transport: text(server.type, 32) } : {}),
+        ...(disabled ? { disabled: true } : {}),
+        ...(provenance ? { provenance } : {}),
+        ...(includeHash
+          ? {
+            contentHash: contentHashHex(JSON.stringify({
+              name,
+              type: server?.type || '',
+              command: server?.command || '',
+              args: Array.isArray(server?.args) ? server.args : [],
+              url: server?.url || '',
+              envKeys: Array.isArray(server?.envKeys) ? server.envKeys : [],
+              headerKeys: Array.isArray(server?.headerKeys) ? server.headerKeys : [],
+              disabled,
+            })),
+          }
+          : {}),
+      }
+      : null;
     return normalizeCapability({
       id: `${capabilitySource}:${kind}:${opaqueFileId(name)}`,
       kind,
@@ -382,9 +428,299 @@ function normalizeMcpNames(servers, { source, kind = 'mcp' }) {
       title: name,
       description: `${kind === 'plugin' ? 'Plugin' : 'MCP server'} configured for this harness.`,
       invocationText: '',
-      enabled: true,
+      enabled,
+      reason: unsupported
+        ? 'This MCP transport is unsupported by AgY.'
+        : disabled
+          ? 'This MCP server is disabled in configuration.'
+          : '',
+      ...(state ? { state } : {}),
     });
   }).filter(Boolean);
+}
+
+function isPathInsideRealRoot(realBase, realTarget) {
+  return Boolean(realBase && realTarget)
+    && (realTarget === realBase || realTarget.startsWith(`${realBase}${sep}`));
+}
+
+async function resolveContainedRegularPath(baseDir, candidatePath) {
+  const relOrAbs = text(candidatePath, 1000);
+  if (!relOrAbs) return '';
+  const base = resolve(baseDir);
+  const resolved = resolve(base, relOrAbs);
+  if (resolved !== base && !resolved.startsWith(`${base}${sep}`)) return '';
+  const info = await lstat(resolved).catch(() => null);
+  if (!info || info.isSymbolicLink()) return '';
+  let targetPath = resolved;
+  if (info.isDirectory()) {
+    targetPath = join(resolved, 'SKILL.md');
+    const skillInfo = await lstat(targetPath).catch(() => null);
+    if (!skillInfo || skillInfo.isSymbolicLink() || !skillInfo.isFile()) return '';
+  } else if (!info.isFile()) {
+    return '';
+  }
+  const [realBase, realTarget] = await Promise.all([
+    realpath(base).catch(() => ''),
+    realpath(targetPath).catch(() => ''),
+  ]);
+  if (!isPathInsideRealRoot(realBase, realTarget)) return '';
+  return realTarget;
+}
+
+async function listAgyWorkspaceSkillsManifest(cwd, existingItems) {
+  const manifestPath = join(resolve(cwd), '.agents', 'skills.json');
+  let raw = '';
+  try {
+    raw = await readFile(manifestPath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+
+  const byTitle = new Map(existingItems.filter(Boolean).map((item) => [item.title, item]));
+  const disabledNames = new Set(
+    Array.isArray(parsed?.disabled)
+      ? parsed.disabled.map((v) => text(v, 120)).filter(Boolean)
+      : [],
+  );
+  for (const name of disabledNames) {
+    const existing = byTitle.get(name);
+    if (existing) {
+      existing.enabled = false;
+      existing.invocationText = '';
+      existing.disabledReason = 'Disabled in .agents/skills.json.';
+      existing.state = { ...(existing.state || {}), provenance: 'agy_workspace_manifest' };
+    }
+  }
+
+  let entries = [];
+  if (Array.isArray(parsed)) {
+    entries = parsed;
+  } else if (Array.isArray(parsed?.skills)) {
+    entries = parsed.skills;
+  } else if (parsed?.skills && typeof parsed.skills === 'object' && !Array.isArray(parsed.skills)) {
+    entries = Object.entries(parsed.skills).map(([name, val]) => (
+      val && typeof val === 'object' ? { name, ...val } : { name, enabled: val !== false }
+    ));
+  }
+
+  const extra = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    const name = text(entry.name || entry.id, 120);
+    if (!name || /[\r\n]/.test(name)) continue;
+    const entryEnabled = entry.enabled !== false && entry.disabled !== true && !disabledNames.has(name);
+    const existing = byTitle.get(name);
+    if (existing) {
+      if (!entryEnabled) {
+        existing.enabled = false;
+        existing.invocationText = '';
+        existing.disabledReason = text(entry.disabledReason) || 'Disabled in .agents/skills.json.';
+      }
+      if (!existing.description && entry.description) {
+        existing.description = text(entry.description, MAX_SKILL_DESCRIPTION);
+      }
+      continue;
+    }
+
+    let description = text(entry.description, MAX_SKILL_DESCRIPTION);
+    let contentHash = contentHashHex(JSON.stringify({ name, description, entry: entry.path || entry.skillPath || '' }));
+    let disabledByFrontmatter = false;
+    const candidateFile = await resolveContainedRegularPath(resolve(cwd), entry.path || entry.skillPath || '');
+    if (candidateFile) {
+      const markdown = await readFile(candidateFile, 'utf8').catch(() => '');
+      if (markdown) {
+        contentHash = contentHashHex(markdown);
+        const fields = parseFrontmatter(markdown);
+        if (!description) {
+          description = text(fields.description || fields['short-description'] || fields['short_description'], MAX_SKILL_DESCRIPTION);
+        }
+        disabledByFrontmatter = /^(true|yes|1)$/i.test(text(fields['disable-model-invocation'] || fields.disable_model_invocation));
+      }
+    }
+    const enabled = entryEnabled && !disabledByFrontmatter;
+    extra.push(normalizeCapability({
+      id: `agy-project:skill:${opaqueFileId(`manifest:${name}`)}`,
+      kind: 'skill',
+      source: 'agy-project',
+      title: name,
+      description,
+      invocationText: enabled ? `/${name} ` : '',
+      enabled,
+      reason: enabled ? '' : 'Disabled in .agents/skills.json.',
+      state: {
+        contentHash,
+        provenance: 'agy_workspace_manifest',
+      },
+    }));
+  }
+  return extra.filter(Boolean);
+}
+
+async function listAgyPluginCapabilities({ agyHomeDir }) {
+  const configRoot = join(agyHomeDir, '.gemini', 'config');
+  const pluginsRoot = join(configRoot, 'plugins');
+  let dirEntries;
+  try {
+    dirEntries = await readdir(pluginsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return [];
+    throw error;
+  }
+
+  const [configDoc, settingsDoc] = await Promise.all([
+    readJsonFile(join(configRoot, 'config.json')),
+    readJsonFile(join(configRoot, 'settings.json')),
+  ]);
+  const disabledSet = new Set([
+    ...(Array.isArray(configDoc?.disabledPlugins) ? configDoc.disabledPlugins : []),
+    ...(Array.isArray(settingsDoc?.disabledPlugins) ? settingsDoc.disabledPlugins : []),
+  ].map((v) => text(v, 120)).filter(Boolean));
+  const enabledMap = {
+    ...(configDoc?.enabledPlugins && typeof configDoc.enabledPlugins === 'object' ? configDoc.enabledPlugins : {}),
+    ...(settingsDoc?.enabledPlugins && typeof settingsDoc.enabledPlugins === 'object' ? settingsDoc.enabledPlugins : {}),
+  };
+
+  const items = [];
+  for (const entry of dirEntries) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    const pluginDir = join(pluginsRoot, entry.name);
+    const manifestRaw = await readFile(join(pluginDir, 'plugin.json'), 'utf8')
+      .catch(() => readFile(join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8').catch(() => ''));
+    let manifest = null;
+    if (manifestRaw) {
+      try { manifest = JSON.parse(manifestRaw); } catch { manifest = null; }
+    }
+    const pluginName = text(manifest?.name || entry.name, 120);
+    if (!pluginName) continue;
+    const pluginEnabled = !disabledSet.has(pluginName)
+      && !disabledSet.has(entry.name)
+      && enabledMap[pluginName] !== false
+      && enabledMap[entry.name] !== false
+      && manifest?.enabled !== false;
+    const pluginHash = contentHashHex(manifestRaw || entry.name);
+
+    if (pluginEnabled) {
+      items.push(...await listMarkdownCapabilities({
+        root: join(pluginDir, 'skills'),
+        source: 'agy-plugin',
+        namespace: pluginName,
+        type: 'skill',
+        invocationPrefix: '/',
+        includeHash: true,
+        provenance: 'agy_plugin',
+      }));
+      items.push(...await listMarkdownCapabilities({
+        root: join(pluginDir, 'commands'),
+        source: 'agy-plugin',
+        namespace: pluginName,
+        type: 'command',
+        invocationPrefix: '/',
+        includeHash: true,
+        provenance: 'agy_plugin',
+      }));
+      for (const mcpFile of ['.mcp.json', 'mcp.json', 'mcp_config.json']) {
+        const mcpDoc = await readJsonFile(join(pluginDir, mcpFile));
+        const mcpServers = mcpDoc?.mcpServers;
+        if (mcpServers && typeof mcpServers === 'object' && !Array.isArray(mcpServers)) {
+          items.push(...normalizeMcpNames(
+            Object.entries(mcpServers).map(([name, cfg]) => ({
+              name,
+              ...(cfg && typeof cfg === 'object' ? { disabled: cfg.disabled === true, command: cfg.command, url: cfg.serverUrl || cfg.url } : {}),
+            })),
+            { source: 'agy-plugin', includeHash: true, provenance: 'agy_plugin' },
+          ));
+          break;
+        }
+      }
+    }
+
+    items.push(normalizeCapability({
+      id: `agy:plugin:${opaqueFileId(entry.name)}`,
+      kind: 'plugin',
+      source: 'agy',
+      title: pluginName,
+      description: text(manifest?.description || manifest?.displayName || 'AgY plugin bundle', MAX_SKILL_DESCRIPTION),
+      enabled: pluginEnabled,
+      reason: pluginEnabled ? '' : 'This plugin is disabled in AgY configuration.',
+      state: {
+        contentHash: pluginHash,
+        provenance: 'agy_plugin',
+      },
+    }));
+  }
+  return items.filter(Boolean);
+}
+
+export async function listAgyCapabilities({
+  cwd = process.cwd(),
+  agyHomeDir = AGY_CONTROL_HOME_DIR,
+  listMcpServers = listAgyMcpServers,
+} = {}) {
+  const workspaceRoot = resolve(text(cwd) || process.cwd());
+  const selectedHome = text(agyHomeDir) ? resolve(text(agyHomeDir)) : '';
+  const errors = {};
+
+  const wsSkillsDir = join(workspaceRoot, '.agents', 'skills');
+  const [realWsRoot, realWsSkillsDir] = await Promise.all([
+    realpath(workspaceRoot).catch(() => ''),
+    realpath(wsSkillsDir).catch(() => ''),
+  ]);
+  const wsSkillsContained = !realWsSkillsDir || isPathInsideRealRoot(realWsRoot, realWsSkillsDir);
+  const workspaceSkills = wsSkillsContained
+    ? await listMarkdownCapabilities({
+      root: wsSkillsDir,
+      source: 'agy-project',
+      namespace: '',
+      type: 'skill',
+      invocationPrefix: '/',
+      includeHash: true,
+      provenance: 'agy_workspace',
+    })
+    : [];
+  const manifestSkills = await listAgyWorkspaceSkillsManifest(workspaceRoot, workspaceSkills);
+
+  let homeSkills = [];
+  let pluginItems = [];
+  let mcpItems = [];
+  if (selectedHome) {
+    const [skillsRes, pluginsRes, mcpRes] = await Promise.all([
+      listMarkdownCapabilities({
+        root: join(selectedHome, '.gemini', 'config', 'skills'),
+        source: 'agy',
+        namespace: '',
+        type: 'skill',
+        invocationPrefix: '/',
+        includeHash: true,
+        provenance: 'agy_user_config',
+      }),
+      listAgyPluginCapabilities({ agyHomeDir: selectedHome }),
+      listMcpServers({ agyHomeDir: selectedHome }).catch(() => ({ ok: false, servers: [] })),
+    ]);
+    homeSkills = skillsRes;
+    pluginItems = pluginsRes;
+    if (mcpRes?.ok) {
+      mcpItems = normalizeMcpNames(mcpRes.servers, {
+        source: 'agy',
+        includeHash: true,
+        provenance: 'agy_mcp_config',
+      });
+    } else {
+      errors.agyMcp = 'AgY MCP catalog is unavailable.';
+    }
+  }
+
+  return {
+    items: [...workspaceSkills, ...manifestSkills, ...homeSkills, ...pluginItems, ...mcpItems].filter(Boolean),
+    errors,
+  };
 }
 
 export async function resolveCapabilitySessionProvider({ session = {}, providerProfileId = '', model = '' } = {}) {
@@ -407,8 +743,10 @@ export async function listHarnessCapabilities({
   model = '',
   codexHomeDir = CODEX_CONTROL_HOME_DIR,
   claudeConfigDir = CLAUDE_MANAGED_HOME_DIR,
+  agyHomeDir = '',
   platformSkillsDir = PLATFORM_SKILLS_DIR,
   listCodexCapabilities = listCodexAppServerCapabilities,
+  listAgyMcp = listAgyMcpServers,
   refresh = false,
 } = {}) {
   const tool = text(session?.tool, 64).toLowerCase();
@@ -421,8 +759,8 @@ export async function listHarnessCapabilities({
     try {
       profileHome = await resolveNativeProfileHome(requestedProviderProfile, tool);
     } catch {
-      errors[tool.startsWith('codex') || tool === 'ragent-codex-app-server' ? 'codex' : 'claude'] =
-        'Harness provider profile is unavailable.';
+      const familyErrorKey = nativeProfileFamily(tool) || 'claude';
+      errors[familyErrorKey] = 'Harness provider profile is unavailable.';
     }
   }
   if (tool === 'codex' || tool === 'codex-cli' || tool === 'ragent-codex-app-server') {
@@ -465,6 +803,18 @@ export async function listHarnessCapabilities({
       items.push(...catalog.items);
       Object.assign(errors, catalog.errors);
     } catch { errors.claude = 'Claude capability catalog is unavailable.'; }
+  } else if (nativeProfileFamily(tool) === 'agy') {
+    try {
+      if (requestedProviderProfile && !profileHome) throw new Error('provider-profile-unavailable');
+      const selectedAgyHome = text(agyHomeDir) || resolveAgyMcpHomeDir();
+      const catalog = await listAgyCapabilities({
+        cwd: root,
+        agyHomeDir: selectedAgyHome,
+        listMcpServers: listAgyMcp,
+      });
+      items.push(...catalog.items);
+      Object.assign(errors, catalog.errors);
+    } catch { errors.agy = 'AgY capability catalog is unavailable.'; }
   }
   // The route authorizes access to the session; selection is revalidated before use.
   const builtins = await listBuiltinSkills({ authorize: async () => true });
@@ -522,8 +872,10 @@ export async function resolveHarnessCapabilityInstructions({
   model = '',
   codexHomeDir = CODEX_CONTROL_HOME_DIR,
   claudeConfigDir = CLAUDE_MANAGED_HOME_DIR,
+  agyHomeDir = '',
   platformSkillsDir = PLATFORM_SKILLS_DIR,
   listCodexCapabilities = listCodexAppServerCapabilities,
+  listAgyMcp = listAgyMcpServers,
 } = {}) {
   if (!Array.isArray(ids) || ids.length > MAX_SELECTED_CAPABILITIES) {
     throw capabilityResolutionError('Invalid harness capability selection.', 'HARNESS_CAPABILITY_INVALID', 400);
@@ -541,8 +893,10 @@ export async function resolveHarnessCapabilityInstructions({
     model,
     codexHomeDir,
     claudeConfigDir,
+    agyHomeDir,
     platformSkillsDir,
     listCodexCapabilities,
+    listAgyMcp,
   });
   const byId = new Map(catalog.items.map((item) => [item.id, item]));
   const sections = [];
@@ -562,6 +916,10 @@ export async function resolveHarnessCapabilityInstructions({
         throw capabilityResolutionError('A selected Ragent skill could not be read. Refresh the slash menu and try again.');
       }
       sections.push(`### Ragent skill: ${item.title}\n${markdown.trim()}`);
+      continue;
+    }
+    if (item.kind === 'skill') {
+      sections.push(`- Use the enabled ${item.source} skill “${item.title}” when relevant to this request.`);
       continue;
     }
     if (item.kind === 'mcp') {

@@ -273,6 +273,48 @@ assert.deepEqual(
   ['--print-timeout', '24h'],
 );
 
+const agyMultiTurnInvocation = buildRuntimeInvocation('agy-stream-json', 'Turn 1', {
+  model: 'gemini-4-neon@work',
+  effort: 'xhigh',
+  multiTurn: true,
+  agent: 'probe-agent',
+  settings: { queuedMessages: 'send-immediately' },
+  allowSlashCommands: true,
+}, 'agy');
+assert.equal(agyMultiTurnInvocation.keepStdinOpen, true);
+assert.equal(agyMultiTurnInvocation.multiTurn, true);
+assert.equal(agyMultiTurnInvocation.capabilities?.supportsResume, true);
+assert.equal(agyMultiTurnInvocation.args.includes('--disable-slash-commands'), false);
+assert.ok(agyMultiTurnInvocation.args.includes('--agent') && agyMultiTurnInvocation.args.includes('probe-agent'));
+assert.ok(agyMultiTurnInvocation.args.includes('--settings'));
+assert.ok(agyMultiTurnInvocation.args.includes('--effort') && agyMultiTurnInvocation.args.includes('xhigh'));
+
+const agyAcpInvocation = buildRuntimeInvocation('agy-acp', 'Inspect workspace.', {
+  riskMode: 'recommended',
+  agyGeminiDir: '/isolated/.gemini',
+  agyAppDataDir: 'sessions/s-acp-1',
+  includeDefaultCustomizations: false,
+  sandbox: true,
+  addDirs: ['/extra-ro'],
+  agent: 'probe-reader',
+}, 'agy');
+assert.equal(agyAcpInvocation.runtimeFamily, 'agy-acp');
+assert.equal(agyAcpInvocation.acp, true);
+assert.equal(agyAcpInvocation.isAgyFamily, true);
+assert.equal(agyAcpInvocation.isAgyAcpFamily, true);
+assert.equal(agyAcpInvocation.input, undefined, 'ACP invocation must not pass stream-json user input on stdin');
+assert.equal(agyAcpInvocation.permissionMode, 'default');
+assert.equal(agyAcpInvocation.args.includes('--dangerously-skip-permissions'), false);
+assert.deepEqual(agyAcpInvocation.args, [
+  'acp', '--stdio', '--process-per-session',
+  '--gemini-dir', '/isolated/.gemini',
+  '--app-data-dir', 'sessions/s-acp-1',
+  '--include-default-customizations=false',
+  '--sandbox',
+  '--add-dir', '/extra-ro',
+  '--agent', 'probe-reader',
+]);
+
 const hermesInvocation = buildRuntimeInvocation('hermes-acp', 'Run the task.', {}, 'hermes-acp');
 assert.deepEqual(hermesInvocation.args, []);
 assert.equal(hermesInvocation.acp, true);

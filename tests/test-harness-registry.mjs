@@ -31,6 +31,8 @@ assert.deepEqual(harnesses.map((harness) => harness.id), [
 assert.equal(harnesses.find((harness) => harness.id === 'codex').integration, 'native');
 assert.equal(harnesses.find((harness) => harness.id === 'codex').package, '@openai/codex');
 assert.equal(harnesses.find((harness) => harness.id === 'agy').installable, true);
+assert.equal(harnesses.find((harness) => harness.id === 'agy').runtimeFamily, 'agy-acp');
+assert.equal(harnesses.find((harness) => harness.id === 'agy').transport, 'acp-stdio');
 assert.equal(harnesses.find((harness) => harness.id === 'agy').installUrls.unix, 'https://antigravity.google/cli/install.sh');
 assert.equal(harnesses.find((harness) => harness.id === 'goose').installable, true);
 assert.equal(harnesses.find((harness) => harness.id === 'openhands').package, '@openhands/agent-canvas');

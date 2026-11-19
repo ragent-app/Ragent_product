@@ -2,6 +2,7 @@
 // explicit provisioning command is the only Runtime-owned mutation exposed.
 import { createHash } from 'crypto';
 import { formalMemberDescriptor, makeMemberRef, parseMemberRef } from './organization-member-reference.mjs';
+import { barrierEventFromMember } from './adapters/provider-native-delegation.mjs';
 import { capturedMember, listMemberEvents } from './organization-member-aggregation.mjs';
 import { access } from 'fs/promises';
 import { constants as fsConstants } from 'fs';
@@ -33,13 +34,15 @@ function writeError(res, writeJson, error) {
 }
 
 
+const TERMINAL_MEMBER_STATES = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'lost']);
+
 function memberActivityState(state) {
   return ['spawned', 'running'].includes(state) ? 'working' : state === 'waiting' ? 'waiting' :
     state === 'failed' ? 'failed' : ['completed', 'cancelled', 'interrupted'].includes(state) ? 'idle' : 'unknown';
 }
 
-async function projectHarnessMembers(rootSessionId, rootMember = null) {
-  const memberEvents = await listMemberEvents(rootSessionId);
+async function projectHarnessMembers(rootSessionId, rootMember = null, listMembers = listMemberEvents) {
+  const memberEvents = await listMembers(rootSessionId);
   const rootCanonicalId = rootMember || `root:${rootSessionId}`;
   const latestByMember = new Map();
   const births = new Map();
@@ -54,6 +57,9 @@ async function projectHarnessMembers(rootSessionId, rootMember = null) {
     if (event.phase === 'confirmed' && !births.has(event.memberId)) births.set(event.memberId, event);
     if (!old && event.phase === 'confirmed') latestByMember.set(event.memberId, event);
     else if (old && (event.runId !== old.runId || (event.seq || 0) >= (old.seq || 0))) {
+      if (event.runId === old.runId && TERMINAL_MEMBER_STATES.has(old.state) && !TERMINAL_MEMBER_STATES.has(event.state)) {
+        continue;
+      }
       latestByMember.set(event.memberId, event.parent?.kind === 'unknown' ? { ...event, parent: old.parent } : event);
     }
   }
@@ -63,14 +69,33 @@ async function projectHarnessMembers(rootSessionId, rootMember = null) {
     const actor = birth?.actor?.kind === 'member' ? birth.actor.id :
       birth?.actor?.kind === 'root_session' && birth.actor.id === rootSessionId ? rootCanonicalId : null;
     const state = memberActivityState(event.state);
-    return { canonicalId: event.memberId, sourceTag: event.sourceTag || null, executionHarnessId: event.executionHarnessId || null,
-      parentCanonicalId: parent || null, relationKnown: Boolean(parent), aliases: [...(aliasesByMember.get(event.memberId)?.values() || [])],
+    return {
+      canonicalId: event.memberId,
+      sourceTag: event.sourceTag || null,
+      executionHarnessId: event.executionHarnessId || null,
+      ...(event.displayName ? { displayName: event.displayName } : {}),
+      ...(event.role ? { role: event.role } : {}),
+      ...(event.model ? { model: event.model } : {}),
+      controlCapabilities: event.controlCapabilities || { readOnly: true, canControlMember: false, canMessageMember: false },
+      parentCanonicalId: parent || null,
+      relationKnown: Boolean(parent),
+      aliases: [...(aliasesByMember.get(event.memberId)?.values() || [])],
       birth: birth && actor ? { id: birth.id, actorCanonicalId: actor, operationId: birth.operationId || null, timestamp: birth.timestamp || null } : null,
       activity: { state, kind: null, actionRequired: false, runId: event.runId, sourceSeq: event.seq ?? null },
-      conversation: { ref: makeMemberRef({ kind: 'member', root: rootSessionId, id: event.memberId, runId: event.runId, generation: event._generation }),
-        generation: event._generation, scope: 'activity_only' } };
+      conversation: {
+        ref: makeMemberRef({ kind: 'member', root: rootSessionId, id: event.memberId, runId: event.runId, generation: event._generation }),
+        generation: event._generation,
+        scope: 'activity_only',
+      },
+    };
   });
-  return { rootCanonicalId, members, membersComplete: false, sourceCoverage: { harness: memberEvents.availability, gap: memberEvents.gap } };
+  return {
+    rootCanonicalId,
+    members,
+    membersComplete: false,
+    sourceCoverage: { harness: memberEvents.availability, gap: memberEvents.gap },
+    ...(memberEvents.board ? { board: memberEvents.board, channels: memberEvents.channels || memberEvents.board.channels || [] } : {}),
+  };
 }
 
 export async function handleOrganizationRoutes({
@@ -84,6 +109,8 @@ export async function handleOrganizationRoutes({
   provisionRevision = provisionRootLeadershipRevision,
   managedSessionFactory = createManagedSessionForNode,
   dispatchPhase = null,
+  listMembers = listMemberEvents,
+  readCapturedMember = capturedMember,
 }) {
   const organizationMatch = /^\/api\/organizations\/([^/]+)(?:\/(projection|cancel|provision))?$/.exec(String(pathname || ''));
   const conversationMatch = /^\/api\/organizations\/([^/]+)\/nodes\/([^/]+)\/conversation$/.exec(String(pathname || ''));
@@ -93,9 +120,10 @@ export async function handleOrganizationRoutes({
   const runtimeConstraintsMatch = /^\/api\/sessions\/([^/]+)\/organization\/runtime-constraints$/.exec(String(pathname || ''));
   const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
   const membersMatch = /^\/api\/sessions\/([^/]+)\/organization\/members$/.exec(String(pathname || ''));
+  const boardMatch = /^\/api\/sessions\/([^/]+)\/organization\/board$/.exec(String(pathname || ''));
   const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !boardMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
   if (runtimeConstraintsMatch) {
     if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (!['GET', 'PUT'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
@@ -145,7 +173,27 @@ export async function handleOrganizationRoutes({
         if (candidates.length === 1) rootMember = `formal:${candidates[0].id}`;
       }
       res.setHeader?.('Cache-Control', 'private, no-store');
-      writeJson(res, 200, { rootSessionId: root, ...(await projectHarnessMembers(root, rootMember)) });
+      writeJson(res, 200, { rootSessionId: root, ...(await projectHarnessMembers(root, rootMember, listMembers)) });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (boardMatch) {
+    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(boardMatch[1]);
+      const { getSessionMeta } = await import('./session-manager.mjs');
+      if (!await getSessionMeta(root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const memberEvents = await listMembers(root);
+      const board = memberEvents.board || null;
+      const channels = memberEvents.channels || board?.channels || [];
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, {
+        rootSessionId: root,
+        board,
+        channels,
+        sourceCoverage: { harness: memberEvents.availability, gap: memberEvents.gap },
+      });
     } catch (error) { writeError(res, writeJson, error); }
     return true;
   }
@@ -197,21 +245,26 @@ export async function handleOrganizationRoutes({
           hasMoreBefore: pagination.hasMoreBefore === true, hasMoreAfter: pagination.hasMoreAfter === true });
         return true;
       }
-      const memberEvents = await listMemberEvents(root);
+      const memberEvents = await listMembers(root);
       const observed = memberEvents.events.filter((event) => event.memberId === ref.id && event.runId === ref.runId);
       const confirmed = observed.some((event) => event.phase === 'confirmed');
       if (!confirmed) { writeJson(res, 404, { error: 'Member not found' }); return true; }
       const latest = observed.at(-1);
       // External provider references are not authorized Ragent sessions. Only
       // child frames explicitly captured and normalized by the adapter are read.
-      const captured = capturedMember(root, ref.runId, ref.id);
+      const captured = readCapturedMember(root, ref.runId, ref.id);
       if (captured.generation !== ref.generation) { writeJson(res, 409, { code: 'MEMBER_SOURCE_CHANGED', reset: true }); return true; }
       const all = captured.entries || [];
       const matching = all.filter((event) => (!beforeSeq || event.seq < beforeSeq) && (!afterSeq || event.seq > afterSeq));
       const page = afterSeq ? matching.slice(0, limit) : matching.slice(-limit);
       const oldestSeq = all[0]?.seq ?? null;
       const latestSeq = all.at(-1)?.seq ?? null;
-      writeJson(res, 200, { scope: all.length ? 'full' : 'activity_only', coverage: 'partial',
+      const responseScope = all.length > 0
+        ? (captured.scope && captured.scope !== 'unavailable' ? captured.scope : 'captured_only')
+        : (captured.scope === 'unavailable' ? 'unavailable' : 'activity_only');
+      const responseCoverage = captured.coverage
+        || (all.length > 0 ? 'partial' : (responseScope === 'unavailable' ? 'unavailable' : 'activity_only'));
+      writeJson(res, 200, { scope: responseScope, coverage: responseCoverage,
         availability: captured.availability, generation: captured.generation, revision: null, reset: false,
         gap: memberEvents.gap || captured.gap, oldestSeq, latestSeq,
         activity: { state: memberActivityState(latest?.state), kind: null, actionRequired: false }, entries: page,
@@ -253,9 +306,35 @@ export async function handleOrganizationRoutes({
       const nextAfterLines = delta.nextOffset === 0
         ? Math.max(afterLines, delta.processedLineCount || 0)
         : (delta.skippedLineCount || 0) + (delta.processedLineCount || 0);
-      const events = delta.records.map((record) => record.json)
-        .filter((value) => value?.type === 'ragent.delegation_event' && value.event?.parentSessionId === sessionId && value.event?.runId === runId)
-        .map(({ event }) => ({ id: event.id, runId: event.runId, parentSessionId: event.parentSessionId, delegationId: event.delegationId, parentDelegationId: event.parentDelegationId || null, childSessionId: event.childSessionId || null, kind: event.kind, state: event.state, seq: event.seq, timestamp: event.timestamp, birthActor: event.kind === 'spawned' && event.provider === 'codex' && !event.parentDelegationId && event.facts?.birthActor === 'root_session' ? 'root_session' : null, details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null }));
+      const seenEventIds = new Set();
+      const events = [];
+      for (const record of delta.records) {
+        const value = record?.json;
+        let event = null;
+        if (value?.type === 'ragent.delegation_event') {
+          event = value.event;
+        } else if (value?.type === 'ragent.member_event' && value.event?.barrierParticipation === true) {
+          event = barrierEventFromMember(value.event);
+        }
+        if (!event || event.parentSessionId !== sessionId || event.runId !== runId || !event.id || seenEventIds.has(event.id)) {
+          continue;
+        }
+        seenEventIds.add(event.id);
+        events.push({
+          id: event.id,
+          runId: event.runId,
+          parentSessionId: event.parentSessionId,
+          delegationId: event.delegationId,
+          parentDelegationId: event.parentDelegationId || null,
+          childSessionId: event.childSessionId || null,
+          kind: event.kind,
+          state: event.state,
+          seq: event.seq,
+          timestamp: event.timestamp,
+          birthActor: event.kind === 'spawned' && ['codex', 'agy'].includes(event.provider) && !event.parentDelegationId && event.facts?.birthActor === 'root_session' ? 'root_session' : null,
+          details: event.facts?.candidate?.reason || event.facts?.recovery?.reason || null,
+        });
+      }
       writeJson(res, 200, { sessionId, runId, events, delegations, nextAfterLines, hasMore: delta.truncated === true,
         sourceAvailability: readable ? delta.readStatus : 'missing',
         gap: !readable || delta.readStatus !== 'verified', recoverability: readable ? 'unknown' : 'unavailable' });
@@ -378,7 +457,7 @@ export async function handleOrganizationRoutes({
       projection.nodes = projection.nodes.map((node) => ({ ...node, member: formalMemberDescriptor(org.rootSessionId, node) }));
       const rootCandidates = projection.nodes.filter((node) => node.currentBinding?.sessionId === org.rootSessionId);
       const rootMember = rootCandidates.length === 1 ? rootCandidates[0].member?.canonicalId : null;
-      Object.assign(projection, await projectHarnessMembers(org.rootSessionId, rootMember));
+      Object.assign(projection, await projectHarnessMembers(org.rootSessionId, rootMember, listMembers));
       projection.digest = projectionDigest(projection);
       if (projection.asOf) projection.asOf = { ...projection.asOf, projectionDigest: projection.digest };
       const etag = `"${createHash('sha256').update(JSON.stringify(projection)).digest('hex')}"`;

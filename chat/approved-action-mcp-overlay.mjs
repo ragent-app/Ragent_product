@@ -19,9 +19,12 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { createHash } from 'node:crypto';
 import { resolveWindowsSystemPaths } from './windows-system-paths.mjs';
+import { isReservedRagentMcpName, validateAgyMcpServerInput } from '../lib/agy-mcp-manager.mjs';
 
 const CODEX_RUNTIME = 'codex-app-server-json';
 const CLAUDE_RUNTIME = 'claude-stream-json-bidi';
+const AGY_ACP_RUNTIME = 'agy-acp';
+const AGY_STREAM_JSON_RUNTIME = 'agy-stream-json';
 
 export const MCP_OVERLAY_MAX_ATTEMPTS = 3;
 export const MCP_OVERLAY_RETRY_DELAY_MS = 25;
@@ -206,6 +209,35 @@ async function preflightManagedMcpOverlay({ family, sourceHome, servers, attempt
     }
   }
 
+  if (family === AGY_STREAM_JSON_RUNTIME) {
+    if (!sourceHome) {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.PROVIDER_HOME_UNAVAILABLE,
+        'AgY provider home is not bound to this Run',
+        { stage: 'preflight', attempt, maxAttempts, resource: 'agy_home' },
+      );
+    }
+    let homeInfo;
+    try {
+      ({ value: homeInfo } = await withIoRetries(() => stat(sourceHome)));
+    } catch (error) {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.PROVIDER_HOME_UNAVAILABLE,
+        error?.code === 'ENOENT'
+          ? 'AgY provider home is unavailable'
+          : 'AgY provider home cannot be inspected',
+        { stage: 'preflight', attempt, maxAttempts, cause: error, resource: 'agy_home' },
+      );
+    }
+    if (!homeInfo.isDirectory()) {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.PROVIDER_HOME_UNAVAILABLE,
+        'AgY provider home is not a directory',
+        { stage: 'preflight', attempt, maxAttempts, resource: 'agy_home' },
+      );
+    }
+  }
+
   for (const server of servers) {
     await assertReadableRegularFile(
       server.scriptPath,
@@ -243,6 +275,23 @@ const BROWSER_MCP_ENV_KEYS = [
   'RAGENT_BROWSER_ARTIFACT_DIR',
   'RAGENT_BROWSER_APPROVAL_TIMEOUT_MS',
   'RAGENT_BROWSER_HEADLESS',
+];
+const ORGANIZATION_MCP_ENV_KEYS = [
+  'RAGENT_CHAT_BASE_URL',
+  'RAGENT_ORGANIZATION_TOOL_SCOPE',
+  'RAGENT_SESSION_CONTROL_TOKEN',
+  'RAGENT_SESSION_CONTROL_RUN_ID',
+  'RAGENT_SESSION_CONTROL_SESSION_ID',
+  'RAGENT_SESSION_CONTROL_TURN_ID',
+  'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN',
+  'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE',
+];
+const WINDOWS_BROKER_MCP_ENV_KEYS = [
+  'RAGENT_WINDOWS_BROKER_ENDPOINT',
+  'RAGENT_WINDOWS_BROKER_TOKEN',
+  'RAGENT_WINDOWS_BROKER_SESSION_ID',
+  'RAGENT_WINDOWS_BROKER_RUN_ID',
+  'RAGENT_WINDOWS_BROKER_TURN_ID',
 ];
 
 function trimString(value) {
@@ -365,6 +414,13 @@ function withCleanup(root, extra = {}) {
   };
 }
 
+function defaultEnvKeysForKind(kind) {
+  if (kind === 'browser') return BROWSER_MCP_ENV_KEYS;
+  if (kind === 'organization') return ORGANIZATION_MCP_ENV_KEYS;
+  if (kind === 'broker') return WINDOWS_BROKER_MCP_ENV_KEYS;
+  return APPROVED_ACTION_MCP_ENV_KEYS;
+}
+
 function normalizeServers(servers = []) {
   return (servers || [])
     .map((server) => {
@@ -372,7 +428,7 @@ function normalizeServers(servers = []) {
       const scriptPath = trimString(server?.scriptPath);
       const envKeys = Array.isArray(server?.envKeys) && server.envKeys.length > 0
         ? server.envKeys.filter((key) => /^[A-Z0-9_]+$/.test(String(key)))
-        : kind === 'browser' ? BROWSER_MCP_ENV_KEYS : APPROVED_ACTION_MCP_ENV_KEYS;
+        : defaultEnvKeysForKind(kind);
       if (!scriptPath) return null;
       return {
         kind,
@@ -383,10 +439,80 @@ function normalizeServers(servers = []) {
     .filter(Boolean);
 }
 
-function envPairsFor(server, spawnEnv) {
+function scopedEnvPairs(server, spawnEnv = {}) {
   return server.envKeys
     .filter((key) => typeof spawnEnv[key] === 'string' && spawnEnv[key].length > 0)
-    .map((key) => `${key} = ${tomlString(spawnEnv[key])}`);
+    .map((key) => [key, spawnEnv[key]]);
+}
+
+function envPairsFor(server, spawnEnv) {
+  return scopedEnvPairs(server, spawnEnv)
+    .map(([key, value]) => `${key} = ${tomlString(value)}`);
+}
+
+// Build ACP session/new & session/load mcpServers entries for `agy-acp`.
+// Returns official ACP EnvVariable[] ({ name, value }) arrays by default so
+// per-Run capability bindings stay scoped to each child process without touching
+// ~/.gemini/.
+export function buildAgyAcpMcpServers({
+  runId = '',
+  spawnEnv = {},
+  servers = [],
+  externalServers = [],
+  envFormat = 'array',
+} = {}) {
+  const normalizedServers = normalizeServers(servers);
+  const result = [];
+  const usedNames = new Set();
+
+  for (const server of normalizedServers) {
+    const name = safeServerName(runId, server.kind);
+    usedNames.add(name.toLowerCase());
+    const pairs = scopedEnvPairs(server, spawnEnv);
+    result.push({
+      name,
+      command: process.execPath,
+      args: [server.scriptPath],
+      env: envFormat === 'object'
+        ? Object.fromEntries(pairs)
+        : pairs.map(([key, value]) => ({ name: key, value })),
+    });
+  }
+
+  for (const candidate of Array.isArray(externalServers) ? externalServers : []) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue;
+    const candidateName = trimString(candidate.name);
+    if (!candidateName || isReservedRagentMcpName(candidateName) || usedNames.has(candidateName.toLowerCase())) {
+      continue;
+    }
+    if (candidate.disabled === true) continue;
+    const validated = validateAgyMcpServerInput(candidate);
+    if (!validated.ok) continue;
+    usedNames.add(validated.name.toLowerCase());
+    if (validated.type === 'http') {
+      const headerEntries = Object.entries(validated.normalized.headers || {});
+      result.push({
+        type: 'http',
+        name: validated.name,
+        url: validated.normalized.url,
+        headers: envFormat === 'object'
+          ? Object.fromEntries(headerEntries)
+          : headerEntries.map(([key, value]) => ({ name: key, value })),
+      });
+    } else {
+      const envEntries = Object.entries(validated.normalized.env || {});
+      result.push({
+        name: validated.name,
+        command: validated.normalized.command,
+        args: validated.normalized.args,
+        env: envFormat === 'object'
+          ? Object.fromEntries(envEntries)
+          : envEntries.map(([key, value]) => ({ name: key, value })),
+      });
+    }
+  }
+
+  return result;
 }
 
 // Build the per-thread Codex config without copying CODEX_HOME or its OAuth
@@ -520,7 +646,125 @@ async function prepareClaudeOverlay({ root, servers, runId }) {
   });
 }
 
+async function prepareAgyStreamJsonOverlay({ agyHomeDir, servers, runId, spawnEnv = {} }) {
+  const configDir = join(agyHomeDir, '.gemini', 'config');
+  await mkdir(configDir, { recursive: true, mode: 0o700 });
+  const configPath = join(configDir, 'mcp_config.json');
+
+  let previousRaw = null;
+  let existingDoc = {};
+  try {
+    previousRaw = await readFile(configPath, 'utf8');
+    if (previousRaw.trim()) {
+      const parsed = JSON.parse(previousRaw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        existingDoc = parsed;
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    previousRaw = null;
+  }
+
+  const baseServers = {};
+  if (existingDoc.mcpServers && typeof existingDoc.mcpServers === 'object' && !Array.isArray(existingDoc.mcpServers)) {
+    for (const [name, entry] of Object.entries(existingDoc.mcpServers)) {
+      if (!isReservedRagentMcpName(name)) {
+        baseServers[name] = entry;
+      }
+    }
+  }
+
+  const serverNames = [];
+  for (const server of servers) {
+    const serverName = safeServerName(runId, server.kind);
+    serverNames.push(serverName);
+    baseServers[serverName] = {
+      command: process.execPath,
+      args: [server.scriptPath],
+      disabled: false,
+      env: Object.fromEntries(scopedEnvPairs(server, spawnEnv)),
+    };
+  }
+
+  const nextDoc = {
+    ...existingDoc,
+    mcpServers: baseServers,
+  };
+  await writeOverlayFileAtomically(configPath, `${JSON.stringify(nextDoc, null, 2)}\n`);
+
+  let cleaned = false;
+  return {
+    root: configDir,
+    agyHomeDir,
+    runtimeFamily: AGY_STREAM_JSON_RUNTIME,
+    serverNames,
+    configPath,
+    env: {
+      RAGENT_AGY_HOME_DIR: agyHomeDir,
+      HOME: agyHomeDir,
+    },
+    async cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      if (previousRaw === null) {
+        await unlink(configPath).catch(() => {});
+      } else {
+        await writeOverlayFileAtomically(configPath, previousRaw).catch(() => {});
+      }
+    },
+  };
+}
+
 async function verifyManagedMcpOverlay(result, servers) {
+  if (result.runtimeFamily === AGY_ACP_RUNTIME) {
+    const names = new Set((result.mcpServers || []).map((server) => server?.name));
+    for (const server of servers) {
+      const serverName = safeServerName(result.runId || '', server.kind);
+      if (!names.has(serverName)) {
+        throw createOverlayError(
+          MCP_OVERLAY_ERROR_CODES.VERIFY_FAILED,
+          'Managed ACP MCP overlay is missing a requested server',
+          { stage: 'verify', resource: `mcp_server:${server.kind}` },
+        );
+      }
+    }
+    return;
+  }
+  if (result.runtimeFamily === AGY_STREAM_JSON_RUNTIME) {
+    const info = await stat(result.configPath).catch((error) => {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.VERIFY_FAILED,
+        'Managed AgY MCP configuration is incomplete',
+        { stage: 'verify', cause: error, resource: 'mcp_config.json' },
+      );
+    });
+    if (!info.isFile() || info.size <= 0) {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.VERIFY_FAILED,
+        'Managed AgY MCP configuration is empty',
+        { stage: 'verify', resource: 'mcp_config.json' },
+      );
+    }
+    const configText = await readFile(result.configPath, 'utf8').catch((error) => {
+      throw createOverlayError(
+        MCP_OVERLAY_ERROR_CODES.VERIFY_FAILED,
+        'Managed AgY MCP configuration cannot be read back',
+        { stage: 'verify', cause: error, resource: 'mcp_config.json' },
+      );
+    });
+    for (const server of servers) {
+      const serverName = safeServerName(result.runId || '', server.kind);
+      if (!configText.includes(`"${serverName}"`)) {
+        throw createOverlayError(
+          MCP_OVERLAY_ERROR_CODES.VERIFY_FAILED,
+          'Managed AgY MCP configuration is missing a requested server',
+          { stage: 'verify', resource: `mcp_server:${server.kind}` },
+        );
+      }
+    }
+    return;
+  }
   const requiredFiles = result.runtimeFamily === CODEX_RUNTIME
     ? ['config.toml', 'auth.json']
     : ['mcp.json'];
@@ -569,19 +813,39 @@ async function verifyManagedMcpOverlay(result, servers) {
   }
 }
 
+export async function prepareAgyAcpMcpOverlay({
+  runId = '',
+  spawnEnv = {},
+  servers = [],
+  externalServers = [],
+} = {}) {
+  return prepareManagedMcpOverlay({
+    runtimeFamily: AGY_ACP_RUNTIME,
+    runId,
+    spawnEnv,
+    servers,
+    externalServers,
+  });
+}
+
 export async function prepareManagedMcpOverlay({
   runtimeFamily = '',
   runId = '',
   spawnEnv = {},
   servers = [],
+  agyHomeDir = '',
+  externalServers = [],
   codexWindowsApprovalGate = false,
   codexWindowsInstallHook = '',
 } = {}) {
   const family = trimString(runtimeFamily);
   const normalizedServers = normalizeServers(servers);
-  if (![CODEX_RUNTIME, CLAUDE_RUNTIME].includes(family) ||
-      (normalizedServers.length === 0 && !(family === CODEX_RUNTIME && codexWindowsInstallHook))) return null;
-  const sourceHome = trimString(spawnEnv.CODEX_HOME);
+  const hasExternalAgyServers = family === AGY_ACP_RUNTIME && Array.isArray(externalServers) && externalServers.length > 0;
+  if (![CODEX_RUNTIME, CLAUDE_RUNTIME, AGY_ACP_RUNTIME, AGY_STREAM_JSON_RUNTIME].includes(family) ||
+      (normalizedServers.length === 0 && !hasExternalAgyServers && !(family === CODEX_RUNTIME && codexWindowsInstallHook))) return null;
+  const sourceHome = family === AGY_STREAM_JSON_RUNTIME
+    ? (trimString(agyHomeDir) || trimString(spawnEnv.RAGENT_AGY_HOME_DIR) || trimString(spawnEnv.HOME))
+    : trimString(spawnEnv.CODEX_HOME);
   const maxAttempts = configuredMaxAttempts();
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -594,26 +858,51 @@ export async function prepareManagedMcpOverlay({
         attempt,
         maxAttempts,
       });
-      // CODEX_HOME is also the home of Codex's executable helper aliases.
-      // Moving it into the shared OS temp tree makes Codex refuse to create
-      // those helpers. Keep its private overlay under the already validated
-      // managed provider home; do not change the requested sandbox policy.
-      root = await mkdtemp(join(
-        family === CODEX_RUNTIME ? sourceHome : tmpdir(),
-        'ragent-approved-action-',
-      ));
-      await chmod(root, 0o700).catch(() => {});
-      const result = family === CODEX_RUNTIME
-        ? await prepareCodexOverlay({
-          root,
-          sourceHome,
+      let result;
+      if (family === AGY_ACP_RUNTIME) {
+        const mcpServers = buildAgyAcpMcpServers({
+          runId,
+          spawnEnv,
+          servers: normalizedServers,
+          externalServers,
+        });
+        result = {
+          root: '',
+          configPath: '',
+          runtimeFamily: AGY_ACP_RUNTIME,
+          serverNames: mcpServers.map((server) => server.name),
+          mcpServers,
+          async cleanup() {},
+        };
+      } else if (family === AGY_STREAM_JSON_RUNTIME) {
+        result = await prepareAgyStreamJsonOverlay({
+          agyHomeDir: sourceHome,
           servers: normalizedServers,
           runId,
           spawnEnv,
-          codexWindowsApprovalGate,
-          codexWindowsInstallHook,
-        })
-        : await prepareClaudeOverlay({ root, servers: normalizedServers, runId });
+        });
+      } else {
+        // CODEX_HOME is also the home of Codex's executable helper aliases.
+        // Moving it into the shared OS temp tree makes Codex refuse to create
+        // those helpers. Keep its private overlay under the already validated
+        // managed provider home; do not change the requested sandbox policy.
+        root = await mkdtemp(join(
+          family === CODEX_RUNTIME ? sourceHome : tmpdir(),
+          'ragent-approved-action-',
+        ));
+        await chmod(root, 0o700).catch(() => {});
+        result = family === CODEX_RUNTIME
+          ? await prepareCodexOverlay({
+            root,
+            sourceHome,
+            servers: normalizedServers,
+            runId,
+            spawnEnv,
+            codexWindowsApprovalGate,
+            codexWindowsInstallHook,
+          })
+          : await prepareClaudeOverlay({ root, servers: normalizedServers, runId });
+      }
       await verifyManagedMcpOverlay({ ...result, runId }, normalizedServers);
       return {
         ...result,
@@ -656,11 +945,13 @@ export async function prepareApprovedActionMcpOverlay({
   runId = '',
   spawnEnv = {},
   scriptPath = '',
+  agyHomeDir = '',
 } = {}) {
   const result = await prepareManagedMcpOverlay({
     runtimeFamily,
     runId,
     spawnEnv,
+    agyHomeDir,
     servers: [{ kind: 'actions', scriptPath, envKeys: APPROVED_ACTION_MCP_ENV_KEYS }],
   });
   if (!result) return result;
@@ -673,6 +964,13 @@ export async function prepareApprovedActionMcpOverlay({
 export const APPROVED_ACTION_MCP_RUNTIME_FAMILIES = Object.freeze({
   CODEX: CODEX_RUNTIME,
   CLAUDE: CLAUDE_RUNTIME,
+  AGY_ACP: AGY_ACP_RUNTIME,
+  AGY_STREAM_JSON: AGY_STREAM_JSON_RUNTIME,
 });
 
-export { APPROVED_ACTION_MCP_ENV_KEYS, BROWSER_MCP_ENV_KEYS };
+export {
+  APPROVED_ACTION_MCP_ENV_KEYS,
+  BROWSER_MCP_ENV_KEYS,
+  ORGANIZATION_MCP_ENV_KEYS,
+  WINDOWS_BROKER_MCP_ENV_KEYS,
+};

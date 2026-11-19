@@ -1,6 +1,11 @@
 // Incremental, bounded view of the provider-neutral member event stream.
 // The adapter owns provider decoding; this layer retains only its safe events.
-import { createMemberReader } from './adapters/provider-native-delegation.mjs';
+import {
+  buildReadOnlyBoardProjection,
+  canonicalizeNativeDelegationProvider,
+  createMemberReader,
+} from './adapters/provider-native-delegation.mjs';
+import { AGY_MANAGED_HOME_DIR } from '../lib/config.mjs';
 import { stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
@@ -8,17 +13,75 @@ import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolP
 const readers = new Map();
 const MAX_READERS = 64;
 
-async function readRun(rootSessionId, run) {
+function resolveRunMemberProvider(current, run) {
+  for (const candidate of [
+    current?.provider,
+    current?.providerCapabilities?.provider,
+    current?.runtimeFamily,
+    run?.provider,
+    run?.runtimeFamily,
+  ]) {
+    const resolved = canonicalizeNativeDelegationProvider(candidate);
+    if (resolved) return resolved;
+  }
+  return '';
+}
+
+async function readRun(rootSessionId, run, options = {}) {
   const key = `${rootSessionId}\0${run.id}`;
-  const current = await getRun(run.id);
-  if (!current || current.sessionId !== rootSessionId) return { events: [], gap: true, pending: false };
-  const providerEvidence = String(current.provider || current.providerCapabilities?.provider || current.runtimeFamily || run.provider || '').toLowerCase();
-  const provider = providerEvidence.includes('claude') ? 'claude' : providerEvidence.includes('codex') ? 'codex' : '';
-  if (!provider) return { events: [], gap: false, pending: false };
+  const getRunFn = options.getRun || getRun;
+  const readDeltaFn = options.readRunSpoolDelta || readRunSpoolDelta;
+  const current = await getRunFn(run.id);
+  if (!current || current.sessionId !== rootSessionId) return { events: [], board: null, gap: true, pending: false };
+  const provider = resolveRunMemberProvider(current, run);
+  if (!provider) return { events: [], board: null, gap: false, pending: false };
   const appThread = current.appServerThreadId || '';
   const codexThread = current.codexThreadId || '';
-  const parentThreadId = appThread && codexThread && appThread !== codexThread ? '' : appThread || codexThread;
-  const identity = JSON.stringify([provider, parentThreadId]);
+  const parentThreadId = provider === 'codex'
+    ? (appThread && codexThread && appThread !== codexThread ? '' : appThread || codexThread)
+    : provider === 'agy'
+      ? (current.agyConversationId || current.providerSessionId || appThread || '')
+      : '';
+  const agySessionStorageDir = options.agySessionStorageDir
+    || current.agySessionStorageDir
+    || current.providerPreparation?.agySessionStorageDir
+    || '';
+  const agyAppDataRelDir = options.agyAppDataRelDir
+    || options.appDataRelDir
+    || current.agyAppDataRelDir
+    || current.appDataRelDir
+    || current.manifest?.options?.agyAppDataRelDir
+    || current.manifest?.options?.appDataRelDir
+    || '';
+  const agyAppDataDir = options.agyAppDataDir
+    || current.agyAppDataDir
+    || current.appDataDir
+    || current.manifest?.options?.agyAppDataDir
+    || current.manifest?.options?.appDataDir
+    || '';
+  const agyGeminiDir = options.agyGeminiDir
+    || current.agyGeminiDir
+    || current.geminiDir
+    || current.manifest?.options?.agyGeminiDir
+    || current.manifest?.options?.geminiDir
+    || '';
+  const appDataDirName = options.appDataDirName
+    || current.agyAppDataDirName
+    || current.appDataDirName
+    || current.manifest?.options?.appDataDirName
+    || '';
+  const agyHomeDir = options.agyHomeDir || current.agyHomeDir || current.providerRuntimeHome
+    || (provider === 'agy' ? AGY_MANAGED_HOME_DIR : '');
+  const identity = JSON.stringify([
+    provider,
+    parentThreadId,
+    agySessionStorageDir,
+    agyAppDataRelDir,
+    agyAppDataDir,
+    agyGeminiDir,
+    appDataDirName,
+    agyHomeDir,
+  ]);
   const paths = [runSpoolPath(run.id), runSpoolGzPath(run.id), runSpoolZstPath(run.id)];
   const stats = await Promise.all(paths.map((path) => stat(path).catch(() => null)));
   const index = stats.findIndex(Boolean);
@@ -31,23 +94,56 @@ async function readRun(rootSessionId, run) {
     readers.delete(key); entry = null;
   }
   if (!entry) {
-    entry = { reader: createMemberReader({ provider, runId: run.id, parentSessionId: rootSessionId, parentThreadId }),
-      identity, sourceIdentity, sourceSize: source?.size || 0,
+    entry = {
+      reader: createMemberReader({
+        provider,
+        runId: run.id,
+        parentSessionId: rootSessionId,
+        parentThreadId,
+        providerSessionId: current.agyConversationId || current.providerSessionId || '',
+        agySessionStorageDir,
+        agyAppDataRelDir,
+        agyAppDataDir,
+        agyGeminiDir,
+        appDataDirName,
+        agyHomeDir,
+      }),
+      identity,
+      sourceIdentity,
+      sourceSize: source?.size || 0,
       generation: createHash('sha256').update(`${key}:${sourceIdentity}`).digest().readUInt32BE(0) & 0x7fffffff,
-      fingerprint: '', offset: 0, lines: 0, snapshot: [], gap: false, resetRequired: false, pending: null, complete: false };
+      fingerprint: '',
+      offset: 0,
+      lines: 0,
+      snapshot: [],
+      gap: false,
+      resetRequired: false,
+      pending: null,
+      complete: false,
+    };
     readers.set(key, entry);
     while (readers.size > MAX_READERS) readers.delete(readers.keys().next().value);
   }
   if (entry.pending) return entry.pending;
-  if (entry.complete && entry.fingerprint === fingerprint && ['completed', 'failed', 'cancelled', 'interrupted'].includes(current.state)) {
-    return { events: entry.snapshot.map((event) => ({ ...event, _generation: entry.generation })), gap: entry.gap, pending: false };
+  const terminalParentRun = ['completed', 'failed', 'cancelled', 'interrupted'].includes(current.state);
+  if (entry.complete && entry.fingerprint === fingerprint && terminalParentRun && entry.parentRunState === current.state) {
+    const board = entry.reader.readBoard?.() || null;
+    return {
+      events: entry.snapshot.map((event) => ({ ...event, _generation: entry.generation })),
+      board,
+      gap: entry.gap,
+      pending: false,
+    };
   }
   entry.pending = (async () => {
     let more = false;
     for (let page = 0; page < 4; page++) {
-      const result = await readRunSpoolDelta(run.id, { startOffset: entry.offset, skipLines: entry.lines, maxRecords: 200, strictStatus: true });
+      const result = await readDeltaFn(run.id, { startOffset: entry.offset, skipLines: entry.lines, maxRecords: 200, strictStatus: true });
       const verified = result.readStatus === 'verified';
-      const projection = await entry.reader.consume(result.records, { sourceVerified: verified });
+      const projection = await entry.reader.consume(result.records, {
+        sourceVerified: verified,
+        parentRunState: current.state,
+      });
       entry.snapshot = projection.snapshot;
       entry.gap ||= projection.gap || !verified;
       if (!verified) { entry.resetRequired = true; more = true; break; }
@@ -63,26 +159,68 @@ async function readRun(rootSessionId, run) {
     entry.complete = !more && !entry.resetRequired;
     entry.fingerprint = fingerprint;
     entry.sourceSize = source?.size || 0;
-    return { events: entry.snapshot.map((event) => ({ ...event, _generation: entry.generation })), gap: entry.gap, pending: more };
+    entry.parentRunState = current.state;
+    const board = entry.reader.readBoard?.() || null;
+    return {
+      events: entry.snapshot.map((event) => ({ ...event, _generation: entry.generation })),
+      board,
+      gap: entry.gap,
+      pending: more,
+    };
   })().finally(() => { entry.pending = null; });
   return entry.pending;
 }
 
-export async function listMemberEvents(rootSessionId) {
-  const indexed = await listDurableSessionRunIndexEntries(rootSessionId);
+function mergeBoards(boards = []) {
+  const valid = boards.filter(Boolean);
+  if (valid.length === 0) return null;
+  if (valid.length === 1) return valid[0];
+  const latest = valid[valid.length - 1];
+  const channels = [];
+  const messages = [];
+  let truncated = false;
+  let gap = false;
+  for (const board of valid) {
+    if (Array.isArray(board.channels)) channels.push(...board.channels);
+    if (Array.isArray(board.messages)) messages.push(...board.messages);
+    truncated ||= Boolean(board.truncated);
+    gap ||= Boolean(board.gap);
+  }
+  return buildReadOnlyBoardProjection({
+    title: latest.title || null,
+    channels,
+    messages,
+    source: latest.source || 'provider_native',
+    provider: latest.provider || 'agy',
+    truncated,
+    gap,
+  });
+}
+
+export async function listMemberEvents(rootSessionId, options = {}) {
+  const listRunsFn = options.listDurableSessionRunIndexEntries || listDurableSessionRunIndexEntries;
+  const indexed = await listRunsFn(rootSessionId);
   const runs = indexed.filter((run) => run.sessionId === rootSessionId)
     .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')) || a.id.localeCompare(b.id));
   let gap = false;
   const events = [];
+  const boards = [];
   // Bound each request; continuation occurs through the next organization refresh.
   for (const run of runs.slice(-32)) {
-    const result = await readRun(rootSessionId, run);
+    const result = await readRun(rootSessionId, run, options);
     events.push(...result.events);
+    if (result.board) boards.push(result.board);
     gap ||= result.gap || result.pending;
   }
   if (runs.length > 32 || runs.some((run) => !Number.isFinite(Date.parse(run.createdAt)))) gap = true;
   if (runs.some((run, index) => index > 0 && run.createdAt === runs[index - 1].createdAt)) gap = true;
-  return { events, gap, availability: 'partial' };
+  const board = mergeBoards(boards);
+  return {
+    events,
+    gap,
+    availability: 'partial',
+    ...(board ? { board, channels: board.channels } : {}),
+  };
 }
 
 export function capturedMember(rootSessionId, runId, memberId) {

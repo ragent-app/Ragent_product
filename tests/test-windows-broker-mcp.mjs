@@ -47,6 +47,8 @@ function rpc(method, params = {}) {
   });
 }
 try {
+  const discovered = await rpc('server/discover', {});
+  assert.deepEqual(discovered.result, {});
   const listed = await rpc('tools/list');
   assert.deepEqual(listed.result.tools.map((tool) => tool.name), [
     'ragent_restart_qa_service', 'ragent_restart_qa_service_status',

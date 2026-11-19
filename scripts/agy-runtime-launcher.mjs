@@ -10,6 +10,8 @@ import { join } from 'path';
 import { spawn } from 'child_process';
 
 import {
+  AGY_APP_DATA_DIR_ENV,
+  AGY_GEMINI_DIR_ENV,
   buildAgyRuntimeEnv,
   resolveAgyHome,
   resolveAgySupportCommand,
@@ -86,6 +88,17 @@ function runDirect(command, args, env, cwd) {
   });
 }
 
+function readArgValue(args, flagNames) {
+  for (let i = 0; i < args.length; i += 1) {
+    const token = String(args[i] || '');
+    for (const flag of flagNames) {
+      if (token === flag && i + 1 < args.length) return trim(args[i + 1]);
+      if (token.startsWith(`${flag}=`)) return trim(token.slice(flag.length + 1));
+    }
+  }
+  return '';
+}
+
 async function main() {
   const rawArgs = process.argv.slice(2);
   if (rawArgs[0] === '--') rawArgs.shift();
@@ -96,8 +109,16 @@ async function main() {
     return;
   }
 
+  const argGeminiDir = readArgValue(rawArgs, ['--gemini-dir', '--gemini_dir']);
+  const argAppDataDir = readArgValue(rawArgs, ['--app-data-dir', '--app_data_dir']);
   const env = await buildAgyRuntimeEnv(process.env, {
     homeDir: resolveAgyHome({ environment: process.env }),
+    ...(argGeminiDir || trim(process.env[AGY_GEMINI_DIR_ENV])
+      ? { geminiDir: argGeminiDir || trim(process.env[AGY_GEMINI_DIR_ENV]) }
+      : {}),
+    ...(argAppDataDir || trim(process.env[AGY_APP_DATA_DIR_ENV])
+      ? { appDataDir: argAppDataDir || trim(process.env[AGY_APP_DATA_DIR_ENV]) }
+      : {}),
   });
   const cwd = process.cwd();
   if (process.platform !== 'linux' || env.RAGENT_AGY_PRIVATE_KEYRING !== '1') {

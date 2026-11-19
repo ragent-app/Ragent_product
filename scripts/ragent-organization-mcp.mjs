@@ -29,10 +29,10 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
   let request;
   try {
     request = JSON.parse(line);
-    if (request.id === undefined) continue;
+    if (request.id === undefined || request.id === null) continue;
     let result;
     if (request.method === 'initialize') result = { protocolVersion: request.params?.protocolVersion || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'ragent-organization', version: '1.0.0' } };
-    else if (request.method === 'ping') result = {};
+    else if (request.method === 'ping' || request.method === 'server/discover') result = {};
     else if (request.method === 'tools/list') {
       if (!valid) result = { tools: [] };
       else {

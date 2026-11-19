@@ -421,4 +421,51 @@ assert.equal(buildRecoveryFacts({ mode: 'resume', resumeRef: 'provider/thread/wi
   assert.ok(rejected.errors.some((error) => error.includes('forbidden fields')), `unexpected errors: ${rejected.errors.join('; ')}`);
 }
 
+// --- root birthActor generalization (codex + agy top-level spawned only) ----
+{
+  const agyRootSpawn = normalizeDelegationEvent({
+    provider: 'agy',
+    providerDelegationId: 'agy_sub_1',
+    runId: 'run_agy_1',
+    parentSessionId: 'sess_parent',
+    childSessionId: 'agy_child_1',
+    kind: 'spawned',
+    state: 'spawned',
+    seq: 1,
+    timestamp: 1,
+    facts: { birthActor: 'root_session' },
+  });
+  assert.deepEqual(validateDelegationEvent(agyRootSpawn), { ok: true, errors: [] });
+  assert.equal(agyRootSpawn.facts.birthActor, 'root_session');
+
+  const codexRootSpawn = normalizeDelegationEvent({
+    provider: 'codex',
+    providerDelegationId: 'codex_sub_1',
+    runId: 'run_codex_1',
+    parentSessionId: 'sess_parent',
+    kind: 'spawned',
+    state: 'spawned',
+    seq: 1,
+    timestamp: 1,
+    facts: { birthActor: 'root_session' },
+  });
+  assert.deepEqual(validateDelegationEvent(codexRootSpawn), { ok: true, errors: [] });
+
+  assert.equal(
+    validateDelegationEvent({ ...agyRootSpawn, provider: 'claude' }).ok,
+    false,
+    'non-root-birth providers must still reject root_session birthActor',
+  );
+  assert.equal(
+    validateDelegationEvent({ ...agyRootSpawn, parentDelegationId: identity('agy', 'parent', 'run_agy_1').id }).ok,
+    false,
+    'nested child cannot claim root_session birthActor',
+  );
+  assert.equal(
+    validateDelegationEvent({ ...agyRootSpawn, kind: 'running', state: 'running' }).ok,
+    false,
+    'non-spawned event cannot carry root_session birthActor',
+  );
+}
+
 console.log('test-delegation-canonical: ok');

@@ -43,6 +43,8 @@ const RISK_MODES = new Set(['safe', 'recommended', 'conservative-auto']);
 const MANAGED_MCP_RUNTIME_FAMILIES = new Set([
   'codex-app-server-json',
   'claude-stream-json-bidi',
+  'agy-acp',
+  'agy-stream-json',
 ]);
 
 function trimString(value) {

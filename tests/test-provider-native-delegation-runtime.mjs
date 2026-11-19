@@ -5,9 +5,12 @@ import { readFile } from 'node:fs/promises';
 import {
   canonicalDelegationSpoolRecord,
   isProviderNativeChildFrame,
+  isProviderNativeDelegationEvidence,
   projectProviderNativeDelegation,
   reconcileProviderNativeDelegationRun,
+  resolveProvider,
 } from '../chat/provider-native-delegation-runtime.mjs';
+import { createAgyStreamAdapter } from '../chat/adapters/agy.mjs';
 import { createClaudeAdapter } from '../chat/adapters/claude.mjs';
 import { barrierEventFromMember } from '../chat/adapters/provider-native-delegation.mjs';
 import { createRunProjectionService } from '../chat/run-projection.mjs';
@@ -550,6 +553,298 @@ const codexRecords = await fixture('codex/native-delegations.jsonl');
     });
     assert.equal(JSON.stringify(next.runtime.canonicalEventIds), baseline, 'mixed-traffic replay must be deterministic');
   }
+}
+
+// AgY routing, evidence detection, Join Barrier safety (invoke_subagent vs swarm),
+// and run-projection ragent_intermediate filtering + approval counter normalization.
+{
+  assert.equal(resolveProvider({ provider: 'antigravity' }), 'agy');
+  assert.equal(resolveProvider({ provider: 'agy', runtimeFamily: 'agy-acp' }), 'agy');
+  assert.equal(resolveProvider({ runtimeFamily: 'agy-stream-json-bidi' }), 'agy');
+  assert.equal(resolveProvider({ runtimeFamily: 'legacy-unknown' }), '');
+
+  assert.equal(
+    isProviderNativeDelegationEvidence({
+      method: 'session/update',
+      params: { update: { sessionUpdate: 'tool_call', name: 'invoke_subagent' } },
+    }, 'agy'),
+    true,
+  );
+  assert.equal(
+    isProviderNativeDelegationEvidence({
+      event: 'step_update',
+      step_update: { step_type: 'tool', tool_name: 'swarm', tool_info: { name: 'swarm' } },
+    }, 'antigravity'),
+    true,
+  );
+  assert.equal(
+    isProviderNativeDelegationEvidence({
+      method: 'session/update',
+      params: { update: { sessionUpdate: 'agent_message_chunk', content: { text: 'Let us discuss swarm routing' } } },
+    }, 'agy'),
+    false,
+    'ordinary assistant text mentioning swarm must not trigger native delegation evidence',
+  );
+  assert.equal(
+    isProviderNativeDelegationEvidence({
+      method: 'session/update',
+      params: { update: { sessionUpdate: 'tool_call', name: 'swarm' } },
+      ragent_intermediate: true,
+    }, 'agy'),
+    false,
+  );
+
+  // Active invoke_subagent blocks premature exit; completed invoke_subagent completes cleanly;
+  // un-killed swarm worker stays non-blocking on clean exit without false delegation_lost.
+  const activeSubagentRun = {
+    id: 'run_agy_subagent',
+    sessionId: 'session_agy_subagent',
+    provider: 'antigravity',
+    runtimeFamily: 'agy-acp',
+  };
+  const subSpawnRecord = {
+    stream: 'stdout',
+    json: {
+      method: 'session/update',
+      params: {
+        sessionId: 'agy-root-1',
+        update: { sessionUpdate: 'tool_call', toolCallId: 'sub_1', name: 'invoke_subagent', status: 'in_progress' },
+      },
+    },
+  };
+  const subWait = projectProviderNativeDelegation({
+    run: activeSubagentRun,
+    spoolRecords: [subSpawnRecord],
+    terminalCandidate: { outcome: 'completed' },
+    providerExited: false,
+    nowMs: 1000,
+  });
+  assert.equal(subWait.decision, 'await_delegations');
+  assert.equal(subWait.provider, 'agy');
+
+  const subDoneRecord = {
+    stream: 'stdout',
+    json: {
+      method: 'session/update',
+      params: {
+        sessionId: 'agy-root-1',
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'sub_1',
+          name: 'invoke_subagent',
+          status: 'completed',
+          rawOutput: { conversation_id: 'agy-sub-conv-1' },
+        },
+      },
+    },
+  };
+  const subDone = projectProviderNativeDelegation({
+    run: activeSubagentRun,
+    spoolRecords: [subSpawnRecord, subDoneRecord],
+    terminalCandidate: { outcome: 'completed' },
+    providerExited: true,
+    providerExitedAtMs: 2000,
+    nowMs: 2001,
+  });
+  assert.equal(subDone.decision, 'complete');
+  assert.equal(subDone.runtime.delegationSummary.total, 1);
+
+  let swarmRun = {
+    id: 'run_agy_swarm',
+    sessionId: 'session_agy_swarm',
+    provider: 'agy',
+    runtimeFamily: 'agy-stream-json',
+    state: 'running',
+  };
+  const appendedSwarm = [];
+  const swarmAddRecord = {
+    stream: 'stdout',
+    json: {
+      event: 'step_update',
+      step_update: {
+        conversation_id: 'agy-swarm-root',
+        step_index: 2,
+        state: 'DONE',
+        step_type: 'tool',
+        tool_name: 'swarm',
+        tool_info: {
+          name: 'swarm',
+          parameters: { action: 'add', name: 'echoer', model: 'gemini-3.8-flash-low' },
+          output: JSON.stringify({ conversation_id: 'agy-echoer-1', status: 'added' }),
+        },
+      },
+    },
+  };
+  const swarmReconciled = await reconcileProviderNativeDelegationRun({
+    runId: swarmRun.id,
+    terminalCandidate: { outcome: 'completed' },
+    providerExited: true,
+    providerExitedAtMs: 5000,
+    nowMs: 5001,
+    getRun: async () => structuredClone(swarmRun),
+    readRunSpoolRecords: async () => [swarmAddRecord],
+    appendRunSpoolRecord: async (_id, rec) => { appendedSwarm.push(rec); },
+    updateRun: async (_id, updater) => { swarmRun = updater(structuredClone(swarmRun)); return swarmRun; },
+    writeRunResult: async () => {},
+  });
+  assert.equal(swarmReconciled.decision, 'complete');
+  assert.equal(swarmRun.state, 'completed', 'AgY swarm add without explicit kill must not falsely fail run with delegation_lost');
+  assert.equal(appendedSwarm.some((r) => r.json?.type === 'ragent.member_event' && r.json.event?.displayName === 'echoer'), true);
+
+  // run-projection: AgY ragent_intermediate filtering + approval counter bucket
+  const agySpoolRecords = [
+    {
+      stream: 'stdout',
+      json: {
+        event: 'step_update',
+        step_update: {
+          conversation_id: 'agy-root-p',
+          step_index: 1,
+          state: 'ACTIVE',
+          step_type: 'tool',
+          tool_name: 'invoke_subagent',
+          tool_info: { name: 'invoke_subagent', parameters: { subagent_type: 'worker' }, output: { conversation_id: 'agy-child-secret-id' } },
+        },
+      },
+    },
+    {
+      stream: 'stdout',
+      json: {
+        event: 'step_update',
+        ragent_intermediate: true,
+        step_update: {
+          conversation_id: 'agy-child-secret-id',
+          step_index: 2,
+          state: 'DONE',
+          step_type: 'agent_response',
+          text_delta: 'intermediate wrapper text should be filtered',
+        },
+      },
+    },
+    {
+      stream: 'stdout',
+      json: {
+        event: 'step_update',
+        step_update: {
+          conversation_id: 'agy-child-secret-id',
+          step_index: 3,
+          state: 'DONE',
+          step_type: 'agent_response',
+          text_delta: 'child frame auto tagged intermediate',
+        },
+      },
+    },
+    {
+      stream: 'stdout',
+      json: {
+        event: 'step_update',
+        step_update: {
+          conversation_id: 'agy-root-p',
+          step_index: 4,
+          state: 'DONE',
+          step_type: 'agent_response',
+          text_delta: 'parent visible response',
+        },
+      },
+    },
+    {
+      stream: 'stdout',
+      json: { type: 'ragent.approval_response', approvalId: 'agy:perm-1', provider: 'antigravity', autoApproved: true },
+    },
+  ];
+  const agyProjectionService = createRunProjectionService({
+    buildCodexContextMetricsPayload: () => null,
+    clipPreview: (value) => String(value).slice(0, 100),
+    createToolInvocation: async () => ({
+      adapter: createAgyStreamAdapter(),
+      capabilities: {},
+      provider: 'agy',
+      runtimeFamily: 'agy-stream-json',
+    }),
+    materializeRunSpoolLine: async (_runId, record) => JSON.stringify(record.json),
+    normalizeRunEvents: (_run, events) => events,
+    readLatestCodexSessionMetrics: async () => null,
+    readRunSpoolDelta: async () => ({ records: agySpoolRecords, nextOffset: 500, processedLineCount: agySpoolRecords.length }),
+    readRunSpoolRecords: async () => agySpoolRecords,
+  });
+  const agyProjectionRun = {
+    id: 'run_agy_proj_filter',
+    sessionId: 'sess_agy_proj',
+    provider: 'agy',
+    runtimeFamily: 'agy-stream-json',
+    providerNativeDelegation: {
+      delegations: [{ childSessionId: 'agy-child-secret-id' }],
+    },
+  };
+  const agyProjectionManifest = { tool: 'agy', options: { runtimeFamily: 'agy-stream-json' } };
+  const eventText = (e) => `${String(e?.text ?? '')}\n${String(e?.content ?? '')}`;
+  const agyProjected = await agyProjectionService.collectNormalizedRunEvents(agyProjectionRun, agyProjectionManifest);
+  assert.equal(agyProjected.normalizedEvents.some((e) => eventText(e).includes('intermediate wrapper text')), false);
+  assert.equal(agyProjected.normalizedEvents.some((e) => eventText(e).includes('child frame auto tagged intermediate')), false);
+  assert.equal(agyProjected.normalizedEvents.some((e) => eventText(e).includes('parent visible response')), true);
+  const agyDelta = await agyProjectionService.collectNormalizedRunEventDelta(agyProjectionRun, agyProjectionManifest);
+  assert.equal(agyDelta.normalizedEvents.some((e) => eventText(e).includes('intermediate wrapper text')), false);
+  assert.equal(agyDelta.normalizedEvents.some((e) => eventText(e).includes('child frame auto tagged intermediate')), false);
+  assert.equal(agyDelta.normalizedEvents.some((e) => eventText(e).includes('parent visible response')), true);
+  assert.equal(agyProjectionService.getApprovalSuppressionCounters('run_agy_proj_filter').byProvider.agy.autoAllowed, 1);
+  agyProjectionService.releaseRunRuntimeInvocation('run_agy_proj_filter');
+
+  // Mid-run reconcileProviderNativeDelegationRun with providerExited: false and omitted/null terminalCandidate
+  let midRun = {
+    id: 'run_agy_mid_reconcile',
+    sessionId: 'sess_agy_mid_reconcile',
+    provider: 'agy',
+    runtimeFamily: 'agy-acp',
+    state: 'running',
+  };
+  const midSpool = [
+    {
+      stream: 'stdout',
+      json: {
+        method: 'session/update',
+        params: {
+          sessionId: 'agy-mid-root',
+          update: {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'call_mid_sub_1',
+            name: 'invoke_subagent',
+            kind: 'other',
+            title: 'Run invoke_subagent',
+          },
+        },
+      },
+    },
+    {
+      stream: 'stdout',
+      json: {
+        method: 'session/update',
+        params: {
+          sessionId: 'agy-mid-root',
+          update: {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'call_mid_sub_1',
+            name: 'invoke_subagent',
+            status: 'completed',
+          },
+        },
+      },
+    },
+  ];
+  const midReconciled = await reconcileProviderNativeDelegationRun({
+    runId: midRun.id,
+    providerExited: false,
+    nowMs: 12345,
+    getRun: async () => structuredClone(midRun),
+    readRunSpoolRecords: async () => midSpool,
+    appendRunSpoolRecord: async (_id, rec) => { midSpool.push(rec); },
+    updateRun: async (_id, updater) => {
+      midRun = updater(structuredClone(midRun));
+      return midRun;
+    },
+  });
+  assert.equal(midReconciled.handled, true);
+  assert.equal(midReconciled.decision, 'continue', 'mid-turn reconcile without terminalCandidate must not crash on null');
+  assert.equal(midRun.state, 'running');
 }
 
 console.log('test-provider-native-delegation-runtime: ok');

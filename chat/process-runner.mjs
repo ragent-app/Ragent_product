@@ -26,10 +26,13 @@ import { createKiloAdapter, buildKiloArgs, KILO_RUNTIME_FAMILY } from './adapter
 import {
   AGY_RUNTIME_FAMILY,
   AGY_STREAM_RUNTIME_FAMILY,
+  AGY_ACP_RUNTIME_FAMILY,
   DEFAULT_AGY_PRINT_TIMEOUT,
   createAgyAdapter,
   createAgyStreamAdapter,
+  createAgyAcpAdapter,
   buildAgyArgs,
+  buildAgyAcpArgs,
 } from './adapters/agy.mjs';
 import { expandSessionFolder } from './session-folder.mjs';
 import {
@@ -77,7 +80,8 @@ const CLAUDE_MODEL_ALIAS_ENV_KEYS = {
   haiku: ['ANTHROPIC_DEFAULT_HAIKU_MODEL', 'ANTHROPIC_MODEL'],
   fable: ['ANTHROPIC_DEFAULT_FABLE_MODEL', 'ANTHROPIC_MODEL'],
 };
-const AGY_RUNTIME_FAMILIES = new Set([AGY_RUNTIME_FAMILY, AGY_STREAM_RUNTIME_FAMILY]);
+const AGY_STREAM_RUNTIME_FAMILIES = new Set([AGY_RUNTIME_FAMILY, AGY_STREAM_RUNTIME_FAMILY]);
+const AGY_RUNTIME_FAMILIES = new Set([AGY_RUNTIME_FAMILY, AGY_STREAM_RUNTIME_FAMILY, AGY_ACP_RUNTIME_FAMILY]);
 
 function isClaudeRuntimeFamily(runtimeFamily) {
   return CLAUDE_RUNTIME_FAMILIES.has(String(runtimeFamily || '').trim());
@@ -358,7 +362,18 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
       resume: options.providerResumeId,
       riskMode: options.riskMode,
     });
-  } else if (AGY_RUNTIME_FAMILIES.has(normalizedRuntimeFamily)) {
+  } else if (normalizedRuntimeFamily === AGY_ACP_RUNTIME_FAMILY) {
+    adapter = createAgyAcpAdapter();
+    args = buildAgyAcpArgs({
+      geminiDir: options.agyGeminiDir || options.geminiDir,
+      appDataDir: options.agyAppDataDir || options.appDataDir,
+      includeDefaultCustomizations: options.includeDefaultCustomizations,
+      sandbox: options.sandbox,
+      addDirs: options.addDirs || options.additionalDirectories,
+      agent: options.agent,
+      dangerouslySkipPermissions: allowDangerousPermissionSkip && permissionPolicy?.dangerouslySkipPermissions === true,
+    });
+  } else if (AGY_STREAM_RUNTIME_FAMILIES.has(normalizedRuntimeFamily)) {
     adapter = normalizedRuntimeFamily === AGY_STREAM_RUNTIME_FAMILY
       ? createAgyStreamAdapter()
       : createAgyAdapter();
@@ -372,6 +387,15 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
       mode: options.interactionMode === 'plan' ? 'plan' : 'accept-edits',
       conversationId: options.agyConversationId || options.providerResumeId,
       useResume: options.agyResume === true,
+      agent: options.agent,
+      settings: options.settings,
+      sandbox: options.sandbox,
+      addDirs: options.addDirs || options.additionalDirectories,
+      allowSlashCommands: options.allowSlashCommands,
+      enableSlashCommands: options.enableSlashCommands,
+      disableSlashCommands: options.disableSlashCommands,
+      untrusted: options.untrusted,
+      managed: options.managed,
     });
   } else {
     throw new Error(`Tool "${toolId}" uses unsupported runtimeFamily "${normalizedRuntimeFamily}"`);
@@ -381,6 +405,9 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
   const providerContract = buildProviderContractFields(normalizedRuntimeFamily, {
     providerCapabilities: adapter?.capabilities || null,
   });
+
+  const keepAgyStreamStdinOpen = AGY_STREAM_RUNTIME_FAMILIES.has(normalizedRuntimeFamily)
+    && (options.multiTurn === true || options.keepStdinOpen === true);
 
   return {
     adapter,
@@ -397,6 +424,7 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
       || normalizedRuntimeFamily === CODEX_APP_SERVER_RUNTIME_FAMILY,
     isCodexAppServerFamily: normalizedRuntimeFamily === CODEX_APP_SERVER_RUNTIME_FAMILY,
     isAgyFamily: AGY_RUNTIME_FAMILIES.has(normalizedRuntimeFamily),
+    isAgyAcpFamily: normalizedRuntimeFamily === AGY_ACP_RUNTIME_FAMILY,
     isPiFamily: normalizedRuntimeFamily === PI_RUNTIME_FAMILY,
     isDeepSeekHarnessFamily: normalizedRuntimeFamily === DEEPSEEK_HARNESS_RUNTIME_FAMILY,
     isQwenCodeFamily: normalizedRuntimeFamily === QWEN_CODE_RUNTIME_FAMILY,
@@ -409,11 +437,13 @@ export function buildRuntimeInvocation(runtimeFamily, prompt, options = {}, tool
     isKiloFamily: normalizedRuntimeFamily === KILO_RUNTIME_FAMILY,
     runtimeFamily: providerContract.runtimeFamily || normalizedRuntimeFamily,
     ...(normalizedRuntimeFamily === 'claude-stream-json' ? { input: String(prompt || '') } : {}),
-    ...(AGY_RUNTIME_FAMILIES.has(normalizedRuntimeFamily) ? { input: buildAgyStreamInput(prompt) } : {}),
+    ...(AGY_STREAM_RUNTIME_FAMILIES.has(normalizedRuntimeFamily) ? { input: buildAgyStreamInput(prompt) } : {}),
+    ...(keepAgyStreamStdinOpen ? { keepStdinOpen: true, multiTurn: true } : {}),
     ...(normalizedRuntimeFamily === PI_RUNTIME_FAMILY ? { input: buildPiInput(prompt) } : {}),
     ...((normalizedRuntimeFamily === QWEN_CODE_RUNTIME_FAMILY
       || normalizedRuntimeFamily === KIMI_CODE_RUNTIME_FAMILY
       || normalizedRuntimeFamily === HERMES_RUNTIME_FAMILY
+      || normalizedRuntimeFamily === AGY_ACP_RUNTIME_FAMILY
       || (normalizedRuntimeFamily === DEEPSEEK_HARNESS_RUNTIME_FAMILY && options.deepSeekHarnessAcp === true))
       ? { acp: true } : {}),
   };

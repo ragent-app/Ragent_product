@@ -39,6 +39,18 @@ import {
   buildAcpPromptInput,
   buildAcpModeSwitchInput,
   acpAvailableModesFromResponse,
+  acpAvailableModelsFromResponse,
+  acpConfigOptionsFromResponse,
+  acpConfigOptionValue,
+  buildAcpSetConfigOptionInput,
+  isAcpConfigOptionAccepted,
+  buildAcpCancelNotification,
+  buildAcpCloseSessionInput,
+  isAcpSessionClosed,
+  buildAcpApprovalId,
+  describeAcpPermissionToolCall,
+  parseAcpPermissionRequest,
+  buildAcpPermissionResponse,
   isAcpModeSwitchAccepted,
   buildAcpUnattendedPermissionDenial,
   acpSessionIdFromResponse,
@@ -115,7 +127,7 @@ import {
 } from './claude-bidi-protocol.mjs';
 import { CHAT_PORT } from '../lib/config.mjs';
 import { isManagedLearningProfileWrite } from './managed-memory-gate.mjs';
-import { hasProviderCapability } from './provider-contract.mjs';
+import { hasProviderCapability, supportsOrganizationControlMcp } from './provider-contract.mjs';
 import {
   PRIVILEGED_GATE_DECISION,
   decidePrivilegedGate,
@@ -178,10 +190,15 @@ import {
   resolveRunnerCodexHomeDir,
 } from '../lib/runner-env.mjs';
 import {
+  AGY_APP_DATA_DIR_ENV,
+  AGY_GEMINI_DIR_ENV,
   buildAgyRuntimeLaunchSpec,
   buildAgyStreamInput,
+  ensureAgySessionStorage,
   isAgyRuntime,
+  resolveAgySessionStorage,
 } from '../lib/agy-runtime.mjs';
+import { resolveAuthorizedAgyExternalMcpServers } from '../lib/agy-mcp-manager.mjs';
 import { createClaudeThinkingTokenSampler } from './provider-spool-sampling.mjs';
 import { assertOrdinaryWindowsExecutionIdentity } from '../lib/windows-execution-identity.mjs';
 import { bindWindowsRunExecutionIdentity } from './windows-run-identity.mjs';
@@ -240,6 +257,7 @@ import {
   BROWSER_MCP_ENV_KEYS,
   MCP_OVERLAY_ERROR_CODES,
   MCP_OVERLAY_MAX_ATTEMPTS,
+  prepareAgyAcpMcpOverlay,
   prepareCodexThreadMcp,
   prepareManagedMcpOverlay,
 } from './approved-action-mcp-overlay.mjs';
@@ -491,6 +509,13 @@ const CODEX_APP_SERVER_TURN_RETRY_BACKOFF_BASE_MS = 3000; // 退避基数：第 
 let fatalSidecarTerminationInFlight = false;
 let nativeOAuthLockHandle = null;
 let nativeOAuthLockReleasePromise = null;
+let activeManagedMcpOverlay = null;
+async function cleanupActiveManagedMcpOverlay() {
+  const overlay = activeManagedMcpOverlay;
+  activeManagedMcpOverlay = null;
+  if (!overlay || typeof overlay.cleanup !== 'function') return;
+  await overlay.cleanup().catch(() => {});
+}
 const RUN_ID_PATTERN = /^[a-zA-Z0-9_-]{1,160}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -698,7 +723,7 @@ export function classifyProviderTerminalFrame(runtimeFamily, parsed, { acp = fal
   // ACP prompt responses are the only portable completion edge for the ACP
   // family. DeepSeek uses the same runtime family for a plain headless mode;
   // only classify it when the invocation actually enabled ACP.
-  const isAcpFamily = acp || family === 'qwen-code-acp' || family === 'kimi-code-acp' || family === 'hermes-acp';
+  const isAcpFamily = acp || family === 'agy-acp' || family === 'qwen-code-acp' || family === 'kimi-code-acp' || family === 'hermes-acp';
   if (isAcpFamily && parsed.id === 'ragent-prompt') {
     return parsed.error
       ? { kind: 'failed', reason: readStructuredProviderFailureReason(parsed, 'ACP prompt failed') }
@@ -1500,6 +1525,7 @@ function captureResume(run, parsed, { expectedCodexThreadId = '', runtimeFamily 
     if (sessionId) {
       return {
         providerResumeId: sessionId,
+        ...(runtimeFamily === 'agy-acp' ? { agyConversationId: sessionId } : {}),
         ...(runtimeFamily === 'hermes-acp' ? { hermesSessionId: sessionId } : {}),
       };
     }
@@ -3886,6 +3912,509 @@ export async function flushClaudeBidiApprovalResponses(proc, state, run) {
   }
 }
 
+const ACP_FILE_READ_TOOL_NAMES = Object.freeze({
+  view_file: 'Read',
+  read_file: 'Read',
+  find_by_name: 'Glob',
+  grep_search: 'Grep',
+  list_dir: 'LS',
+});
+
+const ACP_FILE_WRITE_TOOL_NAMES = Object.freeze({
+  write_to_file: 'Write',
+  replace_file_content: 'Edit',
+  multi_replace_file_content: 'Edit',
+});
+
+function createAcpRunState({
+  runtimeFamily = '',
+  provider = 'external-harness',
+  capabilities = null,
+  permissionMode = '',
+  permissionPolicy = null,
+  prompt = '',
+  manifest = {},
+  cwd = '',
+  requestedSessionId = '',
+  additionalDirectories = [],
+  supportsSessionClose = false,
+} = {}) {
+  const options = manifest?.options || {};
+  const riskContextBinding = resolveRunRiskContext(manifest);
+  const approvalGated = Boolean(
+    permissionPolicy
+    && permissionPolicy.dangerouslySkipPermissions !== true
+    && (capabilities?.supportsApproval === true
+      || isGatedPermissionMode(permissionPolicy.id)
+      || options.acpApprovalGate === true),
+  );
+  return {
+    sessionId: '',
+    requestedSessionId: typeof requestedSessionId === 'string' ? requestedSessionId.trim() : '',
+    additionalDirectories: Array.isArray(additionalDirectories) ? additionalDirectories : [],
+    supportsSessionClose: Boolean(supportsSessionClose),
+    promptSent: false,
+    sessionStartRequested: false,
+    startupTimer: null,
+    modeSwitchRequested: false,
+    modeSwitchTimer: null,
+    pendingConfigRequests: [],
+    activeConfigRequest: null,
+    configTimer: null,
+    desiredModel: parseScopedCodexModel(typeof options.model === 'string' ? options.model : '').model,
+    desiredEffort: typeof options.effort === 'string' ? options.effort.trim().toLowerCase() : '',
+    closeRequested: false,
+    closeTimer: null,
+    interruptSent: false,
+    cancelGraceTimer: null,
+    terminalSeen: false,
+    hadError: false,
+    failureReason: '',
+    provider: typeof provider === 'string' && provider.trim() ? provider.trim() : 'external-harness',
+    runtimeFamily: typeof runtimeFamily === 'string' ? runtimeFamily.trim() : '',
+    approvalGated,
+    prompt: typeof prompt === 'string' ? prompt : '',
+    requestId: typeof manifest?.requestId === 'string' ? manifest.requestId : '',
+    reviewChannel: options.runReviewChannel || null,
+    approvalReviewTask: manifest?.approvalReviewTask || null,
+    approvalReviewSteers: [],
+    approvalReviewSteerRevision: 0,
+    cwd: typeof cwd === 'string' ? cwd : '',
+    projectRoot: typeof options.projectRoot === 'string' ? options.projectRoot : '',
+    privilegedMode: options.privilegedMode === true,
+    riskMode: typeof options.riskMode === 'string' ? options.riskMode : '',
+    permissionMode: typeof permissionMode === 'string' && permissionMode.trim()
+      ? permissionMode.trim()
+      : (typeof options.permissionMode === 'string' ? options.permissionMode.trim() : ''),
+    acpModeId: typeof permissionPolicy?.acpModeId === 'string'
+      ? permissionPolicy.acpModeId.trim()
+      : (typeof permissionMode === 'string' ? permissionMode.trim() : ''),
+    interactionMode: typeof options.interactionMode === 'string' ? options.interactionMode : '',
+    riskContext: riskContextBinding.riskContext,
+    riskContextValid: riskContextBinding.valid,
+    riskContextInvalidReason: riskContextBinding.valid ? '' : riskContextBinding.reason,
+    pendingApprovals: new Map(),
+    sentApprovalResponseIds: new Set(),
+    autoApprovedMcpRequestIds: new Set(),
+    lastControlActivityAt: 0,
+    mcpRequired: false,
+    mcpRequiredServers: [],
+    mcpAutoApproveServerNames: new Set(),
+  };
+}
+
+function writeAcpJsonLine(proc, line) {
+  if (!proc?.stdin?.writable || !line) return false;
+  try {
+    proc.stdin.write(line);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseAcpManagedMcpToolName(acpToolName, state) {
+  const name = typeof acpToolName === 'string' ? acpToolName.trim() : '';
+  if (!name || state?.mcpRequired !== true || !Array.isArray(state?.mcpRequiredServers)) return null;
+  for (const server of state.mcpRequiredServers) {
+    const serverName = typeof server?.name === 'string' ? server.name.trim() : '';
+    if (!serverName || !isAutoApprovedMcpServer(state, serverName)) continue;
+    for (const toolName of server.requiredToolNames || []) {
+      if (name === `mcp_${serverName}_${toolName}` || name === `mcp__${serverName}__${toolName}`) {
+        return { mcpServerName: serverName, mcpToolName: toolName };
+      }
+    }
+  }
+  return null;
+}
+
+function mapAcpPermissionToGateApproval(parsed, req, state) {
+  const details = describeAcpPermissionToolCall(req.toolCall);
+  const approvalId = buildAcpApprovalId(state?.provider || 'acp', req.id);
+  const mappedToolName = ACP_FILE_READ_TOOL_NAMES[details.name]
+    || ACP_FILE_WRITE_TOOL_NAMES[details.name]
+    || details.name;
+  const primaryPath = details.filePaths[0] || '';
+  const mappedInput = {
+    ...(details.input && typeof details.input === 'object' ? details.input : {}),
+    ...(primaryPath ? { file_path: primaryPath } : {}),
+    ...(details.command ? { command: details.command } : {}),
+  };
+  return {
+    approvalId,
+    providerRequestId: req.id,
+    providerRequestIdString: String(req.id),
+    providerMethod: 'session/request_permission',
+    kind: details.approvalKind,
+    requestClass: 'tool_invocation',
+    params: {
+      sessionId: req.sessionId,
+      tool_name: mappedToolName,
+      acpToolName: details.name,
+      input: mappedInput,
+      ...(details.command ? { command: details.command } : {}),
+      ...(details.cwd ? { cwd: details.cwd } : {}),
+      toolCall: req.toolCall,
+      acpOptions: req.options,
+    },
+    request: parsed,
+  };
+}
+
+function resolveAcpResponseDecisionSpec(decision) {
+  const raw = typeof decision === 'string' ? decision.trim().toLowerCase().replace(/[\s-]+/g, '_') : '';
+  if (raw === 'allow_once') return { normalized: 'approve', spec: { kind: 'allow_once' } };
+  if (raw === 'allow_always') return { normalized: 'approve_for_session', spec: { kind: 'allow_always', allowFallbackToOnce: true } };
+  if (raw === 'reject_once') return { normalized: 'deny', spec: { kind: 'reject_once' } };
+  const normalized = normalizeCodexAppServerApprovalDecision(decision);
+  if (normalized === 'approve') return { normalized, spec: { kind: 'allow_once' } };
+  if (normalized === 'approve_for_session') return { normalized, spec: { kind: 'allow_always', allowFallbackToOnce: true } };
+  if (normalized === 'deny') return { normalized, spec: { kind: 'reject_once' } };
+  if (normalized === 'cancel') return { normalized, spec: { kind: 'cancelled' } };
+  return null;
+}
+
+async function emitAcpApprovalResponseSpoolRecord(runId, state, approval, formattedDecision, extra = {}) {
+  const status = formattedDecision === 'denied' || formattedDecision === 'cancelled' ? 'denied' : 'approved';
+  await appendRunSpoolRecord(runId, {
+    ts: nowIso(),
+    stream: 'stdout',
+    json: {
+      type: 'ragent.approval_response',
+      approvalId: approval.approvalId,
+      provider: state?.provider || 'acp',
+      decision: formattedDecision,
+      status,
+      providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
+      providerMethod: 'session/request_permission',
+      ...extra,
+    },
+  });
+}
+
+async function handleAcpPermissionRequest(runId, state, parsed, proc, logDiagnosticImpl) {
+  const req = parseAcpPermissionRequest(parsed, state?.sessionId);
+  if (!req || !proc?.stdin?.writable) {
+    return { fatal: true, reason: 'ACP permission request was invalid or stdin is closed' };
+  }
+  const approvalId = buildAcpApprovalId(state?.provider || 'acp', req.id);
+  const minimalApproval = {
+    approvalId,
+    providerRequestId: req.id,
+    providerRequestIdString: String(req.id),
+    providerMethod: 'session/request_permission',
+  };
+
+  if (!state.approvalGated) {
+    const denial = buildAcpUnattendedPermissionDenial(parsed, state.sessionId);
+    if (!denial || !writeAcpJsonLine(proc, denial.line)) {
+      return { fatal: true, reason: 'ACP permission request could not be safely denied' };
+    }
+    await emitAcpApprovalResponseSpoolRecord(runId, state, minimalApproval, denial.cancelled ? 'cancelled' : 'denied', {
+      autoDenied: true,
+      reason: 'ACP unattended or non-gated runtime denied reverse-RPC permission request',
+    });
+    await logDiagnosticImpl(runId, 'ACP permission request automatically denied', {
+      phase: 'acp-permission',
+      requestId: parsed.id,
+      cancelled: denial.cancelled,
+    });
+    if (denial.cancelled) {
+      return {
+        fatalAfterTerminal: true,
+        reason: 'ACP permission request offered no one-time reject option',
+      };
+    }
+    return { handled: true };
+  }
+
+  if (state.pendingApprovals.has(approvalId)) {
+    return { handled: true, duplicate: true };
+  }
+  if (state.autoApprovedMcpRequestIds.has(approvalId)) {
+    return { handled: true, duplicate: true };
+  }
+
+  const approval = mapAcpPermissionToGateApproval(parsed, req, state);
+  const managedMcp = parseAcpManagedMcpToolName(req.toolCall.name, state);
+  if (managedMcp && state.promptSent === true) {
+    const allow = buildAcpPermissionResponse(parsed, 'allow_once', state.sessionId);
+    if (!allow || !writeAcpJsonLine(proc, allow.line)) {
+      return { fatal: true, reason: 'Unable to answer ACP managed MCP permission request' };
+    }
+    state.autoApprovedMcpRequestIds.add(approval.approvalId);
+    await emitAcpApprovalResponseSpoolRecord(runId, state, approval, 'approved', {
+      autoApproved: true,
+      reason: 'managed_mcp_required_tool',
+      acpOutcome: allow.outcome,
+      ...(allow.optionId ? { optionId: allow.optionId } : {}),
+    });
+    return { handled: true };
+  }
+
+  let gateDecision = await decideRunGate(approval, state);
+  gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
+  if (state.reviewStopped || state.terminalSeen || state.interruptSent || !proc?.stdin?.writable) {
+    return { handled: true };
+  }
+  await recordGateDecision(runId, state, approval, state.provider, gateDecision);
+  if (state.reviewStopped || state.terminalSeen || state.interruptSent || !proc?.stdin?.writable) {
+    return { handled: true };
+  }
+
+  if (isUnattendedPermissionMode(state) && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
+    const denial = buildAcpUnattendedPermissionDenial(parsed, state.sessionId);
+    if (!denial || !writeAcpJsonLine(proc, denial.line)) {
+      return { fatal: true, reason: 'ACP unattended permission request could not be safely denied' };
+    }
+    await emitAcpApprovalResponseSpoolRecord(runId, state, approval, denial.cancelled ? 'cancelled' : 'denied', {
+      autoDenied: true,
+      reason: `${state.riskMode || 'unattended'}: ${gateDecision.reason || 'request did not qualify for automatic approval'}`,
+      ...riskAuditFields(gateDecision?.risk),
+    });
+    const record = markApprovalRecordAutoResponded(
+      serializeCodexAppServerApprovalForRun(approval, gateDecision?.risk),
+      denial.cancelled ? 'cancelled' : 'denied',
+    );
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    if (denial.cancelled) {
+      return {
+        fatalAfterTerminal: true,
+        reason: 'ACP permission request offered no one-time reject option',
+      };
+    }
+    return { handled: true };
+  }
+
+  if (gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
+    const allow = buildAcpPermissionResponse(parsed, 'allow_once', state.sessionId);
+    if (!allow || !writeAcpJsonLine(proc, allow.line)) {
+      const denial = buildAcpUnattendedPermissionDenial(parsed, state.sessionId);
+      if (denial) writeAcpJsonLine(proc, denial.line);
+      return { fatal: true, reason: 'ACP permission request offered no one-time allow option' };
+    }
+    await emitAcpApprovalResponseSpoolRecord(runId, state, approval, 'approved', {
+      autoApproved: true,
+      reason: gateDecision.reason || 'auto-allow',
+      acpOutcome: allow.outcome,
+      ...(allow.optionId ? { optionId: allow.optionId } : {}),
+      ...riskAuditFields(gateDecision.risk),
+    });
+    const record = markApprovalRecordAutoResponded(
+      serializeCodexAppServerApprovalForRun(approval, gateDecision.risk),
+    );
+    if (record) state.pendingApprovals.set(approval.approvalId, record);
+    return { handled: true };
+  }
+
+  const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk);
+  if (!record) return { handled: true };
+  state.pendingApprovals.set(approval.approvalId, record);
+  state.lastControlActivityAt = Date.now();
+  await updateRun(runId, (current) => {
+    const existing = Array.isArray(current?.appServerPendingApprovals) ? current.appServerPendingApprovals : [];
+    if (existing.some((entry) => entry?.approvalId === approval.approvalId)) return current;
+    return { ...current, appServerPendingApprovals: [...existing, record] };
+  });
+  return { handled: true };
+}
+
+async function flushAcpApprovalResponses(proc, state, run) {
+  if (!state || !state.approvalGated || state.terminalSeen || !state.sessionId) return;
+  const queue = Array.isArray(run?.appServerApprovalResponseQueue) ? run.appServerApprovalResponseQueue : [];
+  for (const entry of queue) {
+    const responseId = typeof entry?.id === 'string' ? entry.id : '';
+    const approvalId = typeof entry?.approvalId === 'string' ? entry.approvalId : '';
+    if (!responseId || !approvalId || state.sentApprovalResponseIds.has(responseId) || entry?.state === 'sent') continue;
+    const decisionInfo = resolveAcpResponseDecisionSpec(entry?.decision);
+    const pending = findPendingCodexAppServerApproval(state, run, approvalId);
+    if (!decisionInfo || !pending?.request) continue;
+    let built = buildAcpPermissionResponse(pending.request, decisionInfo.spec, state.sessionId);
+    if (!built && decisionInfo.normalized !== 'cancel') {
+      // Fail closed with cancelled when the ACP server lacks the selected optionId.
+      built = buildAcpPermissionResponse(pending.request, 'cancelled', state.sessionId);
+    }
+    if (!built || !writeAcpJsonLine(proc, built.line)) continue;
+    state.sentApprovalResponseIds.add(responseId);
+    const inMemoryPending = state.pendingApprovals.get(approvalId);
+    if (inMemoryPending) inMemoryPending.state = 'responded';
+    state.lastControlActivityAt = Date.now();
+    const formattedDecision = built.cancelled && decisionInfo.normalized !== 'deny'
+      ? 'cancelled'
+      : formatCodexAppServerApprovalDecision(decisionInfo.normalized);
+    await emitAcpApprovalResponseSpoolRecord(run.id, state, pending, formattedDecision, {
+      acpOutcome: built.outcome,
+      ...(built.optionId ? { optionId: built.optionId } : {}),
+      ...riskAuditFields(pending),
+    });
+    await markCodexAppServerApprovalResponseSent(run.id, entry, built.outcome);
+  }
+}
+
+async function resolvePendingAcpApprovalsOnAbort(runId, proc, state, reason = 'cancelled') {
+  if (!state || !(state.pendingApprovals instanceof Map) || !state.sessionId) return;
+  const cancelledIds = [];
+  for (const [approvalId, pending] of state.pendingApprovals.entries()) {
+    if (!pending || pending.state === 'responded') continue;
+    const rawRequest = pending.request;
+    const built = rawRequest ? buildAcpPermissionResponse(rawRequest, 'cancelled', state.sessionId) : null;
+    if (built) writeAcpJsonLine(proc, built.line);
+    pending.state = 'responded';
+    pending.decision = 'cancelled';
+    cancelledIds.push(approvalId);
+    await emitAcpApprovalResponseSpoolRecord(runId, state, pending, 'cancelled', {
+      reason,
+      ...(built?.outcome ? { acpOutcome: built.outcome } : {}),
+      ...riskAuditFields(pending),
+    });
+  }
+  if (cancelledIds.length > 0) {
+    const idSet = new Set(cancelledIds);
+    await updateRun(runId, (current) => ({
+      ...current,
+      appServerPendingApprovals: Array.isArray(current?.appServerPendingApprovals)
+        ? current.appServerPendingApprovals.map((entry) => (
+          idSet.has(entry?.approvalId)
+            ? { ...entry, state: 'responded', decision: 'cancelled', respondedAt: entry.respondedAt || nowIso() }
+            : entry
+        ))
+        : [],
+    })).catch(() => null);
+  }
+}
+
+function maybeInterruptAcpTurn(proc, state) {
+  if (!state || state.interruptSent || !state.sessionId || state.terminalSeen) return false;
+  const cancelLine = buildAcpCancelNotification(state.sessionId);
+  if (!cancelLine || !writeAcpJsonLine(proc, cancelLine)) return false;
+  state.interruptSent = true;
+  return true;
+}
+
+function findAcpOptionValue(options, targetValue) {
+  const target = typeof targetValue === 'string' ? targetValue.trim() : '';
+  if (!target || !Array.isArray(options)) return '';
+  for (const opt of options) {
+    if (typeof opt === 'string') {
+      if (opt.trim() === target) return target;
+      continue;
+    }
+    const val = typeof opt?.value === 'string' ? opt.value.trim()
+      : (typeof opt?.id === 'string' ? opt.id.trim()
+        : (typeof opt?.modelId === 'string' ? opt.modelId.trim() : ''));
+    if (val === target) return val;
+  }
+  return '';
+}
+
+function buildAgyAcpConfigQueue(parsed, state) {
+  const steps = [];
+  if (!state?.sessionId) return steps;
+  const configOptions = acpConfigOptionsFromResponse(parsed);
+  const modelOption = configOptions.find((option) => option?.id === 'model') || null;
+  const thoughtOption = configOptions.find((option) => option?.id === 'thought_level') || null;
+  const modeOption = configOptions.find((option) => option?.id === 'mode') || null;
+  const availableModes = acpAvailableModesFromResponse(parsed);
+  const availableModels = acpAvailableModelsFromResponse(parsed);
+
+  if (state.desiredModel) {
+    let modelValue = findAcpOptionValue(modelOption?.options, state.desiredModel)
+      || findAcpOptionValue(availableModels, state.desiredModel);
+    if (!modelValue) {
+      const stripped = state.desiredModel.replace(/-(?:low|medium|high|xhigh|max|thinking)$/i, '');
+      if (stripped !== state.desiredModel) {
+        modelValue = findAcpOptionValue(modelOption?.options, stripped);
+      }
+    }
+    const currentModel = acpConfigOptionValue(parsed, 'model')
+      || (typeof parsed?.result?.models?.currentModelId === 'string' ? parsed.result.models.currentModelId.trim() : '');
+    if (modelValue && modelValue !== currentModel) {
+      const line = buildAcpSetConfigOptionInput(state.sessionId, 'model', modelValue, 'ragent-set-config-model');
+      if (line) steps.push({ requestId: 'ragent-set-config-model', kind: 'model', line, required: false });
+    }
+  }
+
+  // Only queue thought_level immediately if we didn't already queue a model
+  // switch (which dynamically alters available thought_level options in AgY).
+  const queuedModelChange = steps.some((step) => step.kind === 'model');
+  if (!queuedModelChange && state.desiredEffort) {
+    const thoughtValue = findAcpOptionValue(thoughtOption?.options, state.desiredEffort);
+    const currentThought = acpConfigOptionValue(parsed, 'thought_level');
+    if (thoughtValue && thoughtValue !== currentThought) {
+      const line = buildAcpSetConfigOptionInput(state.sessionId, 'thought_level', thoughtValue, 'ragent-set-config-thought');
+      if (line) steps.push({ requestId: 'ragent-set-config-thought', kind: 'thought_level', line, required: false });
+    }
+  }
+
+  if (state.acpModeId) {
+    const currentMode = acpConfigOptionValue(parsed, 'mode')
+      || (typeof parsed?.result?.modes?.currentModeId === 'string' ? parsed.result.modes.currentModeId.trim() : '');
+    const matchedConfigMode = findAcpOptionValue(modeOption?.options, state.acpModeId);
+    if (matchedConfigMode && matchedConfigMode !== currentMode) {
+      const line = buildAcpSetConfigOptionInput(state.sessionId, 'mode', matchedConfigMode, 'ragent-set-config-mode');
+      if (line) steps.push({ requestId: 'ragent-set-config-mode', kind: 'mode', line, required: false });
+    } else if (!modeOption && availableModes.length > 0 && state.acpModeId !== currentMode) {
+      const line = buildAcpModeSwitchInput(state.sessionId, state.acpModeId, availableModes, 'ragent-set-mode');
+      if (line) steps.push({ requestId: 'ragent-set-mode', kind: 'mode', line, required: false });
+    }
+  }
+
+  return steps;
+}
+
+async function resolveAgyExternalMcpServersForRun(manifest, runnerAgyHomeDir, readOnlyRequested, runPreparation = null) {
+  const isDelegatedRun = Boolean(
+    manifest?.organizationId
+    || manifest?.parentRunId
+    || manifest?.delegatedFromRunId
+    || manifest?.options?.delegated === true,
+  );
+  const explicitAllowedNames = isDelegatedRun
+    ? (Array.isArray(manifest?.options?.delegatedApprovedExternalMcpServers)
+      ? manifest.options.delegatedApprovedExternalMcpServers
+      : [])
+    : (
+      manifest?.options?.authorizedExternalMcpServers
+      || manifest?.options?.allowedExternalMcpServers
+      || manifest?.options?.authorizedAgyMcpServers
+      || []
+    );
+  const explicitServerCandidates = isDelegatedRun
+    ? null
+    : (Array.isArray(manifest?.options?.externalAgyMcpServers) ? manifest.options.externalAgyMcpServers : null);
+  const preparedAllowedNames = !isDelegatedRun
+    && (!Array.isArray(explicitAllowedNames) || explicitAllowedNames.length === 0)
+    && !explicitServerCandidates
+    && Array.isArray(runPreparation?.authorizedExternalMcpNames)
+    ? runPreparation.authorizedExternalMcpNames
+    : [];
+  const effectiveAllowedNames = Array.isArray(explicitAllowedNames) && explicitAllowedNames.length > 0
+    ? explicitAllowedNames
+    : preparedAllowedNames;
+  const hasExplicitAuthorization =
+    (Array.isArray(effectiveAllowedNames) && effectiveAllowedNames.length > 0)
+    || (Array.isArray(explicitServerCandidates) && explicitServerCandidates.length > 0);
+  if (!hasExplicitAuthorization) return { ok: true, servers: [] };
+  if (readOnlyRequested && !(isDelegatedRun && Array.isArray(manifest?.options?.delegatedApprovedExternalMcpServers) && manifest.options.delegatedApprovedExternalMcpServers.length > 0)) {
+    return { ok: true, servers: [] };
+  }
+  const sourceHome = (!isDelegatedRun && typeof manifest?.options?.externalAgyMcpHomeDir === 'string' && manifest.options.externalAgyMcpHomeDir.trim())
+    ? manifest.options.externalAgyMcpHomeDir.trim()
+    : (runnerAgyHomeDir || '');
+  if (!explicitServerCandidates && !sourceHome) return { ok: true, servers: [] };
+  const resolved = await resolveAuthorizedAgyExternalMcpServers({
+    ...(sourceHome ? { agyHomeDir: sourceHome } : {}),
+    ...(explicitServerCandidates ? { explicitServers: explicitServerCandidates } : {}),
+    allowedNames: Array.isArray(effectiveAllowedNames) ? effectiveAllowedNames : [],
+    allowAllEnabled: !isDelegatedRun && Array.isArray(explicitServerCandidates) && effectiveAllowedNames.length === 0,
+  });
+  if (!resolved.ok) return resolved;
+  return {
+    ok: true,
+    servers: resolved.servers.map((server) => ({ ...server.entry, name: server.name })),
+  };
+}
+
 // P1c-4 quiescence window. The provider blocks on its permission gate BEFORE the
 // turn terminal (design §13.6), so the batch cannot be drained at the turn
 // boundary (deadlock — the turn never ends while the gate is held). Instead,
@@ -4063,6 +4592,7 @@ async function abortSidecarFromFatal(error, label) {
   } catch (persistError) {
     console.error(`[sidecar] Failed to persist fatal termination for run ${runId}: ${normalizeErrorMessage(persistError)}`);
   } finally {
+    await cleanupActiveManagedMcpOverlay();
     await releaseNativeOAuthLock();
   }
   process.exit(1);
@@ -4224,6 +4754,36 @@ async function main() {
   const runnerClaudeHomeDir = process.env.RAGENT_PROVIDER_HOMES_DIR
     ? join(process.env.RAGENT_PROVIDER_HOMES_DIR, 'claude')
     : '';
+  const agyRequested = isAgyRuntime({
+    toolId: manifest.tool,
+    runtimeFamily: manifest.options?.runtimeFamily,
+  });
+  const effectiveAgyHomeDir = runnerAgyHomeDir
+    || (typeof manifest.options?.agyHomeDir === 'string' ? manifest.options.agyHomeDir.trim() : '')
+    || (typeof run?.agyHomeDir === 'string' ? run.agyHomeDir.trim() : '')
+    || (typeof run?.providerPreparation?.agyHomeDir === 'string' ? run.providerPreparation.agyHomeDir.trim() : '');
+  const explicitAgyGeminiDir =
+    (typeof manifest.options?.agyGeminiDir === 'string' ? manifest.options.agyGeminiDir.trim() : '')
+    || (typeof run?.agyGeminiDir === 'string' ? run.agyGeminiDir.trim() : '')
+    || (typeof run?.providerPreparation?.agyGeminiDir === 'string' ? run.providerPreparation.agyGeminiDir.trim() : '')
+    || (typeof process.env[AGY_GEMINI_DIR_ENV] === 'string' ? process.env[AGY_GEMINI_DIR_ENV].trim() : '');
+  const explicitAgyAppData =
+    (typeof manifest.options?.agyAppDataRelDir === 'string' ? manifest.options.agyAppDataRelDir.trim() : '')
+    || (typeof manifest.options?.agyAppDataDir === 'string' ? manifest.options.agyAppDataDir.trim() : '')
+    || (typeof run?.agyAppDataRelDir === 'string' ? run.agyAppDataRelDir.trim() : '')
+    || (typeof run?.providerPreparation?.agyAppDataDir === 'string' ? run.providerPreparation.agyAppDataDir.trim() : '')
+    || (typeof process.env[AGY_APP_DATA_DIR_ENV] === 'string' ? process.env[AGY_APP_DATA_DIR_ENV].trim() : '');
+  const preparedAgySessionStorageDir = typeof run?.providerPreparation?.agySessionStorageDir === 'string'
+    ? run.providerPreparation.agySessionStorageDir.trim()
+    : '';
+  const agyStorage = agyRequested && (effectiveAgyHomeDir || explicitAgyGeminiDir || explicitAgyAppData)
+    ? await ensureAgySessionStorage({
+      homeDir: effectiveAgyHomeDir,
+      geminiDir: explicitAgyGeminiDir,
+      appDataDir: explicitAgyAppData,
+      sessionId: manifest.sessionId || runId,
+    })
+    : null;
   const {
     command: initialCommand,
     args: initialArgs,
@@ -4233,11 +4793,14 @@ async function main() {
     capabilities,
     provider,
     permissionMode,
+    permissionPolicy,
     isClaudeFamily,
     isCodexAppServerFamily,
     isClaudeBidiFamily,
     isAgyFamily,
+    isAgyAcpFamily,
     isPiFamily,
+    keepStdinOpen,
     acp,
   } = await createToolInvocation(manifest.tool, forceFreshCodexRecovery ? freshRecoveryPrompt : prompt, {
     dangerouslySkipPermissions: true,
@@ -4259,6 +4822,36 @@ async function main() {
     effort: manifest.options?.effort,
     codexHomeDir: runnerCodexHomeDir,
     claudeHomeDir: runnerClaudeHomeDir,
+    ...(agyStorage ? {
+      agyGeminiDir: agyStorage.geminiDir,
+      agyAppDataDir: agyStorage.appDataRelDir,
+    } : {}),
+    ...(typeof manifest.options?.includeDefaultCustomizations === 'boolean'
+      ? { includeDefaultCustomizations: manifest.options.includeDefaultCustomizations }
+      : {}),
+    ...(manifest.options?.agent ? { agent: manifest.options.agent } : {}),
+    ...(manifest.options?.settings !== undefined ? { settings: manifest.options.settings } : {}),
+    ...(manifest.options?.sandbox === true ? { sandbox: true } : {}),
+    ...(Array.isArray(manifest.options?.addDirs || manifest.options?.additionalDirectories)
+      ? { additionalDirectories: manifest.options.addDirs || manifest.options.additionalDirectories }
+      : {}),
+    ...(Object.hasOwn(manifest.options || {}, 'allowSlashCommands')
+      ? { allowSlashCommands: manifest.options.allowSlashCommands }
+      : {}),
+    ...(Object.hasOwn(manifest.options || {}, 'enableSlashCommands')
+      ? { enableSlashCommands: manifest.options.enableSlashCommands }
+      : {}),
+    ...(Object.hasOwn(manifest.options || {}, 'disableSlashCommands')
+      ? { disableSlashCommands: manifest.options.disableSlashCommands }
+      : {}),
+    ...(Object.hasOwn(manifest.options || {}, 'untrusted')
+      ? { untrusted: manifest.options.untrusted }
+      : {}),
+    ...(Object.hasOwn(manifest.options || {}, 'managed')
+      ? { managed: manifest.options.managed }
+      : {}),
+    ...(manifest.options?.multiTurn === true ? { multiTurn: true } : {}),
+    ...(manifest.options?.keepStdinOpen === true ? { keepStdinOpen: true } : {}),
     interactionMode: manifest.options?.interactionMode,
     permissionMode: manifest.options?.permissionMode,
     riskMode: manifest.options?.riskMode,
@@ -4279,15 +4872,25 @@ async function main() {
     ...(runtimeFamily ? { runtimeFamily } : {}),
     ...(capabilities ? { providerCapabilities: capabilities } : {}),
     ...(permissionMode ? { permissionMode } : {}),
+    ...(agyStorage ? {
+      ...(effectiveAgyHomeDir ? { agyHomeDir: effectiveAgyHomeDir } : {}),
+      agyGeminiDir: agyStorage.geminiDir,
+      agyAppDataRelDir: agyStorage.appDataRelDir,
+      agySessionStorageDir: preparedAgySessionStorageDir || agyStorage.appDataDir,
+    } : {}),
   }));
 
   const spawnEnv = await cleanEnv(manifest.tool, manifest, {
     runtimeFamily,
     envOverrides,
     codexHomeDir: runnerCodexHomeDir,
-    agyHomeDir: runnerAgyHomeDir,
+    agyHomeDir: effectiveAgyHomeDir,
     acp,
   });
+  if (agyStorage) {
+    spawnEnv[AGY_GEMINI_DIR_ENV] = agyStorage.geminiDir;
+    spawnEnv[AGY_APP_DATA_DIR_ENV] = agyStorage.appDataRelDir;
+  }
   const codexBrokerBasePath = spawnEnv.PATH || spawnEnv.Path || '';
   configureWindowsClaudeWorkingDirectory(spawnEnv, { bidi: isClaudeBidiFamily, riskMode: manifest.options?.riskMode });
   let args = initialArgs;
@@ -4491,7 +5094,7 @@ async function main() {
   // 2026-08-08 路线 B：官方 OAuth 行先做账号健康轮换（401/429 → 刷新 →
   // 仍死切池内下一个活账号），随后 sync 把健康 current 镜像出去。
   if (isAgyFamily) {
-    const providerHome = runnerAgyHomeDir || '';
+    const providerHome = effectiveAgyHomeDir || runnerAgyHomeDir || '';
     const marker = providerHome
       ? (await readFile(join(providerHome, '.ragent-provider-id'), 'utf8').catch(() => '')).trim()
       : '';
@@ -4500,16 +5103,27 @@ async function main() {
         || manifest.options?.providerProfile
         || '',
     ).trim();
-    if (!marker || (targetProviderId && marker !== targetProviderId)) {
+    const isBuiltinAgyTool = manifest.tool === 'agy' || manifest.tool === 'agy-stream-json';
+    if ((isBuiltinAgyTool && !marker) || (targetProviderId && marker !== targetProviderId)) {
       throw new Error(`AgY provider home is not prepared for selected provider ${targetProviderId || '(rotation)'}`);
     }
-    await updateRun(runId, (current) => ({
-      ...current,
-      providerProfile: marker,
-      agyProviderProfileId: marker,
-      resolvedProviderId: marker,
-      providerSync: { ok: true, providerId: marker, preparedBy: 'runner-launcher' },
-    }));
+    if (marker || agyStorage) {
+      await updateRun(runId, (current) => ({
+        ...current,
+        ...(marker ? {
+          providerProfile: marker,
+          agyProviderProfileId: marker,
+          resolvedProviderId: marker,
+          providerSync: { ok: true, providerId: marker, preparedBy: 'runner-launcher' },
+        } : {}),
+        ...(agyStorage ? {
+          ...(effectiveAgyHomeDir ? { agyHomeDir: effectiveAgyHomeDir } : {}),
+          agyGeminiDir: agyStorage.geminiDir,
+          agyAppDataRelDir: agyStorage.appDataRelDir,
+          agySessionStorageDir: preparedAgySessionStorageDir || agyStorage.appDataDir,
+        } : {}),
+      }));
+    }
   } else if (isCodexAppServerFamily) {
     // —— 2026-08-09 按所选模型注入凭据 ——
     // 会话选了非 current 提供方模型（scoped id 带 providerId）→ 镜像该
@@ -4606,13 +5220,14 @@ async function main() {
   );
   const readOnlyManagerOrganizationMcp = readOnlyRequested && manifest.options?.readOnlyOrganizationManagerMcp === true
     && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
-  const organizationMcpRequested = (!readOnlyRequested || readOnlyManagerOrganizationMcp) && acp !== true && Boolean(
+  const organizationMcpSupported = supportsOrganizationControlMcp(runtimeFamily);
+  const organizationMcpRequested = (!readOnlyRequested || readOnlyManagerOrganizationMcp) && Boolean(
     spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&
     spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID &&
-    ['codex-app-server-json', 'claude-stream-json-bidi'].includes(runtimeFamily),
+    organizationMcpSupported,
   );
-  if (protectedDelegatedRun && (!readOnlyRequested || readOnlyManagerOrganizationMcp) && acp !== true
-      && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(runtimeFamily)
+  if (protectedDelegatedRun && (!readOnlyRequested || readOnlyManagerOrganizationMcp)
+      && organizationMcpSupported
       && !organizationMcpRequested) {
     const error = new Error('MCP_ORGANIZATION_CAPABILITY_MISSING');
     error.code = 'MCP_ORGANIZATION_CAPABILITY_MISSING';
@@ -4621,6 +5236,21 @@ async function main() {
   if (organizationMcpRequested) spawnEnv.RAGENT_ORGANIZATION_TOOL_SCOPE = manifest.options?.sessionControlChannel?.scope ? 'node' : 'root';
   let managedMcpOverlay = null;
   let acpMcpServers = [];
+  const pendingAcpMcpState = acp === true ? {} : null;
+  const externalAgyMcpResolution = isAgyAcpFamily
+    ? await resolveAgyExternalMcpServersForRun(
+      manifest,
+      effectiveAgyHomeDir || runnerAgyHomeDir,
+      readOnlyRequested,
+      run?.providerPreparation || null,
+    )
+    : { ok: true, servers: [] };
+  if (!externalAgyMcpResolution.ok) {
+    const error = new Error(externalAgyMcpResolution.error || 'Authorized AgY external MCP configuration could not be loaded.');
+    error.code = externalAgyMcpResolution.code || 'AGY_MCP_INVALID_CONFIG';
+    throw error;
+  }
+  const externalAgyMcpServers = externalAgyMcpResolution.servers || [];
   if (managedActionMcpRequested) {
     spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED = '1';
     spawnEnv.RAGENT_APPROVED_ACTIONS_ENDPOINT = approvedActionChannel.endpoint;
@@ -4650,7 +5280,12 @@ async function main() {
     spawnEnv.RAGENT_WINDOWS_BROKER_TURN_ID = windowsBrokerChannel.turnId || manifest.requestId || runId;
   }
 
-  if (managedActionMcpRequested || windowsBrokerMcpRequested || organizationMcpRequested || (browserMcpRequested && acp !== true)) {
+  const shouldPrepareManagedMcp = managedActionMcpRequested
+    || windowsBrokerMcpRequested
+    || organizationMcpRequested
+    || (browserMcpRequested && (acp !== true || isAgyAcpFamily))
+    || externalAgyMcpServers.length > 0;
+  if (shouldPrepareManagedMcp) {
     const preparingMcp = {
       state: 'preparing',
       stage: 'preflight',
@@ -4719,18 +5354,30 @@ async function main() {
           envKeys: BROWSER_MCP_ENV_KEYS,
         });
       }
-      const prepareOverlay = (servers) => threadScopedCodexMcp
-        ? prepareCodexThreadMcp({ runId, spawnEnv, servers })
-        : prepareManagedMcpOverlay({
-        runtimeFamily,
-        runId,
-        spawnEnv,
-        servers,
-        codexWindowsApprovalGate: process.platform === 'win32' && runtimeFamily === 'codex-app-server-json'
-          && ['safe', 'recommended', 'full-auto'].includes(manifest.options?.riskMode),
-        codexWindowsInstallHook: windowsElevationHook
-          ? join(PROJECT_ROOT, 'scripts', 'ragent-codex-windows-install-hook.mjs') : '',
-      });
+      const prepareOverlay = (servers) => {
+        if (isAgyAcpFamily) {
+          return prepareAgyAcpMcpOverlay({
+            runId,
+            spawnEnv,
+            servers,
+            externalServers: externalAgyMcpServers,
+          });
+        }
+        if (threadScopedCodexMcp) {
+          return prepareCodexThreadMcp({ runId, spawnEnv, servers });
+        }
+        return prepareManagedMcpOverlay({
+          runtimeFamily,
+          runId,
+          spawnEnv,
+          agyHomeDir: effectiveAgyHomeDir || runnerAgyHomeDir,
+          servers,
+          codexWindowsApprovalGate: process.platform === 'win32' && runtimeFamily === 'codex-app-server-json'
+            && ['safe', 'recommended', 'full-auto'].includes(manifest.options?.riskMode),
+          codexWindowsInstallHook: windowsElevationHook
+            ? join(PROJECT_ROOT, 'scripts', 'ragent-codex-windows-install-hook.mjs') : '',
+        });
+      };
       let optionalOrganizationOmitted = false;
       try {
         managedMcpOverlay = await prepareOverlay(managedMcpServers);
@@ -4745,11 +5392,17 @@ async function main() {
           type: 'status', role: 'system', content: 'Optional organization MCP unavailable',
           codexMcpReadiness: 'optional-unavailable', codexMcpFailurePhase: 'preparation',
         } });
-        const needsOverlay = managedMcpServers.length > 0 || (!threadScopedCodexMcp && windowsElevationHook);
+        const needsOverlay = managedMcpServers.length > 0
+          || externalAgyMcpServers.length > 0
+          || (!threadScopedCodexMcp && windowsElevationHook);
         managedMcpOverlay = needsOverlay ? await prepareOverlay(managedMcpServers) : null;
         if (needsOverlay && !managedMcpOverlay) throw new Error('MCP_OVERLAY_UNAVAILABLE');
       }
+      activeManagedMcpOverlay = managedMcpOverlay;
       if (threadScopedCodexMcp && managedMcpOverlay) appServerState.threadMcpConfig = managedMcpOverlay.config;
+      if (isAgyAcpFamily && Array.isArray(managedMcpOverlay?.mcpServers)) {
+        acpMcpServers = managedMcpOverlay.mcpServers;
+      }
 
       if (managedMcpOverlay) {
         const readyPreparation = readyMcpOverlayPreparation(managedMcpOverlay);
@@ -4773,7 +5426,7 @@ async function main() {
       if (Array.isArray(managedMcpOverlay?.args)) {
         args = [...args, ...managedMcpOverlay.args];
       }
-      const runtimeState = appServerState || claudeBidiState;
+      const runtimeState = appServerState || claudeBidiState || pendingAcpMcpState;
       if (appServerState && managedMcpOverlay?.codexWindowsInstallHook) appServerState.codexWindowsInstallHook = managedMcpOverlay.codexWindowsInstallHook;
       if (runtimeState && managedMcpOverlay?.serverNames?.length) {
         const serverNamesByKind = new Map(
@@ -4833,7 +5486,8 @@ async function main() {
     } catch (error) {
       delete spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED;
       delete spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED;
-      await managedMcpOverlay?.cleanup?.();
+      await cleanupActiveManagedMcpOverlay();
+      managedMcpOverlay = null;
       const preparation = normalizeMcpOverlayPreparation(error);
       await logSidecarDiagnostic(runId, 'Approved action MCP overlay unavailable', {
         error: normalizeErrorMessage(error),
@@ -4878,16 +5532,17 @@ async function main() {
     try {
       managedMcpOverlay = await prepareManagedMcpOverlay({ runtimeFamily, runId, spawnEnv, servers: [], codexWindowsApprovalGate: Boolean(spawnEnv.RAGENT_WINDOWS_SAFE_DELETE_CONTEXT),
         codexWindowsInstallHook: join(PROJECT_ROOT, 'scripts', 'ragent-codex-windows-install-hook.mjs') });
+      activeManagedMcpOverlay = managedMcpOverlay;
       if (managedMcpOverlay?.codexWindowsInstallHook) {
         Object.assign(spawnEnv, managedMcpOverlay.env);
         appServerState.codexWindowsInstallHook = managedMcpOverlay.codexWindowsInstallHook;
-      } else { await managedMcpOverlay?.cleanup?.(); managedMcpOverlay = null; }
+      } else { await cleanupActiveManagedMcpOverlay(); managedMcpOverlay = null; }
     } catch (error) {
-      await managedMcpOverlay?.cleanup?.(); managedMcpOverlay = null;
+      await cleanupActiveManagedMcpOverlay(); managedMcpOverlay = null;
       await logSidecarDiagnostic(runId, 'Optional Windows command hook unavailable', { error: normalizeErrorMessage(error) });
     }
   }
-  if (browserMcpRequested && acp === true) {
+  if (browserMcpRequested && acp === true && !isAgyAcpFamily) {
     const browserEnv = Object.fromEntries(
       BROWSER_MCP_ENV_KEYS
         .filter((key) => typeof spawnEnv[key] === 'string' && spawnEnv[key].length > 0)
@@ -4920,10 +5575,15 @@ async function main() {
   if (isAgyFamily || isAgyRuntime({ toolId: manifest.tool, runtimeFamily })) {
     // The launcher owns the private Linux D-Bus/keyring session.  It is kept
     // outside the provider CLI so the same boundary also covers custom AgY
-    // command paths and wrapper scripts.
+    // command paths and wrapper scripts. Pass the pre-wrapper target path and
+    // raw argv so agy-runtime-launcher.mjs can read --gemini-dir/--app-data-dir
+    // and apply buildPlatformSpawnSpec() once without double-wrapping .cmd/.ps1.
+    const agyTargetCommand = resolvedCommand.wrapperExecutablePath
+      || resolvedCommand.powershellScriptPath
+      || resolvedCommand.file;
     resolvedCommand = buildAgyRuntimeLaunchSpec({
-      command: resolvedCommand.file,
-      args: resolvedCommand.args,
+      command: agyTargetCommand,
+      args,
       env: spawnEnv,
       cwd: resolvedFolder.cwd,
       nodePath: process.execPath,
@@ -4958,6 +5618,7 @@ async function main() {
   }
   let codexAppServerBrokered = false;
   if (!await launchStillAllowed()) {
+    await cleanupActiveManagedMcpOverlay();
     await releaseNativeOAuthLock();
     return;
   }
@@ -5133,6 +5794,7 @@ async function main() {
   };
   let providerSeedsDelivered = false;
   if (!await launchStillAllowed()) {
+    await cleanupActiveManagedMcpOverlay();
     await releaseNativeOAuthLock();
     return;
   }
@@ -5234,20 +5896,46 @@ async function main() {
   let controlFlushPromise = null;
   let staleClaudeResumeDetected = false;
   let piTerminalSeen = false;
-  const acpState = acp === true ? {
-    sessionId: '',
-    requestedSessionId: runtimeFamily === 'hermes-acp'
-      ? String(manifest.options?.providerResumeId || manifest.options?.hermesSessionId || '').trim()
-      : '',
-    promptSent: false,
-    sessionStartRequested: false,
-    startupTimer: null,
-    modeSwitchRequested: false,
-    modeSwitchTimer: null,
-    terminalSeen: false,
-    hadError: false,
-    failureReason: '',
-  } : null;
+  const acpRequestedSessionId = runtimeFamily === 'hermes-acp'
+    ? String(manifest.options?.providerResumeId || manifest.options?.hermesSessionId || '').trim()
+    : (isAgyAcpFamily && (manifest.options?.agyResume === true || Boolean(manifest.options?.providerResumeId)))
+      ? String(manifest.options?.providerResumeId || manifest.options?.agyConversationId || '').trim()
+      : '';
+  const acpState = acp === true
+    ? Object.assign(
+      createAcpRunState({
+        runtimeFamily,
+        provider,
+        capabilities,
+        permissionMode,
+        permissionPolicy,
+        prompt,
+        manifest,
+        cwd: resolvedFolder.cwd,
+        requestedSessionId: acpRequestedSessionId,
+        additionalDirectories: Array.isArray(manifest.options?.additionalDirectories || manifest.options?.addDirs)
+          ? (manifest.options.additionalDirectories || manifest.options.addDirs)
+          : [],
+        supportsSessionClose: isAgyAcpFamily,
+      }),
+      pendingAcpMcpState || {},
+    )
+    : null;
+  const agyStreamState = isAgyFamily && !acp && keepStdinOpen === true
+    ? {
+      keepStdinOpen: true,
+      turnActive: true,
+      terminalSeen: false,
+      hadError: false,
+      failureReason: '',
+      sentSteerIds: new Set(),
+      followUpPrompts: Array.isArray(manifest.options?.followUpInputs)
+        ? manifest.options.followUpInputs.map((item, idx) => (
+          typeof item === 'string' && item.trim() ? { id: `followup-${idx}`, text: item } : null
+        )).filter(Boolean)
+        : [],
+    }
+    : null;
   let providerHeartbeatTimer = null;
   let providerHeartbeatWritePromise = null;
   let providerHeartbeatCount = 0;
@@ -5396,15 +6084,32 @@ async function main() {
         await flushClaudeBidiApprovalResponses(proc, claudeBidiState, current);
         await flushClaudeBidiSteerQueue(proc, claudeBidiState, current);
       }
+      if (acpState) {
+        await flushAcpApprovalResponses(proc, acpState, current);
+      }
       if (!current?.cancelRequested || cancelSent) return;
       cancelSent = true;
-      for (const state of [appServerState, claudeBidiState]) {
+      for (const state of [appServerState, claudeBidiState, acpState]) {
         if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
       }
       if (claudeBidiState) claudeBidiState.mcpRefreshCancelled = true;
       claudeBidiState?.mcpRefresh?.finish();
       if (appServerState) appServerState.startupCancelled = true;
       appServerState?.accountModelCatalog?.cancel();
+      if (acpState) {
+        await resolvePendingAcpApprovalsOnAbort(runId, proc, acpState, 'cancelled');
+        if (maybeInterruptAcpTurn(proc, acpState)) {
+          acpState.cancelGraceTimer = setTimeout(() => {
+            acpState.cancelGraceTimer = null;
+            if (acpState.terminalSeen || proc.exitCode !== null) return;
+            try {
+              void terminateManagedProcess();
+            } catch {}
+          }, 5000);
+          acpState.cancelGraceTimer.unref?.();
+          return;
+        }
+      }
       if (appServerState && maybeInterruptCodexAppServerTurn(proc, appServerState)) {
         setTimeout(() => {
           if (appServerState.terminalSeen || proc.exitCode !== null) return;
@@ -5446,14 +6151,16 @@ async function main() {
   let idleCheckInFlight = false;
   const idleTimer = setInterval(() => {
     if (cancelSent) return;
-    if (hasPendingRuntimeApproval(appServerState) || hasPendingRuntimeApproval(claudeBidiState)) return;
+    if (hasPendingRuntimeApproval(appServerState)
+        || hasPendingRuntimeApproval(claudeBidiState)
+        || hasPendingRuntimeApproval(acpState)) return;
     // P1c-4: a held privileged-batch gate (provider blocked on stdin awaiting the
     // batch approval) is a legitimate pause, not an idle stall — exempt it from
     // the idle-kill timer just like a pending runtime approval. Default OFF = no-op.
     if (hasPendingPrivilegedBatch(appServerState) || hasPendingPrivilegedBatch(claudeBidiState)) return;
     if (idleCheckInFlight) return;
     idleCheckInFlight = true;
-    void getRun(runId).then((currentRun) => {
+    void getRun(runId).then(async (currentRun) => {
       if (cancelSent || hasPendingApprovedAction(currentRun)) return;
       const codexToolActive = hasActiveCodexAppServerToolItem(appServerState);
       const effectiveIdleTimeoutMs = codexToolActive
@@ -5464,12 +6171,18 @@ async function main() {
         lastProviderLineAt,
         Number(appServerState?.lastControlActivityAt) || 0,
         Number(claudeBidiState?.lastControlActivityAt) || 0,
+        Number(acpState?.lastControlActivityAt) || 0,
       );
       const idleMs = Date.now() - lastActivityAt;
       if (idleMs < effectiveIdleTimeoutMs) return;
       cancelSent = true;
       if (appServerState) appServerState.startupCancelled = true;
       appServerState?.accountModelCatalog?.cancel();
+      if (acpState) {
+        acpState.reviewStopped = true;
+        acpState.activeReviewAbort?.abort();
+        await resolvePendingAcpApprovalsOnAbort(runId, proc, acpState, 'idle_timeout');
+      }
       const idleMinutes = Math.round(idleMs / 60000);
       const activeItems = appServerState?.activeItems instanceof Map
         ? [...appServerState.activeItems.entries()].map(([id, item]) => ({
@@ -5516,6 +6229,15 @@ async function main() {
           void terminateManagedProcess();
         }, codexIdleInterruptGraceMs);
         appServerState.idleTerminationGraceTimer.unref?.();
+        return;
+      }
+      if (acpState && maybeInterruptAcpTurn(proc, acpState)) {
+        acpState.cancelGraceTimer = setTimeout(() => {
+          acpState.cancelGraceTimer = null;
+          if (acpState.terminalSeen || proc.exitCode !== null) return;
+          void terminateManagedProcess();
+        }, 5000);
+        acpState.cancelGraceTimer.unref?.();
         return;
       }
       void terminateManagedProcess();
@@ -5606,7 +6328,9 @@ async function main() {
         2000,
       );
     }
-    const providerTerminalFrame = classifyProviderTerminalFrame(runtimeFamily, parsed, { acp: acp === true });
+    const providerTerminalFrame = agyStreamState && parsed?.event === 'result'
+      ? null
+      : classifyProviderTerminalFrame(runtimeFamily, parsed, { acp: acp === true });
     if (providerTerminalFrame?.kind === 'completed') {
       providerTerminalSeen = true;
       providerTerminalFailureReason = '';
@@ -5628,6 +6352,65 @@ async function main() {
       );
     }
     if (acpState && parsed) {
+      const sendAcpPrompt = async (phaseLabel = 'acp-session') => {
+        if (acpState.promptSent) return true;
+        if (!proc.stdin?.writable) {
+          acpState.hadError = true;
+          acpState.failureReason = 'ACP prompt could not be sent';
+          await logSidecarDiagnostic(runId, acpState.failureReason, { phase: phaseLabel });
+          await terminateManagedProcess();
+          return false;
+        }
+        if (!writeAcpJsonLine(proc, buildAcpPromptInput(acpState.sessionId, prompt))) {
+          acpState.hadError = true;
+          acpState.failureReason = 'ACP prompt could not be sent';
+          await logSidecarDiagnostic(runId, acpState.failureReason, { phase: phaseLabel });
+          await terminateManagedProcess();
+          return false;
+        }
+        acpState.promptSent = true;
+        return true;
+      };
+      const dispatchNextAcpConfigOrPrompt = async (phaseLabel = 'acp-config') => {
+        while (acpState.pendingConfigRequests.length > 0) {
+          const nextStep = acpState.pendingConfigRequests.shift();
+          if (!nextStep?.line) continue;
+          if (!writeAcpJsonLine(proc, nextStep.line)) {
+            if (nextStep.required) {
+              acpState.hadError = true;
+              acpState.failureReason = `${nextStep.kind || 'ACP'} configuration could not be sent`;
+              await logSidecarDiagnostic(runId, acpState.failureReason, { phase: phaseLabel });
+              await terminateManagedProcess();
+              return false;
+            }
+            continue;
+          }
+          acpState.activeConfigRequest = nextStep;
+          if (acpState.configTimer) clearTimeout(acpState.configTimer);
+          acpState.configTimer = setTimeout(() => {
+            acpState.configTimer = null;
+            if (acpState.promptSent || proc.exitCode !== null || proc.signalCode !== null) return;
+            acpState.activeConfigRequest = null;
+            if (nextStep.required) {
+              acpState.hadError = true;
+              acpState.failureReason = `${nextStep.kind || 'ACP'} configuration timed out`;
+              void (async () => {
+                try {
+                  await logSidecarDiagnostic(runId, acpState.failureReason, { phase: phaseLabel });
+                } finally {
+                  await terminateManagedProcess();
+                }
+              })().catch(() => {});
+            } else {
+              void dispatchNextAcpConfigOrPrompt(phaseLabel);
+            }
+          }, 30_000);
+          acpState.configTimer.unref?.();
+          return true;
+        }
+        return sendAcpPrompt(phaseLabel);
+      };
+
       if (parsed.id === 'ragent-initialize') {
         if (!isAcpInitializeAccepted(parsed) || acpState.sessionStartRequested || !proc.stdin?.writable) {
           acpState.hadError = true;
@@ -5636,53 +6419,43 @@ async function main() {
           await terminateManagedProcess();
           return;
         }
-        try {
-          proc.stdin.write(buildAcpSessionInput({
-            cwd: resolvedFolder.cwd,
-            mcpServers: acpMcpServers,
-            ...(runtimeFamily === 'hermes-acp' && acpState.requestedSessionId
-              ? { resumeSessionId: acpState.requestedSessionId }
-              : {}),
-          }));
-          acpState.sessionStartRequested = true;
-        } catch {
+        const caps = parsed.result?.agentCapabilities || {};
+        if (caps.sessionCapabilities?.close || caps.session_capabilities?.close) {
+          acpState.supportsSessionClose = true;
+        }
+        const sessionInput = buildAcpSessionInput({
+          cwd: resolvedFolder.cwd,
+          mcpServers: acpMcpServers,
+          ...((runtimeFamily === 'hermes-acp' || isAgyAcpFamily) && acpState.requestedSessionId
+            ? { resumeSessionId: acpState.requestedSessionId }
+            : {}),
+          ...(acpState.additionalDirectories?.length
+            ? { additionalDirectories: acpState.additionalDirectories }
+            : {}),
+        });
+        if (!writeAcpJsonLine(proc, sessionInput)) {
           acpState.hadError = true;
           acpState.failureReason = 'ACP session start could not be sent';
           await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-initialize' });
           await terminateManagedProcess();
           return;
         }
-      }
-      if (parsed.method === 'session/request_permission') {
-        const denial = buildAcpUnattendedPermissionDenial(parsed, acpState.sessionId);
-        if (!denial || !proc.stdin?.writable) {
+        acpState.sessionStartRequested = true;
+      } else if (parsed.method === 'session/request_permission') {
+        const permOutcome = await handleAcpPermissionRequest(runId, acpState, parsed, proc, logSidecarDiagnostic);
+        if (permOutcome?.fatal) {
           acpState.hadError = true;
-          acpState.failureReason = 'ACP permission request could not be safely denied';
+          acpState.failureReason = permOutcome.reason || 'ACP permission request failed';
           await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-permission' });
           await terminateManagedProcess();
           return;
         }
-        await logSidecarDiagnostic(runId, 'ACP permission request automatically denied', {
-          phase: 'acp-permission',
-          requestId: parsed.id,
-          cancelled: denial.cancelled,
-        });
-        try {
-          proc.stdin.write(denial.line);
-        } catch {
+        if (permOutcome?.fatalAfterTerminal) {
           acpState.hadError = true;
-          acpState.failureReason = 'ACP permission denial could not be sent';
-          await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-permission' });
-          await terminateManagedProcess();
-          return;
-        }
-        if (denial.cancelled) {
-          acpState.hadError = true;
-          acpState.failureReason = 'ACP permission request offered no one-time reject option';
+          acpState.failureReason = permOutcome.reason || 'ACP permission request offered no one-time reject option';
           void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
         }
-      }
-      if (parsed.id === 'ragent-session-new' || parsed.id === 'ragent-session-load') {
+      } else if (parsed.id === 'ragent-session-new' || parsed.id === 'ragent-session-load') {
         if (!acpState.sessionStartRequested || acpState.sessionId) {
           acpState.hadError = true;
           acpState.failureReason = 'ACP session response arrived out of sequence';
@@ -5699,99 +6472,109 @@ async function main() {
           await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-session' });
           await terminateManagedProcess();
           return;
-        } else {
-          if (acpState.startupTimer) clearTimeout(acpState.startupTimer);
-          acpState.startupTimer = null;
-          acpState.sessionId = sessionId;
-          if (runtimeFamily === 'kimi-code-acp') {
-            const modeSwitch = buildAcpModeSwitchInput(
-              sessionId,
-              permissionMode,
-              acpAvailableModesFromResponse(parsed),
-            );
-            if (!modeSwitch || !proc.stdin?.writable) {
-              acpState.hadError = true;
-              acpState.failureReason = `Kimi ACP did not advertise the required ${permissionMode} mode`;
-              await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
-              await terminateManagedProcess();
-              return;
-            }
-            acpState.modeSwitchRequested = true;
-            try {
-              proc.stdin.write(modeSwitch);
-            } catch {
-              acpState.hadError = true;
-              acpState.failureReason = 'Kimi ACP mode switch could not be sent';
-              await terminateManagedProcess();
-              return;
-            }
-            acpState.modeSwitchTimer = setTimeout(() => {
-              if (acpState.promptSent || proc.exitCode !== null || proc.signalCode !== null) return;
-              acpState.hadError = true;
-              acpState.failureReason = 'Kimi ACP mode switch timed out';
-              void (async () => {
-                try {
-                  await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
-                } finally {
-                  await terminateManagedProcess();
-                }
-              })().catch(() => {});
-            }, 30_000);
-            acpState.modeSwitchTimer.unref?.();
-          } else if (!acpState.promptSent) {
-            if (!proc.stdin?.writable) {
-              acpState.hadError = true;
-              acpState.failureReason = 'ACP prompt could not be sent';
-              await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-session' });
-              await terminateManagedProcess();
-              return;
-            }
-            try {
-              proc.stdin.write(buildAcpPromptInput(sessionId, prompt));
-              acpState.promptSent = true;
-            } catch {
-              acpState.hadError = true;
-              acpState.failureReason = 'ACP prompt could not be sent';
-              await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-session' });
-              await terminateManagedProcess();
-              return;
-            }
-          }
         }
-      } else if (runtimeFamily === 'kimi-code-acp' && parsed.id === 'ragent-set-mode') {
+        if (acpState.startupTimer) clearTimeout(acpState.startupTimer);
+        acpState.startupTimer = null;
+        acpState.sessionId = sessionId;
+        if (runtimeFamily === 'kimi-code-acp') {
+          const modeSwitch = buildAcpModeSwitchInput(
+            sessionId,
+            permissionMode,
+            acpAvailableModesFromResponse(parsed),
+          );
+          if (!modeSwitch || !proc.stdin?.writable) {
+            acpState.hadError = true;
+            acpState.failureReason = `Kimi ACP did not advertise the required ${permissionMode} mode`;
+            await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
+            await terminateManagedProcess();
+            return;
+          }
+          acpState.modeSwitchRequested = true;
+          acpState.pendingConfigRequests.push({
+            requestId: 'ragent-set-mode',
+            kind: 'mode',
+            line: modeSwitch,
+            required: true,
+          });
+          if (!await dispatchNextAcpConfigOrPrompt('acp-mode')) return;
+        } else {
+          if (isAgyAcpFamily) {
+            acpState.pendingConfigRequests.push(...buildAgyAcpConfigQueue(parsed, acpState));
+          }
+          if (!await dispatchNextAcpConfigOrPrompt('acp-session')) return;
+        }
+      } else if (acpState.activeConfigRequest && parsed.id === acpState.activeConfigRequest.requestId) {
+        const completedConfig = acpState.activeConfigRequest;
+        acpState.activeConfigRequest = null;
+        if (acpState.configTimer) clearTimeout(acpState.configTimer);
+        acpState.configTimer = null;
         if (acpState.modeSwitchTimer) clearTimeout(acpState.modeSwitchTimer);
         acpState.modeSwitchTimer = null;
-        if (!acpState.modeSwitchRequested || !isAcpModeSwitchAccepted(parsed)) {
-          acpState.hadError = true;
-          acpState.failureReason = 'Kimi ACP mode switch was not confirmed';
-          await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
-          await terminateManagedProcess();
-          return;
-        }
-        if (!acpState.promptSent) {
-          if (!proc.stdin?.writable) {
+        const accepted = completedConfig.requestId === 'ragent-set-mode'
+          ? isAcpModeSwitchAccepted(parsed, completedConfig.requestId)
+          : isAcpConfigOptionAccepted(parsed, completedConfig.requestId);
+        if (!accepted) {
+          if (completedConfig.required) {
             acpState.hadError = true;
-            acpState.failureReason = 'Kimi ACP prompt could not be sent after mode switch';
+            acpState.failureReason = `${runtimeFamily === 'kimi-code-acp' ? 'Kimi ' : ''}ACP ${completedConfig.kind || 'config'} switch was not confirmed`;
             await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
             await terminateManagedProcess();
             return;
           }
-          try {
-            proc.stdin.write(buildAcpPromptInput(acpState.sessionId, prompt));
-            acpState.promptSent = true;
-          } catch {
-            acpState.hadError = true;
-            acpState.failureReason = 'Kimi ACP prompt could not be sent after mode switch';
-            await logSidecarDiagnostic(runId, acpState.failureReason, { phase: 'acp-mode' });
-            await terminateManagedProcess();
-            return;
+          await logSidecarDiagnostic(runId, 'Optional ACP config option rejected; continuing with server defaults', {
+            phase: 'acp-config',
+            configKind: completedConfig.kind,
+            requestId: completedConfig.requestId,
+            error: acpResponseError(parsed) || null,
+          });
+        } else if (completedConfig.kind === 'model' && acpState.desiredEffort) {
+          const updatedOptions = acpConfigOptionsFromResponse(parsed);
+          const thoughtOpt = updatedOptions.find((option) => option?.id === 'thought_level') || null;
+          const thoughtVal = findAcpOptionValue(thoughtOpt?.options, acpState.desiredEffort);
+          const currentThought = acpConfigOptionValue(parsed, 'thought_level');
+          if (thoughtVal && thoughtVal !== currentThought) {
+            const thoughtLine = buildAcpSetConfigOptionInput(
+              acpState.sessionId,
+              'thought_level',
+              thoughtVal,
+              'ragent-set-config-thought',
+            );
+            if (thoughtLine) {
+              acpState.pendingConfigRequests.unshift({
+                requestId: 'ragent-set-config-thought',
+                kind: 'thought_level',
+                line: thoughtLine,
+                required: false,
+              });
+            }
           }
         }
+        if (!await dispatchNextAcpConfigOrPrompt('acp-config')) return;
       } else if (parsed.id === 'ragent-prompt') {
+        if (acpState.cancelGraceTimer) clearTimeout(acpState.cancelGraceTimer);
+        acpState.cancelGraceTimer = null;
         const error = acpResponseError(parsed);
         acpState.hadError = Boolean(error) || acpState.hadError;
         acpState.failureReason = error || acpState.failureReason;
         acpState.terminalSeen = true;
+        const closeLine = acpState.supportsSessionClose && !acpState.closeRequested && acpState.sessionId
+          ? buildAcpCloseSessionInput(acpState.sessionId)
+          : '';
+        if (closeLine && writeAcpJsonLine(proc, closeLine)) {
+          acpState.closeRequested = true;
+          acpState.closeTimer = setTimeout(() => {
+            acpState.closeTimer = null;
+            try { proc.stdin.end(); } catch {}
+            void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
+          }, 1500);
+          acpState.closeTimer.unref?.();
+        } else {
+          try { proc.stdin.end(); } catch {}
+          void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
+        }
+      } else if (parsed.id === 'ragent-session-close') {
+        if (acpState.closeTimer) clearTimeout(acpState.closeTimer);
+        acpState.closeTimer = null;
         try { proc.stdin.end(); } catch {}
         void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
       } else if (parsed.error) {
@@ -6054,6 +6837,55 @@ async function main() {
     if (claudeThinkingTokenSampler && (parsed?.type === 'assistant' || providerTerminalFrame)) {
       await flushPendingClaudeThinkingTokens();
     }
+    let agyMultiTurnHandled = false;
+    if (agyStreamState && parsed?.event === 'result') {
+      const outcome = classifyProviderTerminalFrame(runtimeFamily, parsed, { acp: false });
+      const current = await getRun(runId) || run;
+      let nextFollowUp = null;
+      if (outcome?.kind === 'completed' && current?.cancelRequested !== true && proc.stdin?.writable) {
+        const queuedFollowUp = agyStreamState.followUpPrompts.shift();
+        if (queuedFollowUp) {
+          nextFollowUp = { kind: 'followup', text: queuedFollowUp.text };
+        } else {
+          const queue = Array.isArray(current?.appServerSteerQueue) ? current.appServerSteerQueue : [];
+          const nextSteer = queue.find((entry) => {
+            const id = typeof entry?.id === 'string' ? entry.id : '';
+            return id && entry?.state !== 'sent' && !agyStreamState.sentSteerIds.has(id)
+              && typeof entry?.text === 'string' && entry.text.trim();
+          });
+          if (nextSteer) {
+            nextFollowUp = { kind: 'steer', id: nextSteer.id, text: nextSteer.text };
+          }
+        }
+      }
+      if (nextFollowUp) {
+        try {
+          proc.stdin.write(buildAgyStreamInput(nextFollowUp.text));
+          if (nextFollowUp.kind === 'steer') {
+            agyStreamState.sentSteerIds.add(nextFollowUp.id);
+            await markCodexAppServerSteerSent(runId, nextFollowUp.id);
+          }
+          parsed = { ...parsed, ragent_intermediate: true };
+          spoolLine = JSON.stringify(parsed);
+          agyMultiTurnHandled = true;
+        } catch {
+          agyMultiTurnHandled = false;
+        }
+      }
+      if (!agyMultiTurnHandled) {
+        if (outcome?.kind === 'completed') {
+          providerTerminalSeen = true;
+          providerTerminalFailureReason = '';
+        } else if (outcome?.kind === 'failed') {
+          providerTerminalSeen = true;
+          providerTerminalFailureReason = outcome.reason;
+          providerProtocolErrorPreview = outcome.reason;
+        }
+        agyStreamState.terminalSeen = true;
+        try { proc.stdin.end(); } catch {}
+        void terminateAfterProviderTerminal(runId, terminateManagedProcess, proc);
+      }
+    }
     await appendRunSpoolRecord(runId, {
       ts: nowIso(),
       stream: 'stdout',
@@ -6069,7 +6901,7 @@ async function main() {
       parsed
       && isProviderNativeDelegationEvidence(
         parsed,
-        isClaudeFamily ? 'claude' : isCodexAppServerFamily ? 'codex' : '',
+        isClaudeFamily ? 'claude' : isCodexAppServerFamily ? 'codex' : isAgyFamily ? 'agy' : '',
       )
     ) {
       scheduleProviderNativeDelegationReconcile(runId, {
@@ -6993,14 +7825,19 @@ async function main() {
       throw error;
     }
   }
-  if (isAgyFamily) {
+  if (isAgyFamily && !acp) {
     // AgY 1.1.19 accepts print-mode prompts through its stream-json stdin
     // protocol. Keeping the prompt out of argv avoids ARG_MAX/per-argument
     // limits for long sessions and prevents --print from swallowing a flag.
+    // When multi-turn `keepStdinOpen` is enabled, keep stdin writable until all
+    // turns complete (closing only on EOF / final `result`).
     try {
-      proc.stdin.end(
-        typeof initialInput === 'string' ? initialInput : buildAgyStreamInput(prompt),
-      );
+      const payload = typeof initialInput === 'string' ? initialInput : buildAgyStreamInput(prompt);
+      if (keepStdinOpen === true) {
+        if (proc.stdin?.writable) proc.stdin.write(payload);
+      } else {
+        proc.stdin.end(payload);
+      }
     } catch (error) {
       await logSidecarDiagnostic(runId, 'Failed to send AgY prompt through stdin', {
         error: normalizeErrorMessage(error),
@@ -7049,7 +7886,7 @@ async function main() {
   const handleProcessError = (error) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
-    for (const state of [appServerState, claudeBidiState]) {
+    for (const state of [appServerState, claudeBidiState, acpState]) {
       if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
     }
     void (async () => {
@@ -7062,6 +7899,9 @@ async function main() {
       clearTimeout(appServerState?.turnRetryTimer);
       clearTimeout(acpState?.startupTimer);
       clearTimeout(acpState?.modeSwitchTimer);
+      clearTimeout(acpState?.configTimer);
+      clearTimeout(acpState?.closeTimer);
+      clearTimeout(acpState?.cancelGraceTimer);
       stopRunnerHeartbeat();
       stopProviderHeartbeat();
       // P1c-4: release the privileged-batch debounce timer alongside the run
@@ -7073,7 +7913,8 @@ async function main() {
       clearTimeout(appServerState?.mcpStartupFallbackTimer);
       clearTimeout(claudeBidiState?.privilegedBatchTimer);
       await appServerState?.readOnlyEnvironmentSetup?.close();
-      await managedMcpOverlay?.cleanup?.();
+      await cleanupActiveManagedMcpOverlay();
+      managedMcpOverlay = null;
       await windowsJob?.close();
       await waitForControlFlush();
       await waitForStdoutProcessing();
@@ -7083,6 +7924,9 @@ async function main() {
       }
       if (claudeBidiState?.sentSteerIds?.size) {
         await markClaudeBidiSteerSent(runId, [...claudeBidiState.sentSteerIds]);
+      }
+      if (agyStreamState?.sentSteerIds?.size) {
+        await markCodexAppServerSteerSent(runId, [...agyStreamState.sentSteerIds]);
       }
       const current = await getRun(runId) || run;
       const failure = appServerState?.idleTerminationReason
@@ -7104,7 +7948,7 @@ async function main() {
   const handleProcessExit = (code, signal) => {
     if (terminalizationInFlight) return;
     terminalizationInFlight = true;
-    for (const state of [appServerState, claudeBidiState]) {
+    for (const state of [appServerState, claudeBidiState, acpState]) {
       if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
     }
     void (async () => {
@@ -7117,6 +7961,9 @@ async function main() {
       clearTimeout(appServerState?.turnRetryTimer);
       clearTimeout(acpState?.startupTimer);
       clearTimeout(acpState?.modeSwitchTimer);
+      clearTimeout(acpState?.configTimer);
+      clearTimeout(acpState?.closeTimer);
+      clearTimeout(acpState?.cancelGraceTimer);
       stopProviderHeartbeat();
       // P1c-4: release the privileged-batch debounce timer alongside the run
       // timers so a late quiescence fire cannot drain into a dead/exiting run.
@@ -7127,7 +7974,8 @@ async function main() {
       clearTimeout(appServerState?.mcpStartupFallbackTimer);
       clearTimeout(claudeBidiState?.privilegedBatchTimer);
       await appServerState?.readOnlyEnvironmentSetup?.close();
-      await managedMcpOverlay?.cleanup?.();
+      await cleanupActiveManagedMcpOverlay();
+      managedMcpOverlay = null;
       await windowsJob?.close();
       await waitForControlFlush();
       await waitForStdoutProcessing();
@@ -7137,6 +7985,9 @@ async function main() {
       }
       if (claudeBidiState?.sentSteerIds?.size) {
         await markClaudeBidiSteerSent(runId, [...claudeBidiState.sentSteerIds]);
+      }
+      if (agyStreamState?.sentSteerIds?.size) {
+        await markCodexAppServerSteerSent(runId, [...agyStreamState.sentSteerIds]);
       }
       let current = await getRun(runId) || run;
       if (appServerState && !appServerState.terminalSeen) {
@@ -7233,6 +8084,9 @@ async function main() {
         : (appServerState?.terminalSeen && !appServerState?.hadError && (terminalCode === 0 || terminalSignal === 'SIGTERM' || controlledWindowsTerminalCleanup))
           || (claudeBidiState?.terminalSeen
             && !claudeBidiState?.hadError
+            && (current.cancelRequested === true || terminalCode === 0 || terminalSignal === 'SIGTERM' || controlledWindowsTerminalCleanup))
+          || (acpState?.terminalSeen
+            && !acpState?.hadError
             && (current.cancelRequested === true || terminalCode === 0 || terminalSignal === 'SIGTERM' || controlledWindowsTerminalCleanup))
           || (providerNeedsTerminalEvidence
             && providerTerminalSeen
@@ -7381,6 +8235,7 @@ if (isMainEntry) {
       } catch (persistError) {
         console.error(`[sidecar] Failed to persist main failure for run ${runId}: ${normalizeErrorMessage(persistError)}`);
       } finally {
+        await cleanupActiveManagedMcpOverlay();
         await releaseNativeOAuthLock();
         // Runs no longer hold a WorkspaceLease; nothing to mark terminal.
         process.exit(1);

@@ -54,6 +54,7 @@ export const DELEGATION_EVENT_KINDS = Object.freeze([
 
 const STATE_SET = new Set(DELEGATION_STATES);
 const KIND_SET = new Set(DELEGATION_EVENT_KINDS);
+const ROOT_BIRTH_ACTOR_PROVIDERS = new Set(['codex', 'agy']);
 
 /** States where the delegation is still expected to make progress. */
 export const DELEGATION_ACTIVE_STATES = Object.freeze(['spawned', 'running', 'waiting']);
@@ -299,8 +300,8 @@ export function validateDelegationEvent(input) {
   if (input.facts !== undefined && !normalizeFacts(input.facts)) {
     errors.push('facts must contain at least one valid bounded fact');
   }
-  if (input.facts?.birthActor && (input.facts.birthActor !== 'root_session' || kind !== 'spawned' || input.provider !== 'codex' || input.parentDelegationId)) {
-    errors.push('root birth actor requires a top-level Codex spawned event');
+  if (input.facts?.birthActor && (input.facts.birthActor !== 'root_session' || kind !== 'spawned' || !ROOT_BIRTH_ACTOR_PROVIDERS.has(input.provider) || input.parentDelegationId)) {
+    errors.push('root birth actor requires a top-level Codex or AgY spawned event');
   }
 
   const forbidden = collectForbiddenFields(input);
