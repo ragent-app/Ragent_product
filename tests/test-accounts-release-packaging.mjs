@@ -29,7 +29,7 @@ assert.match(buildScript, /--exclude="\$RELEASE_NAME\/runtime\/node"/);
 assert.match(buildScript, /--mode=0755 -rf/);
 assert.match(buildScript, /gzip -n -c "\$WORK_DIR\/release\.tar"/);
 assert.match(buildScript, /ragent-accounts\.service/);
-assert.match(service, /^Alias=ragent-accounts\.service$/m);
+assert.doesNotMatch(service, /^Alias=/m);
 assert.match(buildScript, /RELEASE_NAME="ragent-accounts-/);
 assert.match(buildScript, /"service":"ragent-accounts"/);
 assert.match(service, /^ExecStart=\/opt\/ragent-accounts\/current\/runtime\/node /m);

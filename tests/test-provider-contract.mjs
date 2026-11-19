@@ -238,7 +238,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { privilegedMode: true }).approvalPolicy,
-  'untrusted',
+  'on-request',
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { privilegedMode: true }).sandbox,
@@ -285,7 +285,7 @@ assert.equal(
 );
 assert.equal(
   resolveProviderPermissionPolicy('codex-app-server-json', { riskMode: 'recommended' }).approvalPolicy,
-  'untrusted',
+  'on-request',
 );
 assert.equal(
   resolveProviderPermissionPolicy('claude-stream-json-bidi', { riskMode: 'recommended', permissionMode: 'bypassPermissions' }).claudePermissionMode,

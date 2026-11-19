@@ -39,5 +39,3 @@ ReadWritePaths=/run/ragent-admin
 
 [Install]
 WantedBy=multi-user.target
-# Transitional alias for an existing installation.
-Alias=ragent-admin-console.service

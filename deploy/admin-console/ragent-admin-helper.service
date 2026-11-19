@@ -32,5 +32,3 @@ ReadWritePaths=/etc/ragent /var/lib/ragent/accounts /var/lib/ragent-admin /var/l
 
 [Install]
 WantedBy=multi-user.target
-# Transitional alias for an existing installation.
-Alias=ragent-admin-helper.service

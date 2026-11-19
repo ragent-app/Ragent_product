@@ -11,6 +11,3 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/var/lib/ragent-admin
 PrivateTmp=true
-
-[Install]
-Alias=ragent-traffic-collector.service

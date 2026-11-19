@@ -5,6 +5,11 @@ const paths = [
   'chat/session-manager.mjs',
   'android/app/src/androidTest/assets/pairing-link-qr.png',
   'accounts/server.mjs',
+  'deploy/accounts/DEPLOY.md',
+  'deploy/accounts/ragent-accounts.service',
+  'deploy/admin-console/README.md',
+  'deploy/admin-console/ragent-admin-console.service',
+  'deploy/admin-console/ragent-admin-helper.service',
   'android/app/google-services.json',
   'android/review/old.png',
   'android/docs/internal-plan.md',
@@ -21,10 +26,18 @@ const paths = [
   'tests/fixtures/risk-datasets/taglio4-safe.jsonl',
   'chat/session-manager.mjs.bak-20260624',
   'notes/private.md',
+  'deploy/private/inventory.ini',
+  'deploy/secrets.txt',
+  'deploy/accounts/.env.production',
+  'deploy/admin-console/server.pem',
   'service/credentials.p12',
   'android/app/build/outputs/app.apk',
   'bin/ragent-p2p-host-amd64',
   'bin/ragent-p2p-host',
+  'p2p/ragent-p2p-host.exe',
+  'native/windows-cli-read-bridge/windows-cli-read-bridge.exe',
+  'infrastructure/admin-console/__pycache__/helper.cpython-313.pyc',
+  'scripts/helper.pyc',
   '.env.production',
   'turn-broker-signing-key.json',
   'accounts.json',
@@ -33,5 +46,5 @@ const paths = [
   'cloudflare/email-worker/wrangler.jsonc',
   'cloudflare/email-worker/.dev.vars',
 ];
-assert.deepEqual(findForbiddenPaths(paths), paths.slice(3));
+assert.deepEqual(findForbiddenPaths(paths), paths.slice(8));
 console.log('Public boundary rules reject private and generated paths.');

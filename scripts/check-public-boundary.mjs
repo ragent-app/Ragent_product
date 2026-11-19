@@ -5,7 +5,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const forbidden = [
-  /^(?:\.agents|\.codex|archive|design|notes|deploy)\//i,
+  /^(?:\.agents|\.codex|archive|design|notes)\//i,
+  /^deploy\/(?!(?:accounts|admin-console)\/)/i,
   /^android\/(?:design|frames|review|screenshots)\//i,
   /^android\/app\/screenshots\//i,
   /^(?:app\/screenshots|web\/review|workspace)\//i,
@@ -18,8 +19,10 @@ const forbidden = [
   /^tests\/fixtures\/risk-datasets\/taglio4-[^/]+\.jsonl$/i,
   /\.bak-[^/]+$/i,
   /^android\/docs\/(?!README\.md$)/i,
-  /^bin\/(?:ragent|ragent)-p2p-host/i,
-  /(^|\/)(?:node_modules|\.gradle|\.kotlin|build)\//i,
+  /^(?:bin|p2p)\/ragent-p2p-host/i,
+  /^native\/windows-cli-read-bridge\/[^/]+\.exe$/i,
+  /(^|\/)(?:node_modules|\.gradle|\.kotlin|build|__pycache__)\//i,
+  /\.py[cod]$/i,
   /(^|\/)(?:google-services\.json|keystore\.properties)$/i,
   /(^|\/)\.env(?:$|\.(?!example$))/i,
   /(^|\/)turn-broker-signing-key\.json$/i,

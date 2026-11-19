@@ -9,4 +9,3 @@ Unit=ragent-traffic-collector.service
 
 [Install]
 WantedBy=timers.target
-Alias=ragent-traffic-collector.timer

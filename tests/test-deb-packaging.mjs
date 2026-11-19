@@ -22,9 +22,14 @@ function exists(relativePath) {
 }
 
 const buildScript = read('scripts/build-deb.sh');
+const stagePayload = read('packaging/linux/stage-payload.sh');
+const buildRpmScript = read('scripts/build-rpm.sh');
+const rpmSpec = read('packaging/rpm/ragent.spec');
+const rpmPreinst = read('packaging/rpm/preinst');
+const rpmPostinst = read('packaging/rpm/postinst');
+const rpmPrerm = read('packaging/rpm/prerm');
 const restartScript = read('restart.sh');
 const mainService = read('packaging/deb/ragent.service');
-const ragentMainService = read('packaging/deb/ragent.service');
 const runnerLifecycleService = read('packaging/deb/ragent-runner-lifecycle.service');
 const runnerSupervisorService = read('packaging/deb/ragent-runner-supervisor.service');
 const privilegedExecutorService = read('packaging/deb/ragent-privileged-executor.service');
@@ -42,20 +47,34 @@ const legacyCcSwitchRetirement = read('packaging/deb/retire-legacy-cc-switch');
 const repairStateAccess = read('packaging/deb/repair-state-access');
 const packageJson = JSON.parse(read('package.json'));
 
-assert.equal(ragentMainService.replace(/^Alias=ragent\.service\r?\n/m, ''), mainService,
-  'renaming the main unit must retain all service security and dependency settings');
-assert.match(ragentMainService, /^Alias=ragent\.service$/m);
-assert.match(buildScript, /ln -s ragent\.service "\$STAGE\/lib\/systemd\/system\/ragent\.service"/);
+assert.doesNotMatch(mainService, /^Alias=/m);
+assert.match(buildScript, /packaging\/linux\/stage-payload\.sh/);
+assert.match(stagePayload, /install -m 0644 "\$ROOT\/packaging\/deb\/ragent\.service" "\$STAGE\/lib\/systemd\/system\/ragent\.service"/);
+assert.doesNotMatch(stagePayload, /ln -s ragent\.service/);
+assert.doesNotMatch(buildScript, /ln -s ragent\.service/);
 assert.match(postinst, /systemctl restart "\$main_service"/);
+
+assert.match(buildRpmScript, /RAGENT_LINUX_PACKAGE_FORMAT=rpm/);
+assert.match(buildRpmScript, /scripts\/build-deb\.sh/);
+assert.match(buildScript, /rpmbuild -bb "\$ROOT\/packaging\/rpm\/ragent\.spec"/);
+assert.match(rpmSpec, /^Name:\s*ragent$/m);
+assert.match(rpmSpec, /^License:\s*Apache-2\.0$/m);
+assert.match(rpmSpec, /^\/usr\/lib\/systemd\/system\/ragent\*$/m);
+assert.match(rpmPostinst, /main_service=ragent\.service/);
+assert.match(rpmPostinst, /systemctl restart "\$main_service"/);
+assert.match(rpmPrerm, /main_service=ragent\.service/);
+assert.match(rpmPrerm, /stop_unit "\$main_service"/);
 
 assert.match(buildScript, /Debian packaging requires a clean committed source tree/);
 assert.match(buildScript, /SOURCE_COMMIT.*ragent-source-commit/s);
 assert.match(buildScript, /Source changed during packaging; refusing to publish the candidate/);
-assert.match(buildScript, /RAGENT_CLAUDE_BINARY_SHA256/);
-assert.match(buildScript, /CLAUDE_LICENSE_SOURCE/);
+assert.match(stagePayload, /RAGENT_CLAUDE_BINARY_SHA256/);
+assert.match(stagePayload, /CLAUDE_LICENSE_SOURCE/);
+assert.doesNotMatch(stagePayload, /\$STAGE\/usr\/bin\/(?:codex|claude)/,
+  'bundled provider launchers must not replace system-wide user commands');
 assert.doesNotMatch(buildScript, /\$STAGE\/usr\/bin\/(?:codex|claude)/,
   'bundled provider launchers must not replace system-wide user commands');
-assert.match(buildScript, /vendor\/licenses\/claude-code\/LICENSE\.md/);
+assert.match(stagePayload, /vendor\/licenses\/claude-code\/LICENSE\.md/);
 
 const retiredPackagePaths = [
   'packaging/deb/ragent-maintenance-admin',
@@ -67,17 +86,19 @@ const retiredPackagePaths = [
 
 for (const path of retiredPackagePaths) {
   assert.equal(exists(path), false, `${path} must be removed from the source tree`);
-  assert.doesNotMatch(
-    buildScript,
-    new RegExp(path.replaceAll('/', '\\/').replaceAll('.', '\\.'), 'i'),
-    `${path} must not be staged by the Deb builder`,
-  );
+  const retiredRegex = new RegExp(path.replaceAll('/', '\\/').replaceAll('.', '\\.'), 'i');
+  assert.doesNotMatch(buildScript, retiredRegex, `${path} must not be staged by the Deb builder`);
+  assert.doesNotMatch(stagePayload, retiredRegex, `${path} must not be staged by the Linux payload stager`);
 }
 
-assert.match(buildScript, /native\/privileged-peercred\.c/);
-assert.match(buildScript, /usr\/lib\/ragent\/privileged-peercred/);
-assert.match(buildScript, /ragent-privileged-executor\.service/);
+assert.match(stagePayload, /native\/privileged-peercred\.c/);
+assert.match(stagePayload, /usr\/lib\/ragent\/privileged-peercred/);
+assert.match(stagePayload, /ragent-privileged-executor\.service/);
 assert.doesNotMatch(buildScript, /ragent-maintenance|deferred-maintenance|maintenance-peercred/i);
+assert.doesNotMatch(stagePayload, /ragent-maintenance|deferred-maintenance|maintenance-peercred/i);
+assert.doesNotMatch(rpmPreinst, /ragent-maintenance|maintenance-control/i);
+assert.doesNotMatch(rpmPostinst, /ragent-maintenance|maintenance-control/i);
+assert.doesNotMatch(rpmPrerm, /ragent-maintenance|maintenance-control/i);
 
 assert.match(environmentFile, /^RAGENT_PRIVILEGED_EXECUTOR_SOCKET=\/run\/ragent-privileged-executor\/sock$/m);
 assert.match(environmentFile, /^RAGENT_PRIVILEGED_EXECUTOR_AUDIT_FILE=\/var\/log\/ragent-privileged\/audit\.jsonl$/m);
@@ -96,8 +117,8 @@ assert.match(runnerLifecycleService, /runner-lifecycle-broker\.mjs/);
 assert.match(runnerLifecycleService, /^RuntimeDirectory=ragent$/m,
   'the lifecycle service must create the protected /run/ragent directory before the supervisor starts');
 assert.match(privilegedExecutorService, /privileged-executor\.mjs serve/);
-assert.match(buildScript, /ragent-storage-gc\.service/);
-assert.match(buildScript, /ragent-storage-gc\.timer/);
+assert.match(stagePayload, /ragent-storage-gc\.service/);
+assert.match(stagePayload, /ragent-storage-gc\.timer/);
 assert.match(storageGcService, /storage-inventory-gc\.mjs --apply --json --scheduled/);
 assert.match(storageGcService, /Nice=19/);
 assert.match(storageGcService, /IOSchedulingClass=idle/);
@@ -161,8 +182,8 @@ if (process.platform !== 'win32') {
     }
   }
 }
-assert.match(postrm, /! -name accounts/);
-assert.match(postrm, /\/var\/lib\/ragent-run \/var\/log\/ragent/);
+assert.doesNotMatch(postrm, /\/var\/lib\/ragent(?:-run)?\b/);
+assert.doesNotMatch(postrm, /\/var\/log\/ragent(?:-privileged)?\b/);
 assert.match(postinst, /mktemp \/etc\/ragent\/\.initial-credentials\.XXXXXX/);
 assert.match(postinst, /chmod 0600 "\$credentials_tmp"/);
 assert.doesNotMatch(postinst, /echo "初始登录密码：\$INITIAL_PASSWORD/);
@@ -196,15 +217,15 @@ assert.match(buildScript, /PACKAGE_ACCOUNTS_URL="\$\{RAGENT_PACKAGE_ACCOUNTS_URL
 assert.match(buildScript, /PACKAGE_TURN_BROKER_URL="\$\{RAGENT_PACKAGE_TURN_BROKER_URL:-https:\/\/ragent\.agentoncloud\.com\/turn\}"/);
 assert.match(buildScript, /PACKAGE_NAME="\$\{RAGENT_DEB_PACKAGE_NAME:-ragent\}"/);
 assert.match(buildScript, /OUTPUT_NAME="\$\{PACKAGE_NAME\}_\$\{VERSION\}_\$\{ARCH\}\.deb"/);
-assert.match(buildScript, /GOOS=linux GOARCH="\$P2P_GOARCH" CGO_ENABLED=0 go build/);
+assert.match(stagePayload, /GOOS=linux GOARCH="\$P2P_GOARCH" CGO_ENABLED=0 go build/);
 assert.match(buildScript, /P2P_GOARCH=arm64/);
 assert.match(buildScript, /P2P_GOARCH=amd64/);
 assert.match(buildScript, /NPM_REGISTRY="\$\{RAGENT_NPM_REGISTRY:-https:\/\/registry\.npmjs\.org\}"/);
 assert.match(buildScript, /resolve_npm_version\(\)/);
 assert.match(buildScript, /verify_npm_sri\(\)/);
 assert.match(buildScript, /registry metadata does not include a sha512 SRI digest/);
-assert.match(buildScript, /@openai\/codex@\$CODEX_VERSION/);
-assert.match(buildScript, /@openai\/codex@\$CODEX_NATIVE_VERSION/);
+assert.match(stagePayload, /@openai\/codex@\$CODEX_VERSION/);
+assert.match(stagePayload, /@openai\/codex@\$CODEX_NATIVE_VERSION/);
 assert.match(buildScript, /harness-version-catalog\.mjs/);
 assert.match(buildScript, /CODEX_ADAPTER_TARGET_VERSION/);
 assert.match(buildScript, /RAGENT_CODEX_VERSION:-\$CODEX_ADAPTER_TARGET_VERSION/);
@@ -212,58 +233,67 @@ assert.match(buildScript, /RAGENT_CLAUDE_VERSION:-\$CLAUDE_ADAPTER_TARGET_VERSIO
 assert.match(buildScript, /CLAUDE_ADAPTER_COMPATIBLE/);
 assert.match(buildScript, /CODEX_ADAPTER_COMPATIBLE/);
 assert.match(buildScript, /@anthropic-ai\/claude-code/);
-assert.match(buildScript, /Fetch the Codex launcher and target-native engine/);
-assert.match(buildScript, /provider-versions/);
+assert.match(stagePayload, /Fetch the Codex launcher and target-native engine/);
+assert.match(stagePayload, /provider-versions/);
 assert.match(buildScript, /Package cache is not writable/);
 assert.match(buildScript, /Package output directory is not writable/);
-assert.match(buildScript, /CODEX_MAIN_CONTENTS=.*codex-launcher-contents\.txt/);
-assert.match(buildScript, /CLAUDE_NATIVE_CONTENTS=.*claude-native-contents\.txt/);
+assert.match(stagePayload, /CODEX_MAIN_CONTENTS=.*codex-launcher-contents\.txt/);
+assert.match(stagePayload, /CLAUDE_NATIVE_CONTENTS=.*claude-native-contents\.txt/);
 assert.doesNotMatch(buildScript, /tar -tzf "\$CODEX_MAIN_CACHE_PATH" \| grep -qx/);
+assert.doesNotMatch(stagePayload, /tar -tzf "\$CODEX_MAIN_CACHE_PATH" \| grep -qx/);
 assert.doesNotMatch(buildScript, /tar -tzf "\$CLAUDE_NATIVE_CACHE_PATH" \| grep -qx/);
+assert.doesNotMatch(stagePayload, /tar -tzf "\$CLAUDE_NATIVE_CACHE_PATH" \| grep -qx/);
 assert.doesNotMatch(buildScript, /CLAUDE_VERSION="\$\{RAGENT_CLAUDE_VERSION:-2\.1\./);
 assert.doesNotMatch(buildScript, /CODEX_NATIVE_VERSION="\$\{RAGENT_CODEX_NATIVE_VERSION:-0\./);
-assert.match(buildScript, /rm -f "\$APP_DIR\/bin\/ragent-p2p-host-amd64" "\$APP_DIR\/bin\/ragent-p2p-host-arm64"/);
+assert.match(stagePayload, /rm -f "\$APP_DIR\/bin\/ragent-p2p-host-amd64" "\$APP_DIR\/bin\/ragent-p2p-host-arm64"/);
 assert.match(buildScript, /Built deb contains an architecture-specific P2P sidecar/);
 assert.match(buildScript, /Built deb is missing the canonical P2P host sidecar/);
 assert.match(postinst, /retire_legacy_p2p_host_variants\(\)/);
 assert.match(postinst, /\/opt\/ragent\/app\/bin\/ragent-p2p-host-amd64/);
 assert.match(postinst, /\/opt\/ragent\/app\/bin\/ragent-p2p-host-arm64/);
-assert.match(buildScript, /install -m 0755 "\$P2P_HOST_BINARY" "\$APP_DIR\/bin\/ragent-p2p-host"/);
+assert.match(stagePayload, /install -m 0755 "\$P2P_HOST_BINARY" "\$APP_DIR\/bin\/ragent-p2p-host"/);
 
-execFileSync('bash', ['-n', join(root, 'scripts/build-deb.sh')]);
+if (process.platform !== 'win32') {
+  execFileSync('bash', ['-n', join(root, 'scripts/build-deb.sh')]);
+  execFileSync('bash', ['-n', join(root, 'scripts/build-rpm.sh')]);
+  execFileSync('bash', ['-n', join(root, 'packaging/linux/stage-payload.sh')]);
 
-const fakeNpmRoot = mkdtempSync(join(tmpdir(), 'ragent-deb-version-gate-'));
-try {
-  const fakeNpm = join(fakeNpmRoot, 'npm');
-  writeFileSync(fakeNpm, [
-    '#!/bin/sh',
-    'case "$*" in',
-    '  *"@openai/codex version"*) printf "0.154.0\\n" ;;',
-    '  *"@anthropic-ai/claude-code version"*) printf "2.1.263\\n" ;;',
-    '  *) exit 2 ;;',
-    'esac',
-  ].join('\n'));
-  chmodSync(fakeNpm, 0o700);
-  const mismatch = spawnSync('bash', [join(root, 'scripts/build-deb.sh')], {
-    cwd: root,
-    encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${fakeNpmRoot}:${process.env.PATH}`,
-      RAGENT_PACKAGE_VERSION: '0.0.0-version-gate-test',
-      RAGENT_CODEX_VERSION: '0.165.0',
-      RAGENT_CLAUDE_VERSION: '2.1.310',
-    },
-  });
-  assert.notEqual(mismatch.status, 0, 'Deb packaging must refuse an explicit unvalidated runtime override');
-  assert.match(mismatch.stderr, /Codex 0\.165\.0 is outside the validated Ragent adapter range/);
-} finally {
-  rmSync(fakeNpmRoot, { recursive: true, force: true });
+  const fakeNpmRoot = mkdtempSync(join(tmpdir(), 'ragent-deb-version-gate-'));
+  try {
+    const fakeNpm = join(fakeNpmRoot, 'npm');
+    writeFileSync(fakeNpm, [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"@openai/codex version"*) printf "0.154.0\\n" ;;',
+      '  *"@anthropic-ai/claude-code version"*) printf "2.1.263\\n" ;;',
+      '  *) exit 2 ;;',
+      'esac',
+    ].join('\n'));
+    chmodSync(fakeNpm, 0o700);
+    const mismatch = spawnSync('bash', [join(root, 'scripts/build-deb.sh')], {
+      cwd: root,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${fakeNpmRoot}:${process.env.PATH}`,
+        RAGENT_PACKAGE_VERSION: '0.0.0-version-gate-test',
+        RAGENT_CODEX_VERSION: '0.165.0',
+        RAGENT_CLAUDE_VERSION: '2.1.310',
+      },
+    });
+    assert.notEqual(mismatch.status, 0, 'Deb packaging must refuse an explicit unvalidated runtime override');
+    assert.match(mismatch.stderr, /Codex 0\.165\.0 is outside the validated Ragent adapter range/);
+  } finally {
+    rmSync(fakeNpmRoot, { recursive: true, force: true });
+  }
+
+  execFileSync('sh', ['-n', join(root, 'packaging/deb/repair-state-access')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/deb/postinst')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/deb/prerm')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/deb/postrm')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/rpm/preinst')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/rpm/postinst')]);
+  execFileSync('sh', ['-n', join(root, 'packaging/rpm/prerm')]);
 }
-
-execFileSync('sh', ['-n', join(root, 'packaging/deb/repair-state-access')]);
-execFileSync('sh', ['-n', join(root, 'packaging/deb/postinst')]);
-execFileSync('sh', ['-n', join(root, 'packaging/deb/prerm')]);
-execFileSync('sh', ['-n', join(root, 'packaging/deb/postrm')]);
 
 console.log('test-deb-packaging: ok');

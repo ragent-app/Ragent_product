@@ -18,12 +18,11 @@ SPEC.loader.exec_module(HELPER)
 
 
 class AdminHelperValidationTests(unittest.TestCase):
-    def test_service_restart_uses_canonical_unit_and_accepts_cached_old_name(self):
+    def test_service_restart_uses_canonical_unit_and_rejects_foreign_units(self):
         with patch.object(HELPER, "_service_restart", return_value={"active": True, "since": "now"}) as restart, patch.object(HELPER, "_audit"):
-            for supplied in ("ragent-accounts", "ragent-accounts"):
-                result = HELPER._restart_service("owner", {"service": supplied})
-                self.assertEqual(result["service"], "ragent-accounts")
-                restart.assert_called_with("ragent-accounts.service")
+            result = HELPER._restart_service("owner", {"service": "ragent-accounts"})
+            self.assertEqual(result["service"], "ragent-accounts")
+            restart.assert_called_with("ragent-accounts.service")
             with self.assertRaises(HELPER.AdminError):
                 HELPER._restart_service("owner", {"service": "foreign.service"})
 

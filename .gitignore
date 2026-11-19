@@ -61,3 +61,9 @@ Thumbs.db
 # Service-private generated account credentials
 ragent-account/account.json
 ragent-account/.initial-*
+
+# Local Python bytecode caches and in-tree Go build outputs
+__pycache__/
+*.py[cod]
+/p2p/ragent-p2p-host*
+/native/windows-cli-read-bridge/*.exe

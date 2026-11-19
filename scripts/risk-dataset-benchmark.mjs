@@ -63,6 +63,14 @@ function sha256(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
+function sha256Dataset(buffer) {
+  // Windows checkouts with core.autocrlf=true may materialize LF fixtures as CRLF.
+  if (process.platform === 'win32' && !buffer.includes(0)) {
+    return sha256(Buffer.from(buffer.toString('utf8').replaceAll('\r\n', '\n'), 'utf8'));
+  }
+  return sha256(buffer);
+}
+
 function readJsonLines(text, sourceName) {
   return text.split(/\r?\n/).filter((line) => line.trim()).map((line, index) => {
     try {
@@ -80,7 +88,7 @@ async function loadManifest() {
 async function loadDataset(manifest, dataset, { limit = Number.POSITIVE_INFINITY } = {}) {
   const path = join(FIXTURE_ROOT, dataset.path);
   const content = await readFile(path);
-  const actualSha256 = sha256(content);
+  const actualSha256 = sha256Dataset(content);
   if (actualSha256 !== dataset.sha256) {
     throw new Error(`${dataset.id}: sha256 mismatch; expected ${dataset.sha256}, got ${actualSha256}`);
   }
