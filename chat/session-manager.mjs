@@ -13873,6 +13873,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       } : {}),
     }
     : null;
+  const requestedOwnerHistoryId = requestedCodexHistoryId(normalizedText);
+  const historyOwnerDevice = process.platform === 'win32' && requestedOwnerHistoryId && rootSessionControl
+    && authenticatedPrincipalKind === 'trusted_device'
+    ? (windowsOwnerDevice || await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null)) : null;
   const shouldResumeCodexForPlanAction = requestedPlanAction
     && ['codex-json', 'codex-app-server-json'].includes(effectiveRuntimeFamily);
   const forceFreshProviderThread = options.freshThread === true;
@@ -13995,10 +13999,6 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   if (effectiveAgyResume) runtimeOptions.agyResume = true;
   if (resumeState.hasResume && ['copilot', 'hermes', 'cline', 'kilo'].includes(resumeState.providerKey)) {
     runtimeOptions.providerResumeId = resumeState.providerResumeId;
-  const requestedOwnerHistoryId = requestedCodexHistoryId(normalizedText);
-  const historyOwnerDevice = process.platform === 'win32' && requestedOwnerHistoryId && rootSessionControl
-    && authenticatedPrincipalKind === 'trusted_device'
-    ? (windowsOwnerDevice || await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null)) : null;
   } else {
     delete runtimeOptions.providerResumeId;
     delete runtimeOptions.hermesSessionId;
@@ -14242,6 +14242,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(approvedActionChannel ? { approvedActionChannel } : {}),
       ...(windowsBrokerChannel ? { windowsBrokerChannel } : {}),
       ...(sessionControlChannel ? { sessionControlChannel } : {}),
+      ...(process.platform === 'win32' && (authenticatedPrincipalKind === 'owner' || historyOwnerDevice)
+        && rootSessionControl && sessionControlChannel?.token && !options.internalOperation && requestedOwnerHistoryId
+        ? { codexHistoryRequest: { sessionId: requestedOwnerHistoryId },
+          ...(historyOwnerDevice ? { authenticatedOwnerDevice: historyOwnerDevice } : {}) } : {}),
       ...(readOnlyOrganizationManagerMcp ? { readOnlyOrganizationManagerMcp: true } : {}),
       ...(collaborationCapabilitySet
         ? { collaborationCapabilities: collaborationCapabilitySet.capabilities }
@@ -14364,10 +14368,6 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   if (!options.internalOperation && isSessionAutoRenamePending(session)) {
     const claimed = await claimPendingSessionTitle(sessionId, run.id,
       isFirstRecordedUserMessage ? recordedUserText : '');
-      ...(process.platform === 'win32' && (authenticatedPrincipalKind === 'owner' || historyOwnerDevice)
-        && rootSessionControl && sessionControlChannel?.token && !options.internalOperation && requestedOwnerHistoryId
-        ? { codexHistoryRequest: { sessionId: requestedOwnerHistoryId },
-          ...(historyOwnerDevice ? { authenticatedOwnerDevice: historyOwnerDevice } : {}) } : {}),
     if (claimed) session = claimed;
   }
 
@@ -14488,6 +14488,41 @@ export async function regenerateSessionReply(sessionId, parentRequestId, options
   });
 }
 
+// Only the owner's complete, explicit request grants this narrowly scoped read.
+function requestedCodexHistoryId(message) {
+  if (typeof message !== 'string' || message.length > 200) return '';
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const zh = '(?:读一下|读取|阅读|总结|概括)(?:这个|该|本地的?|这个本地的?)?\\s*codex\\s*会话(?:的)?(?:历史|记录)';
+  const en = '(?:read|summari[sz]e)\\s+(?:the\\s+)?(?:local\\s+)?codex\\s+session(?:\\s+history)?';
+  const intent = `(?:${zh}|${en})`;
+  const match = message.trim().match(new RegExp(`^(?:(${uuid})\\s+${intent}|${intent}\\s+(${uuid}))$`, 'i'));
+  return (match?.[1] || match?.[2] || '').toLowerCase();
+}
+
+// A replacement is a new Run. Never reuse the parent's capability or identity.
+async function issueDerivedSessionControl({ session, sessionId, runId, requestId, options }) {
+  const principalKind = trimString(options.authenticatedPrincipalKind);
+  let scope = null;
+  const root = canIssueSessionControl({ principalKind, session, temporaryControlAuthority: options.temporaryControlAuthority });
+  if (!root && ['owner', 'trusted_device'].includes(principalKind) && !options.temporaryControlAuthority
+      && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
+    const { getLiveOrganizationSessionReference } = await import('./organization-session-lifecycle.mjs');
+    const binding = await getLiveOrganizationSessionReference(sessionId);
+    if (binding?.kind === 'node' && binding.organizationId === session.organizationId
+        && binding.nodeId === session.organizationNodeId && binding.bindingGeneration > 0) {
+      scope = { kind: 'organization_message', organizationId: binding.organizationId, nodeId: binding.nodeId,
+        bindingGeneration: binding.bindingGeneration, organizationRevision: binding.organizationRevision };
+    }
+  }
+  if (!root && !scope) return null;
+  const capability = createRunSessionControlCapability({ runId, sessionId, turnId: requestId, scope });
+  if (!capability) return null;
+  const renewal = createRunSessionControlRenewalCapability({ runId, sessionId, turnId: requestId, runCreatedAt: Date.now(), scope });
+  if (!renewal) return null;
+  return { ...capability, renewalVersion: renewal.version, renewalEndpoint: renewal.endpoint,
+    renewalToken: renewal.token, renewalTokenHash: renewal.tokenHash, renewalExpiresAt: renewal.expiresAt };
+}
+
 async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, options = {}) {
   const normalizedParentRequestId = typeof parentRequestId === 'string' ? parentRequestId.trim() : '';
   if (!normalizedParentRequestId) {
@@ -14568,8 +14603,14 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
     ...parentOptions,
     freshThread: true,
   };
+  delete manifestOptions.sessionControlChannel;
+  delete manifestOptions.codexHistoryRequest;
+  delete manifestOptions.authenticatedPrincipalKind;
+  delete manifestOptions.authenticatedOwnerDevice;
+  delete manifestOptions.temporaryControlAuthority;
   if (options.authenticatedPrincipalKind) {
     manifestOptions.authenticatedPrincipalKind = options.authenticatedPrincipalKind;
+    if (options.authenticatedOwnerDevice) manifestOptions.authenticatedOwnerDevice = structuredClone(options.authenticatedOwnerDevice);
     delete manifestOptions.temporaryControlAuthority;
     if (options.temporaryControlAuthority) manifestOptions.temporaryControlAuthority = options.temporaryControlAuthority;
   }
@@ -14610,41 +14651,6 @@ async function regenerateSessionReplyUnlocked(sessionId, parentRequestId, option
 
   // Repeated regenerations keep folding under the ORIGINAL user message, so the
   // client can group v1/v2/v3 under one version rail. The chain root lives on
-// Only the owner's complete, explicit request grants this narrowly scoped read.
-function requestedCodexHistoryId(message) {
-  if (typeof message !== 'string' || message.length > 200) return '';
-  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-  const zh = '(?:读一下|读取|阅读|总结|概括)(?:这个|该|本地的?|这个本地的?)?\\s*codex\\s*会话(?:的)?(?:历史|记录)';
-  const en = '(?:read|summari[sz]e)\\s+(?:the\\s+)?(?:local\\s+)?codex\\s+session(?:\\s+history)?';
-  const intent = `(?:${zh}|${en})`;
-  const match = message.trim().match(new RegExp(`^(?:(${uuid})\\s+${intent}|${intent}\\s+(${uuid}))$`, 'i'));
-  return (match?.[1] || match?.[2] || '').toLowerCase();
-}
-
-// A replacement is a new Run. Never reuse the parent's capability or identity.
-async function issueDerivedSessionControl({ session, sessionId, runId, requestId, options }) {
-  const principalKind = trimString(options.authenticatedPrincipalKind);
-  let scope = null;
-  const root = canIssueSessionControl({ principalKind, session, temporaryControlAuthority: options.temporaryControlAuthority });
-  if (!root && ['owner', 'trusted_device'].includes(principalKind) && !options.temporaryControlAuthority
-      && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
-    const { getLiveOrganizationSessionReference } = await import('./organization-session-lifecycle.mjs');
-    const binding = await getLiveOrganizationSessionReference(sessionId);
-    if (binding?.kind === 'node' && binding.organizationId === session.organizationId
-        && binding.nodeId === session.organizationNodeId && binding.bindingGeneration > 0) {
-      scope = { kind: 'organization_message', organizationId: binding.organizationId, nodeId: binding.nodeId,
-        bindingGeneration: binding.bindingGeneration, organizationRevision: binding.organizationRevision };
-    }
-  }
-  if (!root && !scope) return null;
-  const capability = createRunSessionControlCapability({ runId, sessionId, turnId: requestId, scope });
-  if (!capability) return null;
-  const renewal = createRunSessionControlRenewalCapability({ runId, sessionId, turnId: requestId, runCreatedAt: Date.now(), scope });
-  if (!renewal) return null;
-  return { ...capability, renewalVersion: renewal.version, renewalEndpoint: renewal.endpoint,
-    renewalToken: renewal.token, renewalTokenHash: renewal.tokenHash, renewalExpiresAt: renewal.expiresAt };
-}
-
   // the manifest (the status record only stores a fixed field set).
   const rootParentRequestId = trimString(parentManifest.regenerateParentRequestId) || normalizedParentRequestId;
   const attachmentSourceRefs = getManifestAttachmentSourceRefs(parentManifest);
@@ -14701,6 +14707,19 @@ async function issueDerivedSessionControl({ session, sessionId, runId, requestId
   // Regenerate is a NEW run: prepareRunExecution always builds a fresh
   // ExecutionScopeSnapshot and never copies the parent run's scope/digest.
   const nextRunId = createRunId();
+  const derivedChannel = await issueDerivedSessionControl({ session, sessionId, runId: nextRunId, requestId, options });
+  if (derivedChannel) manifest.options.sessionControlChannel = derivedChannel;
+  const sourceTask = parentManifest.approvalReviewTask;
+  const sourceTaskBound = sourceTask?.version === 1 && typeof sourceTask.requestId === 'string'
+    && [parentRun.requestId, parentManifest.regenerateParentRequestId].includes(sourceTask.requestId);
+  const sourceHistoryId = sourceTaskBound ? requestedCodexHistoryId(sourceTask.text) : '';
+  const regenerateOwnerDevice = process.platform === 'win32' && options.authenticatedPrincipalKind === 'trusted_device'
+    ? await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null) : null;
+  if (process.platform === 'win32' && options.providerFailover !== true && sourceHistoryId && derivedChannel
+      && !derivedChannel.scope && !options.temporaryControlAuthority
+      && (options.authenticatedPrincipalKind === 'owner' || regenerateOwnerDevice)) {
+    manifest.options.codexHistoryRequest = { sessionId: sourceHistoryId };
+  }
   const attachmentInputStage = await stageRunAttachmentInputs({
     sessionId,
     runId: nextRunId,
@@ -14725,11 +14744,6 @@ async function issueDerivedSessionControl({ session, sessionId, runId, requestId
         accessMode: 'read', readOnlyRequired: true, runnerId: parentOptions.runnerId,
         runnerUnitScope: parentOptions.runnerUnitScope,
       } : {}),
-  delete manifestOptions.sessionControlChannel;
-  delete manifestOptions.codexHistoryRequest;
-  delete manifestOptions.authenticatedPrincipalKind;
-  delete manifestOptions.authenticatedOwnerDevice;
-  delete manifestOptions.temporaryControlAuthority;
     },
   });
   const run = await createRun({ status: { ...status, id: nextRunId }, manifest: admission.manifest }, { admissionSession:session });
@@ -14743,6 +14757,10 @@ async function issueDerivedSessionControl({ session, sessionId, runId, requestId
   }));
 
   const activeSession = (await mutateSessionMeta(sessionId, (draft) => {
+    if ((!draft.titleAnchorRunId || draft.titleAnchorRunId === parentRun.id)
+        && (!draft.activeRunId || draft.activeRunId === parentRun.id)) {
+      claimPendingSessionTitleForRun(draft, run.id);
+    }
     draft.activeRunId = run.id;
     delete draft.lastAuthRecovery;
     draft.updatedAt = nowIso();
@@ -14829,19 +14847,6 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
   }
   // The run status record and its prompt manifest are stored separately
   // (status.json vs manifest.json) — read the manifest explicitly instead of
-  const derivedChannel = await issueDerivedSessionControl({ session, sessionId, runId: nextRunId, requestId, options });
-  if (derivedChannel) manifest.options.sessionControlChannel = derivedChannel;
-  const sourceTask = parentManifest.approvalReviewTask;
-  const sourceTaskBound = sourceTask?.version === 1 && typeof sourceTask.requestId === 'string'
-    && [parentRun.requestId, parentManifest.regenerateParentRequestId].includes(sourceTask.requestId);
-  const sourceHistoryId = sourceTaskBound ? requestedCodexHistoryId(sourceTask.text) : '';
-  const regenerateOwnerDevice = process.platform === 'win32' && options.authenticatedPrincipalKind === 'trusted_device'
-    ? await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null) : null;
-  if (process.platform === 'win32' && options.providerFailover !== true && sourceHistoryId && derivedChannel
-      && !derivedChannel.scope && !options.temporaryControlAuthority
-      && (options.authenticatedPrincipalKind === 'owner' || regenerateOwnerDevice)) {
-    manifest.options.codexHistoryRequest = { sessionId: sourceHistoryId };
-  }
   // expecting it on the record, which is always empty.
   const parentManifest = (await getRunManifest(parentRun.id)) || {};
   const parentOptions = parentManifest.options && typeof parentManifest.options === 'object'
@@ -14879,10 +14884,6 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
         : effectiveTool === 'codex-cli'
           ? 'codex-json'
           : null);
-    if ((!draft.titleAnchorRunId || draft.titleAnchorRunId === parentRun.id)
-        && (!draft.activeRunId || draft.activeRunId === parentRun.id)) {
-      claimPendingSessionTitleForRun(draft, run.id);
-    }
   const runtimeFamily = trimString(effectiveToolDefinition?.runtimeFamily)
     || (requestedTool
       ? derivedRuntimeFamily
@@ -14934,8 +14935,14 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
     ...(effectiveEffort ? { effort: effectiveEffort } : {}),
     ...(typeof effectiveThinking === 'boolean' ? { thinking: effectiveThinking } : {}),
   };
+  delete runtimeOptions.sessionControlChannel;
+  delete runtimeOptions.codexHistoryRequest;
+  delete runtimeOptions.authenticatedPrincipalKind;
+  delete runtimeOptions.authenticatedOwnerDevice;
+  delete runtimeOptions.temporaryControlAuthority;
   if (options.authenticatedPrincipalKind) {
     runtimeOptions.authenticatedPrincipalKind = options.authenticatedPrincipalKind;
+    if (options.authenticatedOwnerDevice) runtimeOptions.authenticatedOwnerDevice = structuredClone(options.authenticatedOwnerDevice);
     delete runtimeOptions.temporaryControlAuthority;
     if (options.temporaryControlAuthority) runtimeOptions.temporaryControlAuthority = options.temporaryControlAuthority;
   }
@@ -15057,13 +15064,17 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
   delete manifest.providerResumeId;
 
   // Edit-resend is a NEW run: prepareRunExecution always builds a fresh
-  delete runtimeOptions.sessionControlChannel;
-  delete runtimeOptions.codexHistoryRequest;
-  delete runtimeOptions.authenticatedPrincipalKind;
-  delete runtimeOptions.authenticatedOwnerDevice;
-  delete runtimeOptions.temporaryControlAuthority;
   // ExecutionScopeSnapshot and never copies the parent run's scope/digest.
   const nextRunId = createRunId();
+  const derivedChannel = await issueDerivedSessionControl({ session, sessionId, runId: nextRunId, requestId, options });
+  if (derivedChannel) manifest.options.sessionControlChannel = derivedChannel;
+  const derivedHistoryId = requestedCodexHistoryId(editedText);
+  const derivedOwnerDevice = process.platform === 'win32' && options.authenticatedPrincipalKind === 'trusted_device'
+    ? await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null) : null;
+  if (process.platform === 'win32' && derivedHistoryId && derivedChannel && !derivedChannel.scope && !options.temporaryControlAuthority
+      && (options.authenticatedPrincipalKind === 'owner' || derivedOwnerDevice)) {
+    manifest.options.codexHistoryRequest = { sessionId: derivedHistoryId };
+  }
   const attachmentInputStage = await stageRunAttachmentInputs({
     sessionId,
     runId: nextRunId,
@@ -15101,6 +15112,10 @@ async function resendEditedMessageUnlocked(sessionId, parentRequestId, options =
   }));
 
   const activeSession = (await mutateSessionMeta(sessionId, (draft) => {
+    if ((!draft.titleAnchorRunId || draft.titleAnchorRunId === parentRun.id)
+        && (!draft.activeRunId || draft.activeRunId === parentRun.id)) {
+      claimPendingSessionTitleForRun(draft, run.id);
+    }
     draft.activeRunId = run.id;
     delete draft.lastAuthRecovery;
     draft.updatedAt = nowIso();
@@ -15188,15 +15203,6 @@ export function collectUnansweredApprovalRequests(events, options = {}) {
   const respondedIds = new Set();
   for (const event of events) {
     if (!event || typeof event !== 'object' || event.type !== 'approval_response') continue;
-  const derivedChannel = await issueDerivedSessionControl({ session, sessionId, runId: nextRunId, requestId, options });
-  if (derivedChannel) manifest.options.sessionControlChannel = derivedChannel;
-  const derivedHistoryId = requestedCodexHistoryId(editedText);
-  const derivedOwnerDevice = process.platform === 'win32' && options.authenticatedPrincipalKind === 'trusted_device'
-    ? await captureWindowsOwnerDevice(options.authenticatedOwnerDevice).catch(() => null) : null;
-  if (process.platform === 'win32' && derivedHistoryId && derivedChannel && !derivedChannel.scope && !options.temporaryControlAuthority
-      && (options.authenticatedPrincipalKind === 'owner' || derivedOwnerDevice)) {
-    manifest.options.codexHistoryRequest = { sessionId: derivedHistoryId };
-  }
     const id = normalizeRuntimeApprovalId(String(event?.approvalId || ''));
     if (id) respondedIds.add(id);
   }
@@ -15234,10 +15240,6 @@ export function collectUnansweredApprovalRequestsFromHistory(history, runId, opt
   for (const event of history) {
     if (!event || typeof event !== 'object' || event.type !== 'approval_request') continue;
     if (runId && String(event?.runId || '') !== runId) continue;
-    if ((!draft.titleAnchorRunId || draft.titleAnchorRunId === parentRun.id)
-        && (!draft.activeRunId || draft.activeRunId === parentRun.id)) {
-      claimPendingSessionTitleForRun(draft, run.id);
-    }
     const normalized = normalizeRuntimeApprovalId(String(event?.approvalId || ''));
     if (!normalized || cancelIds.has(normalized) || respondedIds.has(normalized)) continue;
     results.push(event);

@@ -36,8 +36,70 @@ const admissionPath=resolve('packaging/windows/check-owner-msi-upgrade.ps1').rep
 const aclProbe=`$ErrorActionPreference='Stop';. '${admissionPath}' -LibraryOnly;$directoryAcl=Get-OwnerPathAcl -Path '${aclProbeRoot}';$fileAcl=Get-OwnerPathAcl -Path '${aclProbeFile}';if($directoryAcl -isnot [System.Security.AccessControl.DirectorySecurity]){throw 'Expected DirectorySecurity'};if($fileAcl -isnot [System.Security.AccessControl.FileSecurity]){throw 'Expected FileSecurity'};'UPGRADE_ACL_PWSH7_PASS'`;
 const aclProbeResult=await exec(pwsh,['-NoProfile','-NonInteractive','-Command',aclProbe],{windowsHide:true,timeout:30000,maxBuffer:16384});
 assert.match(aclProbeResult.stdout,/UPGRADE_ACL_PWSH7_PASS/,'upgrade ACL reads must work for both files and directories in PowerShell 7');
+const upgradeReceiptProbe=`$ErrorActionPreference='Stop';. '${admissionPath}' -LibraryOnly
+function New-ReceiptSet([int]$PolicyVersion=2){
+  $owner='S-1-5-21-1-2-3-1001';$inst='inst_'+('a'*32);$h=('b'*64);$r=('c'*64);$i=('d'*64);$p=('e'*64)
+  $policyJson='{"version":1,"instanceId":"'+$inst+'","controlSid":"S-1-5-80-1-2-3-4-5","executorSid":"S-1-5-80-6-7-8-9-10","ownerSid":"'+$owner+'","port":7690}'
+  $preparedJson='{"version":1,"purpose":"owner-msi-preparation","phase":"prepared","ownerSid":"'+$owner+'"}'
+  if($PolicyVersion -eq 2){
+    $policyReceiptJson='{"version":2,"purpose":"owner-msi-policy-preparation","phase":"policy-prepared","instanceId":"'+$inst+'","policySha256":"__POLICY_SHA__","releaseSha256":"'+$r+'","helperSha256":"'+$h+'","trustMode":"admin-installed-sha256","identityReused":"preserved-existing"}'
+  }else{
+    $policyReceiptJson='{"version":1,"purpose":"owner-msi-policy-preparation","phase":"policy-prepared","instanceId":"'+$inst+'","policySha256":"__POLICY_SHA__","releaseSha256":"'+$r+'","helperSha256":"'+$h+'","publisherSha256":"'+$p+'","identitySha256":"'+$i+'"}'
+  }
+  $activeJson='{"version":1,"purpose":"owner-service-activation","phase":"configuration-committed","instanceId":"'+$inst+'","preparedSha256":"__PREPARED_SHA__","policyReceiptSha256":"__POLICY_RECEIPT_SHA__","committedAt":"2026-11-19T00:00:00.0000000Z","healthConfirmed":false}'
+  $healthJson='{"version":1,"purpose":"owner-service-activation-health","instanceId":"'+$inst+'","observation":"service-processes-running","supervisorPid":4242,"controlPid":2147483647,"observedAt":"2026-11-19T00:00:01.0000000Z"}'
+  $markerJson='{"version":1,"purpose":"owner-service-activation","instanceId":"'+$inst+'","preparedSha256":"__PREPARED_SHA__","policyReceiptSha256":"__POLICY_RECEIPT_SHA__"}'
+  return @{policyJson=$policyJson;preparedJson=$preparedJson;policyReceiptJson=$policyReceiptJson;activeJson=$activeJson;healthJson=$healthJson;markerJson=$markerJson}
+}
+function Invoke-ReceiptSet([hashtable]$Set){
+  $utf8=[Text.UTF8Encoding]::new($false,$true)
+  $policyBytes=$utf8.GetBytes($Set.policyJson);$preparedBytes=$utf8.GetBytes($Set.preparedJson)
+  $policyReceiptJson=$Set.policyReceiptJson.Replace('__POLICY_SHA__',(Get-OwnerDigest $policyBytes))
+  $policyReceiptBytes=$utf8.GetBytes($policyReceiptJson)
+  $preparedDigest=Get-OwnerDigest $preparedBytes;$policyReceiptDigest=Get-OwnerDigest $policyReceiptBytes
+  $activeJson=$Set.activeJson.Replace('__PREPARED_SHA__',$preparedDigest).Replace('__POLICY_RECEIPT_SHA__',$policyReceiptDigest)
+  $markerJson=$Set.markerJson.Replace('__PREPARED_SHA__',$preparedDigest).Replace('__POLICY_RECEIPT_SHA__',$policyReceiptDigest)
+  Assert-OwnerUpgradeAdmissionReceipts ($Set.policyJson|ConvertFrom-Json) $policyBytes ($Set.preparedJson|ConvertFrom-Json) $preparedBytes ($policyReceiptJson|ConvertFrom-Json) $policyReceiptBytes ($activeJson|ConvertFrom-Json) ($Set.healthJson|ConvertFrom-Json) ($markerJson|ConvertFrom-Json)
+}
+foreach($ver in @(1,2)){
+  $valid=New-ReceiptSet $ver
+  if($PSVersionTable.PSVersion.Major -ge 7 -and (($valid.healthJson|ConvertFrom-Json).supervisorPid -isnot [long])){throw 'Expected pwsh 7 Int64 JSON integer'}
+  Invoke-ReceiptSet $valid
+}
+function Assert-Refused([string]$Label,[hashtable]$Set,[string]$ExpectedCode){
+  $actual='';try{Invoke-ReceiptSet $Set}catch{$actual=$_.Exception.GetBaseException().Message}
+  if($actual -cne $ExpectedCode){throw ('Expected '+$ExpectedCode+' for '+$Label+' but got: '+$actual)}
+}
+foreach($badPid in @('2147483648','0','-1','"4242"','4242.5','true','null')){
+  $s=New-ReceiptSet 2;$s.healthJson=$s.healthJson.Replace('"supervisorPid":4242',('"supervisorPid":'+$badPid));Assert-Refused ('supervisorPid='+$badPid) $s 'OUG_ACTIVE_RECEIPT_INVALID'
+  $c=New-ReceiptSet 2;$c.healthJson=$c.healthJson.Replace('"controlPid":2147483647',('"controlPid":'+$badPid));Assert-Refused ('controlPid='+$badPid) $c 'OUG_ACTIVE_RECEIPT_INVALID'
+}
+foreach($badBool in @('0','1','"false"','true','null')){
+  $a=New-ReceiptSet 2;$a.activeJson=$a.activeJson.Replace('"healthConfirmed":false',('"healthConfirmed":'+$badBool));Assert-Refused ('healthConfirmed='+$badBool) $a 'OUG_ACTIVE_RECEIPT_INVALID'
+}
+foreach($badVer in @('"1"','1.0','true','0','-1','2147483648')){
+  $p=New-ReceiptSet 2;$p.preparedJson=$p.preparedJson.Replace('"version":1',('"version":'+$badVer));Assert-Refused ('prepared.version='+$badVer) $p 'OUG_ACTIVE_RECEIPT_INVALID'
+  $pr=New-ReceiptSet 2;$pr.policyReceiptJson=$pr.policyReceiptJson.Replace('"version":2',('"version":'+$badVer));Assert-Refused ('policyReceipt.version='+$badVer) $pr 'OUG_ACTIVE_RECEIPT_INVALID'
+  $ac=New-ReceiptSet 2;$ac.activeJson=$ac.activeJson.Replace('"version":1',('"version":'+$badVer));Assert-Refused ('active.version='+$badVer) $ac 'OUG_ACTIVE_RECEIPT_INVALID'
+  $hl=New-ReceiptSet 2;$hl.healthJson=$hl.healthJson.Replace('"version":1',('"version":'+$badVer));Assert-Refused ('health.version='+$badVer) $hl 'OUG_ACTIVE_RECEIPT_INVALID'
+  $mk=New-ReceiptSet 2;$mk.markerJson=$mk.markerJson.Replace('"version":1',('"version":'+$badVer));Assert-Refused ('marker.version='+$badVer) $mk 'OUG_ACTIVE_RECEIPT_INVALID'
+  $pl=New-ReceiptSet 2;$pl.policyJson=$pl.policyJson.Replace('"version":1',('"version":'+$badVer));Assert-Refused ('policy.version='+$badVer) $pl 'OIP_POLICY_INVALID'
+  $pp=New-ReceiptSet 2;$pp.policyJson=$pp.policyJson.Replace('"port":7690',('"port":'+$badVer));Assert-Refused ('policy.port='+$badVer) $pp 'OIP_POLICY_INVALID'
+}
+foreach($badTime in @('"not-a-date"','"2026-11-19"','"2026-11-19T00:00:00"','""','12345','true','null')){
+  $at=New-ReceiptSet 2;$at.activeJson=$at.activeJson.Replace('"2026-11-19T00:00:00.0000000Z"',$badTime);Assert-Refused ('active.committedAt='+$badTime) $at 'OUG_ACTIVE_RECEIPT_INVALID'
+  $ht=New-ReceiptSet 2;$ht.healthJson=$ht.healthJson.Replace('"2026-11-19T00:00:01.0000000Z"',$badTime);Assert-Refused ('health.observedAt='+$badTime) $ht 'OUG_ACTIVE_RECEIPT_INVALID'
+}
+@{psVersion=$PSVersionTable.PSVersion.ToString();pass=$true}|ConvertTo-Json -Compress`;
+const encodedReceiptProbe=Buffer.from(upgradeReceiptProbe,'utf16le').toString('base64');
+for(const [label,shellExe] of [['powershell-5.1',ps],['pwsh-7',pwsh]]){
+  const receiptResult=await exec(shellExe,['-NoProfile','-NonInteractive','-EncodedCommand',encodedReceiptProbe],{windowsHide:true,timeout:30000,maxBuffer:16384});
+  assert.equal(JSON.parse(receiptResult.stdout).pass,true,`${label} upgrade receipt Int32/Int64 regression failed`);
+}
 const upgradePreparation=await readFile(resolve('packaging/windows/prepare-owner-msi-upgrade.ps1'),'utf8');
 const removal=await readFile(resolve('packaging/windows/remove-owner-msi-policy.ps1'),'utf8');
+assert.doesNotMatch(activationCheck,/\[IO\.(?:Directory|File)\]::GetAccessControl\(/,'activation check must not call ACL APIs absent from PowerShell 7');
+assert.doesNotMatch(removal,/\[IO\.(?:Directory|File)\]::GetAccessControl\(/,'removal admission must not call ACL APIs absent from PowerShell 7');
 const removeRollback=await readFile(resolve('packaging/windows/rollback-owner-msi-uninstall.ps1'),'utf8');
 const prevalidation=await readFile(resolve('packaging/windows/prevalidate-owner-msi.ps1'),'utf8');
 const chatServer=await readFile(resolve('chat-server.mjs'),'utf8');

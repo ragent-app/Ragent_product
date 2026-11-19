@@ -20,20 +20,19 @@ try {
  if(Test-OwnerServicePreparationPresence (Join-Path $root 'owner-policy.install-lock')){throw 'ORP_PENDING_TRANSACTION'}
  $preparedInput=Read-PolicyRemovalJson (Join-Path $product $(if($activeRemoval){'owner-msi.prepared.activated.json'}else{'owner-msi.prepared.json'}));$prepared=$preparedInput.value
  Assert-PolicyRemovalKeys $prepared @('version','purpose','phase','ownerSid')
- if($prepared.version -isnot [int] -or $prepared.version -ne 1 -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '\AS-1-5-21-(\d+-){3}\d+\z'){throw 'ORP_PREPARED_RECEIPT_INVALID'}
+ if(-not (Test-OwnerJsonInteger $prepared.version 1 1) -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '\AS-1-5-21-(\d+-){3}\d+\z'){throw 'ORP_PREPARED_RECEIPT_INVALID'}
  $recordInput=Read-PolicyRemovalJson (Join-Path $product $(if($activeRemoval){'owner-msi.policy.activated.json'}else{'owner-msi.policy.json'}));$record=$recordInput.value
- $trustKey=if($record.version -eq 2){'trustMode'}else{'publisherSha256'};$identityKey=if($record.identityReused -ceq 'preserved-existing'){'identityReused'}else{'identitySha256'}
+ $trustKey=if(Test-OwnerJsonInteger $record.version 2 2){'trustMode'}else{'publisherSha256'};$identityKey=if($record.identityReused -ceq 'preserved-existing'){'identityReused'}else{'identitySha256'}
  Assert-PolicyRemovalKeys $record @('version','purpose','phase','instanceId','policySha256','releaseSha256','helperSha256',$trustKey,$identityKey)
- if($record.version -isnot [int] -or $record.version -notin @(1,2) -or ($record.version -eq 2 -and $record.trustMode -cne 'admin-installed-sha256') -or $record.purpose -cne 'owner-msi-policy-preparation' -or $record.phase -cne 'policy-prepared' -or $record.instanceId -cnotmatch '\Ainst_[a-f0-9]{32}\z'){throw 'ORP_POLICY_RECEIPT_INVALID'}
+ if(-not (Test-OwnerJsonInteger $record.version 1 2) -or ($record.version -eq 2 -and $record.trustMode -cne 'admin-installed-sha256') -or $record.purpose -cne 'owner-msi-policy-preparation' -or $record.phase -cne 'policy-prepared' -or $record.instanceId -cnotmatch '\Ainst_[a-f0-9]{32}\z'){throw 'ORP_POLICY_RECEIPT_INVALID'}
  foreach($name in @('policySha256','releaseSha256','helperSha256')+@($identityKey|Where-Object {$_ -ceq 'identitySha256'})+@($trustKey|Where-Object {$_ -ceq 'publisherSha256'})){if($record.$name -isnot [string] -or $record.$name -cnotmatch '\A[a-f0-9]{64}\z'){throw 'ORP_POLICY_RECEIPT_INVALID'}}
  if($identityKey -ceq 'identityReused' -and $record.identityReused -cne 'preserved-existing'){throw 'ORP_POLICY_RECEIPT_INVALID'}
  if($activeRemoval){
   if(Test-OwnerServicePreparationPresence $removedMarker){throw 'ORP_PRIOR_REMOVAL_MARKER'}
   $activeInput=Read-PolicyRemovalJson (Join-Path $product 'owner-msi.activated.json');$active=$activeInput.value
   Assert-PolicyRemovalKeys $active @('version','purpose','phase','instanceId','preparedSha256','policyReceiptSha256','committedAt','healthConfirmed')
-  $committedTime=[DateTimeOffset]::MinValue
-  if($active.committedAt -isnot [string] -or -not [DateTimeOffset]::TryParseExact($active.committedAt,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$committedTime)){throw 'ORP_ACTIVE_RECEIPT_INVALID'}
-  if($active.version -isnot [int] -or $active.version -ne 1 -or $active.purpose -cne 'owner-service-activation' -or $active.phase -cne 'configuration-committed' -or $active.instanceId -cne $record.instanceId -or $active.healthConfirmed -isnot [bool] -or $active.healthConfirmed -ne $false -or $active.preparedSha256 -cne (Get-OwnerDigest $preparedInput.bytes) -or $active.policyReceiptSha256 -cne (Get-OwnerDigest $recordInput.bytes)){throw 'ORP_ACTIVE_RECEIPT_INVALID'}
+  if(-not (Test-OwnerJsonRoundtripTimestamp $active.committedAt)){throw 'ORP_ACTIVE_RECEIPT_INVALID'}
+  if(-not (Test-OwnerJsonInteger $active.version 1 1) -or $active.purpose -cne 'owner-service-activation' -or $active.phase -cne 'configuration-committed' -or $active.instanceId -cne $record.instanceId -or $active.healthConfirmed -isnot [bool] -or $active.healthConfirmed -ne $false -or $active.preparedSha256 -cne (Get-OwnerDigest $preparedInput.bytes) -or $active.policyReceiptSha256 -cne (Get-OwnerDigest $recordInput.bytes)){throw 'ORP_ACTIVE_RECEIPT_INVALID'}
  }
  $actual=if($activeRemoval){
   # Do not reuse the fresh-install helper: it deliberately requires Disabled /
@@ -46,7 +45,7 @@ try {
  }else{@(Get-OwnerDataServices)}
  $control=($actual|Where-Object {$_.role -eq 'control'}).sid;$executor=($actual|Where-Object {$_.role -eq 'supervisor'}).sid
  foreach($row in @(Get-OwnerDataLayout $control $executor $prepared.ownerSid)){
-  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=Get-Acl -LiteralPath $path -ErrorAction Stop
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'ORP_LAYOUT_MISMATCH'}
  }
  $policyInput=Read-PolicyRemovalJson (Join-Path $root 'security\owner-bootstrap-install.json');$policy=$policyInput.value

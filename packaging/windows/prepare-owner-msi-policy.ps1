@@ -17,12 +17,12 @@ try {
  foreach($path in @((Join-Path $root 'security'),(Join-Path $root 'owner-policy.install-lock'))){if(Test-OwnerServicePreparationPresence $path){throw 'OPP_EXISTING_POLICY_REFUSED'}}
  $stage='receipt';$bytes=Read-OwnerPinnedFile (Join-Path $product 'owner-msi.prepared.json') @(Get-OwnerAdministrativeSids) $pins
  $receipt=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json
- if(@($receipt.PSObject.Properties).Count -ne 4 -or $receipt.version -isnot [int] -or $receipt.version -ne 1 -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OPP_PREPARED_RECEIPT_REQUIRED'}
+ if(@($receipt.PSObject.Properties).Count -ne 4 -or -not (Test-OwnerJsonInteger $receipt.version 1 1) -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OPP_PREPARED_RECEIPT_REQUIRED'}
  $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  $controlSid=($services|Where-Object {$_.role -eq 'control'}).sid;$executorSid=($services|Where-Object {$_.role -eq 'supervisor'}).sid
  foreach($row in @(Get-OwnerDataLayout $controlSid $executorSid $receipt.ownerSid)){
   $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot}
-  $pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $pins.Add([RagentOwnerFilePin]::Directory($path));$acl=Get-Acl -LiteralPath $path -ErrorAction Stop
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'OPP_LAYOUT_MISMATCH'}
  }
  foreach($p in @(Get-OwnerServicePreparationPlan)){$handles.Add([ManagedPreparedService]::new($p.name,$p.command,$p.account))}
@@ -37,7 +37,7 @@ try {
  $stage='identity';$identityRead=$true
  $factsBytes=Read-OwnerPinnedFile (Join-Path $root 'config\owner-identity.result.json') (@(Get-OwnerAdministrativeSids)+@($controlSid)) $pins
  $facts=[Text.UTF8Encoding]::new($false,$true).GetString($factsBytes)|ConvertFrom-Json
- if($facts.version -ne 1 -or $facts.initialized -ne $true -or $facts.sid -cne $controlSid -or $facts.sessionId -ne 0 -or $facts.integrityRid -ne 8192 -or $facts.onlyChangeNotify -ne $true){throw 'OPP_INITIALIZATION_REQUIRED'}
+ if(-not (Test-OwnerJsonInteger $facts.version 1 1) -or $facts.initialized -isnot [bool] -or $facts.initialized -ne $true -or $facts.sid -cne $controlSid -or -not (Test-OwnerJsonInteger $facts.sessionId 0 0) -or -not (Test-OwnerJsonInteger $facts.integrityRid 8192 8192) -or $facts.onlyChangeNotify -isnot [bool] -or $facts.onlyChangeNotify -ne $true){throw 'OPP_INITIALIZATION_REQUIRED'}
  $identityBytes=Read-OwnerPinnedFile (Join-Path $root 'config\instance-identity.json') (@(Get-OwnerAdministrativeSids)+@($controlSid)) $pins 32768
  try{$identity=[Text.UTF8Encoding]::new($false,$true).GetString($identityBytes)|ConvertFrom-Json}catch{throw 'OPP_IDENTITY_INVALID'}
  if($identity.instanceId -cnotmatch '^inst_[a-f0-9]{32}$' -or $identity.algorithm -cne 'ed25519'){throw 'OPP_IDENTITY_INVALID'}

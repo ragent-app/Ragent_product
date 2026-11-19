@@ -71,14 +71,29 @@ function Get-OwnerSigner([string]$Path){
   $qaPublisher=if($qaSignature.SignerCertificate){Get-OwnerDigest $qaSignature.SignerCertificate.RawData}else{''}
   return @{status=[string]$qaSignature.Status;publisherSha256=$qaPublisher}
 }
+function Test-OwnerJsonInteger($Value,[long]$Min=[int32]::MinValue,[long]$Max=[int32]::MaxValue){
+  # Windows PowerShell 5.1 parses JSON integers as Int32; PowerShell 7 parses
+  # them as Int64. Accept only integral CLR types within the allowed bounds.
+  if($null -eq $Value){return $false}
+  if($Value -isnot [int] -and $Value -isnot [long]){return $false}
+  return ($Value -ge $Min -and $Value -le $Max)
+}
+function Test-OwnerJsonRoundtripTimestamp($Value){
+  # Windows PowerShell 5.1 keeps ISO-8601 timestamps as String; PowerShell 7
+  # auto-parses them into DateTime with Kind=Utc/Local (or Unspecified when no offset).
+  if($null -eq $Value){return $false}
+  if($Value -is [DateTime]){return ($Value.Kind -ne [DateTimeKind]::Unspecified)}
+  if($Value -is [DateTimeOffset]){return $true}
+  if($Value -isnot [string]){return $false}
+  $parsed=[DateTime]::MinValue
+  if(-not [DateTime]::TryParseExact($Value,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$parsed)){return $false}
+  return ($parsed.Kind -ne [DateTimeKind]::Unspecified)
+}
 function Assert-OwnerReleaseManifest($Release){
-  $trustKey=if($Release.version -eq 2){'trustMode'}else{'publisherSha256'};$expected=@('version','protocolVersion','helperFile','helperSha256',$trustKey)
-  # ConvertFrom-Json emits Int64 for ordinary JSON integers in PowerShell 7;
-  # accept only integral CLR types while keeping range/schema validation strict.
-  $versionIsInteger=$Release.version -is [int] -or $Release.version -is [long]
-  $protocolVersionIsInteger=$Release.protocolVersion -is [int] -or $Release.protocolVersion -is [long]
+  if($null -eq $Release){throw 'OBD_RELEASE_MISMATCH'}
+  $trustKey=if(Test-OwnerJsonInteger $Release.version 2 2){'trustMode'}else{'publisherSha256'};$expected=@('version','protocolVersion','helperFile','helperSha256',$trustKey)
   if(@($Release.PSObject.Properties).Count -ne 5 -or @($Release.PSObject.Properties.Name|Where-Object {$_ -cnotin $expected}).Count -or
-    -not $versionIsInteger -or $Release.version -notin @(1,2) -or -not $protocolVersionIsInteger -or $Release.protocolVersion -notin @(1,2) -or
+    -not (Test-OwnerJsonInteger $Release.version 1 2) -or -not (Test-OwnerJsonInteger $Release.protocolVersion 1 2) -or
     $Release.helperFile -cne 'Ragent.OwnerBootstrap.exe' -or $Release.helperSha256 -isnot [string] -or $Release.helperSha256 -cnotmatch '\A[a-f0-9]{64}\z' -or
     ($Release.version -eq 2 -and ($Release.trustMode -cne 'admin-installed-sha256' -or $Release.protocolVersion -ne 2)) -or
     ($Release.version -eq 1 -and ($Release.publisherSha256 -isnot [string] -or $Release.publisherSha256 -cnotmatch '\A[a-f0-9]{64}\z'))){throw 'OBD_RELEASE_MISMATCH'}
@@ -100,7 +115,7 @@ function Assert-OwnerPreparedRelease([Collections.Generic.List[IDisposable]]$Pin
   $release=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json
   # New packaged administrative manifests are valid before first identity
   # initialization. A legacy active signed manifest is never silently adopted.
-  if($release.version -ne 2){throw 'OBD_PREPARED_RELEASE_REFUSED'}
+  if(-not (Test-OwnerJsonInteger $release.version 2 2)){throw 'OBD_PREPARED_RELEASE_REFUSED'}
   $helperPath=Join-Path (Get-OwnerProductRoot) 'payload\Ragent.OwnerBootstrap.exe'
   $helper=Read-OwnerPinnedFile $helperPath $admin $Pins 4194304
   $null=Get-OwnerReleaseTrust $release $helper $helperPath

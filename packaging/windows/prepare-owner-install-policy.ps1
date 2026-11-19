@@ -9,10 +9,11 @@ $ownerPolicyLibraryOnly=$LibraryOnly.IsPresent
 $product=Get-OwnerProductRoot
 
 function Assert-OwnerInstallPolicy($Policy){
+  if($null -eq $Policy){throw 'OIP_POLICY_INVALID'}
   $keys=@($Policy.PSObject.Properties.Name)
   $expected=@('version','instanceId','controlSid','executorSid','ownerSid','port')
   if($keys.Count -ne 6 -or @($keys|Where-Object {$_ -cnotin $expected}).Count -or
-    $Policy.version -isnot [int] -or $Policy.version -ne 1 -or $Policy.port -isnot [int] -or $Policy.port -ne 7690 -or
+    -not (Test-OwnerJsonInteger $Policy.version 1 1) -or -not (Test-OwnerJsonInteger $Policy.port 7690 7690) -or
     $Policy.instanceId -isnot [string] -or $Policy.instanceId -cnotmatch '\A(?:[a-f0-9-]{36}|inst_[a-f0-9]{32})\z' -or
     $Policy.controlSid -isnot [string] -or $Policy.controlSid -cnotmatch '\AS-1-5-80-(\d+-){4}\d+\z' -or
     $Policy.executorSid -isnot [string] -or $Policy.executorSid -cnotmatch '\AS-1-5-80-(\d+-){4}\d+\z' -or
@@ -33,7 +34,7 @@ function New-OwnerPolicySecurity($Policy,[ValidateSet('security','runtime','file
   return $acl
 }
 function Assert-OwnerPolicyRelease($Release){
-  try{Assert-OwnerReleaseManifest $Release;if($Release.protocolVersion -ne 2){throw 'protocol'}}catch{throw 'OIP_SIGNED_RELEASE_REQUIRED'}
+  try{Assert-OwnerReleaseManifest $Release;if(-not (Test-OwnerJsonInteger $Release.protocolVersion 2 2)){throw 'protocol'}}catch{throw 'OIP_SIGNED_RELEASE_REQUIRED'}
 }
 function Assert-OwnerPolicyDirectory([string]$Path,[string[]]$Allowed,[Collections.Generic.List[IDisposable]]$Pins){
   for($cursor=[IO.Path]::GetFullPath($Path);$cursor;$cursor=[IO.Path]::GetDirectoryName($cursor)){
@@ -62,7 +63,7 @@ function Publish-OwnerInstallPolicy([string]$Root,$Policy,[string[]]$Administrat
       if(-not [IO.Directory]::Exists($path)){$null=[IO.Directory]::CreateDirectory($path,(New-OwnerPolicySecurity $Policy $kind $Administrators))}
       $pins.Add([RagentOwnerFilePin]::Directory($path))
       Assert-OwnerObjectAcl $path $(if($kind -eq 'runtime'){$Administrators+@($Policy.controlSid)}else{$Administrators})
-      $actual=[IO.Directory]::GetAccessControl($path)
+      $actual=Get-Acl -LiteralPath $path -ErrorAction Stop
       if(-not $actual.AreAccessRulesProtected -or $actual.GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access) -cne (New-OwnerPolicySecurity $Policy $kind $Administrators).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)){throw 'OIP_DIRECTORY_POLICY_MISMATCH'}
     }
     $temporary=Join-Path $security ('owner-policy.pending-'+[guid]::NewGuid().ToString('N'))

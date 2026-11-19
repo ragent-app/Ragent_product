@@ -47,7 +47,7 @@ try {
  Assert-OwnerPreparedRelease $pins
  $stage='receipt';$receiptBytes=Read-OwnerPinnedFile (Join-Path $product 'owner-msi.prepared.json') @(Get-OwnerAdministrativeSids) $pins
  $receipt=[Text.UTF8Encoding]::new($false,$true).GetString($receiptBytes)|ConvertFrom-Json
- if(@($receipt.PSObject.Properties).Count -ne 4 -or $receipt.version -ne 1 -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OII_PREPARED_RECEIPT_REQUIRED'}
+ if(@($receipt.PSObject.Properties).Count -ne 4 -or -not (Test-OwnerJsonInteger $receipt.version 1 1) -or $receipt.purpose -cne 'owner-msi-preparation' -or $receipt.phase -cne 'prepared' -or $receipt.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OII_PREPARED_RECEIPT_REQUIRED'}
  # Verify the entire protected prepared directory layout without changing it.
  $stage='layout';for($parent=(Get-OwnerProgramDataPath);$parent;$parent=[IO.Path]::GetDirectoryName($parent)){$pins.Add([RagentOwnerFilePin]::Directory($parent));Assert-OwnerObjectAcl $parent @(Get-OwnerAdministrativeSids) -Ancestor -Pins $pins}
  $controlSid=($services|Where-Object {$_.role -eq 'control'}).sid;$executorSid=($services|Where-Object {$_.role -eq 'supervisor'}).sid
@@ -66,7 +66,7 @@ try {
  $stage='run';$control.Initialize();$control.Restore();$supervisor.Verify();$null=@(Get-OwnerDataServices)
  $stage='result';$resultBytes=Read-OwnerPinnedFile (Join-Path $config 'owner-identity.result.json') (@(Get-OwnerAdministrativeSids)+@($controlSid)) $pins
  $facts=[Text.UTF8Encoding]::new($false,$true).GetString($resultBytes)|ConvertFrom-Json
- if($facts.version -ne 1 -or $facts.initialized -ne $true -or $facts.sid -cne $controlSid -or $facts.sessionId -ne 0 -or $facts.integrityRid -ne 8192 -or $facts.onlyChangeNotify -ne $true -or $facts.hostPid -le 0 -or $facts.nodePid -le 0){throw 'OII_INITIALIZATION_RESULT_INVALID'}
+ if(-not (Test-OwnerJsonInteger $facts.version 1 1) -or $facts.initialized -isnot [bool] -or $facts.initialized -ne $true -or $facts.sid -cne $controlSid -or -not (Test-OwnerJsonInteger $facts.sessionId 0 0) -or -not (Test-OwnerJsonInteger $facts.integrityRid 8192 8192) -or $facts.onlyChangeNotify -isnot [bool] -or $facts.onlyChangeNotify -ne $true -or -not (Test-OwnerJsonInteger $facts.hostPid 1) -or -not (Test-OwnerJsonInteger $facts.nodePid 1)){throw 'OII_INITIALIZATION_RESULT_INVALID'}
  $stage='identity';$identityBytes=Read-OwnerPinnedFile (Join-Path $config 'instance-identity.json') (@(Get-OwnerAdministrativeSids)+@($controlSid)) $pins 32768
  $identity=[Text.UTF8Encoding]::new($false,$true).GetString($identityBytes)|ConvertFrom-Json
  if($identity.instanceId -cnotmatch '^inst_[a-f0-9]{32}$' -or $identity.algorithm -cne 'ed25519'){throw 'OII_IDENTITY_INVALID'}

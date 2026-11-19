@@ -40,7 +40,7 @@ function Get-OwnerActivationServiceLogSummary([string]$Role,[string]$Path){
 function Copy-OwnerActivationHealth($Payload){
  if($Payload.ok -is [bool]){$healthDiagnostics.ok=$Payload.ok}
  if($Payload.cliTransport -is [string] -and $Payload.cliTransport -cmatch '\A[A-Za-z0-9_-]{1,64}\z'){$healthDiagnostics.cliTransport=$Payload.cliTransport}
- if($Payload.pid -is [int] -and $Payload.pid -gt 0){$healthDiagnostics.pid=[long]$Payload.pid;$healthDiagnostics.pidIsInt32=$true}
+ if(Test-OwnerJsonInteger $Payload.pid 1){$healthDiagnostics.pid=[long]$Payload.pid;$healthDiagnostics.pidIsInt32=$true}
  $activation=$Payload.ownerActivation
  if($null -eq $activation){return}
  $states=@('idle','starting','inspecting','backoff','cooldown','listening','draining','failed','stopping','stopped','cleanup-required')
@@ -78,12 +78,12 @@ try {
  foreach($name in @('owner-msi.prepared.json','owner-msi.policy.json')){if(-not(Test-OwnerServicePreparationPresence (Join-Path $product $name))){throw 'OAC_PREPARATION_RECEIPTS_REQUIRED'}}
  $preparedInput=Read-ActivationJson (Join-Path $product 'owner-msi.prepared.json') $admin;$prepared=$preparedInput.value
  Assert-ActivationKeys $prepared @('version','purpose','phase','ownerSid')
- if($prepared.version -isnot [int] -or $prepared.version -ne 1 -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '\AS-1-5-21-(\d+-){3}\d+\z'){throw 'OAC_PREPARED_RECEIPT_INVALID'}
+ if(-not (Test-OwnerJsonInteger $prepared.version 1 1) -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '\AS-1-5-21-(\d+-){3}\d+\z'){throw 'OAC_PREPARED_RECEIPT_INVALID'}
  $recordInput=Read-ActivationJson (Join-Path $product 'owner-msi.policy.json') $admin;$record=$recordInput.value
- $trustKey=if($record.version -eq 2){'trustMode'}else{'publisherSha256'}
+ $trustKey=if(Test-OwnerJsonInteger $record.version 2 2){'trustMode'}else{'publisherSha256'}
  $identityKey=if($preserveExistingIdentity){'identityReused'}else{'identitySha256'}
  Assert-ActivationKeys $record @('version','purpose','phase','instanceId','policySha256','releaseSha256','helperSha256',$trustKey,$identityKey)
- if($record.version -isnot [int] -or $record.version -notin @(1,2) -or ($record.version -eq 2 -and $record.trustMode -cne 'admin-installed-sha256') -or $record.purpose -cne 'owner-msi-policy-preparation' -or $record.phase -cne 'policy-prepared' -or $record.instanceId -cnotmatch '\Ainst_[a-f0-9]{32}\z'){throw 'OAC_POLICY_RECEIPT_INVALID'}
+ if(-not (Test-OwnerJsonInteger $record.version 1 2) -or ($record.version -eq 2 -and $record.trustMode -cne 'admin-installed-sha256') -or $record.purpose -cne 'owner-msi-policy-preparation' -or $record.phase -cne 'policy-prepared' -or $record.instanceId -cnotmatch '\Ainst_[a-f0-9]{32}\z'){throw 'OAC_POLICY_RECEIPT_INVALID'}
  foreach($name in @('policySha256','releaseSha256','helperSha256')+@($identityKey|Where-Object {$_ -ceq 'identitySha256'})+@($trustKey|Where-Object {$_ -ceq 'publisherSha256'})){if($record.$name -isnot [string] -or $record.$name -cnotmatch '\A[a-f0-9]{64}\z'){throw 'OAC_POLICY_RECEIPT_INVALID'}}
  if($preserveExistingIdentity -and $record.identityReused -cne 'preserved-existing'){throw 'OAC_IDENTITY_REUSE_RECEIPT_INVALID'}
  $stage='services';Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'owner-activation-service-read.cs')))
@@ -91,7 +91,7 @@ try {
  $actual=@(Get-OwnerDataServices);$control=($actual|Where-Object {$_.role -eq 'control'}).sid;$executor=($actual|Where-Object {$_.role -eq 'supervisor'}).sid
  $stage='layout'
  foreach($row in @(Get-OwnerDataLayout $control $executor $prepared.ownerSid)){
-  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=[IO.Directory]::GetAccessControl($path)
+  $path=if($row.relative){Join-Path (Get-OwnerDataRoot) $row.relative}else{Get-OwnerDataRoot};$pins.Add([RagentOwnerFilePin]::Directory($path));$acl=Get-Acl -LiteralPath $path -ErrorAction Stop
   if(-not $acl.AreAccessRulesProtected -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -cne 'S-1-5-32-544' -or (Get-OwnerDataAclSddl $acl ([Security.AccessControl.AccessControlSections]::Access)) -cne (Get-OwnerDataAclSddl (New-OwnerDataAcl $row.grants $row.traverseOnly) ([Security.AccessControl.AccessControlSections]::Access))){throw 'OAC_LAYOUT_MISMATCH'}
  }
  $stage='policy';$policyInput=Read-ActivationJson (Join-Path $root 'security\owner-bootstrap-install.json') $admin;$policy=$policyInput.value
@@ -121,7 +121,7 @@ try {
   if((Get-OwnerDigest $identity.bytes) -cne $record.identitySha256){throw 'OAC_IDENTITY_HASH_MISMATCH'}
   if($identity.value.instanceId -cne $record.instanceId -or $identity.value.algorithm -cne 'ed25519'){throw 'OAC_IDENTITY_BINDING_MISMATCH'}
   $facts=(Read-ActivationJson (Join-Path $root 'config\owner-identity.result.json') ($admin+@($control))).value
-  if($facts.version -isnot [int] -or $facts.version -ne 1 -or $facts.initialized -ne $true -or $facts.sid -cne $control -or $facts.sessionId -ne 0 -or $facts.integrityRid -ne 8192 -or $facts.onlyChangeNotify -ne $true -or $facts.hostPid -le 0 -or $facts.nodePid -le 0){throw 'OAC_INITIALIZATION_REQUIRED'}
+  if(-not (Test-OwnerJsonInteger $facts.version 1 1) -or $facts.initialized -isnot [bool] -or $facts.initialized -ne $true -or $facts.sid -cne $control -or -not (Test-OwnerJsonInteger $facts.sessionId 0 0) -or -not (Test-OwnerJsonInteger $facts.integrityRid 8192 8192) -or $facts.onlyChangeNotify -isnot [bool] -or $facts.onlyChangeNotify -ne $true -or -not (Test-OwnerJsonInteger $facts.hostPid 1) -or -not (Test-OwnerJsonInteger $facts.nodePid 1)){throw 'OAC_INITIALIZATION_REQUIRED'}
  }
  foreach($h in $handles){$h.Verify()}
  if($activationAction -ceq 'Activate'){
@@ -150,10 +150,10 @@ try {
     $response=$request.GetResponse();$reader=$null
     try{$healthDiagnostics.httpStatus=[int]$response.StatusCode;$reader=[IO.StreamReader]::new($response.GetResponseStream(),[Text.Encoding]::UTF8,$true);$health=$reader.ReadToEnd()|ConvertFrom-Json}finally{if($reader){$reader.Dispose()};$response.Dispose()}
     Copy-OwnerActivationHealth $health
-    $healthDiagnostics.ok=($health.ok -eq $true)
+    $healthDiagnostics.ok=($health.ok -is [bool] -and $health.ok -eq $true)
     $healthDiagnostics.cliTransport=if($health.cliTransport -is [string]){$health.cliTransport}else{$null}
-    $healthDiagnostics.pid=if($health.pid -is [ValueType]){[long]$health.pid}else{$null}
-    $healthDiagnostics.pidIsInt32=($health.pid -is [int] -and $health.pid -gt 0)
+    $healthDiagnostics.pid=if($health.pid -is [int] -or $health.pid -is [long]){[long]$health.pid}else{$null}
+    $healthDiagnostics.pidIsInt32=(Test-OwnerJsonInteger $health.pid 1)
     $healthDiagnostics.healthCheckGatePassed=($healthDiagnostics.httpStatus -eq 200 -and $healthDiagnostics.ok -eq $true -and $healthDiagnostics.cliTransport -ceq 'ready' -and $healthDiagnostics.pidIsInt32 -and $healthDiagnostics.pid -gt 0)
     if($healthDiagnostics.healthCheckGatePassed){
      $nodeProcess=Get-CimInstance Win32_Process -Filter ('ProcessId='+$health.pid) -ErrorAction SilentlyContinue

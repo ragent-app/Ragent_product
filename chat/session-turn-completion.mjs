@@ -702,16 +702,6 @@ export function createSessionTurnCompletionHelpers(services) {
     let sessionChanged = false;
     const allowCompletionEffects = allowsSessionTurnCompletionEffects(manifest);
 
-    if (allowCompletionEffects && typeof publishDelegatedResult === 'function') {
-      await publishDelegatedResult({ session, finalizedRun, manifest }).catch((error) => {
-        if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') throw error;
-        console.error(`[delegation] result publication failed for ${sessionId?.slice(0, 8)}: ${error.message}`);
-      });
-    }
-
-    if (isReplySelfRepairOperation(manifest)) {
-      if (finalizedRun.state === 'completed') {
-        await updateReplyPublication(finalizedRun, (current) => ({
     const userReplacement = ['regenerate', 'editResend'].includes(manifest?.internalOperation);
     // Persist the actual terminal state and bounded structured outcome for replay.
     // A completed runner can still report that the user's task is blocked.
@@ -727,6 +717,17 @@ export function createSessionTurnCompletionHelpers(services) {
         ...(outcome ? { outcome } : {}), blockers: boundedList(packet?.blockers), unresolvedItems: boundedList(packet?.unresolvedItems),
       });
     }
+
+    if (allowCompletionEffects && typeof publishDelegatedResult === 'function') {
+      await publishDelegatedResult({ session, finalizedRun, manifest }).catch((error) => {
+        if (error?.code === 'LINUX_RUN_RESULT_UNAVAILABLE') throw error;
+        console.error(`[delegation] result publication failed for ${sessionId?.slice(0, 8)}: ${error.message}`);
+      });
+    }
+
+    if (isReplySelfRepairOperation(manifest)) {
+      if (finalizedRun.state === 'completed') {
+        await updateReplyPublication(finalizedRun, (current) => ({
           ...current,
           state: 'ready',
           resolution: 'auto_continued',

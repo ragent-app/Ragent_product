@@ -54,7 +54,7 @@ try {
  }else{
   $bytes=Read-OwnerPinnedFile $receipt @(Get-OwnerAdministrativeSids) $pins
   $record=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json
-  if($record.version -ne 1 -or $record.purpose -cne 'owner-msi-preparation' -or $record.phase -cne 'prepared' -or $record.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OMI_RECEIPT_INVALID'}
+  if(-not (Test-OwnerJsonInteger $record.version 1 1) -or $record.purpose -cne 'owner-msi-preparation' -or $record.phase -cne 'prepared' -or $record.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OMI_RECEIPT_INVALID'}
  }
  $null=@(Get-OwnerDataServices)
  foreach($plan in @(Get-OwnerServicePreparationPlan)){$services.Add([ManagedPreparedService]::new($plan.name,$plan.command,$plan.account))}

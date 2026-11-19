@@ -30,7 +30,7 @@ function Assert-UpgradeJournal {
  if(-not(Test-OwnerServicePreparationPresence $journalPath)){throw 'OMU_TRANSACTION_REQUIRED'}
  $bytes=Read-UpgradeBytes 'owner-msi.upgrade-transaction.json' 8192
  try{$record=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)|ConvertFrom-Json}catch{throw 'OMU_TRANSACTION_INVALID'}
- if(@($record.PSObject.Properties).Count -ne 9 -or $record.version -isnot [int] -or $record.version -ne 2 -or $record.purpose -cne 'owner-msi-upgrade-transaction' -or $record.phase -cne 'begun' -or $record.transactionId -cnotmatch '^[a-f0-9]{32}$' -or $record.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$' -or $record.controlSid -cnotmatch '^S-1-5-80-(\d+-){4}\d+$' -or $record.executorSid -cnotmatch '^S-1-5-80-(\d+-){4}\d+$' -or $record.controlSid -ceq $record.executorSid){throw 'OMU_TRANSACTION_INVALID'}
+ if(@($record.PSObject.Properties).Count -ne 9 -or -not (Test-OwnerJsonInteger $record.version 2 2) -or $record.purpose -cne 'owner-msi-upgrade-transaction' -or $record.phase -cne 'begun' -or $record.transactionId -cnotmatch '^[a-f0-9]{32}$' -or $record.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$' -or $record.controlSid -cnotmatch '^S-1-5-80-(\d+-){4}\d+$' -or $record.executorSid -cnotmatch '^S-1-5-80-(\d+-){4}\d+$' -or $record.controlSid -ceq $record.executorSid){throw 'OMU_TRANSACTION_INVALID'}
  $archiveRows=@($record.archivedReceipts);$expectedNames=Get-UpgradeReceiptNames
  if($archiveRows.Count -ne $expectedNames.Count){throw 'OMU_TRANSACTION_INVALID'}
  $seen=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -241,7 +241,7 @@ try {
    foreach($name in @('owner-msi.prepare-lock','owner-policy.prepare-lock','owner-msi.policy.json','owner-identity.initialize-lock','owner-activation.prepare-lock')){if(Test-OwnerServicePreparationPresence (Join-Path $product $name)){throw 'OMU_PENDING_TRANSACTION'}}
    $servicesData=@(Get-OwnerDataServices);$control=($servicesData|Where-Object {$_.role -ceq 'control'}).sid;$executor=($servicesData|Where-Object {$_.role -ceq 'supervisor'}).sid
    $prepared=(Read-UpgradeJson (Join-Path $product 'owner-msi.prepared.json') 2048).value
-   if($prepared.version -ne 1 -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OMU_PREPARED_RECEIPT_INVALID'}
+   if(-not (Test-OwnerJsonInteger $prepared.version 1 1) -or $prepared.purpose -cne 'owner-msi-preparation' -or $prepared.phase -cne 'prepared' -or $prepared.ownerSid -cnotmatch '^S-1-5-21-(\d+-){3}\d+$'){throw 'OMU_PREPARED_RECEIPT_INVALID'}
    $policyInput=Read-UpgradeJson (Join-Path $ownerRoot 'security\owner-bootstrap-install.json') 8192;$policy=$policyInput.value
    Assert-ExistingPolicy $policy $policyInput.bytes $control $executor
    if($policy.ownerSid -cne $prepared.ownerSid){throw 'OMU_POLICY_OWNER_MISMATCH'}
@@ -269,7 +269,7 @@ try {
    $preparedPath=Join-Path $product 'owner-msi.prepared.activated.json';$policyPath=Join-Path $product 'owner-msi.policy.activated.json';$activePath=Join-Path $product 'owner-msi.activated.json';$healthPath=Join-Path $product 'owner-msi.activation-health.json'
    foreach($path in @($preparedPath,$policyPath,$activePath,$healthPath)){if(-not(Test-OwnerServicePreparationPresence $path)){throw 'OMU_ACTIVATION_INCOMPLETE'}}
    $prepared=(Read-UpgradeJson $preparedPath 2048).value;$policy=(Read-UpgradeJson $policyPath 2048).value;$active=(Read-UpgradeJson $activePath 2048).value;$health=(Read-UpgradeJson $healthPath 2048).value
-   if($prepared.phase -cne 'prepared' -or $policy.phase -cne 'policy-prepared' -or $policy.identityReused -cne 'preserved-existing' -or $active.purpose -cne 'owner-service-activation' -or $active.phase -cne 'configuration-committed' -or $active.healthConfirmed -ne $false -or $health.purpose -cne 'owner-service-activation-health' -or -not(Test-OwnerServicePreparationPresence (Join-Path $product 'owner-activation.committed-lock'))){throw 'OMU_ACTIVATION_RECEIPT_INVALID'}
+   if($prepared.phase -cne 'prepared' -or $policy.phase -cne 'policy-prepared' -or $policy.identityReused -cne 'preserved-existing' -or $active.purpose -cne 'owner-service-activation' -or $active.phase -cne 'configuration-committed' -or $active.healthConfirmed -isnot [bool] -or $active.healthConfirmed -ne $false -or $health.purpose -cne 'owner-service-activation-health' -or -not(Test-OwnerServicePreparationPresence (Join-Path $product 'owner-activation.committed-lock'))){throw 'OMU_ACTIVATION_RECEIPT_INVALID'}
    Remove-UpgradeArchives $journal
    Remove-UpgradeFile 'owner-msi.upgrade-transaction.json';$complete=$true
    @{ok=$true;transactionCommitted=$true;identityReused=$true;identityRead=$false;dataChanged=$false}|ConvertTo-Json -Compress
