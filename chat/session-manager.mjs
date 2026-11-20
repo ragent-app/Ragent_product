@@ -1305,18 +1305,24 @@ async function buildRunClaudeModelContract({
   providerProfileId,
   catalog = null,
   priorContract = null,
+  resolvedProfile = null,
+  resolvedAuthProfile = null,
 }) {
   if (!isClaudeRunSelection(tool, runtimeFamily) || !trimString(providerProfileId)) {
     return { ok: true, contract: null };
   }
   const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
-  const profile = await registry.getProviderProfile(providerProfileId).catch(() => null);
+  const profile = resolvedProfile || await registry.getProviderProfile(providerProfileId).catch(() => null);
   if (!profile || profile.agentType !== 'claude') {
     return {
       ok: false,
       code: 'claude-model-contract-invalid',
       message: `Claude provider profile ${providerProfileId} is unavailable.`,
     };
+  }
+  const authProfile = resolvedAuthProfile || await registry.getAuthProfile(profile.authProfileId).catch(() => null);
+  if (authProfile?.authType === 'oauth-token') {
+    return { ok: true, contract: null };
   }
   return resolveClaudeModelContract({
     contract: priorContract,
@@ -14173,8 +14179,30 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   // catalog, the requested model must exist in it BEFORE spawn. The run fails
   // with model-not-available instead of silently switching model/provider.
   const requestedScopedModel = trimString(targetBindingManifest.options.model);
+  const requestedModelScope = parseScopedCodexModel(requestedScopedModel).providerId;
+  if (isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily)
+    && requestedModelScope && effectiveProviderProfile && requestedModelScope !== effectiveProviderProfile) {
+    const error = new Error('Requested model belongs to a different provider.');
+    error.code = 'model-not-available';
+    error.statusCode = 400;
+    throw error;
+  }
+  const claudeProviderProfile = effectiveProviderProfile || requestedModelScope;
+  let claudeSetupToken = false;
+  let claudeProfile = null;
+  let claudeAuthProfile = null;
+  if (isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily) && claudeProviderProfile) {
+    const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
+    claudeProfile = await registry.getProviderProfile(claudeProviderProfile).catch(() => null);
+    claudeAuthProfile = claudeProfile?.agentType === 'claude'
+      ? await registry.getAuthProfile(claudeProfile.authProfileId).catch(() => null)
+      : null;
+    claudeSetupToken = claudeAuthProfile?.authType === 'oauth-token';
+  }
   let resolvedModelCatalog = null;
-  if (requestedScopedModel) {
+  // The setup-token catalog is a CLI presentation, not an exhaustive list of
+  // model IDs supported by the account. Claude Code validates those itself.
+  if (requestedScopedModel && !claudeSetupToken) {
     const catalogCheck = await validateRunModelAgainstCatalog({
       tool: effectiveTool,
       model: requestedScopedModel,
@@ -14189,13 +14217,11 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     }
     resolvedModelCatalog = catalogCheck.catalog || null;
   }
-  const claudeProviderProfile = effectiveProviderProfile
-    || parseScopedCodexModel(requestedScopedModel).providerId;
   // Claude Code has its own hidden model invocations (notably automatic
   // session-title generation). Freeze all of those aliases now, before the
   // Run is persisted, rather than letting the runner consult a mutable global
   // modelPolicy after the user-visible work already completed.
-  if (isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily) && claudeProviderProfile && !resolvedModelCatalog) {
+  if (isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily) && claudeProviderProfile && !claudeSetupToken && !resolvedModelCatalog) {
     resolvedModelCatalog = await getToolModelCatalog(effectiveTool, claudeProviderProfile).catch(() => null);
   }
   const claudeContractResult = await buildRunClaudeModelContract({
@@ -14205,6 +14231,8 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     providerProfileId: claudeProviderProfile,
     catalog: resolvedModelCatalog,
     priorContract: session.claudeModelContract || null,
+    resolvedProfile: claudeProfile,
+    resolvedAuthProfile: claudeAuthProfile,
   });
   if (!claudeContractResult.ok) {
     const error = new Error(claudeContractResult.message || 'Claude model mapping is invalid for the selected provider.');
@@ -14225,7 +14253,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     ...(requestedPlanAction ? { planAction: requestedPlanAction } : {}),
     ...(requestedPlanId ? { planId: requestedPlanId } : {}),
     ...(effectiveCodexResume ? { codexResume: true } : {}),
-    ...(claudeModelContract ? { claudeModelContract } : {}),
+    ...(isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily) ? { claudeModelContract: claudeModelContract || undefined } : {}),
     runtimeFingerprint: buildProviderRuntimeFingerprint({
       manifest: targetBindingManifest,
       folder: session.folder || '',
@@ -14597,7 +14625,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     }
     return run;
   }, draft => {
-    if (claudeModelContract && !scopedMessageExecution) draft.claudeModelContract = claudeModelContract;
+    if (!scopedMessageExecution && isClaudeRunSelection(effectiveTool, effectiveRuntimeFamily)) {
+      if (claudeModelContract) draft.claudeModelContract = claudeModelContract;
+      else delete draft.claudeModelContract;
+    }
   });
   const activeSession = publication.activeSession;
   setApiRequestCorrelation({ runId: run.id });

@@ -13,10 +13,13 @@ import { readPersistentCodexCatalog, writePersistentCodexCatalog } from './codex
 import { normalizeModelCatalog, sourceFromModelOrigins } from '../lib/provider-runtime/model-catalog.mjs';
 import { getHarnessProviderProtocols } from '../lib/provider-runtime/harness-bridge.mjs';
 import { getHarnessDefinition, listHarnesses } from '../lib/harness-registry.mjs';
+import { discoverClaudeSetupTokenModels } from './claude-model-discovery.mjs';
 
 const codexModelsCache = new Map();
 const agyModelsCache = new Map();
 const agyModelRefreshes = new Map();
+const claudeSetupModelsCache = new Map();
+const claudeSetupModelRefreshes = new Map();
 const MODEL_CATALOG_CACHE_MAX_ENTRIES = 128;
 
 function cacheGet(map, key) {
@@ -402,6 +405,30 @@ function buildResponseModel(model, fallbackReasoning = null) {
 // (`alias@providerId`), mirroring how codex models are scoped per provider.
 // The run launcher accepts `options.providerProfile` for provider selection,
 // so the id keeps the codex `model@providerId` uniqueness contract.
+async function getSetupTokenModels(token, { providerId, allowNetwork = true, refreshAllowed = true } = {}) {
+  // Cache only a fingerprint, never the credential itself. Separate accounts
+  // may have different Claude Code model entitlements.
+  const key = `${providerId}\u0000${createHash('sha256').update(token).digest('hex')}`;
+  const cached = cacheGet(claudeSetupModelsCache, key);
+  const now = Date.now();
+  if (cached?.failedAt && now - cached.failedAt < PROVIDER_MODEL_LIST_FAIL_COOLDOWN_MS) return cached;
+  if (cached?.at && now - cached.at < PROVIDER_MODEL_LIST_TTL_MS && cached.models) return cached;
+  if (!refreshAllowed) return cached || null;
+  let refresh = claudeSetupModelRefreshes.get(key);
+  if (!refresh) {
+    refresh = discoverClaudeSetupTokenModels({ token }).then((models) => {
+      if (Array.isArray(models) && models.length > 0) {
+        return cacheSet(claudeSetupModelsCache, key, { at: Date.now(), models });
+      }
+      return cacheSet(claudeSetupModelsCache, key, { ...cached, failedAt: Date.now() });
+    }).catch(() => {
+      return cacheSet(claudeSetupModelsCache, key, { ...cached, failedAt: Date.now() });
+    }).finally(() => claudeSetupModelRefreshes.delete(key));
+    claudeSetupModelRefreshes.set(key, refresh);
+  }
+  return allowNetwork ? refresh : cached || null;
+}
+
 async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true } = {}) {
   const { createNativeProviderRegistry, createSecretStore } = await import('../lib/provider-runtime/index.mjs');
   const registry = createNativeProviderRegistry({ configDir: CONFIG_DIR });
@@ -435,6 +462,7 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
     // three tier aliases.  api-key rows only (OAuth official has no
     // list endpoint on this shape).
     let discovered = null;
+    let setupCatalog = null;
     if (authProfile?.authType === 'api-key') {
       const resolvedSecret = await secretStore.resolveSecret(authProfile.storageRef).catch(() => null);
       const apiKey = resolvedSecret?.ok && resolvedSecret.authType === 'api-key'
@@ -448,6 +476,12 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
             auth: { OPENAI_API_KEY: apiKey },
           },
         }, { allowNetwork });
+      }
+    } else if (authProfile?.authType === 'oauth-token') {
+      const secret = await secretStore.resolveSecret(authProfile.storageRef).catch(() => null);
+      if (secret?.ok && secret.authType === 'oauth-token' && secret.token) {
+        setupCatalog = await getSetupTokenModels(secret.token, { providerId: profile.id, allowNetwork, refreshAllowed: Boolean(providerProfile) });
+        discovered = setupCatalog?.models || null;
       }
     }
     const seen = new Set();
@@ -463,20 +497,24 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
       const window = contextWindow || lookupModelContextWindowTokens(id);
       const supportsLongContext = window !== null && window >= 1_000_000;
       const configured = configuredById.get(id) || configuredById.get(`${id}[1m]`);
-      let capabilities = modelEntry?.capabilities
+      let capabilities = modelEntry && Array.isArray(discovered) && discovered.length > 0
         ? parseModelCapabilities(modelEntry, { source: 'upstream' })
         : parseModelCapabilities(configured || {}, { source: 'configured' });
       // Use Harness defaults when the provider does not publish effort levels.
-      if (capabilities.effort.supported !== false && capabilities.effort.levels.length === 0) {
+      if (!(authProfile?.authType === 'oauth-token' && modelEntry)
+          && capabilities.effort.supported !== false && capabilities.effort.levels.length === 0) {
         capabilities = { ...capabilities, effort: {
           supported: true, levels: [...levels], default: 'medium', source: 'builtin',
         } };
       }
       const reasoning = reasoningFromCapabilities(capabilities);
       models.push({
-        id: `${id}${supportsLongContext ? '[1m]' : ''}@${profile.id}`,
-        label: label || id,
-        catalogSource: Array.isArray(discovered) && discovered.length > 0 ? 'discovered' : 'configured',
+        id: `${id}${supportsLongContext && authProfile?.authType !== 'oauth-token' ? '[1m]' : ''}@${profile.id}`,
+        label: modelEntry?.resolvedModel && modelEntry.resolvedModel !== id
+          ? `${label || id} (${modelEntry.resolvedModel})` : (label || id),
+        catalogSource: Array.isArray(discovered) && discovered.length > 0
+          ? (setupCatalog && (setupCatalog.failedAt || Date.now() - setupCatalog.at >= PROVIDER_MODEL_LIST_TTL_MS)
+            ? 'stale-cache' : 'discovered') : 'configured',
         ...(window !== null ? { contextWindow: window } : {}),
         capabilities: publicModelCapabilities({ effort: capabilities.effort }),
         ...(reasoning ? {
@@ -497,9 +535,14 @@ async function getNativeClaudeModels(providerProfile = '', { allowNetwork = true
       if (!target || seen.has(target)) continue;
       pushModel(target, target, null, configuredById.get(target));
     }
+    if (authProfile?.authType === 'oauth-token') {
+      for (const entry of configuredById.values()) {
+        pushModel(String(entry.id).trim(), entry.label || entry.id, null, entry);
+      }
+    }
     // A provider without any model env (OAuth official rows import bare) still
     // needs selectable tiers; expose the raw aliases so the CLI resolves them.
-    if (seen.size === 0 && authProfile?.authType !== 'api-key') {
+    if (authProfile?.authType === 'oauth-token' || (seen.size === 0 && authProfile?.authType !== 'api-key')) {
       for (const tier of ['sonnet', 'opus', 'haiku']) pushModel(tier, tier);
     }
   }
@@ -771,7 +814,7 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
       providerGroups.get(groupKey).push({
         model: bareModel,
         label: model?.label || bareModel,
-        source: sourceFromModelOrigins([model?.catalogSource]),
+        source: model?.catalogSource === 'stale-cache' ? 'stale-cache' : sourceFromModelOrigins([model?.catalogSource]),
         capabilities: model?.capabilities || null,
         ...(Number.isFinite(model?.contextWindow) ? { contextWindow: model.contextWindow } : {}),
       });
@@ -784,6 +827,7 @@ export async function getToolModelCatalogs(toolId, providerProfile = '', { fast 
       const official = officialStates.get(groupKey);
       const discoveryError = official?.errorCode || (!official?.fetchedAt && official ? 'MODEL_LIST_UNAVAILABLE' : '');
       const stale = Boolean(official?.fetchedAt && (official.failedAt || now - official.fetchedAt >= PROVIDER_MODEL_LIST_TTL_MS))
+        || providerOrigins.get(groupKey)?.includes('stale-cache')
         || (['claude', 'claude-bidi'].includes(tool) && providerOrigins.get(groupKey)?.every((origin) => origin === 'configured'));
       catalogs.set(groupKey, normalizeModelCatalog({
         providerProfileId: groupKey,
