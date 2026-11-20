@@ -350,6 +350,12 @@ sealed interface WebParityEvent {
         val defaultModel: String,
         val protocol: String,
     ) : WebParityEvent
+    class SaveClaudeSetupTokenProvider(
+        val existingId: String?,
+        val displayName: String,
+        val oauthToken: String,
+        val defaultModel: String,
+    ) : WebParityEvent
     data class StartProviderOAuth(val agentType: String, val displayName: String, val providerId: String? = null) : WebParityEvent
     data object CheckProviderOAuth : WebParityEvent
     data object OpenProviderOAuth : WebParityEvent
@@ -442,6 +448,21 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
             put("apiKey", apiKey.trim())
             put("defaultModel", defaultModel.trim())
             if (agentType != "claude" && agentType != "agy") put("protocol", protocol)
+        })
+    }
+
+    suspend fun saveClaudeSetupTokenProvider(existingId: String?, displayName: String, oauthToken: String, defaultModel: String) {
+        val token = oauthToken.trim()
+        require(existingId != null || token.isNotEmpty()) { "Credential is required" }
+        val endpoint = existingId?.let { "/api/native-providers/${path(it)}" } ?: "/api/native-providers"
+        request(if (existingId == null) "POST" else "PATCH", endpoint, jsonObject {
+            if (existingId == null) {
+                put("agentType", "claude")
+                put("authType", "oauth-token")
+            }
+            put("displayName", displayName.trim())
+            put("defaultModel", defaultModel.trim())
+            if (token.isNotEmpty()) put("oauthToken", token)
         })
     }
 
@@ -1025,7 +1046,7 @@ class WebParityViewModel(
     fun onEvent(event: WebParityEvent) {
         val providerRepository = if (providerRepositoryFactory == null) repository
             else mutableState.value.providerTargetId?.let(providerRepositoryFactory)
-        val providerAction = event is WebParityEvent.CreateProviderApiKey || event is WebParityEvent.StartProviderOAuth ||
+        val providerAction = event is WebParityEvent.CreateProviderApiKey || event is WebParityEvent.SaveClaudeSetupTokenProvider || event is WebParityEvent.StartProviderOAuth ||
             event is WebParityEvent.UpdateProvider || event is WebParityEvent.DeleteProvider ||
             event is WebParityEvent.RefreshProviderQuota || event is WebParityEvent.ToggleProviderRotation ||
             event is WebParityEvent.ToggleProviderRotationProvider
@@ -1274,6 +1295,9 @@ class WebParityViewModel(
             is WebParityEvent.DeleteTrigger -> mutate { repository.deleteTrigger(event.id) }
             is WebParityEvent.CreateProviderApiKey -> mutateProvider {
                 providerRepository!!.createProviderApiKey(event.agentType, event.displayName, event.baseUrl, event.apiKey, event.defaultModel, event.protocol)
+            }
+            is WebParityEvent.SaveClaudeSetupTokenProvider -> mutateProvider(safeError = "Credential submission failed") {
+                providerRepository!!.saveClaudeSetupTokenProvider(event.existingId, event.displayName, event.oauthToken, event.defaultModel)
             }
             is WebParityEvent.StartProviderOAuth -> {
                 if (mutableState.value.actionInProgress || mutableState.value.providerOAuthJob?.terminal == false) return
@@ -1621,7 +1645,7 @@ class WebParityViewModel(
         }
     }
 
-    private fun mutateProvider(action: suspend () -> Unit) {
+    private fun mutateProvider(safeError: String? = null, action: suspend () -> Unit) {
         val target = mutableState.value.providerInstances.firstOrNull { it.instance.id == mutableState.value.providerTargetId }?.instance
         mutableState.update { it.copy(actionInProgress = true, error = null, providerSavedTarget = null) }
         viewModelScope.launch {
@@ -1631,7 +1655,7 @@ class WebParityViewModel(
                 onRuntimeCatalogChanged?.invoke()
                 refresh(WebParityPage.ModelProviders)
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { mutableState.update { it.copy(actionInProgress = false, error = error.message ?: "Action failed") } }
+            catch (error: Exception) { mutableState.update { it.copy(actionInProgress = false, error = safeError ?: error.message ?: "Action failed") } }
         }
     }
 

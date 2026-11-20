@@ -132,4 +132,11 @@
     <string name="sp_error_selection">제공업체 선택을 업데이트할 수 없습니다.</string>
     <string name="sp_error_file">파일을 열 수 없습니다.</string>
     <string name="sp_error_folder">폴더를 열 수 없습니다.</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">연결된 실행 호스트에서 claude setup-token을 실행한 후 생성된 토큰을 여기에 붙여 넣으세요.</string>
+    <string name="sp_claude_setup_token_keep">비워 두면 기존 토큰이 유지됩니다.</string>
+    <string name="sp_claude_default_base_url">기본 URL을 비워 두면 https://api.anthropic.com을 사용하며, 사용자 지정 게이트웨이를 입력할 수도 있습니다.</string>
+    <string name="sp_claude_console_hint">브라우저에서 Claude Console에 로그인하고 API 키를 만든 다음 여기에 붙여 넣으세요.</string>
+    <string name="sp_claude_console_open">Claude Console 열기</string>
+    <string name="sp_claude_console_open_failed">브라우저를 열 수 없습니다. 다시 시도하세요.</string>
 </resources>

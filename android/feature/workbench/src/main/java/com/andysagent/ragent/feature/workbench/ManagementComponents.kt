@@ -52,10 +52,12 @@ internal fun ManagementHint(text: String, glyph: AgentoWebGlyph = AgentoWebGlyph
 
 @Composable
 internal fun ManagementField(value: String, onChange: (String) -> Unit, label: String,
-    enabled: Boolean, inputModifier: Modifier = Modifier) {
+    enabled: Boolean, inputModifier: Modifier = Modifier, secret: Boolean = false) {
     val colors = LocalRagentColors.current
     OutlinedTextField(value, onChange, modifier = Modifier.fillMaxWidth().then(inputModifier),
         enabled = enabled, singleLine = true, shape = RoundedCornerShape(12.dp),
+        visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = if (secret) androidx.compose.ui.text.input.KeyboardType.Password else androidx.compose.ui.text.input.KeyboardType.Text),
         textStyle = MaterialTheme.typography.bodyMedium,
         label = { Text(label, style = MaterialTheme.typography.bodySmall) },
         colors = OutlinedTextFieldDefaults.colors(

@@ -196,4 +196,11 @@
     <string name="sp_codex_apps_guidance">No apps confirmed. Open a Codex session for the selected account and refresh to check.</string>
     <string name="sp_codex_command_hint">Enter an executable path or an HTTP(S) URL. Put each command argument on its own line.</string>
     <string name="sp_codex_command_args">Arguments, one per line (optional)</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">On the connected host, run claude setup-token and paste the resulting token here.</string>
+    <string name="sp_claude_setup_token_keep">Leave blank to keep the existing token.</string>
+    <string name="sp_claude_default_base_url">Leave the base URL blank to use https://api.anthropic.com, or enter a custom gateway.</string>
+    <string name="sp_claude_console_hint">Sign in to the Claude Console in your browser, create an API key, then paste it here.</string>
+    <string name="sp_claude_console_open">Open Claude Console</string>
+    <string name="sp_claude_console_open_failed">Could not open the browser. Try again.</string>
 </resources>

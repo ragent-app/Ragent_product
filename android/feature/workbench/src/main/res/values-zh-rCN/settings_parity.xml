@@ -196,4 +196,11 @@
     <string name="sp_codex_apps_guidance">尚未确认应用。请打开所选账号的 Codex 会话并刷新查看。</string>
     <string name="sp_codex_command_hint">输入可执行文件路径或 HTTP(S) 地址。命令参数请每行填写一个。</string>
     <string name="sp_codex_command_args">命令参数，每行一个（可选）</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">在连接的执行主机上运行 claude setup-token，然后在此粘贴生成的令牌。</string>
+    <string name="sp_claude_setup_token_keep">留空可保留现有令牌。</string>
+    <string name="sp_claude_default_base_url">基础 URL 留空时使用 https://api.anthropic.com，也可输入自定义网关。</string>
+    <string name="sp_claude_console_hint">在浏览器中登录 Claude Console，创建 API 密钥，然后粘贴到这里。</string>
+    <string name="sp_claude_console_open">打开 Claude Console</string>
+    <string name="sp_claude_console_open_failed">无法打开浏览器，请重试。</string>
 </resources>

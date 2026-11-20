@@ -819,9 +819,13 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
     val uriHandler = LocalUriHandler.current
     var dialog by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
+    var setupToken by remember { mutableStateOf("") }
     LaunchedEffect(state.actionInProgress, state.error, state.providerSavedTarget) {
         if (submitted && !state.actionInProgress) {
-            if (state.error == null || state.providerSavedTarget != null) dialog = false
+            if (state.error == null || state.providerSavedTarget != null) {
+                dialog = false
+                setupToken = ""
+            }
             submitted = false
         }
     }
@@ -856,7 +860,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                 agentType = availableHarnesses.firstOrNull()?.id.orEmpty()
                 authMode = if (agentType == "agy") "oauth" else "api-key"
                 protocol = availableHarnesses.firstOrNull()?.protocols?.firstOrNull() ?: "chat"
-                name = ""; baseUrl = ""; apiKey = ""; model = ""
+                name = ""; baseUrl = ""; apiKey = ""; setupToken = ""; model = ""
                 dialog = true
             }, leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Plus, null, Modifier.size(18.dp)) })
         }
@@ -896,7 +900,8 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                     }
                     val authLabel = when (provider.authType) {
                         "api-key" -> stringResource(R.string.sp_api_key)
-                        "oauth", "oauth-token" -> stringResource(R.string.sp_official_oauth)
+                        "oauth-token" -> stringResource(if (provider.agentType == "claude") R.string.sp_claude_setup_token else R.string.sp_official_oauth)
+                        "oauth" -> stringResource(R.string.sp_official_oauth)
                         else -> provider.authType
                     }
                     Text("${providerRuntimeLabel(provider.agentType)} · $authLabel", style = MaterialTheme.typography.bodySmall, maxLines = 2,
@@ -933,7 +938,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                             editingProvider = provider
                             name = provider.name
                             agentType = provider.agentType
-                            authMode = provider.authType.ifBlank { "api-key" }
+                            authMode = if (provider.agentType == "claude" && provider.authType in setOf("oauth", "oauth-token")) "oauth-token" else provider.authType.ifBlank { "api-key" }
                             baseUrl = provider.baseUrl
                             model = provider.defaultModel
                             protocol = when (provider.protocol) {
@@ -943,6 +948,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                                 else -> provider.protocol.ifBlank { "responses" }
                             }
                             apiKey = ""
+                            setupToken = ""
                             dialog = true
                         }, modifier = Modifier.testTag("provider-edit-${provider.id}"), emphasized = true)
                         if (!restrictedDemo) RemoteManagementAction(stringResource(R.string.sp_delete), { deletingProvider = provider }, modifier = Modifier.testTag("provider-delete-${provider.id}"))
@@ -975,6 +981,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                 if (!state.actionInProgress) {
                     dialog = false
                     editingProvider = null
+                    setupToken = ""
                 }
             },
             confirmModifier = Modifier.testTag("provider-save"),
@@ -982,7 +989,9 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                 val current = editingProvider
                 submitted = current != null || authMode != "oauth"
                 if (!submitted) dialog = false
-                if (current != null) {
+                if (agentType == "claude" && authMode == "oauth-token") {
+                    onEvent(WebParityEvent.SaveClaudeSetupTokenProvider(current?.id, name, setupToken, model))
+                } else if (current != null) {
                     onEvent(WebParityEvent.UpdateProvider(current.id, name, baseUrl, apiKey, model, protocol, current.enabled))
                 } else if (authMode == "oauth") {
                     onEvent(WebParityEvent.StartProviderOAuth(agentType, name))
@@ -991,7 +1000,8 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                 }
             },
             confirmEnabled = !state.actionInProgress && (editingProvider != null || availableHarnesses.any { it.id == agentType }) &&
-                (editingProvider != null || authMode != "oauth" || state.harnesses.any { it.id == agentType && it.installed }),
+                (editingProvider != null || authMode != "oauth" || state.harnesses.any { it.id == agentType && it.installed }) &&
+                (authMode != "oauth-token" || editingProvider?.authType == "oauth-token" || setupToken.isNotBlank()),
             dismissEnabled = !state.actionInProgress,
         ) {
                 Column(verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
@@ -1001,6 +1011,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(RagentSpacing.Compact), verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
                             availableHarnesses.forEach { choice ->
                                 RemoteSettingsAction(choice.label, {
+                                    setupToken = ""
                                     agentType = choice.id
                                     authMode = if (choice.id == "agy") "oauth" else "api-key"
                                     protocol = choice.protocols.firstOrNull() ?: "chat"
@@ -1016,13 +1027,26 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                         color = LocalRagentColors.current.secondaryContent)
                     if (agentType.isNotBlank()) {
                         if (editingProvider == null) Row(horizontalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
-                            if (agentType != "agy") RemoteSettingsAction(stringResource(R.string.sp_api_key), { authMode = "api-key" }, modifier = Modifier.weight(1f), secondary = authMode != "api-key")
+                            if (agentType != "agy") RemoteSettingsAction(stringResource(R.string.sp_api_key), { setupToken = ""; authMode = "api-key" }, modifier = Modifier.weight(1f), secondary = authMode != "api-key")
+                            if (agentType == "claude") RemoteSettingsAction(stringResource(R.string.sp_claude_setup_token), { authMode = "oauth-token" }, modifier = Modifier.weight(1f), secondary = authMode != "oauth-token")
                             if ((agentType == "codex" || agentType == "agy") && state.harnesses.any { it.id == agentType && it.installed }) RemoteSettingsAction(stringResource(R.string.sp_official_oauth), { authMode = "oauth" }, modifier = Modifier.weight(1f), secondary = authMode != "oauth")
                         }
                         ManagementField(name, { name = it }, stringResource(R.string.sp_display_name), enabled = !state.actionInProgress, inputModifier = Modifier.testTag("provider-name"))
                         if (authMode == "api-key") {
                             ManagementField(baseUrl, { baseUrl = it }, stringResource(R.string.sp_base_url), enabled = !state.actionInProgress)
-                            ManagementField(apiKey, { apiKey = it }, stringResource(R.string.sp_api_key), enabled = !state.actionInProgress)
+                            if (agentType == "claude" && editingProvider == null) Text(stringResource(R.string.sp_claude_default_base_url), style = MaterialTheme.typography.bodySmall)
+                            val officialClaudeApi = agentType == "claude" &&
+                                (baseUrl.isBlank() || baseUrl.trim().trimEnd('/').equals("https://api.anthropic.com", ignoreCase = true))
+                            if (officialClaudeApi) {
+                                var claudeConsoleOpenFailed by remember { mutableStateOf(false) }
+                                Text(stringResource(R.string.sp_claude_console_hint), style = MaterialTheme.typography.bodySmall)
+                                RemoteSettingsAction(stringResource(R.string.sp_claude_console_open), {
+                                    claudeConsoleOpenFailed = runCatching { uriHandler.openUri("https://platform.claude.com/settings/keys") }.isFailure
+                                }, enabled = !state.actionInProgress, secondary = true)
+                                if (claudeConsoleOpenFailed) AgentoErrorText(stringResource(R.string.sp_claude_console_open_failed))
+                            }
+                            ManagementField(apiKey, { apiKey = it }, stringResource(R.string.sp_api_key),
+                                enabled = !state.actionInProgress, secret = agentType == "claude")
                             ManagementField(model, { model = it }, stringResource(R.string.sp_default_model), enabled = !state.actionInProgress)
                             val protocols = availableHarnesses.firstOrNull { it.id == agentType }?.protocols.orEmpty()
                             if (protocols.size > 1) {
@@ -1033,6 +1057,12 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                                     }
                                 }
                             }
+                        } else if (agentType == "claude" && authMode == "oauth-token") {
+                            Text(stringResource(R.string.sp_claude_setup_token_hint), style = MaterialTheme.typography.bodySmall)
+                            ManagementField(setupToken, { setupToken = it }, stringResource(R.string.sp_claude_setup_token),
+                                enabled = !state.actionInProgress, inputModifier = Modifier.testTag("provider-setup-token"), secret = true)
+                            if (editingProvider?.authType == "oauth-token") Text(stringResource(R.string.sp_claude_setup_token_keep), style = MaterialTheme.typography.bodySmall)
+                            ManagementField(model, { model = it }, stringResource(R.string.sp_default_model), enabled = !state.actionInProgress)
                         } else {
                             Text(stringResource(R.string.sp_oauth_hint), style = MaterialTheme.typography.bodySmall)
                         }

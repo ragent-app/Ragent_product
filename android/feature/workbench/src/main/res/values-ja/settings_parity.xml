@@ -132,4 +132,11 @@
     <string name="sp_error_selection">プロバイダーの選択を更新できませんでした。</string>
     <string name="sp_error_file">ファイルを開けませんでした。</string>
     <string name="sp_error_folder">フォルダーを開けませんでした。</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">接続先の実行ホストで claude setup-token を実行し、生成されたトークンをここに貼り付けてください。</string>
+    <string name="sp_claude_setup_token_keep">空欄にすると現在のトークンを保持します。</string>
+    <string name="sp_claude_default_base_url">ベース URL を空欄にすると https://api.anthropic.com を使用します。カスタムゲートウェイも指定できます。</string>
+    <string name="sp_claude_console_hint">ブラウザで Claude Console にログインして API キーを作成し、ここに貼り付けてください。</string>
+    <string name="sp_claude_console_open">Claude Console を開く</string>
+    <string name="sp_claude_console_open_failed">ブラウザを開けませんでした。もう一度お試しください。</string>
 </resources>

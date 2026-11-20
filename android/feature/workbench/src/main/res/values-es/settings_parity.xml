@@ -132,4 +132,11 @@
     <string name="sp_error_selection">No se pudo actualizar la selección de proveedores.</string>
     <string name="sp_error_file">No se pudo abrir el archivo.</string>
     <string name="sp_error_folder">No se pudo abrir la carpeta.</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">En el host conectado, ejecuta claude setup-token y pega aquí el token generado.</string>
+    <string name="sp_claude_setup_token_keep">Déjalo vacío para conservar el token actual.</string>
+    <string name="sp_claude_default_base_url">Deja vacía la URL base para usar https://api.anthropic.com o introduce una puerta de enlace personalizada.</string>
+    <string name="sp_claude_console_hint">Inicia sesión en Claude Console en tu navegador, crea una clave API y pégala aquí.</string>
+    <string name="sp_claude_console_open">Abrir Claude Console</string>
+    <string name="sp_claude_console_open_failed">No se pudo abrir el navegador. Inténtalo de nuevo.</string>
 </resources>

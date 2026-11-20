@@ -132,4 +132,11 @@
     <string name="sp_error_selection">Impossible de modifier la sélection des fournisseurs.</string>
     <string name="sp_error_file">Impossible d’ouvrir le fichier.</string>
     <string name="sp_error_folder">Impossible d’ouvrir le dossier.</string>
+    <string name="sp_claude_setup_token">Claude setup-token</string>
+    <string name="sp_claude_setup_token_hint">Sur l’hôte connecté, exécutez claude setup-token et collez ici le jeton obtenu.</string>
+    <string name="sp_claude_setup_token_keep">Laissez vide pour conserver le jeton actuel.</string>
+    <string name="sp_claude_default_base_url">Laissez l’URL de base vide pour utiliser https://api.anthropic.com, ou saisissez une passerelle personnalisée.</string>
+    <string name="sp_claude_console_hint">Connectez-vous à Claude Console dans votre navigateur, créez une clé API, puis collez-la ici.</string>
+    <string name="sp_claude_console_open">Ouvrir Claude Console</string>
+    <string name="sp_claude_console_open_failed">Impossible d’ouvrir le navigateur. Réessayez.</string>
 </resources>
