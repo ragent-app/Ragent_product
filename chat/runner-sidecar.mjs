@@ -2330,12 +2330,32 @@ async function failCodexAppServerMcpReadiness(runId, state, terminate, reasonCod
   return true;
 }
 
+async function recordOrganizationMcpInventory(runId, state, parsed) {
+  const serverName = state?.mcpOptionalOrganizationServerName
+    || state?.mcpRequiredServers?.find((server) => server.requiredToolNames?.includes('ragent_organization_read'))?.name;
+  if (!serverName) return;
+  const records = !parsed?.error && Array.isArray(parsed?.result?.data) ? parsed.result.data : null;
+  const entry = records?.find((item) => (item?.name || item?.serverName || item?.server_name) === serverName);
+  const definitions = entry?.tools && typeof entry.tools === 'object' ? Object.entries(entry.tools) : null;
+  const tools = definitions?.map(([key, tool]) => ({ name: tool?.name || key, tool }))
+    .filter(({ name }) => ['ragent_organization_read', 'ragent_organization_action'].includes(name)).map(({ name, tool }) => {
+      const actions = tool?.inputSchema?.properties?.action?.enum;
+      return { name, actions: Array.isArray(actions) && actions.every((action) => typeof action === 'string') ? actions : null };
+    }) ?? null;
+  await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+    type: 'status', role: 'system', content: 'Organization MCP inventory observed',
+    organizationMcp: { server: serverName, inventory: entry ? 'observed' : (records && parsed.result.nextCursor === null ? 'absent' : 'unknown'),
+      startup: state.mcpStartupStatuses?.[serverName] || 'unknown', tools },
+  } }).catch(() => null);
+}
+
 async function consumeCodexAppServerMcpStatusList(runId, state, proc, parsed, terminate) {
   if (!state || parsed?.id !== state.mcpStatusRequestId) return false;
   const requestWasAfterReady = state.mcpStatusRequestAfterReady === true;
   state.mcpStatusRequestId = null;
   state.mcpStatusRequestAfterReady = false;
   state.mcpDiagnosticInventory = parsed?.error ? 'error' : 'response';
+  await recordOrganizationMcpInventory(runId, state, parsed);
   if (!state.mcpRequired) {
     if (state.providerReadOnly && (parsed?.error || !Array.isArray(parsed?.result?.data)
         || parsed.result.data.length !== 0 || !Object.hasOwn(parsed.result, 'nextCursor') || parsed.result.nextCursor !== null)) {
@@ -5452,6 +5472,10 @@ async function main() {
         runtimeState.mcpOptionalOrganizationServerName = organizationMcpRequested && !protectedDelegatedRun && !optionalOrganizationOmitted
           ? serverNamesByKind.get('organization') : '';
         if (organizationMcpRequested && protectedDelegatedRun) requiredServers.push({ name: serverNamesByKind.get('organization'), requiredToolNames: ['ragent_organization_read', 'ragent_organization_action'] });
+        if (organizationMcpRequested) await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+          type: 'status', role: 'system', content: 'Organization MCP configuration recorded',
+          organizationMcp: { configuration: optionalOrganizationOmitted ? 'omitted' : 'configured', server: serverNamesByKind.get('organization') || null, startup: 'unknown', inventory: 'unknown' },
+        } }).catch(() => null);
         if (managedActionMcpRequested) {
           const requiredToolNames = ['ragent_request_actions'];
           if (approvedActionChannel.productAgentCreate === true) requiredToolNames.push('ragent_create_agent');

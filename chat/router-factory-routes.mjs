@@ -88,11 +88,41 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
         authSession.capabilityOperation !== (organizationTools[2] === 'tools' ? 'organization.tools' : 'session.organization.tools') || decodeURIComponent(organizationTools[1]) !== authSession.sessionId) {
       writeJson(res, 403, { error: 'Scoped organization Run required' }); return true;
     }
+    let action = '';
+    const recordAction = async (status) => {
+      if (!authSession.runId || !/^[a-z]+(?:\.[a-z]+)+$/.test(action) || action === 'capabilities.get') return;
+      try {
+        const { appendRunSpoolRecord } = await import('./runs.mjs');
+        await appendRunSpoolRecord(authSession.runId, { ts: new Date().toISOString(), stream: 'stdout', json: {
+          type: 'status', role: 'system', content: 'Organization action observed',
+          organizationAction: { action, status, evidence: 'scoped_api_call' },
+        } });
+      } catch { /* Observation must not alter the action outcome. */ }
+    };
     try {
       const body = JSON.parse((await readBody(req, 32 * 1024)) || '{}');
+      action = typeof body.action === 'string' ? body.action : '';
       const { executeOrganizationControlTool } = await import('./organization-control-tools.mjs');
-      writeJson(res, 200, await executeOrganizationControlTool({ authSession, action: body.action, args: body.args }));
-    } catch (error) { writeJson(res, error?.statusCode || 400, { error: error?.message || 'Organization tool failed', code: error?.code || undefined }); }
+      const result = await executeOrganizationControlTool({ authSession, action, args: body.args });
+      if (action === 'capabilities.get' && authSession.runId && organizationTools[2] === 'tools-root') {
+        try {
+          const { appendRunSpoolRecord } = await import('./runs.mjs');
+          const status = (value) => value === true ? 'allowed' : value === false ? 'denied' : 'unknown';
+          await appendRunSpoolRecord(authSession.runId, { ts: new Date().toISOString(), stream: 'stdout', json: {
+            type: 'status', role: 'system', content: 'Organization authorization observed',
+            organizationAuthorization: { evidence: 'capability_query', actions: {
+              'plan.submit': status(result.canPlan), 'phase.dispatch': status(result.canDispatch),
+              'swarm.spawn': status(result.canDelegate),
+            } },
+          } });
+        } catch { /* Observation must not alter discovery. */ }
+      }
+      await recordAction('succeeded');
+      writeJson(res, 200, result);
+    } catch (error) {
+      await recordAction(error?.statusCode === 403 ? 'denied' : 'failed');
+      writeJson(res, error?.statusCode || 400, { error: error?.message || 'Organization tool failed', code: error?.code || undefined });
+    }
     return true;
   }
   const ownerReport = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/owner-report-authorization$/.exec(String(pathname || ''));

@@ -806,18 +806,30 @@ export async function executeOrganizationControlTool({ authSession, action, args
     };
 
     if (action === 'capabilities.get') {
+      let canPlan = false;
       let canDispatch = false;
       let canDelegate = false;
       let remainingDepth = 0;
       if (root) {
         const { authorizeRootOrganizationCreate } = await import('./collaboration-capability.mjs');
-        canDispatch = await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId, dispatch: true }).then(() => true, () => false);
-        const { rootPolicy } = await loadRootSwarmState().catch(() => ({ rootPolicy: { canDelegate: false, remainingDepth: 0 } }));
-        canDelegate = rootPolicy.canDelegate;
-        remainingDepth = rootPolicy.remainingDepth;
+        const checkAuthorization = async (dispatch) => {
+          try {
+            await authorizeRootOrganizationCreate({ session, runId: authSession.runId, turnId: authSession.turnId, dispatch });
+            return true;
+          } catch (error) {
+            if (error?.code === 'ORG_PLAN_FORBIDDEN') return false;
+            return null;
+          }
+        };
+        canPlan = await checkAuthorization(false);
+        canDispatch = await checkAuthorization(true);
+        const swarmState = await loadRootSwarmState().catch(() => null);
+        canDelegate = swarmState ? swarmState.rootPolicy.canDelegate : null;
+        remainingDepth = swarmState ? swarmState.rootPolicy.remainingDepth : null;
       }
       return {
         root,
+        canPlan,
         canDispatch,
         canSwarm: root,
         canDelegate,

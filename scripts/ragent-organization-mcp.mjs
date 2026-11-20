@@ -81,7 +81,7 @@ const readTool = {
 
 const actionTool = {
   name: 'ragent_organization_action',
-  description: 'Execute authorized organization or Swarm mutations: submit root proposals, dispatch frozen phases/children, spawn/kill/complete Swarm members, manage channels, post @mention board messages, wait on the board, or resolve incidents. Server responses are authoritative.',
+  description: 'Execute authorized organization or Swarm mutations: submit root proposals, dispatch frozen phases/children, spawn/kill/complete Swarm members, manage channels, post @mention board messages, wait on the board, or resolve incidents. For the conditional proposal contract, read the root skill through skills.read. Server responses are authoritative.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -157,7 +157,7 @@ const actionTool = {
 function filterPermittedReads(capabilities = {}) {
   const swarmMember = rootScope
     ? Boolean(capabilities.canSwarm ?? capabilities.root)
-    : capabilities.canSwarm !== false;
+    : capabilities.canSwarm === true;
   return readActions.filter((action) => {
     if (swarmReadActions.includes(action)) return swarmMember;
     if (['plan.status', 'phase.list', 'result.read'].includes(action)) {
@@ -170,7 +170,7 @@ function filterPermittedReads(capabilities = {}) {
 function filterPermittedWrites(capabilities = {}) {
   const swarmMember = rootScope
     ? Boolean(capabilities.canSwarm ?? capabilities.root)
-    : capabilities.canSwarm !== false;
+    : capabilities.canSwarm === true;
   const canSwarmSpawn = rootScope
     ? Boolean(capabilities.root && capabilities.canDelegate)
     : Boolean(capabilities.canSwarmDelegate);
@@ -183,7 +183,7 @@ function filterPermittedWrites(capabilities = {}) {
     if (action === 'swarm.done') return swarmMember && isCoordinator;
     if (action === 'swarm.model') return swarmMember && capabilities.canSwitchModel === true;
     return rootScope
-      ? Boolean(capabilities.root && capabilities.canDispatch)
+      ? Boolean(capabilities.root && (action === 'plan.submit' ? capabilities.canPlan : capabilities.canDispatch))
       : Boolean(capabilities.canDelegate);
   });
 }
@@ -208,7 +208,11 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
         result = { tools: [] };
       } else {
         const response = await client.request(`/api/sessions/${encodeURIComponent(sessionId)}/organization/${endpoint}`, { method: 'POST', body: { action: 'capabilities.get' } });
-        const capabilities = response.response.ok ? response.json : {};
+        if (!response.response.ok || !response.json || typeof response.json !== 'object' || Array.isArray(response.json)) {
+          send({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'Organization capability discovery failed' } });
+          continue;
+        }
+        const capabilities = response.json;
         const permittedReads = filterPermittedReads(capabilities);
         const permittedWrites = filterPermittedWrites(capabilities);
         result = {
@@ -234,7 +238,8 @@ for await (const line of createInterface({ input: process.stdin, crlfDelay: Infi
     send({ jsonrpc: '2.0', id: request.id, result });
   } catch {
     if (request?.id !== undefined && request?.id !== null) {
-      send({ jsonrpc: '2.0', id: request.id, result: { isError: true, content: [{ type: 'text', text: 'Organization request unavailable' }] } });
+      if (request.method === 'tools/list') send({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message: 'Organization capability discovery failed' } });
+      else send({ jsonrpc: '2.0', id: request.id, result: { isError: true, content: [{ type: 'text', text: 'Organization request unavailable' }] } });
     }
   }
 }
