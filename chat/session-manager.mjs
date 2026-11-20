@@ -9614,7 +9614,7 @@ async function runDetachedRunPostFinalizationEffects(sessionId, finalizedRun, ma
 }
 
 async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifest, fullNormalizedEvents = []) {
-  if (finalizedRun?.state !== 'failed') return null;
+  if (finalizedRun?.state !== 'failed' || manifest?.internalOperation === 'organization_plan_repair') return null;
   // A managed organization's frozen selection cannot be silently changed by
   // provider failover. A future authorized revision may select another runtime.
   const failedSession = await getSession(sessionId);
@@ -14267,14 +14267,14 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     internalOperation: options.internalOperation, collaborationCapability: options.collaborationCapability,
     getAppImpl: getApp, getSessionImpl: getSession,
   });
-  const effectiveReadOnlyRequired = options.readOnlyRequired === true
+  const effectiveReadOnlyRequired = options.internalOperation === 'organization_plan_repair' || options.readOnlyRequired === true
     || (session.lifecycleMode === 'ephemeral_swarm' && session.readOnlyRequired === true);
   const effectiveReadOnlyAdvisory = !effectiveReadOnlyRequired && (
     options.readOnlyAdvisory === true
     || (session.lifecycleMode === 'ephemeral_swarm' && session.readOnlyAdvisory === true)
   );
-  const effectiveAccessMode = trimString(options.accessMode)
-    || (effectiveReadOnlyRequired ? 'read' : (session.lifecycleMode === 'ephemeral_swarm' && session.accessMode === 'read' ? 'read' : ''));
+  const effectiveAccessMode = options.internalOperation === 'organization_plan_repair' ? 'read' : (trimString(options.accessMode)
+    || (effectiveReadOnlyRequired ? 'read' : (session.lifecycleMode === 'ephemeral_swarm' && session.accessMode === 'read' ? 'read' : '')));
   const isReadOnlyRequest = effectiveAccessMode === 'read' || effectiveReadOnlyRequired;
   const orgControlMcpSupported = supportsOrganizationControlMcp(
     effectiveProviderContract.providerCapabilities || effectiveRuntimeFamily,
