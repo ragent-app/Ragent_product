@@ -712,7 +712,6 @@ export function createSessionTurnCompletionHelpers(services) {
     let session = latestSession;
     let sessionChanged = false;
     const allowCompletionEffects = allowsSessionTurnCompletionEffects(manifest);
-
     const userReplacement = ['regenerate', 'editResend'].includes(manifest?.internalOperation);
     // Persist the actual terminal state and bounded structured outcome for replay.
     // A completed runner can still report that the user's task is blocked.

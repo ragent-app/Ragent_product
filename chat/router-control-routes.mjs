@@ -1574,7 +1574,7 @@ export async function handleControlRoutes({
       return true;
     }
     if (!await requireSessionAccess(res, authSession, asset.sessionId, conditionalUpload ? { metadataOnly: true } : undefined)) return true;
-    if (!canAccessFileAssetUpload(authSession, asset, { allowLegacy: true })) { req.resume?.(); writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true; }
+    if (!canAccessFileAssetUpload(authSession, asset, { allowLegacy: true })) { writeJson(res, 403, { code: 'PERMISSION_DENIED' }); return true; }
     if (!getGrantedCapability(authSession, 'uploadAttachments', true)) {
       writeJson(res, 403, { error: 'Access denied' });
       return true;

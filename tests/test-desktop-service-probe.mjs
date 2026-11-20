@@ -11,7 +11,7 @@ async function probe(status,location){
     queueMicrotask(()=>callback({statusCode:status,headers:{location},resume(){}}));return req;}};
   const electron={app:{requestSingleInstanceLock:()=>true,on(){},whenReady:()=>({then(){}})},BrowserWindow(){},ipcMain:{},nativeImage:{},shell:{}};
   const sandbox={require:name=>name==='electron'?electron:name==='node:http'?http:name==='node:path'?path:undefined,
-    Buffer,URL,setInterval,clearInterval,module:{exports:{}},console};
+    Buffer,URL,process:{platform:'win32',argv:[],env:{}},setInterval,clearInterval,module:{exports:{}},console};
   runInNewContext(source+'\nmodule.exports=serviceIsReady;',sandbox);
   const result=await sandbox.module.exports();assert.equal(received.options.headers.Accept,'*/*');return result;
 }

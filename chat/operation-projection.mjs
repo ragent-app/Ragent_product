@@ -112,6 +112,22 @@ function findFallbackOperation(operations, event, { kind = '' } = {}) {
   return null;
 }
 
+function readRawToolArguments(event) {
+  if (event?.type !== 'tool_use') return {value:null,status:'not_tool_use',seq:null};
+  const seq=Number.isSafeInteger(event.seq)&&event.seq>0?event.seq:null;
+  let source=event.toolInput,status='inline';
+  if ((source === '' || source == null) && event.bodyField==='toolInput' && (event.bodyLoaded===false || event.bodyAvailable===true)) {
+    if (typeof event.bodyPreview==='string' && Number.isSafeInteger(event.bodyBytes) && Buffer.byteLength(event.bodyPreview,'utf8')===event.bodyBytes) { source=event.bodyPreview;status='complete_preview'; }
+    else return {value:null,status:event.bodyAvailable===true?'body_unavailable':'body_missing',seq};
+  }
+  try {
+    const value=typeof source==='string'?JSON.parse(source):source;
+    if (!value || typeof value!=='object' || Array.isArray(value)) return {value:null,status:'invalid',seq};
+    if (Buffer.byteLength(JSON.stringify(value),'utf8')>65536) return {value:null,status:'too_large',seq};
+    return {value,status,seq};
+  } catch { return {value:null,status:'invalid',seq}; }
+}
+
 function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
   const seq = eventSeq(event);
   const classified = classifyProviderOperation(event);
@@ -129,6 +145,16 @@ function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
     provider: trimString(event?.provider),
     runtimeFamily: trimString(event?.runtimeFamily),
     runId: trimString(event?.runId),
+    providerRequestId: trimString(event?.providerRequestId),
+    _providerIdentityConflicts: new Set(),
+    providerToolUseId: trimString(event?.providerToolUseId),
+    providerItemId: trimString(event?.providerItemId),
+    providerThreadId: trimString(event?.providerThreadId),
+    providerTurnId: trimString(event?.providerTurnId),
+    rawToolEvidence: readRawToolArguments(event),
+    rawArgumentsBytes: Number.isSafeInteger(event?.bodyBytes) && event.bodyBytes >= 0 ? event.bodyBytes : null,
+    rawArgumentsShape: {inline_present:typeof event?.toolInput==='string'&&event.toolInput.length>0,preview_present:typeof event?.bodyPreview==='string'&&event.bodyPreview.length>0,body_available:event?.bodyAvailable===true,bytes_known:Number.isSafeInteger(event?.bodyBytes)},
+    _providerRequestIdConflict: false,
     kind: classified.kind,
     state: 'running',
     title: classified.title,
@@ -185,8 +211,36 @@ function updateOperationBoundary(operation, event) {
   }
 }
 
+function boundedProjectionInput(input) {
+  if (!input || typeof input !== 'object' || !Object.keys(input).length) return null;
+  try { return JSON.stringify(input).length <= 65536 ? input : null; } catch { return null; }
+}
+
 function updateOperationClassification(operation, event) {
   const classified = classifyProviderOperation(event);
+  if (event?.type === 'tool_use' && operation.rawToolEvidence.value === null) {
+    const raw = readRawToolArguments(event);
+    if (raw.value !== null || operation.rawToolEvidence.status === 'not_tool_use'
+        || (!operation.rawToolEvidence.seq && raw.seq)) {
+      operation.rawToolEvidence = raw;
+      operation.rawArgumentsBytes = Number.isSafeInteger(event.bodyBytes) && event.bodyBytes >= 0 ? event.bodyBytes : null;
+      operation.rawArgumentsShape = {
+        inline_present: typeof event.toolInput === 'string' && event.toolInput.length > 0,
+        preview_present: typeof event.bodyPreview === 'string' && event.bodyPreview.length > 0,
+        body_available: event.bodyAvailable === true,
+        bytes_known: Number.isSafeInteger(event.bodyBytes),
+      };
+    }
+  }
+  for (const field of ['providerItemId','providerThreadId','providerTurnId','providerToolUseId']) {
+    const value=trimString(event?.[field]);
+    if (value && !operation._providerIdentityConflicts.has(field)) {
+      if (operation[field] && operation[field]!==value) { operation[field]=''; operation._providerIdentityConflicts.add(field); }
+      else operation[field]=value;
+    }
+  }
+  const requestId=trimString(event?.providerRequestId);
+  if(requestId&&!operation._providerRequestIdConflict){if(operation.providerRequestId&&operation.providerRequestId!==requestId){operation.providerRequestId='';operation._providerRequestIdConflict=true}else operation.providerRequestId=requestId}
   if (operation.kind === 'other' || event?.type === 'file_change') operation.kind = classified.kind;
   if (!operation.title || operation.title === getOperationTitle('other')) operation.title = classified.title;
   if (!operation.detail && classified.detail) operation.detail = classified.detail;
@@ -439,6 +493,18 @@ function toDisplayOperation(operation) {
     // Keep numeric clocks internal; typed event clients consume an ISO string.
     updatedAt: clientUpdatedAt(operation.updatedAt),
     ...(operation.runId ? { runId: operation.runId } : {}),
+    ...(operation.providerRequestId ? { providerRequestId: operation.providerRequestId } : {}),
+    ...(operation.providerItemId ? { providerItemId: operation.providerItemId } : {}),
+    ...(operation.providerToolUseId ? { providerToolUseId: operation.providerToolUseId } : {}),
+    ...(operation.providerThreadId ? { providerThreadId: operation.providerThreadId } : {}),
+    ...(operation.providerTurnId ? { providerTurnId: operation.providerTurnId } : {}),
+    ...(operation.rawToolEvidence.value !== null ? { rawToolArguments: operation.rawToolEvidence.value } : {}),
+    rawArgumentsStatus: operation.rawToolEvidence.status,
+    rawArgumentsShape: operation.rawArgumentsShape,
+    ...(operation.rawToolEvidence.seq ? { rawArgumentsSeq: operation.rawToolEvidence.seq } : {}),
+    ...(Number.isSafeInteger(operation.rawArgumentsBytes) && operation.rawArgumentsBytes >= 0 ? { rawArgumentsBytes: operation.rawArgumentsBytes } : {}),
+    ...(operation.toolName ? { toolName: operation.toolName } : {}),
+    ...(boundedProjectionInput(operation.input) ? { input: operation.input } : {}),
     kind: operation.kind,
     state: operation.state,
     title: operation.title || getOperationTitle(operation.kind),

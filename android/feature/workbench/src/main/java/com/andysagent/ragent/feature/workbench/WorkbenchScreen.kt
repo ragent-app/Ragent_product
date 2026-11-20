@@ -3028,12 +3028,12 @@ private fun ChatSurface(
         val measuredHeaderInset = organizationHostBounds?.let {
             with(density) { (organizationHeaderBottom - it.top).coerceAtLeast(0f).toDp() }
         } ?: 0.dp
+        val organizationGraphTop = maxOf(topControlsHeight, measuredHeaderInset) + 8.dp
         val hostBounds = organizationHostBounds
         val imeBottom = imeInsets.getBottom(density).toFloat()
         val availableCardHeight = ((hostBounds?.height ?: 0f) - imeBottom).coerceAtLeast(0f)
         val cardHeight = (availableCardHeight * .27f).coerceIn(with(density) { 208.dp.toPx() }, with(density) { 300.dp.toPx() }).coerceAtMost(availableCardHeight)
         val graphCardHeight = with(density) { (imeBottom + cardHeight).toDp() }
-        val organizationGraphTop = maxOf(topControlsHeight, measuredHeaderInset) + 8.dp
         if (organizationTransport != null && state.sessionId != null) {
             com.andysagent.ragent.feature.organization.ui.ConnectedOrganizationGraph(
                 transport = organizationTransport,
@@ -3176,8 +3176,8 @@ private fun ChatSurface(
             ) {
                 Column(Modifier.fillMaxSize()) {
                     LazyColumn(
-                        userScrollEnabled = !organizationCollapsed,
                         state = listState,
+                        userScrollEnabled = !organizationCollapsed,
                         modifier = Modifier
                             .testTag("chat-timeline")
                             .onGloballyPositioned { organizationTimelineTop = it.positionInRoot().y }

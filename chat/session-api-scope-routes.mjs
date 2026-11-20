@@ -28,7 +28,12 @@ export async function handleSessionApiScopeRoutes({ req, res, pathname, parsedUr
       { id: 'message.prepare', method: 'POST', path: '/api/sessions/{sessionId}/app-api-message-preparations', startsRun: false },
       { id: 'message.preparation.receipt', method: 'GET', path: '/api/sessions/{sessionId}/app-api-message-preparations/{requestId}', readonly: true },
       { id: 'message.commit', method: 'POST', path: '/api/sessions/{sessionId}/app-api-message-preparations/{requestId}/commit', durableQueue: true },
-      { id: 'message.commit.receipt', method: 'GET', path: '/api/sessions/{sessionId}/app-api-message-preparations/{requestId}/commit', readonly: true }] });
+      { id: 'message.commit.receipt', method: 'GET', path: '/api/sessions/{sessionId}/app-api-message-preparations/{requestId}/commit', readonly: true },
+      ...(process.env.RAGENT_ASSET_RELAY_ENABLED !== '0' ? [
+        { id: 'asset.upload.relay.start', method: 'POST', path: '/api/assets/{assetId}/relay', stagedBeforeGuard: true },
+        { id: 'asset.upload.relay.status', method: 'GET', path: '/api/assets/{assetId}/relay?jobId={jobId}', readonly: true },
+        { id: 'asset.upload.relay.cancel', method: 'DELETE', path: '/api/assets/{assetId}/relay?jobId={jobId}' },
+      ] : [])] });
   }
   return true;
 }

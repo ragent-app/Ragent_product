@@ -108,7 +108,9 @@ test('authenticated scope discovery advertises only implemented effects and reje
   assert.deepEqual(success.body.effects.map(effect => effect.id), ['run.cancel',
     'asset.upload.intent', 'asset.upload.body', 'asset.upload.chunk', 'asset.upload.checkpoint',
     'asset.upload.finalize', 'asset.upload.receipt',
-    'message.prepare', 'message.preparation.receipt', 'message.commit', 'message.commit.receipt']);
+    'message.prepare', 'message.preparation.receipt', 'message.commit', 'message.commit.receipt',
+    ...(process.env.RAGENT_ASSET_RELAY_ENABLED !== '0'
+      ? ['asset.upload.relay.start', 'asset.upload.relay.status', 'asset.upload.relay.cancel'] : [])]);
   assert.equal(success.body.effects[1].method, 'POST');
   assert.equal(success.body.effects[2].stagedBeforeGuard, true);
   assert.equal(success.body.effects[3].method, 'PATCH');

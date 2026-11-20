@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const artifactDir = join(repoRoot, "artifacts");
+const artifactDir = process.env.RAGENT_QA_ARTIFACT_DIR || join(repoRoot, "artifacts");
 await mkdir(artifactDir, { recursive: true });
 
 const [baseCss, inputCss, responsiveCss, glassCss, m3TokensCss, m3ComponentsCss, sheetActionsCss, materialFinishCss, motionSource, iconsSource, agentSource, connectorSource] = await Promise.all([
@@ -24,7 +24,8 @@ const [baseCss, inputCss, responsiveCss, glassCss, m3TokensCss, m3ComponentsCss,
   readFile(join(repoRoot, "static/chat/connector-panel.js"), "utf8"),
 ]);
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true,
+  ...(process.env.RAGENT_QA_BROWSER_EXECUTABLE ? { executablePath: process.env.RAGENT_QA_BROWSER_EXECUTABLE } : {}) });
 
 async function makePage({ theme = "light", reducedMotion = false, hasTouch = false, viewport = { width: 390, height: 844 } } = {}) {
   const context = await browser.newContext({ viewport, hasTouch });
@@ -82,8 +83,56 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
     ];
     window.fetchConnectorSurfaces = () => Promise.resolve();
     window.canManageConnectorSurfacesFromUi = () => true;
-    window.fetch = async (url) => {
-      if (url === "/api/codex/mcp-servers" || url === "/api/claude/mcp-servers") {
+    window.selectedTool = "codex";
+    window.currentSessionId = "fixture-session";
+    window.getComposerRuntimeSelectedProvider = () => "fixture-provider";
+    window.fixtureCodexServers = [];
+    window.fixtureOAuthConnected = false;
+    window.fixturePluginEnabled = false;
+    window.fixtureSyncStatus = "waiting_for_runtime";
+    window.fixtureSyncMode = "approved-auto";
+    window.open = () => ({ opener: null, location: { href: "" }, close() {} });
+    window.fetch = async (url, options = {}) => {
+      if (url.startsWith("/api/sessions/fixture-session/harness-capabilities?")) {
+        return new Response(JSON.stringify({ providerProfileId: "fixture-provider", items: [
+          { title: "Drive example", source: "codex", kind: "app", enabled: false, state: { runtime: "unknown" } },
+          { id: "codex:skill:aaaaaaaaaaaaaaaaaaaa", title: "Review example", source: "codex", kind: "skill", enabled: true, state: { manageable: true } },
+          ...(window.fixtureOAuthConnected ? [{ title: "docs", source: "codex", kind: "mcp", state: { authorization: "connected" } }] : []),
+        ], errors: {} }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/sessions/fixture-session/harness-capabilities/skills" && options.method === "POST") {
+        window.fixtureSkillSelection = JSON.parse(options.body);
+        return new Response(JSON.stringify({ desiredEnabled: window.fixtureSkillSelection.enabled, effectiveEnabled: null }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/providers/fixture-provider/codex/plugin-preference") {
+        if (options.method === "POST") window.fixturePluginEnabled = JSON.parse(options.body).enabled;
+        return new Response(JSON.stringify({ desiredEnabled: window.fixturePluginEnabled, effectiveEnabled: null }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/providers/fixture-provider/codex/capability-sync") {
+        if (options.method === "POST") window.fixtureSyncStatus = "discovered";
+        return new Response(JSON.stringify({ sync: { status: window.fixtureSyncStatus }, mode: window.fixtureSyncMode }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/providers/fixture-provider/codex/capability-sync-policy") {
+        if (options.method === "POST") window.fixtureSyncMode = JSON.parse(options.body).mode;
+        return new Response(JSON.stringify({ mode: window.fixtureSyncMode }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/oauth") && options.method === "POST") {
+        return new Response(JSON.stringify({ id: "auth-job", authorizationUrl: "https://example.invalid/authorize" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.endsWith("/oauth/auth-job")) {
+        window.fixtureOAuthConnected = true;
+        return new Response(JSON.stringify({ state: "connected" }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url.startsWith("/api/providers/fixture-provider/codex/mcp-servers")) {
+        if (options.method === "POST") {
+          const payload = JSON.parse(options.body);
+          window.fixtureCodexServers.push({ name: payload.name, transport: { type: payload.url ? "streamable_http" : "stdio" } });
+          return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        if (options.method === "DELETE") window.fixtureCodexServers = [];
+        return new Response(JSON.stringify({ servers: window.fixtureCodexServers }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (url === "/api/claude/mcp-servers") {
         return new Response(JSON.stringify({ servers: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -143,6 +192,22 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
     };
     window.t = (key, vars) => {
       const template = ({
+        "compose.connectorPanel.codexApp": "App",
+        "compose.connectorPanel.codexSkill": "Skill",
+        "compose.connectorPanel.codexNotConfirmed": "Availability not confirmed",
+        "compose.connectorPanel.codexAuthUnknown": "Authorization unknown",
+        "compose.connectorPanel.codexAuthReady": "Authorized",
+        "compose.connectorPanel.codexSkillDisable": "Disable",
+        "compose.connectorPanel.codexSkillEnable": "Enable",
+        "compose.connectorPanel.codexPluginLoading": "Native Plugin loading",
+        "compose.connectorPanel.codexPluginWantedOn": "Requested on · runtime restart required",
+        "compose.connectorPanel.codexPluginWantedOff": "Requested off · runtime restart may be required",
+        "compose.connectorPanel.codexSync": "Codex capability discovery",
+        "compose.connectorPanel.codexSyncWaiting": "Waiting for a Codex task",
+        "compose.connectorPanel.codexSyncDiscovered": "Discovery checked",
+        "compose.connectorPanel.refresh": "Refresh status",
+        "compose.connectorPanel.codexSyncPolicy": "Synchronization policy",
+        "compose.connectorPanel.codexSkillPending": "Change pending",
       "compose.agent.loading": "Loading agents…",
       "compose.agent.loadingFailed": "Agents unavailable",
       "compose.agent.none": "No agents available yet.",
@@ -165,6 +230,12 @@ async function makePage({ theme = "light", reducedMotion = false, hasTouch = fal
       "compose.connectorPanel.codexAdd": "Add server",
       "compose.connectorPanel.codexAddName": "Name (e.g. github)",
       "compose.connectorPanel.codexAddCommand": "Command or https:// URL",
+      "compose.connectorPanel.codexArgs": "Arguments (JSON array, optional)",
+      "compose.connectorPanel.codexScope": "Codex account: {provider} · Changes apply when the runtime refreshes.",
+      "compose.connectorPanel.codexConnect": "Connect",
+      "compose.connectorPanel.codexAuthStarted": "Complete authorization on the host.",
+      "compose.connectorPanel.codexAuthLink": "Open authorization link",
+      "compose.connectorPanel.codexAuthConnected": "MCP authorization is connected.",
       "compose.connectorPanel.codexAddSubmit": "Add",
       "compose.connectorPanel.claudeTitle": "Claude Code MCP servers",
       "compose.connectorPanel.claudeNone": "No Claude Code MCP servers configured yet.",
@@ -402,6 +473,27 @@ try {
   assert.deepEqual(formProbe, { inputFontSize: "16px", submitHeight: 48, cancelHeight: 48, form: true }, "MCP form should be keyboard-friendly and touch-safe on mobile");
   await light.screenshot({ path: join(artifactDir, "composer-panel-connector-form-mobile-light.png"), fullPage: true });
   await light.locator("#composerConnectorPanel").screenshot({ path: join(artifactDir, "composer-panel-connector-form-mobile-light-element.png") });
+  assert.equal(await light.getByText("Drive example").count(), 1, "Codex apps should be visible in the connector panel");
+  assert.equal(await light.getByText("Availability not confirmed").count(), 1, "discovery alone must not claim an app is callable");
+  await light.locator('#composerConnectorList .composer-add-panel-row', { hasText: 'Native Plugin loading' }).getByRole('button', { name: 'Enable' }).click();
+  await light.getByText('Requested on · runtime restart required').waitFor();
+  assert.equal(await light.evaluate(() => window.fixturePluginEnabled), true);
+  await light.locator('#composerConnectorList .composer-add-panel-row', { hasText: 'Codex capability discovery' }).getByRole('button', { name: 'Refresh status' }).click();
+  await light.getByText('Discovery checked').waitFor();
+  await light.getByLabel('Synchronization policy').selectOption('manual');
+  await light.waitForFunction(() => window.fixtureSyncMode === 'manual');
+  await light.locator('#composerConnectorList .composer-add-panel-row', { hasText: 'Review example' }).getByRole('button', { name: 'Disable' }).click();
+  await light.locator('#composerConnectorList .composer-add-panel-row', { hasText: 'Review example' }).getByText('Change pending').waitFor();
+  assert.equal(await light.evaluate(() => window.fixtureSkillSelection.enabled), false, 'Skill choice must target the current account without claiming immediate effect');
+  await light.locator('.composer-add-panel-codex-form input[name="name"]').fill('docs');
+  await light.locator('.composer-add-panel-codex-form input[name="command"]').fill('https://example.invalid/mcp');
+  await light.locator('.composer-add-panel-codex-form button[type="submit"]').click();
+  await light.locator('#composerConnectorList .composer-add-panel-row--codex', { hasText: 'docs' }).waitFor();
+  assert.equal(await light.evaluate(() => window.fixtureCodexServers[0].name), 'docs', 'the scoped MCP form must persist its server through the selected-provider API');
+  await light.locator('#composerConnectorList .composer-add-panel-row--codex', { hasText: 'docs' }).getByText('Authorization unknown').waitFor();
+  await light.locator('#composerConnectorList .composer-add-panel-row--codex', { hasText: 'docs' }).getByRole('button', { name: 'Connect', exact: true }).click();
+  await light.locator('#composerConnectorPanelStatus', { hasText: 'MCP authorization is connected.' }).waitFor({ timeout: 7000 });
+  await light.locator('#composerConnectorList .composer-add-panel-row--codex', { hasText: 'docs' }).getByText('Authorized', { exact: true }).waitFor();
   await light.mouse.click(8, 8);
   await light.waitForTimeout(180);
   assert.equal(await light.locator("#composerConnectorPanel").isHidden(), true, "tapping the mobile sheet backdrop should dismiss the panel");
@@ -444,7 +536,7 @@ try {
       pillColor: getComputedStyle(pill).color,
     };
   });
-  assert.deepEqual(darkProbe, { surface: "rgb(28, 28, 30)", backdrop: "none", pillColor: darkProbe.pillColor }, "dark mode should use the matching flat panel surface");
+  assert.deepEqual(darkProbe, { surface: "rgb(21, 22, 23)", backdrop: "none", pillColor: darkProbe.pillColor }, "dark mode should use the panel surface defined by the current theme");
   assert.notEqual(darkProbe.pillColor, "rgb(14, 107, 64)", "dark mode should not reuse the light success text color");
   await dark.close();
 

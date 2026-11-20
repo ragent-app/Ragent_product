@@ -10145,21 +10145,21 @@ export async function startDetachedRunObservers() {
   }
   if (!orphanRunSweepTimer) {
     orphanRunSweepTimer = setInterval(() => {
-      void recoverPendingAgentInterruptions().catch(() => {});
       void reconcileOrphanDetachedRuns().catch((error) => {
         console.error(`[runs] orphan sweep failed: ${error.message}`);
       });
       void recoverCompletionPushCheckpoints().catch(() => {
         console.warn('[account-push] completion recovery unavailable');
       });
+      void recoverPendingAgentInterruptions().catch(() => {});
     }, ORPHAN_RUN_SWEEP_INTERVAL_MS);
     if (typeof orphanRunSweepTimer.unref === 'function') orphanRunSweepTimer.unref();
   }
   // If no compact session metadata advertises completion targets, avoid
   // scanning every historical run directory at boot.
-  await recoverPendingAgentInterruptions();
   await resumePendingCompletionTargets({ targetSessionIds: completionTargetSessionIds });
   await recoverCompletionPushCheckpoints();
+  await recoverPendingAgentInterruptions();
 
   // DS-07: retire runtime state / generation entries of sessions idle past the
   // TTL. Booted here (with the observers) so restart recovery is complete

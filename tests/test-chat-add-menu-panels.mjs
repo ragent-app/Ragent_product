@@ -209,7 +209,7 @@ assert.match(connectorPanelSource, /t\("compose\.connectorPanel\.refresh"\)/, 't
 assert.match(connectorPanelSource, /void refresh\(\)\.then\(renderList, renderList\)/, 'back and refresh should re-render the connector list');
 
 // --- 4c. connector-panel.js Codex MCP servers group ---
-assert.match(connectorPanelSource, /\/api\/codex\/mcp-servers/, 'connector panel should list codex mcp servers from the backend api');
+assert.match(connectorPanelSource, /\/api\/providers\/.*\/codex\/mcp-servers/, 'connector panel should scope codex mcp servers to the selected provider');
 assert.match(connectorPanelSource, /function fetchCodexMcpServers/, 'connector panel should fetch the codex server list');
 assert.match(connectorPanelSource, /function renderCodexSection/, 'connector panel should render a codex section');
 assert.match(connectorPanelSource, /function removeCodexServer/, 'connector panel should support removing a codex server');
@@ -217,7 +217,7 @@ assert.match(connectorPanelSource, /function submitCodexServer/, 'connector pane
 assert.match(connectorPanelSource, /compose\.connectorPanel\.codexTitle/, 'the codex section should use the i18n title');
 assert.match(connectorPanelSource, /codexTransportSummary/, 'rows should summarize stdio/http transport');
 assert.match(connectorPanelSource, /streamable_http/, 'rows should surface Codex streamable HTTP transport');
-assert.match(connectorPanelSource, /auth_status/, 'rows should surface remote auth status');
+assert.match(connectorPanelSource, /state\?\.authorization/, 'rows should surface verified runtime authorization status');
 assert.match(connectorPanelSource, /composer-add-panel-codex-input/, 'the add form should use the panel input style');
 assert.ok(connectorPanelSource.includes('payload = /^https?:\\/\\//i.test(command)'), 'command vs url should be split by scheme');
 
