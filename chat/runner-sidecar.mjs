@@ -4015,13 +4015,25 @@ function writeAcpJsonLine(proc, line) {
 
 function parseAcpManagedMcpToolName(acpToolName, state) {
   const name = typeof acpToolName === 'string' ? acpToolName.trim() : '';
-  if (!name || state?.mcpRequired !== true || !Array.isArray(state?.mcpRequiredServers)) return null;
-  for (const server of state.mcpRequiredServers) {
-    const serverName = typeof server?.name === 'string' ? server.name.trim() : '';
-    if (!serverName || !isAutoApprovedMcpServer(state, serverName)) continue;
-    for (const toolName of server.requiredToolNames || []) {
-      if (name === `mcp_${serverName}_${toolName}` || name === `mcp__${serverName}__${toolName}`) {
-        return { mcpServerName: serverName, mcpToolName: toolName };
+  if (!name) return null;
+  if (state?.mcpRequired === true && Array.isArray(state?.mcpRequiredServers)) {
+    for (const server of state.mcpRequiredServers) {
+      const serverName = typeof server?.name === 'string' ? server.name.trim() : '';
+      if (!serverName || !isAutoApprovedMcpServer(state, serverName)) continue;
+      for (const toolName of server.requiredToolNames || []) {
+        if (name === `mcp_${serverName}_${toolName}` || name === `mcp__${serverName}__${toolName}`) {
+          return { mcpServerName: serverName, mcpToolName: toolName };
+        }
+      }
+    }
+  }
+  const optionalOrgServer = typeof state?.mcpOptionalOrganizationServerName === 'string'
+    ? state.mcpOptionalOrganizationServerName.trim()
+    : '';
+  if (optionalOrgServer && isAutoApprovedMcpServer(state, optionalOrgServer)) {
+    for (const toolName of ['ragent_organization_read', 'ragent_organization_action']) {
+      if (name === `mcp_${optionalOrgServer}_${toolName}` || name === `mcp__${optionalOrgServer}__${toolName}`) {
+        return { mcpServerName: optionalOrgServer, mcpToolName: toolName, isOptionalOrganization: true };
       }
     }
   }
@@ -4145,7 +4157,7 @@ async function handleAcpPermissionRequest(runId, state, parsed, proc, logDiagnos
     state.autoApprovedMcpRequestIds.add(approval.approvalId);
     await emitAcpApprovalResponseSpoolRecord(runId, state, approval, 'approved', {
       autoApproved: true,
-      reason: 'managed_mcp_required_tool',
+      reason: managedMcp.isOptionalOrganization ? 'managed_mcp_optional_organization_tool' : 'managed_mcp_required_tool',
       acpOutcome: allow.outcome,
       ...(allow.optionId ? { optionId: allow.optionId } : {}),
     });
@@ -4918,7 +4930,8 @@ async function main() {
   // provider-gate path. A channel failure must never break the Run; the shim
   // then fails with a self-describing channel error.
   const readOnlyRequested = manifest.executionScope?.accessMode === 'read'
-    || manifest.options?.readOnlyRequired === true;
+    || manifest.options?.readOnlyRequired === true
+    || manifest.options?.accessMode === 'read';
   const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
     && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1';
@@ -5220,13 +5233,16 @@ async function main() {
   );
   const readOnlyManagerOrganizationMcp = readOnlyRequested && manifest.options?.readOnlyOrganizationManagerMcp === true
     && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
+  const readOnlySwarmReviewerOrganizationMcp = readOnlyRequested && manifest.options?.readOnlySwarmReviewerMcp === true
+    && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
+  const readOnlyAllowedOrganizationMcp = readOnlyManagerOrganizationMcp || readOnlySwarmReviewerOrganizationMcp;
   const organizationMcpSupported = supportsOrganizationControlMcp(runtimeFamily);
-  const organizationMcpRequested = (!readOnlyRequested || readOnlyManagerOrganizationMcp) && Boolean(
+  const organizationMcpRequested = (!readOnlyRequested || readOnlyAllowedOrganizationMcp) && Boolean(
     spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&
     spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID &&
     organizationMcpSupported,
   );
-  if (protectedDelegatedRun && (!readOnlyRequested || readOnlyManagerOrganizationMcp)
+  if (protectedDelegatedRun && (!readOnlyRequested || readOnlyAllowedOrganizationMcp)
       && organizationMcpSupported
       && !organizationMcpRequested) {
     const error = new Error('MCP_ORGANIZATION_CAPABILITY_MISSING');
@@ -5754,7 +5770,7 @@ async function main() {
           ...buildRunnerGuiBindPaths(guiEnvironment),
           ...(privilegedShimChannel?.socketBindDir ? [privilegedShimChannel.socketBindDir] : []),
           ...(readOnlyWorkspace ? [readOnlyWorkspace] : []),
-          ...(readOnlyManagerOrganizationMcp && managedMcpOverlay?.root ? [managedMcpOverlay.root] : []),
+          ...(readOnlyAllowedOrganizationMcp && managedMcpOverlay?.root ? [managedMcpOverlay.root] : []),
         ],
         exposeHostDevices: Boolean(guiEnvironment.DISPLAY),
         readOnlyProviderSeeds: providerSeeds?.seeds || [],

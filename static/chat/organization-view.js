@@ -232,6 +232,23 @@
     return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
 
+  function formatBoardBodySafeHtml(rawText) {
+    const escaped = escapeDisplayText(rawText);
+    return escaped
+      .replace(/(^|[\s([{"'])@(#?[A-Za-z0-9][A-Za-z0-9._-]{0,63}|all)(?=$|[\s.,:;!?)\]}"']|&)/g, '$1<span class="org-board-mention">@$2</span>')
+      .replace(/(^|[\s([{"'])#(\d{1,7})\b/g, '$1<span class="org-board-seqref">#$2</span>')
+      .replace(/\[\s*(done|stall)\s*\]/gi, (_, tag) => {
+        const lower = tag.toLowerCase();
+        return `<span class="org-board-inline-tag org-board-inline-tag--${lower}">[${lower}]</span>`;
+      });
+  }
+
+  function normalizeSwarmChannelKey(value, allowEmpty = false) {
+    const cleaned = String(value ?? "").trim().replace(/^#/, "").toLowerCase();
+    if (!cleaned) return allowEmpty ? "" : "main";
+    return cleaned.replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || (allowEmpty ? "" : "main");
+  }
+
   const NodeRuntimeState = Object.freeze({
     PROVISIONING: "PROVISIONING",
     IDLE: "IDLE",
@@ -799,8 +816,27 @@
     }
 
     init() {
+      this.ensureSwarmUiState();
       this.bindDOM();
       this.setupEventListeners();
+    }
+
+    ensureSwarmUiState() {
+      if (!Object.hasOwn(this, "swarmStatus")) this.swarmStatus = null;
+      if (!Object.hasOwn(this, "boardProjection")) this.boardProjection = null;
+      if (!Object.hasOwn(this, "selectedBoardChannel")) this.selectedBoardChannel = "all";
+      if (!Object.hasOwn(this, "boardReplyToSeq")) this.boardReplyToSeq = null;
+      if (!Object.hasOwn(this, "boardComposerDraft")) this.boardComposerDraft = "";
+      if (!Object.hasOwn(this, "boardComposerBusy")) this.boardComposerBusy = false;
+      if (!Object.hasOwn(this, "boardComposerError")) this.boardComposerError = "";
+      if (!Object.hasOwn(this, "boardChannelDraft")) this.boardChannelDraft = "";
+      if (!Object.hasOwn(this, "boardChannelBusy")) this.boardChannelBusy = false;
+      if (!Object.hasOwn(this, "boardChannelError")) this.boardChannelError = "";
+      if (!Object.hasOwn(this, "userCollapsedBoard")) this.userCollapsedBoard = false;
+      if (!Object.hasOwn(this, "killConfirmTargetId")) this.killConfirmTargetId = null;
+      if (!Object.hasOwn(this, "killConflictInfo")) this.killConflictInfo = null;
+      if (!Object.hasOwn(this, "killBusy")) this.killBusy = false;
+      if (!Object.hasOwn(this, "killError")) this.killError = "";
     }
 
     bindDOM() {
@@ -842,6 +878,7 @@
               ${root.RagentIcons?.render?.("close") || "✕"}
             </button>
           </div>
+          <div class="org-swarm-overview" id="orgSwarmOverview" hidden></div>
         </div>
         <div class="org-radar-bottom-container" id="orgRadarBottomContainer">
           <div class="org-approval-overlay" id="orgApprovalOverlay" hidden>
@@ -865,6 +902,22 @@
               <span class="org-activity-chevron" id="orgActivityChevron">▲</span>
             </div>
             <div class="org-activity-feed-list" id="orgActivityFeedList" hidden></div>
+            <div class="org-swarm-board-composer" id="orgSwarmBoardComposer" hidden>
+              <div class="org-board-composer-meta">
+                <span class="org-board-composer-target" id="orgSwarmBoardTargetChannel">#main</span>
+                <span class="org-board-composer-reply" id="orgSwarmBoardReplyBadge" hidden></span>
+                <button type="button" class="org-board-reply-clear" id="orgSwarmBoardReplyClearBtn" hidden>✕</button>
+              </div>
+              <div class="org-board-composer-row">
+                <input type="text" class="org-board-composer-input" id="orgSwarmBoardInput" placeholder="${escapeDisplayText(trText("organization.boardComposerPlaceholder", "Post to Swarm Board (@name, #seq)...", "向协作板发帖（可用 @成员名、#序号引用）..."))}" />
+                <button type="button" class="org-btn org-btn--primary org-board-send-btn" id="orgSwarmBoardSendBtn">${escapeDisplayText(trText("organization.send", "Send", "发送"))}</button>
+              </div>
+              <div class="org-board-channel-create-row">
+                <input type="text" class="org-board-channel-input" id="orgSwarmChannelInput" placeholder="${escapeDisplayText(trText("organization.newChannelPlaceholder", "New #channel", "新建 #频道"))}" />
+                <button type="button" class="org-btn org-btn--secondary org-board-channel-btn" id="orgSwarmChannelCreateBtn">+ ${escapeDisplayText(trText("organization.channel", "Channel", "频道"))}</button>
+              </div>
+              <div class="org-board-composer-status" id="orgSwarmBoardStatus"></div>
+            </div>
           </div>
         </div>
         <div class="org-bottom-sheet-backdrop" id="orgBottomSheetBackdrop" hidden></div>
@@ -880,6 +933,7 @@
         nodesLayer: surface.querySelector("#orgRadarNodesLayer"),
         objective: surface.querySelector("#orgRadarObjective"),
         meta: surface.querySelector("#orgRadarMeta"),
+        swarmOverview: surface.querySelector("#orgSwarmOverview"),
         resetBtn: surface.querySelector("#orgRadarResetBtn"),
         closeBtn: surface.querySelector("#orgRadarCloseBtn"),
         bottomContainer: surface.querySelector("#orgRadarBottomContainer"),
@@ -892,6 +946,15 @@
         activityBadge: surface.querySelector("#orgActivityBadge"),
         activityFeedList: surface.querySelector("#orgActivityFeedList"),
         activityChevron: surface.querySelector("#orgActivityChevron"),
+        swarmBoardComposer: surface.querySelector("#orgSwarmBoardComposer"),
+        swarmBoardTargetChannel: surface.querySelector("#orgSwarmBoardTargetChannel"),
+        swarmBoardReplyBadge: surface.querySelector("#orgSwarmBoardReplyBadge"),
+        swarmBoardReplyClearBtn: surface.querySelector("#orgSwarmBoardReplyClearBtn"),
+        swarmBoardInput: surface.querySelector("#orgSwarmBoardInput"),
+        swarmBoardSendBtn: surface.querySelector("#orgSwarmBoardSendBtn"),
+        swarmChannelInput: surface.querySelector("#orgSwarmChannelInput"),
+        swarmChannelCreateBtn: surface.querySelector("#orgSwarmChannelCreateBtn"),
+        swarmBoardStatus: surface.querySelector("#orgSwarmBoardStatus"),
         sheetBackdrop: surface.querySelector("#orgBottomSheetBackdrop"),
         sheet: surface.querySelector("#orgBottomSheet"),
         detailScreen: surface.querySelector("#orgDetailScreen"),
@@ -917,8 +980,31 @@
       // Bottom Sheet Backdrop dismiss
       this.dom.sheetBackdrop?.addEventListener("click", () => this.dismissBottomSheet());
 
-      // Activity Feed Toggle
+      // Activity Feed & Swarm Board Interactions
       this.dom.activityFeedHeader?.addEventListener("click", () => this.toggleActivityFeed());
+      this.dom.activityFeedList?.addEventListener("click", (e) => this.handleBoardFeedClick(e));
+      this.dom.swarmBoardInput?.addEventListener("input", (e) => {
+        this.boardComposerDraft = String(e?.target?.value ?? "");
+      });
+      this.dom.swarmBoardInput?.addEventListener("keydown", (e) => {
+        if (e?.key === "Enter" && !e.shiftKey) {
+          e.preventDefault?.();
+          void this.submitBoardMessage();
+        }
+      });
+      this.dom.swarmBoardSendBtn?.addEventListener("click", () => {
+        void this.submitBoardMessage();
+      });
+      this.dom.swarmBoardReplyClearBtn?.addEventListener("click", () => {
+        this.boardReplyToSeq = null;
+        this.renderSwarmBoardComposerState(this.resolveActiveBoardState());
+      });
+      this.dom.swarmChannelInput?.addEventListener("input", (e) => {
+        this.boardChannelDraft = String(e?.target?.value ?? "");
+      });
+      this.dom.swarmChannelCreateBtn?.addEventListener("click", () => {
+        void this.createOrArchiveBoardChannel("create", this.dom.swarmChannelInput?.value ?? this.boardChannelDraft);
+      });
 
       // Viewport Pan & Zoom
       const vp = this.dom.viewport;
@@ -1848,6 +1934,21 @@
       this.previousParents = {};
       this.activityEvents = [];
       this.nativeBoard = null;
+      this.swarmStatus = null;
+      this.boardProjection = null;
+      this.selectedBoardChannel = "all";
+      this.boardReplyToSeq = null;
+      this.boardComposerDraft = "";
+      this.boardComposerBusy = false;
+      this.boardComposerError = "";
+      this.boardChannelDraft = "";
+      this.boardChannelBusy = false;
+      this.boardChannelError = "";
+      this.userCollapsedBoard = false;
+      this.killConfirmTargetId = null;
+      this.killConflictInfo = null;
+      this.killBusy = false;
+      this.killError = "";
       this.stopPolling();
       this.dismissBottomSheet();
       this.closeDetailScreen();
@@ -1864,6 +1965,9 @@
     hasCollaborators() {
       const hasFormalNodes = Boolean(this.projection && Array.isArray(this.projection.nodes) && this.projection.nodes.length > 0);
       if (hasFormalNodes) return true;
+      if (Array.isArray(this.swarmStatus?.members) && this.swarmStatus.members.length > 0) return true;
+      if (this.boardProjection?.mode === "ragent_swarm") return true;
+      if (Array.isArray(this.boardProjection?.board?.messages) && this.boardProjection.board.messages.length > 0) return true;
       const membersPage = this.rawUnifiedMembers || (Array.isArray(this.projection?.members) ? this.projection : null);
       const hasUnifiedSubagents = Boolean(
         membersPage &&
@@ -1882,8 +1986,10 @@
       const projectionPromise = this.fetchProjection(force);
       const membersPromise = this.fetchUnifiedMembers(force);
       const delegationsPromise = this.fetchDelegationRuns(force);
+      const swarmStatusPromise = this.fetchSwarmStatus(force);
+      const boardPromise = this.fetchBoardProjection(force);
 
-      const run = Promise.all([projectionPromise, membersPromise, delegationsPromise])
+      const run = Promise.all([projectionPromise, membersPromise, delegationsPromise, swarmStatusPromise, boardPromise])
         .then(([proj]) => {
           if (this.sessionId !== targetSessionId) return null;
           this.lastRefreshAt = Date.now();
@@ -1991,6 +2097,69 @@
         return null;
       } finally {
         this.loading = false;
+      }
+    }
+
+    async fetchSwarmStatus(_force = false) {
+      this.ensureSwarmUiState();
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/organization/swarm/status`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (this.sessionId !== targetSessionId) return null;
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 401 || res.status === 403) {
+            this.swarmStatus = null;
+          }
+          return null;
+        }
+        const data = await res.json();
+        if (this.sessionId !== targetSessionId) return null;
+        this.swarmStatus = data && typeof data === "object" ? data : null;
+        return this.swarmStatus;
+      } catch (err) {
+        console.warn("[organization-view] Failed to fetch swarm status:", err);
+        return null;
+      }
+    }
+
+    async fetchBoardProjection(_force = false) {
+      this.ensureSwarmUiState();
+      const targetSessionId = this.sessionId;
+      if (!targetSessionId) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      try {
+        const params = new URLSearchParams({ limit: "100" });
+        const selected = typeof this.selectedBoardChannel === "string" ? this.selectedBoardChannel.trim() : "";
+        if (selected && selected !== "all") {
+          params.set("channel", selected);
+        }
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(targetSessionId)}/organization/board?${params.toString()}`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (this.sessionId !== targetSessionId) return null;
+        if (!res.ok) {
+          if (res.status === 404 || res.status === 401 || res.status === 403) {
+            this.boardProjection = null;
+          }
+          return null;
+        }
+        const data = await res.json();
+        if (this.sessionId !== targetSessionId) return null;
+        this.boardProjection = data && typeof data === "object" ? data : null;
+        return this.boardProjection;
+      } catch (err) {
+        console.warn("[organization-view] Failed to fetch board projection:", err);
+        return null;
       }
     }
 
@@ -2901,6 +3070,7 @@
         }
         this.dom.meta.textContent = parts.join(" · ");
       }
+      this.renderSwarmOverview(model);
 
       // Prune cached positions when parent topology changes (e.g. detached -> linked)
       Object.entries(nodesMap).forEach(([id, node]) => {
@@ -3023,21 +3193,465 @@
         this.dom.approvalOverlay.hidden = true;
       }
 
-      // Render Activity Feed
+      // Render Activity Feed & Swarm Board
       this.renderActivityFeed();
     }
 
+    resolveActiveBoardState() {
+      this.ensureSwarmUiState();
+      const bp = this.boardProjection;
+      if (bp && bp.mode === "ragent_swarm" && bp.readOnly === false && bp.board && typeof bp.board === "object") {
+        const channels = Array.isArray(bp.channels)
+          ? bp.channels
+          : Array.isArray(bp.board.channels)
+            ? bp.board.channels
+            : [];
+        return {
+          mode: "ragent_swarm",
+          readOnly: false,
+          isWritable: true,
+          board: { ...bp.board, mode: "ragent_swarm", readOnly: false, channels },
+          channels,
+          nativeBoard: bp.nativeBoard || this.nativeBoard || null,
+        };
+      }
+      const nativeRaw =
+        (bp?.board && bp.mode === "provider_native" ? bp.board : null) ||
+        bp?.nativeBoard ||
+        this.nativeBoard ||
+        null;
+      if (nativeRaw && typeof nativeRaw === "object") {
+        const channels = Array.isArray(nativeRaw.channels)
+          ? nativeRaw.channels
+          : Array.isArray(bp?.channels)
+            ? bp.channels
+            : [];
+        return {
+          mode: "provider_native",
+          readOnly: true,
+          isWritable: false,
+          board: { ...nativeRaw, mode: "provider_native", readOnly: true, channels },
+          channels,
+          nativeBoard: null,
+        };
+      }
+      return {
+        mode: null,
+        readOnly: true,
+        isWritable: false,
+        board: null,
+        channels: [],
+        nativeBoard: null,
+      };
+    }
+
+    matchSwarmMemberForNode(node) {
+      const members = Array.isArray(this.swarmStatus?.members) ? this.swarmStatus.members : [];
+      if (!node || members.length === 0) return null;
+      return (
+        members.find((m) => m && (m.nodeId === node.id || (node.stableKey && m.stableKey === node.stableKey) || m.stableKey === node.id)) ||
+        null
+      );
+    }
+
+    formatBudgetSummaryParts(budget) {
+      if (!budget || typeof budget !== "object") return [];
+      const totals = budget.totals && typeof budget.totals === "object" ? budget.totals : {};
+      const limits = budget.limits && typeof budget.limits === "object" ? budget.limits : {};
+      const reserved = budget.reserved && typeof budget.reserved === "object" ? budget.reserved : {};
+      const parts = [];
+      if (Number.isFinite(Number(totals.runs)) || Number.isFinite(Number(limits.maxTotalRuns))) {
+        const runs = Number.isFinite(Number(totals.runs)) ? Number(totals.runs) : 0;
+        const cap = Number.isFinite(Number(limits.maxTotalRuns)) ? `/${Number(limits.maxTotalRuns)}` : "";
+        parts.push(`${trText("organization.budgetRuns", "runs", "运行次数")}: ${runs}${cap}`);
+      }
+      if (Number.isFinite(Number(totals.tokens)) && Number(totals.tokens) > 0) {
+        parts.push(`${trText("organization.budgetTokens", "tokens", "Tokens")}: ${Number(totals.tokens)}`);
+      }
+      if (Number.isFinite(Number(totals.costUsd)) && Number(totals.costUsd) > 0) {
+        parts.push(`$${Number(totals.costUsd).toFixed(4)}`);
+      }
+      if (Number.isFinite(Number(reserved.runs)) && Number(reserved.runs) > 0) {
+        parts.push(`${trText("organization.budgetReserved", "reserved", "预留")}: ${Number(reserved.runs)}`);
+      }
+      return parts;
+    }
+
+    renderSwarmOverview(model = null) {
+      const container = this.dom.swarmOverview;
+      if (!container) return;
+      this.ensureSwarmUiState();
+      const status = this.swarmStatus;
+      const boardState = this.resolveActiveBoardState();
+
+      if (status && typeof status === "object" && status.counts) {
+        const counts = status.counts;
+        const members = Array.isArray(status.members) ? status.members : [];
+        const stalls = Array.isArray(status.activeStalls) && status.activeStalls.length > 0
+          ? status.activeStalls
+          : Array.isArray(boardState.board?.activeStalls)
+            ? boardState.board.activeStalls
+            : [];
+        const pills = [];
+
+        pills.push(`<span class="org-overview-pill org-overview-pill--working">${escapeDisplayText(trText("organization.swarmWorking", "working", "工作中"))}: ${escapeDisplayText(Number(counts.working || 0))}</span>`);
+        pills.push(`<span class="org-overview-pill org-overview-pill--waiting">${escapeDisplayText(trText("organization.swarmWaiting", "waiting", "休眠等待"))}: ${escapeDisplayText(Number(counts.waiting || 0))}</span>`);
+        pills.push(`<span class="org-overview-pill org-overview-pill--stopped">${escapeDisplayText(trText("organization.swarmStopped", "stopped", "已停止"))}: ${escapeDisplayText(Number(counts.stopped || 0))}</span>`);
+        pills.push(`<span class="org-overview-pill org-overview-pill--killed">${escapeDisplayText(trText("organization.swarmKilled", "killed", "已终止"))}: ${escapeDisplayText(Number(counts.killed || 0))}</span>`);
+
+        if (status.isDone || boardState.board?.isDone) {
+          pills.push(`<span class="org-overview-pill org-overview-pill--done">[done]</span>`);
+        }
+
+        const harnessCounts = new Map();
+        const branchSeen = new Set();
+        const worktreePills = [];
+        for (const m of members) {
+          if (!m || m.swarmState === "killed") continue;
+          const harness = String(m.harness || m.provider || "").trim().toLowerCase();
+          if (harness) {
+            harnessCounts.set(harness, (harnessCounts.get(harness) || 0) + 1);
+          }
+          const mode = String(m.workspaceMode || "inherit").toLowerCase();
+          if (mode === "worktree" || mode === "staging" || m.workspaceBranch) {
+            const label = m.workspaceBranch
+              ? `${mode === "staging" ? "staging" : "branch"}: ${m.workspaceBranch}`
+              : `${mode}: ${m.name || m.stableKey || "member"}`;
+            if (!branchSeen.has(label)) {
+              branchSeen.add(label);
+              worktreePills.push(`<span class="org-overview-pill org-overview-pill--worktree">${escapeDisplayText(label)}</span>`);
+            }
+          }
+        }
+        for (const [harness, count] of harnessCounts.entries()) {
+          pills.push(`<span class="org-overview-pill org-overview-pill--harness">${escapeDisplayText(harness)} ×${escapeDisplayText(count)}</span>`);
+        }
+        pills.push(...worktreePills);
+
+        const budgetParts = this.formatBudgetSummaryParts(status.budget);
+        if (budgetParts.length > 0) {
+          pills.push(`<span class="org-overview-pill org-overview-pill--budget">${escapeDisplayText(budgetParts.join(" · "))}</span>`);
+        }
+
+        const stallHtml = stalls.map((s) => {
+          const detailLabel = s.details?.reason || s.conditionKind || "stall";
+          const targetLabel = s.targetNodeId || s.targetRole || "";
+          const alertText = `[stall] ${detailLabel}${targetLabel ? ` (${targetLabel})` : ""}${Number(s.alertCount) > 1 ? ` ×${s.alertCount}` : ""}`;
+          return `<span class="org-overview-pill org-overview-pill--stall">${escapeDisplayText(alertText)}</span>`;
+        }).join("");
+
+        container.hidden = false;
+        container.innerHTML = `<div class="org-overview-row">${pills.join("")}${stallHtml}</div>`;
+        return;
+      }
+
+      // Honest read-only observation fallback for AgY / provider-native Swarm (never fabricating swarm counts or budget)
+      const rawMembers = Array.isArray(this.rawUnifiedMembers?.members) ? this.rawUnifiedMembers.members : [];
+      const nativeMembers = rawMembers.filter((m) => m && m.canonicalId !== this.rawUnifiedMembers?.rootCanonicalId);
+      if (boardState.mode === "provider_native" || nativeMembers.length > 0) {
+        const harnessCounts = new Map();
+        let activeObserved = 0;
+        let idleObserved = 0;
+        for (const m of nativeMembers) {
+          const h = String(m.executionHarnessId || m.sourceTag || "").trim().toLowerCase();
+          if (h) harnessCounts.set(h, (harnessCounts.get(h) || 0) + 1);
+          const actState = String(m.activity?.state || "").toLowerCase();
+          if (["working", "running", "in_progress"].includes(actState)) activeObserved += 1;
+          else idleObserved += 1;
+        }
+        const pills = [
+          `<span class="org-overview-pill org-overview-pill--readonly">${escapeDisplayText(trText("organization.nativeReadOnlyPill", "Provider Native · Read-Only", "原生协作 · 只读"))}</span>`,
+        ];
+        if (nativeMembers.length > 0) {
+          pills.push(`<span class="org-overview-pill org-overview-pill--working">${escapeDisplayText(trText("organization.observedWorking", "working", "运行中"))}: ${escapeDisplayText(activeObserved)}</span>`);
+          pills.push(`<span class="org-overview-pill org-overview-pill--waiting">${escapeDisplayText(trText("organization.observedIdle", "idle", "空闲"))}: ${escapeDisplayText(idleObserved)}</span>`);
+        }
+        for (const [h, count] of harnessCounts.entries()) {
+          pills.push(`<span class="org-overview-pill org-overview-pill--harness">${escapeDisplayText(h)} ×${escapeDisplayText(count)}</span>`);
+        }
+        container.hidden = false;
+        container.innerHTML = `<div class="org-overview-row">${pills.join("")}</div>`;
+        return;
+      }
+
+      container.hidden = true;
+      container.innerHTML = "";
+    }
+
+    selectBoardChannel(channelName = "all") {
+      this.ensureSwarmUiState();
+      const raw = String(channelName ?? "all").trim();
+      this.selectedBoardChannel = !raw || raw === "all" ? "all" : normalizeSwarmChannelKey(raw);
+      if (this.sessionId && this.boardProjection?.mode === "ragent_swarm") {
+        void this.fetchBoardProjection(true).then(() => {
+          if (this.active) this.renderActivityFeed();
+        });
+      }
+      this.renderActivityFeed();
+    }
+
+    handleBoardFeedClick(e) {
+      const target = e?.target;
+      const chanEl = target?.closest?.("[data-board-channel]") || (target?.dataset?.boardChannel ? target : null);
+      if (chanEl) {
+        const ch = chanEl.dataset?.boardChannel || chanEl.getAttribute?.("data-board-channel");
+        if (ch) {
+          e.stopPropagation?.();
+          this.selectBoardChannel(ch);
+          return;
+        }
+      }
+      const archiveEl = target?.closest?.("[data-board-archive]") || (target?.dataset?.boardArchive ? target : null);
+      if (archiveEl) {
+        const ch = archiveEl.dataset?.boardArchive || archiveEl.getAttribute?.("data-board-archive");
+        if (ch) {
+          e.stopPropagation?.();
+          void this.createOrArchiveBoardChannel("archive", ch);
+          return;
+        }
+      }
+      const replyEl = target?.closest?.("[data-board-reply-seq]") || (target?.dataset?.boardReplySeq ? target : null);
+      if (replyEl) {
+        const seq = Number(replyEl.dataset?.boardReplySeq || replyEl.getAttribute?.("data-board-reply-seq"));
+        if (Number.isInteger(seq) && seq > 0) {
+          e.stopPropagation?.();
+          this.boardReplyToSeq = seq;
+          this.renderSwarmBoardComposerState(this.resolveActiveBoardState());
+          this.dom.swarmBoardInput?.focus?.();
+        }
+      }
+    }
+
+    async submitBoardMessage(explicitText = null) {
+      this.ensureSwarmUiState();
+      const boardState = this.resolveActiveBoardState();
+      if (!boardState.isWritable || !this.sessionId || this.boardComposerBusy) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      const rawText = String(explicitText !== null ? explicitText : (this.dom.swarmBoardInput?.value ?? this.boardComposerDraft ?? "")).trim();
+      if (!rawText) {
+        this.boardComposerError = trText("organization.boardMessageEmpty", "Message cannot be empty.", "消息内容不能为空。");
+        this.renderSwarmBoardComposerState(boardState);
+        return null;
+      }
+      const targetChannel = this.selectedBoardChannel && this.selectedBoardChannel !== "all" ? this.selectedBoardChannel : "main";
+      const replyToSeq = Number.isInteger(this.boardReplyToSeq) && this.boardReplyToSeq > 0 ? this.boardReplyToSeq : null;
+      this.boardComposerBusy = true;
+      this.boardComposerError = "";
+      this.renderSwarmBoardComposerState(boardState);
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/board/messages`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            channel: targetChannel,
+            bodyMarkdown: rawText,
+            ...(replyToSeq ? { replyToSeq } : {}),
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.boardComposerError = payload?.error || `HTTP ${res.status}`;
+          return null;
+        }
+        this.boardComposerDraft = "";
+        this.boardReplyToSeq = null;
+        if (this.dom.swarmBoardInput) this.dom.swarmBoardInput.value = "";
+        await Promise.all([this.fetchBoardProjection(true), this.fetchSwarmStatus(true)]);
+        if (this.active) this.render();
+        return payload;
+      } catch (err) {
+        this.boardComposerError = err?.message || "Failed to post message";
+        return null;
+      } finally {
+        this.boardComposerBusy = false;
+        this.renderSwarmBoardComposerState(this.resolveActiveBoardState());
+      }
+    }
+
+    async createOrArchiveBoardChannel(action, rawName, topic = "") {
+      this.ensureSwarmUiState();
+      const boardState = this.resolveActiveBoardState();
+      if (!boardState.isWritable || !this.sessionId || this.boardChannelBusy) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      const name = normalizeSwarmChannelKey(rawName, true);
+      if (!name) {
+        this.boardChannelError = trText("organization.boardInvalidChannel", "Channel name is required.", "请输入有效频道名称。");
+        this.renderSwarmBoardComposerState(boardState);
+        return null;
+      }
+      this.boardChannelBusy = true;
+      this.boardChannelError = "";
+      this.renderSwarmBoardComposerState(boardState);
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/swarm/channels`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ action: action === "archive" ? "archive" : "create", name, ...(topic ? { topic } : {}) }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.boardChannelError = payload?.error || `HTTP ${res.status}`;
+          return null;
+        }
+        if (action === "create") {
+          this.boardChannelDraft = "";
+          if (this.dom.swarmChannelInput) this.dom.swarmChannelInput.value = "";
+          this.selectedBoardChannel = payload?.channel?.name || name;
+        } else if (this.selectedBoardChannel === name) {
+          this.selectedBoardChannel = "all";
+        }
+        await Promise.all([this.fetchBoardProjection(true), this.fetchSwarmStatus(true)]);
+        if (this.active) this.render();
+        return payload;
+      } catch (err) {
+        this.boardChannelError = err?.message || "Channel request failed";
+        return null;
+      } finally {
+        this.boardChannelBusy = false;
+        this.renderSwarmBoardComposerState(this.resolveActiveBoardState());
+      }
+    }
+
+    async killSwarmMemberRequest(targetNodeId, { forceDiscard = false } = {}) {
+      this.ensureSwarmUiState();
+      if (!this.sessionId || !targetNodeId || this.killBusy) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      this.killBusy = true;
+      this.killError = "";
+      this.killConfirmTargetId = targetNodeId;
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/swarm/kill`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ targetNodeId, forceDiscard: forceDiscard === true }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (res.status === 409 && payload?.code === "SWARM_WORKSPACE_UNMERGED_CHANGES") {
+            this.killConflictInfo = payload;
+          } else {
+            this.killConflictInfo = null;
+            this.killError = payload?.error || `HTTP ${res.status}`;
+          }
+          const matchedNode = this.selectedSheetNodeId
+            ? this.buildUnifiedGraphModel().nodesMap?.[this.selectedSheetNodeId]
+            : null;
+          if (matchedNode && this.dom.sheet && !this.dom.sheet.hidden) {
+            this.openBottomSheet(matchedNode);
+          }
+          return payload;
+        }
+        this.killConflictInfo = null;
+        this.killConfirmTargetId = null;
+        this.dismissBottomSheet();
+        await this.refreshOrganizationData({ force: true });
+        if (this.active) this.render();
+        return payload;
+      } catch (err) {
+        this.killError = err?.message || "Kill request failed";
+        return null;
+      } finally {
+        this.killBusy = false;
+      }
+    }
+
+    resolveBoardMessageHarnessAndRole(msg) {
+      const explicitHarness = String(msg?.senderHarness || "").trim();
+      const explicitRole = String(msg?.senderRole || "").trim();
+      if (explicitHarness || explicitRole) {
+        return { harness: explicitHarness, role: explicitRole };
+      }
+      const swarmMembers = Array.isArray(this.swarmStatus?.members) ? this.swarmStatus.members : [];
+      const senderNodeId = String(msg?.senderNodeId || "").trim();
+      const senderName = String(msg?.sender || msg?.senderName || "").trim().toLowerCase();
+      const matchedSwarm = swarmMembers.find((m) =>
+        (senderNodeId && m?.nodeId === senderNodeId) ||
+        (senderName && (String(m?.name || "").toLowerCase() === senderName || String(m?.stableKey || "").toLowerCase() === senderName))
+      );
+      if (matchedSwarm) {
+        return { harness: matchedSwarm.harness || matchedSwarm.provider || "", role: matchedSwarm.role || matchedSwarm.contractRole || "" };
+      }
+      const unifiedMembers = Array.isArray(this.rawUnifiedMembers?.members) ? this.rawUnifiedMembers.members : [];
+      const matchedUnified = unifiedMembers.find((m) =>
+        senderName && String(m?.displayName || "").trim().toLowerCase() === senderName
+      );
+      if (matchedUnified) {
+        return { harness: matchedUnified.executionHarnessId || matchedUnified.sourceTag || "", role: matchedUnified.role || "" };
+      }
+      if (msg?.senderKind === "owner") return { harness: "", role: "owner" };
+      if (msg?.senderKind === "system") return { harness: "", role: "system" };
+      return { harness: "", role: "" };
+    }
+
+    renderSwarmBoardComposerState(boardState) {
+      const composer = this.dom.swarmBoardComposer;
+      if (!composer) return;
+      const showComposer = Boolean(boardState?.isWritable);
+      composer.hidden = !showComposer || !this.isActivityFeedExpanded;
+      composer.setAttribute("data-writable", showComposer ? "true" : "false");
+      if (!showComposer) {
+        if (this.dom.swarmBoardStatus) this.dom.swarmBoardStatus.textContent = "";
+        return;
+      }
+      const targetChannel = this.selectedBoardChannel && this.selectedBoardChannel !== "all" ? this.selectedBoardChannel : "main";
+      if (this.dom.swarmBoardTargetChannel) {
+        this.dom.swarmBoardTargetChannel.textContent = `#${targetChannel}`;
+      }
+      if (this.dom.swarmBoardReplyBadge && this.dom.swarmBoardReplyClearBtn) {
+        if (Number.isInteger(this.boardReplyToSeq) && this.boardReplyToSeq > 0) {
+          this.dom.swarmBoardReplyBadge.hidden = false;
+          this.dom.swarmBoardReplyBadge.textContent = `↳ #${this.boardReplyToSeq}`;
+          this.dom.swarmBoardReplyClearBtn.hidden = false;
+        } else {
+          this.dom.swarmBoardReplyBadge.hidden = true;
+          this.dom.swarmBoardReplyBadge.textContent = "";
+          this.dom.swarmBoardReplyClearBtn.hidden = true;
+        }
+      }
+      if (this.dom.swarmBoardInput && this.dom.swarmBoardInput.value !== this.boardComposerDraft) {
+        this.dom.swarmBoardInput.value = this.boardComposerDraft;
+      }
+      if (this.dom.swarmBoardInput) this.dom.swarmBoardInput.disabled = this.boardComposerBusy;
+      if (this.dom.swarmBoardSendBtn) this.dom.swarmBoardSendBtn.disabled = this.boardComposerBusy;
+      if (this.dom.swarmChannelInput && this.dom.swarmChannelInput.value !== this.boardChannelDraft) {
+        this.dom.swarmChannelInput.value = this.boardChannelDraft;
+      }
+      if (this.dom.swarmChannelInput) this.dom.swarmChannelInput.disabled = this.boardChannelBusy;
+      if (this.dom.swarmChannelCreateBtn) this.dom.swarmChannelCreateBtn.disabled = this.boardChannelBusy;
+      if (this.dom.swarmBoardStatus) {
+        this.dom.swarmBoardStatus.textContent = this.boardComposerError || this.boardChannelError || "";
+      }
+    }
+
     renderActivityFeed() {
+      this.ensureSwarmUiState();
       if (!this.dom.activityFeedList || !this.dom.activityBadge) return;
       const events = this.activityEvents;
-      const board = this.nativeBoard;
+      const boardState = this.resolveActiveBoardState();
+      const board = boardState.board;
       const boardMessages = Array.isArray(board?.messages) ? board.messages : [];
-      const boardChannels = Array.isArray(board?.channels) ? board.channels : [];
+      const boardChannels = Array.isArray(boardState.channels) ? boardState.channels : [];
       const totalUpdates = events.length + boardMessages.length;
       this.dom.activityBadge.textContent = `+${totalUpdates} ${tr("organization.updates")}`;
 
-      if (totalUpdates === 0) {
+      if (boardState.isWritable && !this.userCollapsedBoard && !this.isActivityFeedExpanded) {
+        this.isActivityFeedExpanded = true;
+        this.dom.activityFeedList.hidden = false;
+        if (this.dom.activityChevron) this.dom.activityChevron.textContent = "▼";
+      }
+
+      if (totalUpdates === 0 && !board) {
         this.dom.activityFeedList.innerHTML = `<div class="org-activity-row" style="color:var(--text-secondary);font-size:12px;">${escapeDisplayText(tr("organization.noActivity"))}</div>`;
+        this.renderSwarmBoardComposerState(boardState);
         return;
       }
 
@@ -3052,38 +3666,115 @@
           <span class="org-activity-row-time">${escapeDisplayText(e.time)}</span>
         </div>`;
         });
-      if (boardMessages.length > 0) {
+
+      if (board) {
         const channelSummary = boardChannels
           .map((ch) => `#${ch.name} (${ch.messageCount ?? 0})`)
           .join(" · ");
-        const boardHeader = board.title
-          ? `${trText("organization.swarmBoardReadOnly", "Swarm Board (Read-Only)", "协作留言板（只读）")}: ${board.title}`
+        const headerBase = boardState.isWritable
+          ? trText("organization.swarmBoardTitle", "Swarm Board", "协作留言板")
           : trText("organization.swarmBoardReadOnly", "Swarm Board (Read-Only)", "协作留言板（只读）");
-        rows.push(`<div class="org-activity-row org-board-header" style="font-size:11px;color:var(--text-secondary);">${escapeDisplayText(boardHeader)}${channelSummary ? ` · ${escapeDisplayText(channelSummary)}` : ""}</div>`);
-        for (const msg of boardMessages.slice(-20)) {
-          const seqTag = Number.isInteger(msg.seq) ? `#${msg.seq}` : "";
-          const chTag = msg.channel ? `[#${msg.channel}] ` : "";
-          const replyTag = Number.isInteger(msg.replyToSeq) ? ` -> #${msg.replyToSeq}` : "";
-          const label = `${chTag}${seqTag}${replyTag} ${msg.sender || "member"}: ${msg.text || ""}`.trim();
-          rows.push(`
-        <div class="org-activity-row org-activity-row--board">
-          <span class="org-activity-row-dot org-activity-row-dot--waiting"></span>
-          <span class="org-activity-row-msg">${escapeDisplayText(label)}</span>
-          <span class="org-activity-row-time">${escapeDisplayText(msg.kind || "")}</span>
-        </div>`);
+        const boardHeader = board.title ? `${headerBase}: ${board.title}` : headerBase;
+
+        rows.push(
+          `<div class="org-board-section-header">` +
+            `<div class="org-activity-row org-board-header">` +
+              `<span class="org-board-mode-badge ${boardState.isWritable ? "org-board-mode-badge--writable" : "org-board-mode-badge--readonly"}">${escapeDisplayText(boardHeader)}</span>` +
+              `${board.headSeq ? `<span class="org-board-seq-head">#${escapeDisplayText(board.headSeq)}</span>` : ""}` +
+              `${board.isDone ? `<span class="org-board-signal org-board-signal--done">[done]</span>` : ""}` +
+              `${channelSummary ? `<span class="org-board-channel-summary">${escapeDisplayText(channelSummary)}</span>` : ""}` +
+            `</div>` +
+            `${!boardState.isWritable
+              ? `<div class="org-board-readonly-banner">${escapeDisplayText(trText("organization.swarmBoardReadOnlyBanner", "Provider-native Swarm observation only. Owner posting and channel controls are disabled.", "仅用于观测 Provider 原生协作：禁止发帖或修改频道。"))}</div>`
+              : ""}` +
+          `</div>`
+        );
+
+        if (boardChannels.length > 0) {
+          const activeSel = this.selectedBoardChannel || "all";
+          const allTab = `<button type="button" class="org-board-channel-tab ${activeSel === "all" ? "is-active" : ""}" data-board-channel="all">${escapeDisplayText(trText("organization.allChannels", "All", "全部"))}</button>`;
+          const chanTabs = boardChannels.map((ch) => {
+            const name = String(ch?.name || "main");
+            const isActive = activeSel === name;
+            const unread = Number(ch?.unreadCount || 0);
+            const unreadHtml = unread > 0 ? `<span class="org-board-channel-unread">${escapeDisplayText(unread)}</span>` : "";
+            const archiveHtml = boardState.isWritable && name !== "main"
+              ? `<span class="org-board-channel-archive" role="button" data-board-archive="${escapeDisplayText(name)}" title="Archive #${escapeDisplayText(name)}">×</span>`
+              : "";
+            return `<button type="button" class="org-board-channel-tab ${isActive ? "is-active" : ""}" data-board-channel="${escapeDisplayText(name)}">#${escapeDisplayText(name)}<span class="org-board-channel-count">(${escapeDisplayText(ch?.messageCount ?? 0)})</span>${unreadHtml}${archiveHtml}</button>`;
+          });
+          rows.push(`<div class="org-board-channels" id="orgSwarmBoardChannels">${allTab}${chanTabs.join("")}</div>`);
+        }
+
+        const activeChannelFilter = this.selectedBoardChannel && this.selectedBoardChannel !== "all"
+          ? normalizeSwarmChannelKey(this.selectedBoardChannel)
+          : "";
+        const filteredMessages = [...boardMessages]
+          .filter((msg) => !activeChannelFilter || normalizeSwarmChannelKey(msg?.channel || "main") === activeChannelFilter)
+          .sort((a, b) => (Number(a?.seq) || 0) - (Number(b?.seq) || 0));
+
+        if (filteredMessages.length === 0) {
+          rows.push(`<div class="org-activity-row org-board-empty">${escapeDisplayText(trText("organization.noBoardMessages", "No board messages in this channel yet.", "当前频道暂无留言。"))}</div>`);
+        } else {
+          for (const msg of filteredMessages.slice(-40)) {
+            const seq = Number(msg?.seq || 0);
+            const seqTag = seq > 0 ? `#${seq}` : "";
+            const chName = msg?.channel || "main";
+            const { harness, role } = this.resolveBoardMessageHarnessAndRole(msg);
+            const isStall = Boolean(msg?.isStallAlert || msg?.kind === "stall" || /\[\s*stall\s*\]/i.test(String(msg?.text || msg?.bodyMarkdown || "")));
+            const isDone = Boolean(msg?.isDoneSignal || msg?.kind === "done" || /\[\s*done\s*\]/i.test(String(msg?.text || msg?.bodyMarkdown || "")));
+            const replyTag = Number.isInteger(msg?.replyToSeq) && msg.replyToSeq > 0
+              ? `<span class="org-board-reply-ref">↳ #${escapeDisplayText(msg.replyToSeq)}</span>`
+              : "";
+            const harnessBadge = harness ? `<span class="org-board-sender-badge org-board-sender-badge--harness">${escapeDisplayText(harness)}</span>` : "";
+            const roleBadge = role ? `<span class="org-board-sender-badge org-board-sender-badge--role">${escapeDisplayText(role)}</span>` : "";
+            const signalBadges = `${isDone ? `<span class="org-board-signal org-board-signal--done">[done]</span>` : ""}${isStall ? `<span class="org-board-signal org-board-signal--stall">[stall]</span>` : ""}`;
+            const rawBody = msg?.text ?? msg?.bodyMarkdown ?? "";
+            const bodySafeHtml = formatBoardBodySafeHtml(rawBody);
+            const artifactHtml = Array.isArray(msg?.artifactRefs) && msg.artifactRefs.length > 0
+              ? `<div class="org-board-artifacts">${msg.artifactRefs.map((ref) => `<span class="org-board-artifact-pill">${escapeDisplayText(ref?.title || ref?.id || ref?.packetId || "artifact")}</span>`).join("")}</div>`
+              : "";
+            const replyBtnHtml = boardState.isWritable && seq > 0
+              ? `<button type="button" class="org-board-reply-btn" data-board-reply-seq="${escapeDisplayText(seq)}" title="Reply to #${escapeDisplayText(seq)}">↳</button>`
+              : "";
+            const rowClasses = [
+              "org-board-message-row",
+              isStall ? "org-board-message-row--stall" : "",
+              isDone ? "org-board-message-row--done" : "",
+              msg?.senderKind === "owner" ? "org-board-message-row--owner" : "",
+            ].filter(Boolean).join(" ");
+
+            rows.push(
+              `<div class="${rowClasses}">` +
+                `<div class="org-board-message-meta">` +
+                  `${seqTag ? `<span class="org-board-seq">${escapeDisplayText(seqTag)}</span>` : ""}` +
+                  `<span class="org-board-channel-pill">#${escapeDisplayText(chName)}</span>` +
+                  `<span class="org-board-sender">${escapeDisplayText(msg?.sender || msg?.senderName || "member")}</span>` +
+                  `${harnessBadge}${roleBadge}${replyTag}${signalBadges}` +
+                  `${replyBtnHtml}` +
+                `</div>` +
+                `<div class="org-board-message-body">${bodySafeHtml}</div>` +
+                `${artifactHtml}` +
+              `</div>`
+            );
+          }
         }
       }
       this.dom.activityFeedList.innerHTML = rows.join("");
+      this.renderSwarmBoardComposerState(boardState);
     }
 
     toggleActivityFeed() {
+      this.ensureSwarmUiState();
       this.isActivityFeedExpanded = !this.isActivityFeedExpanded;
+      this.userCollapsedBoard = !this.isActivityFeedExpanded;
       if (this.dom.activityFeedList) {
         this.dom.activityFeedList.hidden = !this.isActivityFeedExpanded;
       }
       if (this.dom.activityChevron) {
         this.dom.activityChevron.textContent = this.isActivityFeedExpanded ? "▼" : "▲";
       }
+      this.renderSwarmBoardComposerState(this.resolveActiveBoardState());
     }
 
     // --- Member Metadata & Provenance Normalization ---
@@ -3106,7 +3797,8 @@
         conversationDescriptor?.availability || ""
       );
       const sourceTag = node.sourceTag ?? memberDesc?.sourceTag ?? (memberKind === "formal" || memberKind === "root_session" ? "ragent" : null);
-      const executionHarnessId = node.executionHarnessId ?? memberDesc?.executionHarnessId ?? null;
+      const matchedSwarm = !isReadOnlyNative ? this.matchSwarmMemberForNode(node) : null;
+      const executionHarnessId = node.executionHarnessId ?? memberDesc?.executionHarnessId ?? (matchedSwarm?.harness || matchedSwarm?.provider || null);
       const isRootLeader = Boolean(node.isRootLeader ?? (role === NodeRole.EXECUTIVE));
       const canOpenInbox = Boolean(
         node.canOpenInbox ?? (memberKind === "formal" && Boolean(this.projection?.organizationId) && !isReadOnlyNative)
@@ -3126,6 +3818,11 @@
         canOpenInbox,
         sourceTag,
         executionHarnessId,
+        swarmState: node.swarmState || matchedSwarm?.swarmState || null,
+        workspaceMode: node.workspaceMode || matchedSwarm?.workspaceMode || null,
+        workspaceBranch: node.workspaceBranch || matchedSwarm?.workspaceBranch || null,
+        swarmMemberId: matchedSwarm?.nodeId || null,
+        swarmChannels: Array.isArray(matchedSwarm?.channels) ? matchedSwarm.channels : null,
         conversationDescriptor,
         coverage,
         parentUnknown: Boolean(node.parentUnknown),
@@ -3151,6 +3848,15 @@
       ];
       if (node.model) {
         pills.push(`<span class="org-meta-pill">${escapeDisplayText(node.model)}</span>`);
+      }
+      if (node.swarmState) {
+        pills.push(`<span class="org-meta-pill org-meta-pill--swarm-${escapeDisplayText(node.swarmState)}">${escapeDisplayText(trText("organization.swarmStateLabel", "Swarm", "集群"))}: ${escapeDisplayText(node.swarmState)}</span>`);
+      }
+      if (node.workspaceBranch || (node.workspaceMode && node.workspaceMode !== "inherit")) {
+        const wsLabel = node.workspaceBranch
+          ? `${node.workspaceMode || "worktree"}: ${node.workspaceBranch}`
+          : String(node.workspaceMode);
+        pills.push(`<span class="org-meta-pill org-meta-pill--worktree">${escapeDisplayText(wsLabel)}</span>`);
       }
       if (node.isReadOnlyNative) {
         pills.push(`<span class="org-meta-pill org-meta-pill--readonly">${escapeDisplayText(trText("organization.readOnly", "Read-only", "只读"))}</span>`);
@@ -3200,8 +3906,16 @@
     }
 
     openBottomSheet(rawNode) {
+      this.ensureSwarmUiState();
       const node = this.normalizeNodeForView(rawNode);
       if (!node) return;
+      const swarmMember = !node.isReadOnlyNative ? this.matchSwarmMemberForNode(node) : null;
+      const killTargetId = swarmMember?.nodeId || node.swarmMemberId || node.id;
+      if (this.killConfirmTargetId && this.killConfirmTargetId !== killTargetId) {
+        this.killConflictInfo = null;
+        this.killError = "";
+        this.killConfirmTargetId = null;
+      }
       this.selectedSheetNodeId = node.id;
       const sheet = this.dom.sheet;
       const backdrop = this.dom.sheetBackdrop;
@@ -3279,6 +3993,29 @@
             : ""
         }
 
+        ${
+          this.killConflictInfo && this.killConfirmTargetId === killTargetId
+            ? `<div class="org-blocker-card org-kill-conflict-card" id="orgSwarmKillConflictCard">
+                <div><strong>${escapeDisplayText(trText("organization.unmergedWorkspaceChanges", "Unmerged workspace changes detected", "检测到未合并的工作区改动"))}</strong></div>
+                <div>${escapeDisplayText(this.killConflictInfo.error || "")}</div>
+                ${this.killConflictInfo.workspaceBranch ? `<div>${escapeDisplayText(`branch: ${this.killConflictInfo.workspaceBranch}`)}</div>` : ""}
+                ${Array.isArray(this.killConflictInfo.dirtyFiles) && this.killConflictInfo.dirtyFiles.length > 0
+                  ? `<div class="org-kill-dirty-files">${escapeDisplayText(this.killConflictInfo.dirtyFiles.join(", "))}</div>`
+                  : ""}
+                <div class="org-sheet-actions" style="margin-top:8px;">
+                  <button type="button" class="org-btn org-btn--danger" id="orgSwarmForceKillBtn">${escapeDisplayText(trText("organization.forceDiscardKill", "Force Discard & Kill", "强制丢弃并终止"))}</button>
+                  <button type="button" class="org-btn org-btn--secondary" id="orgSwarmKillCancelBtn">${escapeDisplayText(trText("organization.cancel", "Cancel", "取消"))}</button>
+                </div>
+              </div>`
+            : ""
+        }
+
+        ${
+          this.killError && this.killConfirmTargetId === killTargetId
+            ? `<div class="org-blocker-card">${escapeDisplayText(this.killError)}</div>`
+            : ""
+        }
+
         <div class="org-sheet-actions">
           ${
             node.isRootLeader
@@ -3286,6 +4023,11 @@
               : ""
           }
           <button type="button" class="org-btn ${node.isRootLeader ? "org-btn--secondary" : "org-btn--primary"}" id="orgViewDetailsBtn">${escapeDisplayText(detailsBtnLabel)}</button>
+          ${
+            swarmMember && !node.isRootLeader && swarmMember.role !== "coordinator" && swarmMember.contractRole !== "root_leadership" && swarmMember.swarmState !== "killed" && this.sessionId
+              ? `<button type="button" class="org-btn org-btn--danger" id="orgSwarmKillBtn">${escapeDisplayText(trText("organization.killSwarmMember", "Kill Member", "终止成员"))}</button>`
+              : ""
+          }
         </div>
       `;
 
@@ -3309,6 +4051,30 @@
         detailBtn.addEventListener("click", () => {
           this.dismissBottomSheet();
           this.openDetailScreen(node);
+        });
+      }
+
+      const killBtn = sheet.querySelector("#orgSwarmKillBtn");
+      if (killBtn && swarmMember) {
+        killBtn.addEventListener("click", () => {
+          void this.killSwarmMemberRequest(killTargetId, { forceDiscard: false });
+        });
+      }
+
+      const forceKillBtn = sheet.querySelector("#orgSwarmForceKillBtn");
+      if (forceKillBtn && swarmMember) {
+        forceKillBtn.addEventListener("click", () => {
+          void this.killSwarmMemberRequest(killTargetId, { forceDiscard: true });
+        });
+      }
+
+      const cancelKillBtn = sheet.querySelector("#orgSwarmKillCancelBtn");
+      if (cancelKillBtn) {
+        cancelKillBtn.addEventListener("click", () => {
+          this.killConflictInfo = null;
+          this.killError = "";
+          this.killConfirmTargetId = null;
+          this.openBottomSheet(rawNode);
         });
       }
 

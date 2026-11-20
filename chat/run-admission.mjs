@@ -27,6 +27,8 @@ import {
   buildExecutionScopeSnapshot,
   computeExecutionScopeDigest,
   isUnresolvableRootError,
+  resolveRealRoot,
+  scopeContainsPath,
 } from './execution-scope.mjs';
 import { collectGitProvenance } from './git-provenance.mjs';
 import { resolveRuntimeReadOnlyCapability } from './runtime-adapter.mjs';
@@ -61,7 +63,7 @@ import {
   systemPathRootsForPlatform,
 } from './risk-policy.mjs';
 
-export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend', 'collaboration_task']);
+export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend', 'collaboration_task', 'swarm_wakeup']);
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -167,6 +169,134 @@ function isUnresolvableScopeError(error) {
   return isUnresolvableRootError(error);
 }
 
+async function resolveIsolatedSwarmWorkspaceRoot({ session, sessionKey, project, options, internalOperation, deps }) {
+  const isEphemeralSwarmSession = session?.sessionPlane === 'organization'
+    && session?.lifecycleMode === 'ephemeral_swarm';
+  if (!isEphemeralSwarmSession) return null;
+
+  const sessionWorkspaceMode = trimString(session?.workspaceMode);
+  const requestedIsolation = trimString(options?.executionIsolation);
+  const claimsIsolation = ['worktree', 'staging'].includes(sessionWorkspaceMode)
+    || ['worktree', 'container'].includes(requestedIsolation);
+  if (!claimsIsolation && (internalOperation !== 'swarm_wakeup' || sessionWorkspaceMode === 'inherit')) {
+    return null;
+  }
+
+  const orgId = trimString(session?.organizationId);
+  const nodeId = trimString(session?.organizationNodeId);
+  if (!orgId || !nodeId) {
+    if (claimsIsolation) {
+      throw createAdmissionError(
+        'Isolated swarm session is missing organization node binding',
+        'EXECUTION_SCOPE_UNAVAILABLE',
+        409,
+        { projectId: project.id },
+      );
+    }
+    return null;
+  }
+
+  const loadOrganizationNode = typeof deps.loadOrganizationNode === 'function'
+    ? deps.loadOrganizationNode
+    : (async ({ organizationId, nodeId: targetNodeId }) => {
+      const { getOrganization, getNode } = await import('./organization-store.mjs');
+      const [org, node] = await Promise.all([
+        getOrganization(organizationId),
+        getNode(targetNodeId),
+      ]);
+      return { org, node };
+    });
+
+  const resolved = await loadOrganizationNode({
+    organizationId: orgId,
+    nodeId,
+    sessionId: sessionKey,
+    session,
+  });
+  const org = resolved?.org || null;
+  const node = resolved?.node || null;
+  const validNode = Boolean(
+    org
+    && org.policy?.swarmEnabled === true
+    && !['archived', 'lifecycle_pending'].includes(org.state)
+    && node
+    && node.organizationId === org.id
+    && node.lifecycleMode === 'ephemeral_swarm'
+    && node.lifecycleState === 'active'
+    && node.retiredRevision === null
+    && node.currentSessionId === sessionKey,
+  );
+  if (!validNode) {
+    if (claimsIsolation) {
+      throw createAdmissionError(
+        'Isolated swarm workspace binding is invalid or inactive',
+        'EXECUTION_SCOPE_UNAVAILABLE',
+        409,
+        { projectId: project.id, organizationId: orgId, nodeId },
+      );
+    }
+    return null;
+  }
+
+  const nodeWorkspaceMode = trimString(node.workspaceMode);
+  if (!['worktree', 'staging'].includes(nodeWorkspaceMode)) {
+    if (claimsIsolation) {
+      throw createAdmissionError(
+        'Session claimed isolated workspace but node workspaceMode is not isolated',
+        'PROJECT_SCOPE_ESCAPE',
+        400,
+        { projectId: project.id, nodeId },
+      );
+    }
+    return null;
+  }
+
+  const nodeWorkspacePath = trimString(node.workspacePath);
+  const sessionFolder = trimString(session?.folder);
+  if (!nodeWorkspacePath || !sessionFolder) {
+    throw createAdmissionError(
+      'Isolated swarm workspace root is unresolved or missing',
+      'WORKSPACE_ROOT_UNRESOLVED',
+      409,
+      { projectId: project.id, nodeId },
+    );
+  }
+
+  let realNodeWorkspace = '';
+  let realSessionFolder = '';
+  try {
+    [realNodeWorkspace, realSessionFolder] = await Promise.all([
+      resolveRealRoot(nodeWorkspacePath),
+      resolveRealRoot(sessionFolder),
+    ]);
+  } catch (error) {
+    if (isUnresolvableScopeError(error)) {
+      throw createAdmissionError(
+        `Isolated swarm workspace root is not accessible: ${error?.code || 'unresolvable'}`,
+        'WORKSPACE_ROOT_UNRESOLVED',
+        409,
+        { projectId: project.id, nodeId },
+      );
+    }
+    throw error;
+  }
+
+  if (realNodeWorkspace !== realSessionFolder) {
+    throw createAdmissionError(
+      'Isolated swarm session folder does not match recorded node workspace',
+      'PROJECT_SCOPE_ESCAPE',
+      400,
+      { projectId: project.id, nodeId },
+    );
+  }
+
+  return {
+    workspaceMode: nodeWorkspaceMode,
+    workspaceRootPath: realNodeWorkspace,
+    executionIsolation: nodeWorkspaceMode === 'staging' ? 'container' : 'worktree',
+  };
+}
+
 /**
  * prepareRunExecution({ sessionId, session, manifest, options, deps })
  *
@@ -267,9 +397,18 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
   }
   const candidateProjectRevision = Number.isInteger(project.revision) && project.revision > 0 ? project.revision : 1;
 
+  const isolatedWorkspace = await resolveIsolatedSwarmWorkspaceRoot({
+    session,
+    sessionKey,
+    project,
+    options,
+    internalOperation,
+    deps,
+  });
+
   // Workspace: drift-checked ensure (raises WORKSPACE_ROOT_DRIFT when the root
   // moved), then a non-mutating re-read for the revision check.
-  const workspace = await ensureWorkspace(project.rootPath);
+  const workspace = await ensureWorkspace(isolatedWorkspace?.workspaceRootPath || project.rootPath);
   if (!workspace || workspace.resolutionState === 'unresolved') {
     throw createAdmissionError(
       'Workspace root is unresolved or not accessible',
@@ -282,16 +421,19 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     ? workspace.revision
     : 1;
 
-  const git = await collectGit(workspace.realRootPath || project.rootPath, {
+  const git = await collectGit(workspace.realRootPath || isolatedWorkspace?.workspaceRootPath || project.rootPath, {
     timeoutMs: options.gitTimeoutMs,
     maxOutputBytes: options.gitMaxOutputBytes,
   });
 
-  const scopeMode = project.scopeMode === 'subpath' ? 'subpath' : 'shared';
+  const scopeMode = isolatedWorkspace?.workspaceMode === 'staging'
+    ? 'shared'
+    : (project.scopeMode === 'subpath' ? 'subpath' : 'shared');
   const requestedAccessMode = options.accessMode === 'read' || requiresReadOnly ? 'read' : 'write';
-  const executionIsolation = options.executionIsolation === 'worktree' || options.executionIsolation === 'container'
-    ? options.executionIsolation
-    : 'shared';
+  const executionIsolation = isolatedWorkspace?.executionIsolation
+    || (options.executionIsolation === 'worktree' || options.executionIsolation === 'container'
+      ? options.executionIsolation
+      : 'shared');
   const agent = options.agent && typeof options.agent === 'object' ? options.agent : undefined;
 
   // S4: runtime read-only certification gate. Resolved BEFORE the snapshot is
@@ -351,7 +493,14 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
       git,
     });
     snapshot = built.snapshot;
-    const riskContext = buildRunRiskContext(snapshot);
+    const extraProtectedRoots = [];
+    if (isolatedWorkspace?.workspaceRootPath && trimString(project?.rootPath)) {
+      const realProjectRoot = await resolveRealRoot(project.rootPath).catch(() => '');
+      if (realProjectRoot && !(await scopeContainsPath(realProjectRoot, isolatedWorkspace.workspaceRootPath))) {
+        extraProtectedRoots.push(realProjectRoot);
+      }
+    }
+    const riskContext = buildRunRiskContext(snapshot, { protectedRoots: extraProtectedRoots });
     // Bind the risk context into the same immutable snapshot/digest as the
     // execution scope. A later observer or sidecar cannot silently replace the
     // protected roots or the trusted workspace with caller-provided values.

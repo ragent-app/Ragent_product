@@ -16,13 +16,28 @@ import { buildOrganizationProjection, projectionDigest } from './organization-pr
 import { attachOrganizationNodeActivities, nativeDelegationActivity } from './organization-node-activity.mjs';
 import { createManagedSessionForNode } from './organization-managed-session-factory.mjs';
 import { provisionRootLeadershipRevision } from './organization-provisioning.mjs';
-import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes } from './organization-store.mjs';
+import { getOrganization, getOrganizationByRootSession, getNode, listOrganizationNodes, withOrganizationDatabase } from './organization-store.mjs';
+import {
+  archiveBoardChannel,
+  buildAuthoritativeBoardProjection,
+  createBoardChannel,
+  ensureOrganizationBoardSchema,
+  normalizeBoardChannelName,
+  postBoardMessage,
+} from './organization-board-store.mjs';
+import {
+  SWARM_WORKSPACE_UNMERGED_CHANGES,
+  deliverPendingSwarmWakeups,
+  getSwarmStatus,
+  killSwarmMember,
+} from './organization-swarm.mjs';
+import { publishOrganizationInvalidation } from './organization-invalidation.mjs';
 import { listOrganizationEvents, getInternalEnvelope } from './organization-messaging.mjs';
 import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
 import { verifiedBirthActor } from './organization-birth-evidence.mjs';
 import { getCollaboration } from './collaboration-store.mjs';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
-import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
+import { getRun, isTerminalRunState, listDurableSessionRunIndexEntries, readRunSpoolDelta, requestRunCancel, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 import { cancelOrganizationDescendants } from './organization-hierarchy.mjs';
 import { readSessionCollaborationSettings, writeSessionCollaborationSettings, readSessionRuntimeConstraints, writeSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
 
@@ -30,7 +45,97 @@ function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function writeError(res, writeJson, error) {
   const code = text(error?.code);
   const status = code === 'ORGANIZATION_NOT_FOUND' ? 404 : error?.statusCode || 400;
-  writeJson(res, status, { error: error?.message || 'Organization request failed', ...(code ? { code } : {}) });
+  const extra = code === SWARM_WORKSPACE_UNMERGED_CHANGES
+    ? {
+      workspaceMode: error.workspaceMode || 'inherit',
+      workspacePath: error.workspacePath || '',
+      workspaceBranch: error.workspaceBranch || '',
+      dirtyFiles: Array.isArray(error.dirtyFiles) ? error.dirtyFiles : [],
+      unmergedCommits: Number(error.unmergedCommits || 0),
+    }
+    : {};
+  writeJson(res, status, { error: error?.message || 'Organization request failed', ...(code ? { code } : {}), ...extra });
+}
+
+function requireOwnerOnlyAccess(authSession, res, writeJson) {
+  if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') {
+    writeJson(res, 403, { error: 'Owner access required' });
+    return false;
+  }
+  return true;
+}
+
+async function resolveSessionMeta(sessionMetaLookup, sessionId) {
+  if (typeof sessionMetaLookup === 'function') return sessionMetaLookup(sessionId);
+  const { getSessionMeta } = await import('./session-manager.mjs');
+  return getSessionMeta(sessionId);
+}
+
+async function parseJsonRequestBody(req, readBody, res, writeJson, maxBytes = 32 * 1024) {
+  try {
+    const rawBody = await readBody(req, maxBytes);
+    const parsed = rawBody ? JSON.parse(rawBody) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      writeJson(res, 400, { error: 'JSON object body required', code: 'BAD_REQUEST' });
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    writeJson(res, error?.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: 'Invalid JSON body' });
+    return null;
+  }
+}
+
+async function defaultSwarmRuntimeDeps() {
+  const { sendMessage, getSessionMeta } = await import('./session-manager.mjs');
+  return {
+    deliverSessionMessage: sendMessage,
+    sendMessage,
+    getSession: getSessionMeta,
+    getRunState: async (memberSessionId) => {
+      const meta = await getSessionMeta(memberSessionId).catch(() => null);
+      const activeRunId = text(meta?.activeRunId);
+      if (!activeRunId) return { running: false, activeRunId: '' };
+      const run = await getRun(activeRunId).catch(() => null);
+      const running = Boolean(run && !isTerminalRunState(run.state));
+      return { running, runId: activeRunId, activeRunId, state: text(run?.state) };
+    },
+    requestRunCancel: (runId) => requestRunCancel(runId),
+  };
+}
+
+async function hasAuthoritativeSwarmBoard(org) {
+  if (!org?.id) return false;
+  if (org.policy?.swarmEnabled === true || org.policy?.mode === 'ragent_swarm') return true;
+  return withOrganizationDatabase((conn) => {
+    ensureOrganizationBoardSchema(conn);
+    const hasChannel = conn.prepare('SELECT 1 FROM organization_board_channels WHERE organization_id = ? LIMIT 1').get(org.id);
+    if (hasChannel) return true;
+    const hasMsg = conn.prepare('SELECT 1 FROM organization_board_messages WHERE organization_id = ? LIMIT 1').get(org.id);
+    return Boolean(hasMsg);
+  });
+}
+
+function normalizeNativeBoardFallback(rawNativeBoard, { channel = '', sinceSeq = 0, limit = 0 } = {}) {
+  if (!rawNativeBoard || typeof rawNativeBoard !== 'object') return null;
+  let messages = Array.isArray(rawNativeBoard.messages) ? [...rawNativeBoard.messages] : [];
+  const normalizedChannel = normalizeBoardChannelName(channel, { allowEmpty: true });
+  if (normalizedChannel) {
+    messages = messages.filter((msg) => normalizeBoardChannelName(msg?.channel || 'main') === normalizedChannel);
+  }
+  if (sinceSeq > 0) {
+    messages = messages.filter((msg) => Number(msg?.seq || 0) > sinceSeq);
+  }
+  if (limit > 0 && messages.length > limit) {
+    messages = sinceSeq > 0 ? messages.slice(0, limit) : messages.slice(-limit);
+  }
+  return {
+    ...rawNativeBoard,
+    mode: 'provider_native',
+    source: text(rawNativeBoard.source) || 'provider_native',
+    readOnly: true,
+    messages,
+  };
 }
 
 
@@ -111,6 +216,8 @@ export async function handleOrganizationRoutes({
   dispatchPhase = null,
   listMembers = listMemberEvents,
   readCapturedMember = capturedMember,
+  sessionMetaLookup = null,
+  swarmDeps = null,
 }) {
   const organizationMatch = /^\/api\/organizations\/([^/]+)(?:\/(projection|cancel|provision))?$/.exec(String(pathname || ''));
   const conversationMatch = /^\/api\/organizations\/([^/]+)\/nodes\/([^/]+)\/conversation$/.exec(String(pathname || ''));
@@ -121,9 +228,13 @@ export async function handleOrganizationRoutes({
   const actionsMatch = /^\/api\/sessions\/([^/]+)\/organization\/actions$/.exec(String(pathname || ''));
   const membersMatch = /^\/api\/sessions\/([^/]+)\/organization\/members$/.exec(String(pathname || ''));
   const boardMatch = /^\/api\/sessions\/([^/]+)\/organization\/board$/.exec(String(pathname || ''));
+  const boardMessagesMatch = /^\/api\/sessions\/([^/]+)\/organization\/board\/messages$/.exec(String(pathname || ''));
+  const swarmStatusMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/status$/.exec(String(pathname || ''));
+  const swarmChannelsMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/channels$/.exec(String(pathname || ''));
+  const swarmKillMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/kill$/.exec(String(pathname || ''));
   const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !boardMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !boardMatch && !boardMessagesMatch && !swarmStatusMatch && !swarmChannelsMatch && !swarmKillMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
   if (runtimeConstraintsMatch) {
     if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (!['GET', 'PUT'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
@@ -178,22 +289,203 @@ export async function handleOrganizationRoutes({
     return true;
   }
   if (boardMatch) {
-    if (authSession?.role !== 'owner') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
     if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
     try {
       const root = decodeURIComponent(boardMatch[1]);
-      const { getSessionMeta } = await import('./session-manager.mjs');
-      if (!await getSessionMeta(root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
-      const memberEvents = await listMembers(root);
-      const board = memberEvents.board || null;
-      const channels = memberEvents.channels || board?.channels || [];
+      if (!await resolveSessionMeta(sessionMetaLookup, root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const url = new URL(req.url || pathname, `http://${req.headers?.host || 'localhost'}`);
+      const channel = text(url.searchParams.get('channel'));
+      const rawSince = url.searchParams.get('sinceSeq');
+      const rawLimit = url.searchParams.get('limit');
+      const sinceSeq = rawSince !== null && rawSince !== '' ? Number(rawSince) : 0;
+      const limit = rawLimit !== null && rawLimit !== '' ? Number(rawLimit) : 100;
+      const hasLimitQuery = rawLimit !== null && rawLimit !== '';
+      if (!Number.isSafeInteger(sinceSeq) || sinceSeq < 0 || !Number.isInteger(limit) || limit < 1 || limit > 200) {
+        writeJson(res, 400, { error: 'Invalid board query cursor or limit', code: 'BAD_REQUEST' });
+        return true;
+      }
+      const includeArchived = url.searchParams.get('includeArchived') === '1' || url.searchParams.get('includeArchived') === 'true';
+      const org = await getOrganizationByRootSession(root);
+      const authoritativeExists = await hasAuthoritativeSwarmBoard(org);
+      const memberEvents = authoritativeExists
+        ? await listMembers(root).catch(() => ({ availability: 'unknown', gap: false, board: null, channels: [] }))
+        : await listMembers(root);
+      const nativeBoard = normalizeNativeBoardFallback(memberEvents?.board || null, {
+        channel,
+        sinceSeq,
+        limit: hasLimitQuery ? limit : 0,
+      });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      if (authoritativeExists) {
+        const authoritativeBoard = await buildAuthoritativeBoardProjection({
+          organizationId: org.id,
+          channel,
+          sinceSeq,
+          limit,
+          includeArchived,
+        });
+        writeJson(res, 200, {
+          rootSessionId: root,
+          organizationId: org.id,
+          mode: 'ragent_swarm',
+          readOnly: false,
+          board: authoritativeBoard,
+          channels: authoritativeBoard.channels,
+          nativeBoard,
+          sourceCoverage: { harness: memberEvents?.availability || 'unknown', gap: Boolean(memberEvents?.gap) },
+        });
+        return true;
+      }
+      if (nativeBoard) {
+        const nativeChannels = memberEvents?.channels || nativeBoard.channels || [];
+        writeJson(res, 200, {
+          rootSessionId: root,
+          organizationId: org?.id || null,
+          mode: 'provider_native',
+          readOnly: true,
+          board: nativeBoard,
+          channels: nativeChannels,
+          nativeBoard,
+          sourceCoverage: { harness: memberEvents?.availability || 'unknown', gap: Boolean(memberEvents?.gap) },
+        });
+        return true;
+      }
+      writeJson(res, 200, {
+        rootSessionId: root,
+        organizationId: org?.id || null,
+        mode: null,
+        readOnly: true,
+        board: null,
+        channels: [],
+        nativeBoard: null,
+        sourceCoverage: { harness: memberEvents?.availability || 'unknown', gap: Boolean(memberEvents?.gap) },
+      });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (boardMessagesMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(boardMessagesMatch[1]);
+      if (!await resolveSessionMeta(sessionMetaLookup, root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 32 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      if (org.state === 'archived') { writeJson(res, 409, { error: `Organization ${org.id} is archived`, code: 'ORG_ARCHIVED' }); return true; }
+      const postResult = await postBoardMessage({
+        organizationId: org.id,
+        channel: body.channel ?? body.channelName ?? 'main',
+        senderKind: 'owner',
+        senderNodeId: '',
+        senderName: text(body.senderName) || text(authSession?.displayName) || text(authSession?.user) || 'owner',
+        bodyMarkdown: body.bodyMarkdown ?? body.text ?? body.body,
+        replyToSeq: Number.isInteger(body.replyToSeq) ? body.replyToSeq : null,
+        artifactRefs: Array.isArray(body.artifactRefs) ? body.artifactRefs : [],
+        kind: text(body.kind) || 'message',
+        mentions: Array.isArray(body.mentions) ? body.mentions : [],
+        idempotencyKey: text(body.idempotencyKey),
+        autoCreateChannel: body.autoCreateChannel === true,
+      });
+      let wakeupsDelivery = null;
+      if (Array.isArray(postResult.wakeups) && postResult.wakeups.length > 0) {
+        const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+        if (typeof deps?.deliverSessionMessage === 'function' || typeof deps?.sendMessage === 'function') {
+          wakeupsDelivery = await deliverPendingSwarmWakeups(deps, { organizationId: org.id });
+        }
+      }
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, postResult.replay ? 200 : 201, {
+        rootSessionId: root,
+        organizationId: org.id,
+        ...postResult,
+        ...(wakeupsDelivery ? { wakeupsDelivery } : {}),
+      });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmStatusMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmStatusMatch[1]);
+      if (!await resolveSessionMeta(sessionMetaLookup, root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const url = new URL(req.url || pathname, `http://${req.headers?.host || 'localhost'}`);
+      const includeKilled = url.searchParams.get('includeKilled') === '1' || url.searchParams.get('includeKilled') === 'true';
+      const status = await getSwarmStatus({ organizationId: org.id, includeKilled });
       res.setHeader?.('Cache-Control', 'private, no-store');
       writeJson(res, 200, {
         rootSessionId: root,
-        board,
-        channels,
-        sourceCoverage: { harness: memberEvents.availability, gap: memberEvents.gap },
+        mode: (org.policy?.swarmEnabled === true || org.policy?.mode === 'ragent_swarm') ? 'ragent_swarm' : 'formal_org',
+        ...status,
       });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmChannelsMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmChannelsMatch[1]);
+      if (!await resolveSessionMeta(sessionMetaLookup, root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 16 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      if (org.state === 'archived') { writeJson(res, 409, { error: `Organization ${org.id} is archived`, code: 'ORG_ARCHIVED' }); return true; }
+      const action = text(body.action || (body.archived === true ? 'archive' : 'create')).toLowerCase();
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      if (action === 'create') {
+        const channel = await createBoardChannel({
+          organizationId: org.id,
+          name: body.name ?? body.channel ?? body.channelName,
+          topic: body.topic,
+          visibility: body.visibility,
+        });
+        publishOrganizationInvalidation({ organizationId: org.id });
+        writeJson(res, 201, { rootSessionId: root, organizationId: org.id, action: 'create', channel });
+        return true;
+      }
+      if (action === 'archive') {
+        const channel = await archiveBoardChannel({
+          organizationId: org.id,
+          name: body.name ?? body.channel ?? body.channelName,
+        });
+        publishOrganizationInvalidation({ organizationId: org.id });
+        writeJson(res, 200, { rootSessionId: root, organizationId: org.id, action: 'archive', channel });
+        return true;
+      }
+      writeJson(res, 400, { error: 'Channel action must be create or archive', code: 'BAD_REQUEST' });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmKillMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmKillMatch[1]);
+      if (!await resolveSessionMeta(sessionMetaLookup, root)) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 16 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const targetNameOrNodeId = text(body.targetNameOrNodeId || body.targetNodeId || body.nodeId || body.name);
+      if (!targetNameOrNodeId) { writeJson(res, 400, { error: 'targetNameOrNodeId is required', code: 'BAD_REQUEST' }); return true; }
+      const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+      const result = await killSwarmMember(deps, {
+        organizationId: org.id,
+        targetNameOrNodeId,
+        forceDiscard: body.forceDiscard === true,
+        projectRoot: text(body.projectRoot),
+      });
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, organizationId: org.id, ...result });
     } catch (error) { writeError(res, writeJson, error); }
     return true;
   }

@@ -19,12 +19,15 @@ function createDOMContext() {
     const el = {
       tagName: tag.toUpperCase(),
       hidden: false,
+      disabled: false,
+      value: '',
       textContent: '',
       innerHTML: '',
       className: '',
       id,
       style: {},
       attributes,
+      dataset: {},
       children: [],
       parentNode: null,
       nextSibling: null,
@@ -70,6 +73,10 @@ function createDOMContext() {
           if (idx >= 0) this.parentNode.children.splice(idx, 1);
           this.parentNode = null;
         }
+      },
+      replaceChildren(...nodes) {
+        this.children = [];
+        for (const n of nodes) this.appendChild(n);
       },
       focus() { this.focused = true; },
       closest() { return null; },
@@ -355,10 +362,204 @@ async function runTests() {
   assert.equal(detachedUiNode.parentId, null, 'Unverified parent stays detached');
   assert.equal(detachedUiNode.parentUnknown, true);
   assert.ok(orgView.dom.activityFeedList.innerHTML.includes('Swarm Board (Read-Only)'), 'Read-only board header rendered');
+  assert.equal(orgView.dom.swarmBoardComposer.hidden, true, 'Composer must stay hidden for AgY native read-only board');
   assert.equal(orgView.dom.activityFeedList.innerHTML.includes('<script>'), false, 'Board XSS payload must be escaped');
   assert.ok(orgView.dom.activityFeedList.innerHTML.includes('&lt;script&gt;'), 'Escaped text survives cleanly');
   orgView.toggleOrganizationMode(false);
 
+  // 9. Wave 2A: Writable Ragent Swarm Overview Header, Channels, Monotonic #seq Timeline, Composer & XSS safety
+  const fetchCalls = [];
+  window.ragentFetch = async (url, opts = {}) => {
+    fetchCalls.push({ url, opts });
+    if (url.includes('/organization/board/messages') && opts.method === 'POST') {
+      return {
+        ok: true,
+        status: 201,
+        async json() {
+          return {
+            message: { seq: 4, channel: 'review', sender: 'owner', senderKind: 'owner', bodyMarkdown: '@verifier-1 please check #2' },
+            headSeq: 4,
+          };
+        },
+      };
+    }
+    if (url.includes('/organization/swarm/kill') && opts.method === 'POST') {
+      const body = JSON.parse(opts.body || '{}');
+      if (!body.forceDiscard) {
+        return {
+          ok: false,
+          status: 409,
+          async json() {
+            return {
+              code: 'SWARM_WORKSPACE_UNMERGED_CHANGES',
+              error: 'Refusing to kill worker-1: dirty files present',
+              workspaceMode: 'worktree',
+              workspaceBranch: 'swarm/worker-1',
+              dirtyFiles: ['chat/router-organization-routes.mjs'],
+              unmergedCommits: 1,
+            };
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async json() { return { killed: true, node: { nodeId: 'node-w1', swarmState: 'killed' } }; },
+      };
+    }
+    if (url.includes('/organization/swarm/status')) {
+      return { ok: true, status: 200, async json() { return orgView.swarmStatus; } };
+    }
+    if (url.includes('/organization/board')) {
+      return { ok: true, status: 200, async json() { return orgView.boardProjection; } };
+    }
+    return { ok: false, status: 404, async json() { return { error: 'Not found' }; } };
+  };
+
+  orgView.onSessionChanged('sess-swarm-1');
+  orgView.rawUnifiedMembers = null;
+  orgView.nativeBoard = null;
+  orgView.projection = {
+    organizationId: 'org-swarm-1',
+    rootSessionId: 'sess-swarm-1',
+    objective: 'Cross-harness Swarm Audit',
+    revision: 0,
+    nodes: [
+      { id: 'node-coord', stableKey: 'coordinator', nodeRole: 'root_leadership', sessionClass: 'ROOT_LEADERSHIP', displayName: 'coordinator', status: 'working' },
+      { id: 'node-w1', parentNodeId: 'node-coord', stableKey: 'worker-1', nodeRole: 'worker', displayName: 'worker-1', status: 'working' },
+      { id: 'node-v1', parentNodeId: 'node-coord', stableKey: 'verifier-1', nodeRole: 'reviewer', displayName: 'verifier-1', status: 'idle' },
+    ],
+    edges: [
+      { id: 'e-c-w1', parentNodeId: 'node-coord', childNodeId: 'node-w1', edgeType: 'MANAGES' },
+      { id: 'e-c-v1', parentNodeId: 'node-coord', childNodeId: 'node-v1', edgeType: 'MANAGES' },
+    ],
+  };
+  orgView.swarmStatus = {
+    organizationId: 'org-swarm-1',
+    mode: 'ragent_swarm',
+    headSeq: 3,
+    isDone: false,
+    counts: { working: 1, waiting: 1, stopped: 1, killed: 1, active: 3, total: 4 },
+    activeStalls: [{ id: 'st-1', conditionKind: 'unconsumed_doorbell', targetNodeId: 'worker-1', alertCount: 2 }],
+    budget: { limits: { maxTotalRuns: 10 }, totals: { runs: 3, tokens: 1200, costUsd: 0.045 }, reserved: { runs: 1 } },
+    members: [
+      { nodeId: 'node-coord', name: 'coordinator', stableKey: 'coordinator', role: 'coordinator', contractRole: 'root_leadership', swarmState: 'working', harness: 'agy', workspaceMode: 'inherit', channels: ['main'] },
+      { nodeId: 'node-w1', name: 'worker-1', stableKey: 'worker-1', role: 'worker', contractRole: 'worker', swarmState: 'waiting', harness: 'codex', workspaceMode: 'worktree', workspaceBranch: 'swarm/worker-1', channels: ['main', 'review'] },
+      { nodeId: 'node-v1', name: 'verifier-1', stableKey: 'verifier-1', role: 'reviewer', contractRole: 'reviewer', swarmState: 'stopped', harness: 'claude', workspaceMode: 'inherit', channels: ['review'] },
+    ],
+  };
+  orgView.boardProjection = {
+    rootSessionId: 'sess-swarm-1',
+    mode: 'ragent_swarm',
+    readOnly: false,
+    channels: [
+      { name: 'main', messageCount: 2, latestSeq: 3, unreadCount: 0 },
+      { name: 'review', messageCount: 1, latestSeq: 2, unreadCount: 1 },
+    ],
+    board: {
+      mode: 'ragent_swarm',
+      readOnly: false,
+      title: 'Cross-Harness <img src=x onerror=alert(1)>',
+      headSeq: 3,
+      isDone: false,
+      activeStalls: [{ id: 'st-1', conditionKind: 'unconsumed_doorbell', targetNodeId: 'worker-1', alertCount: 2 }],
+      messages: [
+        // Intentionally out-of-order to verify monotonic seq sorting
+        { seq: 3, channel: 'main', senderKind: 'system', sender: 'watchdog', senderRole: 'system', text: '[stall] @coordinator check <script>alert(9)</script>', isStallAlert: true },
+        { seq: 1, channel: 'main', senderKind: 'node', senderNodeId: 'node-w1', sender: 'worker-1', text: 'Working on #main' },
+        { seq: 2, channel: 'review', senderKind: 'node', senderNodeId: 'node-v1', sender: 'verifier-1', text: '@worker-1 verified #1 [done]', replyToSeq: 1, isDoneSignal: true },
+      ],
+    },
+  };
+
+  orgView.toggleOrganizationMode(true);
+  orgView.render();
+
+  const overviewHtml = orgView.dom.swarmOverview.innerHTML;
+  assert.equal(orgView.dom.swarmOverview.hidden, false, 'Swarm overview header must be visible');
+  assert.ok(overviewHtml.includes('working: 1') && overviewHtml.includes('waiting: 1') && overviewHtml.includes('stopped: 1') && overviewHtml.includes('killed: 1'), '4-state counts rendered');
+  assert.ok(overviewHtml.includes('[stall]') && overviewHtml.includes('unconsumed_doorbell'), 'stall alert rendered');
+  assert.ok(overviewHtml.includes('codex') && overviewHtml.includes('claude') && overviewHtml.includes('agy'), 'cross-harness badges rendered');
+  assert.ok(overviewHtml.includes('swarm/worker-1'), 'worktree branch pill rendered');
+  assert.ok(overviewHtml.includes('3/10') && overviewHtml.includes('$0.0450') && !overviewHtml.includes('%'), 'budget rendered factually without fabricated percentages');
+
+  const boardHtml = orgView.dom.activityFeedList.innerHTML;
+  assert.equal(orgView.dom.swarmBoardComposer.hidden, false, 'Writable Ragent Swarm board must show Owner composer');
+  assert.ok(boardHtml.includes('#main') && boardHtml.includes('#review'), 'Channel tabs rendered');
+  assert.ok(boardHtml.includes('org-board-channel-unread">1<'), 'Unread badge rendered on #review');
+  assert.ok(
+    boardHtml.indexOf('org-board-seq">#1<') < boardHtml.indexOf('org-board-seq">#2<') &&
+    boardHtml.indexOf('org-board-seq">#2<') < boardHtml.indexOf('org-board-seq">#3<'),
+    'Messages ordered monotonically by #seq',
+  );
+  assert.ok(boardHtml.includes('org-board-mention">@worker-1') && boardHtml.includes('[done]') && boardHtml.includes('[stall]'), 'Mentions and tags highlighted');
+  assert.ok(boardHtml.includes('codex') && boardHtml.includes('claude'), 'Sender harness badges resolved');
+  assert.equal(boardHtml.includes('<script>') || boardHtml.includes('<img src=x'), false, 'XSS payloads escaped cleanly');
+  assert.ok(boardHtml.includes('&lt;img src=x onerror=alert(1)&gt;') && boardHtml.includes('&lt;script&gt;alert(9)&lt;/script&gt;'), 'Escaped XSS strings retained cleanly');
+
+  // Switch to #review & submit owner board message
+  orgView.selectBoardChannel('review');
+  assert.equal(orgView.dom.activityFeedList.innerHTML.includes('Working on #main'), false, 'Channel switch filters messages');
+  assert.ok(orgView.dom.activityFeedList.innerHTML.includes('verified'), 'Selected channel message stays visible');
+  assert.equal(orgView.dom.swarmBoardTargetChannel.textContent, '#review', 'Composer targets selected channel');
+
+  orgView.dom.swarmBoardInput.value = '@verifier-1 please check #2';
+  await orgView.submitBoardMessage();
+  const postCall = fetchCalls.find((c) => c.url.includes('/organization/board/messages') && c.opts.method === 'POST');
+  assert.ok(postCall, 'Owner composer submits POST to /organization/board/messages');
+  assert.deepEqual(JSON.parse(postCall.opts.body), { channel: 'review', bodyMarkdown: '@verifier-1 please check #2' });
+
+  // 10. Read-Only Enforcement: even if server returns nativeBoard alongside provider_native, composer is strictly hidden
+  fetchCalls.length = 0;
+  orgView.swarmStatus = null;
+  orgView.boardProjection = {
+    rootSessionId: 'sess-swarm-1',
+    mode: 'provider_native',
+    readOnly: false, // malicious/spoofed readOnly=false on provider_native must NEVER enable composer!
+    channels: [{ name: 'main', messageCount: 1 }],
+    board: {
+      mode: 'provider_native',
+      source: 'provider_native',
+      readOnly: false,
+      title: 'Native Spoof Check',
+      channels: [{ name: 'main', messageCount: 1 }],
+      messages: [{ seq: 1, channel: 'main', sender: 'coordinator', text: 'native only' }],
+    },
+  };
+  orgView.render();
+  assert.equal(orgView.dom.swarmBoardComposer.hidden, true, 'Composer MUST stay hidden for provider_native even if readOnly flag spoofed');
+  assert.ok(orgView.dom.activityFeedList.innerHTML.includes('Swarm Board (Read-Only)'), 'Explicit read-only banner shown for provider_native');
+  const blockedPost = await orgView.submitBoardMessage('should not send');
+  assert.equal(blockedPost, null, 'submitBoardMessage refuses read-only board');
+  assert.equal(fetchCalls.filter((c) => c.opts.method === 'POST').length, 0, 'No POST dispatched on read-only board');
+
+  // 11. Bottom Sheet Kill Guard (SWARM_WORKSPACE_UNMERGED_CHANGES -> Force Discard confirmation)
+  orgView.swarmStatus = {
+    organizationId: 'org-swarm-1',
+    mode: 'ragent_swarm',
+    counts: { working: 1, waiting: 1, stopped: 0, killed: 0, active: 2, total: 2 },
+    members: [
+      { nodeId: 'node-coord', name: 'coordinator', stableKey: 'coordinator', role: 'coordinator', contractRole: 'root_leadership', swarmState: 'working', harness: 'agy', workspaceMode: 'inherit' },
+      { nodeId: 'node-w1', name: 'worker-1', stableKey: 'worker-1', role: 'worker', contractRole: 'worker', swarmState: 'waiting', harness: 'codex', workspaceMode: 'worktree', workspaceBranch: 'swarm/worker-1' },
+    ],
+  };
+  orgView.openBottomSheet(orgView.projection.nodes.find((n) => n.id === 'node-coord'));
+  assert.equal(orgView.dom.sheet.innerHTML.includes('orgSwarmKillBtn'), false, 'Root coordinator never shows Kill button');
+
+  orgView.openBottomSheet(orgView.projection.nodes.find((n) => n.id === 'node-w1'));
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmKillBtn'), 'Non-root swarm worker shows Kill button');
+  assert.ok(orgView.dom.sheet.innerHTML.includes('swarm/worker-1'), 'Bottom sheet displays worktree branch pill');
+
+  await orgView.killSwarmMemberRequest('node-w1', { forceDiscard: false });
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmKillConflictCard'), '409 SWARM_WORKSPACE_UNMERGED_CHANGES shows unmerged conflict warning');
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmForceKillBtn'), 'Force Discard & Kill button offered on conflict');
+
+  await orgView.killSwarmMemberRequest('node-w1', { forceDiscard: true });
+  const forceKillPost = fetchCalls.find((c) => c.url.includes('/organization/swarm/kill') && JSON.parse(c.opts.body).forceDiscard === true);
+  assert.ok(forceKillPost, 'Explicit forceDiscard kill request dispatched');
+
+  orgView.toggleOrganizationMode(false);
+  orgView.onSessionChanged(null);
   console.log('test-chat-organization-view: ok');
 }
 

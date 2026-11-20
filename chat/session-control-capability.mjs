@@ -81,6 +81,30 @@ export function canIssueSessionControl({ principalKind, session, temporaryContro
     && !internalOperation;
 }
 
+// Tightly-gated capability for server-initiated Swarm coordinator wakeups ONLY.
+// Caller headers/body cannot mint this: internalOperation='swarm_wakeup' and
+// internalOrganizationWakeup=true must originate server-side alongside an
+// authoritative active swarmEnabled organization whose rootSessionId matches
+// this ROOT_LEADERSHIP session.
+export function canIssueSwarmRootWakeupSessionControl({
+  session,
+  internalOperation,
+  internalOrganizationWakeup,
+  temporaryControlAuthority,
+  organization,
+} = {}) {
+  if (text(internalOperation) !== 'swarm_wakeup' || internalOrganizationWakeup !== true) return false;
+  if (temporaryControlAuthority) return false;
+  if (text(session?.sessionClass) !== 'ROOT_LEADERSHIP') return false;
+  if (text(session?.sessionPlane || 'user') !== 'user') return false;
+  if (session?.userAddressable === false) return false;
+  if (text(session?.parentSessionId) || text(session?.delegatedFromSessionId)) return false;
+  if (!organization || organization.policy?.swarmEnabled !== true) return false;
+  if (['archived', 'lifecycle_pending'].includes(text(organization.state))) return false;
+  const sessionId = text(session?.id);
+  return Boolean(sessionId && text(organization.rootSessionId) === sessionId);
+}
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

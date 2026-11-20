@@ -8,7 +8,7 @@
 // without a project binding stay legacy; regenerate/editResend are project-
 // bound new runs (never legacy, never reuse the parent snapshot).
 import assert from 'assert/strict';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -26,8 +26,10 @@ const {
   buildRunRiskContext,
 } = await import('../chat/run-admission.mjs');
 const { computeExecutionScopeDigest } = await import('../chat/execution-scope.mjs');
+const { withDatabase } = await import('../chat/collaboration-store.mjs');
 const { resolveRunRiskContext } = await import('../chat/runner-sidecar.mjs');
 const { decideWindowsApproval } = await import('../chat/windows-approval-gate.mjs');
+await withDatabase(() => {});
 
 const createdDirs = [];
 function makeDir(prefix) {
@@ -242,6 +244,82 @@ try {
     }),
     (error) => error.code === 'EXECUTION_SCOPE_STALE' && error.statusCode === 409,
     'a revision change between resolve and verify must fail with EXECUTION_SCOPE_STALE',
+  );
+
+  // ── Bugs #7 & #8: swarm_wakeup is project-bound + isolated worktree root ─
+  assert.equal(isInternalLegacyRun({ session, internalOperation: 'swarm_wakeup' }), false,
+    'swarm_wakeup must use scoped admission instead of legacy');
+  const swarmWakeShared = await prepareRunExecution({
+    sessionId: 's1',
+    session,
+    manifest: makeManifest({ sessionId: 's1', folder: rootA }),
+    options: { internalOperation: 'swarm_wakeup' },
+  });
+  assert.equal(swarmWakeShared.legacy, false, 'swarm_wakeup must produce an executionScope snapshot');
+  assert.ok(swarmWakeShared.executionScopeDigest, 'swarm_wakeup must attach executionScopeDigest');
+
+  const worktreeDir = realpathSync(makeDir('ragent-adm-wt-'));
+  const isoSession = {
+    id: 'sess_iso_wt',
+    folder: worktreeDir,
+    projectId: project.id,
+    templateId: 'app_iso',
+    sessionPlane: 'organization',
+    lifecycleMode: 'ephemeral_swarm',
+    workspaceMode: 'worktree',
+    organizationId: 'org_wt',
+    organizationNodeId: 'node_wt',
+  };
+  const isoMockDeps = {
+    loadOrganizationNode: async () => ({
+      org: { id: 'org_wt', state: 'active', policy: { swarmEnabled: true } },
+      node: {
+        id: 'node_wt',
+        organizationId: 'org_wt',
+        lifecycleMode: 'ephemeral_swarm',
+        lifecycleState: 'active',
+        retiredRevision: null,
+        currentSessionId: 'sess_iso_wt',
+        workspaceMode: 'worktree',
+        workspacePath: worktreeDir,
+      },
+    }),
+  };
+  const isoWake = await prepareRunExecution({
+    sessionId: 'sess_iso_wt',
+    session: isoSession,
+    manifest: makeManifest({ sessionId: 'sess_iso_wt', folder: worktreeDir }),
+    options: { runId: 'run_iso_wt_1', internalOperation: 'swarm_wakeup', executionIsolation: 'worktree' },
+    deps: isoMockDeps,
+  });
+  assert.equal(isoWake.legacy, false);
+  assert.equal(isoWake.executionScope.executionIsolation, 'worktree');
+  assert.equal(isoWake.executionScope.workspaceRoot.realPath, worktreeDir);
+  assert.equal(isoWake.executionScope.cwd.realPath, worktreeDir);
+  assert.equal(isoWake.executionScope.riskContext.trustedWorkspaceRoot, worktreeDir);
+
+  await assert.rejects(
+    () => prepareRunExecution({
+      sessionId: 'sess_iso_wt',
+      session: { ...isoSession, folder: rootA },
+      manifest: makeManifest({ sessionId: 'sess_iso_wt', folder: rootA }),
+      options: { runId: 'run_iso_wt_2', internalOperation: 'swarm_wakeup', executionIsolation: 'worktree' },
+      deps: isoMockDeps,
+    }),
+    (error) => error.code === 'PROJECT_SCOPE_ESCAPE' && error.statusCode === 400,
+    'mismatched isolated session folder must fail closed instead of binding project.rootPath',
+  );
+
+  await assert.rejects(
+    () => prepareRunExecution({
+      sessionId: 'sess_iso_wt',
+      session: isoSession,
+      manifest: makeManifest({ sessionId: 'sess_iso_wt', folder: worktreeDir }),
+      options: { runId: 'run_iso_wt_3', internalOperation: 'swarm_wakeup', executionIsolation: 'worktree' },
+      deps: { loadOrganizationNode: async () => ({ org: null, node: null }) },
+    }),
+    (error) => error.code === 'EXECUTION_SCOPE_UNAVAILABLE' && error.statusCode === 409,
+    'missing/inactive org node for isolated swarm session must fail closed',
   );
 
   console.log('test-run-admission: ok');

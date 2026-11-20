@@ -152,6 +152,12 @@ if (scenario.mode === 'stream-json') {
     return match?.name || 'ragent_actions';
   }
 
+  function findOrgServerName() {
+    const match = mcpServers.find((server) => Array.isArray(server?.args)
+      && server.args.some((arg) => String(arg).includes('ragent-organization-mcp.mjs')));
+    return match?.name || 'ragent_organization';
+  }
+
   function finishPrompt() {
     if (!promptRequestId) return;
     if (Array.isArray(scenario.emitUpdatesAfterPermissions)) {
@@ -201,6 +207,10 @@ if (scenario.mode === 'stream-json') {
     const rawToolCall = JSON.parse(JSON.stringify(spec.toolCall));
     if (spec.useDynamicActionsTool) {
       rawToolCall.name = \`mcp__\${findActionsServerName()}__ragent_request_actions\`;
+    } else if (spec.useDynamicOrgReadTool) {
+      rawToolCall.name = \`mcp__\${findOrgServerName()}__ragent_organization_read\`;
+    } else if (spec.useDynamicOrgActionToolSingleUnderscore) {
+      rawToolCall.name = \`mcp_\${findOrgServerName()}_ragent_organization_action\`;
     }
     send({
       jsonrpc: '2.0',
@@ -1010,6 +1020,203 @@ try {
       assert.ok(newReq);
       assert.equal(newReq.params.mcpServers.some((s) => s.name === 'authorized_ext'), true);
       assert.equal(newReq.params.mcpServers.some((s) => s.name === 'blocked_ext'), false);
+    } finally {
+      if (sidecar.child.exitCode === null) sidecar.child.kill();
+    }
+  }
+
+  // ---- Scenario 7: Root Coordinator optional organization MCP auto-approved under agy-acp full-auto (Blocker 1) ----
+  {
+    const scenarioDir = join(workRootDir, 's7');
+    mkdirSync(scenarioDir, { recursive: true });
+    writeFileSync(join(scenarioDir, '.fake-agy-scenario.json'), JSON.stringify({
+      sessionId: 'agy-s7-coord',
+      permissions: [
+        {
+          id: 'perm-s7-org-read',
+          useDynamicOrgReadTool: true,
+          toolCall: {
+            toolCallId: 'tc-org-read-s7',
+            name: 'placeholder',
+            kind: 'other',
+            title: 'Read swarm status/board',
+            rawInput: { action: 'board.read', args: { organizationId: 'org-s7' } },
+          },
+          options: [
+            { optionId: 'allow-once-s7-read', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject-once-s7-read', name: 'Reject once', kind: 'reject_once' },
+          ],
+        },
+        {
+          id: 'perm-s7-org-action',
+          useDynamicOrgActionToolSingleUnderscore: true,
+          toolCall: {
+            toolCallId: 'tc-org-action-s7',
+            name: 'placeholder',
+            kind: 'other',
+            title: 'Spawn swarm worker',
+            rawInput: { action: 'swarm.spawn', args: { name: 'coder-1' } },
+          },
+          options: [
+            { optionId: 'allow-once-s7-action', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject-once-s7-action', name: 'Reject once', kind: 'reject_once' },
+          ],
+        },
+      ],
+    }));
+
+    const runId = 'run_agy_acp_s7_coord';
+    const sessionId = 'sess_s7_coord';
+    await runs.createRun({
+      status: { id: runId, sessionId, requestId: 'req-s7', state: 'accepted' },
+      manifest: {
+        protectedDelegatedRun: false,
+        id: runId,
+        sessionId,
+        requestId: 'req-s7',
+        tool: 'agy',
+        folder: scenarioDir,
+        ...buildExecutionScope(scenarioDir),
+        prompt: 'Coordinate swarm using optional organization MCP',
+        options: {
+          runtimeFamily: 'agy-acp',
+          agyHomeDir,
+          riskMode: 'full-auto',
+          sessionControlChannel: {
+            token: 'sc-tok-s7',
+            runId,
+            sessionId,
+            turnId: 'req-s7',
+          },
+        },
+      },
+    });
+
+    const sidecar = await spawnSidecar(runId, { RAGENT_AGY_HOME_DIR: agyHomeDir });
+    try {
+      const exit = await sidecar.exited;
+      const finalRun = await runs.getRun(runId);
+      assert.equal(exit.code, 0, `S7 exited ${exit.code} state=${finalRun?.state} reason=${finalRun?.failureReason}\nlogs:\n${sidecar.logs()}`);
+      assert.equal(finalRun.state, 'completed');
+      const trace = JSON.parse(readFileSync(join(scenarioDir, '.fake-agy-trace.json'), 'utf8'));
+      const newReq = trace.requests.find((req) => req.method === 'session/new');
+      assert.ok(newReq);
+      assert.equal(
+        (newReq.params.mcpServers || []).some((s) => s.args?.some((a) => String(a).includes('ragent-organization-mcp.mjs'))),
+        true,
+        'Root coordinator receives organization MCP server',
+      );
+      assert.deepEqual(
+        trace.permissionOutcomes.map((o) => [o.id, o.result?.outcome]),
+        [
+          ['perm-s7-org-read', { outcome: 'selected', optionId: 'allow-once-s7-read' }],
+          ['perm-s7-org-action', { outcome: 'selected', optionId: 'allow-once-s7-action' }],
+        ],
+        'Root coordinator optional org MCP calls must auto-approve without mcpRequired=true',
+      );
+      const spoolRecords = await runs.readRunSpoolRecords(runId);
+      const optionalOrgSpool = spoolRecords.filter((rec) => rec.json?.reason === 'managed_mcp_optional_organization_tool');
+      assert.equal(optionalOrgSpool.length, 2, 'spool records must log managed_mcp_optional_organization_tool');
+    } finally {
+      if (sidecar.child.exitCode === null) sidecar.child.kill();
+    }
+  }
+
+  // ---- Scenario 8: Advisory Swarm Reviewer gets organization MCP while write/external MCPs stay suppressed (Blocker 2) ----
+  {
+    const scenarioDir = join(workRootDir, 's8');
+    mkdirSync(scenarioDir, { recursive: true });
+    writeFileSync(join(scenarioDir, '.fake-agy-scenario.json'), JSON.stringify({
+      sessionId: 'agy-s8-reviewer',
+      permissions: [
+        {
+          id: 'perm-s8-org-read',
+          useDynamicOrgReadTool: true,
+          toolCall: {
+            toolCallId: 'tc-org-read-s8',
+            name: 'placeholder',
+            kind: 'other',
+            title: 'Read swarm board',
+            rawInput: { action: 'board.read', args: { organizationId: 'org-s8' } },
+          },
+          options: [
+            { optionId: 'allow-once-s8-read', name: 'Allow once', kind: 'allow_once' },
+            { optionId: 'reject-once-s8-read', name: 'Reject once', kind: 'reject_once' },
+          ],
+        },
+      ],
+    }));
+
+    const runId = 'run_agy_acp_s8_reviewer';
+    const sessionId = 'sess_s8_reviewer';
+    await runs.createRun({
+      status: {
+        id: runId,
+        sessionId,
+        requestId: 'req-s8',
+        state: 'accepted',
+        providerPreparation: { authorizedExternalMcpNames: ['authorized_ext'] },
+      },
+      manifest: {
+        protectedDelegatedRun: true,
+        id: runId,
+        sessionId,
+        requestId: 'req-s8',
+        tool: 'agy',
+        folder: scenarioDir,
+        ...buildExecutionScope(scenarioDir),
+        prompt: 'Verify worker diff and post verdict to swarm board',
+        options: {
+          runtimeFamily: 'agy-acp',
+          agyHomeDir,
+          riskMode: 'full-auto',
+          accessMode: 'read',
+          readOnlyRequired: false,
+          readOnlyAdvisory: true,
+          readOnlySwarmReviewerMcp: true,
+          browserMcpEnabled: true,
+          authorizedExternalMcpServers: ['authorized_ext'],
+          approvedActionChannel: {
+            token: 'aa-tok-s8',
+            endpoint: '/api/internal/approved-actions',
+            turnId: 'req-s8',
+          },
+          sessionControlChannel: {
+            token: 'sc-tok-s8',
+            runId,
+            sessionId,
+            turnId: 'req-s8',
+            scope: {
+              kind: 'organization_message',
+              organizationId: 'org-s8',
+              nodeId: 'node-rev-s8',
+              bindingGeneration: 1,
+              organizationRevision: 0,
+            },
+          },
+        },
+      },
+    });
+
+    const sidecar = await spawnSidecar(runId, { RAGENT_AGY_HOME_DIR: agyHomeDir });
+    try {
+      const exit = await sidecar.exited;
+      const finalRun = await runs.getRun(runId);
+      assert.equal(exit.code, 0, `S8 exited ${exit.code} state=${finalRun?.state} reason=${finalRun?.failureReason}\nlogs:\n${sidecar.logs()}`);
+      assert.equal(finalRun.state, 'completed');
+      const trace = JSON.parse(readFileSync(join(scenarioDir, '.fake-agy-trace.json'), 'utf8'));
+      const newReq = trace.requests.find((req) => req.method === 'session/new');
+      assert.ok(newReq);
+      const mcpServers = newReq.params.mcpServers || [];
+      assert.equal(mcpServers.some((s) => s.args?.some((a) => String(a).includes('ragent-organization-mcp.mjs'))), true, 'advisory swarm reviewer must receive organization MCP');
+      assert.equal(mcpServers.some((s) => s.args?.some((a) => String(a).includes('ragent-approved-actions-mcp.mjs'))), false, 'advisory read-only must still suppress approved-actions MCP');
+      assert.equal(mcpServers.some((s) => s.args?.some((a) => String(a).includes('ragent-browser-mcp-server.mjs'))), false, 'advisory read-only must still suppress browser MCP');
+      assert.equal(mcpServers.some((s) => s.name === 'authorized_ext'), false, 'advisory read-only must suppress uncertified external MCP');
+      assert.deepEqual(
+        trace.permissionOutcomes.map((o) => [o.id, o.result?.outcome]),
+        [['perm-s8-org-read', { outcome: 'selected', optionId: 'allow-once-s8-read' }]],
+        'advisory swarm reviewer organization MCP call must auto-approve',
+      );
     } finally {
       if (sidecar.child.exitCode === null) sidecar.child.kill();
     }

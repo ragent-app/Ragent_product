@@ -4,6 +4,7 @@ import { createSerialTaskQueue } from './fs-utils.mjs';
 import { CHAT_COLLABORATIONS_DB, ORG_SHADOW_PROJECTION } from '../lib/config.mjs';
 import { invalidateOrganizationProjectionCache } from './organization-projection-cache.mjs';
 import { isAppendOnlyRevisionCompatible } from './organization-revision-compatibility.mjs';
+import { ensureOrganizationBoardSchema } from './organization-board-store.mjs';
 
 // Organization Runtime data layer (S8). The six organization tables live in the
 // same Collaboration SQLite file (WAL, foreign keys ON) so organization
@@ -11,7 +12,7 @@ import { isAppendOnlyRevisionCompatible } from './organization-revision-compatib
 // Migration is idempotent additive: CREATE TABLE IF NOT EXISTS for the base
 // schema, plus a PRAGMA user_version guard for future additive steps.
 const runOrganizationStoreMutation = createSerialTaskQueue();
-const ORG_SCHEMA_VERSION = 2;
+const ORG_SCHEMA_VERSION = 3;
 
 function nowIso() {
   return new Date().toISOString();
@@ -36,10 +37,18 @@ function orgError(code, message) {
 // Reuse the collaboration connection opener (same file, WAL, FK on) and layer
 // the organization schema on top. New connections are cheap in SQLite; this
 // keeps one canonical opener instead of two handles to the same file.
-function openDatabase() {
+export function openOrganizationDatabase() {
   const db = openCollaborationDatabase();
   ensureOrganizationSchema(db);
   return db;
+}
+
+export async function withOrganizationDatabase(fn, options = {}) {
+  return withDatabase(fn, options);
+}
+
+function openDatabase() {
+  return openOrganizationDatabase();
 }
 
 async function withDatabase(fn, { mutate = false } = {}) {
@@ -60,7 +69,7 @@ async function withDatabase(fn, { mutate = false } = {}) {
   return result;
 }
 
-function ensureOrganizationSchema(db) {
+export function ensureOrganizationSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS organizations (
       id TEXT PRIMARY KEY,
@@ -104,6 +113,11 @@ function ensureOrganizationSchema(db) {
       depth INTEGER NOT NULL DEFAULT 0,
       session_class TEXT,
       idempotency_key TEXT,
+      lifecycle_mode TEXT NOT NULL DEFAULT 'formal_org',
+      swarm_state TEXT,
+      workspace_mode TEXT,
+      workspace_path TEXT,
+      workspace_branch TEXT,
       UNIQUE(organization_id, stable_key)
     );
     CREATE TABLE IF NOT EXISTS role_instances (
@@ -225,6 +239,11 @@ function ensureOrganizationSchema(db) {
     ['depth', 'INTEGER NOT NULL DEFAULT 0'],
     ['session_class', 'TEXT'],
     ['idempotency_key', 'TEXT'],
+    ['lifecycle_mode', "TEXT NOT NULL DEFAULT 'formal_org'"],
+    ['swarm_state', 'TEXT'],
+    ['workspace_mode', 'TEXT'],
+    ['workspace_path', 'TEXT'],
+    ['workspace_branch', 'TEXT'],
   ];
   for (const [column, definition] of nodeAdditions) {
     if (!nodeColumns.has(column)) db.exec(`ALTER TABLE organization_nodes ADD COLUMN ${column} ${definition}`);
@@ -233,6 +252,7 @@ function ensureOrganizationSchema(db) {
     ON organization_nodes(organization_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_org_nodes_parent
     ON organization_nodes(organization_id, parent_node_id, lifecycle_state)`);
+  ensureOrganizationBoardSchema(db);
   const schemaVersion = Number(db.prepare('PRAGMA user_version').get().user_version || 0);
   if (schemaVersion < ORG_SCHEMA_VERSION) {
     migrateOrganizationSchema(db, schemaVersion);
@@ -299,6 +319,11 @@ function rowNode(row) {
     depth: Number(row.depth || 0),
     sessionClass: row.session_class || '',
     idempotencyKey: row.idempotency_key || '',
+    lifecycleMode: row.lifecycle_mode || 'formal_org',
+    swarmState: row.swarm_state || null,
+    workspaceMode: row.workspace_mode || null,
+    workspacePath: row.workspace_path || '',
+    workspaceBranch: row.workspace_branch || '',
   };
 }
 
@@ -721,6 +746,11 @@ export async function createNode({
   depth = 0,
   sessionClass = '',
   idempotencyKey = '',
+  lifecycleMode = 'formal_org',
+  swarmState = null,
+  workspaceMode = null,
+  workspacePath = '',
+  workspaceBranch = '',
 } = {}) {
   if (!organizationId) throw orgError('BAD_REQUEST', 'organizationId is required');
   if (!stableKey) throw orgError('BAD_REQUEST', 'stableKey is required');
@@ -741,11 +771,14 @@ export async function createNode({
       }
       db.prepare(`INSERT INTO organization_nodes
         (id, organization_id, stable_key, node_role, created_revision, retired_revision, lifecycle_state, version, grant_json,
-         current_session_id, binding_generation, role_instance_id, parent_node_id, depth, session_class, idempotency_key)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         current_session_id, binding_generation, role_instance_id, parent_node_id, depth, session_class, idempotency_key,
+         lifecycle_mode, swarm_state, workspace_mode, workspace_path, workspace_branch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(nodeId, organizationId, stableKey, nodeRole, createdRevision, null, lifecycleState, 1, json(grant, {}),
           currentSessionId || null, Math.max(0, Number(bindingGeneration) || 0), roleInstanceId || null,
-          parentNodeId || null, Math.max(0, Number(depth) || 0), sessionClass || null, idempotencyKey || null);
+          parentNodeId || null, Math.max(0, Number(depth) || 0), sessionClass || null, idempotencyKey || null,
+          lifecycleMode === 'ephemeral_swarm' ? 'ephemeral_swarm' : 'formal_org',
+          swarmState || null, workspaceMode || null, workspacePath || null, workspaceBranch || null);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');

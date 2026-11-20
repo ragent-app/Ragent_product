@@ -28,9 +28,12 @@ export async function buildOrganizationExecutionContext({ sessionId, runId, requ
     const node = await getNode(organizationToolScope.nodeId);
     const org = node && await getOrganization(node.organizationId);
     const revision = org && await getRevision(org.id, org.currentRevision);
+    const isEphemeralSwarm = org?.policy?.swarmEnabled === true
+      && node?.lifecycleMode === 'ephemeral_swarm'
+      && Number(org.currentRevision || 0) === 0;
     if (node?.currentSessionId === sessionId && node.bindingGeneration === organizationToolScope.bindingGeneration
         && node.organizationId === organizationToolScope.organizationId && org?.currentRevision === organizationToolScope.organizationRevision
-        && !['archived', 'lifecycle_pending'].includes(org.state) && revision?.state === 'frozen'
+        && !['archived', 'lifecycle_pending'].includes(org.state) && (revision?.state === 'frozen' || isEphemeralSwarm)
         && ['MANAGER', 'PHASE_LEAD', 'EXECUTIVE'].includes(String(node.sessionClass || '').toUpperCase())
         && node.lifecycleState === 'active' && node.retiredRevision === null && node.grant?.canDelegate === true
         && Number.isInteger(node.grant.maxDepth) && node.grant.maxDepth > 0
@@ -46,7 +49,9 @@ export async function buildOrganizationExecutionContext({ sessionId, runId, requ
           root.templateId ? getApp(root.templateId) : null,
         ]);
         try {
-          assertManagerCanDelegate(resolveSessionCollaborationPolicy(manager, managerApp), { depth: manager.delegationDepth || 0 });
+          if (!isEphemeralSwarm || managerApp || manager.collaborationPolicy || manager.collaborationPolicyOverrides) {
+            assertManagerCanDelegate(resolveSessionCollaborationPolicy(manager, managerApp), { depth: manager.delegationDepth || 0 });
+          }
           assertManagerCanDelegate(resolveSessionCollaborationPolicy(root, rootApp), { depth: root.delegationDepth || 0 });
           canDelegate = true;
           remainingDepth = node.grant.maxDepth;

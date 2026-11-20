@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   canIssueSessionControl,
+  canIssueSwarmRootWakeupSessionControl,
   createRunSessionControlCapability,
   createSessionControlAuthenticator,
   sessionControlOperation,
@@ -18,6 +19,59 @@ assert.equal(canIssueSessionControl({ principalKind: 'guest', session: leadershi
 assert.equal(canIssueSessionControl({ principalKind: 'trusted_device', session: leadership, temporaryControlAuthority: {} }), false);
 assert.equal(canIssueSessionControl({ principalKind: 'trusted_device', session: { ...leadership, delegatedFromSessionId: 'parent' } }), false);
 assert.equal(canIssueSessionControl({ principalKind: 'trusted_device', session: leadership, internalOperation: 'internal' }), false);
+assert.equal(canIssueSessionControl({ principalKind: 'trusted_device', session: leadership, internalOperation: 'swarm_wakeup' }), false);
+
+const swarmLeadership = { id: 'root-swarm-sess', sessionClass: 'ROOT_LEADERSHIP', sessionPlane: 'user', userAddressable: true };
+const activeSwarmOrg = { id: 'org-swarm-1', rootSessionId: 'root-swarm-sess', state: 'active', policy: { swarmEnabled: true } };
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  organization: activeSwarmOrg,
+}), true);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: false,
+  organization: activeSwarmOrg,
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'other_internal',
+  internalOrganizationWakeup: true,
+  organization: activeSwarmOrg,
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  temporaryControlAuthority: { id: 'tc-1' },
+  organization: activeSwarmOrg,
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: { ...swarmLeadership, sessionPlane: 'organization' },
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  organization: activeSwarmOrg,
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  organization: { ...activeSwarmOrg, policy: { swarmEnabled: false } },
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  organization: { ...activeSwarmOrg, state: 'archived' },
+}), false);
+assert.equal(canIssueSwarmRootWakeupSessionControl({
+  session: swarmLeadership,
+  internalOperation: 'swarm_wakeup',
+  internalOrganizationWakeup: true,
+  organization: { ...activeSwarmOrg, rootSessionId: 'other-root' },
+}), false);
 const root = { id: 'root-session' };
 const child = { id: 'child-session', delegatedFromSessionId: root.id };
 const runs = new Map([
@@ -89,6 +143,19 @@ const assetAuth = await authenticate({
 });
 assert.equal(assetAuth?.sessionId, root.id);
 assert.equal(assetAuth?.capabilityOperation, 'session.asset.publish');
+
+const rootToolsAuth = await authenticate({
+  method: 'POST',
+  url: `/api/sessions/${root.id}/organization/tools-root`,
+  headers: headers(),
+});
+assert.equal(rootToolsAuth?.sessionId, root.id);
+assert.equal(rootToolsAuth?.capabilityOperation, 'session.organization.tools');
+assert.equal(await authenticate({
+  method: 'POST',
+  url: `/api/sessions/${root.id}/organization/tools`,
+  headers: headers(),
+}), null, 'root-scoped capability must not satisfy node organization.tools route');
 
 const childAssistantMessageAuth = await authenticate({
   method: 'POST',

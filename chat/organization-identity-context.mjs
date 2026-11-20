@@ -16,9 +16,6 @@ export async function buildOrganizationIdentityContext(session = {}) {
   if (!ref) return managed ? unavailable() : '';
   const org = await getOrganization(ref.organizationId);
   if (!org || ['archived', 'lifecycle_pending'].includes(org.state)) return unavailable();
-  const revision = await getRevision(org.id, org.currentRevision);
-  if (!revision || revision.state !== 'frozen') return managed ? unavailable() : '';
-  if (ref.organizationRevision != null && !await isOrganizationRevisionCompatible(org.id, ref.organizationRevision, org.currentRevision)) return unavailable();
   if ((text(session.organizationId) && session.organizationId !== org.id) ||
       (text(session.organizationNodeId) && session.organizationNodeId !== ref.nodeId)) return unavailable();
   const nodes = (await listOrganizationNodes(org.id)).filter((node) => node.retiredRevision == null);
@@ -27,8 +24,23 @@ export async function buildOrganizationIdentityContext(session = {}) {
   const target = ref.kind === 'root' ? rootNode : nodes.find((node) => node.id === ref.nodeId);
   if (ref.kind !== 'root' && (!target || target.bindingGeneration !== ref.bindingGeneration)) return unavailable();
   if (ref.kind !== 'root' && text(session.sessionClass) && text(target.sessionClass) && session.sessionClass !== target.sessionClass) return unavailable();
+  if (ref.kind !== 'root' && (sessionId !== org.rootSessionId && !target)) return unavailable();
   if (ref.kind === 'root' && (sessionId !== org.rootSessionId || !(await getOrganizationByRootSession(sessionId)))) return unavailable();
-  const definitions = new Map((revision.compiled?.nodes || []).map((node) => [node.stableKey, node]));
+  // Formal organizations strictly require a frozen revision and >=1 append-only compatibility;
+  // ephemeral Swarm nodes operate under active revision 0 only when policy.swarmEnabled is set.
+  const isEphemeralSwarm = org.policy?.swarmEnabled === true
+    && (ref.kind === 'node'
+      ? target?.lifecycleMode === 'ephemeral_swarm'
+      : (org.currentRevision === 0 && rootNode?.lifecycleMode === 'ephemeral_swarm'));
+  if (ref.organizationRevision != null) {
+    const revOk = isEphemeralSwarm
+      ? ref.organizationRevision === org.currentRevision
+      : await isOrganizationRevisionCompatible(org.id, ref.organizationRevision, org.currentRevision);
+    if (!revOk) return unavailable();
+  }
+  const revision = await getRevision(org.id, org.currentRevision);
+  if (!isEphemeralSwarm && (!revision || revision.state !== 'frozen')) return managed ? unavailable() : '';
+  const definitions = new Map((revision?.compiled?.nodes || []).map((node) => [node.stableKey, node]));
   const definition = target ? definitions.get(target.stableKey) : null;
   const edges = await listOrganizationEdges(org.id, { revision: null });
   const parentEdges = target ? edges.filter((edge) => edge.edgeType === 'MANAGES' && edge.childNodeId === target.id) : [];
@@ -64,9 +76,9 @@ export async function buildOrganizationIdentityContext(session = {}) {
   const identity = {
     organizationId: org.id, nodeId: target?.id || null, nodeStableKey: text(target?.stableKey) || null, sessionId,
     rootSessionId: org.rootSessionId, rootNodeId: rootNode?.id || null,
-    parentNodeId: parent?.id || null, parentSessionId, parentDisplayName: text(parentDefinition?.displayName) || null,
-    displayName: text(definition?.displayName) || null, structuralRole: target?.nodeRole || (ref.kind === 'root' ? 'root' : null),
-    domain: text(definition?.domain) || null, responsibility: text(definition?.responsibility) || null,
+    parentNodeId: parent?.id || null, parentSessionId, parentDisplayName: text(parentDefinition?.displayName) || text(parent?.grant?.swarmName) || null,
+    displayName: text(definition?.displayName) || text(target?.grant?.swarmName) || null, structuralRole: target?.nodeRole || (ref.kind === 'root' ? 'root' : null),
+    domain: text(definition?.domain) || text(target?.grant?.swarmDomain) || null, responsibility: text(definition?.responsibility) || text(target?.grant?.swarmResponsibility) || null,
     nodeDepth: target && Number.isInteger(target.depth) ? target.depth : null, displayLevel,
     revision: org.currentRevision, bindingGeneration: target?.bindingGeneration ?? null,
     attemptId: factory?.attemptId || null, workItemId: factory?.workItemId || null,

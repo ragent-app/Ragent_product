@@ -34,6 +34,8 @@ import {
   resolveProviderPermissionPolicy,
   requiresExplicitAcpAutoMode,
   getGatedPermissionModeId,
+  supportsOrganizationControlMcp,
+  supportsServerBuiltinSkillRead,
 } from './provider-contract.mjs';
 import { buildCanonicalContext } from './context-canonical.mjs';
 import {
@@ -226,6 +228,7 @@ import {
 } from './approved-agent-create.mjs';
 import {
   canIssueSessionControl,
+  canIssueSwarmRootWakeupSessionControl,
   createRunSessionControlCapability,
   createRunSessionControlRenewalCapability,
 } from './session-control-capability.mjs';
@@ -1953,10 +1956,35 @@ function applySessionContractFields(session, extra, contract) {
   for (const [field, value] of Object.entries(textFields)) {
     if (typeof value === 'string' && value.trim()) session[field] = value.trim();
   }
+  const lifecycleMode = typeof extra.lifecycleMode === 'string' ? extra.lifecycleMode.trim() : '';
+  if (lifecycleMode === 'ephemeral_swarm' || lifecycleMode === 'formal_org') {
+    session.lifecycleMode = lifecycleMode;
+  }
+  const effectiveLifecycleMode = lifecycleMode || (typeof session.lifecycleMode === 'string' ? session.lifecycleMode.trim() : '');
   const revision = extra.organizationRevision ?? extra.revision;
   const revisionNumber = typeof revision === 'string' && revision.trim() ? Number(revision) : revision;
-  if (Number.isInteger(revisionNumber) && revisionNumber > 0) {
+  if (Number.isInteger(revisionNumber) && (revisionNumber > 0 || (effectiveLifecycleMode === 'ephemeral_swarm' && revisionNumber === 0))) {
     session.organizationRevision = revisionNumber;
+  }
+  if (effectiveLifecycleMode === 'ephemeral_swarm' && extra.readOnlyRequired === true) {
+    session.readOnlyRequired = true;
+    delete session.readOnlyAdvisory;
+    session.accessMode = 'read';
+  } else if (effectiveLifecycleMode === 'ephemeral_swarm' && extra.readOnlyAdvisory === true && session.readOnlyRequired !== true) {
+    session.readOnlyAdvisory = true;
+    session.accessMode = 'read';
+  }
+  if (effectiveLifecycleMode === 'ephemeral_swarm') {
+    const workspaceMode = typeof extra.workspaceMode === 'string' ? extra.workspaceMode.trim() : '';
+    if (['inherit', 'worktree', 'staging'].includes(workspaceMode)) {
+      session.workspaceMode = workspaceMode;
+      if (workspaceMode !== 'inherit' && typeof extra.workspacePath === 'string' && extra.workspacePath.trim()) {
+        session.workspacePath = extra.workspacePath.trim();
+      }
+      if (workspaceMode === 'worktree' && typeof extra.workspaceBranch === 'string' && extra.workspaceBranch.trim()) {
+        session.workspaceBranch = extra.workspaceBranch.trim();
+      }
+    }
   }
   if (Number.isInteger(extra.depth) && extra.depth >= 0) session.depth = extra.depth;
   if (extra.inputPolicy && typeof extra.inputPolicy === 'object' && !Array.isArray(extra.inputPolicy)) {
@@ -5062,10 +5090,12 @@ async function reconcileTerminalAgyCredential(run, manifest) {
   return reconciliation;
 }
 
+const AGY_RUNTIME_FAMILIES = new Set(['agy-json', 'agy-stream-json', 'agy-acp', 'agy-stream-json-bidi']);
+
 function isAgyRunManifest(manifest, run = null) {
   const tool = trimString(run?.tool || manifest?.tool);
   const runtimeFamily = trimString(run?.runtimeFamily || manifest?.runtimeFamily || manifest?.options?.runtimeFamily);
-  return tool === 'agy' || runtimeFamily === 'agy-json' || runtimeFamily === 'agy-stream-json';
+  return tool === 'agy' || AGY_RUNTIME_FAMILIES.has(runtimeFamily);
 }
 
 async function resolveAgyRunProviderId(run, manifest) {
@@ -5591,7 +5621,7 @@ function resolveRunNativeProviderId(run, manifest) {
 function resolveRunNativeAgentType(run, manifest) {
   const tool = trimString(run?.tool || manifest?.tool).toLowerCase();
   const family = trimString(run?.runtimeFamily || manifest?.runtimeFamily || manifest?.options?.runtimeFamily).toLowerCase();
-  if (tool === 'agy' || family === 'agy-json' || family === 'agy-stream-json') return 'agy';
+  if (tool === 'agy' || AGY_RUNTIME_FAMILIES.has(family)) return 'agy';
   if (tool === 'codex' || tool === 'codex-cli' || family.startsWith('codex-')) return 'codex';
   if (tool === 'claude' || tool === 'claude-bidi' || family.startsWith('claude-')) return 'claude';
   return '';
@@ -5712,7 +5742,7 @@ function scheduleRunAuthRecoveryLaunch(runId) {
     if (manifest?.options?.providerFailover === false || !recoverySession || recoverySession.sessionPlane === 'organization'
         || recoverySession.organizationId || recoverySession.parentSessionId
         || recoverySession.delegatedFromSessionId
-        || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation)) {
+        || ['collaboration_task', 'collaboration_resume', 'swarm_wakeup'].includes(manifest.internalOperation)) {
       return updateRun(normalizedRunId, (current) => ({
         ...current,
         authRecovery: { ...normalizeRunAuthRecovery(current.authRecovery), authRetryState: 'reauth_required' },
@@ -5890,7 +5920,7 @@ export async function recoverRunAuthFailure({
     if (!recoverySession || recoverySession.sessionPlane === 'organization'
         || recoverySession.organizationId || recoverySession.parentSessionId
         || recoverySession.delegatedFromSessionId
-        || ['collaboration_task', 'collaboration_resume'].includes(manifest.internalOperation)) {
+        || ['collaboration_task', 'collaboration_resume', 'swarm_wakeup'].includes(manifest.internalOperation)) {
       return { ok: false, retry: false, status: 'stopped', reason: 'reconciliation-required' };
     }
     const currentRecovery = normalizeRunAuthRecovery(run.authRecovery);
@@ -7810,7 +7840,7 @@ function resolveProviderContextKey(toolId, options = {}) {
   if (tool === 'codex' || tool === 'codex-cli' || ['codex-json', 'codex-app-server-json'].includes(runtimeFamily)) {
     return 'codex';
   }
-  if (tool === 'agy' || ['agy-json', 'agy-stream-json'].includes(runtimeFamily)) {
+  if (tool === 'agy' || AGY_RUNTIME_FAMILIES.has(runtimeFamily)) {
     return 'agy';
   }
   if (tool === 'copilot' || runtimeFamily === 'copilot-json') {
@@ -8078,7 +8108,7 @@ export function resolveResumeState(toolId, session, options = {}) {
     };
   }
 
-  if (tool === 'agy' || ['agy-json', 'agy-stream-json'].includes(runtimeFamily)) {
+  if (tool === 'agy' || AGY_RUNTIME_FAMILIES.has(runtimeFamily)) {
     const conversationId = trimString(session?.agyConversationId);
     if (!conversationId) return noResume('agy', 'NO_NATIVE_CONVERSATION_ID');
     const requestedProvider = trimString(options.providerProfile);
@@ -9405,6 +9435,20 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
     });
   }
 
+  if (!compacting && finalizedRun?.id && !trimString(remainingActive.meta?.activeRunId)
+      && (finalizedMeta.meta?.lifecycleMode === 'ephemeral_swarm'
+        || finalizedMeta.meta?.sessionClass === 'ROOT_LEADERSHIP'
+        || manifest?.internalOperation === 'swarm_wakeup')) {
+    await import('./organization-swarm.mjs')
+      .then(({ settleSwarmMemberRunState }) => settleSwarmMemberRunState({
+        sessionId,
+        runId: finalizedRun.id,
+        state: finalizedRun.state,
+        failureReason: finalizedRun.failureReason || '',
+      }))
+      .catch(() => {});
+  }
+
   if (compacting) {
     if (workerCompaction && compactionTargetSessionId) {
       const targetSession = await getSession(compactionTargetSessionId);
@@ -9579,7 +9623,7 @@ async function maybeStartNativeProviderFailover(sessionId, finalizedRun, manifes
   if (!failedSession || failedSession.sessionPlane === 'organization'
       || failedSession.organizationId || failedSession.parentSessionId
       || failedSession.delegatedFromSessionId
-      || ['collaboration_task', 'collaboration_resume'].includes(manifest?.internalOperation)) return null;
+      || ['collaboration_task', 'collaboration_resume', 'swarm_wakeup'].includes(manifest?.internalOperation)) return null;
   let preventProviderSwitch = false;
   if (failedSession?.sessionClass === 'ROOT_LEADERSHIP') {
     const { readSessionRuntimeConstraints } = await import('./session-collaboration-settings.mjs');
@@ -10806,6 +10850,43 @@ async function resolveSessionProjectAssociation(folder, extra, requestedVisitorI
   if (requestedProjectId) {
     const project = await getProject(requestedProjectId);
     if (!project) throw new Error('Project not found');
+    const workspaceMode = typeof extra?.workspaceMode === 'string' ? extra.workspaceMode.trim() : '';
+    const isIsolatedSwarmSession = extra?.sessionPlane === 'organization'
+      && extra?.lifecycleMode === 'ephemeral_swarm'
+      && ['worktree', 'staging'].includes(workspaceMode);
+    if (isIsolatedSwarmSession) {
+      const organizationId = typeof extra?.organizationId === 'string' ? extra.organizationId.trim() : '';
+      const organizationNodeId = typeof (extra?.organizationNodeId || extra?.nodeId) === 'string'
+        ? (extra.organizationNodeId || extra.nodeId).trim()
+        : '';
+      const rawFolder = typeof folder === 'string' ? folder.trim() : '';
+      if (!organizationId || !organizationNodeId || !rawFolder) {
+        throw new Error('Isolated swarm session requires organization, node, and workspace folder');
+      }
+      const [{ resolveRealRoot }, { getOrganization }] = await Promise.all([
+        import('./execution-scope.mjs'),
+        import('./organization-store.mjs'),
+      ]);
+      const org = await getOrganization(organizationId);
+      if (!org || org.policy?.swarmEnabled !== true || ['archived', 'lifecycle_pending'].includes(org.state)) {
+        throw new Error('Isolated swarm organization is invalid or inactive');
+      }
+      if (org.projectId && org.projectId !== project.id) {
+        throw new Error('Isolated swarm projectId does not match organization project');
+      }
+      const realFolder = await resolveRealRoot(rawFolder);
+      const explicitWorkspacePath = typeof extra?.workspacePath === 'string' ? extra.workspacePath.trim() : '';
+      if (explicitWorkspacePath) {
+        const realWorkspacePath = await resolveRealRoot(explicitWorkspacePath);
+        if (realWorkspacePath !== realFolder) {
+          throw new Error('Isolated swarm workspacePath does not match session folder');
+        }
+      }
+      return {
+        folder: realFolder,
+        projectId: project.id,
+      };
+    }
     return {
       folder: project.rootPath,
       projectId: project.id,
@@ -11176,6 +11257,11 @@ export async function createSessionWithOutcome(folder, tool, name, extra = {}, {
             node: updated.organizationNodeId,
             role: updated.roleInstanceId,
             revision: updated.organizationRevision,
+            lifecycleMode: updated.lifecycleMode,
+            workspaceMode: updated.workspaceMode,
+            workspacePath: updated.workspacePath,
+            readOnlyRequired: updated.readOnlyRequired,
+            readOnlyAdvisory: updated.readOnlyAdvisory,
             controller: updated.controllerSessionId,
             parent: updated.parentSessionId,
           });
@@ -11188,6 +11274,11 @@ export async function createSessionWithOutcome(folder, tool, name, extra = {}, {
             node: updated.organizationNodeId,
             role: updated.roleInstanceId,
             revision: updated.organizationRevision,
+            lifecycleMode: updated.lifecycleMode,
+            workspaceMode: updated.workspaceMode,
+            workspacePath: updated.workspacePath,
+            readOnlyRequired: updated.readOnlyRequired,
+            readOnlyAdvisory: updated.readOnlyAdvisory,
             controller: updated.controllerSessionId,
             parent: updated.parentSessionId,
           });
@@ -13957,8 +14048,35 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     temporaryControlAuthority: options.temporaryControlAuthority,
     internalOperation: options.internalOperation,
   });
+  let swarmRootWakeupControl = false;
+  if (!rootSessionControl
+      && options.internalOperation === 'swarm_wakeup'
+      && options.internalOrganizationWakeup === true
+      && trimString(session?.sessionClass) === 'ROOT_LEADERSHIP') {
+    const { getOrganizationByRootSession, listOrganizationNodes } = await import('./organization-store.mjs');
+    const rootOrg = await getOrganizationByRootSession(sessionId);
+    const requestedOrgId = trimString(options.organizationId);
+    if (rootOrg && (!requestedOrgId || rootOrg.id === requestedOrgId)
+        && canIssueSwarmRootWakeupSessionControl({
+          session,
+          internalOperation: options.internalOperation,
+          internalOrganizationWakeup: options.internalOrganizationWakeup,
+          temporaryControlAuthority: options.temporaryControlAuthority,
+          organization: rootOrg,
+        })) {
+      const rootNodes = await listOrganizationNodes(rootOrg.id);
+      const rootNode = rootNodes.find((entry) => entry.currentSessionId === sessionId || entry.nodeRole === 'root_leadership');
+      const requestedNodeId = trimString(options.organizationNodeId);
+      if (rootNode && rootNode.lifecycleState === 'active' && rootNode.retiredRevision === null
+          && rootNode.swarmState !== 'killed'
+          && (!requestedNodeId || rootNode.id === requestedNodeId)) {
+        swarmRootWakeupControl = true;
+      }
+    }
+  }
+  const issueRootSessionControl = rootSessionControl || swarmRootWakeupControl;
   let messageScope = null;
-  if (!rootSessionControl && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
+  if (!issueRootSessionControl && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
     const { getLiveOrganizationSessionReference, getFactoryMessageScope } = await import('./organization-session-lifecycle.mjs');
     const binding = await getLiveOrganizationSessionReference(sessionId);
     if (binding?.kind === 'node' && binding.organizationId === session.organizationId && binding.nodeId === session.organizationNodeId && binding.bindingGeneration > 0) {
@@ -13966,7 +14084,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     }
     if (!messageScope) messageScope = await getFactoryMessageScope(sessionId, requestId);
   }
-  const sessionControlCapability = rootSessionControl || messageScope
+  const sessionControlCapability = issueRootSessionControl || messageScope
     ? createRunSessionControlCapability({
       runId: nextRunId,
       sessionId,
@@ -14147,29 +14265,67 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     internalOperation: options.internalOperation, collaborationCapability: options.collaborationCapability,
     getAppImpl: getApp, getSessionImpl: getSession,
   });
+  const effectiveReadOnlyRequired = options.readOnlyRequired === true
+    || (session.lifecycleMode === 'ephemeral_swarm' && session.readOnlyRequired === true);
+  const effectiveReadOnlyAdvisory = !effectiveReadOnlyRequired && (
+    options.readOnlyAdvisory === true
+    || (session.lifecycleMode === 'ephemeral_swarm' && session.readOnlyAdvisory === true)
+  );
+  const effectiveAccessMode = trimString(options.accessMode)
+    || (effectiveReadOnlyRequired ? 'read' : (session.lifecycleMode === 'ephemeral_swarm' && session.accessMode === 'read' ? 'read' : ''));
+  const isReadOnlyRequest = effectiveAccessMode === 'read' || effectiveReadOnlyRequired;
+  const orgControlMcpSupported = supportsOrganizationControlMcp(
+    effectiveProviderContract.providerCapabilities || effectiveRuntimeFamily,
+  );
+  const serverSkillReadSupported = supportsServerBuiltinSkillRead(
+    effectiveProviderContract.providerCapabilities || effectiveRuntimeFamily,
+  );
   let readOnlyOrganizationManagerMcp = false;
-  if ((options.accessMode === 'read' || options.readOnlyRequired === true) && messageScope?.kind === 'organization_message'
-      && effectiveRuntimeFamily === 'claude-stream-json-bidi' && sessionControlChannel?.token
-      && ['MANAGER', 'PHASE_LEAD'].includes(String(session.sessionClass || '').toUpperCase())) {
-    const { getNode, getOrganization } = await import('./organization-store.mjs');
-    const node = await getNode(messageScope.nodeId);
-    const org = node && await getOrganization(node.organizationId);
-    readOnlyOrganizationManagerMcp = !!(node && org && node.currentSessionId === sessionId && node.organizationId === messageScope.organizationId
-      && node.bindingGeneration === messageScope.bindingGeneration && org.currentRevision === messageScope.organizationRevision
-      && !['archived', 'lifecycle_pending'].includes(org.state) && node.lifecycleState === 'active' && node.retiredRevision === null
-      && ['MANAGER', 'PHASE_LEAD'].includes(String(node.sessionClass || '').toUpperCase()) && node.grant?.canDelegate === true);
+  let readOnlySwarmReviewerMcp = false;
+  if (isReadOnlyRequest && messageScope?.kind === 'organization_message' && sessionControlChannel?.token) {
+    const sessionUpperClass = String(session.sessionClass || '').toUpperCase();
+    const isReadOnlyManagerCandidate = effectiveRuntimeFamily === 'claude-stream-json-bidi'
+      && ['MANAGER', 'PHASE_LEAD'].includes(sessionUpperClass);
+    const isSwarmReviewerCandidate = orgControlMcpSupported
+      && session.lifecycleMode === 'ephemeral_swarm'
+      && sessionUpperClass === 'REVIEWER';
+    if (isReadOnlyManagerCandidate || isSwarmReviewerCandidate) {
+      const { getNode, getOrganization } = await import('./organization-store.mjs');
+      const node = await getNode(messageScope.nodeId);
+      const org = node && await getOrganization(node.organizationId);
+      const activeBoundNode = !!(node && org && node.currentSessionId === sessionId
+        && node.organizationId === messageScope.organizationId
+        && node.bindingGeneration === messageScope.bindingGeneration
+        && org.currentRevision === messageScope.organizationRevision
+        && !['archived', 'lifecycle_pending'].includes(org.state)
+        && node.lifecycleState === 'active'
+        && node.retiredRevision === null);
+      if (activeBoundNode) {
+        const nodeUpperClass = String(node.sessionClass || '').toUpperCase();
+        if (isReadOnlyManagerCandidate
+            && ['MANAGER', 'PHASE_LEAD'].includes(nodeUpperClass)
+            && node.grant?.canDelegate === true) {
+          readOnlyOrganizationManagerMcp = true;
+        } else if (isSwarmReviewerCandidate
+            && node.lifecycleMode === 'ephemeral_swarm'
+            && org.policy?.swarmEnabled === true
+            && nodeUpperClass === 'REVIEWER') {
+          readOnlySwarmReviewerMcp = true;
+        }
+      }
+    }
   }
+  const allowOrganizationToolsForRun = readOnlyOrganizationManagerMcp || readOnlySwarmReviewerMcp || !isReadOnlyRequest;
   const organizationExecutionContext = session.sessionPlane === 'organization'
     ? await buildOrganizationExecutionContext({ sessionId, runId: nextRunId, requestId,
       internalOperation: options.internalOperation, capabilities: collaborationCapabilitySet?.capabilities,
-      organizationToolScope: sessionControlChannel?.token && (readOnlyOrganizationManagerMcp || (options.accessMode !== 'read' && options.readOnlyRequired !== true))
-        && options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily) ? messageScope : null,
+      organizationToolScope: sessionControlChannel?.token && allowOrganizationToolsForRun
+        && orgControlMcpSupported ? messageScope : null,
       selectedRuntime: { tool: effectiveTool, provider: effectiveProviderProfile || null,
         model: trimString(options.model || session.model) || null, effort: trimString(options.effort || session.effort) || null,
         runtimeFamily: effectiveRuntimeFamily || null } }) : '';
   const serverBuiltinSkillReadAvailable = !!sessionControlChannel?.token && !!sessionControlChannel?.runId &&
-    !!sessionControlChannel?.sessionId && (readOnlyOrganizationManagerMcp || (options.accessMode !== 'read' && options.readOnlyRequired !== true)) &&
-    options.acp !== true && ['codex-app-server-json', 'claude-stream-json-bidi'].includes(effectiveRuntimeFamily);
+    !!sessionControlChannel?.sessionId && allowOrganizationToolsForRun && serverSkillReadSupported;
   let promptEnvelope;
   if (options.backgroundPreparation === true) {
     const promptStartedHr = process.hrtime.bigint();
@@ -14256,7 +14412,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       : {}),
   };
   const manifest = {
-    protectedDelegatedRun: Boolean(session.sessionPlane === 'organization' || session.organizationId || session.parentSessionId || session.delegatedFromSessionId || ['collaboration_task', 'collaboration_resume'].includes(options.internalOperation)),
+    protectedDelegatedRun: Boolean(session.sessionPlane === 'organization' || session.organizationId || session.parentSessionId || session.delegatedFromSessionId || ['collaboration_task', 'collaboration_resume', 'swarm_wakeup'].includes(options.internalOperation)),
     sessionId,
     requestId,
     responseId: primaryResponseId || null,
@@ -14333,9 +14489,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(session?.folder ? { projectRoot: session.folder } : {}),
       ...(options.freshThread === true ? { freshThread: true } : {}),
       ...(options.skipSessionContinuation === true ? { skipSessionContinuation: true } : {}),
-      ...(options.accessMode === 'read' || options.readOnlyRequired === true ? {
+      ...(isReadOnlyRequest ? {
         accessMode: 'read',
-        readOnlyRequired: options.readOnlyRequired === true,
+        readOnlyRequired: effectiveReadOnlyRequired,
+        ...(effectiveReadOnlyAdvisory ? { readOnlyAdvisory: true } : {}),
         runnerId: trimString(options.runnerId) || undefined,
         runnerUnitScope: trimString(options.runnerUnitScope) || undefined,
       } : {}),
@@ -14369,6 +14526,7 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
         ? { codexHistoryRequest: { sessionId: requestedOwnerHistoryId },
           ...(historyOwnerDevice ? { authenticatedOwnerDevice: historyOwnerDevice } : {}) } : {}),
       ...(readOnlyOrganizationManagerMcp ? { readOnlyOrganizationManagerMcp: true } : {}),
+      ...(readOnlySwarmReviewerMcp ? { readOnlySwarmReviewerMcp: true } : {}),
       ...(collaborationCapabilitySet
         ? { collaborationCapabilities: collaborationCapabilitySet.capabilities }
         : {}),
@@ -14376,6 +14534,10 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
   };
   // S3: allocate the run id up front so the WorkspaceLease can carry it before
   // createRun persists the Run (design 6.4 ordering).
+  const effectiveExecutionIsolation = trimString(options.executionIsolation)
+    || (session.lifecycleMode === 'ephemeral_swarm'
+      ? (session.workspaceMode === 'worktree' ? 'worktree' : (session.workspaceMode === 'staging' ? 'container' : ''))
+      : '');
   const admission = await measureApiRequestPhase(
     'send.run_admission',
     () => prepareRunExecution({
@@ -14384,9 +14546,9 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       manifest,
       options: {
         internalOperation: options.internalOperation || null, runId: nextRunId,
-        accessMode: options.accessMode, readOnlyRequired: options.readOnlyRequired === true,
+        accessMode: effectiveAccessMode || undefined, readOnlyRequired: effectiveReadOnlyRequired,
         runnerId: options.runnerId, runnerUnitScope: options.runnerUnitScope,
-        executionIsolation: options.executionIsolation,
+        executionIsolation: effectiveExecutionIsolation || undefined,
       },
     }),
   );
@@ -14575,6 +14737,8 @@ export async function sendMessage(sessionId, text, images, options = {}) {
 export async function sendUserMessage(sessionId, text, images, options = {}) {
   const {
     forceAddressability = false,
+    internalOperation: _ignoredInternalOperation,
+    internalOrganizationWakeup: _ignoredInternalOrganizationWakeup,
     ...messageOptions
   } = options || {};
   const session = await getSessionMeta(sessionId);
@@ -16824,4 +16988,9 @@ export {
   resumeHarnessRunBudget as __resumeHarnessRunBudgetForTest,
   harnessRunLeases as __harnessRunLeasesForTest,
   yieldedRunLeaseIds as __yieldedRunLeaseIdsForTest,
+  applySessionContractFields as __applySessionContractFieldsForTest,
+  isAgyRunManifest as __isAgyRunManifestForTest,
+  resolveRunNativeAgentType as __resolveRunNativeAgentTypeForTest,
+  resolveProviderContextKey as __resolveProviderContextKeyForTest,
+  resolveResumeState as __resolveResumeStateForTest,
 };

@@ -8,7 +8,7 @@ const ITEMS = Object.freeze({ 'ragent:builtin:session-control': Object.freeze({
   file: 'session-control.md', name: 'Ragent session control',
   description: 'Session, collaboration, organization, connector, and artifact API routing and boundaries.',
 }),
-  ...Object.fromEntries(['root', 'manager', 'worker', 'reviewer', 'calendar'].map((name) => [
+  ...Object.fromEntries(['root', 'manager', 'worker', 'reviewer', 'calendar', 'swarm'].map((name) => [
     `ragent:builtin:${name}`,
     Object.freeze({ file: `${name}.md`, name: `Ragent ${name}`, description: `Authorized ${name} workflow guidance.` }),
   ])),

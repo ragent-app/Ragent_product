@@ -128,12 +128,24 @@ export function assertManagedSessionLineage(session) {
   const roleInstanceId = session.roleInstanceId || session.role;
   const revision = session.organizationRevision ?? session.revision;
   const revisionNumber = typeof revision === 'string' && revision.trim() ? Number(revision) : revision;
-  const complete = hasText(rootSessionId)
-    && hasText(nodeId)
-    && hasText(roleInstanceId)
-    && Number.isInteger(revisionNumber)
-    && revisionNumber > 0
-    && hasText(controllerSessionId);
+  const lifecycleMode = typeof session.lifecycleMode === 'string'
+    ? session.lifecycleMode.trim().toLowerCase()
+    : '';
+  const complete = lifecycleMode === 'ephemeral_swarm'
+    ? (hasText(rootSessionId)
+      && hasText(session.organizationId)
+      && hasText(nodeId)
+      && hasText(roleInstanceId)
+      && hasText(session.parentSessionId)
+      && hasText(controllerSessionId)
+      && Number.isInteger(revisionNumber)
+      && revisionNumber === 0)
+    : (hasText(rootSessionId)
+      && hasText(nodeId)
+      && hasText(roleInstanceId)
+      && Number.isInteger(revisionNumber)
+      && revisionNumber > 0
+      && hasText(controllerSessionId));
   if (complete) return sessionClass;
   const error = new Error(`Managed session ${session.id || '(unknown)'} has incomplete lineage`);
   error.code = MANAGED_SESSION_LINEAGE_INCOMPLETE;
@@ -174,10 +186,14 @@ export const MANAGED_INPUT_OPERATIONS = Object.freeze([
 // gate accepts for them are the consultation channel markers below; any other
 // internal injection is treated as a bypass. Organization-scope sessions keep
 // the legacy collaboration controlled-channel exemption ('collaboration_task' /
-// 'collaboration_resume' and any future org internal operation).
+// 'collaboration_resume', plus 'swarm_wakeup' for Swarm @mention doorbells).
 const CONSULTATION_INTERNAL_OPERATIONS = new Set([
   'consultation_task',
   'consultation_resume',
+]);
+
+export const SWARM_INTERNAL_OPERATIONS = Object.freeze([
+  'swarm_wakeup',
 ]);
 
 // A managed session is one bound to an organization plane (S8 persisted

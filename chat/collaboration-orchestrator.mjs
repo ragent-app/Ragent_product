@@ -47,6 +47,13 @@ import {
 import { isBwrapPresent } from '../lib/runner-sandbox.mjs';
 import { getProject } from './projects.mjs';
 import { getOrganization, getNode, isOrganizationRevisionCompatible } from './organization-store.mjs';
+import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
+import {
+  listActiveSwarmOrganizations,
+  reconcileSwarmMemberStates,
+  deliverPendingSwarmWakeups,
+  evaluateSwarmStalls,
+} from './organization-swarm.mjs';
 import { MANAGED_WRITER_ENABLED, REVIEWER_ENABLED } from '../lib/config.mjs';
 import {
   createStagingWorkspace,
@@ -442,6 +449,27 @@ function buildDefaultDependencies(overrides = {}) {
     // through the user-message ingress and create a second, synthetic turn.
     // Keep the publisher lazy to avoid an import cycle with session-manager.
     emitTriggerEvent: async (type, payload) => (await import('./triggers.mjs')).emitTriggerEvent(type, payload),
+    notifyOwner: async (alert) => {
+      try {
+        const org = await getOrganization(alert.organizationId).catch(() => null);
+        const triggers = await import('./triggers.mjs');
+        const ownerSessionId = org?.rootSessionId || org?.root_session_id || '';
+        if (ownerSessionId && typeof triggers.createTrigger === 'function') {
+          await triggers.createTrigger({
+            sessionId: ownerSessionId,
+            scheduledAt: new Date().toISOString(),
+            dedupeKey: `swarm-stall:${alert.organizationId}:${alert.boardSeq || alert.conditionKind}`,
+            title: `Swarm stall alert (${alert.conditionKind})`,
+            text: alert.summary,
+          }).catch(() => {});
+        }
+        if (typeof triggers.emitTriggerEvent === 'function') {
+          await triggers.emitTriggerEvent('swarm_stall_alert', alert).catch(() => {});
+        }
+      } catch {
+        // Non-blocking: owner stall notifications must not fail reconciler sweeps.
+      }
+    },
     ...overrides,
   };
 }
@@ -1800,7 +1828,39 @@ export function createCollaborationOrchestrator(options = {}) {
         await completeRun(attempt.runId).catch(() => {});
       }
     }
+    await reconcileSwarm().catch(() => {});
     return active.length;
+  }
+
+  async function reconcileSwarm() {
+    if (options.swarmWatchdog === false || getOrganizationRuntimeCapabilities().stallGovernor !== true) {
+      return { organizations: 0, wakeupsDelivered: 0, alertsEmitted: 0 };
+    }
+    const swarmDb = deps.db || options.db || null;
+    const swarmDeps = swarmDb ? { ...deps, db: swarmDb } : deps;
+    const stallOpts = options.swarmStall && typeof options.swarmStall === 'object' ? options.swarmStall : {};
+    const activeSwarms = await listActiveSwarmOrganizations(swarmDb);
+    let wakeupsDelivered = 0;
+    let alertsEmitted = 0;
+    for (const organizationId of activeSwarms) {
+      await reconcileSwarmMemberStates(swarmDeps, { organizationId }).catch(() => null);
+      const firstWake = await deliverPendingSwarmWakeups(swarmDeps, { organizationId }).catch(() => null);
+      wakeupsDelivered += Number(firstWake?.delivered || 0);
+      const nowValue = typeof stallOpts.nowMs === 'function' ? stallOpts.nowMs() : stallOpts.nowMs;
+      const stallRes = await evaluateSwarmStalls(swarmDeps, {
+        organizationId,
+        ...stallOpts,
+        ...(nowValue !== undefined ? { nowMs: nowValue } : {}),
+      }).catch(() => null);
+      if (Array.isArray(stallRes?.alertsEmitted) && stallRes.alertsEmitted.length > 0) {
+        alertsEmitted += stallRes.alertsEmitted.length;
+        if (stallRes.alertsEmitted.some((alert) => alert.targetRole === 'coordinator')) {
+          const secondWake = await deliverPendingSwarmWakeups(swarmDeps, { organizationId }).catch(() => null);
+          wakeupsDelivered += Number(secondWake?.delivered || 0);
+        }
+      }
+    }
+    return { organizations: activeSwarms.length, wakeupsDelivered, alertsEmitted };
   }
 
   async function start() {
@@ -1925,6 +1985,7 @@ export function createCollaborationOrchestrator(options = {}) {
     maybeAggregate,
     reconcile,
     reconcileLedger,
+    reconcileSwarm,
     retry,
     start,
     stop,
