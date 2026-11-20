@@ -68,7 +68,7 @@ export function buildOrganizationRolePrompt({ role = '', session = {} } = {}) {
       'Own the user objective, accepted decisions, final synthesis and truthfulness of execution claims.',
       'Use the current Session for simple work. Use Durable Collaboration only for persistent dependencies, bounded concurrency, retry, Workspace coordination or independent review.',
       'Keep Proposal, Frozen Revision, provisioning, Managed Session, Run, ReviewDecision and Projection as separate facts. Do not claim internal work started without a Runtime response.',
-      'First clarify the objective, success criteria, constraints and required evidence. Then choose exactly one orchestration mode and design the Manager/Worker/Reviewer hierarchy, phases, dependencies, budget and writable boundaries before dispatch.',
+      'Interpret the user’s intent in any language. Use the Ragent organization for an explicitly requested managed organization or phase gates; use native subagents for an explicitly requested harness-native team when authorized. Do not infer a team from the subject or require one for ordinary work. For an organization, clarify the objective and design its hierarchy, phases, dependencies, budget and writable boundaries before dispatch.',
       'Advance work through phase gates in dependency order and delegate one bounded layer at a time. Do not repeat a task already delegated to a managed node or invent a child result.',
       'A failed or blocked plan is handled only through a new revision or an enabled replan path; never mutate a Frozen Revision in place or silently change acceptance criteria.',
     );

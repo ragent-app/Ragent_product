@@ -104,12 +104,12 @@ function normalizeNode(raw, index) {
     'scope', 'scopes', 'runtime', 'runtimePolicy', 'acceptance', 'reviewRequired', 'maxChildren', 'maxConcurrent', 'domain', 'iconKey', 'displayName', 'responsibility', 'runtimeRequirements', 'runtimeRationale',
   ]), `nodes[${index}]`);
   const stableKey = text(value.stableKey);
-  if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key' });
+  if (!stableKey) throw plannerError(PLANNER_ERROR, `nodes[${index}].stableKey is required`, { reason: 'missing_stable_key', field: `nodes[${index}].stableKey` });
   const role = normalizeRole(value.role, `nodes[${index}].role`);
   const agentId = text(value.agentId);
-  if (!agentId) throw plannerError(PLANNER_ERROR, `node ${stableKey} requires agentId`, { reason: 'missing_agent_id', stableKey });
+  if (!agentId) throw plannerError(PLANNER_ERROR, `node ${stableKey} requires agentId`, { reason: 'missing_agent_id', field: `nodes[${index}].agentId`, stableKey });
   const phaseId = text(value.phaseId);
-  if (!phaseId) throw plannerError(PLANNER_ERROR, `node ${stableKey} requires phaseId`, { reason: 'missing_phase_id', stableKey });
+  if (!phaseId) throw plannerError(PLANNER_ERROR, `node ${stableKey} requires phaseId`, { reason: 'missing_phase_id', field: `nodes[${index}].phaseId`, stableKey });
   const parentKey = text(value.parentKey);
   if (parentKey && parentKey === stableKey) {
     throw plannerError(PLANNER_CYCLE, `node ${stableKey} cannot manage itself`, { stableKey });
@@ -165,15 +165,15 @@ function normalizeNode(raw, index) {
 function normalizeAcceptance(value, label, { allowEmpty = false } = {}) {
   if (value === undefined) {
     if (allowEmpty) return [];
-    throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label} is required`, { reason: 'missing_acceptance' });
+    throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label} is required`, { reason: 'missing_acceptance', field: label });
   }
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
-    throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label} must be a non-empty array`, { reason: 'invalid_acceptance' });
+    throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label} must be a non-empty array`, { reason: 'invalid_acceptance', field: label });
   }
   return value.map((entry, index) => {
     const item = assertPlainObject(entry, `${label}[${index}]`);
     const criterion = text(item.criterion || item.id || item.name);
-    if (!criterion) throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label}[${index}] requires criterion`, { reason: 'missing_criterion' });
+    if (!criterion) throw plannerError(PLANNER_ACCEPTANCE_REQUIRED, `${label}[${index}] requires criterion`, { reason: 'missing_criterion', field: `${label}[${index}].criterion` });
     return {
       criterion,
       evidenceRequired: item.evidenceRequired !== false,
@@ -191,7 +191,7 @@ function normalizePhase(raw, index) {
   const acceptance = normalizeAcceptance(value.acceptance, `phases[${index}].acceptance`);
   const reviewerRoles = list(value.reviewerRoles).map((entry) => entry.toLowerCase());
   if (value.reviewRequired !== false && reviewerRoles.length === 0) {
-    throw plannerError(PLANNER_REVIEW_REQUIRED, `phase ${phaseId} requires an independent reviewer`, { phaseId, reason: 'missing_reviewer' });
+    throw plannerError(PLANNER_REVIEW_REQUIRED, `phase ${phaseId} requires an independent reviewer`, { phaseId, reason: 'missing_reviewer', field: `phases[${index}].reviewerRoles` });
   }
   return {
     phaseId,

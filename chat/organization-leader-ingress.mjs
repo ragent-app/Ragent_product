@@ -24,6 +24,7 @@ import {
 } from './organization-runtime-capabilities.mjs';
 import { buildOrganizationRuntimeCatalog } from './organization-runtime-selection.mjs';
 import { queryRuntimeCandidates } from './organization-runtime-decision.mjs';
+import { parseOrganizationProposal } from './organization-planner.mjs';
 
 export const ORGANIZATION_LEADER_DISABLED = 'ORG_LEADER_DISABLED';
 export const ORGANIZATION_PROPOSAL_NOT_FOUND = 'ORG_PROPOSAL_NOT_FOUND';
@@ -154,7 +155,7 @@ export async function buildRootLeadershipTurnContext(session, options = {}) {
     : 'No Organization Proposal block is permitted while the Agent Catalog has no selectable Agent.';
   return `## Root Leadership Organization Proposal
 
-Autonomous organization planning is enabled for this Root Leadership Session. First clarify the objective, acceptance criteria, constraints and evidence required. Then choose exactly one orchestration mode: Organization Proposal for a staged hierarchy with phase gates, or Durable Collaboration for a persistent task graph. Every node in an accepted initial proposal is intended for actual provisioning, not a placeholder; follow the user's requested order for initial and later creation, leaving later manager-created nodes out of the initial proposal. A phase setting reviewRequired=false does not remove an independent review obligation. If the current contract cannot preserve both the requested order and required review, report the constraint rather than weakening review. You may reason in natural language, but you must not claim that internal Sessions, Runs, Reviewers or results exist until the Runtime confirms them. When the objective is concrete enough for a bounded team plan, use plan.submit if that tool is available and authorized; use plan.status to inspect an uncertain submission. If the tool is unavailable, emit one machine-readable block for the selected mode in addition to your normal explanation. Do not submit the same plan through both paths. Availability does not itself grant authority; follow the tool response:
+Autonomous organization planning is available for this Root Leadership Session. Interpret the user's actual intent in any language: an explicit request for a Ragent organization, its managed members or phase gates selects the Organization Proposal; a request for the harness's native subagents selects the native mechanism when authorized. Do not infer either from domain keywords or force a team for ordinary work. Clarify the objective, acceptance criteria, constraints and evidence required as needed. For an organization, every node in an accepted initial proposal is intended for actual provisioning, not a placeholder; follow the user's requested order for initial and later creation, leaving later manager-created nodes out of the initial proposal. A phase setting reviewRequired=false does not remove an independent review obligation. If the current contract cannot preserve both the requested order and required review, report the constraint rather than weakening review. You may reason in natural language, but you must not claim that internal Sessions, Runs, Reviewers or results exist until the Runtime confirms them. For an authorized bounded organization plan, use plan.submit if available; use plan.status to inspect an uncertain submission. If the tool is unavailable, emit one machine-readable block for the selected mode in addition to your normal explanation. Do not submit the same plan through both paths. Availability does not itself grant authority; follow the tool response:
 
 ${proposalContract}
 
@@ -249,6 +250,26 @@ export async function processRootLeadershipProposal({
       catalogState: catalog.state,
       catalogRevision: catalog.revision,
       catalogErrors: catalog.errors,
+    };
+  }
+  // Parsing is side-effect free. Only a parser rejection is safe to offer as
+  // an in-turn correction; compiler and persistence failures may reflect live
+  // policy or an uncertain outcome and must not be treated as schema repair.
+  try {
+    parseOrganizationProposal(proposal);
+  } catch (error) {
+    if (!new Set(['ORG_PLAN_INVALID', 'ORG_PLAN_CYCLE', 'ORG_PLAN_REVIEW_REQUIRED', 'ORG_PLAN_ACCEPTANCE_REQUIRED']).has(error?.code)) {
+      return { ...errorResult(error), sideEffects: 'none' };
+    }
+    const safeField = typeof error?.field === 'string' && /^(?:proposal|nodes|phases|acceptance|reviewPolicy|manages|budget)(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9]*)*$/.test(error.field)
+      ? error.field : null;
+    return {
+      attempted: true, state: 'rejected', phase: 'validation',
+      code: /^ORG_PLAN_[A-Z_]+$/.test(error?.code || '') ? error.code : 'ORG_PLAN_INVALID',
+      reason: /^[a-z_]+$/.test(error?.reason || '') ? error.reason : 'invalid_proposal',
+      field: safeField,
+      message: 'The organization proposal failed validation.',
+      sideEffects: 'none', repairable: true,
     };
   }
   let planned;
