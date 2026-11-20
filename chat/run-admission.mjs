@@ -63,7 +63,7 @@ import {
   systemPathRootsForPlatform,
 } from './risk-policy.mjs';
 
-export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend', 'collaboration_task', 'swarm_wakeup']);
+export const PROJECT_BOUND_NEW_RUN_OPERATIONS = new Set(['regenerate', 'editResend', 'collaboration_task', 'swarm_wakeup', 'organization_plan_repair']);
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';

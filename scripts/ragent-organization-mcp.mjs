@@ -15,6 +15,7 @@ const rootScope = endpoint === 'tools-root';
 const swarmReadActions = ['swarm.status', 'board.read', 'swarm.channel.list'];
 const swarmBoardWriteActions = ['board.post', 'board.wait', 'swarm.channel.create', 'swarm.channel.subscribe', 'swarm.channel.archive'];
 const swarmControlWriteActions = ['swarm.spawn', 'swarm.kill', 'swarm.done', 'swarm.model'];
+const proposalContract = 'plan.submit requires proposal: schemaVersion 1, idempotencyKey (or proposalId), objective, non-empty nodes, phases and acceptance. Each node needs stableKey, role, agentId and phaseId. Each phase needs phaseId, objective and acceptance; its review defaults on and requires reviewerRoles. The proposal review policy defaults on and requires reviewer nodes. Disable review only when consistent with user requirements. Acceptance entries are objects with criterion (or id/name). Read the root skill for the full contract.';
 
 const readActions = [
   'skills.list', 'skills.read', 'candidates.query', 'state.get', 'incidents.list', 'incident.get',
@@ -101,7 +102,7 @@ const actionTool = {
           incidentId: { type: 'string' },
           summary: { type: 'string' },
           evidence: { type: 'string' },
-          proposal: { type: 'object' },
+          proposal: { type: 'object', description: proposalContract },
           organizationId: { type: 'string' },
           title: { type: 'string' },
           channel: { type: 'string' },

@@ -190,6 +190,28 @@ const SAFE_RESOLVER_CODES = new Set([
 ]);
 const SAFE_RESOLVER_REASONS = new Set(['runtime_evidence_unknown', 'runtime_candidate_ineligible', 'runtime_policy_denied', 'tool_required', 'effort_default_unknown', 'effort_unavailable']);
 const SAFE_RESOLVER_FIELDS = new Set(['runtime.tool', 'runtime.provider', 'runtime.model', 'runtime.effort']);
+const VALIDATION_MESSAGES = Object.freeze({
+  missing_reviewer: 'A phase requiring review needs reviewerRoles and an eligible independent reviewer.',
+  reviewer_count: 'The review policy requires more reviewer nodes; preserve any independent review obligation.',
+  missing_acceptance: 'Acceptance criteria are required.',
+  invalid_acceptance: 'Acceptance criteria must be a non-empty array.',
+  missing_criterion: 'Each acceptance entry needs a criterion.',
+  missing_stable_key: 'Each node needs a stableKey.',
+  missing_agent_id: 'Each node needs an available agentId.',
+  missing_phase_id: 'Each node needs a phaseId.',
+  invalid_phase: 'Each phase needs a phaseId and objective.',
+  missing_objective: 'The proposal needs an objective.',
+  empty_nodes: 'The proposal needs at least one node.',
+  empty_phases: 'The proposal needs at least one phase.',
+  missing_idempotency_key: 'The proposal needs an idempotencyKey.',
+  unknown_field: 'Remove the unsupported field.',
+  object_required: 'This field must be an object.',
+  cycle: 'Dependencies and management relationships must not contain cycles.',
+  missing_dependency: 'A dependency must reference a known item.',
+  unknown_phase: 'A node must reference a known phase.',
+  duplicate_key: 'Each key must be unique.',
+  unknown_role: 'Use a supported organization role.',
+});
 
 function errorResult(error, attempted = true) {
   const inner = error?.cause;
@@ -261,14 +283,16 @@ export async function processRootLeadershipProposal({
     if (!new Set(['ORG_PLAN_INVALID', 'ORG_PLAN_CYCLE', 'ORG_PLAN_REVIEW_REQUIRED', 'ORG_PLAN_ACCEPTANCE_REQUIRED']).has(error?.code)) {
       return { ...errorResult(error), sideEffects: 'none' };
     }
-    const safeField = typeof error?.field === 'string' && /^(?:proposal|nodes|phases|acceptance|reviewPolicy|manages|budget)(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9]*)*$/.test(error.field)
+    const safeField = typeof error?.field === 'string' && error.field.length <= 160 && /^(?:proposal|nodes|phases|acceptance|reviewPolicy|manages|budget)(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9]*)*$/.test(error.field)
       ? error.field : null;
+    const reason = /^[a-z_]+$/.test(error?.reason || '') ? error.reason : 'invalid_proposal';
+    const guidance = VALIDATION_MESSAGES[reason] || 'Check the organization proposal contract and correct the invalid fields.';
     return {
       attempted: true, state: 'rejected', phase: 'validation',
       code: /^ORG_PLAN_[A-Z_]+$/.test(error?.code || '') ? error.code : 'ORG_PLAN_INVALID',
-      reason: /^[a-z_]+$/.test(error?.reason || '') ? error.reason : 'invalid_proposal',
+      reason,
       field: safeField,
-      message: 'The organization proposal failed validation.',
+      message: `${safeField ? `${safeField}: ` : ''}${guidance}`,
       sideEffects: 'none', repairable: true,
     };
   }

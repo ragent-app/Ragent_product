@@ -275,6 +275,7 @@ function normalizeOperations(value) {
  * body never grants this capability.
  */
 export function collaborationCapabilityOperationsForRun({ internalOperation = '', policy = null } = {}) {
+  if (internalOperation === 'organization_plan_repair') return [];
   if (internalOperation === 'collaboration_task') {
     // Specialist workers can inspect their exact collaboration, but cannot
     // create or mutate collaborations of their own.
@@ -570,7 +571,7 @@ export async function authorizeRootOrganizationCreate({ session, runId, turnId, 
   return withLockedRunAuthorization(runId, async (run, manifest) => {
     const now = Date.now();
     const terminal = ['completed', 'failed', 'cancelled'].includes(text(run?.state));
-    if (!run || !manifest || run.sessionId !== session?.id || manifest.sessionId !== session.id ||
+    if (!run || !manifest || manifest.internalOperation === 'organization_plan_repair' || run.sessionId !== session?.id || manifest.sessionId !== session.id ||
         text(manifest.requestId) !== text(turnId) || (terminal && !(marker && run.state === 'completed'))) throw deny();
     const channel = manifest.options?.sessionControlChannel;
     if (!terminal && (!channel || text(channel.runId) !== runId || text(channel.sessionId) !== session.id ||

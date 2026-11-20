@@ -1374,7 +1374,8 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
     env.RAGENT_RUN_ID = runId;
     env.RAGENT_MANAGED_RUN = '1';
   }
-  const collaborationCapabilities = Array.isArray(manifest?.options?.collaborationCapabilities)
+  const isOrganizationPlanRepair = manifest?.internalOperation === 'organization_plan_repair';
+  const collaborationCapabilities = !isOrganizationPlanRepair && Array.isArray(manifest?.options?.collaborationCapabilities)
     ? manifest.options.collaborationCapabilities
       .filter((entry) => entry && typeof entry === 'object' && entry.operation && entry.grantId && entry.token)
       .map((entry) => ({ operation: entry.operation, grantId: entry.grantId, token: entry.token }))
@@ -1396,11 +1397,12 @@ async function cleanEnv(toolId, manifest = {}, options = {}) {
   delete env.RAGENT_SESSION_CONTROL_RUN_ID;
   delete env.RAGENT_SESSION_CONTROL_SESSION_ID;
   delete env.RAGENT_SESSION_CONTROL_TURN_ID;
-  const sessionControlChannel = manifest?.options?.sessionControlChannel;
-  const sessionControlToken = sessionControlChannel?.token
-    || await readRunSessionControlToken(runId);
-  const sessionControlRenewalToken = sessionControlChannel?.renewalToken
-    || await readRunSessionControlRenewalToken(runId);
+  delete env.RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE;
+  const sessionControlChannel = isOrganizationPlanRepair ? null : manifest?.options?.sessionControlChannel;
+  const sessionControlToken = sessionControlChannel ? (sessionControlChannel.token
+    || await readRunSessionControlToken(runId)) : null;
+  const sessionControlRenewalToken = sessionControlChannel ? (sessionControlChannel.renewalToken
+    || await readRunSessionControlRenewalToken(runId)) : null;
   if (sessionControlToken && sessionControlChannel?.runId && sessionControlChannel?.sessionId) {
     env.RAGENT_SESSION_CONTROL_TOKEN = sessionControlToken;
     env.RAGENT_SESSION_CONTROL_RUN_ID = sessionControlChannel.runId;
@@ -4949,12 +4951,18 @@ async function main() {
   // ride the same batch → owner-approval → privileged-executor pipeline as the
   // provider-gate path. A channel failure must never break the Run; the shim
   // then fails with a self-describing channel error.
-  const readOnlyRequested = manifest.executionScope?.accessMode === 'read'
+  const organizationPlanRepair = manifest.internalOperation === 'organization_plan_repair';
+  const readOnlyRequested = organizationPlanRepair || manifest.executionScope?.accessMode === 'read'
     || manifest.options?.readOnlyRequired === true
     || manifest.options?.accessMode === 'read';
   const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
     && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1';
+  // Repair is text-only: only the existing verified provider boundary can
+  // rule out network side effects and callable apps as well as file writes.
+  if (organizationPlanRepair && (!providerReadOnly || process.platform !== 'win32')) {
+    throw Object.assign(new Error('Organization plan repair requires verified text-only execution'), { code: 'ORG_REPAIR_ISOLATION_UNAVAILABLE' });
+  }
   if (providerReadOnly && process.platform === 'linux') {
     // A provider-reported policy cannot attest the kernel restrictions of the
     // process that executes commands for a shared broker.
@@ -5255,7 +5263,7 @@ async function main() {
     && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
   const readOnlySwarmReviewerOrganizationMcp = readOnlyRequested && manifest.options?.readOnlySwarmReviewerMcp === true
     && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
-  const readOnlyAllowedOrganizationMcp = readOnlyManagerOrganizationMcp || readOnlySwarmReviewerOrganizationMcp;
+  const readOnlyAllowedOrganizationMcp = !organizationPlanRepair && (readOnlyManagerOrganizationMcp || readOnlySwarmReviewerOrganizationMcp);
   const organizationMcpSupported = supportsOrganizationControlMcp(runtimeFamily);
   const organizationMcpRequested = (!readOnlyRequested || readOnlyAllowedOrganizationMcp) && Boolean(
     spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&

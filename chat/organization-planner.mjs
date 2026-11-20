@@ -187,7 +187,7 @@ function normalizePhase(raw, index) {
   assertNoUnknownKeys(value, new Set(['phaseId', 'objective', 'dependsOn', 'acceptance', 'reviewRequired', 'reviewerRoles']), `phases[${index}]`);
   const phaseId = text(value.phaseId);
   const objective = text(value.objective);
-  if (!phaseId || !objective) throw plannerError(PLANNER_ERROR, `phases[${index}] requires phaseId and objective`, { reason: 'invalid_phase' });
+  if (!phaseId || !objective) throw plannerError(PLANNER_ERROR, `phases[${index}] requires phaseId and objective`, { reason: 'invalid_phase', field: `phases[${index}]` });
   const acceptance = normalizeAcceptance(value.acceptance, `phases[${index}].acceptance`);
   const reviewerRoles = list(value.reviewerRoles).map((entry) => entry.toLowerCase());
   if (value.reviewRequired !== false && reviewerRoles.length === 0) {
@@ -343,7 +343,7 @@ export function parseOrganizationProposal(input) {
   const idempotencyKey = text(proposal.idempotencyKey || proposal.proposalId);
   if (!idempotencyKey) throw plannerError(PLANNER_ERROR, 'proposal.idempotencyKey is required', { reason: 'missing_idempotency_key' });
   if (nodes.filter((node) => node.role === 'reviewer').length < reviewPolicy.minReviewers) {
-    throw plannerError(PLANNER_REVIEW_REQUIRED, 'proposal does not contain enough reviewer nodes', { reason: 'reviewer_count' });
+    throw plannerError(PLANNER_REVIEW_REQUIRED, 'proposal does not contain enough reviewer nodes', { reason: 'reviewer_count', field: 'nodes' });
   }
   return {
     schemaVersion: ORGANIZATION_PROPOSAL_SCHEMA_VERSION,
