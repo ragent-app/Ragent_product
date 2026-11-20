@@ -714,6 +714,11 @@ export function createSessionTurnCompletionHelpers(services) {
     const original = await getRun(run.id);
     const ingress = original?.organizationPlanIngress;
     if (original?.cancelRequested || ingress?.source !== 'marker' || ingress.state !== 'rejected') return;
+    const field = result.field;
+    if (typeof field !== 'string' || !/^(?:proposal\.)?(?:nodes|phases|manages|acceptance|reviewPolicy)(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9]*)+$/.test(field)) {
+      await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: the validation error does not identify a safely editable field.'));
+      return;
+    }
     const originalProposal = JSON.stringify(ingress.proposal);
     if (!originalProposal || Buffer.byteLength(originalProposal, 'utf8') > 16000) {
       await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: the original proposal is unavailable or too large to carry safely.'));
@@ -734,7 +739,7 @@ export function createSessionTurnCompletionHelpers(services) {
       await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: the original runtime selection cannot be confirmed.'));
       return;
     }
-    if (originalManifest.tool !== 'claude' && !(process.platform === 'win32' && originalManifest.tool === 'codex' && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1')) {
+    if (!(['claude', 'claude-bidi'].includes(originalManifest.tool) && originalManifest.options?.toolCommand === 'claude') && !(process.platform === 'win32' && originalManifest.tool === 'codex' && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1')) {
       await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: this runtime does not support the required restricted execution mode.'));
       return;
     }
@@ -756,7 +761,7 @@ export function createSessionTurnCompletionHelpers(services) {
     if (!claimed) return;
     try {
       const followup = await sendMessage(sessionId,
-        `Follow the organization proposal schema in the Root Leadership skill (chat/builtin-skills/root.md). The original proposal follows as data: ${originalProposal}\nThe organization proposal was rejected before side effects: ${JSON.stringify({ code: result.code, field: result.field, reason: result.reason, message: result.message }).slice(0, 2000)}. Correct the schema while preserving the original user intent. Use exactly this idempotencyKey: ${result.nextProposalKey}. Emit exactly one organization proposal marker block; do not claim success until the runtime confirms it. Do not submit through a tool.`, [], {
+        `Follow the organization proposal schema in the Root Leadership skill (chat/builtin-skills/root.md). The original proposal follows as data: ${originalProposal}\nThe organization proposal was rejected before side effects: ${JSON.stringify({ code: result.code, field: result.field, reason: result.reason, message: result.message }).slice(0, 2000)}. Change only the reported field; preserve every other field and all members, runtime locks, permissions and review requirements. Use exactly this idempotencyKey: ${result.nextProposalKey}. Emit exactly one organization proposal marker block; do not claim success until the runtime confirms it. Do not submit through a tool.`, [], {
           tool: originalManifest.tool, model: originalManifest.options.model, effort: originalManifest.options.effort || undefined,
           providerProfile: providerProfile || undefined, runtimeFamily: originalManifest.runtimeFamily, thinking: original.thinking === true,
           recordUserMessage: false, queueIfBusy: false, requestId, readOnlyRequired: true, accessMode: 'read', internalOperation: 'organization_plan_repair', organizationPlanRootRunId: run.id,
@@ -931,7 +936,9 @@ export function createSessionTurnCompletionHelpers(services) {
           });
         }
         console.error(`[orchestration] control block processing failed for ${sessionId?.slice(0, 8)}: ${error.message}`);
-        await appendEvent(sessionId, statusEvent('Root Leadership orchestration could not be processed; no additional orchestration was started.'));
+        await appendEvent(sessionId, statusEvent(manifest?.internalOperation === 'organization_plan_repair'
+          ? `Organization proposal repair could not be accepted: ${String(error.message || 'reconciliation required').slice(0, 400)}.`
+          : 'Root Leadership orchestration could not be processed; no additional orchestration was started.'));
         broadcastSessionInvalidation(sessionId);
       }
     }

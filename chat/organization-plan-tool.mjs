@@ -7,6 +7,30 @@ import { canonicalJson } from './execution-scope.mjs';
 import { resolveSessionCollaborationPolicy } from './collaboration-policy.mjs';
 import { collaborationCapabilityOperationsForRun } from './collaboration-capability.mjs';
 
+// Automatic repair must be a local schema correction, never a replacement plan.
+function repairMatchesOriginal(original, corrected, field) {
+  if (typeof field !== 'string' || !/^(?:proposal\.)?(?:nodes|phases|manages|acceptance|reviewPolicy)(?:\[\d+\]|\.[A-Za-z][A-Za-z0-9]*)+$/.test(field)) return false;
+  const path = field.replace(/^proposal\./, '').replace(/\[(\d+)\]/g, '.$1').split('.');
+  if (path.length < 2 || /^\d+$/.test(path.at(-1)) || path.some((part) => ['acceptance', 'reviewPolicy', 'stableKey', 'agentId', 'runtime', 'runtimePolicy', 'runtimeRequirements', 'projectId', 'reviewRequired', 'scope', 'scopes', 'grant'].includes(part))) return false;
+  const left = structuredClone(original);
+  const right = structuredClone(corrected);
+  delete left.idempotencyKey;
+  delete right.idempotencyKey;
+  const erase = (object) => {
+    let value = object;
+    for (const part of path.slice(0, -1)) {
+      if (!value || typeof value !== 'object' || !Object.hasOwn(value, part)) return false;
+      value = value[part];
+    }
+    if (!value || typeof value !== 'object') return false;
+    const target = value[path.at(-1)];
+    if (target && typeof target === 'object' && path.at(-1) !== 'reviewerRoles') return false;
+    delete value[path.at(-1)];
+    return true;
+  };
+  return erase(left) && erase(right) && canonicalJson(left) === canonicalJson(right);
+}
+
 const inFlight = new Map();
 export async function getOrganizationPlanStatus({ authSession }) {
   if (authSession?.principalKind !== 'run_capability' || authSession.capabilityOperation !== 'session.organization.tools') throw Object.assign(new Error('Root Run required'), { statusCode: 403 });
@@ -100,14 +124,9 @@ export async function processOrganizationPlan({ session, runId, authorizationRun
       const prior = current.organizationPlanIngress;
       if (prior && prior.digest !== digest) {
         if (prior.state !== 'rejected' || prior.result?.sideEffects !== 'none' || prior.result?.repairable !== true || prior.previousRejections?.length || !requestedKey || requestedKey !== prior.result?.nextProposalKey || requestedKey === prior.proposalKey || (authorizationRunId !== runId && !prior.repair)) { conflict = true; return current; }
-        if (authorizationRunId !== runId) {
-          // The automatic repair may correct schema details, but cannot change
-          // the user's objective, acceptance, budget, runtime constraints, or order.
-          const protectedFields = ['objective', 'acceptance', 'budget', 'resolver', 'order', 'metadata'];
-          if (protectedFields.some((field) => canonicalJson(prior.proposal?.[field] ?? null) !== canonicalJson(proposal[field] ?? null))) {
-            conflict = true;
-            return current;
-          }
+        if (authorizationRunId !== runId && !repairMatchesOriginal(prior.proposal, proposal, prior.result?.field)) {
+          conflict = true;
+          return current;
         }
         created = true;
         return { ...current, organizationPlanIngress: { digest, state: 'claimed', proposal, proposalKey: requestedKey, source,
@@ -118,7 +137,7 @@ export async function processOrganizationPlan({ session, runId, authorizationRun
       created = true;
       return { ...current, organizationPlanIngress: { digest, state: 'claimed', proposal, proposalKey: requestedKey, source } };
     });
-    if (conflict || !claimed?.organizationPlanIngress) throw Object.assign(new Error('A different proposal already owns this Run'), { statusCode: 409 });
+    if (conflict || !claimed?.organizationPlanIngress) throw Object.assign(new Error(authorizationRunId !== runId ? 'Repair changed fields outside the reported schema error or could not preserve the original constraints' : 'A different proposal already owns this Run'), { statusCode: 409 });
     if (['completed', 'failed', 'rejected'].includes(claimed.organizationPlanIngress.state)) return claimed.organizationPlanIngress.result;
     if (!created) return { attempted: true, state: 'pending', reason: 'reconciliation_required', message: 'The original proposal operation requires reconciliation.' };
     await updateRun(runId, (current) => current.organizationPlanIngress?.digest === digest
