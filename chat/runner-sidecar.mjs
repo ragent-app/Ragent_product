@@ -4958,10 +4958,19 @@ async function main() {
   const providerReadOnly = ['win32', 'linux'].includes(process.platform) && readOnlyRequested
     && isCodexAppServerFamily && manifest.tool === 'codex'
     && process.env.RAGENT_CODEX_PROVIDER_READONLY === '1';
-  // Repair is text-only: only the existing verified provider boundary can
-  // rule out network side effects and callable apps as well as file writes.
-  if (organizationPlanRepair && (!providerReadOnly || process.platform !== 'win32')) {
+  const claudeTextOnlyRepair = organizationPlanRepair && ['claude', 'claude-bidi'].includes(manifest.tool) && isClaudeFamily
+    && (!manifest.options?.toolCommand || manifest.options.toolCommand === 'claude');
+  // Codex repair needs the existing verified provider boundary. Claude uses
+  // its tool-free, isolated-customization CLI mode below.
+  if (organizationPlanRepair && !claudeTextOnlyRepair && (!providerReadOnly || process.platform !== 'win32')) {
     throw Object.assign(new Error('Organization plan repair requires verified text-only execution'), { code: 'ORG_REPAIR_ISOLATION_UNAVAILABLE' });
+  }
+  if (claudeTextOnlyRepair) {
+    const safeOptions = { model: manifest.options?.model, effort: manifest.options?.effort };
+    const adapter = isClaudeBidiFamily ? await import('./adapters/claude-bidi.mjs') : await import('./adapters/claude.mjs');
+    args = isClaudeBidiFamily ? adapter.buildClaudeBidiArgs(safeOptions) : adapter.buildClaudeArgs('', safeOptions);
+    args.push('--tools', '', '--safe-mode', '--disable-slash-commands', '--setting-sources', '',
+      '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-chrome');
   }
   if (providerReadOnly && process.platform === 'linux') {
     // A provider-reported policy cannot attest the kernel restrictions of the
@@ -5606,7 +5615,8 @@ async function main() {
   // An explicitly requested sandbox is a requirement, not a best-effort
   // preference. Consult only the trusted sidecar environment and never launch
   // a provider unsandboxed if the platform or sandbox setup cannot support it.
-  const readOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
+  const verifiedReadOnlyWorkspace = readOnlyWorkspaceForRun(manifest, resolvedFolder.cwd);
+  const readOnlyWorkspace = claudeTextOnlyRepair ? null : verifiedReadOnlyWorkspace;
   if (providerReadOnly && resolvedFolder.cwd !== manifest.executionScope?.cwd?.realPath) {
     throw Object.assign(new Error('Provider read-only working directory differs from the bound execution scope'), { code: 'READ_ONLY_RUNTIME_REFUSED' });
   }
