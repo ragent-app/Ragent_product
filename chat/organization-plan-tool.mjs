@@ -45,7 +45,7 @@ export async function submitOrganizationPlan({ authSession, proposal }) {
   return processOrganizationPlan({ session, runId, proposal, source: 'tool' });
 }
 
-export async function processOrganizationPlan({ session, runId, proposal, source = 'marker', processor = processRootLeadershipProposal }) {
+export async function processOrganizationPlan({ session, runId, authorizationRunId = runId, proposal, source = 'marker', processor = processRootLeadershipProposal }) {
   if (!session || session.sessionClass !== 'ROOT_LEADERSHIP' || (session.sessionPlane || 'user') !== 'user' || session.userAddressable === false || session.parentSessionId || session.delegatedFromSessionId) {
     return { attempted: false, skipped: 'not_root_leadership' };
   }
@@ -60,6 +60,16 @@ export async function processOrganizationPlan({ session, runId, proposal, source
   }
   const promise = (async () => {
     const run = await getRun(runId);
+    if (authorizationRunId !== runId) {
+      const repairManifest = await getRunManifest(authorizationRunId);
+      const repairRun = await getRun(authorizationRunId);
+      if (!repairRun || repairRun.sessionId !== session.id || repairRun.state !== 'completed' ||
+          repairManifest?.internalOperation !== 'organization_plan_repair' || repairManifest?.organizationPlanRootRunId !== runId ||
+          !['launching', 'started'].includes(run?.organizationPlanIngress?.repair?.state) ||
+          (run.organizationPlanIngress.repair.runId && run.organizationPlanIngress.repair.runId !== authorizationRunId)) {
+        throw Object.assign(new Error('Repair Run is not bound to this proposal'), { statusCode: 403 });
+      }
+    }
     if (!run || run.sessionId !== session.id || (source === 'tool' && ['failed', 'completed', 'cancelled'].includes(run.state))) throw Object.assign(new Error('Run is no longer active'), { statusCode: 409 });
     let conflict = false;
     let created = false;
@@ -68,7 +78,7 @@ export async function processOrganizationPlan({ session, runId, proposal, source
       if (source === 'tool' && ['failed', 'completed', 'cancelled'].includes(current.state)) { conflict = true; return current; }
       const prior = current.organizationPlanIngress;
       if (prior && prior.digest !== digest) {
-        if (prior.state !== 'rejected' || prior.result?.sideEffects !== 'none' || !requestedKey || requestedKey === prior.proposalKey) { conflict = true; return current; }
+        if (prior.state !== 'rejected' || prior.result?.sideEffects !== 'none' || prior.result?.repairable !== true || prior.previousRejections?.length || !requestedKey || requestedKey === prior.proposalKey || (authorizationRunId !== runId && !prior.repair)) { conflict = true; return current; }
         created = true;
         return { ...current, organizationPlanIngress: { digest, state: 'claimed', proposal, proposalKey: requestedKey, source,
           previousRejections: [...(prior.previousRejections || []), { digest: prior.digest, proposalKey: prior.proposalKey, code: prior.result?.code || null }].slice(-20) } };
@@ -82,8 +92,8 @@ export async function processOrganizationPlan({ session, runId, proposal, source
     if (!created) return { attempted: true, state: 'pending', reason: 'reconciliation_required', message: 'The original proposal operation requires reconciliation.' };
     await updateRun(runId, (current) => current.organizationPlanIngress?.digest === digest
       ? { ...current, organizationPlanIngress: { ...current.organizationPlanIngress, state: 'pending' } } : current);
-    const manifest = await getRunManifest(runId);
-    const authorization = { session, runId, turnId: manifest?.requestId, marker: source === 'marker' };
+    const manifest = await getRunManifest(authorizationRunId);
+    const authorization = { session, runId: authorizationRunId, turnId: manifest?.requestId, marker: source === 'marker' };
     let result;
     try {
       await authorizeRootOrganizationCreate(authorization);

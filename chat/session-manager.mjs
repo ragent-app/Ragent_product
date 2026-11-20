@@ -13068,6 +13068,8 @@ function buildPreparingRunRecord({
     ...(effectivePermissionMode ? { permissionMode: effectivePermissionMode } : {}),
     transientProviderContext: options.transientProviderContext === true,
     internalOperation: options.internalOperation || null,
+    ...(options.internalOperation === 'organization_plan_repair' && options.organizationPlanRootRunId
+      ? { organizationPlanRootRunId: options.organizationPlanRootRunId } : {}),
     ...(replyPublicationRootRunId ? { replyPublicationRootRunId } : {}),
     ...(publicationResponseIds.length > 0 ? { replyPublicationResponseIds: publicationResponseIds } : {}),
     ...(typeof options.compactionTargetSessionId === 'string' && options.compactionTargetSessionId
@@ -14459,6 +14461,8 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     ...(promptEnvelope.freshRecoverySystemPrefix ? { freshRecoverySystemPrefix: promptEnvelope.freshRecoverySystemPrefix } : {}),
     ...(options.transientProviderContext === true ? { transientProviderContext: true } : {}),
     internalOperation: options.internalOperation || null,
+    ...(options.internalOperation === 'organization_plan_repair' && options.organizationPlanRootRunId
+      ? { organizationPlanRootRunId: options.organizationPlanRootRunId } : {}),
     ...(replyPublicationRootRunId ? { replyPublicationRootRunId } : {}),
     ...(publicationResponseIds.length > 0 ? { replyPublicationResponseIds: publicationResponseIds } : {}),
     ...(typeof options.compactionTargetSessionId === 'string' && options.compactionTargetSessionId

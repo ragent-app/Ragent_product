@@ -708,6 +708,46 @@ export function createSessionTurnCompletionHelpers(services) {
     return true;
   }
 
+  async function maybeRepairOrganizationPlan(sessionId, run, result) {
+    if (result?.repairable !== true || result?.sideEffects !== 'none') return;
+    const current = await getSession(sessionId);
+    const goal = current?.goal;
+    const budgetUnavailable = goal?.tokenBudget != null && (!Number.isFinite(goal.tokensUsed) || goal.tokensUsed >= goal.tokenBudget);
+    if (!current || current.activeRunId || getSessionQueueCount(current) > 0 || budgetUnavailable) {
+      await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: the session is busy or its available budget cannot be confirmed.'));
+      return;
+    }
+    const { authorizeRootOrganizationCreate } = await import('./collaboration-capability.mjs');
+    const originalManifest = await getRunManifest(run.id);
+    try {
+      await authorizeRootOrganizationCreate({ session: current, runId: run.id, turnId: originalManifest?.requestId, marker: true });
+    } catch {
+      await appendEvent(sessionId, statusEvent('Organization proposal repair skipped: authorization is no longer available.'));
+      return;
+    }
+    let claimed = false;
+    await updateRun(run.id, (value) => {
+      const ingress = value.organizationPlanIngress;
+      if (ingress?.state !== 'rejected' || ingress.result?.repairable !== true || ingress.repair || ingress.previousRejections?.length) return value;
+      claimed = true;
+      return { ...value, organizationPlanIngress: { ...ingress, repair: { state: 'launching' } } };
+    });
+    if (!claimed) return;
+    try {
+      const followup = await sendMessage(sessionId,
+        `The organization proposal was rejected before side effects: ${JSON.stringify({ code: result.code, field: result.field, reason: result.reason, message: result.message }).slice(0, 2000)}. Correct the schema while preserving the original user intent. Use a new idempotencyKey. Emit exactly one organization proposal marker block; do not claim success until the runtime confirms it. Do not submit through a tool.`, [], {
+          tool: run.tool || current.tool, model: run.model || undefined, effort: run.effort || undefined,
+          recordUserMessage: false, queueIfBusy: false, internalOperation: 'organization_plan_repair', organizationPlanRootRunId: run.id,
+        });
+      await updateRun(run.id, (value) => value.organizationPlanIngress?.repair?.state === 'launching'
+        ? { ...value, organizationPlanIngress: { ...value.organizationPlanIngress, repair: { state: 'started', runId: followup?.run?.id || null } } } : value);
+      await appendEvent(sessionId, statusEvent('Organization proposal schema repair started; its result will be checked before any plan is accepted.'));
+    } catch {
+      await appendEvent(sessionId, statusEvent('Organization proposal repair could not be confirmed; reconciliation is required before retrying.'));
+    }
+    broadcastSessionInvalidation(sessionId);
+  }
+
   async function runSessionTurnCompletionEffects(sessionId, latestSession, finalizedRun, manifest) {
     let session = latestSession;
     let sessionChanged = false;
@@ -790,9 +830,9 @@ export function createSessionTurnCompletionHelpers(services) {
       }, { allowPush: allowCompletionEffects });
     }
 
-    if (allowCompletionEffects
+    if ((allowCompletionEffects || manifest?.internalOperation === 'organization_plan_repair')
       && finalizedRun.state === 'completed'
-      && !manifest?.internalOperation
+      && (!manifest?.internalOperation || manifest.internalOperation === 'organization_plan_repair')
       && (typeof processRootLeadershipProposal === 'function' || typeof processCollaborationPlan === 'function')) {
       try {
         const turnContext = await loadReplySelfCheckTurnContext(sessionId, finalizedRun.id, {
@@ -808,7 +848,9 @@ export function createSessionTurnCompletionHelpers(services) {
           await appendEvent(sessionId, statusEvent(status));
           broadcastSessionInvalidation(sessionId);
         } else if (orchestration.mode === 'tool_claimed') {
-          if (['claimed', 'pending'].includes(planIngress.state)) {
+          if (planIngress.state === 'rejected') {
+            await maybeRepairOrganizationPlan(sessionId, finalizedRun, planIngress.result);
+          } else if (['claimed', 'pending'].includes(planIngress.state)) {
             const { inspectOrganizationPlan } = await import('./organization-plan-tool.mjs');
             const status = await inspectOrganizationPlan({ sessionId, runId: finalizedRun.id });
             await appendEvent(sessionId, statusEvent(status.state === 'completed'
@@ -817,9 +859,17 @@ export function createSessionTurnCompletionHelpers(services) {
             broadcastSessionInvalidation(sessionId);
           }
         } else if (orchestration.mode === 'organization' && typeof processRootLeadershipProposal === 'function') {
+          if (manifest?.internalOperation === 'organization_plan_repair') {
+            const current = await getSession(sessionId);
+            if (!current || (current.activeRunId && current.activeRunId !== finalizedRun.id) || getSessionQueueCount(current) > 0) {
+              await appendEvent(sessionId, statusEvent('Organization proposal repair skipped because newer work is pending.'));
+              throw new Error('Newer work is pending');
+            }
+          }
           const { extractOrganizationProposal } = await import('./organization-leader-ingress.mjs');
           const { processOrganizationPlan } = await import('./organization-plan-tool.mjs');
-          const proposalResult = await processOrganizationPlan({ session, runId: finalizedRun.id,
+          const rootRunId = manifest?.internalOperation === 'organization_plan_repair' ? manifest.organizationPlanRootRunId : finalizedRun.id;
+          const proposalResult = await processOrganizationPlan({ session, runId: rootRunId, authorizationRunId: finalizedRun.id,
             proposal: extractOrganizationProposal(assistantText), source: 'marker', processor: processRootLeadershipProposal });
           if (proposalResult?.attempted) {
             const provisioning = proposalResult.provisioning || {};
@@ -832,6 +882,7 @@ export function createSessionTurnCompletionHelpers(services) {
                   : `Organization proposal rejected: ${proposalResult.message || proposalResult.reason || 'validation failed'}.`;
             await appendEvent(sessionId, statusEvent(status));
             broadcastSessionInvalidation(sessionId);
+            if (!manifest?.internalOperation) await maybeRepairOrganizationPlan(sessionId, finalizedRun, proposalResult);
           }
         }
       } catch (error) {
