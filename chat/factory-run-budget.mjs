@@ -3,6 +3,7 @@
 import { stat } from 'node:fs/promises';
 import { CHAT_COLLABORATIONS_DB } from '../lib/config.mjs';
 import { withDatabase } from './collaboration-store.mjs';
+import { verifyFactoryResponsibilityFence } from './factory-responsibility-admission.mjs';
 
 const conflict = message => { throw Object.assign(new Error(message), { code: 'FACTORY_RUN_BUDGET_CONFLICT', statusCode: 409 }); };
 const parse = value => { try { return JSON.parse(value); } catch { return null; } };
@@ -42,6 +43,7 @@ export async function resolveFactoryRunBudget({ sessionId, requestId, runId, man
       || (binding.attempt_id && binding.attempt_id !== row.attempt_id) || (binding.run_id && binding.run_id !== runId)) conflict('Factory binding changed');
     const body = parse(contract.contract_json);
     if (!body || body.organizationRevision !== context.organizationRevision || context.budgetKey !== `factory:${binding.id}`) conflict('Factory contract identity changed');
+    verifyFactoryResponsibilityFence(db, item);
     const counter = db.prepare('SELECT reservations_json FROM organization_budget_counters WHERE organization_id=? AND revision=?').get(context.organizationId, context.organizationRevision);
     const reservation = parse(counter?.reservations_json)?.[context.budgetKey];
     if (!reservation || reservation.state !== 'reserved' || reservation.reservationId !== context.budgetKey || reservation.factoryWorkItemId !== item.id) conflict('Factory budget reservation unavailable');
@@ -57,6 +59,8 @@ export async function resolveFactoryRunBudget({ sessionId, requestId, runId, man
       dispatchCommandId: row.command_id, sessionId, requestId, runId, reservationId: context.budgetKey,
       tokenLimit: Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null,
       costLimit: Number.isFinite(cost) && cost > 0 ? cost : null, costObservation: 'unknown',
+      costEnforcement: 'admission_estimate_only', hardCapAvailable: false,
+      ...(reservation.responsibilityScope ? { responsibilityScope: reservation.responsibilityScope } : {}),
       ...(reservation.automaticDimensions ? { automaticDimensions: reservation.automaticDimensions,
         unknownDimensions: reservation.unknownDimensions } : {}) };
   });

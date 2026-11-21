@@ -14,4 +14,11 @@
     <string name="push_status_scope">通知支持此账号拥有且已配对的电脑，暂不支持共享工作区电脑。</string>
     <string name="push_status_computer_registered">%1$s：已注册</string>
     <string name="push_status_computer_unregistered">%1$s：未注册</string>
+    <string name="push_responsibility_plan">有一项责任计划等待您的审批。</string>
+    <string name="push_responsibility_needs_input">有一项责任需要您的输入。</string>
+    <string name="push_responsibility_blocked">有一项责任受阻，需要您处理。</string>
+    <string name="push_responsibility_budget_rejected">一项责任触发了准入预算限制。</string>
+    <string name="push_responsibility_attempt_failed">一项责任的执行尝试失败。</string>
+    <string name="push_responsibility_workflow_completed">一项责任工作流已完成，等待验收。</string>
+    <string name="push_responsibility_default">一项责任需要您处理。</string>
 </resources>

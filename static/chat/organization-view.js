@@ -1158,6 +1158,36 @@
           add(content, 'p', `Responsibility ${item.lifecycle} · version ${item.rowVersion} · policy ${item.policyRevision}`);
           add(content, 'p', 'A paused responsibility stops new admission; existing work may continue.');
           add(content, 'p', 'A stop request is not proof of stopping. Unknown or older active executions must be reconciled; a run that finished first remains pending result review. Archived responsibilities retain their history.');
+          const budgetStatus = detail.budgetStatus;
+          if (budgetStatus) {
+            add(content, 'h4', 'Daily budget & enforcement boundary');
+            add(content, 'p', `Enforcement: ${budgetStatus.costEnforcement || 'admission_estimate_only'} (hard cap available: ${budgetStatus.hardCapAvailable === true ? 'yes' : 'no'}). ${budgetStatus.budgetBoundaryNote || 'Admission estimates reserve capacity before dispatch; they do not enforce a provider spending hard cap.'}`);
+            if (budgetStatus.timeZone) {
+              const cw = budgetStatus.currentWindow;
+              add(content, 'p', `Window day: ${budgetStatus.currentDay || 'unknown'} · timezone: ${budgetStatus.timeZone} · ${budgetStatus.rolloverRule || ''}${budgetStatus.rolledOverFromDay ? ` · prior day ${budgetStatus.rolledOverFromDay}` : ''}`);
+              add(content, 'p', `Limits: ${JSON.stringify(budgetStatus.limits || {})} · used totals: ${JSON.stringify(cw?.totals || {})} · reserved: ${JSON.stringify(cw?.reserved || {})} · remaining: ${JSON.stringify(cw?.remaining || {})}`);
+            } else {
+              add(content, 'p', 'Daily budget window: not configured on current policy.');
+            }
+            if (budgetStatus.unknownUsageReservationCount > 0) {
+              add(content, 'p', `Unknown-usage reservations retained (${budgetStatus.unknownUsageReservationCount}): ${JSON.stringify(budgetStatus.unresolvedReservations)}`);
+            }
+          }
+          if (Array.isArray(detail.workSummary) && detail.workSummary.length) {
+            add(content, 'h4', 'Linked work items');
+            for (const w of detail.workSummary) {
+              const stopLabel = w.stopStatus === 'cancel_requested_pending'
+                ? 'Cancellation requested (stop NOT yet confirmed)'
+                : w.stopStatus === 'completed_pending_review' || w.stopStatus === 'completed_before_stop'
+                  ? 'Completed before stop (pending review, NOT cancelled)'
+                  : w.stopStatus === 'stopped'
+                    ? 'Confirmed stopped'
+                    : w.stopStatus;
+              const unknownLabel = w.isUnknownOutcome ? ' · UNKNOWN OUTCOME (auto-redispatch disabled; requires reconciliation)' : '';
+              add(content, 'p', `${w.workItemId}: state ${w.state} · control ${w.controlState} · status ${stopLabel}${unknownLabel}`);
+              button(content, `Inspect work ${w.workItemId}`, () => showItem(w.workItemId));
+            }
+          }
           const triggerCatalog = await responsibilityRequest(`/capabilities?organizationId=${encodeURIComponent(organizationId)}&projectId=${encodeURIComponent(item.projectId)}`).catch(() => null);
           if (triggerCatalog?.features?.timeTriggerBridge === true) {
             add(content, 'h4', 'Scheduled responsibility wake');
@@ -1494,6 +1524,9 @@
           content.replaceChildren(); button(content, 'All work items', showList);
           add(content, 'h3', item.contract?.objective || item.id);
           add(content, 'p', `State ${item.state}; control ${item.controlState}; priority ${item.priority}; version ${item.rowVersion}; contract ${item.contractRevision}; as of ${asOf}`);
+          if (item.controlState === 'cancel_requested') add(content, 'p', 'Cancellation requested — stop is NOT confirmed until a Run cancellation or terminal receipt is verified.');
+          else if (item.blockedReason?.code === 'completed_pending_review') add(content, 'p', 'Run completed before stop — pending review, NOT cancelled.');
+          else if (item.blockedReason?.code === 'stopped' || item.state === 'cancelled') add(content, 'p', 'Execution confirmed stopped / cancelled.');
           for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', (item.candidates || []).map(({report, ...candidate}) => candidate)], ['Decisions', item.decisions]]) {
             add(content, 'h4', label); add(content, 'pre', JSON.stringify(value || [], null, 2));
           }
@@ -1572,11 +1605,81 @@
             }
           } catch(error) { add(content,'p',`Blocker proposals unavailable: ${error.message}`); }
           const reconcileStatus = add(content, 'p', 'Loading reconciliation state…');
-          try { const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`); const observation = state.acceptedRunObservation; reconcileStatus.textContent = `${observation?.state === 'found' ? '发现执行记录，等待系统核实关联' : '暂未核实是否已执行'}。${observation?.expectedRunId ? `执行记录：${observation.expectedRunId}；状态：${observation.runState || '未知'}。` : ''} 对账状态：${state.state || '未知'}。` ; }
-          catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
+          const reconcileActions = add(content, 'div', '');
+          try {
+            const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`);
+            const observation = state.acceptedRunObservation;
+            const stopText = state.stopStatus === 'cancel_requested_pending'
+              ? '已请求取消（尚未确认停止）'
+              : state.stopStatus === 'completed_before_stop' || state.stopStatus === 'completed_pending_review'
+                ? 'Run 已在停止前完成（待审阅，不标记为已取消）'
+                : state.stopStatus === 'stopped'
+                  ? '已确认停止'
+                  : (state.stopStatus || 'none');
+            const unknownText = state.unknownOutcome?.isUnknown ? ` · 存在未知结果（${state.unknownOutcome.reason || 'unknown_outcome'}，禁止自动重派）` : '';
+            reconcileStatus.textContent = `${observation?.state === 'found' ? '发现执行记录，等待系统核实关联' : observation?.state === 'bound_run_observed' ? '已关联执行记录' : '暂未核实是否已执行'}。${observation?.expectedRunId ? `执行记录：${observation.expectedRunId}；Run 状态：${observation.runState || '未知'}。` : ''} 对账状态：${state.state || '未知'} · 停止状态：${stopText}${unknownText}。`;
+            if (state.unknownOutcome?.canVerifyAcceptedRun && observation?.expectedRunId) {
+              button(reconcileActions, 'Verify accepted Run receipt', async () => {
+                if (!root.confirm(`Verify and link accepted Run ${observation.expectedRunId} for work item ${item.id}?`)) return;
+                try {
+                  const res = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile/verify-accepted`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ expectedVersion: state.rowVersion, executionEpoch: state.executionEpoch, leaseGeneration: state.schedulerLease?.generation, expectedRunId: observation.expectedRunId }),
+                  });
+                  reconcileStatus.textContent = `Accepted Run verification result: ${res.state}${res.runId ? ` (${res.runId})` : ''}${res.reason ? ` · ${res.reason}` : ''}.`;
+                } catch (error) { reconcileStatus.textContent = `Verify failed: ${error.message}`; }
+              });
+            }
+            if (state.state === 'dead_letter') {
+              button(reconcileActions, 'Resume dead-letter reconciliation', async () => {
+                if (!root.confirm(`Resume dead-letter reconciliation for ${item.id} epoch ${state.executionEpoch}?`)) return;
+                const body = { commandId: root.crypto.randomUUID(), expectedVersion: state.rowVersion, executionEpoch: state.executionEpoch };
+                try {
+                  await request(`/work-items/${encodeURIComponent(item.id)}/reconcile/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                  await showItem(item.id);
+                } catch (error) { reconcileStatus.textContent = `Resume failed: ${error.message}`; }
+              });
+            }
+            if (state.unknownOutcome?.canResolveExplicitly) {
+              const runState = observation?.runState;
+              const options = runState === 'completed'
+                ? [['adopt_run_outcome', 'Confirm completed pending review (not cancelled)']]
+                : runState === 'cancelled'
+                  ? [['adopt_run_outcome', 'Confirm stopped / cancelled from Run receipt']]
+                  : runState === 'failed'
+                    ? [['adopt_run_outcome', 'Confirm failed from Run receipt']]
+                    : [
+                        ...(state.controlState === 'cancel_requested' || state.controlState === 'pause_requested' ? [['confirm_stopped', 'Confirm stopped after owner verification']] : []),
+                        ['confirm_failed', 'Confirm failed (unknown outcome; retains unverified budget reservation)'],
+                      ];
+              for (const [resolution, label] of options) {
+                button(reconcileActions, label, () => {
+                  const rationale = root.prompt(`Owner rationale for ${resolution} on ${item.id}`);
+                  if (!rationale || !rationale.trim()) return;
+                  if (!root.confirm(`Explicitly resolve ${item.id} (epoch ${state.executionEpoch}) as ${resolution}? Audit history and unknown-usage reservations remain preserved.`)) return;
+                  const body = {
+                    commandId: root.crypto.randomUUID(), idempotencyKey: root.crypto.randomUUID(),
+                    expectedVersion: state.rowVersion, executionEpoch: state.executionEpoch,
+                    resolution, rationale: rationale.trim(), confirmed: true,
+                  };
+                  const submit = async () => {
+                    try {
+                      const res = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                      reconcileStatus.textContent = `Explicit resolution recorded: ${res.resolution} -> state ${res.item?.state}, binding ${res.binding?.status}, budgetRetained=${res.budgetRetained}.`;
+                    } catch (error) {
+                      reconcileStatus.textContent = `Resolution not confirmed: ${error.message}`;
+                      button(reconcileActions, `Retry ${resolution}`, submit);
+                    }
+                  };
+                  submit();
+                });
+              }
+            }
+          } catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
           const budgetStatus = add(content, 'p', 'Loading budget facts…');
-          try { const budget = await request(`/work-items/${encodeURIComponent(item.id)}/budget`); const reservation = budget.reservation || {};
-            budgetStatus.textContent = `Budget: ${reservation.state || 'unavailable'} · reserved ${reservation.reserved == null ? 'unknown' : JSON.stringify(reservation.reserved)} · actual usage ${budget.usageState === 'actual' && reservation.actualUsage != null ? JSON.stringify(reservation.actualUsage) : 'unknown'} · window ${reservation.window ? JSON.stringify(reservation.window) : 'unknown'}. Admission estimates do not enforce a provider spending cap; unavailable facts do not prove work did not run.`;
+          try { const budget = await request(`/work-items/${encodeURIComponent(item.id)}/budget`); const reservation = budget.reservation || {}; const wd = budget.windowDetail;
+            const windowSummary = wd ? `${wd.windowDay || 'unknown'} (${wd.timeZone || 'unknown'}${wd.rolledOver ? `, rolled over to ${wd.currentDay}` : ''}; totals ${JSON.stringify(wd.totals)}; reserved ${JSON.stringify(wd.reserved)}; limits ${JSON.stringify(wd.limits)})` : (reservation.window ? JSON.stringify(reservation.window) : 'none');
+            budgetStatus.textContent = `Budget: ${reservation.state || 'unavailable'} · enforcement ${budget.costEnforcement || 'admission_estimate_only'} (hard cap available: ${budget.hardCapAvailable === true ? 'yes' : 'no'}) · reserved ${reservation.reserved == null ? 'unknown' : JSON.stringify(reservation.reserved)} · actual usage ${budget.usageState === 'actual' && reservation.actualUsage != null ? JSON.stringify(reservation.actualUsage) : 'unknown'}${budget.reservationRetained ? ' (reservation retained until authoritative usage or verified unstarted receipt)' : ''} · daily window ${windowSummary}. ${budget.budgetBoundary?.note || 'Admission estimates do not enforce a provider spending cap; unavailable facts do not prove work did not run.'}`;
           } catch (error) { budgetStatus.textContent = `Budget facts unavailable: ${error.message}. This does not prove work did not run.`; }
           button(content, '审阅局部目标修改', async () => {
             try {

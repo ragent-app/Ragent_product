@@ -126,3 +126,271 @@ export function describeApprovalEvent(event = {}) {
   const key = approvalEventId(event);
   return key ? { ...detail, key } : detail;
 }
+
+const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,160}$/;
+const SAFE_TOKEN_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const ATTENTION_TTL_MS = 15 * 60_000;
+const TERMINAL_TTL_MS = 24 * 60 * 60_000;
+
+const RESPONSIBILITY_EVENT_MAP = Object.freeze({
+  plan_proposed: {
+    category: 'plan_awaiting_approval',
+    kind: 'plan',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility plan is awaiting your approval.',
+  },
+  plan_awaiting_approval: {
+    category: 'plan_awaiting_approval',
+    kind: 'plan',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility plan is awaiting your approval.',
+  },
+  planning_needs_input: {
+    category: 'needs_user_input',
+    kind: 'answer',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility needs your input.',
+  },
+  needs_user_input: {
+    category: 'needs_user_input',
+    kind: 'answer',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility needs your input.',
+  },
+  planning_invalid_output: {
+    category: 'blocked',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility planner output was rejected and needs attention.',
+  },
+  plan_admission_blocked: {
+    category: 'blocked',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility plan could not be admitted and needs attention.',
+  },
+  planning_evidence_blocked: {
+    category: 'blocked',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility is waiting on verification evidence.',
+  },
+  decision_waiting: {
+    category: 'blocked',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility is blocked and needs your attention.',
+  },
+  blocked: {
+    category: 'blocked',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility is blocked and needs your attention.',
+  },
+  budget_blocked: {
+    category: 'budget_rejected',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility was blocked by its admission budget.',
+  },
+  budget_rejected: {
+    category: 'budget_rejected',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility was blocked by its admission budget.',
+  },
+  execution_attempt_failed: {
+    category: 'attempt_failed',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility execution attempt failed.',
+  },
+  attempt_failed: {
+    category: 'attempt_failed',
+    kind: 'attention',
+    ttlMs: ATTENTION_TTL_MS,
+    body: 'A responsibility execution attempt failed.',
+  },
+  workflow_completed: {
+    category: 'workflow_completed',
+    kind: 'completion',
+    ttlMs: TERMINAL_TTL_MS,
+    body: 'A responsibility workflow finished and awaits review.',
+  },
+});
+
+function safeBoundedId(value) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return SAFE_ID_RE.test(text) ? text : '';
+}
+
+function boundIdentity(prefix, raw) {
+  if (Buffer.byteLength(raw, 'utf8') <= 256 && !/[\u0000-\u001f]/.test(raw)) return raw;
+  return `${prefix}-${createHash('sha256').update(raw).digest('hex')}`;
+}
+
+export function describeResponsibilityNotification(type, details = {}) {
+  const activityType = typeof type === 'string' ? type.trim() : '';
+  const meta = RESPONSIBILITY_EVENT_MAP[activityType];
+  if (!meta) return null;
+  const parsed = details && typeof details === 'object' && !Array.isArray(details) ? details : {};
+  return {
+    category: meta.category,
+    activityType,
+    kind: meta.kind,
+    ttlMs: meta.ttlMs,
+    title: 'Ragent',
+    body: meta.body,
+    planId: safeBoundedId(parsed.planId),
+    workflowInstanceId: safeBoundedId(parsed.workflowInstanceId),
+    workItemId: safeBoundedId(parsed.workItemId),
+  };
+}
+
+export function buildResponsibilityAwaitingKey({ responsibilityId, category, activityType, planId = '' }) {
+  const rid = safeBoundedId(responsibilityId);
+  const act = typeof category === 'string' ? category.trim() : '';
+  const raw = typeof activityType === 'string' ? activityType.trim() : '';
+  const pid = planId ? safeBoundedId(planId) : '';
+  if (!rid || !SAFE_TOKEN_RE.test(act) || !SAFE_TOKEN_RE.test(raw) || (planId && !pid)) {
+    throw new Error('Invalid responsibility notification identity');
+  }
+  const encoded = `resp:v1:rid=${rid}&act=${act}&raw=${raw}${pid ? `&pid=${pid}` : ''}`;
+  if (Buffer.byteLength(encoded, 'utf8') > 512 || /[\u0000-\u001f]/.test(encoded)) {
+    throw new Error('Responsibility notification key exceeds bounds');
+  }
+  return encoded;
+}
+
+export function parseResponsibilityAwaitingKey(value) {
+  if (typeof value !== 'string' || !value.startsWith('resp:v1:') || Buffer.byteLength(value, 'utf8') > 512 || /[\u0000-\u001f]/.test(value)) {
+    return null;
+  }
+  const fields = Object.create(null);
+  for (const part of value.slice('resp:v1:'.length).split('&')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) return null;
+    const key = part.slice(0, eq);
+    const val = part.slice(eq + 1);
+    if (Object.hasOwn(fields, key)) return null;
+    fields[key] = val;
+  }
+  const responsibilityId = safeBoundedId(fields.rid);
+  const category = typeof fields.act === 'string' && SAFE_TOKEN_RE.test(fields.act) ? fields.act : '';
+  const activityType = typeof fields.raw === 'string' && SAFE_TOKEN_RE.test(fields.raw) ? fields.raw : '';
+  const planId = fields.pid === undefined ? '' : safeBoundedId(fields.pid);
+  if (!responsibilityId || !category || !activityType || (fields.pid !== undefined && !planId)) return null;
+  return { responsibilityId, category, activityType, planId };
+}
+
+export function buildResponsibilityCloudPushEvent({ responsibilityId, sessionId, sequence, type, details = {}, occurredAt }) {
+  const descriptor = describeResponsibilityNotification(type, details);
+  if (!descriptor) throw new Error('Unsupported responsibility notification type');
+  const rid = safeBoundedId(responsibilityId);
+  const sid = safeBoundedId(sessionId);
+  const seq = Number(sequence);
+  if (!rid || !sid) throw new Error('Responsibility push target identity unavailable');
+  if (!Number.isSafeInteger(seq) || seq <= 0 || String(seq).length > 20) {
+    throw new Error('Responsibility notification sequence unavailable');
+  }
+  const when = typeof occurredAt === 'number' ? occurredAt : Date.parse(occurredAt || '');
+  if (!Number.isSafeInteger(when) || when <= 0) {
+    throw new Error('Responsibility notification timestamp unavailable');
+  }
+  const awaitingKey = buildResponsibilityAwaitingKey({
+    responsibilityId: rid,
+    category: descriptor.category,
+    activityType: descriptor.activityType,
+    planId: descriptor.planId,
+  });
+  const eventId = boundIdentity('responsibility', `responsibility:${rid}:${seq}`);
+  const runId = descriptor.kind === 'completion'
+    ? boundIdentity('resp-wf', descriptor.workflowInstanceId ? `resp_wf:${descriptor.workflowInstanceId}` : `resp:${rid}:seq:${seq}`)
+    : boundIdentity('resp-seq', `resp:${rid}:seq:${seq}`);
+  return {
+    sessionId: sid,
+    kind: descriptor.kind,
+    runId,
+    eventId,
+    awaitingKey,
+    generation: String(seq),
+    occurredAt: when,
+    expiresAt: when + descriptor.ttlMs,
+    descriptor,
+  };
+}
+
+export async function enqueueResponsibilityAccountPush({ responsibilityId, sessionId, sequence, type, details = {}, occurredAt }) {
+  if (process.env.RAGENT_RESPONSIBILITY_PUSH_ENABLED !== '1') {
+    throw Object.assign(new Error('Responsibility push delivery is disabled'), { code: 'RESPONSIBILITY_PUSH_DISABLED' });
+  }
+  const payload = buildResponsibilityCloudPushEvent({ responsibilityId, sessionId, sequence, type, details, occurredAt });
+  if (payload.expiresAt <= Date.now()) {
+    throw Object.assign(new Error('Responsibility notification expired before cloud push enqueue'), { code: 'RESPONSIBILITY_PUSH_EXPIRED' });
+  }
+  await enqueueAccountPush({
+    sessionId: payload.sessionId,
+    kind: payload.kind,
+    runId: payload.runId,
+    eventId: payload.eventId,
+    awaitingKey: payload.awaitingKey,
+    generation: payload.generation,
+    occurredAt: payload.occurredAt,
+  });
+  return { persisted: true, ...payload };
+}
+
+export async function resolveResponsibilityAccountPush({
+  responsibilityId,
+  sessionId,
+  sequence,
+  originalSequence,
+  originalType,
+  originalDetails = {},
+  occurredAt,
+}) {
+  if (process.env.RAGENT_RESPONSIBILITY_PUSH_ENABLED !== '1') {
+    throw Object.assign(new Error('Responsibility push delivery is disabled'), { code: 'RESPONSIBILITY_PUSH_DISABLED' });
+  }
+  const rid = safeBoundedId(responsibilityId);
+  const sid = safeBoundedId(sessionId);
+  const seq = Number(sequence);
+  const origSeq = Number(originalSequence);
+  if (!rid || !sid || !Number.isSafeInteger(seq) || seq <= 0 || !Number.isSafeInteger(origSeq) || origSeq <= 0) {
+    throw new Error('Responsibility push resolution identity unavailable');
+  }
+  const when = typeof occurredAt === 'number' ? occurredAt : Date.parse(occurredAt || '');
+  if (!Number.isSafeInteger(when) || when <= 0 || when + TERMINAL_TTL_MS <= Date.now()) {
+    throw Object.assign(new Error('Responsibility resolution notification expired'), { code: 'RESPONSIBILITY_PUSH_EXPIRED' });
+  }
+  const orig = buildResponsibilityCloudPushEvent({
+    responsibilityId: rid,
+    sessionId: sid,
+    sequence: origSeq,
+    type: originalType,
+    details: originalDetails,
+    occurredAt: when,
+  });
+  if (orig.kind === 'completion') {
+    return { persisted: false, skipped: true, reason: 'terminal_not_resolvable' };
+  }
+  const eventId = boundIdentity('responsibility-resolved', `responsibility-resolved:${rid}:${seq}:${origSeq}`);
+  await enqueueAccountPush({
+    sessionId: sid,
+    kind: 'attention_resolved',
+    runId: '',
+    eventId,
+    awaitingKey: orig.awaitingKey,
+    generation: orig.generation,
+    occurredAt: when,
+  });
+  return {
+    persisted: true,
+    kind: 'attention_resolved',
+    eventId,
+    awaitingKey: orig.awaitingKey,
+    generation: orig.generation,
+    occurredAt: when,
+    expiresAt: when + TERMINAL_TTL_MS,
+  };
+}

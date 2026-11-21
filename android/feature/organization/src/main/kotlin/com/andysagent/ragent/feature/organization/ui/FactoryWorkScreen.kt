@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 @Composable
-fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, sessionId: String = "", onBack: () -> Unit) {
+fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, sessionId: String = "", onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -61,6 +61,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
     var memoryPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPolicy by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPlans by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var responsibilityNotifications by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var pendingNotificationToggle by remember(organizationId) { mutableStateOf<Boolean?>(null) }
     var capabilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var responsibilityFeatures by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var triggerBindings by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
@@ -161,7 +163,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
     }
     suspend fun loadResponsibility(id: String) {
-        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null; memoryData = null; memoryConflictData = null; memoryChanges = emptyMap(); memoryPreview = null
+        status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null; memoryData = null; memoryConflictData = null; memoryChanges = emptyMap(); memoryPreview = null; responsibilityNotifications = null; pendingNotificationToggle = null
         runCatching {
             val path = "/${Uri.encode(id)}"
             val response = responsibilityRequest(path)
@@ -169,8 +171,17 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             require(detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
             responsibilityPolicy = response["policy"] as? JsonObject
             responsibilityPlans = runCatching { responsibilityRequest("$path/plans")["plans"] as? JsonArray }.getOrNull()
+            responsibilityNotifications = runCatching { responsibilityRequest("$path/notifications") }.getOrNull()
             if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) triggerBindings = runCatching { responsibilityRequest("$path/trigger-bindings")["bindings"] as? JsonArray }.getOrNull()
-            reviewedPlan = null
+            val focusedPlan = selectedPlanId?.takeIf { it.isNotBlank() }?.let { targetPlanId ->
+                responsibilityPlans?.mapNotNull { it as? JsonObject }?.firstOrNull { plan ->
+                    plan["id"]?.jsonPrimitive?.contentOrNull == targetPlanId &&
+                        plan["state"]?.jsonPrimitive?.contentOrNull == "pending_review" &&
+                        plan["proposal"] is JsonObject && plan["catalog"] is JsonArray &&
+                        plan["proposalDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true
+                }
+            }
+            reviewedPlan = focusedPlan
             detail to responsibilityRequest("$path/activity")["activity"]!!.jsonArray
         }.onSuccess { (detail, activity) -> responsibility = detail; responsibilityActivity = activity; onResponsibilitySelected(id); status = "Responsibility" }
             .onFailure { status = "Responsibility unavailable: ${it.message}" }
@@ -182,14 +193,31 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             status = "Receipt: ${it["operation"]}; task: ${it["item"]?.jsonObject?.get("controlState")}. Refresh for current facts."
         }.onFailure { status = "Request not confirmed: ${it.message}. Retry uses the same command ID." }
     }
+    val latestSelectedResponsibilityId = rememberUpdatedState(selectedResponsibilityId)
+    val latestNavigationKey = rememberUpdatedState(responsibilityNavigationKey)
+    var initialized by remember(transport, organizationId) { mutableStateOf(false) }
+    var lastHandledNavKey by remember(transport, organizationId) { mutableStateOf<String?>(null) }
     LaunchedEffect(transport, organizationId) {
         if (sessionId.isNotBlank()) runCatching {
             val response = transport.execute(ApiRequest(method = "GET", path = "/api/sessions/${Uri.encode(sessionId)}/responsibility-context"))
             if (!response.isSuccessful) error("HTTP ${response.statusCode}")
             Json.parseToJsonElement(response.body).jsonObject["context"] as? JsonObject
         }.onSuccess { sessionContext = it }
-        val resumeId = selectedResponsibilityId ?: sessionContext?.takeIf { it["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId }?.get("responsibilityId")?.jsonPrimitive?.contentOrNull
+        val targetId = latestSelectedResponsibilityId.value
+        lastHandledNavKey = latestNavigationKey.value
+        initialized = true
+        val resumeId = targetId ?: sessionContext?.takeIf { it["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId }?.get("responsibilityId")?.jsonPrimitive?.contentOrNull
         if (resumeId == null) reload() else { loadResponsibilities(); loadResponsibility(resumeId) }
+    }
+    LaunchedEffect(transport, organizationId, selectedResponsibilityId, responsibilityNavigationKey) {
+        if (!initialized) return@LaunchedEffect
+        val targetId = selectedResponsibilityId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val currentId = responsibility?.get("id")?.jsonPrimitive?.contentOrNull
+        val isNewDeepLink = responsibilityNavigationKey != null && responsibilityNavigationKey != lastHandledNavKey
+        if (!isNewDeepLink && targetId == currentId) return@LaunchedEffect
+        lastHandledNavKey = responsibilityNavigationKey
+        if (responsibilities == null) loadResponsibilities()
+        loadResponsibility(targetId)
     }
     LaunchedEffect(organizationId, item?.get("id")) {
         itemBudget = null; itemReconciliation = null; scopedPreview = null; scopedPending = null; scopedObjective = ""; scopedCriterion = ""; multiObjectives = emptyMap(); multiCriteria = emptyMap(); multiPreview = null; multiPending = null
@@ -223,6 +251,34 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 Text("Responsibility ${current["lifecycle"]}; version ${current["rowVersion"]}; policy ${current["policyRevision"]}")
                 Text("A paused responsibility stops new admission; existing work may continue.")
                 Text("A stop request is not proof of stopping. Unknown or older active executions need reconciliation; a run that finished first remains pending review. Archived history is retained.")
+                val topPendingPlans = responsibilityPlans?.mapNotNull { it as? JsonObject }?.filter {
+                    it["state"]?.jsonPrimitive?.contentOrNull == "pending_review"
+                }.orEmpty()
+                if (topPendingPlans.isNotEmpty()) {
+                    Text("Pending plans awaiting owner review: ${topPendingPlans.size}")
+                    topPendingPlans.forEach { plan ->
+                        val pid = plan["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val focused = pid == selectedPlanId
+                        Text("${if (focused) "[Focused] " else ""}Plan $pid · digest ${plan["proposalDigest"]}")
+                        if (reviewedPlan?.get("id")?.jsonPrimitive?.contentOrNull != pid &&
+                            plan["proposal"] is JsonObject && plan["catalog"] is JsonArray &&
+                            plan["proposalDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true) {
+                            TextButton(onClick = { reviewedPlan = plan }) { Text("Review plan $pid") }
+                        }
+                    }
+                }
+                reviewedPlan?.let { plan ->
+                    Text("Approve only this plan: ${plan["proposal"]} · digest ${plan["proposalDigest"]} · responsibility version ${current["rowVersion"]}")
+                    TextButton(onClick = {
+                        val planId = plan["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val body = buildJsonObject { put("expectedVersion", current["rowVersion"]!!); put("proposalDigest", plan["proposalDigest"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true) }
+                        scope.launch {
+                            submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/plans/${Uri.encode(planId)}/approve", body)
+                            reviewedPlan = null
+                            loadResponsibility(current["id"]!!.jsonPrimitive.content)
+                        }
+                    }) { Text("Confirm this plan") }
+                }
                 if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) {
                     Text("触发只记录唤醒请求，不代表工作已经启动。")
                     if (triggerBindings == null) Text("Schedules unavailable.")
@@ -259,7 +315,41 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                         }
                     }
                 }
-                Text("Responsibility notifications through Android FCM are not supported. Activity remains available in the app.")
+                val notifications = responsibilityNotifications
+                if (notifications == null) {
+                    Text("Responsibility notification status is unavailable. Activity remains available in the app.")
+                } else {
+                    val optIn = notifications["enabled"]?.jsonPrimitive?.booleanOrNull == true
+                    val notifVersion = notifications["version"]?.jsonPrimitive?.longOrNull ?: 0L
+                    val deliveryEnabled = notifications["deliveryEnabled"]?.jsonPrimitive?.booleanOrNull == true
+                    val cloudPush = notifications["accountCloudPush"] as? JsonObject
+                    val cloudConfigured = cloudPush?.get("configured")?.jsonPrimitive?.booleanOrNull == true
+                    Text("Notifications: opt-in ${if (optIn) "on" else "off"} · server delivery ${if (deliveryEnabled) "enabled" else "disabled"} · Android Account Cloud Push ${if (cloudConfigured && deliveryEnabled) "configured" else if (cloudConfigured) "account bound (server delivery disabled)" else "not configured"}. Accounts acceptance is not proof of Firebase delivery or user reading.")
+                    TextButton(onClick = { pendingNotificationToggle = !optIn }) {
+                        Text(if (optIn) "Review disabling notifications" else "Review enabling notifications")
+                    }
+                    pendingNotificationToggle?.let { targetEnabled ->
+                        Text("${if (targetEnabled) "Enable" else "Disable"} notifications (Web Push & Account Cloud Push) for this responsibility, settings version $notifVersion? Provider acceptance does not prove reading.")
+                        TextButton(onClick = {
+                            val id = current["id"]!!.jsonPrimitive.content
+                            val body = buildJsonObject {
+                                put("enabled", targetEnabled)
+                                put("expectedVersion", notifVersion)
+                                put("idempotencyKey", UUID.randomUUID().toString())
+                                put("confirmed", true)
+                            }
+                            scope.launch {
+                                submitResponsibility("/api/responsibilities/${Uri.encode(id)}/notifications", body, "PUT")
+                                pendingNotificationToggle = null
+                                responsibilityNotifications = runCatching { responsibilityRequest("/${Uri.encode(id)}/notifications") }.getOrNull()
+                            }
+                        }) { Text("Confirm notification setting") }
+                    }
+                    (notifications["receipts"] as? JsonArray)?.take(5)?.forEach { entry ->
+                        val receipt = entry as? JsonObject ?: return@forEach
+                        Text("Receipt [${receipt["channel"] ?: "web_push"}] · ${receipt["type"]} · ${receipt["state"]} · ${receipt["updatedAt"]} (provider status, not proof of reading)")
+                    }
+                }
                 TextButton(onClick={scope.launch {runCatching { val path="/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory"; responsibilityRequest(path) to responsibilityRequest("$path/conflicts") }.onSuccess { (memory,conflicts) -> memoryData=memory; memoryConflictData=conflicts; memoryChanges=emptyMap();memoryPreview=null }.onFailure {status="记忆不可用：${it.message}"}}}) { Text("查看记忆和可能冲突") }
                 memoryConflictData?.let { conflicts ->
                     Text("仅为可能冲突，不判断真假；保留双方只针对当前版本。${if (conflicts["truncated"]?.jsonPrimitive?.booleanOrNull == true) "候选不完整。" else ""}")
@@ -440,14 +530,6 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     if (plan["proposal"] !is JsonObject) Text("Full proposal unavailable; approval is disabled.")
                     else Text("Full proposal: ${plan["proposal"]}")
                     if (plan["state"]?.jsonPrimitive?.contentOrNull == "pending_review" && plan["proposal"] is JsonObject && plan["catalog"] is JsonArray && plan["proposalDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true) TextButton(onClick = { reviewedPlan = plan }) { Text("Review plan") }
-                }
-                reviewedPlan?.let { plan ->
-                    Text("Approve only this plan: ${plan["proposal"]} · digest ${plan["proposalDigest"]} · responsibility version ${current["rowVersion"]}")
-                    TextButton(onClick = {
-                        val planId = plan["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                        val body = buildJsonObject { put("expectedVersion", current["rowVersion"]!!); put("proposalDigest", plan["proposalDigest"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true) }
-                        scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/plans/${Uri.encode(planId)}/approve", body); reviewedPlan = null }
-                    }) { Text("Confirm this plan") }
                 }
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
                 Text("Activity")

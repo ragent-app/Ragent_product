@@ -325,12 +325,23 @@ enum class GoogleSignInSuccessAction {
     EnterApp,
 }
 
+@Immutable
+data class ResponsibilityNavigationRequest(
+    val requestKey: String,
+    val targetInstanceId: String,
+    val sessionId: String,
+    val responsibilityId: String,
+    val planId: String? = null,
+)
+
 @Composable
 fun WorkbenchScreen(
     state: WorkbenchUiState,
     organizationTransport: com.andysagent.ragent.core.network.RagentTransport? = null,
     verifiedOrganizationTargetId: String? = null,
     verifiedOrganizationAccountId: String? = null,
+    pendingResponsibilityNavigation: ResponsibilityNavigationRequest? = null,
+    onConsumeResponsibilityNavigation: (String) -> Unit = {},
     accountsViewModel: AccountsViewModel? = null,
     webParityViewModel: WebParityViewModel? = null,
     chatWebParityViewModel: WebParityViewModel? = null,
@@ -502,6 +513,17 @@ fun WorkbenchScreen(
     }
     var organizationOpen by remember(state.sessionId, state.chatTargetId) { mutableStateOf(false) }
     var responsibilitySelection by remember(state.sessionId, state.chatTargetId) { mutableStateOf<String?>(null) }
+    var activeResponsibilityNavigation by remember(state.sessionId, state.chatTargetId) { mutableStateOf<ResponsibilityNavigationRequest?>(null) }
+    LaunchedEffect(pendingResponsibilityNavigation, state.chatOpen, state.sessionId, state.chatTargetId, state.activeRemoteTargetId) {
+        val nav = pendingResponsibilityNavigation ?: return@LaunchedEffect
+        val effectiveTarget = state.chatTargetId ?: state.activeRemoteTargetId
+        if (state.chatOpen && state.sessionId == nav.sessionId && (effectiveTarget == null || effectiveTarget == nav.targetInstanceId)) {
+            responsibilitySelection = nav.responsibilityId
+            activeResponsibilityNavigation = nav
+            organizationOpen = true
+            onConsumeResponsibilityNavigation(nav.requestKey)
+        }
+    }
     BackHandler(enabled = organizationOpen) { organizationOpen = false }
     val predictiveBackProgress = remember { Animatable(0f) }
     val backProgress = predictiveBackProgress.value
@@ -861,6 +883,8 @@ fun WorkbenchScreen(
                     responsibilityDraft = state.composerText,
                     selectedResponsibilityId = responsibilitySelection,
                     onResponsibilitySelected = { responsibilitySelection = it },
+                    responsibilityNavigationKey = activeResponsibilityNavigation?.requestKey,
+                    selectedPlanId = activeResponsibilityNavigation?.planId,
                     onBack = { organizationOpen = false },
                 )
             }

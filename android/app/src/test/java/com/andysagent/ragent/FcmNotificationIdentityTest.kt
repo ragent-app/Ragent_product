@@ -58,4 +58,41 @@ class FcmNotificationIdentityTest {
         val b = RagentFirebaseMessagingService.notificationIdentity("s1", "attention", "question", "evt-1", "b")
         assertNotEquals(a, b)
     }
+
+    @Test fun `responsibility events have distinct identities across sequences and computers`() {
+        val keyA = "resp:v1:rid=responsibility_1&act=plan_awaiting_approval&raw=plan_proposed&pid=plan_1"
+        val keyB = "resp:v1:rid=responsibility_2&act=workflow_completed&raw=workflow_completed"
+        val first = RagentFirebaseMessagingService.notificationIdentity(
+            sessionId = "root-sess",
+            kind = "plan",
+            awaitingKey = keyA,
+            eventId = "responsibility:responsibility_1:10",
+            targetInstanceId = "inst_a",
+        )
+        val second = RagentFirebaseMessagingService.notificationIdentity(
+            sessionId = "root-sess",
+            kind = "plan",
+            awaitingKey = keyA,
+            eventId = "responsibility:responsibility_1:11",
+            targetInstanceId = "inst_a",
+        )
+        val otherPc = RagentFirebaseMessagingService.notificationIdentity(
+            sessionId = "root-sess",
+            kind = "plan",
+            awaitingKey = keyA,
+            eventId = "responsibility:responsibility_1:10",
+            targetInstanceId = "inst_b",
+        )
+        val otherResp = RagentFirebaseMessagingService.notificationIdentity(
+            sessionId = "root-sess",
+            kind = "completion",
+            awaitingKey = keyB,
+            eventId = "responsibility:responsibility_2:1",
+            targetInstanceId = "inst_a",
+        )
+        assertEquals(64, first.length)
+        assertNotEquals(first, second)
+        assertNotEquals(first, otherPc)
+        assertNotEquals(first, otherResp)
+    }
 }

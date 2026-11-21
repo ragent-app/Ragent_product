@@ -54,6 +54,44 @@ export async function getAccountPushStatus() {
   });
 }
 
+function summarizeOutboxEntry(entry) {
+  if (!entry) return null;
+  return {
+    kind: entry.kind,
+    eventId: entry.eventId,
+    state: entry.state,
+    attempts: entry.attempts || 0,
+    lastAttemptAt: entry.lastAttemptAt || null,
+    lastResult: entry.lastResult || '',
+    occurredAt: entry.occurredAt,
+    expiresAt: entry.expiresAt,
+  };
+}
+
+export async function getAccountPushEntryStatus(kind, eventId) {
+  if (typeof kind !== 'string' || typeof eventId !== 'string' || !kind || !eventId) return null;
+  return mutate(async () => {
+    const entries = await readOutbox();
+    return summarizeOutboxEntry(entries.find((entry) => entry.kind === kind && entry.eventId === eventId));
+  });
+}
+
+export async function getAccountPushEntriesStatus(pairs = []) {
+  const list = Array.isArray(pairs) ? pairs.filter((pair) => pair?.kind && pair?.eventId) : [];
+  if (!list.length) return new Map();
+  return mutate(async () => {
+    const entries = await readOutbox();
+    const byKey = new Map(entries.map((entry) => [`${entry.kind}\0${entry.eventId}`, summarizeOutboxEntry(entry)]));
+    const result = new Map();
+    for (const { kind, eventId } of list) {
+      const key = `${kind}\0${eventId}`;
+      const found = byKey.get(key);
+      if (found) result.set(key, found);
+    }
+    return result;
+  });
+}
+
 function schedule(delay = 0) {
   if (!started || timer) return;
   timer = setTimeout(() => {
@@ -67,6 +105,14 @@ export function startAccountPushOutbox() {
   if (started) return;
   started = true;
   schedule();
+}
+
+export function stopAccountPushOutbox() {
+  started = false;
+  if (timer) {
+    clearTimeout(timer);
+    timer = null;
+  }
 }
 
 export async function enqueueAccountPush({ sessionId, kind, runId = '', eventId = '', awaitingKey = '', generation = '', occurredAt, historySource = null }) {
@@ -118,7 +164,7 @@ export async function enqueueAccountPush({ sessionId, kind, runId = '', eventId 
   return true; // Persisted locally, not a delivery receipt.
 }
 
-async function submit(entry) {
+async function submit(entry, { fetchImpl = globalThis.fetch } = {}) {
   if (entry.expiresAt <= Date.now()) return { rejected: true, reason: 'expired' };
   // History intents are written before the canonical event. An interrupted or
   // failed append must never produce a notification for an event that did not
@@ -158,7 +204,7 @@ async function submit(entry) {
   const nonce = randomBytes(24).toString('base64url');
   const message = JSON.stringify(['ragent-push-event-v1', instanceId, eventId, sessionId, kind, runId, awaitingKey, generation, occurredAt, expiresAt, issuedAt, nonce]);
   const signature = signWithInstanceIdentity(identity, message);
-  const response = await fetch(`${base.toString().replace(/\/$/, '')}/v1/push/events`, {
+  const response = await fetchImpl(`${base.toString().replace(/\/$/, '')}/v1/push/events`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ instanceId, eventId, sessionId, kind, runId, awaitingKey, generation, occurredAt, expiresAt, issuedAt, nonce, signature }),
     redirect: 'error', signal: AbortSignal.timeout(10_000),
@@ -183,15 +229,15 @@ async function submit(entry) {
   return { rejected: true, reason: `http_${response.status}` };
 }
 
-async function drain() {
+async function drain({ fetchImpl = globalThis.fetch, runWhenStopped = false } = {}) {
   if (draining) return;
   draining = true;
   try {
-    while (started) {
+    while (started || runWhenStopped) {
       const entry = await mutate(async () => (await readOutbox()).find((item) => item.state === 'pending' && ((item.nextAttemptAt || 0) <= Date.now() || item.expiresAt <= Date.now())));
       if (!entry) break;
       let result;
-      try { result = await submit(entry); } catch { result = { retry: true, reason: 'transport_unavailable' }; }
+      try { result = await submit(entry, { fetchImpl }); } catch { result = { retry: true, reason: 'transport_unavailable' }; }
       await mutate(async () => {
         const entries = await readOutbox();
         const current = entries.find((item) => item.kind === entry.kind && item.eventId === entry.eventId);
@@ -213,4 +259,8 @@ async function drain() {
     draining = false;
     if (started) schedule(5_000);
   }
+}
+
+export async function drainAccountPushOutbox({ fetchImpl = globalThis.fetch } = {}) {
+  return drain({ fetchImpl, runWhenStopped: true });
 }

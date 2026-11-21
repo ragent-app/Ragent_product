@@ -162,8 +162,8 @@ export function compileCollaborationPlan(input = {}, policy) {
 }
 
 export function classifyAttemptOutcome(run, result = null) {
-  if (run?.state === 'cancelled' || run?.cancelRequested === true) return { state: 'cancelled', failureKind: 'cancelled', retryable: false };
   if (run?.state === 'completed') return { state: 'succeeded', failureKind: null, retryable: false };
+  if (run?.state === 'cancelled' || run?.cancelRequested === true) return { state: 'cancelled', failureKind: 'cancelled', retryable: false };
   // A failed terminal Run is distinct from an ordinary tool error in a live
   // Run. Text supplied by a provider or model is not a trusted error code.
   // Even a known failure does not establish that external effects are safe

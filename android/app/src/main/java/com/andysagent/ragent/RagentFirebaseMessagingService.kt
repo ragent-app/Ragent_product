@@ -80,6 +80,8 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             val target = data["instanceId"]
             if (version != null && target.isNullOrEmpty()) return false
             val request = runCatching { SessionNavigationRequest(sessionId, target, kind, awaitingKey, eventId).validated() }.getOrNull() ?: return false
+            if (awaitingKey.startsWith("resp:v1:") && request.responsibilityTarget() == null) return false
+            val responsibility = request.responsibilityTarget()
             val effectiveSentTime = sentTimeMillis.takeIf { it > 0L } ?: System.currentTimeMillis()
             if (kind == "attention_resolved") {
                 if (target.isNullOrBlank() || awaitingKey.isBlank() || generation.isBlank()) return false
@@ -111,12 +113,13 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
                 effectiveSentTime <= lifecyclePreferences.getLong(resolvedKey(target, sessionId, "$awaitingKey\u0000$generation"), 0L)) return false
             if (!target.isNullOrBlank() && awaitingKey == "waiting_user" && runId.isNotBlank() &&
                 effectiveSentTime <= lifecyclePreferences.getLong(resolvedKey(target, sessionId, "run:$runId:waiting_user"), 0L)) return false
-            if (!acceptLifecycleEvent(target, sessionId, kind, runId, effectiveSentTime)) return false
+            if (responsibility == null && !acceptLifecycleEvent(target, sessionId, kind, runId, effectiveSentTime)) return false
             val now = System.currentTimeMillis()
             val expiresAt = data["expiresAt"]?.toLongOrNull() ?: Long.MAX_VALUE
             if (expiresAt <= now) return false
             val remaining = expiresAt - now
             val channelId = channelFor(kind)
+            val displayBody = responsibility?.let { responsibilityBody(it) } ?: body
             val accountIdentity = MessageDigest.getInstance("SHA-256").digest(data["accountId"].orEmpty().toByteArray(Charsets.UTF_8))
                 .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -143,8 +146,8 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             val notification = NotificationCompat.Builder(context, channelId)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(title)
-                .setContentText(body)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setContentText(displayBody)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(displayBody))
                 .setAutoCancel(true)
                 .setTimeoutAfter(remaining)
                 .setContentIntent(pendingIntent)
@@ -160,7 +163,7 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
                 .build()
             // A terminal run supersedes that run's "waiting for you" cards;
             // a session-wide terminal push supersedes all of them.
-            if (kind.lowercase() in TERMINAL_NOTIFICATION_KINDS) {
+            if (responsibility == null && kind.lowercase() in TERMINAL_NOTIFICATION_KINDS) {
                 cancelAttentionNotifications(context, target, sessionId, runId)
             }
             if (Build.VERSION.SDK_INT >= 33 &&
@@ -258,6 +261,19 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             editor.commit()
         }
 
+        private fun responsibilityBody(target: com.andysagent.ragent.core.appapi.ResponsibilityNavigationTarget): String {
+            val resId = when (target.category.ifBlank { target.activityType }) {
+                "plan_awaiting_approval", "plan_proposed" -> R.string.push_responsibility_plan
+                "needs_user_input", "planning_needs_input" -> R.string.push_responsibility_needs_input
+                "budget_rejected", "budget_blocked" -> R.string.push_responsibility_budget_rejected
+                "attempt_failed", "execution_attempt_failed" -> R.string.push_responsibility_attempt_failed
+                "workflow_completed" -> R.string.push_responsibility_workflow_completed
+                "blocked", "planning_invalid_output", "plan_admission_blocked", "planning_evidence_blocked", "decision_waiting" -> R.string.push_responsibility_blocked
+                else -> R.string.push_responsibility_default
+            }
+            return context.getString(resId)
+        }
+
         internal fun cancelAttentionNotifications(
             context: Context,
             target: String?,
@@ -270,6 +286,7 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
             context.getSystemService(NotificationManager::class.java).activeNotifications
                 .filter { statusBarNotification ->
                     val extras = statusBarNotification.notification.extras
+                    if (extras.getString(EXTRA_NOTIFICATION_AWAITING_KEY).orEmpty().startsWith("resp:v1:")) return@filter false
                     val notificationRunId = extras.getString(EXTRA_NOTIFICATION_RUN_ID).orEmpty()
                     val identityMatches = when {
                         !runId.isNullOrBlank() -> notificationRunId.isBlank() || notificationRunId == runId
@@ -282,6 +299,23 @@ class RagentFirebaseMessagingService : FirebaseMessagingService() {
                         extras.getString(EXTRA_NOTIFICATION_INSTANCE_ID) == target &&
                         extras.getString(EXTRA_NOTIFICATION_SESSION_ID) == sessionId &&
                         identityMatches
+                }
+                .forEach { NotificationManagerCompat.from(context).cancel(it.tag, it.id) }
+        }
+
+        internal fun cancelResponsibilityNotification(
+            context: Context,
+            target: String?,
+            sessionId: String,
+            notificationTag: String,
+        ) {
+            if (target.isNullOrBlank() || sessionId.isBlank() || notificationTag.isBlank()) return
+            context.getSystemService(NotificationManager::class.java).activeNotifications
+                .filter { statusBarNotification ->
+                    val extras = statusBarNotification.notification.extras
+                    statusBarNotification.tag == notificationTag &&
+                        extras.getString(EXTRA_NOTIFICATION_INSTANCE_ID) == target &&
+                        extras.getString(EXTRA_NOTIFICATION_SESSION_ID) == sessionId
                 }
                 .forEach { NotificationManagerCompat.from(context).cancel(it.tag, it.id) }
         }

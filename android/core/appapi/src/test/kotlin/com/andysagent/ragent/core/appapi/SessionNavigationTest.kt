@@ -55,4 +55,25 @@ class SessionNavigationTest {
             assertFailsWith<AppApiException> { it.validated() }
         }
     }
+    @Test fun parsesValidatedResponsibilityAwaitingKeyWithoutBreakingSessionNavigation() {
+        val awaitingKey = "resp:v1:rid=responsibility_123&act=plan_awaiting_approval&raw=plan_proposed&pid=plan_456"
+        val request = SessionNavigationRequest("root-sess-1", "inst_abc", "plan", awaitingKey, "responsibility:responsibility_123:7")
+        val target = request.responsibilityTarget()
+        assertNotNull(target)
+        assertEquals("responsibility_123", target.responsibilityId)
+        assertEquals("plan_awaiting_approval", target.category)
+        assertEquals("plan_proposed", target.activityType)
+        assertEquals("plan_456", target.planId)
+        assertNull(SessionNavigationRequest("s1", "inst_abc", "attention", "waiting_user").responsibilityTarget())
+        listOf(
+            "resp:v1:",
+            "resp:v1:rid=../bad&act=blocked",
+            "resp:v1:rid=resp_1&rid=resp_2",
+            "resp:v1:rid=resp_1&pid=../bad",
+            "resp:v1:rid=resp_1&act=bad/act",
+            "resp:v1:rid=resp_1\nbad",
+        ).forEach { invalid ->
+            assertNull(parseResponsibilityAwaitingKey(invalid), "Must reject malformed responsibility key: $invalid")
+        }
+    }
 }

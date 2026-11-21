@@ -14,9 +14,10 @@ function assertLease(db,wakeId,lease) { const current=db.prepare('SELECT l.*,w.l
 function hasActiveResponsibilityWork(db,id,currentWakeId) {
   if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_items'").get()) return false;
   const hasExecutions=!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_plan_executions'").get();
-  const linked=db.prepare("SELECT l.wake_id,l.responsibility_revision,w.state FROM responsibility_work_links l JOIN factory_work_items w ON w.goal_id=l.goal_id WHERE l.responsibility_id=? AND w.state NOT IN ('completed','cancelled','failed')").all(id);
+  const linked=db.prepare("SELECT l.wake_id,l.responsibility_revision,w.state,EXISTS(SELECT 1 FROM factory_execution_bindings b WHERE b.work_item_id=w.id AND b.status IN ('intent','running','unknown')) AS active_binding FROM responsibility_work_links l JOIN factory_work_items w ON w.goal_id=l.goal_id WHERE l.responsibility_id=? AND (w.state NOT IN ('completed','cancelled','failed') OR EXISTS(SELECT 1 FROM factory_execution_bindings b WHERE b.work_item_id=w.id AND b.status IN ('intent','running','unknown')))").all(id);
   const current=db.prepare('SELECT responsibility_revision FROM responsibility_wakes WHERE id=?').get(currentWakeId), observation=db.prepare('SELECT kind FROM responsibility_observations WHERE wake_id=?').get(currentWakeId);
   for(const item of linked) {
+    if(item.active_binding) return true;
     if(item.state==='review') {
       if(hasExecutions && db.prepare('SELECT 1 FROM responsibility_plans p JOIN responsibility_plan_executions e ON e.plan_id=p.id WHERE p.wake_id=? LIMIT 1').get(item.wake_id)) continue;
       const outcome=db.prepare('SELECT kind,next_check_at FROM responsibility_planning_outcomes WHERE wake_id=?').get(item.wake_id);
@@ -25,7 +26,7 @@ function hasActiveResponsibilityWork(db,id,currentWakeId) {
     }
     return true;
   }
-  return !!(hasExecutions && db.prepare("SELECT 1 FROM responsibility_plan_executions e JOIN responsibility_plans p ON p.id=e.plan_id JOIN factory_work_items w ON w.goal_id=e.goal_id WHERE p.responsibility_id=? AND w.state NOT IN ('completed','cancelled','failed') LIMIT 1").get(id));
+  return !!(hasExecutions && db.prepare("SELECT 1 FROM responsibility_plan_executions e JOIN responsibility_plans p ON p.id=e.plan_id JOIN factory_work_items w ON w.goal_id=e.goal_id WHERE p.responsibility_id=? AND (w.state NOT IN ('completed','cancelled','failed') OR EXISTS(SELECT 1 FROM factory_execution_bindings b WHERE b.work_item_id=w.id AND b.status IN ('intent','running','unknown'))) LIMIT 1").get(id));
 }
 function responsibilityHistory(db,id) {
   if(!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_items'").get()) return [];
@@ -45,6 +46,7 @@ export async function processResponsibilityWake(wakeId,lease) {
   if(['project-report','generic-planner'].includes(selected.id)) return processProjectReport(snapshot,lease);
   if(!e||e.source!=='github'||e.verification!=='github_api') return wait(wakeId,'awaiting_verified_ci_event',lease);
   if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  if(process.env.RAGENT_FACTORY_SCHEDULER_ENABLED!=='1') return wait(wakeId,'factory_scheduler_disabled',lease);
   if(!String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim()) return wait(wakeId,'admission_service_unconfigured',lease);
   const active=await read(db=>{assertLease(db,wakeId,lease);return hasActiveResponsibilityWork(db,r.id,wakeId);});
   if(active) return wait(wakeId,'existing_work',lease);
@@ -70,6 +72,7 @@ async function processProjectReport(snapshot,lease) {
   const {wake,r,p,d}=snapshot, policy=JSON.parse(p.policy_json), wakeId=wake.id;
   validateProjectReportPolicy(policy,r.project_id);
   if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return wait(wakeId,'factory_control_disabled',lease);
+  if(process.env.RAGENT_FACTORY_SCHEDULER_ENABLED!=='1') return wait(wakeId,'factory_scheduler_disabled',lease);
   const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim(); if(!owner) return wait(wakeId,'admission_service_unconfigured',lease);
   const observation=await read(db=>{assertLease(db,wakeId,lease);return db.prepare('SELECT * FROM responsibility_observations WHERE wake_id=?').get(wakeId);});
   if(!observation||!['manual','interval','event'].includes(observation.kind)) return wait(wakeId,'unsupported_observation',lease);

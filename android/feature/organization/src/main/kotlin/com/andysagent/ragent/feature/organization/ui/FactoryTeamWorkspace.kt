@@ -65,13 +65,17 @@ private fun controlStateLabel(state: String): String = when (state) {
 fun FactoryTeamWorkspace(
     transport: RagentTransport, organizationId: String, nodes: List<OrganizationNodeDto>,
     responsibilityDraft: String, selectedResponsibilityId: String?, onResponsibilitySelected: (String?) -> Unit,
+    responsibilityNavigationKey: String? = null, selectedPlanId: String? = null,
     sessionId: String, rootSessionId: String?, stableAccountScope: Boolean, onBack: () -> Unit,
 ) {
     val repo = remember(transport, organizationId) { FactoryWorkflowRepository(transport, organizationId) }
     val scope = rememberCoroutineScope()
     val appContext = LocalContext.current
     val colors = LocalRagentColors.current
-    var page by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("list") }
+    var page by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(if (selectedResponsibilityId != null) "advanced" else "list") }
+    LaunchedEffect(selectedResponsibilityId, responsibilityNavigationKey) {
+        if (selectedResponsibilityId != null) page = "advanced"
+    }
     var items by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var goals by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var goalsLoaded by remember(organizationId) { mutableStateOf(false) }
@@ -242,7 +246,7 @@ fun FactoryTeamWorkspace(
     }
     Crossfade(targetState = page, animationSpec = animation, label = "team-workspace") { screen ->
         if (screen == "advanced") {
-            FactoryWorkScreen(transport, organizationId, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, onBack = { page = "list" })
+            FactoryWorkScreen(transport, organizationId, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, responsibilityNavigationKey, selectedPlanId, sessionId, onBack = { page = "list" })
         } else Column(Modifier.fillMaxSize().background(colors.canvas)) {
             AgentoTopBar(title = when (screen) { "list" -> stringResource(R.string.factory_team_00); "detail" -> stringResource(R.string.factory_team_01); "createGoal" -> stringResource(R.string.factory_team_02); else -> stringResource(R.string.factory_team_04) },
                 subtitle = stringResource(R.string.factory_team_05), navigationIcon = { TextButton(enabled = !loading, onClick = { back() }) { Text(stringResource(R.string.factory_team_06)) } })

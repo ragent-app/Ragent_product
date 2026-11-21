@@ -5,6 +5,15 @@ import java.security.MessageDigest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 
+/** Parsed responsibility routing hint extracted from a validated `resp:v1:` awaitingKey. */
+@Serializable
+data class ResponsibilityNavigationTarget(
+    val responsibilityId: String,
+    val category: String = "",
+    val activityType: String = "",
+    val planId: String = "",
+)
+
 /** Navigation hints are never submission or approval authority. Null target is legacy input. */
 @Serializable
 data class SessionNavigationRequest(
@@ -24,6 +33,8 @@ data class SessionNavigationRequest(
         return this
     }
 
+    fun responsibilityTarget(): ResponsibilityNavigationTarget? = parseResponsibilityAwaitingKey(awaitingKey)
+
     /** Full digest in Intent data + notification tag; never use String.hashCode identity. */
     fun identity(): String {
         validated()
@@ -34,6 +45,34 @@ data class SessionNavigationRequest(
 }
 
 private val NAVIGATION_ID = Regex("[A-Za-z0-9_-]{1,160}")
+private val RESPONSIBILITY_TOKEN = Regex("[A-Za-z0-9_-]{1,64}")
+
+fun parseResponsibilityAwaitingKey(value: String): ResponsibilityNavigationTarget? {
+    if (!value.startsWith("resp:v1:") || value.toByteArray(Charsets.UTF_8).size > 512 || value.any { it.code < 32 }) {
+        return null
+    }
+    val fields = linkedMapOf<String, String>()
+    for (part in value.removePrefix("resp:v1:").split('&')) {
+        val eq = part.indexOf('=')
+        if (eq <= 0) return null
+        val key = part.substring(0, eq)
+        val raw = part.substring(eq + 1)
+        if (fields.containsKey(key)) return null
+        fields[key] = raw
+    }
+    val responsibilityId = fields["rid"]?.takeIf { NAVIGATION_ID.matches(it) } ?: return null
+    val category = fields["act"]?.also { if (!RESPONSIBILITY_TOKEN.matches(it)) return null }.orEmpty()
+    val activityType = fields["raw"]?.also { if (!RESPONSIBILITY_TOKEN.matches(it)) return null }.orEmpty()
+    val planId = if (fields.containsKey("pid")) {
+        fields["pid"]?.takeIf { NAVIGATION_ID.matches(it) } ?: return null
+    } else ""
+    return ResponsibilityNavigationTarget(
+        responsibilityId = responsibilityId,
+        category = category,
+        activityType = activityType,
+        planId = planId,
+    )
+}
 
 /** Canonical session URI. No commands, credentials, fragments, duplicate or unknown parameters. */
 fun sessionNavigationUri(request: SessionNavigationRequest): String {

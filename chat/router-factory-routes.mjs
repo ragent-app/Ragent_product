@@ -23,7 +23,7 @@ import { setPositionProfile, addTeamRelation, retireTeamRelation, getTeamConfigu
 import { createFactoryTaskHandoff, getFactoryTaskHandoff } from './factory-task-handoff.mjs';
 import { setFactoryTaskKnowledge } from './factory-task-knowledge.mjs';
 import { syncFactoryShadow, listFactoryShadow, listFactoryShadowAttempts, getFactoryRolloutReadiness } from './factory-shadow.mjs';
-import { requestFactoryReconciliation, getFactoryReconciliation, resumeFactoryReconciliation, verifyFactoryAcceptedRun, getFactoryBudgetObservation } from './factory-reconciliation.mjs';
+import { requestFactoryReconciliation, getFactoryReconciliation, resumeFactoryReconciliation, verifyFactoryAcceptedRun, getFactoryBudgetObservation, resolveFactoryUnknownOutcome } from './factory-reconciliation.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
 import { authenticateProotRequest } from '../lib/proot-local-pairing.mjs';
 import { getAuthSession } from '../lib/auth.mjs';
@@ -146,6 +146,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const taskKnowledge = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/knowledge$/.exec(String(pathname || ''));
   const reconcileResume = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/resume$/.exec(String(pathname || ''));
   const reconcileVerify = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/verify-accepted$/.exec(String(pathname || ''));
+  const reconcileResolve = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/reconcile\/resolve$/.exec(String(pathname || ''));
   const goalRevision = /^\/api\/organizations\/([^/]+)\/factory\/goals\/([^/]+)\/revision\/(preview|commit)$/.exec(String(pathname || ''));
   const scopedRevision = /^\/api\/organizations\/([^/]+)\/factory\/goals\/([^/]+)\/scoped-revision\/(preview|commit)$/.exec(String(pathname || ''));
   const itemCheck = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/checks\/(register|accept)$/.exec(String(pathname || ''));
@@ -168,7 +169,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const fanoutWorkflow = /^\/api\/organizations\/([^/]+)\/factory\/workflows\/fanout(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !reconcileResolve && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
   try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
@@ -392,6 +393,13 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
       const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
       writeJson(res,200,await verifyFactoryAcceptedRun({organizationId:decodeURIComponent(reconcileVerify[1]),workItemId:decodeURIComponent(reconcileVerify[2]),expectedVersion:body?.expectedVersion,executionEpoch:body?.executionEpoch,leaseGeneration:body?.leaseGeneration,expectedRunId:body?.expectedRunId},actor));return true;
+    }
+    if (reconcileResolve) {
+      if (req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      if (!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;}
+      const raw=await readBody(req,16384); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
+      const actor={kind:'user',role:'owner',principalId:text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner'};
+      writeJson(res,200,await resolveFactoryUnknownOutcome({organizationId:decodeURIComponent(reconcileResolve[1]),workItemId:decodeURIComponent(reconcileResolve[2]),expectedVersion:body?.expectedVersion,executionEpoch:body?.executionEpoch,commandId:body?.commandId,idempotencyKey:body?.idempotencyKey,resolution:body?.resolution,rationale:body?.rationale,confirmed:body?.confirmed},actor));return true;
     }
     if (reconcileResume) {
       if (req.method!=='POST') { writeJson(res,405,{error:'Method not allowed'}); return true; }

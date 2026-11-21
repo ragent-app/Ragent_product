@@ -80,7 +80,7 @@ private data class NativeBirthFrame(val records: List<NativeDelegationDto>, val 
 private data class UnifiedMemberFrame(val page: com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto? = null, val cues: List<BirthCue> = emptyList())
 
 @Composable
-fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}, rootAction: com.andysagent.ragent.feature.organization.presentation.NodeActionKind? = null, nativeReceiptElapsed: Long = 0L) {
+fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, targetId: String?, offlineScope: String? = null, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, onBack: () -> Unit, embedded: Boolean = false, modifier: Modifier = Modifier, onRootClick: (Rect) -> Unit = {}, onRootAnchorChanged: (Rect?) -> Unit = {}, revealRoot: Boolean = false, rootHidden: Boolean = false, onRootVisualChanged: (OrganizationRootVisual) -> Unit = {}, openNodeId: String? = null, onOpenNodeConsumed: () -> Unit = {}, records: List<NativeDelegationDto> = emptyList(), nativeEvents: List<NativeBirthEvent> = emptyList(), nativeContinuous: Boolean = false, programmaticOpen: Pair<String, String>? = null, onProgrammaticOpenConsumed: () -> Unit = {}, onCollaboratorSnapshot: (resolved: Boolean, definitive: Boolean, hasCollaborators: Boolean) -> Unit = { _, _, _ -> }, onHasCollaboratorsChanged: (Boolean) -> Unit = {}, rootAction: com.andysagent.ragent.feature.organization.presentation.NodeActionKind? = null, nativeReceiptElapsed: Long = 0L) {
     val context = LocalContext.current
     var demoOpen by remember { mutableStateOf(false) }
     val cache = remember(context) { OrganizationOfflineCache(context) }
@@ -114,6 +114,11 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     var organizationId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
     var rootSessionId by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<String?>(null) }
     var workOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(selectedResponsibilityId != null) }
+    LaunchedEffect(selectedResponsibilityId, responsibilityNavigationKey) {
+        if (selectedResponsibilityId != null) {
+            workOpen = true
+        }
+    }
     var messagesOpen by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var organizationNotFound by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
     var baseProjection by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<OrganizationProjectionDto?>(null) }
@@ -327,7 +332,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 if (transport.connectionState.value != RuntimeConnectionState.Connected) error("Offline controls are disabled")
                 val requestGeneration = offlineScope?.let { cache.generation(it) }
                 val response = try { transport.execute(request) } catch (error: ApiException) {
-                    if (offlineScope != null && error.statusCode in listOf(401, 403, 404, 405, 410, 501)) {
+                    if (offlineScope != null && com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus(error.statusCode)) {
                         ownerVerified = false
                         ownerGeneration = null
                         projectionGeneration = null
@@ -342,7 +347,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                     }
                     throw error
                 }
-                if (offlineScope != null && response.statusCode in listOf(401, 403, 404, 405, 410, 501)) {
+                if (offlineScope != null && com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus(response.statusCode)) {
                     ownerVerified = false
                     ownerGeneration = null
                     projectionGeneration = null
@@ -361,7 +366,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                         (tail == "work-items" || tail.matches(Regex("work-items/[^/?]+")) || tail.matches(Regex("nodes/[^/?]+/messages")))
                     if (permitted && requestGeneration != null) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body, requestGeneration, request.path) }
                 }
-                return response
+                return com.andysagent.ragent.feature.organization.data.normalizeOrganizationUnavailableResponse(response)
             }
         }
     }
@@ -564,7 +569,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             // transport's pending owner request after a change of identity.
             val workScope = "${targetId.orEmpty()}:${scopeKey.ifBlank { transportKey }}:$sessionId:${organizationId.orEmpty()}"
             workStateHolder.SaveableStateProvider(workScope) {
-                FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, sessionId, rootSessionId, scopeKey.isNotBlank(), onBack = { workOpen = false })
+                FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, responsibilityNavigationKey, selectedPlanId, sessionId, rootSessionId, scopeKey.isNotBlank(), onBack = { workOpen = false })
             }
         }
         else if (loaded && connection == RuntimeConnectionState.Connected && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })

@@ -14,4 +14,11 @@
     <string name="push_status_scope">Notifications cover paired computers owned by this account. Shared workspace computers are not yet supported.</string>
     <string name="push_status_computer_registered">%1$s: registered</string>
     <string name="push_status_computer_unregistered">%1$s: not registered</string>
+    <string name="push_responsibility_plan">A responsibility plan is awaiting your approval.</string>
+    <string name="push_responsibility_needs_input">A responsibility needs your input.</string>
+    <string name="push_responsibility_blocked">A responsibility is blocked and needs your attention.</string>
+    <string name="push_responsibility_budget_rejected">A responsibility was blocked by its admission budget.</string>
+    <string name="push_responsibility_attempt_failed">A responsibility execution attempt failed.</string>
+    <string name="push_responsibility_workflow_completed">A responsibility workflow finished and awaits review.</string>
+    <string name="push_responsibility_default">A responsibility needs your attention.</string>
 </resources>

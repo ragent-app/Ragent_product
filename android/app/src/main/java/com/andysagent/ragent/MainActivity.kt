@@ -317,6 +317,7 @@ class MainActivity : ComponentActivity() {
     private var computerConnectionError by mutableStateOf<ConnectionErrorCopy?>(null)
     private var pendingSessionNavigation by mutableStateOf<SessionNavigationRequest?>(null)
     private var pendingNotificationAccountId by mutableStateOf<String?>(null)
+    private var pendingResponsibilityNavigation by mutableStateOf<com.andysagent.ragent.feature.workbench.ResponsibilityNavigationRequest?>(null)
     private var sessionNavigationError by mutableStateOf<ApiErrorCode?>(null)
     private var navigationIntakeKey: String? = null
     private var currentPhase3RFrame by mutableIntStateOf(0)
@@ -413,6 +414,19 @@ class MainActivity : ComponentActivity() {
             if (payload.length > 4096) null else runCatching { AppApiJson.decodeFromString<SessionNavigationRequest>(payload).validated() }.getOrNull()
         }
         pendingNotificationAccountId = savedInstanceState?.getString("ragent.navigation.accountId")
+        val savedRespId = savedInstanceState?.getString("ragent.navigation.respId")
+        val savedRespKey = savedInstanceState?.getString("ragent.navigation.respKey")
+        val savedRespTarget = savedInstanceState?.getString("ragent.navigation.respTarget")
+        val savedRespSession = savedInstanceState?.getString("ragent.navigation.respSession")
+        if (!savedRespId.isNullOrBlank() && !savedRespKey.isNullOrBlank() && !savedRespTarget.isNullOrBlank() && !savedRespSession.isNullOrBlank()) {
+            pendingResponsibilityNavigation = com.andysagent.ragent.feature.workbench.ResponsibilityNavigationRequest(
+                requestKey = savedRespKey,
+                targetInstanceId = savedRespTarget,
+                sessionId = savedRespSession,
+                responsibilityId = savedRespId,
+                planId = savedInstanceState.getString("ragent.navigation.respPlanId")?.takeIf { it.isNotBlank() },
+            )
+        }
         if (intent?.hasExtra(RagentFirebaseMessagingService.EXTRA_NOTIFICATION_SESSION_ID) == true && pendingNotificationAccountId.isNullOrBlank()) {
             pendingSessionNavigation = null
         }
@@ -705,6 +719,15 @@ class MainActivity : ComponentActivity() {
                                 if (pendingSessionNavigation == request) {
                                     shell.onEvent(AppShellEvent.OpenChat)
                                     chat.onEvent(ChatEvent.SelectSession(sessionId))
+                                    request.responsibilityTarget()?.let { targetResp ->
+                                        pendingResponsibilityNavigation = com.andysagent.ragent.feature.workbench.ResponsibilityNavigationRequest(
+                                            requestKey = "${request.identity()}:${java.util.UUID.randomUUID()}",
+                                            targetInstanceId = request.targetInstanceId!!,
+                                            sessionId = sessionId,
+                                            responsibilityId = targetResp.responsibilityId,
+                                            planId = targetResp.planId.takeIf { it.isNotBlank() },
+                                        )
+                                    }
                                     consumedNotificationKeys.add(request.identity())
                                     navigationIntakeKey?.let(consumedNotificationKeys::add)
                                     pendingSessionNavigation = null
@@ -1696,6 +1719,12 @@ class MainActivity : ComponentActivity() {
                     organizationTransport = organizationTargetTransport ?: if (tabletDualPane) tabletChatBinding.transport else app.runtime.transport,
                     verifiedOrganizationTargetId = organizationTargetId.takeIf { organizationTargetTransport != null },
                     verifiedOrganizationAccountId = organizationProfileAccount.takeIf { organizationTargetTransport != null },
+                    pendingResponsibilityNavigation = pendingResponsibilityNavigation,
+                    onConsumeResponsibilityNavigation = { key ->
+                        if (pendingResponsibilityNavigation?.requestKey == key) {
+                            pendingResponsibilityNavigation = null
+                        }
+                    },
                     modifier = Modifier.drawWithContent {
                         if (pendingGoogleSignIn != null) recordToLayer(signInBackdrop) else drawContent()
                     },
@@ -2389,6 +2418,13 @@ class MainActivity : ComponentActivity() {
         navigationIntakeKey?.let { outState.putString("ragent.navigation.intakeKey", it) }
         pendingSessionNavigation?.let { outState.putString("ragent.navigation.pending", AppApiJson.encodeToString(it)) }
         pendingNotificationAccountId?.let { outState.putString("ragent.navigation.accountId", it) }
+        pendingResponsibilityNavigation?.let { nav ->
+            outState.putString("ragent.navigation.respKey", nav.requestKey)
+            outState.putString("ragent.navigation.respTarget", nav.targetInstanceId)
+            outState.putString("ragent.navigation.respSession", nav.sessionId)
+            outState.putString("ragent.navigation.respId", nav.responsibilityId)
+            nav.planId?.let { outState.putString("ragent.navigation.respPlanId", it) }
+        }
         val browserPurpose = browserSignInRequest
         val browserChallenge = browserSignInChallenge
         if (browserPurpose != null && browserChallenge != null) {

@@ -57,9 +57,11 @@ import com.andysagent.ragent.core.p2p.P2PSessionFactory
 import com.andysagent.ragent.core.p2p.WebRTCDataChannelTransport
 import com.andysagent.ragent.core.protocol.parsePairingUri
 import com.andysagent.ragent.core.protocol.PairingUriDto
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.contentOrNull
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.core.model.OtherDeviceProject
 import com.andysagent.ragent.core.protocol.ProtocolCodec
@@ -2111,33 +2113,92 @@ class AndroidRuntimeGraph internal constructor(
                 }
                 val verifiedSession = session?.takeIf { it.id == request.sessionId }
                     ?: throw AppApiException(ApiError(ApiErrorCode.RESOURCE_NOT_FOUND, "Session was not found on this computer"))
-                val terminalOrInactive = verifiedSession.status in setOf(
-                    com.andysagent.ragent.core.model.SessionStatus.Completed,
-                    com.andysagent.ragent.core.model.SessionStatus.Failed,
-                    com.andysagent.ragent.core.model.SessionStatus.Cancelled,
-                ) || (verifiedSession.status == com.andysagent.ragent.core.model.SessionStatus.Idle &&
-                    verifiedSession.waitingAction.isNullOrBlank() &&
-                    verifiedSession.workflowState?.trim()?.lowercase() !in setOf(
-                        "waiting", "waiting_user", "waiting_for_user", "waiting_on_user", "needs_user", "needs_input", "waiting_approval",
-                    ))
-                if (terminalOrInactive) {
-                    RagentFirebaseMessagingService.Publisher(application)
-                        .cancelAttentionNotifications(application, target, request.sessionId)
-                }
-                if (request.kind.lowercase() in setOf("approval", "question", "plan", "danger", "answer", "permission")) {
-                    // Event IDs are delivery identities; the approval lookup uses the original awaiting key.
-                    val approvalId = request.awaitingKey
-                    if (approvalId.isNotBlank()) {
-                        val approval = runtime.sessions.findPendingApproval(request.sessionId, approvalId)
-                        if (approval?.status != "pending") {
-                            RagentFirebaseMessagingService.Publisher(application).cancelAttentionNotifications(
-                                application,
-                                target,
-                                request.sessionId,
-                                approval?.runId,
-                                approvalId,
-                                request.identity(),
+                val responsibility = request.responsibilityTarget()
+                if (responsibility == null) {
+                    val terminalOrInactive = verifiedSession.status in setOf(
+                        com.andysagent.ragent.core.model.SessionStatus.Completed,
+                        com.andysagent.ragent.core.model.SessionStatus.Failed,
+                        com.andysagent.ragent.core.model.SessionStatus.Cancelled,
+                    ) || (verifiedSession.status == com.andysagent.ragent.core.model.SessionStatus.Idle &&
+                        verifiedSession.waitingAction.isNullOrBlank() &&
+                        verifiedSession.workflowState?.trim()?.lowercase() !in setOf(
+                            "waiting", "waiting_user", "waiting_for_user", "waiting_on_user", "needs_user", "needs_input", "waiting_approval",
+                        ))
+                    if (terminalOrInactive) {
+                        RagentFirebaseMessagingService.Publisher(application)
+                            .cancelAttentionNotifications(application, target, request.sessionId)
+                    }
+                    if (request.kind.lowercase() in setOf("approval", "question", "plan", "danger", "answer", "permission")) {
+                        // Event IDs are delivery identities; the approval lookup uses the original awaiting key.
+                        val approvalId = request.awaitingKey
+                        if (approvalId.isNotBlank()) {
+                            val approval = runtime.sessions.findPendingApproval(request.sessionId, approvalId)
+                            if (approval?.status != "pending") {
+                                RagentFirebaseMessagingService.Publisher(application).cancelAttentionNotifications(
+                                    application,
+                                    target,
+                                    request.sessionId,
+                                    approval?.runId,
+                                    approvalId,
+                                    request.identity(),
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    val respResponse = try {
+                        runtime.transport.execute(ApiRequest("GET", "/api/responsibilities/${android.net.Uri.encode(responsibility.responsibilityId)}"))
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        if (configStore.directory.first().computers.none { it.instanceId == target }) {
+                            throw AppApiException(ApiError(ApiErrorCode.TARGET_NOT_FOUND, "Computer was unpaired"))
+                        }
+                        val statusCode = (failure as? ApiException)?.statusCode ?: 0
+                        val code = when (statusCode) {
+                            404 -> ApiErrorCode.RESOURCE_NOT_FOUND
+                            401 -> ApiErrorCode.AUTHENTICATION_REQUIRED
+                            403 -> ApiErrorCode.PERMISSION_DENIED
+                            else -> ApiErrorCode.TARGET_OFFLINE
+                        }
+                        val retryable = (failure as? ApiException)?.retryable ?: true
+                        throw AppApiException(ApiError(code, "Source responsibility could not be verified", retryable))
+                    }
+                    if (!respResponse.isSuccessful) {
+                        val code = when (respResponse.statusCode) {
+                            404 -> ApiErrorCode.RESOURCE_NOT_FOUND
+                            401 -> ApiErrorCode.AUTHENTICATION_REQUIRED
+                            403 -> ApiErrorCode.PERMISSION_DENIED
+                            else -> ApiErrorCode.TARGET_OFFLINE
+                        }
+                        throw AppApiException(ApiError(code, "Responsibility was not found on this computer", respResponse.statusCode >= 500))
+                    }
+                    val respObj = runCatching {
+                        kotlinx.serialization.json.Json.parseToJsonElement(respResponse.body).jsonObject["responsibility"]?.jsonObject
+                    }.getOrNull()
+                    if (respObj?.get("id")?.jsonPrimitive?.contentOrNull != responsibility.responsibilityId) {
+                        throw AppApiException(ApiError(ApiErrorCode.RESOURCE_NOT_FOUND, "Responsibility was not found on this computer"))
+                    }
+                    val lifecycle = respObj["lifecycle"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    if (lifecycle in setOf("cancelled", "archived")) {
+                        RagentFirebaseMessagingService.Publisher(application).cancelResponsibilityNotification(
+                            application, target, request.sessionId, request.identity(),
+                        )
+                    } else if (responsibility.planId.isNotBlank()) {
+                        runCatching {
+                            val plansResp = runtime.transport.execute(
+                                ApiRequest("GET", "/api/responsibilities/${android.net.Uri.encode(responsibility.responsibilityId)}/plans"),
                             )
+                            if (plansResp.isSuccessful) {
+                                val plans = kotlinx.serialization.json.Json.parseToJsonElement(plansResp.body).jsonObject["plans"]?.jsonArray
+                                val matching = plans?.mapNotNull { it as? kotlinx.serialization.json.JsonObject }
+                                    ?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == responsibility.planId }
+                                if (matching != null && matching["state"]?.jsonPrimitive?.contentOrNull != "pending_review") {
+                                    RagentFirebaseMessagingService.Publisher(application).cancelResponsibilityNotification(
+                                        application, target, request.sessionId, request.identity(),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

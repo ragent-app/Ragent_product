@@ -9,7 +9,7 @@ import { admitResponsibilityPlan } from './factory-responsibility-admission.mjs'
 import { isResponsibilityTriggerObservationCurrent } from './responsibility-trigger-bridge.mjs';
 
 function fail(message) { throw error(message,409,'RESPONSIBILITY_PLAN_CONFLICT'); }
-function retryableItemError(e) { return (Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<500)||['ENOENT','EACCES','EPERM','ETIMEDOUT'].includes(e?.code); }
+function retryableItemError(e) { return (Number.isInteger(e?.statusCode)&&e.statusCode>=400&&e.statusCode<500)||e?.statusCode===503||['ENOENT','EACCES','EPERM','ETIMEDOUT','EBUSY','ECONNRESET'].includes(e?.code); }
 function matchingCatalogEntry(step,catalog) {
   const matches=catalog.filter(entry=>entry.entryId===step.entryId);
   if(matches.length!==1) return null;
@@ -55,7 +55,15 @@ export function verifyResponsibilityPlanAuthority(db,{planId,planDigest,approval
 
 export async function listResponsibilityPlans(id,actor) {
   await getResponsibility(id,actor);
-  return read(db=>({schemaVersion:1,plans:db.prepare('SELECT * FROM responsibility_plans WHERE responsibility_id=? ORDER BY created_at DESC LIMIT 100').all(id).map(p=>{const approval=db.prepare('SELECT * FROM responsibility_plan_approvals WHERE plan_id=? ORDER BY created_at DESC LIMIT 1').get(p.id),policy=db.prepare('SELECT policy_json FROM responsibility_policy_revisions WHERE responsibility_id=? AND revision=?').get(id,p.policy_revision);return {id:p.id,wakeId:p.wake_id,state:approval?'approved':'pending_review',proposalDigest:p.proposal_digest,responsibilityRevision:p.responsibility_revision,policyRevision:p.policy_revision,createdAt:p.created_at,proposal:JSON.parse(p.proposal_json),catalog:policy?JSON.parse(policy.policy_json).planCatalog:null};})}));
+  return read(db=>{
+    const hasExecutions=!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_plan_executions'").get();
+    return {schemaVersion:1,plans:db.prepare('SELECT * FROM responsibility_plans WHERE responsibility_id=? ORDER BY created_at DESC LIMIT 100').all(id).map(p=>{
+      const approval=db.prepare('SELECT * FROM responsibility_plan_approvals WHERE plan_id=? ORDER BY created_at DESC LIMIT 1').get(p.id),policy=db.prepare('SELECT policy_json FROM responsibility_policy_revisions WHERE responsibility_id=? AND revision=?').get(id,p.policy_revision);
+      const executions=hasExecutions?db.prepare('SELECT step_id,goal_id,workflow_instance_id FROM responsibility_plan_executions WHERE plan_id=? ORDER BY rowid').all(p.id):[];
+      const dispatchRetry=db.prepare('SELECT reason,next_retry_at FROM responsibility_plan_dispatch_retry WHERE plan_id=?').get(p.id);
+      return {id:p.id,wakeId:p.wake_id,state:executions.length?'admitted':approval?'approved':'pending_review',approvalId:approval?.id||null,approvedBy:approval?.actor_id||null,approvedAt:approval?.created_at||null,admitted:executions.length>0,executions:executions.map(e=>({stepId:e.step_id,goalId:e.goal_id,workflowInstanceId:e.workflow_instance_id})),dispatchBlockedReason:dispatchRetry?.reason||null,dispatchNextRetryAt:dispatchRetry?.next_retry_at||null,proposalDigest:p.proposal_digest,responsibilityRevision:p.responsibility_revision,policyRevision:p.policy_revision,createdAt:p.created_at,proposal:JSON.parse(p.proposal_json),catalog:policy?JSON.parse(policy.policy_json).planCatalog:null};
+    })};
+  });
 }
 export async function approveResponsibilityPlan(id,planId,input,actor) {
   await getResponsibility(id,actor);
@@ -80,11 +88,12 @@ export async function collectResponsibilityPlans() {
     if(!snapshot) throw error('Planner candidate evidence is incomplete',409,'PLANNING_EVIDENCE_UNAVAILABLE');
     const [packet,run]=await Promise.all([getResultPacket(snapshot.packetId),getRunAcceptanceEvidence(snapshot.runId)]);
     if(!packet||run?.state!=='completed'||run.id!==snapshot.runId) throw error('Planner Run or packet evidence is not yet available',409,'PLANNING_EVIDENCE_UNAVAILABLE');
-    let output;try {output=JSON.parse(packet.summary);} catch {output=null;}
+    const rawSummary=String(packet.summary||'').trim(), fenced=/^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(rawSummary);
+    let output;try {output=JSON.parse(fenced?fenced[1]:rawSummary);} catch {output=null;}
     let kind=output?.decision||'plan',proposal=null;
     if(!output||typeof output!=='object'||Array.isArray(output)) kind='invalid_output';
     else if(kind==='plan') {if(output.decision==='plan' && Object.keys(output).sort().join(',')==='decision,schemaVersion,steps') proposal={schemaVersion:output.schemaVersion,steps:output.steps};else if(!output.decision) proposal=output;else kind='invalid_output';}
-    else if(kind==='wait') {if(output.schemaVersion!==1||Object.keys(output).sort().join(',')!=='decision,nextCheckAt,reason,schemaVersion'||typeof output.reason!=='string'||!output.reason.trim()||output.reason.length>2000||!Number.isFinite(Date.parse(output.nextCheckAt))||Date.parse(output.nextCheckAt)<Date.now()+15*60000||Date.parse(output.nextCheckAt)>Date.now()+7*86400000) kind='invalid_output';}
+    else if(kind==='wait') {const refMs=Number.isFinite(Date.parse(run.createdAt))?Math.min(Date.now(),Date.parse(run.createdAt)):Date.now();const nextMs=Date.parse(output.nextCheckAt);if(output.schemaVersion!==1||Object.keys(output).sort().join(',')!=='decision,nextCheckAt,reason,schemaVersion'||typeof output.reason!=='string'||!output.reason.trim()||output.reason.length>2000||!Number.isFinite(nextMs)||nextMs<=Date.now()||nextMs<refMs+15*60000||nextMs>Date.now()+7*86400000) kind='invalid_output';}
     else if(kind==='needs_input') {if(output.schemaVersion!==1||Object.keys(output).sort().join(',')!=='decision,question,reason,requiredInput,schemaVersion'||['reason','question','requiredInput'].some(k=>typeof output[k]!=='string'||!output[k].trim()||output[k].length>2000)) kind='invalid_output';}
     else kind='invalid_output';
     await transaction(db=>{const existing=db.prepare('SELECT id FROM responsibility_plans WHERE wake_id=?').get(link.wake_id);if(existing) return;
@@ -106,7 +115,7 @@ export async function collectResponsibilityPlans() {
 
 // Approval is durable before this handoff; an idempotent Factory receipt owns the graph.
 export async function dispatchApprovedResponsibilityPlans() {
-  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim();if(!owner||process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') return;
+  const owner=String(process.env.RAGENT_FACTORY_SCHEDULER_OWNER_ID||'').trim();if(!owner||process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true'||process.env.RAGENT_FACTORY_SCHEDULER_ENABLED!=='1') return;
   const pending=await read(db=>{const hasExecutions=!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='responsibility_plan_executions'").get();return db.prepare(`SELECT p.*,a.id AS approval_id,r.organization_id,r.project_id FROM responsibility_plans p JOIN responsibility_plan_approvals a ON a.plan_id=p.id JOIN responsibilities r ON r.id=p.responsibility_id
     LEFT JOIN responsibility_plan_dispatch_retry retry ON retry.plan_id=p.id WHERE r.lifecycle='active' AND r.revision=p.responsibility_revision AND r.policy_revision=p.policy_revision AND (retry.next_retry_at IS NULL OR retry.next_retry_at<=?) ${hasExecutions?'AND NOT EXISTS(SELECT 1 FROM responsibility_plan_executions e WHERE e.plan_id=p.id)':''} ORDER BY a.created_at LIMIT 20`).all(now());});
   const actor={kind:'service',role:'responsibility_admission',principalId:`responsibility-admission:${owner}`};
