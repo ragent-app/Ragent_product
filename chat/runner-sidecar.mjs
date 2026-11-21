@@ -4610,6 +4610,10 @@ async function main() {
     state: 'running',
     startedAt: current.startedAt || nowIso(),
     runnerProcessId: process.pid,
+    // A prior sidecar generation's turn is evidence of past work, not the
+    // current provider turn. A new generation must establish its own binding.
+    codexTurnIdentity: null,
+    appServerTurnId: null,
     runnerUnitName: current?.runnerUnitName || process.env.RAGENT_RUNNER_UNIT_NAME || null,
     runnerUnitScope: current?.runnerUnitScope || process.env.RAGENT_RUNNER_UNIT_SCOPE || null,
     runnerLaunchMode: current?.runnerLaunchMode || process.env.RAGENT_RUNNER_LAUNCH_MODE || null,
@@ -7047,6 +7051,26 @@ async function main() {
         runPatch.appServerTurnId = turnId;
       }
       await persistProviderRunPatch(runPatch);
+      // Only the response to this sidecar's initial turn/start request gives
+      // an exact request-to-turn binding. Retry requests currently reuse the
+      // same RPC id, so their responses cannot be distinguished from a late
+      // response for an earlier attempt and must not establish this evidence.
+      if (appServerState.startedTurn && (Number(appServerState.turnRetryCount) || 0) === 0
+          && parsed?.id === CODEX_APP_SERVER_REQUEST_IDS.turn && !parsed.error
+          && parsed.result?.turn && appServerState.threadId && turnId
+          && readCodexAppServerTurnId(parsed) === turnId) {
+        const threadId = appServerState.threadId;
+        const runnerLaunchAttempt = Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
+        const authResumeAttempt = normalizeRunAuthAttempt(run);
+        await updateRun(runId, current => {
+          if (!current || current.runnerProcessId !== process.pid
+              || (Number.isSafeInteger(current.runnerLaunchAttempt) ? current.runnerLaunchAttempt : 0) !== runnerLaunchAttempt
+              || normalizeRunAuthAttempt(current) !== authResumeAttempt) return current;
+          // Never replace an established binding from another response.
+          if (current.codexTurnIdentity) return current;
+          return { ...current, codexTurnIdentity: { threadId, turnId, runnerLaunchAttempt, authResumeAttempt, turnRetryCount: 0, recordedAt: nowIso() } };
+        });
+      }
       if (currentCodexTerminalFrame) {
         const turnStatus = parsed.params?.turn?.status;
         if (parsed.error || parsed.method === 'error' || ['failed', 'interrupted'].includes(turnStatus)) {
@@ -7065,6 +7089,9 @@ async function main() {
             && /stream[_ ]truncated|no output was produced|finish_reason[\"':\s]*null|upstream_error/i.test(appServerState.failureReason)
           ) {
             appServerState.turnRetryCount = retryCount + 1;
+            await updateRun(runId, current => current?.runnerProcessId === process.pid
+              ? { ...current, codexTurnIdentity: null, appServerTurnId: null }
+              : current);
             appServerState.hadError = false;
             appServerState.failureReason = '';
             appServerState.turnId = '';

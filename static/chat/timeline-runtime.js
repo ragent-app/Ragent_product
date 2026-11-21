@@ -1056,6 +1056,8 @@
         } else if (planApprovalId && root.isPlanSheetDismissState?.(event)) {
           root.RagentDecisions?.noteResponse?.({ approvalId: planApprovalId }, { sessionId });
         }
+      } else if (type === "run_terminal") {
+        root.applyDurableRunTerminal?.(event, sessionId);
       } else if (type === "status") {
         const statusText = String(event?.content || "").trim().toLowerCase();
         // A full durable refresh contains terminal statuses from older runs.

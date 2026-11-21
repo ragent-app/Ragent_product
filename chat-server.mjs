@@ -5,6 +5,7 @@ import { handleProotAccountLinkRequest } from './chat/proot-account-link-routes.
 import { loadOrCreateInstanceIdentity as loadProotIdentity } from './lib/instance-identity.mjs';
 import { join } from 'path';
 import { readFile as readFileAsync, rename, writeFile } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 
 import {
   E_CLI_SOCKET_MISSING,
@@ -325,7 +326,25 @@ let lastMemorySnapshot = null;
 let listenersReadyAtMs = null;
 const CONTROL_PLANE_FORENSICS_PATH = join(MEMORY_DIR, 'control-plane-forensics.json');
 let forensicSamples = null;
-let forensicWriteChain = Promise.resolve();
+let forensicWriteRunning = false;
+let pendingForensicRecord = null;
+const forensicRunId = randomUUID();
+let forensicBootId = null;
+if (process.platform === 'linux') {
+  try {
+    const value = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    if (/^[0-9a-f-]{36}$/i.test(value)) forensicBootId = value;
+  } catch {}
+}
+const watchdogHeartbeats = [];
+function recordWatchdogHeartbeat(event) {
+  const index = watchdogHeartbeats.findIndex((entry) => entry.sequence === event.sequence);
+  if (index >= 0) watchdogHeartbeats[index] = event;
+  else if (event.result === 'pending') {
+    watchdogHeartbeats.push(event);
+    if (watchdogHeartbeats.length > 16) watchdogHeartbeats.shift();
+  }
+}
 
 function readEventLoopWindow() {
   const now = Date.now();
@@ -433,8 +452,14 @@ function forensicRecord(snapshot) {
   const thresholdMs = readPositiveIntEnv('RAGENT_EVENT_LOOP_FORENSICS_DELAY_MS', 1_000);
   return {
     collectedAtMs: snapshot?.collectedAtMs || Date.now(),
+    run: { id: forensicRunId, bootId: forensicBootId, pid: process.pid, startedAtMs: processStartedAtMs },
     process: snapshot?.process || null,
     sampler,
+    watchdog: {
+      active: systemdWatchdog?.active === true,
+      intervalMs: systemdWatchdog?.intervalMs || null,
+      heartbeats: watchdogHeartbeats.map((event) => ({ ...event })),
+    },
     ...(Math.max(delay.max || 0, sampler.samplingDelayMs || 0) >= thresholdMs
       ? { stall: { thresholdMs, eventLoopMaxMs: delay.max || 0, samplingDelayMs: sampler.samplingDelayMs || 0 } }
       : {}),
@@ -443,26 +468,35 @@ function forensicRecord(snapshot) {
 
 function persistForensicSnapshot(snapshot) {
   const maxSamples = readPositiveIntEnv('RAGENT_FORENSICS_MAX_SAMPLES', 360);
-  const record = forensicRecord(snapshot);
-  forensicWriteChain = forensicWriteChain.catch(() => {}).then(async () => {
-    if (!Array.isArray(forensicSamples)) {
+  pendingForensicRecord = forensicRecord(snapshot);
+  if (forensicWriteRunning) return;
+  forensicWriteRunning = true;
+  void (async () => {
+    while (pendingForensicRecord) {
+      const record = pendingForensicRecord;
+      pendingForensicRecord = null;
       try {
-        const previous = JSON.parse(await readFileAsync(CONTROL_PLANE_FORENSICS_PATH, 'utf8'));
-        forensicSamples = Array.isArray(previous?.samples) ? previous.samples : [];
-      } catch {
-        forensicSamples = [];
+        if (!Array.isArray(forensicSamples)) {
+          try {
+            const previous = JSON.parse(await readFileAsync(CONTROL_PLANE_FORENSICS_PATH, 'utf8'));
+            forensicSamples = Array.isArray(previous?.samples) ? previous.samples : [];
+          } catch {
+            forensicSamples = [];
+          }
+        }
+        forensicSamples.push(record);
+        if (forensicSamples.length > maxSamples) {
+          forensicSamples.splice(0, forensicSamples.length - maxSamples);
+        }
+        const tempPath = `${CONTROL_PLANE_FORENSICS_PATH}.${process.pid}.tmp`;
+        await writeFile(tempPath, JSON.stringify({ schemaVersion: 1, samples: forensicSamples }), { mode: 0o600 });
+        await rename(tempPath, CONTROL_PLANE_FORENSICS_PATH);
+      } catch (error) {
+        console.error(`[forensics] failed to persist control-plane sample: ${error?.message || error}`);
       }
     }
-    forensicSamples.push(record);
-    if (forensicSamples.length > maxSamples) {
-      forensicSamples.splice(0, forensicSamples.length - maxSamples);
-    }
-    const tempPath = `${CONTROL_PLANE_FORENSICS_PATH}.${process.pid}.tmp`;
-    await writeFile(tempPath, JSON.stringify({ schemaVersion: 1, samples: forensicSamples }), { mode: 0o600 });
-    await rename(tempPath, CONTROL_PLANE_FORENSICS_PATH);
-  }).catch((error) => {
-    console.error(`[forensics] failed to persist control-plane sample: ${error?.message || error}`);
-  });
+    forensicWriteRunning = false;
+  })();
 }
 
 // DS-06 unified memory/performance snapshot: process memory + event loop +
@@ -1160,6 +1194,7 @@ server.listen(CHAT_PORT, CHAT_BIND_HOST, () => {
   void systemdNotify.systemdNotify({ ready: true, status: 'Ragent chat server listening' });
   systemdWatchdog = systemdNotify.startSystemdWatchdog({
     status: () => `Ragent chat server healthy; uptime=${Math.round(process.uptime())}s`,
+    onHeartbeat: recordWatchdogHeartbeat,
   });
   // P2P Host lifecycle is per trusted account device, not per invitation.
   // Start it after the control-plane listener is reachable so a slow signaling

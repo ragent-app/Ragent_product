@@ -293,6 +293,7 @@ export async function listCodexAppServerModels({
   environment = null,
   ensureBrokerImpl = ensureCodexAppServerBroker,
   connectImpl = connect,
+  existingBrokerOnly = false,
 } = {}) {
   const home = trimString(codexHomeDir);
   if (!home) throw new Error('Codex home is required for model/list');
@@ -301,30 +302,32 @@ export async function listCodexAppServerModels({
   let env = environment && typeof environment === 'object'
     ? { ...environment, CODEX_HOME: home }
     : null;
-  if (!command) {
+  if (!command && !existingBrokerOnly) {
     const invocation = await resolveCodexToolInvocation(toolId, { codexHomeDir: home });
     command = invocation.command;
     env = invocation.env;
   }
   const socketPath = codexAppServerBrokerSocketPath(home);
-  const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
-    'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
-  ];
-  const spawnSpec = buildPlatformSpawnSpec(command, args, {
-    cwd: trimString(cwd) || process.cwd(),
-    env: env || { ...process.env, CODEX_HOME: home },
-  });
-  await ensureBrokerImpl({
-    socketPath,
-    lockPath: codexAppServerBrokerLockPath(home),
-    upstreamFile: spawnSpec.file,
-    upstreamArgs: spawnSpec.args,
-    upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
-    cwd: trimString(cwd) || process.cwd(),
-    env: spawnSpec.env,
-    waitMs: Math.max(1_000, timeoutMs),
-    expectedAccountDigest: codexBrokerAccountDigest(expectedAccountId),
-  });
+  if (!existingBrokerOnly) {
+    const args = Array.isArray(upstreamArgs) ? upstreamArgs : [
+      'app-server', '--stdio', ...(process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY ? buildSharedCodexWindowsHook({ socketPath }).args : []),
+    ];
+    const spawnSpec = buildPlatformSpawnSpec(command, args, {
+      cwd: trimString(cwd) || process.cwd(),
+      env: env || { ...process.env, CODEX_HOME: home },
+    });
+    await ensureBrokerImpl({
+      socketPath,
+      lockPath: codexAppServerBrokerLockPath(home),
+      upstreamFile: spawnSpec.file,
+      upstreamArgs: spawnSpec.args,
+      upstreamWindowsVerbatimArguments: spawnSpec.windowsVerbatimArguments === true,
+      cwd: trimString(cwd) || process.cwd(),
+      env: spawnSpec.env,
+      waitMs: Math.max(1_000, timeoutMs),
+      expectedAccountDigest: codexBrokerAccountDigest(expectedAccountId),
+    });
+  }
   const remainingMs = Math.max(1_000, Math.max(1_000, timeoutMs) - (Date.now() - startedAt));
   return requestCodexModelListFromBroker(socketPath, {
     timeoutMs: remainingMs,

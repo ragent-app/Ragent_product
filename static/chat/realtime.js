@@ -1550,8 +1550,9 @@ function updateStatus(connState, session = getCurrentSession()) {
     }
     return;
   }
+  if (typeof observeSessionRunIds === "function") observeSessionRunIds(session);
   const activity = getSessionActivity(session);
-  const runIsActive = activity.run.state === "running";
+  const runIsActive = ["running", "unknown"].includes(activity.run.state);
   const inputBusy = isSessionBusy(session);
   if (typeof setChatSessionStatus === "function") {
     setChatSessionStatus(runIsActive ? "running" : "idle");
@@ -1559,7 +1560,7 @@ function updateStatus(connState, session = getCurrentSession()) {
     sessionStatus = runIsActive ? "running" : "idle";
   }
   if (typeof syncLiveMessageMetadataForRunState === "function") {
-    syncLiveMessageMetadataForRunState(runIsActive ? "running" : "idle");
+    syncLiveMessageMetadataForRunState(activity.run.state);
   }
   if (typeof syncEditableMessageActions === "function") {
     syncEditableMessageActions();

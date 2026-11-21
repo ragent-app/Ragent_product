@@ -150,7 +150,13 @@
 
   function normalizeSessionActivity(session) {
     const raw = session?.activity || {};
-    const runState = raw?.run?.state === "running" ? "running" : "idle";
+    const activeRuns = Array.isArray(session?.activeRuns) ? session.activeRuns : null;
+    const liveRuns = activeRuns?.filter((run) => run && typeof run.id === "string" && run.id
+      && !["completed", "failed", "cancelled", "canceled"].includes(String(run.state || "").toLowerCase()));
+    const activeRun = liveRuns?.find((run) => run.state !== "unknown") || liveRuns?.[0];
+    const unresolvedRun = !activeRun && globalThis.ragentHasUnresolvedRun?.(session?.id);
+    const runState = activeRuns ? (activeRun ? (activeRun.state === "unknown" ? "unknown" : "running") : unresolvedRun ? "unknown" : "idle")
+      : (["running", "unknown"].includes(raw?.run?.state) ? raw.run.state : "idle");
     const providerSlotState = raw?.run?.providerSlot?.state === "waiting" ? "waiting" : "idle";
     const queueCount = Number.isInteger(raw?.queue?.count) ? raw.queue.count : 0;
     const queueState = raw?.queue?.state === "queued" && queueCount > 0 ? "queued" : "idle";
@@ -167,7 +173,7 @@
         state: runState,
         phase: typeof raw?.run?.phase === "string" ? raw.run.phase : null,
         startedAt: typeof raw?.run?.startedAt === "string" ? raw.run.startedAt : null,
-        runId: typeof raw?.run?.runId === "string" ? raw.run.runId : null,
+        runId: activeRun?.id || (typeof raw?.run?.runId === "string" ? raw.run.runId : null),
         cancelRequested: raw?.run?.cancelRequested === true,
         authRecovery: normalizeAuthRecovery(raw?.run?.authRecovery),
         providerSlot: {
@@ -213,7 +219,7 @@
 
   function isSessionBusy(session) {
     const activity = normalizeSessionActivity(session);
-    return activity.run.state === "running"
+    return ["running", "unknown"].includes(activity.run.state)
       || activity.queue.state === "queued"
       || activity.planning.state === "checking"
       || activity.compact.state === "pending";
@@ -344,7 +350,9 @@
         "Waiting for this AgY account to finish its previous task...",
       ));
     }
-    if (activity.run.state === "running") {
+    if (activity.run.state === "unknown") {
+      indicators.push(taskStatus("unknown", "status.runUnknown", "Status unknown"));
+    } else if (activity.run.state === "running") {
       indicators.push(taskStatus("running", "status.running", "running"));
     }
     if (activity.queue.state === "queued") {
@@ -410,6 +418,7 @@
         "Waiting for available system capacity...",
       );
     }
+    if (activity.run.state === "unknown") return taskStatus("unknown", "status.runUnknown", "Status unknown");
     if (activity.run.state === "running") return taskStatus("running", "taskFlow.running", "Working...");
     if (activity.compact.state === "pending") return taskStatus("compacting", "taskFlow.compacting", "Compacting context...");
     if (activity.planning.state === "checking" || pending?.stage === "checking") {

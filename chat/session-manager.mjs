@@ -7356,9 +7356,14 @@ async function reconcileSessionActiveRuns(meta) {
   const ids = new Set(entries.filter(entry =>
     !isTerminalRunState(entry.state) || entry.state === 'failed').map(entry => entry.id));
   if (meta.activeRunId) ids.add(meta.activeRunId);
-  const runs = (await Promise.all([...ids].map(id => getRun(id)))).filter(run =>
-    run && run.sessionId === meta.id && !isTerminalRunState(run.state) &&
-    !(run.appApiMessageQueue && run.state === 'queued'));
+  const runs = (await Promise.all([...ids].map(async id => {
+    const run = await getRun(id);
+    // An indexed active Run with temporarily unavailable status remains unresolved.
+    if (!run) return id === meta.activeRunId || entries.some(entry => entry.id === id && !isTerminalRunState(entry.state))
+      ? { id, state: 'unknown' } : null;
+    return run.sessionId === meta.id && !isTerminalRunState(run.state) &&
+      !(run.appApiMessageQueue && run.state === 'queued') ? run : null;
+  }))).filter(Boolean);
   runs.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
     || String(b.id).localeCompare(String(a.id)));
   const result = await withSessionsMetaMutation(async (rows, save) => {
@@ -7366,6 +7371,13 @@ async function reconcileSessionActiveRuns(meta) {
     if (index < 0) return null;
     const current = rows[index];
     const pointed = current.activeRunId ? await getRun(current.activeRunId) : null;
+    // A missing status cannot prove that the pointed run has terminated.
+    if (current.activeRunId && !pointed) {
+      if (!runs.some(run => run.id === current.activeRunId)) {
+        runs.push({ id: current.activeRunId, state: 'unknown' });
+      }
+      return current;
+    }
     if (pointed && pointed.sessionId === meta.id && !isTerminalRunState(pointed.state) &&
         !(pointed.appApiMessageQueue && pointed.state === 'queued')) {
       if (!runs.some(run => run.id === pointed.id)) runs.push(pointed);
@@ -7402,7 +7414,11 @@ async function enrichSessionMeta(meta, options = {}) {
     ...(options.strictHistory === true ? { strict: true } : {}),
   });
   const queuedCount = getFollowUpQueueCount(meta);
-  const runActivity = await resolveSessionRunActivity(meta);
+  const selectedRun = active.runs.find(run => run.state !== 'unknown') || active.runs[0];
+  const runActivity = selectedRun
+    ? { state: selectedRun.state === 'unknown' ? 'unknown' : 'running', run: selectedRun,
+        authRecovery: normalizeAuthRecoveryForActivity(selectedRun.authRecovery) }
+    : await resolveSessionRunActivity(meta);
   const { managerState, workState } = buildSessionControlState(meta);
   const {
     followUpQueue,

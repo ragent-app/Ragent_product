@@ -1570,9 +1570,7 @@ class RoomSessionRepository(
             cursorStore = RoomCursorStore(dao),
             eventSink = RoomEventSink(database, dao) { scope ->
                 val activity = runActivityState.value[scope]
-                val state = (activity?.get("state") as? JsonPrimitive)?.contentOrNull?.lowercase()
-                if (state in setOf("starting", "queued", "working", "running", "streaming", "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision"))
-                    (activity?.get("runId") as? JsonPrimitive)?.contentOrNull else null
+                ((activity?.get("runId") ?: activity?.get("id")) as? JsonPrimitive)?.contentOrNull
             },
             replayProvider = ReplayProvider { scope, applied, _ ->
                 val replayResponse = requestDurableEventPage(eventPagePath(scope, applied, waitForEvents = false))
@@ -1624,6 +1622,7 @@ class RoomSessionRepository(
                         durableMessages.associate { it.id to it.content },
                         durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
                         page.events.filter { it.terminalRunState() != null }.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+                        durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
                     )
                     liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
                 } }
@@ -3422,7 +3421,8 @@ private class RoomEventSink(
             val terminal = event.terminalRunState()
             val currentRunId = activeRunId(scope)
             val isOtherRunTerminal = terminal != null && !event.runId.isNullOrBlank() &&
-                !currentRunId.isNullOrBlank() && event.runId != currentRunId
+                (if (type == "run_terminal") event.runId != currentRunId
+                 else !currentRunId.isNullOrBlank() && event.runId != currentRunId)
             val status = (if (isOtherRunTerminal) null else terminal)?.let { if (it == "interrupted") "cancelled" else it } ?: when {
                 isOtherRunTerminal -> session.status
                 type.contains("approval_request") || type.contains("confirmation_request")

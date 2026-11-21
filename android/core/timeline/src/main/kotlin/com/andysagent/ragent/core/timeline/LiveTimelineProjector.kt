@@ -55,6 +55,7 @@ class LiveTimelineProjector {
         durableMessages: Map<String, String> = emptyMap(),
         completedEntityIds: Set<String> = emptySet(),
         completedRunIds: Set<String> = emptySet(),
+        durableMessageRunIds: Set<String> = completedRunIds,
     ) {
         if (durableSeq < this.durableSeq) return
         terminalRunIds.addAll(completedRunIds)
@@ -62,7 +63,7 @@ class LiveTimelineProjector {
         // finalized durable snapshot. Once its terminal event is durable, the
         // snapshot is authoritative and the ephemeral overlay must retire.
         renderedEvents.entries.removeIf { (key, event) ->
-            key in ephemeralRenderKeys && event.runId in completedRunIds && event.messageState != null
+            key in ephemeralRenderKeys && event.runId in completedRunIds && event.runId in durableMessageRunIds && event.messageState != null
         }
         val durableChanged = durableSeq > this.durableSeq
             || durableMessages != durableBaseline
@@ -174,7 +175,7 @@ class LiveTimelineProjector {
     }
 
     private fun upsertRenderedEvent(event: SessionEventDto, renderSeq: Long) {
-        if (event.source == "context_compaction_handoff" || event.type in setOf("context_barrier", "run_terminal")) return
+        if (event.source == "context_compaction_handoff" || event.type == "context_barrier") return
         val statusError = event.type?.lowercase() == "status" && event.role?.lowercase() == "system" &&
             event.textContent()?.trimStart()?.startsWith("error:", ignoreCase = true) == true
         if (statusError) {
@@ -201,7 +202,7 @@ class LiveTimelineProjector {
             }
             return
         }
-        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled")) return
+        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled", "run_terminal")) return
         if (event.isTimelineMessage()) {
             val id = event.messageProjectionId()
             val before = messageStates[id] ?: textByEntity[id]?.let { baseline ->

@@ -200,12 +200,12 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
       socket.destroy();
       resolve(ready === true);
     };
-    const uncertain = () => {
+    const uncertain = (detail = '') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       socket.destroy();
-      const error = new Error('Cannot establish whether the existing Codex broker is active; do not remove its socket or restart it until active Runs and the broker process have been verified');
+      const error = new Error(`Cannot establish whether the existing Codex broker at ${normalized} is active${detail}; do not remove its socket or restart it until active Runs and the broker process have been verified`);
       error.code = 'CODEX_BROKER_STATE_UNCERTAIN';
       reject(error);
     };
@@ -222,7 +222,11 @@ async function probeBroker(socketPath, timeoutMs = 1_500, { failOnAccessDenied =
         reject(denied);
         return;
       }
-      if (requireConclusive && error?.code !== 'ENOENT') return uncertain();
+      if (requireConclusive && error?.code !== 'ENOENT') {
+        return uncertain(error?.code === 'ECONNREFUSED'
+          ? ' (the socket refused a connection; its ownership and the upstream process are unverified)'
+          : '');
+      }
       finish(false);
     });
     socket.on('end', () => { if (requireConclusive) uncertain(); else finish(false); });
@@ -362,13 +366,13 @@ export async function ensureCodexAppServerBroker({
     });
     brokerChild.unref?.();
     brokerPid = brokerChild.pid ?? null;
-    // Keep creation serialized through initialize. A second caller otherwise
-    // sees an unready socket, unlinks it, and starts a second refresh owner.
-    let ready;
-    try { ready = await waitForBroker(normalizedSocket, waitMs, binding); }
-    catch (error) { try { brokerChild?.kill?.('SIGTERM'); } catch {} throw error; }
+    // Keep creation serialized through initialize so another caller cannot
+    // mistake an unready socket for permission to start a second owner.
+    const ready = await waitForBroker(normalizedSocket, waitMs, binding);
     if (!ready) {
-      try { brokerChild?.kill?.('SIGTERM'); } catch {}
+      // A readiness timeout does not prove the broker is dead or unused. A
+      // caller may already have connected, so leave ownership and recovery to
+      // its supervisor rather than terminating a potentially active process.
       const error = new Error('Codex app-server broker did not become ready');
       error.code = 'CODEX_APP_SERVER_BROKER_UNAVAILABLE';
       throw error;

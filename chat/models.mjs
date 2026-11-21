@@ -1075,7 +1075,7 @@ async function fetchProviderModelList(provider, { allowNetwork = true } = {}) {
   }
 }
 
-async function discoverOfficialCodexCatalog(provider) {
+async function discoverOfficialCodexCatalog(provider, { existingBrokerOnly = false } = {}) {
   const providerId = String(provider?.id || '').trim();
   if (!providerId) throw new Error('Official Codex provider id is missing');
   const { prepareNativeRunProviderHome } = await import('../lib/provider-runtime/run-provider-prepare.mjs');
@@ -1111,6 +1111,7 @@ async function discoverOfficialCodexCatalog(provider) {
       codexHomeDir: prepared.codexHomeDir,
       expectedAccountId: prepared.oauthAccountId || '',
       timeoutMs: PROVIDER_MODEL_LIST_FETCH_TIMEOUT_MS,
+      existingBrokerOnly,
     });
   } catch (cause) {
     throw Object.assign(new Error('Official Codex model request failed', { cause }), { discoveryStage: 'REQUEST' });
@@ -1126,12 +1127,18 @@ async function discoverOfficialCodexCatalog(provider) {
   }));
 }
 
-function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null) {
+function refreshOfficialCodexCatalog(provider, cacheKey, staleEntry = null, { background = false } = {}) {
   if (officialCodexModelListRefreshes.has(cacheKey)) {
     return officialCodexModelListRefreshes.get(cacheKey);
   }
   const staleModels = Array.isArray(staleEntry?.models) ? staleEntry.models : null;
-  const promise = discoverOfficialCodexCatalog(provider)
+  // Preserve first-use discovery when no account catalog is available. Once
+  // an authenticated catalog exists, lifecycle-managed Linux can retain it
+  // while waiting for a Run-owned broker instead of starting another broker in
+  // the control-plane cgroup just to refresh the model picker.
+  const existingBrokerOnly = background && process.platform === 'linux'
+    && !!process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET && !!staleModels?.length;
+  const promise = discoverOfficialCodexCatalog(provider, { existingBrokerOnly })
     .then(async (models) => {
       const entry = { at: Date.now(), models };
       cacheSet(officialCodexModelListCache, cacheKey, entry);
@@ -1178,7 +1185,7 @@ async function readOfficialCodexCatalog(provider, { allowNetwork = true } = {}) 
     return staleModels || [];
   }
   if (!allowNetwork) {
-    void refreshOfficialCodexCatalog(provider, cacheKey, cached);
+    void refreshOfficialCodexCatalog(provider, cacheKey, cached, { background: true });
     return staleModels || [];
   }
   return await refreshOfficialCodexCatalog(provider, cacheKey, cached) || [];

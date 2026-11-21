@@ -1115,6 +1115,9 @@ export function createDetachedRunnerSpawner({
         return await launchDetachedRunnerViaSystemd(runId, { scope, execFileImpl, prepareProviderImpl });
       } catch (error) {
         if (error?.providerPreparation || error?.launchStage === 'provider-preparation') throw error;
+        // A timeout or signal can interrupt systemd-run after it submitted the
+        // unit. A second launch could then run the same request twice.
+        if (error?.code === 'ETIMEDOUT' || error?.killed === true || error?.signal) throw error;
         console.error(`[runs] Failed to launch detached runner ${runId} via systemd-run (${scope}): ${error?.message || String(error)}; falling back to plain detached process.`);
       }
     }

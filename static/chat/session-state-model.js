@@ -3,6 +3,7 @@
 (function attachRagentSessionStateModel(root) {
   const fallbackStrings = {
     "status.idle": "idle",
+    "status.runUnknown": "Status unknown",
     "status.running": "running",
     "workflow.priority.high": "High",
     "workflow.priority.highTitle": "Needs user attention soon.",
@@ -327,9 +328,14 @@
 
   function normalizeSessionActivity(session) {
     const raw = session?.activity || {};
-    const rawRunState = raw?.run?.state;
+    const activeRuns = Array.isArray(session?.activeRuns) ? session.activeRuns : null;
+    const liveRuns = activeRuns?.filter((run) => run && typeof run.id === "string" && run.id
+      && !["completed", "failed", "cancelled", "canceled"].includes(String(run.state || "").toLowerCase()));
+    const activeRun = liveRuns?.find((run) => run.state !== "unknown") || liveRuns?.[0];
+    const unresolvedRun = !activeRun && globalThis.ragentHasUnresolvedRun?.(session?.id);
+    const rawRunState = activeRuns ? (activeRun ? (activeRun.state === "unknown" ? "unknown" : "running") : unresolvedRun ? "unknown" : "idle") : raw?.run?.state;
     const runState =
-      rawRunState === "running"
+      rawRunState === "running" || rawRunState === "unknown"
         ? rawRunState
         : "idle";
     const providerSlotState = raw?.run?.providerSlot?.state === "waiting"
@@ -359,7 +365,7 @@
         state: runState,
         phase: typeof raw?.run?.phase === "string" ? raw.run.phase : null,
         startedAt: typeof raw?.run?.startedAt === "string" ? raw.run.startedAt : null,
-        runId: typeof raw?.run?.runId === "string" ? raw.run.runId : null,
+        runId: activeRun?.id || (typeof raw?.run?.runId === "string" ? raw.run.runId : null),
         cancelRequested: raw?.run?.cancelRequested === true,
         authRecovery: normalizeAuthRecovery(raw?.run?.authRecovery),
         providerSlot: {
@@ -410,7 +416,7 @@
 
   function isSessionBusy(session) {
     const activity = normalizeSessionActivity(session);
-    return activity.run.state === "running"
+    return ["running", "unknown"].includes(activity.run.state)
       || activity.queue.state === "queued"
       || activity.planning.state === "checking"
       || activity.compact.state === "pending";
@@ -459,7 +465,9 @@
       }));
     }
 
-    if (activity.run.state === "running") {
+    if (activity.run.state === "unknown") {
+      indicators.push(createStatus("unknown", t("status.runUnknown"), "status-running", "running"));
+    } else if (activity.run.state === "running") {
       indicators.push(createStatus("running", t("status.running"), "status-running", "running"));
     }
 
@@ -575,6 +583,9 @@
       });
     }
 
+    if (activity.run.state === "unknown") {
+      return createTaskFlowStatus("unknown", "status.runUnknown", { className: "status-running", dotClass: "running" });
+    }
     if (activity.run.state === "running") {
       return createTaskFlowStatus("running", "taskFlow.running", {
         className: "status-running",

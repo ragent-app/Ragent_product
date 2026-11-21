@@ -84,7 +84,8 @@ export function normalizeAuthRecoveryForActivity(value) {
 export async function resolveSessionRunActivity(meta) {
   if (meta?.activeRunId) {
     const run = await getRun(meta.activeRunId);
-    if (run && !isTerminalRunState(run.state)) {
+    if (!run) return { state: 'unknown', run: { id: meta.activeRunId, state: 'unknown' }, authRecovery: null };
+    if (!isTerminalRunState(run.state)) {
       return {
         state: 'running',
         run,
@@ -140,14 +141,14 @@ export function buildSessionActivity(meta, runtimeState, { runState, run, queued
 
   return {
     run: {
-      state: runState === 'running' ? 'running' : 'idle',
+      state: runState === 'unknown' ? 'unknown' : runState === 'running' ? 'running' : 'idle',
       phase: runState === 'running'
         ? (typeof run?.state === 'string' ? run.state : null)
         : null,
       startedAt: runState === 'running'
         ? (typeof run?.startedAt === 'string' ? run.startedAt : null)
         : null,
-      runId: runState === 'running'
+      runId: runState === 'running' || runState === 'unknown'
         ? (typeof run?.id === 'string'
           ? run.id
           : (typeof meta?.activeRunId === 'string' ? meta.activeRunId : null))

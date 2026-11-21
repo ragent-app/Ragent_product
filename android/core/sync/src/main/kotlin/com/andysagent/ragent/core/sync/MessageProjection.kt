@@ -27,8 +27,12 @@ fun SessionEventDto.isTimelineMessage(): Boolean = source != "context_compaction
 )
 
 fun SessionEventDto.terminalRunState(): String? {
-    if (type?.lowercase() !in setOf("status", "run_completed", "run_failed", "run_cancelled", "session_completed")) return null
-    return when ((runState ?: status ?: state ?: textContent()?.trim()
+    val eventType = type?.lowercase()
+    if (eventType !in setOf("status", "run_completed", "run_failed", "run_cancelled", "session_completed", "run_terminal")) return null
+    // A run terminal is authoritative only when it is durable and identifies its run.
+    if (eventType == "run_terminal" && (boundarySeq() <= 0L || runId.isNullOrBlank())) return null
+    val reportedState = if (eventType == "run_terminal") state else runState ?: status ?: state
+    return when ((reportedState ?: textContent()?.trim()
         ?: type?.removePrefix("run_")?.removePrefix("session_")).orEmpty().lowercase()) {
         "completed", "finished", "succeeded", "success", "done" -> "completed"
         "cancelled", "canceled", "interrupted" -> "interrupted"

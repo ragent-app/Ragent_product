@@ -790,8 +790,8 @@ export function createSessionTurnCompletionHelpers(services) {
     }
     // Persist the actual terminal state and bounded structured outcome for replay.
     // A completed runner can still report that the user's task is blocked.
-    if ((allowCompletionEffects || userReplacement) && finalizedRun?.id) {
-      const assistant = finalizedRun.state === 'completed'
+    if (finalizedRun?.id) {
+      const assistant = (allowCompletionEffects || userReplacement) && finalizedRun.state === 'completed'
         ? await findLatestAssistantMessageForRun(sessionId, finalizedRun.id) : null;
       const packet = parseJsonObjectText(extractTaggedBlock(assistant?.content || '', 'ragent-result-packet'));
       const outcome = ['completed', 'blocked', 'waiting', 'failed'].includes(packet?.state) ? packet.state : '';

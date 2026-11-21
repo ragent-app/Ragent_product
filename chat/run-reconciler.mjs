@@ -16,6 +16,20 @@ function parseIsoTimestampMs(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function diagnosticCodexTurnIdentity(run) {
+  const identity = run?.codexTurnIdentity;
+  const launchAttempt = Number.isSafeInteger(run?.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0;
+  const rawResumeAttempt = Number(run?.authRecovery?.resumeAttempt);
+  const resumeAttempt = Number.isSafeInteger(rawResumeAttempt) && rawResumeAttempt >= 0 ? rawResumeAttempt : 0;
+  const opaqueId = value => typeof value === 'string' && value.length > 0 && value.length <= 256
+    && /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+  const threadId = opaqueId(identity?.threadId);
+  const turnId = opaqueId(identity?.turnId);
+  if (!threadId || !turnId || identity.runnerLaunchAttempt !== launchAttempt
+      || identity.authResumeAttempt !== resumeAttempt || identity.turnRetryCount !== 0) return null;
+  return { threadId, turnId, runnerLaunchAttempt: launchAttempt, authResumeAttempt: resumeAttempt, turnRetryCount: 0 };
+}
+
 export function isRecordedProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -221,6 +235,7 @@ export function createDetachedRunReconciler({
       missingResultDetectedAt: run?.missingResultDetectedAt || null,
       normalizedLineCount: Number.isInteger(run?.normalizedLineCount) ? run.normalizedLineCount : 0,
       normalizedEventCount: Number.isInteger(run?.normalizedEventCount) ? run.normalizedEventCount : 0,
+      codexTurnIdentity: diagnosticCodexTurnIdentity(run),
       preview,
     };
     let error = null;

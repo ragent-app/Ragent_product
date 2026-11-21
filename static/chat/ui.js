@@ -1856,9 +1856,85 @@ function finalizeLiveMessageMetadata() {
   }
 }
 
-const RUN_MOTION_TERMINAL_STATES = new Set(["completed", "failed", "cancelled", "idle"]);
+const RUN_MOTION_TERMINAL_STATES = new Set(["completed", "failed", "cancelled"]);
 let lastRunMotionState = "";
 let runMotionTerminalTimer = null;
+let observedRunSessionId = "";
+const observedRunIds = new Set();
+const confirmedTerminalRunIds = new Set();
+const pendingRunChecks = new Set();
+let runCheckTimer = null;
+
+window.ragentHasUnresolvedRun = (sessionId) =>
+  String(sessionId || "") === observedRunSessionId && observedRunIds.size > 0;
+
+function reconcileMissingObservedRuns(sessionId, activeIds) {
+  for (const runId of observedRunIds) {
+    if (activeIds.has(runId) || pendingRunChecks.has(runId)) continue;
+    pendingRunChecks.add(runId);
+    Promise.resolve().then(() => fetchJsonOrRedirect(`/api/runs/${encodeURIComponent(runId)}`, { revalidate: false }))
+      .then((data) => {
+        const run = data?.run;
+        if (String(run?.id || "") !== runId || String(run?.sessionId || "") !== sessionId) return;
+        applyDurableRunTerminal({ runId, state: run.state }, sessionId);
+      }).catch(() => { /* Keep the run unresolved until durable status can be read. */ })
+      .finally(() => {
+        pendingRunChecks.delete(runId);
+        if (sessionId !== observedRunSessionId) return;
+        if (!observedRunIds.has(runId) && typeof updateStatus === "function" && typeof getCurrentSession === "function") {
+          const connected = typeof isConnectionRecoveryTransportUp === "function" && isConnectionRecoveryTransportUp();
+          updateStatus(connected ? "connected" : "disconnected", getCurrentSession());
+        }
+        if (observedRunIds.has(runId) && !runCheckTimer) {
+          runCheckTimer = window.setTimeout(() => {
+            runCheckTimer = null;
+            if (sessionId === observedRunSessionId && typeof getCurrentSession === "function") {
+              observeSessionRunIds(getCurrentSession());
+            }
+          }, 5000);
+        }
+      });
+  }
+}
+
+function observeSessionRunIds(session) {
+  const sessionId = String(session?.id || "");
+  if (sessionId !== observedRunSessionId) {
+    observedRunSessionId = sessionId;
+    observedRunIds.clear();
+    confirmedTerminalRunIds.clear();
+    pendingRunChecks.clear();
+    if (runCheckTimer) window.clearTimeout(runCheckTimer);
+    runCheckTimer = null;
+  }
+  const activeIds = new Set();
+  for (const run of Array.isArray(session?.activeRuns) ? session.activeRuns : []) {
+    const id = String(run?.id || "");
+    if (!id || RUN_MOTION_TERMINAL_STATES.has(String(run?.state || "").toLowerCase())) continue;
+    activeIds.add(id);
+    if (!confirmedTerminalRunIds.has(id)) observedRunIds.add(id);
+  }
+  if (session?.activity?.run?.runId && session.activity.run.state !== "idle") {
+    const id = String(session.activity.run.runId);
+    if (!confirmedTerminalRunIds.has(id)) observedRunIds.add(id);
+    if (!Array.isArray(session?.activeRuns)) activeIds.add(id);
+  }
+  if (Array.isArray(session?.activeRuns)) reconcileMissingObservedRuns(sessionId, activeIds);
+}
+
+function applyDurableRunTerminal(event, sessionId) {
+  const runId = String(event?.runId || "").trim();
+  const state = String(event?.state || "").trim().toLowerCase();
+  if (String(sessionId || "") !== observedRunSessionId || !runId
+      || !observedRunIds.has(runId) || !RUN_MOTION_TERMINAL_STATES.has(state)) return;
+  observedRunIds.delete(runId);
+  confirmedTerminalRunIds.add(runId);
+  if (observedRunIds.size === 0) {
+    syncRunMotionState(state, { confirmedTerminal: true });
+    finalizeLiveMessageMetadata();
+  }
+}
+window.applyDurableRunTerminal = applyDurableRunTerminal;
 
 function normalizeRunMotionState(runState = "") {
   const normalized = String(runState || "").trim().toLowerCase();
@@ -1868,7 +1944,7 @@ function normalizeRunMotionState(runState = "") {
 // Derive one visual state from the existing session state. This is not a second
 // business-state machine: it gives the live message, composer slot and status
 // surfaces one atomic hand-off when a run starts or settles.
-function syncRunMotionState(runState = "") {
+function syncRunMotionState(runState = "", { confirmedTerminal = false } = {}) {
   const normalized = normalizeRunMotionState(runState);
   const previous = lastRunMotionState;
   lastRunMotionState = normalized;
@@ -1879,7 +1955,7 @@ function syncRunMotionState(runState = "") {
   ].filter(Boolean);
   for (const target of targets) target.dataset.runMotionState = normalized;
 
-  const enteredTerminal = previous === "running"
+  const enteredTerminal = (previous === "running" || confirmedTerminal)
     && RUN_MOTION_TERMINAL_STATES.has(normalized);
   if (enteredTerminal) {
     if (runMotionTerminalTimer) window.clearTimeout(runMotionTerminalTimer);
@@ -1888,10 +1964,10 @@ function syncRunMotionState(runState = "") {
       : [];
     for (const node of liveNodes) {
       node.classList.add("run-terminal-settle");
-      node.dataset.runTerminalState = normalized === "idle" ? "completed" : normalized;
+      node.dataset.runTerminalState = normalized;
     }
     window.RagentStreamingPresentation?.settleTerminal?.(
-      normalized === "idle" ? "completed" : normalized,
+      normalized,
     );
     runMotionTerminalTimer = window.setTimeout(() => {
       runMotionTerminalTimer = null;
@@ -1912,7 +1988,7 @@ function syncRunMotionState(runState = "") {
 function syncLiveMessageMetadataForRunState(runState = "") {
   const normalized = normalizeRunMotionState(runState);
   syncRunMotionState(normalized);
-  if (normalized !== "running" && normalized !== "waiting_user") {
+  if (RUN_MOTION_TERMINAL_STATES.has(normalized)) {
     finalizeLiveMessageMetadata();
   }
 }
