@@ -1,9 +1,13 @@
 import path from 'node:path';
-import { realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, realpath, stat } from 'node:fs/promises';
 import { analyzeWindowsBash, parseLiteralBashWords, splitLiteralCompound } from './windows-bash-actions.mjs';
-import { analyzeWindowsPowerShell, decideWindowsPowerShellActions, readOnlyRipgrepArgs, RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
+import { analyzeWindowsPowerShell, analyzeWindowsFileChanges, decideWindowsPowerShellActions, readOnlyRipgrepArgs, RIPGREP_SENSITIVE_EXCLUSIONS, ripgrepSafePrefix } from './windows-powershell-actions.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
+import { decideRiskGate, decideRiskGateWithSyntax, verifyPosixPathEffects } from './privileged-gate.mjs';
+import { permissionExpansion } from './approval-policy.mjs';
 import { appendPowerShellRipgrepGuards } from './windows-ripgrep-bridge.mjs';
+import { systemPathRootsForPlatform } from './risk-policy.mjs';
+import { assessPosixShellSyntax } from './posix-shell-ast.mjs';
 
 export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
   const params = approval?.params || {}; const input = params.input;
@@ -11,20 +15,31 @@ export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
       || params.tool_name !== 'Bash' || typeof params.tool_use_id !== 'string' || !params.tool_use_id
       || !input || typeof input !== 'object' || Array.isArray(input) || state?.turnActive !== true || state?.riskContextValid !== true
       || !['recommended', 'full-auto'].includes(state?.riskMode) || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
-      || !path.posix.isAbsolute(state.cwd || '')) return null;
+      || state?.executionEnvironment || permissionExpansion(approval) || !path.posix.isAbsolute(state.cwd || '')) return null;
+  const shell = await assessPosixShellSyntax(input.command);
+  const root = shell.groups?.[0];
+  const firstNode = root?.type === 'command' ? root : root?.type === 'and' ? root.left : null;
+  const tailNode = root?.type === 'and' ? root.right : null;
+  if (!shell.complete || shell.groups?.length !== 1 || !firstNode || firstNode.type !== 'command'
+      || (tailNode && tailNode.type !== 'command') || shell.effects?.length
+      || shell.commandFacts?.length !== (tailNode ? 2 : 1)
+      || shell.commandFacts[firstNode.index]?.argv?.[0] !== 'cd') return null;
   const parsed = splitLiteralCompound(input.command);
   if (!parsed || parsed.segments.length > 2 || (parsed.operators.length && parsed.operators[0] !== '&&')) return null;
   const first = parseLiteralBashWords(parsed.segments[0]);
-  if (!first || first.length !== 2 || first[0] !== 'cd' || first[1].startsWith('~')) return null;
+  if (!first || first.length !== 2 || first[0] !== 'cd' || first[1].startsWith('-')
+      || !(path.posix.isAbsolute(first[1]) || first[1] === '.' || first[1] === '..' || first[1].startsWith('./') || first[1].startsWith('../'))) return null;
   const tail = parsed.segments[1] || ''; const words = tail ? parseLiteralBashWords(tail) : [];
   if (tail && (!words?.length || ['cd', 'pushd', 'popd', 'source', '.', 'eval', 'exec', 'bash', 'sh'].includes(words[0]))) return null;
   let from; let to;
   try { from = await realpath(state.cwd); to = await realpath(path.posix.resolve(from, first[1])); if (!(await stat(to)).isDirectory()) return null; } catch { return null; }
   const review = { review: true, reason: 'directory change target requires owner review' };
   if (Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
-      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)) return review;
+      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false)
+      || (input.run_in_background !== undefined && input.run_in_background !== false)) return review;
   const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent)(?:\/|$)/i;
-  if (sensitive.test(to) || words.some(word => sensitive.test(word))) return review;
+  const protectedReview = { review: true, hard: true, reason: 'directory change targets protected scope' };
+  if (sensitive.test(to) || words.some(word => sensitive.test(word))) return protectedReview;
   const roots = state.riskContext?.protectedRoots;
   if (!Array.isArray(roots)) return review;
   for (const root of roots) {
@@ -32,22 +47,35 @@ export async function buildClaudePosixCwdTransition({ approval, state } = {}) {
     if (!value || !path.posix.isAbsolute(value)) continue;
     let actual = value; try { actual = await realpath(value); } catch {}
     const relative = path.posix.relative(actual, to);
-    if (!relative || (relative !== '..' && !relative.startsWith('../') && !path.posix.isAbsolute(relative))) return review;
+    if (!relative || (relative !== '..' && !relative.startsWith('../') && !path.posix.isAbsolute(relative))) return protectedReview;
     for (const word of words.slice(1)) {
       if (word.startsWith('-')) continue;
       const lexical = path.posix.resolve(to, word); let resolved = lexical;
       try { resolved = await realpath(lexical); } catch {}
-      if ([lexical, resolved].some(target => { const rel = path.posix.relative(actual, target); return !rel || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); })) return review;
+      if ([lexical, resolved].some(target => { const rel = path.posix.relative(actual, target); return !rel || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); })) return protectedReview;
     }
   }
+  const targetProof = await verifyPosixPathEffects({ context: state.riskContext, cwd: from, effects: [{ kind: 'list', path: to }] });
+  if (!targetProof.verified || targetProof.cwd !== from) return review;
   let safeTail = tail;
   if (words[0] === 'rg') {
     const rg = await buildClaudePosixRipgrepBridge({ approval: { ...approval, params: { ...params, input: { ...input, command: tail } } }, state: { ...state, cwd: to } });
     if (!rg || rg.review) return review;
     safeTail = rg.updatedInput.command;
+  } else if (tail) {
+    const syntax = await assessPosixShellSyntax(tail);
+    if (!syntax.complete || syntax.commandFacts?.length !== 1 || !syntax.commandFacts[0].boundedRead
+        || syntax.effects?.length || !syntax.classifiedLiterals?.every(Boolean)) return review;
+    const decision = decideRiskGate({ ...approval, params: { ...params, input: { ...input, command: tail } } }, {
+      riskMode: state.riskMode, cwd: to, projectRoot: state.projectRoot || '', home: state.home || '',
+      riskContext: state.riskContext, literalArgv: syntax.commandFacts[0].argv,
+    });
+    if (decision.decision !== 'auto-allow' || decision.decisionClass !== 'allow') return review;
+    const proof = await verifyPosixPathEffects({ context: state.riskContext, cwd: to, effects: syntax.commandFacts[0].readEffects });
+    if (!proof.verified || proof.cwd !== to) return review;
   }
   const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
-  const command = `builtin cd -- ${quote(to)}${safeTail ? ` && ${safeTail}` : ''}`;
+  const command = `builtin cd -- ${quote(to)}${safeTail ? ` && [[ . -ef ${quote(to)} ]] && ${safeTail}` : ''}`;
   return { updatedInput: { ...input, command: `if [[ . -ef ${quote(from)} ]]; then ${command}; else [[ 1 == 0 ]]; fi` },
     toolUseId: params.tool_use_id, from, to };
 }
@@ -134,6 +162,12 @@ export async function buildClaudeWindowsDefaultFileToolBridge({ approval, state 
       || state?.interactionMode === 'plan' || state?.permissionMode === 'plan'
       || params.networkApprovalContext || params.network_approval_context || params.additionalPermissions || params.additional_permissions
       || !path.win32.isAbsolute(state.cwd || '')) return null;
+  const fields = { Glob: ['pattern', 'path'], Grep: ['pattern', 'path', 'glob', 'type', 'output_mode', '-i', '-n', '-A', '-B', '-C', 'head_limit', 'offset', 'multiline'], LS: ['path', 'ignore'], List: ['path', 'ignore'], Read: ['file_path', 'offset', 'limit', 'pages'], Write: ['file_path', 'content'], Edit: ['file_path', 'old_string', 'new_string', 'replace_all'], MultiEdit: ['file_path', 'edits'], NotebookEdit: ['notebook_path', 'cell_id', 'new_source', 'cell_type', 'edit_mode'] };
+  if (Object.keys(input).some(key => !fields[params.tool_name].includes(key))) return null;
+  if (['Glob', 'Grep'].includes(params.tool_name) && (typeof input.pattern !== 'string' || !input.pattern || input.pattern.length > 32768)) return null;
+  if (params.tool_name === 'Glob' && (/^(?:[\\/]|[a-z]:)/i.test(input.pattern) || input.pattern.split(/[\\/]/).includes('..'))) return null;
+  if (input.glob !== undefined && (typeof input.glob !== 'string' || /^(?:[\\/]|[a-z]:)/i.test(input.glob) || input.glob.split(/[\\/]/).includes('..'))) return null;
+  try { if (JSON.stringify(input).length > 65536) return null; } catch { return null; }
   const supplied = ['path', 'file_path', 'notebook_path'].filter(key => input[key] !== undefined);
   let key; let target;
   if (supplied.length === 0 && ['Glob', 'Grep', 'LS', 'List'].includes(params.tool_name)) {
@@ -145,6 +179,10 @@ export async function buildClaudeWindowsDefaultFileToolBridge({ approval, state 
     target = path.win32.resolve(state.cwd, raw);
   } else return null;
   const updatedInput = { ...input, [key]: target };
+  if (['Glob', 'Grep'].includes(params.tool_name)) {
+    const inspected = await analyzeWindowsFileChanges([{ path: target, kind: 'read', recursive: true }], { ...state.riskContext, cwd: state.cwd, requireAbsolutePaths: true });
+    if (decideWindowsPowerShellActions(inspected, { safeOnly: false }).decision !== 'allow') return null;
+  }
   const decision = await decideWindowsApproval({ ...approval, params: { ...params, input: updatedInput } }, state);
   if (decision.decision !== 'auto-allow') return null;
   return { updatedInput, risk: decision.risk };
@@ -212,4 +250,83 @@ export async function buildClaudeWindowsRelativeOperationBridge({ approval, stat
   return { updatedInput: { ...input, command: updatedCommand }, risk: { tier: decision.tier || 'safe', platform: params.tool_name === 'Bash' ? 'bash' : 'powershell',
     policyVersion: 'windows-approval/v3', confidence: 'high', reasons: [{ code: 'windows_runtime_cwd_verified', message: 'operation bound to execution working directory' }],
     signals: { targetScope: outside ? 'outside-workspace' : 'trusted-workspace' }, actions: result.actions } };
+}
+
+// Bind simple local file reads and listings to an existing canonical target.
+// Recursive search requires separate proof that its descendants are safe.
+export async function buildClaudePosixFileToolBridge({ approval, state } = {}) {
+  const params = approval?.params || {}; const input = params.input; const tool = params.tool_name;
+  if (process.platform === 'win32' || approval?.providerMethod !== 'can_use_tool'
+      || !['Read', 'LS', 'List', 'Glob', 'Grep'].includes(tool) || permissionExpansion(approval)
+      || !input || typeof input !== 'object' || Array.isArray(input)
+      || state?.turnActive !== true || state?.riskContextValid !== true
+      || !['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(state?.riskMode)
+      || state?.interactionMode === 'plan' || state?.permissionMode === 'plan') return null;
+  const allowed = tool === 'Read' ? ['file_path', 'path', 'offset', 'limit', 'pages'] : tool === 'Glob' ? ['path', 'pattern'] : tool === 'Grep' ? ['path', 'pattern', 'glob', 'type', 'output_mode', '-i', '-n', '-A', '-B', '-C', 'head_limit', 'offset', 'multiline'] : ['path', 'ignore'];
+  if (Object.keys(input).some(key => !allowed.includes(key))) return null;
+  if (['Glob', 'Grep'].includes(tool) && (typeof input.pattern !== 'string' || !input.pattern || input.pattern.length > 32768)) return null;
+  if (['Glob', 'Grep'].includes(tool) && [tool === 'Glob' ? input.pattern : input.glob].some(value => typeof value === 'string' && /(?:^|[\\/])\.git(?:[\\/]|$)/i.test(value))) return null;
+  if (tool === 'Glob' && (/^(?:[\\/]|[a-z]:)/i.test(input.pattern) || input.pattern.split(/[\\/]/).includes('..'))) return null;
+  if (input.glob !== undefined && (typeof input.glob !== 'string' || /^(?:[\\/]|[a-z]:)/i.test(input.glob) || input.glob.split(/[\\/]/).includes('..'))) return null;
+  try { if (JSON.stringify(input).length > 65536) return null; } catch { return null; }
+  const supplied = ['path', 'file_path'].filter(key => input[key] !== undefined);
+  if (supplied.length > 1 || (!supplied.length && tool === 'Read')) return null;
+  const key = supplied[0] || 'path'; const raw = supplied.length ? input[key] : '.';
+  if (typeof raw !== 'string' || !raw || raw.length > 32768 || /[\0\r\n]/.test(raw) || raw.startsWith('~')) return null;
+  const context = state.riskContext; const root = context?.trustedWorkspaceRoot;
+  if (context?.schemaVersion !== 1 || !['linux', 'darwin'].includes(context.platform)
+      || !path.posix.isAbsolute(root || '') || !path.posix.isAbsolute(state.cwd || '')
+      || !Array.isArray(context.protectedRoots)) return null;
+  const within = (target, base) => { const rel = path.posix.relative(base, target); return rel === '' || (rel !== '..' && !rel.startsWith('../') && !path.posix.isAbsolute(rel)); };
+  const canonical = async value => {
+    let current = value; const suffix = [];
+    for (;;) { try { return path.posix.resolve(await realpath(current), ...suffix); }
+      catch (error) { if (error?.code !== 'ENOENT') throw error; const parent = path.posix.dirname(current);
+        if (parent === current) throw error; suffix.unshift(path.posix.basename(current)); current = parent; } }
+  };
+  try {
+    const lexical = path.posix.resolve(state.cwd, raw);
+    const [actualRoot, actualCwd, target] = await Promise.all([realpath(root), realpath(state.cwd), realpath(lexical)]);
+    const info = await stat(target);
+    const ordinaryAbsoluteRead = tool === 'Read' && path.posix.isAbsolute(raw)
+      && typeof process.getuid === 'function' && info.uid === process.getuid() && info.nlink === 1;
+    const sensitive = /(?:^|\/)(?:\.env(?:\.[^/]*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent|\.config|\.netrc|\.npmrc|[^/]*(?:credential|secret|password|token)[^/]*|[^/]*\.(?:pem|key|p12|pfx|jks|keystore))(?:\/|$)/i;
+    if ((!ordinaryAbsoluteRead && (!within(actualCwd, actualRoot) || !within(target, actualRoot) || !within(lexical, path.posix.resolve(root))))
+        || sensitive.test(lexical) || sensitive.test(target) || (tool === 'Read' ? !info.isFile() : !info.isDirectory())) return null;
+    const protectedPaths = [];
+    for (const entry of [...context.protectedRoots, ...systemPathRootsForPlatform('posix'), ...(context.systemPathRoots || [])]) {
+      const value = typeof entry === 'string' ? entry : entry?.path;
+      if (!path.posix.isAbsolute(value || '')) return null;
+      const protectedRoot = await canonical(value);
+      protectedPaths.push(value, protectedRoot);
+      if ([value, protectedRoot].some(protectedPath => within(target, protectedPath) || within(lexical, protectedPath)
+          || (tool !== 'Read' && (within(protectedPath, target) || within(protectedPath, lexical))))) return null;
+    }
+    if (tool === 'Read') {
+      if (raw.split('/').includes('..')) return null;
+      let current = '/';
+      for (const part of lexical.split('/').filter(Boolean)) {
+        current = path.posix.join(current, part);
+        const item = await lstat(current);
+        if (item.isSymbolicLink() || (current === lexical ? (!item.isFile() || item.nlink !== 1) : !item.isDirectory())
+            || (ordinaryAbsoluteRead && !within(target, actualRoot)
+              && current !== lexical && item.uid !== 0 && item.uid !== process.getuid())) return null;
+      }
+      if (target !== lexical) return null;
+    }
+    if (['Glob', 'Grep'].includes(tool)) {
+      const pending = [target]; let count = 0;
+      while (pending.length) {
+        if (++count > 10000) return null;
+        const current = pending.pop(); const item = await lstat(current);
+        if (item.isSymbolicLink() || (item.isFile() && item.nlink > 1) || sensitive.test(current)
+            || protectedPaths.some(value => within(current, value))) return null;
+        if (item.isDirectory()) for (const name of await readdir(current)) pending.push(path.posix.join(current, name));
+      }
+    }
+    const updatedInput = { ...input, [key]: target };
+    const decision = await decideRiskGateWithSyntax({ ...approval, params: { ...params, input: updatedInput } }, {
+      riskMode: state.riskMode, cwd: actualCwd, projectRoot: state.projectRoot || '', home: state.home || '', riskContext: context });
+    return decision.decision === 'auto-allow' ? { updatedInput, risk: decision.risk } : null;
+  } catch { return null; }
 }

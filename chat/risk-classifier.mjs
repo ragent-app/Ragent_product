@@ -641,7 +641,7 @@ export function classifyRisk(input = {}) {
     return finalizeRisk(RISK_TIER.SAFE, signals, null, { platform: RISK_PLATFORM.NONE });
   }
 
-  const facts = parseCommandFacts(command, { cwd, projectRoot, home, declaredCategory, riskContext });
+  const facts = parseCommandFacts(command, { cwd, projectRoot, home, declaredCategory, riskContext, literalArgv: input.literalArgv });
   let pc = classifyPrivilegedOperation({ command, declaredCategory, cwd });
   // 前导包装（env/command/nohup/nice/timeout/exec）后的 sudo 此前会被当成包装命令
   // 本身而漏判（`env sudo apt install` 曾判成普通 env）。解析器看穿包装后，分类决策
@@ -657,7 +657,10 @@ export function classifyRisk(input = {}) {
   signals.sudo = pc.sawSudo === true;
   signals.composite = pc.composite;
 
-  const { tokens } = tokenizeCommand(pcSource);
+  const tokens = facts?.command === pcSource && Array.isArray(input.literalArgv)
+    && facts?.wrappers?.length === 0 && facts?.environmentAssignments?.length === 0
+    && facts?.program === input.literalArgv[0]?.toLowerCase()
+    ? facts.tokens : tokenizeCommand(pcSource).tokens;
   const { rest } = stripSudo(tokens); // args after the real program
   const innerFacts = facts?.scriptInterpreter && facts?.innerCommand
     ? parseCommandFacts(facts.innerCommand, { cwd, projectRoot, home, riskContext })

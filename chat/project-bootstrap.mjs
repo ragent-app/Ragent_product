@@ -98,11 +98,11 @@ function initialText(plan) {
   return [
     `# ${plan.name}`,
     '',
-    '## 持续目标',
+    '## Ongoing objective',
     plan.purpose,
     '',
-    ...(plan.userRequirement ? ['## 用户原始要求', plan.userRequirement, ''] : []),
-    ...(plan.sourceRefs.length ? ['## 输入来源', ...plan.sourceRefs.map((ref) => `- ${ref.replaceAll('\n', ' ')}`), ''] : []),
+    ...(plan.userRequirement ? ['## Original user request', plan.userRequirement, ''] : []),
+    ...(plan.sourceRefs.length ? ['## Input sources', ...plan.sourceRefs.map((ref) => `- ${ref.replaceAll('\n', ' ')}`), ''] : []),
   ].join('\n');
 }
 

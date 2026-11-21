@@ -93,29 +93,29 @@ async function resolveCurrentMailboxAddress() {
 function buildInboundEmailSetupHint(mailboxAddress) {
   if (mailboxAddress) {
     return [
-      '如果你想测试邮件进入实例并创建会话，需要先启用邮件接入并配置允许发件人。告诉我发件地址后，我会在当前权限允许时协助配置；请以实际配置和发送结果为准。',
-      `这个实例当前的收件地址是 \`${mailboxAddress}\`。`,
+      'To test whether incoming mail creates a session, first enable email integration and configure allowed senders. Tell me the sender address and I can help configure it within the current permissions. Rely on the actual configuration and delivery result.',
+      `The current inbound address for this instance is \`${mailboxAddress}\`.`,
     ].join('\n\n');
   }
 
-  return '如果你想测试邮件进入实例并创建会话，需要先启用邮件接入并配置允许发件人。告诉我发件地址后，我会在当前权限允许时协助配置；请以实际配置和发送结果为准。';
+  return 'To test whether incoming mail creates a session, first enable email integration and configure allowed senders. Tell me the sender address and I can help configure it within the current permissions. Rely on the actual configuration and delivery result.';
 }
 
 function buildEmailShowcaseIntro(mailboxAddress) {
   if (mailboxAddress) {
     return [
-      '这是预置的邮件接入示例，展示配置成功后的使用方式。',
-      `这个实例当前的收件地址是 \`${mailboxAddress}\`。邮件接入正常运行且发件人获允许时，收到的邮件可创建新会话。`,
-      '正式测试前，先确认邮件接入和允许发件人配置；我会在当前权限允许时协助配置。',
-      '下面的用户消息展示邮件进入会话后的示例格式。',
+      'This built-in email integration example shows how it works after successful configuration.',
+      `The current inbound address for this instance is \`${mailboxAddress}\`. When email integration is working and the sender is allowed, incoming mail can create a new session.`,
+      'Before testing, confirm the email integration and allowed sender settings. I can help configure them within the current permissions.',
+      'The user message below shows an example of the format for email received in a session.',
     ].join('\n\n');
   }
 
   return [
-    '这是预置的邮件接入示例，展示配置成功后的使用方式。',
-    '实例启用邮件接入并允许发件人后，收到的邮件可创建新会话。',
-    '正式测试前，先确认邮件接入和允许发件人配置；我会在当前权限允许时协助配置。',
-    '下面的用户消息展示邮件进入会话后的示例格式。',
+    'This built-in email integration example shows how it works after successful configuration.',
+    'Once email integration is enabled and the sender is allowed, incoming mail can create a new session.',
+    'Before testing, confirm the email integration and allowed sender settings. I can help configure them within the current permissions.',
+    'The user message below shows an example of the format for email received in a session.',
   ].join('\n\n');
 }
 
@@ -123,23 +123,23 @@ function buildEmailShowcaseUserMessage(mailboxAddress) {
   return [
     'Inbound email.',
     '- From: person-1@example.test',
-    '- Subject: 预置示例邮件',
+    '- Subject: Built-in example email',
     '- Date: (no date)',
     '- Message-ID: (no message id)',
     '',
     'User message:',
-    '这是一封预置示例邮件。',
+    'This is a built-in example email.',
     '',
     mailboxAddress
-      ? `如果链路正常，发到 ${mailboxAddress} 的邮件会自动进到一个新会话里。`
-      : '如果链路正常，发到这个实例地址的邮件会自动进到一个新会话里。',
+      ? `If the integration works, email sent to ${mailboxAddress} will automatically enter a new session.`
+      : 'If the integration works, email sent to this instance address will automatically enter a new session.',
   ].join('\n');
 }
 
 function buildDigestShowcaseIntro() {
   return [
-    '这是预置样例，用于展示可能的工作过程和结果。',
-    '这个示例展示先整理行业热点、再向指定邮箱发送摘要的预期流程。',
+    'This built-in example illustrates a possible workflow and result.',
+    'This example shows the intended workflow of gathering industry news and emailing a summary to a specified address.',
   ].join('\n\n');
 }
 
@@ -153,23 +153,23 @@ function buildGuestMigrationGuideMessages() {
     {
       role: 'assistant',
       content: [
-        '这个实例已经预留了本地迁移入口。我可以直接从你的旧电脑里盘点项目目录、读取少量说明文本，再把真正有价值的文件拉进这个实例。',
-        '目标不是让你自己判断该上传什么，而是先把“旧电脑里的项目上下文”迁进来，后面就尽量都在这个实例里继续协作。',
-        '你可以直接这样开口：',
-        '- “先连接我的本地文件，从整机里找 xxx 项目，列出最相关的 rvt / dwg / pdf / xlsx。”',
-        '- “先别全量上传，先盘点目录结构，再把最关键的文件拉进当前实例。”',
-        '- “把旧项目里能解释背景的 README、交付说明、表格和图纸先带进来。”',
+        'This instance supports local migration. I can inspect project directories on your old computer, read a small number of explanatory files, and bring useful files into this instance.',
+        'The goal is to bring the project context from your old computer into this instance so we can continue collaborating here, without making you decide what to upload alone.',
+        'You can ask, for example:',
+        '- "Connect to my local files, find project xxx on the computer, and list the most relevant RVT, DWG, PDF, and XLSX files."',
+        '- "Do not upload everything yet. Inventory the directory structure first, then bring the most important files into this instance."',
+        '- "First bring in the old project README, delivery notes, tables, and drawings that explain its background."',
       ].join('\n\n'),
     },
     {
       role: 'assistant',
       content: [
-        '迁移的典型顺序是这样的：',
-        '1. 安装一次本地助手并连上这个实例。',
-        '2. 我先列目录、搜关键词、读少量说明文本，必要时再继续往下钻。',
-        '3. 确认有价值后，再按需把文件拉进当前实例。',
-        '4. 迁移完成后，后续沟通和交付都继续留在这个实例里。',
-        '如果你只知道项目大概在本机哪个盘、哪个目录附近，也够了；剩下的目录盘点和筛选我来做。',
+        'A typical migration proceeds as follows:',
+        '1. Install the local assistant and connect it to this instance.',
+        '2. I list directories, search keywords, and read a few explanatory files, then investigate further if needed.',
+        '3. Once their value is confirmed, bring files into this instance as needed.',
+        '4. After migration, continue communication and delivery in this instance.',
+        'An approximate drive or directory location is enough to start. I can inventory and filter the rest.',
       ].join('\n\n'),
     },
   ];
@@ -189,16 +189,16 @@ function buildCalendarGuideMessages() {
     {
       role: 'assistant',
       content: [
-        '这个实例支持日历订阅功能。我创建的所有日程事件都会写入一个 iCal 订阅源，你只需要订阅一次，之后所有新事件都会自动同步到你的日历 app 里。',
-        `**推荐订阅入口：**\n[点击订阅日历](${buildCalendarSubscribeHelperPath()})`,
-        `手动订阅入口：\n[使用 HTTPS 订阅](${buildCalendarSubscribeHelperPath({ format: 'https' })})`,
-        '点击上面的链接后，系统会弹出"订阅日历？"的确认框，确认即可。',
-        '**各平台操作方式：**',
-        '- **iOS**：设置 → 日历 → 账户 → 添加账户 → 其他 → 添加已订阅的日历 → 粘贴地址',
-        '- **macOS**：日历 → 文件 → 新建日历订阅 → 粘贴地址',
-        '- **Android**：推荐使用 [One Calendar](https://play.google.com/store/apps/details?id=com.degenhardt.android.onecalendar)，支持导入订阅链接',
-        '日历客户端的刷新频率和设置方式因应用而异，请以客户端实际选项为准。',
-        '订阅完成后，可通过支持的会话创建日程；客户端何时刷新取决于其自身设置。',
+        'This instance supports calendar subscriptions. Created calendar events are written to an iCal feed. Subscribe once and new events can sync to your calendar app.',
+        `**Recommended subscription link:**\n[Subscribe to the calendar](${buildCalendarSubscribeHelperPath()})`,
+        `Manual subscription link:\n[Subscribe using HTTPS](${buildCalendarSubscribeHelperPath({ format: 'https' })})`,
+        'Open the link above and confirm the calendar subscription prompt.',
+        '**Platform instructions:**',
+        '- **iOS**: Settings > Calendar > Accounts > Add Account > Other > Add Subscribed Calendar, then paste the address.',
+        '- **macOS**: Calendar > File > New Calendar Subscription, then paste the address.',
+        '- **Android**: [One Calendar](https://play.google.com/store/apps/details?id=com.degenhardt.android.onecalendar) supports importing subscription links.',
+        'Refresh frequency and settings vary by calendar app. Follow the options shown by your client.',
+        'After subscribing, supported sessions can create events. The client refresh time depends on its settings.',
       ].join('\n\n'),
     },
   ];
@@ -238,7 +238,7 @@ async function getOwnerBootstrapSessionDefinitions() {
       extraMessages: [
         ...(!starterTool.available ? [{
           role: 'assistant',
-          content: '初始化或恢复引导时没有检测到可用的 Harness。要开始执行任务，请先在 Harness 管理中安装或配置一个可用的运行工具；之后以当前工具状态为准。',
+          content: 'No available harness was detected during initialization or bootstrap recovery. To begin tasks, install or configure an available runtime in Harness management and check its current status.',
         }] : []),
         {
           role: 'assistant',
@@ -251,7 +251,7 @@ async function getOwnerBootstrapSessionDefinitions() {
     pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_GUEST_MIGRATION_GUIDE_EXTERNAL_TRIGGER_ID,
-      name: '[引导] 连接本地文件，把旧电脑资料迁进这个实例',
+      name: '[Guide] Connect local files and migrate material from an old computer',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: buildGuestMigrationGuideMessages(),
@@ -261,20 +261,20 @@ async function getOwnerBootstrapSessionDefinitions() {
   pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_FILE_SHOWCASE_EXTERNAL_TRIGGER_ID,
-      name: '[示例] 上传一份表格，我把清洗后的文件回给你',
+      name: '[Example] Upload a spreadsheet and receive a cleaned file',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: [
         {
           role: 'assistant',
           content: [
-            '这是预置样例，用于展示可能的工作过程和结果。',
-            '你可以直接点附件看交付长什么样：上面是用户上传的原始表，下面是我回给用户的结果文件。',
+            'This built-in example illustrates a possible workflow and result.',
+            'Open the attachments to see the deliverable. The original uploaded spreadsheet appears above and the returned result below.',
           ].join('\n\n'),
         },
         {
           role: 'user',
-          content: '我先上传一份样例销售表。你可以把它理解成用户真实会发来的那种“日期混乱、联系人和电话混在一起、还有重复客户”的表。',
+          content: 'I will upload a sample sales spreadsheet with inconsistent dates, mixed contact and phone fields, and duplicate customers.',
           attachments: [
             {
               localPath: RAW_SPREADSHEET_ASSET_PATH,
@@ -287,8 +287,8 @@ async function getOwnerBootstrapSessionDefinitions() {
         {
           role: 'assistant',
           content: [
-            '下面是示例结果：一个清洗后的表和一份清洗说明。',
-            '你把自己的表发来后，我会先按同样方式跑第一版，再决定有没有必要固化成重复流程。',
+            'The sample result below contains a cleaned spreadsheet and cleanup notes.',
+            'After you send your own spreadsheet, I will prepare a first version in the same way and then assess whether a reusable workflow is needed.',
           ].join('\n\n'),
           attachments: [
             {
@@ -299,7 +299,7 @@ async function getOwnerBootstrapSessionDefinitions() {
             },
             {
               localPath: CLEANUP_NOTES_ASSET_PATH,
-              originalName: '清洗说明.md',
+              originalName: 'Cleanup notes.md',
               mimeType: 'text/markdown',
               renderAs: 'file',
             },
@@ -310,7 +310,7 @@ async function getOwnerBootstrapSessionDefinitions() {
   pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_DIGEST_SHOWCASE_EXTERNAL_TRIGGER_ID,
-      name: '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
+      name: '[Example] Summarize recent industry news and email it',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: [
@@ -320,18 +320,18 @@ async function getOwnerBootstrapSessionDefinitions() {
         },
         {
           role: 'user',
-          content: '我想跟踪 AI 编程助手 / remote agent 这类行业热点。先给我一版今天的摘要，并发到我的收件邮箱；如果格式合适，再改成每天早上 8 点。',
+          content: 'I want to follow industry news about AI coding assistants and remote agents. First give me a summary for today and send it to my email. If the format works, make it daily at 8 a.m.',
         },
         {
           role: 'assistant',
           content: [
-            '这是一份预置摘要附件；实际发送邮件需要先配置并授权可用的邮箱。',
-            '如果你确认格式和收件都没问题，我再把它固化成每天自动发。',
+            'This is a built-in summary attachment. Sending email requires a configured and authorized mailbox.',
+            'If you confirm the format and delivery work, I can set it up for automatic daily delivery.',
           ].join('\n\n'),
           attachments: [
             {
               localPath: DIGEST_SHOWCASE_ASSET_PATH,
-              originalName: 'AI 编程助手热点摘要（样例）.md',
+              originalName: 'AI coding assistant news summary (example).md',
               mimeType: 'text/markdown',
               renderAs: 'file',
             },
@@ -342,7 +342,7 @@ async function getOwnerBootstrapSessionDefinitions() {
   pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_INSTANCE_EMAIL_EXTERNAL_TRIGGER_ID,
-      name: '[示例] 发一封邮件到这个实例，会自动开一个新会话',
+      name: '[Example] Send email to this instance to create a session',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: [
@@ -356,7 +356,7 @@ async function getOwnerBootstrapSessionDefinitions() {
         },
         {
           role: 'assistant',
-          content: '这是邮件接入配置成功后的示例：符合接收条件的邮件可以进入单独会话，再继续处理。实际是否创建会话取决于当前配置和邮件处理结果。',
+          content: 'This example shows successful email integration: eligible incoming mail can enter a separate session for further handling. Session creation depends on the current configuration and mail processing result.',
         },
       ],
     });
@@ -364,7 +364,7 @@ async function getOwnerBootstrapSessionDefinitions() {
     pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_CALENDAR_SUBSCRIBE_EXTERNAL_TRIGGER_ID,
-      name: '[引导] 订阅日历，接收 AI 创建的日程事件',
+      name: '[Guide] Subscribe to calendar events created by AI',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: buildCalendarGuideMessages(),
@@ -373,34 +373,34 @@ async function getOwnerBootstrapSessionDefinitions() {
   pushDefinition({
       tool: defaultToolId,
       externalTriggerId: OWNER_BOOTSTRAP_SHORTCUTS_GUIDE_EXTERNAL_TRIGGER_ID,
-      name: '[引导] 安装快捷指令，用 Siri 或一键启动 Ragent',
+      name: '[Guide] Install shortcuts to launch Ragent with Siri or one tap',
       entryMode: SESSION_ENTRY_MODE_READ,
       pinned: true,
       messages: [
         {
           role: 'assistant',
           content: [
-            '三个快捷指令帮你从 iPhone/Mac 快速启动 Ragent。点击下方附件下载安装。',
-            '**Ragent 语音**\n语音说出问题，自动提交并跳转到 Ragent 查看 AI 流式回复。最适合绑定 Siri。',
-            '**Ragent 文字**\n文字输入问题，提交后跳转。适合添加到主屏幕 Widget。',
-            '**打开 Ragent**\n一键直接打开，最快的启动方式。',
+            'These three shortcuts can launch Ragent from an iPhone or Mac. Download and install them from the attachments below.',
+            '**Ragent Voice**\nSpeak a question, submit it automatically, and open Ragent to view the streaming response. This is suitable for Siri.',
+            '**Ragent Text**\nType a question, submit it, and open Ragent. This is suitable for a Home Screen widget.',
+            '**Open Ragent**\nOpen Ragent directly with one tap.',
           ].join('\n\n'),
           attachments: [
             {
               localPath: SHORTCUT_VOICE_ASSET_PATH,
-              originalName: 'Ragent 语音.shortcut',
+              originalName: 'Ragent Voice.shortcut',
               mimeType: 'application/octet-stream',
               renderAs: 'file',
             },
             {
               localPath: SHORTCUT_TEXT_ASSET_PATH,
-              originalName: 'Ragent 文字.shortcut',
+              originalName: 'Ragent Text.shortcut',
               mimeType: 'application/octet-stream',
               renderAs: 'file',
             },
             {
               localPath: SHORTCUT_OPEN_ASSET_PATH,
-              originalName: '打开 Ragent.shortcut',
+              originalName: 'Open Ragent.shortcut',
               mimeType: 'application/octet-stream',
               renderAs: 'file',
             },
@@ -409,14 +409,14 @@ async function getOwnerBootstrapSessionDefinitions() {
         {
           role: 'assistant',
           content: [
-            '**安装方法**',
-            'iOS：点击附件下载，系统会自动弹出快捷指令导入界面，确认添加即可。',
-            'Mac：下载后双击文件，会自动导入到快捷指令 app，之后通过 iCloud 同步到 iPhone。',
-            '首次安装可能需要到「设置 → 快捷指令」中允许不受信任的快捷指令。',
-            '**安装后建议**',
-            '- 把「语音」绑定到 Siri：打开快捷指令 app → 长按该指令 → 详细信息 → 添加到 Siri',
-            '- 把「文字」或「打开」添加到主屏幕 Widget 或锁屏',
-            '- 三个都会出现在 Spotlight 搜索中，下拉搜索即可触发',
+            '**Installation**',
+            'iOS: Download an attachment and confirm the Shortcuts import prompt.',
+            'Mac: Download and double-click the file to import it into Shortcuts, then sync it to the iPhone through iCloud.',
+            'The first installation may require allowing untrusted shortcuts in Settings > Shortcuts.',
+            '**After installation**',
+            '- Add Voice to Siri from the shortcut details in the Shortcuts app.',
+            '- Add Text or Open to a Home Screen widget or the lock screen.',
+            '- All three shortcuts are available through Spotlight search.',
           ].join('\n\n'),
         },
       ],
@@ -426,9 +426,9 @@ async function getOwnerBootstrapSessionDefinitions() {
 }
 
 const WELCOME_SHOWCASE_HINT = [
-  '左侧有预置示例会话：表格清洗回传、行业热点摘要发邮箱，以及邮件进入实例后的会话。',
-  '你可以按兴趣点开看看，主要是参考：用户通常怎么开头、我会怎么交付，以及结果会长什么样。',
-  '觉得哪个最像你的情况，就直接照着那个方式把你的版本发给我。',
+  'The sidebar contains built-in example sessions for spreadsheet cleanup, emailed industry summaries, and incoming email.',
+  'Open whichever interests you to see examples of a request, delivery process, and result.',
+  'If an example matches your situation, send me your own request in a similar form.',
 ].join('\n\n');
 
 function getStarterMessagesForDefinition(definition) {
@@ -505,16 +505,16 @@ async function appendMissingBootstrapMessages(sessionId, messages = [], existing
 }
 
 async function backfillWelcomeGuideMessages(session, mailboxAddress) {
-  const hasShowcaseHint = (content) => /预置示例会话|3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content);
+  const hasShowcaseHint = (content) => /预置示例会话|3 个真实跑通过的示例会话|发邮件进实例自动开新会话|The sidebar contains built-in example sessions/u.test(content);
   const existingContents = await loadMessageContents(session.id, {
     stopWhen: (current) => current.some(hasShowcaseHint)
-      && current.some((content) => /允许发件人|安全机制会先把邮件拦掉/u.test(content)),
+      && current.some((content) => /允许发件人|安全机制会先把邮件拦掉|configure allowed senders/u.test(content)),
   });
   const followups = [];
   if (!existingContents.some(hasShowcaseHint)) {
     followups.push({ role: 'assistant', content: WELCOME_SHOWCASE_HINT });
   }
-  if (!existingContents.some((content) => /允许发件人|安全机制会先把邮件拦掉/u.test(content))) {
+  if (!existingContents.some((content) => /允许发件人|安全机制会先把邮件拦掉|configure allowed senders/u.test(content))) {
     followups.push({ role: 'assistant', content: buildInboundEmailSetupHint(mailboxAddress) });
   }
   await appendMissingBootstrapMessages(session.id, followups, existingContents);

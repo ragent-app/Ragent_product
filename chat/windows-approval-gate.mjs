@@ -1,3 +1,4 @@
+import { approvalCheckpoint } from './approval-policy.mjs';
 import path from 'node:path';
 import { analyzeWindowsFileChanges, analyzeWindowsPowerShell, decideWindowsPowerShellActions } from './windows-powershell-actions.mjs';
 import { analyzeWindowsBash, parseLiteralBashWords } from './windows-bash-actions.mjs';
@@ -146,10 +147,11 @@ async function decideWindowsApprovalCore(approval, state = {}, { analyze = analy
   };
   // These requests can grant more than execution of the displayed command.
   // Command classification alone cannot authorize additional permissions.
-  if (params.networkApprovalContext || params.network_approval_context
-      || params.additionalPermissions || params.additional_permissions || params.input?.dangerouslyDisableSandbox === true) {
-    return promptWindowsApproval('additional permissions require owner approval', 'windows_permission_expansion', 'danger');
-  }
+  const checkpoint = approvalCheckpoint(approval);
+  if (checkpoint) return promptWindowsApproval(checkpoint === 'permission_expansion'
+    ? 'additional permissions require owner approval' : 'permission gate requires owner approval',
+  checkpoint === 'permission_expansion' ? 'windows_permission_expansion' : 'owner_checkpoint', 'danger');
+
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode: mode });
   if (claudeToolDecision) return claudeToolDecision;
   if (state.riskContextValid === false) return promptWindowsApproval('run path context is unavailable');

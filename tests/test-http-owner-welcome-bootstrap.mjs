@@ -218,12 +218,12 @@ async function assertSessionListEmpty(port, { legacy = false } = {}) {
 async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   const expectedSessionNames = [
     'Welcome',
-    '[引导] 连接本地文件，把旧电脑资料迁进这个实例',
-    '[示例] 上传一份表格，我把清洗后的文件回给你',
-    '[示例] 汇总最近行业热点，并把摘要发到指定邮箱',
-    '[示例] 发一封邮件到这个实例，会自动开一个新会话',
-    '[引导] 订阅日历，接收 AI 创建的日程事件',
-    '[引导] 安装快捷指令，用 Siri 或一键启动 Ragent',
+    '[Guide] Connect local files and migrate material from an old computer',
+    '[Example] Upload a spreadsheet and receive a cleaned file',
+    '[Example] Summarize recent industry news and email it',
+    '[Example] Send email to this instance to create a session',
+    '[Guide] Subscribe to calendar events created by AI',
+    '[Guide] Install shortcuts to launch Ragent with Siri or one tap',
   ];
   const list = await waitFor(async () => {
     const response = await request(port, 'GET', '/api/sessions', null, { Cookie: ownerCookie });
@@ -269,11 +269,11 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
       .map((event) => resolveEventContent(port, welcomeSession.id, event, { Cookie: ownerCookie })),
   );
   assert.ok(
-    welcomeAssistantMessages.some((content) => /发件邮箱|允许发件人|安全机制/u.test(content)),
+    welcomeAssistantMessages.some((content) => /configure allowed senders/u.test(content)),
     'welcome bootstrap should warn that inbound email tests need the sender address allowlisted first',
   );
   assert.ok(
-    welcomeAssistantMessages.some((content) => /预置示例会话|3 个真实跑通过的示例会话|发邮件进实例自动开新会话/u.test(content)),
+    welcomeAssistantMessages.some((content) => /The sidebar contains built-in example sessions/u.test(content)),
     'welcome bootstrap should mention the three pinned examples when backfilled',
   );
 
@@ -288,7 +288,7 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   assert.equal(fileUserMessage?.attachments?.length, 1, 'file showcase should include a sample uploaded file');
   assert.equal(fileAssistantMessage?.attachments?.length, 2, 'file showcase should include downloadable result files');
   const fileShowcaseContent = await resolveEventContent(port, fileShowcaseSession.id, fileAssistantMessage, { Cookie: ownerCookie });
-  assert.match(fileShowcaseContent, /示例结果/u, 'file showcase should identify its downloadable deliverables as examples');
+  assert.match(fileShowcaseContent, /sample result/u, 'file showcase should identify its downloadable deliverables as examples');
   const fileDownloadRes = await fetch(`http://127.0.0.1:${port}/api/assets/${fileAssistantMessage.attachments[0].assetId}/download`, {
     method: 'GET',
     headers: { Cookie: ownerCookie },
@@ -305,18 +305,18 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   const digestIntroContent = await resolveEventContent(port, digestShowcaseSession.id, digestShowcaseMessages[0], { Cookie: ownerCookie });
   const digestUserContent = await resolveEventContent(port, digestShowcaseSession.id, digestShowcaseMessages[1], { Cookie: ownerCookie });
   const digestAssistantMessage = [...digestShowcaseMessages].reverse().find((event) => event.role === 'assistant' && Array.isArray(event.attachments) && event.attachments.length > 0);
-  assert.match(digestIntroContent, /真实交付链路|指定邮箱/u, 'digest showcase should explain the combined summary-and-delivery flow');
-  assert.match(digestUserContent, /每天早上 8 点|行业热点/u, 'digest showcase should demonstrate a recurring summary ask');
+  assert.match(digestIntroContent, /emailing a summary to a specified address/u, 'digest showcase should explain the combined summary-and-delivery flow');
+  assert.match(digestUserContent, /industry news|daily at 8 a.m./u, 'digest showcase should demonstrate a recurring summary ask');
   assert.equal(digestAssistantMessage?.attachments?.length, 1, 'digest showcase should attach the delivered summary body');
   const digestShowcaseContent = await resolveEventContent(port, digestShowcaseSession.id, digestAssistantMessage, { Cookie: ownerCookie });
-  assert.match(digestShowcaseContent, /预置摘要附件|固化成每天自动发/u, 'digest showcase should end with a concrete delivery handoff');
+  assert.match(digestShowcaseContent, /built-in summary attachment|automatic daily delivery/u, 'digest showcase should end with a concrete delivery handoff');
   const digestDownloadRes = await fetch(`http://127.0.0.1:${port}/api/assets/${digestAssistantMessage.attachments[0].assetId}/download`, {
     method: 'GET',
     headers: { Cookie: ownerCookie },
   });
   assert.equal(digestDownloadRes.status, 200, 'digest showcase attachment should be downloadable');
   const digestBody = await digestDownloadRes.text();
-  assert.match(digestBody, /今日最重要结论|Claude Code|Codex/u, 'digest showcase attachment should contain a readable summary body');
+  assert.match(digestBody, /Most important conclusions today|Claude Code|Codex/u, 'digest showcase attachment should contain a readable summary body');
 
   const emailShowcaseSession = list.json?.sessions?.[4];
   const emailShowcaseEvents = await request(port, 'GET', `/api/sessions/${emailShowcaseSession.id}/events?filter=all`, null, { Cookie: ownerCookie });
@@ -326,9 +326,9 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
   const emailIntroContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[0], { Cookie: ownerCookie });
   const emailUserContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[1], { Cookie: ownerCookie });
   const emailAssistantContent = await resolveEventContent(port, emailShowcaseSession.id, emailShowcaseMessages[2], { Cookie: ownerCookie });
-  assert.match(emailIntroContent, /收件地址|允许发件人|自动多出一个新会话/u, 'email showcase should explain the inbound-email entry flow');
-  assert.match(emailUserContent, /预置示例邮件/u, 'email showcase should identify the transcript as an example');
-  assert.match(emailAssistantContent, /实际是否创建会话取决于当前配置和邮件处理结果/u, 'email showcase should make delivery conditional on actual configuration and processing');
+  assert.match(emailIntroContent, /inbound address|sender is allowed|create a new session/u, 'email showcase should explain the inbound-email entry flow');
+  assert.match(emailUserContent, /Built-in example email/u, 'email showcase should identify the transcript as an example');
+  assert.match(emailAssistantContent, /Session creation depends on the current configuration and mail processing result/u, 'email showcase should make delivery conditional on actual configuration and processing');
 
   const calendarGuideSession = list.json?.sessions?.[5];
   assert.ok(calendarGuideSession?.id, 'calendar guide session should always exist when the calendar feed is enabled');
@@ -341,12 +341,12 @@ async function assertWelcomeBootstrapped(port, { legacy = false } = {}) {
 
   assert.match(
     calendarGuideContent,
-    /\[点击订阅日历\]\(\/subscribe\/calendar\)/,
+    /\[Subscribe to the calendar\]\(\/subscribe\/calendar\)/,
     'calendar guide should link to the stable subscription helper route',
   );
   assert.match(
     calendarGuideContent,
-    /\[使用 HTTPS 订阅\]\(\/subscribe\/calendar\?format=https\)/,
+    /\[Subscribe using HTTPS\]\(\/subscribe\/calendar\?format=https\)/,
     'calendar guide should expose the manual helper route instead of a baked absolute URL',
   );
   assert.doesNotMatch(
@@ -385,7 +385,7 @@ async function runScenario(options) {
       const messages = await Promise.all((events.json?.events || [])
         .filter((event) => event.type === 'message' && event.role === 'assistant')
         .map((event) => resolveEventContent(port, restored.welcomeSessionId, event, { Cookie: ownerCookie })));
-      assert.ok(messages.some((content) => /没有检测到可用的 Harness/.test(content)),
+      assert.ok(messages.some((content) => /No available harness was detected/.test(content)),
         'welcome should explain that a harness must be installed or configured');
       const repeated = await restoreStarterSessions(port);
       assert.equal(repeated.welcomeSessionId, restored.welcomeSessionId, 'no-harness restore remains idempotent');

@@ -1,3 +1,4 @@
+import { approvalFact, decideApprovalFacts } from './approval-policy.mjs';
 import path from 'node:path';
 import { lstat, realpath, readdir } from 'node:fs/promises';
 import { expandWindowsPowerShellGlob, parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
@@ -919,23 +920,26 @@ export async function analyzeWindowsPowerShell(command, context = {}, { parse = 
 export function decideWindowsPowerShellActions(result, { safeOnly = false, conservative = false } = {}) {
   // `conservative` remains as a compatibility alias for existing callers.
   const requireWorkspaceOnly = safeOnly || conservative;
-  if (!result.complete || !result.actions.length) return { decision: 'review', reason: result.reason || 'PowerShell analysis incomplete', tier: 'danger' };
-  let cautionAction = null;
+  const hard = (reason, action) => decideApprovalFacts([approvalFact({ tier: 'danger', reason, ...(action ? { action } : {}) })], { safeOnly: requireWorkspaceOnly });
+  if (!result.complete || !result.actions.length) return hard(result.reason || 'PowerShell analysis incomplete');
+  const facts = [];
   for (const action of result.actions) {
-    if (action.requiresPinnedExecution) return { decision: 'review', reason: 'wildcard delete targets are not bound to execution', action, tier: 'danger' };
-    if (action.protected) return { decision: 'review', reason: 'protected or sensitive path', action, tier: 'danger' };
+    if (action.requiresPinnedExecution) return hard('wildcard delete targets are not bound to execution', action);
+    if (action.protected) return hard('protected or sensitive path', action);
     // Checking a directory tree is only a snapshot. Its descendants may be
     // replaced or added before an independently executed recursive removal.
-    if (action.kind === 'delete' && action.recursive) return { decision: 'review', reason: 'recursive deletion is not bound to inspected contents', action, tier: 'danger' };
-    if (action.linked && action.kind !== 'delete') return { decision: 'review', reason: 'file has multiple hard links', action, tier: 'danger' };
-    if ((action.kind === 'read' || action.kind === 'write') && action.recursive && !action.recursiveVerified) return { decision: 'review', reason: 'recursive file operation needs verification', action, tier: 'danger' };
+    if (action.kind === 'delete' && action.recursive) return hard('recursive deletion is not bound to inspected contents', action);
+    if (action.linked && action.kind !== 'delete') return hard('file has multiple hard links', action);
+    if ((action.kind === 'read' || action.kind === 'write') && action.recursive && !action.recursiveVerified) return hard('recursive file operation needs verification', action);
     if (action.kind === 'delete' && ((!action.workspace && !action.regularFile) || action.workspaceRoot || (action.recursive && !action.regularFile && !action.recursiveVerified) || action.target?.actual === action.target?.lexical && win.parse(action.target.actual).root === action.target.actual)) {
-      return { decision: 'review', reason: 'delete target or recursive delete needs verification', action, tier: 'danger' };
+      return hard('delete target or recursive delete needs verification', action);
     }
-    if (requireWorkspaceOnly && action.target && !action.workspace) return { decision: 'review', reason: 'outside safe workspace', action, tier: 'caution' };
-    if (action.caution) cautionAction ||= action;
+    if (requireWorkspaceOnly && action.target && !action.workspace) facts.push(approvalFact({ tier: 'caution', reason: 'outside safe workspace', action }));
+    if (action.caution) facts.push(approvalFact({ tier: 'caution', reason: action.reason || 'verified workspace developer task', action }));
   }
-  if (cautionAction && requireWorkspaceOnly) return { decision: 'review', reason: 'safe mode requires owner review for a workspace developer task', action: cautionAction, tier: 'caution' };
-  if (cautionAction) return { decision: 'allow', reason: cautionAction.reason || 'verified workspace developer task', action: cautionAction, tier: 'caution' };
-  return { decision: 'allow', reason: 'verified ordinary PowerShell operations', tier: 'safe' };
+  if (!facts.length) facts.push(approvalFact({ tier: 'safe', reason: 'verified ordinary PowerShell operations' }));
+  const verdict = decideApprovalFacts(facts, { riskMode: requireWorkspaceOnly ? 'safe' : 'recommended' });
+  if (verdict.decision === 'review' && verdict.action?.caution && verdict.reason !== 'outside safe workspace')
+    return { ...verdict, reason: 'safe mode requires owner review for a workspace developer task' };
+  return verdict;
 }

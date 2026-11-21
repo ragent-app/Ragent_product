@@ -1,3 +1,4 @@
+import { approvalCheckpoint, approvalFact, approvalFactFromGate, decideApprovalFacts } from './approval-policy.mjs';
 // Gate-side decision logic for the Ragent privileged-approval flow
 // (design §13–§14, Path G). Pure logic, no I/O.
 //
@@ -30,6 +31,10 @@ import { parsePrivilegedSentinel } from './privileged-sentinel.mjs';
 import { classifyRisk, RISK_TIER } from './risk-classifier.mjs';
 import { decideClaudeToolApproval } from './claude-tool-policy.mjs';
 import { assessPosixShellSyntax } from './posix-shell-ast.mjs';
+import { isReadOnlyStdinFilter } from './windows-bash-actions.mjs';
+import { systemPathRootsForPlatform } from './risk-policy.mjs';
+import path from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
 
 export const PRIVILEGED_GATE_DECISION = Object.freeze({
   PASS: 'pass',
@@ -87,8 +92,11 @@ export function isKnownFileGate(approval, toolName = '') {
 
 function requiresOwnerPrompt(approval) {
   const requestClass = trimString(approval?.requestClass);
-  return (trimString(approval?.kind) === 'permissions' && requestClass !== 'tool_invocation')
-    || OWNER_PROMPT_GATE_METHODS.has(trimString(approval?.providerMethod));
+  const method = trimString(approval?.providerMethod);
+  const legacyToolInvocation = !requestClass && method === 'can_use_tool'
+    && Boolean(trimString(approval?.params?.tool_name));
+  return OWNER_PROMPT_GATE_METHODS.has(method)
+    || (trimString(approval?.kind) === 'permissions' && requestClass !== 'tool_invocation' && !legacyToolInvocation);
 }
 
 function codexFileChangeEntries(approval) {
@@ -362,13 +370,11 @@ function decideRiskGateCore(approval, options = {}) {
     return { decision: PRIVILEGED_GATE_DECISION.PASS, reason: 'not an approval request' };
   }
 
-  const gateParams = approval.params || {};
-  if (gateParams.networkApprovalContext || gateParams.network_approval_context || gateParams.additionalPermissions || gateParams.additional_permissions
-      || gateParams.input?.dangerouslyDisableSandbox === true) {
-    const reason = 'additional permissions require owner approval';
-    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason, reasonCode: 'permission_expansion',
-      risk: { tier: RISK_TIER.DANGER, confidence: 'high', reasons: [{ code: 'permission_expansion', message: reason }],
-        signals: { reasons: [reason] } } };
+  const checkpoint = approvalCheckpoint(approval);
+  if (checkpoint) {
+    const reason = checkpoint === 'permission_expansion' ? 'additional permissions require owner approval' : 'permission gate requires owner approval';
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason, reasonCode: checkpoint,
+      risk: { tier: RISK_TIER.DANGER, confidence: 'high', reasons: [{ code: checkpoint, message: reason }], signals: { reasons: [reason] } } };
   }
 
   if (hasAmbiguousCommandArgv(approval)) {
@@ -385,7 +391,7 @@ function decideRiskGateCore(approval, options = {}) {
   const realCommand = sentinel?.valid ? sentinel.realCommand : command;
   const declaredCategory = sentinel?.valid ? trimString(sentinel.declaredCategory) : '';
 
-  const risk = classifyRisk({
+  const riskInput = {
     command: realCommand,
     toolName,
     toolInput,
@@ -394,36 +400,50 @@ function decideRiskGateCore(approval, options = {}) {
     home: options.home,
     declaredCategory,
     riskContext: options.riskContext,
-  });
+  };
+  const legacyRisk = classifyRisk(riskInput);
+  const literalRisk = Array.isArray(options.literalArgv) && !sentinel?.valid
+    ? classifyRisk({ ...riskInput, literalArgv: options.literalArgv }) : null;
+  // Text analysis remains an additive backstop: argv facts may not downgrade
+  // any independently detected danger, privilege need or unresolved effect.
+  const rank = { safe: 0, caution: 1, danger: 2 };
+  const legacyStricter = !literalRisk || (rank[legacyRisk.tier] ?? 2) > (rank[literalRisk.tier] ?? 2)
+    || ((rank[legacyRisk.tier] ?? 2) === (rank[literalRisk.tier] ?? 2)
+      && ((legacyRisk.facts?.unknownProgram && !literalRisk.facts?.unknownProgram)
+        || (legacyRisk.signals?.complex && !literalRisk.signals?.complex)));
+  const selectedRisk = legacyStricter ? legacyRisk : literalRisk;
+  const risk = literalRisk ? { ...selectedRisk,
+    signals: { ...selectedRisk.signals,
+      needsPrivilegedExecution: Boolean(legacyRisk.signals?.needsPrivilegedExecution || literalRisk.signals?.needsPrivilegedExecution),
+      autoExecute: selectedRisk.tier !== RISK_TIER.DANGER && selectedRisk.signals?.autoExecute === true } } : legacyRisk;
 
   const reasonText = `risk ${risk.tier}: ${(risk.signals?.reasons || []).join('; ') || 'no reason'}`;
 
+  // Capability requests require owner review even if their payload resembles
+  // an ordinary file tool or file change.
+  if (OWNER_PROMPT_GATE_METHODS.has(trimString(approval.providerMethod))) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      reason: `${reasonText}; permission gate requires owner approval`, command, risk };
+  }
+
   const claudeToolDecision = decideClaudeToolApproval(approval, { riskMode });
   if (claudeToolDecision) return { ...claudeToolDecision, command, risk: claudeToolDecision.risk };
+
+  if (requiresOwnerPrompt(approval)) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      reason: `${reasonText}; permission gate requires owner approval`, command, risk };
+  }
 
   const codexFileChange = classifyCodexFileChangeRisk(approval, options);
   if (codexFileChange) {
     const fileRisk = codexFileChange.risk;
     const fileReason = `risk ${fileRisk.tier}: ${(fileRisk.signals?.reasons || []).join('; ') || 'file change'}`;
-    if (!codexFileChange.complete || fileRisk.tier === RISK_TIER.DANGER
-        || fileRisk.signals?.needsPrivilegedExecution === true
-        || (fileRisk.tier === RISK_TIER.CAUTION && riskMode === 'safe')) {
+    const fileVerdict = decideApprovalFacts([approvalFact({ tier: fileRisk.tier, complete: codexFileChange.complete, reason: fileReason })], { riskMode });
+    if (fileVerdict.decision === 'review' || fileRisk.signals?.needsPrivilegedExecution === true) {
       return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${fileReason}; Codex file change requires owner review`, command: '', risk: fileRisk,
         ...(!codexFileChange.complete ? { decisionClass: 'review_needed', reasonCode: 'file_change_incomplete' } : {}) };
     }
     return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: fileReason, command: '', risk: fileRisk };
-  }
-
-  // A permissions request grants capability rather than asking to execute the
-  // command represented in its payload. Command risk alone cannot authorize
-  // that grant, so keep all such provider shapes on the owner path.
-  if (requiresOwnerPrompt(approval) && !isKnownFileGate(approval, toolName)) {
-    return {
-      decision: PRIVILEGED_GATE_DECISION.PROMPT,
-      reason: `${reasonText}; permission gate requires owner approval`,
-      command,
-      risk,
-    };
   }
 
   // Known file tools have no shell command to route through the privileged
@@ -443,7 +463,7 @@ function decideRiskGateCore(approval, options = {}) {
           risk,
         };
       }
-      if (risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
+      if (decideApprovalFacts([approvalFact({ tier: risk.tier, reason: reasonText })], { riskMode }).decision === 'review') {
         return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command: '', risk };
       }
       return { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: reasonText, command: '', risk };
@@ -462,8 +482,11 @@ function decideRiskGateCore(approval, options = {}) {
       decisionClass: 'review_needed', reasonCode: 'command_semantics_unknown' };
   }
 
-  if (!sentinel?.valid && risk.tier === RISK_TIER.CAUTION && riskMode === 'safe') {
-    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; safe mode requires owner approval`, command, risk };
+  const verdict = decideApprovalFacts([approvalFact({ tier: risk.tier, reason: reasonText })], { riskMode });
+  if (!sentinel?.valid && risk.tier !== RISK_TIER.DANGER && risk.signals?.needsPrivilegedExecution !== true
+      && verdict.decision === 'review') {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: `${reasonText}; ${risk.tier === RISK_TIER.CAUTION ? 'safe mode requires owner approval' : 'command risk requires context review'}`, command, risk,
+      ...(risk.tier === RISK_TIER.CAUTION ? {} : { decisionClass: 'review_needed', reasonCode: 'command_risk_unknown' }) };
   }
 
   // A declared managed action must never auto-allow its provider shell just
@@ -519,36 +542,271 @@ export function decideRiskGate(approval, options = {}) {
   return annotateGateDecision(decideRiskGateCore(approval, options));
 }
 
+// Verify literal effects using a caller-validated local Run context. This
+// performs filesystem metadata checks and does not authorize a shell command.
+export async function verifyPosixPathEffects({ context, cwd, effects } = {}) {
+  const root = context?.trustedWorkspaceRoot;
+  const within = (target, base) => {
+    const relative = path.posix.relative(base, target);
+    return relative === '' || (relative !== '..' && !relative.startsWith('../') && !path.posix.isAbsolute(relative));
+  };
+  // Default macOS volumes commonly fold case and Unicode spelling. Treat
+  // either spelling as protected while keeping workspace admission strict.
+  const protectionKey = value => context.platform === 'darwin' ? value.normalize('NFD').toLowerCase() : value;
+  const withinProtected = (target, base) => within(protectionKey(target), protectionKey(base));
+  const sensitive = /^(?:\.env(?:\..*)?|\.git|\.ssh|\.gnupg|\.aws|\.azure|\.kube|\.ragent|\.config|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9_]+|.*(?:credential|secret|password|token).*|.*\.(?:pem|key|p12|pfx|jks|keystore))$/i;
+  let verified = context && ['linux', 'darwin'].includes(context.platform)
+    && typeof root === 'string' && path.posix.isAbsolute(root)
+    && typeof cwd === 'string' && path.posix.isAbsolute(cwd)
+    && Array.isArray(context.protectedRoots) && Array.isArray(effects) && effects.length > 0 && effects.length <= 128;
+  let verifiedCwd = '';
+  try {
+    if (!verified) throw new Error('invalid scope');
+    const lexicalRoot = path.posix.resolve(root), lexicalCwd = path.posix.resolve(cwd);
+    const canonicalRoot = await realpath(lexicalRoot), canonicalCwd = await realpath(lexicalCwd);
+    verifiedCwd = canonicalCwd;
+    const readOnly = effects.every(effect => effect.kind === 'read' || effect.kind === 'list');
+    if ((!within(lexicalCwd, lexicalRoot) || !within(canonicalCwd, canonicalRoot)) && !readOnly) throw new Error('cwd outside workspace');
+    const roots = [...context.protectedRoots, ...systemPathRootsForPlatform('posix'),
+      ...(Array.isArray(context.systemPathRoots) ? context.systemPathRoots : [])];
+    const protectedRoots = await Promise.all(roots.map(async entry => {
+      const value = typeof entry === 'string' ? entry : entry?.path;
+      if (typeof value !== 'string' || !path.posix.isAbsolute(value)) throw new Error('invalid protected root');
+      const lexical = path.posix.resolve(value); let current = lexical; const suffix = [];
+      for (;;) {
+        try { return { lexical, canonical: path.posix.resolve(await realpath(current), ...suffix) }; }
+        catch (error) {
+          if (error?.code !== 'ENOENT') throw error;
+          const parent = path.posix.dirname(current);
+          if (parent === current) throw error;
+          suffix.unshift(path.posix.basename(current)); current = parent;
+        }
+      }
+    }));
+    if (protectedRoots.some(item => withinProtected(lexicalCwd, item.lexical) || withinProtected(canonicalCwd, item.canonical))) throw new Error('cwd in protected scope');
+    const inputTargets = new Set(effects.filter(effect => ['read', 'list'].includes(effect.kind)).map(effect => protectionKey(path.posix.resolve(lexicalCwd, effect.path))));
+    const outputTargets = effects.filter(effect => ['write', 'append'].includes(effect.kind)).map(effect => protectionKey(path.posix.resolve(lexicalCwd, effect.path)));
+    if (new Set(outputTargets).size !== outputTargets.length || outputTargets.some(target => inputTargets.has(target))) throw new Error('overlapping file targets');
+    for (const effect of effects) {
+      const operand = effect.path;
+      if (typeof operand !== 'string' || !operand || operand.startsWith('//') || (effect.kind !== 'list' && operand.endsWith('/')) || operand.split('/').includes('..')
+          || operand.split('/').filter(Boolean).length > 64) throw new Error('invalid target');
+      const target = path.posix.resolve(lexicalCwd, operand);
+      const outside = !within(target, lexicalRoot);
+      if ((outside && (!readOnly || typeof process.getuid !== 'function')) || target.split('/').some(part => sensitive.test(part.normalize('NFD')))
+          || protectedRoots.some(item => withinProtected(target, item.lexical))) throw new Error('protected target');
+      let current = '/'; const parts = target.split('/').filter(Boolean);
+      for (let i = 0; i < parts.length; i += 1) {
+        current = path.posix.join(current, parts[i]);
+        let info;
+        try { info = await lstat(current); }
+        catch (error) {
+          if (error?.code === 'ENOENT' && i === parts.length - 1 && ['write', 'append'].includes(effect.kind)) break;
+          throw error;
+        }
+        if (info.isSymbolicLink() || (i < parts.length - 1 && !info.isDirectory())
+            || (i === parts.length - 1 && (effect.kind === 'list' ? !(info.isFile() || info.isDirectory()) || (info.isFile() && info.nlink !== 1) : (!info.isFile() || info.nlink !== 1)))
+            || (outside && (i === parts.length - 1 ? info.uid !== process.getuid() : info.uid !== 0 && info.uid !== process.getuid()))) throw new Error('unsafe target');
+      }
+      const parent = await realpath(path.posix.dirname(target));
+      const canonical = path.posix.join(parent, path.posix.basename(target));
+      if ((!outside && !within(canonical, canonicalRoot)) || protectedRoots.some(item => withinProtected(canonical, item.canonical))) throw new Error('canonical target outside scope');
+    }
+  } catch { verified = false; }
+  return { verified, cwd: verifiedCwd };
+}
+
 // Asynchronous AST path for real runs; the synchronous API stays compatible
 // with existing callers. The original hard decision is never weakened.
 export async function decideRiskGateWithSyntax(approval, options = {}) {
   const initial = decideRiskGate(approval, options);
   const { command, toolName } = readGateToolContext(approval);
+  const params = approval?.params || {};
+  const rawCommand = toolName === 'Bash' ? params.input?.command : params.command;
+  const rawStringValid = typeof rawCommand !== 'string' || (!rawCommand.includes('\0')
+    && !/[^ \t\r\n]/.test(rawCommand.slice(0, rawCommand.length - rawCommand.trimStart().length))
+    && !/[^ \t\r\n]/.test(rawCommand.slice(rawCommand.trimEnd().length)));
+  // A literal listing of a protected path is still owner-approved, but does
+  // not need the privileged executor merely because the path is protected.
+  // Any independent danger, capability grant, or unsupported syntax keeps its
+  // original decision. This never establishes executable or object identity.
+  if (command && rawStringValid && (!toolName || toolName === 'Bash') && initial.decision === PRIVILEGED_GATE_DECISION.ACCUMULATE
+      && initial.risk?.signals?.reasons?.length === 1
+      && initial.risk.signals.reasons[0] === 'targets Ragent control-plane path'
+      && !parsePrivilegedSentinel(command)?.isSentinel
+      && !initial.risk.signals.sudo
+      && options.riskContext?.schemaVersion === 1
+      && typeof options.riskContext.trustedWorkspaceRoot === 'string'
+      && options.riskContext.trustedWorkspaceRoot.length > 0
+      && Array.isArray(options.riskContext.protectedRoots)
+      && ['linux', 'darwin'].includes(options.riskContext?.platform)) {
+    const syntax = await assessPosixShellSyntax(typeof rawCommand === 'string' ? rawCommand : command);
+    if (syntax.metadataListing) return annotateGateDecision({
+      ...initial, decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'ask',
+      reasonCode: 'protected_metadata_listing',
+      reason: 'listing a protected control-plane path requires owner approval in the existing sandbox',
+      op: undefined,
+      risk: { ...initial.risk,
+        reasons: [{ code: 'protected_metadata_listing', message: 'protected control-plane metadata listing requires owner approval' }],
+        signals: { ...initial.risk.signals, needsPrivilegedExecution: false,
+          reasons: ['protected control-plane metadata listing requires owner approval'] },
+        originalScopeReasons: initial.risk.reasons },
+      syntaxFacts: { parser: 'mvdan-sh-wasm', complete: syntax.complete, reasonCode: syntax.reasonCode,
+        nodeTypes: syntax.nodeTypes || [], commandCount: syntax.commandCount || 0, metadataListing: true },
+    }, 'posix_ast');
+  }
+  const unresolvedComposite = initial.decisionClass === 'ask' && initial.risk?.tier === RISK_TIER.CAUTION
+    && initial.risk?.signals?.needsPrivilegedExecution !== true
+    && initial.risk?.reasons?.length === 1 && initial.risk.reasons[0].code === 'composite_unanalyzed';
   if (!command || (toolName && toolName !== 'Bash') || initial.reasonCode === 'command_arguments_ambiguous'
-      || initial.decisionClass === 'ask'
+      || (initial.decisionClass === 'ask' && !unresolvedComposite)
       || initial.decisionClass === 'deny') return initial;
-  const syntax = await assessPosixShellSyntax(command);
+  if ([params.approvalKind, params.approval_kind].some(kind => kind != null && kind !== 'command')) {
+    return annotateGateDecision({ ...initial, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      decisionClass: 'ask', reasonCode: 'approval_kind_requires_review',
+      reason: 'approval kind requires owner review', op: undefined }, 'posix_ast');
+  }
+  if (!rawStringValid || (typeof rawCommand !== 'string' && !Array.isArray(rawCommand))) {
+    return annotateGateDecision({ ...initial, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      decisionClass: 'review_needed', reasonCode: 'shell_input_ambiguous',
+      reason: 'shell input requires context review', op: undefined }, 'posix_ast');
+  }
+  const syntax = await assessPosixShellSyntax(typeof rawCommand === 'string' ? rawCommand : command);
   const syntaxFacts = { parser: 'mvdan-sh-wasm', complete: syntax.complete, reasonCode: syntax.reasonCode,
-    nodeTypes: syntax.nodeTypes || [], commandCount: syntax.commandCount || 0 };
+    nodeTypes: syntax.nodeTypes || [], commandCount: syntax.commandCount || 0,
+    effectCount: syntax.effects?.length || 0, effectKinds: [...new Set((syntax.effects || []).map(effect => effect.kind))] };
   if (!syntax.complete) return annotateGateDecision({ ...initial, syntaxFacts, decision: PRIVILEGED_GATE_DECISION.PROMPT,
     decisionClass: 'review_needed', reasonCode: syntax.reasonCode,
     reason: 'shell syntax needs context review' }, 'posix_ast');
-  const decisions = syntax.commands.map(part => {
+  const decisions = syntax.commands.map((part, index) => {
     const params = approval.params || {};
     const rewritten = toolName === 'Bash'
       ? { ...approval, params: { ...params, input: { ...params.input, command: part } } }
       : { ...approval, params: { ...params, command: part } };
-    return decideRiskGate(rewritten, options);
+    return decideRiskGate(rewritten, { ...options, literalArgv: syntax.commandFacts?.[index]?.argv });
   });
-  const hard = decisions.find(item => item.decisionClass === 'deny' || item.decisionClass === 'ask');
+  const denied = decisions.find(item => item.decisionClass === 'deny');
+  if (denied) return annotateGateDecision({ ...denied, command, syntaxFacts }, 'posix_ast');
+  const hard = decisions.find(item => item.decisionClass === 'ask');
   if (hard) return annotateGateDecision({ ...hard, decision: PRIVILEGED_GATE_DECISION.PROMPT,
-    reason: 'a shell command requires approval', command }, 'posix_ast');
-  const unknown = decisions.find(item => item.needsContextReview);
-  if (unknown) return annotateGateDecision({ ...unknown, command, syntaxFacts }, 'posix_ast');
+    reason: 'a shell command requires approval', command, op: undefined }, 'posix_ast');
+  // Effects are verified together against the Run's actual cwd and its
+  // admission-time workspace. A failed or incomplete proof keeps review.
+  if (syntax.commandFacts.length > 1 && syntax.commandFacts.some(fact =>
+    ['ls', 'cat', 'head', 'tail'].includes(fact.argv?.[0]) && !fact.boundedRead
+      && !fact.stdinOnly)) {
+    return annotateGateDecision({ ...initial, command, syntaxFacts, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      decisionClass: 'review_needed', reasonCode: 'shell_effects_incomplete',
+      reason: 'shell command effects require context review', op: undefined }, 'posix_ast');
+  }
+  if ((syntax.pipelines || []).some(pipeline => pipeline.recursiveSearch)
+      && (syntax.groups.length !== 1 || syntax.commandFacts.length !== 2 || syntax.effects.length)) {
+    return annotateGateDecision({ ...initial, command, syntaxFacts, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      decisionClass: 'review_needed', reasonCode: 'shell_effects_incomplete',
+      reason: 'recursive search effects require context review', op: undefined }, 'posix_ast');
+  }
+  const effects = [...(syntax.effects || []), ...syntax.commandFacts.flatMap(fact => fact.readEffects)];
+  let requiredCwdGuard = '';
+  const pipelineByCommand = new Map();
+  for (const pipeline of syntax.pipelines || []) for (const index of pipeline.indexes) pipelineByCommand.set(index, pipeline);
+  // Only bounded reads, stdin filters and literal builtins may share a
+  // proof; verified, non-overlapping ordinary output redirects are allowed.
+  if (effects.length && syntax.commandFacts.length > 1) {
+    const unstable = syntax.commandFacts.some((fact, index) => {
+      const builtin = ['echo', 'pwd', 'true', 'false', ':'].includes(fact.argv?.[0]);
+      const pipeline = pipelineByCommand.get(index);
+      const filter = pipeline?.bounded && pipeline.indexes[0] !== index && fact.stdinOnly;
+      return !builtin && !fact.boundedRead && !filter;
+    });
+    if (unstable) return annotateGateDecision({ ...initial, command, syntaxFacts,
+      decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+      reasonCode: 'shell_effects_incomplete', reason: 'shell effects require context review', op: undefined }, 'posix_ast');
+  }
+  if (syntax.effects?.length) {
+    const unproved = syntax.commandFacts.some((fact, index) => {
+      const builtin = ['echo', 'pwd', 'true', 'false', ':'].includes(fact.argv?.[0]);
+      const pipeline = pipelineByCommand.get(index);
+      const filter = fact.stdinOnly;
+      const pipelineFilter = pipeline?.bounded && pipeline.indexes[0] !== index && filter;
+      if (!builtin && !fact.boundedRead && !pipelineFilter && !(filter && fact.effects.some(effect => effect.kind === 'read'))) return true;
+      return fact.effects.some(effect => effect.kind === 'read'
+        ? !filter || Boolean(pipeline) || fact.boundedRead
+        : !builtin && !fact.boundedRead && !pipelineFilter && !filter)
+        || fact.effects.some((effect, n) => fact.effects.findIndex(other => (other.kind === 'read') === (effect.kind === 'read')) !== n);
+    });
+    if (unproved) return annotateGateDecision({ ...initial, command, syntaxFacts, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+      decisionClass: 'review_needed', reasonCode: 'shell_effects_incomplete', reason: 'shell effects require context review', op: undefined }, 'posix_ast');
+  }
+  if (effects.length) {
+    const context = options.riskContext;
+    const root = context?.trustedWorkspaceRoot;
+    const params = approval?.params || {};
+    const input = params.input && typeof params.input === 'object' ? params.input : {};
+    const foreignEnvironment = options.localExecution !== true
+      || [params, input].some(source => ['environmentId', 'environment_id', 'executionEnvironment', 'execution_environment'].some(key => Object.hasOwn(source, key)));
+    const unsupportedApprovalKind = [params.approvalKind, params.approval_kind].some(kind => kind != null && kind !== 'command');
+    // Codex binds cwd to the command execution approval itself. Claude Bash
+    // can persist cwd across invocations, so the Run's initial cwd is not an
+    // attestation of the shell's current directory.
+    const codexCwd = approval?.providerMethod === 'item/commandExecution/requestApproval'
+      && approval?.kind === 'command' && typeof params.command === 'string'
+      && ['threadId', 'turnId', 'itemId'].every(key => typeof params[key] === 'string' && params[key].trim())
+      && typeof params.cwd === 'string' && path.posix.isAbsolute(params.cwd) ? params.cwd : '';
+    const claudeCwd = options.claudeCwdGuardCandidate === true && approval?.providerMethod === 'can_use_tool'
+      && approval?.kind === 'command' && toolName === 'Bash'
+      && typeof params.tool_use_id === 'string' && params.tool_use_id
+      && typeof rawCommand === 'string' && typeof options.cwd === 'string' && path.posix.isAbsolute(options.cwd)
+      && Object.keys(input).every(key => ['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
+      && (input.run_in_background === undefined || input.run_in_background === false)
+      && (input.dangerouslyDisableSandbox === undefined || input.dangerouslyDisableSandbox === false)
+      ? options.cwd : '';
+    const cwdOverride = ['cwd', 'working_directory', 'workingDirectory', 'workdir', 'work_dir']
+      .some(key => Object.hasOwn(input, key))
+      || ['working_directory', 'workingDirectory', 'workdir', 'work_dir']
+        .some(key => Object.hasOwn(params, key))
+      || (Object.hasOwn(params, 'cwd') && !codexCwd);
+    const claudeInputUnbound = approval?.providerMethod === 'can_use_tool' && (!claudeCwd
+      || Object.keys(input).some(key => !['command', 'description', 'timeout', 'run_in_background', 'dangerouslyDisableSandbox'].includes(key))
+      || (input.run_in_background !== undefined && input.run_in_background !== false)
+      || (input.dangerouslyDisableSandbox !== undefined && input.dangerouslyDisableSandbox !== false));
+    const cwd = codexCwd || claudeCwd || root;
+    const eligible = context?.schemaVersion === 1 && ['linux', 'darwin'].includes(context.platform)
+      && typeof root === 'string' && path.posix.isAbsolute(root)
+      && typeof cwd === 'string' && path.posix.isAbsolute(cwd)
+      && !foreignEnvironment && !unsupportedApprovalKind && !cwdOverride && !claudeInputUnbound
+      && (codexCwd || claudeCwd || effects.every(effect => typeof effect.path === 'string' && path.posix.isAbsolute(effect.path)))
+      && Array.isArray(context.protectedRoots) && effects.length <= 128;
+    const proof = eligible ? await verifyPosixPathEffects({ context, cwd, effects }) : { verified: false };
+    const verified = proof.verified;
+    const verifiedCwd = proof.cwd;
+    if (!verified) {
+      const cwdMissing = !codexCwd && !claudeCwd && effects.some(effect => typeof effect.path === 'string' && !path.posix.isAbsolute(effect.path));
+      return annotateGateDecision({ ...initial, command, syntaxFacts,
+        decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+        reasonCode: cwdMissing ? 'shell_cwd_unverified' : 'shell_effect_scope_unverified',
+        reason: cwdMissing ? 'shell working directory requires verification' : 'shell file targets require scope review', op: undefined }, 'posix_ast');
+    }
+    if (claudeCwd && effects.some(effect => !path.posix.isAbsolute(effect.path))) {
+      requiredCwdGuard = verifiedCwd;
+    }
+  }
   if (!syntax.classifiedLiterals?.every(Boolean)) return annotateGateDecision({ ...initial, command, syntaxFacts,
     decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
     reasonCode: 'command_semantics_unknown', reason: 'shell command semantics require context review' }, 'posix_ast');
+  const hasWrite = effects.some(effect => ['write', 'append'].includes(effect.kind));
+  const aggregate = decideApprovalFacts([...decisions.map(approvalFactFromGate), ...(hasWrite ? [approvalFact({ tier: 'safe', reason: 'in-project file edit' })] : [])], { riskMode: options.riskMode === 'conservative-auto' ? 'safe' : options.riskMode });
+  if (aggregate.decision === 'review') return annotateGateDecision({ ...(aggregate.item || initial),
+    decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+    reasonCode: aggregate.item?.reasonCode || 'command_risk_unknown',
+    reason: aggregate.reason || 'shell command risk requires context review', command, syntaxFacts, op: undefined }, 'posix_ast');
+  const riskReasons = decisions.flatMap(item => item.risk?.reasons || []);
+  if (hasWrite) riskReasons.push({ code: 'file_edit_project', message: 'in-project file edit' });
+  const finalRisk = { ...(aggregate.item?.risk || initial.risk), tier: aggregate.tier,
+    reasons: riskReasons, signals: { ...(aggregate.item?.risk?.signals || initial.risk?.signals),
+      composite: false, reasons: riskReasons.map(reason => reason.message) } };
   return annotateGateDecision({ ...initial, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
     decisionClass: 'allow', reasonCode: 'shell_commands_classified',
-    reason: 'all literal shell commands independently classified', command, syntaxFacts }, 'posix_ast');
+    reason: 'all literal shell commands independently classified', command, syntaxFacts,
+    requiredCwdGuard: requiredCwdGuard || undefined,
+    risk: finalRisk }, 'posix_ast');
 }

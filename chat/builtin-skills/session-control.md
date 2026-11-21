@@ -22,6 +22,7 @@ Session lifecycle and conversation:
 
 History and projections:
 
+- To read this session's history or the currently bound Run status, prefer `ragent_read_current_session` when it appears in this turn's tool list. Use `events.list`, `events.body`, or `run.status`; it accepts no session ID, Run ID, URL, or path. When the tool is unavailable and the current session API is authorized, use the CLI GET fallback for history, for example in a POSIX shell: `ragent api GET "/api/sessions/$RAGENT_SESSION_ID/events?direction=latest&limit=20"`. In PowerShell use `$env:RAGENT_SESSION_ID`. If access is denied, report the limitation and do not search provider directories to bypass it.
 - Timeline reads are `GET /api/sessions/:id/events`, `.../events/delta`, `.../events/wait`, `.../events/blocks/:startSeq-:endSeq`, and `.../events/:seq/body`; use cursors/pagination and fetch cold bodies only when needed. Derived reads are `GET /api/sessions/:id/{projection,audit-projection,run-sheet,source-context}` and `GET .../responses/:responseId`.
 
 Runs, collaboration, and deferred wake:

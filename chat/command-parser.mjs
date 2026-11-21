@@ -461,9 +461,16 @@ export function parseCommandFacts(command, options = {}) {
   // 段级解析只做一层（展示/召回用），避免嵌套复合命令无限递归。
   const segmentDepth = Number.isInteger(options._segmentDepth) ? options._segmentDepth : 0;
 
-  const { tokens, composite } = tokenizeCommand(text);
+  const legacy = tokenizeCommand(text);
+  const literalArgv = options.literalArgv;
+  const useLiteral = Array.isArray(literalArgv) && literalArgv.length > 0
+    && literalArgv.every(value => typeof value === 'string' && !value.includes('\0'))
+    && /^[A-Za-z0-9_.+-]+$/.test(literalArgv[0])
+    && !['env', 'command', 'nohup', 'nice', 'timeout', 'exec', 'sudo'].includes(literalArgv[0]);
+  const tokens = useLiteral ? [...literalArgv] : legacy.tokens;
+  const composite = legacy.composite;
   const { remaining, wrappers, environmentAssignments } = unwrapCommand(tokens);
-  const unwrappedCommand = joinTokens(remaining);
+  const unwrappedCommand = useLiteral && wrappers.length === 0 && environmentAssignments.length === 0 ? text : joinTokens(remaining);
   const stripped = stripSudo(remaining);
   const program = stripped.program;
   const rest = stripped.rest;

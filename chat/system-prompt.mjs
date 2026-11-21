@@ -24,6 +24,8 @@ import { buildSharedStartupDefaultsSection } from './shared-startup-defaults.mjs
 
 const SYSTEM_STARTUP_CONTEXT_ASSET = 'system/startup-context.md';
 
+const CURRENT_SESSION_READ_GUIDANCE = `To read this session's history or the currently bound Run status, prefer \`ragent_read_current_session\` when it appears in this turn's tool list. Use \`events.list\`, \`events.body\`, or \`run.status\`; it accepts no session ID, Run ID, URL, or path. When the tool is unavailable and the current session API is authorized, use the CLI GET fallback for history, for example in a POSIX shell: \`ragent api GET "/api/sessions/$RAGENT_SESSION_ID/events?direction=latest&limit=20"\`. In PowerShell use \`$env:RAGENT_SESSION_ID\`. If access is denied, report the limitation and do not search provider directories to bypass it.`;
+
 /**
  * Keep the live system prompt focused on routing decisions and stable
  * endpoint families. Detailed schemas remain in the API responses and CLI
@@ -53,6 +55,7 @@ Session lifecycle and conversation:
 
 History and projections:
 
+- ${CURRENT_SESSION_READ_GUIDANCE}
 - Timeline reads are \`GET /api/sessions/:id/events\`, \`.../events/delta\`, \`.../events/wait\`, \`.../events/blocks/:startSeq-:endSeq\`, and \`.../events/:seq/body\`; use cursors/pagination and fetch cold bodies only when needed. Derived reads are \`GET /api/sessions/:id/{projection,audit-projection,run-sheet,source-context}\` and \`GET .../responses/:responseId\`.
 
 Runs, collaboration, and deferred wake:
@@ -180,7 +183,7 @@ export async function buildSystemContext(options = {}) {
   })).trim();
 
   context += builtinSkillReadAvailable
-    ? `\n\n## Ragent capabilities\nUse the authorized ragent_organization_read tool with action skills.list; when details are needed, call action skills.read with args {id, expectedHash: index.contentHash} using the selected index entry. A skill or index does not grant authority. If unavailable, report the limitation; never bypass a denial.`
+    ? `\n\n## Ragent capabilities\nUse the authorized ragent_organization_read tool with action skills.list; when details are needed, call action skills.read with args {id, expectedHash: index.contentHash} using the selected index entry. A skill or index does not grant authority. If unavailable, report the limitation; never bypass a denial. ${CURRENT_SESSION_READ_GUIDANCE}`
     : `\n\n${sessionControlSections.api}`;
 
   if (includeSharedStartupDefaults) {

@@ -1,7 +1,7 @@
-# 清洗说明
+# Cleanup notes
 
-- 已按手机号去重，`13800138000` 合并为 1 条。
-- 日期统一为 `YYYY-MM-DD`。
-- 已将“客户信息”拆分为“客户”和“手机号”。
-- 新增 `省`、`市`、`需人工确认` 三列。
-- `赵六` 的地址由文本推断，建议人工复核。
+- Deduplicated by phone number, merging `13800138000` into one record.
+- Standardized dates to `YYYY-MM-DD`.
+- Split the `Customer info` column into `Customer` and `Phone`.
+- Added the `Province`, `City`, and `Needs review` columns.
+- The address for `Zhao Liu` was inferred from text and should be reviewed manually.

@@ -489,6 +489,19 @@ export function createRunProjectionService({
           stableTimestamp,
         );
       let normalized = normalizeRunEvents(projectionRun, parsedEvents);
+      // Pending records are produced by the gate; provider frames are not a
+      // source of internal policy explanations. Preserve old events when no
+      // trusted pending record is available.
+      const gatePending = approvalRequestInfo?.approvalId && Array.isArray(run?.appServerPendingApprovals)
+        ? run.appServerPendingApprovals.find(entry => entry?.approvalId === approvalRequestInfo.approvalId) : null;
+      if (gatePending && typeof gatePending.gateReason === 'string' && gatePending.gateReason) {
+        normalized = normalized.map(event => {
+          if (event?.type !== 'approval_request' || event.kind !== 'command') return event;
+          const explanation = event.explanation ? { ...event.explanation, reason: gatePending.gateReason } : null;
+          if (explanation) delete explanation.riskCode;
+          return { ...event, reason: gatePending.gateReason, ...(explanation ? { explanation } : {}) };
+        });
+      }
       if (approvalRequestInfo?.approvalId) {
         const group = equivalentPendingApprovals(run, approvalRequestInfo.approvalId);
         if (group.length > 1 && group[0].approvalId !== approvalRequestInfo.approvalId
@@ -766,9 +779,12 @@ export function createRunProjectionService({
   }
 
   function approvalRiskForPayload(payload, run, requestInfo = null) {
-    const explicit = readRiskAuditInfo(payload);
-    if (explicit.tier || explicit.policyVersion || explicit.reasonCodes.length > 0) return explicit;
     const info = requestInfo || readApprovalRequestInfo(payload);
+    // Native request frames are provider-controlled and cannot assert gate audit facts.
+    if (!info) {
+      const explicit = readRiskAuditInfo(payload);
+      if (explicit.tier || explicit.policyVersion || explicit.reasonCodes.length > 0) return explicit;
+    }
     const approvalId = trimString(info?.approvalId) || trimString(payload?.approvalId);
     const pending = approvalId && Array.isArray(run?.appServerPendingApprovals)
       ? run.appServerPendingApprovals.find(entry => trimString(entry?.approvalId) === approvalId) : null;

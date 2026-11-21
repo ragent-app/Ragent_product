@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import { permissionExpansion } from './approval-policy.mjs';
 import { WORKBENCH_EXECUTION_POLICY, applyWorkbenchRunPolicy, buildWorkbenchCodexEnvironment } from '../lib/workbench-execution-policy.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'child_process';
 import { accessSync, constants, rmSync, statSync } from 'fs';
 import { createInterface } from 'readline';
 import { PassThrough } from 'node:stream';
-import { dirname, isAbsolute, join, relative, resolve, win32 } from 'path';
+import { dirname, isAbsolute, join, relative, resolve, win32, posix } from 'path';
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import { installWindowsRunCliShim } from './windows-run-cli-shim.mjs';
 import { buildCodexRunShellEnvironment } from './codex-shared-environment.mjs';
@@ -137,10 +138,9 @@ import {
   isUserFacingGateKind,
 } from './privileged-gate.mjs';
 import { decideWindowsApproval } from './windows-approval-gate.mjs';
-import { classifyRisk } from './risk-classifier.mjs';
 import { buildClaudeWindowsRipgrepBridge, buildWindowsSelectStringGlobBridge, verifyCodexWindowsBoundSearchApproval } from './windows-ripgrep-bridge.mjs';
 import { buildWindowsWildcardNameBridge, verifyCodexWindowsWildcardNameApproval } from './windows-wildcard-list-bridge.mjs';
-import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
+import { buildClaudePosixCwdTransition, buildClaudePosixRipgrepBridge, buildClaudePosixFileToolBridge, observeClaudePosixCwdResult, buildClaudeWindowsDefaultFileToolBridge, buildClaudeWindowsRelativeOperationBridge } from './windows-claude-relative-operation-bridge.mjs';
 import { buildClaudeWindowsInstallBridge, checkWindowsInstallBridgeReadiness } from './windows-auto-install-bridge.mjs';
 import { buildWindowsCliAssetBridge, buildWindowsCliReadBridge } from './windows-cli-read-bridge.mjs';
 import { needsWindowsElevationGuidance, windowsElevationGuidance, shouldInstallWindowsElevationHook } from './windows-elevation-guidance.mjs';
@@ -163,7 +163,6 @@ import {
   readRunSessionControlToken,
   readRunSessionControlRenewalToken,
   runSessionControlRenewalCapabilityPath,
-  runReviewCapabilityPath,
   readRunSpoolRecords,
   streamRunSpoolRecords,
   sessionBrowserProfileDir,
@@ -1843,44 +1842,6 @@ function writeInitialClaudeBidiMessages(proc, state) {
   writeClaudeBidiMessage(proc, buildClaudeBidiInitializeMessage(state.initializeRequestId));
 }
 
-// Resolve a refresh at the stdout reader, independently of the ordered approval
-// queue that is waiting for it. Only the matching native control response is used.
-function consumeClaudeMcpRefresh(state, parsed) {
-  const pending = state?.mcpRefresh;
-  const control = pending && readClaudeBidiControlResponse(parsed);
-  if (!control || control.requestId !== pending.requestId) return false;
-  const servers = control.response?.response?.mcpServers;
-  if (control.success && Array.isArray(servers)) state.claudeMcpInventory = servers.map(server => ({
-    name: server?.name, status: server?.status, serverInfo: server?.serverInfo,
-    tools: Array.isArray(server?.tools) ? server.tools.map(tool => ({ name: tool?.name, description: tool?.description })) : null,
-  }));
-  pending.finish();
-  return true;
-}
-
-function refreshClaudeMcpInventory(proc, state) {
-  if (!state?.turnActive || state.terminalSeen || state.interruptSent || !proc?.stdin?.writable) return Promise.resolve();
-  if (state.mcpRefresh) return state.mcpRefresh.promise;
-  const requestId = nextClaudeBidiControlRequestId(state);
-  let resolve;
-  const promise = new Promise(done => { resolve = done; });
-  const pending = { requestId, promise, finish: null, turnSequence: state.approvalTurnSequence };
-  const finish = () => {
-    if (state.mcpRefresh !== pending) return;
-    state.mcpRefresh = null;
-    clearTimeout(timer);
-    proc.removeListener('close', finish);
-    resolve();
-  };
-  pending.finish = finish;
-  const timer = setTimeout(finish, 5000);
-  state.mcpRefresh = pending;
-  proc.once('close', finish);
-  if (!writeClaudeBidiMessage(proc, { type: 'control_request', request_id: requestId,
-    request: { subtype: 'mcp_status' } })) finish();
-  return promise;
-}
-
 function handleClaudeBidiControlResponse(proc, state, parsed) {
   const control = readClaudeBidiControlResponse(parsed);
   if (!control) return false;
@@ -1905,11 +1866,6 @@ function handleClaudeBidiControlResponse(proc, state, parsed) {
     return true;
   }
   if (control.requestId && control.requestId === state.mcpStatusControlId) {
-    const servers = control.response?.response?.mcpServers;
-    state.claudeMcpInventory = control.success && Array.isArray(servers) ? servers.map(server => ({
-      name: server?.name, status: server?.status, serverInfo: server?.serverInfo,
-      tools: Array.isArray(server?.tools) ? server.tools.map(tool => ({ name: tool?.name, description: tool?.description })) : null,
-    })) : [];
     if (state.mcpStatusTimer) clearTimeout(state.mcpStatusTimer);
     state.mcpStatusTimer = null;
     state.mcpStatusControlId = '';
@@ -2958,7 +2914,7 @@ function riskAuditFields(value) {
   };
 }
 
-function serializeCodexAppServerApprovalForRun(approval, risk = null) {
+function serializeCodexAppServerApprovalForRun(approval, risk = null, gate = null) {
   if (!approval?.approvalId) return null;
   return {
     approvalId: approval.approvalId,
@@ -2969,6 +2925,9 @@ function serializeCodexAppServerApprovalForRun(approval, risk = null) {
     params: approval.params || {},
     request: approval.request || null,
     ...riskAuditFields(risk),
+    ...(typeof gate?.reason === 'string' ? { gateReason: gate.reason.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 300) } : {}),
+    ...(typeof gate?.reasonCode === 'string' && /^[a-z0-9_]{1,64}$/.test(gate.reasonCode) ? { gateReasonCode: gate.reasonCode } : {}),
+    ...(typeof gate?.reviewInitialReasonCode === 'string' && /^[a-z0-9_]{1,64}$/.test(gate.reviewInitialReasonCode) ? { gateInitialReasonCode: gate.reviewInitialReasonCode } : {}),
     state: 'pending',
     createdAt: nowIso(),
   };
@@ -3018,6 +2977,9 @@ function clearPrivilegedBatchOpenIfResolved(state) {
 // privileged gate so bypass-mode sessions stay unchanged. Pure dispatch — the
 // gate functions share the {decision, reason, op} contract.
 async function decideRunGate(approval, state) {
+  if (permissionExpansion(approval)) {
+    return { decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'ask', reasonCode: 'permission_expansion', reason: 'permission expansion requires owner approval' };
+  }
   if (isUserFacingGateKind(approval?.kind || '')) {
     return {
       decision: PRIVILEGED_GATE_DECISION.PASS,
@@ -3047,6 +3009,12 @@ async function decideRunGate(approval, state) {
       projectRoot: state.projectRoot || '',
       home: state.home || '',
       riskContext: state.riskContext || null,
+      localExecution: !state.executionEnvironment,
+      claudeCwdGuardCandidate: process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY
+        && state.turnActive === true && state.riskContextValid === true
+        && state.interactionMode !== 'plan' && state.permissionMode !== 'plan'
+        && state.approvalTurnSequence > 0 && Boolean(state.requestId && state.approvalProcessId)
+        && !state.executionEnvironment,
     });
   }
   return decidePrivilegedGate(approval, {
@@ -3067,7 +3035,9 @@ async function recordGateDecision(runId, state, approval, provider, gateDecision
     type: 'ragent.approval_decision', runId, approvalId: approval.approvalId, provider,
     providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
     decisionClass, reasonCode: gateDecision.reasonCode || (allowed ? 'ordinary_operation' : 'approval_required'),
-    stage: gateDecision.reviewStatus ? 'ragent_context_review' : 'ragent_rules',
+    ...riskAuditFields(gateDecision.risk),
+    stage: gateDecision.reviewStatus && gateDecision.reviewReasonCode !== 'review_operation_facts_unverified'
+      ? 'ragent_context_review' : 'ragent_rules',
     action: gateDecision.action || (allowed ? 'approved' : unattended ? 'denied' : 'prompted'),
     unattended, reviewStatus: gateDecision.reviewStatus || 'not_requested',
     ...(gateDecision.reviewStatus ? { reviewAdapter: gateDecision.reviewAdapter || '', reviewReasonCode: gateDecision.reviewReasonCode || '',
@@ -3076,147 +3046,10 @@ async function recordGateDecision(runId, state, approval, provider, gateDecision
   } });
 }
 
-async function reviewRunGate(runId, state, approval, gate) {
-  const mcpFacts = gate?.mcpFacts;
-  const unknown = reviewReasonCode => ({ ...gate, reviewStatus: 'unknown', reviewReasonCode });
+function reviewRunGate(_runId, _state, _approval, gate) {
   if (!gate?.needsContextReview) return gate;
-  const unknownTool = ['tool_semantics_unknown', 'windows_unrecognized_request'].includes(gate?.reasonCode)
-    && approval?.providerMethod === 'can_use_tool' && typeof approval.params?.tool_name === 'string'
-    && approval.params?.input && typeof approval.params.input === 'object' && !Array.isArray(approval.params.input);
-  let reviewRisk = gate?.risk;
-  if (unknownTool) {
-    const target = approval.params.input.file_path || approval.params.input.path;
-    if (target !== undefined) {
-      if (typeof target !== 'string' || !target || /[\0\r\n$*?{}]/.test(target)) return unknown('review_target_ambiguous');
-      const targetRisk = classifyRisk({ toolName: 'Write', toolInput: { file_path: target },
-        cwd: state.cwd, projectRoot: state.projectRoot, riskContext: state.riskContext });
-      if (targetRisk.tier === 'danger' || targetRisk.signals?.needsPrivilegedExecution) return unknown('review_target_prohibited');
-      reviewRisk = targetRisk;
-    } else reviewRisk = { tier: 'unknown', signals: { targetScope: 'unknown' } };
-  }
-  if (!mcpFacts && !unknownTool && ['tool_semantics_unknown', 'windows_unrecognized_request'].includes(gate.reasonCode)) return unknown('review_tool_input_missing');
-  if (!mcpFacts && !unknownTool && !['command_semantics_unknown', 'windows_syntax_unsupported', 'shell_syntax_dynamic_or_unsupported'].includes(gate.reasonCode)) return gate;
-  if (state?.riskContextValid !== true) return unknown('review_risk_context_invalid');
-  if (reviewRisk?.tier === 'danger' || reviewRisk?.signals?.needsPrivilegedExecution === true) return unknown('review_hard_risk');
-  if (['safe', 'conservative-auto'].includes(state?.riskMode) && reviewRisk?.tier === 'caution') return unknown('review_mode_requires_approval');
-  if (!mcpFacts && !reviewRisk?.signals?.targetScope) return unknown('review_target_scope_missing');
-  if (!mcpFacts && !unknownTool && (typeof gate.command !== 'string' || !gate.command)) return unknown('review_command_missing');
-  if (gate.reasonCode === 'windows_syntax_unsupported' && approval.params?.tool_name === 'Bash'
-      && reviewRisk?.platform !== 'powershell') return unknown('review_platform_unavailable');
-  if (!state.reviewChannel) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_unavailable' };
-  // Do not transmit common credential-bearing commands or user input. The
-  // reviewer receives only the operation, task and already-attested scope.
-  const taskBinding = state.approvalReviewTask;
-  if (!taskBinding || taskBinding.version !== 1 || taskBinding.requestId !== state.requestId
-      || typeof taskBinding.text !== 'string' || taskBinding.additionalContextOmitted !== true) return unknown('review_task_binding_invalid');
-  if (state.steerAwaitingTurnEnd || state.approvalReviewSteerUnconfirmed) return unknown('review_task_changed');
-  const steers = state.approvalReviewSteers;
-  if (!Array.isArray(steers) || steers.some(entry => typeof entry.id !== 'string' || !entry.id || typeof entry.requestId !== 'string' || !entry.requestId
-      || typeof entry.text !== 'string' || !entry.text.trim())) return unknown('review_task_binding_invalid');
-  const taskRevision = state.approvalReviewSteerRevision;
-  const task = [taskBinding.text, ...steers.map(entry => `User follow-up:\n${entry.text}`)].join('\n\n');
-  const command = mcpFacts ? JSON.stringify(mcpFacts) : unknownTool ? JSON.stringify({ tool: approval.params.tool_name, input: approval.params.input }) : gate.command;
-  if (!task) return unknown('review_task_missing');
-  if (task.length > 12000 || command.length > 12000) return unknown('review_context_too_large');
-  if (/(?:api[_-]?key|access[_-]?token|password|secret)['"]?\s*[:=]\s*['"]?[^\s'";,}]{4,}|authorization['"]?\s*:\s*['"]?\S+\s+\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----/i.test(`${task}\n${command}`)) return unknown('review_context_sensitive');
-  const channel = state.reviewChannel;
-  if (channel.runId !== runId || channel.turnId !== state.requestId || !channel.sessionId) return unknown('review_channel_binding_invalid');
-  const context = { task, taskSteerIds: steers.map(entry => entry.id), additionalContextOmitted: true, command, workspace: state.riskContext.trustedWorkspaceRoot,
-    cwd: state.cwd, riskTier: reviewRisk?.tier || 'unknown', targetScope: reviewRisk?.signals?.targetScope || 'unknown',
-    platform: reviewRisk?.platform || process.platform, ruleReasonCode: gate.reasonCode,
-    syntaxFacts: gate.syntaxFacts || null, providerMethod: approval.providerMethod || '',
-    operationKind: mcpFacts ? 'mcp' : unknownTool ? 'tool' : 'command' };
-  const request = { approvalId: approval.approvalId, requestId: state.requestId, context };
-  const requestHash = createHash('sha256').update(JSON.stringify(request)).digest('hex');
-  if (state.reviewStopped) return unknown('review_cancelled');
-  const reviewController = new AbortController();
-  state.activeReviewAbort = reviewController;
-  try {
-    const token = (await readFile(runReviewCapabilityPath(runId), 'utf8')).trim();
-    if (!token) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_capability_empty' };
-    await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
-      type: 'ragent.approval_review_request', runId, approvalId: approval.approvalId,
-      requestId: state.requestId, requestHash, reasonCode: gate.reasonCode,
-    } });
-    if (state.reviewStopped) return unknown('review_cancelled');
-    const response = await fetch(`http://127.0.0.1:${CHAT_PORT}/api/internal/run-review`, {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-ragent-run-review-token': token,
-        'x-ragent-run-review-run-id': runId, 'x-ragent-run-review-session-id': channel.sessionId,
-        'x-ragent-run-review-turn-id': channel.turnId },
-      body: JSON.stringify({ ...request, requestHash }), signal: AbortSignal.any([AbortSignal.timeout(50000), reviewController.signal]), redirect: 'error',
-    });
-    const result = await response.json();
-    if (state.reviewStopped || reviewController.signal.aborted) return unknown('review_cancelled');
-    if (state.approvalReviewSteerRevision !== taskRevision || state.steerAwaitingTurnEnd || state.approvalReviewSteerUnconfirmed) return unknown('review_task_changed');
-    const bound = result.approvalId === approval.approvalId && result.requestHash === requestHash;
-    const safeReason = typeof result.reason === 'string' && /^[a-z0-9_]{1,64}$/.test(result.reason) ? result.reason : '';
-    if (!response.ok) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: bound && safeReason ? safeReason : `review_http_${response.status}` };
-    if (!bound || !['allow', 'ask', 'deny', 'unknown'].includes(result.verdict)) return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_response_binding_invalid' };
-    const d = result.diagnostics;
-    const stops = new Set(['end_turn', 'max_tokens', 'stop_sequence', 'tool_use', 'pause_turn', 'refusal', 'model_context_window_exceeded', 'unknown']);
-    const blocks = new Set(['text', 'thinking', 'redacted_thinking', 'tool_use', 'server_tool_use', 'other']);
-    const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 65536;
-    const reviewDiagnostics = d && typeof d === 'object' && stops.has(d.stopReason) && d.blockTypes
-      && typeof d.blockTypes === 'object' && !Array.isArray(d.blockTypes)
-      && Object.entries(d.blockTypes).every(([key, value]) => blocks.has(key) && count(value))
-      && count(d.textBlocks) && count(d.textLength) && ['bare', 'single_json_fence', 'unsupported'].includes(d.envelope)
-      ? { stopReason: d.stopReason, blockTypes: d.blockTypes, textBlocks: d.textBlocks, textLength: d.textLength, envelope: d.envelope } : null;
-    const reviewAudit = { reviewStatus: result.verdict, reviewAdapter: result.adapter || '',
-      reviewReasonCode: result.reasonCode || result.reason || '', reviewInitialReasonCode: gate.reasonCode, reviewUsage: result.usage || null, reviewDiagnostics };
-    if (result.verdict === 'allow') return { ...gate, ...reviewAudit, decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW,
-      decisionClass: 'allow', needsContextReview: false, reasonCode: 'context_review_allow', reason: 'context review allowed operation' };
-    if (result.verdict === 'deny') return { ...gate, ...reviewAudit, decisionClass: 'ask',
-      needsContextReview: false, reasonCode: 'context_review_high_risk', reason: 'context review recommends owner approval' };
-    if (result.verdict === 'ask') return { ...gate, ...reviewAudit, decisionClass: 'ask',
-      needsContextReview: false, reasonCode: 'context_review_ask', reason: 'context review requests owner approval' };
-    return { ...gate, ...reviewAudit };
-  } catch (error) { return { ...gate, reviewStatus: 'unknown', reviewReasonCode:
-    state.reviewStopped || reviewController.signal.aborted ? 'review_cancelled'
-      : error?.name === 'TimeoutError' || error?.name === 'AbortError' ? 'review_transport_timeout'
-        : error instanceof SyntaxError ? 'review_response_invalid_json'
-          : error?.code === 'ENOENT' ? 'review_capability_missing' : 'review_transport_error' }; }
-  finally { if (state.activeReviewAbort === reviewController) state.activeReviewAbort = null; }
-}
-
-function bindCodexMcpFacts(approval, state) {
-  const server = approval?.params?.serverName || approval?.params?.server_name;
-  if (!server || !(state?.activeItems instanceof Map) || !Array.isArray(state.mcpToolDefinitions)) return null;
-  const requestedId = approval.params.itemId || approval.params.item_id || '';
-  state.reviewBoundMcpItems ||= new Set();
-  const candidates = [...state.activeItems.entries()].filter(([id, item]) => item.mcpServer === server
-    && (!requestedId || requestedId === id) && !state.reviewBoundMcpItems.has(id));
-  if (candidates.length !== 1) return null;
-  const [itemId, item] = candidates[0];
-  const serverRecords = state.mcpToolDefinitions.filter(entry => (entry?.name || entry?.serverName || entry?.server_name) === server);
-  if (serverRecords.length !== 1 || !serverRecords[0].tools || typeof serverRecords[0].tools !== 'object') return null;
-  const definitions = Object.values(serverRecords[0].tools).filter(tool => tool?.name === item.mcpTool
-    && tool.inputSchema && typeof tool.inputSchema === 'object' && !Array.isArray(tool.inputSchema));
-  if (definitions.length !== 1) return null;
-  const tool = definitions[0];
-  const facts = { server, tool: item.mcpTool, arguments: item.mcpArguments,
-    definition: { name: tool.name, description: typeof tool.description === 'string' ? tool.description : '', inputSchema: tool.inputSchema } };
-  if (Buffer.byteLength(JSON.stringify(facts)) > 12000) return null;
-  state.reviewBoundMcpItems.add(itemId);
-  return facts;
-}
-
-function bindClaudeMcpFacts(approval, state) {
-  if (state?.turnActive !== true || !Array.isArray(state.claudeMcpInventory)) return null;
-  const name = approval?.params?.tool_name;
-  const input = approval?.params?.input;
-  if (typeof name !== 'string' || !name.startsWith('mcp__') || !input || typeof input !== 'object' || Array.isArray(input)) return null;
-  const split = name.lastIndexOf('__');
-  if (split <= 5 || split >= name.length - 2) return null;
-  const server = name.slice(5, split), toolName = name.slice(split + 2);
-  const servers = state.claudeMcpInventory.filter(entry => entry.name === server && entry.status === 'connected');
-  if (servers.length !== 1) return null;
-  const list = servers[0].tools;
-  const matches = Array.isArray(list) ? list.filter(tool => tool.name === toolName || tool.name === name) : [];
-  if (Array.isArray(list) && matches.length !== 1) return null;
-  const facts = { server, tool: toolName, arguments: input, serverInfo: servers[0].serverInfo || null,
-    definitionEvidence: matches.length ? 'connected_inventory' : 'missing_definition',
-    definition: matches.length ? { name: matches[0].name, description: matches[0].description || '' } : null };
-  return Buffer.byteLength(JSON.stringify(facts)) <= 12000 ? facts : null;
+  return { ...gate, reviewStatus: 'unknown', reviewReasonCode: 'review_operation_facts_unverified',
+    reviewInitialReasonCode: gate.reasonCode || '' };
 }
 
 async function denyUnattendedPermissionRequest(runId, state, approval, proc, provider, gateDecision = null) {
@@ -3298,6 +3131,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   if (!state || !parsed) return null;
   const approval = readCodexAppServerApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
+  const expandsPermissions = permissionExpansion(approval);
   // A shared app-server may report requests for another thread or turn. Never
   // answer those using this run's workspace and approval policy.
   const requestThread = typeof approval.params?.threadId === 'string' ? approval.params.threadId.trim() : '';
@@ -3315,7 +3149,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     return null;
   }
   const managedMcp = readCodexAppServerManagedMcpRequest(parsed);
-  if (managedMcp
+  if (managedMcp && !expandsPermissions
     && state.mcpRequired === true && isAutoApprovedMcpServer(state, managedMcp.mcpServerName)
     && state.startedTurn === true
     && isCurrentCodexAppServerMcpRequest(approval, state)
@@ -3350,18 +3184,18 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   // MCP elicitation is not a shell/file operation. Never let the generic risk
   // classifier auto-allow an unknown server; it must reach the user approval
   // path and use the provider-specific elicitation response shape.
-  const controlledInstall = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledInstall = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsInstallBridgeApproval({ approval, state, runId, nodePath: process.execPath,
       scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-install-bridge.mjs') });
-  const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
-  const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
-  const controlledTrigger = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledTrigger = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsTriggerApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
-  const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsBoundSearchApproval({ approval, state, helperPath: searchHelperPath });
-  const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp
+  const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
     && await verifyCodexWindowsWildcardNameApproval({ approval, state, helperPath: searchHelperPath });
   let gateDecision = controlledTrigger
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session trigger operation' }
@@ -3375,6 +3209,8 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'handle-bound workspace deletion' }
     : controlledInstall
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled Windows installation' }
+    : expandsPermissions
+    ? await decideRunGate(approval, state)
     : managedMcp
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, decisionClass: 'ask', reasonCode: 'mcp_tool_facts_missing',
       reason: 'MCP tool identity and arguments are unavailable for this request' }
@@ -3383,11 +3219,6 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
       reason: 'MCP elicitation requires a user response' }
     : await decideRunGate(withCurrentCodexFileChanges(approval, state), state);
 
-  if (managedMcp && gateDecision.reasonCode === 'mcp_tool_facts_missing') {
-    const mcpFacts = bindCodexMcpFacts(approval, state);
-    if (mcpFacts) gateDecision = { ...gateDecision, decisionClass: 'review_needed', needsContextReview: true,
-      reasonCode: 'mcp_semantics_unknown', mcpFacts };
-  }
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
   if (state.reviewStopped) return null;
   await recordGateDecision(runId, state, approval, 'codex', gateDecision);
@@ -3448,7 +3279,7 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   // gate, or a request the risk classifier deliberately could not prove safe).
   // Keep the risk result on the pending record so owner approval and projection
   // retain the same provider-neutral audit dimensions as auto-allow.
-  const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk);
+  const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk, gateDecision);
   if (!record) return null;
   state.pendingApprovals.set(approval.approvalId, record);
   await updateRun(runId, (current) => {
@@ -3470,6 +3301,11 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   if (!state || !parsed) return null;
   const approval = readClaudeBidiApprovalRequest(parsed);
   if (!approval?.approvalId) return null;
+  const approvalTurnSequence = state.approvalTurnSequence;
+  const stopped = () => state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
+    || (Number.isInteger(approvalTurnSequence) && (state.approvalTurnSequence !== approvalTurnSequence
+      || state.mcpRefreshTerminatedTurnSequence === approvalTurnSequence)) || !proc?.stdin?.writable;
+  const expandsPermissions = permissionExpansion(approval);
   // Claude's bidi stream can also replay a control_request. Reuse the first
   // automatic response or owner card for this request id.
   if (state.pendingApprovals instanceof Map && state.pendingApprovals.has(approval.approvalId)) {
@@ -3481,7 +3317,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   const managedMcp = readClaudeBidiManagedMcpRequest(parsed);
   const isMcpTool = isClaudeBidiMcpToolName(approval.params?.tool_name);
 
-  if (managedMcp
+  if (managedMcp && !expandsPermissions
     && state.mcpRequired === true
     && state.turnActive === true
     && isRequiredMcpTool(state, managedMcp.mcpServerName, managedMcp.mcpToolName)
@@ -3509,23 +3345,20 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
       await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: 'managed_mcp_binding' });
       return null;
     }
-  } else if (managedMcp
-    && !(approval.params?.networkApprovalContext || approval.params?.network_approval_context
-      || approval.params?.additionalPermissions || approval.params?.additional_permissions
-      || approval.params?.grantRoot || approval.params?.grant_root
-      || approval.params?.dangerouslyDisableSandbox === true
-      || approval.params?.dangerously_disable_sandbox === true
-      || approval.params?.input?.dangerouslyDisableSandbox === true
-      || approval.params?.input?.dangerously_disable_sandbox === true)
+  } else if (managedMcp && !expandsPermissions
     && state.turnActive === true
-    && typeof state.mcpOptionalOrganizationServerName === 'string'
-    && state.mcpOptionalOrganizationServerName.trim()
-    && managedMcp.mcpServerName === state.mcpOptionalOrganizationServerName.trim()
-    && ['ragent_organization_read', 'ragent_organization_action'].includes(managedMcp.mcpToolName)
+    && ((typeof state.mcpOptionalOrganizationServerName === 'string'
+      && state.mcpOptionalOrganizationServerName.trim()
+      && managedMcp.mcpServerName === state.mcpOptionalOrganizationServerName.trim()
+      && ['ragent_organization_read', 'ragent_organization_action'].includes(managedMcp.mcpToolName))
+      || (!stopped() && state.sessionControlReadAvailable === true && state.sessionControlReadRunId === runId
+        && state.mcpOptionalHistoryRunId === runId && state.mcpOptionalHistoryServerName
+        && managedMcp.mcpServerName === state.mcpOptionalHistoryServerName
+        && managedMcp.mcpToolName === 'ragent_read_current_session'))
     && isAutoApprovedMcpServer(state, managedMcp.mcpServerName)
     && !state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
     const message = buildClaudeBidiManagedMcpResponse(approval, 'approve');
-    if (message && writeClaudeBidiMessage(proc, message)) {
+    if (message && (managedMcp.mcpToolName !== 'ragent_read_current_session' || !stopped()) && writeClaudeBidiMessage(proc, message)) {
       state.autoApprovedMcpRequestIds.add(approval.approvalId);
       await appendRunSpoolRecord(runId, {
         ts: nowIso(),
@@ -3541,10 +3374,10 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
           autoApproved: true,
           mcpServerName: managedMcp.mcpServerName,
           mcpToolName: managedMcp.mcpToolName,
-          reason: 'optional root organization MCP tool',
+          reason: managedMcp.mcpToolName === 'ragent_read_current_session' ? 'optional current-session MCP tool' : 'optional root organization MCP tool',
         },
       });
-      await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: 'managed_mcp_optional_organization_tool' });
+      await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: managedMcp.mcpToolName === 'ragent_read_current_session' ? 'managed_mcp_optional_session_read' : 'managed_mcp_optional_organization_tool' });
       return null;
     }
   }
@@ -3569,16 +3402,61 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   // privileged op). Non-privileged sessions pass through unchanged.
   // Any Claude MCP tool that is not the exact run-scoped allowlist entry must
   // remain an explicit user decision, even in a risk-gated session.
-  let gateDecision = isMcpTool
+  let gateDecision = expandsPermissions ? await decideRunGate(approval, state) : isMcpTool
     ? { decision: PRIVILEGED_GATE_DECISION.PASS, decisionClass: 'ask', reasonCode: 'mcp_tool_facts_missing',
       reason: 'MCP tool definition and authorization binding are unavailable' }
     : await decideRunGate(approval, state);
 
-  const cwdTransition = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+  // A structured file tool cannot run the Bash identity guard. Do not turn a
+  // tracked directory candidate into an absolute target on its behalf.
+  const posixRiskGated = ['safe', 'recommended', 'full-auto', 'conservative-auto'].includes(state.riskMode)
+    || isGatedPermissionMode(state.permissionMode || '');
+  if (process.platform !== 'win32' && posixRiskGated && approval.providerMethod === 'can_use_tool'
+      && ['Read', 'LS', 'List', 'Glob', 'Grep', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(approval.params?.tool_name)
+      && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
+    const input = approval.params?.input || {};
+    const targets = ['path', 'file_path', 'notebook_path'].filter(key => Object.hasOwn(input, key)).map(key => input[key]);
+    if (targets.length !== 1 || typeof targets[0] !== 'string' || !posix.isAbsolute(targets[0])) {
+      gateDecision = { ...gateDecision, decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+        reasonCode: 'file_cwd_unattested', reason: 'relative file target requires an absolute path or owner review' };
+    }
+  }
+
+  if (gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW && gateDecision.requiredCwdGuard) {
+    if (stopped()) return null;
+    const input = approval.params?.input;
+    if (process.platform === 'win32' || WORKBENCH_EXECUTION_POLICY || isMcpTool || expandsPermissions
+        || approval.providerMethod !== 'can_use_tool' || approval.params?.tool_name !== 'Bash'
+        || !input || typeof input.command !== 'string') {
+      gateDecision = { ...gateDecision, decision: PRIVILEGED_GATE_DECISION.PROMPT,
+        decisionClass: 'review_needed', reasonCode: 'cwd_guard_unavailable', reason: 'execution directory requires review' };
+    } else {
+      const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
+      const updatedInput = { ...input, command: `if [[ . -ef ${quote(gateDecision.requiredCwdGuard)} ]]; then\n${input.command}\nelse printf '%s\\n' 'Working directory changed; retry with absolute paths.' >&2; false; fi` };
+      const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput });
+      if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound file operation response');
+      await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+        type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+        providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+        autoApproved: true, reason: 'file operation bound to execution directory', ...riskAuditFields(gateDecision.risk),
+      } });
+      await recordGateDecision(runId, state, approval, 'claude', { ...gateDecision, reasonCode: 'controlled_cwd_guard' });
+      const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, gateDecision.risk));
+      if (record) state.pendingApprovals.set(approval.approvalId, record);
+      return record;
+    }
+  }
+
+  const cwdTransition = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
+    && (gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+      || (gateDecision.decisionClass === 'review_needed' && ['command_semantics_unknown', 'shell_effects_incomplete'].includes(gateDecision.reasonCode)))
     ? await buildClaudePosixCwdTransition({ approval, state }) : null;
+  if (cwdTransition && stopped()) return null;
   if (cwdTransition?.review) {
-    gateDecision = { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: cwdTransition.reason,
-      risk: { ...gateDecision.risk, tier: 'danger', reasons: [{ code: 'posix_cwd_sensitive_target', message: cwdTransition.reason }] } };
+    const code = cwdTransition.hard ? 'posix_cwd_sensitive_target' : 'shell_cwd_unverified';
+    gateDecision = { ...gateDecision, decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: cwdTransition.reason,
+      decisionClass: cwdTransition.hard ? 'ask' : 'review_needed', reasonCode: code,
+      risk: { ...gateDecision.risk, tier: cwdTransition.hard ? 'danger' : 'unknown', reasons: [{ code, message: cwdTransition.reason }] } };
   } else if (cwdTransition) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: cwdTransition.updatedInput });
     if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound directory change response');
@@ -3595,7 +3473,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  const posixRipgrep = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+  const posixRipgrep = process.platform !== 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
     ? await buildClaudePosixRipgrepBridge({ approval, state }) : null;
   if (posixRipgrep?.review) {
     gateDecision = { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: posixRipgrep.reason,
@@ -3614,9 +3492,9 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+  const deleteBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
     ? await buildWindowsSafeDeleteBridge({ approval, state, runId, helperPath: safeDeleteHelperPath }) : null;
-  const listingBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+  const listingBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW
     ? await buildWindowsWildcardNameBridge({ approval, state, helperPath: searchHelperPath }) : null;
   if (listingBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: listingBridge.updatedCommand } });
@@ -3631,7 +3509,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }
-  const searchGlobBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && gateDecision.reason === 'wildcard search requires bound targets'
+  const searchGlobBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions && gateDecision.reason === 'wildcard search requires bound targets'
     ? await buildWindowsSelectStringGlobBridge({ approval, state, helperPath: searchHelperPath }) : null;
   if (searchGlobBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: { ...approval.params.input, command: searchGlobBridge.updatedCommand } });
@@ -3646,7 +3524,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }
-  const ripgrepBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+  const ripgrepBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
     && ['ripgrep configuration is not disabled', 'ripgrep sensitive exclusions are not enforced', 'recursive file operation needs verification'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRipgrepBridge({ approval, state }) : null;
   if (ripgrepBridge) {
@@ -3662,7 +3540,28 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }
-  const defaultFileBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+  const posixFileTool = process.platform !== 'win32' && posixRiskGated && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
+    && !state.executionEnvironment && gateDecision.decision === PRIVILEGED_GATE_DECISION.AUTO_ALLOW
+    && approval.params?.tool_name === 'Read';
+  if (posixFileTool) {
+    const binding = await buildClaudePosixFileToolBridge({ approval, state });
+    if (binding) {
+      const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: binding.updatedInput });
+      if (!message || !writeClaudeBidiMessage(proc, message)) throw new Error('Unable to send bound file response');
+      await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'stdout', json: {
+        type: 'ragent.approval_response', approvalId: approval.approvalId, provider: 'claude', decision: 'approved', status: 'approved',
+        providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''), providerMethod: approval.providerMethod || '',
+        autoApproved: true, reason: 'file tool bound to session directory', ...riskAuditFields(binding.risk),
+      } });
+      await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: 'controlled_bridge', risk: binding.risk });
+      const record = markApprovalRecordAutoResponded(serializeCodexAppServerApprovalForRun(approval, binding.risk));
+      if (record) state.pendingApprovals.set(approval.approvalId, record);
+      return record;
+    }
+    gateDecision = { ...gateDecision, decision: PRIVILEGED_GATE_DECISION.PROMPT, decisionClass: 'review_needed',
+      reasonCode: 'file_target_unverified', reason: 'file target requires scope review' };
+  }
+  const defaultFileBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
     && ['file targets are unavailable', 'working directory is not attested'].includes(gateDecision.reason) ? await buildClaudeWindowsDefaultFileToolBridge({ approval, state }) : null;
   if (defaultFileBridge) {
     const message = buildClaudeBidiApprovalResponseMessage(approval, 'approve', null, { updatedInput: defaultFileBridge.updatedInput });
@@ -3677,7 +3576,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     if (record) state.pendingApprovals.set(approval.approvalId, record);
     return record;
   }
-  const relativeOperationBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !deleteBridge
+  const relativeOperationBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions && !deleteBridge
     && ['working directory is not attested', 'ripgrep configuration is not disabled', 'ripgrep sensitive exclusions are not enforced', 'ripgrep path cannot be resolved', 'recursive file operation needs verification', 'curl configuration is not disabled', 'Git command is not on the read-only allowlist'].includes(gateDecision.reason)
     ? await buildClaudeWindowsRelativeOperationBridge({ approval, state }) : null;
   if (relativeOperationBridge) {
@@ -3707,7 +3606,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  const cliReadBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool
+  const cliReadBridge = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !isMcpTool && !expandsPermissions
     ? await buildWindowsCliReadBridge({ approval, state, runId, port: Number(CHAT_PORT), helperPath: cliReadHelperPath })
       || await buildWindowsCliAssetBridge({ approval, state, runId, port: Number(CHAT_PORT), helperPath: cliReadHelperPath }) : null;
   if (cliReadBridge) {
@@ -3725,7 +3624,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  const installBridge = process.platform === 'win32' && !isMcpTool
+  const installBridge = process.platform === 'win32' && !isMcpTool && !expandsPermissions
     ? buildClaudeWindowsInstallBridge({ approval, state, runId, nodePath: process.execPath,
       scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-install-bridge.mjs') }) : null;
   if (installBridge && await checkWindowsInstallBridgeReadiness({ channel: state.windowsManagedActionBinding,
@@ -3743,23 +3642,10 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
     return record;
   }
 
-  if (isMcpTool && gateDecision.reasonCode === 'mcp_tool_facts_missing') {
-    let mcpFacts = bindClaudeMcpFacts(approval, state);
-    if (!mcpFacts) {
-      await refreshClaudeMcpInventory(proc, state);
-      if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
-          || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
-      mcpFacts = bindClaudeMcpFacts(approval, state);
-    }
-    if (mcpFacts) gateDecision = { ...gateDecision, decisionClass: 'review_needed', needsContextReview: true,
-      reasonCode: 'mcp_semantics_unknown', mcpFacts };
-  }
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
-  if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
-      || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
+  if (stopped()) return null;
   await recordGateDecision(runId, state, approval, 'claude', gateDecision);
-  if (state.reviewStopped || !state.turnActive || state.terminalSeen || state.interruptSent || state.mcpRefreshCancelled
-      || state.mcpRefreshTerminatedTurnSequence === state.approvalTurnSequence || !proc?.stdin?.writable) return null;
+  if (stopped()) return null;
   if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'claude', gateDecision);
@@ -3817,7 +3703,7 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
   // gate, or a request the risk classifier deliberately could not prove safe).
   // Keep the risk result on the pending record so owner approval and projection
   // retain the same provider-neutral audit dimensions as auto-allow.
-  const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk);
+  const record = serializeCodexAppServerApprovalForRun(approval, gateDecision.risk, gateDecision);
   if (!record) return null;
   if (state.turnActive === true && state.riskContextValid === true && state.approvalTurnSequence > 0 && state.requestId && state.cwd && state.approvalProcessId) {
     record.approvalGroupScope = { turnId: state.requestId, turnSequence: state.approvalTurnSequence, processId: state.approvalProcessId, cwd: state.cwd };
@@ -4101,12 +3987,23 @@ function parseAcpManagedMcpToolName(acpToolName, state) {
 }
 
 function mapAcpPermissionToGateApproval(parsed, req, state) {
-  const details = describeAcpPermissionToolCall(req.toolCall);
+  const rawToolCall = parsed?.params?.toolCall || {};
+  const explicitName = rawToolCall.name || rawToolCall.toolName || rawToolCall.tool_name || '';
+  const details = describeAcpPermissionToolCall({ ...req.toolCall, name: explicitName });
+  const expansionKeys = ['networkApprovalContext', 'network_approval_context', 'additionalPermissions', 'additional_permissions', 'grantRoot', 'grant_root', 'dangerouslyDisableSandbox', 'dangerously_disable_sandbox'];
+  const expandsPermissions = [parsed?.params, rawToolCall, rawToolCall.rawInput, rawToolCall.input, rawToolCall.args].some(source =>
+    source && typeof source === 'object' && expansionKeys.some(key => key.startsWith('dangerously') ? source[key] === true : Boolean(source[key])));
   const approvalId = buildAcpApprovalId(state?.provider || 'acp', req.id);
   const mappedToolName = ACP_FILE_READ_TOOL_NAMES[details.name]
     || ACP_FILE_WRITE_TOOL_NAMES[details.name]
     || details.name;
-  const primaryPath = details.filePaths[0] || '';
+  const fileTool = Boolean(ACP_FILE_READ_TOOL_NAMES[details.name] || ACP_FILE_WRITE_TOOL_NAMES[details.name]);
+  const expectedKinds = ACP_FILE_READ_TOOL_NAMES[details.name] ? ['read', 'search'] : ['edit', 'write'];
+  const validFileFacts = fileTool && expectedKinds.includes(details.kind) && details.filePaths.length === 1
+    && typeof details.filePaths[0] === 'string' && isAbsolute(details.filePaths[0])
+    && ['TargetFile', 'target_file', 'file_path', 'filePath', 'path', 'AbsolutePath', 'absolute_path', 'DirectoryPath', 'SearchDirectory']
+      .filter(key => Object.hasOwn(details.input, key)).length === 1;
+  const primaryPath = validFileFacts ? details.filePaths[0] : '';
   const mappedInput = {
     ...(details.input && typeof details.input === 'object' ? details.input : {}),
     ...(primaryPath ? { file_path: primaryPath } : {}),
@@ -4121,7 +4018,8 @@ function mapAcpPermissionToGateApproval(parsed, req, state) {
     requestClass: 'tool_invocation',
     params: {
       sessionId: req.sessionId,
-      tool_name: mappedToolName,
+      tool_name: fileTool && !validFileFacts ? '' : mappedToolName,
+      ...(expandsPermissions ? { additionalPermissions: true } : {}),
       acpToolName: details.name,
       input: mappedInput,
       ...(details.command ? { command: details.command } : {}),
@@ -4208,8 +4106,8 @@ async function handleAcpPermissionRequest(runId, state, parsed, proc, logDiagnos
   }
 
   const approval = mapAcpPermissionToGateApproval(parsed, req, state);
-  const managedMcp = parseAcpManagedMcpToolName(req.toolCall.name, state);
-  if (managedMcp && state.promptSent === true) {
+  const managedMcp = parseAcpManagedMcpToolName(parsed.params?.toolCall?.name || parsed.params?.toolCall?.toolName || parsed.params?.toolCall?.tool_name, state);
+  if (managedMcp && !permissionExpansion(approval) && state.promptSent === true) {
     const allow = buildAcpPermissionResponse(parsed, 'allow_once', state.sessionId);
     if (!allow || !writeAcpJsonLine(proc, allow.line)) {
       return { fatal: true, reason: 'Unable to answer ACP managed MCP permission request' };
@@ -4224,7 +4122,10 @@ async function handleAcpPermissionRequest(runId, state, parsed, proc, logDiagnos
     return { handled: true };
   }
 
-  let gateDecision = await decideRunGate(approval, state);
+  let gateDecision = permissionExpansion(approval) ? await decideRunGate(approval, state)
+    : approval.params.acpToolName && (!approval.params.tool_name || (process.platform !== 'win32' && (ACP_FILE_READ_TOOL_NAMES[approval.params.acpToolName] || ACP_FILE_WRITE_TOOL_NAMES[approval.params.acpToolName])))
+    ? { decision: PRIVILEGED_GATE_DECISION.PROMPT, reason: 'ACP file operation facts are incomplete or ambiguous' }
+    : await decideRunGate(approval, state);
   gateDecision = await reviewRunGate(runId, state, approval, gateDecision);
   if (state.reviewStopped || state.terminalSeen || state.interruptSent || !proc?.stdin?.writable) {
     return { handled: true };
@@ -5312,6 +5213,16 @@ async function main() {
     && manifest.options?.sessionControlChannel?.scope?.kind === 'organization_message';
   const readOnlyAllowedOrganizationMcp = !organizationPlanRepair && (readOnlyManagerOrganizationMcp || readOnlySwarmReviewerOrganizationMcp);
   const organizationMcpSupported = supportsOrganizationControlMcp(runtimeFamily);
+  // Node-scoped organization capabilities do not include session.events.read.
+  // Do not attach this optional history tool to read-only isolation or repair
+  // runs: their capability and filesystem boundaries remain unchanged.
+  const sessionHistoryMcpRequested = !readOnlyRequested && !organizationPlanRepair && isClaudeBidiFamily
+    && !manifest.options?.sessionControlChannel?.scope
+    && Boolean(spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_TURN_ID
+      && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID === runId
+      && spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID === manifest.sessionId
+      && spawnEnv.RAGENT_SESSION_ID === manifest.sessionId);
+
   const organizationMcpRequested = (!readOnlyRequested || readOnlyAllowedOrganizationMcp) && Boolean(
     spawnEnv.RAGENT_SESSION_CONTROL_TOKEN && spawnEnv.RAGENT_SESSION_CONTROL_RUN_ID &&
     spawnEnv.RAGENT_SESSION_CONTROL_SESSION_ID &&
@@ -5371,7 +5282,8 @@ async function main() {
     spawnEnv.RAGENT_WINDOWS_BROKER_TURN_ID = windowsBrokerChannel.turnId || manifest.requestId || runId;
   }
 
-  const shouldPrepareManagedMcp = managedActionMcpRequested
+  const shouldPrepareManagedMcp = sessionHistoryMcpRequested
+    || managedActionMcpRequested
     || windowsBrokerMcpRequested
     || organizationMcpRequested
     || (browserMcpRequested && (acp !== true || isAgyAcpFamily))
@@ -5400,6 +5312,12 @@ async function main() {
     })).catch(() => null);
     try {
       const managedMcpServers = [];
+      if (sessionHistoryMcpRequested) {
+        managedMcpServers.push({ kind: 'history', scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-current-session-mcp.mjs'),
+          envKeys: ['RAGENT_CHAT_BASE_URL', 'RAGENT_SESSION_CONTROL_TOKEN', 'RAGENT_SESSION_CONTROL_RUN_ID',
+            'RAGENT_SESSION_CONTROL_SESSION_ID', 'RAGENT_SESSION_CONTROL_TURN_ID',
+            'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN', 'RAGENT_SESSION_CONTROL_RENEWAL_TOKEN_FILE'] });
+      }
       if (organizationMcpRequested) {
         managedMcpServers.push({ kind: 'organization', scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-organization-mcp.mjs'),
           envKeys: ['RAGENT_CHAT_BASE_URL', 'RAGENT_ORGANIZATION_TOOL_SCOPE', 'RAGENT_SESSION_CONTROL_TOKEN',
@@ -5470,24 +5388,36 @@ async function main() {
         });
       };
       let optionalOrganizationOmitted = false;
-      try {
-        managedMcpOverlay = await prepareOverlay(managedMcpServers);
-        if (!managedMcpOverlay) throw new Error('MCP_OVERLAY_UNAVAILABLE');
-      } catch (error) {
-        const optionalIndex = !protectedDelegatedRun
-          ? managedMcpServers.findIndex((server) => server.kind === 'organization') : -1;
-        if (optionalIndex < 0) throw error;
-        managedMcpServers.splice(optionalIndex, 1);
-        optionalOrganizationOmitted = true;
-        await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'error', json: {
-          type: 'status', role: 'system', content: 'Optional organization MCP unavailable',
-          codexMcpReadiness: 'optional-unavailable', codexMcpFailurePhase: 'preparation',
-        } });
-        const needsOverlay = managedMcpServers.length > 0
-          || externalAgyMcpServers.length > 0
-          || (!threadScopedCodexMcp && windowsElevationHook);
-        managedMcpOverlay = needsOverlay ? await prepareOverlay(managedMcpServers) : null;
-        if (needsOverlay && !managedMcpOverlay) throw new Error('MCP_OVERLAY_UNAVAILABLE');
+      let optionalHistoryOmitted = false;
+      for (;;) {
+        try {
+          const needsOverlay = managedMcpServers.length > 0 || externalAgyMcpServers.length > 0
+            || (!threadScopedCodexMcp && windowsElevationHook);
+          managedMcpOverlay = needsOverlay ? await prepareOverlay(managedMcpServers) : null;
+          if (needsOverlay && !managedMcpOverlay) throw new Error('MCP_OVERLAY_UNAVAILABLE');
+          break;
+        } catch (error) {
+          const historyIndex = managedMcpServers.findIndex((server) => server.kind === 'history');
+          if (historyIndex >= 0) {
+            managedMcpServers.splice(historyIndex, 1);
+            optionalHistoryOmitted = true;
+            await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'error', json: {
+              type: 'status', role: 'system', content: 'Optional current-session MCP unavailable',
+              codexMcpReadiness: 'optional-unavailable', codexMcpFailurePhase: 'preparation',
+            } }).catch(() => null);
+            continue;
+          }
+          const optionalIndex = !protectedDelegatedRun
+            ? managedMcpServers.findIndex((server) => server.kind === 'organization') : -1;
+          if (optionalIndex < 0) throw error;
+          managedMcpServers.splice(optionalIndex, 1);
+          optionalOrganizationOmitted = true;
+          await appendRunSpoolRecord(runId, { ts: nowIso(), stream: 'error', json: {
+            type: 'status', role: 'system', content: 'Optional organization MCP unavailable',
+            codexMcpReadiness: 'optional-unavailable', codexMcpFailurePhase: 'preparation',
+          } });
+          continue;
+        }
       }
       activeManagedMcpOverlay = managedMcpOverlay;
       if (threadScopedCodexMcp && managedMcpOverlay) appServerState.threadMcpConfig = managedMcpOverlay.config;
@@ -5551,6 +5481,8 @@ async function main() {
             requiredToolNames: ['ragent_browser_navigate'],
           });
         }
+        runtimeState.mcpOptionalHistoryServerName = sessionHistoryMcpRequested && !optionalHistoryOmitted ? serverNamesByKind.get('history') || '' : '';
+        runtimeState.mcpOptionalHistoryRunId = runtimeState.mcpOptionalHistoryServerName ? runId : '';
         runtimeState.mcpRequired = requiredServers.length > 0;
         if (process.platform === 'win32' && managedActionMcpRequested) {
           runtimeState.windowsManagedActionChannel = true;
@@ -5566,12 +5498,13 @@ async function main() {
             || server.name === serverNamesByKind.get('organization')).map((server) => server.name),
         );
         if (runtimeState.mcpOptionalOrganizationServerName) runtimeState.mcpAutoApproveServerNames.add(runtimeState.mcpOptionalOrganizationServerName);
+        if (!WORKBENCH_EXECUTION_POLICY && runtimeState.mcpOptionalHistoryServerName) runtimeState.mcpAutoApproveServerNames.add(runtimeState.mcpOptionalHistoryServerName);
         runtimeState.mcpExpectedServerName = requiredServers[0]?.name || '';
         // Keep the legacy fields populated for older helper paths and fixtures.
         runtimeState.mcpRequiredToolNames = requiredServers[0]?.requiredToolNames?.slice() || [];
       }
 
-      if (!managedMcpOverlay && !optionalOrganizationOmitted) {
+      if (!managedMcpOverlay && !optionalOrganizationOmitted && !optionalHistoryOmitted) {
         delete spawnEnv.RAGENT_APPROVED_ACTIONS_ENABLED;
         delete spawnEnv.RAGENT_AGENT_CREATE_APPROVED_ACTION_ENABLED;
         const error = new Error('MCP readiness failed: MCP_OVERLAY_UNAVAILABLE');
@@ -6189,7 +6122,6 @@ async function main() {
         if (state) { state.reviewStopped = true; state.activeReviewAbort?.abort(); }
       }
       if (claudeBidiState) claudeBidiState.mcpRefreshCancelled = true;
-      claudeBidiState?.mcpRefresh?.finish();
       if (appServerState) appServerState.startupCancelled = true;
       appServerState?.accountModelCatalog?.cancel();
       if (acpState) {
@@ -7843,13 +7775,12 @@ async function main() {
   providerStdoutStream.on('error', handleProviderStdoutError);
   if (earlyStdoutError) handleProviderStdoutError(earlyStdoutError);
   providerStdoutInput.on('line', (line) => {
-    if (claudeBidiState?.mcpRefresh || Number.isInteger(claudeBidiState?.processingApprovalTurnSequence)) {
+    if (Number.isInteger(claudeBidiState?.processingApprovalTurnSequence)) {
       try {
         const parsed = JSON.parse(line);
         if (isClaudeBidiTurnTerminal(parsed)) {
           claudeBidiState.mcpRefreshTerminatedTurnSequence = claudeBidiState.processingApprovalTurnSequence;
-          claudeBidiState.mcpRefresh?.finish();
-        } else if (consumeClaudeMcpRefresh(claudeBidiState, parsed)) return;
+        }
       } catch {}
     }
     void enqueueStdoutLine(line);

@@ -1,3 +1,4 @@
+import { approvalCheckpoint, decideApprovalFacts } from './approval-policy.mjs';
 // Explicit policy for Claude Code tool calls that do not execute a shell
 // command or operate on a filesystem path. Unknown tools remain owner-gated.
 export const CLAUDE_TOOL_POLICY_VERSION = 'claude-tool-policy/v1';
@@ -97,8 +98,7 @@ export function decideClaudeToolApproval(approval, { riskMode = '' } = {}) {
   if (approval?.providerMethod !== 'can_use_tool') return null;
   if (approval?.requestClass && approval.requestClass !== 'tool_invocation') return null;
   const params = approval?.params && typeof approval.params === 'object' ? approval.params : {};
-  if (params.networkApprovalContext || params.network_approval_context
-      || params.additionalPermissions || params.additional_permissions) return null;
+  if (approvalCheckpoint(approval)) return null;
   const toolName = typeof approval?.params?.tool_name === 'string' ? approval.params.tool_name.trim() : '';
   if (!toolName || ['Bash', 'PowerShell', 'AskUserQuestion', 'ExitPlanMode'].includes(toolName)
       || FILE_TOOLS.has(toolName) || toolName.startsWith('mcp__')) return null;
@@ -114,8 +114,8 @@ export function decideClaudeToolApproval(approval, { riskMode = '' } = {}) {
 
   const tier = SAFE_TOOLS.has(toolName) ? 'safe' : 'caution';
   const risk = riskFor(tier, reason);
-  const allowsCaution = ['recommended', 'full-auto'].includes(riskMode);
-  if (tier === 'caution' && !allowsCaution) {
+  const verdict = decideApprovalFacts([{ tier, reason }], { riskMode });
+  if (verdict.decision === 'review') {
     return { decision: 'prompt', reason: `risk caution: ${reason}; safe mode requires owner approval`, risk };
   }
   return { decision: 'auto-allow', reason: `risk ${tier}: ${reason}`, risk };

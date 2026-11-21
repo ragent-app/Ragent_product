@@ -195,6 +195,7 @@ export function isReadOnlyStdinFilter(command) {
       pattern = true; continue;
     }
     if (!positional && /^-[iFEnwvcl]+$/.test(arg)) continue;
+    if (!positional && arg.startsWith('-') && arg !== '-') return false;
     if (!pattern && arg !== '-') { pattern = true; continue; }
     if (arg !== '-') return false;
   }
