@@ -1,5 +1,5 @@
 import { execFile } from 'child_process';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { access } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
@@ -29,15 +29,30 @@ import {
   reserveOrganizationBudget,
 } from './organization-governor.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
+import {
+  assertRuntimeConstraints,
+  queryRuntimeCandidates,
+  selectRuntimeConstraints,
+} from './organization-runtime-decision.mjs';
+import { buildOrganizationRuntimeCatalog, TOOL_SET } from './organization-runtime-selection.mjs';
+import { getModelsForTool } from './models.mjs';
+import { readSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
 import { invalidateOrganizationProjectionCache } from './organization-projection-cache.mjs';
 import { createGitWorktree, removeGitWorktree } from './collaboration-workspace.mjs';
 import { createStagingWorkspace, discardStaging, resolveStagingDiff } from './managed-writer.mjs';
 import { acquireWorkspaceLease, releaseLease } from './workspace-leases.mjs';
-import { remoteFactoryTaskSummary } from './factory-task-handoff.mjs';
+import { createFactoryTaskHandoff, remoteFactoryTaskSummary } from './factory-task-handoff.mjs';
 
 const execFileAsync = promisify(execFile);
 
 export const SWARM_WORKSPACE_UNMERGED_CHANGES = 'SWARM_WORKSPACE_UNMERGED_CHANGES';
+export const SWARM_MODEL_FORBIDDEN = 'SWARM_MODEL_FORBIDDEN';
+export const SWARM_MODEL_LOCKED_BY_OWNER = 'SWARM_MODEL_LOCKED_BY_OWNER';
+export const SWARM_MEMBER_BUSY = 'SWARM_MEMBER_BUSY';
+export const SWARM_MEMBER_KILLED = 'SWARM_MEMBER_KILLED';
+export const SWARM_MODEL_CANDIDATE_INVALID = 'SWARM_MODEL_CANDIDATE_INVALID';
+export const SWARM_MODEL_POLICY_DENIED = 'SWARM_MODEL_POLICY_DENIED';
+export const SWARM_BINDING_CONFLICT = 'SWARM_BINDING_CONFLICT';
 export const SWARM_STATES = Object.freeze(['waiting', 'working', 'stopped', 'killed']);
 export const SWARM_WORKSPACE_MODES = Object.freeze(['inherit', 'worktree', 'staging']);
 
@@ -153,11 +168,270 @@ function redactSecrets(text) {
     .replace(/\b(sk-[A-Za-z0-9_-]{12,}|ghp_[A-Za-z0-9]{16,}|AIza[0-9A-Za-z_-]{16,}|Bearer\s+[A-Za-z0-9._-]{16,})\b/g, '[REDACTED]');
 }
 
+function normalizeRuntimeTuple(input = {}) {
+  const tool = trimString(input.tool || input.harness).toLowerCase();
+  const provider = trimString(input.provider || input.providerProfile);
+  const model = trimString(input.model);
+  const effort = trimString(input.effort).toLowerCase();
+  return {
+    ...(tool ? { tool } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+  };
+}
+
+function normalizeUsageFields(rawUsage = null) {
+  if (!rawUsage || typeof rawUsage !== 'object') return null;
+  const pickInt = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Math.trunc(Number(v)) : 0);
+  const pickCost = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
+  const inputTokens = pickInt(rawUsage.inputTokens ?? rawUsage.contextInputTokens ?? rawUsage.promptTokens);
+  const outputTokens = pickInt(rawUsage.outputTokens ?? rawUsage.completionTokens);
+  const cachedInputTokens = pickInt(rawUsage.cachedInputTokens ?? rawUsage.cached_input_tokens);
+  const cacheReadTokens = pickInt(
+    rawUsage.cacheReadTokens ?? rawUsage.cachedReadTokens ?? rawUsage.cache_read_input_tokens ?? rawUsage.cache_read_tokens,
+  );
+  const cacheCreationTokens = pickInt(rawUsage.cacheCreationTokens ?? rawUsage.cache_creation_input_tokens);
+  const reasoningTokens = pickInt(rawUsage.reasoningTokens ?? rawUsage.thoughtTokens);
+  const explicitTotal = pickInt(rawUsage.totalTokens ?? rawUsage.contextWindowTokens);
+  const cachedTotal = Math.max(cachedInputTokens, cacheReadTokens);
+  const totalTokens = explicitTotal > 0
+    ? explicitTotal
+    : (inputTokens + outputTokens + reasoningTokens + cachedTotal + cacheCreationTokens);
+  const costUsd = pickCost(rawUsage.costUsd ?? rawUsage.estimatedCostUsd ?? rawUsage.cost);
+  if (inputTokens === 0 && outputTokens === 0 && reasoningTokens === 0 && totalTokens === 0 && costUsd === 0 && cachedInputTokens === 0 && cacheReadTokens === 0 && cacheCreationTokens === 0) {
+    return null;
+  }
+  return {
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
+    cachedInputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+    totalTokens,
+    costUsd,
+  };
+}
+
+function emptyEpochUsage() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cachedInputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    runCount: 0,
+    runIds: [],
+  };
+}
+
+function createModelEpoch({
+  epochIndex = 1,
+  bindingGeneration = 1,
+  startedAt = nowIso(),
+  endedAt = null,
+  reason = 'initial_spawn',
+  requestedConfig = {},
+  resolvedConfig = {},
+  actualReportedConfig = null,
+  usage = null,
+} = {}) {
+  const baseUsage = emptyEpochUsage();
+  if (usage && typeof usage === 'object') {
+    for (const key of ['inputTokens', 'outputTokens', 'reasoningTokens', 'cachedInputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'totalTokens', 'costUsd', 'runCount']) {
+      if (Number.isFinite(Number(usage[key])) && Number(usage[key]) >= 0) {
+        baseUsage[key] = key === 'costUsd' ? Number(usage[key]) : Math.trunc(Number(usage[key]));
+      }
+    }
+    if (Array.isArray(usage.runIds)) {
+      baseUsage.runIds = [...new Set(usage.runIds.map((id) => trimString(id)).filter(Boolean))].slice(-64);
+    }
+  }
+  return {
+    epochIndex: Math.max(1, Number(epochIndex) || 1),
+    bindingGeneration: Math.max(1, Number(bindingGeneration) || 1),
+    startedAt: trimString(startedAt) || nowIso(),
+    endedAt: trimString(endedAt) || null,
+    reason: trimString(reason) || 'initial_spawn',
+    requestedConfig: normalizeRuntimeTuple(requestedConfig),
+    resolvedConfig: normalizeRuntimeTuple(resolvedConfig),
+    actualReportedConfig: actualReportedConfig && typeof actualReportedConfig === 'object'
+      ? normalizeRuntimeTuple(actualReportedConfig)
+      : null,
+    usage: baseUsage,
+  };
+}
+
+function ensureGrantModelHistory(grant = {}, fallbackBindingGeneration = 1) {
+  const runtimePolicy = grant?.runtimePolicy && typeof grant.runtimePolicy === 'object' ? grant.runtimePolicy : {};
+  const existing = Array.isArray(grant?.modelHistory) ? grant.modelHistory : [];
+  if (existing.length > 0) {
+    return existing.map((epoch, idx) => createModelEpoch({ ...epoch, epochIndex: epoch?.epochIndex ?? (idx + 1) }));
+  }
+  const initialConfig = normalizeRuntimeTuple({
+    tool: runtimePolicy.tool || grant?.harness,
+    provider: runtimePolicy.providerProfile || grant?.provider,
+    model: runtimePolicy.model || grant?.model,
+    effort: runtimePolicy.effort || grant?.effort,
+  });
+  return [
+    createModelEpoch({
+      epochIndex: 1,
+      bindingGeneration: Math.max(1, Number(fallbackBindingGeneration) || 1),
+      reason: 'initial_spawn',
+      requestedConfig: initialConfig,
+      resolvedConfig: initialConfig,
+    }),
+  ];
+}
+
+function extractRunUsageAndActualConfig(run = null, session = null) {
+  if (!run && !session) return { usage: null, actualReportedConfig: null };
+  const usage = normalizeUsageFields(run?.usage || run?.tokenUsage || run);
+  const actualTuple = normalizeRuntimeTuple({
+    tool: run?.tool || run?.actualTool || session?.tool,
+    provider: run?.providerProfile || run?.actualProvider || run?.agyQueue?.providerId || run?.agyProviderProfileId || session?.providerProfile,
+    model: run?.actualModel || run?.model || run?.codexThreadModel || session?.model,
+    effort: run?.effort || run?.codexThreadEffort || session?.effort,
+  });
+  return {
+    usage,
+    actualReportedConfig: Object.keys(actualTuple).length > 0 ? actualTuple : null,
+  };
+}
+
+function recordEpochRunTelemetry(grant = {}, {
+  bindingGeneration = 1,
+  runId = '',
+  run = null,
+  session = null,
+  usage = null,
+  actualReportedConfig = null,
+  endedAt = '',
+} = {}) {
+  const history = ensureGrantModelHistory(grant, bindingGeneration);
+  let targetEpoch = null;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (!history[i].endedAt && history[i].bindingGeneration === Number(bindingGeneration || history[i].bindingGeneration)) {
+      targetEpoch = history[i];
+      break;
+    }
+  }
+  if (!targetEpoch) {
+    targetEpoch = history[history.length - 1];
+  }
+  const normalizedRunId = trimString(runId || run?.id || run?.runId);
+  const extracted = extractRunUsageAndActualConfig(run, session);
+  const resolvedUsage = normalizeUsageFields(usage) || extracted.usage;
+  const resolvedActual = actualReportedConfig && typeof actualReportedConfig === 'object'
+    ? normalizeRuntimeTuple(actualReportedConfig)
+    : extracted.actualReportedConfig;
+  if (resolvedActual && Object.keys(resolvedActual).length > 0) {
+    targetEpoch.actualReportedConfig = {
+      ...(targetEpoch.actualReportedConfig || {}),
+      ...resolvedActual,
+    };
+  }
+  const alreadyRecorded = Boolean(normalizedRunId && targetEpoch.usage.runIds.includes(normalizedRunId));
+  if (!alreadyRecorded && (normalizedRunId || resolvedUsage)) {
+    if (resolvedUsage) {
+      targetEpoch.usage.inputTokens += resolvedUsage.inputTokens;
+      targetEpoch.usage.outputTokens += resolvedUsage.outputTokens;
+      targetEpoch.usage.reasoningTokens += Number(resolvedUsage.reasoningTokens || 0);
+      targetEpoch.usage.cachedInputTokens += resolvedUsage.cachedInputTokens;
+      targetEpoch.usage.cacheReadTokens += resolvedUsage.cacheReadTokens;
+      targetEpoch.usage.cacheCreationTokens += resolvedUsage.cacheCreationTokens;
+      targetEpoch.usage.totalTokens += resolvedUsage.totalTokens;
+      targetEpoch.usage.costUsd = Math.round((targetEpoch.usage.costUsd + resolvedUsage.costUsd) * 1e6) / 1e6;
+    }
+    if (normalizedRunId) {
+      targetEpoch.usage.runCount += 1;
+      targetEpoch.usage.runIds.push(normalizedRunId);
+      if (targetEpoch.usage.runIds.length > 64) {
+        targetEpoch.usage.runIds = targetEpoch.usage.runIds.slice(-64);
+      }
+    }
+  }
+  if (endedAt && !targetEpoch.endedAt) {
+    targetEpoch.endedAt = endedAt;
+  }
+  grant.modelHistory = history;
+  return history;
+}
+
+function mergeNonEmptyRuntimeConfig(...configs) {
+  const merged = {};
+  for (const raw of configs) {
+    if (!raw || typeof raw !== 'object') continue;
+    const tool = trimString(raw.tool || raw.harness);
+    const provider = trimString(raw.provider || raw.providerProfile);
+    const model = trimString(raw.model);
+    const effort = trimString(raw.effort).toLowerCase();
+    if (tool) merged.tool = tool;
+    if (provider) merged.provider = provider;
+    if (model) merged.model = model;
+    if (effort) merged.effort = effort;
+  }
+  return merged;
+}
+
+function summarizeUsageByModel(modelHistory = []) {
+  const byModel = new Map();
+  for (const epoch of modelHistory) {
+    const cfg = mergeNonEmptyRuntimeConfig(
+      epoch?.requestedConfig,
+      epoch?.resolvedConfig,
+      epoch?.actualReportedConfig,
+    );
+    const key = `${cfg.tool || 'unknown'}:${cfg.model || cfg.provider || 'default'}`;
+    if (!byModel.has(key)) {
+      byModel.set(key, {
+        modelKey: key,
+        tool: cfg.tool || '',
+        provider: cfg.provider || '',
+        model: cfg.model || '',
+        effort: cfg.effort || '',
+        epochs: [],
+        inputTokens: 0,
+        outputTokens: 0,
+        reasoningTokens: 0,
+        cachedInputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        totalTokens: 0,
+        costUsd: 0,
+        runCount: 0,
+      });
+    }
+    const bucket = byModel.get(key);
+    const u = epoch?.usage || {};
+    bucket.epochs.push(epoch.epochIndex);
+    bucket.inputTokens += Number(u.inputTokens || 0);
+    bucket.outputTokens += Number(u.outputTokens || 0);
+    bucket.reasoningTokens += Number(u.reasoningTokens || 0);
+    bucket.cachedInputTokens += Number(u.cachedInputTokens || 0);
+    bucket.cacheReadTokens += Number(u.cacheReadTokens || 0);
+    bucket.cacheCreationTokens += Number(u.cacheCreationTokens || 0);
+    bucket.totalTokens += Number(u.totalTokens || 0);
+    bucket.costUsd = Math.round((bucket.costUsd + Number(u.costUsd || 0)) * 1e6) / 1e6;
+    bucket.runCount += Number(u.runCount || 0);
+  }
+  return [...byModel.values()];
+}
+
 function serializeSwarmMember(row, subscriptionsByNode = new Map()) {
   if (!row) return null;
   const grant = parseJson(row.grant_json, {});
   const runtimePolicy = grant?.runtimePolicy && typeof grant.runtimePolicy === 'object' ? grant.runtimePolicy : {};
   const workspaceMeta = grant?.swarmWorkspace && typeof grant.swarmWorkspace === 'object' ? grant.swarmWorkspace : {};
+  const bindingGeneration = Number(row.binding_generation || 0);
+  const modelHistory = ensureGrantModelHistory(grant, bindingGeneration);
+  const usageByModel = summarizeUsageByModel(modelHistory);
+  const activeModelEpoch = modelHistory[modelHistory.length - 1] || null;
   return {
     nodeId: row.id,
     id: row.id,
@@ -175,7 +449,7 @@ function serializeSwarmMember(row, subscriptionsByNode = new Map()) {
     parentNodeId: row.parent_node_id || '',
     depth: Number(row.depth || 0),
     currentSessionId: row.current_session_id || '',
-    bindingGeneration: Number(row.binding_generation || 0),
+    bindingGeneration,
     harness: trimString(runtimePolicy.tool || grant?.harness),
     provider: trimString(runtimePolicy.providerProfile || grant?.provider),
     model: trimString(runtimePolicy.model || grant?.model),
@@ -185,11 +459,18 @@ function serializeSwarmMember(row, subscriptionsByNode = new Map()) {
     workspaceBranch: row.workspace_branch || '',
     baseRef: trimString(workspaceMeta.baseRef),
     sealedCandidateId: trimString(workspaceMeta.sealedCandidateId),
+    promotedWorkItemId: trimString(workspaceMeta.promotedWorkItemId),
+    parentWorkItemId: trimString(grant?.parentWorkItemId || grant?.workItemId),
     channels: subscriptionsByNode.get(row.id) || ['main'],
     canDelegate: grant?.canDelegate === true,
     canWrite: grant?.canWrite === true,
     canReview: grant?.canReview === true,
     certifiedReadOnly: grant?.certifiedReadOnly === true,
+    modelSwitchCount: Number(grant?.modelSwitchCount || 0),
+    pendingModelSwitchHandoff: Boolean(grant?.pendingModelSwitchHandoff),
+    activeModelEpoch,
+    modelHistory,
+    usageByModel,
     ...(trimString(grant?.lastRunId) ? { lastRunId: trimString(grant.lastRunId) } : {}),
     ...(trimString(grant?.lastStateReason) ? { lastStateReason: trimString(grant.lastStateReason) } : {}),
     ...(grant?.lastRunFailure && typeof grant.lastRunFailure === 'object' ? { lastRunFailure: grant.lastRunFailure } : {}),
@@ -612,6 +893,7 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
     forkFromNodeId = '',
     forkSinceSeq = 0,
     workItemId = '',
+    parentWorkItemId = '',
     projectRoot = '',
     capabilities = null,
     writablePaths = [],
@@ -994,9 +1276,27 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
       try {
 
         for (const item of preparedMembers) {
+          const initialConfig = normalizeRuntimeTuple({
+            tool: preflight.derivedGrant?.runtimePolicy?.tool || harness || preflight.actor?.harness || 'codex',
+            provider: preflight.derivedGrant?.runtimePolicy?.providerProfile || provider,
+            model: preflight.derivedGrant?.runtimePolicy?.model || model,
+            effort: preflight.derivedGrant?.runtimePolicy?.effort || effort,
+          });
+          const effectiveParentWorkItemId = trimString(parentWorkItemId || workItemId);
           const memberGrant = {
             ...preflight.derivedGrant,
             swarmName: item.memberName,
+            ...(effectiveParentWorkItemId ? { parentWorkItemId: effectiveParentWorkItemId, workItemId: effectiveParentWorkItemId } : {}),
+            modelHistory: [
+              createModelEpoch({
+                epochIndex: 1,
+                bindingGeneration: 1,
+                startedAt: ts,
+                reason: 'initial_spawn',
+                requestedConfig: initialConfig,
+                resolvedConfig: initialConfig,
+              }),
+            ],
             ...(item.reservation ? { swarmReservation: item.reservation } : {}),
             swarmWorkspace: {
               mode: item.workspace.workspaceMode,
@@ -1164,6 +1464,10 @@ export async function getSwarmStatus(firstArg, secondArg) {
       reserved: counterRow ? parseJson(counterRow.reserved_json, {}) : {},
     };
 
+    const usageByModel = summarizeUsageByModel(
+      allMembers.flatMap((member) => (Array.isArray(member.modelHistory) ? member.modelHistory : [])),
+    );
+
     return {
       organizationId: normalizedOrgId,
       title: trimString(orgPolicy?.swarmTitle || orgPolicy?.title) || null,
@@ -1173,6 +1477,7 @@ export async function getSwarmStatus(firstArg, secondArg) {
       members,
       channels,
       budget,
+      usageByModel,
       activeStalls,
     };
   });
@@ -1273,7 +1578,7 @@ export async function markSwarmDone(firstArg, secondArg) {
   }, { mutate: true, organizationId: normalizedOrgId });
 }
 
-async function inspectWorkspaceUnmergedChanges(deps, node, projectRoot) {
+export async function inspectWorkspaceUnmergedChanges(deps, node, projectRoot) {
   const mode = node.workspace_mode || 'inherit';
   const wsPath = trimString(node.workspace_path);
   const grant = parseJson(node.grant_json, {});
@@ -1563,11 +1868,30 @@ export async function deliverPendingSwarmWakeups(firstArg, secondArg) {
       }
     }
 
+    const rawNodeGrant = nodeRow ? parseJson(nodeRow.grant_json, {}) : {};
+    const pendingSwitchHandoff = rawNodeGrant?.pendingModelSwitchHandoff && typeof rawNodeGrant.pendingModelSwitchHandoff === 'object'
+      ? rawNodeGrant.pendingModelSwitchHandoff
+      : null;
+    const handoffLines = pendingSwitchHandoff ? [
+      `[Swarm Verified Model Switch Handoff]`,
+      `Handoff: ${pendingSwitchHandoff.handoffId} | Binding generation: ${pendingSwitchHandoff.nextBindingGeneration} | Switched to ${pendingSwitchHandoff.resolvedConfig?.tool || member.harness}:${pendingSwitchHandoff.resolvedConfig?.model || pendingSwitchHandoff.resolvedConfig?.provider || 'default'}`,
+      pendingSwitchHandoff.factoryTaskHandoffId ? `FactoryTaskHandoff: ${pendingSwitchHandoff.factoryTaskHandoffId}` : '',
+      pendingSwitchHandoff.workspace && pendingSwitchHandoff.workspace.mode !== 'inherit'
+        ? `Workspace (${pendingSwitchHandoff.workspace.mode}): branch=${pendingSwitchHandoff.workspace.branch || '(none)'}, dirtyFiles=${Array.isArray(pendingSwitchHandoff.workspace.dirtyFiles) ? pendingSwitchHandoff.workspace.dirtyFiles.length : 0}, unmergedCommits=${Number(pendingSwitchHandoff.workspace.unmergedCommits || 0)}`
+        : '',
+      pendingSwitchHandoff.boardRange
+        ? `Unread board range: #${pendingSwitchHandoff.boardRange.unreadFromSeq}..#${pendingSwitchHandoff.boardRange.headSeq}`
+        : '',
+      pendingSwitchHandoff.briefSummary ? `Brief: ${pendingSwitchHandoff.briefSummary}` : '',
+      pendingSwitchHandoff.handoffNotes ? `Handoff notes: ${pendingSwitchHandoff.handoffNotes}` : '',
+    ] : [];
+
     const digest = [
       `[Swarm Board Doorbell — Untrusted Peer Content]`,
       `Channel #${wakeup.channel_name} | Trigger #${wakeup.trigger_seq} (latest #${wakeup.latest_seq}, coalesced=${wakeup.coalesced_count})`,
       senderName ? `From: ${senderName}` : '',
       preview ? `Preview: ${preview}` : '',
+      ...handoffLines,
       `Call ragent_organization_read (action: "board.read", channel: "${wakeup.channel_name}", sinceSeq: ${Math.max(0, Number(wakeup.trigger_seq) - 1)}) for full messages.`,
     ].filter(Boolean).join('\n');
 
@@ -1588,6 +1912,7 @@ export async function deliverPendingSwarmWakeups(firstArg, secondArg) {
           readOnlyRequired: requireCertifiedReadOnly,
           ...(requireCertifiedReadOnly ? {} : { readOnlyAdvisory: true }),
         } : {}),
+        ...(pendingSwitchHandoff ? { modelSwitchHandoff: pendingSwitchHandoff } : {}),
         organizationId: wakeup.organization_id,
         organizationNodeId: member.id,
         bindingGeneration: member.bindingGeneration,
@@ -1602,6 +1927,19 @@ export async function deliverPendingSwarmWakeups(firstArg, secondArg) {
         continue;
       }
       await markBoardWakeupDelivered(db || undefined, { wakeupId: wakeup.id });
+      if (pendingSwitchHandoff) {
+        await runWithOrgDb(db, (conn) => {
+          const latestRow = conn.prepare('SELECT grant_json FROM organization_nodes WHERE id = ? AND organization_id = ?').get(member.id, wakeup.organization_id);
+          if (!latestRow) return;
+          const latestGrant = parseJson(latestRow.grant_json, {});
+          if (latestGrant?.pendingModelSwitchHandoff?.handoffId === pendingSwitchHandoff.handoffId) {
+            latestGrant.lastDeliveredModelSwitchHandoffId = pendingSwitchHandoff.handoffId;
+            delete latestGrant.pendingModelSwitchHandoff;
+            conn.prepare('UPDATE organization_nodes SET grant_json = ? WHERE id = ? AND organization_id = ?')
+              .run(encodeJson(latestGrant, {}), member.id, wakeup.organization_id);
+          }
+        }, { mutate: true, organizationId: wakeup.organization_id });
+      }
       const wakeupRunId = trimString(res?.run?.id || res?.runId);
       await markSwarmMemberState(db || undefined, {
         organizationId: wakeup.organization_id,
@@ -1660,13 +1998,24 @@ async function resolveMemberRunInfo(deps, member) {
   return fallback ? { ...fallback, hasSessionActiveRun: Boolean(activeRunId) } : null;
 }
 
+function hasEpochRecordedRun(memberOrGrant = {}, runId = '') {
+  const normalizedRunId = trimString(runId);
+  if (!normalizedRunId) return false;
+  const history = Array.isArray(memberOrGrant?.modelHistory) ? memberOrGrant.modelHistory : [];
+  return history.some((epoch) => Array.isArray(epoch?.usage?.runIds) && epoch.usage.runIds.includes(normalizedRunId));
+}
+
 export async function settleSwarmMemberRunState(firstArg, secondArg) {
-  const { db, options } = splitDbOrDeps(firstArg, secondArg);
+  const { db, deps, options } = splitDbOrDeps(firstArg, secondArg);
   const {
     sessionId = '',
     runId = '',
     state = '',
     failureReason = '',
+    usage = null,
+    actualReportedConfig = null,
+    run: explicitRun = null,
+    session: explicitSession = null,
   } = options;
   const targetSessionId = trimString(sessionId);
   if (!targetSessionId) return { settled: false, count: 0, nodes: [] };
@@ -1677,8 +2026,25 @@ export async function settleSwarmMemberRunState(firstArg, secondArg) {
     ? `run_failed:${normalizedState}${trimString(failureReason) ? `: ${redactSecrets(trimString(failureReason))}` : ''}`.slice(0, 300)
     : 'run_completed_without_wait';
 
+  let resolvedRun = explicitRun;
+  const normalizedRunId = trimString(runId);
+  if (!resolvedRun && normalizedRunId && !db) {
+    if (typeof deps.getRun === 'function') {
+      resolvedRun = await deps.getRun(normalizedRunId).catch(() => null);
+    } else if (deps.skipRunLookup !== true) {
+      try {
+        const runsMod = await import('./runs.mjs');
+        resolvedRun = await runsMod.getRun(normalizedRunId).catch(() => null);
+      } catch {}
+    }
+  }
+  let resolvedSession = explicitSession;
+  if (!resolvedSession && typeof deps.getSession === 'function') {
+    resolvedSession = await deps.getSession(targetSessionId).catch(() => null);
+  }
+
   return runWithOrgDb(db, (conn) => {
-    const workingNodes = conn.prepare(`
+    const activeNodes = conn.prepare(`
       SELECT n.*
       FROM organization_nodes n
       JOIN organizations o ON o.id = n.organization_id
@@ -1686,31 +2052,54 @@ export async function settleSwarmMemberRunState(firstArg, secondArg) {
         AND n.lifecycle_mode = 'ephemeral_swarm'
         AND n.lifecycle_state = 'active'
         AND n.retired_revision IS NULL
-        AND n.swarm_state = 'working'
+        AND COALESCE(NULLIF(LOWER(TRIM(n.swarm_state)), ''), 'waiting') != 'killed'
         AND o.state = 'active'
     `).all(targetSessionId);
-    if (!workingNodes.length) return { settled: false, count: 0, nodes: [] };
+    if (!activeNodes.length) return { settled: false, count: 0, nodes: [] };
 
     const settledNodes = [];
-    for (const row of workingNodes) {
+    for (const row of activeNodes) {
+      const currentState = resolveMemberSwarmState(row);
+      const isWorking = currentState === 'working';
       const grant = parseJson(row.grant_json, {});
-      grant.lastStateReason = cleanReason;
-      if (trimString(runId)) grant.lastRunId = trimString(runId);
-      if (isFailure) {
+      const beforeGrantJson = encodeJson(grant, {});
+      if (isWorking) {
+        grant.lastStateReason = cleanReason;
+        if (normalizedRunId) grant.lastRunId = normalizedRunId;
+      } else if (normalizedRunId) {
+        grant.lastRunId = normalizedRunId;
+      }
+      recordEpochRunTelemetry(grant, {
+        bindingGeneration: Number(row.binding_generation || 1),
+        runId: normalizedRunId || trimString(grant.lastRunId),
+        run: resolvedRun,
+        session: resolvedSession,
+        usage,
+        actualReportedConfig,
+      });
+      if (isFailure && (isWorking || !grant.lastRunFailure || grant.lastRunFailure.runId !== normalizedRunId)) {
+        if (!isWorking) grant.lastStateReason = cleanReason;
         grant.lastRunFailure = {
-          runId: trimString(runId),
+          runId: normalizedRunId,
           state: normalizedState,
           reason: redactSecrets(trimString(failureReason) || normalizedState).slice(0, 240),
           failedAt: nowIso(),
         };
       }
+      const afterGrantJson = encodeJson(grant, {});
+      if (!isWorking && beforeGrantJson === afterGrantJson) {
+        continue;
+      }
       const info = conn.prepare(`
         UPDATE organization_nodes
-        SET swarm_state = 'waiting',
+        SET swarm_state = CASE WHEN swarm_state = 'working' THEN 'waiting' ELSE swarm_state END,
             grant_json = ?,
             version = version + 1
-        WHERE id = ? AND organization_id = ? AND swarm_state = 'working'
-      `).run(encodeJson(grant, {}), row.id, row.organization_id);
+        WHERE id = ?
+          AND organization_id = ?
+          AND version = ?
+          AND COALESCE(NULLIF(LOWER(TRIM(swarm_state)), ''), 'waiting') != 'killed'
+      `).run(afterGrantJson, row.id, row.organization_id, row.version);
       if (info.changes > 0) {
         settledNodes.push(serializeSwarmMember(
           conn.prepare('SELECT * FROM organization_nodes WHERE id = ?').get(row.id),
@@ -1730,7 +2119,7 @@ export async function reconcileSwarmMemberStates(firstArg, secondArg) {
     return { checked: 0, settled: 0, nodes: [] };
   }
 
-  const workingNodes = await runWithOrgDb(db, (conn) => {
+  const candidateNodes = await runWithOrgDb(db, (conn) => {
     const orgRow = conn.prepare('SELECT * FROM organizations WHERE id = ?').get(normalizedOrgId);
     if (!orgRow || ['archived', 'lifecycle_pending'].includes(orgRow.state)) return [];
     return conn.prepare(`
@@ -1739,13 +2128,17 @@ export async function reconcileSwarmMemberStates(firstArg, secondArg) {
         AND lifecycle_mode = 'ephemeral_swarm'
         AND lifecycle_state = 'active'
         AND retired_revision IS NULL
-        AND swarm_state = 'working'
+        AND COALESCE(NULLIF(LOWER(TRIM(swarm_state)), ''), 'waiting') != 'killed'
     `).all(normalizedOrgId).map((row) => serializeSwarmMember(row));
   });
 
   let settled = 0;
   const nodes = [];
-  for (const member of workingNodes) {
+  for (const member of candidateNodes) {
+    const isWorking = member.swarmState === 'working';
+    if (!isWorking && member.lastRunId && hasEpochRecordedRun(member, member.lastRunId)) {
+      continue;
+    }
     const runInfo = await resolveMemberRunInfo(deps, member);
     if (!runInfo) continue;
     const terminalState = trimString(runInfo?.state || runInfo?.status).toLowerCase();
@@ -1754,18 +2147,25 @@ export async function reconcileSwarmMemberStates(firstArg, secondArg) {
         || runInfo?.hasSessionActiveRun === true) {
       continue;
     }
-    const res = await settleSwarmMemberRunState(db || undefined, {
+    const candidateRunId = trimString(runInfo?.runId || runInfo?.id || member.lastRunId);
+    if (!isWorking && (!candidateRunId || hasEpochRecordedRun(member, candidateRunId))) {
+      continue;
+    }
+    const res = await settleSwarmMemberRunState({ ...deps, ...(db ? { db } : {}) }, {
       sessionId: member.currentSessionId,
-      runId: trimString(runInfo?.runId || runInfo?.id || member.lastRunId),
+      runId: candidateRunId,
       state: terminalState,
       failureReason: trimString(runInfo?.failureReason || runInfo?.error),
+      ...(runInfo?.usage ? { usage: runInfo.usage } : {}),
+      ...(runInfo?.actualReportedConfig ? { actualReportedConfig: runInfo.actualReportedConfig } : {}),
+      run: runInfo,
     });
     if (res.settled) {
       settled += res.count;
       nodes.push(...res.nodes);
     }
   }
-  return { checked: workingNodes.length, settled, nodes };
+  return { checked: candidateNodes.length, settled, nodes };
 }
 
 function parseMs(iso) {
@@ -1962,4 +2362,722 @@ export async function listActiveSwarmOrganizations(db = null) {
       })
       .map((r) => r.id);
   });
+}
+
+function findSwarmNodeRow(conn, organizationId, query) {
+  return conn.prepare(
+    'SELECT * FROM organization_nodes WHERE organization_id = ? AND (id = ? OR LOWER(stable_key) = LOWER(?)) LIMIT 1',
+  ).get(organizationId, query, query);
+}
+
+function normalizeRuntimeLockEntries(rawConstraints = null) {
+  if (!rawConstraints || typeof rawConstraints !== 'object' || Array.isArray(rawConstraints)) return {};
+  const result = {};
+  for (const field of ['tool', 'provider', 'model', 'effort']) {
+    const entry = rawConstraints[field];
+    if (!entry) continue;
+    if (Array.isArray(entry)) {
+      result[field] = entry;
+      continue;
+    }
+    if (typeof entry === 'string' && trimString(entry)) {
+      result[field] = {
+        value: ['tool', 'effort'].includes(field) ? trimString(entry).toLowerCase() : trimString(entry),
+        mode: 'locked',
+        source: 'owner',
+        scope: 'organization',
+        version: 1,
+      };
+    } else if (typeof entry === 'object') {
+      result[field] = entry;
+    }
+  }
+  return result;
+}
+
+function assertOwnerRuntimeLocksAllowSwitch({
+  constraintsSources = [],
+  scopes = ['organization'],
+  candidateRuntime = {},
+}) {
+  const merged = {};
+  for (const src of constraintsSources) {
+    const normalizedSrc = normalizeRuntimeLockEntries(src);
+    for (const [field, entry] of Object.entries(normalizedSrc)) {
+      const list = Array.isArray(entry) ? entry : [entry];
+      merged[field] = [...(merged[field] || []), ...list];
+    }
+  }
+  if (Object.keys(merged).length === 0) return;
+  let selected = {};
+  try {
+    selected = selectRuntimeConstraints(merged, scopes);
+    assertRuntimeConstraints(candidateRuntime, selected);
+  } catch (error) {
+    if (error?.code === 'ORG_RUNTIME_USER_LOCKED') {
+      const lockedEntries = Object.entries(selected)
+        .filter(([, entry]) => entry?.mode === 'locked')
+        .map(([field, entry]) => `${field}=${entry.value}`);
+      throw swarmError(
+        SWARM_MODEL_LOCKED_BY_OWNER,
+        `Cannot switch member runtime (${error.message}${lockedEntries.length ? `: ${lockedEntries.join(', ')}` : ''})`,
+        409,
+        { lockedConstraints: selected },
+      );
+    }
+    throw error;
+  }
+}
+
+async function validateModelSwitchCandidateAndBudget(conn, deps, {
+  orgRow,
+  orgPolicy = {},
+  orgBudget = {},
+  targetGrant = {},
+  previousRuntime = {},
+  proposedRuntime = {},
+}) {
+  if (orgPolicy?.allowModelSwitch === false) {
+    throw swarmError(SWARM_MODEL_POLICY_DENIED, 'Organization policy disables runtime/model switching', 403);
+  }
+  const targetTool = trimString(proposedRuntime.tool).toLowerCase();
+  if (!targetTool || (deps.allowCustomTools !== true && !TOOL_SET.has(targetTool))) {
+    throw swarmError(
+      SWARM_MODEL_CANDIDATE_INVALID,
+      `Unsupported target harness/tool "${targetTool || '(empty)'}"`,
+      422,
+    );
+  }
+  if (Array.isArray(orgPolicy?.allowedHarnesses) && orgPolicy.allowedHarnesses.length > 0) {
+    const allowedTools = new Set(orgPolicy.allowedHarnesses.map((t) => trimString(t).toLowerCase()).filter(Boolean));
+    if (!allowedTools.has(targetTool)) {
+      throw swarmError(SWARM_MODEL_POLICY_DENIED, `Harness "${targetTool}" is not allowed by organization policy`, 403);
+    }
+  }
+  const targetModel = trimString(proposedRuntime.model);
+  const policyAllowedModels = Array.isArray(orgPolicy?.allowedModels) ? orgPolicy.allowedModels : targetGrant?.runtimePolicy?.allowedModels;
+  if (targetModel && Array.isArray(policyAllowedModels) && policyAllowedModels.length > 0) {
+    const allowedSet = new Set(policyAllowedModels.map((m) => trimString(m)).filter(Boolean));
+    if (!allowedSet.has(targetModel)) {
+      throw swarmError(SWARM_MODEL_POLICY_DENIED, `Model "${targetModel}" is not in organization allowedModels policy`, 403);
+    }
+  }
+  if (targetModel && Array.isArray(orgPolicy?.disallowedModels) && orgPolicy.disallowedModels.includes(targetModel)) {
+    throw swarmError(SWARM_MODEL_POLICY_DENIED, `Model "${targetModel}" is disallowed by organization policy`, 403);
+  }
+
+  if (typeof deps.validateRuntimeCandidate === 'function') {
+    const verdict = await deps.validateRuntimeCandidate({
+      organizationId: orgRow.id,
+      previousRuntime,
+      proposedRuntime,
+      orgPolicy,
+      orgBudget,
+    });
+    if (verdict === false || verdict?.allowed === false) {
+      throw swarmError(
+        verdict?.code || SWARM_MODEL_CANDIDATE_INVALID,
+        verdict?.reason || `Candidate ${targetTool}:${targetModel || '(default)'} is not permitted`,
+        verdict?.statusCode || 422,
+      );
+    }
+  }
+
+  let catalog = Array.isArray(deps.runtimeCatalog) ? deps.runtimeCatalog : null;
+  if (!catalog && typeof deps.getRuntimeCatalog === 'function') {
+    catalog = await deps.getRuntimeCatalog().catch(() => null);
+  }
+  if (!catalog && deps.validateCatalog === true) {
+    catalog = await buildOrganizationRuntimeCatalog().catch(() => null);
+  }
+  if (Array.isArray(catalog)) {
+    const toolEntry = catalog.find((entry) => trimString(entry?.tool).toLowerCase() === targetTool);
+    if (!toolEntry) {
+      throw swarmError(SWARM_MODEL_CANDIDATE_INVALID, `Harness "${targetTool}" is not present in runtime catalog`, 422);
+    }
+    const providerCatalogModels = Array.isArray(toolEntry.providerCatalogs)
+      && toolEntry.providerCatalogs.some((pc) => Array.isArray(pc?.models) && pc.models.length > 0);
+    const directModels = Array.isArray(toolEntry.models) ? toolEntry.models : [];
+    if (providerCatalogModels) {
+      const candidateQuery = queryRuntimeCandidates(catalog, {
+        tool: targetTool,
+        ...(trimString(proposedRuntime.provider) ? { provider: trimString(proposedRuntime.provider) } : {}),
+        ...(targetModel ? { model: targetModel } : {}),
+      });
+      if (candidateQuery.total === 0 || candidateQuery.items.every((item) => item.eligible === false)) {
+        throw swarmError(
+          SWARM_MODEL_CANDIDATE_INVALID,
+          `Target runtime ${targetTool}:${targetModel || proposedRuntime.provider || '(default)'} failed catalog validation`,
+          422,
+        );
+      }
+    } else if (targetModel && directModels.length > 0) {
+      const matched = directModels.some((m) => m?.id === targetModel || m?.model === targetModel);
+      if (!matched) {
+        throw swarmError(
+          SWARM_MODEL_CANDIDATE_INVALID,
+          `Model "${targetModel}" is not present in ${targetTool} runtime catalog`,
+          422,
+        );
+      }
+    }
+    const effort = trimString(proposedRuntime.effort).toLowerCase();
+    if (effort) {
+      const modelMeta = Array.isArray(toolEntry.models)
+        ? toolEntry.models.find((m) => m.id === targetModel)
+        : null;
+      const validEfforts = modelMeta?.effortLevels?.length ? modelMeta.effortLevels : toolEntry.effortLevels;
+      if (Array.isArray(validEfforts) && validEfforts.length > 0 && !validEfforts.includes(effort)) {
+        throw swarmError(
+          SWARM_MODEL_CANDIDATE_INVALID,
+          `Effort "${effort}" is unsupported for ${targetTool}${targetModel ? `/${targetModel}` : ''}`,
+          422,
+        );
+      }
+    }
+  } else if (targetModel && deps.skipCatalogCheck !== true) {
+    const modelsRes = await getModelsForTool(targetTool).catch(() => null);
+    const knownModels = Array.isArray(modelsRes?.models) ? modelsRes.models : [];
+    if (knownModels.length > 0 && !knownModels.some((entry) => entry?.id === targetModel || entry?.model === targetModel)) {
+      throw swarmError(
+        SWARM_MODEL_CANDIDATE_INVALID,
+        `Model "${targetModel}" is not available in ${targetTool} model catalog`,
+        422,
+      );
+    }
+  }
+
+  // Budget policy gate via organization_budget_counters
+  if (typeof deps.checkModelBudget === 'function') {
+    await deps.checkModelBudget({ organizationId: orgRow.id, orgBudget, previousRuntime, proposedRuntime });
+  }
+  const hasCounterTable = Boolean(
+    conn?.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'organization_budget_counters'").get(),
+  );
+  const counterRow = hasCounterTable
+    ? conn.prepare('SELECT totals_json, reserved_json FROM organization_budget_counters WHERE organization_id = ? AND revision = ?')
+      .get(orgRow.id, Number(orgRow.current_revision || 0))
+    : null;
+  const totals = counterRow ? parseJson(counterRow.totals_json, {}) : {};
+  const reserved = counterRow ? parseJson(counterRow.reserved_json, {}) : {};
+  const checkLimit = (limitVal, usedVal, dimension) => {
+    if (limitVal === undefined || limitVal === null) return;
+    const limitNum = Number(limitVal);
+    if (!Number.isFinite(limitNum) || limitNum < 0) return;
+    if (Number(usedVal || 0) >= limitNum) {
+      throw swarmError('ORG_BUDGET_EXCEEDED', `${dimension} budget exhausted (${usedVal}/${limitNum})`, 409, { dimension });
+    }
+  };
+  checkLimit(orgBudget?.maxCost ?? orgBudget?.cost, Number(totals.cost || 0) + Number(reserved.cost || 0), 'cost');
+  checkLimit(orgBudget?.maxTokens ?? orgBudget?.tokens, Number(totals.tokens || 0) + Number(reserved.tokens || 0), 'tokens');
+  checkLimit(
+    orgBudget?.maxSessionReplacements ?? orgBudget?.sessionReplacements,
+    Number(totals.sessionReplacements || 0) + Number(reserved.sessionReplacements || 0),
+    'sessionReplacements',
+  );
+}
+
+async function rebindSwarmSessionRuntime(deps, { sessionId, resolvedConfig }) {
+  const normalizedSessionId = trimString(sessionId);
+  if (!normalizedSessionId) return { rebound: false, reason: 'missing_session_id' };
+  const patch = {
+    tool: resolvedConfig.tool || 'codex',
+    providerProfile: resolvedConfig.provider || '',
+    model: resolvedConfig.model || '',
+    effort: resolvedConfig.effort || '',
+  };
+  if (typeof deps.updateSessionRuntime === 'function') {
+    const out = await deps.updateSessionRuntime(normalizedSessionId, patch);
+    return { rebound: true, session: out };
+  }
+  const sm = await import('./session-manager.mjs');
+  const existing = typeof sm.getSessionMeta === 'function'
+    ? await sm.getSessionMeta(normalizedSessionId).catch(() => null)
+    : (typeof sm.getSession === 'function' ? await sm.getSession(normalizedSessionId).catch(() => null) : null);
+  if (!existing) {
+    return { rebound: false, reason: 'synthetic_or_unregistered_session' };
+  }
+  const updated = await sm.updateSessionRuntimePreferences(normalizedSessionId, patch);
+  return { rebound: Boolean(updated), session: updated };
+}
+
+export async function switchSwarmMemberModel(firstArg, secondArg) {
+  const { db, deps, options } = splitDbOrDeps(firstArg, secondArg);
+  const {
+    organizationId,
+    actorNodeId = '',
+    targetNameOrNodeId = '',
+    targetNodeId = '',
+    harness = '',
+    tool = '',
+    provider = '',
+    providerProfile = '',
+    model = '',
+    effort = '',
+    reason = '',
+    handoffNotes = '',
+    expectedBindingGeneration = null,
+    workItemId = '',
+    projectRoot = '',
+    postToBoard = false,
+    wakeNow = false,
+    idempotencyKey = '',
+  } = options;
+
+  const normalizedOrgId = trimString(organizationId);
+  const targetQuery = trimString(targetNameOrNodeId || targetNodeId);
+  if (!normalizedOrgId || !targetQuery) {
+    throw swarmError('BAD_REQUEST', 'organizationId and targetNameOrNodeId are required', 400);
+  }
+  const reqHarness = trimString(harness || tool).toLowerCase();
+  const reqProvider = trimString(provider || providerProfile);
+  const reqModel = trimString(model);
+  const reqEffort = trimString(effort).toLowerCase();
+  if (!reqHarness && !reqProvider && !reqModel && !reqEffort) {
+    throw swarmError('BAD_REQUEST', 'At least one target runtime field (harness, provider, model, or effort) is required', 400);
+  }
+  const normalizedKey = trimString(idempotencyKey);
+
+  // Step 1: Read current org, actor, and target node state.
+  const preflight = await runWithOrgDb(db, (conn) => {
+    const orgRow = conn.prepare('SELECT * FROM organizations WHERE id = ?').get(normalizedOrgId);
+    if (!orgRow) throw swarmError('ORGANIZATION_NOT_FOUND', `organization ${normalizedOrgId} not found`, 404);
+    if (['archived', 'lifecycle_pending'].includes(orgRow.state)) {
+      throw swarmError('ORG_ARCHIVED', `Organization ${normalizedOrgId} is ${orgRow.state}`, 409);
+    }
+    if (trimString(actorNodeId)) {
+      const actorRow = conn.prepare('SELECT * FROM organization_nodes WHERE id = ? AND organization_id = ?')
+        .get(trimString(actorNodeId), normalizedOrgId);
+      if (!actorRow) throw swarmError(SWARM_MODEL_FORBIDDEN, 'Actor node does not belong to this organization', 403);
+      const actorGrant = parseJson(actorRow.grant_json, {});
+      if (!isCoordinatorNodeRow(actorRow) && actorGrant?.canDelegate !== true) {
+        throw swarmError(SWARM_MODEL_FORBIDDEN, 'Only Coordinator, delegator, or Owner may switch member model', 403);
+      }
+    }
+    const targetRow = findSwarmNodeRow(conn, normalizedOrgId, targetQuery);
+    if (!targetRow) {
+      throw swarmError('ORGANIZATION_NODE_NOT_FOUND', `Swarm member "${targetQuery}" not found`, 404);
+    }
+    if (targetRow.lifecycle_state !== 'active' || targetRow.retired_revision !== null || resolveMemberSwarmState(targetRow) === 'killed') {
+      throw swarmError(SWARM_MEMBER_KILLED, `Swarm member "${targetRow.stable_key}" is permanently killed`, 409);
+    }
+    const targetMember = serializeSwarmMember(targetRow);
+    const targetGrant = parseJson(targetRow.grant_json, {});
+    const orgPolicy = parseJson(orgRow.policy_json, {});
+    const orgBudget = parseJson(orgRow.budget_json, {});
+
+    const harnessChanged = Boolean(reqHarness && reqHarness !== targetMember.harness);
+    const providerChanged = Boolean(reqProvider && reqProvider !== targetMember.provider);
+    const requestedConfig = normalizeRuntimeTuple({
+      tool: reqHarness || targetMember.harness || 'codex',
+      provider: reqProvider || (harnessChanged ? '' : targetMember.provider),
+      model: reqModel || ((harnessChanged || providerChanged) ? '' : targetMember.model),
+      effort: reqEffort || (harnessChanged ? '' : targetMember.effort),
+    });
+
+    const receipts = targetGrant?.modelSwitchReceipts && typeof targetGrant.modelSwitchReceipts === 'object'
+      ? targetGrant.modelSwitchReceipts
+      : {};
+    if (normalizedKey && receipts[normalizedKey]) {
+      const prevReceipt = receipts[normalizedKey];
+      if (JSON.stringify(prevReceipt.requestedConfig) !== JSON.stringify(requestedConfig)) {
+        throw swarmError(SWARM_BINDING_CONFLICT, 'Idempotency key reused with a different target model configuration', 409);
+      }
+      return {
+        replay: true,
+        result: {
+          organizationId: normalizedOrgId,
+          member: targetMember,
+          handoff: prevReceipt.handoff || null,
+          previousBindingGeneration: prevReceipt.previousBindingGeneration,
+          bindingGeneration: prevReceipt.bindingGeneration,
+          replay: true,
+        },
+      };
+    }
+
+    if (expectedBindingGeneration !== null && expectedBindingGeneration !== undefined) {
+      const expectedGen = Number(expectedBindingGeneration);
+      if (Number.isInteger(expectedGen) && expectedGen !== targetMember.bindingGeneration) {
+        throw swarmError(
+          SWARM_BINDING_CONFLICT,
+          `Binding generation mismatch (expected ${expectedGen}, current ${targetMember.bindingGeneration})`,
+          409,
+        );
+      }
+    }
+    return {
+      replay: false,
+      orgRow,
+      orgPolicy,
+      orgBudget,
+      targetRow,
+      targetGrant,
+      targetMember,
+      requestedConfig,
+    };
+  });
+
+  if (preflight.replay) {
+    return preflight.result;
+  }
+
+  const { orgRow, orgPolicy, orgBudget, targetRow, targetGrant, targetMember, requestedConfig } = preflight;
+
+  // Step 2: Fail closed on owner runtime locks BEFORE busy checks! NEVER silently replace a locked field.
+  const readConstraintsFn = typeof deps.readSessionRuntimeConstraints === 'function'
+    ? deps.readSessionRuntimeConstraints
+    : (id) => readSessionRuntimeConstraints(id).catch(() => null);
+  const rootSessionMeta = !deps.session?.runtimeConstraints && orgRow.root_session_id && typeof deps.getSession === 'function'
+    ? await deps.getSession(orgRow.root_session_id).catch(() => null)
+    : null;
+  const loadedRootConstraints = deps.session?.runtimeConstraints
+    ? { constraints: deps.session.runtimeConstraints }
+    : (rootSessionMeta?.runtimeConstraints
+      ? { constraints: rootSessionMeta.runtimeConstraints }
+      : (orgRow.root_session_id ? await readConstraintsFn(orgRow.root_session_id) : null));
+  const memberScopes = [
+    ...(isCoordinatorNodeRow(targetRow) ? ['root'] : []),
+    'organization',
+    'collaboration',
+    `node:${targetMember.stableKey}`,
+    `node:${targetMember.id}`,
+  ];
+  assertOwnerRuntimeLocksAllowSwitch({
+    constraintsSources: [
+      loadedRootConstraints?.constraints || loadedRootConstraints,
+      orgPolicy?.runtimeConstraints,
+      orgPolicy?.ownerRuntimeLocks,
+      targetGrant?.ownerRuntimeLocks,
+    ],
+    scopes: memberScopes,
+    candidateRuntime: requestedConfig,
+  });
+
+  // Step 3: Refuse while member is working or has an active Run.
+  if (targetMember.swarmState === 'working') {
+    throw swarmError(
+      SWARM_MEMBER_BUSY,
+      `Cannot switch model while "${targetMember.stableKey}" is working; wait for current turn to settle`,
+      409,
+    );
+  }
+  const runInfo = await resolveMemberRunInfo(deps, targetMember);
+  if (runInfo?.running === true || runInfo?.hasSessionActiveRun === true) {
+    throw swarmError(
+      SWARM_MEMBER_BUSY,
+      `Cannot switch model while "${targetMember.stableKey}" has an active Run`,
+      409,
+    );
+  }
+
+  // Step 4: Validate candidate catalog, org policy, and governor budget.
+  await runWithOrgDb(db, async (conn) => {
+    await validateModelSwitchCandidateAndBudget(conn, deps, {
+      orgRow,
+      orgPolicy,
+      orgBudget,
+      targetGrant,
+      previousRuntime: normalizeRuntimeTuple({
+        tool: targetMember.harness,
+        provider: targetMember.provider,
+        model: targetMember.model,
+        effort: targetMember.effort,
+      }),
+      proposedRuntime: requestedConfig,
+    });
+  });
+
+  const resolvedConfig = { ...requestedConfig };
+
+  // Step 5: Inspect dirty workspace state + unread board #seq range + outgoing run telemetry cleanly.
+  const effectiveProjectRoot = trimString(projectRoot)
+    || trimString(targetGrant?.swarmWorkspace?.projectRoot)
+    || trimString(orgPolicy?.projectRoot)
+    || trimString(orgPolicy?.workspaceScope);
+  const workspaceState = await inspectWorkspaceUnmergedChanges(deps, targetRow, effectiveProjectRoot)
+    .catch(() => ({ unmerged: false, dirtyFiles: [], unmergedCommits: 0 }));
+
+  const outgoingRunId = trimString(targetMember.lastRunId || runInfo?.runId || runInfo?.id);
+  let outgoingRun = runInfo && (runInfo.usage || runInfo.model || runInfo.actualReportedConfig) ? runInfo : null;
+  if (!outgoingRun && outgoingRunId && typeof deps.getRun === 'function') {
+    outgoingRun = await deps.getRun(outgoingRunId).catch(() => null);
+  } else if (!outgoingRun && outgoingRunId && deps.skipRunLookup !== true) {
+    try {
+      const runsMod = await import('./runs.mjs');
+      outgoingRun = await runsMod.getRun(outgoingRunId).catch(() => null);
+    } catch {}
+  }
+  const outgoingSession = typeof deps.getSession === 'function' && targetMember.currentSessionId
+    ? await deps.getSession(targetMember.currentSessionId).catch(() => null)
+    : null;
+
+  const effectiveWorkItemId = trimString(workItemId || targetGrant?.parentWorkItemId || targetGrant?.workItemId);
+  let factoryTaskHandoffId = '';
+  if (effectiveWorkItemId) {
+    let liveWorkItemVersion = Number.isInteger(options.workItemExpectedVersion) ? options.workItemExpectedVersion : null;
+    if (liveWorkItemVersion === null) {
+      liveWorkItemVersion = await runWithOrgDb(db, (conn) => {
+        const hasWi = Boolean(conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'factory_work_items'").get());
+        if (!hasWi) return null;
+        const row = conn.prepare('SELECT row_version FROM factory_work_items WHERE id = ? AND organization_id = ?')
+          .get(effectiveWorkItemId, normalizedOrgId);
+        return row ? Number(row.row_version) : null;
+      }).catch(() => null);
+    }
+    if (liveWorkItemVersion !== null) {
+      try {
+        const factoryHandoff = await createFactoryTaskHandoff({
+          organizationId: normalizedOrgId,
+          workItemId: effectiveWorkItemId,
+          commandId: `swarm_model_${targetMember.id}_${targetMember.bindingGeneration}_${randomUUID()}`,
+          expectedVersion: liveWorkItemVersion,
+        }, { kind: 'user', role: 'owner', principalId: trimString(actorNodeId) || 'owner' });
+        factoryTaskHandoffId = trimString(factoryHandoff?.id);
+      } catch {
+        // Standalone tests without full Work Graph state degrade cleanly to Swarm handoff facts.
+      }
+    }
+  }
+
+  // Step 6: Atomically execute CAS in SQLite FIRST (never mutating live session prefs if CAS loses a race!).
+  const committed = await runWithOrgDb(db, (conn) => {
+    const ts = nowIso();
+    const freshRow = conn.prepare('SELECT * FROM organization_nodes WHERE id = ? AND organization_id = ?')
+      .get(targetRow.id, normalizedOrgId);
+    if (!freshRow || freshRow.lifecycle_state !== 'active' || freshRow.retired_revision !== null || resolveMemberSwarmState(freshRow) === 'killed') {
+      throw swarmError(SWARM_MEMBER_KILLED, `Swarm member "${targetMember.stableKey}" was killed concurrently`, 409);
+    }
+    if (Number(freshRow.binding_generation || 0) !== targetMember.bindingGeneration) {
+      throw swarmError(SWARM_BINDING_CONFLICT, 'Member bindingGeneration changed concurrently during model switch', 409);
+    }
+    if (resolveMemberSwarmState(freshRow) === 'working') {
+      throw swarmError(SWARM_MEMBER_BUSY, 'Member became working during model switch', 409);
+    }
+
+    const headRow = conn.prepare('SELECT COALESCE(MAX(seq), 0) AS head_seq FROM organization_board_messages WHERE organization_id = ?').get(normalizedOrgId);
+    const headSeq = Number(headRow?.head_seq || 0);
+    const deliveredRow = conn.prepare(
+      "SELECT COALESCE(MAX(latest_seq), 0) AS last_seq FROM organization_board_wakeups WHERE organization_id = ? AND target_node_id = ? AND state = 'delivered'",
+    ).get(normalizedOrgId, freshRow.id);
+    const lastDeliveredSeq = Number(deliveredRow?.last_seq || 0);
+    const recentRows = conn.prepare(
+      'SELECT seq, channel_name, sender_name, kind, body_markdown, created_at FROM organization_board_messages WHERE organization_id = ? AND seq > ? ORDER BY seq ASC LIMIT 12',
+    ).all(normalizedOrgId, lastDeliveredSeq);
+    const briefRow = conn.prepare(
+      "SELECT seq, body_markdown, created_at FROM organization_board_messages WHERE organization_id = ? AND kind = 'brief' AND LOWER(body_markdown) LIKE ? ORDER BY seq ASC LIMIT 1",
+    ).get(normalizedOrgId, `%@${targetMember.stableKey.toLowerCase()}%`);
+
+    let workItemSummary = null;
+    if (effectiveWorkItemId) {
+      try {
+        workItemSummary = remoteFactoryTaskSummary(conn, {
+          organizationId: normalizedOrgId,
+          workItemId: effectiveWorkItemId,
+          contractDigest: '',
+          payload: { contract: { organizationRevision: orgRow.current_revision || 0 } },
+        }, 4096);
+      } catch {}
+    }
+
+    const previousBindingGeneration = Number(freshRow.binding_generation || 1);
+    const nextBindingGeneration = previousBindingGeneration + 1;
+    const handoffId = `smh_${randomBytes(10).toString('hex')}`;
+    const previousRuntime = normalizeRuntimeTuple({
+      tool: targetMember.harness,
+      provider: targetMember.provider,
+      model: targetMember.model,
+      effort: targetMember.effort,
+    });
+    const handoffBundle = {
+      schemaVersion: 1,
+      kind: 'swarm_model_switch_handoff',
+      handoffId,
+      organizationId: normalizedOrgId,
+      nodeId: freshRow.id,
+      stableKey: freshRow.stable_key,
+      role: targetMember.role,
+      previousBindingGeneration,
+      nextBindingGeneration,
+      previousRuntime,
+      requestedConfig,
+      resolvedConfig,
+      reason: trimString(reason).slice(0, 300),
+      handoffNotes: redactSecrets(trimString(handoffNotes)).slice(0, 600),
+      briefSummary: redactSecrets(trimString(briefRow?.body_markdown)).slice(0, 500),
+      workspace: {
+        mode: freshRow.workspace_mode || 'inherit',
+        path: freshRow.workspace_path || '',
+        branch: freshRow.workspace_branch || '',
+        baseRef: trimString(targetGrant?.swarmWorkspace?.baseRef),
+        unmerged: workspaceState?.unmerged === true,
+        dirtyFiles: Array.isArray(workspaceState?.dirtyFiles) ? workspaceState.dirtyFiles.slice(0, 50) : [],
+        unmergedCommits: Number(workspaceState?.unmergedCommits || 0),
+      },
+      boardRange: {
+        unreadFromSeq: lastDeliveredSeq + 1,
+        lastDeliveredSeq,
+        headSeq,
+        recentMessages: recentRows.map((m) => ({
+          seq: m.seq,
+          channel: m.channel_name,
+          sender: m.sender_name,
+          kind: m.kind,
+          text: redactSecrets(m.body_markdown).slice(0, 300),
+          createdAt: m.created_at,
+        })),
+      },
+      ...(effectiveWorkItemId ? { workItemId: effectiveWorkItemId } : {}),
+      ...(factoryTaskHandoffId ? { factoryTaskHandoffId } : {}),
+      ...(workItemSummary ? { workItemSummary } : {}),
+      createdAt: ts,
+    };
+
+    const nextGrant = parseJson(freshRow.grant_json, {});
+    recordEpochRunTelemetry(nextGrant, {
+      bindingGeneration: previousBindingGeneration,
+      runId: outgoingRunId,
+      run: outgoingRun,
+      session: outgoingSession,
+      usage: options.previousRunUsage || null,
+      actualReportedConfig: options.previousActualConfig || null,
+      endedAt: ts,
+    });
+    const nextEpochIndex = nextGrant.modelHistory.length + 1;
+    nextGrant.modelHistory.push(
+      createModelEpoch({
+        epochIndex: nextEpochIndex,
+        bindingGeneration: nextBindingGeneration,
+        startedAt: ts,
+        reason: trimString(reason) || 'swarm_model_switch',
+        requestedConfig,
+        resolvedConfig,
+      }),
+    );
+    nextGrant.runtimePolicy = {
+      tool: resolvedConfig.tool,
+      ...(resolvedConfig.provider ? { providerProfile: resolvedConfig.provider } : {}),
+      ...(resolvedConfig.model ? { model: resolvedConfig.model } : {}),
+      ...(resolvedConfig.effort ? { effort: resolvedConfig.effort } : {}),
+      ...(Array.isArray(nextGrant.runtimePolicy?.allowedModels) ? { allowedModels: nextGrant.runtimePolicy.allowedModels } : {}),
+    };
+    nextGrant.pendingModelSwitchHandoff = handoffBundle;
+    nextGrant.lastStateReason = 'model_switched';
+    nextGrant.modelSwitchCount = Number(nextGrant.modelSwitchCount || 0) + 1;
+    if (normalizedKey) {
+      nextGrant.modelSwitchReceipts = {
+        ...(nextGrant.modelSwitchReceipts && typeof nextGrant.modelSwitchReceipts === 'object' ? nextGrant.modelSwitchReceipts : {}),
+        [normalizedKey]: {
+          requestedConfig,
+          resolvedConfig,
+          previousBindingGeneration,
+          bindingGeneration: nextBindingGeneration,
+          handoff: handoffBundle,
+          switchedAt: ts,
+        },
+      };
+    }
+
+    conn.exec('BEGIN IMMEDIATE');
+    try {
+      const updateInfo = conn.prepare(`
+        UPDATE organization_nodes
+        SET binding_generation = ?,
+            grant_json = ?,
+            version = version + 1
+        WHERE id = ? AND organization_id = ? AND version = ? AND binding_generation = ?
+      `).run(
+        nextBindingGeneration,
+        encodeJson(nextGrant, {}),
+        freshRow.id,
+        normalizedOrgId,
+        freshRow.version,
+        freshRow.binding_generation,
+      );
+      if (updateInfo.changes === 0) {
+        throw swarmError(SWARM_BINDING_CONFLICT, 'Concurrent modification detected during model switch', 409);
+      }
+      conn.exec('COMMIT');
+    } catch (error) {
+      try { conn.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+
+    const updatedMember = serializeSwarmMember(conn.prepare('SELECT * FROM organization_nodes WHERE id = ?').get(freshRow.id));
+    return {
+      nodeId: freshRow.id,
+      updatedMember,
+      handoff: handoffBundle,
+      handoffId,
+      previousBindingGeneration,
+      bindingGeneration: nextBindingGeneration,
+      rollbackSnapshot: {
+        previousBindingGeneration: freshRow.binding_generation,
+        previousGrantJson: freshRow.grant_json,
+      },
+    };
+  }, { mutate: true, organizationId: normalizedOrgId });
+
+  // Step 7: Rebind live session runtime strictly AFTER DB CAS succeeds, with compensating DB rollback on error!
+  let rebindResult;
+  try {
+    rebindResult = await rebindSwarmSessionRuntime(deps, {
+      sessionId: targetMember.currentSessionId,
+      resolvedConfig,
+    });
+  } catch (rebindError) {
+    await runWithOrgDb(db, (conn) => {
+      conn.exec('BEGIN IMMEDIATE');
+      try {
+        conn.prepare(`
+          UPDATE organization_nodes
+          SET binding_generation = ?,
+              grant_json = ?,
+              version = version + 1
+          WHERE id = ? AND organization_id = ? AND binding_generation = ?
+        `).run(
+          committed.rollbackSnapshot.previousBindingGeneration,
+          committed.rollbackSnapshot.previousGrantJson,
+          committed.nodeId,
+          normalizedOrgId,
+          committed.bindingGeneration,
+        );
+        conn.exec('COMMIT');
+      } catch (rollbackErr) {
+        try { conn.exec('ROLLBACK'); } catch {}
+        throw rollbackErr;
+      }
+    }, { mutate: true, organizationId: normalizedOrgId }).catch(() => {});
+    throw rebindError;
+  }
+
+  let boardPost = null;
+  if (postToBoard || wakeNow) {
+    const mentionPrefix = wakeNow ? `@${committed.updatedMember.stableKey} ` : '';
+    const runtimeLabel = `${resolvedConfig.tool}:${resolvedConfig.model || resolvedConfig.provider || 'default'}${resolvedConfig.effort ? ` (${resolvedConfig.effort})` : ''}`;
+    boardPost = await runWithOrgDb(db, (conn) => postBoardMessage(conn, {
+      organizationId: normalizedOrgId,
+      channel: 'main',
+      senderKind: trimString(actorNodeId) ? 'node' : 'owner',
+      senderNodeId: trimString(actorNodeId),
+      bodyMarkdown: `${mentionPrefix}[handoff] Switched ${committed.updatedMember.stableKey} runtime to ${runtimeLabel} (gen ${committed.bindingGeneration}, handoff ${committed.handoffId}).`,
+      kind: 'handoff',
+      isDoneSignal: false,
+    }), { mutate: true, organizationId: normalizedOrgId });
+  }
+
+  if (wakeNow && (typeof deps.deliverSessionMessage === 'function' || typeof deps.sendMessage === 'function')) {
+    await deliverPendingSwarmWakeups({ ...deps, ...(db ? { db } : {}) }, { organizationId: normalizedOrgId }).catch(() => {});
+  }
+
+  return {
+    organizationId: normalizedOrgId,
+    member: committed.updatedMember,
+    handoff: committed.handoff,
+    previousBindingGeneration: committed.previousBindingGeneration,
+    bindingGeneration: committed.bindingGeneration,
+    sessionRebound: rebindResult.rebound,
+    boardPost,
+    replay: false,
+  };
 }

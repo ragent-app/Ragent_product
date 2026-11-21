@@ -837,6 +837,14 @@
       if (!Object.hasOwn(this, "killConflictInfo")) this.killConflictInfo = null;
       if (!Object.hasOwn(this, "killBusy")) this.killBusy = false;
       if (!Object.hasOwn(this, "killError")) this.killError = "";
+      if (!Object.hasOwn(this, "modelSwitchTargetId")) this.modelSwitchTargetId = null;
+      if (!Object.hasOwn(this, "modelSwitchOpen")) this.modelSwitchOpen = false;
+      if (!Object.hasOwn(this, "modelSwitchBusy")) this.modelSwitchBusy = false;
+      if (!Object.hasOwn(this, "modelSwitchError")) this.modelSwitchError = "";
+      if (!Object.hasOwn(this, "modelSwitchStatus")) this.modelSwitchStatus = "";
+      if (!Object.hasOwn(this, "promoteBusy")) this.promoteBusy = false;
+      if (!Object.hasOwn(this, "promoteError")) this.promoteError = "";
+      if (!Object.hasOwn(this, "promoteResult")) this.promoteResult = null;
     }
 
     bindDOM() {
@@ -3333,6 +3341,16 @@
           pills.push(`<span class="org-overview-pill org-overview-pill--budget">${escapeDisplayText(budgetParts.join(" · "))}</span>`);
         }
 
+        if (Array.isArray(status.usageByModel) && status.usageByModel.length > 0) {
+          for (const bucket of status.usageByModel) {
+            if (!bucket) continue;
+            const tok = Number(bucket.totalTokens || 0);
+            const cost = Number(bucket.costUsd || 0);
+            const label = `${bucket.modelKey || `${bucket.tool || "runtime"}:${bucket.model || bucket.provider || "default"}`}${tok > 0 || cost > 0 ? ` (${tok} tok${cost > 0 ? `, $${cost.toFixed(4)}` : ""})` : ""}`;
+            pills.push(`<span class="org-overview-pill org-overview-pill--model">${escapeDisplayText(label)}</span>`);
+          }
+        }
+
         const stallHtml = stalls.map((s) => {
           const detailLabel = s.details?.reason || s.conditionKind || "stall";
           const targetLabel = s.targetNodeId || s.targetRole || "";
@@ -3562,6 +3580,125 @@
       } finally {
         this.killBusy = false;
       }
+    }
+
+    async switchSwarmMemberModelRequest(targetNodeId, { harness = "", provider = "", model = "", effort = "", reason = "" } = {}) {
+      this.ensureSwarmUiState();
+      if (!this.sessionId || !targetNodeId || this.modelSwitchBusy) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      this.modelSwitchBusy = true;
+      this.modelSwitchError = "";
+      this.modelSwitchStatus = "";
+      this.modelSwitchTargetId = targetNodeId;
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/swarm/model`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({
+            targetNodeId,
+            ...(harness ? { harness } : {}),
+            ...(provider ? { provider } : {}),
+            ...(model ? { model } : {}),
+            ...(effort ? { effort } : {}),
+            ...(reason ? { reason } : {}),
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.modelSwitchError = payload?.code
+            ? `${payload.code}: ${payload.error || `HTTP ${res.status}`}`
+            : (payload?.error || `HTTP ${res.status}`);
+        } else {
+          this.modelSwitchOpen = false;
+          this.modelSwitchStatus = trText(
+            "organization.modelSwitched",
+            `Switched to gen ${payload.bindingGeneration} (${payload.handoff?.resolvedConfig?.model || payload.handoff?.resolvedConfig?.tool || "updated"})`,
+            `已切换至第 ${payload.bindingGeneration} 代绑定`,
+          );
+          await this.refreshOrganizationData({ force: true });
+          if (this.active) this.render();
+        }
+        const matchedNode = this.selectedSheetNodeId
+          ? this.buildUnifiedGraphModel().nodesMap?.[this.selectedSheetNodeId]
+          : null;
+        if (matchedNode && this.dom.sheet && !this.dom.sheet.hidden) {
+          this.openBottomSheet(matchedNode);
+        }
+        return payload;
+      } catch (err) {
+        this.modelSwitchError = err?.message || "Model switch request failed";
+        return null;
+      } finally {
+        this.modelSwitchBusy = false;
+      }
+    }
+
+    async promoteSwarmCandidateRequest(targetNodeId, { summary = "" } = {}) {
+      this.ensureSwarmUiState();
+      if (!this.sessionId || !targetNodeId || this.promoteBusy) return null;
+      const fetcher = this.getFetcher();
+      if (!fetcher) return null;
+      this.promoteBusy = true;
+      this.promoteError = "";
+      this.promoteResult = null;
+      try {
+        const res = await fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}/organization/swarm/promote-candidate`, {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ targetNodeId, ...(summary ? { summary } : {}) }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          this.promoteError = payload?.code
+            ? `${payload.code}: ${payload.error || `HTTP ${res.status}`}`
+            : (payload?.error || `HTTP ${res.status}`);
+        } else {
+          this.promoteResult = payload;
+          await this.refreshOrganizationData({ force: true });
+          if (this.active) this.render();
+        }
+        const matchedNode = this.selectedSheetNodeId
+          ? this.buildUnifiedGraphModel().nodesMap?.[this.selectedSheetNodeId]
+          : null;
+        if (matchedNode && this.dom.sheet && !this.dom.sheet.hidden) {
+          this.openBottomSheet(matchedNode);
+        }
+        return payload;
+      } catch (err) {
+        this.promoteError = err?.message || "Promote candidate failed";
+        return null;
+      } finally {
+        this.promoteBusy = false;
+      }
+    }
+
+    renderModelEpochHistoryHtml(swarmMember) {
+      const history = Array.isArray(swarmMember?.modelHistory) ? swarmMember.modelHistory : [];
+      if (history.length === 0) return "";
+      const rows = history.map((epoch) => {
+        const req = epoch?.requestedConfig || {};
+        const res = epoch?.resolvedConfig || {};
+        const act = epoch?.actualReportedConfig || null;
+        const u = epoch?.usage || {};
+        const fmtCfg = (c) => [c?.tool, c?.provider, c?.model, c?.effort].filter(Boolean).join("/") || "unrecorded";
+        const tokens = Number(u.totalTokens || (Number(u.inputTokens || 0) + Number(u.outputTokens || 0)) || 0);
+        const cost = Number(u.costUsd || 0);
+        const stateTag = epoch?.endedAt ? "closed" : "active";
+        return `<div class="org-epoch-item">
+          <div><strong>#${escapeDisplayText(epoch.epochIndex)}</strong> (gen ${escapeDisplayText(epoch.bindingGeneration)}, ${escapeDisplayText(stateTag)})</div>
+          <div>requested: ${escapeDisplayText(fmtCfg(req))} · resolved: ${escapeDisplayText(fmtCfg(res))}${act ? ` · actual: ${escapeDisplayText(fmtCfg(act))}` : ""}</div>
+          <div>usage: ${escapeDisplayText(tokens)} tok · $${escapeDisplayText(cost.toFixed(4))} · ${escapeDisplayText(Number(u.runCount || 0))} run(s)</div>
+        </div>`;
+      }).join("");
+      return `<div class="org-info-card" id="orgSwarmModelHistoryCard">
+        <div class="org-info-card-label">${escapeDisplayText(trText("organization.modelHistory", "Model & Usage Epochs", "模型与用量世代"))}</div>
+        <div class="org-epoch-list">${rows}</div>
+      </div>`;
     }
 
     resolveBoardMessageHarnessAndRole(msg) {
@@ -3916,6 +4053,14 @@
         this.killError = "";
         this.killConfirmTargetId = null;
       }
+      if (this.modelSwitchTargetId && this.modelSwitchTargetId !== killTargetId) {
+        this.modelSwitchOpen = false;
+        this.modelSwitchError = "";
+        this.modelSwitchStatus = "";
+        this.promoteError = "";
+        this.promoteResult = null;
+        this.modelSwitchTargetId = null;
+      }
       this.selectedSheetNodeId = node.id;
       const sheet = this.dom.sheet;
       const backdrop = this.dom.sheetBackdrop;
@@ -4016,6 +4161,55 @@
             : ""
         }
 
+        ${
+          !node.isReadOnlyNative && swarmMember
+            ? this.renderModelEpochHistoryHtml(swarmMember)
+            : ""
+        }
+
+        ${
+          !node.isReadOnlyNative && swarmMember && this.modelSwitchOpen && this.modelSwitchTargetId === killTargetId
+            ? `<div class="org-model-switch-card" id="orgSwarmModelForm">
+                <div class="org-info-card-label">${escapeDisplayText(trText("organization.switchModel", "Controlled Model Switch", "受控切换模型"))}</div>
+                <div class="org-model-switch-grid">
+                  <input type="text" class="org-model-switch-input" id="orgSwarmModelHarness" placeholder="harness (codex/claude/agy)" value="${escapeDisplayText(swarmMember.harness || "")}" />
+                  <input type="text" class="org-model-switch-input" id="orgSwarmModelProvider" placeholder="provider" value="${escapeDisplayText(swarmMember.provider || "")}" />
+                  <input type="text" class="org-model-switch-input" id="orgSwarmModelName" placeholder="model" value="${escapeDisplayText(swarmMember.model || "")}" />
+                  <input type="text" class="org-model-switch-input" id="orgSwarmModelEffort" placeholder="effort" value="${escapeDisplayText(swarmMember.effort || "")}" />
+                </div>
+                <input type="text" class="org-model-switch-input" id="orgSwarmModelReason" style="margin-top:6px;" placeholder="reason (optional)" value="" />
+                <div class="org-sheet-actions" style="margin-top:8px;">
+                  <button type="button" class="org-btn org-btn--primary" id="orgSwarmModelSubmitBtn"${this.modelSwitchBusy ? " disabled" : ""}>${escapeDisplayText(trText("organization.confirmSwitch", "Confirm Switch", "确认切换"))}</button>
+                  <button type="button" class="org-btn org-btn--secondary" id="orgSwarmModelCancelBtn">${escapeDisplayText(trText("organization.cancel", "Cancel", "取消"))}</button>
+                </div>
+              </div>`
+            : ""
+        }
+
+        ${
+          this.modelSwitchError
+            ? `<div class="org-blocker-card" id="orgSwarmModelError">${escapeDisplayText(this.modelSwitchError)}</div>`
+            : ""
+        }
+
+        ${
+          this.modelSwitchStatus
+            ? `<div class="org-info-card org-info-card--success" id="orgSwarmModelStatus">${escapeDisplayText(this.modelSwitchStatus)}</div>`
+            : ""
+        }
+
+        ${
+          this.promoteError
+            ? `<div class="org-blocker-card" id="orgSwarmPromoteError">${escapeDisplayText(this.promoteError)}</div>`
+            : ""
+        }
+
+        ${
+          this.promoteResult?.candidate
+            ? `<div class="org-info-card org-info-card--success" id="orgSwarmPromoteResult">${escapeDisplayText(`Candidate ${this.promoteResult.candidate.candidateId} (Work Item ${this.promoteResult.workItem?.id || ""}) ready for acceptance`)}</div>`
+            : ""
+        }
+
         <div class="org-sheet-actions">
           ${
             node.isRootLeader
@@ -4023,6 +4217,16 @@
               : ""
           }
           <button type="button" class="org-btn ${node.isRootLeader ? "org-btn--secondary" : "org-btn--primary"}" id="orgViewDetailsBtn">${escapeDisplayText(detailsBtnLabel)}</button>
+          ${
+            !node.isReadOnlyNative && swarmMember && swarmMember.swarmState !== "killed" && this.sessionId
+              ? `<button type="button" class="org-btn org-btn--secondary" id="orgSwarmModelBtn"${swarmMember.swarmState === "working" ? " disabled" : ""}>${escapeDisplayText(swarmMember.swarmState === "working" ? trText("organization.switchWaitRequired", "Switch Model (Waiting Required)", "切换模型（需先休眠）") : trText("organization.switchModelBtn", "Switch Model", "切换模型"))}</button>`
+              : ""
+          }
+          ${
+            !node.isReadOnlyNative && swarmMember && ["worktree", "staging"].includes(swarmMember.workspaceMode) && swarmMember.swarmState !== "killed" && this.sessionId
+              ? `<button type="button" class="org-btn org-btn--secondary" id="orgSwarmPromoteBtn"${swarmMember.swarmState === "working" || this.promoteBusy ? " disabled" : ""}>${escapeDisplayText(trText("organization.promoteCandidate", "Promote Candidate", "晋升候选产物"))}</button>`
+              : ""
+          }
           ${
             swarmMember && !node.isRootLeader && swarmMember.role !== "coordinator" && swarmMember.contractRole !== "root_leadership" && swarmMember.swarmState !== "killed" && this.sessionId
               ? `<button type="button" class="org-btn org-btn--danger" id="orgSwarmKillBtn">${escapeDisplayText(trText("organization.killSwarmMember", "Kill Member", "终止成员"))}</button>`
@@ -4075,6 +4279,51 @@
           this.killError = "";
           this.killConfirmTargetId = null;
           this.openBottomSheet(rawNode);
+        });
+      }
+
+      const modelBtn = sheet.querySelector("#orgSwarmModelBtn");
+      if (modelBtn && swarmMember) {
+        modelBtn.addEventListener("click", () => {
+          this.modelSwitchTargetId = killTargetId;
+          this.modelSwitchOpen = !this.modelSwitchOpen;
+          this.modelSwitchError = "";
+          this.openBottomSheet(rawNode);
+        });
+      }
+
+      const modelCancelBtn = sheet.querySelector("#orgSwarmModelCancelBtn");
+      if (modelCancelBtn) {
+        modelCancelBtn.addEventListener("click", () => {
+          this.modelSwitchOpen = false;
+          this.modelSwitchError = "";
+          this.openBottomSheet(rawNode);
+        });
+      }
+
+      const modelSubmitBtn = sheet.querySelector("#orgSwarmModelSubmitBtn");
+      if (modelSubmitBtn && swarmMember) {
+        modelSubmitBtn.addEventListener("click", () => {
+          const harness = sheet.querySelector("#orgSwarmModelHarness")?.value?.trim() || "";
+          const provider = sheet.querySelector("#orgSwarmModelProvider")?.value?.trim() || "";
+          const modelName = sheet.querySelector("#orgSwarmModelName")?.value?.trim() || "";
+          const effort = sheet.querySelector("#orgSwarmModelEffort")?.value?.trim() || "";
+          const reason = sheet.querySelector("#orgSwarmModelReason")?.value?.trim() || "";
+          void this.switchSwarmMemberModelRequest(killTargetId, {
+            harness,
+            provider,
+            model: modelName,
+            effort,
+            reason,
+          });
+        });
+      }
+
+      const promoteBtn = sheet.querySelector("#orgSwarmPromoteBtn");
+      if (promoteBtn && swarmMember) {
+        promoteBtn.addEventListener("click", () => {
+          this.modelSwitchTargetId = killTargetId;
+          void this.promoteSwarmCandidateRequest(killTargetId);
         });
       }
 

@@ -590,7 +590,7 @@ try {
     'Killed node can no longer execute organization.tools',
   );
 
-  // Phase 3 swarm.model boundary check: Worker rejected 403, Coordinator hits clean 501 Phase 3 boundary.
+  // Phase 3 swarm.model boundary check: Worker rejected 403, Coordinator hits clean 409 owner-lock guard when trying to mutate locked model.
   await rejectsWith(
     () => tools.executeOrganizationControlTool({
       authSession: nodeAuth({ sessionId: coder1.currentSessionId, organizationId: orgAId, nodeId: coder1.id }),
@@ -608,8 +608,8 @@ try {
       args: { targetNameOrNodeId: 'coder-1', model: 'other-model' },
       deps: sharedDeps,
     }),
-    (err) => err?.statusCode === 501 && err?.code === 'SWARM_MODEL_PHASE3_UNAVAILABLE' && err?.phase === 3,
-    'swarm.model leaves clean Phase 3 boundary error without mutating locked config',
+    (err) => err?.statusCode === 409 && err?.code === 'SWARM_MODEL_LOCKED_BY_OWNER',
+    'swarm.model fails closed with 409 SWARM_MODEL_LOCKED_BY_OWNER without mutating locked config',
   );
 
   // Coordinator completes Swarm via swarm.done.
@@ -710,7 +710,7 @@ try {
     assertions += 1;
     ok(rootReadActions.includes('swarm.status') && rootReadActions.includes('board.read') && rootReadActions.includes('swarm.channel.list'));
     ok(rootWriteActions.includes('swarm.spawn') && rootWriteActions.includes('swarm.kill') && rootWriteActions.includes('swarm.done') && rootWriteActions.includes('board.post'));
-    ok(!rootWriteActions.includes('swarm.model'), 'Phase 2 tools/list hides Phase 3 swarm.model');
+    ok(rootWriteActions.includes('swarm.model') && rootWriteActions.includes('swarm.promote_candidate') && rootWriteActions.includes('swarm.complete_work_item'), 'Phase 3 tools/list exposes swarm.model and bridge actions for Coordinator');
 
     const mcpStatusCall = await rootMcp.call(3, 'tools/call', {
       name: 'ragent_organization_read',
@@ -724,8 +724,8 @@ try {
       name: 'ragent_organization_action',
       arguments: { action: 'swarm.model', args: { targetNameOrNodeId: 'coder-1', model: 'gpt-x' } },
     });
-    equal(mcpModelCall.result.isError, true, 'MCP swarm.model returns explicit error boundary');
-    ok(mcpModelCall.result.content[0].text.includes('SWARM_MODEL_PHASE3_UNAVAILABLE'));
+    equal(mcpModelCall.result.isError, true, 'MCP swarm.model fails closed on locked owner constraint');
+    ok(mcpModelCall.result.content[0].text.includes('SWARM_MODEL_LOCKED_BY_OWNER'));
     await rootMcp.close();
 
     const workerMcp = await spawnMcpClient({ scope: 'node', sessionId: coder1.currentSessionId, token: 'tok-worker' });
@@ -734,7 +734,7 @@ try {
     const workerWriteActions = workerList.result.tools.find((t) => t.name === 'ragent_organization_action').inputSchema.properties.action.enum;
     ok(workerReadActions.includes('board.read') && workerReadActions.includes('swarm.status'));
     ok(workerWriteActions.includes('board.post') && workerWriteActions.includes('board.wait'));
-    ok(!workerWriteActions.includes('swarm.spawn') && !workerWriteActions.includes('swarm.kill') && !workerWriteActions.includes('swarm.done'));
+    ok(!workerWriteActions.includes('swarm.spawn') && !workerWriteActions.includes('swarm.kill') && !workerWriteActions.includes('swarm.done') && !workerWriteActions.includes('swarm.model') && !workerWriteActions.includes('swarm.promote_candidate'));
 
     const workerPost = await workerMcp.call(2, 'tools/call', {
       name: 'ragent_organization_action',

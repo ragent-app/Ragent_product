@@ -250,7 +250,7 @@ async function commitFactoryChanges({ prepared, root, operationId, beforeRef, on
         const privateIndex = join(privateDir, 'index');
         const options = { windowsHide: true, env: { ...process.env, GIT_INDEX_FILE: privateIndex } };
         await git('git', ['-C', root, 'read-tree', prepared.op.expected_head], options);
-        await git('git', ['-C', root, 'add', '-A', '--', ...paths], options);
+        await git('git', ['-C', root, '-c', 'core.autocrlf=false', '-c', 'core.safecrlf=false', 'add', '-A', '--', ...paths], options);
         const staged = (await git('git', ['-C', root, 'diff', '--cached', '--name-only', '-z'], options)).stdout.split('\0').filter(Boolean).sort();
         if (JSON.stringify(staged) !== JSON.stringify([...paths].sort())) fail('Private Git index does not match candidate paths');
         for (const change of prepared.changes) {

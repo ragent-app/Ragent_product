@@ -9,7 +9,9 @@ import { submitFactoryBlockerProposal, listFactoryBlockerProposals, disposeFacto
 import { readBody } from '../lib/utils.mjs';
 import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems } from './factory-control.mjs';
 import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage, escalateOverdueTeamMessage } from './organization-team-messages.mjs';
-import { compileFactoryWorkflow, instantiateFactoryWorkflow } from './factory-workflow.mjs';
+import { compileFactoryWorkflow, instantiateFactoryWorkflow, compileFactoryFanoutWorkflow } from './factory-workflow.mjs';
+import { executeFactoryFanout, getFactoryFanoutWorkflowExecution, listFactoryFanoutWorkflowExecutions } from './factory-fanout-executor.mjs';
+import { getOrganization } from './organization-store.mjs';
 import { decideFactoryManualAcceptance, decideFactoryCheckAcceptance } from './factory-acceptance.mjs';
 import { beginOrganizationLifecycle, getOrganizationLifecycleInfo, beginNodeRebind, finishNodeRebind, cancelNodeRebind } from './organization-session-lifecycle.mjs';
 import { getNode, getRoleInstance, getRevision } from './organization-store.mjs';
@@ -164,8 +166,9 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const shadowAttempts = /^\/api\/organizations\/([^/]+)\/factory\/shadow\/([^/]+)\/attempts$/.exec(String(pathname || ''));
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
+  const fanoutWorkflow = /^\/api\/organizations\/([^/]+)\/factory\/workflows\/fanout(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
   try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
@@ -544,6 +547,90 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
       const message = await sendOwnerTeamMessage({ ...body, organizationId, recipientNodeId: nodeId }, actor);
       writeJson(res, 200, { message }); return true;
+    }
+    if (fanoutWorkflow) {
+      const organizationId = decodeURIComponent(fanoutWorkflow[1]);
+      const workflowId = fanoutWorkflow[2] ? decodeURIComponent(fanoutWorkflow[2]) : '';
+      const actor = { kind: 'user', role: 'owner', principalId: text(authSession.principalId || authSession.deviceId || authSession.id) || 'local-owner' };
+      await listFactoryGoals(organizationId, { limit: 1 }, actor);
+      if (req.method === 'GET') {
+        const result = workflowId
+          ? await getFactoryFanoutWorkflowExecution(organizationId, workflowId)
+          : { workflows: await listFactoryFanoutWorkflowExecutions(organizationId) };
+        writeJson(res, 200, result);
+        return true;
+      }
+      if (req.method !== 'POST' || workflowId) {
+        writeJson(res, 405, { error: 'Method not allowed' });
+        return true;
+      }
+      if (!mutationSourceAllowed(req)) {
+        writeJson(res, 403, { code: 'FACTORY_SOURCE_DENIED', error: 'Request source or content type is not allowed' });
+        return true;
+      }
+      const raw = await readBody(req, 256 * 1024);
+      let body;
+      try { body = JSON.parse(raw || '{}'); } catch { writeJson(res, 400, { error: 'Invalid JSON body' }); return true; }
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        writeJson(res, 400, { error: 'Fan-out workflow payload must be an object' });
+        return true;
+      }
+      if (body.organizationId && body.organizationId !== organizationId) {
+        writeJson(res, 400, { error: 'Organization scope mismatch' });
+        return true;
+      }
+      const org = await getOrganization(organizationId);
+      const requestedProjectId = text(body.projectId);
+      if (org?.projectId && requestedProjectId && requestedProjectId !== org.projectId) {
+        writeJson(res, 409, { code: 'FACTORY_CONFLICT', error: 'Project does not match organization' });
+        return true;
+      }
+      const safeRuntime = body.runtime && typeof body.runtime === 'object' && !Array.isArray(body.runtime)
+        ? {
+            ...(text(body.runtime.tool) ? { tool: text(body.runtime.tool) } : {}),
+            ...(text(body.runtime.runtimeFamily) ? { runtimeFamily: text(body.runtime.runtimeFamily) } : {}),
+            ...(text(body.runtime.providerProfile) ? { providerProfile: text(body.runtime.providerProfile) } : {}),
+            ...(text(body.runtime.model) ? { model: text(body.runtime.model) } : {}),
+            ...(text(body.runtime.effort) ? { effort: text(body.runtime.effort) } : {}),
+            ...(text(body.runtime.mode) ? { mode: text(body.runtime.mode) } : {}),
+            ...(text(body.runtime.permissionMode) ? { permissionMode: text(body.runtime.permissionMode) } : {}),
+            ...(Number.isInteger(body.runtime.timeoutMs) ? { timeoutMs: body.runtime.timeoutMs } : {}),
+          }
+        : undefined;
+      const fanoutInput = {
+        organizationId,
+        projectId: text(org?.projectId) || requestedProjectId,
+        ...(body.objective !== undefined ? { objective: body.objective } : {}),
+        ...(body.title !== undefined ? { title: body.title } : {}),
+        ...(body.phases !== undefined ? { phases: body.phases } : {}),
+        ...(body.stages !== undefined ? { stages: body.stages } : {}),
+        ...(body.pipeline !== undefined ? { pipeline: body.pipeline } : {}),
+        ...(body.spec !== undefined ? { spec: body.spec } : {}),
+        ...(body.allowedPaths !== undefined ? { allowedPaths: body.allowedPaths } : {}),
+        ...(body.accessMode !== undefined ? { accessMode: body.accessMode } : {}),
+        ...(body.maxCost !== undefined ? { maxCost: body.maxCost } : {}),
+        ...(body.maxRuns !== undefined ? { maxRuns: body.maxRuns } : {}),
+        ...(body.maxConcurrency !== undefined ? { maxConcurrency: body.maxConcurrency } : {}),
+        ...(body.maxAttempts !== undefined ? { maxAttempts: body.maxAttempts } : {}),
+        ...(body.targetBranch !== undefined ? { targetBranch: body.targetBranch } : {}),
+        ...(body.candidateScope !== undefined ? { candidateScope: body.candidateScope } : {}),
+        ...(body.workflowId !== undefined ? { workflowId: body.workflowId } : {}),
+        ...(body.commandId !== undefined ? { commandId: body.commandId } : {}),
+        ...(body.idempotencyKey !== undefined ? { idempotencyKey: body.idempotencyKey } : {}),
+        ...(safeRuntime ? { runtime: safeRuntime } : {}),
+      };
+      const mode = text(body.mode).toLowerCase();
+      if (mode === 'preview' || body.dryRun === true) {
+        writeJson(res, 200, { proposal: compileFactoryFanoutWorkflow(fanoutInput) });
+        return true;
+      }
+      if (process.env.RAGENT_FACTORY_CONTROL_ENABLED !== 'true') {
+        writeJson(res, 503, { code: 'FACTORY_CONTROL_DISABLED', error: 'Factory control is disabled' });
+        return true;
+      }
+      const execResult = await executeFactoryFanout({}, { ...fanoutInput, actor });
+      writeJson(res, 200, execResult);
+      return true;
     }
     const organizationId = decodeURIComponent(match[1]);
     const resource = match[2];

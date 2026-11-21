@@ -334,6 +334,111 @@ try {
   equal(afterDoneStatus.status, 200);
   equal(afterDoneStatus.payload.isDone, true, 'unmentioned owner [done] closes swarm');
 
+  // 4. Phase 3 routes: auth/method guards + controlled /swarm/model switch & busy check
+  const p3AuthRoutes = [
+    ['POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/model`, { targetNodeId: ensured.coordinatorNode.id, model: 'claude-sonnet-4-6', harness: 'claude' }],
+    ['POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/promote-candidate`, { targetNodeId: workerNode.nodeId }],
+    ['POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/work-items/work-1/start`, {}],
+    ['POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/work-items/work-1/complete`, {}],
+  ];
+  for (const [method, url, body] of p3AuthRoutes) {
+    equal((await invoke(method, url, { authSession: { role: 'agent' }, body })).status, 403);
+    equal((await invoke(method, url, { authSession: { role: 'owner', principalKind: 'run_capability' }, body })).status, 403);
+    equal((await invoke('GET', url)).status, 405);
+  }
+
+  // Spawn an unlocked waiting worker and switch its model via POST /swarm/model
+  const switchableRes = await swarm.spawnSwarmMembers({
+    organizationId: ensured.organization.id,
+    actorNodeId: ensured.coordinatorNode.id,
+    name: 'analyst-1',
+    role: 'reviewer',
+    brief: 'Initial review on codex',
+    workspace: 'inherit',
+    harness: 'codex',
+    model: 'gpt-5.4',
+    deferDelivery: true,
+  });
+  const analyst = switchableRes.members[0];
+  const badModelReq = await invoke('POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/model`, {
+    body: { targetNodeId: analyst.nodeId },
+    swarmDeps: {},
+  });
+  equal(badModelReq.status, 400, 'POST /swarm/model requires at least one target runtime field');
+
+  const modelSwitchRes = await invoke('POST', `/api/sessions/${swarmRootSession.id}/organization/swarm/model`, {
+    body: { targetNodeId: analyst.nodeId, harness: 'claude', model: 'claude-sonnet-4-6', effort: 'high', reason: 'route switch test' },
+    swarmDeps: { skipRunLookup: true },
+  });
+  equal(modelSwitchRes.status, 200, `POST /swarm/model succeeds: ${JSON.stringify(modelSwitchRes.payload)}`);
+  equal(modelSwitchRes.payload.bindingGeneration, 2);
+  equal(modelSwitchRes.payload.member.harness, 'claude');
+  equal(modelSwitchRes.payload.member.model, 'claude-sonnet-4-6');
+  equal(modelSwitchRes.payload.member.modelHistory.length, 2);
+
+  // Track 2B (#163/#164) regression: POST /work-items/:wiId/start using defaultSwarmRuntimeDeps() wires createSession (never synthetic swarm_sess_*)
+  const factoryControl = await import('../chat/factory-control.mjs');
+  const wiRouteRootSession = await sessionManager.createSession(join(tempHome, 'workspace'), 'codex', 'WI Route Root');
+  const wiProjectId = wiRouteRootSession.projectId || 'proj-route-wi';
+  const wiEnsured = await swarm.ensureSwarmOrganization({
+    rootSessionId: wiRouteRootSession.id,
+    projectId: wiProjectId,
+    title: 'Route WI Swarm',
+    policy: { projectRoot: join(tempHome, 'workspace') },
+  });
+  const ownerActor = { kind: 'user', role: 'owner', principalId: 'owner' };
+  const routeGoal = await factoryControl.executeFactoryCommand({
+    commandId: 'cmd_route_wi_goal_1',
+    idempotencyKey: 'route_wi_goal_1',
+    organizationId: wiEnsured.organization.id,
+    targetId: wiEnsured.organization.id,
+    type: 'CreateGoal',
+    payload: { projectId: wiProjectId, objective: 'Verify defaultSwarmRuntimeDeps createSession' },
+  }, ownerActor);
+  const routeWi = await factoryControl.executeFactoryCommand({
+    commandId: 'cmd_route_wi_1',
+    idempotencyKey: 'route_wi_1',
+    organizationId: wiEnsured.organization.id,
+    targetId: wiEnsured.organization.id,
+    type: 'CreateWorkItem',
+    payload: {
+      goalId: routeGoal.goal.id,
+      kind: 'execution',
+      assigneeNodeId: wiEnsured.coordinatorNode.id,
+      contract: {
+        objective: 'Start WorkItem child using defaultSwarmRuntimeDeps',
+        targetBranch: 'main',
+        allowedPaths: ['README.md'],
+        acceptanceCriteria: [{ id: 'done_wi', title: 'Started', method: 'manual' }],
+      },
+    },
+  }, ownerActor);
+  await factoryControl.executeFactoryCommand({
+    commandId: 'cmd_route_wi_approve_1',
+    idempotencyKey: 'route_wi_approve_1',
+    organizationId: wiEnsured.organization.id,
+    targetId: routeWi.item.id,
+    type: 'ApproveContract',
+    expectedVersion: routeWi.item.rowVersion,
+    payload: {},
+  }, ownerActor);
+
+  const defaultDepsStart = await invoke(
+    'POST',
+    `/api/sessions/${wiRouteRootSession.id}/organization/swarm/work-items/${routeWi.item.id}/start`,
+    {
+      body: {
+        members: [{ name: 'wi-default-deps', role: 'worker', brief: 'Verify real session creation', workspace: 'inherit', harness: 'codex' }],
+        deferDelivery: true,
+      },
+    },
+  );
+  equal(defaultDepsStart.status, 200, `POST /work-items/:id/start succeeds via defaultSwarmRuntimeDeps: ${JSON.stringify(defaultDepsStart.payload)}`);
+  const startedWiMember = defaultDepsStart.payload.members[0];
+  ok(startedWiMember?.currentSessionId && !startedWiMember.currentSessionId.startsWith('swarm_sess_'), 'defaultSwarmRuntimeDeps creates real session id instead of synthetic fallback');
+  const persistedMeta = await sessionManager.getSessionMeta(startedWiMember.currentSessionId);
+  ok(Boolean(persistedMeta && persistedMeta.id === startedWiMember.currentSessionId), 'Created child session exists in session-manager store');
+
   console.log(`test-organization-swarm-routes: ok (${assertions} assertions)`);
 } finally {
   rmSync(tempHome, { recursive: true, force: true });

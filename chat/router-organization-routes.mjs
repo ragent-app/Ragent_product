@@ -30,7 +30,13 @@ import {
   deliverPendingSwarmWakeups,
   getSwarmStatus,
   killSwarmMember,
+  switchSwarmMemberModel,
 } from './organization-swarm.mjs';
+import {
+  completeWorkItemSwarm,
+  promoteSwarmWorkspaceToCandidate,
+  startWorkItemSwarm,
+} from './organization-swarm-factory-bridge.mjs';
 import { publishOrganizationInvalidation } from './organization-invalidation.mjs';
 import { listOrganizationEvents, getInternalEnvelope } from './organization-messaging.mjs';
 import { organizationHasCreatedSubordinate } from './organization-created-subordinate.mjs';
@@ -87,8 +93,9 @@ async function parseJsonRequestBody(req, readBody, res, writeJson, maxBytes = 32
 }
 
 async function defaultSwarmRuntimeDeps() {
-  const { sendMessage, getSessionMeta } = await import('./session-manager.mjs');
+  const { sendMessage, getSessionMeta, createSession } = await import('./session-manager.mjs');
   return {
+    createSession,
     deliverSessionMessage: sendMessage,
     sendMessage,
     getSession: getSessionMeta,
@@ -232,9 +239,13 @@ export async function handleOrganizationRoutes({
   const swarmStatusMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/status$/.exec(String(pathname || ''));
   const swarmChannelsMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/channels$/.exec(String(pathname || ''));
   const swarmKillMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/kill$/.exec(String(pathname || ''));
+  const swarmModelMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/model$/.exec(String(pathname || ''));
+  const swarmPromoteMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/promote-candidate$/.exec(String(pathname || ''));
+  const swarmWorkItemStartMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/work-items\/([^/]+)\/start$/.exec(String(pathname || ''));
+  const swarmWorkItemCompleteMatch = /^\/api\/sessions\/([^/]+)\/organization\/swarm\/work-items\/([^/]+)\/complete$/.exec(String(pathname || ''));
   const memberConversationMatch = /^\/api\/sessions\/([^/]+)\/organization\/members\/([^/]+)\/conversation$/.exec(String(pathname || ''));
   const nativeMatch = /^\/api\/sessions\/([^/]+)\/delegation-runs(?:\/([^/]+)\/events)?$/.exec(String(pathname || ''));
-  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !boardMatch && !boardMessagesMatch && !swarmStatusMatch && !swarmChannelsMatch && !swarmKillMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
+  if (!organizationMatch && !phaseDispatchMatch && !rootSessionMatch && !conversationMatch && !actionsMatch && !nativeMatch && !memberConversationMatch && !membersMatch && !boardMatch && !boardMessagesMatch && !swarmStatusMatch && !swarmChannelsMatch && !swarmKillMatch && !swarmModelMatch && !swarmPromoteMatch && !swarmWorkItemStartMatch && !swarmWorkItemCompleteMatch && !collaborationSettingsMatch && !runtimeConstraintsMatch) return false;
   if (runtimeConstraintsMatch) {
     if (authSession?.role !== 'owner' || authSession?.principalKind === 'run_capability') { writeJson(res, 403, { error: 'Owner access required' }); return true; }
     if (!['GET', 'PUT'].includes(req.method)) { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
@@ -486,6 +497,150 @@ export async function handleOrganizationRoutes({
       publishOrganizationInvalidation({ organizationId: org.id });
       res.setHeader?.('Cache-Control', 'private, no-store');
       writeJson(res, 200, { rootSessionId: root, organizationId: org.id, ...result });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmModelMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmModelMatch[1]);
+      const rootMeta = await resolveSessionMeta(sessionMetaLookup, root);
+      if (!rootMeta) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 16 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const targetNameOrNodeId = text(body.targetNameOrNodeId || body.targetNodeId || body.nodeId || body.name);
+      if (!targetNameOrNodeId) { writeJson(res, 400, { error: 'targetNameOrNodeId is required', code: 'BAD_REQUEST' }); return true; }
+      const authoritativeRoot = text(org.policy?.projectRoot || org.policy?.workspaceScope || rootMeta?.folder);
+      const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+      const result = await switchSwarmMemberModel(deps, {
+        organizationId: org.id,
+        targetNameOrNodeId,
+        harness: text(body.harness ?? body.tool),
+        provider: text(body.provider ?? body.providerProfile),
+        model: text(body.model),
+        effort: text(body.effort),
+        reason: text(body.reason),
+        handoffNotes: text(body.handoffNotes),
+        expectedBindingGeneration: body.expectedBindingGeneration !== undefined ? Number(body.expectedBindingGeneration) : null,
+        workItemId: text(body.workItemId),
+        projectRoot: authoritativeRoot,
+        postToBoard: body.postToBoard === true,
+        wakeNow: body.wakeNow === true,
+        idempotencyKey: text(body.idempotencyKey) || text(req.headers?.['idempotency-key']),
+      });
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, ...result });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmPromoteMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmPromoteMatch[1]);
+      const rootMeta = await resolveSessionMeta(sessionMetaLookup, root);
+      if (!rootMeta) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 32 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const targetNameOrNodeId = text(body.targetNameOrNodeId || body.targetNodeId || body.nodeId || body.name);
+      if (!targetNameOrNodeId) { writeJson(res, 400, { error: 'targetNameOrNodeId is required', code: 'BAD_REQUEST' }); return true; }
+      const authoritativeRoot = text(org.policy?.projectRoot || org.policy?.workspaceScope || rootMeta?.folder);
+      const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+      const result = await promoteSwarmWorkspaceToCandidate(deps, {
+        organizationId: org.id,
+        targetNameOrNodeId,
+        goalId: text(body.goalId),
+        workItemId: text(body.workItemId),
+        title: text(body.title),
+        objective: text(body.objective),
+        criterionId: text(body.criterionId) || 'manual_review',
+        criterionTitle: text(body.criterionTitle) || 'Verified isolated Swarm workspace deliverable',
+        writablePaths: Array.isArray(body.writablePaths) ? body.writablePaths : null,
+        targetBranch: text(body.targetBranch),
+        runId: text(body.runId),
+        summary: text(body.summary),
+        projectRoot: authoritativeRoot,
+        postToBoard: body.postToBoard !== false,
+        idempotencyKey: text(body.idempotencyKey) || text(req.headers?.['idempotency-key']),
+        actor: { kind: 'user', role: 'owner', principalId: text(authSession?.user || authSession?.principalId || 'owner') },
+      });
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, ...result });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmWorkItemStartMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmWorkItemStartMatch[1]);
+      const workItemId = decodeURIComponent(swarmWorkItemStartMatch[2]);
+      const rootMeta = await resolveSessionMeta(sessionMetaLookup, root);
+      if (!rootMeta) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 32 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const authoritativeRoot = text(org.policy?.projectRoot || org.policy?.workspaceScope || rootMeta?.folder);
+      const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+      const result = await startWorkItemSwarm(deps, {
+        organizationId: org.id,
+        workItemId,
+        actorNodeId: text(body.actorNodeId),
+        actorSessionId: text(body.actorSessionId) || root,
+        members: Array.isArray(body.members) ? body.members : [],
+        brief: text(body.brief),
+        channels: Array.isArray(body.channels) ? body.channels : [],
+        projectRoot: authoritativeRoot,
+        deferDelivery: body.deferDelivery === true,
+        idempotencyKey: text(body.idempotencyKey) || text(req.headers?.['idempotency-key']),
+        actor: { kind: 'user', role: 'owner', principalId: text(authSession?.user || authSession?.principalId || 'owner') },
+      });
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, ...result });
+    } catch (error) { writeError(res, writeJson, error); }
+    return true;
+  }
+  if (swarmWorkItemCompleteMatch) {
+    if (!requireOwnerOnlyAccess(authSession, res, writeJson)) return true;
+    if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+    try {
+      const root = decodeURIComponent(swarmWorkItemCompleteMatch[1]);
+      const workItemId = decodeURIComponent(swarmWorkItemCompleteMatch[2]);
+      const rootMeta = await resolveSessionMeta(sessionMetaLookup, root);
+      if (!rootMeta) { writeJson(res, 404, { error: 'Session not found' }); return true; }
+      const body = await parseJsonRequestBody(req, readBody, res, writeJson, 32 * 1024);
+      if (!body) return true;
+      const org = await getOrganizationByRootSession(root);
+      if (!org) { writeJson(res, 404, { error: 'Organization not found', code: 'ORGANIZATION_NOT_FOUND' }); return true; }
+      const authoritativeRoot = text(org.policy?.projectRoot || org.policy?.workspaceScope || rootMeta?.folder);
+      const deps = swarmDeps !== null ? swarmDeps : await defaultSwarmRuntimeDeps();
+      const result = await completeWorkItemSwarm(deps, {
+        organizationId: org.id,
+        workItemId,
+        actorNodeId: text(body.actorNodeId),
+        summary: text(body.summary),
+        runId: text(body.runId),
+        boardSeqFrom: Number.isInteger(body.boardSeqFrom) ? body.boardSeqFrom : 0,
+        boardSeqTo: Number.isInteger(body.boardSeqTo) ? body.boardSeqTo : null,
+        evidenceRefs: Array.isArray(body.evidenceRefs) ? body.evidenceRefs : [],
+        tests: Array.isArray(body.tests) ? body.tests : [],
+        projectRoot: authoritativeRoot,
+        forceDiscard: body.forceDiscard === true,
+        markDone: body.markDone === true,
+        actor: { kind: 'user', role: 'owner', principalId: text(authSession?.user || authSession?.principalId || 'owner') },
+      });
+      publishOrganizationInvalidation({ organizationId: org.id });
+      res.setHeader?.('Cache-Control', 'private, no-store');
+      writeJson(res, 200, { rootSessionId: root, ...result });
     } catch (error) { writeError(res, writeJson, error); }
     return true;
   }

@@ -558,6 +558,86 @@ async function runTests() {
   const forceKillPost = fetchCalls.find((c) => c.url.includes('/organization/swarm/kill') && JSON.parse(c.opts.body).forceDiscard === true);
   assert.ok(forceKillPost, 'Explicit forceDiscard kill request dispatched');
 
+  // 12. Phase 3 Model Switch & Candidate Promotion UI + Per-Epoch Model History (never fabricated for read-only native)
+  fetchCalls.length = 0;
+  orgView.swarmStatus = {
+    organizationId: 'org-swarm-1',
+    mode: 'ragent_swarm',
+    counts: { working: 1, waiting: 1, stopped: 0, killed: 0, active: 2, total: 2 },
+    usageByModel: [
+      { modelKey: 'codex:gpt-5.4', tool: 'codex', model: 'gpt-5.4', totalTokens: 1200, costUsd: 0.015 },
+      { modelKey: 'claude:claude-sonnet-4-6', tool: 'claude', model: 'claude-sonnet-4-6', totalTokens: 800, costUsd: 0.012 },
+    ],
+    members: [
+      { nodeId: 'node-coord', name: 'coordinator', stableKey: 'coordinator', role: 'coordinator', contractRole: 'root_leadership', swarmState: 'working', harness: 'agy', workspaceMode: 'inherit' },
+      {
+        nodeId: 'node-w1',
+        name: 'worker-1',
+        stableKey: 'worker-1',
+        role: 'worker',
+        contractRole: 'worker',
+        swarmState: 'waiting',
+        harness: 'claude',
+        model: 'claude-sonnet-4-6',
+        bindingGeneration: 2,
+        workspaceMode: 'worktree',
+        workspaceBranch: 'swarm/worker-1',
+        modelHistory: [
+          {
+            epochIndex: 1,
+            bindingGeneration: 1,
+            endedAt: '2026-11-20T00:10:00Z',
+            requestedConfig: { tool: 'codex', model: 'gpt-5.4' },
+            resolvedConfig: { tool: 'codex', model: 'gpt-5.4' },
+            actualReportedConfig: { tool: 'codex', model: 'gpt-5.4' },
+            usage: { totalTokens: 1200, costUsd: 0.015, runCount: 1 },
+          },
+          {
+            epochIndex: 2,
+            bindingGeneration: 2,
+            endedAt: null,
+            requestedConfig: { tool: 'claude', model: 'claude-sonnet-4-6' },
+            resolvedConfig: { tool: 'claude', model: 'claude-sonnet-4-6' },
+            actualReportedConfig: null,
+            usage: { totalTokens: 800, costUsd: 0.012, runCount: 1 },
+          },
+        ],
+      },
+    ],
+  };
+  orgView.renderSwarmOverview();
+  assert.ok(orgView.dom.swarmOverview.innerHTML.includes('codex:gpt-5.4 (1200 tok') && orgView.dom.swarmOverview.innerHTML.includes('claude:claude-sonnet-4-6 (800 tok'), 'Per-model epoch usage pills rendered separately');
+
+  orgView.openBottomSheet(orgView.projection.nodes.find((n) => n.id === 'node-coord'));
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmModelBtn') && orgView.dom.sheet.innerHTML.includes('Waiting Required'), 'Working member disables model switch cleanly');
+
+  orgView.openBottomSheet(orgView.projection.nodes.find((n) => n.id === 'node-w1'));
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmModelHistoryCard'), 'Separate model epochs rendered in member sheet');
+  assert.ok(orgView.dom.sheet.innerHTML.includes('#1') && orgView.dom.sheet.innerHTML.includes('#2') && orgView.dom.sheet.innerHTML.includes('1200 tok') && orgView.dom.sheet.innerHTML.includes('800 tok'), 'Epoch metrics stay separated');
+  assert.ok(orgView.dom.sheet.innerHTML.includes('orgSwarmPromoteBtn'), 'Isolated waiting worker offers Promote Candidate button');
+
+  await orgView.switchSwarmMemberModelRequest('node-w1', { harness: 'codex', model: 'gpt-5.4', reason: 'ui switch' });
+  const switchPost = fetchCalls.find((c) => c.url.includes('/organization/swarm/model') && c.opts.method === 'POST');
+  assert.ok(switchPost && JSON.parse(switchPost.opts.body).model === 'gpt-5.4', 'UI dispatches /swarm/model POST');
+
+  await orgView.promoteSwarmCandidateRequest('node-w1', { summary: 'promote from ui' });
+  const promotePost = fetchCalls.find((c) => c.url.includes('/organization/swarm/promote-candidate') && c.opts.method === 'POST');
+  assert.ok(promotePost && JSON.parse(promotePost.opts.body).targetNodeId === 'node-w1', 'UI dispatches /swarm/promote-candidate POST');
+
+  // Read-only native member never renders switch/promote/kill buttons
+  orgView.openBottomSheet({
+    id: 'native:subagent-1',
+    displayName: 'Native Subagent',
+    role: 'WORKER',
+    runtimeState: 'IDLE',
+    isNativeMember: true,
+    isReadOnlyNative: true,
+    sourceTag: 'codex',
+  });
+  assert.equal(orgView.dom.sheet.innerHTML.includes('orgSwarmModelBtn'), false, 'Read-only native subagent never renders Switch Model');
+  assert.equal(orgView.dom.sheet.innerHTML.includes('orgSwarmPromoteBtn'), false, 'Read-only native subagent never renders Promote Candidate');
+  assert.equal(orgView.dom.sheet.innerHTML.includes('orgSwarmKillBtn'), false, 'Read-only native subagent never renders Kill');
+
   orgView.toggleOrganizationMode(false);
   orgView.onSessionChanged(null);
   console.log('test-chat-organization-view: ok');

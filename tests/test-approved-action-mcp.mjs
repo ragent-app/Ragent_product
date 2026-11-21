@@ -252,7 +252,7 @@ await writeFile(join(codexOverlay.root, 'rules', 'owner.rules'), '# isolated cha
 assert.equal(await readFile(join(codexSource, 'rules', 'owner.rules'), 'utf8'), ownerRule);
 const overlayConfig = await readFile(codexOverlay.configPath, 'utf8');
 assert.match(overlayConfig, /mcp_servers\.user_tool/);
-assert.match(overlayConfig, /mcp_servers\.ragent_actions_/);
+assert.match(overlayConfig, /mcp_servers\.ragent_act_/);
 assert.match(overlayConfig, /ragent-approved-actions-mcp\.mjs/);
 // Regression: codex MCP children do not inherit the parent env. The run-scoped
 // bindings must be projected into the [mcp_servers.X.env] table or the script
@@ -369,9 +369,9 @@ const multiOverlay = await prepareManagedMcpOverlay({
 });
 assert.equal(multiOverlay.serverNames.length, 3);
 const multiConfig = await readFile(multiOverlay.configPath, 'utf8');
-assert.match(multiConfig, /mcp_servers\.ragent_actions_/);
-assert.match(multiConfig, /mcp_servers\.ragent_browser_/);
-assert.match(multiConfig, /mcp_servers\.ragent_broker_/);
+assert.match(multiConfig, /mcp_servers\.ragent_act_/);
+assert.match(multiConfig, /mcp_servers\.ragent_brw_/);
+assert.match(multiConfig, /mcp_servers\.ragent_brk_/);
 assert.match(multiConfig, /RAGENT_APPROVED_ACTIONS_TOKEN = "action-token"/);
 assert.match(multiConfig, /RAGENT_BROWSER_TOKEN = "browser-token"/);
 assert.match(multiConfig, /RAGENT_WINDOWS_BROKER_TOKEN = "broker-token"/);
@@ -414,7 +414,7 @@ const claudeOverlay = await prepareApprovedActionMcpOverlay({
 assert.ok(claudeOverlay);
 const claudeArgs = buildClaudeBidiArgs({ mcpConfigPath: claudeOverlay.configPath });
 assert.deepEqual(claudeArgs.slice(-2), ['--mcp-config', claudeOverlay.configPath]);
-assert.match(await readFile(claudeOverlay.configPath, 'utf8'), /ragent_actions_/);
+assert.match(await readFile(claudeOverlay.configPath, 'utf8'), /ragent_act_/);
 await claudeOverlay.cleanup();
 
 // Policy & browser capability runtime family admission for AgY
@@ -446,7 +446,7 @@ const acpOverlay = await prepareAgyAcpMcpOverlay({
 assert.ok(acpOverlay);
 assert.equal(acpOverlay.mcpServers.length, 3);
 const acpActions = acpOverlay.mcpServers[0];
-assert.match(acpActions.name, /^ragent_actions_/);
+assert.match(acpActions.name, /^ragent_act_/);
 assert.deepEqual(acpActions.args, [scriptPath]);
 assert.ok(Array.isArray(acpActions.env));
 assert.ok(acpActions.env.some((e) => e.name === 'RAGENT_APPROVED_ACTIONS_TOKEN' && e.value === 'agy-acp-token'));
@@ -511,5 +511,83 @@ const directAcpList = buildAgyAcpMcpServers({
   servers: [{ kind: 'organization', scriptPath: join(repoRoot, 'scripts', 'ragent-organization-mcp.mjs') }],
 });
 assert.ok(directAcpList[0].env.some((e) => e.name === 'RAGENT_SESSION_CONTROL_TOKEN' && e.value === 'org-tok'));
+
+const allManagedSpecs = [
+  {
+    kind: 'organization',
+    scriptPath: join(repoRoot, 'scripts', 'ragent-organization-mcp.mjs'),
+    expectedPrefix: /^ragent_org_[a-f0-9]{8}$/,
+    tools: ['ragent_organization_read', 'ragent_organization_action'],
+  },
+  {
+    kind: 'actions',
+    scriptPath: join(repoRoot, 'scripts', 'ragent-approved-actions-mcp.mjs'),
+    expectedPrefix: /^ragent_act_[a-f0-9]{8}$/,
+    tools: ['ragent_request_actions', 'ragent_create_agent'],
+  },
+  {
+    kind: 'browser',
+    scriptPath: join(repoRoot, 'scripts', 'ragent-browser-mcp-server.mjs'),
+    expectedPrefix: /^ragent_brw_[a-f0-9]{8}$/,
+    tools: [
+      'ragent_browser_navigate',
+      'ragent_browser_snapshot',
+      'ragent_browser_click',
+      'ragent_browser_fill',
+      'ragent_browser_press',
+      'ragent_browser_select_option',
+      'ragent_browser_screenshot',
+      'ragent_browser_download',
+    ],
+  },
+  {
+    kind: 'broker',
+    scriptPath: join(repoRoot, 'scripts', 'ragent-windows-broker-mcp.mjs'),
+    expectedPrefix: /^ragent_brk_[a-f0-9]{8}$/,
+    tools: [
+      'ragent_restart_qa_service',
+      'ragent_restart_qa_service_status',
+      'ragent_restart_qa_service_with_env',
+    ],
+  },
+  {
+    kind: 'windows_broker',
+    scriptPath: join(repoRoot, 'scripts', 'ragent-windows-broker-mcp.mjs'),
+    expectedPrefix: /^ragent_brk_[a-f0-9]{8}$/,
+    tools: [
+      'ragent_restart_qa_service',
+      'ragent_restart_qa_service_status',
+      'ragent_restart_qa_service_with_env',
+    ],
+  },
+];
+const allManagedOverlay = await prepareAgyAcpMcpOverlay({
+  runId: 'run-with-long-id-for-agy-mcp-name-limit',
+  spawnEnv: { RAGENT_SESSION_CONTROL_TOKEN: 'org-tok' },
+  servers: allManagedSpecs.map(({ kind, scriptPath }) => ({ kind, scriptPath })),
+});
+const serverNamesByKind = new Map(
+  allManagedSpecs.map((spec, index) => [spec.kind, allManagedOverlay.serverNames[index]]),
+);
+assert.deepEqual(
+  [...serverNamesByKind.keys()],
+  ['organization', 'actions', 'browser', 'broker', 'windows_broker'],
+);
+assert.equal(new Set(allManagedOverlay.serverNames).size, allManagedSpecs.length);
+for (const spec of allManagedSpecs) {
+  const serverName = serverNamesByKind.get(spec.kind);
+  assert.match(serverName, spec.expectedPrefix);
+  assert.match(serverName, /^ragent(?:[_-]|$)/i);
+  assert.ok(serverName.length <= 22, `serverName too long (${serverName.length}): ${serverName}`);
+  for (const toolName of spec.tools) {
+    const single = `mcp_${serverName}_${toolName}`;
+    const double = `mcp__${serverName}__${toolName}`;
+    assert.ok(single.length <= 64, `composed tool name exceeds 64 chars (${single.length}): ${single}`);
+    assert.ok(double.length <= 64, `double-underscore tool name exceeds 64 chars (${double.length}): ${double}`);
+    assert.match(single, /^[a-zA-Z0-9_-]{1,64}$/);
+    assert.match(double, /^[a-zA-Z0-9_-]{1,64}$/);
+  }
+}
+await allManagedOverlay.cleanup();
 
 console.log('test-approved-action-mcp: ok');

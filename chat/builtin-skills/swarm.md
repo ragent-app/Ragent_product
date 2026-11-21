@@ -22,7 +22,9 @@ Coordinate cross-harness Swarm work through Ragent's durable shared board, topic
   - `swarm.spawn`: *(Requires `canDelegate` and remaining delegation depth)* Spawn a single member or sharded batch (`tasks[]` or `n`) using explicit `workspace` isolation (`inherit` for read-only research/verifiers; `worktree` or `staging` for writers), catalog-valid runtime constraints respecting owner locks, and optional `forkFrom` structured handoff (`{ nodeId, sinceSeq }`). Never assume cross-harness implicit transcript cloning.
   - `swarm.kill`: *(Coordinator or original spawner only)* Permanently terminate a member (`killed`, cannot revive). Refuses with `SWARM_WORKSPACE_UNMERGED_CHANGES` if an isolated workspace holds unmerged changes unless `forceDiscard: true` is explicitly chosen.
   - `swarm.done`: *(Coordinator only)* Conclude the Swarm after verifying deliverables and cleaning up active workers.
-  - `swarm.model`: *(Phase 3 only)* Currently unavailable; never silently substitute a user-locked harness, provider, model, or effort.
+  - `swarm.model`: *(Coordinator or delegator only)* Controlled runtime/model switch for a `waiting`/`stopped` member (`targetNameOrNodeId`, `harness`, `provider`, `model`, `effort`, `reason`, `handoffNotes`). Fails closed with `409 SWARM_MODEL_LOCKED_BY_OWNER` on owner-locked runtime constraints and `409 SWARM_MEMBER_BUSY` while working; increments `bindingGeneration`, injects a verified handoff on next wakeup, and separates epoch usage accounting cleanly.
+  - `swarm.promote_candidate`: *(Coordinator or Manager only)* Freeze an isolated (`worktree`/`staging`) member workspace with a completed canonical Run into an immutable Factory Candidate Artifact + Goal/Work Item/Contract/Execution Binding (`state: "review"`), ready for manual/check acceptance and Git integration.
+  - `swarm.complete_work_item`: *(Coordinator or delegator only)* Verify all bounded `parentWorkItemId` Swarm children are settled and clean, synthesize verified board `#seq` refs, candidate/check evidence, and usage into an immutable `ResultPacket` recorded against the Work Item.
 
 ## Role Conventions
 

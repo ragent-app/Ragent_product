@@ -30,8 +30,14 @@ import {
   markSwarmDone,
   markSwarmMemberState,
   spawnSwarmMembers,
+  switchSwarmMemberModel,
   SWARM_WORKSPACE_MODES,
 } from './organization-swarm.mjs';
+import {
+  completeWorkItemSwarm,
+  promoteSwarmWorkspaceToCandidate,
+  validateWorkItemSpawnBoundary,
+} from './organization-swarm-factory-bridge.mjs';
 import { readSessionRuntimeConstraints } from './session-collaboration-settings.mjs';
 
 const SWARM_READ_ACTIONS = new Set(['swarm.status', 'board.read', 'swarm.channel.list']);
@@ -40,6 +46,8 @@ const SWARM_WRITE_ACTIONS = new Set([
   'swarm.kill',
   'swarm.done',
   'swarm.model',
+  'swarm.promote_candidate',
+  'swarm.complete_work_item',
   'swarm.channel.create',
   'swarm.channel.subscribe',
   'swarm.channel.archive',
@@ -681,6 +689,22 @@ async function executeSwarmToolAction({ action, args: rawArgs, ctx, deps }) {
     if (args.certifiedReadOnly !== undefined && typeof args.certifiedReadOnly !== 'boolean') {
       throw toolError('BAD_REQUEST', 'certifiedReadOnly must be a boolean', 400);
     }
+    const parentWorkItemId = optionalString(args.parentWorkItemId ?? args.workItemId, 'parentWorkItemId', 160)
+      || trim(ctx.actorWorkItemId);
+    if (parentWorkItemId && ensuredCtx.org?.id) {
+      const validateScope = async (conn) => validateWorkItemSpawnBoundary(conn, {
+        organizationId: ensuredCtx.org.id,
+        parentWorkItemId,
+        writablePaths,
+        requestedCount: shardCount,
+      });
+      if (deps?.db) {
+        await validateScope(deps.db);
+      } else {
+        const { withDatabase } = await import('./collaboration-store.mjs');
+        await withDatabase(validateScope);
+      }
+    }
     const spawnFn = deps?.spawnSwarmMembers || spawnSwarmMembers;
     return callStore(spawnFn, sDeps, {
       organizationId: ensuredCtx.org.id,
@@ -701,7 +725,8 @@ async function executeSwarmToolAction({ action, args: rawArgs, ctx, deps }) {
       channels,
       forkFromNodeId,
       forkSinceSeq,
-      workItemId: optionalString(args.workItemId, 'workItemId', 160),
+      workItemId: parentWorkItemId,
+      parentWorkItemId,
       projectRoot: ensuredCtx.projectRoot,
       writablePaths,
       certifiedReadOnly: args.certifiedReadOnly === true,
@@ -760,22 +785,112 @@ async function executeSwarmToolAction({ action, args: rawArgs, ctx, deps }) {
       'targetNameOrNodeId',
       160,
     );
-    if (targetRef && ctx.org) {
-      const nodes = await dbListNodes(deps, ctx.org.id);
-      const target = nodes.find((entry) => entry.id === targetRef || entry.stableKey.toLowerCase() === targetRef.toLowerCase());
-      if (!target) {
-        throw toolError('ORGANIZATION_NODE_NOT_FOUND', `Swarm member "${targetRef}" does not belong to this organization`, 404);
-      }
+    if (!targetRef) {
+      throw toolError('BAD_REQUEST', 'targetNameOrNodeId is required for swarm.model', 400);
+    }
+    if (!ctx.org) {
+      throw toolError('ORGANIZATION_NOT_FOUND', 'Swarm organization not found', 404);
+    }
+    const nodes = await dbListNodes(deps, ctx.org.id);
+    const target = nodes.find((entry) => entry.id === targetRef || entry.stableKey.toLowerCase() === targetRef.toLowerCase());
+    if (!target) {
+      throw toolError('ORGANIZATION_NODE_NOT_FOUND', `Swarm member "${targetRef}" does not belong to this organization`, 404);
+    }
+    if (!ctx.isCoordinator && target.parentNodeId !== ctx.actorNodeId) {
+      throw toolError('SWARM_MODEL_FORBIDDEN', 'Only Coordinator or the spawning parent may switch this member model', 403);
     }
     if (typeof deps?.onSwarmModelRequest === 'function') {
-      return deps.onSwarmModelRequest({ ctx, args, targetRef });
+      return deps.onSwarmModelRequest({ ctx, args, targetRef, target });
     }
-    throw toolError(
-      'SWARM_MODEL_PHASE3_UNAVAILABLE',
-      'swarm.model is deferred to Phase 3; user-locked runtime selections cannot be mutated in Phase 2',
-      501,
-      { phase: 3, target: targetRef || null, lockedRuntimePreserved: true },
+    const switchFn = deps?.switchSwarmMemberModel || switchSwarmMemberModel;
+    return callStore(switchFn, sDeps, {
+      organizationId: ctx.org.id,
+      actorNodeId: ctx.actorNodeId,
+      targetNameOrNodeId: target.id,
+      harness: optionalString(args.harness ?? args.tool, 'harness', 64),
+      provider: optionalString(args.provider ?? args.providerProfile, 'provider', 128),
+      model: optionalString(args.model, 'model', 160),
+      effort: optionalString(args.effort, 'effort', 64),
+      reason: optionalString(args.reason, 'reason', 300),
+      handoffNotes: optionalString(args.handoffNotes, 'handoffNotes', 600),
+      expectedBindingGeneration: args.expectedBindingGeneration !== undefined ? Number(args.expectedBindingGeneration) : null,
+      workItemId: optionalString(args.workItemId, 'workItemId', 160),
+      projectRoot: ctx.projectRoot,
+      postToBoard: args.postToBoard === true,
+      wakeNow: args.wakeNow === true,
+      idempotencyKey: optionalString(args.idempotencyKey, 'idempotencyKey', 160),
+    });
+  }
+
+  if (action === 'swarm.promote_candidate') {
+    if (!ctx.org) throw toolError('ORGANIZATION_NOT_FOUND', 'Swarm organization not found', 404);
+    if (!ctx.isCoordinator && !ctx.canDelegate) {
+      throw toolError('SWARM_PROMOTE_FORBIDDEN', 'Only Coordinator or Manager may promote a Swarm workspace to Factory candidate', 403);
+    }
+    const targetRef = optionalString(
+      args.targetNameOrNodeId ?? args.targetNodeId ?? args.target ?? args.name,
+      'targetNameOrNodeId',
+      160,
     );
+    if (!targetRef) {
+      throw toolError('BAD_REQUEST', 'targetNameOrNodeId is required for swarm.promote_candidate', 400);
+    }
+    const nodes = await dbListNodes(deps, ctx.org.id);
+    const target = nodes.find((entry) => entry.id === targetRef || entry.stableKey.toLowerCase() === targetRef.toLowerCase());
+    if (!target) {
+      throw toolError('ORGANIZATION_NODE_NOT_FOUND', `Swarm member "${targetRef}" does not belong to this organization`, 404);
+    }
+    if (!ctx.isCoordinator && target.parentNodeId !== ctx.actorNodeId) {
+      throw toolError('SWARM_PROMOTE_FORBIDDEN', 'Only Coordinator or the spawning parent may promote this member workspace', 403);
+    }
+    const promoteFn = deps?.promoteSwarmWorkspaceToCandidate || promoteSwarmWorkspaceToCandidate;
+    return callStore(promoteFn, sDeps, {
+      organizationId: ctx.org.id,
+      actorNodeId: ctx.actorNodeId,
+      targetNameOrNodeId: targetRef,
+      goalId: optionalString(args.goalId, 'goalId', 160),
+      workItemId: optionalString(args.workItemId, 'workItemId', 160),
+      title: optionalString(args.title, 'title', 200),
+      objective: optionalString(args.objective, 'objective', 1000),
+      criterionId: optionalString(args.criterionId, 'criterionId', 120) || 'manual_review',
+      criterionTitle: optionalString(args.criterionTitle, 'criterionTitle', 300) || 'Verified isolated Swarm workspace deliverable',
+      writablePaths: args.writablePaths !== undefined
+        ? optionalStringArray(args.writablePaths, 'writablePaths', MAX_ARRAY_PATHS, 320)
+        : null,
+      targetBranch: optionalString(args.targetBranch, 'targetBranch', 160),
+      runId: optionalString(args.runId, 'runId', 160),
+      summary: optionalString(args.summary, 'summary', MAX_DONE_SUMMARY_CHARS),
+      projectRoot: ctx.projectRoot,
+      postToBoard: args.postToBoard !== false,
+      idempotencyKey: optionalString(args.idempotencyKey, 'idempotencyKey', 160),
+    });
+  }
+
+  if (action === 'swarm.complete_work_item') {
+    if (!ctx.org) throw toolError('ORGANIZATION_NOT_FOUND', 'Swarm organization not found', 404);
+    if (!ctx.isCoordinator && !ctx.canDelegate) {
+      throw toolError('SWARM_WORK_ITEM_FORBIDDEN', 'Only Coordinator or delegator may synthesize Work Item completion', 403);
+    }
+    const workItemId = optionalString(args.workItemId, 'workItemId', 160);
+    if (!workItemId) {
+      throw toolError('BAD_REQUEST', 'workItemId is required for swarm.complete_work_item', 400);
+    }
+    const completeFn = deps?.completeWorkItemSwarm || completeWorkItemSwarm;
+    return callStore(completeFn, sDeps, {
+      organizationId: ctx.org.id,
+      workItemId,
+      actorNodeId: ctx.actorNodeId,
+      summary: optionalString(args.summary, 'summary', MAX_DONE_SUMMARY_CHARS),
+      runId: optionalString(args.runId, 'runId', 160),
+      boardSeqFrom: optionalNonNegativeInt(args.boardSeqFrom, 'boardSeqFrom', 0),
+      boardSeqTo: args.boardSeqTo !== undefined ? optionalNonNegativeInt(args.boardSeqTo, 'boardSeqTo', 0) : null,
+      evidenceRefs: args.evidenceRefs !== undefined
+        ? optionalStringArray(args.evidenceRefs, 'evidenceRefs', MAX_ARRAY_REFS, 240)
+        : [],
+      projectRoot: ctx.projectRoot,
+      forceDiscard: args.forceDiscard === true,
+      markDone: args.markDone === true,
+    });
   }
 
   throw toolError('BAD_REQUEST', 'Unknown Swarm organization tool', 400);
@@ -834,7 +949,9 @@ export async function executeOrganizationControlTool({ authSession, action, args
         canSwarm: root,
         canDelegate,
         remainingDepth,
-        canSwitchModel: false,
+        canSwitchModel: root,
+        canPromoteCandidate: root,
+        canCompleteWorkItem: root,
         swarmModelPhase: 3,
       };
     }
@@ -965,7 +1082,9 @@ export async function executeOrganizationControlTool({ authSession, action, args
       canSwarm: true,
       canSwarmDelegate,
       isCoordinator,
-      canSwitchModel: false,
+      canSwitchModel: Boolean(isCoordinator || canSwarmDelegate),
+      canPromoteCandidate: Boolean(isCoordinator || canSwarmDelegate),
+      canCompleteWorkItem: Boolean(isCoordinator || canSwarmDelegate),
       swarmModelPhase: 3,
     };
   }
@@ -981,6 +1100,7 @@ export async function executeOrganizationControlTool({ authSession, action, args
         session: null,
         org,
         actorNodeId: node.id,
+        actorWorkItemId: trim(node.grant?.parentWorkItemId || node.grant?.workItemId),
         isCoordinator,
         canDelegate: canSwarmDelegate,
         remainingDepth,

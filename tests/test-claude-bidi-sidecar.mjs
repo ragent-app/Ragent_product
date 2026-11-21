@@ -112,10 +112,10 @@ function result(text, extra = {}) {
   });
 }
 function managedMcpServerName() {
-  return 'ragent_actions_' + crypto.createHash('sha256')
+  return 'ragent_act_' + crypto.createHash('sha256')
     .update(process.env.RAGENT_RUN_ID || 'run', 'utf8')
     .digest('hex')
-    .slice(0, 16);
+    .slice(0, 8);
 }
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const message = JSON.parse(line);

@@ -14,7 +14,7 @@ const rootScope = endpoint === 'tools-root';
 
 const swarmReadActions = ['swarm.status', 'board.read', 'swarm.channel.list'];
 const swarmBoardWriteActions = ['board.post', 'board.wait', 'swarm.channel.create', 'swarm.channel.subscribe', 'swarm.channel.archive'];
-const swarmControlWriteActions = ['swarm.spawn', 'swarm.kill', 'swarm.done', 'swarm.model'];
+const swarmControlWriteActions = ['swarm.spawn', 'swarm.kill', 'swarm.done', 'swarm.model', 'swarm.promote_candidate', 'swarm.complete_work_item'];
 const proposalContract = 'plan.submit requires proposal: schemaVersion 1, idempotencyKey (or proposalId), objective, non-empty nodes, phases and acceptance. Each node needs stableKey, role, agentId and phaseId. Each phase needs phaseId, objective and acceptance; its review defaults on and requires reviewerRoles. The proposal review policy defaults on and requires reviewer nodes. Disable review only when consistent with user requirements. Acceptance entries are objects with criterion (or id/name). Read the root skill for the full contract.';
 
 const readActions = [
@@ -148,6 +148,22 @@ const actionTool = {
           },
           forceDiscard: { type: 'boolean' },
           postToBoard: { type: 'boolean' },
+          wakeNow: { type: 'boolean' },
+          tool: { type: 'string' },
+          handoffNotes: { type: 'string' },
+          expectedBindingGeneration: { type: 'integer' },
+          workItemId: { type: 'string' },
+          parentWorkItemId: { type: 'string' },
+          goalId: { type: 'string' },
+          criterionId: { type: 'string' },
+          criterionTitle: { type: 'string' },
+          objective: { type: 'string' },
+          targetBranch: { type: 'string' },
+          runId: { type: 'string' },
+          boardSeqFrom: { type: 'integer' },
+          boardSeqTo: { type: 'integer' },
+          evidenceRefs: { type: 'array', items: { type: 'string' } },
+          markDone: { type: 'boolean' },
         },
       },
     },
@@ -183,6 +199,12 @@ function filterPermittedWrites(capabilities = {}) {
     if (action === 'swarm.kill') return swarmMember && (canSwarmSpawn || isCoordinator);
     if (action === 'swarm.done') return swarmMember && isCoordinator;
     if (action === 'swarm.model') return swarmMember && capabilities.canSwitchModel === true;
+    if (action === 'swarm.promote_candidate') {
+      return swarmMember && (capabilities.canPromoteCandidate === true || isCoordinator || canSwarmSpawn);
+    }
+    if (action === 'swarm.complete_work_item') {
+      return swarmMember && (capabilities.canCompleteWorkItem === true || isCoordinator || canSwarmSpawn);
+    }
     return rootScope
       ? Boolean(capabilities.root && (action === 'plan.submit' ? capabilities.canPlan : capabilities.canDispatch))
       : Boolean(capabilities.canDelegate);

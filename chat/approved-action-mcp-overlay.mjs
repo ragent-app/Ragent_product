@@ -298,19 +298,33 @@ function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const SHORT_MCP_KIND_TAGS = Object.freeze({
+  organization: 'org',
+  actions: 'act',
+  browser: 'brw',
+  broker: 'brk',
+  windows_broker: 'brk',
+});
+
+function shortServerKindTag(normalizedKind) {
+  if (SHORT_MCP_KIND_TAGS[normalizedKind]) return SHORT_MCP_KIND_TAGS[normalizedKind];
+  const ascii = String(normalizedKind || 'mcp').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ascii.slice(0, 6) || 'mcp';
+}
+
 function safeServerName(runId, kind = 'actions') {
   const normalizedKind = kind === 'approved-actions' ? 'actions' : kind;
-  // Keep the established approved-action name stable. Browser is the first
-  // additional managed server and gets its own namespace without changing
-  // existing Codex/Claude readiness or persisted fixtures.
+  // Keep generated server names <= 22 chars with the reserved ragent_ prefix so
+  // composed AgY/ACP tool names (mcp_<server>_<tool>) stay within 64 chars.
   const hashInput = normalizedKind === 'actions'
     ? (trimString(runId) || 'run')
     : `${trimString(runId) || 'run'}:${normalizedKind}`;
   const suffix = createHash('sha256')
     .update(hashInput, 'utf8')
     .digest('hex')
-    .slice(0, 16);
-  return `ragent_${normalizedKind}_${suffix}`;
+    .slice(0, 8);
+  const tag = shortServerKindTag(normalizedKind);
+  return `ragent_${tag}_${suffix}`;
 }
 
 function tomlString(value) {
@@ -417,7 +431,7 @@ function withCleanup(root, extra = {}) {
 function defaultEnvKeysForKind(kind) {
   if (kind === 'browser') return BROWSER_MCP_ENV_KEYS;
   if (kind === 'organization') return ORGANIZATION_MCP_ENV_KEYS;
-  if (kind === 'broker') return WINDOWS_BROKER_MCP_ENV_KEYS;
+  if (kind === 'broker' || kind === 'windows_broker') return WINDOWS_BROKER_MCP_ENV_KEYS;
   return APPROVED_ACTION_MCP_ENV_KEYS;
 }
 
