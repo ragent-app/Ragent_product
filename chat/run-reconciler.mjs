@@ -109,7 +109,8 @@ export function createDetachedRunReconciler({
       // before the launcher records its PID or unit. Once that launch window
       // expires, however, there is no owner left to produce a result; leave a
       // durable failure instead of an immortal session spinner.
-      if (run?.state === 'waiting_user' || run?.state === 'queued') return null;
+      if (run?.state === 'waiting_user') return null;
+      if (run?.state === 'queued' && run?.runnerLaunchState !== 'lifecycle_submitting' && !run?.failureReason) return null;
       const heartbeatAtMs = parseIsoTimestampMs(run?.runnerHeartbeatAt);
       const updatedAtMs = parseIsoTimestampMs(run?.updatedAt);
       const createdAtMs = parseIsoTimestampMs(run?.createdAt);

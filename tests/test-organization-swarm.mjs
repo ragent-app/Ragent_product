@@ -1005,6 +1005,74 @@ async function runTests() {
   a.equal(reconcileSettled.nodes[0].lastRunFailure?.state, 'failed');
   a.equal(reconcileSettled.nodes[0].lastRunFailure?.reason.includes('sk-secretTokenValue987654321'), false, 'failure reason secrets redacted');
   a.ok(reconcileSettled.nodes[0].lastRunFailure?.reason.includes('[REDACTED]'));
+
+  // 12. P0 #2 regression: deliverPendingSwarmWakeups + sessionManager swarm_wakeup preserve model/effort/providerProfile/tool/riskMode
+  const rtRootSess = await sessionManager.createSession(repoDir, 'agy', 'Swarm Wakeup Model Root', {
+    projectId: isoProject.id,
+    sessionClass: 'ROOT_LEADERSHIP',
+    sessionPlane: 'user',
+    model: 'test-swarm-model-1',
+    effort: 'high',
+    riskMode: 'full-auto',
+    riskModeExplicit: true,
+  });
+  const rtDeliveries = [];
+  const rtDeps = {
+    createSession: sessionManager.createSession,
+    getSession: sessionManager.getSession,
+    getRunState: async () => null,
+    requestRunCancel: async (runId) => ({ id: runId, state: 'cancelled' }),
+    sendMessage: async (sessionId, text, images, options) => {
+      rtDeliveries.push({ sessionId, text, options });
+      return { deferred: false, queued: false, run: { id: `run_rt_${rtDeliveries.length}`, options } };
+    },
+  };
+  const { organization: rtOrg, coordinatorNode: rtCoord } = await swarm.ensureSwarmOrganization({
+    rootSessionId: rtRootSess.id,
+    projectId: isoProject.id,
+    policy: { projectRoot: repoDir, maxConcurrent: 4, maxDepth: 2 },
+    actor: {
+      projectId: isoProject.id,
+      runtimePolicy: { tool: 'agy', model: 'test-swarm-model-1', effort: 'high' },
+      riskMode: 'full-auto',
+      riskModeExplicit: true,
+    },
+  });
+  const rtSpawn = await swarm.spawnSwarmMembers(rtDeps, {
+    organizationId: rtOrg.id,
+    actorNodeId: rtCoord.id,
+    actorSessionId: rtRootSess.id,
+    name: 'rt-worker',
+    brief: 'Verify wakeup runtime tuple',
+    deferDelivery: true,
+  });
+  const rtWorker = rtSpawn.members[0];
+  a.equal(rtDeliveries.length, 0);
+  const wakeRes = await swarm.deliverPendingSwarmWakeups(rtDeps, { organizationId: rtOrg.id });
+  a.equal(wakeRes.delivered, 1);
+  a.equal(rtDeliveries[0].options.tool, 'agy');
+  a.equal(rtDeliveries[0].options.model, 'test-swarm-model-1');
+  a.equal(rtDeliveries[0].options.effort, 'high');
+  a.equal(rtDeliveries[0].options.riskMode, 'full-auto');
+  a.equal(rtDeliveries[0].options.riskModeExplicit, true);
+
+  // Even if an internal swarm_wakeup caller omits options.model / options.effort, sessionManager inherits session.model / session.effort.
+  const wakeRunRes = await sessionManager.sendMessage(rtWorker.currentSessionId, '[Swarm Board Doorbell] #1 fallback test', [], {
+    internalOperation: 'swarm_wakeup',
+    internalOrganizationWakeup: true,
+    organizationId: rtOrg.id,
+    organizationNodeId: rtWorker.id,
+    bindingGeneration: rtWorker.bindingGeneration,
+    skipRunnerLaunch: true,
+    recordUserMessage: false,
+  });
+  a.ok(wakeRunRes?.run?.id, 'swarm_wakeup fallback creates a run');
+  a.equal(wakeRunRes.run.model, 'test-swarm-model-1', 'run.model inherits session.model on swarm_wakeup');
+  a.equal(wakeRunRes.run.effort, 'high', 'run.effort inherits session.effort on swarm_wakeup');
+  const wakeRunManifest = await runs.getRunManifest(wakeRunRes.run.id);
+  a.equal(wakeRunManifest?.options?.model, 'test-swarm-model-1', 'manifest.options.model inherits session.model on swarm_wakeup');
+  a.equal(wakeRunManifest?.options?.effort, 'high', 'manifest.options.effort inherits session.effort on swarm_wakeup');
+  a.equal(wakeRunManifest?.options?.riskMode, 'full-auto', 'manifest.options.riskMode preserves explicit riskMode');
 }
 
 try {

@@ -56,6 +56,9 @@ data class RenderedNodeUiState(
     val accessibilityText: String = "",
     val hasRecognizedDomain: Boolean = false,
     val professionName: String? = null,
+    val failureCode: String? = null,
+    val resultPacketSummary: String? = null,
+    val harness: String? = null,
     val physicsFrame: NodePhysicsFrame? = null,
 )
 
@@ -120,6 +123,81 @@ data class NodeDetailUiState(
     val resultPacketSummary: String? = null,
     val isRootLeader: Boolean = false,
     val professionName: String? = null,
+    val failureCode: String? = null,
+    val harness: String? = null,
+    val workspaceBranch: String? = null,
+)
+
+data class SwarmStallBadgeUiState(
+    val id: String,
+    val label: String,
+)
+
+data class SwarmHarnessBadgeUiState(
+    val harness: String,
+    val count: Int,
+)
+
+data class SwarmOverviewUiState(
+    val mode: String? = null,
+    val title: String? = null,
+    val workingCount: Int = 0,
+    val waitingCount: Int = 0,
+    val stoppedCount: Int = 0,
+    val killedCount: Int = 0,
+    val activeCount: Int = 0,
+    val totalCount: Int = 0,
+    val isDone: Boolean = false,
+    val showSwarmCounts: Boolean = true,
+    val isReadOnlyNative: Boolean = false,
+    val harnesses: List<SwarmHarnessBadgeUiState> = emptyList(),
+    val branches: List<String> = emptyList(),
+    val stalls: List<SwarmStallBadgeUiState> = emptyList(),
+    val usageLabels: List<String> = emptyList(),
+)
+
+data class SwarmBoardChannelTabUiState(
+    val id: String,
+    val label: String,
+    val messageCount: Int = 0,
+    val unreadCount: Int = 0,
+    val selected: Boolean = false,
+)
+
+data class SwarmBoardMessageUiState(
+    val id: String,
+    val seq: Long,
+    val channel: String,
+    val senderKind: String,
+    val senderNodeId: String? = null,
+    val senderName: String,
+    val senderRole: String? = null,
+    val senderHarness: String? = null,
+    val kind: String = "message",
+    val bodyMarkdown: String = "",
+    val mentions: List<String> = emptyList(),
+    val replyToSeq: Long? = null,
+    val artifactLabels: List<String> = emptyList(),
+    val isDoneSignal: Boolean = false,
+    val isStallAlert: Boolean = false,
+    val createdAt: String? = null,
+)
+
+data class SwarmBoardUiState(
+    val mode: String? = null,
+    val title: String? = null,
+    val headSeq: Long = 0L,
+    val isDone: Boolean = false,
+    val readOnly: Boolean = true,
+    val isWritable: Boolean = false,
+    val channels: List<SwarmBoardChannelTabUiState> = emptyList(),
+    val selectedChannel: String = "__all__",
+    val messages: List<SwarmBoardMessageUiState> = emptyList(),
+    val activeStalls: List<SwarmStallBadgeUiState> = emptyList(),
+    val replyToSeq: Long? = null,
+    val composerDraft: String = "",
+    val isPosting: Boolean = false,
+    val postError: String? = null,
 )
 
 data class ActivityFeedItemUiState(
@@ -160,4 +238,6 @@ data class OrganizationUiState(
     val reduceMotion: Boolean = false,
     val physicsRunning: Boolean = false,
     val isLoading: Boolean = false,
+    val swarmOverview: SwarmOverviewUiState? = null,
+    val swarmBoard: SwarmBoardUiState? = null,
 )

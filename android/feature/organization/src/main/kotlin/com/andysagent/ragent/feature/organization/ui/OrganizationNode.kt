@@ -127,7 +127,7 @@ fun OrganizationNode(node: RenderedNodeUiState, onClick: () -> Unit, onDoubleTap
         modifier = modifier.absoluteOffset {
             val half = with(density) { touchSize.toPx() / 2f }
             IntOffset((node.x - half).roundToInt(), (node.y - half).roundToInt())
-        }.size(touchSize).then(if (morphHidden || !clickable) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, actionDescription, node.taskSummary, node.blockerText).joinToString("，") })
+        }.size(touchSize).then(if (morphHidden || !clickable) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = listOfNotNull(node.displayName, roleDescription, node.professionName, status, actionDescription, node.taskSummary, node.blockerText, node.failureCode?.takeIf { it != node.blockerText }, node.resultPacketSummary).joinToString("，") })
             .graphicsLayer { scaleX = node.scale * press; scaleY = node.scale * press; alpha = if (morphHidden) 0f else node.alpha }
             .drawWithContent {
                 val offset = occluderOffset

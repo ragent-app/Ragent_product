@@ -581,7 +581,9 @@ export async function launchDetachedRunnerViaLifecycleBroker(runId, {
 } = {}) {
   const normalizedSocketPath = normalizeSupervisorSocketPath(socketPath);
   if (!normalizedSocketPath) {
-    throw new Error('Runner lifecycle broker socket is not configured');
+    const error = new Error('Runner lifecycle broker socket is not configured');
+    error.launchDefinitelyNotSubmitted = true;
+    throw error;
   }
   const guiEnvironment = resolveRunnerGuiEnvironment();
   let scopeGrant = null;
@@ -743,16 +745,18 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
 } = {}) {
   const normalizedSocketPath = normalizeSupervisorSocketPath(socketPath);
   if (!normalizedSocketPath) {
-    throw new Error('Runner supervisor socket is not configured');
+    const error = new Error('Runner supervisor socket is not configured');
+    error.launchDefinitelyNotSubmitted = true;
+    throw error;
   }
 
-  const proxyEnv = await resolveRunnerProxyEnvironment();
-  const baseEnv = buildDetachedRunnerEnvironment({
-    launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE,
-    proxyEnv,
-  });
   let prepared;
   try {
+    const proxyEnv = await resolveRunnerProxyEnvironment();
+    const baseEnv = buildDetachedRunnerEnvironment({
+      launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE,
+      proxyEnv,
+    });
     prepared = await prepareProviderImpl(runId, {
       environment: baseEnv,
       runnerReadable: true,
@@ -778,7 +782,11 @@ export async function launchDetachedRunnerViaSupervisor(runId, {
       && process.env.RAGENT_WINDOWS_SERVICE_ROLE === 'control' && connectImpl === connectSocket;
     let result;
     if (managedWindows) {
-      if (normalizedSocketPath.toLowerCase() !== '\\\\.\\pipe\\ragent-runner-supervisor-owner') throw new Error('Runner supervisor pipe is not the installed endpoint');
+      if (normalizedSocketPath.toLowerCase() !== '\\\\.\\pipe\\ragent-runner-supervisor-owner') {
+        const error = new Error('Runner supervisor pipe is not the installed endpoint');
+        error.launchDefinitelyNotSubmitted = true;
+        throw error;
+      }
       const response = await exchangeWindowsSupervisorRequest(request, { timeoutMs });
       result = { pid: Number.isInteger(response.pid) && response.pid > 0 ? response.pid : null,
         unitName: null, unitScope: null, supervisorSocket: normalizedSocketPath, launchMode: DETACHED_RUNNER_SUPERVISOR_LAUNCH_MODE };
@@ -913,9 +921,17 @@ export async function launchDetachedRunnerViaSystemd(runId, {
   prepareProviderImpl = prepareDetachedRunnerProvider,
 } = {}) {
   const launchMode = DETACHED_RUNNER_SYSTEMD_LAUNCH_MODE;
-  const proxyEnv = await resolveRunnerProxyEnvironment();
-  const baseEnv = buildDetachedRunnerEnvironment({ launchMode, unitName, unitScope: scope, proxyEnv });
-  const prepared = await prepareProviderImpl(runId, { environment: baseEnv });
+  let baseEnv;
+  let prepared;
+  try {
+    const proxyEnv = await resolveRunnerProxyEnvironment();
+    baseEnv = buildDetachedRunnerEnvironment({ launchMode, unitName, unitScope: scope, proxyEnv });
+    prepared = await prepareProviderImpl(runId, { environment: baseEnv });
+  } catch (error) {
+    error.launchDefinitelyNotSubmitted = true;
+    error.launchStage = 'provider-preparation';
+    throw error;
+  }
   const env = prepared?.environment || baseEnv;
   const args = [
     ...buildSystemdRunArgs(scope),
@@ -961,9 +977,17 @@ export async function spawnDetachedRunnerAsProcess(runId, {
   prepareProviderImpl = prepareDetachedRunnerProvider,
   launchMode = DETACHED_RUNNER_PROCESS_LAUNCH_MODE,
 } = {}) {
-  const proxyEnv = await resolveRunnerProxyEnvironment();
-  const baseEnv = buildDetachedRunnerEnvironment({ launchMode, proxyEnv });
-  const prepared = await prepareProviderImpl(runId, { environment: baseEnv });
+  let baseEnv;
+  let prepared;
+  try {
+    const proxyEnv = await resolveRunnerProxyEnvironment();
+    baseEnv = buildDetachedRunnerEnvironment({ launchMode, proxyEnv });
+    prepared = await prepareProviderImpl(runId, { environment: baseEnv });
+  } catch (error) {
+    error.launchDefinitelyNotSubmitted = true;
+    error.launchStage = 'provider-preparation';
+    throw error;
+  }
   const env = prepared?.environment || baseEnv;
   let oauthLockHandedOff = false;
   try {
@@ -983,6 +1007,11 @@ export async function spawnDetachedRunnerAsProcess(runId, {
       unitScope: null,
       launchMode,
     };
+  } catch (error) {
+    if (error && error.launchMayHaveBeenAccepted !== true) {
+      error.launchDefinitelyNotSubmitted = true;
+    }
+    throw error;
   } finally {
     if (!oauthLockHandedOff) {
       try { await prepared?.oauthLock?.release?.(); } catch {}
@@ -1011,6 +1040,7 @@ export function createDetachedRunnerSpawner({
   platform = process.platform,
   assertExecutionBoundaryImpl = assertRunLaunchBoundary,
   scheduleRunDiscoveryImpl = scheduleRunCapabilityDiscovery,
+  prepareProviderImpl = prepareDetachedRunnerProvider,
 } = {}) {
   return async function spawnDetachedRunner(runId, { launchAttempt = 0 } = {}) {
     // All launch strategies, including lifecycle and legacy fallbacks, share
@@ -1051,7 +1081,7 @@ export function createDetachedRunnerSpawner({
     }
     if (shouldUseRunnerSupervisor()) {
       try {
-        return await launchDetachedRunnerViaSupervisor(runId, { connectImpl });
+        return await launchDetachedRunnerViaSupervisor(runId, { connectImpl, prepareProviderImpl });
       } catch (error) {
         if (error?.launchMayHaveBeenAccepted || error?.providerPreparation
             || ['provider-preparation', 'supervisor-rejection'].includes(error?.launchStage)) throw error;
@@ -1077,17 +1107,18 @@ export function createDetachedRunnerSpawner({
       throw error;
     }
     if (process.env.RAGENT_RUNTIME_MODE === 'proot') {
-      return spawnDetachedRunnerAsProcess(runId, { spawnImpl, launchMode: PROOT_RUNNER_PROCESS_LAUNCH_MODE });
+      return spawnDetachedRunnerAsProcess(runId, { spawnImpl, prepareProviderImpl, launchMode: PROOT_RUNNER_PROCESS_LAUNCH_MODE });
     }
-    const scope = getScopeImpl();
-    if (shouldUseSystemdDetachedRunner({ scope })) {
+    const scope = getScopeImpl({ platform });
+    if (shouldUseSystemdDetachedRunner({ platform, scope })) {
       try {
-        return await launchDetachedRunnerViaSystemd(runId, { scope, execFileImpl });
+        return await launchDetachedRunnerViaSystemd(runId, { scope, execFileImpl, prepareProviderImpl });
       } catch (error) {
+        if (error?.providerPreparation || error?.launchStage === 'provider-preparation') throw error;
         console.error(`[runs] Failed to launch detached runner ${runId} via systemd-run (${scope}): ${error?.message || String(error)}; falling back to plain detached process.`);
       }
     }
-    return spawnDetachedRunnerAsProcess(runId, { spawnImpl });
+    return spawnDetachedRunnerAsProcess(runId, { spawnImpl, prepareProviderImpl });
     };
     const result = await launch();
     // Discovery is advisory and must not delay or fail a successfully launched

@@ -2,6 +2,8 @@ package com.andysagent.ragent.feature.organization.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class DelegationRunsDto(val sessionId: String, val runs: List<DelegationRunDto> = emptyList())
@@ -152,6 +154,8 @@ data class OrganizationNodeDto(
     val reviewState: String? = null,
     val lastChangedAt: String? = null,
     val attemptCount: Int = 1,
+    val resultPacketId: String? = null,
+    val resultPacketSummary: String? = null,
     val directChildCount: Int = 0,
     val activeChildCount: Int = 0,
     val blockedChildCount: Int = 0,
@@ -268,6 +272,8 @@ data class OrganizationBlockerDto(
     val nodeId: String? = null,
     val type: String? = null,
     val reasonCode: String? = null,
+    val reason: String? = null,
+    val message: String? = null,
     val kind: String? = null,
     val taskId: String? = null,
     val attemptId: String? = null,
@@ -302,4 +308,201 @@ data class OrganizationAsOfDto(
     val eventId: Long = 0L,
     val progressEpoch: Int = 0,
     val projectionDigest: String? = null,
+)
+
+@Serializable
+data class SwarmRunFailureDto(
+    val runId: String? = null,
+    val state: String? = null,
+    val reason: String? = null,
+    val failedAt: String? = null,
+)
+
+@Serializable
+data class SwarmMemberDto(
+    val nodeId: String = "",
+    val id: String = "",
+    val organizationId: String? = null,
+    val name: String = "",
+    val stableKey: String = "",
+    val role: String = "worker",
+    val contractRole: String? = null,
+    val domain: String? = null,
+    val lifecycleMode: String? = null,
+    val lifecycleState: String? = null,
+    val swarmState: String = "waiting",
+    val sessionClass: String = "",
+    val roleInstanceId: String? = null,
+    val parentNodeId: String? = null,
+    val depth: Int = 0,
+    val currentSessionId: String? = null,
+    val bindingGeneration: Long = 0L,
+    val harness: String? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val effort: String? = null,
+    val workspaceMode: String? = null,
+    val workspacePath: String? = null,
+    val workspaceBranch: String? = null,
+    val channels: List<String> = emptyList(),
+    val lastRunId: String? = null,
+    val lastStateReason: String? = null,
+    val lastRunFailure: SwarmRunFailureDto? = null,
+)
+
+@Serializable
+data class SwarmCountsDto(
+    val waiting: Int = 0,
+    val working: Int = 0,
+    val stopped: Int = 0,
+    val killed: Int = 0,
+    val active: Int = 0,
+    val total: Int = 0,
+)
+
+@Serializable
+data class SwarmStallAlertDto(
+    val id: String = "",
+    val dedupeKey: String? = null,
+    val conditionKind: String? = null,
+    val targetRole: String? = null,
+    val targetNodeId: String? = null,
+    val boardSeq: Long? = null,
+    val details: JsonObject? = null,
+    val alertCount: Int = 1,
+    val lastAlertAt: String? = null,
+)
+
+@Serializable
+data class SwarmUsageByModelDto(
+    val modelKey: String? = null,
+    val tool: String? = null,
+    val model: String? = null,
+    val provider: String? = null,
+    val totalTokens: Long = 0L,
+    val costUsd: Double = 0.0,
+)
+
+@Serializable
+data class SwarmBoardChannelDto(
+    val id: String? = null,
+    val organizationId: String? = null,
+    val name: String,
+    val topic: String? = null,
+    val visibility: String? = null,
+    val state: String? = null,
+    val createdByNodeId: String? = null,
+    val createdAt: String? = null,
+    val messageCount: Int = 0,
+    val latestSeq: Long = 0L,
+    val unreadCount: Int = 0,
+)
+
+@Serializable
+data class SwarmBoardArtifactRefDto(
+    val id: String = "",
+    val kind: String? = null,
+    val title: String? = null,
+    val label: String? = null,
+    val packetId: String? = null,
+    val path: String? = null,
+    val ref: String? = null,
+)
+
+@Serializable
+data class SwarmBoardMessageDto(
+    val id: String? = null,
+    val organizationId: String? = null,
+    val seq: Long = 0L,
+    val channel: String = "main",
+    val senderKind: String = "system",
+    val senderNodeId: String? = null,
+    val sender: String? = null,
+    val senderName: String? = null,
+    val senderRole: String? = null,
+    val senderHarness: String? = null,
+    val kind: String = "message",
+    val text: String? = null,
+    val bodyMarkdown: String? = null,
+    val mentions: List<String> = emptyList(),
+    val replyToSeq: Long? = null,
+    val artifactRefs: List<SwarmBoardArtifactRefDto> = emptyList(),
+    val isDoneSignal: Boolean = false,
+    val isStallAlert: Boolean = false,
+    val createdAt: String? = null,
+) {
+    val displayBody: String get() = bodyMarkdown?.takeIf { it.isNotBlank() } ?: text.orEmpty()
+    val resolvedSender: String get() = senderName?.takeIf { it.isNotBlank() }
+        ?: sender?.takeIf { it.isNotBlank() }
+        ?: senderNodeId?.takeIf { it.isNotBlank() }
+        ?: senderKind
+}
+
+@Serializable
+data class SwarmBoardPayloadDto(
+    val mode: String? = null,
+    val source: String? = null,
+    val readOnly: Boolean = false,
+    val organizationId: String? = null,
+    val title: String? = null,
+    val headSeq: Long = 0L,
+    val isDone: Boolean = false,
+    val channels: List<SwarmBoardChannelDto> = emptyList(),
+    val messages: List<SwarmBoardMessageDto> = emptyList(),
+    val hasMore: Boolean = false,
+    val activeStalls: List<SwarmStallAlertDto> = emptyList(),
+)
+
+@Serializable
+data class SwarmStatusDto(
+    val rootSessionId: String? = null,
+    val mode: String? = null,
+    val organizationId: String? = null,
+    val title: String? = null,
+    val headSeq: Long = 0L,
+    val isDone: Boolean = false,
+    val counts: SwarmCountsDto? = null,
+    val members: List<SwarmMemberDto> = emptyList(),
+    val channels: List<SwarmBoardChannelDto> = emptyList(),
+    val activeStalls: List<SwarmStallAlertDto> = emptyList(),
+    val budget: JsonObject? = null,
+    val usageByModel: List<SwarmUsageByModelDto> = emptyList(),
+)
+
+@Serializable
+data class SwarmBoardResponseDto(
+    val rootSessionId: String? = null,
+    val organizationId: String? = null,
+    val mode: String? = null,
+    val readOnly: Boolean = true,
+    val board: SwarmBoardPayloadDto? = null,
+    val channels: List<SwarmBoardChannelDto> = emptyList(),
+    val nativeBoard: SwarmBoardPayloadDto? = null,
+    val sourceCoverage: MemberSourceCoverageDto? = null,
+) {
+    val activeBoard: SwarmBoardPayloadDto?
+        get() = board ?: nativeBoard
+
+    val effectiveReadOnly: Boolean
+        get() = readOnly || (activeBoard?.readOnly == true) || mode != "ragent_swarm"
+
+    val isWritable: Boolean
+        get() = mode == "ragent_swarm" && !effectiveReadOnly
+}
+
+@Serializable
+data class PostBoardMessageRequestDto(
+    val channel: String = "main",
+    val bodyMarkdown: String,
+    val replyToSeq: Long? = null,
+    val idempotencyKey: String? = null,
+)
+
+@Serializable
+data class PostBoardMessageResponseDto(
+    val rootSessionId: String? = null,
+    val organizationId: String? = null,
+    val message: SwarmBoardMessageDto? = null,
+    val headSeq: Long = 0L,
+    val replay: Boolean = false,
 )

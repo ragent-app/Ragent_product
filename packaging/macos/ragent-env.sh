@@ -176,6 +176,57 @@ NODE
   fi
 }
 
+RAGENT_PACKAGED_ORG_ROLLOUT_FLAGS=(
+  RAGENT_ORG_SCHEMA_ENABLED
+  RAGENT_ORG_SHADOW_PROJECTION
+  RAGENT_ORG_SESSION_ADDRESSABILITY_ENABLED
+  RAGENT_MANAGED_INPUT_ENFORCEMENT
+  RAGENT_MANAGED_WRITER_ENABLED
+  RAGENT_REVIEWER_ENABLED
+  RAGENT_COLLABORATION_LEADER_ENABLED
+  RAGENT_ORG_INTERNAL_ENVELOPE_ENABLED
+  RAGENT_ORG_AUTONOMOUS_LEADER_ENABLED
+  RAGENT_ORG_AUTONOMOUS_PROVISIONING_ENABLED
+  RAGENT_ORG_AUTONOMOUS_AUTO_PROVISIONING_ENABLED
+  RAGENT_ORG_HIERARCHICAL_DELEGATION_ENABLED
+  RAGENT_ORG_DYNAMIC_REPLAN_ENABLED
+  RAGENT_ORG_STALL_GOVERNOR_ENABLED
+  RAGENT_ORG_PROJECTION_V1_ENABLED
+  RAGENT_ORG_PROJECTION_V2_ENABLED
+  RAGENT_ORG_RECOVERY_V1_ENABLED
+  RAGENT_CONSULTATION_V1_ENABLED
+)
+
+ragent_resolve_packaged_opt_out_flag_value() {
+  local raw="${1:-}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  if [ -z "$raw" ]; then
+    printf '1'
+    return 0
+  fi
+  case "$raw" in
+    0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]|[Oo][Ff][Ff])
+      printf '0'
+      ;;
+    1|[Tt][Rr][Uu][Ee]|[Yy][Ee][Ss]|[Oo][Nn])
+      printf '1'
+      ;;
+    *)
+      printf '%s' "$raw"
+      ;;
+  esac
+}
+
+ragent_apply_packaged_org_defaults() {
+  local name current resolved
+  for name in "${RAGENT_PACKAGED_ORG_ROLLOUT_FLAGS[@]}"; do
+    eval "current=\"\${${name}:-}\""
+    resolved="$(ragent_resolve_packaged_opt_out_flag_value "$current")"
+    export "${name}=${resolved}"
+  done
+}
+
 ragent_source_instance_env() {
   local env_file
   env_file="$(ragent_config_dir)/instance.env"
@@ -188,6 +239,7 @@ ragent_source_instance_env() {
     fi
     set +a
   fi
+  ragent_apply_packaged_org_defaults
 }
 
 ragent_ensure_runtime_shims() {

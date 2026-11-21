@@ -907,7 +907,7 @@ fun WorkbenchScreen(
     }
 
     // Predictive back handler
-    PredictiveBackHandler(enabled = backLayer != null && showAttention == null) { progress ->
+    PredictiveBackHandler(enabled = backLayer != null && !organizationOpen && showAttention == null) { progress ->
         var committed = false
         try {
             val choiceDismissal = choiceBackHandoff.dismissal
@@ -3565,6 +3565,53 @@ private fun ChatSurface(
             }
         }
 
+        if (onOpenOrganization != null &&
+            organizationSnapshotReady &&
+            organizationHasCollaborators &&
+            !organizationExpanded &&
+            !runIslandExpanded &&
+            !composerFullscreenActive &&
+            state.approval == null
+        ) {
+            val openOrgLabel = stringResource(com.andysagent.ragent.feature.organization.R.string.organization_open_workspace)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = organizationGraphTop + 2.dp, end = 12.dp)
+                    .zIndex(1.9f)
+                    .heightIn(min = 48.dp)
+                    .clip(AgentoShapes.PillShape)
+                    .clickable(onClick = onOpenOrganization)
+                    .testTag("open-organization-button"),
+                contentAlignment = Alignment.Center,
+            ) {
+                AgentoFrostedGlassBox(
+                    shape = AgentoShapes.PillShape,
+                    backdropLayer = chatBackdropForControls,
+                    hasShadow = false,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        AgentoWebIcon(
+                            glyph = AgentoWebGlyph.Fork,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = colors.primaryContent,
+                        )
+                        Text(
+                            text = openOrgLabel,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.primaryContent,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
         // Top run-details Dynamic Island: grows out of the header title
         // capsule in place of the old bottom sheet.
         val pendingIslandRequest = state.approval?.let {
@@ -3703,6 +3750,16 @@ private fun ChatSurface(
                 .padding(top = 56.dp, end = AgentoSpacing.ComposerMargin)
                 .zIndex(10f),
         ) {
+            if (onOpenOrganization != null) {
+                AgentoDropdownMenuItem(
+                    text = stringResource(com.andysagent.ragent.feature.organization.R.string.organization_open_workspace),
+                    onClick = {
+                        onEvent(WorkbenchEvent.CloseSessionMenu)
+                        onOpenOrganization()
+                    },
+                    leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Fork, contentDescription = null) },
+                )
+            }
             AgentoDropdownMenuItem(
                 text = stringResource(R.string.collaboration_settings),
                 onClick = {

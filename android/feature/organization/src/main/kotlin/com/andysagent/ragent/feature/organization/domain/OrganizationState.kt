@@ -177,6 +177,10 @@ data class OrganizationNodeModel(
     val lastChangedAt: Long = 0L,
     val changedFiles: List<String> = emptyList(),
     val resultPacketSummary: String? = null,
+    val failureCode: String? = null,
+    val harness: String? = null,
+    val workspaceMode: String? = null,
+    val workspaceBranch: String? = null,
 )
 
 data class OrganizationEdgeModel(
@@ -223,6 +227,120 @@ data class OrganizationActivityEvent(
     val type: CommunicationType? = null,
 )
 
+data class SwarmCountsModel(
+    val waiting: Int = 0,
+    val working: Int = 0,
+    val stopped: Int = 0,
+    val killed: Int = 0,
+    val active: Int = 0,
+    val total: Int = 0,
+)
+
+data class SwarmStallAlertModel(
+    val id: String,
+    val conditionKind: String? = null,
+    val targetRole: String? = null,
+    val targetNodeId: String? = null,
+    val boardSeq: Long? = null,
+    val reason: String? = null,
+    val alertCount: Int = 1,
+    val lastAlertAt: String? = null,
+)
+
+data class SwarmUsageBucketModel(
+    val label: String,
+    val totalTokens: Long = 0L,
+    val costUsd: Double = 0.0,
+)
+
+data class SwarmMemberModel(
+    val nodeId: String,
+    val displayName: String,
+    val role: NodeRole = NodeRole.WORKER,
+    val domain: AgentDomain = AgentDomain.GENERAL,
+    val hasRecognizedDomain: Boolean = false,
+    val professionName: String? = null,
+    val parentNodeId: String? = null,
+    val currentSessionId: String? = null,
+    val swarmState: String = "waiting",
+    val lifecycleState: String? = null,
+    val sessionClass: String = "",
+    val harness: String? = null,
+    val provider: String? = null,
+    val model: String? = null,
+    val workspaceMode: String? = null,
+    val workspaceBranch: String? = null,
+    val lastStateReason: String? = null,
+    val lastRunFailureReason: String? = null,
+    val lastRunFailureState: String? = null,
+)
+
+data class SwarmBoardChannelModel(
+    val name: String,
+    val topic: String? = null,
+    val messageCount: Int = 0,
+    val latestSeq: Long = 0L,
+    val unreadCount: Int = 0,
+)
+
+data class SwarmBoardArtifactRefModel(
+    val id: String,
+    val kind: String? = null,
+    val label: String,
+    val packetId: String? = null,
+    val path: String? = null,
+)
+
+data class SwarmBoardMessageModel(
+    val id: String,
+    val seq: Long,
+    val channel: String,
+    val senderKind: String,
+    val senderNodeId: String? = null,
+    val senderName: String,
+    val senderRole: String? = null,
+    val senderHarness: String? = null,
+    val kind: String = "message",
+    val bodyMarkdown: String = "",
+    val mentions: List<String> = emptyList(),
+    val replyToSeq: Long? = null,
+    val artifactRefs: List<SwarmBoardArtifactRefModel> = emptyList(),
+    val isDoneSignal: Boolean = false,
+    val isStallAlert: Boolean = false,
+    val createdAt: String? = null,
+)
+
+data class SwarmStatusModel(
+    val organizationId: String? = null,
+    val rootSessionId: String? = null,
+    val mode: String? = null,
+    val title: String? = null,
+    val headSeq: Long = 0L,
+    val isDone: Boolean = false,
+    val counts: SwarmCountsModel = SwarmCountsModel(),
+    val members: List<SwarmMemberModel> = emptyList(),
+    val channels: List<SwarmBoardChannelModel> = emptyList(),
+    val activeStalls: List<SwarmStallAlertModel> = emptyList(),
+    val usageByModel: List<SwarmUsageBucketModel> = emptyList(),
+)
+
+data class SwarmBoardModel(
+    val organizationId: String? = null,
+    val mode: String? = null,
+    val source: String? = null,
+    val readOnly: Boolean = true,
+    val title: String? = null,
+    val headSeq: Long = 0L,
+    val isDone: Boolean = false,
+    val channels: List<SwarmBoardChannelModel> = emptyList(),
+    val messages: List<SwarmBoardMessageModel> = emptyList(),
+    val hasMore: Boolean = false,
+    val activeStalls: List<SwarmStallAlertModel> = emptyList(),
+) {
+    val isWritable: Boolean
+        get() = mode == "ragent_swarm" && !readOnly
+}
+
 data class OrganizationState(
     val organizationId: String = "",
     val rootSessionId: String? = null,
@@ -240,6 +358,14 @@ data class OrganizationState(
     val recentActivity: List<OrganizationActivityEvent> = emptyList(),
     val isCompleted: Boolean = false,
     val leaderSummary: String? = null,
+    val isSyntheticSwarmNodes: Boolean = false,
+    val swarmStatus: SwarmStatusModel? = null,
+    val board: SwarmBoardModel? = null,
+    val selectedBoardChannel: String? = null,
+    val boardReplyToSeq: Long? = null,
+    val boardComposerDraft: String = "",
+    val boardPosting: Boolean = false,
+    val boardError: String? = null,
 ) {
     val rootExecutiveNode: OrganizationNodeModel?
         get() = nodes.values.firstOrNull { it.role == NodeRole.EXECUTIVE } ?: nodes.values.firstOrNull { it.parentId == null }

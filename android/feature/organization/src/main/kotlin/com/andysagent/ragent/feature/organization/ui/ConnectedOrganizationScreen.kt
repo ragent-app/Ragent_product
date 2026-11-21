@@ -1,5 +1,6 @@
 package com.andysagent.ragent.feature.organization.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,8 @@ import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.feature.organization.data.OrganizationOfflineCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -58,6 +61,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.security.MessageDigest
 import com.andysagent.ragent.feature.organization.data.RealOrganizationApi
+import com.andysagent.ragent.feature.organization.data.SwarmBoardResponseDto
+import com.andysagent.ragent.feature.organization.data.SwarmStatusDto
+import com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.data.NativeDelegationDto
@@ -117,12 +123,54 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     val formalBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     val nativeBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     var nativeFrame by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(NativeBirthFrame(emptyList(), emptyList())) }
-    var rawUnifiedMembers by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto?>(null) }
+    var rawUnifiedMembers by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<UnifiedMembersPageDto?>(null) }
     var unifiedFrame by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(UnifiedMemberFrame()) }
     val unifiedMembers = unifiedFrame.page
     val unifiedBirthTracker = remember(transport, targetId, sessionId, scopeKey) { BirthEventTracker() }
     var unifiedReceipt by remember(transport, targetId, sessionId, scopeKey) { mutableLongStateOf(0L) }
     var unifiedResolved by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    var swarmStatus by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<SwarmStatusDto?>(null) }
+    var boardResponse by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf<SwarmBoardResponseDto?>(null) }
+    var swarmResolved by remember(transport, targetId, sessionId, scopeKey) { mutableStateOf(false) }
+    LaunchedEffect(transport, targetId, sessionId, scopeKey, connection, lifecycleState, demoOpen) {
+        if (demoOpen) {
+            swarmResolved = true
+            return@LaunchedEffect
+        }
+        if (connection == RuntimeConnectionState.AuthenticationRequired) {
+            swarmStatus = null
+            boardResponse = null
+            swarmResolved = true
+            organizationViewModel.clearSwarmAndBoard()
+            return@LaunchedEffect
+        }
+        if (connection != RuntimeConnectionState.Connected || lifecycleState != Lifecycle.State.RESUMED) {
+            swarmResolved = true
+            return@LaunchedEffect
+        }
+        val api = RealOrganizationApi(transport)
+        while (true) {
+            coroutineScope {
+                val activeChannel = organizationViewModel.activeBoardChannel()
+                val swarmDeferred = async { api.getSwarmStatus(sessionId) }
+                val boardDeferred = async { api.getBoard(sessionId, channel = activeChannel) }
+                val swarmResult = swarmDeferred.await()
+                val boardResult = boardDeferred.await()
+                swarmResult.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                boardResult.exceptionOrNull()?.let { if (it is CancellationException) throw it }
+                swarmResult.onSuccess { dto ->
+                    swarmStatus = dto
+                    organizationViewModel.applySwarmStatus(dto)
+                }
+                boardResult.onSuccess { dto ->
+                    boardResponse = dto
+                    organizationViewModel.applyBoardResponse(dto)
+                }
+            }
+            swarmResolved = true
+            delay(3_000)
+        }
+    }
     LaunchedEffect(transport, targetId, sessionId, scopeKey, connection, lifecycleState) {
         unifiedReceipt = 0L
         if (connection == RuntimeConnectionState.AuthenticationRequired) { rawUnifiedMembers = null; unifiedFrame = UnifiedMemberFrame(); unifiedResolved = true; return@LaunchedEffect }
@@ -220,7 +268,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 if (!owner && offlineScope != null) cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
             }
             val response = try {
-                transport.execute(ApiRequest("GET", "/api/sessions/${android.net.Uri.encode(sessionId)}/organization/projection"))
+                transport.execute(ApiRequest("GET", "/api/sessions/${android.net.Uri.encode(sessionId)}/organization/projection?version=2"))
             } catch (error: ApiException) {
                 confirmedNotFound = error.statusCode == 404 && error.code == "ORGANIZATION_NOT_FOUND" &&
                     (offlineScope == null || (requestGeneration != null && cache.isCurrent(offlineScope, requestGeneration)))
@@ -369,16 +417,8 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                 delay(3_000)
                 continue
             }
-            val roots = projection.nodes.filter { it.sessionId == sessionId }
-            val root = when (roots.size) {
-                0 -> projection.nodes.filter { it.parentId == null }.singleOrNull()?.id
-                1 -> roots.single().id
-                else -> null
-            }
-            if (root == null) {
-                formalBirthTracker.reset(); established = false; cursor = 0L
-                delay(3_000); continue
-            }
+            val matchedRoot = resolveFormalRootNodeId(projection.nodes, sessionId, projection.rootSessionId)
+            val root = matchedRoot ?: "root:$sessionId"
             val nativeNodes = nativeDisplayNodes(latestRecords, root, latestMemberName, latestRootChildren)
             val graphNodes = latestUnifiedMembers?.let { unifiedMemberNodes(it, root, projection.nodes, latestMemberName) } ?: projection.nodes
             val graph = projection.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, projection.edges))
@@ -407,13 +447,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         }
         organizationViewModel.replayLocalDemoBirths()
     }
-    val rootSession = rootSessionId?.takeIf { it.isNotBlank() } ?: sessionId
-    val rootMatches = nodes.filter { it.sessionId == rootSession }
-    val rootNodeId = when (rootMatches.size) {
-        0 -> nodes.filter { it.parentId == null }.singleOrNull()?.id
-        1 -> rootMatches.single().id
-        else -> null
-    }
+    val rootNodeId = resolveFormalRootNodeId(nodes, sessionId, rootSessionId)
     val nativeMemberName = stringResource(R.string.organization_native_member)
     LaunchedEffect(rawUnifiedMembers, unifiedReceipt, connection, lifecycleState, rootNodeId, baseProjection, nativeMemberName) {
         val page = rawUnifiedMembers
@@ -437,7 +471,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         }
         val cues = unifiedBirthTracker.observe("$scopeKey:$sessionId:${page.rootCanonicalId}:$root", sessionId,
             page.sourceCoverage?.gap == false, parents, root, null, emptyList(), emptyList(), emptyList(), births)
-        if (formal != null && rootNodeId != null) {
+        if (formal != null) {
             organizationViewModel.applyProjection(formal.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, formal.edges)), birthCues = cues)
             unifiedFrame = UnifiedMemberFrame(page)
         } else unifiedFrame = UnifiedMemberFrame(page, cues)
@@ -475,7 +509,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         val cues = nativeBirthTracker.observe("$scopeKey:$sessionId:${formal?.organizationId.orEmpty()}", sessionId,
             nativeContinuous && connection == RuntimeConnectionState.Connected && lifecycleState == Lifecycle.State.RESUMED && (formal == null || formal.nodes.size < 200),
             parents, root, null, emptyList(), nativeEvents, records)
-        if (formal != null && rootNodeId != null && cues.isNotEmpty()) {
+        if (formal != null && cues.isNotEmpty()) {
             organizationViewModel.applyProjection(formal.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, formal.edges)), birthCues = cues.filter { it.nodeId in parents })
         }
         // The fallback graph must receive the snapshot and its cue together.
@@ -483,7 +517,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     }
     LaunchedEffect(baseProjection, nativeFrame.records, rootNodeId, nativeMemberName, nativeEvents, unifiedMembers) {
         val projection = baseProjection ?: return@LaunchedEffect
-        val root = rootNodeId ?: return@LaunchedEffect
+        val root = rootNodeId ?: "root:$sessionId"
         val nativeNodes = nativeDisplayNodes(nativeFrame.records, root, nativeMemberName, confirmedRootChildren(nativeEvents, sessionId))
         val graphNodes = unifiedMembers?.let { unifiedMemberNodes(it, root, projection.nodes, nativeMemberName) } ?: projection.nodes
         organizationViewModel.applyProjection(projection.copy(nodes = graphNodes, edges = unifiedMemberEdges(graphNodes, projection.edges)))
@@ -494,9 +528,10 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             refresh++
         }
     }
-    val hasCollaborators = unifiedMembers?.let { page -> page.members.any { it.canonicalId != page.rootCanonicalId } } == true ||
-        (loaded && baseProjection?.hasCreatedSubordinate == true)
-    val snapshotResolved = unifiedResolved && (loaded || status != "Loading organization…" || connection != RuntimeConnectionState.Connected)
+    val hasSwarmOrBoard = swarmStatus != null || boardResponse?.activeBoard != null || boardResponse?.mode == "ragent_swarm"
+    val hasCollaborators = computeHasCollaborators(unifiedMembers, loaded, baseProjection, swarmStatus, boardResponse)
+    val snapshotResolved = unifiedResolved && (swarmResolved || connection != RuntimeConnectionState.Connected) &&
+        (loaded || hasSwarmOrBoard || status != "Loading organization…" || connection != RuntimeConnectionState.Connected)
     // A successful gap-free observation establishes the current display baseline;
     // it does not assert that the historical member source is complete.
     val observedBaseline = unifiedReceipt > 0L && unifiedMembers?.sourceCoverage?.gap == false &&
@@ -507,11 +542,16 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
         onCollaboratorSnapshot(snapshotResolved, snapshotDefinitive, hasCollaborators)
         onHasCollaboratorsChanged(hasCollaborators)
     }
+    if (!embedded) {
+        BackHandler(enabled = workOpen) { workOpen = false }
+        BackHandler(enabled = messagesOpen) { messagesOpen = false }
+    }
     CompositionLocalProvider(LocalContentColor provides LocalRagentColors.current.primaryContent) {
     Box(modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().background(LocalRagentColors.current.canvas).then(
         if (demoOpen) Modifier.clearAndSetSemantics {} else Modifier,
     )) {
+        val effectiveOrganizationId = organizationId ?: swarmStatus?.organizationId ?: boardResponse?.organizationId
         if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && cachedAt != null && offlineScope != null && (workOpen || messagesOpen)) {
             when {
                 workOpen && organizationId != null -> OfflineOrganizationItems(cache, offlineScope, organizationId!!, null) { workOpen = false }
@@ -528,27 +568,42 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             }
         }
         else if (loaded && connection == RuntimeConnectionState.Connected && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })
-        else if (loaded && connection != RuntimeConnectionState.AuthenticationRequired && (connection == RuntimeConnectionState.Connected || cachedAt != null || ownerVerified)) {
-            if (connection != RuntimeConnectionState.Connected || cachedAt != null) Text(stringResource(R.string.organization_offline_snapshot), Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = LocalRagentColors.current.secondaryContent)
-            key(scopeKey, transportKey, ownerGeneration, projectionGeneration, organizationId) {
-                OrganizationScreen(organizationViewModel, modifier = Modifier.weight(1f), onBack = onBack,
-                    onOpenWorkItems = { workOpen = true }, onOpenTeamMessages = { messagesOpen = true },
+        else if ((loaded || hasSwarmOrBoard) && connection != RuntimeConnectionState.AuthenticationRequired && (connection == RuntimeConnectionState.Connected || cachedAt != null || ownerVerified)) {
+            if (loaded && (connection != RuntimeConnectionState.Connected || cachedAt != null)) {
+                Text(stringResource(R.string.organization_offline_snapshot), Modifier.padding(horizontal = 24.dp, vertical = 4.dp), color = LocalRagentColors.current.secondaryContent)
+            }
+            key(scopeKey, transportKey, ownerGeneration, projectionGeneration, effectiveOrganizationId) {
+                OrganizationScreen(
+                    organizationViewModel,
+                    modifier = Modifier.weight(1f),
+                    onBack = onBack,
+                    onOpenWorkItems = { workOpen = true }.takeIf { organizationId != null },
+                    onOpenTeamMessages = { messagesOpen = true }.takeIf { organizationId != null },
                     conversationContent = { nodeId, contentModifier ->
                         val member = nodes.firstOrNull { it.id == nodeId }
+                        val swarmMember = swarmStatus?.members?.firstOrNull { (it.nodeId.ifBlank { it.id }) == nodeId }
                         val descriptor = member?.member ?: unifiedMembers?.members?.firstOrNull { unifiedUiId(it.canonicalId) == nodeId }
-                        val conversationRef = descriptor?.conversation?.takeUnless {
-                            it.scope == "full" && member?.currentBinding?.sessionId != null
-                        }?.ref
-                        if ((member != null || conversationRef != null) && ownerVerified &&
-                            ownerGeneration != null && ownerGeneration == projectionGeneration && organizationId != null) {
+                        val conversationRef = resolveMemberConversationRef(member, descriptor)
+                        val nodeUi = organizationViewModel.uiState.value.nodes.firstOrNull { it.id == nodeId }
+                        val knownFailureText = nodeUi?.failureCode ?: nodeUi?.blockerText
+                        val canOpenFormal = ownerVerified && ownerGeneration != null && ownerGeneration == projectionGeneration && organizationId != null
+                        val canOpenSwarmOrNative = effectiveOrganizationId != null && hasSwarmOrBoard && connection == RuntimeConnectionState.Connected && (ownerVerified || offlineScope == null)
+                        if ((member != null || conversationRef != null || swarmMember != null) && effectiveOrganizationId != null && (canOpenFormal || canOpenSwarmOrNative)) {
                             val requestGeneration = ownerGeneration
-                            val requestOrganization = organizationId
-                            OrganizationConversationContent(transport, organizationId!!, nodeId, targetId,
-                                identityScope = "$scopeKey:$transportKey:$ownerGeneration", modifier = contentModifier,
-                                rootSessionId = sessionId.takeIf { conversationRef != null }, memberRef = conversationRef,
+                            val requestOrganization = effectiveOrganizationId
+                            OrganizationConversationContent(
+                                transport,
+                                effectiveOrganizationId,
+                                nodeId,
+                                targetId,
+                                identityScope = "$scopeKey:$transportKey:${ownerGeneration ?: 0L}",
+                                modifier = contentModifier,
+                                rootSessionId = sessionId.takeIf { conversationRef != null },
+                                memberRef = conversationRef,
+                                knownFailureText = knownFailureText,
                                 onRuntimeState = { state -> conversationRuntime = nodeId to state },
                                 onAuthorizationDenied = {
-                                    if (ownerGeneration == requestGeneration && organizationId == requestOrganization) {
+                                    if (ownerGeneration == requestGeneration && (organizationId == requestOrganization || effectiveOrganizationId == requestOrganization)) {
                                         ownerVerified = false
                                         ownerGeneration = null
                                         projectionGeneration = null
@@ -563,12 +618,24 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                                             cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
                                         }
                                     }
-                                })
+                                },
+                            )
                         } else {
                             Text(stringResource(R.string.organization_conversation_unavailable), contentModifier.padding(20.dp), color = LocalRagentColors.current.secondaryContent)
                         }
-                    }, conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second },
-                    embedded = embedded, embeddedRootId = rootNodeId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = programmaticOpen?.let { memberIdForLegacy(unifiedMembers, it.first, it.second, nodes) } ?: openNodeId, onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() })
+                    },
+                    conversationRuntimeState = { nodeId -> conversationRuntime?.takeIf { it.first == nodeId }?.second },
+                    embedded = embedded,
+                    embeddedRootId = rootNodeId,
+                    onRootClick = onRootClick,
+                    onRootAnchorChanged = onRootAnchorChanged,
+                    revealRoot = revealRoot,
+                    rootHidden = rootHidden,
+                    onRootVisualChanged = onRootVisualChanged,
+                    openNodeId = programmaticOpen?.let { memberIdForLegacy(unifiedMembers, it.first, it.second, nodes) } ?: openNodeId,
+                    onOpenNodeConsumed = { if (programmaticOpen != null) onProgrammaticOpenConsumed() else onOpenNodeConsumed() },
+                    sessionId = sessionId,
+                )
             }
         }
         else if (embedded && unifiedMembers?.members?.isNotEmpty() == true) {
@@ -617,3 +684,37 @@ fun ConnectedOrganizationGraph(
         modifier = modifier, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, revealRoot = revealRoot, rootHidden = rootHidden, onRootVisualChanged = onRootVisualChanged, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed, records = records, nativeEvents = nativeEvents, nativeContinuous = nativeContinuous, programmaticOpen = programmaticOpen, onProgrammaticOpenConsumed = onProgrammaticOpenConsumed, onCollaboratorSnapshot = onCollaboratorSnapshot,
         onHasCollaboratorsChanged = onHasCollaboratorsChanged, rootAction = rootAction, nativeReceiptElapsed = nativeReceiptElapsed)
 }
+
+internal fun resolveFormalRootNodeId(
+    nodes: List<OrganizationNodeDto>,
+    sessionId: String,
+    rootSessionId: String? = null,
+): String? {
+    val rootSession = rootSessionId?.takeIf { it.isNotBlank() } ?: sessionId
+    val rootMatches = nodes.filter { node ->
+        val boundSession = node.currentBinding?.sessionId?.takeIf { it.isNotBlank() } ?: node.sessionId
+        boundSession == rootSession
+    }
+    return if (rootMatches.size == 1) rootMatches.single().id else null
+}
+
+internal fun computeHasCollaborators(
+    unifiedMembers: UnifiedMembersPageDto?,
+    loaded: Boolean,
+    baseProjection: OrganizationProjectionDto?,
+    swarmStatus: SwarmStatusDto?,
+    boardResponse: SwarmBoardResponseDto?,
+): Boolean {
+    if (unifiedMembers?.members?.any { it.canonicalId != unifiedMembers.rootCanonicalId } == true) return true
+    if (loaded && baseProjection?.hasCreatedSubordinate == true) return true
+    if (swarmStatus != null && (swarmStatus.mode == "ragent_swarm" || swarmStatus.members.size > 1)) return true
+    if (boardResponse != null && (boardResponse.mode == "ragent_swarm" || boardResponse.activeBoard?.messages?.isNotEmpty() == true)) return true
+    return false
+}
+
+internal fun resolveMemberConversationRef(
+    member: OrganizationNodeDto?,
+    descriptor: com.andysagent.ragent.feature.organization.data.UnifiedMemberDto?,
+): String? = descriptor?.conversation?.takeUnless {
+    it.scope == "full" && member?.currentBinding?.sessionId != null
+}?.ref

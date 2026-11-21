@@ -65,6 +65,15 @@ fun OrganizationBottomSheet(node: NodeDetailUiState, onDismiss: () -> Unit, onVi
                 if (!node.currentActivity.isNullOrBlank()) DetailSection(stringResource(R.string.organization_activity_label), node.currentActivity)
                 if (node.progressTotal > 0) DetailSection(stringResource(R.string.organization_progress), "${node.progressCompleted} / ${node.progressTotal}")
                 if (!node.blockerText.isNullOrBlank()) DetailSection(stringResource(R.string.organization_blocker), node.blockerText)
+                if (!node.failureCode.isNullOrBlank() && node.failureCode != node.blockerText) {
+                    DetailSection(stringResource(R.string.organization_failure_code), node.failureCode)
+                }
+                if (!node.resultPacketSummary.isNullOrBlank()) {
+                    DetailSection(stringResource(R.string.organization_result_packet), node.resultPacketSummary)
+                }
+                if (!node.harness.isNullOrBlank()) {
+                    DetailSection(stringResource(R.string.organization_harness), node.harness)
+                }
                 if (node.changedFiles.isNotEmpty()) DetailSection(stringResource(R.string.organization_files), node.changedFiles.joinToString("\n"))
                 Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (node.isRootLeader && onSendInstruction != null) {

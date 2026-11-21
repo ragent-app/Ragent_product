@@ -11,6 +11,9 @@ import com.andysagent.ragent.feature.organization.animation.NodeAppearanceAnimat
 import com.andysagent.ragent.feature.organization.animation.ParticleAnimation
 import com.andysagent.ragent.feature.organization.data.OrganizationRepository
 import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
+import com.andysagent.ragent.feature.organization.data.SwarmBoardResponseDto
+import com.andysagent.ragent.feature.organization.data.SwarmStatusDto
+import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.domain.OrganizationState
 import com.andysagent.ragent.feature.organization.layout.EdgePoint
 import com.andysagent.ragent.feature.organization.layout.LayoutResult
@@ -150,8 +153,24 @@ class OrganizationViewModel(
                 mapped.copy(
                     nodes = mapped.nodes.map { node ->
                         val frame = physicsFrame.frames[node.id]
-                        if (frame == null) node.copy(action = actions[node.id]) else node.copy(x = frame.centerX, y = frame.centerY,
-                            radiusDp = frame.radiusDp, scale = 1f, physicsFrame = frame, action = actions[node.id])
+                        val resolvedAction = when {
+                            actions[node.id] == NodeActionKind.NEEDS_USER -> NodeActionKind.NEEDS_USER
+                            node.runtimeState == NodeRuntimeState.BLOCKED -> NodeActionKind.BLOCKED
+                            node.runtimeState == NodeRuntimeState.FAILED -> NodeActionKind.FAILED
+                            else -> actions[node.id]
+                        }
+                        if (frame == null) {
+                            node.copy(action = resolvedAction)
+                        } else {
+                            node.copy(
+                                x = frame.centerX,
+                                y = frame.centerY,
+                                radiusDp = frame.radiusDp,
+                                scale = 1f,
+                                physicsFrame = frame,
+                                action = resolvedAction,
+                            )
+                        }
                     },
                     physicsRunning = physicsFrame.running,
                 )
@@ -318,6 +337,53 @@ class OrganizationViewModel(
 
     fun onRejectBlocker(blockerId: String) {
         // User rejected action
+    }
+
+    fun applySwarmStatus(dto: SwarmStatusDto?) {
+        repository.applySwarmStatus(dto)
+    }
+
+    fun applyBoardResponse(dto: SwarmBoardResponseDto?) {
+        repository.applyBoardResponse(dto)
+    }
+
+    fun clearSwarmAndBoard() {
+        repository.clearSwarmAndBoard()
+    }
+
+    fun refreshSwarmAndBoard(sessionId: String) {
+        viewModelScope.launch {
+            repository.refreshSwarmAndBoard(sessionId)
+        }
+    }
+
+    fun activeBoardChannel(): String? =
+        repository.state.value.selectedBoardChannel?.takeIf { it.isNotBlank() && it != "__all__" }
+
+    fun selectBoardChannel(channel: String?, sessionId: String? = null) {
+        repository.selectBoardChannel(channel)
+        if (!sessionId.isNullOrBlank()) {
+            viewModelScope.launch {
+                repository.refreshSwarmAndBoard(
+                    sessionId = sessionId,
+                    channel = channel?.takeIf { it != "__all__" },
+                )
+            }
+        }
+    }
+
+    fun setBoardComposerDraft(draft: String) {
+        repository.setBoardComposerDraft(draft)
+    }
+
+    fun setBoardReplyToSeq(seq: Long?) {
+        repository.setBoardReplyToSeq(seq)
+    }
+
+    fun postBoardMessage(sessionId: String) {
+        viewModelScope.launch {
+            repository.postBoardMessage(sessionId)
+        }
     }
 
     /** Called only by the local debug demonstration, not by production events. */

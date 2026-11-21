@@ -66,4 +66,22 @@
     <string name="organization_action_sending">正在发送</string>
     <string name="organization_action_waiting_subordinates">等待成员</string>
     <string name="organization_action_needs_user">需要你的处理</string>
+    <string name="organization_result_packet">结果包</string>
+    <string name="organization_failure_code">错误码</string>
+    <string name="organization_harness">运行引擎</string>
+    <string name="organization_workspace_branch">分支</string>
+    <string name="organization_swarm_board_title">协作留言板</string>
+    <string name="organization_swarm_working">工作中</string>
+    <string name="organization_swarm_waiting">休眠等待</string>
+    <string name="organization_swarm_stopped">已停止</string>
+    <string name="organization_swarm_killed">已终止</string>
+    <string name="organization_swarm_done">已完成</string>
+    <string name="organization_swarm_readonly_banner">当前为只读留言板，仅在实时 Ragent 蜂群模式下可发送消息。</string>
+    <string name="organization_swarm_empty_board">暂无留言板消息。</string>
+    <string name="organization_swarm_composer_placeholder">在 %1$s 发送消息…</string>
+    <string name="organization_swarm_send">发送</string>
+    <string name="organization_swarm_reply">回复</string>
+    <string name="organization_swarm_replying_to">回复 #%1$d</string>
+    <string name="organization_swarm_cancel_reply">取消回复</string>
+    <string name="organization_open_workspace">团队与留言板</string>
 </resources>

@@ -11,6 +11,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -18,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.andysagent.ragent.core.agentui.*
+import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.core.network.ApiRequest
@@ -110,8 +113,9 @@ private class ConversationReader(private val transport: RagentTransport, private
     var items by mutableStateOf<List<TimelineItem>>(emptyList()); private set
     var hasOlder by mutableStateOf(false); private set
     var loadingOlder by mutableStateOf(false); private set
-    var status by mutableStateOf(ConversationStatus.Loading); private set
+    var status by mutableStateOf(initialConversationStatusForConnection(transport.connectionState.value)); private set
     var runtimeState by mutableStateOf("unknown"); private set
+    var failureReason by mutableStateOf<String?>(null); private set
     var memberScope by mutableStateOf<String?>(null); private set
     var memberGap by mutableStateOf<Boolean?>(null); private set
     var memberCoverage by mutableStateOf<String?>(null); private set
@@ -146,7 +150,7 @@ private class ConversationReader(private val transport: RagentTransport, private
     private suspend fun check(expected: ConversationBinding) {
         if (descriptor() != expected) throw BindingChanged()
     }
-    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; memberScope = null; memberGap = null; memberCoverage = null; memberActivity = null; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
+    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; failureReason = null; memberScope = null; memberGap = null; memberCoverage = null; memberActivity = null; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
     private fun memberPage(body: String): MemberConversationPage =
         RagentProtocol.json.decodeFromString<MemberConversationPage>(body).also {
             if (it.reset || it.generation == null || it.generation < 0 || it.scope !in setOf("full", "captured_only", "activity_only", "unavailable")) throw ConversationReset()
@@ -174,6 +178,7 @@ private class ConversationReader(private val transport: RagentTransport, private
         val durable = LiveTimelineProjector().projectPage(events)
         val base = TimelineProjector.project(emptyList(), durable)
         items = if (browsingHistory) base else mergeTimelineItems(base, TimelineProjector.project(emptyList(), live.snapshotEvents()))
+        failureReason = extractEventFailureReason(events)
     }
     private fun page(body: String, sid: String): SessionEventsPageDto {
         val page = RagentProtocol.json.decodeFromString<SessionEventsPageDto>(body)
@@ -343,34 +348,89 @@ private class ConversationReader(private val transport: RagentTransport, private
             render()
         }
     }
-    fun transportChanged() { epoch++; offline() }
+    fun prepareForTransportChange(connection: RuntimeConnectionState) {
+        epoch++
+        status = when (connection) {
+            RuntimeConnectionState.Connected -> if (items.isEmpty()) ConversationStatus.Loading else status
+            RuntimeConnectionState.AuthenticationRequired -> ConversationStatus.Denied
+            else -> ConversationStatus.Offline
+        }
+    }
     fun offline() { status = ConversationStatus.Offline }
     fun denied() { clear(); status = ConversationStatus.Denied }
     fun reset() { clear(); status = ConversationStatus.Loading }
     fun readFailed() { status = if (transport.connectionState.value == RuntimeConnectionState.Connected) ConversationStatus.Error else ConversationStatus.Offline }
 }
-private enum class ConversationStatus { Loading, Ready, Offline, Denied, Unbound, Error }
+internal enum class ConversationStatus { Loading, Ready, Offline, Denied, Unbound, Error }
+
+internal fun initialConversationStatusForConnection(connection: RuntimeConnectionState): ConversationStatus =
+    when (connection) {
+        RuntimeConnectionState.Connected -> ConversationStatus.Loading
+        RuntimeConnectionState.AuthenticationRequired -> ConversationStatus.Denied
+        else -> ConversationStatus.Offline
+    }
+
+internal fun extractEventFailureReason(events: List<SessionEventDto>): String? {
+    for (event in events.asReversed()) {
+        val directCode = event.executorUnavailableReasonCode?.trim()?.takeIf { it.isNotEmpty() }
+        if (directCode != null) return directCode
+        val isFailureEvent = event.terminalRunState() == "failed" ||
+            event.state.equals("failed", ignoreCase = true) ||
+            event.runState.equals("failed", ignoreCase = true) ||
+            event.type.equals("run.failed", ignoreCase = true) ||
+            event.type.equals("error", ignoreCase = true)
+        if (!isFailureEvent) continue
+        val candidate = listOfNotNull(
+            event.payload?.get("failureReasonCode")?.jsonPrimitive?.contentOrNull,
+            event.payload?.get("reasonCode")?.jsonPrimitive?.contentOrNull,
+            event.payload?.get("errorCode")?.jsonPrimitive?.contentOrNull,
+            event.reason,
+            event.payload?.get("reason")?.jsonPrimitive?.contentOrNull,
+            event.payload?.get("error")?.jsonPrimitive?.contentOrNull,
+            event.message,
+        ).firstOrNull { it.isNotBlank() }?.trim()
+        if (candidate != null) return candidate
+    }
+    return null
+}
 
 @Composable
-fun OrganizationConversationContent(transport: RagentTransport, organizationId: String, nodeId: String, targetId: String?, identityScope: String, modifier: Modifier = Modifier, onRuntimeState: (String?) -> Unit = {}, onAuthorizationDenied: () -> Unit = {}, rootSessionId: String? = null, memberRef: String? = null) {
+fun OrganizationConversationContent(
+    transport: RagentTransport,
+    organizationId: String,
+    nodeId: String,
+    targetId: String?,
+    identityScope: String,
+    modifier: Modifier = Modifier,
+    onRuntimeState: (String?) -> Unit = {},
+    onAuthorizationDenied: () -> Unit = {},
+    rootSessionId: String? = null,
+    memberRef: String? = null,
+    knownFailureText: String? = null,
+    onFailureReason: (String?) -> Unit = {},
+) {
     val delegate = (transport as? SwitchingRagentTransport)?.delegate?.collectAsState()?.value
     val reader = remember(transport, targetId, identityScope, organizationId, nodeId, rootSessionId, memberRef) { ConversationReader(transport, organizationId, nodeId, rootSessionId, memberRef) }
     val connection by transport.connectionState.collectAsState()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
     val currentCallback by rememberUpdatedState(onRuntimeState)
+    val failureCallback by rememberUpdatedState(onFailureReason)
     val authorizationDeniedCallback by rememberUpdatedState(onAuthorizationDenied)
     LaunchedEffect(reader, reader.runtimeState, reader.memberActivity, reader.status) {
         val state = if (memberRef != null) reader.memberActivity else reader.runtimeState
         currentCallback(state?.takeIf { reader.status in setOf(ConversationStatus.Ready, ConversationStatus.Offline, ConversationStatus.Error) && it != "unknown" })
     }
-    DisposableEffect(reader) { onDispose { currentCallback(null) } }
+    LaunchedEffect(reader, reader.failureReason) {
+        failureCallback(reader.failureReason)
+    }
+    DisposableEffect(reader) { onDispose { currentCallback(null); failureCallback(null) } }
     val list = rememberLazyListState()
     var newContent by remember(reader) { mutableStateOf(false) }
     var previousTail by remember(reader) { mutableStateOf<String?>(null) }
     var restart by remember(reader) { mutableIntStateOf(0) }
     LaunchedEffect(reader, lifecycle, connection, restart, delegate) {
-        reader.transportChanged()
+        reader.prepareForTransportChange(connection)
         if (connection == RuntimeConnectionState.AuthenticationRequired) { reader.denied(); return@LaunchedEffect }
         if (connection != RuntimeConnectionState.Connected) { reader.offline(); return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -401,6 +461,23 @@ fun OrganizationConversationContent(transport: RagentTransport, organizationId: 
         }
     }
     Column(modifier.fillMaxWidth()) {
+        val colors = LocalRagentColors.current
+        val inlineFailure = reader.failureReason?.takeIf { it.isNotBlank() && it != knownFailureText }
+        if (inlineFailure != null) {
+            Text(
+                text = inlineFailure,
+                color = colors.error,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clip(AgentoShapes.SurfaceSmallShape)
+                    .background(colors.error.copy(alpha = 0.12f))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
         if (reader.memberScope == "activity_only") ConversationLabel(R.string.org_conversation_activity_only)
         if (reader.memberScope == "activity_only" && reader.status == ConversationStatus.Ready && reader.memberGap == false) {
             val activityLabel = when (reader.memberActivity) {

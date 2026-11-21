@@ -8,7 +8,9 @@ import com.andysagent.ragent.feature.organization.domain.NodeRole
 import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.domain.OrganizationNodeModel
 import com.andysagent.ragent.feature.organization.domain.OrganizationState
+import com.andysagent.ragent.feature.organization.domain.SwarmStallAlertModel
 import com.andysagent.ragent.feature.organization.layout.LayoutResult
+import java.util.Locale
 
 object OrganizationUiMapper {
 
@@ -53,6 +55,8 @@ object OrganizationUiMapper {
                 val runtimeState = node?.runtimeState ?: NodeRuntimeState.IDLE
                 val hasBlocker = (runtimeState == NodeRuntimeState.BLOCKED)
                 val blockerText = node?.blockerText
+                val failureCode = node?.failureCode
+                val resultPacketSummary = node?.resultPacketSummary
 
                 val effectiveScale = anim?.nodeScale ?: pos.scale
                 val effectiveAlpha = anim?.nodeAlpha ?: pos.alpha
@@ -64,6 +68,7 @@ object OrganizationUiMapper {
                         NodeRuntimeState.WORKING -> "working"
                         NodeRuntimeState.WAITING -> "waiting"
                         NodeRuntimeState.BLOCKED -> "blocked"
+                        NodeRuntimeState.FAILED -> "failed"
                         NodeRuntimeState.REVIEWING -> "reviewing"
                         NodeRuntimeState.DONE -> "completed"
                         NodeRuntimeState.PROVISIONING -> "provisioning"
@@ -75,8 +80,14 @@ object OrganizationUiMapper {
                     if (!node?.currentTaskSummary.isNullOrBlank()) {
                         append(", current task: ${node?.currentTaskSummary}")
                     }
-                    if (hasBlocker && !blockerText.isNullOrBlank()) {
+                    if (!blockerText.isNullOrBlank() && (hasBlocker || runtimeState == NodeRuntimeState.FAILED)) {
                         append(", blocker: $blockerText")
+                    }
+                    if (!failureCode.isNullOrBlank() && failureCode != blockerText) {
+                        append(", failure: $failureCode")
+                    }
+                    if (!resultPacketSummary.isNullOrBlank()) {
+                        append(", $resultPacketSummary")
                     }
                 }
 
@@ -104,6 +115,9 @@ object OrganizationUiMapper {
                     testsPassed = node?.testsPassed ?: 0,
                     testsTotal = node?.testsTotal ?: 0,
                     accessibilityText = a11y,
+                    failureCode = failureCode,
+                    resultPacketSummary = resultPacketSummary,
+                    harness = node?.harness,
                 )
             }
         }
@@ -185,6 +199,8 @@ object OrganizationUiMapper {
             focusNodeId = focusNodeId,
             reduceMotion = reduceMotion,
             isLoading = false,
+            swarmOverview = mapSwarmOverview(state),
+            swarmBoard = mapSwarmBoard(state),
         )
     }
 
@@ -211,6 +227,173 @@ object OrganizationUiMapper {
             changedFiles = node.changedFiles,
             resultPacketSummary = node.resultPacketSummary,
             isRootLeader = (node.role == NodeRole.EXECUTIVE),
+            failureCode = node.failureCode,
+            harness = node.harness,
+            workspaceBranch = node.workspaceBranch,
+        )
+    }
+
+    private fun mapSwarmOverview(state: OrganizationState): SwarmOverviewUiState? {
+        val status = state.swarmStatus
+        val board = state.board
+        if (status == null && board == null) return null
+
+        val rawStalls = status?.activeStalls?.takeIf { it.isNotEmpty() } ?: board?.activeStalls.orEmpty()
+        val stalls = rawStalls.map(::mapStallBadge)
+        val isReadOnlyNative = (board?.mode == "provider_native" || status?.mode == "provider_native" || board?.readOnly == true)
+
+        if (status != null) {
+            val harnessCounts = linkedMapOf<String, Int>()
+            val branchLabels = linkedSetOf<String>()
+            for (member in status.members) {
+                if (member.swarmState.equals("killed", ignoreCase = true)) continue
+                val harness = (member.harness ?: member.provider)?.trim()?.lowercase(Locale.ROOT)
+                if (!harness.isNullOrEmpty()) {
+                    harnessCounts[harness] = (harnessCounts[harness] ?: 0) + 1
+                }
+                val wsMode = member.workspaceMode?.lowercase(Locale.ROOT) ?: "inherit"
+                if (wsMode == "worktree" || wsMode == "staging" || !member.workspaceBranch.isNullOrBlank()) {
+                    val label = if (!member.workspaceBranch.isNullOrBlank()) {
+                        "${if (wsMode == "staging") "staging" else "branch"}: ${member.workspaceBranch}"
+                    } else {
+                        "$wsMode: ${member.displayName}"
+                    }
+                    branchLabels.add(label)
+                }
+            }
+            val usageLabels = status.usageByModel.map { bucket ->
+                if (bucket.totalTokens > 0L || bucket.costUsd > 0.0) {
+                    val costSuffix = if (bucket.costUsd > 0.0) String.format(Locale.US, ", $%.4f", bucket.costUsd) else ""
+                    "${bucket.label} (${bucket.totalTokens} tok$costSuffix)"
+                } else {
+                    bucket.label
+                }
+            }
+            val nativeMode = isReadOnlyNative && status.mode != "ragent_swarm"
+            return SwarmOverviewUiState(
+                mode = status.mode ?: board?.mode,
+                title = status.title ?: board?.title,
+                workingCount = status.counts.working,
+                waitingCount = status.counts.waiting,
+                stoppedCount = status.counts.stopped,
+                killedCount = status.counts.killed,
+                activeCount = status.counts.active,
+                totalCount = status.counts.total,
+                isDone = status.isDone || (board?.isDone == true),
+                showSwarmCounts = !nativeMode,
+                isReadOnlyNative = nativeMode,
+                harnesses = harnessCounts.map { (harness, count) -> SwarmHarnessBadgeUiState(harness, count) },
+                branches = branchLabels.toList(),
+                stalls = stalls,
+                usageLabels = usageLabels,
+            )
+        }
+
+        val activeBoard = board ?: return null
+        return SwarmOverviewUiState(
+            mode = activeBoard.mode,
+            title = activeBoard.title,
+            totalCount = state.nodes.size,
+            isDone = activeBoard.isDone,
+            showSwarmCounts = false,
+            isReadOnlyNative = activeBoard.readOnly || activeBoard.mode != "ragent_swarm",
+            stalls = stalls,
+        )
+    }
+
+    private fun mapSwarmBoard(state: OrganizationState): SwarmBoardUiState? {
+        val board = state.board ?: return null
+        val selectedChannel = state.selectedBoardChannel?.takeIf { it.isNotBlank() } ?: "__all__"
+
+        val channelStats = linkedMapOf<String, Pair<Int, Int>>()
+        board.channels.forEach { ch ->
+            channelStats[ch.name] = ch.messageCount to ch.unreadCount
+        }
+        board.messages.forEach { msg ->
+            if (!channelStats.containsKey(msg.channel)) {
+                channelStats[msg.channel] = board.messages.count { it.channel == msg.channel } to 0
+            }
+        }
+        if (channelStats.isEmpty()) {
+            channelStats["main"] = board.messages.size to 0
+        }
+
+        val totalMsgCount = maxOf(board.messages.size, channelStats.values.sumOf { it.first })
+        val totalUnread = channelStats.values.sumOf { it.second }
+        val channelTabs = buildList {
+            add(
+                SwarmBoardChannelTabUiState(
+                    id = "__all__",
+                    label = "All",
+                    messageCount = totalMsgCount,
+                    unreadCount = totalUnread,
+                    selected = selectedChannel == "__all__",
+                )
+            )
+            channelStats.forEach { (name, counts) ->
+                add(
+                    SwarmBoardChannelTabUiState(
+                        id = name,
+                        label = "#$name",
+                        messageCount = counts.first,
+                        unreadCount = counts.second,
+                        selected = selectedChannel == name,
+                    )
+                )
+            }
+        }
+
+        val visibleMessages = if (selectedChannel == "__all__") {
+            board.messages
+        } else {
+            board.messages.filter { it.channel == selectedChannel }
+        }.map { msg ->
+            SwarmBoardMessageUiState(
+                id = msg.id,
+                seq = msg.seq,
+                channel = msg.channel,
+                senderKind = msg.senderKind,
+                senderNodeId = msg.senderNodeId,
+                senderName = msg.senderName,
+                senderRole = msg.senderRole,
+                senderHarness = msg.senderHarness,
+                kind = msg.kind,
+                bodyMarkdown = msg.bodyMarkdown,
+                mentions = msg.mentions,
+                replyToSeq = msg.replyToSeq,
+                artifactLabels = msg.artifactRefs.map { it.label }.filter { it.isNotBlank() },
+                isDoneSignal = msg.isDoneSignal,
+                isStallAlert = msg.isStallAlert,
+                createdAt = msg.createdAt,
+            )
+        }
+
+        return SwarmBoardUiState(
+            mode = board.mode,
+            title = board.title,
+            headSeq = board.headSeq,
+            isDone = board.isDone,
+            readOnly = board.readOnly,
+            isWritable = board.isWritable,
+            channels = channelTabs,
+            selectedChannel = selectedChannel,
+            messages = visibleMessages,
+            activeStalls = board.activeStalls.map(::mapStallBadge),
+            replyToSeq = state.boardReplyToSeq,
+            composerDraft = state.boardComposerDraft,
+            isPosting = state.boardPosting,
+            postError = state.boardError,
+        )
+    }
+
+    private fun mapStallBadge(stall: SwarmStallAlertModel): SwarmStallBadgeUiState {
+        val detail = stall.reason ?: stall.conditionKind ?: "stall"
+        val target = stall.targetNodeId?.takeIf { it.isNotBlank() } ?: stall.targetRole?.takeIf { it.isNotBlank() }
+        val countSuffix = if (stall.alertCount > 1) " ×${stall.alertCount}" else ""
+        val targetSuffix = if (target != null) " ($target)" else ""
+        return SwarmStallBadgeUiState(
+            id = stall.id,
+            label = "[stall] $detail$targetSuffix$countSuffix",
         )
     }
 }

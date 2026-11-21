@@ -1150,6 +1150,15 @@ export function createCollaborationOrchestrator(options = {}) {
             stagingDir: staging.stagingDir,
             canonicalCwd: staging.mapping.canonicalCwd,
             writablePaths: staging.mapping.writablePaths,
+            ...(managedTarget ? {
+              targetSessionId: managedTarget.id,
+              organizationId: managedTarget.organizationId,
+              organizationNodeId: managedTarget.organizationNodeId,
+              organizationRevision: managedTarget.organizationRevision,
+              ...(Number.isInteger(collaboration.policy?.organizationBindingGeneration)
+                ? { organizationBindingGeneration: collaboration.policy.organizationBindingGeneration }
+                : {}),
+            } : {}),
           },
         }
       : worktreeRef
@@ -1165,6 +1174,9 @@ export function createCollaborationOrchestrator(options = {}) {
         sessionPlane: 'organization',
         sessionClass: managedTarget.sessionClass,
         managedScope: managedTarget.managedScope,
+        ...(managedTarget.lifecycleMode || collaboration.policy?.organizationId
+          ? { lifecycleMode: managedTarget.lifecycleMode || 'formal_org' }
+          : {}),
         organizationRootSessionId: managedTarget.organizationRootSessionId,
         organizationId: managedTarget.organizationId,
         organizationNodeId: managedTarget.organizationNodeId,
@@ -1173,6 +1185,14 @@ export function createCollaborationOrchestrator(options = {}) {
         controllerSessionId: managedTarget.controllerSessionId,
         parentSessionId: managedTarget.id,
         inputPolicy: managedTarget.inputPolicy,
+        ...(managedTarget.riskMode
+          ? {
+              riskMode: (managedTarget.riskMode === 'full-auto' && managedTarget.riskModeExplicit !== true)
+                ? 'recommended'
+                : managedTarget.riskMode,
+              ...(managedTarget.riskModeExplicit === true ? { riskModeExplicit: true } : {}),
+            }
+          : {}),
       } : {}),
       ...((managedWriter || validationWorkspace) ? {} : { projectId: task.projectId || root.projectId || '' }),
       templateId: app.id,

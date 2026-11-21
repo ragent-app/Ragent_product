@@ -500,6 +500,10 @@ function buildCoordinatorGrant(policy = {}, actor = {}) {
     canWrite: actor.accessMode !== 'read_only',
     canReview: true,
     ...(actor.runtimePolicy && typeof actor.runtimePolicy === 'object' ? { runtimePolicy: actor.runtimePolicy } : {}),
+    ...(trimString(actor.riskMode) ? {
+      riskMode: trimString(actor.riskMode),
+      ...(actor.riskModeExplicit === true ? { riskModeExplicit: true } : {}),
+    } : {}),
   };
 }
 
@@ -889,6 +893,8 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
     provider = '',
     model = '',
     effort = '',
+    riskMode = '',
+    riskModeExplicit = false,
     channels = [],
     forkFromNodeId = '',
     forkSinceSeq = 0,
@@ -1119,6 +1125,26 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
     || trimString(preflight.org.policy?.workspaceScope)
     || process.cwd();
 
+  const parentSessId = trimString(actorSessionId) || preflight.actor.currentSessionId || preflight.org.rootSessionId;
+  const actorSession = (typeof deps.getSession === 'function' && parentSessId)
+    ? await deps.getSession(parentSessId).catch(() => null)
+    : null;
+  const actorTool = trimString(actorSession?.tool || actorSession?.harness) || trimString(preflight.actor.harness);
+  const memberTool = trimString(harness) || actorTool || 'codex';
+  const sameToolAsActor = Boolean(!trimString(harness) || !actorTool || memberTool === actorTool);
+  const memberProvider = trimString(provider)
+    || (sameToolAsActor ? (trimString(actorSession?.providerProfile || actorSession?.provider) || trimString(preflight.actor.provider)) : '');
+  const memberModel = trimString(model)
+    || (sameToolAsActor ? (trimString(actorSession?.model) || trimString(preflight.actor.model)) : '');
+  const memberEffort = trimString(effort)
+    || (sameToolAsActor ? (trimString(actorSession?.effort || actorSession?.codexThreadEffort) || trimString(preflight.actor.effort)) : '');
+  const rawRiskMode = trimString(riskMode) || trimString(preflight.actor?.riskMode) || trimString(actorSession?.riskMode);
+  const rawRiskExplicit = trimString(riskMode)
+    ? (riskModeExplicit === true || trimString(riskMode) !== 'full-auto')
+    : (actorSession ? actorSession.riskModeExplicit === true : preflight.actor?.riskModeExplicit === true);
+  const memberRiskMode = (rawRiskMode === 'full-auto' && !rawRiskExplicit) ? 'recommended' : rawRiskMode;
+  const memberRiskExplicit = memberRiskMode === 'full-auto' && rawRiskExplicit === true;
+
   try {
     const stallGovernorActive = getOrganizationRuntimeCapabilities().stallGovernor === true;
     const reserveFn = typeof deps.reserveOrganizationBudget === 'function'
@@ -1188,8 +1214,6 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
 
       const memberSessionClass = resolveSwarmSessionClass(preflight.contractRole);
       const memberRoleInstanceId = makeId('rinst');
-      const parentSessId = trimString(actorSessionId) || preflight.actor.currentSessionId || preflight.org.rootSessionId;
-      const memberTool = trimString(harness) || trimString(preflight.actor.harness) || 'codex';
       const isReviewer = preflight.contractRole === 'reviewer';
       const requireCertifiedReadOnly = isReviewer && certifiedReadOnly === true;
       let managedSessionId = '';
@@ -1199,9 +1223,13 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
           memberTool,
           `${memberName} (${preflight.derivedGrant.swarmDisplayRole || preflight.contractRole})`,
           {
-            ...(trimString(provider) ? { providerProfile: trimString(provider) } : {}),
-            ...(trimString(model) ? { model: trimString(model) } : {}),
-            ...(trimString(effort) ? { effort: trimString(effort) } : {}),
+            ...(memberProvider ? { providerProfile: memberProvider } : {}),
+            ...(memberModel ? { model: memberModel } : {}),
+            ...(memberEffort ? { effort: memberEffort } : {}),
+            ...(memberRiskMode ? {
+              riskMode: memberRiskMode,
+              ...(memberRiskExplicit ? { riskModeExplicit: true } : {}),
+            } : {}),
             ...(trimString(preflight.org.projectId) ? { projectId: trimString(preflight.org.projectId) } : {}),
             organizationId: normalizedOrgId,
             organizationNodeId: nodeId,
@@ -1250,6 +1278,14 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
         releaseBudget,
         workspace: memberWorkspace,
         managedSessionId,
+        runtime: {
+          tool: memberTool,
+          provider: memberProvider,
+          model: memberModel,
+          effort: memberEffort,
+        },
+        riskMode: memberRiskMode,
+        riskModeExplicit: memberRiskExplicit,
         idempotencyKey: trimString(idempotencyKey) ? `${trimString(idempotencyKey)}:${idx}` : '',
       });
     }
@@ -1277,14 +1313,28 @@ export async function spawnSwarmMembers(firstArg, secondArg) {
 
         for (const item of preparedMembers) {
           const initialConfig = normalizeRuntimeTuple({
-            tool: preflight.derivedGrant?.runtimePolicy?.tool || harness || preflight.actor?.harness || 'codex',
-            provider: preflight.derivedGrant?.runtimePolicy?.providerProfile || provider,
-            model: preflight.derivedGrant?.runtimePolicy?.model || model,
-            effort: preflight.derivedGrant?.runtimePolicy?.effort || effort,
+            tool: preflight.derivedGrant?.runtimePolicy?.tool || item.runtime?.tool || harness || preflight.actor?.harness || 'codex',
+            provider: preflight.derivedGrant?.runtimePolicy?.providerProfile || item.runtime?.provider || provider,
+            model: preflight.derivedGrant?.runtimePolicy?.model || item.runtime?.model || model,
+            effort: preflight.derivedGrant?.runtimePolicy?.effort || item.runtime?.effort || effort,
           });
+          const mergedRuntimePolicy = {
+            ...(preflight.derivedGrant?.runtimePolicy && typeof preflight.derivedGrant.runtimePolicy === 'object'
+              ? preflight.derivedGrant.runtimePolicy
+              : {}),
+            ...(initialConfig.tool ? { tool: initialConfig.tool } : {}),
+            ...(initialConfig.provider ? { providerProfile: initialConfig.provider } : {}),
+            ...(initialConfig.model ? { model: initialConfig.model } : {}),
+            ...(initialConfig.effort ? { effort: initialConfig.effort } : {}),
+          };
           const effectiveParentWorkItemId = trimString(parentWorkItemId || workItemId);
           const memberGrant = {
             ...preflight.derivedGrant,
+            ...(Object.keys(mergedRuntimePolicy).length > 0 ? { runtimePolicy: mergedRuntimePolicy } : {}),
+            ...(item.riskMode ? {
+              riskMode: item.riskMode,
+              ...(item.riskModeExplicit === true ? { riskModeExplicit: true } : {}),
+            } : {}),
             swarmName: item.memberName,
             ...(effectiveParentWorkItemId ? { parentWorkItemId: effectiveParentWorkItemId, workItemId: effectiveParentWorkItemId } : {}),
             modelHistory: [
@@ -1898,12 +1948,41 @@ export async function deliverPendingSwarmWakeups(firstArg, secondArg) {
     try {
       const isReviewerMember = member.contractRole === 'reviewer' || String(member.sessionClass || '').toUpperCase() === 'REVIEWER';
       const requireCertifiedReadOnly = isReviewerMember && member.certifiedReadOnly === true;
+      const memberSession = (typeof deps.getSession === 'function' && member.currentSessionId)
+        ? await deps.getSession(member.currentSessionId).catch(() => null)
+        : null;
+      const nodeTool = trimString(member.harness);
+      const sessTool = trimString(memberSession?.tool || memberSession?.harness);
+      const wakeupTool = nodeTool || sessTool;
+      const sameTool = Boolean(!nodeTool || !sessTool || nodeTool === sessTool);
+      const wakeupProvider = trimString(member.provider)
+        || (sameTool ? trimString(memberSession?.providerProfile || memberSession?.provider) : '');
+      const wakeupModel = trimString(member.model)
+        || (sameTool ? trimString(memberSession?.model) : '');
+      const wakeupEffort = trimString(member.effort)
+        || (sameTool ? trimString(memberSession?.effort || memberSession?.codexThreadEffort) : '');
+      const rawWakeRiskMode = trimString(rawNodeGrant?.riskMode) || trimString(memberSession?.riskMode);
+      const rawWakeRiskExplicit = trimString(rawNodeGrant?.riskMode)
+        ? rawNodeGrant?.riskModeExplicit === true
+        : memberSession?.riskModeExplicit === true;
+      const wakeupRiskMode = (rawWakeRiskMode === 'full-auto' && !rawWakeRiskExplicit)
+        ? 'recommended'
+        : rawWakeRiskMode;
+      const wakeupRiskExplicit = wakeupRiskMode === 'full-auto' && rawWakeRiskExplicit === true;
       const res = await deliverFn(member.currentSessionId, digest, [], {
         queueIfBusy: false,
         deferIfBusy: true,
         skipPendingDispatchLookup: true,
         internalOrganizationWakeup: true,
         internalOperation: 'swarm_wakeup',
+        ...(wakeupTool ? { tool: wakeupTool } : {}),
+        ...(wakeupProvider ? { providerProfile: wakeupProvider } : {}),
+        ...(wakeupModel ? { model: wakeupModel } : {}),
+        ...(wakeupEffort ? { effort: wakeupEffort } : {}),
+        ...(wakeupRiskMode ? {
+          riskMode: wakeupRiskMode,
+          ...(wakeupRiskExplicit ? { riskModeExplicit: true } : {}),
+        } : {}),
         ...(member.workspaceMode === 'worktree'
           ? { executionIsolation: 'worktree' }
           : (member.workspaceMode === 'staging' ? { executionIsolation: 'container' } : {})),

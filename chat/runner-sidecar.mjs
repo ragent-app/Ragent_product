@@ -3509,6 +3509,44 @@ export async function trackClaudeBidiApprovalRequest(runId, state, parsed, proc,
       await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: 'managed_mcp_binding' });
       return null;
     }
+  } else if (managedMcp
+    && !(approval.params?.networkApprovalContext || approval.params?.network_approval_context
+      || approval.params?.additionalPermissions || approval.params?.additional_permissions
+      || approval.params?.grantRoot || approval.params?.grant_root
+      || approval.params?.dangerouslyDisableSandbox === true
+      || approval.params?.dangerously_disable_sandbox === true
+      || approval.params?.input?.dangerouslyDisableSandbox === true
+      || approval.params?.input?.dangerously_disable_sandbox === true)
+    && state.turnActive === true
+    && typeof state.mcpOptionalOrganizationServerName === 'string'
+    && state.mcpOptionalOrganizationServerName.trim()
+    && managedMcp.mcpServerName === state.mcpOptionalOrganizationServerName.trim()
+    && ['ragent_organization_read', 'ragent_organization_action'].includes(managedMcp.mcpToolName)
+    && isAutoApprovedMcpServer(state, managedMcp.mcpServerName)
+    && !state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
+    const message = buildClaudeBidiManagedMcpResponse(approval, 'approve');
+    if (message && writeClaudeBidiMessage(proc, message)) {
+      state.autoApprovedMcpRequestIds.add(approval.approvalId);
+      await appendRunSpoolRecord(runId, {
+        ts: nowIso(),
+        stream: 'stdout',
+        json: {
+          type: 'ragent.approval_response',
+          approvalId: approval.approvalId,
+          provider: 'claude',
+          decision: 'approved',
+          status: 'approved',
+          providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
+          providerMethod: approval.providerMethod || '',
+          autoApproved: true,
+          mcpServerName: managedMcp.mcpServerName,
+          mcpToolName: managedMcp.mcpToolName,
+          reason: 'optional root organization MCP tool',
+        },
+      });
+      await recordGateDecision(runId, state, approval, 'claude', { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, decisionClass: 'allow', reasonCode: 'managed_mcp_optional_organization_tool' });
+      return null;
+    }
   }
 
   if (process.platform === 'win32' && !isMcpTool && state.turnActive === true && approval.kind === 'command' &&

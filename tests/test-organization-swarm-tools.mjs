@@ -957,6 +957,95 @@ try {
       deps: sharedDeps,
     });
     equal(certToolRev.members[0].certifiedReadOnly, true, 'swarm.spawn forwards certifiedReadOnly opt-in');
+
+    // Regression (Stream F1 P0 #2): swarm.spawn accepts args.tool/providerProfile/riskMode and inherits Coordinator runtime when omitted.
+    const createdInheritedSessions = new Map();
+    const inheritDeps = {
+      ...sharedDeps,
+      createSession: async (folder, tool, name, extra = {}) => {
+        const s = { id: `inherit-sess-${createdInheritedSessions.size + 1}`, folder, tool, name, ...extra };
+        createdInheritedSessions.set(s.id, s);
+        return s;
+      },
+    };
+    sessionsById.set('root-claude-inherit', {
+      id: 'root-claude-inherit',
+      sessionClass: 'ROOT_LEADERSHIP',
+      sessionPlane: 'user',
+      userAddressable: true,
+      folder: workFolder,
+      tool: 'claude-bidi',
+      providerProfile: 'glm-68f6bd41',
+      model: 'glm-5.3',
+      effort: 'medium',
+      riskMode: 'full-auto',
+      riskModeExplicit: true,
+    });
+    await rejectsWith(
+      () => tools.executeOrganizationControlTool({
+        authSession: rootAuth('root-claude-inherit'),
+        action: 'swarm.spawn',
+        args: { name: 'mismatch-tool', harness: 'codex', tool: 'claude-bidi', brief: 'mismatch', workspace: 'inherit' },
+        deps: inheritDeps,
+      }),
+      (err) => err?.statusCode === 400 && err?.code === 'BAD_REQUEST',
+      'swarm.spawn rejects conflicting tool and harness values',
+    );
+    const inheritedSpawn = await tools.executeOrganizationControlTool({
+      authSession: rootAuth('root-claude-inherit'),
+      action: 'swarm.spawn',
+      args: { name: 'inherited-claude', brief: 'inherit coordinator runtime', workspace: 'inherit' },
+      deps: inheritDeps,
+    });
+    equal(inheritedSpawn.members[0].harness, 'claude-bidi', 'swarm.spawn inherits coordinator tool instead of codex default');
+    equal(inheritedSpawn.members[0].provider, 'glm-68f6bd41', 'swarm.spawn inherits coordinator providerProfile');
+    equal(inheritedSpawn.members[0].model, 'glm-5.3', 'swarm.spawn inherits coordinator model');
+    equal(inheritedSpawn.members[0].effort, 'medium', 'swarm.spawn inherits coordinator effort');
+    const inheritedSess = createdInheritedSessions.get(inheritedSpawn.members[0].currentSessionId);
+    equal(inheritedSess.tool, 'claude-bidi');
+    equal(inheritedSess.providerProfile, 'glm-68f6bd41');
+    equal(inheritedSess.model, 'glm-5.3');
+    equal(inheritedSess.effort, 'medium');
+    equal(inheritedSess.riskMode, 'full-auto');
+    equal(inheritedSess.riskModeExplicit, true);
+
+    const toolArgSpawn = await tools.executeOrganizationControlTool({
+      authSession: rootAuth('root-claude-inherit'),
+      action: 'swarm.spawn',
+      args: { name: 'explicit-tool-arg', tool: 'claude-bidi', brief: 'use args.tool', workspace: 'inherit' },
+      deps: inheritDeps,
+    });
+    equal(toolArgSpawn.members[0].harness, 'claude-bidi', 'swarm.spawn honors args.tool');
+    equal(toolArgSpawn.members[0].model, 'glm-5.3', 'swarm.spawn inherits model when args.tool matches coordinator');
+
+    const crossToolSpawn = await tools.executeOrganizationControlTool({
+      authSession: rootAuth('root-claude-inherit'),
+      action: 'swarm.spawn',
+      args: { name: 'cross-codex', tool: 'codex', brief: 'explicit different tool', workspace: 'inherit' },
+      deps: inheritDeps,
+    });
+    equal(crossToolSpawn.members[0].harness, 'codex', 'swarm.spawn accepts cross-tool args.tool');
+    equal(crossToolSpawn.members[0].model, '', 'cross-tool spawn does not leak claude-bidi model onto codex');
+
+    sessionsById.set('root-claude-unexplicit', {
+      id: 'root-claude-unexplicit',
+      sessionClass: 'ROOT_LEADERSHIP',
+      sessionPlane: 'user',
+      userAddressable: true,
+      folder: workFolder,
+      tool: 'claude-bidi',
+      providerProfile: 'glm-68f6bd41',
+      model: 'glm-5.3',
+      riskMode: 'full-auto',
+      riskModeExplicit: false,
+    });
+    const clampedSpawn = await tools.executeOrganizationControlTool({
+      authSession: rootAuth('root-claude-unexplicit'),
+      action: 'swarm.spawn',
+      args: { name: 'clamped-risk', brief: 'clamp unexplicit full-auto', workspace: 'inherit' },
+      deps: inheritDeps,
+    });
+    equal(createdInheritedSessions.get(clampedSpawn.members[0].currentSessionId).riskMode, 'recommended', 'unexplicit full-auto coordinator clamps inherited worker riskMode to recommended');
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

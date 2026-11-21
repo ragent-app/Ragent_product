@@ -105,6 +105,53 @@ export function canIssueSwarmRootWakeupSessionControl({
   return Boolean(sessionId && text(organization.rootSessionId) === sessionId);
 }
 
+// Tightly-gated capability for server-initiated formal collaboration / org
+// root aggregation wakeups ONLY.
+// Caller headers/body cannot mint this: internalOperation='collaboration_resume'
+// must originate server-side alongside an authoritative ROOT_LEADERSHIP user
+// session, a DB-verified collaboration in waiting_aggregation/aggregating state
+// with no existing aggregationRunId, and (when org-bound) an active
+// non-archived organization whose rootSessionId matches.
+export function canIssueCollaborationResumeRootSessionControl({
+  session,
+  internalOperation,
+  temporaryControlAuthority,
+  collaboration,
+  organization,
+  sourceContext,
+  requestId,
+} = {}) {
+  if (text(internalOperation) !== 'collaboration_resume') return false;
+  if (temporaryControlAuthority) return false;
+  if (text(session?.sessionClass) !== 'ROOT_LEADERSHIP') return false;
+  if (text(session?.sessionPlane || 'user') !== 'user') return false;
+  if (session?.userAddressable === false) return false;
+  if (text(session?.parentSessionId) || text(session?.delegatedFromSessionId)) return false;
+  const sessionId = text(session?.id);
+  if (!sessionId) return false;
+  if (!collaboration || text(collaboration.rootSessionId) !== sessionId) return false;
+  if (!['waiting_aggregation', 'aggregating'].includes(text(collaboration.state))) return false;
+  if (text(collaboration.aggregationRunId)) return false;
+  const expectedGeneration = Number(collaboration.aggregationGeneration);
+  if (sourceContext !== undefined) {
+    if (!sourceContext || typeof sourceContext !== 'object') return false;
+    if (text(sourceContext.kind) !== 'collaboration_aggregation') return false;
+    if (text(sourceContext.collaborationId) !== text(collaboration.id)) return false;
+    if (!Number.isSafeInteger(expectedGeneration) || Number(sourceContext.aggregationGeneration) !== expectedGeneration) return false;
+    if (text(requestId) !== `collaboration:${text(collaboration.id)}:aggregation:${expectedGeneration}`) return false;
+  } else if (text(requestId)) {
+    if (!Number.isSafeInteger(expectedGeneration) || text(requestId) !== `collaboration:${text(collaboration.id)}:aggregation:${expectedGeneration}`) return false;
+  }
+  const policyOrgId = text(collaboration.policy?.organizationId);
+  if (policyOrgId || organization) {
+    if (!organization) return false;
+    if (policyOrgId && text(organization.id) !== policyOrgId) return false;
+    if (['archived', 'lifecycle_pending'].includes(text(organization.state))) return false;
+    if (text(organization.rootSessionId) !== sessionId) return false;
+  }
+  return true;
+}
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }

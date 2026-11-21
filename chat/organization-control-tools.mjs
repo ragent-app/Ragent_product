@@ -13,6 +13,7 @@ import {
   readBoardMessages,
 } from './organization-board-store.mjs';
 import { applyRuntimeConstraints, selectRuntimeConstraints } from './organization-runtime-decision.mjs';
+import { getManagedWriterStagingOrganizationReference } from './organization-identity-context.mjs';
 import { getFactoryMessageScope, getLiveOrganizationSessionReference } from './organization-session-lifecycle.mjs';
 import {
   getNode,
@@ -370,6 +371,21 @@ async function ensureSwarmContextForWrite(ctx, args, deps) {
     accessMode: ctx.rootPolicy.accessMode === 'read' ? 'read_only' : 'writer',
     projectRoot: trim(ctx.session.folder),
   } : { projectRoot: trim(ctx.session.folder) };
+  const actorTool = trim(ctx.session.tool || ctx.session.harness);
+  const actorProvider = trim(ctx.session.providerProfile || ctx.session.provider);
+  const actorModel = trim(ctx.session.model);
+  const actorEffort = trim(ctx.session.effort || ctx.session.codexThreadEffort);
+  const actorRuntimePolicy = {
+    ...(actorTool ? { tool: actorTool } : {}),
+    ...(actorProvider ? { providerProfile: actorProvider } : {}),
+    ...(actorModel ? { model: actorModel } : {}),
+    ...(actorEffort ? { effort: actorEffort } : {}),
+  };
+  const actorRiskRaw = trim(ctx.session.riskMode);
+  const actorRiskMode = (actorRiskRaw === 'full-auto' && ctx.session.riskModeExplicit !== true)
+    ? 'recommended'
+    : actorRiskRaw;
+  const actorRiskExplicit = actorRiskMode === 'full-auto' && ctx.session.riskModeExplicit === true;
   const ensured = await callStore(ensureFn, swarmDbArg(deps), {
     rootSessionId: ctx.session.id,
     projectId: trim(ctx.session.projectId),
@@ -382,6 +398,8 @@ async function ensureSwarmContextForWrite(ctx, args, deps) {
       maxConcurrent: ctx.rootPolicy?.maxConcurrent ?? 6,
       accessMode: ctx.rootPolicy?.accessMode === 'read' ? 'read_only' : 'writer',
       writablePaths: trim(ctx.session.folder) ? [trim(ctx.session.folder)] : [],
+      ...(Object.keys(actorRuntimePolicy).length > 0 ? { runtimePolicy: actorRuntimePolicy } : {}),
+      ...(actorRiskMode ? { riskMode: actorRiskMode, ...(actorRiskExplicit ? { riskModeExplicit: true } : {}) } : {}),
     },
   });
   return {
@@ -662,24 +680,55 @@ async function executeSwarmToolAction({ action, args: rawArgs, ctx, deps }) {
     }
     const channels = optionalStringArray(args.channels, 'channels', MAX_ARRAY_CHANNELS, MAX_CHANNEL_NAME_CHARS);
     const writablePaths = optionalStringArray(args.writablePaths, 'writablePaths', MAX_ARRAY_PATHS, 320);
+    const explicitHarness = optionalString(args.harness, 'harness', 64);
+    const explicitTool = optionalString(args.tool, 'tool', 64);
+    if (explicitHarness && explicitTool && explicitHarness !== explicitTool) {
+      throw toolError('BAD_REQUEST', 'swarm.spawn received conflicting harness and tool arguments', 400);
+    }
+    const explicitProvider = optionalString(args.provider, 'provider', 128);
+    const explicitProviderProfile = optionalString(args.providerProfile, 'providerProfile', 128);
+    if (explicitProvider && explicitProviderProfile && explicitProvider !== explicitProviderProfile) {
+      throw toolError('BAD_REQUEST', 'swarm.spawn received conflicting provider and providerProfile arguments', 400);
+    }
+    const explicitRiskMode = optionalString(args.riskMode, 'riskMode', 32);
     const requestedRuntime = {
-      tool: optionalString(args.harness, 'harness', 64),
-      provider: optionalString(args.provider, 'provider', 128),
+      tool: explicitHarness || explicitTool,
+      provider: explicitProvider || explicitProviderProfile,
       model: optionalString(args.model, 'model', 160),
       effort: optionalString(args.effort, 'effort', 64),
     };
+    const callerSession = ctx.session
+      || (typeof sDeps?.getSession === 'function' ? await sDeps.getSession(ctx.authSession.sessionId).catch(() => null) : null);
     const baseTargetName = normalizeSwarmTargetName(name) || name;
     const shardCount = tasks ? tasks.length : n;
     const shardTargetNames = (tasks || shardCount > 1)
       ? Array.from({ length: shardCount }, (_, idx) => `${baseTargetName}-${idx + 1}`)
       : [baseTargetName];
     const effectiveRuntime = await validateSwarmSpawnRuntime({
-      session: ctx.session,
-      rootSessionId: ctx.org?.rootSessionId || ctx.session?.id || '',
+      session: callerSession,
+      rootSessionId: ctx.org?.rootSessionId || callerSession?.id || ctx.authSession?.sessionId || '',
       targetNames: [name, baseTargetName, ...shardTargetNames],
       runtime: requestedRuntime,
       deps,
     });
+    const callerTool = trim(callerSession?.tool || callerSession?.harness);
+    const effectiveTool = trim(effectiveRuntime.tool) || callerTool;
+    const sameToolAsCaller = Boolean(!effectiveTool || !callerTool || effectiveTool === callerTool);
+    const effectiveProvider = trim(effectiveRuntime.provider)
+      || (sameToolAsCaller ? trim(callerSession?.providerProfile || callerSession?.provider) : '');
+    const effectiveModel = trim(effectiveRuntime.model)
+      || (sameToolAsCaller ? trim(callerSession?.model) : '');
+    const effectiveEffort = trim(effectiveRuntime.effort)
+      || (sameToolAsCaller ? trim(callerSession?.effort || callerSession?.codexThreadEffort) : '');
+    const callerRiskRaw = trim(callerSession?.riskMode);
+    const callerRiskMode = (callerRiskRaw === 'full-auto' && callerSession?.riskModeExplicit !== true)
+      ? 'recommended'
+      : callerRiskRaw;
+    const effectiveRiskMode = explicitRiskMode || callerRiskMode;
+    const effectiveRiskExplicit = Boolean(
+      effectiveRiskMode === 'full-auto'
+      && (explicitRiskMode === 'full-auto' || (!explicitRiskMode && callerSession?.riskModeExplicit === true)),
+    );
     const ensuredCtx = await ensureSwarmContextForWrite(ctx, args, deps);
     const { forkFromNodeId, forkSinceSeq } = await resolveForkTargetInOrg({
       orgId: ensuredCtx.org.id,
@@ -718,10 +767,14 @@ async function executeSwarmToolAction({ action, args: rawArgs, ctx, deps }) {
       tasks,
       n,
       workspace,
-      harness: effectiveRuntime.tool,
-      provider: effectiveRuntime.provider,
-      model: effectiveRuntime.model,
-      effort: effectiveRuntime.effort,
+      harness: effectiveTool,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      effort: effectiveEffort,
+      ...(effectiveRiskMode ? {
+        riskMode: effectiveRiskMode,
+        ...(effectiveRiskExplicit ? { riskModeExplicit: true } : {}),
+      } : {}),
       channels,
       forkFromNodeId,
       forkSinceSeq,
@@ -1048,7 +1101,10 @@ export async function executeOrganizationControlTool({ authSession, action, args
     node = dbNode;
   } else {
     const direct = await getLiveOrganizationSessionReference(authSession.sessionId);
-    const current = direct?.kind === 'node' ? direct : await getFactoryMessageScope(authSession.sessionId, '');
+    const current = direct?.kind === 'node'
+      ? direct
+      : (await getFactoryMessageScope(authSession.sessionId, '')
+        || await getManagedWriterStagingOrganizationReference(authSession.sessionId, ''));
     if (!current || current.organizationId !== scope.organizationId || current.nodeId !== scope.nodeId ||
         current.bindingGeneration !== scope.bindingGeneration ||
         (current.organizationRevision !== scope.organizationRevision && !await isOrganizationRevisionCompatible(scope.organizationId, scope.organizationRevision, current.organizationRevision)) ||

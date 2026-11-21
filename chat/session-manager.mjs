@@ -227,6 +227,7 @@ import {
   validateAgentCreatePayloadRegistries,
 } from './approved-agent-create.mjs';
 import {
+  canIssueCollaborationResumeRootSessionControl,
   canIssueSessionControl,
   canIssueSwarmRootWakeupSessionControl,
   createRunSessionControlCapability,
@@ -462,7 +463,7 @@ import {
 } from './project-memory-engine.mjs';
 import { extractTaggedBlock } from './session-text-parsing.mjs';
 import { buildTurnContextHook } from './turn-context-hook.mjs';
-import { buildOrganizationIdentityContext } from './organization-identity-context.mjs';
+import { buildOrganizationIdentityContext, getManagedWriterStagingOrganizationReference } from './organization-identity-context.mjs';
 import { buildOrganizationExecutionContext } from './organization-execution-context.mjs';
 const BUILTIN_SKILL_READ_AVAILABLE = Symbol('builtinSkillReadAvailable');
 const ORGANIZATION_EXECUTION_CONTEXT = Symbol('organizationExecutionContext');
@@ -5264,7 +5265,14 @@ async function drainAdaptiveRunQueue() {
     })).filter(Boolean);
     let blockedByAdaptiveCapacity = false;
     for (const { run, manifest } of candidates) {
-      const result = await launchDetachedRunWithAgySlot(run.sessionId, run, manifest);
+      let result;
+      try {
+        result = await launchDetachedRunWithAgySlot(run.sessionId, run, manifest);
+      } catch (error) {
+        adaptiveQueuedRunIds.delete(run.id);
+        console.error(`[runs] adaptive queued run ${run.id} launch failed: ${error?.message || error}`);
+        continue;
+      }
       if (result?.queued === true && result?.adaptiveCapacity === true) {
         blockedByAdaptiveCapacity = true;
         break;
@@ -5410,7 +5418,13 @@ async function launchNextQueuedAgyRun(providerId) {
       candidates.push({ candidate, manifest });
     }
     for (const { candidate, manifest } of sortAgyQueuedRuns(candidates)) {
-      const started = await launchDetachedRunWithAgySlot(candidate.sessionId, candidate, manifest);
+      let started;
+      try {
+        started = await launchDetachedRunWithAgySlot(candidate.sessionId, candidate, manifest);
+      } catch (error) {
+        console.error(`[runs] queued AgY launch failed for ${candidate.id}: ${error?.message || error}`);
+        continue;
+      }
       if (started?.queued !== true) break;
     }
   } catch (error) {
@@ -5496,16 +5510,22 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
   }
 
   let spawned;
+  let beforeSpawnSubmission = true;
   try {
     if (run.appApiMessageVersion === 1) await admitScopedMessageLaunch(run.id);
+    adaptiveQueuedRunIds.delete(run.id);
     await updateRun(run.id, (current) => ({
       ...current,
+      state: current.state === 'queued' ? 'accepted' : current.state,
+      adaptiveQueue: undefined,
+      agyQueue: undefined,
       runnerLaunchState: 'lifecycle_submitting',
       runnerLifecycleSubmittedAt: current.runnerLifecycleSubmittedAt || nowIso(),
     }));
     if (!observeDetachedRun(sessionId, run.id)) {
       throw new Error('Unable to observe detached Run before launch');
     }
+    beforeSpawnSubmission = false;
     spawned = await spawnDetachedRunner(run.id, {
       launchAttempt: Number.isSafeInteger(run.runnerLaunchAttempt) ? run.runnerLaunchAttempt : 0,
     });
@@ -5523,22 +5543,42 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
     }
   } catch (error) {
     const failureReason = `Runner launch failed: ${error?.message || String(error)}`;
-    const definitelyNotSubmitted = error?.launchDefinitelyNotSubmitted === true;
-    if (definitelyNotSubmitted && !await getRunResult(run.id)) {
+    const definitelyNotSubmitted = beforeSpawnSubmission
+      || error?.launchDefinitelyNotSubmitted === true
+      || error?.launchStage === 'provider-preparation'
+      || error?.providerPreparation?.state === 'failed';
+    if (definitelyNotSubmitted) {
+      const existingResult = await getRunResult(run.id).catch(() => null);
       const completedAt = nowIso();
       const errorCode = typeof error?.code === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(error.code)
         ? error.code : '';
-      const result = { exitCode: 1, signal: null, error: failureReason, completedAt,
-        ...(errorCode ? { errorCode } : {}) };
+      const result = existingResult || {
+        exitCode: 1,
+        signal: null,
+        error: failureReason,
+        completedAt,
+        ...(errorCode ? { errorCode } : {}),
+      };
       let claimed = false;
-      await updateRun(run.id, current => {
+      await updateRun(run.id, (current) => {
         if (isTerminalRunState(current.state) || current.cancelRequested === true || hasRegisteredDetachedRunner(current)) return current;
         claimed = true;
-        return { ...current, state: 'failed', failureReason, completedAt, result,
-          ...(current.appApiMessageVersion === 1 ? { messageFailureCode: ['REVISION_CONFLICT', 'REQUEST_EXPIRED', 'REQUEST_CANCELLED', 'RESTRICTED_EXECUTION_UNAVAILABLE',
-            'RUN_EXECUTION_INPUT_UNAVAILABLE'].includes(error.code) ? error.code : 'LAUNCH_FAILED' } : {}) };
+        return {
+          ...current,
+          state: 'failed',
+          runnerLaunchState: 'failed',
+          adaptiveQueue: undefined,
+          agyQueue: undefined,
+          failureReason,
+          completedAt: current.completedAt || completedAt,
+          result,
+          ...(current.appApiMessageVersion === 1 ? {
+            messageFailureCode: ['REVISION_CONFLICT', 'REQUEST_EXPIRED', 'REQUEST_CANCELLED', 'RESTRICTED_EXECUTION_UNAVAILABLE',
+              'RUN_EXECUTION_INPUT_UNAVAILABLE'].includes(error?.code) ? error.code : 'LAUNCH_FAILED',
+          } : {}),
+        };
       });
-      if (claimed) await writeRunResult(run.id, result);
+      if (claimed && !existingResult) await writeRunResult(run.id, result);
     }
     // A broker timeout can race a successful launch or a terminal result.
     // Record the diagnostic without claiming the outcome; the ordinary
@@ -5548,17 +5588,19 @@ async function launchDetachedRunWithAgySlotUnlocked(sessionId, run, manifest) {
       return { ...current, failureReason };
     });
     const settled = await syncDetachedRun(sessionId, run.id) || await getRun(run.id);
-    if (!settled || isTerminalRunState(settled.state)) {
+    const terminal = !settled || isTerminalRunState(settled.state);
+    if (terminal || settled.cancelRequested === true || definitelyNotSubmitted) {
       const completed = settled?.state === 'completed';
-      await releaseAgyRunSlot(run.id, { outcome: completed ? 'success' : 'error' });
-      releaseHarnessRunBudget(run.id, { schedule: true, outcome: completed ? 'success' : 'error' });
+      const outcome = completed ? 'success' : (settled?.cancelRequested === true ? 'cancelled' : 'error');
+      await releaseAgyRunSlot(run.id, { outcome });
+      releaseHarnessRunBudget(run.id, { schedule: true, outcome });
       if (completed) return { queued: false, spawned: null, providerId };
+      if (!terminal) stopObservedRun(run.id);
+      throw error;
     }
     // An unacknowledged broker request is not proof that no runner started.
     // Keep observing the same Run instead of surfacing a definitive failure.
-    if (settled && !isTerminalRunState(settled.state) && settled.cancelRequested !== true)
-      return { queued: false, spawned: null, providerId };
-    throw error;
+    return { queued: false, spawned: null, providerId };
   }
   const afterLaunch = await getRun(run.id);
   if (!afterLaunch || isTerminalRunState(afterLaunch.state) || afterLaunch.cancelRequested === true) {
@@ -9962,7 +10004,7 @@ async function reconcileOrphanDetachedRuns() {
         scheduleScopedMessageRun(run.sessionId, runId);
         continue;
       }
-      if (run.state === 'queued') {
+      if (run.state === 'queued' && run.runnerLaunchState !== 'lifecycle_submitting' && !run.failureReason) {
         if (run.adaptiveQueue?.reason === 'adaptive_capacity') adaptiveQueuedRunIds.add(runId);
         continue;
       }
@@ -12979,12 +13021,17 @@ function buildPreparingRunRecord({
   effectiveToolDefinition,
 }) {
   const ackAt = nowIso();
+  const isInternalWakeupOperation = ['swarm_wakeup', 'collaboration_resume'].includes(options.internalOperation);
+  const resolvedWakeupModel = trimString(options.model)
+    || (isInternalWakeupOperation ? trimString(session?.model || session?.codexThreadModel) : '');
+  const resolvedWakeupEffort = trimString(options.effort)
+    || (isInternalWakeupOperation ? trimString(session?.effort || session?.codexThreadEffort) : '');
   const manifestOptions = {
     images: attachmentInputStage.stagedAttachments,
     thinking: options.thinking === true,
     ...(typeof options.providerFailover === 'boolean' ? { providerFailover: options.providerFailover } : {}),
-    model: options.model || undefined,
-    effort: options.effort || undefined,
+    model: resolvedWakeupModel || undefined,
+    effort: resolvedWakeupEffort || undefined,
     serviceTier: effectiveServiceTier,
     providerProfile: effectiveProviderProfile || undefined,
     interactionMode: effectiveInteractionMode,
@@ -13023,8 +13070,8 @@ function buildPreparingRunRecord({
     ackAt,
     tool: effectiveTool,
     providerProfile: effectiveProviderProfile || null,
-    model: options.model || null,
-    effort: options.effort || null,
+    model: resolvedWakeupModel || null,
+    effort: resolvedWakeupEffort || null,
     serviceTier: effectiveServiceTier,
     thinking: options.thinking === true,
     provider: effectiveProviderContract.provider || null,
@@ -14082,7 +14129,38 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       }
     }
   }
-  const issueRootSessionControl = rootSessionControl || swarmRootWakeupControl;
+  let collaborationResumeControl = false;
+  if (!rootSessionControl
+      && !swarmRootWakeupControl
+      && options.internalOperation === 'collaboration_resume'
+      && trimString(session?.sessionClass) === 'ROOT_LEADERSHIP') {
+    const collabId = trimString(sourceContext?.collaborationId);
+    if (collabId && sourceContext?.kind === 'collaboration_aggregation') {
+      const { getCollaboration } = await import('./collaboration-store.mjs');
+      const collab = await getCollaboration(collabId).catch(() => null);
+      if (collab && collab.state === 'aggregating'
+          && Number(collab.aggregationClaimedGeneration) === Number(collab.aggregationGeneration)) {
+        const policyOrgId = trimString(collab.policy?.organizationId);
+        let rootOrg = null;
+        if (policyOrgId) {
+          const { getOrganization } = await import('./organization-store.mjs');
+          rootOrg = await getOrganization(policyOrgId).catch(() => null);
+        }
+        if (canIssueCollaborationResumeRootSessionControl({
+          session,
+          internalOperation: options.internalOperation,
+          temporaryControlAuthority: options.temporaryControlAuthority,
+          collaboration: collab,
+          organization: rootOrg,
+          sourceContext,
+          requestId,
+        })) {
+          collaborationResumeControl = true;
+        }
+      }
+    }
+  }
+  const issueRootSessionControl = rootSessionControl || swarmRootWakeupControl || collaborationResumeControl;
   let messageScope = null;
   if (!issueRootSessionControl && session.sessionPlane === 'organization' && session.organizationId && session.organizationNodeId) {
     const { getLiveOrganizationSessionReference, getFactoryMessageScope } = await import('./organization-session-lifecycle.mjs');
@@ -14091,6 +14169,21 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       messageScope = { kind: 'organization_message', organizationId: binding.organizationId, nodeId: binding.nodeId, bindingGeneration: binding.bindingGeneration, organizationRevision: binding.organizationRevision };
     }
     if (!messageScope) messageScope = await getFactoryMessageScope(sessionId, requestId);
+    if (!messageScope) {
+      const stagingBinding = await getManagedWriterStagingOrganizationReference(sessionId, requestId);
+      if (stagingBinding?.kind === 'node'
+          && stagingBinding.organizationId === session.organizationId
+          && stagingBinding.nodeId === session.organizationNodeId
+          && stagingBinding.bindingGeneration > 0) {
+        messageScope = {
+          kind: 'organization_message',
+          organizationId: stagingBinding.organizationId,
+          nodeId: stagingBinding.nodeId,
+          bindingGeneration: stagingBinding.bindingGeneration,
+          organizationRevision: stagingBinding.organizationRevision,
+        };
+      }
+    }
   }
   const sessionControlCapability = issueRootSessionControl || messageScope
     ? createRunSessionControlCapability({
@@ -14407,6 +14500,12 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
 
   await assertRunStartsAllowed();
 
+  const isInternalWakeupOperation = ['swarm_wakeup', 'collaboration_resume'].includes(options.internalOperation);
+  const resolvedWakeupModel = trimString(options.model)
+    || (isInternalWakeupOperation ? trimString(requestedScopedModel || session.model || session.codexThreadModel) : '');
+  const resolvedWakeupEffort = trimString(options.effort)
+    || (isInternalWakeupOperation ? trimString(session.effort || session.codexThreadEffort) : '');
+
   const status = {
     sessionId,
     requestId,
@@ -14416,8 +14515,8 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     promptReadyAt: nowIso(),
     tool: effectiveTool,
     providerProfile: effectiveProviderProfile || null,
-    model: options.model || null,
-    effort: options.effort || null,
+    model: resolvedWakeupModel || null,
+    effort: resolvedWakeupEffort || null,
     serviceTier: effectiveServiceTier,
     thinking: options.thinking === true,
     provider: effectiveProviderContract.provider || null,
@@ -14510,8 +14609,8 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
       ...(authenticatedPrincipalKind ? { authenticatedPrincipalKind } : {}),
       ...(options.temporaryControlAuthority ? { temporaryControlAuthority: options.temporaryControlAuthority } : {}),
       thinking: options.thinking === true,
-      model: options.model || undefined,
-      effort: options.effort || undefined,
+      model: resolvedWakeupModel || undefined,
+      effort: resolvedWakeupEffort || undefined,
       serviceTier: effectiveServiceTier,
       providerProfile: effectiveProviderProfile || undefined,
       interactionMode: effectiveInteractionMode,
@@ -17028,4 +17127,7 @@ export {
   resolveRunNativeAgentType as __resolveRunNativeAgentTypeForTest,
   resolveProviderContextKey as __resolveProviderContextKeyForTest,
   resolveResumeState as __resolveResumeStateForTest,
+  launchDetachedRunWithAgySlot as __launchDetachedRunWithAgySlotForTest,
+  drainAdaptiveRunQueue as __drainAdaptiveRunQueueForTest,
+  adaptiveQueuedRunIds as __adaptiveQueuedRunIdsForTest,
 };

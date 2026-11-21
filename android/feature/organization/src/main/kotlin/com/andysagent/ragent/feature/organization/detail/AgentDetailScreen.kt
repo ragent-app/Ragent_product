@@ -48,7 +48,12 @@ fun AgentDetailScreen(node: NodeDetailUiState, onBack: () -> Unit, modifier: Mod
                 if (node.testsTotal > 0) DetailSection(stringResource(R.string.org_detail_checks)) { DetailText(stringResource(R.string.org_detail_progress_value, node.testsPassed, node.testsTotal)) }
                 if (node.changedFiles.isNotEmpty()) DetailSection(stringResource(R.string.org_detail_files)) { node.changedFiles.forEach { DetailText(it) } }
                 node.resultPacketSummary?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_result)) { DetailText(value) } }
+                node.failureCode?.takeIf { it.isNotBlank() && it != node.blockerText }?.let { value ->
+                    DetailSection(stringResource(R.string.organization_failure_code)) { DetailText(value) }
+                }
                 node.blockerText?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_blocker)) { DetailText(value) } }
+                node.harness?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.organization_harness)) { DetailText(value) } }
+                node.workspaceBranch?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.organization_workspace_branch)) { DetailText(value) } }
                 node.latestUpdateText?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_update)) { DetailText(value) } }
                 node.reviewState?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_review)) { DetailText(value) } }
             }

@@ -590,4 +590,104 @@ for (const spec of allManagedSpecs) {
 }
 await allManagedOverlay.cleanup();
 
+// Regression (P1 #5b): Codex under Windows RunnerSupervisor spawns MCP children with
+// LOCALAPPDATA/APPDATA/USERPROFILE pointing under ProgramData and RAGENT_* stripped except
+// ORGANIZATION_MCP_ENV_KEYS. ragent-organization-mcp.mjs must start and serve tools without
+// crashing inside config.mjs's ProgramData runtime-path check.
+{
+  const { createServer } = await import('node:http');
+  const seenCalls = [];
+  const orgHttp = createServer(async (req, res) => {
+    assert.equal(req.headers['x-ragent-session-control-token'], 'sc-tok-win-pd');
+    assert.equal(req.headers['x-ragent-session-control-run-id'], 'run-win-pd');
+    assert.equal(req.headers['x-ragent-session-control-session-id'], 'sess-win-pd');
+    assert.equal(req.headers['x-ragent-session-control-turn-id'], 'turn-win-pd');
+    assert.equal(req.method, 'POST');
+    assert.equal(req.url, '/api/sessions/sess-win-pd/organization/tools-root');
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+    seenCalls.push(body);
+    if (body.action === 'capabilities.get') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        actions: ['swarm.status', 'board.read'],
+        tools: [
+          {
+            name: 'ragent_organization_read',
+            description: 'Read org state',
+            inputSchema: { type: 'object', properties: { action: { type: 'string' } }, required: ['action'] },
+          },
+          {
+            name: 'ragent_organization_action',
+            description: 'Perform org action',
+            inputSchema: { type: 'object', properties: { action: { type: 'string' } }, required: ['action'] },
+          },
+        ],
+      }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, action: body.action, visibility: 'org' }));
+  });
+  await new Promise((resolveListen) => orgHttp.listen(0, '127.0.0.1', resolveListen));
+  const orgPort = orgHttp.address().port;
+  const orgBaseUrl = `http://127.0.0.1:${orgPort}`;
+  try {
+    const codexThreadMcp = await prepareCodexThreadMcp({
+      runId: 'run-win-pd',
+      spawnEnv: {
+        CODEX_HOME: codexSource,
+        RAGENT_CHAT_BASE_URL: orgBaseUrl,
+        RAGENT_ORGANIZATION_TOOL_SCOPE: 'root',
+        RAGENT_SESSION_CONTROL_TOKEN: 'sc-tok-win-pd',
+        RAGENT_SESSION_CONTROL_RUN_ID: 'run-win-pd',
+        RAGENT_SESSION_CONTROL_SESSION_ID: 'sess-win-pd',
+        RAGENT_SESSION_CONTROL_TURN_ID: 'turn-win-pd',
+      },
+      servers: [{ kind: 'organization', scriptPath: join(repoRoot, 'scripts', 'ragent-organization-mcp.mjs') }],
+    });
+    const orgServerName = codexThreadMcp.serverNames[0];
+    const mcpSpec = codexThreadMcp.config.mcp_servers[orgServerName];
+    assert.ok(mcpSpec, 'prepareCodexThreadMcp must build organization mcp_servers entry');
+    const orgMcpProc = spawn(mcpSpec.command, mcpSpec.args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.SYSTEMROOT ? { SYSTEMROOT: process.env.SYSTEMROOT } : {}),
+        LOCALAPPDATA: 'C:\\ProgramData\\Ragent\\instances\\owner\\executor\\home\\AppData\\Local',
+        APPDATA: 'C:\\ProgramData\\Ragent\\instances\\owner\\executor\\home\\AppData\\Roaming',
+        USERPROFILE: 'C:\\ProgramData\\Ragent\\instances\\owner\\executor\\home',
+        ...mcpSpec.env,
+      },
+    });
+    let stderrText = '';
+    orgMcpProc.stderr.on('data', (chunk) => { stderrText += chunk.toString('utf8'); });
+    try {
+      const rpc = readResponses(orgMcpProc);
+      const initRes = await rpc(1, 'initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+      assert.equal(initRes.result?.serverInfo?.name, 'ragent-organization');
+      orgMcpProc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} })}\n`);
+      const listRes = await rpc(2, 'tools/list', {});
+      assert.deepEqual(
+        (listRes.result?.tools || []).map((t) => t.name),
+        ['ragent_organization_read', 'ragent_organization_action'],
+      );
+      const callRes = await rpc(3, 'tools/call', {
+        name: 'ragent_organization_read',
+        arguments: { action: 'swarm.status' },
+      });
+      assert.equal(Boolean(callRes.result?.isError), false, `unexpected error response: ${JSON.stringify(callRes)}`);
+      assert.equal(JSON.parse(callRes.result.content[0].text).visibility, 'org');
+      assert.deepEqual(seenCalls, [{ action: 'capabilities.get' }, { action: 'swarm.status', args: {} }]);
+      assert.equal(stderrText, '', `unexpected stderr on organization MCP startup: ${stderrText}`);
+    } finally {
+      orgMcpProc.stdin.end();
+      await new Promise((resolveExit) => orgMcpProc.once('exit', resolveExit));
+    }
+  } finally {
+    await new Promise((resolveClose) => orgHttp.close(resolveClose));
+  }
+}
+
 console.log('test-approved-action-mcp: ok');

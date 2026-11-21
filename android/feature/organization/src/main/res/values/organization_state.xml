@@ -66,4 +66,22 @@
     <string name="organization_action_sending">Sending</string>
     <string name="organization_action_waiting_subordinates">Waiting for members</string>
     <string name="organization_action_needs_user">Needs your attention</string>
+    <string name="organization_result_packet">Result packet</string>
+    <string name="organization_failure_code">Error code</string>
+    <string name="organization_harness">Harness</string>
+    <string name="organization_workspace_branch">Branch</string>
+    <string name="organization_swarm_board_title">Shared board</string>
+    <string name="organization_swarm_working">Working</string>
+    <string name="organization_swarm_waiting">Waiting</string>
+    <string name="organization_swarm_stopped">Stopped</string>
+    <string name="organization_swarm_killed">Killed</string>
+    <string name="organization_swarm_done">Done</string>
+    <string name="organization_swarm_readonly_banner">Read-only board view. Owner posting is only enabled for live Ragent swarms.</string>
+    <string name="organization_swarm_empty_board">No board messages yet.</string>
+    <string name="organization_swarm_composer_placeholder">Post a message to %1$s…</string>
+    <string name="organization_swarm_send">Post</string>
+    <string name="organization_swarm_reply">Reply</string>
+    <string name="organization_swarm_replying_to">Replying to #%1$d</string>
+    <string name="organization_swarm_cancel_reply">Cancel reply</string>
+    <string name="organization_open_workspace">Team &amp; Board</string>
 </resources>

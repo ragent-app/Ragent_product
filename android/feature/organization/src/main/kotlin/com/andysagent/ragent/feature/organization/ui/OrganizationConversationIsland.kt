@@ -8,6 +8,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -157,10 +158,64 @@ internal fun OrganizationConversationIsland(
                             "idle" -> R.string.organization_node_idle
                             else -> R.string.organization_state_unknown
                         }
-                        Text(stringResource(state), color = colors.secondaryContent, fontSize = 12.sp, lineHeight = 18.sp)
+                        val statusText = buildString {
+                            append(stringResource(state))
+                            node.harness?.takeIf { it.isNotBlank() }?.let {
+                                append(" · ")
+                                append(it)
+                            }
+                        }
+                        Text(statusText, color = colors.secondaryContent, fontSize = 12.sp, lineHeight = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     AgentoIconButton(onClick = onDismiss, contentDescription = stringResource(R.string.organization_conversation_close), modifier = Modifier.size(48.dp)) {
                         AgentoWebIcon(AgentoWebGlyph.Close, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.secondaryContent)
+                    }
+                }
+                val failureSummary = node.failureCode?.takeIf { it.isNotBlank() }
+                    ?: node.blockerText?.takeIf { it.isNotBlank() }
+                val packetSummary = node.resultPacketSummary?.takeIf { it.isNotBlank() }
+                if (failureSummary != null || packetSummary != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .padding(bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (failureSummary != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(AgentoShapes.SurfaceSmallShape)
+                                    .background(colors.error.copy(alpha = 0.12f))
+                                    .border(1.dp, colors.error.copy(alpha = 0.28f), AgentoShapes.SurfaceSmallShape)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    text = "${stringResource(R.string.organization_failure_code)}: $failureSummary",
+                                    color = colors.error,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                        if (packetSummary != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(AgentoShapes.SurfaceSmallShape)
+                                    .background(colors.quietSurface)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Text(
+                                    text = packetSummary,
+                                    color = colors.primaryContent,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                )
+                            }
+                        }
                     }
                 }
                 content(node.id, Modifier.fillMaxWidth().weight(1f))

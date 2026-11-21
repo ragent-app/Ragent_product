@@ -51,8 +51,10 @@ fun OrganizationScreen(
     rootHidden: Boolean = false,
     openNodeId: String? = null,
     onOpenNodeConsumed: () -> Unit = {},
+    sessionId: String? = null,
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val resolvedSessionId = sessionId ?: uiState.rootSessionId
     val preference = motionPolicy().preference
     val effectivePreference = if (uiState.reduceMotion && preference == MotionPreference.Full) MotionPreference.Reduced else preference
     LaunchedEffect(effectivePreference, viewModel) { viewModel.setMotionPreference(effectivePreference) }
@@ -66,6 +68,10 @@ fun OrganizationScreen(
         onSizeChanged = { w, h, density -> viewModel.updateViewportSize(w.toFloat(), h.toFloat(), density) },
         onSendRootInstruction = onSendRootInstruction, modifier = modifier, showNodeLabels = showNodeLabels, onAdvancePhysicsFrame = viewModel::advancePhysicsFrame, onReportBirthSurfaceGaps = viewModel::reportBirthSurfaceGaps,
         onBack = onBack, onOpenWorkItems = onOpenWorkItems, onOpenTeamMessages = onOpenTeamMessages, isDemo = isDemo, conversationContent = conversationContent, conversationRuntimeState = conversationRuntimeState, embeddedRootId = embeddedRootId, onRootClick = onRootClick, onRootAnchorChanged = onRootAnchorChanged, embedded = embedded, revealRoot = revealRoot, onRootVisualChanged = onRootVisualChanged, rootHidden = rootHidden, openNodeId = openNodeId, onOpenNodeConsumed = onOpenNodeConsumed,
+        onSelectBoardChannel = { channel -> viewModel.selectBoardChannel(channel, resolvedSessionId) },
+        onBoardComposerDraftChange = viewModel::setBoardComposerDraft,
+        onSelectBoardReplySeq = viewModel::setBoardReplyToSeq,
+        onPostBoardMessage = { if (!resolvedSessionId.isNullOrBlank()) viewModel.postBoardMessage(resolvedSessionId) },
     )
 }
 
@@ -104,6 +110,10 @@ fun OrganizationScreenContent(
     rootHidden: Boolean = false,
     openNodeId: String? = null,
     onOpenNodeConsumed: () -> Unit = {},
+    onSelectBoardChannel: (String) -> Unit = {},
+    onBoardComposerDraftChange: (String) -> Unit = {},
+    onSelectBoardReplySeq: (Long?) -> Unit = {},
+    onPostBoardMessage: () -> Unit = {},
 ) {
     val colors = LocalRagentColors.current
     val rootVisualNode = uiState.nodes.firstOrNull { it.id == embeddedRootId }
@@ -174,20 +184,26 @@ fun OrganizationScreenContent(
                         else -> R.string.organization_state_unknown
                     }
                     Text(stringResource(if (isDemo) R.string.organization_demo_explanation else statusText), Modifier.padding(top = 6.dp), color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 2)
+                    uiState.swarmOverview?.let { overview ->
+                        SwarmOverviewBar(
+                            overview = overview,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
                 }
                 if (embedded || (navigationHeight > 0 && taskHeight > 0 && activityHeight > 0)) {
                     OrganizationGraph(uiState, onPan, onZoom, { id ->
                         val node = uiState.nodes.firstOrNull { it.id == id }
-                        if (embedded && id == embeddedRootId) anchors[id]?.let { onRootClick(Rect(it.center.x - it.radius, it.center.y - it.radius, it.center.x + it.radius, it.center.y + it.radius)) }
+                        if (embedded && embeddedRootId != null && id == embeddedRootId) anchors[id]?.let { onRootClick(Rect(it.center.x - it.radius, it.center.y - it.radius, it.center.x + it.radius, it.center.y + it.radius)) }
                         else if (node?.isCluster == true) onNodeClick(id)
                         else if (node != null && anchors[id] != null && selectedId == null) {
                             selectedId = id; selectedNode = node; deleted = false; expanded = true
                         }
                     }, onNodeDoubleTap, onSizeChanged, modifier = Modifier.fillMaxWidth().height(graphHeight).clip(AgentoShapes.SurfaceLargeShape),
-                        hiddenNodeId = anchorId ?: embeddedRootId.takeIf { embedded && rootHidden }, onAdvancePhysicsFrame = onAdvancePhysicsFrame, onReportBirthSurfaceGaps = onReportBirthSurfaceGaps, onAnchorsChanged = { latest, bounds ->
+                        hiddenNodeId = anchorId ?: embeddedRootId?.takeIf { embedded && rootHidden }, onAdvancePhysicsFrame = onAdvancePhysicsFrame, onReportBirthSurfaceGaps = onReportBirthSurfaceGaps, onAnchorsChanged = { latest, bounds ->
                             if (anchors != latest) anchors = latest
                             if (embedded) {
-                                val root = latest[embeddedRootId]
+                                val root = embeddedRootId?.let(latest::get)
                                 val rect = root?.let { Rect(it.center.x - it.radius, it.center.y - it.radius, it.center.x + it.radius, it.center.y + it.radius) }
                                 onRootAnchorChanged(rect?.takeIf { bounds != null && it.left >= bounds.left && it.right <= bounds.right && it.top >= bounds.top && it.bottom <= bounds.bottom })
                             }
@@ -196,8 +212,29 @@ fun OrganizationScreenContent(
                 } else {
                     Spacer(Modifier.fillMaxWidth().height(graphHeight))
                 }
-                if (!embedded) OrganizationActivityFeed(uiState.activityFeed, uiState.isActivityFeedExpanded, onToggleActivityFeed, Modifier.onSizeChanged { activityHeight = it.height }.padding(top = 12.dp, bottom = 16.dp), reduceMotion = uiState.reduceMotion)
+                if (!embedded) {
+                    uiState.swarmBoard?.let { board ->
+                        SwarmBoardPanel(
+                            board = board,
+                            onSelectChannel = onSelectBoardChannel,
+                            onComposerDraftChange = onBoardComposerDraftChange,
+                            onSelectReplySeq = onSelectBoardReplySeq,
+                            onPostMessage = onPostBoardMessage,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                    OrganizationActivityFeed(uiState.activityFeed, uiState.isActivityFeedExpanded, onToggleActivityFeed, Modifier.onSizeChanged { activityHeight = it.height }.padding(top = 12.dp, bottom = 16.dp), reduceMotion = uiState.reduceMotion)
+                }
             }
+        }
+        if (embedded && uiState.swarmOverview != null) {
+            SwarmOverviewBar(
+                overview = uiState.swarmOverview,
+                compact = true,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
         }
         val rootAnchor = anchors[embeddedRootId]
         LaunchedEffect(revealRoot, rootAnchor, viewport) {

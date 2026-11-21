@@ -2,11 +2,16 @@ package com.andysagent.ragent.feature.organization.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -19,21 +24,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.MotionPreference
 import com.andysagent.ragent.core.designsystem.motionPolicy
 import com.andysagent.ragent.core.designsystem.rememberAgentoPressScale
+import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
+import kotlin.math.roundToInt
 
 internal data class OrganizationNodeAnchor(val center: Offset, val radius: Float, val baseRadiusDp: Float, val alpha: Float)
 
@@ -52,6 +67,7 @@ internal fun OrganizationGraph(
     onReportBirthSurfaceGaps: (Map<String, Float>) -> Unit = {},
 ) {
     val density = LocalDensity.current.density
+    val colors = LocalRagentColors.current
     val preference = if (uiState.reduceMotion && motionPolicy().preference == MotionPreference.Full) MotionPreference.Reduced else motionPolicy().preference
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(uiState.nodes.isNotEmpty()) { if (uiState.nodes.isNotEmpty()) shown = true }
@@ -144,7 +160,7 @@ internal fun OrganizationGraph(
                     }
                     val badgeVisible = (frame?.birthProgress ?: 1f) >= .85f &&
                         (source == null || graphSurfaceGap(source, surface) > 0f)
-                    OrganizationNode(node.copy(x = surface.center.x, y = surface.center.y, radiusDp = radiusDp, scale = 1f),
+                        OrganizationNode(node.copy(x = surface.center.x, y = surface.center.y, radiusDp = radiusDp, scale = 1f),
                         onClick = { onNodeClick(node.id) }, onDoubleTap = { onNodeDoubleTap(node.id) },
                         modifier = Modifier.align(AbsoluteAlignment.TopLeft), morphHidden = node.id == hiddenNodeId || !surface.visible,
                         interactionSource = interactions[node.id], externalPressScale = press, drawSurface = false,
@@ -153,6 +169,46 @@ internal fun OrganizationGraph(
                         occluderMajor = source?.major ?: 0f, occluderMinor = source?.minor ?: 0f, occluderAxis = source?.axis ?: Offset(0f, 1f),
                         minimumTouchSize = 64.dp / (uiState.zoomScale * press).coerceAtLeast(.001f),
                         actionVisible = badgeVisible, badgeAngleDegrees = badgeAngle, motionPreference = preference)
+                    val failureCaption = (node.failureCode ?: node.blockerText)?.takeIf {
+                        it.isNotBlank() && (node.runtimeState == NodeRuntimeState.BLOCKED || node.runtimeState == NodeRuntimeState.FAILED)
+                    }
+                    val captionText = failureCaption ?: node.resultPacketSummary?.takeIf { it.isNotBlank() }
+                    if (captionText != null && node.id != hiddenNodeId && surface.visible && (frame?.birthProgress ?: 1f) >= .85f) {
+                        val isError = failureCaption != null
+                        val captionBg = if (isError) colors.error.copy(alpha = 0.14f) else colors.quietSurface.copy(alpha = 0.94f)
+                        val captionBorder = if (isError) colors.error.copy(alpha = 0.35f) else colors.subtleOutline
+                        val captionColor = if (isError) colors.error else colors.secondaryContent
+                        val gapPx = 4f * density
+                        Layout(
+                            modifier = Modifier.align(AbsoluteAlignment.TopLeft).graphicsLayer { alpha = node.alpha },
+                            content = {
+                                Text(
+                                    text = captionText,
+                                    color = captionColor,
+                                    fontSize = 10.sp,
+                                    lineHeight = 13.sp,
+                                    fontWeight = if (isError) FontWeight.SemiBold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .testTag("node-status-caption-${node.id}")
+                                        .widthIn(max = 136.dp)
+                                        .clip(AgentoShapes.PillShape)
+                                        .background(captionBg)
+                                        .border(0.75.dp, captionBorder, AgentoShapes.PillShape)
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            },
+                        ) { measurables, constraints ->
+                            val placeable = measurables.single().measure(Constraints())
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                placeable.place(
+                                    x = (surface.center.x - placeable.width / 2f).roundToInt(),
+                                    y = (surface.center.y + surface.radius + gapPx).roundToInt(),
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

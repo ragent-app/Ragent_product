@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 
 import {
+  canIssueCollaborationResumeRootSessionControl,
   canIssueSessionControl,
   canIssueSwarmRootWakeupSessionControl,
   createRunSessionControlCapability,
@@ -29,6 +30,95 @@ assert.equal(canIssueSwarmRootWakeupSessionControl({
   internalOrganizationWakeup: true,
   organization: activeSwarmOrg,
 }), true);
+
+const collabRoot = { id: 'root-collab-sess', sessionClass: 'ROOT_LEADERSHIP', sessionPlane: 'user', userAddressable: true };
+const activeFormalOrg = { id: 'org-formal-1', rootSessionId: 'root-collab-sess', state: 'active' };
+const aggregatingOrgCollab = {
+  id: 'collab-1',
+  rootSessionId: 'root-collab-sess',
+  state: 'aggregating',
+  aggregationGeneration: 1,
+  aggregationClaimedGeneration: 1,
+  aggregationRunId: '',
+  policy: { organizationId: 'org-formal-1' },
+};
+const validAggregationContext = {
+  kind: 'collaboration_aggregation',
+  collaborationId: 'collab-1',
+  aggregationGeneration: 1,
+};
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+  sourceContext: validAggregationContext,
+  requestId: 'collaboration:collab-1:aggregation:1',
+}), true);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: { ...aggregatingOrgCollab, policy: {} },
+  sourceContext: validAggregationContext,
+  requestId: 'collaboration:collab-1:aggregation:1',
+}), true);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  temporaryControlAuthority: { id: 'tmp' },
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'swarm_poll',
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: { ...collabRoot, sessionPlane: 'organization' },
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: { ...collabRoot, delegatedFromSessionId: 'other-root' },
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: { ...aggregatingOrgCollab, state: 'running' },
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: { ...aggregatingOrgCollab, aggregationRunId: 'run-already-started' },
+  organization: activeFormalOrg,
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: { ...activeFormalOrg, state: 'archived' },
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: { ...activeFormalOrg, rootSessionId: 'other-root' },
+}), false);
+assert.equal(canIssueCollaborationResumeRootSessionControl({
+  session: collabRoot,
+  internalOperation: 'collaboration_resume',
+  collaboration: aggregatingOrgCollab,
+  organization: activeFormalOrg,
+  sourceContext: validAggregationContext,
+  requestId: 'collaboration:collab-1:aggregation:2',
+}), false);
 assert.equal(canIssueSwarmRootWakeupSessionControl({
   session: swarmLeadership,
   internalOperation: 'swarm_wakeup',
