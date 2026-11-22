@@ -1041,6 +1041,494 @@
       }
     }
 
+    nextMemoryIdempotencyKey() {
+      if (typeof root.crypto?.randomUUID === "function") return root.crypto.randomUUID();
+      return `mem_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    }
+
+    renderResponsibilityMemoryPanel(content, {
+      responsibilityId,
+      context,
+      conflicts,
+      userMemory,
+      episodicMemory,
+      auditData,
+      responsibilityRequest,
+      onBack,
+      onReload,
+    }) {
+      const add = (parent, tag, value, className = '') => {
+        const el = document.createElement(tag);
+        el.textContent = value;
+        if (className) el.className = className;
+        parent.appendChild(el);
+        return el;
+      };
+      const button = (parent, label, action) => {
+        const el = add(parent, 'button', label, 'org-btn org-btn--secondary');
+        el.type = 'button';
+        el.addEventListener('click', action);
+        return el;
+      };
+      const appendProvenanceLine = (parent, item) => {
+        const row = add(parent, 'div', '', 'org-memory-provenance-row');
+        const layer = item.layer || 'project';
+        const sourceType = item.sourceType || (item.sourceKind === 'user' ? 'user_rule' : 'model_inferred');
+        add(row, 'span', `[layer:${layer}]`, `org-memory-badge org-memory-badge--layer-${layer}`);
+        add(row, 'span', `[source:${sourceType}]`, `org-memory-badge org-memory-badge--source-${sourceType}`);
+        if (item.confidence !== undefined && item.confidence !== null) {
+          add(row, 'span', ` conf=${item.confidence}`, 'org-memory-meta-chip');
+        }
+        if (item.validUntil) {
+          add(row, 'span', ` validUntil=${item.validUntil}`, 'org-memory-meta-chip');
+        }
+        if (item.sourceRef) {
+          add(row, 'span', ` ref=${item.sourceRef}`, 'org-memory-meta-chip');
+        }
+        if (sourceType === 'external_untrusted') {
+          add(row, 'span', ' [UNTRUSTED: isolated from policy & user_rule]', 'org-memory-badge org-memory-badge--warning');
+        }
+        return row;
+      };
+
+      content.replaceChildren();
+      if (typeof onBack === 'function') button(content, 'Responsibility', onBack);
+      if (typeof onReload === 'function') button(content, 'Refresh memory', onReload);
+
+      const memory = context?.memory || null;
+      const revisionEnabled = Boolean(context?.revisionEnabled);
+      add(content, 'h3', `Five-Layer Memory & Conflict Governance${memory ? ` · Project v${memory.version}` : ''}`);
+      if (!revisionEnabled) {
+        add(content, 'p', 'Memory writes are currently disabled (RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED is off); read-only inspection and previews remain available.');
+      }
+      add(content, 'p', 'Source provenance and validity are shown as recorded; external_untrusted and model_inferred sources are never promoted to user_rule or Responsibility policy.');
+
+      // 1. Five-layer summary & ranked retrieved items
+      const layers = context?.layers || null;
+      if (layers) {
+        const layerSection = add(content, 'section', '', 'org-memory-layers-section');
+        add(layerSection, 'h4', 'Five-Layer Assembly');
+        for (const layerName of ['user', 'project', 'responsibility', 'episodic', 'working']) {
+          const info = layers[layerName];
+          if (!info) continue;
+          add(layerSection, 'p', `${layerName}: ${info.includedCount ?? (info.items?.length || 0)} included / ${info.totalActive ?? 0} active${info.truncated ? ' (trimmed by budget)' : ''}`);
+        }
+        const retrieval = context?.retrieval;
+        if (retrieval?.budget) {
+          add(layerSection, 'p', `Retrieval budget: ${retrieval.budget.usedTokens}/${retrieval.budget.maxTokens} tokens · ${retrieval.budget.usedBytes}/${retrieval.budget.maxBytes} bytes · excluded untrusted=${retrieval.excludedCounts?.untrusted ?? 0}, expired=${retrieval.excludedCounts?.expired ?? 0}, retracted=${retrieval.excludedCounts?.retractedOrInactive ?? 0}`);
+        }
+        for (const item of (context?.retrievedMemory || []).slice(0, 20)) {
+          const card = add(layerSection, 'div', '', 'org-memory-item-card');
+          add(card, 'p', `${item.factKey || item.id}: ${item.text}`);
+          appendProvenanceLine(card, item);
+        }
+      }
+
+      // 2. Semantic & Cross-Layer Conflict Candidates (Human Review Only)
+      const conflictSection = add(content, 'section', '', 'org-memory-conflicts-section');
+      add(conflictSection, 'h4', 'Semantic & Cross-Layer Conflict Candidates');
+      add(conflictSection, 'p', '以下仅是确定性规则识别的候选冲突，专供人工审阅裁决；模型不会自动裁决真伪或静默删除历史。');
+      const groups = conflicts?.groups || [];
+      if (!groups.length) {
+        add(conflictSection, 'p', 'No semantic or same-key memory conflicts detected.');
+      }
+      for (const group of groups) {
+        const groupBox = add(conflictSection, 'div', '', 'org-memory-conflict-group');
+        const kindLabel = group.kind || 'possible_conflict';
+        const layersLabel = Array.isArray(group.layers) ? group.layers.join(' <-> ') : 'project';
+        add(
+          groupBox,
+          'p',
+          `[${kindLabel}] ${group.factKey} · ${group.reviewed ? '已审阅当前版本' : '待人工审阅'} · layers=${layersLabel}${group.authorityTension ? ' · CROSS-LAYER USER_RULE TENSION' : ''}${group.truncated ? ' · 部分省略' : ''}`,
+        );
+        if (group.conflictReason) {
+          add(groupBox, 'p', `Reason (${group.reasonCode || 'candidate'}): ${group.conflictReason}`);
+        }
+        const groupControls = [];
+        for (const fact of group.facts || []) {
+          const itemBox = add(groupBox, 'div', '', 'org-memory-conflict-fact');
+          add(itemBox, 'p', `${fact.factId} (${fact.factKey}): ${fact.factValue} · v${fact.version ?? fact.currentVersion ?? 1} · ${fact.status || fact.state}`);
+          appendProvenanceLine(itemBox, fact);
+          if (fact.readOnly || fact.layer === 'responsibility_policy') {
+            add(itemBox, 'p', 'Read-only Responsibility policy constraint (cannot be mutated via memory resolution).');
+            groupControls.push({ fact, readOnly: true });
+            continue;
+          }
+          const controlRow = add(itemBox, 'div', '', 'org-memory-control-row');
+          const chosen = document.createElement('input');
+          chosen.type = 'checkbox';
+          chosen.checked = true;
+          const action = document.createElement('select');
+          for (const opt of ['keep', 'correct', 'retract', 'supersede', 'set_valid_until']) {
+            const o = document.createElement('option');
+            o.value = opt;
+            o.textContent = opt;
+            action.appendChild(o);
+          }
+          const valueInput = document.createElement('input');
+          valueInput.placeholder = 'New/replacement value (correct/supersede)';
+          const validUntilInput = document.createElement('input');
+          validUntilInput.placeholder = 'validUntil ISO (set_valid_until)';
+          controlRow.appendChild(chosen);
+          controlRow.appendChild(action);
+          controlRow.appendChild(valueInput);
+          controlRow.appendChild(validUntilInput);
+          groupControls.push({ fact, chosen, action, valueInput, validUntilInput, readOnly: false });
+        }
+        button(groupBox, 'Preview conflict resolution', async () => {
+          try {
+            const selected = groupControls.filter(row => row.readOnly || row.chosen.checked);
+            const changes = selected.map(row => {
+              if (row.readOnly) {
+                return { layer: row.fact.layer, factId: row.fact.factId, action: 'keep' };
+              }
+              const act = row.action.value;
+              const entry = {
+                layer: row.fact.layer,
+                factId: row.fact.factId,
+                action: act,
+                expectedVersion: row.fact.version ?? row.fact.currentVersion,
+              };
+              if (act === 'correct' || (act === 'supersede' && row.valueInput.value.trim())) {
+                entry.value = row.valueInput.value.trim();
+              }
+              if (act === 'set_valid_until') {
+                entry.validUntil = row.validUntilInput.value.trim();
+              }
+              return entry;
+            });
+            if (changes.length < 2) throw new Error('Select at least 2 facts in this conflict group');
+            const body = {
+              factIds: changes.map(c => c.factId),
+              changes,
+              expectedVersion: conflicts.projectVersion ?? conflicts.version ?? 0,
+              expectedProjectVersion: conflicts.projectVersion ?? conflicts.version ?? 0,
+            };
+            const preview = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/conflicts/preview`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const review = add(groupBox, 'section', '', 'org-memory-preview-box');
+            add(review, 'p', `Preview ready (crossStore=${Boolean(preview.preview.crossStore)}; expires=${preview.preview.expiresAt}).`);
+            add(review, 'pre', JSON.stringify({
+              changes: preview.preview.changes,
+              projectedUserFacts: preview.preview.projectedUserFacts,
+              projectedSummary: preview.preview.projectedSummary,
+            }, null, 2));
+            if (!revisionEnabled) {
+              add(review, 'p', 'Memory writes are disabled; commit blocked by default-off gate.');
+              return;
+            }
+            const commit = {
+              ...body,
+              previewDigest: preview.previewDigest,
+              confirmed: true,
+              idempotencyKey: this.nextMemoryIdempotencyKey(),
+            };
+            const submit = async () => {
+              try {
+                const res = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/conflicts/commit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(commit),
+                });
+                add(review, 'p', `Resolution committed (journal=${res.journalId || 'ok'}, projectVersion=${res.projectVersion ?? res.version ?? 0}).`);
+                if (typeof onReload === 'function') await onReload();
+              } catch (err) {
+                add(review, 'p', `Resolution not confirmed: ${err.message}`);
+                button(review, 'Retry same resolution', submit);
+              }
+            };
+            button(review, 'Confirm conflict resolution', submit);
+          } catch (err) {
+            add(groupBox, 'p', `Preview unavailable: ${err.message}`);
+          }
+        });
+      }
+
+      if (conflicts?.truncated || memory?.truncated) {
+        add(conflictSection, 'p', '列表不完整，未显示的事实不能在此选择。');
+      }
+
+      // Free-form multi-fact selection across active facts (preserving legacy workflow)
+      const activeProjectFacts = (memory?.currentFacts || []).filter(fact => fact.state === 'active').map(f => ({ ...f, layer: 'project', version: f.factVersion }));
+      const activeUserFacts = (userMemory?.facts || []).filter(fact => fact.status === 'active').map(f => ({ ...f, factId: f.id, state: f.status, layer: 'user' }));
+      const selectableFacts = [...activeUserFacts, ...activeProjectFacts];
+      if (selectableFacts.length >= 2) {
+        const selections = selectableFacts.map(fact => {
+          const row = add(conflictSection, 'div', '', 'org-memory-manual-row');
+          const chosen = document.createElement('input');
+          chosen.type = 'checkbox';
+          const action = document.createElement('select');
+          for (const option of ['keep', 'correct', 'retract', 'supersede', 'set_valid_until']) {
+            const el = document.createElement('option');
+            el.value = option;
+            el.textContent = option;
+            action.appendChild(el);
+          }
+          const value = document.createElement('input');
+          value.placeholder = '更正/替代值或 validUntil ISO';
+          const textLabel = add(row, 'span', ` [${fact.layer}] ${fact.factId}: ${fact.factValue} `);
+          row.insertBefore(chosen, textLabel);
+          row.appendChild(action);
+          row.appendChild(value);
+          return { fact, chosen, action, value };
+        });
+        button(conflictSection, '预览事实审阅', async () => {
+          try {
+            const selected = selections.filter(row => row.chosen.checked);
+            const changes = selected.map(row => {
+              const act = row.action.value;
+              const entry = { layer: row.fact.layer, factId: row.fact.factId, action: act, expectedVersion: row.fact.version };
+              if (act === 'correct' || (act === 'supersede' && row.value.value.trim())) entry.value = row.value.value.trim();
+              if (act === 'set_valid_until') entry.validUntil = row.value.value.trim();
+              return entry;
+            });
+            if (selected.length < 2 || selected.length > 20 || changes.some(change => change.action === 'correct' && !change.value)) {
+              throw new Error('请选择 2 至 20 项事实并填写更正值');
+            }
+            const body = {
+              factIds: changes.map(change => change.factId),
+              changes,
+              expectedVersion: conflicts?.projectVersion ?? conflicts?.version ?? memory?.version ?? 0,
+              expectedProjectVersion: conflicts?.projectVersion ?? conflicts?.version ?? memory?.version ?? 0,
+            };
+            const preview = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/conflicts/preview`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            const review = add(conflictSection, 'section', '');
+            add(review, 'p', '事实及来源、所选处理和重建结果如下；撤回不等于物理删除。');
+            for (const [label, val] of [
+              ['事实与来源', preview.preview.facts],
+              ['处理', preview.preview.changes],
+              ['原摘要', preview.preview.previousSummary],
+              ['重建正文', preview.preview.projectedContent],
+              ['重建摘要', preview.preview.projectedSummary],
+              ['预览到期', preview.preview.expiresAt],
+            ]) {
+              add(review, 'h4', label);
+              add(review, 'pre', typeof val === 'string' ? val : JSON.stringify(val, null, 2));
+            }
+            if (!revisionEnabled) {
+              add(review, 'p', '记忆写入当前关闭，不能提交。');
+              return;
+            }
+            const commit = { ...body, previewDigest: preview.previewDigest, confirmed: true, idempotencyKey: this.nextMemoryIdempotencyKey() };
+            const submit = async () => {
+              try {
+                const result = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/conflicts/commit`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(commit),
+                });
+                add(review, 'p', `已记录版本 ${result.version}；投影 ${result.projectionState}。`);
+              } catch (err) {
+                add(review, 'p', `未确认：${err.message}`);
+                button(review, '使用同一请求重试', submit);
+              }
+            };
+            button(review, '确认事实审阅', submit);
+          } catch (err) {
+            add(conflictSection, 'p', `预览不可用：${err.message}`);
+          }
+        });
+      }
+
+      // 3. User Memory Section
+      const userSection = add(content, 'section', '', 'org-memory-user-section');
+      add(userSection, 'h4', 'User Memory (Cross-Project Rules & Preferences)');
+      if (revisionEnabled) {
+        button(userSection, 'Add User Memory rule/preference', async () => {
+          const category = root.prompt?.('Category: user_rule, preference, work_habit, or constraint', 'user_rule') || '';
+          if (!['user_rule', 'preference', 'work_habit', 'constraint'].includes(category.trim())) return;
+          const factKey = root.prompt?.('Fact key (e.g. user.preferred_language)', '') || '';
+          const factValue = root.prompt?.('Fact statement/value', '') || '';
+          if (!factValue.trim()) return;
+          const scope = root.prompt?.('Scope: global, project, or responsibility', 'global') || 'global';
+          const validUntilRaw = root.prompt?.('Optional validUntil ISO timestamp (blank for none)', '') || '';
+          const body = {
+            category: category.trim(),
+            sourceType: category.trim() === 'user_rule' ? 'user_rule' : 'user_rule',
+            sourceRef: `owner:ui:${responsibilityId}`,
+            factKey: factKey.trim() || undefined,
+            factValue: factValue.trim(),
+            scope: scope.trim() === 'responsibility'
+              ? { type: 'responsibility', responsibilityId }
+              : scope.trim() === 'project'
+                ? 'project'
+                : 'global',
+            ...(validUntilRaw.trim() ? { validUntil: validUntilRaw.trim() } : {}),
+            idempotencyKey: this.nextMemoryIdempotencyKey(),
+          };
+          if (!root.confirm?.(`Save ${body.category}: ${body.factValue}?`)) return;
+          try {
+            await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/user`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (typeof onReload === 'function') await onReload();
+          } catch (err) {
+            add(userSection, 'p', `Unable to create user memory: ${err.message}`);
+          }
+        });
+      }
+      const userFacts = userMemory?.facts || [];
+      if (!userFacts.length) add(userSection, 'p', 'No User Memory facts recorded for this scope.');
+      for (const u of userFacts) {
+        const card = add(userSection, 'div', '', 'org-memory-user-card');
+        add(card, 'p', `${u.id} · ${u.category} · ${u.factKey}: ${u.factValue} · status=${u.status} · v${u.version}`);
+        appendProvenanceLine(card, { ...u, layer: 'user' });
+        button(card, 'History', async () => {
+          try {
+            const detail = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/user/${encodeURIComponent(u.id)}?includeHistory=1`);
+            add(card, 'pre', JSON.stringify(detail.history || [], null, 2));
+          } catch (err) {
+            add(card, 'p', `History unavailable: ${err.message}`);
+          }
+        });
+        if (revisionEnabled && u.status === 'active') {
+          for (const action of ['revise', 'retract', 'supersede', 'valid-until']) {
+            button(card, action, async () => {
+              const payload = { action: action === 'valid-until' ? 'set_valid_until' : action, expectedVersion: u.version };
+              if (action === 'revise' || action === 'supersede') {
+                const val = root.prompt?.(`New value for ${action}`, u.factValue || '') || '';
+                if (!val.trim()) return;
+                payload.factValue = val.trim();
+              } else if (action === 'valid-until') {
+                const vu = root.prompt?.('validUntil ISO timestamp (blank to clear)', u.validUntil || '') ?? null;
+                if (vu === null) return;
+                payload.validUntil = vu.trim() || null;
+              }
+              try {
+                const preview = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/user/${encodeURIComponent(u.id)}/preview`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(payload),
+                });
+                const review = add(card, 'div', '');
+                add(review, 'pre', JSON.stringify(preview.preview.projectedFact, null, 2));
+                const commitBody = {
+                  ...payload,
+                  previewDigest: preview.previewDigest,
+                  confirmed: true,
+                  idempotencyKey: this.nextMemoryIdempotencyKey(),
+                };
+                button(review, `Confirm user ${action}`, async () => {
+                  try {
+                    await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/user/${encodeURIComponent(u.id)}/${action}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(commitBody),
+                    });
+                    if (typeof onReload === 'function') await onReload();
+                  } catch (err) {
+                    add(review, 'p', `User memory ${action} failed: ${err.message}`);
+                  }
+                });
+              } catch (err) {
+                add(card, 'p', `Preview unavailable: ${err.message}`);
+              }
+            });
+          }
+        }
+      }
+
+      // 4. Project Memory Section
+      const projectSection = add(content, 'section', '', 'org-memory-project-section');
+      if (!memory) {
+        add(projectSection, 'h4', 'Project Memory');
+        add(projectSection, 'p', 'No committed project memory.');
+      } else {
+        add(projectSection, 'h4', `Project Memory · version ${memory.version}`);
+        for (const fact of memory.currentFacts || []) {
+          const card = add(projectSection, 'div', '', 'org-memory-project-card');
+          add(card, 'p', `${fact.factId}: ${fact.factValue || '(retracted)'} · ${fact.state}${fact.contestedBy ? ` · contested by ${fact.contestedBy}` : ''}`);
+          appendProvenanceLine(card, { ...fact, layer: 'project' });
+          for (const source of (memory.facts || []).filter(entry => entry.factId === fact.factId)) {
+            add(card, 'p', `Source: session ${source.sessionId || 'unknown'}, run ${source.runId || 'unknown'}, events ${source.sourceEventStart}-${source.sourceEventEnd}`);
+          }
+          for (const action of revisionEnabled ? ['correct', 'retract', 'supersede', 'valid-until'] : []) {
+            button(card, action, async () => {
+              const reqBody = {
+                action: action === 'valid-until' ? 'set_valid_until' : action,
+                expectedVersion: memory.version,
+              };
+              if (action === 'correct' || action === 'supersede') {
+                const value = root.prompt?.(action === 'correct' ? 'Corrected fact' : 'Replacement fact (optional)', fact.factValue || '');
+                if (action === 'correct' && !value) return;
+                if (value) reqBody.value = value;
+              } else if (action === 'valid-until') {
+                const validUntil = root.prompt?.('validUntil ISO timestamp', fact.validUntil || '') || '';
+                if (!validUntil.trim()) return;
+                reqBody.validUntil = validUntil.trim();
+              }
+              let preview;
+              try {
+                preview = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/facts/${encodeURIComponent(fact.factId)}/preview`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(reqBody),
+                });
+              } catch (err) {
+                add(card, 'p', `Preview unavailable: ${err.message}`);
+                return;
+              }
+              const review = add(card, 'div', '');
+              add(review, 'h4', `Review ${action}: ${fact.factId}`);
+              add(review, 'p', 'Current summary is rebuilt from active facts. Unstructured text remains in history; this is not physical deletion.');
+              add(review, 'pre', preview.preview.projectedSummary);
+              add(review, 'p', `Preview expires ${preview.preview.expiresAt}`);
+              const body = {
+                ...reqBody,
+                previewDigest: preview.previewDigest,
+                confirmed: true,
+                idempotencyKey: this.nextMemoryIdempotencyKey(),
+              };
+              const submit = async () => {
+                try {
+                  const result = await responsibilityRequest(`/${encodeURIComponent(responsibilityId)}/memory/facts/${encodeURIComponent(fact.factId)}/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                  });
+                  add(review, 'p', `Memory version ${result.version}; projection ${result.projectionState}.`);
+                } catch (err) {
+                  add(review, 'p', `Request not confirmed: ${err.message}`);
+                  button(review, 'Retry same request', submit);
+                }
+              };
+              button(review, `Confirm ${action}`, submit);
+            });
+          }
+        }
+        if (memory.truncated) add(projectSection, 'p', 'Some facts or sources are omitted from this view.');
+      }
+
+      // 5. Episodic Memory Section
+      const episodicSection = add(content, 'section', '', 'org-memory-episodic-section');
+      add(episodicSection, 'h4', 'Episodic Memory (Execution Outcomes & Repairs)');
+      const episodes = episodicMemory?.episodes || [];
+      if (!episodes.length) add(episodicSection, 'p', 'No execution episodes recorded yet.');
+      for (const ep of episodes) {
+        const card = add(episodicSection, 'div', '', 'org-memory-episodic-card');
+        add(card, 'p', `[${ep.outcome}] ${ep.summary}${ep.failureRootCause ? ` · Root cause: ${ep.failureRootCause}` : ''}${ep.repairAttempt ? ` · Repair (${ep.repairStatus}): ${ep.repairAttempt}` : ''}`);
+        appendProvenanceLine(card, { ...ep, layer: 'episodic' });
+      }
+
+      // 6. Governance Audit Trail
+      const auditSection = add(content, 'section', '', 'org-memory-audit-section');
+      add(auditSection, 'h4', 'Memory Governance Audit Trail');
+      const auditRows = auditData?.audit || [];
+      if (!auditRows.length) add(auditSection, 'p', 'No memory governance audit entries recorded.');
+      for (const entry of auditRows.slice(0, 20)) {
+        add(auditSection, 'p', `${entry.createdAt} · ${entry.operation} · [${entry.layer}] ${entry.factId} · ${entry.action} (v${entry.previousVersion ?? '-'} -> v${entry.newVersion ?? '-'})`);
+      }
+    }
+
     async showFactoryWork(initialResponsibilityId = '') {
       const organizationId = this.projection?.organizationId;
       if (!organizationId || !this.dom.detailScreen) return;
@@ -1454,65 +1942,30 @@
               submitCommand(proposal.action, { expectedVersion:proposal.expectedVersion, idempotencyKey:root.crypto.randomUUID() });
             } catch (error) { add(content, 'p', `Unable to interpret text: ${error.message}`); }
           });
-          button(content, 'Project memory', async () => {
+          const openMemoryGovernance = async () => {
             try {
-              const context = await responsibilityRequest(`/${encodeURIComponent(id)}/memory`);
-              content.replaceChildren(); button(content, 'Responsibility', () => showResponsibility(id));
-              const memory = context.memory;
-              if (!memory) { add(content, 'p', 'No committed project memory.'); return; }
-              add(content, 'h3', `Project memory · version ${memory.version}`);
-              if (!context.revisionEnabled) add(content, 'p', 'Memory corrections and retractions are currently disabled.');
-              add(content, 'p', 'Source and validity are shown as recorded; unknown sources are not treated as instructions.');
-              try {
-                const conflicts = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts`);
-                add(content,'p','以下仅是可能冲突，并非真假判断；也可从当前事实自行选择。保留双方只针对当前版本。');
-                for (const group of conflicts.groups || []) add(content,'p',`候选 ${group.factKey} · ${group.reviewed ? '已审阅当前版本' : '待审阅'}${group.truncated ? ' · 部分省略' : ''}：${JSON.stringify(group.facts)}`);
-                if (conflicts.truncated || memory.truncated) add(content,'p','列表不完整，未显示的事实不能在此选择。');
-                const selections = (memory.currentFacts || []).filter(fact => fact.state === 'active').map(fact => {
-                  const label=document.createElement('label'), chosen=document.createElement('input'), action=document.createElement('select'), value=document.createElement('input');
-                  chosen.type='checkbox'; for(const option of ['keep','correct','retract']) {const el=document.createElement('option');el.value=option;el.textContent=option;action.appendChild(el);}
-                  value.placeholder='更正后的值（仅更正时）';label.append(chosen,document.createTextNode(` ${fact.factId}: ${fact.factValue} `),action,value);content.appendChild(label);return {fact,chosen,action,value};
-                });
-                button(content,'预览事实审阅',async()=>{try {
-                  const selected=selections.filter(row=>row.chosen.checked), changes=selected.map(row=>({factId:row.fact.factId,action:row.action.value,...(row.action.value==='correct'?{value:row.value.value}: {})}));
-                  if(selected.length<2||selected.length>20||changes.some(change=>change.action==='correct'&&!change.value.trim())) throw new Error('请选择 2 至 20 项事实并填写更正值');
-                  const body={factIds:changes.map(change=>change.factId),changes,expectedVersion:conflicts.version};
-                  const preview=await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts/preview`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-                  const review=add(content,'section','');add(review,'p','事实及来源、所选处理和重建结果如下；撤回不等于物理删除。');
-                  for(const [label,value] of [['事实与来源',preview.preview.facts],['处理',preview.preview.changes],['原摘要',preview.preview.previousSummary],['重建正文',preview.preview.projectedContent],['重建摘要',preview.preview.projectedSummary],['预览到期',preview.preview.expiresAt]]) {add(review,'h4',label);add(review,'pre',typeof value==='string'?value:JSON.stringify(value,null,2));}
-                  if(!context.revisionEnabled) {add(review,'p','记忆写入当前关闭，不能提交。');return;}
-                  const commit={...body,previewDigest:preview.previewDigest,confirmed:true,idempotencyKey:root.crypto.randomUUID()};
-                  const submit=async()=>{try {const result=await responsibilityRequest(`/${encodeURIComponent(id)}/memory/conflicts/commit`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(commit)});add(review,'p',`已记录版本 ${result.version}；投影 ${result.projectionState}。`);}catch(error){add(review,'p',`未确认：${error.message}`);button(review,'使用同一请求重试',submit);}};
-                  button(review,'确认事实审阅',submit);
-                } catch(error) {add(content,'p',`预览不可用：${error.message}`);}});
-              } catch(error) { add(content,'p',`冲突候选不可用：${error.message}`); }
-              for (const fact of memory.currentFacts || []) {
-                add(content, 'p', `${fact.factId}: ${fact.factValue || '(retracted)'} · ${fact.state} · source ${fact.sourceKind}${fact.contestedBy ? ` · contested by ${fact.contestedBy}` : ''}`);
-                for (const source of (memory.facts || []).filter(entry => entry.factId === fact.factId)) add(content, 'p', `Source: session ${source.sessionId || 'unknown'}, run ${source.runId || 'unknown'}, events ${source.sourceEventStart}-${source.sourceEventEnd}`);
-                for (const action of context.revisionEnabled ? ['correct', 'retract'] : []) button(content, action, async () => {
-                  const value = action === 'correct' ? root.prompt('Corrected fact', fact.factValue || '') : '';
-                  if (action === 'correct' && !value) return;
-                  let preview;
-                  try { preview = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/facts/${encodeURIComponent(fact.factId)}/preview`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ action, value, expectedVersion:memory.version }) }); }
-                  catch (error) { add(content, 'p', `Preview unavailable: ${error.message}`); return; }
-                  const review = add(content, 'div', '');
-                  add(review, 'h4', `Review ${action}: ${fact.factId}`);
-                  add(review, 'p', 'Current summary is rebuilt from active facts. Unstructured text remains in history; this is not physical deletion.');
-                  add(review, 'h4', 'Current summary'); add(review, 'pre', preview.preview.previousSummary);
-                  add(review, 'h4', 'Rebuilt summary'); add(review, 'pre', preview.preview.projectedSummary);
-                  add(review, 'h4', 'Rebuilt content'); add(review, 'pre', preview.preview.projectedContent);
-                  add(review, 'p', `Preview expires ${preview.preview.expiresAt}`);
-                  const body = { value, expectedVersion: memory.version, previewDigest:preview.previewDigest, confirmed:true, idempotencyKey: root.crypto.randomUUID() };
-                  const submit = async () => { try {
-                    const result = await responsibilityRequest(`/${encodeURIComponent(id)}/memory/facts/${encodeURIComponent(fact.factId)}/${action}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-                    add(content, 'p', `Memory version ${result.version}; projection ${result.projectionState}.`);
-                  } catch (error) { add(content, 'p', `Request not confirmed: ${error.message}`); button(content, 'Retry same request', submit); } };
-                  button(review, `Confirm ${action}`, submit);
-                });
-              }
-              if (memory.truncated) add(content, 'p', 'Some facts or sources are omitted from this view.');
+              const encoded = encodeURIComponent(id);
+              const [context, conflicts, userMemory, episodicMemory, auditData] = await Promise.all([
+                responsibilityRequest(`/${encoded}/memory`),
+                responsibilityRequest(`/${encoded}/memory/conflicts`).catch(() => ({ groups: [], semanticCandidates: [], version: 0 })),
+                responsibilityRequest(`/${encoded}/memory/user?includeInactive=1&includeExpired=1`).catch(() => ({ facts: [] })),
+                responsibilityRequest(`/${encoded}/memory/episodes`).catch(() => ({ episodes: [] })),
+                responsibilityRequest(`/${encoded}/memory/audit`).catch(() => ({ audit: [] })),
+              ]);
+              this.renderResponsibilityMemoryPanel(content, {
+                responsibilityId: id,
+                context,
+                conflicts,
+                userMemory,
+                episodicMemory,
+                auditData,
+                responsibilityRequest,
+                onBack: () => showResponsibility(id),
+                onReload: openMemoryGovernance,
+              });
             } catch (error) { add(content, 'p', `Memory unavailable: ${error.message}`); }
-          });
+          };
+          button(content, 'Memory & governance', openMemoryGovernance);
           button(content, 'Refresh', () => showResponsibility(id));
         } catch (error) { content.replaceChildren(); add(content, 'p', `Responsibility unavailable: ${error.message}`); button(content, 'Responsibilities', showResponsibilities); }
       };

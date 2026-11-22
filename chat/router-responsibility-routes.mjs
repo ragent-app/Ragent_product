@@ -10,7 +10,20 @@ import { observeGithubFailure } from './github-ci-observer.mjs';
 import { proposeResponsibilityIntent } from './responsibility-intent.mjs';
 import { resolveResponsibilityActor } from './responsibility-actor.mjs';
 import { getResponsibilitySessionContext, setResponsibilitySessionContext } from './responsibility-session-context.mjs';
-import { previewResponsibilityMemory, reviseResponsibilityMemory, listResponsibilityMemoryConflicts, previewResponsibilityMemoryConflict, commitResponsibilityMemoryConflict } from './responsibility-memory.mjs';
+import {
+  previewResponsibilityMemory,
+  reviseResponsibilityMemory,
+  listResponsibilityMemoryConflicts,
+  previewResponsibilityMemoryConflict,
+  commitResponsibilityMemoryConflict,
+  listOwnerUserMemory,
+  getOwnerUserMemoryFact,
+  createOwnerUserMemoryFact,
+  previewUserMemoryRevision,
+  commitUserMemoryRevision,
+  listOwnerEpisodicMemory,
+  listResponsibilityMemoryAudit,
+} from './responsibility-memory.mjs';
 import { getResponsibilityCapabilities } from './responsibility-capabilities.mjs';
 import { captureResponsibilityCodeBaseline } from './responsibility-code-baseline.mjs';
 import { listResponsibilityPlans, approveResponsibilityPlan } from './responsibility-plans.mjs';
@@ -95,19 +108,110 @@ function mutationSourceAllowed(req) {
   const origin=String(req.headers?.origin||''); if(!origin) return true;
   try { const url=new URL(origin); return !url.username && !url.password && url.origin===origin && url.protocol===(req.socket?.encrypted?'https:':'http:') && url.host.toLowerCase()===String(req.headers?.host||'').toLowerCase(); } catch { return false; }
 }
+async function readJsonBodyOrRespond(req, res, writeJson, maxBytes = 65536) {
+  const raw = await readBody(req, maxBytes);
+  try {
+    const parsed = JSON.parse(raw || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      writeJson(res, 400, { error: 'Body must be a JSON object' });
+      return null;
+    }
+    return parsed;
+  } catch {
+    writeJson(res, 400, { error: 'Invalid JSON body' });
+    return null;
+  }
+}
+
 export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
   const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline|observations|external-watermarks|producer-events|goal-revisions))?)?$/.exec(String(pathname||''));
-  const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract)$/.exec(String(pathname||''));
+  const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract|supersede|valid-until)$/.exec(String(pathname||''));
   const memoryConflicts=/^\/api\/responsibilities\/([^/]+)\/memory\/conflicts(?:\/(preview|commit))?$/.exec(String(pathname||''));
+  const ownerUserMemory=/^\/api\/responsibilities\/user-memory(?:\/([^/]+)(?:\/(preview|revise|correct|retract|supersede|valid-until))?)?$/.exec(String(pathname||''));
+  const ownerEpisodicMemory=/^\/api\/responsibilities\/episodic-memory$/.exec(String(pathname||''));
+  const scopedUserMemory=/^\/api\/responsibilities\/([^/]+)\/memory\/user(?:\/([^/]+)(?:\/(preview|revise|correct|retract|supersede|valid-until))?)?$/.exec(String(pathname||''));
+  const scopedEpisodicMemory=/^\/api\/responsibilities\/([^/]+)\/memory\/(episodes|episodic)$/.exec(String(pathname||''));
+  const scopedMemoryAudit=/^\/api\/responsibilities\/([^/]+)\/memory\/audit$/.exec(String(pathname||''));
   const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
   const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||''));
   const plans=/^\/api\/responsibilities\/([^/]+)\/plans(?:\/([^/]+)\/(approve))?$/.exec(String(pathname||''));
   const triggerBinding=/^\/api\/responsibilities\/([^/]+)\/trigger-bindings(?:\/([^/]+)\/(revoke|recover))?$/.exec(String(pathname||''));
-  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!plans&&!notificationBinding&&!triggerBinding) return false;
+  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!ownerUserMemory&&!ownerEpisodicMemory&&!scopedUserMemory&&!scopedEpisodicMemory&&!scopedMemoryAudit&&!plans&&!notificationBinding&&!triggerBinding) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
   const actor=await resolveResponsibilityActor(req,authSession);
   if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
   try {
+    if(ownerUserMemory || scopedUserMemory) {
+      const responsibilityId = scopedUserMemory ? decodeURIComponent(scopedUserMemory[1]) : '';
+      const factId = decodeURIComponent((scopedUserMemory ? scopedUserMemory[2] : ownerUserMemory[1]) || '');
+      const action = (scopedUserMemory ? scopedUserMemory[3] : ownerUserMemory[2]) || '';
+      const reqUrl = new URL(req.url || pathname, 'http://localhost');
+      if (!action && req.method === 'GET') {
+        if (factId) {
+          if (responsibilityId) await getResponsibility(responsibilityId, actor);
+          writeJson(res, 200, await getOwnerUserMemoryFact(factId, actor, { includeHistory: reqUrl.searchParams.get('includeHistory') !== '0' }));
+          return true;
+        }
+        writeJson(res, 200, await listOwnerUserMemory({
+          responsibilityId,
+          projectId: reqUrl.searchParams.get('projectId') || '',
+          scopeType: reqUrl.searchParams.get('scopeType') || '',
+          exactScopeOnly: reqUrl.searchParams.get('exactScopeOnly') === '1',
+          category: reqUrl.searchParams.get('category') || '',
+          sourceType: reqUrl.searchParams.get('sourceType') || '',
+          status: reqUrl.searchParams.get('status') || '',
+          includeInactive: reqUrl.searchParams.get('includeInactive') === '1',
+          includeExpired: reqUrl.searchParams.get('includeExpired') === '1',
+          includeUntrusted: reqUrl.searchParams.get('includeUntrusted') !== '0',
+          keywords: reqUrl.searchParams.get('keywords') || '',
+          limit: Number(reqUrl.searchParams.get('limit') || 100),
+        }, actor));
+        return true;
+      }
+      if (req.method !== 'POST') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+      if (!mutationSourceAllowed(req)) { writeJson(res, 403, { error: 'Owner JSON request required' }); return true; }
+      if (action !== 'preview' && process.env.RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED !== '1') {
+        writeJson(res, 503, { code: 'MEMORY_REVISION_DISABLED', error: 'Memory revision is disabled' });
+        return true;
+      }
+      const body = await readJsonBodyOrRespond(req, res, writeJson, 65536);
+      if (!body) return true;
+      if (!factId && !action) {
+        writeJson(res, 200, await createOwnerUserMemoryFact({ ...body, ...(responsibilityId ? { responsibilityId } : {}) }, actor));
+        return true;
+      }
+      if (!factId || !action) { writeJson(res, 400, { error: 'Fact ID and action are required' }); return true; }
+      if (action === 'preview') {
+        writeJson(res, 200, await previewUserMemoryRevision(factId, body, actor, { responsibilityId }));
+        return true;
+      }
+      writeJson(res, 200, await commitUserMemoryRevision(factId, action, body, actor, { responsibilityId }));
+      return true;
+    }
+    if (ownerEpisodicMemory || scopedEpisodicMemory) {
+      if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+      const reqUrl = new URL(req.url || pathname, 'http://localhost');
+      const responsibilityId = scopedEpisodicMemory ? decodeURIComponent(scopedEpisodicMemory[1]) : (reqUrl.searchParams.get('responsibilityId') || '');
+      writeJson(res, 200, await listOwnerEpisodicMemory({
+        responsibilityId,
+        projectId: reqUrl.searchParams.get('projectId') || '',
+        outcome: reqUrl.searchParams.get('outcome') || '',
+        sourceType: reqUrl.searchParams.get('sourceType') || '',
+        includeExpired: reqUrl.searchParams.get('includeExpired') === '1',
+        includeRetracted: reqUrl.searchParams.get('includeRetracted') === '1',
+        includeUntrusted: reqUrl.searchParams.get('includeUntrusted') === '1',
+        keywords: reqUrl.searchParams.get('keywords') || '',
+        limit: Number(reqUrl.searchParams.get('limit') || 50),
+      }, actor));
+      return true;
+    }
+    if (scopedMemoryAudit) {
+      if (req.method !== 'GET') { writeJson(res, 405, { error: 'Method not allowed' }); return true; }
+      const id = decodeURIComponent(scopedMemoryAudit[1]);
+      const reqUrl = new URL(req.url || pathname, 'http://localhost');
+      writeJson(res, 200, await listResponsibilityMemoryAudit(id, actor, { limit: Number(reqUrl.searchParams.get('limit') || 50) }));
+      return true;
+    }
     if(memoryConflicts) {const id=decodeURIComponent(memoryConflicts[1]),action=memoryConflicts[2];if(!action&&req.method==='GET') {writeJson(res,200,await listResponsibilityMemoryConflicts(id,actor));return true;}if(!action||req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}if(action==='commit'&&process.env.RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED!=='1') {writeJson(res,503,{code:'MEMORY_REVISION_DISABLED',error:'Memory revision is disabled'});return true;}const raw=await readBody(req,65536);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}writeJson(res,200,await (action==='preview'?previewResponsibilityMemoryConflict(id,body,actor):commitResponsibilityMemoryConflict(id,body,actor)));return true;}
     if(triggerBinding) {const id=decodeURIComponent(triggerBinding[1]);if(req.method==='GET'&&!triggerBinding[2]) {writeJson(res,200,await listResponsibilityTriggers(id,actor));return true;}if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}const result=triggerBinding[2]?await changeResponsibilityTrigger(id,decodeURIComponent(triggerBinding[2]),triggerBinding[3],body,actor):await createResponsibilityTrigger(id,body,actor);writeJson(res,200,result);return true;}
     const bearer=req?._bearerAuthSession;
@@ -172,7 +276,17 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
     else if(req.method==='GET'&&id&&!action) {const base=await getResponsibility(id,actor);const stage2=await loadResponsibilityStage2Summary(base.responsibility,actor);result={...base,changeObservation:stage2.changeObservation,producerEvents:stage2.producerEvents,goalRevisionSummary:stage2.goalRevisionSummary};}
     else if(req.method==='GET'&&id&&action==='activity') result=await listResponsibilityActivity(id,{after:Number(url.searchParams.get('after')||0),limit:Number(url.searchParams.get('limit')||100)},actor);
     else if(req.method==='GET'&&id&&action==='context') result=await assembleResponsibilityContext(id,actor);
-    else if(req.method==='GET'&&id&&action==='memory') result={schemaVersion:1,revisionEnabled:process.env.RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED==='1',memory:(await assembleResponsibilityContext(id,actor)).memory};
+    else if(req.method==='GET'&&id&&action==='memory') {
+      const assembled = await assembleResponsibilityContext(id, actor);
+      result = {
+        schemaVersion: 1,
+        revisionEnabled: process.env.RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED === '1',
+        memory: assembled.memory,
+        layers: assembled.layers,
+        retrievedMemory: assembled.retrievedMemory,
+        retrieval: assembled.retrieval,
+      };
+    }
     else if(id&&action==='notifications') {if(req.method==='GET') {const settings=await getResponsibilityNotificationSettings(id,actor),runtimeEnabled=process.env.RAGENT_RESPONSIBILITY_RUNTIME_ENABLED==='1',accountCloudPushAvailable=Boolean(settings.deliveryEnabled&&runtimeEnabled&&settings.accountCloudPush?.configured);result={...settings,runtimeEnabled,deliveryAvailable:settings.deliveryEnabled&&runtimeEnabled,accountCloudPushAvailable,registrationSupported,registrationReason:registrationSupported?'':'A verified paired owner device is required'};}else if(req.method==='PUT'&&mutationSourceAllowed(req)) {const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {throw Object.assign(new Error('Invalid JSON body'),{statusCode:400});}result=await setResponsibilityNotificationSettings(id,body,actor);}else {writeJson(res,405,{error:'Method or request source is not allowed'});return true;}}
     else if((req.method==='POST'&&!id)||(req.method==='PATCH'&&id&&!action)||(req.method==='POST'&&id&&['pause','resume','complete','cancel','archive','wake','github-event'].includes(action))) { if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Request source or content type is not allowed'});return true;} const raw=await readBody(req,64*1024); let body; try {body=JSON.parse(raw||'{}');} catch {throw Object.assign(new Error('Invalid JSON body'),{statusCode:400});} if(!body||typeof body!=='object'||Array.isArray(body)) throw Object.assign(new Error('Body must be an object'),{statusCode:400}); if(!id) result=await createResponsibility(body,actor); else if(!action) result=await updateResponsibility(id,body,actor); else if(action==='wake') result=await wakeResponsibility(id,body,actor); else if(action==='github-event') result=await observeGithubFailure(id,body,actor); else result=await setResponsibilityLifecycle(id,action,body,actor);
     } else {writeJson(res,405,{error:'Method not allowed'});return true;} writeJson(res,200,result);
