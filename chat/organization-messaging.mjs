@@ -381,6 +381,10 @@ export async function appendOrganizationEvent(input = {}) {
     eventId: event.id,
     revision: event.organizationRevision || 0,
   });
+  try {
+    const { captureOrganizationProducerEvent } = await import('./responsibility-trigger-events.mjs');
+    await captureOrganizationProducerEvent(event);
+  } catch {}
   return event;
 }
 

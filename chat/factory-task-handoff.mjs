@@ -21,12 +21,257 @@ function safeFact(value,depth=0) {
     output[key]=safeFact(entry,depth+1);
   } return output;
 }
+function tableExists(db,name) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+}
+function redactSensitiveText(text) {
+  return String(text || '')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]{6,}/gi, '$1[redacted]')
+    .replace(/((?:secret|credential|token|password|private[_-]?key|cookie|api[_-]?key|auth)\s*[:=]\s*)([^\s,;]+)/gi, '$1[redacted]');
+}
+function fitBoundedEntry(entry, maxBytes = 290, trimOrder = ['reconcile_error', 'reconcile_state', 'evidence_ref', 'incident_category', 'reason', 'packet_id', 'incident_id']) {
+  const out = { ...entry };
+  if (Buffer.byteLength(encode(out), 'utf8') <= maxBytes) return out;
+  const textTruncateOrder = new Set(['reason', 'evidence_ref', 'reconcile_error', 'path', 'digest']);
+  for (const key of trimOrder) {
+    if (textTruncateOrder.has(key) && typeof out[key] === 'string' && out[key].length > 48) {
+      out[key] = `${out[key].slice(0, 45)}...`;
+      if (Buffer.byteLength(encode(out), 'utf8') <= maxBytes) return out;
+    }
+  }
+  for (const key of trimOrder) {
+    if (key in out) {
+      if (key === 'reason' && typeof out[key] === 'string' && out[key].length > 24) {
+        out[key] = `${out[key].slice(0, 21)}...`;
+        if (Buffer.byteLength(encode(out), 'utf8') <= maxBytes) return out;
+      }
+      delete out[key];
+      if (Buffer.byteLength(encode(out), 'utf8') <= maxBytes) return out;
+    }
+  }
+  return out;
+}
+function boundedArray(items, limit = 5, maxEntryBytes = 300) {
+  let truncated = items.length > limit;
+  const kept = [];
+  for (const entry of items.slice(0, limit)) {
+    const fitted = fitBoundedEntry(entry, maxEntryBytes);
+    if (Buffer.byteLength(encode(fitted), 'utf8') <= maxEntryBytes) {
+      kept.push(fitted);
+    } else {
+      truncated = true;
+    }
+  }
+  return { kept, truncated };
+}
+export function collectWorkerFailureHandoffEvidence(db, organizationId, workItemId) {
+  const hasBindings = tableExists(db, 'factory_execution_bindings');
+  const hasAttempts = tableExists(db, 'collaboration_attempts');
+  const bindingRows = hasBindings
+    ? db.prepare('SELECT id,contract_revision,execution_epoch,binding_generation,status,collaboration_id,task_id,attempt_id,run_id,details_json,updated_at FROM factory_execution_bindings WHERE work_item_id=? ORDER BY execution_epoch DESC,id DESC LIMIT 51').all(workItemId)
+    : [];
+  const attemptRows = (hasBindings && hasAttempts)
+    ? db.prepare(`SELECT a.id,a.run_id,a.task_id,a.state,a.failure_kind,a.failure_reason,a.result_packet_id,a.report_json,a.created_at,
+        b.id AS binding_id,b.status AS binding_status,b.execution_epoch,b.binding_generation,b.details_json AS binding_details_json
+      FROM factory_execution_bindings b
+      LEFT JOIN collaboration_attempts a ON a.id=b.attempt_id
+      WHERE b.work_item_id=? AND (a.state='failed' OR b.status IN ('failed','unknown') OR a.failure_kind IS NOT NULL)
+      ORDER BY COALESCE(a.created_at, b.updated_at) DESC, b.id DESC LIMIT 51`).all(workItemId)
+    : [];
+
+  const runIds = new Set();
+  const attemptIds = new Set();
+  const taskIds = new Set([workItemId]);
+  for (const b of bindingRows) {
+    if (b.run_id) runIds.add(b.run_id);
+    if (b.attempt_id) attemptIds.add(b.attempt_id);
+    if (b.task_id) taskIds.add(b.task_id);
+  }
+  for (const a of attemptRows) {
+    if (a.run_id) runIds.add(a.run_id);
+    if (a.id) attemptIds.add(a.id);
+    if (a.task_id) taskIds.add(a.task_id);
+  }
+
+  let incidentRows = [];
+  if (tableExists(db, 'agent_interruption_incidents')) {
+    const incCols = new Set(db.prepare('PRAGMA table_info(agent_interruption_incidents)').all().map(c => c.name));
+    const reportedExpr = incCols.has('reported_code') ? 'reported_code' : "'' AS reported_code";
+    const conditions = [];
+    const params = [];
+    if (runIds.size) {
+      const list = [...runIds];
+      conditions.push(`run_id IN (${list.map(() => '?').join(',')})`);
+      params.push(...list);
+    }
+    if (attemptIds.size) {
+      const list = [...attemptIds];
+      conditions.push(`attempt_id IN (${list.map(() => '?').join(',')})`);
+      params.push(...list);
+    }
+    if (taskIds.size) {
+      const list = [...taskIds];
+      conditions.push(`task_id IN (${list.map(() => '?').join(',')})`);
+      params.push(...list);
+    }
+    if (conditions.length) {
+      incidentRows = db.prepare(`SELECT id,run_id,attempt_id,task_id,category,source,confidence,evidence_ref,side_effects,occurred_at,delivery_state,acknowledged_at,resolved_at,${reportedExpr}
+        FROM agent_interruption_incidents
+        WHERE organization_id=? AND (${conditions.join(' OR ')})
+        ORDER BY occurred_at DESC, id DESC LIMIT 51`).all(organizationId, ...params);
+    }
+  }
+
+  let nativeInterruptions = [];
+  if (tableExists(db, 'native_member_interruptions') && runIds.size) {
+    const list = [...runIds];
+    nativeInterruptions = db.prepare(`SELECT id,run_id,member_id,provider,state,occurred_at,delivery_state,resolved_at
+      FROM native_member_interruptions
+      WHERE organization_id=? AND run_id IN (${list.map(() => '?').join(',')})
+      ORDER BY occurred_at DESC, id DESC LIMIT 51`).all(organizationId, ...list);
+  }
+
+  const reconciliationRows = tableExists(db, 'factory_reconciliation_failures')
+    ? db.prepare('SELECT execution_epoch,failures,state,error_code,next_attempt_at,updated_at FROM factory_reconciliation_failures WHERE organization_id=? AND work_item_id=? ORDER BY execution_epoch DESC LIMIT 51').all(organizationId, workItemId)
+    : [];
+
+  const incidentByRunId = new Map();
+  const incidentByAttemptId = new Map();
+  for (const inc of incidentRows) {
+    if (inc.run_id && !incidentByRunId.has(inc.run_id)) incidentByRunId.set(inc.run_id, inc);
+    if (inc.attempt_id && !incidentByAttemptId.has(inc.attempt_id)) incidentByAttemptId.set(inc.attempt_id, inc);
+  }
+  const reconByEpoch = new Map();
+  for (const rf of reconciliationRows) {
+    if (!reconByEpoch.has(rf.execution_epoch)) reconByEpoch.set(rf.execution_epoch, rf);
+  }
+
+  const failureEntries = [];
+  const seenFailureRunOrIds = new Set();
+  for (const row of attemptRows) {
+    const bDetails = decode(row.binding_details_json, {});
+    const inc = (row.id && incidentByAttemptId.get(row.id)) || (row.run_id && incidentByRunId.get(row.run_id)) || null;
+    const recon = reconByEpoch.get(row.execution_epoch) || null;
+    const packetId = row.result_packet_id || (typeof bDetails?.packetId === 'string' ? bDetails.packetId : '') || '';
+    const failureKind = row.failure_kind || (row.binding_status === 'unknown' ? 'unknown_outcome' : 'execution_failed');
+    const rawReason = row.failure_reason || bDetails?.error || bDetails?.reason || '';
+    const entry = {
+      id: row.id || row.binding_id,
+      run_id: row.run_id || null,
+      failure_kind: failureKind,
+      ...(packetId ? { packet_id: packetId } : {}),
+      ...(inc ? { incident_id: inc.id, incident_category: inc.category } : {}),
+      ...(inc?.evidence_ref ? { evidence_ref: redactSensitiveText(String(inc.evidence_ref).slice(0, 96)) } : {}),
+      ...(recon ? { reconcile_state: recon.state, reconcile_error: redactSensitiveText(String(recon.error_code || '').slice(0, 64)) } : {}),
+      ...(rawReason ? { reason: redactSensitiveText(String(rawReason).slice(0, 120)) } : {}),
+    };
+    failureEntries.push(fitBoundedEntry(entry, 290));
+    if (row.run_id) seenFailureRunOrIds.add(row.run_id);
+    if (row.id) seenFailureRunOrIds.add(row.id);
+    if (row.binding_id) seenFailureRunOrIds.add(row.binding_id);
+  }
+
+  // Ensure orphan interruption incidents (e.g. Run crashed before collaboration_attempts updated) are surfaced as failure evidence.
+  for (const inc of incidentRows) {
+    if ((inc.run_id && seenFailureRunOrIds.has(inc.run_id)) || (inc.attempt_id && seenFailureRunOrIds.has(inc.attempt_id))) continue;
+    const unknownSideEffects = inc.category === 'unknown_outcome' || (!inc.resolved_at && String(inc.side_effects || '').toLowerCase() === 'unknown');
+    failureEntries.push(fitBoundedEntry({
+      id: inc.attempt_id || inc.id,
+      run_id: inc.run_id || null,
+      failure_kind: unknownSideEffects ? 'unknown_outcome' : (inc.category || 'interrupted'),
+      incident_id: inc.id,
+      incident_category: inc.category,
+      ...(inc.evidence_ref ? { evidence_ref: redactSensitiveText(String(inc.evidence_ref).slice(0, 96)) } : {}),
+    }, 290));
+  }
+
+  const incidentRefs = [
+    ...incidentRows.map(inc => fitBoundedEntry({
+      kind: 'agent_interruption',
+      id: inc.id,
+      run_id: inc.run_id || null,
+      category: inc.category,
+      source: inc.source,
+      confidence: inc.confidence,
+      side_effects: inc.side_effects,
+      delivery_state: inc.delivery_state,
+      resolved_at: inc.resolved_at || null,
+      evidence_ref: redactSensitiveText(String(inc.evidence_ref || '').slice(0, 96)),
+      ...(inc.reported_code ? { reported_code: redactSensitiveText(String(inc.reported_code).slice(0, 48)) } : {}),
+    }, 290, ['evidence_ref', 'reported_code', 'source', 'confidence'])),
+    ...nativeInterruptions.map(ni => fitBoundedEntry({
+      kind: 'native_member_interruption',
+      id: ni.id,
+      run_id: ni.run_id,
+      member_id: ni.member_id,
+      provider: ni.provider,
+      state: ni.state,
+      delivery_state: ni.delivery_state,
+      resolved_at: ni.resolved_at || null,
+    }, 290, ['provider', 'member_id'])),
+  ];
+
+  const reconciliationFailures = reconciliationRows.map(rf => fitBoundedEntry({
+    execution_epoch: rf.execution_epoch,
+    failures: rf.failures,
+    state: rf.state,
+    error_code: redactSensitiveText(String(rf.error_code || '').slice(0, 64)),
+    next_attempt_at: rf.next_attempt_at || null,
+  }, 290, ['error_code', 'next_attempt_at']));
+
+  const artifactRefs = [];
+  const seenArtifacts = new Set();
+  const pushArtifact = (ref) => {
+    const key = encode(ref);
+    if (seenArtifacts.has(key)) return;
+    seenArtifacts.add(key);
+    artifactRefs.push(fitBoundedEntry(ref, 290, ['path', 'evidence_ref', 'handoff_id', 'digest']));
+  };
+  for (const row of attemptRows) {
+    const bDetails = decode(row.binding_details_json, {});
+    const report = decode(row.report_json, {});
+    const packetId = row.result_packet_id || (typeof bDetails?.packetId === 'string' ? bDetails.packetId : '');
+    if (packetId) pushArtifact({ kind: 'result_packet', packet_id: packetId, run_id: row.run_id || null });
+    if (typeof bDetails?.handoffId === 'string' && bDetails.handoffId) {
+      pushArtifact({ kind: 'worker_handoff', handoff_id: bDetails.handoffId, run_id: row.run_id || null });
+    }
+    const extraRefs = Array.isArray(bDetails?.artifactRefs) ? bDetails.artifactRefs : (Array.isArray(report?.evidenceRefs) ? report.evidenceRefs : []);
+    for (const ref of extraRefs.slice(0, 10)) {
+      if (typeof ref === 'string' && ref.trim()) {
+        pushArtifact({ kind: 'artifact_ref', evidence_ref: redactSensitiveText(ref.trim().slice(0, 120)), run_id: row.run_id || null });
+      }
+    }
+  }
+  for (const inc of incidentRows) {
+    if (inc.evidence_ref) {
+      pushArtifact({ kind: 'incident_evidence', incident_id: inc.id, evidence_ref: redactSensitiveText(String(inc.evidence_ref).slice(0, 120)), run_id: inc.run_id || null });
+    }
+  }
+
+  const unknownExecution = Boolean(
+    bindingRows.some(b => b.status === 'unknown')
+    || failureEntries.some(f => f.failure_kind === 'unknown_outcome')
+    || incidentRows.some(inc => inc.category === 'unknown_outcome' || (!inc.resolved_at && String(inc.side_effects || '').toLowerCase() === 'unknown'))
+    || reconciliationRows.some(rf => rf.state === 'exhausted' || rf.state === 'dead_letter')
+  );
+
+  return {
+    failures: failureEntries.slice(0, 50),
+    incidentRefs: incidentRefs.slice(0, 50),
+    reconciliationFailures: reconciliationFailures.slice(0, 50),
+    artifactRefs: artifactRefs.slice(0, 50),
+    unknownExecution,
+    autoRedispatchForbidden: unknownExecution,
+    truncated: failureEntries.length > 50 || incidentRefs.length > 50 || reconciliationRows.length > 50 || artifactRefs.length > 50,
+  };
+}
 function sourceRefs(db,organizationId,workItemId,contractRevision,executionEpoch,{skipMessages=false}={}) {
   const dependencies=db.prepare('SELECT predecessor_id,milestone,candidate_digest FROM factory_dependencies WHERE successor_id=? ORDER BY predecessor_id LIMIT 101').all(workItemId);
   const bindings=db.prepare('SELECT id,contract_revision,execution_epoch,binding_generation,status,attempt_id,run_id FROM factory_execution_bindings WHERE work_item_id=? ORDER BY execution_epoch DESC,id LIMIT 51').all(workItemId);
   const candidates=db.prepare('SELECT id,digest,contract_revision,execution_epoch FROM factory_candidates WHERE work_item_id=? ORDER BY created_at DESC,id LIMIT 51').all(workItemId);
   const decisions=db.prepare('SELECT id,criterion_id,decision,candidate_digest,contract_revision FROM factory_acceptance_decisions WHERE work_item_id=? ORDER BY created_at DESC,id LIMIT 51').all(workItemId);
-  const failures=db.prepare("SELECT a.id,a.run_id,a.failure_kind FROM factory_execution_bindings b JOIN collaboration_attempts a ON a.id=b.attempt_id WHERE b.work_item_id=? AND a.state='failed' ORDER BY a.created_at DESC,a.id DESC LIMIT 51").all(workItemId);
+  const failureEvidence=collectWorkerFailureHandoffEvidence(db,organizationId,workItemId);
+  const failures=failureEvidence.failures;
   const hasMessages=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_team_messages'").get();
   const hasReplies=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_team_replies'").get();
   const hasRespondBy=hasMessages && db.prepare('PRAGMA table_info(organization_team_messages)').all().some(c=>c.name==='respond_by');
@@ -34,14 +279,30 @@ function sourceRefs(db,organizationId,workItemId,contractRevision,executionEpoch
   const hasRelations=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_team_relations'").get();
   const hasChanges=db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_team_relation_changes'").get();
   const relationVersion=hasRelations ? (hasChanges ? db.prepare('SELECT MAX(version) AS version FROM (SELECT version FROM organization_team_relations WHERE organization_id=? UNION ALL SELECT version FROM organization_team_relation_changes WHERE organization_id=?)').get(organizationId,organizationId).version : db.prepare('SELECT MAX(version) AS version FROM organization_team_relations WHERE organization_id=?').get(organizationId).version) || 0 : 0;
-  return {workItemId,contractRevision,executionEpoch,relationVersion,dependencies:dependencies.slice(0,100),bindings:bindings.slice(0,50),candidates:candidates.slice(0,50),decisions:decisions.slice(0,50),failures:failures.slice(0,50),unansweredMessageRefs:hasMessages && hasReplies ? questions.slice(0,50) : 'unknown',remainingBudget:'unknown',truncated:dependencies.length>100||bindings.length>50||candidates.length>50||decisions.length>50||failures.length>50||questions.length>50};
+  return {
+    workItemId,
+    contractRevision,
+    executionEpoch,
+    relationVersion,
+    dependencies:dependencies.slice(0,100),
+    bindings:bindings.slice(0,50),
+    candidates:candidates.slice(0,50),
+    decisions:decisions.slice(0,50),
+    failures:failures.slice(0,50),
+    incidentRefs:failureEvidence.incidentRefs.slice(0,50),
+    reconciliationFailures:failureEvidence.reconciliationFailures.slice(0,50),
+    artifactRefs:failureEvidence.artifactRefs.slice(0,50),
+    unansweredMessageRefs:hasMessages && hasReplies ? questions.slice(0,50) : 'unknown',
+    remainingBudget:'unknown',
+    truncated:dependencies.length>100||bindings.length>50||candidates.length>50||decisions.length>50||failureEvidence.truncated||questions.length>50,
+  };
 }
 function workerRefs(db,organizationId,workItemId,contractRevision,executionEpoch,nodeId) {
   const refs=sourceRefs(db,organizationId,workItemId,contractRevision,executionEpoch,{skipMessages:true});
-  for (const key of ['dependencies','bindings','candidates','decisions','failures']) {
-    if (refs[key].length>5) refs.truncated=true;
-    refs[key]=refs[key].slice(0,5);
-    refs[key]=refs[key].filter(entry=>{ const fits=Buffer.byteLength(encode(entry),'utf8')<=300; if(!fits) refs.truncated=true; return fits; });
+  for (const key of ['dependencies','bindings','candidates','decisions','failures','incidentRefs','reconciliationFailures','artifactRefs']) {
+    const { kept, truncated } = boundedArray(Array.isArray(refs[key]) ? refs[key] : [], 5, 300);
+    if (truncated) refs.truncated = true;
+    refs[key] = kept;
   }
   if (Array.isArray(refs.unansweredMessageRefs)) {
     const hasRespondBy=db.prepare('PRAGMA table_info(organization_team_messages)').all().some(c=>c.name==='respond_by');
@@ -90,13 +351,43 @@ function publicHandoff(db,row,item,org) {
   const limited=!!(live && item.row_version===row.row_version && (encode(facts.contract)!==encode(live.contract) || encode(facts.blockedReason)!==encode(live.blockedReason)));
   const truncated=!!(facts.sourceRefs?.truncated || current?.truncated || facts.contractTruncated || facts.blockedReasonTruncated || limited);
   const unavailable=!facts.sourceRefs || facts.sourceRefs.unansweredMessageRefs==='unknown' || current?.unansweredMessageRefs==='unknown';
-  const unknownExecution=!!(current?.bindings?.some(binding=>binding.status==='unknown') || current?.failures?.some(failure=>failure.failure_kind==='unknown_outcome'));
+  const unknownExecution=Boolean(
+    current?.bindings?.some(binding=>binding.status==='unknown')
+    || current?.failures?.some(failure=>failure.failure_kind==='unknown_outcome')
+    || current?.incidentRefs?.some(inc=>inc.category==='unknown_outcome' || (!inc.resolved_at && String(inc.side_effects || '').toLowerCase()==='unknown'))
+    || current?.reconciliationFailures?.some(rf=>rf.state==='exhausted' || rf.state==='dead_letter')
+  );
   if(truncated) reasons.push('source_data_truncated');
   if(unavailable) reasons.push('source_data_unavailable');
   if(unknownExecution) reasons.push('execution_outcome_unknown');
   const stale=!item || (!facts.workerScope && facts.sourceRefs?.truncated === true) || item.row_version!==row.row_version || item.contract_revision!==row.contract_revision || item.execution_epoch!==row.execution_epoch || org?.current_revision!==row.organization_revision || (facts.workerScope && (item.assignee_node_id!==facts.workerScope.nodeId || item.binding_generation!==facts.workerScope.bindingGeneration)) || JSON.stringify(current)!==JSON.stringify(facts.sourceRefs);
   const assessment=truncated||unavailable||unknownExecution||!item||!org?'unknown':stale?'stale':'current';
-  return {id:row.id,organizationId:row.organization_id,workItemId:row.work_item_id,contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,organizationRevision:row.organization_revision,asOf:row.created_at,sourceVersion:row.row_version,stale,staleReasons:reasons,assessment,assessesExecutionSafety:false,freshness:facts.workerScope && (facts.sourceRefs?.truncated || facts.contractTruncated || facts.blockedReasonTruncated)?'unknown_truncated':'checked',facts,schemaVersion:1};
+  const failureEvidence = current ? {
+    failures: current.failures || [],
+    incidentRefs: current.incidentRefs || [],
+    reconciliationFailures: current.reconciliationFailures || [],
+    artifactRefs: current.artifactRefs || [],
+  } : null;
+  return {
+    id:row.id,
+    organizationId:row.organization_id,
+    workItemId:row.work_item_id,
+    contractRevision:row.contract_revision,
+    executionEpoch:row.execution_epoch,
+    organizationRevision:row.organization_revision,
+    asOf:row.created_at,
+    sourceVersion:row.row_version,
+    stale,
+    staleReasons:reasons,
+    assessment,
+    assessesExecutionSafety:false,
+    unknownExecution,
+    autoRedispatchForbidden:unknownExecution,
+    failureEvidence,
+    freshness:facts.workerScope && (facts.sourceRefs?.truncated || facts.contractTruncated || facts.blockedReasonTruncated)?'unknown_truncated':'checked',
+    facts,
+    schemaVersion:1,
+  };
 }
 
 // Internal dispatch path only. The caller must enforce the scheduler lease and
@@ -159,4 +450,7 @@ export async function createFactoryTaskHandoff(input,actor) {
 }
 export async function getFactoryTaskHandoff(organizationId,id,actor) {
   return factoryRead(db=>{ schema(db); const org=authorize(db,organizationId,actor,'factory.read'); const row=db.prepare('SELECT * FROM factory_task_handoffs WHERE id=? AND organization_id=?').get(id,organizationId); if(!row) throw factoryError('FACTORY_NOT_FOUND','Handoff not found',404); return publicHandoff(db,row,selectItem(db,organizationId,row.work_item_id),org); });
+}
+export async function getWorkerFailureHandoffEvidence(organizationId,workItemId,actor) {
+  return factoryRead(db=>{ schema(db); authorize(db,organizationId,actor,'factory.read'); selectItem(db,organizationId,workItemId); return { schemaVersion: 1, organizationId, workItemId, ...collectWorkerFailureHandoffEvidence(db,organizationId,workItemId) }; });
 }

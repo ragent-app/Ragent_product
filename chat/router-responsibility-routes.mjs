@@ -1,5 +1,6 @@
 import { readBody } from '../lib/utils.mjs';
-import { createResponsibility, listResponsibilities, getResponsibility, updateResponsibility, setResponsibilityLifecycle, listResponsibilityActivity } from './responsibility-service.mjs';
+import { read } from './responsibility-store.mjs';
+import { createResponsibility, listResponsibilities, getResponsibility, updateResponsibility, setResponsibilityLifecycle, listResponsibilityActivity, listResponsibilityWorkLinks } from './responsibility-service.mjs';
 import { wakeResponsibility } from './responsibility-events.mjs';
 import { assembleResponsibilityContext } from './responsibility-context.mjs';
 import { getRun } from './runs.mjs';
@@ -15,6 +16,78 @@ import { captureResponsibilityCodeBaseline } from './responsibility-code-baselin
 import { listResponsibilityPlans, approveResponsibilityPlan } from './responsibility-plans.mjs';
 import { registerResponsibilityNotificationSubscription, revokeResponsibilityNotificationSubscription, getResponsibilityNotificationSettings, setResponsibilityNotificationSettings } from './responsibility-notifications.mjs';
 import { createResponsibilityTrigger, listResponsibilityTriggers, changeResponsibilityTrigger } from './responsibility-trigger-bridge.mjs';
+import { recordExternalResourceWatermark, listExternalResourceWatermarks } from './responsibility-git-observation.mjs';
+import { listProducerTriggerEvents } from './responsibility-trigger-events.mjs';
+import { getFactoryGoalRevisionArtifacts } from './factory-goal-revision.mjs';
+
+async function loadResponsibilityStage2Summary(responsibility, actor) {
+  const [watermarks, links] = await Promise.all([
+    listExternalResourceWatermarks(responsibility.id),
+    listResponsibilityWorkLinks(responsibility.id, actor).catch(() => ({ links: [] })),
+  ]);
+  const dbSummary = await read(db => {
+    const org = db.prepare('SELECT root_session_id FROM organizations WHERE id=?').get(responsibility.organizationId);
+    const rootSessionId = org?.root_session_id || '';
+    const latestObs = db.prepare('SELECT * FROM responsibility_change_observations WHERE responsibility_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1').get(responsibility.id);
+    const skipCount = db.prepare("SELECT COUNT(*) AS n FROM responsibility_change_observations WHERE responsibility_id=? AND outcome='no_change_skipped'").get(responsibility.id).n;
+    const producerCount = db.prepare('SELECT COUNT(*) AS n, COALESCE(MAX(sequence),0) AS max_seq FROM responsibility_producer_events WHERE organization_id=? OR session_id=?').get(responsibility.organizationId, rootSessionId);
+    const retention = db.prepare('SELECT min_available_sequence,max_pruned_occurred_at,pruned_count,last_pruned_at FROM responsibility_producer_event_retention WHERE id=1').get();
+    return {
+      rootSessionId,
+      latestObservation: latestObs ? {
+        wakeId: latestObs.wake_id,
+        outcome: latestObs.outcome,
+        baselineWakeId: latestObs.baseline_wake_id || null,
+        fingerprintDigest: latestObs.fingerprint_digest,
+        gitDigest: latestObs.git_digest || null,
+        workspaceDigest: latestObs.workspace_digest || null,
+        externalDigest: latestObs.external_digest || null,
+        details: JSON.parse(latestObs.details_json || '{}'),
+        createdAt: latestObs.created_at,
+      } : null,
+      noChangeSkipCount: Number(skipCount || 0),
+      producerEvents: {
+        totalCount: Number(producerCount?.n || 0),
+        latestSequence: Number(producerCount?.max_seq || 0),
+        retention: retention ? {
+          minAvailableSequence: Number(retention.min_available_sequence || 0),
+          maxPrunedOccurredAt: retention.max_pruned_occurred_at || null,
+          prunedCount: Number(retention.pruned_count || 0),
+          lastPrunedAt: retention.last_pruned_at || null,
+        } : { minAvailableSequence: 0, maxPrunedOccurredAt: null, prunedCount: 0, lastPrunedAt: null },
+      },
+    };
+  });
+  const goalIds = [...new Set((links.links || []).map(l => l.goalId).filter(Boolean))];
+  const goals = [];
+  for (const goalId of goalIds) {
+    try {
+      const info = await getFactoryGoalRevisionArtifacts({ organizationId: responsibility.organizationId, goalId }, actor);
+      goals.push({
+        goalId: info.goal.id,
+        goalRevision: info.goal.revision,
+        invalidatedCount: info.invalidatedItems.length,
+        reusableArtifactCount: info.reusableArtifacts.length,
+        reusableWorkItemIds: info.reusableArtifacts.map(a => a.workItemId),
+      });
+    } catch {}
+  }
+  return {
+    changeObservation: {
+      latest: dbSummary.latestObservation,
+      noChangeSkipCount: dbSummary.noChangeSkipCount,
+      externalWatermarkCount: watermarks.length,
+      externalWatermarks: watermarks,
+    },
+    producerEvents: dbSummary.producerEvents,
+    goalRevisionSummary: {
+      goals,
+      totalInvalidatedItems: goals.reduce((n, g) => n + g.invalidatedCount, 0),
+      totalReusableArtifacts: goals.reduce((n, g) => n + g.reusableArtifactCount, 0),
+    },
+    rootSessionId: dbSummary.rootSessionId,
+  };
+}
 
 function mutationSourceAllowed(req) {
   if(!/^application\/json(?:\s*;|\s*$)/i.test(String(req.headers?.['content-type']||''))) return false;
@@ -23,7 +96,7 @@ function mutationSourceAllowed(req) {
   try { const url=new URL(origin); return !url.username && !url.password && url.origin===origin && url.protocol===(req.socket?.encrypted?'https:':'http:') && url.host.toLowerCase()===String(req.headers?.host||'').toLowerCase(); } catch { return false; }
 }
 export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
-  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline))?)?$/.exec(String(pathname||''));
+  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline|observations|external-watermarks|producer-events|goal-revisions))?)?$/.exec(String(pathname||''));
   const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract)$/.exec(String(pathname||''));
   const memoryConflicts=/^\/api\/responsibilities\/([^/]+)\/memory\/conflicts(?:\/(preview|commit))?$/.exec(String(pathname||''));
   const review=/^\/api\/runs\/([^/]+)\/email-targets\/([^/]+)\/manual-review$/.exec(String(pathname||''));
@@ -54,8 +127,49 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
     if(match?.[1]==='intent'&&!match[2]) { if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await proposeResponsibilityIntent({text:body?.text,responsibilityId:body?.responsibilityId},actor));return true; }
     const id=match[1]?decodeURIComponent(match[1]):'', action=match[2]||'', url=new URL(req.url||pathname,'http://localhost'); let result;
     if(action==='code-baseline') {if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const current=await getResponsibility(id,actor);writeJson(res,200,{schemaVersion:1,baseline:await captureResponsibilityCodeBaseline(current.responsibility.organizationId,current.responsibility.projectId)});return true;}
+    if(id&&action==='observations') {
+      if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      const current=await getResponsibility(id,actor);
+      const watermarks=await listExternalResourceWatermarks(id);
+      const rows=await read(db=>({
+        changeObservations:db.prepare('SELECT * FROM responsibility_change_observations WHERE responsibility_id=? ORDER BY created_at DESC, rowid DESC LIMIT 50').all(id).map(r=>({wakeId:r.wake_id,responsibilityRevision:r.responsibility_revision,policyRevision:r.policy_revision,catalogDigest:r.catalog_digest,decisionId:r.decision_id||null,projectFactId:r.project_fact_id,observationKind:r.observation_kind,outcome:r.outcome,baselineWakeId:r.baseline_wake_id||null,fingerprintDigest:r.fingerprint_digest,gitDigest:r.git_digest||null,workspaceDigest:r.workspace_digest||null,externalDigest:r.external_digest||null,details:JSON.parse(r.details_json||'{}'),createdAt:r.created_at})),
+        gitObservations:db.prepare('SELECT * FROM responsibility_git_observations WHERE responsibility_id=? ORDER BY created_at DESC, rowid DESC LIMIT 50').all(id).map(r=>({wakeId:r.wake_id,decisionId:r.decision_id,projectFactId:r.project_fact_id,observationDigest:r.observation_digest,observation:JSON.parse(r.observation_json||'{}'),createdAt:r.created_at})),
+      }));
+      writeJson(res,200,{schemaVersion:1,responsibilityId:current.responsibility.id,externalWatermarks:watermarks,...rows});
+      return true;
+    }
+    if(id&&action==='external-watermarks') {
+      if(req.method==='GET') {await getResponsibility(id,actor);writeJson(res,200,{schemaVersion:1,responsibilityId:id,watermarks:await listExternalResourceWatermarks(id)});return true;}
+      if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
+      await getResponsibility(id,actor);
+      const raw=await readBody(req,16384);let body;try {body=JSON.parse(raw||'{}');}catch {writeJson(res,400,{error:'Invalid JSON body'});return true;}
+      const watermark=await recordExternalResourceWatermark({responsibilityId:id,source:body?.source,resourceKey:body?.resourceKey,watermarkValue:body?.watermarkValue,observedAt:body?.observedAt,metadata:body?.metadata||{}});
+      writeJson(res,200,{schemaVersion:1,watermark});return true;
+    }
+    if(id&&action==='producer-events') {
+      if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      const current=await getResponsibility(id,actor);
+      const afterSequence=Number(url.searchParams.get('afterSequence')||0);
+      const limit=Number(url.searchParams.get('limit')||100);
+      const eventType=url.searchParams.get('eventType')||'';
+      const org=await read(db=>db.prepare('SELECT root_session_id FROM organizations WHERE id=?').get(current.responsibility.organizationId));
+      const byOrg=await listProducerTriggerEvents({organizationId:current.responsibility.organizationId,eventType,afterSequence,limit});
+      const bySess=org?.root_session_id?await listProducerTriggerEvents({sessionId:org.root_session_id,eventType,afterSequence,limit}):{events:[],nextSequence:afterSequence,retention:byOrg.retention,cursorGapDetected:false};
+      const merged=new Map();for(const ev of [...byOrg.events,...bySess.events]) merged.set(ev.sequence,ev);
+      const events=[...merged.values()].sort((a,b)=>a.sequence-b.sequence).slice(0,Math.max(1,Math.min(limit||100,500)));
+      writeJson(res,200,{schemaVersion:1,responsibilityId:id,events,nextSequence:events.length?events.at(-1).sequence:afterSequence,retention:byOrg.retention,cursorGapDetected:byOrg.cursorGapDetected||bySess.cursorGapDetected});
+      return true;
+    }
+    if(id&&action==='goal-revisions') {
+      if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      const current=await getResponsibility(id,actor);
+      const links=await listResponsibilityWorkLinks(id,actor);
+      const goalIds=[...new Set((links.links||[]).map(l=>l.goalId).filter(Boolean))];
+      const goals=[];for(const gid of goalIds) {try {goals.push(await getFactoryGoalRevisionArtifacts({organizationId:current.responsibility.organizationId,goalId:gid},actor));}catch {}}
+      writeJson(res,200,{schemaVersion:1,responsibilityId:id,goals});return true;
+    }
     if(req.method==='GET'&&!id) result=await listResponsibilities({organizationId:url.searchParams.get('organizationId')||'',projectId:url.searchParams.get('projectId')||'',limit:Number(url.searchParams.get('limit')||100)},actor);
-    else if(req.method==='GET'&&id&&!action) result=await getResponsibility(id,actor);
+    else if(req.method==='GET'&&id&&!action) {const base=await getResponsibility(id,actor);const stage2=await loadResponsibilityStage2Summary(base.responsibility,actor);result={...base,changeObservation:stage2.changeObservation,producerEvents:stage2.producerEvents,goalRevisionSummary:stage2.goalRevisionSummary};}
     else if(req.method==='GET'&&id&&action==='activity') result=await listResponsibilityActivity(id,{after:Number(url.searchParams.get('after')||0),limit:Number(url.searchParams.get('limit')||100)},actor);
     else if(req.method==='GET'&&id&&action==='context') result=await assembleResponsibilityContext(id,actor);
     else if(req.method==='GET'&&id&&action==='memory') result={schemaVersion:1,revisionEnabled:process.env.RAGENT_RESPONSIBILITY_MEMORY_WRITES_ENABLED==='1',memory:(await assembleResponsibilityContext(id,actor)).memory};

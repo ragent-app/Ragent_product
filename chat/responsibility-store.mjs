@@ -66,6 +66,71 @@ CREATE TRIGGER IF NOT EXISTS responsibility_wake_identity_no_update BEFORE UPDAT
 CREATE TRIGGER IF NOT EXISTS responsibility_wake_no_delete BEFORE DELETE ON responsibility_wakes BEGIN SELECT RAISE(ABORT,'immutable wake'); END;
 CREATE TRIGGER IF NOT EXISTS responsibility_event_no_update BEFORE UPDATE ON responsibility_events BEGIN SELECT RAISE(ABORT,'immutable event'); END;
 CREATE TRIGGER IF NOT EXISTS responsibility_event_no_delete BEFORE DELETE ON responsibility_events BEGIN SELECT RAISE(ABORT,'immutable event'); END;
+CREATE TABLE IF NOT EXISTS responsibility_producer_events (
+  sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_key TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  organization_id TEXT,
+  project_id TEXT,
+  session_id TEXT,
+  run_id TEXT,
+  event_id TEXT,
+  state TEXT,
+  occurred_at TEXT NOT NULL,
+  payload_digest TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS responsibility_producer_events_session_seq ON responsibility_producer_events(session_id, sequence);
+CREATE INDEX IF NOT EXISTS responsibility_producer_events_org_seq ON responsibility_producer_events(organization_id, sequence);
+CREATE INDEX IF NOT EXISTS responsibility_producer_events_type_seq ON responsibility_producer_events(event_type, occurred_at, sequence);
+CREATE TRIGGER IF NOT EXISTS responsibility_producer_event_no_update BEFORE UPDATE ON responsibility_producer_events BEGIN SELECT RAISE(ABORT,'immutable producer event'); END;
+CREATE TABLE IF NOT EXISTS responsibility_producer_event_retention (
+  id INTEGER PRIMARY KEY CHECK(id = 1),
+  min_available_sequence INTEGER NOT NULL DEFAULT 0,
+  max_pruned_occurred_at TEXT,
+  pruned_count INTEGER NOT NULL DEFAULT 0,
+  last_pruned_at TEXT
+);
+CREATE TABLE IF NOT EXISTS responsibility_trigger_producer_cursors (
+  binding_id TEXT PRIMARY KEY REFERENCES responsibility_trigger_bindings(id),
+  last_sequence INTEGER NOT NULL DEFAULT 0,
+  retained_floor_sequence INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS responsibility_external_watermarks (
+  responsibility_id TEXT NOT NULL REFERENCES responsibilities(id),
+  source TEXT NOT NULL,
+  resource_key TEXT NOT NULL,
+  watermark_value TEXT NOT NULL,
+  watermark_digest TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(responsibility_id, source, resource_key)
+);
+CREATE TABLE IF NOT EXISTS responsibility_change_observations (
+  wake_id TEXT PRIMARY KEY REFERENCES responsibility_wakes(id),
+  responsibility_id TEXT NOT NULL REFERENCES responsibilities(id),
+  responsibility_revision INTEGER NOT NULL,
+  policy_revision INTEGER NOT NULL,
+  catalog_digest TEXT NOT NULL,
+  decision_id TEXT,
+  project_fact_id TEXT NOT NULL,
+  observation_kind TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  baseline_wake_id TEXT,
+  fingerprint_digest TEXT NOT NULL,
+  git_digest TEXT,
+  workspace_digest TEXT,
+  external_digest TEXT,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS responsibility_change_obs_lookup ON responsibility_change_observations(responsibility_id, responsibility_revision, policy_revision, catalog_digest, created_at);
+CREATE TRIGGER IF NOT EXISTS responsibility_change_observation_no_update BEFORE UPDATE ON responsibility_change_observations BEGIN SELECT RAISE(ABORT,'immutable change observation'); END;
+CREATE TRIGGER IF NOT EXISTS responsibility_change_observation_no_delete BEFORE DELETE ON responsibility_change_observations BEGIN SELECT RAISE(ABORT,'immutable change observation'); END;
 `;
 export const now = () => new Date().toISOString();
 export const newId = prefix => `${prefix}_${randomUUID()}`;

@@ -45,7 +45,10 @@ import {
   inspectWorkspaceUnmergedChanges,
   markSwarmDone,
   spawnSwarmMembers,
+  switchSwarmMemberModel,
 } from './organization-swarm.mjs';
+import { verifyFactoryResponsibilityFence } from './factory-responsibility-admission.mjs';
+import { resolveCostAwareModelTiering } from './responsibility-capabilities.mjs';
 import { createExecutionPacket, getResultPacket } from './result-packets.mjs';
 import { getRun, getRunAcceptanceEvidence, isTerminalRunState } from './runs.mjs';
 import { event as recordFactoryEvent, encode, factoryTransaction, now as workNow } from './work-graph-store.mjs';
@@ -356,7 +359,7 @@ export async function validateWorkItemSpawnBoundary(conn, {
   if (!itemRow) {
     throw bridgeError('FACTORY_NOT_FOUND', `Parent Work Item ${workItemId} not found in organization`, 404);
   }
-  if (['completed', 'cancelled'].includes(itemRow.state) || itemRow.ownership !== 'active' || itemRow.control_state !== 'none') {
+  if (['proposed', 'blocked', 'completed', 'cancelled'].includes(itemRow.state) || itemRow.ownership !== 'active' || itemRow.control_state !== 'none') {
     throw bridgeError('FACTORY_CONFLICT', `Parent Work Item ${workItemId} is not open for bounded Swarm work (${itemRow.state})`, 409);
   }
   const contractRow = conn.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id = ? AND revision = ?')
@@ -759,21 +762,18 @@ export async function promoteSwarmWorkspaceToCandidate(firstArg, secondArg) {
       resultPacketId: packet.packetId,
     });
 
-    sealed = await sealFactoryCandidate({
-      context: candidateContext,
-      workspace: {
-        stagingDir: staging.stagingDir,
-        canonicalCwd: realCanonicalCwd,
-        writablePaths: stagingWritableScopes,
-      },
-      runId: candidateRunId,
-    });
-
-    // Ensure workItem is in claimed+intent (reusing unbound intent or inserting cleanly after ready guard), then bind_run -> submit_candidate!
+    // Claim work item (or validate existing unbound intent) BEFORE sealing candidate so
+    // `sealFactoryCandidate` enforces the active execution epoch and binding generation fence.
     const claimedItem = await factoryTransaction((db) => {
       const ts = workNow();
       const row = db.prepare('SELECT * FROM factory_work_items WHERE id = ? AND organization_id = ?').get(item.id, normalizedOrgId);
       if (!row) throw bridgeError('FACTORY_NOT_FOUND', `Work item ${item.id} missing`, 404);
+      const invalidation = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_invalidations'").get()
+        ? db.prepare('SELECT goal_id, goal_revision, command_id FROM factory_work_invalidations WHERE work_item_id = ?').get(row.id)
+        : null;
+      if (invalidation) {
+        throw bridgeError('FACTORY_WORK_INVALIDATED', `Work item ${item.id} was invalidated by goal revision`, 409, { invalidation });
+      }
       if (row.ownership !== 'active' || row.control_state !== 'none' || !['ready', 'claimed'].includes(row.state)) {
         throw bridgeError('FACTORY_CONFLICT', `Work item ${item.id} is no longer eligible for candidate claim (${row.state})`, 409);
       }
@@ -812,6 +812,16 @@ export async function promoteSwarmWorkspaceToCandidate(firstArg, secondArg) {
         dispatchKey,
       });
       return db.prepare('SELECT * FROM factory_work_items WHERE id = ?').get(row.id);
+    });
+
+    sealed = await sealFactoryCandidate({
+      context: candidateContext,
+      workspace: {
+        stagingDir: staging.stagingDir,
+        canonicalCwd: realCanonicalCwd,
+        writablePaths: stagingWritableScopes,
+      },
+      runId: candidateRunId,
     });
 
     const boundRes = await updateFactoryBinding({
@@ -945,14 +955,30 @@ export async function startWorkItemSwarm(firstArg, secondArg) {
   }
   const actor = ownerActor(rawActor, trimString(actorNodeId) || 'owner');
   const { item } = await getFactoryWorkItem(normalizedOrgId, normalizedWorkItemId, actor);
-  if (['completed', 'cancelled'].includes(item.state) || item.ownership !== 'active' || item.controlState !== 'none') {
+  if (['proposed', 'blocked', 'completed', 'cancelled'].includes(item.state) || item.ownership !== 'active' || item.controlState !== 'none') {
     throw bridgeError('FACTORY_CONFLICT', `Work Item ${item.id} is not eligible for child Swarm execution (${item.state})`, 409);
   }
 
   const memberList = Array.isArray(members) ? members : [];
-  const allowedPaths = Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths : [];
+  const isReadOnlyWorkItem = String(item.contract?.accessMode || '').trim().toLowerCase() === 'read';
+  const allowedPaths = isReadOnlyWorkItem
+    ? []
+    : (Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths : []);
   for (const spec of memberList) {
     const specPaths = Array.isArray(spec?.writablePaths) ? spec.writablePaths : [];
+    const specAccess = String(spec?.accessMode || '').trim().toLowerCase();
+    const specCaps = Array.isArray(spec?.capabilities) ? spec.capabilities.map((c) => String(c).trim().toLowerCase()) : [];
+    const specWorkspace = String(spec?.workspace || '').trim().toLowerCase();
+    if (isReadOnlyWorkItem) {
+      if (specPaths.length > 0 || specAccess === 'write' || specCaps.includes('write') || ['worktree', 'staging'].includes(specWorkspace)) {
+        throw bridgeError(
+          SWARM_WORK_ITEM_SCOPE_EXCEEDED,
+          `Read-only Work Item ${item.id} forbids child member "${spec?.name || 'worker'}" write paths, write capability, or isolated write workspace`,
+          403,
+        );
+      }
+      continue;
+    }
     for (const p of specPaths) {
       if (!pathWithinAllowed(p, allowedPaths)) {
         throw bridgeError(
@@ -998,6 +1024,10 @@ export async function startWorkItemSwarm(firstArg, secondArg) {
       ? conn.prepare('SELECT * FROM organization_nodes WHERE id = ? AND organization_id = ?').get(trimString(actorNodeId), normalizedOrgId)
       : conn.prepare("SELECT * FROM organization_nodes WHERE organization_id = ? AND (node_role = 'root_leadership' OR session_class = 'ROOT_LEADERSHIP') LIMIT 1").get(normalizedOrgId);
     if (!coordinator) throw bridgeError('SWARM_ACTOR_NOT_FOUND', 'Coordinator node not found in organization', 404);
+    const workItemRow = conn.prepare('SELECT * FROM factory_work_items WHERE id = ? AND organization_id = ?').get(item.id, normalizedOrgId);
+    if (workItemRow) {
+      verifyFactoryResponsibilityFence(conn, workItemRow);
+    }
     const coordGrant = parseJson(coordinator.grant_json, {});
     if (coordGrant?.canDelegate !== true) {
       throw bridgeError('SWARM_DELEGATION_FORBIDDEN', 'Parent Work Item actor lacks delegation authority', 403);
@@ -1048,10 +1078,39 @@ export async function startWorkItemSwarm(firstArg, secondArg) {
     });
   });
 
+  const bridgedSwarmDeps = typeof deps.createSession === 'function'
+    ? {
+        ...deps,
+        createSession: (cwd, tool, title, meta = {}) => {
+          const rev = Number(meta?.organizationRevision ?? meta?.revision ?? 0);
+          const adjustedMeta = (meta?.lifecycleMode === 'ephemeral_swarm' && Number.isInteger(rev) && rev > 0)
+            ? { ...meta, lifecycleMode: 'formal_org' }
+            : meta;
+          return deps.createSession(cwd, tool, title, adjustedMeta);
+        },
+      }
+    : deps;
+
   const spawnedMembers = [];
   for (let i = 0; i < memberList.length; i += 1) {
     const spec = memberList[i] || {};
-    const spawnRes = await spawnSwarmMembers(deps, {
+    const requestedHint = trimString(spec.modelTierHint || '');
+    const contractHint = trimString(item.contract?.modelTierHint || '');
+    const memberTiering = (!trimString(spec.model) && (requestedHint || contractHint))
+      ? await resolveSwarmWorkItemModelTier({
+          organizationId: normalizedOrgId,
+          workItemId: item.id,
+          targetTier: requestedHint || contractHint,
+          stepKind: trimString(spec.taskKind || spec.stepKind || (isReadOnlyWorkItem ? 'investigation' : 'implementation')),
+          accessMode: isReadOnlyWorkItem ? 'read' : (trimString(spec.accessMode) || item.contract?.accessMode || 'write'),
+          requiredRole: trimString(spec.role || 'worker'),
+          tool: trimString(spec.tool || spec.harness || ''),
+        })
+      : null;
+    if (memberTiering?.budgetExceeded) {
+      throw bridgeError('ORG_BUDGET_EXCEEDED', `Budget exhausted before spawning swarm member "${spec.name || 'worker'}"`, 409, { tiering: memberTiering });
+    }
+    const spawnRes = await spawnSwarmMembers(bridgedSwarmDeps, {
       organizationId: normalizedOrgId,
       actorNodeId: bindingState.coordinatorId,
       actorSessionId: bindingState.coordinatorSessionId,
@@ -1062,13 +1121,15 @@ export async function startWorkItemSwarm(firstArg, secondArg) {
       brief: trimString(spec.brief) || trimString(brief) || trimString(item.contract?.objective),
       tasks: spec.tasks || null,
       n: spec.n || 1,
-      workspace: spec.workspace || 'inherit',
-      harness: spec.harness || '',
+      workspace: isReadOnlyWorkItem ? 'inherit' : (spec.workspace || 'inherit'),
+      harness: spec.harness || spec.tool || memberTiering?.selectedTool || '',
       provider: spec.provider || '',
-      model: spec.model || '',
+      model: spec.model || memberTiering?.selectedModel || '',
       effort: spec.effort || '',
       channels: Array.isArray(spec.channels) && spec.channels.length ? spec.channels : channels,
-      writablePaths: resolvedMemberWritablePaths[i] || [],
+      capabilities: isReadOnlyWorkItem ? ['run'] : (Array.isArray(spec.capabilities) ? spec.capabilities : null),
+      certifiedReadOnly: isReadOnlyWorkItem,
+      writablePaths: isReadOnlyWorkItem ? [] : (resolvedMemberWritablePaths[i] || []),
       workItemId: item.id,
       parentWorkItemId: item.id,
       projectRoot: effectiveProjectRoot,
@@ -1282,5 +1343,303 @@ export async function completeWorkItemSwarm(firstArg, secondArg) {
     workItemId: item.id,
     resultPacket: packet,
     synthesis,
+  };
+}
+
+function dayInTimeZoneForBridge(timeZone, date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(date)
+    .reduce((acc, part) => ((acc[part.type] = part.value), acc), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function tableExists(conn, tableName) {
+  return Boolean(conn.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(tableName));
+}
+
+function finiteBudgetValue(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function mergeBridgeBudgetLimits(orgBudget = {}, extraLimits = {}) {
+  const sources = [orgBudget, extraLimits].filter((s) => s && typeof s === 'object' && !Array.isArray(s));
+  const merged = {};
+  const takeMin = (key, ...fieldNames) => {
+    let best = null;
+    for (const src of sources) {
+      for (const f of fieldNames) {
+        const val = finiteBudgetValue(src[f]);
+        if (val !== null) best = best === null ? val : Math.min(best, val);
+      }
+    }
+    if (best !== null) merged[key] = best;
+  };
+  takeMin('maxCost', 'maxCost', 'cost');
+  takeMin('maxTotalRuns', 'maxTotalRuns', 'maxRuns', 'runs');
+  takeMin('maxTokens', 'maxTokens', 'tokens');
+  return merged;
+}
+
+export async function resolveSwarmWorkItemModelTier({
+  organizationId,
+  workItemId,
+  targetTier = '',
+  stepKind = '',
+  accessMode = '',
+  requiredRole = '',
+  tieringPolicy = null,
+  tool = '',
+  currentModel = '',
+  ownerRuntimeLocks = null,
+  actor = null,
+} = {}) {
+  const normalizedOrgId = trimString(organizationId);
+  const normalizedItemId = trimString(workItemId);
+  if (!normalizedOrgId || !normalizedItemId) {
+    throw bridgeError('BAD_REQUEST', 'organizationId and workItemId are required', 400);
+  }
+  const workItemRes = await getFactoryWorkItem(normalizedOrgId, normalizedItemId, ownerActor(actor));
+  const item = workItemRes?.item || null;
+  if (!item) throw bridgeError('WORK_ITEM_NOT_FOUND', `Work Item ${normalizedItemId} not found`, 404);
+
+  const state = await withOrganizationDatabase((conn) => {
+    const orgRow = conn.prepare('SELECT * FROM organizations WHERE id = ?').get(normalizedOrgId);
+    if (!orgRow) throw bridgeError('ORGANIZATION_NOT_FOUND', `Organization ${normalizedOrgId} not found`, 404);
+    const orgPolicy = parseJson(orgRow.policy_json, {});
+
+    let respPolicy = null;
+    let responsibilityId = '';
+    if (item.goalId && tableExists(conn, 'responsibility_plan_executions')) {
+      const execRow = conn.prepare('SELECT plan_id FROM responsibility_plan_executions WHERE goal_id = ?').get(item.goalId);
+      if (execRow) {
+        const planRow = conn.prepare('SELECT responsibility_id, policy_revision FROM responsibility_plans WHERE id = ?').get(execRow.plan_id);
+        if (planRow) {
+          responsibilityId = planRow.responsibility_id;
+          const pRow = conn.prepare('SELECT policy_json FROM responsibility_policy_revisions WHERE responsibility_id = ? AND revision = ?')
+            .get(planRow.responsibility_id, planRow.policy_revision);
+          respPolicy = parseJson(pRow?.policy_json, null);
+        }
+      }
+    }
+    if (!respPolicy && item.goalId && tableExists(conn, 'responsibility_work_links')) {
+      const linkRow = conn.prepare('SELECT responsibility_id, policy_revision FROM responsibility_work_links WHERE goal_id = ?').get(item.goalId);
+      if (linkRow) {
+        responsibilityId = linkRow.responsibility_id;
+        const pRow = conn.prepare('SELECT policy_json FROM responsibility_policy_revisions WHERE responsibility_id = ? AND revision = ?')
+          .get(linkRow.responsibility_id, linkRow.policy_revision);
+        respPolicy = parseJson(pRow?.policy_json, null);
+      }
+    }
+
+    const orgBudget = parseJson(orgRow.budget_json, {});
+    const mergedOrgLimits = mergeBridgeBudgetLimits(orgBudget, orgPolicy?.budgetLimits);
+    let orgUsedCost = 0;
+    let orgUsedRuns = 0;
+    let orgUsedTokens = 0;
+    if (tableExists(conn, 'organization_budget_counters')) {
+      const counters = conn.prepare('SELECT totals_json, reserved_json FROM organization_budget_counters WHERE organization_id = ?')
+        .all(normalizedOrgId);
+      for (const counter of counters) {
+        const totals = parseJson(counter?.totals_json, {});
+        const reserved = parseJson(counter?.reserved_json, {});
+        orgUsedCost += Number(totals?.cost || 0) + Number(reserved?.cost || 0);
+        orgUsedRuns += Number(totals?.runs || 0) + Number(reserved?.runs || 0);
+        orgUsedTokens += Number(totals?.tokens || 0) + Number(reserved?.tokens || 0);
+      }
+    }
+    const orgMaxCost = mergedOrgLimits.maxCost ?? null;
+    const orgMaxRuns = mergedOrgLimits.maxTotalRuns ?? null;
+    const orgMaxTokens = mergedOrgLimits.maxTokens ?? null;
+    const orgRemainingCost = orgMaxCost !== null ? Number((orgMaxCost - orgUsedCost).toFixed(6)) : null;
+    const orgRemainingRuns = orgMaxRuns !== null ? orgMaxRuns - orgUsedRuns : null;
+    const orgRemainingTokens = orgMaxTokens !== null ? orgMaxTokens - orgUsedTokens : null;
+
+    let dailyRemainingCost = null;
+    let dailyRemainingRuns = null;
+    let dailyRemainingTokens = null;
+    if (responsibilityId && respPolicy?.dailyBudget) {
+      let winTotals = {};
+      let winReserved = {};
+      if (tableExists(conn, 'organization_responsibility_budget_windows')) {
+        const day = dayInTimeZoneForBridge(respPolicy.dailyBudget.timeZone || 'UTC');
+        const win = conn.prepare('SELECT totals_json, reserved_json FROM organization_responsibility_budget_windows WHERE responsibility_id = ? AND day = ?')
+          .get(responsibilityId, day);
+        winTotals = parseJson(win?.totals_json, {});
+        winReserved = parseJson(win?.reserved_json, {});
+      }
+      const dMaxCost = finiteBudgetValue(respPolicy.dailyBudget.maxCost);
+      if (dMaxCost !== null) {
+        dailyRemainingCost = Number((dMaxCost - (Number(winTotals?.cost || 0) + Number(winReserved?.cost || 0))).toFixed(6));
+      }
+      if (Number.isSafeInteger(respPolicy.dailyBudget.maxRuns)) {
+        dailyRemainingRuns = Number(respPolicy.dailyBudget.maxRuns) - (Number(winTotals?.runs || 0) + Number(winReserved?.runs || 0));
+      }
+      const dMaxTokens = finiteBudgetValue(respPolicy.dailyBudget.maxTokens);
+      if (dMaxTokens !== null) {
+        dailyRemainingTokens = dMaxTokens - (Number(winTotals?.tokens || 0) + Number(winReserved?.tokens || 0));
+      }
+    }
+    const candidates = [orgRemainingCost, dailyRemainingCost].filter((v) => v !== null);
+    const dailyMaxCost = finiteBudgetValue(respPolicy?.dailyBudget?.maxCost);
+    const maxCostCandidates = [orgMaxCost, dailyMaxCost].filter((v) => v !== null);
+    const tokenCandidates = [orgRemainingTokens, dailyRemainingTokens].filter((v) => v !== null);
+    const dailyMaxTokens = finiteBudgetValue(respPolicy?.dailyBudget?.maxTokens);
+    const maxTokensCandidates = [orgMaxTokens, dailyMaxTokens].filter((v) => v !== null);
+    return {
+      orgRevision: Number(orgRow.current_revision || 0),
+      orgPolicy,
+      respPolicy,
+      budgetContext: {
+        maxCost: maxCostCandidates.length ? Math.min(...maxCostCandidates) : null,
+        remainingCost: candidates.length ? Math.min(...candidates) : null,
+        maxTokens: maxTokensCandidates.length ? Math.min(...maxTokensCandidates) : null,
+        remainingTokens: tokenCandidates.length ? Math.min(...tokenCandidates) : null,
+        orgRemainingCost,
+        orgRemainingRuns,
+        orgRemainingTokens,
+        dailyRemainingCost,
+        dailyRemainingRuns,
+        dailyRemainingTokens,
+        exhausted: (orgRemainingCost !== null && orgRemainingCost <= 0)
+          || (orgRemainingRuns !== null && orgRemainingRuns <= 0)
+          || (orgRemainingTokens !== null && orgRemainingTokens <= 0)
+          || (dailyRemainingCost !== null && dailyRemainingCost <= 0)
+          || (dailyRemainingRuns !== null && dailyRemainingRuns <= 0)
+          || (dailyRemainingTokens !== null && dailyRemainingTokens <= 0),
+      },
+    };
+  });
+
+  const tiering = resolveCostAwareModelTiering({
+    capability: item.contract?.executionMode === 'fanout' ? 'fanout' : 'swarm-collaboration',
+    stepKind: trimString(stepKind) || item.kind || '',
+    accessMode: trimString(accessMode) || item.contract?.accessMode || 'read',
+    requiredRole: trimString(requiredRole) || item.contract?.requiredRole || '',
+    modelTierHint: trimString(targetTier) || item.contract?.modelTierHint || '',
+    tieringPolicy: tieringPolicy || state.respPolicy?.modelTiering || null,
+    orgPolicy: state.orgPolicy,
+    ownerRuntimeLocks,
+    budgetContext: state.budgetContext,
+    tool: trimString(tool),
+    currentModel: trimString(currentModel),
+  });
+
+  return {
+    ...tiering,
+    organizationId: normalizedOrgId,
+    workItemId: normalizedItemId,
+    orgRevision: state.orgRevision,
+  };
+}
+
+export async function switchWorkItemSwarmMemberTier(firstArg, secondArg) {
+  const { deps, options } = splitDepsAndOptions(firstArg, secondArg);
+  const {
+    organizationId,
+    workItemId,
+    actorNodeId = '',
+    targetNameOrNodeId = '',
+    targetNodeId = '',
+    targetTier = '',
+    stepKind = '',
+    accessMode = '',
+    requiredRole = '',
+    tieringPolicy = null,
+    harness = '',
+    tool = '',
+    reason = '',
+    handoffNotes = '',
+    expectedBindingGeneration = null,
+    projectRoot = '',
+    postToBoard = false,
+    idempotencyKey = '',
+    actor = null,
+  } = options;
+
+  const normalizedOrgId = trimString(organizationId);
+  const normalizedItemId = trimString(workItemId);
+  if (!normalizedOrgId || !normalizedItemId) {
+    throw bridgeError('BAD_REQUEST', 'organizationId and workItemId are required', 400);
+  }
+  const workItemRes = await getFactoryWorkItem(normalizedOrgId, normalizedItemId, ownerActor(actor));
+  const item = workItemRes?.item || null;
+  if (!item) throw bridgeError('WORK_ITEM_NOT_FOUND', `Work Item ${normalizedItemId} not found`, 404);
+  if (['proposed', 'blocked', 'completed', 'cancelled'].includes(item.state) || item.ownership !== 'active' || item.controlState !== 'none') {
+    throw bridgeError('FACTORY_CONFLICT', `Work Item ${item.id} is not open for model tier switching (${item.state})`, 409);
+  }
+  if (item.contract?.swarmSpec && item.contract.swarmSpec.allowModelSwitch !== true) {
+    throw bridgeError('SWARM_MODEL_POLICY_DENIED', `Work Item ${item.id} plan policy forbids model switching`, 403);
+  }
+
+  const targetMeta = await withOrganizationDatabase((conn) => {
+    const workItemRow = conn.prepare('SELECT * FROM factory_work_items WHERE id = ? AND organization_id = ?').get(item.id, normalizedOrgId);
+    if (workItemRow) {
+      verifyFactoryResponsibilityFence(conn, workItemRow);
+    }
+    const targetRef = trimString(targetNodeId || targetNameOrNodeId);
+    const node = targetRef
+      ? conn.prepare('SELECT * FROM organization_nodes WHERE organization_id = ? AND (id = ? OR LOWER(stable_key) = LOWER(?)) LIMIT 1')
+          .get(normalizedOrgId, targetRef, targetRef)
+      : null;
+    if (!node) {
+      throw bridgeError('SWARM_MEMBER_NOT_FOUND', `Target Swarm member "${targetRef}" not found in organization ${normalizedOrgId}`, 404);
+    }
+    const grant = parseJson(node.grant_json, {});
+    const boundWorkItemId = trimString(grant?.parentWorkItemId || grant?.workItemId);
+    const belongsToWorkItem = (boundWorkItemId && boundWorkItemId === item.id)
+      || (item.assigneeNodeId && item.assigneeNodeId === node.id);
+    if (!belongsToWorkItem) {
+      throw bridgeError(
+        SWARM_WORK_ITEM_SCOPE_EXCEEDED,
+        `Swarm member "${node.stable_key}" (${node.id}) is not bound to Work Item ${item.id}`,
+        403,
+      );
+    }
+    return { node, grant };
+  });
+
+  const resolvedAccessMode = trimString(accessMode)
+    || (targetMeta.grant?.canWrite === true ? 'write' : '')
+    || item.contract?.accessMode
+    || 'read';
+  const tiering = await resolveSwarmWorkItemModelTier({
+    organizationId: normalizedOrgId,
+    workItemId: normalizedItemId,
+    targetTier,
+    stepKind: trimString(stepKind) || (targetMeta.grant?.canReview ? 'review' : resolvedAccessMode === 'write' ? 'implementation' : 'investigation'),
+    accessMode: resolvedAccessMode,
+    requiredRole: trimString(requiredRole),
+    tieringPolicy,
+    tool: trimString(tool || harness),
+    actor,
+  });
+
+  if (tiering.budgetExceeded || !tiering.budgetOk || !tiering.selectedModel) {
+    throw bridgeError('ORG_BUDGET_EXCEEDED', `Budget exhausted or no permitted model available for tier '${tiering.resolvedTier}'`, 409, { tiering });
+  }
+
+  const switched = await switchSwarmMemberModel(deps, {
+    organizationId: normalizedOrgId,
+    actorNodeId,
+    targetNameOrNodeId,
+    targetNodeId,
+    harness: trimString(harness) || tiering.selectedTool || '',
+    tool: trimString(tool) || tiering.selectedTool || '',
+    model: tiering.selectedModel,
+    reason: trimString(reason) || `cost_aware_tier_switch:${tiering.resolvedTier}`,
+    handoffNotes,
+    expectedBindingGeneration,
+    workItemId: normalizedItemId,
+    projectRoot,
+    postToBoard,
+    ...(trimString(idempotencyKey) ? { idempotencyKey } : {}),
+    actor,
+  });
+
+  return {
+    ...switched,
+    tiering,
   };
 }

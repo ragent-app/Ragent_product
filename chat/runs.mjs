@@ -2072,6 +2072,13 @@ export async function updateRun(runId, updater, { beforeWrite = null, beforeComm
       const { removeLinuxRunResultTransaction } = await import('./linux-run-result-transaction.mjs');
       await removeLinuxRunResultTransaction(runId, protectedResultAttempt);
     }
+    if (!isolatedScopeRunner() && isTerminalRunState(next.state) && next.finalizedAt && next.runPublication
+        && (!isTerminalRunState(latest.state) || !latest.finalizedAt)) {
+      try {
+        const { captureRunTerminalProducerEvent } = await import('./responsibility-trigger-events.mjs');
+        await captureRunTerminalProducerEvent(next);
+      } catch {}
+    }
     return clone(next);
   }));
 }

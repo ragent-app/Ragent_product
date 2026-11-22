@@ -9,6 +9,7 @@ import { resolveStagingDiff } from './managed-writer.mjs';
 import { getRun } from './runs.mjs';
 import { MANAGED_WORK_ROOT_DIR, CHAT_COLLABORATIONS_DIR } from '../lib/config.mjs';
 import { verifyRemoteFactoryEvidence } from './factory-remote-evidence.mjs';
+import { assertFactoryWorkItemGenerationFence } from './factory-goal-revision.mjs';
 
 const MAX_BYTES = 32 * 1024 * 1024;
 const MAX_FILES = 1000;
@@ -146,6 +147,16 @@ export async function sealFactoryCandidate({ context, workspace, runId }) {
     writablePaths: workspace.writablePaths };
   return withDatabase((db) => {
     schema(db);
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_work_items'").get()) {
+      assertFactoryWorkItemGenerationFence(db, context.workItemId, {
+        contractRevision: context.contractRevision,
+        executionEpoch: context.executionEpoch,
+        bindingGeneration: context.bindingGeneration,
+        ...(context.gateGeneration !== undefined ? { gateGeneration: context.gateGeneration } : {}),
+        ...(context.goalRevision !== undefined ? { goalRevision: context.goalRevision } : {}),
+        requireActiveControl: true,
+      });
+    }
     const baseline = db.prepare('SELECT * FROM factory_candidate_payloads WHERE candidate_id=?').get(`baseline:${context.dispatchKey}`);
     if (!baseline || baseline.digest !== payloadDigest(baseline)) invalid('Factory baseline is missing or corrupted');
     let baselinePayload;
