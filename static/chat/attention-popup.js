@@ -817,26 +817,229 @@
 
   // The full option list. Tapping an option is the approval: it submits that
   // choice for its question immediately (other questions stay unanswered).
-  function appendQuestionDetails(parent, item) {
-    const groups = questionGroups(item.event || {});
+  function appendQuestionDetails(parent, item, footerActions = null) {
+    const event = item.event || {};
+    const groups = questionGroups(event);
     const wrap = el("div", "oneui-notification__choices");
+    const isGroupCustomAllowed = (group) => (
+      group?.isOther === true
+      || group?.isSecret === true
+      || (group?.isOther !== false && questionOptions(group).length === 0)
+    );
+    const isMultiGroup = (group) => group?.multiSelect === true || group?.isMultiSelect === true;
+    const isNonBlocking = event?.isBlocking === false;
+    const isExplicitSubmitMode = groups.length > 1
+      || groups.some((g) => isMultiGroup(g) || g?.isSecret === true || isGroupCustomAllowed(g))
+      || isNonBlocking;
+    item._isExplicitQuestionMode = isExplicitSubmitMode;
+
+    if (!item._questionDraft) {
+      item._questionDraft = {
+        selected: groups.map(() => []),
+        custom: groups.map(() => ""),
+      };
+    }
+    const draft = item._questionDraft;
+
+    if (isNonBlocking) {
+      const badgeText = typeof root.t === "function" && root.t("approval.badge.nonBlocking") !== "approval.badge.nonBlocking"
+        ? root.t("approval.badge.nonBlocking")
+        : "Optional · Non-blocking";
+      wrap.appendChild(el("span", "oneui-notification__badge--nonblocking", badgeText));
+    }
+
+    let submitBtn = null;
+    const collectPopupPayload = () => {
+      const choices = groups.map((_, idx) => {
+        const list = Array.isArray(draft.selected[idx]) ? draft.selected[idx] : [];
+        return list.length > 0 ? list[0] : -1;
+      });
+      const hasMulti = groups.some((g) => isMultiGroup(g));
+      const multiChoices = hasMulti
+        ? groups.map((_, idx) => (Array.isArray(draft.selected[idx]) ? [...draft.selected[idx]] : []))
+        : null;
+      const customAnswers = groups.map((_, idx) => String(draft.custom[idx] || "").trim());
+      const hasText = customAnswers.some(Boolean);
+      const customAnswer = groups.length === 1 && !hasMulti ? (customAnswers[0] || "") : "";
+      const hasOption = draft.selected.some((arr) => Array.isArray(arr) && arr.length > 0);
+      return {
+        choices,
+        multiChoices,
+        customAnswers: hasMulti || hasText ? customAnswers : null,
+        customAnswer,
+        hasAnswer: hasOption || hasText,
+      };
+    };
+
+    const syncSubmitDisabled = () => {
+      if (!submitBtn) return;
+      const { hasAnswer } = collectPopupPayload();
+      submitBtn.disabled = !hasAnswer;
+    };
+
     groups.forEach((group, questionIndex) => {
-      if (groups.length > 1 && (group?.question || group?.prompt)) {
-        wrap.appendChild(el("div", "oneui-notification__choice-question", group.question || group.prompt));
+      const multi = isMultiGroup(group);
+      const secret = group?.isSecret === true;
+      const allowCustom = isGroupCustomAllowed(group);
+
+      const questionTitle = group?.header && group?.question && group.header !== group.question
+        ? `${group.header} — ${group.question}`
+        : (group?.question || group?.prompt || group?.header || "");
+      if ((groups.length > 1 || allowCustom || multi || secret) && questionTitle) {
+        const qTitleEl = el("div", "oneui-notification__choice-question", questionTitle);
+        qTitleEl.dataset.questionIndex = String(questionIndex);
+        wrap.appendChild(qTitleEl);
       }
+
+      const optionButtons = [];
       questionOptions(group).forEach((option, optionIndex) => {
         const label = questionOptionLabel(option);
         const button = el("button", "oneui-notification__choice", label);
         button.type = "button";
+        button.dataset.questionIndex = String(questionIndex);
+        button.dataset.optionIndex = String(optionIndex);
         button.setAttribute("aria-label", tr("attention.question.answerWith", { label: String(label ?? "") }));
+        const currentSelected = Array.isArray(draft.selected[questionIndex]) ? draft.selected[questionIndex] : [];
+        const isSelected = currentSelected.includes(optionIndex);
+        button.classList.toggle("is-selected", isSelected);
+        if (multi) {
+          button.setAttribute("role", "checkbox");
+          button.setAttribute("aria-checked", isSelected ? "true" : "false");
+        }
         button.addEventListener("click", () => {
           if (button.disabled) return;
-          const choices = groups.map((_, index) => (index === questionIndex ? optionIndex : -1));
-          void submit(item, "approve", button, { choices, customAnswer: "" });
+          if (!isExplicitSubmitMode) {
+            const choices = groups.map((_, index) => (index === questionIndex ? optionIndex : -1));
+            void submit(item, "approve", button, { choices, customAnswer: "" });
+            return;
+          }
+          if (!Array.isArray(draft.selected[questionIndex])) {
+            draft.selected[questionIndex] = [];
+          }
+          const selList = draft.selected[questionIndex];
+          const existingPos = selList.indexOf(optionIndex);
+          if (multi) {
+            if (existingPos >= 0) selList.splice(existingPos, 1);
+            else selList.push(optionIndex);
+          } else if (existingPos >= 0) {
+            draft.selected[questionIndex] = [];
+          } else {
+            draft.selected[questionIndex] = [optionIndex];
+          }
+          const nextSel = draft.selected[questionIndex];
+          optionButtons.forEach((optBtn, idx) => {
+            const active = nextSel.includes(idx);
+            optBtn.classList.toggle("is-selected", active);
+            if (multi) optBtn.setAttribute("aria-checked", active ? "true" : "false");
+          });
+          syncSubmitDisabled();
         });
+        optionButtons.push(button);
         wrap.appendChild(button);
       });
+
+      if (allowCustom) {
+        const customWrap = el("div", "oneui-notification__question-custom");
+        customWrap.dataset.questionIndex = String(questionIndex);
+        const field = document.createElement("input");
+        field.className = "oneui-notification__question-input";
+        field.type = secret ? "password" : "text";
+        field.value = draft.custom[questionIndex] || "";
+        field.dataset.questionIndex = String(questionIndex);
+        field.setAttribute("autocomplete", "off");
+        field.setAttribute("spellcheck", "false");
+        field.placeholder = secret
+          ? (typeof root.t === "function" && root.t("approval.secret.placeholder") !== "approval.secret.placeholder"
+            ? root.t("approval.secret.placeholder")
+            : "Enter secret response…")
+          : (typeof root.t === "function" && root.t("approval.customAnswer.placeholder") !== "approval.customAnswer.placeholder"
+            ? root.t("approval.customAnswer.placeholder")
+            : "Write your own response…");
+        field.addEventListener("input", () => {
+          draft.custom[questionIndex] = field.value;
+          syncSubmitDisabled();
+        });
+        customWrap.appendChild(field);
+
+        if (secret) {
+          const revealBtn = el("button", "oneui-notification__secret-toggle", "👁");
+          revealBtn.type = "button";
+          revealBtn.setAttribute("aria-pressed", "false");
+          revealBtn.setAttribute("aria-label", tr("approval.secret.reveal"));
+          revealBtn.addEventListener("click", () => {
+            const isShown = field.type === "text";
+            field.type = isShown ? "password" : "text";
+            revealBtn.setAttribute("aria-pressed", isShown ? "false" : "true");
+            revealBtn.setAttribute(
+              "aria-label",
+              isShown ? tr("approval.secret.reveal") : tr("approval.secret.hide")
+            );
+          });
+          customWrap.appendChild(revealBtn);
+        }
+        wrap.appendChild(customWrap);
+      }
     });
+
+    if (isExplicitSubmitMode) {
+      const submitLabel = typeof root.t === "function" && root.t("approval.action.submitAnswer") !== "approval.action.submitAnswer"
+        ? root.t("approval.action.submitAnswer")
+        : "Submit answer";
+      submitBtn = el("button", "oneui-notification__action oneui-notification__action--primary", submitLabel);
+      submitBtn.type = "button";
+      submitBtn.addEventListener("click", () => {
+        const { choices, multiChoices, customAnswers, customAnswer, hasAnswer } = collectPopupPayload();
+        if (!hasAnswer) return;
+        void submit(item, "approve", submitBtn, {
+          choices,
+          ...(multiChoices ? { multiChoices } : {}),
+          ...(Array.isArray(customAnswers) ? { customAnswers } : {}),
+          customAnswer,
+        });
+      });
+      syncSubmitDisabled();
+
+      const skipBtn = isNonBlocking
+        ? el(
+          "button",
+          "oneui-notification__action oneui-notification__skip-action",
+          typeof root.t === "function" && root.t("approval.action.skip") !== "approval.action.skip"
+            ? root.t("approval.action.skip")
+            : "Skip"
+        )
+        : null;
+      if (skipBtn) {
+        skipBtn.type = "button";
+        skipBtn.addEventListener("click", () => {
+          void submit(item, "approve", skipBtn, {
+            choices: groups.map(() => -1),
+            customAnswer: "",
+            emptySkip: true,
+          });
+        });
+      }
+
+      if (footerActions) {
+        const applyPopupQuestionFooter = (actionsTarget) => {
+          actionsTarget.querySelectorAll?.(".oneui-notification__skip-action, .oneui-notification__question-submit")?.forEach((n) => n.remove());
+          submitBtn.classList.add("oneui-notification__question-submit");
+          const anchor = actionsTarget.firstChild || null;
+          if (skipBtn) actionsTarget.insertBefore(skipBtn, anchor);
+          actionsTarget.insertBefore(submitBtn, anchor);
+        };
+        if (footerActions.children?.length > 0) {
+          applyPopupQuestionFooter(footerActions);
+        } else {
+          item._pendingFooterQuestionPatch = applyPopupQuestionFooter;
+        }
+      } else {
+        const inlineActions = el("div", "oneui-notification__actions");
+        if (skipBtn) inlineActions.appendChild(skipBtn);
+        inlineActions.appendChild(submitBtn);
+        wrap.appendChild(inlineActions);
+      }
+    }
+
     if (wrap.children.length) parent.appendChild(wrap);
   }
 
@@ -1012,12 +1215,134 @@
     appendDetail(details, tr("attention.detail.permissions"), permissions);
     const categories = item.type === "privileged_batch_request" ? appendBatchDetails(details, item, footerActions) : [];
     if (item.type === "approved_action_batch_request") appendApprovedActionDetails(details, item);
-    if (item.kind === "question") appendQuestionDetails(details, item);
+    const elicitationInfo = typeof root.classifyCodexElicitation === "function"
+      ? root.classifyCodexElicitation(item.event)
+      : null;
+    if (elicitationInfo && elicitationInfo.kind !== "compact_mcp") {
+      details.innerHTML = "";
+      let activeFormCtrl = null;
+      let activeUrlResult = null;
+      if (elicitationInfo.kind === "form") {
+        const isSimple = typeof root.isSimpleElicitationForm === "function"
+          ? root.isSimpleElicitationForm(elicitationInfo.schema)
+          : false;
+        if (isSimple && typeof root.buildElicitationSchemaForm === "function") {
+          activeFormCtrl = root.buildElicitationSchemaForm(elicitationInfo.schema, {
+            tr: (k, v, fb) => (typeof tr === "function" && tr(k, v) !== k ? tr(k, v) : (fb || k)),
+          });
+          if (elicitationInfo.message) {
+            details.appendChild(el("div", "oneui-notification__message", elicitationInfo.message));
+          }
+          details.appendChild(activeFormCtrl.element);
+        } else {
+          details.appendChild(el(
+            "div",
+            "oneui-notification__message",
+            typeof root.t === "function" && root.t("elicitation.complexFormHint") !== "elicitation.complexFormHint"
+              ? root.t("elicitation.complexFormHint")
+              : "This form has multiple fields. Open the session to fill and submit it."
+          ));
+        }
+      } else if (elicitationInfo.kind === "url" && typeof root.buildElicitationUrlCard === "function") {
+        activeUrlResult = root.buildElicitationUrlCard(elicitationInfo.elicitation, {
+          tr: (k, v, fb) => (typeof tr === "function" && tr(k, v) !== k ? tr(k, v) : (fb || k)),
+          buttonClassName: "oneui-notification__action",
+        });
+        details.appendChild(activeUrlResult.element);
+      } else if (typeof root.buildElicitationUnsupportedCard === "function") {
+        details.appendChild(root.buildElicitationUnsupportedCard(
+          elicitationInfo.elicitation,
+          elicitationInfo.mode,
+          { tr: (k, v, fb) => (typeof tr === "function" && tr(k, v) !== k ? tr(k, v) : (fb || k)) }
+        ));
+      }
+
+      const patchElicitationFooter = (actionsTarget) => {
+        if (!actionsTarget) return;
+        actionsTarget.innerHTML = "";
+        const makePopupBtn = (label, className, onClick, disabled = false) => {
+          const btn = el("button", `oneui-notification__action ${className}`.trim(), label);
+          btn.type = "button";
+          btn.disabled = Boolean(disabled);
+          btn.addEventListener("click", onClick);
+          return btn;
+        };
+        const tOr = (key, fb) => (typeof root.t === "function" && root.t(key) !== key ? root.t(key) : fb);
+        if (elicitationInfo.kind === "form") {
+          if (activeFormCtrl) {
+            const subBtn = makePopupBtn(tOr("elicitation.action.accept", "Submit"), "oneui-notification__action--primary", () => {
+              const validation = activeFormCtrl.collectAndValidate(true);
+              if (!validation.valid) return;
+              void submit(item, "approve", subBtn, {
+                elicitationResponse: { action: "accept", content: validation.content },
+              });
+            });
+            actionsTarget.appendChild(subBtn);
+          } else {
+            actionsTarget.appendChild(makePopupBtn(tOr("attention.action.open", "Open session"), "oneui-notification__action--primary", () => {
+              openSession(item);
+            }));
+          }
+          const decBtn = makePopupBtn(tOr("elicitation.action.decline", "Decline"), "oneui-notification__action--danger", () => {
+            void submit(item, "deny", decBtn, { elicitationResponse: { action: "decline" } });
+          });
+          const canBtn = makePopupBtn(tOr("elicitation.action.cancel", "Cancel"), "", () => {
+            void submit(item, "cancel", canBtn, { elicitationResponse: { action: "cancel" } });
+          });
+          actionsTarget.appendChild(decBtn);
+          actionsTarget.appendChild(canBtn);
+        } else if (elicitationInfo.kind === "url") {
+          const okBtn = makePopupBtn(
+            tOr("elicitation.action.confirmUrl", "Confirm & Continue"),
+            "oneui-notification__action--primary",
+            () => {
+              if (!activeUrlResult?.valid) return;
+              void submit(item, "approve", okBtn, { elicitationResponse: { action: "accept" } });
+            },
+            !activeUrlResult?.valid
+          );
+          const decBtn = makePopupBtn(tOr("elicitation.action.decline", "Decline"), "oneui-notification__action--danger", () => {
+            void submit(item, "deny", decBtn, { elicitationResponse: { action: "decline" } });
+          });
+          const canBtn = makePopupBtn(tOr("elicitation.action.cancel", "Cancel"), "", () => {
+            void submit(item, "cancel", canBtn, { elicitationResponse: { action: "cancel" } });
+          });
+          actionsTarget.appendChild(okBtn);
+          actionsTarget.appendChild(decBtn);
+          actionsTarget.appendChild(canBtn);
+        } else {
+          const decBtn = makePopupBtn(tOr("elicitation.action.decline", "Decline"), "oneui-notification__action--danger", () => {
+            void submit(item, "deny", decBtn, { elicitationResponse: { action: "decline" } });
+          });
+          const canBtn = makePopupBtn(tOr("elicitation.action.cancel", "Cancel"), "", () => {
+            void submit(item, "cancel", canBtn, { elicitationResponse: { action: "cancel" } });
+          });
+          actionsTarget.appendChild(decBtn);
+          actionsTarget.appendChild(canBtn);
+        }
+      };
+
+      if (footerActions && footerActions.children?.length > 0) {
+        patchElicitationFooter(footerActions);
+      } else {
+        item._pendingFooterElicitationPatch = patchElicitationFooter;
+      }
+    } else if (item.kind === "question") {
+      appendQuestionDetails(details, item, footerActions);
+    }
     if (details.children.length) parent.appendChild(details);
     return categories;
   }
 
-  async function submit(item, decision, button, { category = "", choices = null, customAnswer = "" } = {}) {
+  async function submit(item, decision, button, {
+    category = "",
+    choices = null,
+    multiChoices = null,
+    customAnswer = "",
+    customAnswers = null,
+    emptySkip = false,
+    elicitationResponse = null,
+  } = {}) {
     const card = button?.closest?.(".oneui-notification");
     card?.querySelectorAll("button").forEach((node) => { node.disabled = true; });
     card?.querySelectorAll("input, textarea").forEach((node) => { node.disabled = true; });
@@ -1042,9 +1367,29 @@
         ok = typeof root.dispatchAction === "function" && await root.dispatchAction({ action: "plan_action", sessionId: item.sessionId, planId, planAction: "execute", requestId: `oneui-${Date.now()}` });
       } else if (typeof root.dispatchAction === "function") {
         const confirmation = typeof root.isSessionConfirmationApproval === "function" && root.isSessionConfirmationApproval(event);
+        const hasMultiChoices = Array.isArray(multiChoices) && multiChoices.length > 0;
+        const normalizedCustomAnswers = Array.isArray(customAnswers) ? customAnswers : [];
+        const hasPerQuestionAnswers = normalizedCustomAnswers.some((v) => typeof v === "string" && v.trim());
+        const wireDecision = item.kind === "question" && decision === "approve" && emptySkip !== true
+          ? (hasMultiChoices
+            ? "approve_with_multi_choices"
+            : (hasPerQuestionAnswers ? "approve_with_answers" : decision))
+          : decision;
         ok = await root.dispatchAction(confirmation
           ? { action: "session_confirmation", sessionId: item.sessionId, approvalId: event.approvalId, decision }
-          : { action: "runtime_approval", runId: String(event.runId || ""), approvalId: event.approvalId, decision, ...(item.kind === "question" ? { choices: choices || [], customAnswer } : {}) });
+          : {
+              action: "runtime_approval",
+              runId: String(event.runId || ""),
+              approvalId: event.approvalId,
+              decision: wireDecision,
+              ...(item.kind === "question" ? {
+                choices: choices || [],
+                ...(hasMultiChoices ? { multiChoices, customAnswers: normalizedCustomAnswers } : (hasPerQuestionAnswers ? { customAnswers: normalizedCustomAnswers } : {})),
+                ...(emptySkip === true ? { emptySkip: true } : {}),
+                customAnswer,
+              } : {}),
+              ...(elicitationResponse && typeof elicitationResponse === "object" ? { elicitationResponse } : {}),
+            });
       }
     } catch (error) {
       root.showSystemToast?.(tr("attention.submitFailed", { message: error?.message || "" }), "error");
@@ -1228,7 +1573,12 @@
     } else if (item.kind === "question") {
       // Options answer directly and the answer rail owns the footer, so the
       // generic approve/submit pair has no place on an ask-user card.
-      footer.appendChild(buildAnswerForm(item));
+      if (item._isExplicitQuestionMode) {
+        card.classList.add("oneui-notification--detailed");
+        addAction(actions, tr("attention.action.deny"), item, "deny", "oneui-notification__action--quiet");
+      } else {
+        footer.appendChild(buildAnswerForm(item));
+      }
     } else {
       addAction(actions, tr("attention.action.approve"), item, "approve", "oneui-notification__action--primary");
       addAction(actions, tr("attention.action.deny"), item, "deny", "oneui-notification__action--quiet");
@@ -1238,6 +1588,15 @@
     // affordance remains available for context and audit review.
     if (!isCompletion && !synthetic) {
       addAction(actions, tr("attention.action.detail"), item, "open", "oneui-notification__action--secondary");
+    }
+    if (typeof item._pendingFooterElicitationPatch === "function") {
+      item._pendingFooterElicitationPatch(actions);
+      delete item._pendingFooterElicitationPatch;
+      card.classList.add("oneui-notification--detailed");
+    }
+    if (typeof item._pendingFooterQuestionPatch === "function") {
+      item._pendingFooterQuestionPatch(actions);
+      delete item._pendingFooterQuestionPatch;
     }
     if (batchFooterActions.children.length) footer.appendChild(batchFooterActions);
     if (actions.children.length) footer.appendChild(actions);

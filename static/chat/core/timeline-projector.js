@@ -234,8 +234,39 @@
     return `live:${scope ? String(scope).trim() : "anonymous"}`;
   }
 
+  function isAsyncDeliveryMessageEvent(event) {
+    if (!event || typeof event !== "object") return false;
+    const delivery = String(event.messageDelivery ?? event.delivery ?? "").trim().toLowerCase();
+    return delivery === "async" || (Array.isArray(event.asyncQuestions) && event.asyncQuestions.length > 0);
+  }
+
+  function asyncDeliveryMessageIdentity(event) {
+    if (!event || typeof event !== "object") return "";
+    const itemId = typeof event.itemId === "string" ? event.itemId.trim() : "";
+    if (itemId) return `item:${itemId}`;
+    const qId = Array.isArray(event.asyncQuestions)
+      ? String(event.asyncQuestions[0]?.id ?? event.asyncQuestions[0]?.questionItemId ?? "").trim()
+      : "";
+    if (qId) return `q:${qId}`;
+    const seq = Number(event.seq);
+    if (Number.isFinite(seq) && seq > 0) return `seq:${seq}`;
+    const id = typeof event.id === "string" ? event.id.trim() : "";
+    return id ? `id:${id}` : "";
+  }
+
+  function sameAsyncDeliveryIdentity(a, b) {
+    const idA = asyncDeliveryMessageIdentity(a);
+    const idB = asyncDeliveryMessageIdentity(b);
+    if (idA && idB) return idA === idB;
+    return false;
+  }
+
   function entityIdFor(event) {
     const explicit = typeof event?.timelineEntityId === "string" ? event.timelineEntityId.trim() : "";
+    if (!explicit && isAsyncDeliveryMessageEvent(event) && kindFor(event) === "message" && normalizedRole(event) === "assistant") {
+      const asyncId = asyncDeliveryMessageIdentity(event);
+      if (asyncId) return `message:assistant:async:${asyncId}`;
+    }
     if (explicit) return explicit;
     const type = normalizedType(event);
     if (type === "operation" || type === "tool_use" || type === "tool_result" || type === "file_change") {
@@ -1117,6 +1148,35 @@
 
     getChangeSet() { return this.lastChange; }
   }
+
+  const proto = TimelineProjector.prototype;
+  const baseLiveScope = proto.liveScope;
+  const baseSameMessageScope = proto.sameMessageScope;
+  const baseCanReuseLive = proto.canReuseLiveMessageEntity;
+
+  proto.liveScope = function liveScopeWithAsyncIsolation(event) {
+    const scope = baseLiveScope.call(this, event);
+    if (!scope || !isAsyncDeliveryMessageEvent(event)) return scope;
+    const identity = asyncDeliveryMessageIdentity(event);
+    return identity ? `${scope}:async:${identity}` : `${scope}:async`;
+  };
+
+  proto.sameMessageScope = function sameMessageScopeWithAsyncIsolation(a, b) {
+    const asyncA = isAsyncDeliveryMessageEvent(a);
+    const asyncB = isAsyncDeliveryMessageEvent(b);
+    if (asyncA !== asyncB) return false;
+    if (asyncA && asyncB) return sameAsyncDeliveryIdentity(a, b);
+    return baseSameMessageScope.call(this, a, b);
+  };
+
+  proto.canReuseLiveMessageEntity = function canReuseLiveWithAsyncIsolation(previous, incoming) {
+    const asyncPrev = isAsyncDeliveryMessageEvent(previous);
+    const asyncInc = isAsyncDeliveryMessageEvent(incoming);
+    if (asyncPrev || asyncInc) {
+      return asyncPrev && asyncInc && sameAsyncDeliveryIdentity(previous, incoming);
+    }
+    return baseCanReuseLive.call(this, previous, incoming);
+  };
 
   root.RagentTimelineProjector = Object.freeze({
     TimelineProjector,

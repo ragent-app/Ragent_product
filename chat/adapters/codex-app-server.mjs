@@ -13,6 +13,7 @@ import {
   usageEvent,
 } from '../normalizer.mjs';
 import {
+  classifyCodexMcpElicitation,
   readCodexAppServerApprovalRequest,
   readCodexAppServerGoalFields,
   readCodexAppServerGoalPayload,
@@ -67,6 +68,8 @@ export function createCodexAppServerAdapter() {
   // automatically allowed and denied tools out of the
   // approval cards, push notifications, and the replay gate entirely.
   const autoApprovedIds = new Set();
+  const approvalIdByRequestId = new Map();
+  const resolvedApprovalIds = new Set();
 
   return {
     adapterCompatibility: getHarnessAdapterCompatibility('codex'),
@@ -89,6 +92,8 @@ export function createCodexAppServerAdapter() {
         agentMessageTextByItemId,
         reasoningTextByItemId,
         autoApprovedIds,
+        approvalIdByRequestId,
+        resolvedApprovalIds,
         textDeltaOrdinalByItemId,
       });
     },
@@ -118,6 +123,9 @@ function parseAppServerMessage(message, state = {}) {
     return [messageEvent('system', MAC_CLEANUP_WARNING, undefined, { code: 'MAC_CANCELLATION_CLEANUP_UNCONFIRMED' })];
   }
   if (message.type === 'ragent.approval_response') {
+    if (typeof message.approvalId === 'string' && message.approvalId) {
+      state.resolvedApprovalIds?.add(message.approvalId);
+    }
     if ((message.autoApproved === true || message.autoDenied === true)
       && typeof message.approvalId === 'string' && message.approvalId) {
       // Sidecar automatic decision: suppress the answered request frame so
@@ -129,13 +137,23 @@ function parseAppServerMessage(message, state = {}) {
       approvalId: message.approvalId,
       decision: message.decision,
       status: message.status,
-      source: 'codex-app-server',
+      source: typeof message.source === 'string' && message.source.trim()
+        ? message.source.trim()
+        : 'codex-app-server',
       providerRequestId: message.providerRequestId,
       providerMethod: message.providerMethod,
+      ...(message.redacted === true ? { redacted: true } : {}),
     })].filter(Boolean);
   }
   const approvalRequest = readCodexAppServerApprovalRequest(message);
   if (approvalRequest) {
+    const reqKey = String((approvalRequest.providerRequestIdString || approvalRequest.providerRequestId) ?? '');
+    if (reqKey && approvalRequest.approvalId) {
+      state.approvalIdByRequestId?.set(reqKey, {
+        approvalId: approvalRequest.approvalId,
+        providerMethod: approvalRequest.providerMethod,
+      });
+    }
     if (approvalRequest.approvalId && state.autoApprovedIds?.has(approvalRequest.approvalId)) {
       return [];
     }
@@ -235,6 +253,22 @@ function parseAppServerMessage(message, state = {}) {
 
     case 'mcpServer/elicitation/request':
       return parseMcpElicitation(message.params);
+
+    case 'serverRequest/resolved': {
+      const reqId = message.params?.requestId;
+      const reqKey = reqId === undefined || reqId === null ? '' : String(reqId);
+      const mapped = reqKey ? state.approvalIdByRequestId?.get(reqKey) : null;
+      if (!mapped || state.resolvedApprovalIds?.has(mapped.approvalId)) return [];
+      state.resolvedApprovalIds?.add(mapped.approvalId);
+      return [approvalResponseEvent({
+        approvalId: mapped.approvalId,
+        decision: 'cancelled',
+        status: 'cancelled',
+        source: 'codex-server-request-resolved',
+        providerRequestId: reqKey,
+        providerMethod: mapped.providerMethod || '',
+      })].filter(Boolean);
+    }
 
     case 'account/rateLimits/updated':
       return parseRateLimitsUpdated(message.params);
@@ -449,21 +483,54 @@ function parseApprovalRequest(approval) {
   const commandIsArgv = Array.isArray(params.command);
   const command = commandIsArgv ? `argv: ${JSON.stringify(params.command)}` : formatCommandValue(params.command);
   const filePaths = collectFileChangePaths(params);
-  const providerReason = approval.providerMethod === 'mcpServer/elicitation/request'
+  const isUserInput = approval.providerMethod === 'item/tool/requestUserInput';
+  const isElicitation = approval.providerMethod === 'mcpServer/elicitation/request';
+  const classifiedElicitation = isElicitation ? classifyCodexMcpElicitation(params) : null;
+  const providerReason = isElicitation
     ? (params.message || params.reason || params.request?.message || params.request?.prompt || '')
     : (params.reason || params.message || params.request?.message || params.request?.prompt || '');
   let reason = typeof providerReason === 'string' ? providerReason : '';
+  let questions;
+  let isBlocking;
+  if (isUserInput) {
+    questions = Array.isArray(approval.questions)
+      ? approval.questions
+      : (Array.isArray(params.questions) ? params.questions : []);
+    isBlocking = typeof approval.isBlocking === 'boolean'
+      ? approval.isBlocking
+      : (typeof params.isBlocking === 'boolean' ? params.isBlocking : true);
+    const summary = questions
+      .map((q) => {
+        const header = typeof q?.header === 'string' ? q.header.trim() : '';
+        const text = typeof q?.question === 'string' ? q.question.trim() : '';
+        return [header, text].filter(Boolean).join(': ');
+      })
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 500);
+    reason = summary || reason || 'User input requested';
+  }
   // Codex emits MCP confirmations as elicitation requests. Its current
   // protocol places the prompt at params.message and the actual tool input in
   // _meta; without both, an owner sees an empty approval card.
-  if (approval.providerMethod === 'mcpServer/elicitation/request'
+  if (isElicitation
       && params._meta?.codex_approval_kind === 'mcp_tool_call'
       && params._meta.tool_params && typeof params._meta.tool_params === 'object'
       && !Array.isArray(params._meta.tool_params)) {
     const input = JSON.stringify(params._meta.tool_params, null, 2);
     const limit = 16_000;
     reason = [reason, `Tool arguments:\n${input.length > limit ? `${input.slice(0, limit)}\n[Arguments truncated]` : input}`].filter(Boolean).join('\n\n');
+  } else if (classifiedElicitation?.isStructured) {
+    const structured = classifiedElicitation.elicitation;
+    if (classifiedElicitation.isUserVerificationMode) {
+      reason = [structured?.title, structured?.description, reason].filter(Boolean).join('\n\n')
+        || `Verification requested by ${structured?.serverName || 'MCP server'}`;
+    } else if (!reason) {
+      reason = structured?.message
+        || (structured?.serverName ? `MCP ${structured.serverName} requires input` : 'MCP elicitation requested');
+    }
   }
+  const skipExplanation = commandIsArgv || isUserInput || classifiedElicitation?.isStructured === true;
   return approvalRequestEvent({
     approvalId: approval.approvalId,
     providerRequestId: approval.providerRequestIdString,
@@ -479,9 +546,14 @@ function parseApprovalRequest(approval) {
     filePaths,
     grantRoot: params.grantRoot || '',
     permissions: params.permissions || null,
+    ...(questions ? { questions } : {}),
+    ...(typeof isBlocking === 'boolean' ? { isBlocking } : {}),
+    ...(classifiedElicitation?.isStructured && classifiedElicitation.elicitation
+      ? { elicitation: classifiedElicitation.elicitation }
+      : {}),
     status: 'pending',
     source: 'codex-app-server',
-    explanation: commandIsArgv ? null : explanationForApproval({ command, cwd: params.cwd || '', providerDescription: reason }),
+    explanation: skipExplanation ? null : explanationForApproval({ command, cwd: params.cwd || '', providerDescription: reason }),
   });
 }
 
@@ -707,6 +779,63 @@ function parseTurnPlanUpdated(params) {
   });
 }
 
+function extractAgentMessageText(item) {
+  if (typeof item?.text === 'string' && item.text) return item.text;
+  if (Array.isArray(item?.content)) {
+    const parts = [];
+    for (const block of item.content) {
+      if (typeof block === 'string') {
+        parts.push(block);
+      } else if (block && typeof block === 'object') {
+        if (typeof block.text === 'string') parts.push(block.text);
+        else if (typeof block.content === 'string') parts.push(block.content);
+      }
+    }
+    const joined = parts.join('');
+    if (joined) return joined;
+  }
+  return typeof item?.text === 'string' ? item.text : '';
+}
+
+function normalizeCodexMessagePhase(phase) {
+  const value = typeof phase === 'string' ? phase.trim() : '';
+  if (value === 'finalAnswer' || value === 'final_answer') return 'final_answer';
+  if (value === 'commentary') return 'commentary';
+  return '';
+}
+
+function normalizeAsyncQuestions(rawQuestions, messageId) {
+  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return [];
+  const normalized = [];
+  for (let index = 0; index < Math.min(rawQuestions.length, 16); index += 1) {
+    const raw = rawQuestions[index];
+    if (!raw || typeof raw !== 'object') continue;
+    const title = typeof raw.title === 'string'
+      ? raw.title.trim()
+      : (typeof raw.question === 'string' ? raw.question.trim() : '');
+    if (!title) continue;
+    const rawOptions = Array.isArray(raw.options) ? raw.options : null;
+    const options = rawOptions
+      ? rawOptions
+        .map((opt) => (typeof opt === 'string'
+          ? opt.trim()
+          : (typeof opt?.label === 'string' ? opt.label.trim() : '')))
+        .filter(Boolean)
+      : null;
+    const idBase = messageId || 'async';
+    normalized.push({
+      id: JSON.stringify(['request_user_input_async', idBase, index]),
+      index,
+      title,
+      question: title,
+      options: options && options.length > 0 ? options : null,
+      allowFreeText: true,
+      status: 'pending',
+    });
+  }
+  return normalized;
+}
+
 function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {}) {
   const events = [];
   const providerItemId = readProviderItemId(params, item);
@@ -719,7 +848,7 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
     case 'agentMessage':
       {
         const streamId = agentMessageStreamId(params, item);
-        const declaredText = typeof item.text === 'string' ? item.text : '';
+        const declaredText = extractAgentMessageText(item);
         const streamedText = state.agentMessageTextByItemId instanceof Map
           ? (state.agentMessageTextByItemId.get(streamId) || '')
           : '';
@@ -727,18 +856,25 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
         // item text is a protocol shape used by some app-server versions, so
         // recover the exact text that was already streamed for this item.
         const content = declaredText || streamedText;
-        if (content && lifecycle === 'completed' && item.phase === 'final_answer' && providerItemId && params?.turnId) {
+        const normalizedPhase = normalizeCodexMessagePhase(item.phase);
+        const isAsyncDelivery = item.delivery === 'async';
+        const asyncQuestions = normalizeAsyncQuestions(item.questions, providerItemId);
+        const hasAsyncQuestions = asyncQuestions.length > 0;
+        if (content && lifecycle === 'completed' && normalizedPhase === 'final_answer' && !isAsyncDelivery && providerItemId && params?.turnId) {
           const candidates = state.terminalCandidates?.get(params.turnId) || new Map();
           candidates.set(providerItemId, content);
           state.terminalCandidates?.set(params.turnId, candidates);
         }
-        if (content) {
+        if (content || isAsyncDelivery || hasAsyncQuestions) {
           events.push(messageEvent('assistant', content, undefined, {
-          // Codex replays the completed agentMessage during recovery. Keep
-          // its stable item id so provider-event dedup can enforce exactly
-          // once history publication across a control-plane restart.
-          ...(providerItemId ? { providerMessageId: providerItemId } : {}),
-          ...(['commentary', 'final_answer'].includes(item.phase) ? { messagePhase: item.phase } : {}),
+            // Codex replays the completed agentMessage during recovery. Keep
+            // its stable item id so provider-event dedup can enforce exactly
+            // once history publication across a control-plane restart.
+            ...(providerItemId ? { providerMessageId: providerItemId } : {}),
+            ...(normalizedPhase ? { messagePhase: normalizedPhase } : {}),
+            ...(isAsyncDelivery ? { messageDelivery: 'async', delivery: 'async' } : {}),
+            ...((isAsyncDelivery || hasAsyncQuestions) && providerItemId ? { asyncQuestionMessageId: providerItemId } : {}),
+            ...(hasAsyncQuestions ? { asyncQuestions, asyncQuestionsState: 'pending' } : {}),
           }));
         }
         if (lifecycle === 'completed') state.agentMessageTextByItemId?.delete(streamId);
@@ -995,7 +1131,14 @@ function parseTurnCompleted(params, state = {}) {
   const candidates = new Map(state.terminalCandidates?.get(providerTurnId) || []);
   if (status === 'completed' && Array.isArray(params?.turn?.items)) {
     for (const item of params.turn.items) {
-      if (item?.type === 'agentMessage' && item.phase === 'final_answer' && typeof item.id === 'string' && item.id && typeof item.text === 'string' && item.text) candidates.set(item.id, item.text);
+      const itemText = extractAgentMessageText(item);
+      if (item?.type === 'agentMessage'
+        && normalizeCodexMessagePhase(item.phase) === 'final_answer'
+        && item.delivery !== 'async'
+        && typeof item.id === 'string' && item.id
+        && itemText) {
+        candidates.set(item.id, itemText);
+      }
     }
   }
   state.terminalCandidates?.delete(providerTurnId);

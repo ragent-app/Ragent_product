@@ -371,6 +371,261 @@ test('deadline admission rejection inside a Run mutation leaves durable state un
   assert.deepEqual(await readFile(path), before);
   assert.equal((await runs.getRunAcceptanceEvidence(run.id)).cancelRequested, false);
 });
+test('Codex item/tool/requestUserInput validates multiSelect, isOther, emptySkip, secrets and 64KB body limit', async () => {
+  const v = await seed();
+  const questions = [
+    { id: 'env', question: 'Target env?', multiSelect: true, isOther: false, options: [{ label: 'Staging' }, { label: 'Prod' }] },
+    { id: 'notes', question: 'Optional notes' },
+    { id: 'api_secret', question: 'Deploy secret', isSecret: true },
+  ];
+  const run = await makeRun(v, 'running', { runtimeFamily: 'codex-app-server-json' });
+  await active(v, run);
+  await runs.updateRun(run.id, {
+    appServerPendingApprovals: [
+      {
+        approvalId: 'codex:ui-1',
+        providerMethod: 'item/tool/requestUserInput',
+        state: 'pending',
+        kind: 'question',
+        isBlocking: true,
+        params: { isBlocking: true, questions },
+      },
+      {
+        approvalId: 'codex:ui-nonblocking',
+        providerMethod: 'item/tool/requestUserInput',
+        state: 'pending',
+        kind: 'question',
+        isBlocking: false,
+        params: { isBlocking: false, questions: [{ id: 'opt', question: 'Optional?', options: [{ label: 'A' }] }] },
+      },
+    ],
+  });
+
+  const blockingPath = `/api/runs/${run.id}/approvals/${encodeURIComponent('codex:ui-1')}`;
+  const isOtherRejected = await route(v, '', {
+    path: blockingPath,
+    method: 'POST',
+    body: { decision: 'approve_with_multi_choices', multiChoices: [[], [], []], customAnswers: ['CustomNotAllowed', 'ok', 'tok'] },
+  });
+  assert.equal(isOtherRejected.status, 400);
+  assert.equal(isOtherRejected.body.code, 'INVALID_APPROVAL_CHOICES');
+
+  const blockingSkipRejected = await route(v, '', {
+    path: blockingPath,
+    method: 'POST',
+    body: { decision: 'approve', emptySkip: true },
+  });
+  assert.equal(blockingSkipRejected.status, 400);
+  assert.equal(blockingSkipRejected.body.code, 'INVALID_APPROVAL_CHOICES');
+
+  const bigNote = 'a'.repeat(24 * 1024);
+  const largePayloadAccepted = await route(v, '', {
+    path: blockingPath,
+    method: 'POST',
+    body: {
+      decision: 'approve',
+      requestId: 'codex-ui-big',
+      answers: {
+        env: ['Staging', 'Prod'],
+        notes: [bigNote],
+        api_secret: ['super-secret-token'],
+      },
+    },
+  });
+  assert.equal(largePayloadAccepted.status, 202, 'approval body >16KB and <=64KB must be accepted');
+  assert.equal(largePayloadAccepted.body.approval?.redacted, true);
+  assert.deepEqual(largePayloadAccepted.body.approval?.answers?.api_secret, { answers: ['[redacted]'] });
+  assert.deepEqual(largePayloadAccepted.body.approval?.answers?.env, { answers: ['Staging', 'Prod'] });
+
+  const overLimit = await route(v, '', {
+    path: blockingPath,
+    method: 'POST',
+    raw: JSON.stringify({ decision: 'approve', customAnswer: 'z'.repeat(70 * 1024) }),
+  });
+  assert.equal(overLimit.status, 413, 'approval body >64KB must fail with 413');
+
+  const nonBlockingPath = `/api/runs/${run.id}/approvals/${encodeURIComponent('codex:ui-nonblocking')}`;
+  const emptySkipOk = await route(v, '', {
+    path: nonBlockingPath,
+    method: 'POST',
+    body: { decision: 'approve', requestId: 'codex-ui-skip', emptySkip: true },
+  });
+  assert.equal(emptySkipOk.status, 202);
+  const stored = await runs.getRun(run.id);
+  const skipEntry = stored.appServerApprovalResponseQueue.find((e) => e.approvalId === 'codex:ui-nonblocking');
+  assert.equal(skipEntry?.emptySkip, true);
+  assert.deepEqual(skipEntry?.answers, {});
+
+  await runs.updateRun(run.id, { state: 'cancelled' });
+});
+
+test('Track 3 mcpServer/elicitation/request validates form schema, protects secrets, and handles cancel & userVerification', async () => {
+  const v = await seed();
+  const run = await makeRun(v, 'running', { runtimeFamily: 'codex-app-server-json' });
+  await active(v, run);
+  await runs.updateRun(run.id, {
+    appServerPendingApprovals: [
+      {
+        approvalId: 'codex:elicit-form',
+        providerMethod: 'mcpServer/elicitation/request',
+        state: 'pending',
+        kind: 'permissions',
+        params: {
+          mode: 'openai/form',
+          serverName: 'jira',
+          requestedSchema: {
+            type: 'object',
+            required: ['summary', 'apiToken'],
+            properties: {
+              summary: { type: 'string' },
+              apiToken: { type: 'string', format: 'password' },
+              count: { type: 'integer' },
+            },
+          },
+        },
+      },
+      {
+        approvalId: 'codex:elicit-verify',
+        providerMethod: 'mcpServer/elicitation/request',
+        state: 'pending',
+        kind: 'permissions',
+        params: {
+          mode: 'openai/userVerification',
+          serverName: 'bank',
+          title: 'Confirm wire',
+        },
+      },
+    ],
+  });
+
+  const formPath = `/api/runs/${run.id}/approvals/${encodeURIComponent('codex:elicit-form')}`;
+  const invalidType = await route(v, '', {
+    path: formPath,
+    method: 'POST',
+    body: {
+      decision: 'approve',
+      elicitationResponse: { action: 'accept', content: { summary: 'Ok', apiToken: 'pw', count: 'nan' } },
+    },
+  });
+  assert.equal(invalidType.status, 400);
+  assert.equal(invalidType.body.code, 'INVALID_ELICITATION_CONTENT');
+
+  const validForm = await route(v, '', {
+    path: formPath,
+    method: 'POST',
+    body: {
+      decision: 'approve',
+      requestId: 'elicit-form-ok',
+      elicitationResponse: {
+        action: 'accept',
+        content: { summary: 'Ship fix', apiToken: 'tok-999', count: 3, extraIgnored: 'drop' },
+      },
+    },
+  });
+  assert.equal(validForm.status, 202);
+  assert.equal(validForm.body.approval?.redacted, true);
+  assert.equal(validForm.body.approval?.elicitationContent?.apiToken, '[redacted]');
+  assert.equal(validForm.body.approval?.elicitationContent?.summary, 'Ship fix');
+  assert.equal(Object.hasOwn(validForm.body.approval?.elicitationContent || {}, 'extraIgnored'), false);
+
+  const verifyPath = `/api/runs/${run.id}/approvals/${encodeURIComponent('codex:elicit-verify')}`;
+  const rejectAcceptVerify = await route(v, '', {
+    path: verifyPath,
+    method: 'POST',
+    body: { decision: 'approve', elicitationResponse: { action: 'accept', content: {} } },
+  });
+  assert.equal(rejectAcceptVerify.status, 400);
+  assert.equal(rejectAcceptVerify.body.code, 'UNSUPPORTED_ELICITATION_MODE');
+
+  const cancelVerify = await route(v, '', {
+    path: verifyPath,
+    method: 'POST',
+    body: { decision: 'cancel', requestId: 'elicit-verify-cancel' },
+  });
+  assert.equal(cancelVerify.status, 202);
+  assert.equal(cancelVerify.body.approval?.decision, 'cancel');
+
+  await runs.updateRun(run.id, { state: 'cancelled' });
+});
+
+test('Track 2 POST /api/sessions/:id/messages accepts asyncQuestionReplies without text and steers active Codex run', async () => {
+  const v = await seed();
+  const run = await runs.createRun({
+    status: {
+      sessionId: v.sessionId,
+      state: 'running',
+      requestId: `steer_parent_${++sequence}`,
+      tool: 'run-fixture',
+      runtimeFamily: 'codex-app-server-json',
+      providerCapabilities: { supportsSteer: true },
+    },
+    manifest: {
+      sessionId: v.sessionId,
+      tool: 'run-fixture',
+      runtimeFamily: 'codex-app-server-json',
+    },
+  });
+  await active(v, run);
+
+  const sendMessageRoute = async (bodyObj) => {
+    const path = `/api/sessions/${v.sessionId}/messages`;
+    const url = new URL(path, 'http://localhost');
+    const req = new PassThrough();
+    req.method = 'POST';
+    req.headers = { 'content-type': 'application/json' };
+    const res = new EventEmitter();
+    res.headers = {};
+    res.setHeader = (k, val) => { res.headers[k] = val; };
+    const pending = handleSessionMainRoutes({
+      req,
+      res,
+      parsedUrl: url,
+      pathname: url.pathname,
+      authSession: { role: 'owner', principalKind: 'trusted_device' },
+      isDirectoryPath: async () => true,
+      createSessionSummaryRef: () => null,
+      isSessionVisibleToAuthSession: () => true,
+      getAuthPrincipalId: () => 'owner',
+      getAuthScopeAgentId: () => '',
+      isAgentScopedAuthSession: () => false,
+      resolveRequestedSessionAttachments: async () => [],
+      requireSessionAccess: async () => true,
+      readSessionMessagePayload: async () => { throw new Error('direct JSON reader expected'); },
+      writeJson: (_res, status, body) => Object.assign(res, { status, body }),
+    });
+    req.end(JSON.stringify(bodyObj));
+    assert.equal(await pending, true);
+    return { status: res.status, body: res.body };
+  };
+
+  const rejectedEmpty = await sendMessageRoute({ requestId: 'async-empty', text: '', asyncQuestionReplies: [] });
+  assert.equal(rejectedEmpty.status, 400);
+
+  const qItemId = JSON.stringify(['request_user_input_async', 'msg-async-route', 0]);
+  const steeredRes = await sendMessageRoute({
+    requestId: 'async-steer-1',
+    text: '',
+    steerIfRunning: true,
+    asyncQuestionReplies: [{ questionItemId: qItemId, question: 'Target runtime?', answer: 'Node 24' }],
+  });
+  assert.equal(steeredRes.status, 202);
+  assert.equal(steeredRes.body.steered, true);
+  assert.equal(steeredRes.body.queued, false);
+
+  const storedRun = await runs.getRun(run.id);
+  assert.equal(storedRun.appServerSteerQueue?.length, 1);
+  assert.match(storedRun.appServerSteerQueue[0].text, /<send_user_message_question_reply>/);
+  assert.match(storedRun.appServerSteerQueue[0].text, /Node 24/);
+
+  const events = await history.loadHistory(v.sessionId);
+  const userMsg = events.find((e) => e.type === 'message' && e.requestId === 'async-steer-1');
+  assert.ok(userMsg, 'steered async reply writes user history event');
+  assert.deepEqual(userMsg.answeredQuestionItemIds, [qItemId]);
+  assert.equal(userMsg.asyncQuestionReplies?.[0]?.answer, 'Node 24');
+
+  await runs.updateRun(run.id, { state: 'cancelled' });
+});
+
 test('large UTF8 result previews remain explicitly incomplete and bounded', async () => {
   const v = await seed(); const run = await makeRun(v, 'completed', { responseId: 'large-response' });
   await history.appendEvent(v.sessionId, messageEvent('assistant', '报告🙂'.repeat(20000), null, { runId: run.id, responseId: 'large-response' }));

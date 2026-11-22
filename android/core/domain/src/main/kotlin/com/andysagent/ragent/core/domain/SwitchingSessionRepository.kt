@@ -2,7 +2,9 @@ package com.andysagent.ragent.core.domain
 
 import com.andysagent.ragent.core.model.Approval
 import com.andysagent.ragent.core.model.ApprovalActionDecision
+import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.Computer
+import com.andysagent.ragent.core.model.ElicitationResponse
 import com.andysagent.ragent.core.model.Message
 import com.andysagent.ragent.core.model.Project
 import com.andysagent.ragent.core.model.RuntimeConnectionState
@@ -147,6 +149,14 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         attachments: List<OutboundAttachment>,
         harnessCapabilityIds: List<String>,
     ) = current().sendMessage(sessionId, text, selection, requestId, agentId, attachments, harnessCapabilityIds)
+    override suspend fun sendAsyncQuestionReplies(
+        sessionId: String,
+        replies: List<AsyncQuestionReply>,
+        trailingText: String,
+        selection: RuntimeSelection?,
+        steerIfRunning: Boolean,
+        requestId: String,
+    ): Boolean = current().sendAsyncQuestionReplies(sessionId, replies, trailingText, selection, steerIfRunning, requestId)
     override suspend fun updateQueuedFollowUp(
         sessionId: String,
         action: QueuedFollowUpAction,
@@ -189,6 +199,20 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         current().resolveRuntimeApprovalWithAnswers(runId, approvalId, choices, customAnswers, requestId)
     override suspend fun resolveRuntimeApprovalWithMultiChoices(runId: String, approvalId: String, multiChoices: List<List<Int>>, customAnswers: List<String>, requestId: String) =
         current().resolveRuntimeApprovalWithMultiChoices(runId, approvalId, multiChoices, customAnswers, requestId)
+    override suspend fun resolveRuntimeApprovalStructured(
+        runId: String,
+        approvalId: String,
+        decision: String,
+        choices: List<String>,
+        customAnswer: String?,
+        customAnswers: List<String>,
+        multiChoices: List<List<Int>>?,
+        emptySkip: Boolean?,
+        elicitationResponse: ElicitationResponse?,
+        requestId: String,
+    ) = current().resolveRuntimeApprovalStructured(
+        runId, approvalId, decision, choices, customAnswer, customAnswers, multiChoices, emptySkip, elicitationResponse, requestId,
+    )
     override suspend fun updateSessionGoal(sessionId: String, goal: String?, autoContinue: Boolean) = current().updateSessionGoal(sessionId, goal, autoContinue)
     override suspend fun submitPlanAction(sessionId: String, planId: String, action: String, text: String, requestId: String): JsonObject =
         current().submitPlanAction(sessionId, planId, action, text, requestId)

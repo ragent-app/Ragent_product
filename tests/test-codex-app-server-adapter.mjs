@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createHash } from 'node:crypto';
 import assert from 'assert/strict';
 
 import {
@@ -15,6 +16,7 @@ import {
   buildCodexAppServerThreadGoalSetMessage,
   buildCodexAppServerThreadGoalGetMessage,
   buildCodexAppServerThreadGoalClearMessage,
+  classifyCodexMcpElicitation,
   readCodexAppServerApprovalRequest,
   readCodexAppServerManagedMcpRequest,
   readCodexAppServerThreadId,
@@ -1013,5 +1015,251 @@ assert.equal(goalClearedEvents.length, 1);
 assert.equal(goalClearedEvents[0].type, 'status');
 assert.equal(goalClearedEvents[0].codexGoalEvent, 'cleared');
 assert.equal(goalClearedEvents[0].providerThreadId, 'thread-123');
+
+// --- Track 1: item/tool/requestUserInput & serverRequest/resolved ---
+
+const initCaps = buildCodexAppServerInitializeMessage();
+assert.deepEqual(initCaps.params.capabilities.extensions, { 'openai/form': {} });
+
+const userInputRpc = {
+  id: 501,
+  method: 'item/tool/requestUserInput',
+  params: {
+    threadId: 'thread-ui',
+    turnId: 'turn-ui',
+    itemId: 'item-ui-1',
+    isBlocking: false,
+    questions: [
+      {
+        id: 'env',
+        header: 'Environment',
+        question: 'Select deployment target',
+        isOther: false,
+        multiSelect: true,
+        options: [
+          { label: 'Staging', description: 'Pre-production' },
+          { label: 'Production', description: 'Live traffic' },
+        ],
+      },
+      {
+        id: 'api_secret',
+        header: 'Secret',
+        question: 'Enter deploy token',
+        isSecret: true,
+      },
+    ],
+  },
+};
+const parsedUserInputMeta = readCodexAppServerApprovalRequest(userInputRpc);
+assert.equal(parsedUserInputMeta.kind, 'question');
+assert.equal(parsedUserInputMeta.requestClass, 'user_input');
+assert.equal(parsedUserInputMeta.isBlocking, false);
+assert.equal(parsedUserInputMeta.threadId, 'thread-ui');
+assert.equal(parsedUserInputMeta.turnId, 'turn-ui');
+assert.equal(parsedUserInputMeta.itemId, 'item-ui-1');
+assert.equal(parsedUserInputMeta.questions.length, 2);
+
+const userInputEvents = adapter.parseLine(JSON.stringify(userInputRpc));
+assert.equal(userInputEvents.length, 1);
+assert.equal(userInputEvents[0].type, 'approval_request');
+assert.equal(userInputEvents[0].kind, 'question');
+assert.equal(userInputEvents[0].isBlocking, false);
+assert.equal(userInputEvents[0].explanation, undefined, 'requestUserInput skips shell command explanation');
+assert.equal(userInputEvents[0].questions[0].isOther, false);
+assert.equal(userInputEvents[0].questions[1].isSecret, true);
+assert.match(userInputEvents[0].reason, /Select deployment target/);
+
+const multiChoiceResp = buildCodexAppServerApprovalResponseMessage(parsedUserInputMeta, 'approve', {
+  multiChoices: [[0, 1], []],
+  customAnswers: ['', 'tok-secret'],
+});
+assert.deepEqual(multiChoiceResp, {
+  id: 501,
+  result: {
+    answers: {
+      env: { answers: ['Staging', 'Production'] },
+      api_secret: { answers: ['tok-secret'] },
+    },
+  },
+});
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(parsedUserInputMeta, 'approve', { emptySkip: true }),
+  { id: 501, result: { answers: {} } },
+);
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(parsedUserInputMeta, 'cancel'),
+  { id: 501, result: { answers: {} } },
+);
+
+const resolvedFallback = adapter.parseLine(JSON.stringify({
+  method: 'serverRequest/resolved',
+  params: { threadId: 'thread-ui', requestId: 501 },
+}));
+assert.equal(resolvedFallback.length, 1);
+assert.equal(resolvedFallback[0].type, 'approval_response');
+assert.equal(resolvedFallback[0].approvalId, parsedUserInputMeta.approvalId);
+assert.equal(resolvedFallback[0].decision, 'cancelled');
+assert.equal(resolvedFallback[0].source, 'codex-server-request-resolved');
+assert.equal(
+  adapter.parseLine(JSON.stringify({ method: 'serverRequest/resolved', params: { requestId: 501 } })).length,
+  0,
+  'duplicate serverRequest/resolved for same request is suppressed',
+);
+
+const syntheticApprovalResp = adapter.parseLine(JSON.stringify({
+  type: 'ragent.approval_response',
+  approvalId: 'codex:item/tool/requestUserInput:502',
+  decision: 'cancelled',
+  status: 'cancelled',
+  source: 'codex-server-request-resolved',
+  providerRequestId: '502',
+  providerMethod: 'item/tool/requestUserInput',
+  redacted: true,
+}));
+assert.equal(syntheticApprovalResp[0].source, 'codex-server-request-resolved');
+assert.equal(syntheticApprovalResp[0].redacted, true);
+
+// --- Track 2: agentMessage content[], finalAnswer phase, async delivery + questions ---
+
+const asyncTurnAdapter = createCodexAppServerAdapter();
+assert.equal(
+  asyncTurnAdapter.parseLine(JSON.stringify({
+    method: 'item/completed',
+    params: {
+      threadId: 't-async',
+      turnId: 'turn-async',
+      item: {
+        type: 'agentMessage',
+        id: 'msg-async-q',
+        phase: 'commentary',
+        delivery: 'async',
+        content: [{ type: 'text', text: 'Before ' }, { type: 'text', text: 'you proceed:' }],
+        questions: [
+          { title: 'Target cloud?', options: [{ label: 'AWS' }, 'GCP'] },
+          { title: 'Extra notes?' },
+        ],
+      },
+    },
+  }))[0].asyncQuestionsState,
+  'pending',
+);
+const asyncMsg = asyncTurnAdapter.parseLine(JSON.stringify({
+  method: 'item/completed',
+  params: {
+    threadId: 't-async',
+    turnId: 'turn-async',
+    item: {
+      type: 'agentMessage',
+      id: 'msg-async-q-2',
+      delivery: 'async',
+      questions: [{ title: 'Confirm?', options: ['Yes', 'No'] }],
+    },
+  },
+}))[0];
+assert.equal(asyncMsg.type, 'message');
+assert.equal(asyncMsg.messageDelivery, 'async');
+assert.equal(asyncMsg.asyncQuestionMessageId, 'msg-async-q-2');
+assert.equal(asyncMsg.asyncQuestions[0].id, JSON.stringify(['request_user_input_async', 'msg-async-q-2', 0]));
+assert.deepEqual(asyncMsg.asyncQuestions[0].options, ['Yes', 'No']);
+assert.equal(asyncMsg.asyncQuestions[0].allowFreeText, true);
+
+const finalMsg = asyncTurnAdapter.parseLine(JSON.stringify({
+  method: 'item/completed',
+  params: {
+    threadId: 't-async',
+    turnId: 'turn-async',
+    item: {
+      type: 'agentMessage',
+      id: 'msg-final-1',
+      phase: 'finalAnswer',
+      content: [{ type: 'text', text: 'Real final ' }, { type: 'text', text: 'reply.' }],
+    },
+  },
+}))[0];
+assert.equal(finalMsg.content, 'Real final reply.');
+assert.equal(finalMsg.messagePhase, 'final_answer');
+
+const turnDoneEvents = asyncTurnAdapter.parseLine(JSON.stringify({
+  method: 'turn/completed',
+  params: {
+    threadId: 't-async',
+    turn: {
+      id: 'turn-async',
+      status: 'completed',
+      items: [
+        { type: 'agentMessage', id: 'msg-async-only', phase: 'finalAnswer', delivery: 'async', text: 'Async should not override final reply' },
+        { type: 'agentMessage', id: 'msg-final-1', phase: 'finalAnswer', content: [{ type: 'text', text: 'Real final reply.' }] },
+      ],
+    },
+  },
+}));
+const turnDoneStatus = turnDoneEvents.find((e) => e.type === 'status');
+assert.equal(turnDoneStatus.runState, 'completed');
+assert.equal(turnDoneStatus.deliveryProviderMessageId, 'msg-final-1', 'async delivery message must be excluded from terminalCandidates');
+assert.equal(
+  turnDoneStatus.deliveryContentHash,
+  createHash('sha256').update('Real final reply.', 'utf8').digest('hex'),
+);
+
+// --- Track 3: mcpServer/elicitation/request (compat mcp_tool_call vs form/url/userVerification) ---
+
+const legacyMcpConfirm = {
+  id: 601,
+  method: 'mcpServer/elicitation/request',
+  params: {
+    serverName: 'weather',
+    message: 'Run weather lookup?',
+    requestedSchema: { type: 'object', properties: {} },
+    _meta: { codex_approval_kind: 'mcp_tool_call', tool_params: { city: 'Tokyo' } },
+  },
+};
+assert.equal(classifyCodexMcpElicitation(legacyMcpConfirm.params).isStructured, false);
+const legacyConfirmEvt = adapter.parseLine(JSON.stringify(legacyMcpConfirm))[0];
+assert.equal(legacyConfirmEvt.kind, 'permissions');
+assert.equal(legacyConfirmEvt.elicitation, undefined);
+assert.match(legacyConfirmEvt.reason, /Tokyo/);
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(readCodexAppServerApprovalRequest(legacyMcpConfirm), 'approve'),
+  { id: 601, result: { action: 'accept', content: {} } },
+);
+
+const structuredFormRpc = {
+  id: 602,
+  method: 'mcpServer/elicitation/request',
+  params: {
+    serverName: 'jira',
+    mode: 'openai/form',
+    message: 'Provide Jira ticket details',
+    requestedSchema: {
+      type: 'object',
+      required: ['summary', 'apiToken'],
+      properties: {
+        summary: { type: 'string', title: 'Summary' },
+        apiToken: { type: 'string', format: 'password' },
+      },
+    },
+  },
+};
+const structuredFormMeta = readCodexAppServerApprovalRequest(structuredFormRpc);
+const structuredFormEvt = adapter.parseLine(JSON.stringify(structuredFormRpc))[0];
+assert.equal(structuredFormEvt.kind, 'permissions');
+assert.equal(structuredFormEvt.explanation, undefined);
+assert.equal(structuredFormEvt.elicitation.mode, 'openai/form');
+assert.equal(structuredFormEvt.elicitation.serverName, 'jira');
+assert.equal(structuredFormEvt.elicitation.requestedSchema.properties.apiToken.format, 'password');
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(structuredFormMeta, 'approve', {
+    elicitationContent: { summary: 'Fix bug', apiToken: 'sec-123' },
+  }),
+  { id: 602, result: { action: 'accept', content: { summary: 'Fix bug', apiToken: 'sec-123' } } },
+);
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(structuredFormMeta, 'cancel'),
+  { id: 602, result: { action: 'cancel' } },
+);
+assert.deepEqual(
+  buildCodexAppServerApprovalResponseMessage(structuredFormMeta, 'deny'),
+  { id: 602, result: { action: 'decline' } },
+);
 
 console.log('test-codex-app-server-adapter: ok');

@@ -20,6 +20,12 @@ import { listHarnessCapabilities, resolveHarnessCapabilityInstructions, resolveC
 import { setCodexSkillPreference } from './codex-skill-management.mjs';
 import { WORKBENCH_EXECUTION_POLICY, workbenchToolAllowed } from '../lib/workbench-execution-policy.mjs';
 import { readBody } from '../lib/utils.mjs';
+import {
+  buildAsyncQuestionReplyText,
+  extractAnsweredQuestionItemIds,
+  normalizeAsyncQuestionReplies,
+  parseAsyncQuestionReplyEnvelope,
+} from './codex-async-question-reply.mjs';
 import { measureApiRequestPhase, setApiRequestCorrelation } from './api-request-log.mjs';
 import { appendEvent, MAX_EVENT_RANGE_SPAN, readEventBody } from './history.mjs';
 import { messageEvent } from './normalizer.mjs';
@@ -377,6 +383,51 @@ function buildRunSheetProjectionView({ session, projection, model, run = null })
     sourceLatestSeq: projection?.sourceLatestSeq || 0,
     projectionStale: projection?.projectionStale === true,
     ...buildDelegationProjection(run),
+  };
+}
+
+const SESSION_MESSAGE_JSON_MAX_BYTES = Math.max(
+  256 * 1024,
+  Number.parseInt(process.env.RAGENT_MESSAGE_JSON_MAX_BYTES || String(4 * 1024 * 1024), 10)
+    || 4 * 1024 * 1024,
+);
+
+async function readJsonSessionMessagePayload(req) {
+  const raw = await readBody(req, SESSION_MESSAGE_JSON_MAX_BYTES);
+  const payload = JSON.parse(raw);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.filter(Boolean)
+    : (Array.isArray(payload.images) ? payload.images.filter(Boolean) : []);
+  return {
+    sessionId: typeof payload.sessionId === 'string' ? payload.sessionId.trim() : '',
+    requestId: typeof payload.requestId === 'string' ? payload.requestId.trim() : '',
+    runId: typeof payload.runId === 'string' ? payload.runId.trim() : '',
+    text: typeof payload.text === 'string' ? payload.text : '',
+    tool: typeof payload.tool === 'string' ? payload.tool.trim() : '',
+    providerProfile: typeof payload.providerProfile === 'string' ? payload.providerProfile.trim() : '',
+    model: typeof payload.model === 'string' ? payload.model.trim() : '',
+    effort: typeof payload.effort === 'string' ? payload.effort.trim() : '',
+    serviceTier: typeof payload.serviceTier === 'string' ? payload.serviceTier.trim() : '',
+    interactionMode: typeof payload.interactionMode === 'string' ? payload.interactionMode.trim() : '',
+    permissionMode: typeof payload.permissionMode === 'string' ? payload.permissionMode.trim() : '',
+    planAction: typeof payload.planAction === 'string' ? payload.planAction.trim() : '',
+    planId: typeof payload.planId === 'string' ? payload.planId.trim() : '',
+    harnessCapabilityIds: Array.isArray(payload.harnessCapabilityIds) ? payload.harnessCapabilityIds : [],
+    agentId: typeof payload.agentId === 'string' ? payload.agentId.trim() : '',
+    templateId: typeof payload.templateId === 'string' ? payload.templateId.trim() : '',
+    thinking: payload.thinking === true,
+    ...(typeof payload.providerFailover === 'boolean' ? { providerFailover: payload.providerFailover } : {}),
+    browserMcpEnabled: payload.browserMcpEnabled === true,
+    deferPromptBuild: payload.deferPromptBuild === true,
+    source: typeof payload.source === 'string' ? payload.source.trim() : '',
+    sourceContext: payload.sourceContext && typeof payload.sourceContext === 'object' ? payload.sourceContext : null,
+    uiLanguage: typeof payload.uiLanguage === 'string' ? payload.uiLanguage.trim() : '',
+    attachments,
+    ...(payload.asyncQuestionReplies !== undefined ? { asyncQuestionReplies: payload.asyncQuestionReplies } : {}),
+    steerIfRunning: payload.steerIfRunning === true,
   };
 }
 
@@ -1261,9 +1312,16 @@ export async function handleSessionMainRoutes({
       }
       let body;
       try {
+        const contentType = String(req?.headers?.['content-type'] || '').toLowerCase();
+        const useDirectJsonReader = !contentType.startsWith('multipart/form-data')
+          && req
+          && typeof req.on === 'function'
+          && typeof req.read === 'function';
         body = await measureApiRequestPhase(
           'route.read_payload',
-          () => readSessionMessagePayload(req, pathname),
+          () => (useDirectJsonReader
+            ? readJsonSessionMessagePayload(req)
+            : readSessionMessagePayload(req, pathname)),
         );
       } catch (err) {
         writeJson(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: err.code === 'BODY_TOO_LARGE' ? 'Request body too large' : 'Bad request' });
@@ -1274,8 +1332,18 @@ export async function handleSessionMainRoutes({
         writeJson(res, 400, { error: 'Invalid request body' });
         return true;
       }
-      if (!payload?.text || typeof payload.text !== 'string') {
-        writeJson(res, 400, { error: 'text is required' });
+      const rawText = typeof payload.text === 'string' ? payload.text : '';
+      const normalizedAsyncReplies = normalizeAsyncQuestionReplies(payload.asyncQuestionReplies);
+      const parsedEnvelope = parseAsyncQuestionReplyEnvelope(rawText);
+      const effectiveAsyncReplies = normalizedAsyncReplies.length > 0
+        ? normalizedAsyncReplies
+        : parsedEnvelope.replies;
+      const composedMessageText = normalizedAsyncReplies.length > 0 && parsedEnvelope.replies.length === 0
+        ? buildAsyncQuestionReplyText(normalizedAsyncReplies, rawText)
+        : rawText.trim();
+      const answeredQuestionItemIds = extractAnsweredQuestionItemIds(effectiveAsyncReplies);
+      if (!composedMessageText) {
+        writeJson(res, 400, { error: 'text or asyncQuestionReplies is required' });
         return true;
       }
       try {
@@ -1356,13 +1424,16 @@ export async function handleSessionMainRoutes({
           ...(payload.deferPromptBuild === true ? { deferPromptBuild: true } : {}),
           deferRunnerLaunch: true,
           ...(preSavedAttachments.length > 0 ? { preSavedAttachments } : {}),
+          ...(effectiveAsyncReplies.length > 0 ? { asyncQuestionReplies: effectiveAsyncReplies } : {}),
+          ...(answeredQuestionItemIds.length > 0 ? { answeredQuestionItemIds } : {}),
+          ...(payload.steerIfRunning === true ? { steerIfRunning: true } : {}),
           // This fact comes only from the authenticated server session. It is
           // never accepted from the request body.
           ...authenticatedTurnOptions(authSession),
         };
         const outcome = await measureApiRequestPhase(
           'route.submit_message',
-          () => sendUserMessage(sessionId, payload.text.trim(), [], {
+          () => sendUserMessage(sessionId, composedMessageText, [], {
             ...messageOptions,
             ...(requestId ? { requestId } : {}),
             ...(rootSessionMessageRoute ? { forceAddressability: true } : {}),
@@ -1372,6 +1443,7 @@ export async function handleSessionMainRoutes({
           requestId: requestId || outcome.requestId || outcome.run?.requestId || null,
           duplicate: outcome.duplicate,
           queued: outcome.queued,
+          ...(outcome.steered === true ? { steered: true } : {}),
           run: outcome.run,
           response: outcome.response || null,
           session: createClientSessionDetail(outcome.session),
@@ -2207,7 +2279,7 @@ export async function handleSessionMainRoutes({
       }
       let payload = {};
       try {
-        const body = await readBody(req, 16 * 1024);
+        const body = await readBody(req, 64 * 1024);
         payload = body ? JSON.parse(body) : {};
       } catch (err) {
         writeJson(res, err.code === 'BODY_TOO_LARGE' ? 413 : 400, { error: err.code === 'BODY_TOO_LARGE' ? 'Request body too large' : 'Bad request' });
@@ -2232,6 +2304,19 @@ export async function handleSessionMainRoutes({
           customAnswer: typeof payload?.customAnswer === 'string' ? payload.customAnswer : '',
           customAnswers: Array.isArray(payload?.customAnswers) ? payload.customAnswers : [],
           ...(payload?.decision === 'approve_with_multi_choices' ? { multiChoices: payload.multiChoices } : {}),
+          ...(payload?.emptySkip === true ? { emptySkip: true } : {}),
+          ...(payload?.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers)
+            ? { answers: payload.answers }
+            : {}),
+          ...(payload?.elicitationResponse && typeof payload.elicitationResponse === 'object'
+            ? { elicitationResponse: payload.elicitationResponse }
+            : {}),
+          ...(payload?.elicitationContent && typeof payload.elicitationContent === 'object'
+            ? { elicitationContent: payload.elicitationContent }
+            : {}),
+          ...(payload?.content && typeof payload.content === 'object' && !Array.isArray(payload.content)
+            ? { content: payload.content }
+            : {}),
           approvalActor: temporaryControlApprovalActor(authSession, 'approval.resolve'),
         });
         writeJson(res, outcome.duplicate ? 200 : 202, {

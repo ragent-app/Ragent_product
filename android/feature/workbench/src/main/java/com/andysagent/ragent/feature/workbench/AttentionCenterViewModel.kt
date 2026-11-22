@@ -61,6 +61,8 @@ sealed interface AttentionEvent {
         val customAnswers: List<String> = emptyList(),
     ) : AttentionEvent
     data class ResolveMultiChoices(val itemId: String, val selections: List<List<Int>>, val customAnswers: List<String>) : AttentionEvent
+    data class SkipQuestion(val itemId: String) : AttentionEvent
+    data class ResolveElicitation(val itemId: String, val action: String, val contentJson: String? = null) : AttentionEvent
     data object ClearError : AttentionEvent
 }
 
@@ -151,6 +153,8 @@ class AttentionCenterViewModel(
             is AttentionEvent.ResolveQuestion -> resolveQuestion(event)
             is AttentionEvent.ResolveQuestions -> resolveQuestions(event)
             is AttentionEvent.ResolveMultiChoices -> resolveMultiChoices(event)
+            is AttentionEvent.SkipQuestion -> skipQuestion(event.itemId)
+            is AttentionEvent.ResolveElicitation -> resolveElicitation(event)
             AttentionEvent.ClearError -> mutableState.update { it.copy(error = null) }
         }
     }
@@ -432,6 +436,40 @@ class AttentionCenterViewModel(
                 choices = event.choices,
                 customAnswer = event.customAnswer,
                 customAnswers = event.customAnswers,
+            )
+            consumeResolutionForRepository(fixed, event.itemId, outcome)
+        }
+    }
+
+    private fun skipQuestion(itemId: String) {
+        val current = mutableState.value
+        if (current.resolvingItemId != null) return
+        val item = current.items.firstOrNull { it.id == itemId } ?: return
+        val approval = item.approval ?: return
+        val fixed = currentRepository() ?: return
+        mutableState.update { it.copy(resolvingItemId = itemId, error = null) }
+        viewModelScope.launch {
+            val outcome = ApprovalResolutionCoordinator(fixed).skipNonBlockingQuestion(
+                sessionId = item.sessionId,
+                approvalId = approval.id,
+            )
+            consumeResolutionForRepository(fixed, itemId, outcome)
+        }
+    }
+
+    private fun resolveElicitation(event: AttentionEvent.ResolveElicitation) {
+        val current = mutableState.value
+        if (current.resolvingItemId != null) return
+        val item = current.items.firstOrNull { it.id == event.itemId } ?: return
+        val approval = item.approval ?: return
+        val fixed = currentRepository() ?: return
+        mutableState.update { it.copy(resolvingItemId = event.itemId, error = null) }
+        viewModelScope.launch {
+            val outcome = ApprovalResolutionCoordinator(fixed).resolveElicitation(
+                sessionId = item.sessionId,
+                approvalId = approval.id,
+                action = event.action,
+                contentJson = event.contentJson,
             )
             consumeResolutionForRepository(fixed, event.itemId, outcome)
         }

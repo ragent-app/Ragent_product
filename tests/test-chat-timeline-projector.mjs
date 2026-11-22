@@ -475,4 +475,59 @@ assert.ok(
   'a giant live response must be clipped before it can grow without bound',
 );
 
+await (async () => {
+  const { default: assertMod } = await import('node:assert/strict');
+  await import('../static/chat/core/timeline-projector.js');
+  const { TimelineProjector } = globalThis.RagentTimelineProjector;
+  const projector = new TimelineProjector({ sessionId: 'async-proj-sess' });
+
+  projector.ingest([{ type: 'text_delta', role: 'assistant', runId: 'run-a1', itemId: 'prose-1', text: 'Inspecting workspace...' }]);
+  const first = projector.replaceDurable([
+    { seq: 1, type: 'message', role: 'assistant', runId: 'run-a1', itemId: 'followup-1', content: 'Async note', delivery: 'async' },
+    {
+      seq: 2,
+      type: 'message',
+      role: 'assistant',
+      runId: 'run-a1',
+      itemId: 'ask-1',
+      content: '',
+      messageDelivery: 'async',
+      asyncQuestions: [{ id: 'q-async-1', index: 0, question: 'Target branch?', status: 'pending' }],
+    },
+    {
+      seq: 3,
+      type: 'message',
+      role: 'user',
+      content: '<send_user_message_question_reply>[{"questionItemId":"q-async-1","question":"Target branch?","answer":"main"}]</send_user_message_question_reply>',
+      answeredQuestionItemIds: ['q-async-1'],
+      asyncQuestionReplies: [{ questionItemId: 'q-async-1', question: 'Target branch?', answer: 'main' }],
+    },
+  ]);
+
+  assertMod.equal(first.items.length, 4, 'live prose, followup async note, async question card, and user reply remain distinct items');
+  const askItem = first.items.find((i) => i.event?.itemId === 'ask-1');
+  assertMod.equal(askItem.event.messageDelivery, 'async');
+  assertMod.equal(askItem.event.asyncQuestions[0].status, 'pending');
+  const userItem = first.items.find((i) => i.event?.role === 'user');
+  assertMod.deepEqual(userItem.event.answeredQuestionItemIds, ['q-async-1']);
+  assertMod.equal(userItem.event.asyncQuestionReplies[0].answer, 'main');
+
+  // Re-applying durable snapshot with answered status updates askItem cleanly
+  const second = projector.replaceDurable([
+    {
+      seq: 2,
+      type: 'message',
+      role: 'assistant',
+      runId: 'run-a1',
+      itemId: 'ask-1',
+      content: '',
+      messageDelivery: 'async',
+      asyncQuestions: [{ id: 'q-async-1', index: 0, question: 'Target branch?', status: 'answered', answeredText: 'main' }],
+    },
+  ]);
+  const updatedAsk = second.items.find((i) => i.event?.itemId === 'ask-1');
+  assertMod.equal(updatedAsk.event.asyncQuestions[0].status, 'answered');
+  assertMod.equal(updatedAsk.event.asyncQuestions[0].answeredText, 'main');
+})();
+
 console.log('test-chat-timeline-projector: ok');

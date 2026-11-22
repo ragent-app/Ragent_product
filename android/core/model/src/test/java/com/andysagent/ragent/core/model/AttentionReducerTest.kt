@@ -291,4 +291,70 @@ class AttentionReducerTest {
         )
         assertTrue(items.isEmpty())
     }
+
+    @Test
+    fun `complex elicitation form requires session while simple form url and unsupported stay inline`() {
+        val complex = approval("e-complex", "s1", passkeyRequired = false).copy(
+            kind = "permissions",
+            elicitation = ElicitationPayload(
+                mode = "form",
+                schemaProperties = listOf(
+                    ElicitationSchemaProperty(name = "a"),
+                    ElicitationSchemaProperty(name = "b"),
+                    ElicitationSchemaProperty(name = "c"),
+                ),
+            ),
+        )
+        val nested = approval("e-object", "s1", passkeyRequired = false).copy(
+            kind = "permissions",
+            elicitation = ElicitationPayload(
+                mode = "openai/form",
+                schemaProperties = listOf(ElicitationSchemaProperty(name = "cfg", type = "object")),
+            ),
+        )
+        val simpleForm = approval("e-simple", "s1", passkeyRequired = false).copy(
+            kind = "permissions",
+            elicitation = ElicitationPayload(
+                mode = "form",
+                schemaProperties = listOf(
+                    ElicitationSchemaProperty(name = "token", format = "password"),
+                    ElicitationSchemaProperty(name = "confirm", type = "boolean"),
+                ),
+            ),
+        )
+        val externalUrl = approval("e-url", "s1", passkeyRequired = false).copy(
+            kind = "permissions",
+            elicitation = ElicitationPayload(mode = "url", url = "https://example.com/auth"),
+        )
+        val unsupported = approval("e-unsupported", "s1", passkeyRequired = false).copy(
+            kind = "permissions",
+            elicitation = ElicitationPayload(mode = "openai/userVerification"),
+        )
+
+        val items = AttentionReducer.project(
+            sessions = listOf(session("s1", status = SessionStatus.WaitingApproval)),
+            approvals = listOf(complex, nested, simpleForm, externalUrl, unsupported),
+        ).associateBy { it.approval?.id }
+
+        assertTrue(items.getValue("e-complex").requiresSession)
+        assertTrue(items.getValue("e-object").requiresSession)
+        assertFalse(items.getValue("e-simple").requiresSession)
+        assertFalse(items.getValue("e-url").requiresSession)
+        assertFalse(items.getValue("e-unsupported").requiresSession)
+    }
+
+    @Test
+    fun `non-blocking question projects even while session stays working`() {
+        val q = approval("q-nonblock", "s1", kind = "question").copy(
+            isBlocking = false,
+            questions = listOf(ApprovalQuestion(question = "Optional note?", isOther = true)),
+        )
+        val items = AttentionReducer.project(
+            sessions = listOf(session("s1", status = SessionStatus.Working)),
+            approvals = listOf(q),
+        )
+        assertEquals(1, items.size)
+        assertEquals(AttentionKind.Question, items.single().kind)
+        assertFalse(items.single().approval!!.isBlocking)
+    }
 }

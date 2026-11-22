@@ -953,7 +953,34 @@ function createRuntimeApprovalSummary(evt) {
   return summary;
 }
 
-async function submitRuntimeApprovalDecision(evt, decision, button, choices, customAnswer = "") {
+async function submitRuntimeApprovalDecision(evt, decision, button, choices, customAnswer = "", extra = null) {
+  const normalizeCustomAnswersList = (raw) => {
+    if (Array.isArray(raw)) {
+      return raw.map((v) => (typeof v === "string" ? v.trim().slice(0, 8000) : ""));
+    }
+    if (raw && typeof raw === "object") {
+      const indices = Object.keys(raw).map((k) => Number(k)).filter((n) => Number.isInteger(n) && n >= 0);
+      if (indices.length === 0) return [];
+      const len = Math.max(...indices) + 1;
+      const out = Array.from({ length: len }, () => "");
+      for (const k of Object.keys(raw)) {
+        const idx = Number(k);
+        if (Number.isInteger(idx) && idx >= 0 && typeof raw[k] === "string") {
+          out[idx] = raw[k].trim().slice(0, 8000);
+        }
+      }
+      return out;
+    }
+    return [];
+  };
+  const customAnswersList = normalizeCustomAnswersList(extra?.customAnswers);
+  const hasMultiChoices = Array.isArray(extra?.multiChoices) && extra.multiChoices.length > 0;
+  const hasPerQuestionAnswers = customAnswersList.some((v) => Boolean(v));
+  const wireDecision = decision === "approve" && extra?.emptySkip !== true
+    ? (hasMultiChoices
+      ? "approve_with_multi_choices"
+      : (hasPerQuestionAnswers ? "approve_with_answers" : decision))
+    : decision;
   const approvalId = getApprovalEventId(evt);
   if (!approvalId || typeof dispatchAction !== "function") return false;
   const sessionId = String(currentSessionId || evt?.sessionId || "").trim();
@@ -974,10 +1001,23 @@ async function submitRuntimeApprovalDecision(evt, decision, button, choices, cus
           sessionId,
           runId: String(evt?.runId || "").trim(),
           approvalId,
-          decision,
+          decision: wireDecision,
           ...(Array.isArray(choices) && choices.length > 0 ? { choices } : {}),
+          ...(hasMultiChoices
+            ? { multiChoices: extra.multiChoices, customAnswers: customAnswersList }
+            : (hasPerQuestionAnswers ? { customAnswers: customAnswersList } : {})),
           ...(typeof customAnswer === "string" && customAnswer.trim()
             ? { customAnswer: customAnswer.trim().slice(0, 8000) }
+            : {}),
+          ...(extra?.emptySkip === true ? { emptySkip: true } : {}),
+          ...(extra?.answers && typeof extra.answers === "object" && !Array.isArray(extra.answers)
+            ? { answers: extra.answers }
+            : {}),
+          ...(extra?.elicitationResponse && typeof extra.elicitationResponse === "object"
+            ? { elicitationResponse: extra.elicitationResponse }
+            : {}),
+          ...(typeof extra?.decisionSource === "string" && extra.decisionSource.trim()
+            ? { decisionSource: extra.decisionSource.trim() }
             : {}),
         });
     if (ok) {
@@ -1034,35 +1074,755 @@ function collectApprovalPromptOptions(value) {
 
 function getApprovalPromptSections(evt) {
   const sections = [];
+  const rootBlocking = evt?.isBlocking !== false;
   if (Array.isArray(evt?.questions)) {
     for (const entry of evt.questions) {
       const question = typeof entry === "string" ? { question: entry } : entry;
       if (!(question && typeof question === "object")) continue;
       const header = readApprovalPromptText(question, ["header", "title", "label"]);
-      const id = readApprovalPromptText(question, ["id", "key", "name"]);
+      const id = readApprovalPromptText(question, ["id", "key", "name", "questionId"]);
       const text = readApprovalPromptText(question, ["question", "prompt", "text", "message"]);
       const options = collectApprovalPromptOptions(question.options || question.choices);
+      const multiSelect = question.multiSelect === true || question.isMultiSelect === true;
+      const isOther = typeof question.isOther === "boolean"
+        ? question.isOther
+        : (typeof evt?.isOther === "boolean" ? evt.isOther : undefined);
+      const isSecret = question.isSecret === true || evt?.isSecret === true;
+      const isBlocking = question.isBlocking === false ? false : rootBlocking;
       if (header || id || text || options.length > 0) {
-        sections.push({ header, id, question: text, options });
+        sections.push({ header, id, question: text, options, multiSelect, isOther, isSecret, isBlocking });
       }
     }
   }
   if (sections.length > 0) return sections;
 
   const question = readApprovalPromptText(evt, ["question", "prompt"]);
+  const header = readApprovalPromptText(evt, ["header", "title"]);
+  const id = readApprovalPromptText(evt, ["questionId", "id", "key"]);
   const options = collectApprovalPromptOptions(evt?.options || evt?.choices);
-  if (question || options.length > 0) sections.push({ question, options });
+  const multiSelect = evt?.multiSelect === true || evt?.isMultiSelect === true;
+  const isOther = typeof evt?.isOther === "boolean" ? evt.isOther : undefined;
+  const isSecret = evt?.isSecret === true;
+  if (question || header || options.length > 0) {
+    sections.push({
+      header,
+      id,
+      question,
+      options,
+      multiSelect,
+      isOther,
+      isSecret,
+      isBlocking: rootBlocking,
+    });
+  }
   return sections;
+}
+
+function uiTranslate(key, vars, fallback = "") {
+  if (typeof globalThis.t === "function") {
+    const out = globalThis.t(key, vars);
+    if (typeof out === "string" && out !== key) return out;
+  }
+  let text = fallback || key;
+  if (vars && typeof vars === "object") {
+    for (const [k, v] of Object.entries(vars)) {
+      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v ?? ""));
+    }
+  }
+  return text;
+}
+
+function parseQuestionReplyEnvelopeCompat(text) {
+  if (typeof globalThis.parseQuestionReplyEnvelope === "function") {
+    return globalThis.parseQuestionReplyEnvelope(text);
+  }
+  const source = typeof text === "string" ? text : "";
+  const tagRe = /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi;
+  let matched = false;
+  const replies = [];
+  const answeredIds = [];
+  const stripped = source.replace(tagRe, (_m, inner) => {
+    matched = true;
+    try {
+      const parsed = JSON.parse(String(inner || "").trim());
+      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.replies) ? parsed.replies : [parsed]);
+      for (const item of arr) {
+        if (!item || typeof item !== "object") continue;
+        const questionItemId = String(item.questionItemId ?? item.question_item_id ?? item.itemId ?? item.id ?? "").trim();
+        const question = String(item.question ?? item.prompt ?? "").trim();
+        const answer = String(item.answer ?? item.reply ?? "").trim();
+        if (!questionItemId && !question && !answer) continue;
+        replies.push({ questionItemId, question, answer });
+        if (questionItemId && !answeredIds.includes(questionItemId)) answeredIds.push(questionItemId);
+      }
+    } catch {
+      // ignore malformed JSON
+    }
+    return "\n";
+  });
+  if (!matched) {
+    return { hasEnvelope: false, replies: [], answeredIds: [], trailingText: source, displayText: source };
+  }
+  const trailingText = stripped.replace(/^\s+|\s+$/g, "").replace(/\n{3,}/g, "\n\n");
+  const lines = replies.map((r) => (r.question && r.answer ? `${r.question}: ${r.answer}` : (r.answer || r.question))).filter(Boolean);
+  const parts = [];
+  if (lines.length) parts.push(lines.join("\n"));
+  if (trailingText) parts.push(trailingText);
+  return {
+    hasEnvelope: true,
+    replies,
+    answeredIds,
+    trailingText,
+    displayText: parts.join("\n\n").trim(),
+  };
+}
+
+function hasApprovalSecretQuestion(evt) {
+  if (!evt || typeof evt !== "object") return false;
+  if (evt.isSecret === true) return true;
+  if (Array.isArray(evt.questions)) {
+    return evt.questions.some((q) => q && typeof q === "object" && q.isSecret === true);
+  }
+  return false;
+}
+
+function redactApprovalSecretValue(value) {
+  const str = String(value ?? "").trim();
+  if (!str) return "";
+  return uiTranslate("approval.secret.redacted", null, "••••••");
+}
+
+function isSafeExternalHttpUrl(rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value) return { safe: false, href: "" };
+  try {
+    const parsed = new URL(value);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol === "http:" || protocol === "https:") {
+      return { safe: true, href: parsed.href, url: parsed };
+    }
+  } catch {
+    // invalid URL
+  }
+  return { safe: false, href: value };
+}
+
+function isElicitationSchemaEmpty(schema) {
+  if (!schema || typeof schema !== "object") return true;
+  const props = schema.properties;
+  return !props || typeof props !== "object" || Object.keys(props).length === 0;
+}
+
+function classifyCodexElicitation(evt) {
+  const elicitation = evt?.elicitation && typeof evt.elicitation === "object" ? evt.elicitation : null;
+  if (!elicitation) return null;
+  const rawMode = String(elicitation.mode || "").trim();
+  const mode = rawMode.toLowerCase();
+  const codexKind = String(elicitation.codexApprovalKind || "").trim().toLowerCase();
+  const schema = elicitation.requestedSchema && typeof elicitation.requestedSchema === "object"
+    ? elicitation.requestedSchema
+    : null;
+  const schemaEmpty = isElicitationSchemaEmpty(schema);
+  const serverName = String(elicitation.serverName || evt?.serverName || "").trim();
+  const message = String(elicitation.message || evt?.reason || "").trim();
+
+  if ((codexKind === "mcp_tool_call" || (!mode && !elicitation.url)) && schemaEmpty) {
+    return { kind: "compact_mcp", mode: mode || codexKind, elicitation, serverName, message };
+  }
+  if (mode === "form" || mode === "openai/form" || mode === "openaiform" || (!mode && !schemaEmpty)) {
+    return { kind: "form", mode: rawMode || "form", elicitation, schema: schema || { properties: {} }, serverName, message };
+  }
+  if (mode === "url" || (!!elicitation.url && !mode)) {
+    return { kind: "url", mode: rawMode || "url", elicitation, url: String(elicitation.url || "").trim(), serverName, message };
+  }
+  return { kind: "unsupported", mode: rawMode || codexKind || "unknown", elicitation, serverName, message };
+}
+
+function isSimpleElicitationForm(schema) {
+  if (!schema || typeof schema !== "object" || !schema.properties) return true;
+  const entries = Object.entries(schema.properties);
+  if (entries.length > 2) return false;
+  return entries.every(([, prop]) => {
+    const type = String(prop?.type || "string").toLowerCase();
+    return type !== "object" && type !== "array";
+  });
+}
+
+function getSchemaEnumOptions(prop) {
+  if (Array.isArray(prop?.enum)) {
+    return prop.enum.map((val, idx) => ({
+      value: val,
+      label: Array.isArray(prop.enumNames) && prop.enumNames[idx] !== undefined
+        ? String(prop.enumNames[idx])
+        : String(val),
+    }));
+  }
+  const variants = Array.isArray(prop?.oneOf) ? prop.oneOf : (Array.isArray(prop?.anyOf) ? prop.anyOf : null);
+  if (variants) {
+    const out = [];
+    for (const v of variants) {
+      if (!v || typeof v !== "object") continue;
+      if (v.const !== undefined) {
+        out.push({ value: v.const, label: String(v.title ?? v.label ?? v.const) });
+      } else if (Array.isArray(v.enum) && v.enum.length === 1) {
+        out.push({ value: v.enum[0], label: String(v.title ?? v.label ?? v.enum[0]) });
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  return null;
+}
+
+function createSecretRevealButton(inputEl, { buttonClassName = "runtime-approval-card__secret-toggle", tr = uiTranslate } = {}) {
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = buttonClassName;
+  toggleBtn.setAttribute("aria-pressed", "false");
+  toggleBtn.setAttribute("aria-label", tr("approval.secret.reveal", null, "Show secret answer"));
+  toggleBtn.textContent = "👁";
+  toggleBtn.addEventListener("click", () => {
+    const revealed = inputEl.type === "text";
+    inputEl.type = revealed ? "password" : "text";
+    toggleBtn.setAttribute("aria-pressed", revealed ? "false" : "true");
+    toggleBtn.setAttribute(
+      "aria-label",
+      revealed
+        ? tr("approval.secret.reveal", null, "Show secret answer")
+        : tr("approval.secret.hide", null, "Hide secret answer")
+    );
+  });
+  return toggleBtn;
+}
+
+function buildElicitationSchemaForm(schema, { tr = uiTranslate, onInputChange = null } = {}) {
+  const form = document.createElement("div");
+  form.className = "elicitation-form";
+  const props = schema?.properties && typeof schema.properties === "object" ? schema.properties : {};
+  const requiredSet = new Set(Array.isArray(schema?.required) ? schema.required : []);
+  const fieldControllers = [];
+
+  for (const [key, rawProp] of Object.entries(props)) {
+    const prop = rawProp && typeof rawProp === "object" ? rawProp : {};
+    const fieldWrap = document.createElement("div");
+    fieldWrap.className = "elicitation-field";
+    fieldWrap.dataset.fieldKey = key;
+
+    const labelText = String(prop.title || key).trim();
+    const isRequired = requiredSet.has(key);
+    const errorEl = document.createElement("div");
+    errorEl.className = "elicitation-field__error";
+    errorEl.hidden = true;
+
+    const rawType = Array.isArray(prop.type)
+      ? (prop.type.find((t) => t !== "null") || "string")
+      : String(prop.type || "string").toLowerCase();
+    const enumOptions = getSchemaEnumOptions(prop);
+
+    let readAndValidate = null;
+    let focusTarget = null;
+
+    if (rawType === "boolean") {
+      const checkRow = document.createElement("label");
+      checkRow.className = "elicitation-field__checkbox-row";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = prop.default === true;
+      checkbox.dataset.fieldKey = key;
+      checkbox.addEventListener("change", () => {
+        errorEl.hidden = true;
+        onInputChange?.();
+      });
+      const textSpan = document.createElement("span");
+      textSpan.textContent = labelText;
+      checkRow.appendChild(checkbox);
+      checkRow.appendChild(textSpan);
+      if (isRequired) {
+        const req = document.createElement("span");
+        req.className = "elicitation-field__required";
+        req.textContent = "*";
+        checkRow.appendChild(req);
+      }
+      fieldWrap.appendChild(checkRow);
+      if (prop.description) {
+        const desc = document.createElement("div");
+        desc.className = "elicitation-field__description";
+        desc.textContent = String(prop.description);
+        fieldWrap.appendChild(desc);
+      }
+      focusTarget = checkbox;
+      readAndValidate = () => ({ valid: true, include: true, value: Boolean(checkbox.checked), error: "" });
+    } else if (rawType === "array" && Array.isArray(prop.items?.enum)) {
+      const labelEl = document.createElement("div");
+      labelEl.className = "elicitation-field__label";
+      labelEl.textContent = labelText;
+      if (isRequired) {
+        const req = document.createElement("span");
+        req.className = "elicitation-field__required";
+        req.textContent = "*";
+        labelEl.appendChild(req);
+      }
+      fieldWrap.appendChild(labelEl);
+      if (prop.description) {
+        const desc = document.createElement("div");
+        desc.className = "elicitation-field__description";
+        desc.textContent = String(prop.description);
+        fieldWrap.appendChild(desc);
+      }
+      const defaultArr = Array.isArray(prop.default) ? new Set(prop.default.map(String)) : new Set();
+      const checkboxes = [];
+      for (const itemVal of prop.items.enum) {
+        const row = document.createElement("label");
+        row.className = "elicitation-field__checkbox-row";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = String(itemVal);
+        cb.checked = defaultArr.has(String(itemVal));
+        cb.addEventListener("change", () => {
+          errorEl.hidden = true;
+          onInputChange?.();
+        });
+        row.appendChild(cb);
+        row.appendChild(document.createTextNode(String(itemVal)));
+        fieldWrap.appendChild(row);
+        checkboxes.push({ cb, typedValue: itemVal });
+      }
+      focusTarget = checkboxes[0]?.cb || null;
+      readAndValidate = () => {
+        const chosen = checkboxes.filter((entry) => entry.cb.checked).map((entry) => entry.typedValue);
+        if (isRequired && chosen.length === 0) {
+          return {
+            valid: false,
+            include: false,
+            value: chosen,
+            error: tr("elicitation.validation.required", { field: labelText }, `Please fill required field: ${labelText}`),
+          };
+        }
+        if (!isRequired && chosen.length === 0) return { valid: true, include: false, value: chosen, error: "" };
+        return { valid: true, include: true, value: chosen, error: "" };
+      };
+    } else {
+      const labelEl = document.createElement("label");
+      labelEl.className = "elicitation-field__label";
+      labelEl.textContent = labelText;
+      if (isRequired) {
+        const req = document.createElement("span");
+        req.className = "elicitation-field__required";
+        req.textContent = "*";
+        labelEl.appendChild(req);
+      }
+      fieldWrap.appendChild(labelEl);
+      if (prop.description) {
+        const desc = document.createElement("div");
+        desc.className = "elicitation-field__description";
+        desc.textContent = String(prop.description);
+        fieldWrap.appendChild(desc);
+      }
+
+      if (enumOptions) {
+        const selectEl = document.createElement("select");
+        selectEl.className = "elicitation-field__input";
+        selectEl.dataset.fieldKey = key;
+        const placeholderOpt = document.createElement("option");
+        placeholderOpt.value = "";
+        placeholderOpt.textContent = tr("elicitation.selectPlaceholder", null, "Select an option…");
+        selectEl.appendChild(placeholderOpt);
+        selectEl.value = "";
+        enumOptions.forEach((opt, idx) => {
+          const optionEl = document.createElement("option");
+          optionEl.value = String(idx);
+          optionEl.textContent = opt.label;
+          if (prop.default !== undefined && opt.value === prop.default) {
+            optionEl.selected = true;
+            selectEl.value = String(idx);
+          }
+          selectEl.appendChild(optionEl);
+        });
+        selectEl.addEventListener("change", () => {
+          errorEl.hidden = true;
+          onInputChange?.();
+        });
+        fieldWrap.appendChild(selectEl);
+        focusTarget = selectEl;
+        readAndValidate = () => {
+          const rawIdx = selectEl.value;
+          if (rawIdx === "") {
+            if (isRequired) {
+              return {
+                valid: false,
+                include: false,
+                value: undefined,
+                error: tr("elicitation.validation.required", { field: labelText }, `Please fill required field: ${labelText}`),
+              };
+            }
+            return { valid: true, include: false, value: undefined, error: "" };
+          }
+          const matched = enumOptions[Number(rawIdx)];
+          return { valid: true, include: true, value: matched ? matched.value : rawIdx, error: "" };
+        };
+      } else {
+        const wrap = document.createElement("div");
+        wrap.className = "elicitation-field__input-wrap";
+        const fieldInput = document.createElement("input");
+        fieldInput.className = "elicitation-field__input";
+        fieldInput.dataset.fieldKey = key;
+        fieldInput.setAttribute("autocomplete", "off");
+        fieldInput.setAttribute("spellcheck", "false");
+
+        const isSecretField = prop.format === "password" || prop.writeOnly === true;
+        if (rawType === "number" || rawType === "integer") {
+          fieldInput.type = "number";
+          fieldInput.step = rawType === "integer" ? "1" : "any";
+          if (Number.isFinite(Number(prop.minimum))) fieldInput.min = String(prop.minimum);
+          if (Number.isFinite(Number(prop.maximum))) fieldInput.max = String(prop.maximum);
+        } else if (isSecretField) {
+          fieldInput.type = "password";
+          fieldInput.dataset.secret = "true";
+        } else if (prop.format === "email") {
+          fieldInput.type = "email";
+        } else if (prop.format === "uri" || prop.format === "url") {
+          fieldInput.type = "url";
+        } else {
+          fieldInput.type = "text";
+        }
+
+        if (prop.default !== undefined && prop.default !== null) {
+          fieldInput.value = String(prop.default);
+        }
+        fieldInput.addEventListener("input", () => {
+          errorEl.hidden = true;
+          onInputChange?.();
+        });
+        wrap.appendChild(fieldInput);
+        if (isSecretField) {
+          wrap.appendChild(createSecretRevealButton(fieldInput, { tr }));
+        }
+        fieldWrap.appendChild(wrap);
+        focusTarget = fieldInput;
+
+        readAndValidate = () => {
+          const rawVal = fieldInput.value;
+          const trimmed = rawVal.trim();
+          if (!trimmed) {
+            if (isRequired) {
+              return {
+                valid: false,
+                include: false,
+                value: "",
+                error: tr("elicitation.validation.required", { field: labelText }, `Please fill required field: ${labelText}`),
+              };
+            }
+            return { valid: true, include: false, value: "", error: "" };
+          }
+          if (rawType === "number" || rawType === "integer") {
+            const num = Number(trimmed);
+            if (!Number.isFinite(num)) {
+              return {
+                valid: false,
+                include: false,
+                value: undefined,
+                error: tr("elicitation.validation.number", { field: labelText }, `Enter a valid number for ${labelText}`),
+              };
+            }
+            if (rawType === "integer" && !Number.isInteger(num)) {
+              return {
+                valid: false,
+                include: false,
+                value: undefined,
+                error: tr("elicitation.validation.integer", { field: labelText }, `Enter a whole number for ${labelText}`),
+              };
+            }
+            if ((Number.isFinite(Number(prop.minimum)) && num < Number(prop.minimum))
+                || (Number.isFinite(Number(prop.maximum)) && num > Number(prop.maximum))) {
+              return {
+                valid: false,
+                include: false,
+                value: undefined,
+                error: tr("elicitation.validation.range", { field: labelText }, `${labelText} is out of allowed range`),
+              };
+            }
+            return { valid: true, include: true, value: num, error: "" };
+          }
+          if ((Number.isFinite(Number(prop.minLength)) && rawVal.length < Number(prop.minLength))
+              || (Number.isFinite(Number(prop.maxLength)) && rawVal.length > Number(prop.maxLength))) {
+            return {
+              valid: false,
+              include: false,
+              value: undefined,
+              error: tr("elicitation.validation.length", { field: labelText }, `${labelText} length is out of allowed range`),
+            };
+          }
+          return { valid: true, include: true, value: rawVal, error: "" };
+        };
+      }
+    }
+
+    fieldWrap.appendChild(errorEl);
+    form.appendChild(fieldWrap);
+    if (readAndValidate) {
+      fieldControllers.push({ key, errorEl, focusTarget, readAndValidate });
+    }
+  }
+
+  return {
+    element: form,
+    hasFields: fieldControllers.length > 0,
+    collectAndValidate(showErrors = true) {
+      const content = {};
+      let valid = true;
+      let firstInvalid = null;
+      for (const ctrl of fieldControllers) {
+        const res = ctrl.readAndValidate();
+        if (!res.valid) {
+          valid = false;
+          if (!firstInvalid && ctrl.focusTarget) firstInvalid = ctrl.focusTarget;
+          if (showErrors && res.error) {
+            ctrl.errorEl.textContent = res.error;
+            ctrl.errorEl.hidden = false;
+          }
+        } else {
+          ctrl.errorEl.hidden = true;
+          if (res.include) content[ctrl.key] = res.value;
+        }
+      }
+      if (!valid && showErrors && firstInvalid?.focus) {
+        firstInvalid.focus();
+      }
+      return { valid, content };
+    },
+  };
+}
+
+function buildElicitationUrlCard(elicitation, { tr = uiTranslate, buttonClassName = "decision-sheet__url-btn" } = {}) {
+  const card = document.createElement("div");
+  card.className = "elicitation-url-card";
+  const serverName = String(elicitation?.serverName || "").trim();
+  const message = String(elicitation?.message || "").trim();
+  const urlCheck = isSafeExternalHttpUrl(elicitation?.url);
+
+  if (serverName) {
+    const serverRow = document.createElement("div");
+    serverRow.className = "runtime-approval-card__detail";
+    const lbl = document.createElement("span");
+    lbl.className = "runtime-approval-card__detail-label";
+    lbl.textContent = tr("elicitation.serverLabel", null, "MCP Server");
+    const val = document.createElement("span");
+    val.className = "runtime-approval-card__detail-value";
+    val.textContent = serverName;
+    serverRow.appendChild(lbl);
+    serverRow.appendChild(val);
+    card.appendChild(serverRow);
+  }
+  if (message) {
+    const msgEl = document.createElement("div");
+    msgEl.className = "runtime-approval-card__detail-value";
+    msgEl.textContent = message;
+    card.appendChild(msgEl);
+  }
+
+  const urlBox = document.createElement("div");
+  urlBox.className = "elicitation-url-card__url";
+  urlBox.textContent = urlCheck.href || String(elicitation?.url || "");
+  card.appendChild(urlBox);
+
+  if (!urlCheck.safe) {
+    const warn = document.createElement("div");
+    warn.className = "elicitation-url-card__warning";
+    warn.textContent = tr("elicitation.invalidUrl", null, "Blocked unsafe URL (only http/https links are allowed).");
+    card.appendChild(warn);
+    return { element: card, safeUrl: "", valid: false };
+  }
+
+  const hint = document.createElement("div");
+  hint.className = "elicitation-field__description";
+  hint.textContent = tr("elicitation.urlSecurityHint", null, "Open and verify this link in your browser only if you trust the destination.");
+  card.appendChild(hint);
+
+  const actions = document.createElement("div");
+  actions.className = "elicitation-url-card__actions";
+
+  const openBtn = document.createElement("button");
+  openBtn.type = "button";
+  openBtn.className = buttonClassName;
+  openBtn.textContent = tr("elicitation.openLink", null, "Open link");
+  openBtn.addEventListener("click", () => {
+    globalThis.open?.(urlCheck.href, "_blank", "noopener,noreferrer");
+  });
+  actions.appendChild(openBtn);
+
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.className = buttonClassName;
+  copyBtn.textContent = tr("elicitation.copyLink", null, "Copy URL");
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await globalThis.navigator?.clipboard?.writeText?.(urlCheck.href);
+      copyBtn.textContent = tr("elicitation.copiedLink", null, "Copied");
+      globalThis.setTimeout?.(() => {
+        copyBtn.textContent = tr("elicitation.copyLink", null, "Copy URL");
+      }, 1500);
+    } catch {
+      // ignore clipboard errors in constrained tests
+    }
+  });
+  actions.appendChild(copyBtn);
+
+  card.appendChild(actions);
+  return { element: card, safeUrl: urlCheck.href, valid: true };
+}
+
+function buildElicitationUnsupportedCard(elicitation, mode, { tr = uiTranslate } = {}) {
+  const card = document.createElement("div");
+  card.className = "elicitation-unsupported";
+  const serverName = String(elicitation?.serverName || "").trim();
+  if (serverName) {
+    const serverRow = document.createElement("div");
+    serverRow.className = "runtime-approval-card__detail";
+    const lbl = document.createElement("span");
+    lbl.className = "runtime-approval-card__detail-label";
+    lbl.textContent = tr("elicitation.serverLabel", null, "MCP Server");
+    const val = document.createElement("span");
+    val.className = "runtime-approval-card__detail-value";
+    val.textContent = serverName;
+    serverRow.appendChild(lbl);
+    serverRow.appendChild(val);
+    card.appendChild(serverRow);
+  }
+  const notice = document.createElement("div");
+  notice.className = "elicitation-unsupported__notice";
+  notice.textContent = tr(
+    "elicitation.unsupportedBody",
+    { mode: String(mode || "unknown") },
+    `This request requires "${String(mode || "unknown")}", which is not supported in this client.`
+  );
+  card.appendChild(notice);
+  if (elicitation?.message) {
+    const msgEl = document.createElement("div");
+    msgEl.className = "runtime-approval-card__detail-value";
+    msgEl.textContent = String(elicitation.message);
+    card.appendChild(msgEl);
+  }
+  return card;
+}
+
+function createQuestionCustomInputRow(section, sectionIndex, {
+  rowClassName = "runtime-approval-card__custom-row",
+  inputClassName = "runtime-approval-card__custom-input",
+  toggleClassName = "runtime-approval-card__secret-toggle",
+  onInput = null,
+  tr = uiTranslate,
+} = {}) {
+  const isSecret = section?.isSecret === true;
+  const row = document.createElement("div");
+  row.className = rowClassName;
+  row.dataset.questionIndex = String(sectionIndex);
+
+  const label = document.createElement("label");
+  label.className = "runtime-approval-card__custom-label";
+  const titleText = section?.header || section?.question || "";
+  label.textContent = titleText
+    ? tr("approval.customAnswer.labelFor", { question: titleText }, `${titleText} — Other`)
+    : tr("approval.customAnswer.label", null, "Other response");
+  row.appendChild(label);
+
+  const inputWrap = document.createElement("div");
+  inputWrap.className = isSecret ? "runtime-approval-card__secret-wrap" : "decision-sheet__prompt-custom-row";
+
+  const field = document.createElement("input");
+  field.type = isSecret ? "password" : "text";
+  field.className = inputClassName;
+  field.dataset.questionIndex = String(sectionIndex);
+  if (isSecret) field.dataset.secret = "true";
+  field.setAttribute("autocomplete", "off");
+  field.setAttribute("spellcheck", "false");
+  field.placeholder = isSecret
+    ? tr("approval.secret.placeholder", null, "Enter secret response…")
+    : tr("approval.customAnswer.placeholder", null, "Write your own response…");
+  if (typeof onInput === "function") {
+    field.addEventListener("input", () => onInput(field.value, field));
+  }
+  inputWrap.appendChild(field);
+  if (isSecret) {
+    inputWrap.appendChild(createSecretRevealButton(field, { buttonClassName: toggleClassName, tr }));
+  }
+  row.appendChild(inputWrap);
+  return { row, input: field };
+}
+
+function enhanceApprovalPromptSectionDom(sectionEl, section, sectionIndex = 0, {
+  renderCustomInput = false,
+  customRowClassName = "runtime-approval-card__custom-row",
+  customInputClassName = "runtime-approval-card__custom-input",
+  toggleClassName = "runtime-approval-card__secret-toggle",
+  onCustomInput = null,
+  tr = uiTranslate,
+} = {}) {
+  if (!sectionEl) return sectionEl;
+  sectionEl.dataset.questionIndex = String(sectionIndex);
+  sectionEl.dataset.multiSelect = section?.multiSelect === true ? "true" : "false";
+  sectionEl.dataset.isSecret = section?.isSecret === true ? "true" : "false";
+  sectionEl.dataset.isOther = section?.isOther === false
+    ? "false"
+    : (section?.isOther === true ? "true" : "auto");
+
+  const optionList = sectionEl.querySelector?.(".runtime-approval-card__option-list");
+  if (optionList && section?.multiSelect === true) {
+    optionList.dataset.multiSelect = "true";
+    optionList.setAttribute("role", "group");
+    if (!sectionEl.querySelector?.(".runtime-approval-card__multi-hint")) {
+      const hint = document.createElement("div");
+      hint.className = "runtime-approval-card__multi-hint";
+      hint.textContent = tr("approval.multiSelect.hint", null, "Select one or more");
+      optionList.parentNode?.insertBefore(hint, optionList);
+    }
+    optionList.querySelectorAll(".runtime-approval-card__option").forEach((optBtn) => {
+      optBtn.setAttribute("role", "checkbox");
+      optBtn.setAttribute("aria-checked", optBtn.classList.contains("is-selected") ? "true" : "false");
+    });
+  }
+
+  const optionsCount = Array.isArray(section?.options) ? section.options.length : 0;
+  const shouldShowCustom = section?.isOther === false && optionsCount > 0 ? false : true;
+  if (renderCustomInput && shouldShowCustom && !sectionEl.querySelector?.(`.${customRowClassName.split(" ")[0]}`)) {
+    const { row } = createQuestionCustomInputRow(section, sectionIndex, {
+      rowClassName: customRowClassName,
+      inputClassName: customInputClassName,
+      toggleClassName,
+      onInput: onCustomInput,
+      tr,
+    });
+    sectionEl.appendChild(row);
+  }
+  return sectionEl;
+}
+
+if (typeof globalThis !== "undefined") {
+  globalThis.parseQuestionReplyEnvelopeCompat = parseQuestionReplyEnvelopeCompat;
+  globalThis.hasApprovalSecretQuestion = hasApprovalSecretQuestion;
+  globalThis.redactApprovalSecretValue = redactApprovalSecretValue;
+  globalThis.isSafeExternalHttpUrl = isSafeExternalHttpUrl;
+  globalThis.classifyCodexElicitation = classifyCodexElicitation;
+  globalThis.isSimpleElicitationForm = isSimpleElicitationForm;
+  globalThis.buildElicitationSchemaForm = buildElicitationSchemaForm;
+  globalThis.buildElicitationUrlCard = buildElicitationUrlCard;
+  globalThis.buildElicitationUnsupportedCard = buildElicitationUnsupportedCard;
+  globalThis.createQuestionCustomInputRow = createQuestionCustomInputRow;
+  globalThis.enhanceApprovalPromptSectionDom = enhanceApprovalPromptSectionDom;
 }
 
 // Single-select an option within its question group and enable the card's submit button.
 function selectApprovalOption(option) {
-  if (!option) return;
+  if (!option || option.dataset?.sheetBound === "true") return;
   const list = typeof option.closest === "function" ? option.closest(".runtime-approval-card__option-list") : null;
   if (list) {
-    list.querySelectorAll(".runtime-approval-card__option").forEach((node) => {
-      node.classList.toggle("is-selected", node === option);
-    });
+    if (list.dataset?.multiSelect === "true") {
+      const next = !option.classList.contains("is-selected");
+      option.classList.toggle("is-selected", next);
+      option.setAttribute("aria-checked", next ? "true" : "false");
+    } else {
+      list.querySelectorAll(".runtime-approval-card__option").forEach((node) => {
+        node.classList.toggle("is-selected", node === option);
+      });
+    }
   }
   const card = typeof option.closest === "function" ? option.closest(".runtime-approval-card") : null;
   if (card) {
@@ -1161,6 +1921,37 @@ function getMessageActionText(evt, role = "assistant") {
   const source = typeof evt?.content === "string" && evt.content
     ? evt.content
     : (typeof evt?.bodyPreview === "string" ? evt.bodyPreview : "");
+  let parsed = null;
+  if (typeof parseQuestionReplyEnvelopeCompat === "function") {
+    parsed = parseQuestionReplyEnvelopeCompat(source);
+  } else if (typeof parseQuestionReplyEnvelope === "function") {
+    parsed = parseQuestionReplyEnvelope(source);
+  } else if (source && /<send_user_message_question_reply\b/i.test(source)) {
+    const lines = [];
+    const stripped = source.replace(
+      /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi,
+      (_m, inner) => {
+        try {
+          const json = JSON.parse(String(inner || "").trim());
+          const arr = Array.isArray(json) ? json : (Array.isArray(json?.replies) ? json.replies : [json]);
+          for (const item of arr) {
+            if (!item || typeof item !== "object") continue;
+            const q = String(item.question ?? item.prompt ?? "").trim();
+            const a = String(item.answer ?? item.reply ?? "").trim();
+            if (q && a) lines.push(`${q}: ${a}`);
+            else if (a || q) lines.push(a || q);
+          }
+        } catch {
+          // ignore
+        }
+        return "\n";
+      }
+    ).replace(/^\s+|\s+$/g, "").replace(/\n{3,}/g, "\n\n");
+    parsed = { hasEnvelope: true, displayText: [lines.join("\n"), stripped].filter(Boolean).join("\n\n").trim(), trailingText: stripped };
+  }
+  if (parsed?.hasEnvelope) {
+    return parsed.displayText || parsed.trailingText || "";
+  }
   if (typeof formatDecodedDisplayText === "function") {
     return formatDecodedDisplayText(source);
   }
@@ -2963,18 +3754,79 @@ function createUserMessageNode(evt, {
       wrap.appendChild(imgWrap);
     }
   }
-  if (evt?.content || evt?.bodyAvailable) {
-    const span = document.createElement("span");
-    span.className = "md-content";
+  if (evt?.content || evt?.bodyAvailable || (Array.isArray(evt?.asyncQuestionReplies) && evt.asyncQuestionReplies.length > 0)) {
     const preview = evt.content || evt.bodyPreview || "";
-    if (typeof renderMarkdownIntoNode === "function" && renderMarkdownIntoNode(span, preview)) {
-      // markdown rendered successfully
-    } else {
-      span.textContent = formatDecodedDisplayText(preview);
+    const parsedReply = typeof parseQuestionReplyEnvelopeCompat === "function"
+      ? parseQuestionReplyEnvelopeCompat(preview)
+      : (typeof parseQuestionReplyEnvelope === "function"
+        ? parseQuestionReplyEnvelope(preview)
+        : (() => {
+            if (!preview || !/<send_user_message_question_reply\b/i.test(preview)) {
+              return { hasEnvelope: false, replies: [], trailingText: preview };
+            }
+            const replies = [];
+            const stripped = preview.replace(
+              /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi,
+              (_m, inner) => {
+                try {
+                  const json = JSON.parse(String(inner || "").trim());
+                  const arr = Array.isArray(json) ? json : (Array.isArray(json?.replies) ? json.replies : [json]);
+                  for (const item of arr) {
+                    if (!item || typeof item !== "object") continue;
+                    const q = String(item.question ?? item.prompt ?? "").trim();
+                    const a = String(item.answer ?? item.reply ?? "").trim();
+                    if (q || a) replies.push({ questionItemId: String(item.questionItemId || ""), question: q, answer: a });
+                  }
+                } catch {
+                  // ignore
+                }
+                return "\n";
+              }
+            );
+            return { hasEnvelope: true, replies, trailingText: stripped.replace(/^\s+|\s+$/g, "").replace(/\n{3,}/g, "\n\n") };
+          })());
+    const replyItems = parsedReply.hasEnvelope && parsedReply.replies.length > 0
+      ? parsedReply.replies
+      : (Array.isArray(evt?.asyncQuestionReplies) ? evt.asyncQuestionReplies : []);
+    if (replyItems.length > 0) {
+      const replyList = document.createElement("div");
+      replyList.className = "user-question-reply-list";
+      for (const item of replyItems) {
+        const chip = document.createElement("div");
+        chip.className = "user-question-reply-chip";
+        if (item.questionItemId) chip.dataset.questionItemId = item.questionItemId;
+        const qLabel = document.createElement("div");
+        qLabel.className = "user-question-reply-chip__question";
+        qLabel.textContent = String(
+          item.question
+          || (typeof uiTranslate === "function" ? uiTranslate("asyncQuestion.replyChipTitle", null, "Answered question") : "Answered question")
+        );
+        const aVal = document.createElement("div");
+        aVal.className = "user-question-reply-chip__answer";
+        aVal.textContent = String(item.answer || "");
+        chip.appendChild(qLabel);
+        chip.appendChild(aVal);
+        replyList.appendChild(chip);
+      }
+      bubble.appendChild(replyList);
     }
-    bubble.appendChild(span);
-    appendUserMessageDisclosure(bubble, span, preview);
-    if (markLazyEventBodyNode(span, evt, {
+
+    const visiblePreview = parsedReply.hasEnvelope ? parsedReply.trailingText : preview;
+    let span = null;
+    if (visiblePreview) {
+      span = document.createElement("span");
+      span.className = "md-content";
+      if (typeof renderMarkdownIntoNode === "function" && renderMarkdownIntoNode(span, visiblePreview)) {
+        // markdown rendered successfully
+      } else {
+        span.textContent = typeof formatDecodedDisplayText === "function"
+          ? formatDecodedDisplayText(visiblePreview)
+          : visiblePreview;
+      }
+      bubble.appendChild(span);
+      appendUserMessageDisclosure(bubble, span, visiblePreview);
+    }
+    if (span && markLazyEventBodyNode(span, evt, {
       preview: evt.bodyPreview || evt.content || "",
       renderMode: "markdown",
     })) {
@@ -3822,6 +4674,91 @@ function renderMessage(evt) {
   return renderMessageInto(messagesInner, evt, {
     finalizeActiveThinkingBlock: true,
   });
+}
+
+if (typeof getApprovalTitle === "function") {
+  const baseGetApprovalTitle = getApprovalTitle;
+  getApprovalTitle = function enhancedGetApprovalTitle(evt) {
+    const elicitationInfo = classifyCodexElicitation(evt);
+    if (elicitationInfo && elicitationInfo.kind !== "compact_mcp") {
+      if (evt?.title) return String(evt.title).trim();
+      const modeTitle = elicitationInfo.kind === "url"
+        ? uiTranslate("elicitation.mode.url", null, "External authorization")
+        : (elicitationInfo.kind === "form"
+          ? uiTranslate("elicitation.mode.form", null, "Input requested")
+          : uiTranslate("elicitation.mode.unsupported", null, "Unsupported request"));
+      return elicitationInfo.serverName ? `${elicitationInfo.serverName} · ${modeTitle}` : modeTitle;
+    }
+    return baseGetApprovalTitle(evt);
+  };
+  if (typeof globalThis !== "undefined") {
+    globalThis.getApprovalTitle = getApprovalTitle;
+  }
+}
+
+if (typeof createApprovalPromptSection === "function") {
+  const baseCreateApprovalPromptSection = createApprovalPromptSection;
+  createApprovalPromptSection = function enhancedCreateApprovalPromptSection(section, sectionIndex = 0, options = {}) {
+    const el = baseCreateApprovalPromptSection(section, sectionIndex, options);
+    return enhanceApprovalPromptSectionDom(el, section, sectionIndex, options);
+  };
+  if (typeof globalThis !== "undefined") {
+    globalThis.createApprovalPromptSection = createApprovalPromptSection;
+  }
+}
+
+if (typeof renderMessageInto === "function") {
+  const baseRenderMessageInto = renderMessageInto;
+  renderMessageInto = function enhancedRenderMessageInto(container, evt, options = {}) {
+    const resultNode = baseRenderMessageInto(container, evt, options);
+    const asyncApi = globalThis.RagentAsyncQuestions;
+    const isAsyncMsg = asyncApi?.isAsyncQuestionMessage
+      ? asyncApi.isAsyncQuestionMessage(evt)
+      : (evt?.role === "assistant" && (
+        evt?.messageDelivery === "async"
+        || evt?.delivery === "async"
+        || (Array.isArray(evt?.asyncQuestions) && evt.asyncQuestions.length > 0)
+      ));
+    if (!isAsyncMsg || !container) return resultNode;
+
+    let targetNode = resultNode;
+    if (!targetNode) {
+      targetNode = document.createElement("div");
+      targetNode.className = "msg msg-assistant";
+      if (Number.isFinite(Number(evt?.seq))) targetNode.dataset.eventSeq = String(evt.seq);
+      if (evt?.itemId) targetNode.dataset.itemId = String(evt.itemId);
+      const cardNode = asyncApi?.renderInStreamMessageQuestions?.(evt, {
+        sessionId: evt?.sessionId || (typeof currentSessionId === "string" ? currentSessionId : ""),
+      });
+      if (cardNode) targetNode.appendChild(cardNode);
+      if (typeof appendMessageMeta === "function") {
+        appendMessageMeta(targetNode, evt, "assistant", {
+          live: typeof isAssistantMessageLive === "function" ? isAssistantMessageLive(evt) : false,
+        });
+      }
+      container.appendChild(targetNode);
+      targetNode.dataset.messageDelivery = "async";
+      return targetNode;
+    }
+    targetNode.dataset.messageDelivery = "async";
+    if (!targetNode.querySelector?.(".async-question-stream-group, .async-followup-card")) {
+      const cardNode = asyncApi?.renderInStreamMessageQuestions?.(evt, {
+        sessionId: evt?.sessionId || (typeof currentSessionId === "string" ? currentSessionId : ""),
+      });
+      if (cardNode) {
+        const metaNode = targetNode.querySelector?.(".msg-meta, .msg-assistant-time");
+        if (metaNode && metaNode.parentNode === targetNode) {
+          targetNode.insertBefore(cardNode, metaNode);
+        } else {
+          targetNode.appendChild(cardNode);
+        }
+      }
+    }
+    return targetNode;
+  };
+  if (typeof globalThis !== "undefined") {
+    globalThis.renderMessageInto = renderMessageInto;
+  }
 }
 
 function clearStreamingSettlementStyles(node) {

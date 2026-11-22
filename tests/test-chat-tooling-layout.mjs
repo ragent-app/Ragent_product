@@ -286,4 +286,51 @@ desktopHarness.body.classList.add('keyboard-open');
 desktopHarness.mq.dispatch(true);
 assert.equal(desktopHarness.body.classList.contains('keyboard-open'), false, 'desktop breakpoint changes should clear any stale mobile keyboard state');
 
+await (async () => {
+  const { default: assertMod } = await import('node:assert/strict');
+  const fsMod = await import('node:fs');
+  const vmMod = await import('node:vm');
+
+  const vars = {};
+  const asyncEl = {
+    hidden: false,
+    offsetHeight: 72,
+    getBoundingClientRect: () => ({ height: 72 }),
+  };
+  const queueEl = {
+    hidden: false,
+    offsetHeight: 44,
+    getBoundingClientRect: () => ({ height: 44 }),
+  };
+  const ctx = {
+    window: null,
+    globalThis: null,
+    console,
+    Math,
+    queuedPanel: queueEl,
+    document: {
+      documentElement: {
+        style: { setProperty(k, v) { vars[k] = v; } },
+      },
+      getElementById: (id) => (id === 'asyncQuestionsPanel' ? asyncEl : null),
+    },
+    getComputedStyle: () => ({
+      getPropertyValue: (k) => (k === '--chat-floating-status-gap' ? '8px' : '0px'),
+    }),
+  };
+  ctx.window = ctx;
+  ctx.globalThis = ctx;
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/layout-tooling.js', 'utf8'), ctx);
+  ctx.RagentLayout.syncChatBottomOverlaySpacing();
+  assertMod.equal(vars['--chat-async-questions-panel-stack-height'], '80px');
+  assertMod.equal(vars['--chat-queued-panel-stack-height'], '52px');
+  assertMod.equal(vars['--chat-floating-status-height'], '132px');
+  assertMod.equal(vars['--chat-floating-status-fab-offset'], '140px', 'FAB offset must clear both queuedPanel and asyncQuestionsPanel');
+  asyncEl.hidden = true;
+  asyncEl.offsetHeight = 0;
+  ctx.RagentLayout.syncChatBottomOverlaySpacing();
+  assertMod.equal(vars['--chat-async-questions-panel-stack-height'], '0px');
+  assertMod.equal(vars['--chat-floating-status-fab-offset'], '60px');
+})();
+
 console.log('test-chat-tooling-layout: ok');

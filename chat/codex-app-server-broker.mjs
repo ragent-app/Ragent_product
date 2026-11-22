@@ -389,7 +389,12 @@ function initializeMessage() {
     id: BROKER_INTERNAL_INITIALIZE_ID,
     params: {
       clientInfo: { name: 'ragent-codex-broker', title: 'Ragent Codex broker', version: '1' },
-      capabilities: { experimentalApi: true },
+      capabilities: {
+        experimentalApi: true,
+        extensions: {
+          'openai/form': {},
+        },
+      },
     },
   };
 }
@@ -453,6 +458,7 @@ function runBroker() {
   // Server-initiated requests use a separate id namespace from client
   // requests. Keep the original upstream id for the eventual response.
   const pendingServerRequests = new Map();
+  const recentServerRequestIds = new Map();
   const pendingThreadClients = [];
   const threadStartQueue = [];
   const pendingThreadReloads = new Map();
@@ -499,6 +505,62 @@ function runBroker() {
       return;
     }
     const threadId = readThreadId(message);
+    if (message?.method === 'serverRequest/resolved') {
+      const upstreamRequestId = message.params?.requestId;
+      let matchedClientId = '';
+      let matchedEntry = null;
+      for (const [clientReqId, entry] of pendingServerRequests.entries()) {
+        if (entry.upstreamId === upstreamRequestId) {
+          matchedClientId = clientReqId;
+          matchedEntry = entry;
+          break;
+        }
+      }
+      if (!matchedEntry && upstreamRequestId !== undefined && upstreamRequestId !== null) {
+        const targetStr = String(upstreamRequestId);
+        for (const [clientReqId, entry] of pendingServerRequests.entries()) {
+          if (String(entry.upstreamId) === targetStr) {
+            matchedClientId = clientReqId;
+            matchedEntry = entry;
+            break;
+          }
+        }
+      }
+      if (matchedEntry) {
+        pendingServerRequests.delete(matchedClientId);
+        const targetClient = matchedEntry.client && !matchedEntry.client.destroyed
+          ? matchedEntry.client
+          : (threadId ? threadOwners.get(threadId) : null);
+        if (targetClient) {
+          sendClient(targetClient, {
+            ...message,
+            params: {
+              ...(message.params && typeof message.params === 'object' ? message.params : {}),
+              requestId: matchedClientId,
+            },
+          });
+        }
+        return;
+      }
+      const recentKey = upstreamRequestId === undefined || upstreamRequestId === null ? '' : String(upstreamRequestId);
+      const recent = recentKey ? recentServerRequestIds.get(recentKey) : null;
+      if (recent) {
+        recentServerRequestIds.delete(recentKey);
+        const targetClient = recent.client && !recent.client.destroyed
+          ? recent.client
+          : (threadId ? threadOwners.get(threadId) : null);
+        if (targetClient) {
+          sendClient(targetClient, {
+            ...message,
+            params: {
+              ...(message.params && typeof message.params === 'object' ? message.params : {}),
+              requestId: recent.clientRequestId,
+            },
+          });
+        }
+        return;
+      }
+    }
     if (message?.method === 'hook/started' && threadId) {
       pruneHookObservations();
       const owner = threadOwners.get(threadId), router = owner && hookRouters.get(owner);
@@ -821,6 +883,13 @@ function runBroker() {
       const request = pendingServerRequests.get(message.id);
       if (!request || request.client !== client) return;
       pendingServerRequests.delete(message.id);
+      const recentKey = String(request.upstreamId ?? '');
+      if (recentKey) {
+        recentServerRequestIds.set(recentKey, { client, clientRequestId: message.id });
+        if (recentServerRequestIds.size > 512) {
+          recentServerRequestIds.delete(recentServerRequestIds.keys().next().value);
+        }
+      }
       try { upstream?.stdin?.write(`${JSON.stringify({ ...message, id: request.upstreamId })}\n`); } catch {}
       return;
     }

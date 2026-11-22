@@ -1,9 +1,17 @@
 package com.andysagent.ragent.core.protocol
 
-import kotlinx.serialization.Serializable
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -630,6 +638,31 @@ data class ApprovalOptionDto(
     val description: String? = null,
 )
 
+/** Deserializes option arrays whether formatted as strings, objects, or JSON null. */
+object FlexibleApprovalOptionListSerializer : KSerializer<List<ApprovalOptionDto>> {
+    private val delegate = ListSerializer(ApprovalOptionDto.serializer())
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: List<ApprovalOptionDto>) {
+        delegate.serialize(encoder, value)
+    }
+
+    override fun deserialize(decoder: Decoder): List<ApprovalOptionDto> {
+        val jsonDecoder = decoder as? JsonDecoder ?: return delegate.deserialize(decoder)
+        val element = jsonDecoder.decodeJsonElement()
+        if (element is JsonNull || element !is JsonArray) return emptyList()
+        return element.mapNotNull { entry ->
+            when (entry) {
+                is JsonPrimitive -> entry.contentOrNull?.let { ApprovalOptionDto(label = it, value = it) }
+                is JsonObject -> runCatching {
+                    jsonDecoder.json.decodeFromJsonElement(ApprovalOptionDto.serializer(), entry)
+                }.getOrNull()
+                else -> null
+            }
+        }
+    }
+}
+
 /** A server-owned user-facing question, as carried by approval_request. */
 @Serializable
 data class ApprovalQuestionDto(
@@ -640,9 +673,53 @@ data class ApprovalQuestionDto(
     val choices: List<ApprovalOptionDto> = emptyList(),
     val multiSelect: Boolean? = null,
     val isMultiSelect: Boolean? = null,
+    val isOther: Boolean? = null,
+    val isSecret: Boolean = false,
 )
 
 fun ApprovalQuestionDto.allOptions(): List<ApprovalOptionDto> = options.ifEmpty { choices }
+
+@Serializable
+data class AsyncQuestionDto(
+    val id: String = "",
+    val index: Int = 0,
+    val title: String = "",
+    val question: String = "",
+    @Serializable(with = FlexibleApprovalOptionListSerializer::class)
+    val options: List<ApprovalOptionDto> = emptyList(),
+    val allowFreeText: Boolean = true,
+    val status: String? = null,
+    val answeredText: String? = null,
+    val isOther: Boolean? = null,
+    val isSecret: Boolean = false,
+)
+
+@Serializable
+data class AsyncQuestionReplyDto(
+    val questionItemId: String,
+    val question: String = "",
+    val answer: String = "",
+)
+
+@Serializable
+data class ElicitationPayloadDto(
+    val mode: String? = null,
+    val serverName: String? = null,
+    val elicitationId: String? = null,
+    val message: String? = null,
+    val requestedSchema: JsonObject? = null,
+    val url: String? = null,
+    val codexApprovalKind: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val challenge: String? = null,
+)
+
+@Serializable
+data class ElicitationResponseDto(
+    val action: String,
+    val content: JsonObject? = null,
+)
 
 /** Non-secret authorization metadata exposed by the approved-action client projection. */
 @Serializable
@@ -812,6 +889,17 @@ data class SessionEventDto(
     val source: String? = null,
     val previousPlanId: String? = null,
     val lastPlanAction: String? = null,
+    /** Codex question & MCP elicitation extensions. */
+    val isBlocking: Boolean? = null,
+    val elicitation: ElicitationPayloadDto? = null,
+    /** Codex non-blocking async question extensions (delivery="async"). */
+    val messageDelivery: String? = null,
+    val delivery: String? = null,
+    val asyncQuestionMessageId: String? = null,
+    val asyncQuestions: List<AsyncQuestionDto> = emptyList(),
+    val asyncQuestionsState: String? = null,
+    val asyncQuestionReplies: List<AsyncQuestionReplyDto> = emptyList(),
+    val answeredQuestionItemIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -918,6 +1006,16 @@ data class SendMessageRequestDto(
     val planId: String? = null,
     val harnessCapabilityIds: List<String> = emptyList(),
     val attachments: List<AttachmentItemDto> = emptyList(),
+    val asyncQuestionReplies: List<AsyncQuestionReplyDto> = emptyList(),
+    val steerIfRunning: Boolean? = null,
+)
+
+@Serializable
+data class SendMessageResponseDto(
+    val requestId: String? = null,
+    val duplicate: Boolean = false,
+    val queued: Boolean = false,
+    val steered: Boolean = false,
 )
 
 @Serializable
@@ -1022,6 +1120,8 @@ data class RuntimeApprovalDecisionRequestDto(
     val customAnswer: String? = null,
     val customAnswers: List<String> = emptyList(),
     val multiChoices: List<List<Int>>? = null,
+    val emptySkip: Boolean? = null,
+    val elicitationResponse: ElicitationResponseDto? = null,
 )
 
 fun parsePairingUri(value: String): PairingUriDto {
@@ -1275,6 +1375,16 @@ fun SessionEventDto.sessionEventFingerprint(): String = listOf(
     totalTokens,
     riskLevel,
     severity,
+    isBlocking,
+    elicitation,
+    messageDelivery,
+    delivery,
+    asyncQuestionMessageId,
+    asyncQuestions,
+    asyncQuestionsState,
+    asyncQuestionReplies,
+    answeredQuestionItemIds,
+    questions,
 ).joinToString("|")
 
 fun SessionEventDto.requestKey(): String = requestId

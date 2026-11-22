@@ -384,4 +384,64 @@ class TurnTimelineWorkspaceTest {
         assertEquals(2, resolveTurnDockAnchorIndex(turns, "req-3"))
         assertEquals(-1, resolveTurnDockAnchorIndex(turns, "non-existent"))
     }
+
+    @Test
+    fun `splitTurnEntries protects async question and async delivery entries from commentary folding`() {
+        val thought = TimelineItem.Operation(
+            id = "thought-1",
+            seq = 1,
+            kind = TimelineOperationKind.Tool,
+            title = "Thinking",
+            detail = "Reasoning",
+            status = TimelineOperationStatus.Completed,
+            isReasoning = true,
+        )
+        val asyncQuestionMsg = TimelineItem.Message(
+            id = "async-q-1",
+            seq = 2,
+            role = TimelineRole.Agent,
+            text = "Pick your target",
+            completed = true,
+            messagePhase = "commentary",
+            messageDelivery = "async",
+            asyncQuestions = listOf(
+                com.andysagent.ragent.core.model.AsyncQuestion(
+                    id = "aq-1",
+                    index = 0,
+                    title = "Target",
+                    question = "Which target?",
+                ),
+            ),
+        )
+        val asyncFollowupMsg = TimelineItem.Message(
+            id = "async-f-1",
+            seq = 3,
+            role = TimelineRole.Agent,
+            text = "Heads up while running",
+            completed = true,
+            messagePhase = "commentary",
+            messageDelivery = "async",
+        )
+        val final = TimelineItem.Message(
+            id = "final-1",
+            seq = 4,
+            role = TimelineRole.Agent,
+            text = "All done",
+            completed = true,
+            messagePhase = "final_answer",
+        )
+
+        val (processWithFinal, outsideWithFinal) = splitTurnEntries(
+            listOf(thought, asyncQuestionMsg, asyncFollowupMsg, final),
+        )
+        assertEquals(listOf(thought), processWithFinal)
+        assertEquals(listOf(asyncQuestionMsg, asyncFollowupMsg, final), outsideWithFinal)
+
+        val (processNoFinal, outsideNoFinal) = splitTurnEntries(
+            listOf(thought, asyncQuestionMsg),
+            allowTerminalFallback = true,
+        )
+        assertEquals(listOf(thought), processNoFinal)
+        assertEquals(listOf(asyncQuestionMsg), outsideNoFinal)
+    }
 }

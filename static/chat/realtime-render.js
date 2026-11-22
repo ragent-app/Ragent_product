@@ -1068,6 +1068,11 @@ function restorePreservedComposerEchoesAfterRender() {
 }
 
 function clearMessages({ preserveRunningBlockExpanded = false, preserveContent = false } = {}) {
+  if (!preserveContent) {
+    window.RagentAsyncQuestions?.setActiveSession?.(
+      typeof currentSessionId === "string" ? currentSessionId : ""
+    );
+  }
   if (typeof clearSessionLoadError === "function") clearSessionLoadError();
   if (typeof removeAssistantPendingNode === "function") {
     removeAssistantPendingNode({ immediate: true });
@@ -1600,6 +1605,9 @@ function renderEvent(
       break;
     case "message":
     case "attachment_delivery":
+      window.RagentAsyncQuestions?.ingestEvents?.([evt], {
+        sessionId: typeof currentSessionId === "string" ? currentSessionId : "",
+      });
       if (historyPrepend) {
         renderMessageInto(messagesInner, evt, {
           finalizeActiveThinkingBlock: false,
@@ -2420,9 +2428,12 @@ function stripHiddenDisplayBlocks(text) {
   let visible = String(text || "")
     .replace(/<private>[\s\S]*?<\/private>/gi, "")
     .replace(/<hide>[\s\S]*?<\/hide>/gi, "")
+    .replace(/<send_user_message_question_reply\b[^>]*>[\s\S]*?(?:<\/send_user_message_question_reply>|$)/gi, "")
+    .replace(/<\/send_user_message_question_reply>/gi, "")
     .replace(/<ragent-(organization-proposal|collaboration-plan|result-packet|session-labels)\b[^>]*>[\s\S]*?(?:<\/ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>|$)/gi, "")
     .replace(/<\/ragent-(?:organization-proposal|collaboration-plan|result-packet|session-labels)>/gi, "");
   const markers = [
+    "<send_user_message_question_reply>",
     "<ragent-organization-proposal>",
     "<ragent-collaboration-plan>",
     "<ragent-result-packet>",
@@ -2474,7 +2485,52 @@ function tryDecodeUtf8Base64Text(text) {
 }
 
 function formatDecodedDisplayText(text) {
-  const source = stripHiddenDisplayBlocks(typeof text === "string" ? text : "");
+  const raw = typeof text === "string" ? text : "";
+  let envelope = null;
+  if (typeof parseQuestionReplyEnvelope === "function") {
+    envelope = parseQuestionReplyEnvelope(raw);
+  } else if (raw && /<send_user_message_question_reply\b/i.test(raw)) {
+    const lines = [];
+    const stripped = raw.replace(
+      /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi,
+      (_m, inner) => {
+        try {
+          const parsed = JSON.parse(String(inner || "").trim());
+          const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.replies) ? parsed.replies : [parsed]);
+          for (const item of list) {
+            if (!item || typeof item !== "object") continue;
+            const q = String(item.question ?? item.prompt ?? "").trim();
+            const a = String(item.answer ?? item.reply ?? "").trim();
+            if (q && a) lines.push(`${q}: ${a}`);
+            else if (a || q) lines.push(a || q);
+          }
+        } catch {
+          // ignore
+        }
+        return "\n";
+      }
+    );
+    envelope = {
+      hasEnvelope: true,
+      replies: lines,
+      trailingText: stripped.replace(/^\s+|\s+$/g, "").replace(/\n{3,}/g, "\n\n"),
+    };
+  }
+  if (envelope?.hasEnvelope) {
+    const cleanTrailing = typeof stripHiddenDisplayBlocks === "function"
+      ? stripHiddenDisplayBlocks(envelope.trailingText || "")
+      : (envelope.trailingText || "");
+    const summaryText = Array.isArray(envelope.replies) && envelope.replies.length > 0
+      ? (typeof envelope.replies[0] === "string"
+        ? envelope.replies.join("\n")
+        : envelope.replies
+          .map((r) => (r.question && r.answer ? `${r.question}: ${r.answer}` : (r.answer || r.question || "")))
+          .filter(Boolean)
+          .join("\n"))
+      : "";
+    return [summaryText, cleanTrailing].filter(Boolean).join("\n\n").trim();
+  }
+  const source = stripHiddenDisplayBlocks(raw);
   const marker = "Original email:";
   const markerIndex = source.indexOf(marker);
   if (markerIndex === -1) return source;

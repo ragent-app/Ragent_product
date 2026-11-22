@@ -100,6 +100,10 @@ import com.andysagent.ragent.core.designsystem.RagentSizes
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.agentoPressScale
 import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
+import com.andysagent.ragent.core.model.AsyncQuestion
+import com.andysagent.ragent.core.model.AsyncQuestionReply
+import com.andysagent.ragent.core.model.ElicitationKind
+import com.andysagent.ragent.core.protocol.QuestionReplyEnvelopeCodec
 import kotlin.math.roundToInt
 
 /**
@@ -147,8 +151,16 @@ fun RunDock(
     onSaveGoal: (String) -> Unit = {},
     onClearGoal: () -> Unit = {},
     onToggleAutoContinue: () -> Unit = {},
+    onSubmitElicitation: (String, String, String?) -> Unit = { _, _, _ -> },
+    pendingAsyncQuestions: List<AsyncQuestion> = emptyList(),
+    submittingAsyncQuestionIds: Set<String> = emptySet(),
+    asyncQuestionExpanded: Boolean = false,
+    onExpandAsyncQuestions: () -> Unit = {},
+    onCollapseAsyncQuestions: () -> Unit = {},
+    onSubmitAsyncQuestionReplies: (List<AsyncQuestionReply>, String) -> Unit = { _, _ -> },
 ) {
-    val hasOtherCapsules = approval != null || queuedMessages.isNotEmpty()
+    val hasPendingAsyncQuestions = pendingAsyncQuestions.isNotEmpty()
+    val hasOtherCapsules = approval != null || hasPendingAsyncQuestions || queuedMessages.isNotEmpty()
     val hasGoal = goalMode
     val isVisible = hasOtherCapsules || hasGoal
 
@@ -177,25 +189,49 @@ fun RunDock(
                         onExpand = onExpandApproval,
                         onApprove = { onApprove(approval.id) },
                         onDeny = { onDeny(approval.id) },
+                        onSubmitElicitation = { action, contentJson ->
+                            onSubmitElicitation(approval.id, action, contentJson)
+                        },
                         onReviewChanges = onReviewChanges,
                         backdropLayer = backdropLayer,
                         backdropOrigin = backdropOrigin,
                         modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth),
                     )
                 }
-                queuedMessages.isNotEmpty() -> {
-                    QueuedMessageIsland(
-                        queuedMessages = queuedMessages,
-                        expanded = queueExpanded,
-                        onExpand = onExpandQueue,
-                        onCollapse = onCollapseQueue,
-                        onEdit = onEditQueuedMessage,
-                        onSteer = onSteerQueue,
-                        onRemove = onRemoveQueuedMessage,
-                        backdropLayer = backdropLayer,
-                        backdropOrigin = backdropOrigin,
-                        modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth),
-                    )
+                hasPendingAsyncQuestions || queuedMessages.isNotEmpty() -> {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (hasPendingAsyncQuestions) {
+                            AsyncQuestionIsland(
+                                pendingQuestions = pendingAsyncQuestions,
+                                submittingIds = submittingAsyncQuestionIds,
+                                expanded = asyncQuestionExpanded && !queueExpanded,
+                                onExpand = onExpandAsyncQuestions,
+                                onCollapse = onCollapseAsyncQuestions,
+                                onSubmitReplies = onSubmitAsyncQuestionReplies,
+                                backdropLayer = backdropLayer,
+                                backdropOrigin = backdropOrigin,
+                                modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth),
+                            )
+                        }
+                        if (queuedMessages.isNotEmpty()) {
+                            QueuedMessageIsland(
+                                queuedMessages = queuedMessages,
+                                expanded = queueExpanded && !asyncQuestionExpanded,
+                                onExpand = onExpandQueue,
+                                onCollapse = onCollapseQueue,
+                                onEdit = onEditQueuedMessage,
+                                onSteer = onSteerQueue,
+                                onRemove = onRemoveQueuedMessage,
+                                backdropLayer = backdropLayer,
+                                backdropOrigin = backdropOrigin,
+                                modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth),
+                            )
+                        }
+                    }
                 }
                 hasGoal -> {
                     GoalIsland(
@@ -831,7 +867,8 @@ private fun QueueCardContent(
             queuedMessages.forEachIndexed { index, message ->
                 val removeLabel = stringResource(R.string.composer_remove_queued)
                 val editLabel = stringResource(R.string.composer_edit_queued)
-                val preview = message.text.ifBlank {
+                val rawPreview = QuestionReplyEnvelopeCodec.formatReadableCopyText(message.text)
+                val preview = rawPreview.ifBlank {
                     if (message.attachments.isNotEmpty()) {
                         pluralStringResource(R.plurals.composer_queued_attachments,
                             message.attachments.size, message.attachments.size)
@@ -1093,6 +1130,149 @@ internal fun Modifier.islandTapShield(): Modifier = pointerInput(Unit) {
  * capsule-continuous at every frame of the morph.
  */
 @Composable
+private fun AsyncQuestionIsland(
+    pendingQuestions: List<AsyncQuestion>,
+    submittingIds: Set<String>,
+    expanded: Boolean,
+    onExpand: () -> Unit,
+    onCollapse: () -> Unit,
+    onSubmitReplies: (List<AsyncQuestionReply>, String) -> Unit,
+    backdropLayer: GraphicsLayer?,
+    backdropOrigin: IntOffset,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    var backdropOffset by remember { mutableStateOf(IntOffset.Zero) }
+    var presentedExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(expanded) {
+        if (expanded) withFrameNanos { }
+        presentedExpanded = expanded
+    }
+    AgentoFrostedGlassBox(
+        modifier = modifier
+            .testTag("composer-async-questions-island")
+            .wrapContentWidth(Alignment.CenterHorizontally)
+            .widthIn(max = RagentSizes.ContentMaxWidth)
+            .islandTapShield()
+            .onGloballyPositioned { coords ->
+                val pos = coords.positionInRoot()
+                backdropOffset = IntOffset(
+                    backdropOrigin.x - pos.x.roundToInt(),
+                    backdropOrigin.y - pos.y.roundToInt(),
+                )
+            },
+        shape = RoundedCornerShape(20.dp),
+        surface = if (isDark) AgentoGlassSurface.Tinted(Color(0xFF222226).copy(alpha = 0.86f)) else AgentoGlassSurface.Neutral,
+        blurRadius = AgentoFrostedTokens.BlurNavigation,
+        backdropLayer = backdropLayer,
+        backdropOffset = backdropOffset,
+        material = AgentoGlassMaterial.LiquidClear,
+        specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+        showTopHairline = false,
+        hasShadow = true,
+        shadowElevation = 8.dp,
+        shadowAlpha = if (isDark) 0.16f else 0.06f,
+    ) {
+        AnimatedContent(
+            targetState = presentedExpanded,
+            transitionSpec = {
+                ContentTransform(
+                    targetContentEnter = fadeIn(tween(150)) + scaleIn(
+                        initialScale = 0.92f,
+                        animationSpec = spring(dampingRatio = 0.82f, stiffness = 420f),
+                        transformOrigin = TransformOrigin(0.5f, 1f),
+                    ),
+                    initialContentExit = fadeOut(tween(100)) + scaleOut(
+                        targetScale = 0.96f,
+                        animationSpec = tween(110),
+                        transformOrigin = TransformOrigin(0.5f, 1f),
+                    ),
+                    sizeTransform = IslandSizeTransform(clip = true),
+                )
+            },
+            contentAlignment = Alignment.BottomCenter,
+            label = "async_question_island",
+        ) { isExpanded ->
+            if (isExpanded) {
+                val collapseLabel = stringResource(R.string.async_question_collapse)
+                Column(
+                    modifier = Modifier
+                        .widthIn(min = 280.dp, max = 420.dp)
+                        .animateContentSize(spring(dampingRatio = 0.86f, stiffness = 370f))
+                        .padding(start = 15.dp, end = 15.dp, top = 8.dp, bottom = 12.dp),
+                ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            pluralStringResource(R.plurals.async_questions_pending, pendingQuestions.size, pendingQuestions.size),
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = colors.primaryContent,
+                        )
+                        Box(
+                            Modifier
+                                .size(48.dp)
+                                .testTag("async-questions-collapse")
+                                .clickable(role = Role.Button, onClick = onCollapse)
+                                .semantics { contentDescription = collapseLabel },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AgentoWebIcon(
+                                AgentoWebGlyph.ChevronDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(17.dp),
+                                tint = colors.secondaryContent,
+                            )
+                        }
+                    }
+                    Column(Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                        AsyncQuestionsCardContent(
+                            questions = pendingQuestions,
+                            submittingIds = submittingIds,
+                            onSubmitReplies = onSubmitReplies,
+                            collapsibleWhenAnswered = false,
+                        )
+                    }
+                }
+            } else {
+                val pillLabel = pluralStringResource(
+                    R.plurals.async_questions_pending,
+                    pendingQuestions.size,
+                    pendingQuestions.size,
+                )
+                Row(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .testTag("async-questions-pill")
+                        .agentoPressScale(pressedScale = 0.94f, onClick = onExpand)
+                        .padding(start = 15.dp, end = 13.dp)
+                        .semantics { contentDescription = pillLabel; role = Role.Button },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    AgentoBreathingDot(color = colors.accentPrimary, size = 7.dp)
+                    Text(
+                        pillLabel,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.primaryContent,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    AgentoWebIcon(
+                        AgentoWebGlyph.ChevronDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp).rotate(180f),
+                        tint = colors.secondaryContent,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ApprovalIsland(
     approval: PermissionRequestUiState,
     expanded: Boolean,
@@ -1103,6 +1283,7 @@ private fun ApprovalIsland(
     backdropLayer: GraphicsLayer?,
     backdropOrigin: IntOffset,
     modifier: Modifier = Modifier,
+    onSubmitElicitation: (String, String?) -> Unit = { _, _ -> },
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
@@ -1160,6 +1341,7 @@ private fun ApprovalIsland(
                     onApprove = onApprove,
                     onDeny = onDeny,
                     onReviewChanges = onReviewChanges,
+                    onSubmitElicitation = onSubmitElicitation,
                 )
             } else {
                 ApprovalPillContent(
@@ -1235,9 +1417,64 @@ internal fun ApprovalCardContent(
     onApprove: () -> Unit,
     onDeny: () -> Unit,
     onReviewChanges: () -> Unit,
+    onSubmitElicitation: (String, String?) -> Unit = { action, _ ->
+        if (action == "accept") onApprove() else onDeny()
+    },
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
+    val elicitation = approval.elicitation
+    val isRichElicitation = elicitation != null && elicitation.resolvedKind != ElicitationKind.CompactToolApproval
+    if (isRichElicitation && elicitation != null) {
+        val formState = rememberElicitationFormState(elicitation)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFF59E0B)),
+                )
+                Text(
+                    text = approval.title.ifBlank { stringResource(R.string.journey_approval_needed) },
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    ),
+                    color = colors.primaryContent,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                ElicitationContent(
+                    elicitation = elicitation,
+                    formState = formState,
+                    resolving = approval.resolving,
+                )
+            }
+            ElicitationActionBar(
+                elicitation = elicitation,
+                formState = formState,
+                resolving = approval.resolving,
+                onSubmitAction = onSubmitElicitation,
+            )
+        }
+        return
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()

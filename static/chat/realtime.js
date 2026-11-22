@@ -800,6 +800,10 @@ async function dispatchAction(msg) {
                 body: JSON.stringify({
                   requestId,
                   text: msg.text,
+                  ...(msg.steerIfRunning === true ? { steerIfRunning: true } : {}),
+                  ...(Array.isArray(msg.asyncQuestionReplies) && msg.asyncQuestionReplies.length > 0
+                    ? { asyncQuestionReplies: msg.asyncQuestionReplies }
+                    : {}),
                   ...(attachments.length > 0 ? { attachments } : {}),
                   ...(msg.model ? { model: msg.model } : {}),
                   ...(msg.effort ? { effort: msg.effort } : {}),
@@ -924,8 +928,28 @@ async function dispatchAction(msg) {
                 decision,
                 requestId: msg.requestId || createRequestId(),
                 ...(Array.isArray(msg.choices) ? { choices: msg.choices } : {}),
+                ...(Array.isArray(msg.multiChoices) && msg.multiChoices.length > 0
+                  ? { multiChoices: msg.multiChoices }
+                  : {}),
+                ...(Array.isArray(msg.customAnswers)
+                  ? {
+                      customAnswers: msg.customAnswers.map((v) =>
+                        (typeof v === "string" ? v.trim().slice(0, 8000) : "")
+                      ),
+                    }
+                  : {}),
                 ...(typeof msg.customAnswer === "string" && msg.customAnswer.trim()
                   ? { customAnswer: msg.customAnswer.trim().slice(0, 8000) }
+                  : {}),
+                ...(msg.emptySkip === true ? { emptySkip: true } : {}),
+                ...(msg.answers && typeof msg.answers === "object" && !Array.isArray(msg.answers)
+                  ? { answers: msg.answers }
+                  : {}),
+                ...(msg.elicitationResponse && typeof msg.elicitationResponse === "object"
+                  ? { elicitationResponse: msg.elicitationResponse }
+                  : {}),
+                ...(typeof msg.decisionSource === "string" && msg.decisionSource.trim()
+                  ? { decisionSource: msg.decisionSource.trim() }
                   : {}),
               }),
             },

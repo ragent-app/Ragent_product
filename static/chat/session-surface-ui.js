@@ -60,6 +60,52 @@ function formatQueuedMessageTimestamp(stamp) {
 
 function getQueuedMessageText(item) {
   const text = typeof item?.text === "string" ? item.text.trim() : "";
+  const explicitReplies = Array.isArray(item?.asyncQuestionReplies) ? item.asyncQuestionReplies : [];
+  let parsed = null;
+  if (typeof parseQuestionReplyEnvelope === "function") {
+    parsed = parseQuestionReplyEnvelope(text);
+  } else if (text && /<send_user_message_question_reply\b/i.test(text)) {
+    const replies = [];
+    const stripped = text.replace(
+      /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi,
+      (_m, inner) => {
+        try {
+          const json = JSON.parse(String(inner || "").trim());
+          const arr = Array.isArray(json) ? json : (Array.isArray(json?.replies) ? json.replies : [json]);
+          for (const entry of arr) {
+            if (!entry || typeof entry !== "object") continue;
+            const q = String(entry.question ?? entry.prompt ?? "").trim();
+            const a = String(entry.answer ?? entry.reply ?? "").trim();
+            if (q || a) replies.push({ question: q, answer: a });
+          }
+        } catch {
+          // ignore invalid JSON
+        }
+        return " ";
+      }
+    );
+    parsed = { hasEnvelope: true, replies, trailingText: stripped.replace(/\s+/g, " ").trim() };
+  }
+  const formatReplies = (list, trailing) => {
+    const parts = (Array.isArray(list) ? list : []).map((r) => {
+      const q = String(r?.question || "").trim();
+      const a = String(r?.answer || "").trim();
+      if (q && a && typeof t === "function") {
+        const localized = t("asyncQuestion.queuedSummary", { question: q, answer: a });
+        if (localized && localized !== "asyncQuestion.queuedSummary") return localized;
+      }
+      return [q, a].filter(Boolean).join(": ");
+    }).filter(Boolean);
+    if (trailing) parts.push(trailing);
+    return parts.join(" · ");
+  };
+  if (parsed?.hasEnvelope) {
+    const replies = parsed.replies.length > 0 ? parsed.replies : explicitReplies;
+    return formatReplies(replies, parsed.trailingText) || parsed.displayText || t("queue.attachmentOnly");
+  }
+  if (explicitReplies.length > 0) {
+    return formatReplies(explicitReplies, text) || t("queue.attachmentOnly");
+  }
   return text || t("queue.attachmentOnly");
 }
 
@@ -213,7 +259,36 @@ function setQueuedSteerRowBusy(row, busy) {
 
 function setQueuedMessageIntoComposer(item) {
   if (!msgInput) return false;
-  const text = typeof item?.text === "string" ? item.text : "";
+  const rawText = typeof item?.text === "string" ? item.text : "";
+  let text = rawText;
+  if (typeof parseQuestionReplyEnvelope === "function") {
+    const parsed = parseQuestionReplyEnvelope(rawText);
+    if (parsed?.hasEnvelope) {
+      text = parsed.trailingText || parsed.displayText || "";
+    }
+  } else if (rawText && /<send_user_message_question_reply\b/i.test(rawText)) {
+    const lines = [];
+    const stripped = rawText.replace(
+      /<send_user_message_question_reply\b[^>]*>([\s\S]*?)<\/send_user_message_question_reply>/gi,
+      (_m, inner) => {
+        try {
+          const json = JSON.parse(String(inner || "").trim());
+          const arr = Array.isArray(json) ? json : (Array.isArray(json?.replies) ? json.replies : [json]);
+          for (const entry of arr) {
+            if (!entry || typeof entry !== "object") continue;
+            const q = String(entry.question ?? entry.prompt ?? "").trim();
+            const a = String(entry.answer ?? entry.reply ?? "").trim();
+            if (q && a) lines.push(`${q}: ${a}`);
+            else if (a || q) lines.push(a || q);
+          }
+        } catch {
+          // ignore
+        }
+        return "\n";
+      }
+    ).trim();
+    text = stripped || lines.join("\n");
+  }
   msgInput.value = text;
   if (typeof writeStoredDraft === "function") {
     writeStoredDraft(currentSessionId, text);

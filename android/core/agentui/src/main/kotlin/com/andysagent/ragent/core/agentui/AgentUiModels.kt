@@ -1,6 +1,7 @@
 package com.andysagent.ragent.core.agentui
 
 import androidx.compose.runtime.Immutable
+import com.andysagent.ragent.core.model.ElicitationPayload
 
 enum class AgentRunStatus { Idle, Working, WaitingApproval, Completed, Failed, Cancelled }
 enum class AgentConnectionStatus { Disconnected, Connecting, Connected, Reconnecting, AuthenticationRequired, Error }
@@ -54,6 +55,8 @@ data class PermissionRequestUiState(
     val permissionsJson: String? = null,
     val explanation: ApprovalExplanationUiState? = null,
     val executorUnavailableReasonCode: String? = null,
+    val isBlocking: Boolean = true,
+    val elicitation: ElicitationPayload? = null,
 )
 
 @Immutable

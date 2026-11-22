@@ -265,4 +265,183 @@ try {
   await browser.close();
 }
 
+await (async () => {
+  const { default: assertMod } = await import('node:assert/strict');
+  const fsMod = await import('node:fs');
+  const vmMod = await import('node:vm');
+
+  function makeRtEl(tag, id = '') {
+    const node = {
+      tagName: String(tag || 'DIV').toUpperCase(),
+      id,
+      className: '',
+      children: [],
+      dataset: {},
+      attrs: {},
+      style: { setProperty() {}, removeProperty() {} },
+      listeners: {},
+      hidden: false,
+      disabled: false,
+      type: '',
+      value: '',
+      placeholder: '',
+      _text: '',
+      setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'hidden') this.hidden = true; },
+      removeAttribute(k) { delete this.attrs[k]; if (k === 'hidden') this.hidden = false; },
+      getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+      hasAttribute(k) { return k in this.attrs; },
+      classList: {
+        add(...cs) { node.className = [...new Set([...node.className.split(/\s+/).filter(Boolean), ...cs])].join(' '); },
+        remove(...cs) { node.className = node.className.split(/\s+/).filter(Boolean).filter((c) => !cs.includes(c)).join(' '); },
+        toggle(c, f) { const has = this.contains(c); const next = f === undefined ? !has : Boolean(f); if (next) this.add(c); else this.remove(c); return next; },
+        contains(c) { return node.className.split(/\s+/).filter(Boolean).includes(c); },
+      },
+      appendChild(c) {
+        if (!c) return c;
+        if (c.tagName === 'FRAGMENT') {
+          for (const k of [...c.children]) this.appendChild(k);
+          c.children = [];
+          return c;
+        }
+        if (c.parentNode && Array.isArray(c.parentNode.children)) {
+          const oldIdx = c.parentNode.children.indexOf(c);
+          if (oldIdx >= 0) c.parentNode.children.splice(oldIdx, 1);
+        }
+        c.parentNode = this;
+        this.children.push(c);
+        return c;
+      },
+      replaceChildren(...cs) { this.children = []; for (const c of cs) this.appendChild(c); },
+      get childNodes() { return this.children; },
+      get firstElementChild() { return this.children[0] || null; },
+      insertBefore(c, ref) {
+        if (!c) return c;
+        if (c.parentNode && Array.isArray(c.parentNode.children)) {
+          const oldIdx = c.parentNode.children.indexOf(c);
+          if (oldIdx >= 0) c.parentNode.children.splice(oldIdx, 1);
+        }
+        c.parentNode = this;
+        const i = ref ? this.children.indexOf(ref) : -1;
+        if (i >= 0) this.children.splice(i, 0, c);
+        else this.children.push(c);
+        return c;
+      },
+      replaceChild(n, o) { const i = this.children.indexOf(o); if (i >= 0) { n.parentNode = this; this.children[i] = n; } return o; },
+      remove() { if (this.parentNode) { const i = this.parentNode.children.indexOf(this); if (i >= 0) this.parentNode.children.splice(i, 1); } },
+      addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
+      querySelectorAll(sel) {
+        const out = [];
+        const parts = String(sel).split(',').map((s) => s.trim()).filter(Boolean);
+        const match = (n) => parts.some((p) => {
+          const base = p.split('[')[0];
+          const clsMatch = base.startsWith('.') ? n.classList?.contains(base.slice(1)) : (!base || n.tagName === base.toUpperCase());
+          return clsMatch;
+        });
+        const walk = (n) => { for (const c of n.children || []) { if (match(c)) out.push(c); walk(c); } };
+        walk(this);
+        return out;
+      },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+      get textContent() { return this._text || this.children.map((c) => c.textContent || '').join(''); },
+      set textContent(v) { this._text = String(v ?? ''); },
+      set innerHTML(v) { this.children = []; this._text = String(v ?? ''); },
+      contains(target) {
+        let cur = target;
+        while (cur) {
+          if (cur === this) return true;
+          cur = cur.parentNode;
+        }
+        return false;
+      },
+    };
+    return node;
+  }
+
+  const messagesInner = makeRtEl('div', 'messagesInner');
+  const asyncPanel = makeRtEl('div', 'asyncQuestionsPanel');
+  const emptyState = makeRtEl('div', 'emptyState');
+  const doc = {
+    createElement: (tag) => makeRtEl(tag),
+    createDocumentFragment: () => makeRtEl('fragment'),
+    createTextNode: (t) => ({ textContent: String(t), children: [] }),
+    getElementById: (id) => (id === 'messagesInner' ? messagesInner : (id === 'asyncQuestionsPanel' ? asyncPanel : (id === 'emptyState' ? emptyState : null))),
+  };
+  const ctx = {
+    window: null,
+    document: doc,
+    globalThis: null,
+    console,
+    URL,
+    TextEncoder,
+    setTimeout,
+    clearTimeout,
+    requestAnimationFrame: (fn) => { fn(); return 1; },
+    cancelAnimationFrame: () => {},
+    currentSessionId: 'rt-async-sess',
+    messagesInner,
+    emptyState,
+    renderedEventState: { sessionId: 'rt-async-sess', latestSeq: 0 },
+    resetRenderedEventState: () => {},
+    marked: { parse: (v) => `<p>${String(v ?? '')}</p>` },
+    enhanceCodeBlocks: () => {},
+    enhanceTables: () => {},
+    enhanceRenderedContentLinks: () => {},
+    renderMarkdownIntoNode: () => false,
+    formatDecodedDisplayText: (v) => String(v ?? ''),
+    appendUserMessageDisclosure: () => {},
+    markLazyEventBodyNode: () => false,
+    appendMessageMeta: () => {},
+    t: (k) => k,
+  };
+  ctx.window = ctx;
+  ctx.globalThis = ctx;
+
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/async-questions-ui.js', 'utf8'), ctx);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/ui.js', 'utf8'), ctx);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/core/timeline-projector.js', 'utf8'), ctx);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/timeline-runtime.js', 'utf8'), ctx);
+
+  ctx.RagentTimelineRuntime.renderBatch([
+    {
+      seq: 1,
+      type: 'message',
+      role: 'assistant',
+      itemId: 'item-rt-1',
+      content: 'Pick environment',
+      messageDelivery: 'async',
+      asyncQuestions: [{ id: 'rt-q1', index: 0, question: 'Environment?', options: ['Dev', 'Prod'], status: 'pending' }],
+    },
+    {
+      seq: 2,
+      type: 'message',
+      role: 'assistant',
+      itemId: 'item-rt-2',
+      content: 'Also checking logs...',
+      messageDelivery: 'async',
+    },
+  ], { sessionId: 'rt-async-sess', runState: 'running', reset: true });
+
+  assertMod.equal(ctx.RagentAsyncQuestions.getPendingQuestions('rt-async-sess').length, 1);
+  assertMod.equal(asyncPanel.hidden, false);
+  assertMod.equal(messagesInner.querySelectorAll('.async-question-card').length, 1);
+  assertMod.equal(messagesInner.querySelector('.async-question-card').dataset.asyncQuestionState, 'pending');
+  assertMod.equal(messagesInner.querySelectorAll('.async-followup-card').length, 1);
+
+  // Delta user message reply settles both the floating panel and in-stream card cleanly
+  ctx.RagentTimelineRuntime.renderDurableDelta([
+    {
+      seq: 3,
+      type: 'message',
+      role: 'user',
+      content: '<send_user_message_question_reply>[{"questionItemId":"rt-q1","question":"Environment?","answer":"Prod"}]</send_user_message_question_reply>',
+      answeredQuestionItemIds: ['rt-q1'],
+    },
+  ], { sessionId: 'rt-async-sess', runState: 'running' });
+
+  assertMod.equal(ctx.RagentAsyncQuestions.getPendingQuestions('rt-async-sess').length, 0);
+  assertMod.equal(asyncPanel.hidden, true);
+  assertMod.equal(messagesInner.querySelector('.async-question-card').dataset.asyncQuestionState, 'answered');
+  assertMod.equal(messagesInner.querySelectorAll('.user-question-reply-chip').length, 1);
+})();
+
 console.log('test-chat-timeline-runtime: ok');

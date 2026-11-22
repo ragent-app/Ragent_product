@@ -44,9 +44,16 @@ import {
   shouldIncludeSessionTemplateInstructions,
 } from './context-renderer.mjs';
 import {
+  classifyCodexMcpElicitation,
   formatCodexAppServerApprovalDecision,
   normalizeCodexAppServerApprovalDecision,
 } from './codex-app-server-protocol.mjs';
+import {
+  buildAsyncQuestionReplyText,
+  extractAnsweredQuestionItemIds,
+  normalizeAsyncQuestionReplies,
+  parseAsyncQuestionReplyEnvelope,
+} from './codex-async-question-reply.mjs';
 import {
   forkCodexAppServerThread,
 } from './codex-app-server-client.mjs';
@@ -2207,6 +2214,15 @@ function sanitizeQueuedFollowUpOptions(options = {}) {
     next.internalOperation = 'approved_action_resume';
   }
   if (options.recordUserMessage === false) next.recordUserMessage = false;
+  if (options.userMessageAlreadyRecorded === true) next.userMessageAlreadyRecorded = true;
+  if (Array.isArray(options.asyncQuestionReplies) && options.asyncQuestionReplies.length > 0) {
+    const normalizedReplies = normalizeAsyncQuestionReplies(options.asyncQuestionReplies);
+    if (normalizedReplies.length > 0) next.asyncQuestionReplies = normalizedReplies;
+  }
+  if (Array.isArray(options.answeredQuestionItemIds) && options.answeredQuestionItemIds.length > 0) {
+    const ids = [...new Set(options.answeredQuestionItemIds.map(trimString).filter(Boolean))];
+    if (ids.length > 0) next.answeredQuestionItemIds = ids;
+  }
   return next;
 }
 
@@ -7122,7 +7138,21 @@ const {
   listRunIds,
   loadHistory,
   loadRecentTurnHistory,
-  loadReplySelfCheckTurnContext,
+  loadReplySelfCheckTurnContext: async (sessionId, runId, options = {}) => {
+    const context = await loadReplySelfCheckTurnContext(sessionId, runId, options);
+    if (!context?.assistantTurnText) return context;
+    const loader = options.loadSessionHistory || loadRecentTurnHistory;
+    const recent = await loader(sessionId, { includeBodies: false }).catch(() => []);
+    const display = buildSessionDisplayEvents(Array.isArray(recent) ? recent : [], { sessionRunning: false });
+    const hasPendingAsyncQuestions = display.some((event) => (
+      event?.type === 'message'
+      && event.role === 'assistant'
+      && (!runId || event.runId === runId)
+      && Array.isArray(event.asyncQuestions)
+      && event.asyncQuestions.some((q) => q?.status !== 'answered')
+    ));
+    return hasPendingAsyncQuestions ? { ...context, assistantTurnText: '' } : context;
+  },
   maybeApplyAssistantSessionLabels,
   maybeApplyAssistantTaskCard,
   maybeApplyContextBudget,
@@ -8437,21 +8467,55 @@ async function trySteerActiveBidirectionalRun({
   }
 
   const sourceContext = normalizeSourceContext(options?.sourceContext);
+  const asyncQuestionReplies = normalizeAsyncQuestionReplies(options?.asyncQuestionReplies);
+  const envelopeParsed = parseAsyncQuestionReplyEnvelope(text);
+  const answeredQuestionItemIds = [...new Set([
+    ...(Array.isArray(options?.answeredQuestionItemIds) ? options.answeredQuestionItemIds.map(trimString) : []),
+    ...extractAnsweredQuestionItemIds(asyncQuestionReplies),
+    ...extractAnsweredQuestionItemIds(envelopeParsed.replies),
+  ].filter(Boolean))];
   const steerId = generateId();
-  await updateRun(activeRun.id, (current) => ({
-    ...current,
-    appServerSteerQueue: [
-      ...(Array.isArray(current?.appServerSteerQueue) ? current.appServerSteerQueue : []),
-      {
-        id: steerId,
-        requestId,
-        responseId,
-        text,
-        state: 'pending',
-        createdAt: nowIso(),
-      },
-    ],
-  }));
+  let enqueued = false;
+  let duplicateEntry = false;
+  const updatedRun = await updateRun(activeRun.id, (current) => {
+    if (!current || isTerminalRunState(current.state)) return current;
+    const queue = Array.isArray(current.appServerSteerQueue) ? current.appServerSteerQueue : [];
+    if (queue.some((entry) => trimString(entry?.requestId) === requestId)) {
+      duplicateEntry = true;
+      return current;
+    }
+    enqueued = true;
+    return {
+      ...current,
+      appServerSteerQueue: [
+        ...queue,
+        {
+          id: steerId,
+          requestId,
+          responseId,
+          text,
+          state: 'pending',
+          createdAt: nowIso(),
+        },
+      ],
+    };
+  });
+  if (!enqueued && !duplicateEntry) return null;
+  if (duplicateEntry) {
+    return {
+      requestId,
+      duplicate: true,
+      queued: false,
+      steered: true,
+      run: updatedRun || activeRun,
+      session: await getSession(sessionId) || session,
+      response: buildReplyPublicationSummary({
+        id: responseId,
+        responseIds: [responseId],
+        state: 'running',
+      }),
+    };
+  }
   const steerSource = isClaudeBidiRunLike(activeRun, manifest)
     ? 'claude-bidi-steer'
     : 'codex-app-server-steer';
@@ -8461,6 +8525,8 @@ async function trySteerActiveBidirectionalRun({
     runId: activeRun.id,
     source: steerSource,
     ...(sourceContext ? { sourceContext } : {}),
+    ...(asyncQuestionReplies.length > 0 ? { asyncQuestionReplies } : {}),
+    ...(answeredQuestionItemIds.length > 0 ? { answeredQuestionItemIds } : {}),
   }));
   broadcastSessionInvalidation(sessionId);
   return {
@@ -8468,7 +8534,7 @@ async function trySteerActiveBidirectionalRun({
     duplicate: false,
     queued: false,
     steered: true,
-    run: await getRun(activeRun.id) || activeRun,
+    run: updatedRun || await getRun(activeRun.id) || activeRun,
     session: await getSession(sessionId) || session,
     response: buildReplyPublicationSummary({
       id: responseId,
@@ -9462,6 +9528,132 @@ async function finalizeDetachedRun(sessionId, run, manifest, fullNormalizedEvent
       console.warn(`[runs] interruption observation deferred: ${error?.message || error}`);
       return '';
     });
+  }
+
+  // Scrub any unsent secret approval payloads from terminalized runs so plaintext
+  // secrets never persist in status.json after run completion or failure.
+  const pendingApprovalById = new Map(
+    (Array.isArray(run?.appServerPendingApprovals) ? run.appServerPendingApprovals : [])
+      .filter((entry) => entry?.approvalId)
+      .map((entry) => [entry.approvalId, entry]),
+  );
+  const hasSecretApprovalQueueItems = (Array.isArray(run?.appServerApprovalResponseQueue)
+    ? run.appServerApprovalResponseQueue
+    : []).some((entry) => {
+    const pending = pendingApprovalById.get(entry?.approvalId);
+    const questions = Array.isArray(pending?.params?.questions) ? pending.params.questions : [];
+    const hasSecretQuestion = questions.some((q) => q?.isSecret === true);
+    const props = pending?.params?.requestedSchema?.properties;
+    const hasSecretElicitation = props && typeof props === 'object'
+      && Object.values(props).some((p) => p && typeof p === 'object' && (String(p.format || '').toLowerCase() === 'password' || p.writeOnly === true));
+    return (hasSecretQuestion || hasSecretElicitation) && entry?.redacted !== true;
+  });
+  if (hasSecretApprovalQueueItems) {
+    await updateRun(run.id, (current) => ({
+      ...current,
+      appServerApprovalResponseQueue: (Array.isArray(current?.appServerApprovalResponseQueue)
+        ? current.appServerApprovalResponseQueue
+        : []).map((entry) => {
+        const pending = pendingApprovalById.get(entry?.approvalId);
+        if (!pending) return entry;
+        const questions = Array.isArray(pending?.params?.questions) ? pending.params.questions : [];
+        const secretIndices = new Set();
+        const secretIds = new Set();
+        questions.forEach((q, idx) => {
+          if (q?.isSecret === true) {
+            secretIndices.add(idx);
+            secretIds.add(trimString(q.id || q.key || q.name) || `question_${idx + 1}`);
+          }
+        });
+        const props = pending?.params?.requestedSchema?.properties;
+        const secretFields = new Set(
+          props && typeof props === 'object'
+            ? Object.entries(props)
+              .filter(([, p]) => p && typeof p === 'object' && (String(p.format || '').toLowerCase() === 'password' || p.writeOnly === true))
+              .map(([k]) => k)
+            : [],
+        );
+        if (secretIndices.size === 0 && secretFields.size === 0) return entry;
+        const scrubbed = { ...entry, redacted: true };
+        if (typeof scrubbed.customAnswer === 'string' && scrubbed.customAnswer) scrubbed.customAnswer = '[redacted]';
+        if (Array.isArray(scrubbed.customAnswers)) {
+          scrubbed.customAnswers = scrubbed.customAnswers.map((v, i) => (secretIndices.has(i) && v ? '[redacted]' : v));
+        }
+        if (scrubbed.answers && typeof scrubbed.answers === 'object' && !Array.isArray(scrubbed.answers)) {
+          scrubbed.answers = Object.fromEntries(
+            Object.entries(scrubbed.answers).map(([k, v]) => [k, secretIds.has(k) ? { answers: ['[redacted]'] } : v]),
+          );
+        }
+        if (scrubbed.elicitationContent && typeof scrubbed.elicitationContent === 'object' && !Array.isArray(scrubbed.elicitationContent)) {
+          scrubbed.elicitationContent = Object.fromEntries(
+            Object.entries(scrubbed.elicitationContent).map(([k, v]) => [k, secretFields.has(k) ? '[redacted]' : v]),
+          );
+        }
+        return scrubbed;
+      }),
+    }));
+  }
+
+  // Requeue any mid-turn steer entries that never confirmed delivery (e.g. turn
+  // ended right as turn/steer was in flight or pending) so user messages and
+  // async question replies are never silently dropped on turn-end races.
+  if (!compacting && run.cancelRequested !== true && run.state !== 'cancelled') {
+    const latestRunForSteer = await getRun(run.id).catch(() => run) || run;
+    const undeliveredSteers = (Array.isArray(latestRunForSteer?.appServerSteerQueue)
+      ? latestRunForSteer.appServerSteerQueue
+      : []).filter((entry) => (
+        entry
+        && entry.factorySteer !== true
+        && entry.state !== 'sent'
+        && !entry.requeuedAt
+        && typeof entry.text === 'string'
+        && entry.text.trim()
+        && trimString(entry.requestId)
+      ));
+    if (undeliveredSteers.length > 0) {
+      const requeuedAt = nowIso();
+      const requeuedRequestIds = [];
+      await mutateSessionMeta(sessionId, (session) => {
+        const currentQueue = getFollowUpQueue(session);
+        const existingRequestIds = new Set(currentQueue.map((item) => trimString(item?.requestId)).filter(Boolean));
+        const toAppend = [];
+        for (const entry of undeliveredSteers) {
+          const reqId = trimString(entry.requestId);
+          if (!reqId || existingRequestIds.has(reqId)) continue;
+          existingRequestIds.add(reqId);
+          requeuedRequestIds.push(reqId);
+          toAppend.push({
+            requestId: reqId,
+            responseId: trimString(entry.responseId || reqId),
+            text: entry.text,
+            queuedAt: entry.createdAt || requeuedAt,
+            images: [],
+            userMessageAlreadyRecorded: true,
+            ...(run.tool ? { tool: run.tool } : {}),
+          });
+        }
+        if (toAppend.length === 0) return false;
+        if (Array.isArray(session.recentFollowUpRequestIds)) {
+          const requeuedSet = new Set(requeuedRequestIds);
+          session.recentFollowUpRequestIds = session.recentFollowUpRequestIds.filter((id) => !requeuedSet.has(id));
+        }
+        session.followUpQueue = [...toAppend, ...currentQueue];
+        session.updatedAt = nowIso();
+        return true;
+      });
+      if (requeuedRequestIds.length > 0) {
+        const requeuedSet = new Set(requeuedRequestIds);
+        await updateRun(run.id, (current) => ({
+          ...current,
+          appServerSteerQueue: (Array.isArray(current?.appServerSteerQueue) ? current.appServerSteerQueue : []).map((entry) => (
+            requeuedSet.has(trimString(entry?.requestId))
+              ? { ...entry, state: entry.state === 'sent' ? 'sent' : 'undelivered', requeuedAt }
+              : entry
+          )),
+        }));
+        sessionChanged = true;
+      }
+    }
   }
 
   // Wake durable follow-up messages once the active Run pointer, continuity
@@ -13833,6 +14025,30 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     setApiRequestCorrelation({ runId: activeRunId });
   }
 
+  if (hasActiveRun && options.steerIfRunning === true && !hasPendingCompact && activeRun) {
+    const steeredOutcome = await trySteerActiveBidirectionalRun({
+      sessionId,
+      session,
+      activeRun,
+      requestId,
+      responseId,
+      text: normalizedText,
+      images,
+      options,
+    });
+    if (steeredOutcome) {
+      return steeredOutcome;
+    }
+    // The active run may have reached terminal state while preparing to steer.
+    const refreshedActiveRun = await flushDetachedRunIfNeeded(sessionId, activeRunId) || await getRun(activeRunId);
+    hasActiveRun = Boolean(refreshedActiveRun && !isTerminalRunState(refreshedActiveRun.state));
+    const refreshedAfterRace = await getSession(sessionId);
+    if (refreshedAfterRace) {
+      session = refreshedAfterRace;
+      sessionMeta = await findSessionMeta(sessionId) || sessionMeta;
+    }
+  }
+
   const sessionBusy = hasActiveRun || hasPendingCompact || getFollowUpQueueCount(sessionMeta) > 0;
   if (sessionBusy && options.deferIfBusy === true) {
     // Internal control-plane work must never be smuggled through the owner
@@ -14387,6 +14603,33 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
     codexThreadId: persistedCodexThreadId,
     agyConversationId: persistedAgyConversationId,
   } = resumeState;
+  if (effectiveCodexResume && persistedCodexThreadId && effectiveRuntimeFamily === 'codex-app-server-json') {
+    const priorApprovalEvents = await readAllRuntimeApprovalEvents(sessionId).catch(() => []);
+    const respondedApprovalIds = new Set();
+    for (const evt of priorApprovalEvents) {
+      if (evt?.type === 'approval_response' && evt.approvalId) {
+        respondedApprovalIds.add(normalizeRuntimeApprovalId(String(evt.approvalId)));
+      }
+    }
+    const priorKeys = [];
+    const seenKeys = new Set();
+    for (const evt of priorApprovalEvents) {
+      if (evt?.type !== 'approval_request' || evt.providerMethod !== 'item/tool/requestUserInput') continue;
+      const normId = normalizeRuntimeApprovalId(String(evt.approvalId || ''));
+      if (!normId || !respondedApprovalIds.has(normId)) continue;
+      const thread = trimString(evt.providerThreadId);
+      const turn = trimString(evt.providerTurnId);
+      const item = trimString(evt.providerItemId);
+      if (!thread || !turn || !item) continue;
+      const key = JSON.stringify([thread, turn, item]);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      priorKeys.push(key);
+    }
+    if (priorKeys.length > 0) {
+      runtimeOptions.priorResolvedUserInputKeys = priorKeys.slice(-128);
+    }
+  }
   // codex goal mode: carry the user's goal intent into the run manifest so the
   // sidecar can apply it (threadGoal/clear + threadGoal/set) at turn start.
   const codexGoalIntent = effectiveRuntimeFamily === 'codex-app-server-json'
@@ -14764,11 +15007,20 @@ async function submitHttpMessageInternal(sessionId, text, images, options = {}) 
 
   await measureApiRequestPhase('send.history_write', async () => {
     if (options.recordUserMessage !== false && !userMessageAlreadyRecorded) {
+      const userAsyncReplies = normalizeAsyncQuestionReplies(options.asyncQuestionReplies);
+      const envelopeReplies = parseAsyncQuestionReplyEnvelope(recordedUserText).replies;
+      const answeredIds = [...new Set([
+        ...(Array.isArray(options.answeredQuestionItemIds) ? options.answeredQuestionItemIds.map(trimString) : []),
+        ...extractAnsweredQuestionItemIds(userAsyncReplies),
+        ...extractAnsweredQuestionItemIds(envelopeReplies),
+      ].filter(Boolean))];
       const userEvent = messageEvent('user', recordedUserText, imageRefs.length > 0 ? imageRefs : undefined, {
         requestId,
         responseId: primaryResponseId || undefined,
         runId: run.id,
         ...(sourceContext ? { sourceContext } : {}),
+        ...(userAsyncReplies.length > 0 ? { asyncQuestionReplies: userAsyncReplies } : {}),
+        ...(answeredIds.length > 0 ? { answeredQuestionItemIds: answeredIds } : {}),
       });
       await appendEvent(sessionId, userEvent);
 
@@ -15889,13 +16141,32 @@ async function seedRunApprovalFromSessionStream(run, normalizedApprovalId) {
   const providerRequestId = String(
     requestEvent.providerRequestId || requestEvent.providerRequestIdString || '',
   ).trim();
+  const seededParams = requestEvent.params && typeof requestEvent.params === 'object'
+    ? { ...requestEvent.params }
+    : {};
+  if (!Array.isArray(seededParams.questions) && Array.isArray(requestEvent.questions)) {
+    seededParams.questions = requestEvent.questions;
+  }
+  if (typeof seededParams.isBlocking !== 'boolean' && typeof requestEvent.isBlocking === 'boolean') {
+    seededParams.isBlocking = requestEvent.isBlocking;
+  }
+  if (requestEvent.elicitation && typeof requestEvent.elicitation === 'object') {
+    if (!seededParams.mode && requestEvent.elicitation.mode) seededParams.mode = requestEvent.elicitation.mode;
+    if (!seededParams.serverName && requestEvent.elicitation.serverName) seededParams.serverName = requestEvent.elicitation.serverName;
+    if (!seededParams.elicitationId && requestEvent.elicitation.elicitationId) seededParams.elicitationId = requestEvent.elicitation.elicitationId;
+    if (!seededParams.url && requestEvent.elicitation.url) seededParams.url = requestEvent.elicitation.url;
+    if (!seededParams.requestedSchema && requestEvent.elicitation.requestedSchema) {
+      seededParams.requestedSchema = requestEvent.elicitation.requestedSchema;
+    }
+  }
   return {
     approvalId: String(requestEvent.approvalId).trim(),
     providerRequestId: providerRequestId || null,
     providerRequestIdString: providerRequestId,
     providerMethod: String(requestEvent.providerMethod || '').trim() || null,
     kind: String(requestEvent.kind || '').trim() || null,
-    params: requestEvent.params || {},
+    ...(typeof requestEvent.isBlocking === 'boolean' ? { isBlocking: requestEvent.isBlocking } : {}),
+    params: seededParams,
     request: requestEvent.request || null,
     state: 'pending',
     createdAt: nowIso(),
@@ -15927,12 +16198,432 @@ function normalizeRuntimeApprovalCustomAnswer(value) {
   return value.trim().slice(0, 8000);
 }
 
+function isPlainRecord(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateQuestionApprovalAnswers({ run, pending, options, normalizedDecision }) {
+  const isClaudeQuestion = run.runtimeFamily === 'claude-stream-json-bidi'
+    && pending?.params?.tool_name === 'AskUserQuestion';
+  const isCodexUserInput = pending?.providerMethod === 'item/tool/requestUserInput'
+    || (run.runtimeFamily === 'codex-app-server-json' && pending?.kind === 'question');
+  const questions = isClaudeQuestion
+    ? pending?.params?.input?.questions
+    : (isCodexUserInput ? pending?.params?.questions : null);
+  const isBlocking = isCodexUserInput
+    ? (typeof pending?.isBlocking === 'boolean'
+      ? pending.isBlocking
+      : (typeof pending?.params?.isBlocking === 'boolean' ? pending.params.isBlocking : true))
+    : true;
+  const isApproving = normalizedDecision === 'approve' || normalizedDecision === 'approve_for_session';
+  const emptySkipRequested = options?.emptySkip === true;
+
+  if (emptySkipRequested) {
+    if (!isApproving || !isCodexUserInput || isBlocking !== false) {
+      const error = new Error('Empty skip is only permitted for non-blocking user input requests');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    return {
+      emptySkip: true,
+      multiChoices: Array.isArray(questions) ? questions.map(() => []) : undefined,
+      customAnswers: Array.isArray(questions) ? questions.map(() => '') : [],
+      answers: {},
+    };
+  }
+
+  if (isApproving && isPlainRecord(options?.answers)) {
+    if (!isCodexUserInput || !Array.isArray(questions) || questions.length === 0) {
+      const error = new Error('Per-question answers map is only supported for Codex user input questions');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    const rawKeys = Object.keys(options.answers);
+    if (rawKeys.length === 0) {
+      if (isBlocking === false) {
+        return {
+          emptySkip: true,
+          multiChoices: questions.map(() => []),
+          customAnswers: questions.map(() => ''),
+          answers: {},
+        };
+      }
+      const error = new Error('Answers are required for blocking questions');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    const questionById = new Map();
+    questions.forEach((q, idx) => {
+      const qid = trimString(q?.id || q?.key || q?.name) || `question_${idx + 1}`;
+      questionById.set(qid, { question: q, index: idx });
+    });
+    const normalizedAnswers = {};
+    for (const [rawKey, entry] of Object.entries(options.answers)) {
+      const qid = trimString(rawKey);
+      const target = questionById.get(qid);
+      if (!target) {
+        const error = new Error(`Unknown question id: ${qid}`);
+        error.code = 'INVALID_APPROVAL_CHOICES';
+        throw error;
+      }
+      const valuesRaw = Array.isArray(entry)
+        ? entry
+        : (isPlainRecord(entry) && Array.isArray(entry.answers)
+          ? entry.answers
+          : (typeof entry === 'string' ? [entry] : null));
+      if (!valuesRaw) {
+        const error = new Error('Invalid question answer entry');
+        error.code = 'INVALID_APPROVAL_CHOICES';
+        throw error;
+      }
+      const values = valuesRaw
+        .map((v) => (typeof v === 'string' ? v.trim().slice(0, 8000) : ''))
+        .filter(Boolean);
+      if (values.length === 0) continue;
+      const available = Array.isArray(target.question?.options) ? target.question.options : [];
+      const optionLabels = new Set(
+        available
+          .map((opt) => (typeof opt === 'string' ? opt.trim() : trimString(opt?.label || opt?.value || opt?.title)))
+          .filter(Boolean),
+      );
+      if (optionLabels.size > 0 && target.question?.isOther === false) {
+        const invalidOther = values.some((v) => !optionLabels.has(v));
+        if (invalidOther) {
+          const error = new Error('Custom free-text answer is not allowed when isOther is false');
+          error.code = 'INVALID_APPROVAL_CHOICES';
+          throw error;
+        }
+      }
+      normalizedAnswers[qid] = { answers: values };
+    }
+    if (Object.keys(normalizedAnswers).length === 0) {
+      const error = new Error('At least one non-empty answer is required');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    return { answers: normalizedAnswers };
+  }
+
+  if (Object.hasOwn(options, 'multiChoices')) {
+    const choices = options.multiChoices;
+    const answers = options.customAnswers;
+    const valid = (isClaudeQuestion || isCodexUserInput)
+      && Array.isArray(questions) && questions.length > 0 && questions.length <= 6
+      && Array.isArray(choices) && choices.length === questions.length
+      && Array.isArray(answers) && answers.length === questions.length
+      && (isClaudeQuestion
+        ? new Set(questions.map((q) => q?.question?.trim())).size === questions.length
+        : new Set(questions.map((q, idx) => trimString(q?.id) || trimString(q?.question) || String(idx))).size === questions.length)
+      && questions.every((question, index) => {
+        const selected = choices[index];
+        const text = answers[index];
+        const available = Array.isArray(question?.options) ? question.options : [];
+        const hasOptions = available.length > 0;
+        const allowOther = isClaudeQuestion ? true : (!hasOptions || question?.isOther !== false);
+        const questionTextValid = typeof question?.question === 'string' && question.question.trim();
+        if (!questionTextValid || !Array.isArray(selected) || typeof text !== 'string') return false;
+        if (isClaudeQuestion && !Array.isArray(question?.options)) return false;
+        if (new Set(selected).size !== selected.length) return false;
+        const selectedValid = selected.every((i) => {
+          if (!Number.isInteger(i) || i < 0 || i >= available.length) return false;
+          const label = typeof available[i] === 'string'
+            ? available[i].trim()
+            : trimString(available[i]?.label);
+          return Boolean(label);
+        });
+        if (!selectedValid) return false;
+        if (question.multiSelect !== true && selected.length > 1) return false;
+        if (!allowOther && text.trim()) return false;
+        if (question.multiSelect !== true && selected.length > 0 && text.trim()) return false;
+        return selected.length > 0 || text.trim();
+      });
+    if (!valid) {
+      const error = new Error('Invalid per-question choices or answers');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    return {
+      multiChoices: choices.map((selected) => [...selected]),
+    };
+  }
+
+  if (isApproving && isCodexUserInput && Array.isArray(questions) && questions.length > 0) {
+    const customAnswers = Array.isArray(options?.customAnswers) ? options.customAnswers : [];
+    const customAnswer = typeof options?.customAnswer === 'string' ? options.customAnswer.trim() : '';
+    const choices = Array.isArray(options?.choices) ? options.choices : [];
+    const hasValidChoice = choices.some((c) => Number.isInteger(c) && c >= 0);
+    const hasCustomAnswer = customAnswers.some((v) => typeof v === 'string' && v.trim()) || Boolean(customAnswer);
+    if (!hasValidChoice && !hasCustomAnswer) {
+      const error = new Error('At least one choice or answer is required unless emptySkip is used for non-blocking questions');
+      error.code = 'INVALID_APPROVAL_CHOICES';
+      throw error;
+    }
+    if (customAnswers.length > 0) {
+      questions.forEach((question, idx) => {
+        const text = typeof customAnswers[idx] === 'string' ? customAnswers[idx].trim() : '';
+        const available = Array.isArray(question?.options) ? question.options : [];
+        if (available.length > 0 && question?.isOther === false && text) {
+          const labels = new Set(
+            available
+              .map((opt) => (typeof opt === 'string' ? opt.trim() : trimString(opt?.label || opt?.value || opt?.title)))
+              .filter(Boolean),
+          );
+          if (!labels.has(text)) {
+            const error = new Error('Custom free-text answer is not allowed when isOther is false');
+            error.code = 'INVALID_APPROVAL_CHOICES';
+            throw error;
+          }
+        }
+      });
+    } else if (customAnswer) {
+      const firstQuestion = questions[0];
+      const available = Array.isArray(firstQuestion?.options) ? firstQuestion.options : [];
+      if (available.length > 0 && firstQuestion?.isOther === false) {
+        const labels = new Set(
+          available
+            .map((opt) => (typeof opt === 'string' ? opt.trim() : trimString(opt?.label || opt?.value || opt?.title)))
+            .filter(Boolean),
+        );
+        if (!labels.has(customAnswer)) {
+          const error = new Error('Custom free-text answer is not allowed when isOther is false');
+          error.code = 'INVALID_APPROVAL_CHOICES';
+          throw error;
+        }
+      }
+    }
+  }
+  return {};
+}
+
+function validateAndFilterElicitationSubmission(pending, normalizedDecision, options = {}) {
+  if (pending?.providerMethod !== 'mcpServer/elicitation/request') return {};
+  const classified = classifyCodexMcpElicitation(pending?.params || {});
+  const rawAction = trimString(options?.elicitationResponse?.action).toLowerCase();
+  const effectiveDecision = rawAction === 'accept'
+    ? 'approve'
+    : (rawAction === 'cancel' ? 'cancel' : (rawAction === 'decline' ? 'deny' : normalizedDecision));
+  const isAccept = effectiveDecision === 'approve' || effectiveDecision === 'approve_for_session';
+  if (!isAccept) {
+    return { effectiveDecision };
+  }
+  if (classified.isUserVerificationMode || (classified.isStructured && !classified.isFormMode && !classified.isUrlMode)) {
+    const error = new Error('This elicitation mode is not supported for remote approval; decline or cancel instead');
+    error.code = 'UNSUPPORTED_ELICITATION_MODE';
+    throw error;
+  }
+  if (!classified.isStructured || classified.isUrlMode) {
+    return { effectiveDecision, elicitationContent: {} };
+  }
+
+  const rawContent = options?.elicitationResponse?.content ?? options?.elicitationContent ?? options?.content ?? {};
+  if (!isPlainRecord(rawContent)) {
+    const error = new Error('Elicitation form content must be a JSON object');
+    error.code = 'INVALID_ELICITATION_CONTENT';
+    throw error;
+  }
+  const schema = classified.requestedSchema || {};
+  const properties = isPlainRecord(schema.properties) ? schema.properties : {};
+  const requiredSet = new Set(Array.isArray(schema.required) ? schema.required.map(trimString).filter(Boolean) : []);
+  const propEntries = Object.entries(properties);
+  if (propEntries.length === 0) {
+    for (const reqKey of requiredSet) {
+      if (!Object.hasOwn(rawContent, reqKey) || rawContent[reqKey] === undefined || rawContent[reqKey] === null || rawContent[reqKey] === '') {
+        const error = new Error(`Missing required elicitation field: ${reqKey}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+    }
+    return { effectiveDecision, elicitationContent: { ...rawContent } };
+  }
+
+  const filtered = {};
+  for (const [key, propSchema] of propEntries) {
+    const schemaObj = isPlainRecord(propSchema) ? propSchema : {};
+    const hasProp = Object.hasOwn(rawContent, key) && rawContent[key] !== undefined && rawContent[key] !== null;
+    const val = hasProp ? rawContent[key] : undefined;
+    const isRequired = requiredSet.has(key);
+    const isEmptyString = typeof val === 'string' && val.trim() === '';
+    if (!hasProp || (isRequired && (isEmptyString || (Array.isArray(val) && val.length === 0)))) {
+      if (isRequired) {
+        const error = new Error(`Missing required elicitation field: ${key}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      continue;
+    }
+    const expectedType = trimString(schemaObj.type);
+    const enumValues = Array.isArray(schemaObj.enum)
+      ? schemaObj.enum
+      : (Array.isArray(schemaObj.oneOf)
+        ? schemaObj.oneOf.map((entry) => entry?.const).filter((v) => v !== undefined)
+        : null);
+
+    if (expectedType === 'boolean') {
+      if (typeof val !== 'boolean') {
+        const error = new Error(`Field "${key}" must be a boolean`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      filtered[key] = val;
+    } else if (expectedType === 'integer') {
+      if (typeof val !== 'number' || !Number.isInteger(val)) {
+        const error = new Error(`Field "${key}" must be an integer`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isFinite(schemaObj.minimum) && val < schemaObj.minimum) {
+        const error = new Error(`Field "${key}" must be >= ${schemaObj.minimum}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isFinite(schemaObj.maximum) && val > schemaObj.maximum) {
+        const error = new Error(`Field "${key}" must be <= ${schemaObj.maximum}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      filtered[key] = val;
+    } else if (expectedType === 'number') {
+      if (typeof val !== 'number' || !Number.isFinite(val)) {
+        const error = new Error(`Field "${key}" must be a number`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isFinite(schemaObj.minimum) && val < schemaObj.minimum) {
+        const error = new Error(`Field "${key}" must be >= ${schemaObj.minimum}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isFinite(schemaObj.maximum) && val > schemaObj.maximum) {
+        const error = new Error(`Field "${key}" must be <= ${schemaObj.maximum}`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      filtered[key] = val;
+    } else if (expectedType === 'array') {
+      if (!Array.isArray(val)) {
+        const error = new Error(`Field "${key}" must be an array`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isInteger(schemaObj.minItems) && val.length < schemaObj.minItems) {
+        const error = new Error(`Field "${key}" requires at least ${schemaObj.minItems} item(s)`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isInteger(schemaObj.maxItems) && val.length > schemaObj.maxItems) {
+        const error = new Error(`Field "${key}" allows at most ${schemaObj.maxItems} item(s)`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      const itemEnum = Array.isArray(schemaObj.items?.enum)
+        ? schemaObj.items.enum
+        : (Array.isArray(schemaObj.items?.anyOf)
+          ? schemaObj.items.anyOf.map((item) => item?.const).filter((v) => v !== undefined)
+          : null);
+      if (itemEnum && val.some((item) => !itemEnum.includes(item))) {
+        const error = new Error(`Field "${key}" contains an invalid option`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      filtered[key] = [...val];
+    } else if (expectedType === 'object') {
+      if (!isPlainRecord(val)) {
+        const error = new Error(`Field "${key}" must be an object`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      filtered[key] = { ...val };
+    } else {
+      if (typeof val !== 'string') {
+        const error = new Error(`Field "${key}" must be a string`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      const maxLen = Number.isInteger(schemaObj.maxLength) && schemaObj.maxLength > 0
+        ? Math.min(schemaObj.maxLength, 32_768)
+        : 32_768;
+      if (val.length > maxLen) {
+        const error = new Error(`Field "${key}" exceeds max length`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (Number.isInteger(schemaObj.minLength) && val.length < schemaObj.minLength) {
+        const error = new Error(`Field "${key}" requires at least ${schemaObj.minLength} characters`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (enumValues && !enumValues.includes(val)) {
+        const error = new Error(`Field "${key}" must be one of the allowed options`);
+        error.code = 'INVALID_ELICITATION_CONTENT';
+        throw error;
+      }
+      if (typeof schemaObj.pattern === 'string' && schemaObj.pattern.length > 0 && schemaObj.pattern.length <= 256 && val.length <= 4096) {
+        let re = null;
+        try { re = new RegExp(schemaObj.pattern); } catch {}
+        if (re && !re.test(val)) {
+          const error = new Error(`Field "${key}" does not match expected format`);
+          error.code = 'INVALID_ELICITATION_CONTENT';
+          throw error;
+        }
+      }
+      filtered[key] = val;
+    }
+  }
+  return {
+    effectiveDecision,
+    elicitationContent: filtered,
+    hasSecretFields: classified.hasSecretFields,
+  };
+}
+
+function redactApprovalResponseEntryForClient(entry, pending) {
+  if (!entry || typeof entry !== 'object') return entry;
+  const questions = Array.isArray(pending?.params?.questions) ? pending.params.questions : [];
+  const secretIndices = new Set();
+  const secretIds = new Set();
+  questions.forEach((q, idx) => {
+    if (q?.isSecret === true) {
+      secretIndices.add(idx);
+      secretIds.add(trimString(q.id || q.key || q.name) || `question_${idx + 1}`);
+    }
+  });
+  const props = pending?.params?.requestedSchema?.properties;
+  const secretFields = new Set(
+    isPlainRecord(props)
+      ? Object.entries(props)
+        .filter(([, p]) => isPlainRecord(p) && (trimString(p.format).toLowerCase() === 'password' || p.writeOnly === true))
+        .map(([k]) => k)
+      : [],
+  );
+  if (secretIndices.size === 0 && secretFields.size === 0) return entry;
+  const redacted = { ...entry, redacted: true };
+  if (typeof redacted.customAnswer === 'string' && redacted.customAnswer) redacted.customAnswer = '[redacted]';
+  if (Array.isArray(redacted.customAnswers)) {
+    redacted.customAnswers = redacted.customAnswers.map((v, i) => (secretIndices.has(i) && v ? '[redacted]' : v));
+  }
+  if (isPlainRecord(redacted.answers)) {
+    redacted.answers = Object.fromEntries(
+      Object.entries(redacted.answers).map(([k, v]) => [k, secretIds.has(k) ? { answers: ['[redacted]'] } : v]),
+    );
+  }
+  if (isPlainRecord(redacted.elicitationContent)) {
+    redacted.elicitationContent = Object.fromEntries(
+      Object.entries(redacted.elicitationContent).map(([k, v]) => [k, secretFields.has(k) ? '[redacted]' : v]),
+    );
+  }
+  return redacted;
+}
+
 export async function submitRuntimeApproval(runId, approvalId, options = {}) {
   const assertApproval = () => temporaryApprovalDelegation(options.approvalActor, 'approval.resolve');
   const temporaryApproval = assertApproval();
   const normalizedRunId = trimString(runId);
   const normalizedApprovalId = normalizeRuntimeApprovalId(approvalId);
-  const normalizedDecision = normalizeCodexAppServerApprovalDecision(options.decision || options.action);
+  const rawElicitationAction = trimString(options?.elicitationResponse?.action).toLowerCase();
+  const rawDecisionInput = options.decision || options.action || (
+    rawElicitationAction === 'accept' ? 'approve' : (rawElicitationAction === 'decline' ? 'deny' : rawElicitationAction)
+  );
+  const normalizedDecision = normalizeCodexAppServerApprovalDecision(rawDecisionInput);
   if (!normalizedDecision) {
     const error = new Error('approval decision must be approve, approve_for_session, deny, or cancel');
     error.code = 'INVALID_APPROVAL_DECISION';
@@ -15967,7 +16658,7 @@ export async function submitRuntimeApproval(runId, approvalId, options = {}) {
     return {
       requestId: trimString(options.requestId) || null,
       duplicate: true,
-      approval: pending || queued,
+      approval: redactApprovalResponseEntryForClient(pending || queued, pending),
       run,
       session: await getSession(run.sessionId),
     };
@@ -15994,48 +16685,25 @@ export async function submitRuntimeApproval(runId, approvalId, options = {}) {
     }); }, { beforeWrite: assertApproval, beforeCommit: assertApproval });
   }
 
-  let multiChoices;
-  if (Object.hasOwn(options, 'multiChoices')) {
-    const questions = pending?.params?.input?.questions;
-    const choices = options.multiChoices;
-    const answers = options.customAnswers;
-    const valid = run.runtimeFamily === 'claude-stream-json-bidi'
-      && pending?.params?.tool_name === 'AskUserQuestion'
-      && Array.isArray(questions) && questions.length > 0 && questions.length <= 6
-      && Array.isArray(choices) && choices.length === questions.length
-      && Array.isArray(answers) && answers.length === questions.length
-      && new Set(questions.map((q) => q?.question?.trim())).size === questions.length
-      && questions.every((question, index) => {
-        const selected = choices[index];
-        const text = answers[index];
-        const available = question?.options;
-        return typeof question?.question === 'string' && question.question.trim()
-          && Array.isArray(available) && Array.isArray(selected) && typeof text === 'string'
-          && new Set(selected).size === selected.length
-          && selected.every((i) => Number.isInteger(i) && i >= 0 && i < available.length
-            && typeof available[i]?.label === 'string' && available[i].label.trim())
-          && (question.multiSelect === true || selected.length <= 1)
-          && (question.multiSelect === true || !selected.length || !text.trim())
-          && (selected.length > 0 || text.trim());
-      });
-    if (!valid) {
-      const error = new Error('Invalid per-question choices or answers');
-      error.code = 'INVALID_APPROVAL_CHOICES';
-      throw error;
-    }
-    multiChoices = choices.map((selected) => [...selected]);
-  }
+  const questionValidation = validateQuestionApprovalAnswers({ run, pending, options, normalizedDecision });
+  const elicitationValidation = validateAndFilterElicitationSubmission(pending, normalizedDecision, options);
+  const effectiveDecision = elicitationValidation.effectiveDecision || normalizedDecision;
 
   const responseEntry = {
     id: generateId(),
     approvalId: normalizedApprovalId,
-    decision: normalizedDecision,
-    displayDecision: formatCodexAppServerApprovalDecision(normalizedDecision),
+    decision: effectiveDecision,
+    displayDecision: formatCodexAppServerApprovalDecision(effectiveDecision),
     requestId: trimString(options.requestId) || '',
     choices: normalizeRuntimeApprovalChoices(options.choices),
     customAnswer: normalizeRuntimeApprovalCustomAnswer(options.customAnswer),
-    customAnswers: Array.isArray(options.customAnswers) ? options.customAnswers.slice(0, 6).map(normalizeRuntimeApprovalCustomAnswer) : [],
-    ...(multiChoices ? { multiChoices } : {}),
+    customAnswers: Array.isArray(questionValidation.customAnswers)
+      ? questionValidation.customAnswers
+      : (Array.isArray(options.customAnswers) ? options.customAnswers.slice(0, 6).map(normalizeRuntimeApprovalCustomAnswer) : []),
+    ...(questionValidation.multiChoices ? { multiChoices: questionValidation.multiChoices } : {}),
+    ...(questionValidation.answers ? { answers: questionValidation.answers } : {}),
+    ...(questionValidation.emptySkip === true ? { emptySkip: true } : {}),
+    ...(elicitationValidation.elicitationContent ? { elicitationContent: elicitationValidation.elicitationContent } : {}),
     state: 'pending',
     createdAt: nowIso(),
     ...(temporaryApproval ? { decisionSource: temporaryApproval.source,
@@ -16081,7 +16749,7 @@ export async function submitRuntimeApproval(runId, approvalId, options = {}) {
   return {
     requestId: responseEntry.requestId || null,
     duplicate: false,
-    approval: responseEntry,
+    approval: redactApprovalResponseEntryForClient(responseEntry, pending),
     run: updatedRun,
     session: await getSession(updatedRun.sessionId),
   };

@@ -4,6 +4,8 @@ import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.protocol.allAttachments
 import com.andysagent.ragent.core.protocol.boundarySeq
 import com.andysagent.ragent.core.protocol.dedupeKey
+import com.andysagent.ragent.core.protocol.encodeMessageMetadataJson
+import com.andysagent.ragent.core.protocol.mergeMessageMetadataJson
 import com.andysagent.ragent.core.protocol.requestKey
 import com.andysagent.ragent.core.protocol.sessionEventFingerprint
 import com.andysagent.ragent.core.protocol.startingSeq
@@ -220,6 +222,7 @@ class LiveTimelineProjector {
                 role = when (next.role) { "user" -> TimelineRole.User; "system" -> TimelineRole.System; else -> TimelineRole.Agent },
                 messageState = next.state, lastEventSeq = if (event.boundarySeq() == 0L) 0L else next.lastEventSeq,
                 messagePhase = next.messagePhase,
+                metadataJson = mergeMessageMetadataJson(previous?.metadataJson, next.metadataJson),
                 providerMessageId = event.providerMessageId ?: previous?.providerMessageId,
                 providerContentBlockIndex = event.providerContentBlockIndex ?: event.messageBlockIndex ?: previous?.providerContentBlockIndex,
                 operationStatus = if (next.completed) TimelineOperationStatus.Completed else TimelineOperationStatus.InProgress,
@@ -459,6 +462,7 @@ class LiveTimelineProjector {
             providerItemId = event.providerItemId,
             providerToolUseId = event.providerToolUseId,
             responseId = event.responseId,
+            metadataJson = mergeMessageMetadataJson(previous?.metadataJson, event.encodeMessageMetadataJson()),
         )
     }
 

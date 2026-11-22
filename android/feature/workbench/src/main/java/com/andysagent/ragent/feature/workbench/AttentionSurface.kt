@@ -64,6 +64,13 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.andysagent.ragent.core.model.ElicitationKind
+import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.NotificationImportant
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Checkbox
@@ -522,6 +529,20 @@ private fun AttentionCard(
                     Text(headline, color = colors.primaryContent, style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold, maxLines = if (expanded) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis)
+                    if (item.approval?.isBlocking == false) {
+                        Spacer(Modifier.size(4.dp))
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = colors.secondaryContent.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.decision_optional_nonblocking),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colors.secondaryContent,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                     if (queuedCount > 0) Text(stringResource(R.string.attention_queued, queuedCount),
                         color = colors.tertiaryContent, style = MaterialTheme.typography.labelSmall)
                 } else {
@@ -616,7 +637,29 @@ private fun AttentionCard(
                 }
                 }
                 Spacer(Modifier.size(RagentSpacing.Compact))
+                val elicitation = item.approval?.elicitation
+                val isRichElicitation = elicitation != null &&
+                    elicitation.resolvedKind != ElicitationKind.CompactToolApproval &&
+                    !item.requiresSession
+                val elicitationFormState = if (isRichElicitation && elicitation != null) {
+                    rememberElicitationFormState(elicitation)
+                } else null
                 if (isApprovalNotification) {
+                    if (isRichElicitation && elicitation != null && elicitationFormState != null) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(approvalScroll),
+                            verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact),
+                        ) {
+                            ElicitationContent(
+                                elicitation = elicitation,
+                                formState = elicitationFormState,
+                                resolving = resolving,
+                            )
+                        }
+                    } else {
                     AttentionDisclosure(expanded, disclosureProgress, disclosureMotion::record) {
                     // Keep all technical material inside one bounded scroll
                     // region. The action rail below never scrolls away.
@@ -660,6 +703,7 @@ private fun AttentionCard(
                         ApprovalDetails(item, skipActionList = isActionBatch,
                             skipProviderDescription = item.approval?.reason == headline && !headlineOverflows)
                         Spacer(Modifier.size(RagentSpacing.Compact))
+                    }
                     }
                     }
                 } else {
@@ -729,16 +773,28 @@ private fun AttentionCard(
                 } else if (isPrivilegedCategoryBatch) {
                     PrivilegedCategoryActions(item, selectedActionIds, resolving, error, onEvent, onOpenSession)
                 } else {
-                    AttentionActions(
-                        item = item,
-                        resolving = resolving,
-                        error = error,
-                        onEvent = onEvent,
-                        onOpenSession = onOpenSession,
-                        selectedActionIds = selectedActionIds,
-                        onResolveActionBatch = { onEvent(AttentionEvent.ResolveActionBatch(item.id, selectedActionIds)) },
-                        onDenyActionBatch = { onEvent(AttentionEvent.ResolveActionBatch(item.id, emptySet(), "deny")) },
-                    )
+                    if (isRichElicitation && elicitation != null && elicitationFormState != null) {
+                        ElicitationActionBar(
+                            elicitation = elicitation,
+                            formState = elicitationFormState,
+                            resolving = resolving,
+                            onSubmitAction = { action, contentJson ->
+                                onEvent(AttentionEvent.ResolveElicitation(item.id, action, contentJson))
+                            },
+                        )
+                        AttentionInlineErrorRow(error = error, resolving = resolving, onEvent = onEvent)
+                    } else {
+                        AttentionActions(
+                            item = item,
+                            resolving = resolving,
+                            error = error,
+                            onEvent = onEvent,
+                            onOpenSession = onOpenSession,
+                            selectedActionIds = selectedActionIds,
+                            onResolveActionBatch = { onEvent(AttentionEvent.ResolveActionBatch(item.id, selectedActionIds)) },
+                            onDenyActionBatch = { onEvent(AttentionEvent.ResolveActionBatch(item.id, emptySet(), "deny")) },
+                        )
+                    }
                 }
                 }
             }
@@ -765,7 +821,9 @@ private fun QuestionOptionsBody(
 ) {
     val colors = LocalRagentColors.current
     val options = questions.firstOrNull()?.options.orEmpty()
-    if (questions.size > 1 || questions.any { it.isMultiSelect }) {
+    val useExplicitSubmit = questions.size > 1 || questions.any { it.isMultiSelect || it.isOther == true || it.isSecret }
+    val secretRevealByQuestion = remember(item.id) { mutableStateMapOf<Int, Boolean>() }
+    if (useExplicitSubmit) {
         val answeredCount = questions.indices.count { questionIndex ->
             selectedOptions[questionIndex].orEmpty().isNotEmpty() ||
                 customAnswers[questionIndex].orEmpty().trim().isNotEmpty()
@@ -778,7 +836,7 @@ private fun QuestionOptionsBody(
         val policy = motionPolicy()
         val duration = policy.duration(RagentMotion.Feedback)
         AnimatedVisibility(
-            visible = expanded,
+            visible = expanded || questions.size == 1,
             enter = if (policy.preference == MotionPreference.None) {
                 EnterTransition.None
             } else {
@@ -798,6 +856,19 @@ private fun QuestionOptionsBody(
                 verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact),
             ) {
                 questions.forEachIndexed { questionIndex, question ->
+                    question.header?.takeIf { it.isNotBlank() }?.let { headerText ->
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = colors.accentPrimary.copy(alpha = 0.12f),
+                        ) {
+                            Text(
+                                text = headerText,
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                color = colors.accentPrimary,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
                     if (questions.size > 1 && question.question.isNotBlank()) {
                         Text(
                             text = "问题 ${questionIndex + 1}：${question.question}",
@@ -816,20 +887,52 @@ private fun QuestionOptionsBody(
                             onClick = { onSelectOption(questionIndex, optionIndex) },
                         )
                     }
-                    AgentoTextField(
-                        value = customAnswers[questionIndex].orEmpty(),
-                        onValueChange = { onCustomAnswerChange(questionIndex, it) },
-                        label = "其他回复",
-                        enabled = !resolving,
-                        // Multi-question answers are committed by the footer
-                        // button; neither IME action nor Enter submits them.
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .semantics {
-                                contentDescription = "问题 ${questionIndex + 1} 的自定义回复"
-                            },
-                    )
+                    val allowOther = (question.isOther != false) || question.options.isEmpty()
+                    if (allowOther) {
+                        if (question.isSecret) {
+                            val revealed = secretRevealByQuestion[questionIndex] == true
+                            androidx.compose.material3.OutlinedTextField(
+                                value = customAnswers[questionIndex].orEmpty(),
+                                onValueChange = { onCustomAnswerChange(questionIndex, it) },
+                                label = { Text("其他回复") },
+                                enabled = !resolving,
+                                singleLine = true,
+                                visualTransformation = if (revealed) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(onClick = { secretRevealByQuestion[questionIndex] = !revealed }) {
+                                        Icon(
+                                            imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                            contentDescription = stringResource(
+                                                if (revealed) R.string.decision_secret_hide else R.string.decision_secret_reveal,
+                                            ),
+                                        )
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("attention-question-$questionIndex-secret-input")
+                                    .semantics {
+                                        contentDescription = "问题 ${questionIndex + 1} 的自定义回复"
+                                    },
+                            )
+                        } else {
+                            AgentoTextField(
+                                value = customAnswers[questionIndex].orEmpty(),
+                                onValueChange = { onCustomAnswerChange(questionIndex, it) },
+                                label = "其他回复",
+                                enabled = !resolving,
+                                // Multi-question answers are committed by the footer
+                                // button; neither IME action nor Enter submits them.
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .semantics {
+                                        contentDescription = "问题 ${questionIndex + 1} 的自定义回复"
+                                    },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -980,7 +1083,9 @@ private fun QuestionAnswerRail(
     resolving: Boolean,
     onEvent: (AttentionEvent) -> Unit,
 ) {
-    if (questions.size > 1 || questions.any { it.isMultiSelect }) {
+    val useExplicitSubmit = questions.size > 1 || questions.any { it.isMultiSelect || it.isOther == true || it.isSecret }
+    val isNonBlocking = item.approval?.isBlocking == false
+    if (useExplicitSubmit) {
         val customAnswerIndexes = questions.indices.filter { questionIndex ->
             selectedOptions[questionIndex].orEmpty().isEmpty() &&
                 customAnswers[questionIndex].orEmpty().trim().isNotEmpty()
@@ -1004,7 +1109,11 @@ private fun QuestionAnswerRail(
                     if (questions.any { it.isMultiSelect }) onEvent(AttentionEvent.ResolveMultiChoices(
                         item.id, questions.indices.map { selectedOptions[it].orEmpty().sorted() },
                         questions.indices.map { customAnswers[it].orEmpty().trim() },
-                    )) else onEvent(
+                    )) else if (questions.size == 1) {
+                        val chosenOption = selectedOptions[0].orEmpty().singleOrNull()
+                        val typed = if (chosenOption == null) customAnswers[0].orEmpty().trim() else ""
+                        onEvent(AttentionEvent.ResolveQuestion(item.id, 0, chosenOption, typed))
+                    } else onEvent(
                         AttentionEvent.ResolveQuestions(
                             itemId = item.id,
                             choices = questions.indices.map { selectedOptions[it].orEmpty().singleOrNull() ?: -1 },
@@ -1016,6 +1125,15 @@ private fun QuestionAnswerRail(
                 enabled = !resolving && canSubmit,
                 secondary = false,
             )
+            if (isNonBlocking) {
+                AgentoButton(
+                    text = stringResource(R.string.decision_skip),
+                    onClick = { onEvent(AttentionEvent.SkipQuestion(item.id)) },
+                    enabled = !resolving,
+                    secondary = true,
+                    modifier = Modifier.testTag("attention-skip"),
+                )
+            }
             Spacer(Modifier.weight(1f))
             AgentoButton(
                 text = approvalLabel(item.approval?.denyLabel, "拒绝"),
@@ -1027,33 +1145,48 @@ private fun QuestionAnswerRail(
         return
     }
     var answer by remember(item.id) { mutableStateOf("") }
+    val firstQuestion = questions.firstOrNull()
+    val showCompactWriteIn = firstQuestion == null || firstQuestion.isOther != false || firstQuestion.options.isEmpty()
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(RagentSpacing.Compact),
     ) {
-        AgentoTextField(
-            value = answer,
-            onValueChange = { answer = it },
-            label = "其他回复",
-            enabled = !resolving,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(
-                onSend = {
-                    val text = answer.trim()
-                    if (text.isNotEmpty()) {
-                        onEvent(AttentionEvent.ResolveQuestion(item.id, 0, null, text))
-                    }
-                },
-            ),
-            modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) onEvent(AttentionEvent.SetExpanded(item.id, true)) },
-        )
-        if (answer.isNotBlank()) {
+        if (showCompactWriteIn) {
+            AgentoTextField(
+                value = answer,
+                onValueChange = { answer = it },
+                label = "其他回复",
+                enabled = !resolving,
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        val text = answer.trim()
+                        if (text.isNotEmpty()) {
+                            onEvent(AttentionEvent.ResolveQuestion(item.id, 0, null, text))
+                        }
+                    },
+                ),
+                modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) onEvent(AttentionEvent.SetExpanded(item.id, true)) },
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        if (showCompactWriteIn && answer.isNotBlank()) {
             AgentoButton(
                 text = "发送",
                 onClick = { onEvent(AttentionEvent.ResolveQuestion(item.id, 0, null, answer.trim())) },
                 enabled = !resolving,
                 secondary = false,
+            )
+        }
+        if (isNonBlocking) {
+            AgentoButton(
+                text = stringResource(R.string.decision_skip),
+                onClick = { onEvent(AttentionEvent.SkipQuestion(item.id)) },
+                enabled = !resolving,
+                secondary = true,
+                modifier = Modifier.testTag("attention-skip"),
             )
         }
         AgentoButton(
@@ -1154,27 +1287,37 @@ private fun AttentionActions(
                 }
             }
         }
-        if (error != null) {
-            Spacer(Modifier.size(RagentSpacing.Compact))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AgentoIcon(
-                    imageVector = Icons.Outlined.ErrorOutline,
-                    contentDescription = stringResource(R.string.attention_error),
-                    modifier = Modifier.size(16.dp),
-                    tint = colors.stateError,
-                )
-                Spacer(Modifier.size(RagentSpacing.xs))
-                Text(
-                    text = error,
-                    color = colors.stateError,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                TextButton(onClick = { onEvent(AttentionEvent.ClearError) }, enabled = !resolving, colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary)) {
-                    Text(stringResource(R.string.attention_clear_error), color = colors.secondaryContent)
-                }
+        AttentionInlineErrorRow(error = error, resolving = resolving, onEvent = onEvent)
+    }
+}
+
+@Composable
+private fun AttentionInlineErrorRow(
+    error: String?,
+    resolving: Boolean,
+    onEvent: (AttentionEvent) -> Unit,
+) {
+    val colors = LocalRagentColors.current
+    if (error != null) {
+        Spacer(Modifier.size(RagentSpacing.Compact))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AgentoIcon(
+                imageVector = Icons.Outlined.ErrorOutline,
+                contentDescription = stringResource(R.string.attention_error),
+                modifier = Modifier.size(16.dp),
+                tint = colors.stateError,
+            )
+            Spacer(Modifier.size(RagentSpacing.xs))
+            Text(
+                text = error,
+                color = colors.stateError,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(onClick = { onEvent(AttentionEvent.ClearError) }, enabled = !resolving, colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary)) {
+                Text(stringResource(R.string.attention_clear_error), color = colors.secondaryContent)
             }
         }
     }

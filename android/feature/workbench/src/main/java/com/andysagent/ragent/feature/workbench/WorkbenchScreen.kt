@@ -191,6 +191,8 @@ import com.andysagent.ragent.core.agentui.PermissionRequestUiState
 import com.andysagent.ragent.core.agentui.RetryCard
 import com.andysagent.ragent.core.agentui.RetryUiState
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
+import com.andysagent.ragent.core.model.AsyncQuestion
+import com.andysagent.ragent.core.protocol.QuestionReplyEnvelopeCodec
 import com.andysagent.ragent.core.agentui.FileChangeItem
 import com.andysagent.ragent.core.agentui.FileChangeType
 import com.andysagent.ragent.core.agentui.FileChangeUiState
@@ -1767,10 +1769,30 @@ private fun ChatSurface(
         "native.recovered" to stringResource(R.string.collaboration_native_recovered),
         "native.snapshot" to stringResource(R.string.collaboration_native_snapshot),
     )
+    val effectiveTimelineItems = remember(state.timelineItems, state.optimisticallyAnsweredAsyncQuestions) {
+        if (state.optimisticallyAnsweredAsyncQuestions.isEmpty()) state.timelineItems
+        else state.timelineItems.map { item ->
+            if (item is TimelineItem.Message && item.asyncQuestions.any { !it.isAnswered && it.id in state.optimisticallyAnsweredAsyncQuestions }) {
+                item.copy(
+                    asyncQuestions = item.asyncQuestions.map { q ->
+                        val ans = state.optimisticallyAnsweredAsyncQuestions[q.id]
+                        if (ans != null && !q.isAnswered) q.copy(status = "answered", answeredText = ans) else q
+                    },
+                )
+            } else item
+        }
+    }
+    val pendingAsyncQuestions: List<AsyncQuestion> = remember(effectiveTimelineItems) {
+        effectiveTimelineItems.asSequence()
+            .filterIsInstance<TimelineItem.Message>()
+            .flatMap { it.asyncQuestions.asSequence() }
+            .filter { !it.isAnswered }
+            .toList()
+    }
     val turnGroupProjector = remember(state.sessionId) { TurnGroupProjector() }
-    val turnGroups = remember(state.timelineItems, collaborationActions, collaborationLabels, state.pendingTurn, state.acceptedTurns, state.runStatus, state.runMetrics) {
-        val terminal = latestTurnHasTerminalRun(state.timelineItems, state.pendingTurn, state.runStatus, state.runMetrics)
-        val items = com.andysagent.ragent.core.timeline.settleLatestTurnMessages(state.timelineItems, terminal)
+    val turnGroups = remember(effectiveTimelineItems, collaborationActions, collaborationLabels, state.pendingTurn, state.acceptedTurns, state.runStatus, state.runMetrics) {
+        val terminal = latestTurnHasTerminalRun(effectiveTimelineItems, state.pendingTurn, state.runStatus, state.runMetrics)
+        val items = com.andysagent.ragent.core.timeline.settleLatestTurnMessages(effectiveTimelineItems, terminal)
         turnGroupProjector.project(mergeCollaborationActions(items, collaborationActions, collaborationLabels), state.pendingTurn, state.acceptedTurns)
     }
     val lastAgentEntryIndex = remember(turnGroups) {
@@ -2220,6 +2242,10 @@ private fun ChatSurface(
     // this Session opens the island automatically; a newer message restarts
     // its short expanded dwell, while a manual expand cancels that timer.
     var queueDockExpanded by remember(state.sessionId) { mutableStateOf(false) }
+    var asyncQuestionDockExpanded by remember(state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(pendingAsyncQuestions.size) {
+        if (pendingAsyncQuestions.isEmpty()) asyncQuestionDockExpanded = false
+    }
     var seenQueueIds by remember(state.sessionId) {
         mutableStateOf(state.queuedMessages.map { it.id }.toSet())
     }
@@ -2228,6 +2254,7 @@ private fun ChatSurface(
         val currentIds = state.queuedMessages.map { it.id }.toSet()
         if (currentIds.any { it !in seenQueueIds } && state.approval == null) {
             queueDockExpanded = true
+            asyncQuestionDockExpanded = false
             queueAutoCollapseGeneration += 1
         }
         if (currentIds.isEmpty()) queueDockExpanded = false
@@ -2243,6 +2270,7 @@ private fun ChatSurface(
     LaunchedEffect(state.approval?.id) {
         if (state.approval != null) {
             queueDockExpanded = false
+            asyncQuestionDockExpanded = false
             queueAutoCollapseGeneration = 0
         }
     }
@@ -2729,6 +2757,7 @@ private fun ChatSurface(
                 queueExpanded = queueDockExpanded,
                 onExpandQueue = {
                     queueAutoCollapseGeneration = 0
+                    asyncQuestionDockExpanded = false
                     queueDockExpanded = true
                 },
                 onCollapseQueue = {
@@ -2736,14 +2765,16 @@ private fun ChatSurface(
                     queueDockExpanded = false
                 },
                 onEditQueuedMessage = { qm ->
+                    val editableText = QuestionReplyEnvelopeCodec.formatEditableComposerText(qm.text)
                     editingQueuedMessageId = qm.id
-                    editingQueuedOriginalText = qm.text
+                    editingQueuedOriginalText = editableText
                     editingQueuedAttachmentCount = qm.attachments.size
                     queueAutoCollapseGeneration = 0
                     queueDockExpanded = false
+                    asyncQuestionDockExpanded = false
                     onSetEditingTurn(null, null)
                     onSetAttachments(qm.attachments)
-                    onEvent(WorkbenchEvent.ComposerChanged(qm.text))
+                    onEvent(WorkbenchEvent.ComposerChanged(editableText))
                     composerExpanded = true
                 },
                 onSteerQueue = { qm -> onEvent(WorkbenchEvent.SteerMessage(qm.id)) },
@@ -2753,6 +2784,22 @@ private fun ChatSurface(
                 onOpenRunDetails = ::openRunIsland,
                 onApprove = { reqId -> onEvent(WorkbenchEvent.Approve(reqId)) },
                 onDeny = { reqId -> onEvent(WorkbenchEvent.Deny(reqId)) },
+                onSubmitElicitation = { approvalId, action, contentJson ->
+                    onEvent(WorkbenchEvent.SubmitElicitation(approvalId, action, contentJson))
+                },
+                pendingAsyncQuestions = pendingAsyncQuestions,
+                submittingAsyncQuestionIds = state.submittingAsyncQuestionIds,
+                asyncQuestionExpanded = asyncQuestionDockExpanded,
+                onExpandAsyncQuestions = {
+                    queueAutoCollapseGeneration = 0
+                    queueDockExpanded = false
+                    asyncQuestionDockExpanded = true
+                },
+                onCollapseAsyncQuestions = { asyncQuestionDockExpanded = false },
+                onSubmitAsyncQuestionReplies = { replies, note ->
+                    asyncQuestionDockExpanded = false
+                    onEvent(WorkbenchEvent.SubmitAsyncQuestionReplies(replies, note))
+                },
                 onReviewChanges = {
                     val firstChanged = changedFiles.firstOrNull()
                     if (firstChanged != null) onSetSelectedDiffFile(firstChanged) else openRunIsland()
@@ -2862,9 +2909,10 @@ private fun ChatSurface(
                 },
                 onStop = { onEvent(WorkbenchEvent.CancelRun) },
                 working = state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval ||
-                    state.approval != null || activeDecision?.takeUnless { it.isSubmitted } != null,
-                forceStopAction = state.runStatus == AgentRunStatus.WaitingApproval || state.approval != null ||
-                    activeDecision?.takeUnless { it.isSubmitted } != null,
+                    state.approval != null || (activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true),
+                forceStopAction = state.approval != null ||
+                    (activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true) ||
+                    (state.runStatus == AgentRunStatus.WaitingApproval && activeDecision == null),
                 onAddAttachment = { onSetComposerActionSheetOpen(true) },
                 enabled = (!state.isLoading || state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval) &&
                     !state.historyLoading,
@@ -2873,8 +2921,7 @@ private fun ChatSurface(
                     else AgentUiR.string.agentui_loading_conversation,
                 ),
                 actionEnabled = state.connection == AgentConnectionStatus.Connected && state.stopRequest == StopRequestState.None &&
-                    (state.runStatus == AgentRunStatus.WaitingApproval || state.approval != null ||
-                        activeDecision?.takeUnless { it.isSubmitted } != null ||
+                    (state.approval != null || (activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true) ||
                         (!state.approvalResolving && !state.runtimeResolving && state.runtimeModel != null && state.runtimeModelsError == null)),
                 attachmentsEnabled = true,
                 runtimeTool = state.runtimeTool,
@@ -3311,6 +3358,11 @@ private fun ChatSurface(
                                     sending = state.pendingTurn?.state == PendingTurnState.Sending,
                                     actionState = state.currentAction)
                             }} else null,
+                            submittingAsyncQuestionIds = state.submittingAsyncQuestionIds,
+                            onSubmitAsyncQuestionReplies = { replies, note ->
+                                onEvent(WorkbenchEvent.SubmitAsyncQuestionReplies(replies, note))
+                            },
+                            onQuickReplyAsyncFollowup = { _ -> composerExpanded = true },
                         )
                     }
 
@@ -3364,6 +3416,7 @@ private fun ChatSurface(
                                 onEvent(WorkbenchEvent.DecisionWriteInChanged(decision.id, text, questionIndex))
                             },
                             onDeny = { onEvent(WorkbenchEvent.Deny(decision.id)) },
+                            onSkip = { onEvent(WorkbenchEvent.SkipDecision(decision.id)) },
                         )
                     }
                 }

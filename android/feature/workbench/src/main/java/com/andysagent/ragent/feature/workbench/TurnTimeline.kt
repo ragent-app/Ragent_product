@@ -90,6 +90,8 @@ import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.designsystem.agentoPressScale
 import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.domain.FileUploadPhase
+import com.andysagent.ragent.core.model.AsyncQuestionReply
+import com.andysagent.ragent.core.protocol.QuestionReplyEnvelopeCodec
 import com.andysagent.ragent.core.timeline.FileChangeItem
 import com.andysagent.ragent.core.timeline.PlanStepItem
 import com.andysagent.ragent.core.timeline.TimelineItem
@@ -124,6 +126,9 @@ fun TurnTimelineView(
     onEditAdditional: ((String, String) -> Unit)? = null,
     collaborationActions: Map<String, CollaborationActionPresentation> = emptyMap(),
     onOpenCollaborator: (CollaborationActionPresentation) -> Unit = {},
+    submittingAsyncQuestionIds: Set<String> = emptySet(),
+    onSubmitAsyncQuestionReplies: ((List<AsyncQuestionReply>, String) -> Unit)? = null,
+    onQuickReplyAsyncFollowup: ((String) -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -136,7 +141,7 @@ fun TurnTimelineView(
             UserPromptBlock(
                 prompt = prompt,
                 onBranch = onBranch?.takeIf { prompt.seq > 0L }?.let { branch -> { branch(prompt.seq, "user-continue") } },
-                onEditResend = { onEditResend(prompt.text) },
+                onEditResend = { onEditResend(QuestionReplyEnvelopeCodec.formatEditableComposerText(prompt.text)) },
                 onRetry = onRetryPendingTurn,
                 showMessageActions = showMessageActions,
             )
@@ -144,8 +149,13 @@ fun TurnTimelineView(
 
         if (turn.entries.isNotEmpty() || runActive || runDuration != null) {
             // Keep the run's process in chronological order, with its final reply outside.
-            val (processEntries, outsideEntries) = if (runActive) turn.entries to emptyList()
-                else splitTurnEntries(turn.entries, allowTerminalFallback = runDuration != null && !turn.isLive)
+            val (processEntries, outsideEntries) = if (runActive) {
+                val protected = turn.entries.filter { it.isProtectedAsyncEntry() }
+                val process = turn.entries.filterNot { it.isProtectedAsyncEntry() }
+                process to protected
+            } else {
+                splitTurnEntries(turn.entries, allowTerminalFallback = runDuration != null && !turn.isLive)
+            }
             var expanded by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(runActive) }
             var userToggled by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(false) }
             LaunchedEffect(runActive) { if (!runActive && !userToggled) expanded = false }
@@ -161,9 +171,39 @@ fun TurnTimelineView(
                                         mimeType = att.mimeType ?: "application/octet-stream", sizeBytes = att.sizeBytes ?: 0L,
                                         previewUrl = att.downloadUrl ?: att.url) }),
                                 onBranch = onBranch?.takeIf { item.seq > 0L }?.let { branch -> { branch(item.seq, "user-continue") } },
-                                onEditResend = { item.requestId?.let { onEditAdditional?.invoke(it, item.text) } }, onRetry = onRetryPendingTurn,
+                                onEditResend = {
+                                    item.requestId?.let {
+                                        onEditAdditional?.invoke(it, QuestionReplyEnvelopeCodec.formatEditableComposerText(item.text))
+                                    }
+                                },
+                                onRetry = onRetryPendingTurn,
                                 showMessageActions = showMessageActions && item.requestId != null && onEditAdditional != null,
                             )
+                        } else if (item.asyncQuestions.isNotEmpty()) {
+                            AsyncQuestionsCardContent(
+                                questions = item.asyncQuestions,
+                                submittingIds = submittingAsyncQuestionIds,
+                                onSubmitReplies = { replies, note ->
+                                    onSubmitAsyncQuestionReplies?.invoke(replies, note)
+                                },
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        } else if (item.messageDelivery.equals("async", ignoreCase = true)) {
+                            AsyncFollowupMessageCard(
+                                text = item.text,
+                                onQuickReply = { onQuickReplyAsyncFollowup?.invoke(it) },
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            ) {
+                                ResultBlock(
+                                    message = item,
+                                    isLastTurn = isLastTurn && item.id == turn.agentMessages.lastOrNull { it.completed }?.id,
+                                    onBranch = onBranch?.takeIf { item.lastEventSeq > 0L }?.let { branch -> { branch(item.lastEventSeq, "assistant-continue") } },
+                                    onRestart = item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
+                                    onReport = onReport?.let { report -> { report(item.text) } },
+                                    showMessageActions = showMessageActions,
+                                    pauseStreaming = runWaitingApproval,
+                                )
+                            }
                         } else ResultBlock(item,
                             isLastTurn && item.id == turn.agentMessages.lastOrNull { it.completed }?.id,
                             onBranch?.takeIf { item.lastEventSeq > 0L }?.let { branch -> { branch(item.lastEventSeq, "assistant-continue") } },
@@ -344,29 +384,39 @@ fun UserPromptBlock(
                     contentColor = colors.primaryContent,
                     shadowElevation = 0.dp,
                 ) {
+                    val parsedEnvelope = remember(prompt.text) { QuestionReplyEnvelopeCodec.parse(prompt.text) }
                     Column(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (!isExpanded) {
-                                        Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(4.dp))
-                                    } else Modifier
-                                ),
-                        ) {
-                            AgentMarkdown(
-                                markdown = prompt.text,
-                                isStreaming = false,
-                                modifier = Modifier.fillMaxWidth().onSizeChanged { size ->
-                                    if (!isExpanded) isClipped = size.height >= collapsedHeightPx
-                                },
+                        if (parsedEnvelope.hasEnvelope) {
+                            ReplyEnvelopeChips(
+                                replies = parsedEnvelope.replies,
+                                malformed = parsedEnvelope.isMalformed,
                             )
-                            if (!isExpanded && isClipped) {
-                                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
-                                    .background(Brush.verticalGradient(listOf(Color.Transparent, bubbleColor))))
+                        }
+                        val markdownBody = if (parsedEnvelope.hasEnvelope) parsedEnvelope.trailingText else prompt.text
+                        if (markdownBody.isNotBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (!isExpanded) {
+                                            Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(4.dp))
+                                        } else Modifier
+                                    ),
+                            ) {
+                                AgentMarkdown(
+                                    markdown = markdownBody,
+                                    isStreaming = false,
+                                    modifier = Modifier.fillMaxWidth().onSizeChanged { size ->
+                                        if (!isExpanded) isClipped = size.height >= collapsedHeightPx
+                                    },
+                                )
+                                if (!isExpanded && isClipped) {
+                                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                                        .background(Brush.verticalGradient(listOf(Color.Transparent, bubbleColor))))
+                                }
                             }
                         }
 
@@ -408,7 +458,9 @@ fun UserPromptBlock(
                         text = stringResource(AgentUiR.string.agentui_copy),
                         onClick = {
                             menuExpanded = false
-                            clipboardManager.setText(AnnotatedString(prompt.text))
+                            clipboardManager.setText(
+                                AnnotatedString(QuestionReplyEnvelopeCodec.formatReadableCopyText(prompt.text)),
+                            )
                         },
                         leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Copy, null) },
                     )

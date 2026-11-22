@@ -223,7 +223,22 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   const message = JSON.parse(line);
   record(message);
   if (pendingApproval && message.id === pendingApproval.id && message.result) {
-    const accepted = message.result.decision === 'accept' || message.result.action === 'accept';
+    let accepted = false;
+    if (pendingApproval.kind === 'user_input') {
+      const answers = message.result.answers || {};
+      accepted = Array.isArray(answers.env?.answers)
+        && answers.env.answers.includes('Staging')
+        && answers.env.answers.includes('Prod')
+        && answers.api_secret?.answers?.[0] === 'top-secret-pw';
+    } else if (pendingApproval.kind === 'elicitation_form') {
+      accepted = message.result.action === 'accept'
+        && message.result.content?.summary === 'Patch bug'
+        && message.result.content?.apiToken === 'secret-form-tok';
+    } else if (pendingApproval.kind === 'elicitation_cancel') {
+      accepted = message.result.action === 'cancel';
+    } else {
+      accepted = message.result.decision === 'accept' || message.result.action === 'accept';
+    }
     if (!accepted) {
       send({ method: 'error', params: { error: { message: 'approval denied' }, turnId: pendingApproval.turnId } });
       process.exit(1);
@@ -349,6 +364,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   }
   if (message.method === 'turn/steer') {
     const turnId = message.params.expectedTurnId || longTurnId;
+    if (turnId === 'turn-req-app-server-steer-race') {
+      send({ id: message.id, error: { code: -32001, message: 'turn already completed' } });
+      finishTurn(turnId);
+      return;
+    }
     send({ id: message.id, result: { accepted: true } });
     finishTurn(turnId);
     return;
@@ -590,6 +610,111 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
 	      });
 	      return;
 	    }
+    if (message.params.clientUserMessageId === 'req-app-server-user-input-secret') {
+      pendingApproval = { id: 'user-input-secret-1', turnId, kind: 'user_input' };
+      send({
+        method: 'item/tool/requestUserInput',
+        id: pendingApproval.id,
+        params: {
+          threadId,
+          turnId,
+          itemId: 'item-ui-secret-1',
+          isBlocking: true,
+          questions: [
+            {
+              id: 'env',
+              header: 'Env',
+              question: 'Select target environments',
+              multiSelect: true,
+              options: [{ label: 'Staging' }, { label: 'Prod' }],
+            },
+            {
+              id: 'api_secret',
+              header: 'Secret',
+              question: 'Deploy API secret',
+              isSecret: true,
+            },
+          ],
+        },
+      });
+      return;
+    }
+    if (message.params.clientUserMessageId === 'req-app-server-user-input-resolved') {
+      send({
+        method: 'item/tool/requestUserInput',
+        id: 'user-input-resolved-1',
+        params: {
+          threadId,
+          turnId,
+          itemId: 'item-ui-resolved-1',
+          isBlocking: true,
+          questions: [{ id: 'confirm', question: 'Proceed?' }],
+        },
+      });
+      setTimeout(() => {
+        send({ method: 'serverRequest/resolved', params: { threadId, requestId: 'user-input-resolved-1' } });
+        finishTurn(turnId);
+      }, 150);
+      return;
+    }
+    if (message.params.clientUserMessageId === 'req-app-server-elicitation-form') {
+      pendingApproval = { id: 'elicit-form-1', turnId, kind: 'elicitation_form' };
+      send({
+        method: 'mcpServer/elicitation/request',
+        id: pendingApproval.id,
+        params: {
+          serverName: 'jira',
+          mode: 'openai/form',
+          threadId,
+          turnId,
+          message: 'Enter Jira token',
+          requestedSchema: {
+            type: 'object',
+            required: ['summary', 'apiToken'],
+            properties: {
+              summary: { type: 'string' },
+              apiToken: { type: 'string', format: 'password' },
+            },
+          },
+        },
+      });
+      return;
+    }
+    if (message.params.clientUserMessageId === 'req-app-server-elicitation-cancel') {
+      pendingApproval = { id: 'elicit-cancel-1', turnId, kind: 'elicitation_cancel' };
+      send({
+        method: 'mcpServer/elicitation/request',
+        id: pendingApproval.id,
+        params: {
+          serverName: 'github',
+          mode: 'url',
+          url: 'https://example.invalid/oauth',
+          threadId,
+          turnId,
+          message: 'Authorize GitHub',
+        },
+      });
+      return;
+    }
+    if (message.params.clientUserMessageId === 'req-app-server-steer-race') {
+      longTurnId = turnId;
+      send({
+        method: 'item/completed',
+        params: {
+          threadId,
+          turnId,
+          item: {
+            type: 'agentMessage',
+            id: 'msg-async-e2e',
+            phase: 'commentary',
+            delivery: 'async',
+            content: [{ type: 'text', text: 'Quick check before continuing' }],
+            questions: [{ title: 'Pick DB?', options: ['Postgres', 'SQLite'] }],
+          },
+        },
+      });
+      return;
+    }
     if (message.params.clientUserMessageId === 'req-app-server-plan') {
       pendingApproval = { id: 'approval-1', turnId };
       send({
@@ -1685,6 +1810,159 @@ try {
     'unsupported MCP discovery must abort before turn/start',
   );
 
+  // Track 1 E2E: item/tool/requestUserInput with multiSelect + isSecret redaction on disk
+  const uiSecretSession = await createSession(port, 'safe');
+  const uiSecretRun = await submitMessage(port, uiSecretSession.id, {
+    requestId: 'req-app-server-user-input-secret',
+    text: 'Ask for target env and secret token.',
+    tool: 'fake-codex-app-server',
+    model: 'fake-model',
+    permissionMode: 'on-request-danger-full-access',
+  });
+  const uiReq = await waitForApprovalRequest(port, uiSecretSession.id);
+  assert.equal(uiReq.kind, 'question');
+  assert.equal(uiReq.isBlocking, true);
+  assert.equal(uiReq.questions?.[1]?.isSecret, true);
+  const uiAnswerRes = await request(
+    port,
+    'POST',
+    `/api/runs/${uiSecretRun.id}/approvals/${encodeURIComponent(uiReq.approvalId)}`,
+    {
+      requestId: 'req-ui-secret-submit',
+      decision: 'approve_with_multi_choices',
+      multiChoices: [[0, 1], []],
+      customAnswers: ['', 'top-secret-pw'],
+    },
+  );
+  assert.equal(uiAnswerRes.status, 202);
+  assert.equal(uiAnswerRes.json.approval?.redacted, true);
+  assert.equal((await waitForRunTerminal(port, uiSecretRun.id)).state, 'completed');
+  const uiRunDir = join(home, '.ragent', 'data', 'chat-runs', uiSecretRun.id);
+  const uiStatusRaw = readFileSync(join(uiRunDir, 'status.json'), 'utf8');
+  const uiSpoolRaw = readFileSync(join(uiRunDir, 'spool.jsonl'), 'utf8');
+  assert.equal(uiStatusRaw.includes('top-secret-pw'), false, 'isSecret answer must not persist in status.json');
+  assert.equal(uiSpoolRaw.includes('top-secret-pw'), false, 'isSecret answer must not persist in spool.jsonl');
+  assert.match(uiStatusRaw, /\[redacted\]/);
+
+  // Track 1 E2E: serverRequest/resolved closes pending user input cleanly with cancelled response
+  const uiResolvedSession = await createSession(port, 'safe');
+  const uiResolvedRun = await submitMessage(port, uiResolvedSession.id, {
+    requestId: 'req-app-server-user-input-resolved',
+    text: 'Wait for provider serverRequest/resolved cancellation.',
+    tool: 'fake-codex-app-server',
+    model: 'fake-model',
+    permissionMode: 'on-request-danger-full-access',
+  });
+  assert.equal((await waitForRunTerminal(port, uiResolvedRun.id)).state, 'completed');
+  const resolvedEvents = await request(port, 'GET', `/api/sessions/${uiResolvedSession.id}/events`);
+  const cancelledEvent = (resolvedEvents.json?.events || []).find((e) => e.type === 'approval_response' && e.source === 'codex-server-request-resolved');
+  assert.ok(cancelledEvent, 'serverRequest/resolved emits synthetic cancelled approval_response');
+  assert.equal(cancelledEvent.decision, 'cancelled');
+
+  // Track 3 E2E: structured openai/form redacts password & cancel sends { action: 'cancel' }
+  const elicitFormSession = await createSession(port, 'safe');
+  const elicitFormRun = await submitMessage(port, elicitFormSession.id, {
+    requestId: 'req-app-server-elicitation-form',
+    text: 'Exercise structured elicitation form submission.',
+    tool: 'fake-codex-app-server',
+    model: 'fake-model',
+    permissionMode: 'on-request-danger-full-access',
+  });
+  const formReq = await waitForApprovalRequest(port, elicitFormSession.id);
+  assert.equal(formReq.kind, 'permissions');
+  assert.equal(formReq.elicitation?.mode, 'openai/form');
+  const formSubmitRes = await request(
+    port,
+    'POST',
+    `/api/runs/${elicitFormRun.id}/approvals/${encodeURIComponent(formReq.approvalId)}`,
+    {
+      requestId: 'req-elicit-form-submit',
+      decision: 'approve',
+      elicitationResponse: { action: 'accept', content: { summary: 'Patch bug', apiToken: 'secret-form-tok' } },
+    },
+  );
+  assert.equal(formSubmitRes.status, 202);
+  assert.equal((await waitForRunTerminal(port, elicitFormRun.id)).state, 'completed');
+  const formRunDir = join(home, '.ragent', 'data', 'chat-runs', elicitFormRun.id);
+  assert.equal(readFileSync(join(formRunDir, 'status.json'), 'utf8').includes('secret-form-tok'), false);
+  assert.equal(readFileSync(join(formRunDir, 'spool.jsonl'), 'utf8').includes('secret-form-tok'), false);
+
+  const elicitCancelSession = await createSession(port, 'safe');
+  const elicitCancelRun = await submitMessage(port, elicitCancelSession.id, {
+    requestId: 'req-app-server-elicitation-cancel',
+    text: 'Exercise elicitation cancel action.',
+    tool: 'fake-codex-app-server',
+    model: 'fake-model',
+    permissionMode: 'on-request-danger-full-access',
+  });
+  const cancelReq = await waitForApprovalRequest(port, elicitCancelSession.id);
+  assert.equal(cancelReq.elicitation?.mode, 'url');
+  const cancelSubmitRes = await request(
+    port,
+    'POST',
+    `/api/runs/${elicitCancelRun.id}/approvals/${encodeURIComponent(cancelReq.approvalId)}`,
+    { requestId: 'req-elicit-cancel-submit', decision: 'cancel' },
+  );
+  assert.equal(cancelSubmitRes.status, 202);
+  assert.equal((await waitForRunTerminal(port, elicitCancelRun.id)).state, 'completed');
+
+  // Track 2 E2E: async agentMessage + steerIfRunning losing turn-end race requeues without duplicating user bubble
+  const steerRaceSession = await createSession(port, 'recommended');
+  const steerRaceRun = await submitMessage(port, steerRaceSession.id, {
+    requestId: 'req-app-server-steer-race',
+    text: 'Emit async question and lose turn/steer race.',
+    tool: 'fake-codex-app-server',
+    model: 'fake-model',
+  });
+  await waitFor(async () => {
+    const res = await request(port, 'GET', `/api/sessions/${steerRaceSession.id}/events`);
+    return (res.json?.events || []).some((e) => e.type === 'message' && Array.isArray(e.asyncQuestions) && e.asyncQuestions.length === 1);
+  }, 'async question message arrival');
+  const qItemId = JSON.stringify(['request_user_input_async', 'msg-async-e2e', 0]);
+  const steerReplyRes = await request(port, 'POST', `/api/sessions/${steerRaceSession.id}/messages`, {
+    requestId: 'req-steer-race-reply',
+    text: '',
+    steerIfRunning: true,
+    asyncQuestionReplies: [{ questionItemId: qItemId, question: 'Pick DB?', answer: 'Postgres' }],
+  });
+  assert.equal(steerReplyRes.status, 202);
+  assert.equal(steerReplyRes.json?.steered, true);
+  assert.equal((await waitForRunTerminal(port, steerRaceRun.id)).state, 'completed');
+  try {
+    await waitFor(() => {
+      try {
+        return readRecordedMessages(recordPath).some((m) => (
+          m.method === 'turn/start' && m.params?.clientUserMessageId === 'req-steer-race-reply'
+        ));
+      } catch {
+        return false;
+      }
+    }, 'requeued undelivered steer follow-up turn/start');
+  } catch (err) {
+    const out = server.getOutput?.() || {};
+    const sess = await request(port, 'GET', `/api/sessions/${steerRaceSession.id}`).catch(() => null);
+    const r = await request(port, 'GET', `/api/runs/${steerRaceRun.id}`).catch(() => null);
+    err.message += `\nsteerRaceRun: ${JSON.stringify(r?.json?.run?.appServerSteerQueue)}\nsession: ${JSON.stringify(sess?.json?.session)}\nrecorded turn/start: ${JSON.stringify(readRecordedMessages(recordPath).filter((m) => m.method === 'turn/start' || m.method === 'turn/steer'))}\nstderr tail: ${(out.stderr || '').slice(-3000)}`;
+    throw err;
+  }
+  await waitFor(async () => {
+    const res = await request(port, 'GET', `/api/sessions/${steerRaceSession.id}`);
+    const s = res.json?.session;
+    if (!s || s.activeRunId || (s.followUpQueueCount || 0) > 0) return false;
+    const ev = await request(port, 'GET', `/api/sessions/${steerRaceSession.id}/events`);
+    return (ev.json?.events || []).filter((e) => e.type === 'message' && e.role === 'assistant' && e.content === 'fake reply').length >= 2;
+  }, 'requeued undelivered steer follow-up completion');
+  const finalRaceEvents = await request(port, 'GET', `/api/sessions/${steerRaceSession.id}/events`);
+  const allRaceEvents = finalRaceEvents.json?.events || [];
+  assert.equal(
+    allRaceEvents.filter((e) => e.type === 'message' && e.role === 'user' && e.requestId === 'req-steer-race-reply').length,
+    1,
+    'requeued undelivered steer must not duplicate the user chat message',
+  );
+  const answeredAsyncMsg = allRaceEvents.find((e) => e.type === 'message' && Array.isArray(e.asyncQuestions));
+  assert.equal(answeredAsyncMsg?.asyncQuestions?.[0]?.status, 'answered');
+  assert.equal(answeredAsyncMsg?.asyncQuestions?.[0]?.answeredText, 'Postgres');
+
   await stopServer(server);
   server = await startServer({
     home,
@@ -1816,6 +2094,64 @@ try {
   assert.equal(terminalStartupTimeout.state, 'failed');
   assert.match(terminalStartupTimeout.failureReason || '', /startup timed out/);
   assert.equal(terminalStartupTimeout.result?.providerStage, 'failed');
+
+  // Fast in-process sidecar unit checks: full-auto isBlocking branching & cross-process resume dedup
+  const unitRoot = join(home, 'unit-sidecar');
+  mkdirSync(unitRoot, { recursive: true });
+  process.env.RAGENT_INSTANCE_ROOT = unitRoot;
+  const { createRun, getRun } = await import('../chat/runs.mjs');
+  const { createCodexAppServerRunState, trackCodexAppServerApprovalRequest } = await import('../chat/runner-sidecar.mjs');
+  const priorKey = JSON.stringify(['thread-res', 'turn-res', 'item-res']);
+
+  const nonBlockingAutoRun = await createRun({
+    status: { sessionId: 'unit-s1', requestId: 'unit-r1', state: 'running', tool: 'codex', runtimeFamily: 'codex-app-server-json' },
+    manifest: { sessionId: 'unit-s1', requestId: 'unit-r1', folder: workDir, tool: 'codex', runtimeFamily: 'codex-app-server-json', prompt: 'x', options: {} },
+  });
+  const autoSent = [];
+  const autoProc = { stdin: { writable: true, write(line) { autoSent.push(JSON.parse(line)); return true; } } };
+  const autoState = await createCodexAppServerRunState({
+    manifest: { folder: workDir, options: { riskMode: 'full-auto', priorResolvedUserInputKeys: [priorKey] } },
+    cwd: workDir,
+    riskContextValid: true,
+    riskContext: { platform: process.platform, trustedWorkspaceRoot: workDir, protectedRoots: [] },
+  });
+  autoState.threadId = 'thread-res';
+  autoState.turnId = 'turn-res';
+  autoState.startedTurn = true;
+  await trackCodexAppServerApprovalRequest(nonBlockingAutoRun.id, autoState, {
+    id: 801,
+    method: 'item/tool/requestUserInput',
+    params: { threadId: 'thread-res', turnId: 'turn-res', itemId: 'item-nonblocking', isBlocking: false, questions: [{ id: 'q1', question: 'Opt?' }] },
+  }, autoProc);
+  assert.deepEqual(autoSent[0], { id: 801, result: { answers: {} } }, 'full-auto auto-resolves non-blocking user input empty');
+
+  await trackCodexAppServerApprovalRequest(nonBlockingAutoRun.id, autoState, {
+    id: 802,
+    method: 'item/tool/requestUserInput',
+    params: { threadId: 'thread-res', turnId: 'turn-res', itemId: 'item-blocking', isBlocking: true, questions: [{ id: 'q2', question: 'Required?' }] },
+  }, autoProc);
+  assert.equal(autoSent.length, 1, 'full-auto interactive session parks isBlocking:true for owner instead of auto-resolving');
+  assert.equal((await getRun(nonBlockingAutoRun.id)).appServerPendingApprovals?.length, 1);
+
+  await trackCodexAppServerApprovalRequest(nonBlockingAutoRun.id, autoState, {
+    id: 803,
+    method: 'item/tool/requestUserInput',
+    params: { threadId: 'thread-res', turnId: 'turn-res', itemId: 'item-res', isBlocking: true, questions: [{ id: 'q3', question: 'Prior?' }] },
+  }, autoProc);
+  assert.deepEqual(autoSent[1], { id: 803, result: { answers: {} } }, 'priorResolvedUserInputKeys suppresses replayed user input across resume');
+
+  const headlessState = await createCodexAppServerRunState({
+    manifest: { folder: workDir, protectedDelegatedRun: true, options: { riskMode: 'full-auto' } },
+    cwd: workDir,
+    riskContextValid: true,
+    riskContext: { platform: process.platform, trustedWorkspaceRoot: workDir, protectedRoots: [] },
+  });
+  await trackCodexAppServerApprovalRequest(nonBlockingAutoRun.id, headlessState, {
+    id: 804,
+    method: 'item/tool/requestUserInput',
+    params: { threadId: 't-head', turnId: 'turn-head', itemId: 'item-head', isBlocking: true, questions: [{ id: 'q4', question: 'Headless?' }] },
+  }, autoProc);
+  assert.deepEqual(autoSent[2], { id: 804, result: { answers: {} } }, 'headless unattended resolves blocking user input empty');
 
   console.log('test-codex-app-server-sidecar: ok');
 } finally {

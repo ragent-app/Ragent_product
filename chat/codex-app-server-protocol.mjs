@@ -22,6 +22,7 @@ const CODEX_APP_SERVER_APPROVAL_METHOD_KINDS = Object.freeze({
   'item/fileChange/requestApproval': 'file_change',
   'item/permissions/requestApproval': 'permissions',
   'mcpServer/elicitation/request': 'permissions',
+  'item/tool/requestUserInput': 'question',
 });
 
 export function normalizeCodexAppServerPlanAction(value) {
@@ -169,6 +170,9 @@ export function buildCodexAppServerInitializeMessage() {
       },
       capabilities: {
         experimentalApi: true,
+        extensions: {
+          'openai/form': {},
+        },
       },
     },
   };
@@ -641,12 +645,84 @@ export function evaluateCodexAppServerMcpReadiness({
   };
 }
 
+function elicitationSchemaHasSecretFields(schema) {
+  if (!isRecord(schema) || !isRecord(schema.properties)) return false;
+  return Object.values(schema.properties).some((prop) => (
+    isRecord(prop) && (trimString(prop.format).toLowerCase() === 'password' || prop.writeOnly === true)
+  ));
+}
+
+export function classifyCodexMcpElicitation(params = {}) {
+  const input = isRecord(params) ? params : {};
+  const mode = trimString(input.mode);
+  const serverName = trimString(input.serverName || input.server_name);
+  const codexApprovalKind = trimString(input._meta?.codex_approval_kind);
+  const schema = isRecord(input.requestedSchema) ? input.requestedSchema : null;
+  const hasProperties = Boolean(schema && isRecord(schema.properties) && Object.keys(schema.properties).length > 0);
+  const hasRequired = Boolean(schema && Array.isArray(schema.required) && schema.required.length > 0);
+  const hasNonEmptySchema = hasProperties || hasRequired;
+  const isCompactMcpToolCall = codexApprovalKind === 'mcp_tool_call' && (!mode || mode === 'form') && !hasNonEmptySchema;
+  const isFormMode = mode === 'form' || mode === 'openai/form' || mode === 'openaiForm';
+  const isUrlMode = mode === 'url';
+  const isUserVerificationMode = mode === 'openai/userVerification';
+  const isStructured = !isCompactMcpToolCall && (
+    isUrlMode
+    || isUserVerificationMode
+    || mode === 'openai/form'
+    || mode === 'openaiForm'
+    || (mode === 'form' && hasNonEmptySchema)
+    || (Boolean(mode) && mode !== 'form')
+  );
+  const message = trimString(input.message || input.reason || input.request?.message || input.request?.prompt);
+  const elicitationId = trimString(input.elicitationId || input.elicitation_id);
+  const url = trimString(input.url);
+  const title = trimString(input.title);
+  const description = trimString(input.description);
+  const challenge = trimString(input.challenge);
+  const elicitation = isStructured ? {
+    mode: mode || 'unknown',
+    ...(serverName ? { serverName } : {}),
+    ...(elicitationId ? { elicitationId } : {}),
+    ...(message ? { message } : {}),
+    ...(schema ? { requestedSchema: schema } : {}),
+    ...(url ? { url } : {}),
+    ...(codexApprovalKind ? { codexApprovalKind } : {}),
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(challenge ? { challenge } : {}),
+  } : null;
+
+  return {
+    mode,
+    serverName,
+    codexApprovalKind,
+    requestedSchema: schema,
+    hasNonEmptySchema,
+    isCompactMcpToolCall,
+    isFormMode,
+    isUrlMode,
+    isUserVerificationMode,
+    isStructured,
+    hasSecretFields: elicitationSchemaHasSecretFields(schema),
+    elicitation,
+  };
+}
+
 export function readCodexAppServerApprovalRequest(message) {
   if (!message || typeof message !== 'object' || !hasJsonRpcRequestId(message)) return null;
   const method = trimString(message.method);
   const kind = CODEX_APP_SERVER_APPROVAL_METHOD_KINDS[method] || '';
   if (!kind) return null;
   const providerRequestId = message.id;
+  const params = message.params && typeof message.params === 'object' ? message.params : {};
+  const isUserInput = method === 'item/tool/requestUserInput';
+  const questions = isUserInput && Array.isArray(params.questions) ? params.questions : [];
+  const isBlocking = isUserInput
+    ? (typeof params.isBlocking === 'boolean' ? params.isBlocking : true)
+    : undefined;
+  const threadId = trimString(params.threadId || params.thread_id || params.conversationId);
+  const turnId = trimString(params.turnId || params.turn_id);
+  const itemId = trimString(params.itemId || params.item_id || params.callId || params.call_id);
   return {
     approvalId: `${method}:${String(providerRequestId)}`,
     providerRequestId,
@@ -655,8 +731,16 @@ export function readCodexAppServerApprovalRequest(message) {
     kind,
     requestClass: kind === 'command' ? 'command_invocation'
       : kind === 'file_change' ? 'file_change'
-        : method === 'mcpServer/elicitation/request' ? 'mcp_elicitation' : 'capability_grant',
-    params: message.params && typeof message.params === 'object' ? message.params : {},
+        : isUserInput ? 'user_input'
+          : method === 'mcpServer/elicitation/request' ? 'mcp_elicitation' : 'capability_grant',
+    ...(isUserInput ? {
+      questions,
+      isBlocking,
+      ...(threadId ? { threadId } : {}),
+      ...(turnId ? { turnId } : {}),
+      ...(itemId ? { itemId } : {}),
+    } : {}),
+    params,
     request: message,
   };
 }
@@ -743,7 +827,66 @@ function buildPermissionsResponse(decision, params = {}) {
   };
 }
 
-export function buildCodexAppServerApprovalResponseMessage(request, decision) {
+function buildUserInputAnswersPayload(params = {}, decision, options = {}) {
+  const normalized = normalizeCodexAppServerApprovalDecision(decision);
+  if (normalized === 'deny' || normalized === 'cancel' || options?.emptySkip === true) {
+    return { answers: {} };
+  }
+  if (isRecord(options?.answers)) {
+    const answers = {};
+    for (const [rawId, entry] of Object.entries(options.answers)) {
+      const qid = trimString(rawId);
+      if (!qid) continue;
+      if (Array.isArray(entry)) {
+        const values = entry.map((v) => String(v ?? '').trim()).filter(Boolean);
+        if (values.length > 0) answers[qid] = { answers: values };
+      } else if (isRecord(entry) && Array.isArray(entry.answers)) {
+        const values = entry.answers.map((v) => String(v ?? '').trim()).filter(Boolean);
+        if (values.length > 0) answers[qid] = { answers: values };
+      } else if (typeof entry === 'string' && entry.trim()) {
+        answers[qid] = { answers: [entry.trim()] };
+      }
+    }
+    return { answers };
+  }
+
+  const questions = Array.isArray(params?.questions) ? params.questions : [];
+  const multiChoices = Array.isArray(options?.multiChoices) ? options.multiChoices : null;
+  const choices = Array.isArray(options?.choices) ? options.choices : [];
+  const customAnswers = Array.isArray(options?.customAnswers) ? options.customAnswers : [];
+  const singleCustomAnswer = typeof options?.customAnswer === 'string' ? options.customAnswer : '';
+  const answers = {};
+
+  for (let index = 0; index < questions.length; index += 1) {
+    const q = questions[index];
+    if (!q || typeof q !== 'object') continue;
+    const qid = trimString(q.id || q.key || q.name) || `question_${index + 1}`;
+    const qOptions = Array.isArray(q.options) ? q.options : [];
+    const selectedIndices = Array.isArray(multiChoices?.[index])
+      ? multiChoices[index]
+      : (Number.isInteger(choices[index]) && choices[index] >= 0 ? [choices[index]] : []);
+    const selectedLabels = [];
+    for (const optIdx of selectedIndices) {
+      if (!Number.isInteger(optIdx) || optIdx < 0 || optIdx >= qOptions.length) continue;
+      const opt = qOptions[optIdx];
+      const label = typeof opt === 'string'
+        ? trimString(opt)
+        : trimString(opt?.label || opt?.value || opt?.title);
+      if (label) selectedLabels.push(label);
+    }
+    const rawCustom = typeof customAnswers[index] === 'string'
+      ? customAnswers[index]
+      : (questions.length === 1 ? singleCustomAnswer : '');
+    const customText = rawCustom.trim();
+    const combined = [...selectedLabels, ...(customText ? [customText] : [])];
+    if (combined.length > 0) {
+      answers[qid] = { answers: combined };
+    }
+  }
+  return { answers };
+}
+
+export function buildCodexAppServerApprovalResponseMessage(request, decision, options = {}) {
   const approval = readCodexAppServerApprovalRequest(request?.request || request) || request;
   const method = trimString(approval?.providerMethod || approval?.method);
   const id = Object.prototype.hasOwnProperty.call(approval || {}, 'providerRequestId')
@@ -767,11 +910,21 @@ export function buildCodexAppServerApprovalResponseMessage(request, decision) {
     case 'item/permissions/requestApproval':
       result = buildPermissionsResponse(decision, params);
       break;
+    case 'item/tool/requestUserInput':
+      result = buildUserInputAnswersPayload(params, decision, options);
+      break;
     case 'mcpServer/elicitation/request': {
       const normalized = normalizeCodexAppServerApprovalDecision(decision);
-      result = normalized === 'approve' || normalized === 'approve_for_session'
-        ? { action: 'accept', content: {} }
-        : { action: 'decline' };
+      if (normalized === 'approve' || normalized === 'approve_for_session') {
+        const content = isRecord(options?.elicitationContent)
+          ? options.elicitationContent
+          : (isRecord(options?.content) ? options.content : {});
+        result = { action: 'accept', content };
+      } else if (normalized === 'cancel') {
+        result = { action: 'cancel' };
+      } else {
+        result = { action: 'decline' };
+      }
       break;
     }
     default:

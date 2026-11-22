@@ -30,6 +30,8 @@ import com.andysagent.ragent.core.model.AppLanguage
 import com.andysagent.ragent.core.model.AppTheme
 import com.andysagent.ragent.core.model.Approval
 import com.andysagent.ragent.core.model.ApprovalActionDecision
+import com.andysagent.ragent.core.model.ApprovalOption
+import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.Computer
 import com.andysagent.ragent.core.model.OtherDeviceProject
 import com.andysagent.ragent.core.model.Project
@@ -172,6 +174,8 @@ data class WorkbenchUiState(
     val editingTurnText: String? = null,
     val queuedMessages: List<QueuedMessageUiState> = emptyList(),
     val activeDecision: DecisionQuestionUiState? = null,
+    val submittingAsyncQuestionIds: Set<String> = emptySet(),
+    val optimisticallyAnsweredAsyncQuestions: Map<String, String> = emptyMap(),
     val runSheetOpen: Boolean = false,
     val selectedDiffFile: FileDiffDetail? = null,
     val planMode: Boolean = false,
@@ -296,6 +300,9 @@ sealed interface WorkbenchEvent {
     data class SelectDecisionOption(val questionId: String, val optionIndex: Int, val questionIndex: Int = 0) : WorkbenchEvent
     data class DecisionWriteInChanged(val questionId: String, val text: String, val questionIndex: Int = 0) : WorkbenchEvent
     data class SubmitDecision(val questionId: String) : WorkbenchEvent
+    data class SkipDecision(val questionId: String) : WorkbenchEvent
+    data class SubmitAsyncQuestionReplies(val replies: List<AsyncQuestionReply>, val trailingText: String = "") : WorkbenchEvent
+    data class SubmitElicitation(val approvalId: String, val action: String, val contentJson: String? = null) : WorkbenchEvent
     data class SelectApprovalAction(val approvalId: String, val actionId: String, val selected: Boolean) : WorkbenchEvent
     data class Approve(val approvalId: String) : WorkbenchEvent
     data class Deny(val approvalId: String) : WorkbenchEvent
@@ -512,6 +519,8 @@ data class ChatUiState(
     val editingTurnText: String? = null,
     val queuedMessages: List<QueuedMessageUiState> = emptyList(),
     val activeDecision: DecisionQuestionUiState? = null,
+    val submittingAsyncQuestionIds: Set<String> = emptySet(),
+    val optimisticallyAnsweredAsyncQuestions: Map<String, String> = emptyMap(),
     val runSheetOpen: Boolean = false,
     val selectedDiffFile: FileDiffDetail? = null,
     val planMode: Boolean = false,
@@ -628,6 +637,9 @@ sealed interface ChatEvent {
     data class SelectDecisionOption(val questionId: String, val optionIndex: Int, val questionIndex: Int = 0) : ChatEvent
     data class DecisionWriteInChanged(val questionId: String, val text: String, val questionIndex: Int = 0) : ChatEvent
     data class SubmitDecision(val questionId: String) : ChatEvent
+    data class SkipDecision(val questionId: String) : ChatEvent
+    data class SubmitAsyncQuestionReplies(val replies: List<AsyncQuestionReply>, val trailingText: String = "") : ChatEvent
+    data class SubmitElicitation(val approvalId: String, val action: String, val contentJson: String? = null) : ChatEvent
 
     // Run Sheet & Diff
     data object OpenRunSheet : ChatEvent
@@ -688,6 +700,11 @@ private fun Approval.toDecisionQuestionUiState(): DecisionQuestionUiState? {
         isMultiSelect = question?.isMultiSelect ?: isMultiSelect,
         recommendedIndex = null,
         questionGroups = questions,
+        header = question?.header,
+        questionOptions = question?.options ?: labels.map { ApprovalOption(it) },
+        isOther = question?.isOther ?: true,
+        isSecret = question?.isSecret ?: false,
+        isBlocking = isBlocking,
     )
 }
 
@@ -938,6 +955,8 @@ class ChatViewModel(
                             acceptedTurns = emptyList(),
                             isLoading = false,
                             activeDecision = null,
+                            submittingAsyncQuestionIds = emptySet(),
+                            optimisticallyAnsweredAsyncQuestions = emptyMap(),
                             approval = null,
                             resolvingApprovalId = null,
                             approvalOutcomeUnknownId = null,
@@ -1341,10 +1360,16 @@ class ChatViewModel(
                             customByQuestion = current.customByQuestion + (event.questionIndex to event.text),
                             selectedByQuestion = if (event.text.isNotEmpty()) current.selectedByQuestion - event.questionIndex else current.selectedByQuestion,
                         ))
-                    } else copy(activeDecision = current.copy(writeInText = event.text))
+                    } else copy(activeDecision = current.copy(
+                        writeInText = event.text,
+                        selectedIndices = if (!current.isMultiSelect && event.text.isNotEmpty()) emptySet() else current.selectedIndices,
+                    ))
                 } else this
             }
             is ChatEvent.SubmitDecision -> submitDecision(event.questionId)
+            is ChatEvent.SkipDecision -> skipDecision(event.questionId)
+            is ChatEvent.SubmitAsyncQuestionReplies -> submitAsyncQuestionReplies(event.replies, event.trailingText)
+            is ChatEvent.SubmitElicitation -> submitElicitation(event.approvalId, event.action, event.contentJson)
 
             // Run Sheet & Diff
             ChatEvent.OpenRunSheet -> updateState { copy(runSheetOpen = true) }
@@ -1931,7 +1956,14 @@ class ChatViewModel(
         } else {
             setOf(optionIndex)
         }
-        updateState { copy(activeDecision = current.copy(selectedIndices = newIndices)) }
+        updateState {
+            copy(
+                activeDecision = current.copy(
+                    selectedIndices = newIndices,
+                    writeInText = if (!current.isMultiSelect) "" else current.writeInText,
+                ),
+            )
+        }
     }
 
     private fun submitDecision(questionId: String) {
@@ -2085,6 +2117,134 @@ class ChatViewModel(
         }
     }
 
+    private fun skipDecision(questionId: String) {
+        val currentDecision = mutableState.value.activeDecision ?: return
+        if (currentDecision.id != questionId || currentDecision.isSubmitted || currentDecision.isSubmitting || currentDecision.isBlocking) return
+        val sessionId = mutableState.value.sessionId ?: return
+        val fixed = selectedRepository ?: return
+        if (fixed !== activeRepository() || currentDecision.approvalId in uncertainApprovals[fixed to sessionId].orEmpty()) return
+        val generation = sessionGeneration
+
+        updateState { copy(activeDecision = currentDecision.copy(isSubmitting = true, submissionError = null), error = null) }
+        viewModelScope.launch {
+            val outcome = ApprovalResolutionCoordinator(fixed).skipNonBlockingQuestion(sessionId, currentDecision.approvalId)
+            if (outcome is ApprovalResolutionCoordinator.Outcome.Failed && outcome.outcomeUnknown) {
+                uncertainApprovals.getOrPut(fixed to sessionId) { mutableSetOf() }.add(currentDecision.approvalId)
+            }
+            if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation) || mutableState.value.activeDecision?.id != questionId) return@launch
+            when (outcome) {
+                ApprovalResolutionCoordinator.Outcome.Submitted -> {
+                    updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false, isSubmitted = true)) }
+                    launch { refreshSession(sessionId, generation) }
+                }
+                ApprovalResolutionCoordinator.Outcome.Stale -> updateState {
+                    copy(
+                        activeDecision = activeDecision?.takeUnless { it.id == questionId },
+                        approval = approval?.takeUnless { it.id == questionId },
+                        resolvingApprovalId = resolvingApprovalId?.takeUnless { it == questionId },
+                        error = null,
+                    )
+                }
+                is ApprovalResolutionCoordinator.Outcome.Failed -> {
+                    if (outcome.outcomeUnknown) {
+                        updateState { copy(approvalOutcomeUnknownId = currentDecision.approvalId, error = null) }
+                        launch { refreshSession(sessionId, generation) }
+                    } else {
+                        updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false, submissionError = outcome.message)) }
+                    }
+                }
+                else -> updateState { copy(activeDecision = currentDecision.copy(isSubmitting = false)) }
+            }
+        }
+    }
+
+    private fun submitElicitation(approvalId: String, action: String, contentJson: String?) {
+        val current = mutableState.value
+        val sessionId = current.sessionId ?: return
+        val fixed = selectedRepository ?: return
+        if (fixed !== activeRepository() || approvalId in uncertainApprovals[fixed to sessionId].orEmpty()) return
+        if (current.approval?.id != approvalId || current.resolvingApprovalId != null) return
+        val generation = sessionGeneration
+
+        updateState { copy(resolvingApprovalId = approvalId, error = null) }
+        viewModelScope.launch {
+            val outcome = ApprovalResolutionCoordinator(fixed).resolveElicitation(sessionId, approvalId, action, contentJson)
+            if (outcome is ApprovalResolutionCoordinator.Outcome.Failed && outcome.outcomeUnknown) {
+                uncertainApprovals.getOrPut(fixed to sessionId) { mutableSetOf() }.add(approvalId)
+            }
+            if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
+            when (outcome) {
+                ApprovalResolutionCoordinator.Outcome.Submitted,
+                ApprovalResolutionCoordinator.Outcome.Stale,
+                -> {
+                    updateState {
+                        copy(
+                            approval = approval?.takeUnless { it.id == approvalId },
+                            resolvingApprovalId = resolvingApprovalId?.takeUnless { it == approvalId },
+                        )
+                    }
+                    launch { refreshSession(sessionId, generation) }
+                }
+                is ApprovalResolutionCoordinator.Outcome.Failed -> {
+                    if (outcome.outcomeUnknown) {
+                        updateState { copy(resolvingApprovalId = null, approvalOutcomeUnknownId = approvalId, error = null) }
+                        launch { refreshSession(sessionId, generation) }
+                    } else {
+                        updateState { copy(resolvingApprovalId = null, error = outcome.message) }
+                    }
+                }
+                else -> updateState { copy(resolvingApprovalId = null) }
+            }
+        }
+    }
+
+    private fun submitAsyncQuestionReplies(replies: List<AsyncQuestionReply>, trailingText: String) {
+        if (replies.isEmpty()) return
+        val current = mutableState.value
+        val sessionId = current.sessionId ?: return
+        val fixed = selectedRepository ?: return
+        if (fixed !== activeRepository()) return
+        val generation = sessionGeneration
+        val ids = replies.mapNotNull { it.questionItemId.takeIf(String::isNotBlank) }.toSet()
+        if (ids.any { it in current.submittingAsyncQuestionIds }) return
+
+        val selection = RuntimeSelection(
+            tool = current.runtimeTool,
+            providerProfile = current.runtimeProvider,
+            model = current.runtimeModel,
+            effort = current.selectedEffort,
+            serviceTier = current.serviceTier,
+            interactionMode = if (current.planMode) "plan" else "agent",
+        )
+        updateState { copy(submittingAsyncQuestionIds = submittingAsyncQuestionIds + ids, error = null) }
+        viewModelScope.launch {
+            try {
+                fixed.sendAsyncQuestionReplies(
+                    sessionId = sessionId,
+                    replies = replies,
+                    trailingText = trailingText,
+                    selection = selection,
+                    steerIfRunning = true,
+                )
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
+                updateState {
+                    copy(
+                        submittingAsyncQuestionIds = submittingAsyncQuestionIds - ids,
+                        optimisticallyAnsweredAsyncQuestions = optimisticallyAnsweredAsyncQuestions +
+                            replies.associate { it.questionItemId to it.answer },
+                    )
+                }
+                launch { refreshSession(sessionId, generation) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (selectedRepository !== fixed || !isCurrentSession(sessionId, generation)) return@launch
+                updateState { copy(submittingAsyncQuestionIds = submittingAsyncQuestionIds - ids) }
+                showError(error, "Async reply could not be sent")
+            }
+        }
+    }
+
     private fun createSession(projectId: String?) {
         val fixed = activeRepository() ?: return
         saveSelectedDraft()
@@ -2119,6 +2279,8 @@ class ChatViewModel(
                 isLoading = false,
                 queuedMessages = emptyList(),
                 activeDecision = null,
+                submittingAsyncQuestionIds = emptySet(),
+                optimisticallyAnsweredAsyncQuestions = emptyMap(),
                 attachments = emptyList(),
                 editingTurnId = null,
                 editingTurnText = null,
@@ -2213,6 +2375,8 @@ class ChatViewModel(
                 isLoading = false,
                 queuedMessages = emptyList(),
                 activeDecision = null,
+                submittingAsyncQuestionIds = emptySet(),
+                optimisticallyAnsweredAsyncQuestions = emptyMap(),
                 attachments = emptyList(),
                 editingTurnId = null,
                 editingTurnText = null,
@@ -4000,6 +4164,8 @@ private fun Approval.toUiState(): PermissionRequestUiState = PermissionRequestUi
     permissionsJson = permissionsJson,
     explanation = explanation?.toUiState(),
     executorUnavailableReasonCode = executorUnavailableReasonCode,
+    isBlocking = isBlocking,
+    elicitation = elicitation,
     actions = actions.map { action ->
         ApprovalActionUiState(
             id = action.id,

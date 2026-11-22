@@ -428,6 +428,7 @@
              the stack is the column that matches the message column width on
              desktop, so the FAB stays aligned with the transcript content. -->
         <button type="button" class="scroll-to-bottom-fab" id="scrollToBottomFab" aria-label="Scroll to latest message" data-i18n-aria-label="messages.scrollToLatest"><svg class="rl-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="async-questions-panel" id="asyncQuestionsPanel" hidden></div>
         <div class="queued-panel" id="queuedPanel"></div>
         <div class="input-config-row" id="inputConfigRow">
           <div class="input-config-group left">
@@ -907,6 +908,7 @@
 <script src="chat/layout-tooling.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/tooling.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/realtime.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
+<script src="chat/async-questions-ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/realtime-render.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/ui.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>
 <script src="chat/timeline-runtime.js?v={{ASSET_VERSION}}" nonce="{{NONCE}}"></script>

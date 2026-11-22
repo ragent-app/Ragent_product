@@ -558,4 +558,34 @@
     <string name="approval_safer_target">继续前确认目标的完整解析结果。</string>
     <string name="approval_safer_backup">继续前确认目标和可用备份。</string>
     <string name="approval_safer_download">执行前先检查下载内容及其来源。</string>
+    <string name="decision_optional_nonblocking">可选 · 非阻塞</string>
+    <string name="decision_skip">跳过</string>
+    <string name="decision_secret_reveal">显示密钥</string>
+    <string name="decision_secret_hide">隐藏密钥</string>
+    <string name="decision_submitted_redacted">已提交（密钥已隐藏）</string>
+    <string name="async_question_badge">异步提问 · 任务继续运行</string>
+    <string name="async_question_followup_badge">智能体异步跟进</string>
+    <string name="async_question_send_reply">发送回复</string>
+    <string name="async_question_sending">发送中…</string>
+    <string name="async_question_answered_prefix">已回答</string>
+    <string name="async_question_quick_reply">快速回复</string>
+    <string name="async_question_reply_badge">已回复问题</string>
+    <string name="async_question_free_text_hint">输入回复…</string>
+    <string name="async_question_note_hint">补充说明（可选）…</string>
+    <string name="async_question_collapse">收起异步提问</string>
+    <plurals name="async_questions_pending">
+        <item quantity="one">%1$d 个待答问题</item>
+        <item quantity="other">%1$d 个待答问题</item>
+    </plurals>
+    <string name="elicitation_external_auth">外部链接授权</string>
+    <string name="elicitation_open_link">打开链接</string>
+    <string name="elicitation_open_link_failed">无法在浏览器中打开此链接</string>
+    <string name="elicitation_invalid_url">无效或不支持的链接协议</string>
+    <string name="elicitation_accept">授权 / 提交</string>
+    <string name="elicitation_decline">拒绝</string>
+    <string name="elicitation_cancel">取消</string>
+    <string name="elicitation_unsupported_mode">当前端暂不支持此验证方式（%1$s），请拒绝、取消或在桌面端完成。</string>
+    <string name="elicitation_json_object_hint">输入 JSON 对象</string>
+    <string name="elicitation_array_hint">以逗号分隔多项</string>
+    <string name="elicitation_copy_url">复制链接</string>
 </resources>

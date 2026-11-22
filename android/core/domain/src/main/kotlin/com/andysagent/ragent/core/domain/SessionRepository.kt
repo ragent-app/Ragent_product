@@ -3,7 +3,9 @@ package com.andysagent.ragent.core.domain
 import com.andysagent.ragent.core.model.Message
 import com.andysagent.ragent.core.model.Approval
 import com.andysagent.ragent.core.model.ApprovalActionDecision
+import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.Computer
+import com.andysagent.ragent.core.model.ElicitationResponse
 import com.andysagent.ragent.core.model.Project
 import com.andysagent.ragent.core.model.Session
 import com.andysagent.ragent.core.model.RuntimeConnectionState
@@ -313,6 +315,27 @@ interface SessionRepository {
         attachments: List<OutboundAttachment> = emptyList(),
         harnessCapabilityIds: List<String> = emptyList(),
     ) = sendMessage(sessionId, text, requestId)
+
+    /**
+     * Submits structured non-blocking async question answers via `POST /api/sessions/:id/messages`,
+     * optionally steering the active run mid-turn without interrupting it. Returns true if steered.
+     */
+    suspend fun sendAsyncQuestionReplies(
+        sessionId: String,
+        replies: List<AsyncQuestionReply>,
+        trailingText: String = "",
+        selection: RuntimeSelection? = null,
+        steerIfRunning: Boolean = true,
+        requestId: String = newRequestId(),
+    ): Boolean {
+        val text = com.andysagent.ragent.core.protocol.QuestionReplyEnvelopeCodec.buildText(replies, trailingText)
+        if (selection != null) {
+            sendMessage(sessionId, text, selection, requestId)
+        } else {
+            sendMessage(sessionId, text, requestId)
+        }
+        return false
+    }
     suspend fun updateQueuedFollowUp(
         sessionId: String,
         action: QueuedFollowUpAction,
@@ -442,6 +465,31 @@ interface SessionRepository {
         runId: String, approvalId: String, multiChoices: List<List<Int>>, customAnswers: List<String>,
         requestId: String = newRequestId(),
     ) { error("Multiple-choice approval answers are not supported by this repository") }
+
+    suspend fun resolveRuntimeApprovalStructured(
+        runId: String,
+        approvalId: String,
+        decision: String,
+        choices: List<String> = emptyList(),
+        customAnswer: String? = null,
+        customAnswers: List<String> = emptyList(),
+        multiChoices: List<List<Int>>? = null,
+        emptySkip: Boolean? = null,
+        elicitationResponse: ElicitationResponse? = null,
+        requestId: String = newRequestId(),
+    ) {
+        when {
+            multiChoices != null -> resolveRuntimeApprovalWithMultiChoices(
+                runId, approvalId, multiChoices, customAnswers, requestId,
+            )
+            customAnswers.isNotEmpty() -> resolveRuntimeApprovalWithAnswers(
+                runId, approvalId, choices, customAnswers, requestId,
+            )
+            else -> resolveRuntimeApproval(
+                runId, approvalId, decision, choices, customAnswer, requestId,
+            )
+        }
+    }
     suspend fun updateSessionGoal(sessionId: String, goal: String?, autoContinue: Boolean = false) {}
     /** Submits a server-owned plan artifact action; never encodes the action as chat text. */
     suspend fun submitPlanAction(

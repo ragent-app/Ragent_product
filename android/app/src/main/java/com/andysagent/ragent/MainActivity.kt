@@ -1590,6 +1590,8 @@ class MainActivity : ComponentActivity() {
                     changedFiles = chatState.changedFiles,
                     queuedMessages = chatState.queuedMessages,
                     activeDecision = chatState.activeDecision,
+                    submittingAsyncQuestionIds = chatState.submittingAsyncQuestionIds,
+                    optimisticallyAnsweredAsyncQuestions = chatState.optimisticallyAnsweredAsyncQuestions,
                     goalDialogOpen = chatState.goalDialogOpen,
                     isLoading = chatState.isLoading,
                     loadingOlder = chatState.loadingOlder,
@@ -2143,6 +2145,9 @@ class MainActivity : ComponentActivity() {
                             is WorkbenchEvent.SelectDecisionOption -> chat.onEvent(ChatEvent.SelectDecisionOption(event.questionId, event.optionIndex, event.questionIndex))
                             is WorkbenchEvent.DecisionWriteInChanged -> chat.onEvent(ChatEvent.DecisionWriteInChanged(event.questionId, event.text, event.questionIndex))
                             is WorkbenchEvent.SubmitDecision -> chat.onEvent(ChatEvent.SubmitDecision(event.questionId))
+                            is WorkbenchEvent.SkipDecision -> chat.onEvent(ChatEvent.SkipDecision(event.questionId))
+                            is WorkbenchEvent.SubmitAsyncQuestionReplies -> chat.onEvent(ChatEvent.SubmitAsyncQuestionReplies(event.replies, event.trailingText))
+                            is WorkbenchEvent.SubmitElicitation -> chat.onEvent(ChatEvent.SubmitElicitation(event.approvalId, event.action, event.contentJson))
                             is WorkbenchEvent.SelectApprovalAction -> chat.onEvent(ChatEvent.SelectApprovalAction(event.approvalId, event.actionId, event.selected))
                             is WorkbenchEvent.Approve -> chat.onEvent(ChatEvent.Approve(event.approvalId))
                             is WorkbenchEvent.Deny -> chat.onEvent(ChatEvent.Deny(event.approvalId))

@@ -76,6 +76,8 @@ function normalizeApprovalQuestionItem(question) {
     ...(options.length > 0 ? { options } : {}),
     ...(typeof (question.multiSelect ?? question.isMultiSelect) === 'boolean'
       ? { multiSelect: question.multiSelect ?? question.isMultiSelect } : {}),
+    ...(typeof question.isOther === 'boolean' ? { isOther: question.isOther } : {}),
+    ...(typeof question.isSecret === 'boolean' ? { isSecret: question.isSecret } : {}),
   };
 }
 
@@ -423,6 +425,8 @@ export function approvalRequestEvent({
   denyLabel,
   approveMessage,
   denyMessage,
+  isBlocking,
+  elicitation,
   risk,
   explanation,
 } = {}) {
@@ -489,6 +493,8 @@ export function approvalRequestEvent({
     ...(permissions && typeof permissions === 'object' ? { permissions } : {}),
     ...(trimOptionalString(source) ? { source: trimOptionalString(source) } : {}),
     ...(normalizedQuestions.length > 0 ? { questions: normalizedQuestions } : {}),
+    ...(typeof isBlocking === 'boolean' ? { isBlocking } : {}),
+    ...(elicitation && typeof elicitation === 'object' ? { elicitation } : {}),
     ...(trimOptionalString(confirmLabel) ? { confirmLabel: trimOptionalString(confirmLabel) } : {}),
     ...(trimOptionalString(denyLabel) ? { denyLabel: trimOptionalString(denyLabel) } : {}),
     ...(trimOptionalString(approveMessage) ? { approveMessage: trimOptionalString(approveMessage) } : {}),
@@ -507,6 +513,7 @@ export function approvalResponseEvent({
   source,
   providerRequestId,
   providerMethod,
+  redacted,
 } = {}) {
   const normalizedApprovalId = trimOptionalString(approvalId);
   if (!normalizedApprovalId) return null;
@@ -521,6 +528,7 @@ export function approvalResponseEvent({
     ...(trimOptionalString(source) ? { source: trimOptionalString(source) } : {}),
     ...(trimOptionalString(providerRequestId) ? { providerRequestId: trimOptionalString(providerRequestId) } : {}),
     ...(trimOptionalString(providerMethod) ? { providerMethod: trimOptionalString(providerMethod) } : {}),
+    ...(redacted === true ? { redacted: true } : {}),
   });
 }
 

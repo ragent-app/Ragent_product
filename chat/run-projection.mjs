@@ -17,6 +17,7 @@ const APPROVAL_METHOD_KINDS = Object.freeze({
   'item/fileChange/requestApproval': 'file_change',
   'item/permissions/requestApproval': 'permissions',
   'mcpServer/elicitation/request': 'permissions',
+  'item/tool/requestUserInput': 'question',
 });
 
 const projectionBudget = getAdaptiveConcurrencyBudget('projectionCPU');
@@ -112,6 +113,9 @@ function readApprovalRequestInfo(payload) {
     toolName: '',
     toolInput: {},
     command: formatCommandValue(params.command),
+    ...(method === 'item/tool/requestUserInput' && typeof params.isBlocking === 'boolean'
+      ? { isBlocking: params.isBlocking }
+      : {}),
   };
 }
 

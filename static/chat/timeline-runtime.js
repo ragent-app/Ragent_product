@@ -1118,6 +1118,10 @@
         historyPrepend,
       });
     applyAcceptedEventEffects(snapshot.changeSet?.acceptedEvents, { sessionId, historyPrepend, renderOptions, runState });
+    if (!historyPrepend) {
+      root.RagentAsyncQuestions?.setActiveSession?.(sessionId);
+    }
+    root.RagentAsyncQuestions?.ingestEvents?.(events, { sessionId });
     const ids = snapshot.changeSet?.changedIds || snapshot.items.map((item) => item.id);
     const committed = commit(snapshot, ids, {
       runState,
@@ -1152,6 +1156,7 @@
       ),
     });
     applyAcceptedEventEffects(snapshot.changeSet?.acceptedEvents, { sessionId, renderOptions, runState });
+    root.RagentAsyncQuestions?.ingestEvents?.(events, { sessionId });
     const commitOptions = {
       runState,
       pagination,
@@ -1190,6 +1195,7 @@
       runState,
     });
     applyAcceptedEventEffects(snapshot.changeSet?.acceptedEvents, { sessionId, renderOptions, runState });
+    root.RagentAsyncQuestions?.ingestEvents?.(events, { sessionId });
     const committed = commit(snapshot, snapshot.changeSet?.changedIds, {
       runState,
       pagination,

@@ -31,6 +31,8 @@ import com.andysagent.ragent.core.model.ApprovalActionDecision
 import com.andysagent.ragent.core.model.ApprovalAuthorization
 import com.andysagent.ragent.core.model.ApprovalOption
 import com.andysagent.ragent.core.model.ApprovalQuestion
+import com.andysagent.ragent.core.model.AsyncQuestionReply
+import com.andysagent.ragent.core.model.ElicitationResponse
 import com.andysagent.ragent.core.model.Message
 import com.andysagent.ragent.core.model.Approval
 import com.andysagent.ragent.core.model.Computer
@@ -63,15 +65,23 @@ import com.andysagent.ragent.core.protocol.ListTrustedDevicesResponse
 import com.andysagent.ragent.core.protocol.ProjectListResponseDto
 import com.andysagent.ragent.core.protocol.ProtocolCodec
 import com.andysagent.ragent.core.protocol.RuntimeApprovalDecisionRequestDto
+import com.andysagent.ragent.core.protocol.AsyncQuestionReplyDto
+import com.andysagent.ragent.core.protocol.ElicitationPayloadDto
+import com.andysagent.ragent.core.protocol.ElicitationResponseDto
 import com.andysagent.ragent.core.protocol.QueueMutationRequestDto
 import com.andysagent.ragent.core.protocol.QueueMutationResponseDto
 import com.andysagent.ragent.core.protocol.QueuedFollowUpDto
 import com.andysagent.ragent.core.protocol.allAttachments
 import com.andysagent.ragent.core.protocol.allOptions
+import com.andysagent.ragent.core.protocol.reconcileAsyncQuestionStatuses
+import com.andysagent.ragent.core.protocol.toDomain
+import com.andysagent.ragent.core.protocol.toDto
+import com.andysagent.ragent.core.protocol.withDecodedMetadata
 import com.andysagent.ragent.core.protocol.ForkAtRequestDto
 import com.andysagent.ragent.core.protocol.RegenerateMessageRequestDto
 import com.andysagent.ragent.core.protocol.ResendEditedMessageRequestDto
 import com.andysagent.ragent.core.protocol.SendMessageRequestDto
+import com.andysagent.ragent.core.protocol.SendMessageResponseDto
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.protocol.SessionEventsPageDto
 import com.andysagent.ragent.core.protocol.SessionListResponseDto
@@ -514,27 +524,29 @@ class RoomSessionRepository(
     override fun observeSession(sessionId: String): Flow<Session?> = observeRows(dao.observeSessions()).map { items -> items.firstOrNull { it.id == sessionId }?.let(::toDomain) }
 
     override fun observeMessages(sessionId: String): Flow<List<Message>> = observeRows(dao.observeMessages(sessionId)).map { items ->
-        items.filterNot {
-            // Older app versions persisted compaction handoffs as assistant
-            // messages without retaining their source. Hide the distinctive
-            // internal envelope while preserving the stored history.
-            it.role == "assistant" && it.runId.isNullOrBlank() &&
-                it.content.trimStart().startsWith("# Auto Compress\n") &&
-                it.content.contains("## Kept in current context")
-        }.map {
-            Message(
-                id = it.id,
-                sessionId = it.sessionId,
-                role = it.role,
-                content = it.content,
-                seq = it.seq,
-                completed = it.completed,
-                lastEventSeq = it.lastEventSeq, revision = it.revision, messageState = it.messageState,
-                messagePhase = it.messagePhase,
-                requestId = it.requestId,
-                runId = it.runId,
-            )
-        }
+        reconcileAsyncQuestionStatuses(
+            items.filterNot {
+                // Older app versions persisted compaction handoffs as assistant
+                // messages without retaining their source. Hide the distinctive
+                // internal envelope while preserving the stored history.
+                it.role == "assistant" && it.runId.isNullOrBlank() &&
+                    it.content.trimStart().startsWith("# Auto Compress\n") &&
+                    it.content.contains("## Kept in current context")
+            }.map {
+                Message(
+                    id = it.id,
+                    sessionId = it.sessionId,
+                    role = it.role,
+                    content = it.content,
+                    seq = it.seq,
+                    completed = it.completed,
+                    lastEventSeq = it.lastEventSeq, revision = it.revision, messageState = it.messageState,
+                    messagePhase = it.messagePhase,
+                    requestId = it.requestId,
+                    runId = it.runId,
+                ).withDecodedMetadata(it.metadataJson)
+            },
+        )
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
@@ -1513,11 +1525,11 @@ class RoomSessionRepository(
                 if (event.isTimelineMessage()) {
                     val old = dao.getStagedMessage(sessionId, event.messageProjectionId())
                     val previous = old?.let { ProjectedMessage(it.id, it.role, it.content,
-                        it.seq, it.lastEventSeq, it.revision, it.messageState, it.requestId, it.runId, it.messagePhase) }
+                        it.seq, it.lastEventSeq, it.revision, it.messageState, it.requestId, it.runId, it.messagePhase, it.metadataJson) }
                     val next = reduceMessage(previous, event, event.boundarySeq())
                     dao.upsertStagedMessage(TimelineMessageStagingEntity(sessionId, next.id,
                         next.role, next.text, next.firstSeq, next.lastEventSeq, next.revision,
-                        next.state, next.requestId, next.runId, next.messagePhase))
+                        next.state, next.requestId, next.runId, next.messagePhase, next.metadataJson))
                 }
                 event.terminalRunState()?.let { terminal ->
                     dao.settleStagedMessages(sessionId, event.runId, event.requestId, terminal)
@@ -1988,6 +2000,44 @@ class RoomSessionRepository(
             interruptedRunId = payload.interruptedRunId,
             queued = payload.queued,
         )
+    }
+
+    override suspend fun sendAsyncQuestionReplies(
+        sessionId: String,
+        replies: List<AsyncQuestionReply>,
+        trailingText: String,
+        selection: RuntimeSelection?,
+        steerIfRunning: Boolean,
+        requestId: String,
+    ): Boolean {
+        val path = "/api/sessions/${encode(sessionId)}/messages"
+        val body = codec.encode(
+            serializer<SendMessageRequestDto>(),
+            SendMessageRequestDto(
+                text = trailingText.trim(),
+                requestId = requestId,
+                tool = selection?.tool,
+                providerProfile = selection?.providerProfile,
+                model = selection?.model,
+                effort = selection?.effort,
+                serviceTier = selection?.serviceTier,
+                interactionMode = selection?.interactionMode,
+                permissionMode = selection?.permissionMode,
+                planAction = selection?.planAction,
+                planId = selection?.planId,
+                asyncQuestionReplies = replies.map { it.toDto() },
+                steerIfRunning = steerIfRunning,
+            ),
+        )
+        var steered = false
+        executePending(sessionId, requestId, "send_message", path, body) {
+            val response = execute(ApiRequest("POST", path, body, requestId, requestId))
+            steered = runCatching {
+                codec.decode(serializer<SendMessageResponseDto>(), response.body).steered
+            }.getOrDefault(false)
+        }
+        runCatching { refreshSessionDetail(sessionId) }
+        return steered
     }
 
     private fun encodeMessage(
@@ -2743,6 +2793,43 @@ class RoomSessionRepository(
         }
     }
 
+    override suspend fun resolveRuntimeApprovalStructured(
+        runId: String,
+        approvalId: String,
+        decision: String,
+        choices: List<String>,
+        customAnswer: String?,
+        customAnswers: List<String>,
+        multiChoices: List<List<Int>>?,
+        emptySkip: Boolean?,
+        elicitationResponse: ElicitationResponse?,
+        requestId: String,
+    ) {
+        val responseDto = elicitationResponse?.let { er ->
+            val contentObj = er.contentJson?.let { raw ->
+                runCatching { RagentProtocol.json.decodeFromString(JsonObject.serializer(), raw) }.getOrNull()
+            }
+            ElicitationResponseDto(action = er.action, content = contentObj)
+        }
+        val body = codec.encode(
+            serializer<RuntimeApprovalDecisionRequestDto>(),
+            RuntimeApprovalDecisionRequestDto(
+                decision = decision,
+                requestId = requestId,
+                choices = choices,
+                customAnswer = customAnswer,
+                customAnswers = customAnswers,
+                multiChoices = multiChoices,
+                emptySkip = emptySkip,
+                elicitationResponse = responseDto,
+            ),
+        )
+        val path = "/api/runs/${encode(runId)}/approvals/${encode(approvalId)}"
+        executePending(runId, requestId, "runtime_approval", path, body) {
+            execute(ApiRequest("POST", path, body, requestId, requestId))
+        }
+    }
+
     override suspend fun updateSessionGoal(sessionId: String, goal: String?, autoContinue: Boolean) {
         val payload = if (goal != null && goal.isNotBlank()) {
             buildJsonObject {
@@ -3391,7 +3478,7 @@ private class RoomEventSink(
             val existing = dao.getMessage(id)?.takeIf { it.sessionId == scope }
             val previous = existing?.let {
                 ProjectedMessage(it.id, it.role, it.content, it.seq ?: event.boundarySeq(),
-                    it.lastEventSeq, it.revision, it.messageState, it.requestId, it.runId, it.messagePhase)
+                    it.lastEventSeq, it.revision, it.messageState, it.requestId, it.runId, it.messagePhase, it.metadataJson)
             }
             val next = reduceMessage(previous, event, event.boundarySeq())
             dao.upsertMessages(listOf(MessageEntity(
@@ -3399,7 +3486,7 @@ private class RoomEventSink(
                 seq = next.firstSeq, requestId = next.requestId, runId = next.runId,
                 completed = next.completed, updatedAt = System.currentTimeMillis(),
                 lastEventSeq = next.lastEventSeq, revision = next.revision, messageState = next.state,
-                messagePhase = next.messagePhase,
+                messagePhase = next.messagePhase, metadataJson = next.metadataJson,
             )))
         }
         event.terminalRunState()?.let { terminal ->
@@ -3425,7 +3512,8 @@ private class RoomEventSink(
                  else !currentRunId.isNullOrBlank() && event.runId != currentRunId)
             val status = (if (isOtherRunTerminal) null else terminal)?.let { if (it == "interrupted") "cancelled" else it } ?: when {
                 isOtherRunTerminal -> session.status
-                type.contains("approval_request") || type.contains("confirmation_request")
+                type.contains("approval_request") -> if (event.isBlocking == false) session.status else "waiting_approval"
+                type.contains("confirmation_request")
                     || type == "privileged_batch_request" || type == "approved_action_batch_request" -> "waiting_approval"
                 type.contains("approval_response") || type.contains("confirmation_response")
                     || type == "privileged_batch_response" || type == "approved_action_batch_response"
@@ -3538,6 +3626,7 @@ private class RoomEventSink(
                 type.contains("started") || type.contains("running"))) {
             val waiting = dao.getPendingApprovals(scope).any { approval ->
                 approval.kind in setOf("approval_request", "confirmation_request", "privileged_batch_request") &&
+                    approval.toDomainApproval().isBlocking &&
                     (event.runId.isNullOrBlank() || approval.runId.isNullOrBlank() || approval.runId == event.runId)
             }
             if (waiting) dao.getSession(scope)?.let {
@@ -3822,6 +3911,8 @@ private fun ApprovalEntity.toDomainApproval(): Approval {
                 options = options,
                 isMultiSelect = question["multiSelect"]?.jsonPrimitive?.booleanOrNull
                     ?: question["isMultiSelect"]?.jsonPrimitive?.booleanOrNull ?: isMulti,
+                isOther = question["isOther"]?.jsonPrimitive?.booleanOrNull,
+                isSecret = question["isSecret"]?.jsonPrimitive?.booleanOrNull ?: false,
             )
         }.getOrNull()
     }
@@ -3878,6 +3969,12 @@ private fun ApprovalEntity.toDomainApproval(): Approval {
         },
         identityAliases = listOf("id", "approvalId", "batchId", "providerRequestId", "providerItemId")
             .mapNotNull { key -> (details?.get(key) as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty) }.toSet(),
+        isBlocking = details?.get("isBlocking")?.jsonPrimitive?.booleanOrNull ?: true,
+        elicitation = details?.get("elicitation")?.let { elem ->
+            runCatching {
+                RagentProtocol.json.decodeFromJsonElement(serializer<ElicitationPayloadDto>(), elem).toDomain()
+            }.getOrNull()
+        },
     )
 }
 
@@ -3922,6 +4019,8 @@ private fun buildApprovalDetails(event: SessionEventDto): String? {
         event.selectionManifestHash?.let { put("selectionManifestHash", JsonPrimitive(it)) }
         event.permissionMode?.let { put("permissionMode", JsonPrimitive(it)) }
         event.expiresAt?.let { put("expiresAt", JsonPrimitive(it)) }
+        event.isBlocking?.let { put("isBlocking", JsonPrimitive(it)) }
+        event.elicitation?.let { put("elicitation", RagentProtocol.json.encodeToJsonElement(serializer<ElicitationPayloadDto>(), it)) }
         if (event.questions.isNotEmpty()) {
             put("questions", buildJsonArray {
                 event.questions.forEach { question ->
@@ -3930,6 +4029,8 @@ private fun buildApprovalDetails(event: SessionEventDto): String? {
                         question.header?.let { put("header", JsonPrimitive(it)) }
                         question.question?.let { put("question", JsonPrimitive(it)) }
                         (question.multiSelect ?: question.isMultiSelect)?.let { put("multiSelect", JsonPrimitive(it)) }
+                        question.isOther?.let { put("isOther", JsonPrimitive(it)) }
+                        if (question.isSecret) put("isSecret", JsonPrimitive(true))
                         val questionOptions = question.allOptions()
                         if (questionOptions.isNotEmpty()) {
                             put("options", buildJsonArray {

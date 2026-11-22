@@ -7,7 +7,12 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import com.andysagent.ragent.core.protocol.AsyncQuestionDto
+import com.andysagent.ragent.core.protocol.AsyncQuestionReplyDto
 import com.andysagent.ragent.core.protocol.SessionEventDto
+import com.andysagent.ragent.core.protocol.encodeMessageMetadataJson
+import com.andysagent.ragent.core.model.AsyncQuestion
+import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.Message
 
 class TimelineEngineTest {
@@ -841,6 +846,65 @@ class TimelineEngineTest {
         assertTrue(item.isReasoning)
         assertEquals("Complete", item.detail)
         assertEquals(TimelineOperationStatus.Completed, item.status)
+    }
+
+    @Test
+    fun `async question metadata survives live projection, merge, and cross-client answer reconciliation`() {
+        val projector = LiveTimelineProjector()
+        val liveEvent = SessionEventDto(
+            seq = 1,
+            eventId = "ev-aq-1",
+            type = "message",
+            role = "assistant",
+            entityId = "msg-aq",
+            runId = "run-aq",
+            delivery = "async",
+            asyncQuestionMessageId = "aqm-1",
+            asyncQuestionsState = "pending",
+            asyncQuestions = listOf(
+                AsyncQuestionDto(id = "q-1", index = 0, title = "Mode", question = "Which mode?"),
+                AsyncQuestionDto(id = "q-2", index = 1, title = "Secret", question = "Token?", isSecret = true),
+            ),
+            text = "Please choose mode",
+        )
+        val liveItems = TimelineProjector.project(emptyList(), projector.projectPage(listOf(liveEvent)))
+        val liveMsg = assertIs<TimelineItem.Message>(liveItems.single())
+        assertEquals("async", liveMsg.messageDelivery)
+        assertEquals("aqm-1", liveMsg.asyncQuestionMessageId)
+        assertEquals(2, liveMsg.asyncQuestions.size)
+
+        val durableAssistant = Message(
+            id = "msg-aq",
+            sessionId = "s1",
+            role = "assistant",
+            content = "Please choose mode",
+            seq = 1,
+            runId = "run-aq",
+            metadataJson = liveEvent.encodeMessageMetadataJson(),
+            messageDelivery = "async",
+            asyncQuestionMessageId = "aqm-1",
+            asyncQuestions = listOf(
+                AsyncQuestion(id = "q-1", index = 0, title = "Mode", question = "Which mode?"),
+                AsyncQuestion(id = "q-2", index = 1, title = "Secret", question = "Token?", isSecret = true),
+            ),
+            asyncQuestionsState = "pending",
+        )
+        val userReply = Message(
+            id = "msg-user-reply",
+            sessionId = "s1",
+            role = "user",
+            content = "<send_user_message_question_reply>\n[{\"questionItemId\":\"q-1\",\"question\":\"Which mode?\",\"answer\":\"Fast\"}]\n</send_user_message_question_reply>",
+            seq = 2,
+            answeredQuestionItemIds = listOf("q-2"),
+        )
+        val durableItems = TimelineProjector.fromMessages(listOf(durableAssistant, userReply))
+        val merged = mergeTimelineItems(durableItems, emptyList())
+        val reconciled = reconcileTimelineAsyncQuestions(merged)
+        val reconciledAssistant = assertIs<TimelineItem.Message>(reconciled.first())
+        assertEquals("answered", reconciledAssistant.asyncQuestions[0].status)
+        assertEquals("Fast", reconciledAssistant.asyncQuestions[0].answeredText)
+        assertEquals("answered", reconciledAssistant.asyncQuestions[1].status)
+        assertEquals("answered", reconciledAssistant.asyncQuestionsState)
     }
 
     private fun charFor(i: Int): Char = ('a'.code + ((i - 1) % 26)).toChar()

@@ -217,6 +217,109 @@ data class ApprovalQuestion(
     val question: String = "",
     val options: List<ApprovalOption> = emptyList(),
     val isMultiSelect: Boolean = false,
+    val isOther: Boolean? = null,
+    val isSecret: Boolean = false,
+)
+
+/** Non-blocking question surfaced asynchronously alongside an active turn. */
+data class AsyncQuestion(
+    val id: String,
+    val index: Int = 0,
+    val title: String = "",
+    val question: String = title,
+    val options: List<ApprovalOption> = emptyList(),
+    val allowFreeText: Boolean = true,
+    val status: String = "pending",
+    val answeredText: String? = null,
+    val isOther: Boolean? = null,
+    val isSecret: Boolean = false,
+) {
+    val isAnswered: Boolean get() = status.equals("answered", ignoreCase = true)
+    val promptText: String get() = question.ifBlank { title }
+}
+
+/** Structured answer referencing a persisted async question item id. */
+data class AsyncQuestionReply(
+    val questionItemId: String,
+    val question: String = "",
+    val answer: String = "",
+)
+
+/** Parsed `<send_user_message_question_reply>` envelope from user message text. */
+data class ParsedQuestionReplyEnvelope(
+    val replies: List<AsyncQuestionReply> = emptyList(),
+    val trailingText: String = "",
+    val hasEnvelope: Boolean = false,
+    val isMalformed: Boolean = false,
+)
+
+enum class ElicitationKind {
+    CompactToolApproval,
+    DynamicForm,
+    ExternalUrl,
+    Unsupported,
+}
+
+data class ElicitationSchemaProperty(
+    val name: String,
+    val type: String = "string",
+    val title: String? = null,
+    val description: String? = null,
+    val format: String? = null,
+    val writeOnly: Boolean = false,
+    val enumValues: List<String> = emptyList(),
+    val defaultValue: String? = null,
+    val defaultBoolean: Boolean? = null,
+    val minLength: Int? = null,
+    val maxLength: Int? = null,
+    val minimum: Double? = null,
+    val maximum: Double? = null,
+    val pattern: String? = null,
+    val required: Boolean = false,
+    val arrayItemEnumValues: List<String> = emptyList(),
+) {
+    val isSecretField: Boolean get() = writeOnly || format.equals("password", ignoreCase = true)
+}
+
+data class ElicitationPayload(
+    val mode: String? = null,
+    val serverName: String? = null,
+    val elicitationId: String? = null,
+    val message: String? = null,
+    val requestedSchemaJson: String? = null,
+    val schemaProperties: List<ElicitationSchemaProperty> = emptyList(),
+    val url: String? = null,
+    val codexApprovalKind: String? = null,
+    val title: String? = null,
+    val description: String? = null,
+    val challenge: String? = null,
+) {
+    val resolvedKind: ElicitationKind
+        get() {
+            val normalizedMode = mode?.trim()?.lowercase()
+            return when (normalizedMode) {
+                "url" -> ElicitationKind.ExternalUrl
+                "form", "openai/form", "openaiform", null -> {
+                    when {
+                        normalizedMode == null && !url.isNullOrBlank() -> ElicitationKind.ExternalUrl
+                        schemaProperties.isNotEmpty() -> ElicitationKind.DynamicForm
+                        else -> ElicitationKind.CompactToolApproval
+                    }
+                }
+                else -> ElicitationKind.Unsupported
+            }
+        }
+
+    val isFormComplexForAttention: Boolean
+        get() = resolvedKind == ElicitationKind.DynamicForm &&
+            (schemaProperties.size > 2 || schemaProperties.any {
+                it.type == "object" || (it.type == "array" && it.arrayItemEnumValues.isEmpty())
+            })
+}
+
+data class ElicitationResponse(
+    val action: String,
+    val contentJson: String? = null,
 )
 
 data class ApprovalAuthorization(
@@ -301,6 +404,13 @@ data class Message(
     val revision: Long = 0,
     val messageState: String = if (completed) "completed" else "streaming",
     val messagePhase: String? = null,
+    val metadataJson: String? = null,
+    val messageDelivery: String? = null,
+    val asyncQuestionMessageId: String? = null,
+    val asyncQuestions: List<AsyncQuestion> = emptyList(),
+    val asyncQuestionsState: String? = null,
+    val asyncQuestionReplies: List<AsyncQuestionReply> = emptyList(),
+    val answeredQuestionItemIds: List<String> = emptyList(),
 )
 
 data class Approval(
@@ -350,6 +460,8 @@ data class Approval(
     val executorUnavailableReasonCode: String? = null,
     val identityAliases: Set<String> = emptySet(),
     val explanation: ApprovalExplanation? = null,
+    val isBlocking: Boolean = true,
+    val elicitation: ElicitationPayload? = null,
 )
 
 data class RunActivity(

@@ -112,6 +112,11 @@ function syncChatBottomOverlaySpacing(reason = "layout", {
       )
     : Number.POSITIVE_INFINITY;
   const queuePanel = typeof queuedPanel !== "undefined" ? queuedPanel : null;
+  const asyncQuestionsPanel = typeof asyncQuestionsPanelEl !== "undefined"
+    ? asyncQuestionsPanelEl
+    : (typeof document?.getElementById === "function"
+      ? document.getElementById("asyncQuestionsPanel")
+      : null);
   const decisionSheet = typeof document?.getElementById === "function"
     ? document.getElementById("decisionSheet")
     : null;
@@ -129,14 +134,18 @@ function syncChatBottomOverlaySpacing(reason = "layout", {
     : null;
   const decisionIslandOpen = Boolean(decisionIsland && !decisionIsland.hidden);
   const queueHeight = getRenderedOuterHeight(queuePanel);
+  const asyncQuestionsHeight = getRenderedOuterHeight(asyncQuestionsPanel);
   const floatingStatusGap = getFloatingStatusGapPx();
   const queueStackHeight = queueHeight > 0
     ? queueHeight + floatingStatusGap
     : 0;
+  const asyncQuestionsStackHeight = asyncQuestionsHeight > 0
+    ? asyncQuestionsHeight + floatingStatusGap
+    : 0;
   const decisionIslandHeight = decisionIslandOpen
     ? getRenderedOuterHeight(decisionIsland) + floatingStatusGap
     : 0;
-  const floatingStatusHeight = liveBarHeight + decisionSheetHeight + queueStackHeight + decisionIslandHeight;
+  const floatingStatusHeight = liveBarHeight + decisionSheetHeight + queueStackHeight + asyncQuestionsStackHeight + decisionIslandHeight;
   const floatingOffset = floatingStatusHeight > 0 ? floatingStatusGap : 0;
   // The FAB is another floating surface in this same composer zone. Keep it
   // above the complete status stack (including the bottom separation gap),
@@ -171,6 +180,7 @@ function syncChatBottomOverlaySpacing(reason = "layout", {
   document.documentElement.style.setProperty("--chat-floating-status-height", `${Math.ceil(floatingStatusHeight)}px`);
   document.documentElement.style.setProperty("--chat-floating-status-fab-offset", `${Math.ceil(floatingStatusFabOffset)}px`);
   document.documentElement.style.setProperty("--chat-queued-panel-stack-height", `${Math.ceil(queueStackHeight)}px`);
+  document.documentElement.style.setProperty("--chat-async-questions-panel-stack-height", `${Math.ceil(asyncQuestionsStackHeight)}px`);
   document.documentElement.style.setProperty("--chat-decision-sheet-height", `${Math.ceil(decisionSheetHeight)}px`);
   document.documentElement.style.setProperty("--chat-bottom-overlay-height", `${overlayHeight}px`);
   lastChatOverlayMetrics = metrics;

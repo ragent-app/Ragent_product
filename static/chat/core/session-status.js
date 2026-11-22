@@ -453,16 +453,23 @@
     return dangerValues.has(String(raw || "").trim().toLowerCase());
   }
 
+  function isApprovalBlocking(approval) {
+    if (!approval || typeof approval !== "object") return true;
+    return approval.isBlocking !== false;
+  }
+
   function resolveApprovalWaitingStatus(approval) {
     if (!approval || typeof approval !== "object") return null;
+    const blocking = isApprovalBlocking(approval);
+    const withBlocking = (status) => (status && !blocking ? { ...status, isBlocking: false } : status);
     const kind = String(approval.kind || "").trim().toLowerCase();
     const isQuestion = kind === "question"
       || !!approval.question
       || (Array.isArray(approval.questions) && approval.questions.length > 0);
-    if (kind === "plan") return taskStatus("plan_pending", "workflow.waiting.plan", "Plan awaiting approval", "workflow.waiting.planTitle", "The proposed plan is ready for your approval");
-    if (isQuestion) return taskStatus("awaiting_answer", "workflow.waiting.answer", "Awaiting your reply", "workflow.waiting.answerTitle", "A question needs your answer");
-    if (resolveLiveBarDangerRisk(approval)) return taskStatus("danger_pending", "workflow.waiting.danger", "Dangerous action awaiting approval", "workflow.waiting.dangerTitle", "A potentially dangerous action needs your approval");
-    return taskStatus("approval_pending", "workflow.waiting.approval", "Approval needed", "workflow.waiting.approvalTitle", "An action needs your approval");
+    if (kind === "plan") return withBlocking(taskStatus("plan_pending", "workflow.waiting.plan", "Plan awaiting approval", "workflow.waiting.planTitle", "The proposed plan is ready for your approval"));
+    if (isQuestion) return withBlocking(taskStatus("awaiting_answer", "workflow.waiting.answer", "Awaiting your reply", "workflow.waiting.answerTitle", "A question needs your answer"));
+    if (resolveLiveBarDangerRisk(approval)) return withBlocking(taskStatus("danger_pending", "workflow.waiting.danger", "Dangerous action awaiting approval", "workflow.waiting.dangerTitle", "A potentially dangerous action needs your approval"));
+    return withBlocking(taskStatus("approval_pending", "workflow.waiting.approval", "Approval needed", "workflow.waiting.approvalTitle", "An action needs your approval"));
   }
 
   function createReadyStatus() {
@@ -491,6 +498,7 @@
     getSessionAttentionBand,
     compareSessionListSessions,
     resolveApprovalWaitingStatus,
+    isApprovalBlocking,
     resolveLiveBarDangerRisk,
     createReadyStatus,
   };

@@ -237,6 +237,38 @@ class RagentDatabaseMigrationTest {
         migrated.close()
     }
 
+    @Test
+    fun migratesMessageMetadataFromVersion16To17() {
+        helper.createDatabase(TEST_DB_16_17, 16).use { database ->
+            database.execSQL(
+                "INSERT INTO messages (id, sessionId, role, content, seq, requestId, runId, completed, updatedAt, lastEventSeq, revision, messageState, messagePhase) "
+                    + "VALUES ('msg-1', 'session-1', 'assistant', 'Choose environment', 4, 'req-4', 'run-1', 1, 100, 4, 1, 'completed', 'final_answer')",
+            )
+            database.execSQL(
+                "INSERT INTO timeline_message_staging (sessionId, id, role, content, seq, lastEventSeq, revision, messageState, requestId, runId, messagePhase) "
+                    + "VALUES ('session-1', 'msg-2', 'assistant', 'Next question', 5, 5, 1, 'completed', 'req-5', 'run-1', 'commentary')",
+            )
+        }
+
+        val migrated = helper.runMigrationsAndValidate(
+            TEST_DB_16_17,
+            17,
+            true,
+            RagentDatabase.MIGRATION_16_17,
+        )
+        migrated.query("SELECT content, metadataJson FROM messages WHERE id = 'msg-1'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals("Choose environment", cursor.getString(cursor.getColumnIndexOrThrow("content")))
+            assertEquals(null, cursor.getString(cursor.getColumnIndexOrThrow("metadataJson")))
+        }
+        migrated.query("SELECT content, metadataJson FROM timeline_message_staging WHERE id = 'msg-2'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals("Next question", cursor.getString(cursor.getColumnIndexOrThrow("content")))
+            assertEquals(null, cursor.getString(cursor.getColumnIndexOrThrow("metadataJson")))
+        }
+        migrated.close()
+    }
+
     companion object {
         private const val TEST_DB_4_5 = "migration-4-5-test.db"
         private const val TEST_DB_5_6 = "migration-5-6-test.db"
@@ -244,5 +276,6 @@ class RagentDatabaseMigrationTest {
         private const val TEST_DB_8_9 = "migration-8-9-test.db"
         private const val TEST_DB_9_10 = "migration-9-10-test.db"
         private const val TEST_DB_11_12 = "migration-11-12-test.db"
+        private const val TEST_DB_16_17 = "migration-16-17-test.db"
     }
 }

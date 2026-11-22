@@ -2,6 +2,8 @@ package com.andysagent.ragent.core.sync
 
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.protocol.boundarySeq
+import com.andysagent.ragent.core.protocol.encodeMessageMetadataJson
+import com.andysagent.ragent.core.protocol.mergeMessageMetadataJson
 import com.andysagent.ragent.core.protocol.messageEntityKey
 import com.andysagent.ragent.core.protocol.textContent
 
@@ -17,6 +19,7 @@ data class ProjectedMessage(
     val requestId: String? = null,
     val runId: String? = null,
     val messagePhase: String? = null,
+    val metadataJson: String? = null,
 ) {
     val completed: Boolean get() = state != "streaming"
 }
@@ -82,5 +85,6 @@ fun reduceMessage(previous: ProjectedMessage?, event: SessionEventDto, provision
         requestId = event.requestId ?: previous?.requestId,
         runId = event.runId ?: previous?.runId,
         messagePhase = event.messagePhase ?: previous?.messagePhase,
+        metadataJson = mergeMessageMetadataJson(previous?.metadataJson, event.encodeMessageMetadataJson()),
     )
 }

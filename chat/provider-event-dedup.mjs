@@ -124,6 +124,22 @@ export function getProviderEventDedupKey(event) {
     ? event.providerContentBlockIndex
     : null;
   if (event?.type === 'message' && providerMessageId) {
+    const hasAsyncMetadata = Boolean(
+      trimString(event?.messageDelivery || event?.delivery)
+      || (Array.isArray(event?.asyncQuestions) && event.asyncQuestions.length > 0),
+    );
+    const asyncSummary = hasAsyncMetadata
+      ? JSON.stringify([
+        trimString(event?.messageDelivery || event?.delivery),
+        Array.isArray(event?.asyncQuestions)
+          ? event.asyncQuestions.map((q) => [
+            trimString(q?.id),
+            trimString(q?.title || q?.question),
+            Array.isArray(q?.options) ? q.options : null,
+          ])
+          : [],
+      ])
+      : '';
     return JSON.stringify([
       runId,
       'message',
@@ -131,6 +147,7 @@ export function getProviderEventDedupKey(event) {
       providerMessageId,
       contentBlockIndex,
       readEventBody(event, ['content', 'bodyPreview']),
+      ...(asyncSummary ? [asyncSummary] : []),
     ]);
   }
   if (event?.type === 'reasoning' && providerMessageId) {

@@ -568,4 +568,34 @@
     <string name="approval_safer_target">Verify the fully resolved target before proceeding.</string>
     <string name="approval_safer_backup">Verify the target and a current backup before proceeding.</string>
     <string name="approval_safer_download">Inspect the downloaded content and its source before running it.</string>
+    <string name="decision_optional_nonblocking">Optional · Non-blocking</string>
+    <string name="decision_skip">Skip</string>
+    <string name="decision_secret_reveal">Show secret</string>
+    <string name="decision_secret_hide">Hide secret</string>
+    <string name="decision_submitted_redacted">Secret answer submitted</string>
+    <string name="async_question_badge">Async question · Agent continues</string>
+    <string name="async_question_followup_badge">Agent follow-up</string>
+    <string name="async_question_send_reply">Send reply</string>
+    <string name="async_question_sending">Sending…</string>
+    <string name="async_question_answered_prefix">Answered</string>
+    <string name="async_question_quick_reply">Quick reply</string>
+    <string name="async_question_reply_badge">Replied to question</string>
+    <string name="async_question_free_text_hint">Type your reply…</string>
+    <string name="async_question_note_hint">Optional additional note…</string>
+    <string name="async_question_collapse">Collapse async questions</string>
+    <plurals name="async_questions_pending">
+        <item quantity="one">%1$d pending question</item>
+        <item quantity="other">%1$d pending questions</item>
+    </plurals>
+    <string name="elicitation_external_auth">External authorization</string>
+    <string name="elicitation_open_link">Open link</string>
+    <string name="elicitation_open_link_failed">Could not open link in browser</string>
+    <string name="elicitation_invalid_url">Invalid or unsupported URL scheme</string>
+    <string name="elicitation_accept">Accept</string>
+    <string name="elicitation_decline">Decline</string>
+    <string name="elicitation_cancel">Cancel</string>
+    <string name="elicitation_unsupported_mode">This verification mode (%1$s) is not supported on this device. Please decline, cancel, or complete it on desktop.</string>
+    <string name="elicitation_json_object_hint">Enter JSON object</string>
+    <string name="elicitation_array_hint">Comma-separated values</string>
+    <string name="elicitation_copy_url">Copy link</string>
 </resources>

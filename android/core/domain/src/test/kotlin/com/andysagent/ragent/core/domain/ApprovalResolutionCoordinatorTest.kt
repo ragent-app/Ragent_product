@@ -5,6 +5,8 @@ import com.andysagent.ragent.core.model.ApprovalAction
 import com.andysagent.ragent.core.model.ApprovalOption
 import com.andysagent.ragent.core.model.ApprovalQuestion
 import com.andysagent.ragent.core.model.Computer
+import com.andysagent.ragent.core.model.ElicitationPayload
+import com.andysagent.ragent.core.model.ElicitationResponse
 import com.andysagent.ragent.core.model.Message
 import com.andysagent.ragent.core.model.Project
 import com.andysagent.ragent.core.model.RuntimeConnectionState
@@ -37,6 +39,8 @@ class ApprovalResolutionCoordinatorTest {
         var findError: Throwable? = null
         var runtimeApprovalError: Throwable? = null
         var retiredApproval: Pair<String, String>? = null
+        var lastEmptySkip: Boolean? = null
+        var lastElicitationResponse: ElicitationResponse? = null
 
         override val connectionState: StateFlow<RuntimeConnectionState> =
             MutableStateFlow(RuntimeConnectionState.Connected).asStateFlow()
@@ -129,6 +133,27 @@ class ApprovalResolutionCoordinatorTest {
             lastMultiChoices = multiChoices
             lastCustomAnswers = customAnswers
             runtimeApprovals += Triple(runId, approvalId, "approve_with_multi_choices")
+        }
+
+        override suspend fun resolveRuntimeApprovalStructured(
+            runId: String,
+            approvalId: String,
+            decision: String,
+            choices: List<String>,
+            customAnswer: String?,
+            customAnswers: List<String>,
+            multiChoices: List<List<Int>>?,
+            emptySkip: Boolean?,
+            elicitationResponse: ElicitationResponse?,
+            requestId: String,
+        ) {
+            runtimeApprovalError?.let { throw it }
+            lastChoices = choices
+            lastCustomAnswer = customAnswer
+            lastCustomAnswers = customAnswers
+            lastEmptySkip = emptySkip
+            lastElicitationResponse = elicitationResponse
+            runtimeApprovals += Triple(runId, approvalId, decision)
         }
 
         override suspend fun resumePendingOperations(): Int = 0
@@ -510,5 +535,80 @@ class ApprovalResolutionCoordinatorTest {
         })
         val outcome = failingCoordinator.resolvePlainApproval("s1", "a1", true)
         assertEquals("network gone", (outcome as ApprovalResolutionCoordinator.Outcome.Failed).message)
+    }
+
+    @Test
+    fun `skipNonBlockingQuestion submits emptySkip=true and blocks when isBlocking=true`() = runTest {
+        val repository = FakeRepository()
+        repository.approvals += Approval(
+            id = "q-nonblock",
+            sessionId = "s1",
+            title = "Optional",
+            status = "pending",
+            runId = "run-1",
+            kind = "question",
+            isBlocking = false,
+            passkeyRequired = false,
+        )
+        repository.approvals += Approval(
+            id = "q-blocking",
+            sessionId = "s1",
+            title = "Required",
+            status = "pending",
+            runId = "run-1",
+            kind = "question",
+            isBlocking = true,
+            passkeyRequired = false,
+        )
+        val coordinator = ApprovalResolutionCoordinator(repository)
+
+        val blocked = coordinator.skipNonBlockingQuestion("s1", "q-blocking")
+        assertTrue(blocked is ApprovalResolutionCoordinator.Outcome.Failed)
+
+        val skipped = coordinator.skipNonBlockingQuestion("s1", "q-nonblock")
+        assertEquals(ApprovalResolutionCoordinator.Outcome.Submitted, skipped)
+        assertEquals(true, repository.lastEmptySkip)
+        assertEquals(Triple("run-1", "q-nonblock", "approve"), repository.runtimeApprovals.single())
+    }
+
+    @Test
+    fun `resolveElicitation forwards accept decline cancel and blocks accept on Unsupported`() = runTest {
+        val repository = FakeRepository()
+        repository.approvals += Approval(
+            id = "el-form",
+            sessionId = "s1",
+            title = "GitHub Auth",
+            status = "pending",
+            runId = "run-1",
+            kind = "permissions",
+            passkeyRequired = false,
+            elicitation = ElicitationPayload(mode = "url", url = "https://example.com/oauth"),
+        )
+        repository.approvals += Approval(
+            id = "el-unsupported",
+            sessionId = "s1",
+            title = "Device Verification",
+            status = "pending",
+            runId = "run-1",
+            kind = "permissions",
+            passkeyRequired = false,
+            elicitation = ElicitationPayload(mode = "openai/userVerification"),
+        )
+        val coordinator = ApprovalResolutionCoordinator(repository)
+
+        val acceptForm = coordinator.resolveElicitation("s1", "el-form", "accept", """{"token":"abc"}""")
+        assertEquals(ApprovalResolutionCoordinator.Outcome.Submitted, acceptForm)
+        assertEquals("accept", repository.lastElicitationResponse?.action)
+        assertEquals("""{"token":"abc"}""", repository.lastElicitationResponse?.contentJson)
+        assertEquals("approve", repository.runtimeApprovals.last().third)
+
+        val blockedAccept = coordinator.resolveElicitation("s1", "el-unsupported", "accept")
+        assertTrue(blockedAccept is ApprovalResolutionCoordinator.Outcome.Failed)
+
+        val canceled = coordinator.resolveElicitation("s1", "el-unsupported", "cancel", """{"ignored":true}""")
+        assertEquals(ApprovalResolutionCoordinator.Outcome.Submitted, canceled)
+        assertEquals("cancel", repository.lastElicitationResponse?.action)
+        assertEquals(null, repository.lastElicitationResponse?.contentJson)
+        assertEquals("cancel", repository.runtimeApprovals.last().third)
     }
 }

@@ -93,6 +93,7 @@ import {
   buildCodexAppServerTurnStartMessage,
   buildCodexAppServerTurnSteerMessage,
   buildCodexAppServerApprovalResponseMessage,
+  classifyCodexMcpElicitation,
   readCodexAppServerManagedMcpRequest,
   buildCodexAppServerMcpServerStatusListMessage,
   buildCodexAppServerThreadGoalSetMessage,
@@ -1739,9 +1740,18 @@ export async function createCodexAppServerRunState({
     failureReason: '',
     nextControlRequestId: 1000,
     sentSteerIds: new Set(),
+    confirmedSteerIds: new Set(),
+    pendingSteerRequests: new Map(),
     pendingApprovals: new Map(),
     sentApprovalResponseIds: new Set(),
     autoApprovedMcpRequestIds: new Set(),
+    resolvedUserInputKeys: new Set(
+      Array.isArray(options.priorResolvedUserInputKeys)
+        ? options.priorResolvedUserInputKeys.filter((value) => typeof value === 'string' && value.trim())
+        : [],
+    ),
+    headlessUnattended: manifest?.protectedDelegatedRun === true
+      || Boolean(manifest?.internalOperation && manifest.internalOperation !== 'approved_action_resume'),
     privilegedTurnOps: [],
   };
 }
@@ -1912,7 +1922,7 @@ async function markClaudeBidiSteerSent(runId, steerId) {
     ...current,
     appServerSteerQueue: Array.isArray(current?.appServerSteerQueue)
       ? current.appServerSteerQueue.map((entry) => (
-        normalizedIds.has(entry?.id)
+        normalizedIds.has(entry?.id) && entry?.state !== 'undelivered'
           ? { ...entry, sentAt: entry.sentAt || sentAt, state: 'sent' }
           : entry
       ))
@@ -2540,6 +2550,9 @@ function recoverCodexAppServerFromStaleResume(proc, state) {
   state.providerStage = 'fresh_thread_recovery';
   state.freshRecoveryRequested = true;
   state.activeItems.clear();
+  state.pendingApprovals?.clear();
+  state.autoApprovedMcpRequestIds?.clear();
+  state.pendingSteerRequests?.clear();
   state.idleTerminationReason = '';
   const written = writeCodexAppServerThreadStart(proc, state);
   if (!written) {
@@ -2816,7 +2829,7 @@ async function markCodexAppServerSteerSent(runId, steerId) {
     ...current,
     appServerSteerQueue: Array.isArray(current?.appServerSteerQueue)
       ? current.appServerSteerQueue.map((entry) => (
-        normalizedIds.has(entry?.id)
+        normalizedIds.has(entry?.id) && entry?.state !== 'undelivered'
           ? { ...entry, sentAt: entry.sentAt || sentAt, state: 'sent' }
           : entry
       ))
@@ -2845,6 +2858,57 @@ async function consumeFactorySteerResponse(runId, state, parsed) {
     : accepted ? { state: 'accepted', threadId: pending.threadId, turnId: pending.turnId, at: nowIso() }
       : { state: 'sent_unknown', at: nowIso() };
   await recordFactorySteerReceipt(runId, pending.id, receipt);
+  return true;
+}
+
+async function markCodexAppServerSteerDispatched(runId, steerId) {
+  if (!runId || !steerId) return;
+  const dispatchedAt = nowIso();
+  await updateRun(runId, (current) => ({
+    ...current,
+    appServerSteerQueue: Array.isArray(current?.appServerSteerQueue)
+      ? current.appServerSteerQueue.map((entry) => (
+        entry?.id === steerId && entry?.state !== 'sent'
+          ? { ...entry, state: 'dispatched', dispatchedAt: entry.dispatchedAt || dispatchedAt }
+          : entry
+      ))
+      : [],
+  }));
+}
+
+async function markCodexAppServerSteerUndelivered(runId, steerId, reason = '') {
+  if (!runId || !steerId) return;
+  const undeliveredAt = nowIso();
+  await updateRun(runId, (current) => ({
+    ...current,
+    appServerSteerQueue: Array.isArray(current?.appServerSteerQueue)
+      ? current.appServerSteerQueue.map((entry) => (
+        entry?.id === steerId && entry?.state !== 'sent'
+          ? {
+            ...entry,
+            state: 'undelivered',
+            undeliveredAt: entry.undeliveredAt || undeliveredAt,
+            ...(reason ? { undeliveredReason: String(reason).slice(0, 300) } : {}),
+          }
+          : entry
+      ))
+      : [],
+  }));
+}
+
+async function consumeCodexAppServerSteerResponse(runId, state, parsed) {
+  const pending = state?.pendingSteerRequests?.get(parsed?.id);
+  if (!pending || (!Object.hasOwn(parsed, 'result') && !Object.hasOwn(parsed, 'error'))) return false;
+  state.pendingSteerRequests.delete(parsed.id);
+  const rejected = Boolean(parsed.error) || parsed.result?.accepted === false;
+  if (!rejected) {
+    state.confirmedSteerIds ||= new Set();
+    state.confirmedSteerIds.add(pending.id);
+    await markCodexAppServerSteerSent(runId, pending.id);
+    return true;
+  }
+  const reason = readStructuredProviderFailureReason(parsed, 'Provider rejected turn/steer');
+  await markCodexAppServerSteerUndelivered(runId, pending.id, reason);
   return true;
 }
 
@@ -2887,6 +2951,13 @@ async function flushCodexAppServerSteerQueue(proc, state, run) {
     }
     const requestId = state.nextControlRequestId;
     state.nextControlRequestId += 1;
+    state.pendingSteerRequests ||= new Map();
+    state.pendingSteerRequests.set(requestId, {
+      id: steerId,
+      requestId: typeof entry?.requestId === 'string' ? entry.requestId : '',
+      threadId: state.threadId,
+      turnId: state.turnId,
+    });
     if (writeCodexAppServerMessage(proc, buildCodexAppServerTurnSteerMessage({
       id: requestId,
       threadId: state.threadId,
@@ -2896,10 +2967,10 @@ async function flushCodexAppServerSteerQueue(proc, state, run) {
     }))) {
       state.approvalReviewSteers.push({ id: steerId, requestId: entry.requestId || '', text });
       state.approvalReviewSteerRevision += 1;
-      state.approvalReviewSteerUnconfirmed = true;
       state.sentSteerIds.add(steerId);
-      await markCodexAppServerSteerSent(run.id, steerId);
-      state.approvalReviewSteerUnconfirmed = false;
+      await markCodexAppServerSteerDispatched(run.id, steerId);
+    } else {
+      state.pendingSteerRequests.delete(requestId);
     }
   }
 }
@@ -2934,15 +3005,56 @@ function riskAuditFields(value) {
   };
 }
 
+function resolveCodexNonBlockingInputTimeoutMs(env = process.env) {
+  const configured = Number.parseInt(env?.RAGENT_CODEX_NON_BLOCKING_INPUT_TIMEOUT_MS || '', 10);
+  if (Number.isFinite(configured) && configured >= 250) return configured;
+  return 180_000;
+}
+
+function codexUserInputKey(approval) {
+  if (approval?.providerMethod !== 'item/tool/requestUserInput') return '';
+  const params = approval?.params || {};
+  const threadId = typeof (approval.providerThreadId || approval.threadId || params.threadId || params.thread_id) === 'string'
+    ? (approval.providerThreadId || approval.threadId || params.threadId || params.thread_id).trim()
+    : '';
+  const turnId = typeof (approval.providerTurnId || approval.turnId || params.turnId || params.turn_id) === 'string'
+    ? (approval.providerTurnId || approval.turnId || params.turnId || params.turn_id).trim()
+    : '';
+  const itemId = typeof (approval.providerItemId || approval.itemId || params.itemId || params.item_id || params.callId || params.call_id) === 'string'
+    ? (approval.providerItemId || approval.itemId || params.itemId || params.item_id || params.callId || params.call_id).trim()
+    : '';
+  return threadId && turnId && itemId ? JSON.stringify([threadId, turnId, itemId]) : '';
+}
+
 function serializeCodexAppServerApprovalForRun(approval, risk = null, gate = null) {
   if (!approval?.approvalId) return null;
+  const params = approval.params || {};
+  const providerThreadId = typeof (approval.threadId || params.threadId || params.thread_id) === 'string'
+    ? (approval.threadId || params.threadId || params.thread_id).trim()
+    : '';
+  const providerTurnId = typeof (approval.turnId || params.turnId || params.turn_id) === 'string'
+    ? (approval.turnId || params.turnId || params.turn_id).trim()
+    : '';
+  const providerItemId = typeof (approval.itemId || params.itemId || params.item_id || params.callId || params.call_id) === 'string'
+    ? (approval.itemId || params.itemId || params.item_id || params.callId || params.call_id).trim()
+    : '';
+  const isUserInput = approval.providerMethod === 'item/tool/requestUserInput';
+  const isBlocking = isUserInput
+    ? (typeof approval.isBlocking === 'boolean' ? approval.isBlocking : (typeof params.isBlocking === 'boolean' ? params.isBlocking : true))
+    : undefined;
   return {
     approvalId: approval.approvalId,
     providerRequestId: approval.providerRequestId,
     providerRequestIdString: approval.providerRequestIdString,
     providerMethod: approval.providerMethod,
     kind: approval.kind,
-    params: approval.params || {},
+    ...(approval.requestClass ? { requestClass: approval.requestClass } : {}),
+    ...(typeof isBlocking === 'boolean' ? { isBlocking } : {}),
+    ...(isUserInput && isBlocking === false ? { softDeadlineAtMs: Date.now() + resolveCodexNonBlockingInputTimeoutMs() } : {}),
+    ...(providerThreadId ? { providerThreadId } : {}),
+    ...(providerTurnId ? { providerTurnId } : {}),
+    ...(providerItemId ? { providerItemId } : {}),
+    params,
     request: approval.request || null,
     ...riskAuditFields(risk),
     ...(typeof gate?.reason === 'string' ? { gateReason: gate.reason.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 300) } : {}),
@@ -3165,6 +3277,43 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   if (state.pendingApprovals instanceof Map && state.pendingApprovals.has(approval.approvalId)) {
     return state.pendingApprovals.get(approval.approvalId) || null;
   }
+  const userInputKey = codexUserInputKey(approval);
+  if (userInputKey) {
+    state.resolvedUserInputKeys ||= new Set();
+    if (state.resolvedUserInputKeys.has(userInputKey)) {
+      const emptyMessage = buildCodexAppServerApprovalResponseMessage(approval, 'approve', { emptySkip: true });
+      if (emptyMessage && proc) {
+        writeCodexAppServerMessage(proc, emptyMessage);
+        await appendRunSpoolRecord(runId, {
+          ts: nowIso(),
+          stream: 'stdout',
+          json: {
+            type: 'ragent.approval_response',
+            approvalId: approval.approvalId,
+            provider: 'codex',
+            decision: 'approved',
+            status: 'approved',
+            providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
+            providerMethod: approval.providerMethod || '',
+            autoApproved: true,
+            reason: 'resume-dedup: user input already resolved',
+          },
+        });
+      }
+      return null;
+    }
+    if (state.pendingApprovals instanceof Map) {
+      for (const existing of state.pendingApprovals.values()) {
+        if (codexUserInputKey(existing) === userInputKey) {
+          if (existing.state === 'responded') {
+            const emptyMessage = buildCodexAppServerApprovalResponseMessage(approval, 'approve', { emptySkip: true });
+            if (emptyMessage && proc) writeCodexAppServerMessage(proc, emptyMessage);
+          }
+          return existing;
+        }
+      }
+    }
+  }
   if (state.autoApprovedMcpRequestIds instanceof Set && state.autoApprovedMcpRequestIds.has(approval.approvalId)) {
     return null;
   }
@@ -3204,18 +3353,19 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   // MCP elicitation is not a shell/file operation. Never let the generic risk
   // classifier auto-allow an unknown server; it must reach the user approval
   // path and use the provider-specific elicitation response shape.
-  const controlledInstall = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const skipBridge = managedMcp || expandsPermissions || approval.kind === 'question';
+  const controlledInstall = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsInstallBridgeApproval({ approval, state, runId, nodePath: process.execPath,
       scriptPath: join(PROJECT_ROOT, 'scripts', 'ragent-windows-install-bridge.mjs') });
-  const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const controlledDelete = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsSafeDeleteApproval({ approval, state, runId, helperPath: safeDeleteHelperPath });
-  const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const controlledAsset = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsCliAssetApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
-  const controlledTrigger = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const controlledTrigger = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsTriggerApproval({ approval, state, runId, helperPath: cliReadHelperPath, port: Number(CHAT_PORT) });
-  const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const controlledSearch = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsBoundSearchApproval({ approval, state, helperPath: searchHelperPath });
-  const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !managedMcp && !expandsPermissions
+  const controlledListing = process.platform === 'win32' && !WORKBENCH_EXECUTION_POLICY && !skipBridge
     && await verifyCodexWindowsWildcardNameApproval({ approval, state, helperPath: searchHelperPath });
   let gateDecision = controlledTrigger
     ? { decision: PRIVILEGED_GATE_DECISION.AUTO_ALLOW, reason: 'controlled current-session trigger operation' }
@@ -3243,7 +3393,40 @@ export async function trackCodexAppServerApprovalRequest(runId, state, parsed, p
   if (state.reviewStopped) return null;
   await recordGateDecision(runId, state, approval, 'codex', gateDecision);
   if (state.reviewStopped) return null;
-  if (isUnattendedPermissionMode(state)
+  if (approval.providerMethod === 'item/tool/requestUserInput' && isUnattendedPermissionMode(state)) {
+    if (approval.isBlocking === false || state.headlessUnattended === true) {
+      const message = buildCodexAppServerApprovalResponseMessage(approval, 'approve', { emptySkip: true });
+      if (message && proc) {
+        writeCodexAppServerMessage(proc, message);
+        await appendRunSpoolRecord(runId, {
+          ts: nowIso(),
+          stream: 'stdout',
+          json: {
+            type: 'ragent.approval_response',
+            approvalId: approval.approvalId,
+            provider: 'codex',
+            decision: 'approved',
+            status: 'approved',
+            providerRequestId: approval.providerRequestIdString || String(approval.providerRequestId ?? ''),
+            providerMethod: approval.providerMethod || '',
+            autoApproved: true,
+            reason: approval.isBlocking === false
+              ? 'unattended: non-blocking user input resolved empty'
+              : 'unattended: headless user input resolved empty',
+          },
+        });
+      }
+      if (userInputKey) {
+        state.resolvedUserInputKeys ||= new Set();
+        state.resolvedUserInputKeys.add(userInputKey);
+      }
+      const record = markApprovalRecordAutoResponded(
+        serializeCodexAppServerApprovalForRun(approval, gateDecision.risk, gateDecision),
+      );
+      if (record) state.pendingApprovals.set(approval.approvalId, record);
+      return record;
+    }
+  } else if (isUnattendedPermissionMode(state)
       && gateDecision.decision !== PRIVILEGED_GATE_DECISION.AUTO_ALLOW) {
     return denyUnattendedPermissionRequest(runId, state, approval, proc, 'codex', gateDecision);
   }
@@ -3749,9 +3932,92 @@ function findPendingCodexAppServerApproval(state, run, approvalId) {
   return pending.find((entry) => entry?.approvalId === approvalId) || null;
 }
 
-async function markCodexAppServerApprovalResponseSent(runId, responseEntry, sentPayload = {}) {
+function codexApprovalSecretInfo(pending) {
+  const secretQuestionIds = new Set();
+  const secretQuestionIndices = new Set();
+  const secretElicitationFields = new Set();
+  if (pending?.providerMethod === 'item/tool/requestUserInput') {
+    const questions = Array.isArray(pending?.params?.questions) ? pending.params.questions : [];
+    for (let index = 0; index < questions.length; index += 1) {
+      const q = questions[index];
+      if (q?.isSecret === true) {
+        secretQuestionIndices.add(index);
+        const qid = typeof (q.id || q.key || q.name) === 'string' && (q.id || q.key || q.name).trim()
+          ? (q.id || q.key || q.name).trim()
+          : `question_${index + 1}`;
+        secretQuestionIds.add(qid);
+      }
+    }
+  } else if (pending?.providerMethod === 'mcpServer/elicitation/request') {
+    const classified = classifyCodexMcpElicitation(pending?.params || {});
+    const props = classified.requestedSchema?.properties;
+    if (props && typeof props === 'object' && !Array.isArray(props)) {
+      for (const [key, prop] of Object.entries(props)) {
+        if (prop && typeof prop === 'object' && (String(prop.format || '').toLowerCase() === 'password' || prop.writeOnly === true)) {
+          secretElicitationFields.add(key);
+        }
+      }
+    }
+  }
+  return {
+    hasSecret: secretQuestionIndices.size > 0 || secretElicitationFields.size > 0,
+    secretQuestionIds,
+    secretQuestionIndices,
+    secretElicitationFields,
+  };
+}
+
+function redactCodexApprovalSentPayload(pending, message) {
+  const info = codexApprovalSecretInfo(pending);
+  if (!info.hasSecret || !message || typeof message !== 'object') return message;
+  const cloned = JSON.parse(JSON.stringify(message));
+  if (pending?.providerMethod === 'item/tool/requestUserInput' && cloned.result?.answers && typeof cloned.result.answers === 'object') {
+    for (const qid of Object.keys(cloned.result.answers)) {
+      if (info.secretQuestionIds.has(qid) && cloned.result.answers[qid]) {
+        cloned.result.answers[qid] = { answers: ['[redacted]'] };
+      }
+    }
+  }
+  if (pending?.providerMethod === 'mcpServer/elicitation/request' && cloned.result?.content && typeof cloned.result.content === 'object') {
+    for (const key of info.secretElicitationFields) {
+      if (Object.hasOwn(cloned.result.content, key)) {
+        cloned.result.content[key] = '[redacted]';
+      }
+    }
+  }
+  return cloned;
+}
+
+function redactCodexApprovalQueueEntry(pending, entry) {
+  const info = codexApprovalSecretInfo(pending);
+  if (!info.hasSecret || !entry || typeof entry !== 'object') return entry;
+  const next = { ...entry, redacted: true };
+  if (typeof next.customAnswer === 'string' && next.customAnswer) next.customAnswer = '[redacted]';
+  if (Array.isArray(next.customAnswers)) {
+    next.customAnswers = next.customAnswers.map((val, idx) => (info.secretQuestionIndices.has(idx) && val ? '[redacted]' : val));
+  }
+  if (next.answers && typeof next.answers === 'object' && !Array.isArray(next.answers)) {
+    const scrubbed = {};
+    for (const [key, val] of Object.entries(next.answers)) {
+      scrubbed[key] = info.secretQuestionIds.has(key) ? { answers: ['[redacted]'] } : val;
+    }
+    next.answers = scrubbed;
+  }
+  if (next.elicitationContent && typeof next.elicitationContent === 'object' && !Array.isArray(next.elicitationContent)) {
+    const scrubbed = { ...next.elicitationContent };
+    for (const key of info.secretElicitationFields) {
+      if (Object.hasOwn(scrubbed, key)) scrubbed[key] = '[redacted]';
+    }
+    next.elicitationContent = scrubbed;
+  }
+  return next;
+}
+
+async function markCodexAppServerApprovalResponseSent(runId, responseEntry, sentPayload = {}, pending = null) {
   if (!runId || !responseEntry?.approvalId) return;
   const decision = formatCodexAppServerApprovalDecision(responseEntry.decision);
+  const redactedPayload = redactCodexApprovalSentPayload(pending, sentPayload);
+  const redactedEntry = redactCodexApprovalQueueEntry(pending, responseEntry);
   await updateRun(runId, (current) => ({
     ...current,
     appServerPendingApprovals: Array.isArray(current?.appServerPendingApprovals)
@@ -3770,11 +4036,11 @@ async function markCodexAppServerApprovalResponseSent(runId, responseEntry, sent
       ? current.appServerApprovalResponseQueue.map((entry) => (
         entry?.id === responseEntry.id
           ? {
-              ...entry,
+              ...redactedEntry,
               state: 'sent',
               decision,
               sentAt: entry.sentAt || nowIso(),
-              response: sentPayload,
+              response: redactedPayload,
             }
           : entry
       ))
@@ -3797,15 +4063,29 @@ export async function flushCodexAppServerApprovalResponses(proc, state, run) {
     if (!decision) continue;
     const pending = findPendingCodexAppServerApproval(state, run, approvalId);
     if (!pending) continue;
-    const message = buildCodexAppServerApprovalResponseMessage(pending, decision);
+    const message = buildCodexAppServerApprovalResponseMessage(pending, decision, {
+      choices: entry?.choices,
+      customAnswer: entry?.customAnswer,
+      customAnswers: entry?.customAnswers,
+      multiChoices: entry?.multiChoices,
+      answers: entry?.answers,
+      emptySkip: entry?.emptySkip === true,
+      elicitationContent: entry?.elicitationContent,
+    });
     if (!message) continue;
     if (writeCodexAppServerMessage(proc, message)) {
       state.sentApprovalResponseIds.add(responseId);
       const inMemoryPending = state.pendingApprovals.get(approvalId);
       if (inMemoryPending) inMemoryPending.state = 'responded';
+      const userInputKey = codexUserInputKey(pending);
+      if (userInputKey) {
+        state.resolvedUserInputKeys ||= new Set();
+        state.resolvedUserInputKeys.add(userInputKey);
+      }
       clearPrivilegedBatchOpenIfResolved(state);
       state.lastControlActivityAt = Date.now();
       const formattedDecision = formatCodexAppServerApprovalDecision(decision);
+      const hasSecret = codexApprovalSecretInfo(pending).hasSecret;
       // DS-14: line was a pure duplicate of json — readers prefer `json`.
       await appendRunSpoolRecord(run.id, {
         ts: nowIso(),
@@ -3818,6 +4098,7 @@ export async function flushCodexAppServerApprovalResponses(proc, state, run) {
           status: formattedDecision === 'denied' || formattedDecision === 'cancelled' ? 'denied' : 'approved',
           providerRequestId: pending.providerRequestIdString || String(pending.providerRequestId ?? ''),
           providerMethod: pending.providerMethod || '',
+          ...(hasSecret ? { redacted: true } : {}),
           ...(entry?.privilegedBatchId ? { privilegedBatchId: entry.privilegedBatchId } : {}),
           ...(entry?.privilegedOpId ? { privilegedOpId: entry.privilegedOpId } : {}),
           ...(entry?.privilegedCategory ? { privilegedCategory: entry.privilegedCategory } : {}),
@@ -3827,8 +4108,110 @@ export async function flushCodexAppServerApprovalResponses(proc, state, run) {
           ...riskAuditFields(pending),
         },
       });
-      await markCodexAppServerApprovalResponseSent(run.id, entry, message);
+      await markCodexAppServerApprovalResponseSent(run.id, entry, message, pending);
     }
+  }
+}
+
+async function handleCodexServerRequestResolved(runId, state, parsed) {
+  if (!state || parsed?.method !== 'serverRequest/resolved') return false;
+  const requestId = parsed.params?.requestId;
+  if (requestId === undefined || requestId === null || requestId === '') return false;
+  const requestIdStr = String(requestId);
+  let matched = null;
+  if (state.pendingApprovals instanceof Map) {
+    for (const entry of state.pendingApprovals.values()) {
+      if (entry?.providerRequestIdString === requestIdStr || String(entry?.providerRequestId ?? '') === requestIdStr) {
+        matched = entry;
+        break;
+      }
+    }
+  }
+  if (!matched || matched.state === 'responded') return Boolean(matched);
+  matched.state = 'responded';
+  matched.decision = 'cancelled';
+  matched.respondedAt = nowIso();
+  const userInputKey = codexUserInputKey(matched);
+  if (userInputKey) {
+    state.resolvedUserInputKeys ||= new Set();
+    state.resolvedUserInputKeys.add(userInputKey);
+  }
+  clearPrivilegedBatchOpenIfResolved(state);
+  state.lastControlActivityAt = Date.now();
+  await updateRun(runId, (current) => ({
+    ...current,
+    appServerPendingApprovals: Array.isArray(current?.appServerPendingApprovals)
+      ? current.appServerPendingApprovals.map((entry) => (
+        entry?.approvalId === matched.approvalId
+          ? { ...entry, state: 'responded', decision: 'cancelled', respondedAt: matched.respondedAt }
+          : entry
+      ))
+      : [],
+  }));
+  await appendRunSpoolRecord(runId, {
+    ts: nowIso(),
+    stream: 'stdout',
+    json: {
+      type: 'ragent.approval_response',
+      approvalId: matched.approvalId,
+      provider: 'codex',
+      decision: 'cancelled',
+      status: 'cancelled',
+      source: 'codex-server-request-resolved',
+      providerRequestId: matched.providerRequestIdString || requestIdStr,
+      providerMethod: matched.providerMethod || '',
+    },
+  });
+  return true;
+}
+
+async function checkCodexNonBlockingUserInputDeadlines(proc, state, run) {
+  if (!state || state.terminalSeen || !(state.pendingApprovals instanceof Map)) return;
+  const now = Date.now();
+  const responseQueue = Array.isArray(run?.appServerApprovalResponseQueue)
+    ? run.appServerApprovalResponseQueue
+    : [];
+  for (const entry of state.pendingApprovals.values()) {
+    if (!entry || entry.state === 'responded') continue;
+    if (entry.providerMethod !== 'item/tool/requestUserInput' || entry.isBlocking !== false) continue;
+    if (!Number.isFinite(entry.softDeadlineAtMs) || now < entry.softDeadlineAtMs) continue;
+    if (responseQueue.some((item) => item?.approvalId === entry.approvalId)) continue;
+    const message = buildCodexAppServerApprovalResponseMessage(entry, 'approve', { emptySkip: true });
+    if (!message || !writeCodexAppServerMessage(proc, message)) continue;
+    entry.state = 'responded';
+    entry.decision = 'approved';
+    entry.respondedAt = nowIso();
+    const userInputKey = codexUserInputKey(entry);
+    if (userInputKey) {
+      state.resolvedUserInputKeys ||= new Set();
+      state.resolvedUserInputKeys.add(userInputKey);
+    }
+    state.lastControlActivityAt = now;
+    await updateRun(run.id, (current) => ({
+      ...current,
+      appServerPendingApprovals: Array.isArray(current?.appServerPendingApprovals)
+        ? current.appServerPendingApprovals.map((item) => (
+          item?.approvalId === entry.approvalId
+            ? { ...item, state: 'responded', decision: 'approved', respondedAt: entry.respondedAt }
+            : item
+        ))
+        : [],
+    }));
+    await appendRunSpoolRecord(run.id, {
+      ts: nowIso(),
+      stream: 'stdout',
+      json: {
+        type: 'ragent.approval_response',
+        approvalId: entry.approvalId,
+        provider: 'codex',
+        decision: 'approved',
+        status: 'approved',
+        autoResolved: true,
+        source: 'codex-nonblocking-timeout',
+        providerRequestId: entry.providerRequestIdString || String(entry.providerRequestId ?? ''),
+        providerMethod: entry.providerMethod || '',
+      },
+    });
   }
 }
 
@@ -6132,6 +6515,7 @@ async function main() {
       const current = await getRun(runId);
       if (appServerState) {
         await flushCodexAppServerApprovalResponses(proc, appServerState, current);
+        await checkCodexNonBlockingUserInputDeadlines(proc, appServerState, current);
         await flushCodexAppServerSteerQueue(proc, appServerState, current);
       }
       if (claudeBidiState) {
@@ -6645,6 +7029,7 @@ async function main() {
       }
     }
     if (appServerState && parsed && await consumeFactorySteerResponse(runId, appServerState, parsed)) return;
+    if (appServerState && parsed && await consumeCodexAppServerSteerResponse(runId, appServerState, parsed)) return;
     if (appServerState && parsed && await maybeConsumeCodexAppServerGoalResponse(runId, appServerState, parsed)) {
       return;
     }
@@ -6798,6 +7183,7 @@ async function main() {
     );
     if (appServerState && parsed && !foreignCodexThreadEvent) {
       await trackCodexAppServerApprovalRequest(runId, appServerState, parsed, proc);
+      await handleCodexServerRequestResolved(runId, appServerState, parsed);
     }
     if (claudeBidiState && parsed) {
       const isApproval = Boolean(readClaudeBidiApprovalRequest(parsed)?.approvalId);
@@ -7994,8 +8380,8 @@ async function main() {
       await waitForControlFlush();
       await waitForStdoutProcessing();
       await flushPendingClaudeThinkingTokens();
-      if (appServerState?.sentSteerIds?.size) {
-        await markCodexAppServerSteerSent(runId, [...appServerState.sentSteerIds]);
+      if (appServerState?.confirmedSteerIds?.size) {
+        await markCodexAppServerSteerSent(runId, [...appServerState.confirmedSteerIds]);
       }
       if (claudeBidiState?.sentSteerIds?.size) {
         await markClaudeBidiSteerSent(runId, [...claudeBidiState.sentSteerIds]);
@@ -8055,8 +8441,8 @@ async function main() {
       await waitForControlFlush();
       await waitForStdoutProcessing();
       await flushPendingClaudeThinkingTokens();
-      if (appServerState?.sentSteerIds?.size) {
-        await markCodexAppServerSteerSent(runId, [...appServerState.sentSteerIds]);
+      if (appServerState?.confirmedSteerIds?.size) {
+        await markCodexAppServerSteerSent(runId, [...appServerState.confirmedSteerIds]);
       }
       if (claudeBidiState?.sentSteerIds?.size) {
         await markClaudeBidiSteerSent(runId, [...claudeBidiState.sentSteerIds]);

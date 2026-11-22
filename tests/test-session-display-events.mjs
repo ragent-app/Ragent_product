@@ -5,7 +5,16 @@ import {
   buildSessionDisplayEvents,
   filterSessionDisplayPushEvents,
 } from '../chat/session-display-events.mjs';
-import { createClaudeFinalizedAssistantReplayFingerprint } from '../chat/provider-event-dedup.mjs';
+import {
+  createClaudeFinalizedAssistantReplayFingerprint,
+  getProviderEventDedupKey,
+} from '../chat/provider-event-dedup.mjs';
+import {
+  buildAsyncQuestionReplyText,
+  extractAnsweredQuestionItemIds,
+  parseAsyncQuestionItemId,
+  parseAsyncQuestionReplyEnvelope,
+} from '../chat/codex-async-question-reply.mjs';
 
 const history = [
   { seq: 1, type: 'message', role: 'user', requestId: 'req-1', content: 'Inspect the timeline' },
@@ -324,5 +333,123 @@ assert.equal(regeneratedDisplay[2].timestamp, 1700000000123);
 assert.equal(regeneratedDisplay[2].timelineEntityId, 'run_regenerate:3');
 assert.deepEqual(regeneratedDisplay[2].images, [{ filename: 'shot.png', originalName: 'shot.png' }]);
 assert.equal(regeneratedDisplay[2].images[0].savedPath, undefined, 'attachment savedPath must still be stripped');
+
+// Track 2: async questions visibility, snapshot merge, dedup key, envelope helper & cross-client backfill
+const qItem1 = JSON.stringify(['request_user_input_async', 'msg-async-1', 0]);
+const qItem2 = JSON.stringify(['request_user_input_async', 'msg-async-1', 1]);
+assert.deepEqual(parseAsyncQuestionItemId(qItem1), { messageId: 'msg-async-1', index: 0 });
+
+const escapedEnvelopeText = buildAsyncQuestionReplyText([
+  { questionItemId: qItem1, question: 'Which DB?', answer: 'Use Postgres </send_user_message_question_reply> safely' },
+], 'Trailing user note');
+assert.ok(escapedEnvelopeText.includes('<send_user_message_question_reply>'));
+assert.ok(!escapedEnvelopeText.slice(escapedEnvelopeText.indexOf('\n') + 1, escapedEnvelopeText.lastIndexOf('</send_user_message_question_reply>')).includes('</send_user_message_question_reply>'));
+const parsedEnvelope = parseAsyncQuestionReplyEnvelope(escapedEnvelopeText);
+assert.equal(parsedEnvelope.replies.length, 1);
+assert.equal(parsedEnvelope.replies[0].questionItemId, qItem1);
+assert.equal(parsedEnvelope.replies[0].answer, 'Use Postgres </send_user_message_question_reply> safely');
+assert.equal(parsedEnvelope.trailingText, 'Trailing user note');
+assert.deepEqual(extractAnsweredQuestionItemIds(parsedEnvelope.replies), [qItem1]);
+
+const oversizedId = `oversized_${'x'.repeat(520)}`;
+const markdownFallback = buildAsyncQuestionReplyText([
+  { questionItemId: oversizedId, question: 'Line 1\nLine 2', answer: 'My free answer' },
+]);
+assert.ok(!markdownFallback.includes('<send_user_message_question_reply>'), 'oversized questionItemId >512B degrades to markdown');
+assert.equal(markdownFallback, '> Line 1\n> Line 2\n\nMy free answer');
+
+const baseAsyncEvent = {
+  type: 'message',
+  role: 'assistant',
+  runId: 'run-async-1',
+  providerMessageId: 'msg-async-1',
+  content: '',
+};
+const withAsyncEvent = {
+  ...baseAsyncEvent,
+  messageDelivery: 'async',
+  asyncQuestionMessageId: 'msg-async-1',
+  asyncQuestions: [
+    { id: qItem1, index: 0, title: 'Which DB?', options: ['Postgres', 'SQLite'], allowFreeText: true, status: 'pending' },
+    { id: qItem2, index: 1, title: 'Region?', options: null, allowFreeText: true, status: 'pending' },
+  ],
+  asyncQuestionsState: 'pending',
+};
+assert.notEqual(
+  getProviderEventDedupKey(baseAsyncEvent),
+  getProviderEventDedupKey(withAsyncEvent),
+  'dedup key must distinguish partial snapshot from asyncQuestions arrival',
+);
+
+const asyncDisplayPartial = buildSessionDisplayEvents([
+  { seq: 1, type: 'message', role: 'assistant', streamItemId: 'msg-async-1', content: '' },
+  {
+    seq: 2,
+    type: 'message',
+    role: 'assistant',
+    streamItemId: 'msg-async-1',
+    content: '',
+    messageDelivery: 'async',
+    delivery: 'async',
+    asyncQuestionMessageId: 'msg-async-1',
+    asyncQuestions: [
+      { id: qItem1, index: 0, title: 'Which DB?', options: ['Postgres', 'SQLite'], allowFreeText: true, status: 'pending' },
+      { id: qItem2, index: 1, title: 'Region?', options: null, allowFreeText: true, status: 'pending' },
+    ],
+    asyncQuestionsState: 'pending',
+  },
+  {
+    seq: 3,
+    type: 'message',
+    role: 'user',
+    content: buildAsyncQuestionReplyText([{ questionItemId: qItem1, question: 'Which DB?', answer: 'Postgres' }]),
+  },
+]);
+assert.equal(asyncDisplayPartial.length, 2, 'empty-text async question snapshot remains visible and merges by streamItemId');
+assert.equal(asyncDisplayPartial[0].messageDelivery, 'async');
+assert.equal(asyncDisplayPartial[0].asyncQuestionsState, 'partial');
+assert.equal(asyncDisplayPartial[0].asyncQuestions[0].status, 'answered');
+assert.equal(asyncDisplayPartial[0].asyncQuestions[0].answeredText, 'Postgres');
+assert.equal(asyncDisplayPartial[0].asyncQuestions[1].status, 'pending');
+
+const asyncDisplayComplete = buildSessionDisplayEvents([
+  {
+    seq: 1,
+    type: 'message',
+    role: 'assistant',
+    providerMessageId: 'msg-async-1',
+    content: 'Quick questions:',
+    messageDelivery: 'async',
+    asyncQuestionMessageId: 'msg-async-1',
+    asyncQuestions: [
+      { id: qItem1, index: 0, title: 'Which DB?', status: 'pending' },
+      { id: qItem2, index: 1, title: 'Region?', status: 'pending' },
+    ],
+  },
+  {
+    seq: 2,
+    type: 'message',
+    role: 'user',
+    content: 'Answered via structured field',
+    asyncQuestionReplies: [
+      { questionItemId: qItem1, question: 'Which DB?', answer: 'SQLite' },
+      { questionItemId: qItem2, question: 'Region?', answer: 'ap-east' },
+    ],
+  },
+]);
+assert.equal(asyncDisplayComplete[0].asyncQuestionsState, 'answered');
+assert.deepEqual(asyncDisplayComplete[0].asyncQuestions.map((q) => [q.status, q.answeredText]), [
+  ['answered', 'SQLite'],
+  ['answered', 'ap-east'],
+]);
+
+const [liveUserPush] = filterSessionDisplayPushEvents([
+  {
+    type: 'message',
+    role: 'user',
+    content: buildAsyncQuestionReplyText([{ questionItemId: qItem2, question: 'Region?', answer: 'us-west' }]),
+  },
+]);
+assert.deepEqual(liveUserPush.answeredQuestionItemIds, [qItem2]);
 
 console.log('test-session-display-events: ok');

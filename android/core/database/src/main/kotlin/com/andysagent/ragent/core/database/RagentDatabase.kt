@@ -23,13 +23,19 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TargetRuntimeSummaryEventEntity::class,
         TargetRuntimeSummaryCursorEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class RagentDatabase : RoomDatabase() {
     abstract fun dao(): RagentDao
 
     companion object {
+        val MIGRATION_16_17: Migration = object : Migration(16, 17) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE messages ADD COLUMN metadataJson TEXT")
+                database.execSQL("ALTER TABLE timeline_message_staging ADD COLUMN metadataJson TEXT")
+            }
+        }
         val MIGRATION_15_16: Migration = object : Migration(15, 16) {
             override fun migrate(database: SupportSQLiteDatabase) {
                 database.execSQL("CREATE TABLE IF NOT EXISTS run_durations (sessionId TEXT NOT NULL, runId TEXT NOT NULL, durationMs INTEGER NOT NULL, PRIMARY KEY(sessionId, runId))")
@@ -212,6 +218,7 @@ abstract class RagentDatabase : RoomDatabase() {
             MIGRATION_13_14,
             MIGRATION_14_15,
             MIGRATION_15_16,
+            MIGRATION_16_17,
         ).build()
     }
 }

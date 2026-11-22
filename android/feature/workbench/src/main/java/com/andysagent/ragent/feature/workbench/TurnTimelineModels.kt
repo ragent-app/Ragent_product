@@ -96,13 +96,18 @@ internal fun latestTurnHasTerminalRun(items: List<TimelineItem>, pending: Pendin
     return sessionStatus in terminal || matchingRun
 }
 
+internal fun TimelineItem.isProtectedAsyncEntry(): Boolean =
+    this is TimelineItem.Message &&
+        (asyncQuestions.isNotEmpty() || messageDelivery.equals("async", ignoreCase = true))
+
 /** Preserve explicit final phases; at terminal state, recover a missing final phase from the last completed reply. */
 internal fun splitTurnEntries(
     entries: List<TimelineItem>,
     allowTerminalFallback: Boolean = false,
 ): Pair<List<TimelineItem>, List<TimelineItem>> {
     val explicitIndex = entries.indexOfLast {
-        it is TimelineItem.Message && it.role == TimelineRole.Agent && it.messagePhase == "final_answer"
+        it is TimelineItem.Message && it.role == TimelineRole.Agent && it.messagePhase == "final_answer" &&
+            !it.isProtectedAsyncEntry()
     }
     val finalIndex = if (explicitIndex >= 0) explicitIndex else if (allowTerminalFallback) {
         // Durable reasoning blocks can be emitted after a finalized assistant
@@ -110,16 +115,26 @@ internal fun splitTurnEntries(
         // the actual reply when the turn is complete.
         entries.indexOfLast { entry ->
             entry is TimelineItem.Message && entry.role == TimelineRole.Agent && entry.completed &&
-                entry.messagePhase?.lowercase() in setOf(null, "commentary")
+                entry.messagePhase?.lowercase() in setOf(null, "commentary") &&
+                !entry.isProtectedAsyncEntry()
         }
     } else -1
-    if (finalIndex < 0) return if (allowTerminalFallback) entries to emptyList() else emptyList<TimelineItem>() to entries
+    if (finalIndex < 0) {
+        if (!allowTerminalFallback) return emptyList<TimelineItem>() to entries
+        val protected = entries.filter { it.isProtectedAsyncEntry() }
+        val process = entries.filterNot { it.isProtectedAsyncEntry() }
+        return process to protected
+    }
     // Late-arriving entries still belong to the run's process, even if a
     // finalized snapshot was projected before them.
     val afterFinal = entries.drop(finalIndex + 1)
     val lateCollaboration = afterFinal.filter { it is TimelineItem.Notice && it.id.startsWith("collaboration:") }
-    return (entries.take(finalIndex) + afterFinal.filterNot { it in lateCollaboration }) to
-        (listOf(entries[finalIndex]) + lateCollaboration)
+    val protectedBeforeFinal = entries.take(finalIndex).filter { it.isProtectedAsyncEntry() }
+    val protectedAfterFinal = afterFinal.filter { it.isProtectedAsyncEntry() }
+    val processEntries = entries.take(finalIndex).filterNot { it.isProtectedAsyncEntry() } +
+        afterFinal.filterNot { it in lateCollaboration || it.isProtectedAsyncEntry() }
+    val outsideEntries = protectedBeforeFinal + listOf(entries[finalIndex]) + lateCollaboration + protectedAfterFinal
+    return processEntries to outsideEntries
 }
 
 internal fun activeRunTurnIndex(turns: List<TurnGroup>, runId: String?, requestId: String?): Int {

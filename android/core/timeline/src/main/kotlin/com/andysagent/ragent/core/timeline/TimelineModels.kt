@@ -1,6 +1,16 @@
 package com.andysagent.ragent.core.timeline
 
+import com.andysagent.ragent.core.model.AsyncQuestion
+import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.SessionStatus
+import com.andysagent.ragent.core.protocol.AsyncAnswerMatchSource
+import com.andysagent.ragent.core.protocol.MessageMetadataSnapshot
+import com.andysagent.ragent.core.protocol.buildAnsweredQuestionIndex
+import com.andysagent.ragent.core.protocol.decodeMessageMetadataJson
+import com.andysagent.ragent.core.protocol.encodeMessageMetadataSnapshot
+import com.andysagent.ragent.core.protocol.mergeMessageMetadataJson
+import com.andysagent.ragent.core.protocol.toDomain
+import com.andysagent.ragent.core.protocol.toDto
 
 enum class TimelineRole { User, Agent, System }
 
@@ -53,6 +63,13 @@ sealed interface TimelineItem {
         val lastEventSeq: Long = seq,
         val messageState: String = if (completed) "completed" else "streaming",
         val messagePhase: String? = null,
+        val metadataJson: String? = null,
+        val messageDelivery: String? = null,
+        val asyncQuestionMessageId: String? = null,
+        val asyncQuestions: List<AsyncQuestion> = emptyList(),
+        val asyncQuestionsState: String? = null,
+        val asyncQuestionReplies: List<AsyncQuestionReply> = emptyList(),
+        val answeredQuestionItemIds: List<String> = emptyList(),
     ) : TimelineItem
 
     data class Operation(
@@ -173,6 +190,7 @@ data class TimelineEvent(
     val messagePhase: String? = null,
     val lastEventSeq: Long? = null,
     val beforeAssistantAtSameSeq: Boolean = false,
+    val metadataJson: String? = null,
     )
 
 data class TimelineUiState(
@@ -298,8 +316,20 @@ class TimelineEngine {
             val entityKey = event.entityId ?: event.id
             val current = latestEventByEntity[entityKey]
             if (current == null || isNewer(event, current)) {
-                latestEventByEntity[entityKey] = if (current == null) event else event.copy(seq = current.seq)
+                val mergedMetadata = if (current == null) event.metadataJson
+                    else mergeMessageMetadataJson(current.metadataJson, event.metadataJson)
+                latestEventByEntity[entityKey] = if (current == null) {
+                    event
+                } else {
+                    event.copy(seq = current.seq, metadataJson = mergedMetadata)
+                }
                 cachedSnapshot = null
+            } else {
+                val mergedMetadata = mergeMessageMetadataJson(current.metadataJson, event.metadataJson)
+                if (mergedMetadata != current.metadataJson) {
+                    latestEventByEntity[entityKey] = current.copy(metadataJson = mergedMetadata)
+                    cachedSnapshot = null
+                }
             }
             event.requestId?.takeIf { it.isNotBlank() }?.let { operationByRequest[it] = event.id }
         }
@@ -317,10 +347,11 @@ class TimelineEngine {
 
     fun snapshot(): List<TimelineItem> {
         cachedSnapshot?.let { return it }
-        return latestEventByEntity.values
-            .sortedWith(compareBy<TimelineEvent> { it.seq }.thenBy { if (it.role == TimelineRole.User && it.messageState != null) 0 else if (it.beforeAssistantAtSameSeq) 1 else 2 }.thenBy { it.id })
-            .map(::toItem)
-            .also { cachedSnapshot = it }
+        return reconcileTimelineAsyncQuestions(
+            latestEventByEntity.values
+                .sortedWith(compareBy<TimelineEvent> { it.seq }.thenBy { if (it.role == TimelineRole.User && it.messageState != null) 0 else if (it.beforeAssistantAtSameSeq) 1 else 2 }.thenBy { it.id })
+                .map(::toItem),
+        ).also { cachedSnapshot = it }
     }
 
     private fun sameIdentity(previous: TimelineEvent, incoming: TimelineEvent): Boolean =
@@ -402,21 +433,29 @@ class TimelineEngine {
         if (type.contains("approval") || type.contains("confirmation") || type.contains("error") || type.contains("system")) {
             return TimelineItem.Notice(renderId, event.seq, event.text.orEmpty(), event.requestId, event.runId)
         }
-            return TimelineItem.Message(
+        val metadata = decodeMessageMetadataJson(event.metadataJson)
+        return TimelineItem.Message(
             id = renderId,
             seq = event.seq,
             role = event.role ?: if (type.contains("user")) TimelineRole.User else TimelineRole.Agent,
             text = event.text.orEmpty(),
             completed = event.messageState?.let { it != "streaming" }
                 ?: (!type.contains("delta") && !type.contains("stream") && event.operationStatus != TimelineOperationStatus.InProgress),
-                attachments = event.attachments,
-                requestId = event.requestId,
-                runId = event.runId,
-                revision = event.revision ?: 0,
-                lastEventSeq = event.lastEventSeq ?: event.seq,
-                messageState = event.messageState ?: if (type.contains("delta")) "streaming" else "completed",
-                messagePhase = event.messagePhase,
-            )
+            attachments = event.attachments,
+            requestId = event.requestId,
+            runId = event.runId,
+            revision = event.revision ?: 0,
+            lastEventSeq = event.lastEventSeq ?: event.seq,
+            messageState = event.messageState ?: if (type.contains("delta")) "streaming" else "completed",
+            messagePhase = event.messagePhase,
+            metadataJson = event.metadataJson,
+            messageDelivery = metadata?.messageDelivery,
+            asyncQuestionMessageId = metadata?.asyncQuestionMessageId,
+            asyncQuestions = metadata?.asyncQuestions?.map { it.toDomain() }.orEmpty(),
+            asyncQuestionsState = metadata?.asyncQuestionsState,
+            asyncQuestionReplies = metadata?.asyncQuestionReplies?.map { it.toDomain() }.orEmpty(),
+            answeredQuestionItemIds = metadata?.answeredQuestionItemIds.orEmpty(),
+        )
     }
 
     private fun kindFromType(type: String): TimelineOperationKind = when {
@@ -503,6 +542,25 @@ object TimelineProjector {
                 messageState = message.messageState,
                 messagePhase = message.messagePhase,
                 lastEventSeq = message.lastEventSeq,
+                metadataJson = message.metadataJson ?: encodeMessageMetadataSnapshot(
+                    if (
+                        message.messageDelivery != null ||
+                        message.asyncQuestionMessageId != null ||
+                        message.asyncQuestions.isNotEmpty() ||
+                        message.asyncQuestionsState != null ||
+                        message.asyncQuestionReplies.isNotEmpty() ||
+                        message.answeredQuestionItemIds.isNotEmpty()
+                    ) {
+                        MessageMetadataSnapshot(
+                            messageDelivery = message.messageDelivery,
+                            asyncQuestionMessageId = message.asyncQuestionMessageId,
+                            asyncQuestions = message.asyncQuestions.map { it.toDto() },
+                            asyncQuestionsState = message.asyncQuestionsState,
+                            asyncQuestionReplies = message.asyncQuestionReplies.map { it.toDto() },
+                            answeredQuestionItemIds = message.answeredQuestionItemIds,
+                        )
+                    } else null,
+                ),
                 attachments = message.attachments.map { attachment ->
                     AttachmentItem(
                         assetId = attachment.assetId,
@@ -546,10 +604,33 @@ fun mergeTimelineItems(primary: List<TimelineItem>, secondary: List<TimelineItem
         val key = timelineMergeKey(incoming)
         merged[key] = merged[key]?.let { preferTimelineItem(it, incoming) } ?: incoming
     }
-    return merged.values.sortedWith(compareBy<TimelineItem> { it.seq }.thenBy {
-        if (it is TimelineItem.Message && it.role == TimelineRole.User) 0
-        else if (it is TimelineItem.Operation && it.beforeAssistantAtSameSeq) 1 else 2
-    }.thenBy { it.id })
+    return reconcileTimelineAsyncQuestions(
+        merged.values.sortedWith(compareBy<TimelineItem> { it.seq }.thenBy {
+            if (it is TimelineItem.Message && it.role == TimelineRole.User) 0
+            else if (it is TimelineItem.Operation && it.beforeAssistantAtSameSeq) 1 else 2
+        }.thenBy { it.id }),
+    )
+}
+
+fun reconcileTimelineAsyncQuestions(items: List<TimelineItem>): List<TimelineItem> {
+    if (items.none { it is TimelineItem.Message && it.asyncQuestions.isNotEmpty() }) return items
+    val index = buildAnsweredQuestionIndex(
+        items.asSequence()
+            .filterIsInstance<TimelineItem.Message>()
+            .filter { it.role == TimelineRole.User }
+            .map { AsyncAnswerMatchSource(it.text, it.asyncQuestionReplies, it.answeredQuestionItemIds) }
+            .toList(),
+    )
+    if (index.isEmpty) return items
+    return items.map { item ->
+        if (item !is TimelineItem.Message || item.asyncQuestions.isEmpty()) return@map item
+        val (updated, changed) = index.resolve(item.asyncQuestions)
+        if (!changed) item
+        else item.copy(
+            asyncQuestions = updated,
+            asyncQuestionsState = index.resolvedState(updated, item.asyncQuestionsState),
+        )
+    }
 }
 
 private fun timelineMergeKey(item: TimelineItem): String {
@@ -601,12 +682,35 @@ private fun preferTimelineItem(current: TimelineItem, incoming: TimelineItem): T
         incoming.lastEventSeq > current.lastEventSeq -> incoming
         else -> current
     }
+    val mergedQuestions = when {
+        newer.asyncQuestions.isNotEmpty() -> {
+            val otherQuestions = (if (newer === current) incoming else current).asyncQuestions
+            if (otherQuestions.isEmpty()) newer.asyncQuestions
+            else {
+                val otherById = otherQuestions.associateBy { it.id }
+                newer.asyncQuestions.map { q ->
+                    val peer = otherById[q.id]
+                    if (peer != null && !q.isAnswered && peer.isAnswered) peer else q
+                }
+            }
+        }
+        current.asyncQuestions.isNotEmpty() -> current.asyncQuestions
+        else -> incoming.asyncQuestions
+    }
+    val mergedAnsweredIds = (current.answeredQuestionItemIds + incoming.answeredQuestionItemIds).distinct()
     return newer.copy(
         id = current.id, seq = minOf(current.seq, incoming.seq),
         attachments = newer.attachments.ifEmpty { current.attachments.ifEmpty { incoming.attachments } },
         requestId = newer.requestId ?: current.requestId ?: incoming.requestId,
         runId = newer.runId ?: current.runId ?: incoming.runId,
         messagePhase = newer.messagePhase ?: current.messagePhase ?: incoming.messagePhase,
+        metadataJson = mergeMessageMetadataJson(current.metadataJson, incoming.metadataJson),
+        messageDelivery = newer.messageDelivery ?: current.messageDelivery ?: incoming.messageDelivery,
+        asyncQuestionMessageId = newer.asyncQuestionMessageId ?: current.asyncQuestionMessageId ?: incoming.asyncQuestionMessageId,
+        asyncQuestions = mergedQuestions,
+        asyncQuestionsState = newer.asyncQuestionsState ?: current.asyncQuestionsState ?: incoming.asyncQuestionsState,
+        asyncQuestionReplies = newer.asyncQuestionReplies.ifEmpty { current.asyncQuestionReplies.ifEmpty { incoming.asyncQuestionReplies } },
+        answeredQuestionItemIds = mergedAnsweredIds,
     )
 }
 

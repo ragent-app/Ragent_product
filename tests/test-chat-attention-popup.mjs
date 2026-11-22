@@ -438,4 +438,168 @@ try {
   }
 }
 
+await (async () => {
+  const { default: assertMod } = await import('node:assert/strict');
+  const fsMod = await import('node:fs');
+  const vmMod = await import('node:vm');
+
+  function mkPopupEl(tag) {
+    const node = {
+      tagName: String(tag || 'DIV').toUpperCase(),
+      className: '',
+      children: [],
+      dataset: {},
+      attrs: {},
+      style: { setProperty() {}, removeProperty() {} },
+      listeners: {},
+      hidden: false,
+      disabled: false,
+      type: '',
+      value: '',
+      placeholder: '',
+      _text: '',
+      setAttribute(k, v) { this.attrs[k] = String(v); },
+      getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+      hasAttribute(k) { return k in this.attrs; },
+      removeAttribute(k) { delete this.attrs[k]; },
+      classList: {
+        add(...cs) { node.className = [...new Set([...node.className.split(/\s+/).filter(Boolean), ...cs])].join(' '); },
+        remove(...cs) { node.className = node.className.split(/\s+/).filter(Boolean).filter((c) => !cs.includes(c)).join(' '); },
+        toggle(c, f) { const has = this.contains(c); const next = f === undefined ? !has : Boolean(f); if (next) this.add(c); else this.remove(c); return next; },
+        contains(c) { return node.className.split(/\s+/).filter(Boolean).includes(c); },
+      },
+      appendChild(c) { c.parentNode = this; this.children.push(c); return c; },
+      append(...cs) { for (const c of cs) if (c) this.appendChild(typeof c === 'string' ? doc.createTextNode(c) : c); },
+      replaceChildren(...cs) { this.children = []; this.append(...cs); },
+      insertBefore(c, ref) { c.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i >= 0) this.children.splice(i, 0, c); else this.children.push(c); return c; },
+      remove() { if (this.parentNode) { const i = this.parentNode.children.indexOf(this); if (i >= 0) this.parentNode.children.splice(i, 1); } },
+      addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); },
+      querySelectorAll(sel) {
+        const out = [];
+        const cls = sel.startsWith('.') ? sel.slice(1).split(' ')[0] : null;
+        const walk = (n) => { for (const c of n.children || []) { if (cls ? c.classList?.contains(cls) : c.tagName === sel.toUpperCase()) out.push(c); walk(c); } };
+        walk(this);
+        return out;
+      },
+      querySelector(sel) { return this.querySelectorAll(sel)[0] || null; },
+      get firstChild() { return this.children[0] || null; },
+      get textContent() { return this._text || this.children.map((c) => c.textContent || '').join(''); },
+      set textContent(v) { this._text = String(v ?? ''); },
+      set innerHTML(v) { if (v === '') { this.children = []; this._text = ''; } },
+      closest() { return null; },
+    };
+    return node;
+  }
+
+  const body = mkPopupEl('body');
+  const doc = {
+    body,
+    createElement: mkPopupEl,
+    createTextNode: (t) => ({ textContent: String(t), children: [] }),
+    getElementById: () => null,
+    addEventListener: () => {},
+  };
+  const dispatched = [];
+  const ctx = {
+    window: null,
+    document: doc,
+    globalThis: null,
+    console,
+    setTimeout,
+    clearTimeout,
+    URL,
+    Map,
+    Set,
+    Array,
+    Object,
+    String,
+    Number,
+    Boolean,
+    Math,
+    JSON,
+    dispatchAction: async (p) => { dispatched.push(p); return { ok: true }; },
+  };
+  ctx.window = ctx;
+  ctx.globalThis = ctx;
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/ui.js', 'utf8'), ctx);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/attention-popup.js', 'utf8'), ctx);
+
+  // Track 1: multi-question + multiSelect + isSecret + isBlocking:false toggles & requires Submit (no immediate submit on option tap)
+  ctx.RagentAttentionPopup.onRealtimeEvents('s-bg', [{
+    type: 'approval_request',
+    approvalId: 'q-multi',
+    kind: 'question',
+    isBlocking: false,
+    questions: [
+      { question: 'Env?', options: ['Dev', 'Prod'] },
+      { question: 'Scopes?', options: ['Read', 'Write'], multiSelect: true, isSecret: true },
+    ],
+  }]);
+  let card = body.querySelector('.oneui-notification');
+  assertMod.ok(card.classList.contains('oneui-notification--detailed'));
+  assertMod.ok(card.querySelector('.oneui-notification__badge--nonblocking'));
+  const secretField = card.querySelector('.oneui-notification__question-input');
+  assertMod.equal(secretField.type, 'password');
+  assertMod.equal(secretField.getAttribute('autocomplete'), 'off');
+
+  const opts = card.querySelectorAll('.oneui-notification__choice');
+  opts[0].listeners.click[0]();
+  assertMod.equal(dispatched.length, 0, 'clicking Q1 option must not submit multi-question popup immediately');
+  opts[2].listeners.click[0]();
+  opts[3].listeners.click[0]();
+  secretField.value = 'sec-val';
+  secretField.listeners.input[0]();
+
+  const submitBtn = card.querySelectorAll('.oneui-notification__action').find((b) => b.classList.contains('oneui-notification__action--primary'));
+  assertMod.equal(submitBtn.disabled, false);
+  await submitBtn.listeners.click[0]();
+  assertMod.equal(dispatched.length, 1);
+  assertMod.equal(dispatched[0].decision, 'approve_with_multi_choices');
+  assertMod.equal(JSON.stringify(dispatched[0].choices), JSON.stringify([0, 0]));
+  assertMod.equal(JSON.stringify(dispatched[0].multiChoices), JSON.stringify([[0], [0, 1]]));
+  assertMod.equal(JSON.stringify(dispatched[0].customAnswers), JSON.stringify(['', 'sec-val']));
+
+  // Skip button on isBlocking:false submits emptySkip:true
+  const body2 = mkPopupEl('body');
+  const ctx2 = {
+    ...ctx,
+    window: null,
+    globalThis: null,
+    document: { ...doc, body: body2 },
+  };
+  ctx2.window = ctx2;
+  ctx2.globalThis = ctx2;
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/ui.js', 'utf8'), ctx2);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/attention-popup.js', 'utf8'), ctx2);
+  ctx2.RagentAttentionPopup.onRealtimeEvents('s-bg', [{
+    type: 'approval_request',
+    approvalId: 'q-skip',
+    kind: 'question',
+    isBlocking: false,
+    questions: [{ question: 'Optional?', options: ['A', 'B'] }],
+  }]);
+  const card2 = body2.querySelector('.oneui-notification');
+  const skipBtn = card2.querySelectorAll('.oneui-notification__action').find((b) => b.classList.contains('oneui-notification__skip-action'));
+  await skipBtn.listeners.click[0]();
+  assertMod.equal(dispatched[1].emptySkip, true);
+  assertMod.equal(dispatched[1].decision, 'approve');
+
+  // Track 3: unsupported openai/userVerification hides Approve and exposes Decline/Cancel only
+  const body3 = mkPopupEl('body');
+  const ctx3 = { ...ctx, window: null, globalThis: null, document: { ...doc, body: body3 } };
+  ctx3.window = ctx3;
+  ctx3.globalThis = ctx3;
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/ui.js', 'utf8'), ctx3);
+  vmMod.runInNewContext(fsMod.readFileSync('static/chat/attention-popup.js', 'utf8'), ctx3);
+  ctx3.RagentAttentionPopup.onRealtimeEvents('s-bg', [{
+    type: 'approval_request',
+    approvalId: 'el-uv',
+    kind: 'permissions',
+    elicitation: { mode: 'openai/userVerification', serverName: 'gh', message: 'Biometric check' },
+  }]);
+  const card3 = body3.querySelector('.oneui-notification');
+  const btnTexts = card3.querySelectorAll('.oneui-notification__action').map((b) => b.textContent);
+  assertMod.equal(JSON.stringify(btnTexts), JSON.stringify(['Decline', 'Cancel']));
+})();
+
 console.log('test-chat-attention-popup: ok');

@@ -3,6 +3,8 @@ package com.andysagent.ragent.core.domain
 import com.andysagent.ragent.core.model.Approval
 import com.andysagent.ragent.core.model.ApprovalOption
 import com.andysagent.ragent.core.model.ApprovalQuestion
+import com.andysagent.ragent.core.model.ElicitationKind
+import com.andysagent.ragent.core.model.ElicitationResponse
 import com.andysagent.ragent.core.network.ApiException
 import kotlinx.coroutines.CancellationException
 
@@ -170,6 +172,112 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
         }
     }
 
+    /** Skips a non-blocking question (`!approval.isBlocking`), submitting empty answers. */
+    suspend fun skipNonBlockingQuestion(
+        sessionId: String,
+        approvalId: String,
+        requestId: String = newRequestId(),
+    ): Outcome {
+        return when (val read = readPending(sessionId, approvalId)) {
+            is PendingRead.Error -> Outcome.Failed(read.message, read.outcomeUnknown)
+            is PendingRead.Missing -> Outcome.Stale
+            is PendingRead.Found -> {
+                val pending = read.approval
+                if (pending.status != "pending") return Outcome.Stale
+                if (pending.isBlocking) return Outcome.Failed("阻塞性问题必须回答后才能继续")
+                try {
+                    val runId = pending.runId
+                    if (runId != null) {
+                        repository.resolveRuntimeApprovalStructured(
+                            runId = runId,
+                            approvalId = approvalId,
+                            decision = "approve",
+                            emptySkip = true,
+                            requestId = requestId,
+                        )
+                    } else {
+                        repository.decideConfirmation(
+                            sessionId = sessionId,
+                            confirmationId = approvalId,
+                            decision = "approve",
+                            requestId = requestId,
+                        )
+                    }
+                    retireResolvedApproval(sessionId, approvalId)
+                    runCatching { repository.refreshSessionDetail(sessionId) }
+                    Outcome.Submitted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
+                    Outcome.Failed(error.message ?: "跳过失败", error.isAmbiguousApprovalSubmission())
+                }
+            }
+        }
+    }
+
+    /** Resolves an MCP elicitation (`accept` / `decline` / `cancel`) with optional structured content JSON. */
+    suspend fun resolveElicitation(
+        sessionId: String,
+        approvalId: String,
+        action: String,
+        contentJson: String? = null,
+        requestId: String = newRequestId(),
+    ): Outcome {
+        return when (val read = readPending(sessionId, approvalId)) {
+            is PendingRead.Error -> Outcome.Failed(read.message, read.outcomeUnknown)
+            is PendingRead.Missing -> Outcome.Stale
+            is PendingRead.Found -> {
+                val pending = read.approval
+                if (pending.status != "pending") return Outcome.Stale
+                val normalizedAction = action.trim().lowercase()
+                if (pending.elicitation?.resolvedKind == ElicitationKind.Unsupported && normalizedAction == "accept") {
+                    return Outcome.Failed("当前端暂不支持此验证方式，请拒绝或取消")
+                }
+                val decision = when (normalizedAction) {
+                    "accept", "approve" -> "approve"
+                    "cancel" -> "cancel"
+                    else -> "deny"
+                }
+                val responseAction = when (decision) {
+                    "approve" -> "accept"
+                    "cancel" -> "cancel"
+                    else -> "decline"
+                }
+                try {
+                    val runId = pending.runId
+                    if (runId != null) {
+                        repository.resolveRuntimeApprovalStructured(
+                            runId = runId,
+                            approvalId = approvalId,
+                            decision = decision,
+                            elicitationResponse = ElicitationResponse(
+                                action = responseAction,
+                                contentJson = if (responseAction == "accept") contentJson else null,
+                            ),
+                            requestId = requestId,
+                        )
+                    } else {
+                        repository.decideConfirmation(
+                            sessionId = sessionId,
+                            confirmationId = approvalId,
+                            decision = decision,
+                            requestId = requestId,
+                        )
+                    }
+                    retireResolvedApproval(sessionId, approvalId)
+                    runCatching { repository.refreshSessionDetail(sessionId) }
+                    Outcome.Submitted
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    if (error.isTerminalApprovalFailure()) return retireStaleApproval(sessionId, approvalId, error)
+                    Outcome.Failed(error.message ?: "验证提交失败", error.isAmbiguousApprovalSubmission())
+                }
+            }
+        }
+    }
+
     private suspend fun resolveQuestionChoices(
         sessionId: String,
         approvalId: String,
@@ -289,7 +397,8 @@ class ApprovalResolutionCoordinator(private val repository: SessionRepository) {
 
     private fun Approval.requiresStructuredResolution(): Boolean = batchId != null ||
         actions.any { it.needsPasskey } ||
-        (passkeyRequired && !isQuestionApproval())
+        (passkeyRequired && !isQuestionApproval()) ||
+        (elicitation?.isFormComplexForAttention == true)
 
     private fun Approval.isQuestionApproval(): Boolean = kind.equals("question", ignoreCase = true) || questions.isNotEmpty()
 

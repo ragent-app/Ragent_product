@@ -18,6 +18,12 @@ import {
   stripAssistantControlBlocks,
 } from './assistant-control-blocks.mjs';
 import { createClaudeFinalizedAssistantReplayFingerprint } from './provider-event-dedup.mjs';
+import {
+  extractAnsweredQuestionItemIds,
+  normalizeAsyncQuestionReplies,
+  parseAsyncQuestionItemId,
+  parseAsyncQuestionReplyEnvelope,
+} from './codex-async-question-reply.mjs';
 
 const INTERNAL_TYPES = new Set(['manager_context']);
 const STREAM_LIMIT = 128;
@@ -59,7 +65,15 @@ function isVisible(event) {
   if (INTERNAL_TYPES.has(event.type)) return false;
   if (event.type === 'message') {
     const content = typeof event.content === 'string' ? stripAssistantControlBlocks(event.content).trim() : '';
-    return Boolean(content || (Array.isArray(event.attachments) && event.attachments.length > 0) || (Array.isArray(event.images) && event.images.length > 0));
+    const hasAsyncQuestions = Array.isArray(event.asyncQuestions) && event.asyncQuestions.length > 0;
+    const isAsyncDelivery = text(event.messageDelivery || event.delivery) === 'async';
+    return Boolean(
+      content
+      || hasAsyncQuestions
+      || isAsyncDelivery
+      || (Array.isArray(event.attachments) && event.attachments.length > 0)
+      || (Array.isArray(event.images) && event.images.length > 0)
+    );
   }
   return [
     'plan', 'operation', 'attachment_delivery', 'approval_request', 'approval_response',
@@ -196,6 +210,22 @@ function mergeMessageSnapshot(current, incoming) {
   if (Array.isArray(current.images) && current.images.length > 0
     && (!Array.isArray(incoming.images) || incoming.images.length === 0)) {
     next.images = current.images;
+  }
+  if (Array.isArray(current.asyncQuestions) && current.asyncQuestions.length > 0
+    && (!Array.isArray(incoming.asyncQuestions) || incoming.asyncQuestions.length === 0)) {
+    next.asyncQuestions = current.asyncQuestions;
+  }
+  if (text(current.messageDelivery) && !text(incoming.messageDelivery)) {
+    next.messageDelivery = current.messageDelivery;
+  }
+  if (text(current.delivery) && !text(incoming.delivery)) {
+    next.delivery = current.delivery;
+  }
+  if (text(current.asyncQuestionMessageId) && !text(incoming.asyncQuestionMessageId)) {
+    next.asyncQuestionMessageId = current.asyncQuestionMessageId;
+  }
+  if (text(current.asyncQuestionsState) && !text(incoming.asyncQuestionsState)) {
+    next.asyncQuestionsState = current.asyncQuestionsState;
   }
   return next;
 }
@@ -400,6 +430,90 @@ function ordered(events) {
     .map(({ event }) => event);
 }
 
+function annotateAsyncQuestionReplies(projected) {
+  const answersByItemId = new Map();
+  const answersByMsgAndIndex = new Map();
+
+  const recordReply = (reply, userEvent) => {
+    const answer = text(reply?.answer);
+    if (!answer) return;
+    const itemId = text(reply?.questionItemId || reply?.id);
+    const entry = {
+      answer,
+      question: text(reply?.question || reply?.title),
+      answeredAt: Number.isFinite(userEvent?.timestamp) ? userEvent.timestamp : null,
+      answeredBySeq: seqOf(userEvent) || null,
+      answeredByRequestId: text(userEvent?.requestId) || null,
+    };
+    if (itemId) {
+      if (!answersByItemId.has(itemId)) answersByItemId.set(itemId, []);
+      answersByItemId.get(itemId).push(entry);
+      const parsedId = parseAsyncQuestionItemId(itemId);
+      if (parsedId) {
+        const composite = `${parsedId.messageId}\u0000${parsedId.index}`;
+        if (!answersByMsgAndIndex.has(composite)) answersByMsgAndIndex.set(composite, []);
+        answersByMsgAndIndex.get(composite).push(entry);
+      }
+    }
+  };
+
+  for (const event of projected) {
+    if (event?.type !== 'message' || event.role !== 'user') continue;
+    const structured = normalizeAsyncQuestionReplies(event.asyncQuestionReplies);
+    for (const reply of structured) recordReply(reply, event);
+    const parsedEnvelope = parseAsyncQuestionReplyEnvelope(event.content);
+    for (const reply of parsedEnvelope.replies) {
+      if (structured.some((s) => s.questionItemId && s.questionItemId === reply.questionItemId)) continue;
+      recordReply(reply, event);
+    }
+  }
+
+  if (answersByItemId.size === 0 && answersByMsgAndIndex.size === 0) {
+    return projected;
+  }
+
+  return projected.map((event) => {
+    if (event?.type !== 'message' || event.role !== 'assistant'
+      || !Array.isArray(event.asyncQuestions) || event.asyncQuestions.length === 0) {
+      return event;
+    }
+    const eventSeq = seqOf(event);
+    const msgId = text(event.asyncQuestionMessageId || event.providerMessageId);
+    const updatedQuestions = event.asyncQuestions.map((q, idx) => {
+      if (!q || typeof q !== 'object') return q;
+      const qId = text(q.id);
+      const candidates = (qId && answersByItemId.get(qId))
+        || (msgId && answersByMsgAndIndex.get(`${msgId}\u0000${Number.isInteger(q.index) ? q.index : idx}`))
+        || null;
+      const hit = candidates
+        ? candidates.find((entry) => !eventSeq || !entry.answeredBySeq || entry.answeredBySeq >= eventSeq)
+        : null;
+      if (!hit) {
+        return {
+          ...q,
+          status: q.status === 'answered' ? 'answered' : 'pending',
+        };
+      }
+      return {
+        ...q,
+        status: 'answered',
+        answeredText: hit.answer,
+        ...(hit.answeredAt ? { answeredAt: hit.answeredAt } : {}),
+        ...(hit.answeredBySeq ? { answeredBySeq: hit.answeredBySeq } : {}),
+      };
+    });
+    const answeredCount = updatedQuestions.filter((q) => q?.status === 'answered').length;
+    const asyncQuestionsState = answeredCount === 0
+      ? 'pending'
+      : (answeredCount >= updatedQuestions.length ? 'answered' : 'partial');
+    return {
+      ...event,
+      asyncQuestions: updatedQuestions,
+      asyncQuestionsState,
+    };
+  });
+}
+
 // The durable baseline is a single chronological projection. There is no
 // turn-level state, no completed-turn compaction, and no running-only branch.
 // A tool's lifecycle revises one entity at its original sequence; all other
@@ -468,8 +582,10 @@ export function buildSessionDisplayEvents(history = [], { projectRoot = '', home
     if (isVisible(next)) timeline.push(next);
   }
   flushReasoning();
-  const projected = annotateEntities(mergeMessageSnapshots(timeline))
-    .map((event) => event.canonicalMessageId ? { ...event, seq: event.firstSeq || event.seq } : event);
+  const projected = annotateAsyncQuestionReplies(
+    annotateEntities(mergeMessageSnapshots(timeline))
+      .map((event) => event.canonicalMessageId ? { ...event, seq: event.firstSeq || event.seq } : event),
+  );
   // A provider may announce an empty assistant message before it emits its
   // first text block. Block indexes prove that an earlier thinking block came
   // first even when that empty message anchor has a smaller sequence.
@@ -535,6 +651,12 @@ export function filterSessionDisplayPushEvents(events = []) {
       next.content = stripAssistantControlBlocks(next.content);
       const key = streamKey(next);
       if (key) activeControlStreams.delete(key);
+    } else if (next.type === 'message' && next.role === 'user') {
+      const explicitIds = Array.isArray(next.answeredQuestionItemIds) ? next.answeredQuestionItemIds : [];
+      const replyIds = extractAnsweredQuestionItemIds(normalizeAsyncQuestionReplies(next.asyncQuestionReplies));
+      const envelopeIds = extractAnsweredQuestionItemIds(parseAsyncQuestionReplyEnvelope(next.content).replies);
+      const mergedIds = [...new Set([...explicitIds, ...replyIds, ...envelopeIds].map(text).filter(Boolean))];
+      if (mergedIds.length > 0) next.answeredQuestionItemIds = mergedIds;
     }
     output.push(createApprovedActionClientEventProjection(next));
   }

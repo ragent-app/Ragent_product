@@ -192,40 +192,47 @@
     return LIVE_BAR_DANGER_VALUES.has(normalized);
   }
 
+  function isApprovalBlocking(approval) {
+    if (!approval || typeof approval !== "object") return true;
+    return approval.isBlocking !== false;
+  }
+
   // Map a pending approval/question event to a distinct Live Bar waiting state.
   // Returns null when the event is not a user-facing waiting action.
   function resolveApprovalWaitingStatus(approval) {
     if (!approval || typeof approval !== "object") return null;
+    const blocking = isApprovalBlocking(approval);
+    const withBlocking = (status) => (status && !blocking ? { ...status, isBlocking: false } : status);
     const kind = String(approval?.kind || "").trim().toLowerCase();
     const isQuestion = kind === "question"
       || !!approval?.question
       || (Array.isArray(approval?.questions) && approval.questions.length > 0);
     if (kind === "plan") {
-      return createTaskFlowStatus("plan_pending", "workflow.waiting.plan", {
+      return withBlocking(createTaskFlowStatus("plan_pending", "workflow.waiting.plan", {
         className: "status-plan-pending",
         dotClass: "plan-pending",
         title: t("workflow.waiting.planTitle"),
-      });
+      }));
     }
     if (isQuestion) {
-      return createTaskFlowStatus("awaiting_answer", "workflow.waiting.answer", {
+      return withBlocking(createTaskFlowStatus("awaiting_answer", "workflow.waiting.answer", {
         className: "status-awaiting-answer",
         dotClass: "awaiting-answer",
         title: t("workflow.waiting.answerTitle"),
-      });
+      }));
     }
     if (resolveLiveBarDangerRisk(approval)) {
-      return createTaskFlowStatus("danger_pending", "workflow.waiting.danger", {
+      return withBlocking(createTaskFlowStatus("danger_pending", "workflow.waiting.danger", {
         className: "status-danger-pending",
         dotClass: "danger-pending",
         title: t("workflow.waiting.dangerTitle"),
-      });
+      }));
     }
-    return createTaskFlowStatus("approval_pending", "workflow.waiting.approval", {
+    return withBlocking(createTaskFlowStatus("approval_pending", "workflow.waiting.approval", {
       className: "status-approval-pending",
       dotClass: "approval-pending",
       title: t("workflow.waiting.approvalTitle"),
-    });
+    }));
   }
 
   function createReadyStatus() {
@@ -778,6 +785,7 @@
     getSessionAttentionBand,
     compareSessionListSessions,
     resolveApprovalWaitingStatus,
+    isApprovalBlocking,
     resolveLiveBarDangerRisk,
     createReadyStatus,
   };

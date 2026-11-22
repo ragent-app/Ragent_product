@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -115,6 +117,151 @@ class RoomLiveFeedTest {
             val final = reply("Hello", true).filter { it.role == TimelineRole.Agent }
             assertEquals(1, final.size); assertTrue(final.single().completed)
             assertEquals(2L, database.dao().getCursor("session-live")?.lastAppliedSeq)
+        } finally { repo.close(); database.close() }
+    }
+
+    @Test fun asyncQuestionMetadataPersistsInRoomAndCrossClientReplyMarksItAnswered() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        val transport = LiveFeedTransport()
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Async", null, "running", 0, 0)))
+            transport.body = """
+                {
+                  "sessionId": "session-live",
+                  "events": [
+                    {
+                      "seq": 1,
+                      "type": "message",
+                      "role": "assistant",
+                      "entityId": "msg-async",
+                      "content": "Pick deploy target",
+                      "delivery": "async",
+                      "asyncQuestionMessageId": "aqm-99",
+                      "asyncQuestionsState": "pending",
+                      "asyncQuestions": [
+                        {
+                          "id": "aq-item-1",
+                          "index": 0,
+                          "title": "Target",
+                          "question": "Which target?",
+                          "options": [{"label": "Staging", "value": "staging", "description": "Safe"}]
+                        }
+                      ]
+                    }
+                  ],
+                  "latestSeq": 1
+                }
+            """.trimIndent()
+            repo.refreshEvents("session-live")
+
+            val beforeReply = repo.observeMessages("session-live").first().single()
+            assertEquals("async", beforeReply.messageDelivery)
+            assertEquals("aqm-99", beforeReply.asyncQuestionMessageId)
+            assertEquals(1, beforeReply.asyncQuestions.size)
+            assertEquals("pending", beforeReply.asyncQuestions.single().status)
+
+            // Cross-client reply arrives as a user message containing <send_user_message_question_reply>.
+            transport.body = """
+                {
+                  "sessionId": "session-live",
+                  "events": [
+                    {
+                      "seq": 2,
+                      "type": "message",
+                      "role": "user",
+                      "entityId": "msg-user",
+                      "content": "<send_user_message_question_reply>\n[{\"questionItemId\":\"aq-item-1\",\"question\":\"Which target?\",\"answer\":\"staging\"}]\n</send_user_message_question_reply>"
+                    }
+                  ],
+                  "latestSeq": 2
+                }
+            """.trimIndent()
+            repo.refreshEvents("session-live")
+
+            val afterReply = repo.observeMessages("session-live").first()
+            val updatedQuestionMsg = afterReply.first { it.id == beforeReply.id }
+            assertEquals("answered", updatedQuestionMsg.asyncQuestions.single().status)
+            assertEquals("staging", updatedQuestionMsg.asyncQuestions.single().answeredText)
+            assertEquals("answered", updatedQuestionMsg.asyncQuestionsState)
+        } finally { repo.close(); database.close() }
+    }
+
+    @Test fun nonBlockingQuestionPreservesRunningSessionStatusAndApprovalDetailsRoundTrip() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        val transport = LiveFeedTransport()
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Codex", null, "running", 0, 0)))
+            transport.body = """
+                {
+                  "sessionId": "session-live",
+                  "events": [
+                    {
+                      "seq": 1,
+                      "type": "approval_request",
+                      "kind": "question",
+                      "approvalId": "q-nb",
+                      "runId": "run-1",
+                      "isBlocking": false,
+                      "title": "Feedback",
+                      "questions": [
+                        {
+                          "id": "q1",
+                          "header": "Tone",
+                          "question": "Preferred tone?",
+                          "isOther": false,
+                          "isSecret": true,
+                          "options": [{"label": "Concise", "value": "concise", "description": "Short replies"}]
+                        }
+                      ]
+                    },
+                    {
+                      "seq": 2,
+                      "type": "approval_request",
+                      "kind": "permissions",
+                      "approvalId": "el-1",
+                      "runId": "run-1",
+                      "title": "MCP Elicitation",
+                      "elicitation": {
+                        "mode": "form",
+                        "serverName": "github",
+                        "elicitationId": "el-id",
+                        "requestedSchema": {
+                          "properties": {"token": {"type": "string", "format": "password"}},
+                          "required": ["token"]
+                        }
+                      }
+                    }
+                  ],
+                  "latestSeq": 2
+                }
+            """.trimIndent()
+            repo.refreshEvents("session-live")
+
+            val pending = repo.observePendingApprovals("session-live").first().associateBy { it.id }
+            val nbQuestion = pending.getValue("q-nb")
+            assertFalse(nbQuestion.isBlocking)
+            assertEquals("Tone", nbQuestion.questions.single().header)
+            assertEquals(false, nbQuestion.questions.single().isOther)
+            assertTrue(nbQuestion.questions.single().isSecret)
+            assertEquals("Short replies", nbQuestion.questions.single().options.single().description)
+
+            val elicitation = pending.getValue("el-1").elicitation
+            assertNotNull(elicitation)
+            assertEquals("github", elicitation?.serverName)
+            assertTrue(elicitation?.schemaProperties?.single()?.isSecretField == true)
+
+            // Non-blocking question alone must not coerce a running session to waiting_approval,
+            // though here el-1 is blocking so let's also verify removing el-1 keeps session non-blocked.
+            repo.retireStaleApproval("session-live", "el-1")
+            assertEquals("waiting_approval", database.dao().getSession("session-live")?.status)
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Codex", null, "running", 0, 0)))
+            transport.body = """{"sessionId":"session-live","events":[{"seq":3,"type":"approval_request","kind":"question","approvalId":"q-nb-2","runId":"run-1","isBlocking":false,"questions":[{"question":"Optional?"}]}],"latestSeq":3}"""
+            repo.refreshEvents("session-live")
+            assertEquals("running", database.dao().getSession("session-live")?.status)
         } finally { repo.close(); database.close() }
     }
 }

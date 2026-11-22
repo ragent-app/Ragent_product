@@ -142,6 +142,7 @@ object AttentionReducer {
             // Supported batch formats have their own structured decision
             // endpoints and can request native passkey verification inline.
             requiresSession = approval.kind != WINDOWS_BROKER_APPROVAL_KIND && (
+                (approval.elicitation?.isFormComplexForAttention == true) ||
                 (approval.kind == "privileged_batch_request" && (approval.runId.isNullOrBlank() || approval.batchId.isNullOrBlank() ||
                     approval.actions.none { it.category in setOf("privileged_other", "destructive_delete") })) ||
                 (approval.batchId != null && approval.actions.isEmpty()) ||

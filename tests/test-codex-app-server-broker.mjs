@@ -70,7 +70,22 @@ const fakeUpstream = `
       let message; try { message = JSON.parse(line); } catch { continue; }
       if (!message.method && approvals.has(message.id)) {
         const threadId = approvals.get(message.id); approvals.delete(message.id);
-        process.stdout.write(JSON.stringify({ method: 'approval/result', params: { threadId, decision: message.result.decision } }) + '\\n');
+        const decision = message.result && message.result.decision !== undefined
+          ? message.result.decision
+          : 'answered';
+        process.stdout.write(JSON.stringify({ method: 'approval/result', params: { threadId, decision } }) + '\\n');
+        continue;
+      }
+      if (message.method === 'fixture/resolve-upstream-request') {
+        process.stdout.write(JSON.stringify({
+          method: 'serverRequest/resolved',
+          params: { threadId: message.params.threadId, requestId: message.params.upstreamRequestId },
+        }) + '\\n');
+        process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+        continue;
+      }
+      if (!message.method && message.id === 777001) {
+        process.stdout.write(JSON.stringify({ method: 'fixture/unexpected-resolved-reply', params: { id: message.id } }) + '\\n');
         continue;
       }
       if (message.method === 'initialize') {
@@ -153,6 +168,27 @@ const fakeUpstream = `
           const approvalId = message.id;
           approvals.set(approvalId, message.params.threadId);
           process.stdout.write(JSON.stringify({ id: approvalId, method: 'item/commandExecution/requestApproval', params: { threadId: message.params.threadId } }) + '\\n');
+          process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+          continue;
+        }
+        if (message.params.input[0].text === 'user-input-resolved') {
+          const upstreamReqId = 777001;
+          process.stdout.write(JSON.stringify({
+            id: upstreamReqId,
+            method: 'item/tool/requestUserInput',
+            params: { threadId: message.params.threadId, turnId: 'turn-ui-res', itemId: 'item-ui-res', questions: [{ id: 'q1', question: 'Pick?' }] },
+          }) + '\\n');
+          process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
+          continue;
+        }
+        if (message.params.input[0].text === 'user-input-answered-then-resolved') {
+          const upstreamReqId = 777002;
+          approvals.set(upstreamReqId, message.params.threadId);
+          process.stdout.write(JSON.stringify({
+            id: upstreamReqId,
+            method: 'item/tool/requestUserInput',
+            params: { threadId: message.params.threadId, turnId: 'turn-ui-ans', itemId: 'item-ui-ans', questions: [{ id: 'q2', question: 'Confirm?' }] },
+          }) + '\\n');
           process.stdout.write(JSON.stringify({ id: message.id, result: { ok: true } }) + '\\n');
           continue;
         }
@@ -399,6 +435,43 @@ right.proxy.send({ id: rightRequest.id, result: { decision: 'right' } });
 const [leftResult, rightResult] = await Promise.all([left.proxy.next(), right.proxy.next()]);
 assert.equal(leftResult.params.decision, 'left');
 assert.equal(rightResult.params.decision, 'right');
+
+// Track 1: serverRequest/resolved translates upstreamId -> clientRequestId and clears pendingServerRequests
+left.proxy.send({ method: 'turn/start', id: 201, params: { threadId: left.threadId, input: [{ type: 'text', text: 'user-input-resolved' }] } });
+const uiPendingMsgs = [await left.proxy.next(), await left.proxy.next()];
+const uiReq = uiPendingMsgs.find((m) => m.method === 'item/tool/requestUserInput');
+assert.ok(uiReq, 'broker forwards item/tool/requestUserInput to thread owner');
+assert.notEqual(uiReq.id, 777001, 'broker assigns private clientRequestId');
+
+// Upstream resolves requestId 777001 -> broker translates to uiReq.id and removes pendingServerRequests entry
+left.proxy.send({ method: 'fixture/resolve-upstream-request', id: 202, params: { threadId: left.threadId, upstreamRequestId: 777001 } });
+const resolvedMsgs = [await left.proxy.next(), await left.proxy.next()];
+const resolvedNotif = resolvedMsgs.find((m) => m.method === 'serverRequest/resolved');
+assert.ok(resolvedNotif, 'owner client receives translated serverRequest/resolved notification');
+assert.equal(resolvedNotif.params.requestId, uiReq.id, 'serverRequest/resolved requestId matches clientRequestId');
+
+// A stale client response for the already-resolved uiReq.id must be ignored because pendingServerRequests deleted uiReq.id
+left.proxy.send({ id: uiReq.id, result: { answers: { q1: { answers: ['too-late'] } } } });
+left.proxy.send({ method: 'turn/start', id: 205, params: { threadId: left.threadId, input: [{ type: 'text', text: 'after-resolved-ping' }] } });
+const afterPingMsgs = [await left.proxy.next(), await left.proxy.next(), await left.proxy.next(), await left.proxy.next()];
+assert.equal(
+  afterPingMsgs.some((m) => m.method === 'fixture/unexpected-resolved-reply'),
+  false,
+  'broker must delete resolved pendingServerRequests so late replies are never forwarded upstream',
+);
+
+// Also verify recentServerRequestIds translates a late serverRequest/resolved after client already answered
+left.proxy.send({ method: 'turn/start', id: 203, params: { threadId: left.threadId, input: [{ type: 'text', text: 'user-input-answered-then-resolved' }] } });
+const uiAnsMsgs = [await left.proxy.next(), await left.proxy.next()];
+const uiAnsReq = uiAnsMsgs.find((m) => m.method === 'item/tool/requestUserInput');
+left.proxy.send({ id: uiAnsReq.id, result: { answers: { q2: { answers: ['yes'] } } } });
+const ansAck = await left.proxy.next();
+assert.equal(ansAck.method, 'approval/result');
+left.proxy.send({ method: 'fixture/resolve-upstream-request', id: 204, params: { threadId: left.threadId, upstreamRequestId: 777002 } });
+const lateResolvedMsgs = [await left.proxy.next(), await left.proxy.next()];
+const lateResolved = lateResolvedMsgs.find((m) => m.method === 'serverRequest/resolved');
+assert.equal(lateResolved?.params?.requestId, uiAnsReq.id, 'late serverRequest/resolved still maps via recentServerRequestIds');
+
 left.proxy.child.kill('SIGTERM');
 right.proxy.child.kill('SIGTERM');
 

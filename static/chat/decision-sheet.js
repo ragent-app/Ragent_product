@@ -1222,12 +1222,32 @@
       if (option.dataset.sheetBound === "true") return;
       option.dataset.sheetBound = "true";
       option.classList.add("oneui-notification__choice");
+      const syncQuestionButtons = () => {
+        if (!hostEl) return;
+        const primaryBtn = hostEl.querySelector(".oneui-notification__action--primary");
+        if (!primaryBtn) return;
+        const hasOption = Boolean(hostEl.querySelector(".runtime-approval-card__option.is-selected"));
+        const hasText = Array.from(hostEl.querySelectorAll(".oneui-notification__custom-input"))
+          .some((node) => Boolean(String(node?.value || "").trim()));
+        primaryBtn.disabled = !(hasOption || hasText);
+      };
       const choose = () => {
         const list = option.closest(".runtime-approval-card__option-list");
-        if (list) list.querySelectorAll(".runtime-approval-card__option").forEach((n) => {
-          n.classList.toggle("is-selected", n === option);
-        });
-        enableSubmitOnSelect();
+        const isMulti = list?.dataset?.multiSelect === "true";
+        if (isMulti) {
+          const next = !option.classList.contains("is-selected");
+          option.classList.toggle("is-selected", next);
+          option.setAttribute("aria-checked", next ? "true" : "false");
+          syncQuestionButtons();
+        } else {
+          if (list) list.querySelectorAll(".runtime-approval-card__option").forEach((n) => {
+            n.classList.toggle("is-selected", n === option);
+            if (n.hasAttribute("aria-checked")) {
+              n.setAttribute("aria-checked", n === option ? "true" : "false");
+            }
+          });
+          enableSubmitOnSelect();
+        }
       };
       option.addEventListener("click", (event) => { event.preventDefault(); choose(); });
       option.addEventListener("keydown", (event) => {
@@ -1387,8 +1407,89 @@
     }
     const buttons = Array.from(hostEl.querySelectorAll(".oneui-notification__action"));
     const isQuestion = String(evt?.kind || "") === "question";
-    const choices = (isQuestion && decision === "approve") ? collectSheetChoices() : undefined;
-    const customAnswer = isQuestion && decision === "approve" ? getSheetCustomAnswer() : "";
+    const isEmptySkip = isQuestion && decision === "approve" && button?.dataset?.emptySkip === "true";
+    const activeElicitation = hostEl.__activeElicitation || null;
+    const explicitElicitationAction = String(button?.dataset?.elicitationAction || "").trim();
+    let sheetExtraPayload = null;
+
+    if (activeElicitation) {
+      if (activeElicitation.kind === "form" && decision === "approve") {
+        const validation = activeElicitation.form?.collectAndValidate?.(true);
+        if (validation && !validation.valid) {
+          return false;
+        }
+        sheetExtraPayload = {
+          elicitationResponse: {
+            action: "accept",
+            content: validation?.content || {},
+          },
+        };
+      } else if (activeElicitation.kind === "url" && decision === "approve") {
+        if (activeElicitation.urlResult && !activeElicitation.urlResult.valid) {
+          return false;
+        }
+        sheetExtraPayload = {
+          elicitationResponse: { action: "accept" },
+        };
+      } else {
+        const action = explicitElicitationAction
+          || (decision === "cancel" ? "cancel" : (decision === "deny" ? "decline" : "accept"));
+        sheetExtraPayload = {
+          elicitationResponse: { action },
+        };
+      }
+    }
+
+    let choices;
+    let customAnswer = "";
+    if (isQuestion && decision === "approve") {
+      if (isEmptySkip) {
+        const prompts = hostEl.querySelectorAll(".runtime-approval-card__prompt");
+        choices = prompts.length > 0 ? Array.from(prompts, () => -1) : [-1];
+        sheetExtraPayload = { emptySkip: true };
+      } else {
+        choices = collectSheetChoices();
+        const promptEls = Array.from(hostEl.querySelectorAll(".runtime-approval-card__prompt"));
+        const hasMulti = promptEls.some((el) => el.dataset?.multiSelect === "true");
+        const multiChoices = hasMulti
+          ? promptEls.map((promptEl) => {
+              const selected = [];
+              promptEl.querySelectorAll(".runtime-approval-card__option").forEach((optBtn, optIdx) => {
+                if (optBtn.classList.contains("is-selected")) selected.push(optIdx);
+              });
+              return selected;
+            })
+          : null;
+
+        const customAnswers = Array.from({ length: promptEls.length }, () => "");
+        const perQuestionInputs = Array.from(hostEl.querySelectorAll(".decision-sheet__prompt-custom-input"));
+        perQuestionInputs.forEach((fieldEl, idx) => {
+          const parsedIdx = Number(fieldEl.dataset?.questionIndex ?? idx);
+          const qIdx = Number.isInteger(parsedIdx) && parsedIdx >= 0 ? parsedIdx : idx;
+          while (customAnswers.length <= qIdx) customAnswers.push("");
+          customAnswers[qIdx] = String(fieldEl.value || "").trim();
+        });
+        const hasNonEmptyCustom = customAnswers.some(Boolean);
+
+        if (perQuestionInputs.length > 0) {
+          if (promptEls.length <= 1 && !hasMulti && customAnswers[0]) {
+            customAnswer = customAnswers[0];
+          }
+        } else {
+          customAnswer = getSheetCustomAnswer();
+          if (customAnswer && promptEls.length > 1) {
+            customAnswers[0] = customAnswer;
+          }
+        }
+
+        if ((multiChoices && multiChoices.length > 0) || customAnswers.some(Boolean) || hasNonEmptyCustom) {
+          sheetExtraPayload = {
+            ...(multiChoices && multiChoices.length > 0 ? { multiChoices } : {}),
+            customAnswers,
+          };
+        }
+      }
+    }
     buttons.forEach((b) => { b.disabled = true; });
     if (button) button.setAttribute("aria-busy", "true");
     let ok = false;
@@ -1419,6 +1520,10 @@
           ok = true;
           if (approvalId) root.RagentDecisions?.noteResponse({ approvalId });
         }
+      } else if (sheetExtraPayload) {
+        ok = typeof root.submitRuntimeApprovalDecision === "function"
+          ? await root.submitRuntimeApprovalDecision(evt, decision, button, choices, customAnswer, sheetExtraPayload)
+          : false;
       } else {
         ok = typeof root.submitRuntimeApprovalDecision === "function"
           ? await root.submitRuntimeApprovalDecision(evt, decision, button, choices, customAnswer)
@@ -1750,15 +1855,200 @@
     const details = el("div", "oneui-notification__details decision-sheet__details");
 
     const isQuestion = String(evt?.kind || "") === "question";
-    if (isQuestion && typeof root.getApprovalPromptSections === "function"
+    const elicitationInfo = typeof root.classifyCodexElicitation === "function"
+      ? root.classifyCodexElicitation(evt)
+      : null;
+    hostEl.__activeElicitation = null;
+    const prevFooterHook = hostEl.__ragentFooterHook;
+    if (prevFooterHook) {
+      if (hostEl.appendChild === prevFooterHook.hookAppendChild) {
+        if (prevFooterHook.ownHadAppendChild) hostEl.appendChild = prevFooterHook.baseAppendChild;
+        else delete hostEl.appendChild;
+      }
+      if (hostEl.append === prevFooterHook.hookAppend) {
+        if (prevFooterHook.ownHadAppend) hostEl.append = prevFooterHook.baseAppend;
+        else delete hostEl.append;
+      }
+      delete hostEl.__ragentFooterHook;
+    }
+
+    const syncSheetFooterState = (footerEl) => {
+      if (!footerEl) return;
+      const footerActions = footerEl.querySelector?.(".oneui-notification__actions");
+      if (!footerActions) return;
+
+      if (elicitationInfo && elicitationInfo.kind !== "compact_mcp") {
+        if (typeof setSheetExpanded === "function") setSheetExpanded(true);
+        details.querySelectorAll?.(".decision-sheet__session-actions")?.forEach((n) => n.remove());
+        footerActions.innerHTML = "";
+        const makeElicitBtn = (labelText, decisionName, actionName, { primary = false, danger = false, disabled = false } = {}) => {
+          const btn = el("button", "oneui-notification__action", "");
+          btn.type = "button";
+          if (primary) btn.classList.add("oneui-notification__action--primary");
+          if (danger) btn.classList.add("oneui-notification__action--danger");
+          btn.disabled = Boolean(disabled);
+          btn.dataset.elicitationAction = actionName;
+          const lbl = el("span", "oneui-notification__action-label", labelText);
+          btn.appendChild(lbl);
+          btn.addEventListener("click", () => {
+            void submitDecision(evt, decisionName, btn);
+          });
+          return btn;
+        };
+
+        if (elicitationInfo.kind === "form") {
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.accept"), "approve", "accept", { primary: true }));
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.decline"), "deny", "decline", { danger: true }));
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.cancel"), "cancel", "cancel"));
+        } else if (elicitationInfo.kind === "url") {
+          const urlValid = Boolean(hostEl.__activeElicitation?.urlResult?.valid);
+          footerActions.appendChild(makeElicitBtn(
+            tr("elicitation.action.confirmUrl"),
+            "approve",
+            "accept",
+            { primary: true, disabled: !urlValid }
+          ));
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.decline"), "deny", "decline", { danger: true }));
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.cancel"), "cancel", "cancel"));
+        } else {
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.decline"), "deny", "decline", { danger: true }));
+          footerActions.appendChild(makeElicitBtn(tr("elicitation.action.cancel"), "cancel", "cancel"));
+        }
+        return;
+      }
+
+      if (isQuestion && evt?.isBlocking === false) {
+        const skipBtn = el("button", "oneui-notification__action decision-sheet__skip-action", "");
+        skipBtn.type = "button";
+        skipBtn.dataset.emptySkip = "true";
+        skipBtn.appendChild(el("span", "oneui-notification__action-label", tr("approval.action.skip")));
+        skipBtn.addEventListener("click", () => {
+          void submitDecision(evt, "approve", skipBtn);
+        });
+        const primaryBtn = footerActions.querySelector(".oneui-notification__action--primary");
+        if (primaryBtn) footerActions.insertBefore(skipBtn, primaryBtn);
+        else footerActions.appendChild(skipBtn);
+      }
+    };
+
+    if ((elicitationInfo && elicitationInfo.kind !== "compact_mcp") || (isQuestion && evt?.isBlocking === false)) {
+      const ownHadAppendChild = Object.prototype.hasOwnProperty.call(hostEl, "appendChild");
+      const baseAppendChild = hostEl.appendChild;
+      const ownHadAppend = Object.prototype.hasOwnProperty.call(hostEl, "append");
+      const baseAppend = hostEl.append;
+
+      const findFooterNode = (nodes) => {
+        for (const n of nodes) {
+          if (!n || typeof n !== "object") continue;
+          if (n.tagName === "FOOTER" || n.classList?.contains?.("oneui-notification__footer")) return n;
+          const nested = n.querySelector?.(".oneui-notification__footer");
+          if (nested) return nested;
+        }
+        return null;
+      };
+      const restoreHooks = () => {
+        if (ownHadAppendChild) hostEl.appendChild = baseAppendChild;
+        else delete hostEl.appendChild;
+        if (ownHadAppend) hostEl.append = baseAppend;
+        else delete hostEl.append;
+        delete hostEl.__ragentFooterHook;
+      };
+
+      const hookAppendChild = function interceptedAppendChild(child) {
+        const res = baseAppendChild.call(this, child);
+        const footerNode = findFooterNode([child]);
+        if (footerNode) {
+          restoreHooks();
+          syncSheetFooterState(footerNode);
+        }
+        return res;
+      };
+      const hookAppend = function interceptedAppend(...nodes) {
+        const res = baseAppend.apply(this, nodes);
+        const footerNode = findFooterNode(nodes);
+        if (footerNode) {
+          restoreHooks();
+          syncSheetFooterState(footerNode);
+        }
+        return res;
+      };
+
+      hostEl.__ragentFooterHook = {
+        hookAppendChild,
+        ownHadAppendChild,
+        baseAppendChild,
+        hookAppend,
+        ownHadAppend,
+        baseAppend,
+      };
+      hostEl.appendChild = hookAppendChild;
+      if (typeof baseAppend === "function") hostEl.append = hookAppend;
+    }
+
+    if (isQuestion && evt?.isBlocking === false) {
+      const badge = el("span", "decision-sheet__nonblocking-badge", tr("approval.badge.nonBlocking"));
+      details.appendChild(badge);
+    }
+
+    if (elicitationInfo && elicitationInfo.kind !== "compact_mcp") {
+      if (elicitationInfo.kind === "form" && typeof root.buildElicitationSchemaForm === "function") {
+        const formCtrl = root.buildElicitationSchemaForm(elicitationInfo.schema, {
+          tr: (k, v) => tr(k, v),
+        });
+        hostEl.__activeElicitation = { kind: "form", form: formCtrl, info: elicitationInfo };
+        if (elicitationInfo.serverName) {
+          const row = el("div", "runtime-approval-card__detail");
+          row.appendChild(el("span", "runtime-approval-card__detail-label", tr("elicitation.serverLabel")));
+          row.appendChild(el("span", "runtime-approval-card__detail-value", elicitationInfo.serverName));
+          details.appendChild(row);
+        }
+        if (elicitationInfo.message) {
+          details.appendChild(el("div", "oneui-notification__message", elicitationInfo.message));
+        }
+        details.appendChild(formCtrl.element);
+      } else if (elicitationInfo.kind === "url" && typeof root.buildElicitationUrlCard === "function") {
+        const urlResult = root.buildElicitationUrlCard(elicitationInfo.elicitation, {
+          tr: (k, v) => tr(k, v),
+        });
+        hostEl.__activeElicitation = { kind: "url", urlResult, info: elicitationInfo };
+        details.appendChild(urlResult.element);
+      } else if (typeof root.buildElicitationUnsupportedCard === "function") {
+        const unsupportedEl = root.buildElicitationUnsupportedCard(elicitationInfo.elicitation, elicitationInfo.mode, {
+          tr: (k, v) => tr(k, v),
+        });
+        hostEl.__activeElicitation = { kind: "unsupported", info: elicitationInfo };
+        details.appendChild(unsupportedEl);
+      }
+    } else if (isQuestion && typeof root.getApprovalPromptSections === "function"
         && typeof root.createApprovalPromptSection === "function") {
       const sections = root.getApprovalPromptSections(evt);
+      const usePerQuestionCustom = sections.length > 1
+        || sections.some((s) => s.multiSelect || s.isSecret || typeof s.isOther === "boolean");
       if (sections.length > 0) {
         const wrap = el("div", "oneui-notification__choices");
-        sections.forEach((section, idx) => wrap.appendChild(root.createApprovalPromptSection(section, idx)));
+        const syncCustomEnable = () => {
+          const primaryBtn = hostEl?.querySelector?.(".oneui-notification__action--primary");
+          if (!primaryBtn) return;
+          const hasOption = Boolean(hostEl.querySelector(".runtime-approval-card__option.is-selected"));
+          const hasText = Array.from(hostEl.querySelectorAll(".oneui-notification__custom-input"))
+            .some((node) => Boolean(String(node?.value || "").trim()));
+          primaryBtn.disabled = !(hasOption || hasText);
+        };
+        sections.forEach((section, idx) => {
+          const secEl = root.createApprovalPromptSection(section, idx, {
+            renderCustomInput: usePerQuestionCustom,
+            customRowClassName: "decision-sheet__prompt-custom",
+            customInputClassName: "oneui-notification__custom-input decision-sheet__prompt-custom-input",
+            toggleClassName: "decision-sheet__secret-toggle",
+            onCustomInput: syncCustomEnable,
+          });
+          wrap.appendChild(secEl);
+        });
         details.appendChild(wrap);
       }
-      appendQuestionCustomAnswer(details);
+      if (!usePerQuestionCustom) {
+        appendQuestionCustomAnswer(details);
+      }
     } else if (String(evt?.kind || "").toLowerCase() === "plan") {
       appendScope(details, evt);
       appendPlanEditor(details, evt);

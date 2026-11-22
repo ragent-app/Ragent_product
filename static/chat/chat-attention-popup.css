@@ -521,3 +521,60 @@
   height: auto;
   min-height: 128px;
 }
+
+
+.oneui-notification__badge--nonblocking {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 650;
+  background: color-mix(in srgb, var(--sys-primary, #1a73e8) 14%, transparent);
+  color: var(--sys-primary, #1a73e8);
+}
+
+.oneui-notification__question-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.oneui-notification__question-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.oneui-notification__question-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--sys-on-surface, #1f2937) 20%, transparent);
+  border-radius: 10px;
+  background: var(--oneui-surface, var(--sys-surface-container, #fff));
+  color: var(--oneui-ink, var(--sys-on-surface, #111827));
+  font: inherit;
+  font-size: 13px;
+}
+
+.oneui-notification__secret-toggle {
+  flex: 0 0 auto;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--sys-on-surface, #1f2937) 20%, transparent);
+  background: transparent;
+  color: var(--oneui-muted, inherit);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.oneui-notification__choice.is-selected {
+  outline: 2px solid var(--sys-primary, #1a73e8);
+  outline-offset: -1px;
+  background: color-mix(in srgb, var(--sys-primary, #1a73e8) 14%, transparent);
+}
