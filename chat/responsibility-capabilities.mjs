@@ -3,6 +3,13 @@ import { getFactoryFormula } from './factory-workflow.mjs';
 import { digest } from './work-graph-store.mjs';
 import { PROJECT_REPORT_PROVIDER, GENERIC_PLANNER_PROVIDER } from './responsibility-providers.mjs';
 import { getPricingMetadataForModel } from '../lib/model-pricing.mjs';
+import {
+  CONNECTOR_CORE_IDS,
+  CONNECTOR_RISK_LEVELS,
+  evaluateConnectorActionPolicy,
+  getConnectorActionCatalog,
+  getConnectorActionDefinition,
+} from '../lib/connector-action-dispatcher.mjs';
 
 export const MODEL_TIERS = Object.freeze(['lightweight', 'standard', 'strong']);
 
@@ -62,6 +69,286 @@ export const STAGE2_FANOUT_WRITE_FORMULA = Object.freeze({
   version: 1,
   capabilities: Object.freeze(['read', 'write']),
 });
+
+function requiredConnectorGateForRisk(riskLevel) {
+  if (riskLevel === 'read') return 'capabilityGates.allowConnectorRead';
+  if (riskLevel === 'reversible_write') return 'capabilityGates.allowConnectorWrite';
+  return 'capabilityGates.allowConnectorBroadcast';
+}
+
+function buildConnectorCatalogDescriptors() {
+  return Object.freeze(
+    getConnectorActionCatalog().map((entry) => {
+      const actionClass = entry.actionClass || (entry.riskLevel === 'read' ? 'read' : (entry.riskLevel === 'reversible_write' ? 'write' : 'broadcast'));
+      return Object.freeze({
+        capability: entry.capability,
+        connectorId: entry.connectorId,
+        actionClass,
+        privilegeGroup: entry.privilegeGroup || actionClass,
+        riskLevel: entry.riskLevel,
+        confirmationPolicy: entry.confirmationPolicy,
+        timeoutMs: entry.timeoutMs,
+        defaultOptIn: false,
+        autoEligible: false,
+        requiresHumanApproval: entry.riskLevel !== 'read' || entry.confirmationPolicy === 'require_approval',
+        requiredCapabilityGate: requiredConnectorGateForRisk(entry.riskLevel),
+        receiptVerifierKind: entry.receiptVerifier?.kind || 'none_readonly',
+        receiptVerifierSupported: entry.receiptVerifier?.supported === true,
+        compensationMode: entry.compensation?.mode || 'none_readonly',
+        compensationSupported: entry.compensation?.supported === true,
+      });
+    }),
+  );
+}
+
+export const STAGE4_CONNECTOR_CAPABILITY_CATALOG = buildConnectorCatalogDescriptors();
+
+function buildStage4ConnectorPlanDescriptors() {
+  const groups = new Map();
+  for (const item of STAGE4_CONNECTOR_CAPABILITY_CATALOG) {
+    const key = `${item.connectorId}:${item.actionClass}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        connectorId: item.connectorId,
+        actionClass: item.actionClass,
+        riskLevels: new Set(),
+        capabilities: [],
+        requiredCapabilityGate: item.requiredCapabilityGate,
+      });
+    }
+    const group = groups.get(key);
+    group.riskLevels.add(item.riskLevel);
+    group.capabilities.push(item.capability);
+  }
+
+  return Object.freeze(
+    [...groups.values()].map((group) => {
+      const templateObj = Object.freeze({
+        id: `ragent-connector-${group.connectorId}-${group.actionClass}`,
+        version: 1,
+        connectorId: group.connectorId,
+        actionClass: group.actionClass,
+        capabilities: Object.freeze([...group.capabilities]),
+      });
+      const gateKey = group.requiredCapabilityGate;
+      const reason = group.actionClass === 'broadcast'
+        ? `Requires explicit policy.${gateKey}=true, allowedConnectorCapabilities opt-in, scoped resource bounds, and mandatory per-action human approval (never auto-admitted).`
+        : `Requires explicit policy.${gateKey}=true, allowedConnectorCapabilities opt-in, and scoped resource bounds.`;
+      return Object.freeze({
+        capability: `connector-${group.connectorId}-${group.actionClass}`,
+        connectorId: group.connectorId,
+        actionClass: group.actionClass,
+        riskLevels: Object.freeze([...group.riskLevels]),
+        connectorCapabilities: templateObj.capabilities,
+        available: true,
+        defaultOptIn: false,
+        requiredCapabilityGate: gateKey,
+        reason,
+        templateId: templateObj.id,
+        templateVersion: templateObj.version,
+        templateDigest: digest(templateObj),
+        requiredFields: Object.freeze(['connectorId', 'capability', 'scope', 'idempotencyKey']),
+        autoEligible: false,
+        requiresHumanApproval: true,
+      });
+    }),
+  );
+}
+
+export const STAGE4_CONNECTOR_PLAN_DESCRIPTORS = buildStage4ConnectorPlanDescriptors();
+
+function intersectScopedArray(policyArr, orgArr) {
+  const hasPolicy = Array.isArray(policyArr);
+  const hasOrg = Array.isArray(orgArr);
+  if (hasPolicy && hasOrg) {
+    const orgSet = new Set(orgArr.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean));
+    return policyArr.filter((v) => orgSet.has(String(v || '').trim().toLowerCase()));
+  }
+  if (hasPolicy) return [...policyArr];
+  if (hasOrg) return [...orgArr];
+  return undefined;
+}
+
+function extractScopedMap(rawScopes, connectorId) {
+  if (!rawScopes || typeof rawScopes !== 'object' || Array.isArray(rawScopes)) return {};
+  if (Object.hasOwn(rawScopes, connectorId)) {
+    const sub = rawScopes[connectorId];
+    return sub && typeof sub === 'object' && !Array.isArray(sub) ? sub : {};
+  }
+  if (CONNECTOR_CORE_IDS.some((id) => Object.hasOwn(rawScopes, id))) {
+    return {};
+  }
+  return rawScopes;
+}
+
+function mergeConnectorScopes(policyScopes = null, orgScopes = null, connectorId = '') {
+  const p = extractScopedMap(policyScopes, connectorId);
+  const o = extractScopedMap(orgScopes, connectorId);
+  const merged = { ...p };
+  for (const arrayKey of [
+    'allowedRepositories',
+    'allowedBaseBranches',
+    'allowedRecipients',
+    'allowedRecipientDomains',
+    'allowedCalendarIds',
+    'allowedFolderIds',
+    'allowedShareEmails',
+    'allowedShareDomains',
+  ]) {
+    const intersected = intersectScopedArray(p[arrayKey], o[arrayKey]);
+    if (intersected !== undefined) merged[arrayKey] = intersected;
+  }
+  if (p.allowDraftOnly === true || o.allowDraftOnly === true) {
+    merged.allowDraftOnly = true;
+  }
+  if (p.allowPublicExposure === true && (o.allowPublicExposure === undefined || o.allowPublicExposure === true)) {
+    merged.allowPublicExposure = true;
+  } else {
+    merged.allowPublicExposure = false;
+  }
+  return { [connectorId]: merged };
+}
+
+/**
+ * Evaluate conservative Planner/Responsibility boundaries for a connector
+ * action before dispatch. Connector capabilities are default-off and strictly
+ * separated across read, reversible_write, and irreversible/broadcast tiers.
+ */
+export function resolveConnectorCapabilityBoundary({
+  capability,
+  scope = {},
+  payload = null,
+  idempotencyKey = 'boundary-check',
+  policy = null,
+  orgPolicy = null,
+  approval = null,
+  actor = null,
+} = {}) {
+  const def = getConnectorActionDefinition(capability);
+  if (!def) {
+    return {
+      allowed: false,
+      state: 'denied',
+      code: 'CONNECTOR_CAPABILITY_UNKNOWN',
+      reason: `Unverified or unknown connector capability "${String(capability || '')}".`,
+    };
+  }
+
+  const gates = policy?.capabilityGates && typeof policy.capabilityGates === 'object' ? policy.capabilityGates : {};
+  if (def.riskLevel === 'read' && gates.allowConnectorRead !== true) {
+    return {
+      allowed: false,
+      state: 'denied',
+      code: 'CONNECTOR_GATE_DISABLED',
+      reason: `Capability "${def.capability}" requires explicit policy.capabilityGates.allowConnectorRead=true.`,
+    };
+  }
+  if (def.riskLevel === 'reversible_write' && gates.allowConnectorWrite !== true) {
+    return {
+      allowed: false,
+      state: 'denied',
+      code: 'CONNECTOR_GATE_DISABLED',
+      reason: `Capability "${def.capability}" requires explicit policy.capabilityGates.allowConnectorWrite=true.`,
+    };
+  }
+  if ((def.riskLevel === 'irreversible_write' || def.riskLevel === 'external_broadcast') && gates.allowConnectorBroadcast !== true) {
+    return {
+      allowed: false,
+      state: 'denied',
+      code: 'CONNECTOR_GATE_DISABLED',
+      reason: `Capability "${def.capability}" requires explicit policy.capabilityGates.allowConnectorBroadcast=true.`,
+    };
+  }
+
+  // Default-off opt-in check: policy MUST explicitly opt in to the exact capability.
+  const optedIn = Array.isArray(policy?.allowedConnectorCapabilities)
+    ? policy.allowedConnectorCapabilities.map((c) => String(c || '').trim()).filter(Boolean)
+    : [];
+  if (!optedIn.includes(def.capability)) {
+    return {
+      allowed: false,
+      state: 'denied',
+      code: 'CONNECTOR_CAPABILITY_NOT_OPTED_IN',
+      reason: `Capability "${def.capability}" is default-off and not opted into policy.allowedConnectorCapabilities.`,
+    };
+  }
+
+  if (orgPolicy && typeof orgPolicy === 'object') {
+    if (Array.isArray(orgPolicy.disallowedConnectors) && orgPolicy.disallowedConnectors.includes(def.connectorId)) {
+      return {
+        allowed: false,
+        state: 'denied',
+        code: 'CONNECTOR_ORG_POLICY_DENIED',
+        reason: `Organization policy disables connector "${def.connectorId}".`,
+      };
+    }
+    if (Array.isArray(orgPolicy.disallowedConnectorCapabilities) && orgPolicy.disallowedConnectorCapabilities.includes(def.capability)) {
+      return {
+        allowed: false,
+        state: 'denied',
+        code: 'CONNECTOR_ORG_POLICY_DENIED',
+        reason: `Organization policy disables capability "${def.capability}".`,
+      };
+    }
+    if (Array.isArray(orgPolicy.allowedConnectors) && !orgPolicy.allowedConnectors.includes(def.connectorId)) {
+      return {
+        allowed: false,
+        state: 'denied',
+        code: 'CONNECTOR_ORG_POLICY_DENIED',
+        reason: `Connector "${def.connectorId}" is not allowed by organization policy.`,
+      };
+    }
+    if (Array.isArray(orgPolicy.allowedConnectorCapabilities) && !orgPolicy.allowedConnectorCapabilities.includes(def.capability)) {
+      return {
+        allowed: false,
+        state: 'denied',
+        code: 'CONNECTOR_ORG_POLICY_DENIED',
+        reason: `Capability "${def.capability}" is not allowed by organization policy.`,
+      };
+    }
+  }
+
+  const effectiveScope = {
+    connectorId: def.connectorId,
+    resource: scope?.resource || `${def.connectorId}:scoped`,
+    ...(scope && typeof scope === 'object' ? scope : {}),
+  };
+
+  const mergedScopes = mergeConnectorScopes(
+    policy?.connectorScopes || policy?.allowedScopes,
+    orgPolicy?.connectorScopes || orgPolicy?.allowedScopes,
+    def.connectorId,
+  );
+
+  const effectivePolicy = {
+    ...(policy && typeof policy === 'object' ? policy : {}),
+    allowedCapabilities: optedIn,
+    connectorScopes: mergedScopes,
+    withinPolicy: policy?.planApproval === 'within_policy' && policy?.planAutoAdmissionConfirmed === true,
+  };
+
+  return evaluateConnectorActionPolicy({
+    contract: {
+      capability: def.capability,
+      connectorId: def.connectorId,
+      actionClass: def.actionClass,
+      privilegeGroup: def.privilegeGroup,
+      scope: effectiveScope,
+      riskLevel: def.riskLevel,
+      idempotencyKey,
+      confirmationPolicy: def.confirmationPolicy,
+      timeoutMs: def.timeoutMs,
+      receiptVerifier: def.receiptVerifier?.supported
+        ? { ...def.receiptVerifier, verify: async () => null }
+        : def.receiptVerifier,
+      compensation: def.compensation,
+    },
+    payload,
+    policy: effectivePolicy,
+    approval,
+    actor,
+  });
+}
 
 const OBSERVATION_KINDS = new Set([
   'observation',
@@ -370,11 +657,17 @@ export async function getResponsibilityCapabilities({ organizationId, projectId 
       swarmCollaboration: true,
       costAwareModelTiering: true,
       workerFailureHandoffEvidence: true,
+      unifiedConnectorContracts: true,
+      connectorRiskLevels: [...CONNECTOR_RISK_LEVELS],
+      coreConnectors: [...CONNECTOR_CORE_IDS],
       defaultCapabilityGates: {
         allowWrite: false,
         allowFanout: false,
         allowSwarm: false,
         allowModelSwitch: false,
+        allowConnectorRead: false,
+        allowConnectorWrite: false,
+        allowConnectorBroadcast: false,
       },
     },
     modelTiering: {
@@ -388,6 +681,7 @@ export async function getResponsibilityCapabilities({ organizationId, projectId 
         templates:[template(report)], requiredScope:'entire_project', networkPolicies:{ deny:'requires_verified_isolation', inherit_existing_permissions:'requires_explicit_owner_confirmation' }, approvalMode:'preauthorized_template_and_manual_result' },
       { ...GENERIC_PLANNER_PROVIDER, available:true, reason:'Configuration is available; execution requires enabled services, node grants and verified isolation. Real execution is not yet validated.', templates:[template(planner)], requiredScope:'entire_project', approvalMode:'always' },
     ],
+    connectorCatalogDescriptors: STAGE4_CONNECTOR_CAPABILITY_CATALOG,
     planCatalogDescriptors: [
       {
         capability: 'project-report',
@@ -439,6 +733,7 @@ export async function getResponsibilityCapabilities({ organizationId, projectId 
         autoEligible: false,
         requiresHumanApproval: true,
       },
+      ...STAGE4_CONNECTOR_PLAN_DESCRIPTORS,
     ],
   };
 }

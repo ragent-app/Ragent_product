@@ -115,6 +115,7 @@ export function verifyRemoteFactoryAdmission(db, { binding: proposedBinding, ope
   return { binding:binding(row), operation:canonical };
 }
 export async function acceptRemoteFactoryOperation(input, principal, { admit } = {}) {
+  if (process.env.RAGENT_REMOTE_FACTORY_ENABLED !== '1') throw factoryError('REMOTE_FACTORY_DISABLED', 'Remote Factory admission is disabled', 503);
   const bindingId=required(input?.bindingId,'bindingId'), operationId=required(input?.operationId,'operationId');
   verifyPrincipal(principal,bindingId,'factory.remote.accept');
   const requestId=required(input?.requestId,'requestId'), sourceFactoryBindingId=required(input?.sourceFactoryBindingId,'sourceFactoryBindingId');
@@ -167,7 +168,12 @@ export async function getRemoteFactoryOperation(bindingId, operationId, principa
     if (!b || b.target_instance_id!==principal.targetInstanceId || !row || row.source_instance_id!==principal.sourceInstanceId) throw factoryError('REMOTE_NOT_FOUND','Operation unavailable',404); return receipt(row);});
   if (typeof queryChild!=='function') return result;
   const child=await queryChild(bindingId,operationId);
-  return { ...result, target:child || null };
+  const candidateAvailable=Boolean(child?.state==='review' && child?.controlState==='none');
+  const executionSyncState=candidateAvailable ? 'executed_unsynced'
+    : (['completed','failed','cancelled'].includes(child?.state) || ['failed','cancelled','succeeded'].includes(child?.execution?.attemptState)) ? 'terminal'
+    : child?.workItemId ? 'running'
+    : 'pending';
+  return { ...result, candidateAvailable, executionSyncState, target:child || null };
 }
 export function verifyRemoteFactoryCancellation(db,input,principal) {
   const bindingId=required(input?.bindingId,'bindingId'), operationId=required(input?.operationId,'operationId'), cancelId=required(input?.cancelId,'cancelId');
