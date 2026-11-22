@@ -83,7 +83,7 @@ export async function prepareFactoryCombinationValidation({organizationId,workIt
   if(data.prior) {if(data.prior.state!=='prepared'||data.prior.run_id||data.prior.session_id||data.prior.candidate_digest!==data.row.combination_digest||data.prior.provenance!=='combination_materialized'||data.prior.input_manifest_json!==data.row.manifest_json||data.prior.output_paths_json!==encode(data.outputPaths)) fail('Prior validation workspace differs');
     await checkWorkspace(data.prior);return {id:data.prior.id,cwd:data.prior.cwd,candidateDigest:data.prior.candidate_digest};}
   await preflightFactoryWorkspace({canonicalCwd:data.row.workspace,writablePaths:data.base.workspace.writablePaths});
-  const stage=await createStagingWorkspace({canonicalCwd:data.row.workspace,writablePaths:data.base.workspace.writablePaths});
+  const stage=await createStagingWorkspace({canonicalCwd:data.row.workspace,writablePaths:data.base.workspace.writablePaths,includeRootReferenceFiles:false});
   try {await checkWorkspace({cwd:stage.stagingDir,input_manifest_json:data.row.manifest_json,output_paths_json:'[]'});
     await factoryTransaction(db=>{schema(db);authorize(db,organizationId,actor,'factory.execution');verifyFactoryIntegrationQueue(db,{organizationId,queueId:data.map.queue_id,combinationDigest:data.map.combination_digest});
       const item=selectItem(db,organizationId,workItemId);if(item.state!=='claimed'||item.execution_epoch!==binding.executionEpoch||item.contract_revision!==binding.contractRevision||item.binding_generation!==binding.bindingGeneration) fail('Validation binding changed');
@@ -123,7 +123,7 @@ export async function materializeFactoryIntegration({organizationId,id},actor) {
   const root=await realpath(data.base.workspace.canonicalCwd);
   if(await factoryTargetHead(root)!==data.row.base_head||await factoryTargetBranch(root)!==data.row.target_branch) { await factoryTransaction(db=>db.prepare("UPDATE factory_integration_queue SET state='stale',updated_at=? WHERE id=? AND state='queued'").run(now(),id)); fail('Target changed; combination evidence is stale'); }
   await preflightFactoryWorkspace({canonicalCwd:root,writablePaths:data.base.workspace.writablePaths}); await checkFactoryBaseline(root,data.base);
-  const stage=await createStagingWorkspace({canonicalCwd:root,writablePaths:data.base.workspace.writablePaths});
+  const stage=await createStagingWorkspace({canonicalCwd:root,writablePaths:data.base.workspace.writablePaths,includeRootReferenceFiles:false});
   try { await checkFactoryBaseline(stage.stagingDir,data.base);const files=new Map(data.base.files.map(file=>[file.path,file]));const paths=new Set();
     for(const source of data.all) for(const change of source.changes) {if(paths.has(change.path)) fail('Candidate paths conflict');paths.add(change.path);const target=await checkedFactoryTarget(stage.stagingDir,change.path);if(change.type==='delete'){await rm(target);files.delete(change.path);}else{await mkdir(dirname(target),{recursive:true});await writeFile(target,Buffer.from(change.bytes,'base64'));files.set(change.path,change);}}
     const final=[...files.values()].sort((a,b)=>a.path.localeCompare(b.path));await checkFactoryBaseline(stage.stagingDir,{...data.base,files:final});

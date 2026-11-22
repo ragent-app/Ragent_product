@@ -462,7 +462,7 @@ async function runTests() {
     senderKind: 'node',
     senderNodeId: bug6Coord.id,
     bodyMarkdown: `@${bug6Author.stableKey} reply with @verifier [done] when verified`,
-    kind: 'done',
+    kind: 'message',
   });
   await boardStore.postBoardMessage({
     organizationId: bug6Org.id,
@@ -472,7 +472,18 @@ async function runTests() {
     kind: 'message',
   });
   const bug6MidProjection = await boardStore.buildAuthoritativeBoardProjection({ organizationId: bug6Org.id });
-  a.equal(bug6MidProjection.isDone, false, 'brief or @mention-bearing Coordinator/Owner [done] instructions must not mark Swarm done');
+  a.equal(bug6MidProjection.isDone, false, 'brief or @mention-bearing ordinary Coordinator/Owner [done] instructions must not mark Swarm done');
+
+  await boardStore.postBoardMessage({
+    organizationId: bug6Org.id,
+    channel: 'main',
+    senderKind: 'node',
+    senderNodeId: bug6Coord.id,
+    bodyMarkdown: `@${bug6Author.stableKey} [done] Verified cleanly with all deliverables accepted.`,
+    kind: 'done',
+  });
+  const bug6ExplicitMentionDoneProjection = await boardStore.buildAuthoritativeBoardProjection({ organizationId: bug6Org.id });
+  a.equal(bug6ExplicitMentionDoneProjection.isDone, true, 'explicit Coordinator kind=done closes Swarm even when summary contains @mentions');
 
   await boardStore.postBoardMessage({
     organizationId: bug6Org.id,

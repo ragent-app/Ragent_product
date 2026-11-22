@@ -114,6 +114,79 @@ await store.retireNode(workerB.id, { retiredRevision: 1 });
 const replaced = await projection.buildOrganizationProjection(org.id, { version: 2 });
 equal(replaced.nodes.find((node) => node.id === workerB.id).status, 'replaced', 'retired node is projected as replaced');
 
+// Regression (P2 #4): completed phase with all nodes completed and no open/passed gate
+// must project state='completed' (never stuck at 'planned') while preserving honest reviewState='pending'.
+const noGateOrg = await store.createOrganization({
+  id: 'org-proj-phase-complete-no-gate',
+  rootSessionId: 'root-phase-complete',
+  state: 'running',
+  idempotencyKey: 'org-proj-phase-complete-no-gate',
+});
+const noGateRev = await store.createRevisionAtHead(noGateOrg.id, {
+  expectedCurrentRevision: 0,
+  proposal: { objective: 'Complete phase cleanly' },
+  compiled: {
+    objective: 'Complete phase cleanly',
+    nodes: [{ stableKey: 'lead', phaseId: 'phase-only' }],
+    phases: [{
+      phaseId: 'phase-only',
+      objective: 'Run lead node',
+      dependsOn: [],
+      acceptance: [{ criterion: 'done', evidenceRequired: true }],
+      reviewRequired: true,
+    }],
+  },
+  digest: 'sha256:phase-complete',
+  idempotencyKey: 'rev-phase-complete',
+});
+await store.freezeRevision(noGateOrg.id, noGateRev.revision);
+const leadNode = await store.createNode({
+  id: 'node-lead-phase-complete',
+  organizationId: noGateOrg.id,
+  stableKey: 'lead',
+  nodeRole: 'specialist',
+  currentSessionId: 'sess-lead-phase-complete',
+  bindingGeneration: 1,
+  sessionClass: 'WORKER',
+});
+const leadCollab = await collaboration.createCollaborationRecord({
+  rootSessionId: 'root-phase-complete',
+  title: 'lead-phase',
+  policy: {
+    organizationId: noGateOrg.id,
+    organizationNodeId: leadNode.id,
+    organizationRevision: 1,
+    organizationBindingGeneration: 1,
+    role: 'specialist',
+  },
+  idempotencyKey: 'collab-lead-phase-complete',
+  plan: {
+    version: 1,
+    tasks: [{
+      id: 'task-lead-complete',
+      agentId: 'worker',
+      role: 'specialist',
+      objective: 'deliver',
+      dependsOn: [],
+      acceptance: [{ criterion: 'ok' }],
+      writablePaths: ['out'],
+      retry: { maxAttempts: 1, retryOn: ['transient'] },
+      timeoutMs: 60_000,
+    }],
+  },
+});
+await collaboration.markReadyTasks(leadCollab.id);
+const leadAttempt = await collaboration.claimTaskAttempt('task-lead-complete', {
+  sessionId: leadNode.currentSessionId,
+  runId: 'run-lead-phase-complete',
+});
+await collaboration.completeAttempt(leadAttempt.id, { state: 'succeeded', resultPacketId: 'pkt-lead' });
+const noGateProjection = await projection.buildOrganizationProjection(noGateOrg.id, { version: 2 });
+const noGatePhase = noGateProjection.phases.find((phase) => phase.phaseId === 'phase-only');
+equal(noGatePhase.state, 'completed', 'phase transitions from planned to completed when all phase nodes complete');
+equal(noGatePhase.reviewState, 'pending', 'reviewState honestly stays pending when no gate passed');
+equal(noGatePhase.gate, null, 'gate fact is not fabricated');
+
 function responseProbe() {
   const state = { status: 0, payload: null, headers: {} };
   return {

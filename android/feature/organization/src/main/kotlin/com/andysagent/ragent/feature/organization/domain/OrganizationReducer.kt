@@ -4,6 +4,7 @@ import com.andysagent.ragent.feature.organization.data.OrganizationBlockerDto
 import com.andysagent.ragent.feature.organization.data.OrganizationCommunicationDto
 import com.andysagent.ragent.feature.organization.data.OrganizationEventDto
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
+import com.andysagent.ragent.feature.organization.data.OrganizationPhaseDto
 import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.data.SwarmBoardChannelDto
 import com.andysagent.ragent.feature.organization.data.SwarmBoardMessageDto
@@ -11,6 +12,9 @@ import com.andysagent.ragent.feature.organization.data.SwarmBoardResponseDto
 import com.andysagent.ragent.feature.organization.data.SwarmMemberDto
 import com.andysagent.ragent.feature.organization.data.SwarmStallAlertDto
 import com.andysagent.ragent.feature.organization.data.SwarmStatusDto
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -20,12 +24,16 @@ object OrganizationReducer {
         current: OrganizationState,
         dto: OrganizationProjectionDto,
     ): OrganizationState {
-        val blockersMap = dto.blockers.associateBy { it.nodeId ?: it.id.orEmpty() }
+        val blockersByNode = dto.blockers.groupBy { it.nodeId ?: it.id.orEmpty() }
+        val phasesById = dto.phases.associateBy { it.phaseId }
         val swarmMembers = current.swarmStatus?.members.orEmpty()
 
         val rawNodes = dto.nodes.map { nodeDto ->
-            val blocker = blockersMap[nodeDto.id] ?: nodeDto.blocker
-            val mapped = mapNode(nodeDto, blocker)
+            val mapped = mapNode(
+                dto = nodeDto,
+                projectionBlockers = blockersByNode[nodeDto.id].orEmpty(),
+                phase = nodeDto.phaseId?.let(phasesById::get),
+            )
             val swarmMatch = swarmMembers.firstOrNull { member ->
                 member.nodeId == mapped.id ||
                     (!mapped.sessionId.isNullOrBlank() && member.currentSessionId == mapped.sessionId)
@@ -87,7 +95,9 @@ object OrganizationReducer {
         }
 
         val isCompleted = dto.state.equals("completed", ignoreCase = true) ||
-                (phases.isNotEmpty() && phases.all { it.isCompleted })
+                (phases.isNotEmpty() && phases.all { it.isCompleted }) ||
+                current.swarmStatus?.isDone == true ||
+                current.board?.isDone == true
 
         return current.copy(
             organizationId = dto.organizationId,
@@ -207,7 +217,7 @@ object OrganizationReducer {
             objective = current.objective.ifBlank { dto.title.orEmpty() },
             nodes = nextNodes,
             edges = nextEdges,
-            isCompleted = if (useSynthetic) dto.isDone else current.isCompleted,
+            isCompleted = if (useSynthetic) dto.isDone else (current.isCompleted || dto.isDone),
             isSyntheticSwarmNodes = useSynthetic,
             swarmStatus = swarmModel,
         )
@@ -260,6 +270,7 @@ object OrganizationReducer {
         return current.copy(
             organizationId = current.organizationId.ifBlank { boardModel.organizationId.orEmpty() },
             rootSessionId = current.rootSessionId ?: dto.rootSessionId,
+            isCompleted = current.isCompleted || boardModel.isDone,
             board = boardModel,
             selectedBoardChannel = validSelected ?: "__all__",
             boardReplyToSeq = if (boardModel.isWritable) current.boardReplyToSeq else null,
@@ -283,12 +294,24 @@ object OrganizationReducer {
         }
     }
 
-    private fun mapNode(dto: OrganizationNodeDto, blocker: OrganizationBlockerDto?): OrganizationNodeModel {
+    private fun mapNode(
+        dto: OrganizationNodeDto,
+        projectionBlockers: List<OrganizationBlockerDto> = emptyList(),
+        phase: OrganizationPhaseDto? = null,
+    ): OrganizationNodeModel {
         val role = NodeRole.fromString(dto.role)
         val domain = AgentDomain.fromExplicit(dto.domain, dto.iconKey)
-        val hasBlocker = (blocker != null) || dto.status.equals("blocked", ignoreCase = true)
+        val allBlockers = (listOfNotNull(dto.blocker) + dto.blockers + projectionBlockers).distinct()
+        val packetObj = dto.resultPacket
+        val packetBlockers = extractPacketStringList(packetObj, "blockers") +
+            extractPacketStringList(packetObj, "unresolvedItems")
+        val packetAcceptance = extractPacketStringList(packetObj, "acceptanceNotes")
+        val hasBlocker = allBlockers.isNotEmpty() ||
+            dto.status.equals("blocked", ignoreCase = true) ||
+            packetBlockers.isNotEmpty()
         val rawRuntimeState = NodeRuntimeState.fromString(dto.status, dto.currentActivity, hasBlocker)
         val attemptFailure = dto.attempt?.failureReasonCode?.trim()?.takeIf { it.isNotEmpty() }
+        val attemptReason = dto.attempt?.failureReason?.trim()?.takeIf { it.isNotEmpty() }
         val runtimeState = if (!hasBlocker && attemptFailure != null &&
             (dto.status.equals("failed", true) || dto.attempt.runState.equals("failed", true))
         ) {
@@ -297,17 +320,60 @@ object OrganizationReducer {
             rawRuntimeState
         }
 
-        val blockerDetail = listOfNotNull(
-            blocker?.reason?.trim()?.takeIf { it.isNotEmpty() },
-            blocker?.reasonCode?.trim()?.takeIf { it.isNotEmpty() },
-            blocker?.message?.trim()?.takeIf { it.isNotEmpty() },
-            blocker?.type?.trim()?.takeIf { it.isNotEmpty() },
-        ).firstOrNull()
-        val failureCode = attemptFailure ?: blocker?.reasonCode?.trim()?.takeIf { it.isNotEmpty() } ?: blockerDetail
-        val blockerText = blockerDetail ?: attemptFailure
+        val blockerReasonCodes = allBlockers.mapNotNull { it.reasonCode?.trim()?.takeIf(String::isNotEmpty) }.distinct()
+        val concreteBlockerMessages = (
+            listOfNotNull(attemptReason) +
+                allBlockers.flatMap { listOfNotNull(it.reason, it.message) }
+                    .mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) } +
+                packetBlockers
+            ).distinct()
+        val fallbackBlockerTags = allBlockers.mapNotNull {
+            (it.reasonCode ?: it.type ?: it.kind)?.trim()?.takeIf(String::isNotEmpty)
+        }.distinct()
+        val failureCode = attemptFailure
+            ?: blockerReasonCodes.firstOrNull()
+            ?: fallbackBlockerTags.firstOrNull()
+            ?: concreteBlockerMessages.firstOrNull()
+        val blockerText = concreteBlockerMessages.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+            ?: fallbackBlockerTags.firstOrNull()
+            ?: attemptFailure
+
+        val packetId = (dto.attempt?.resultPacketId
+            ?: dto.resultPacketId
+            ?: (packetObj?.get("id") as? JsonPrimitive)?.contentOrNull)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val packetVerdict = (dto.attempt?.verdict
+            ?: (packetObj?.get("verdict") as? JsonPrimitive)?.contentOrNull
+            ?: (packetObj?.get("state") as? JsonPrimitive)?.contentOrNull)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+        val packetSummaryBody = (
+            (packetObj?.get("summary") as? JsonPrimitive)?.contentOrNull
+                ?: dto.attempt?.summary
+            )?.trim()?.takeIf { it.isNotEmpty() }
+        val structuredPacketSummary = buildList {
+            if (packetVerdict != null && !packetVerdict.equals("completed", true) &&
+                (packetSummaryBody == null || !packetSummaryBody.contains(packetVerdict, ignoreCase = true))
+            ) {
+                add(packetVerdict)
+            }
+            if (packetSummaryBody != null) add(packetSummaryBody)
+            else if (packetAcceptance.isNotEmpty()) add(packetAcceptance.joinToString(" · "))
+        }.joinToString(": ").takeIf { it.isNotBlank() }
         val rawSummary = dto.resultPacketSummary?.trim()?.takeIf { it.isNotEmpty() }
-        val packetId = (dto.attempt?.resultPacketId ?: dto.resultPacketId)?.trim()?.takeIf { it.isNotEmpty() }
+            ?: dto.resultSummary?.trim()?.takeIf { it.isNotEmpty() }
+            ?: structuredPacketSummary
         val resultPacketSummary = rawSummary ?: packetId?.let { "ResultPacket: $it" }
+
+        val rawReview = dto.reviewState?.trim()?.takeIf { it.isNotEmpty() }
+        val phaseReview = phase?.reviewState?.trim()?.takeIf { it.isNotEmpty() }
+        val effectiveReviewState = when {
+            rawReview != null && !rawReview.equals("not_applicable", ignoreCase = true) -> rawReview
+            phaseReview.equals("needs_changes", ignoreCase = true) ||
+                phaseReview.equals("rejected", ignoreCase = true) -> phaseReview
+            else -> rawReview
+        }
         val effectiveSessionId = dto.currentBinding?.sessionId?.takeIf { it.isNotBlank() } ?: dto.sessionId
 
         return OrganizationNodeModel(
@@ -327,12 +393,18 @@ object OrganizationReducer {
             progressCompleted = dto.progress?.completed ?: 0,
             progressTotal = dto.progress?.total ?: 0,
             blockerText = blockerText,
-            reviewState = dto.reviewState,
+            reviewState = effectiveReviewState,
             attemptCount = dto.attemptCount,
             lastChangedAt = System.currentTimeMillis(),
+            resultPacketId = packetId,
             resultPacketSummary = resultPacketSummary,
             failureCode = failureCode,
         )
+    }
+
+    private fun extractPacketStringList(packet: JsonObject?, key: String): List<String> {
+        val arr = packet?.get(key) as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty) }
     }
 
     private fun mapSwarmMember(dto: SwarmMemberDto): SwarmMemberModel {

@@ -1080,9 +1080,13 @@ export function isSwarmMarkedDoneSync(conn, organizationId, orgPolicy = {}) {
     ORDER BY m.seq DESC
   `).all(organizationId);
   return candidateRows.some((row) => {
+    // Explicit Coordinator/Owner kind='done' closes the Swarm even when the
+    // summary includes @mentions; ordinary messages and kind='brief' still
+    // ignore [done] markers paired with @mentions.
+    if (row.kind === 'done') return true;
     const mentions = parseJson(row.mentions_json, []);
     if (Array.isArray(mentions) && mentions.length > 0) return false;
-    return row.kind === 'done' || /\[\s*done\s*\]/i.test(String(row.body_markdown || ''));
+    return /\[\s*done\s*\]/i.test(String(row.body_markdown || ''));
   });
 }
 

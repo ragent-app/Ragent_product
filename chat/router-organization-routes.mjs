@@ -3,7 +3,7 @@
 import { createHash } from 'crypto';
 import { formalMemberDescriptor, makeMemberRef, parseMemberRef } from './organization-member-reference.mjs';
 import { barrierEventFromMember } from './adapters/provider-native-delegation.mjs';
-import { capturedMember, listMemberEvents } from './organization-member-aggregation.mjs';
+import { capturedMember, listMemberEvents, resolveFormalNodeStagingConversationSession } from './organization-member-aggregation.mjs';
 import { access } from 'fs/promises';
 import { constants as fsConstants } from 'fs';
 import {
@@ -674,15 +674,29 @@ export async function handleOrganizationRoutes({
         }
         const { getSessionTimelinePage, getSessionReadSnapshot } = await import('./session-manager.mjs');
         const first = await getSessionReadSnapshot(node.currentSessionId);
-        if (!first) { writeJson(res, 200, { scope: 'unavailable', generation: ref.generation, revision: null, entries: [], nextBeforeSeq: null, nextAfterSeq: null, hasMoreBefore: false, hasMoreAfter: false }); return true; }
-        const page = await getSessionTimelinePage(node.currentSessionId, { beforeSeq, afterSeq, limit, strict: true,
-          historyMeta: first.historyMeta, sessionMeta: first.sessionMeta, run: first.run });
-        const [current, last] = await Promise.all([getNode(ref.id), getSessionReadSnapshot(node.currentSessionId)]);
+        let targetSessionId = node.currentSessionId;
+        let targetFirst = first;
+        if (!first || Number(first.historyMeta?.latestSeq || 0) === 0) {
+          const stagingConversation = await resolveFormalNodeStagingConversationSession({
+            organizationId: org.id,
+            rootSessionId: org.rootSessionId,
+            node,
+            getSessionReadSnapshotFn: getSessionReadSnapshot,
+          });
+          if (stagingConversation?.sessionId && (stagingConversation.hasEntries || !first)) {
+            targetSessionId = stagingConversation.sessionId;
+            targetFirst = stagingConversation.snapshot;
+          }
+        }
+        if (!targetFirst) { writeJson(res, 200, { scope: 'unavailable', generation: ref.generation, revision: null, entries: [], nextBeforeSeq: null, nextAfterSeq: null, hasMoreBefore: false, hasMoreAfter: false }); return true; }
+        const page = await getSessionTimelinePage(targetSessionId, { beforeSeq, afterSeq, limit, strict: true,
+          historyMeta: targetFirst.historyMeta, sessionMeta: targetFirst.sessionMeta, run: targetFirst.run });
+        const [current, last] = await Promise.all([getNode(ref.id), getSessionReadSnapshot(targetSessionId)]);
         if (!current || current.organizationId !== org.id || current.bindingGeneration !== ref.generation || current.currentSessionId !== node.currentSessionId) {
           writeJson(res, 409, { code: 'ORGANIZATION_BINDING_CHANGED', reset: true }); return true;
         }
-        const revision = first.historyMeta?.historyRevision ?? null;
-        if (!last || (last.historyMeta?.latestSeq ?? 0) < (first.historyMeta?.latestSeq ?? 0)) {
+        const revision = targetFirst.historyMeta?.historyRevision ?? null;
+        if (!last || (last.historyMeta?.latestSeq ?? 0) < (targetFirst.historyMeta?.latestSeq ?? 0)) {
           writeJson(res, 409, { code: 'MEMBER_HISTORY_CHANGED', reset: true }); return true;
         }
         const pagination = page.pagination || {};
@@ -850,6 +864,22 @@ export async function handleOrganizationRoutes({
           runtimeState = projected.bindingRuntimeState || 'unknown';
         }
       }
+      let effectiveSessionId = sessionId;
+      if (sessionId) {
+        const { getSessionReadSnapshot } = await import('./session-manager.mjs');
+        const targetSnap = await getSessionReadSnapshot(sessionId);
+        if (!targetSnap || Number(targetSnap.historyMeta?.latestSeq || 0) === 0) {
+          const stagingConversation = await resolveFormalNodeStagingConversationSession({
+            organizationId,
+            rootSessionId: org.rootSessionId,
+            node,
+            getSessionReadSnapshotFn: getSessionReadSnapshot,
+          });
+          if (stagingConversation?.sessionId && (stagingConversation.hasEntries || !targetSnap)) {
+            effectiveSessionId = stagingConversation.sessionId;
+          }
+        }
+      }
       // This fences observed node binding changes during the projection read, not later history reads.
       const current = await getNode(nodeId);
       if (!available(current)) { writeJson(res, 404, { error: 'Node not found' }); return true; }
@@ -857,7 +887,7 @@ export async function handleOrganizationRoutes({
         writeJson(res, 409, { error: 'Node binding changed; refresh and retry', code: 'ORGANIZATION_BINDING_CHANGED' }); return true;
       }
       res.setHeader?.('Cache-Control', 'private, no-store');
-      writeJson(res, 200, { organizationId, nodeId, currentBinding: { sessionId, generation }, runtimeState, observedAt: new Date().toISOString() });
+      writeJson(res, 200, { organizationId, nodeId, currentBinding: { sessionId: effectiveSessionId, generation }, runtimeState, observedAt: new Date().toISOString() });
     } catch (error) { writeError(res, writeJson, error); }
     return true;
   }

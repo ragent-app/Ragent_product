@@ -18,7 +18,7 @@ const swarmControlWriteActions = ['swarm.spawn', 'swarm.kill', 'swarm.done', 'sw
 const proposalContract = 'plan.submit requires proposal: schemaVersion 1, idempotencyKey (or proposalId), objective, non-empty nodes, phases and acceptance. Each node needs stableKey, role, agentId and phaseId. Each phase needs phaseId, objective and acceptance; its review defaults on and requires reviewerRoles. The proposal review policy defaults on and requires reviewer nodes. Disable review only when consistent with user requirements. Acceptance entries are objects with criterion (or id/name). Read the root skill for the full contract.';
 
 const readActions = [
-  'skills.list', 'skills.read', 'candidates.query', 'state.get', 'incidents.list', 'incident.get',
+  'skills.list', 'skills.read', 'candidates.query', 'state.get', 'capabilities.get', 'incidents.list', 'incident.get',
   ...swarmReadActions,
   ...(rootScope ? ['plan.status', 'phase.list', 'result.read'] : []),
 ];

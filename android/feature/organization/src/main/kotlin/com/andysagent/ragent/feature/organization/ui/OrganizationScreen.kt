@@ -1,5 +1,6 @@
 package com.andysagent.ragent.feature.organization.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -122,6 +123,9 @@ fun OrganizationScreenContent(
         val palette = nodeAccent(visual, colors.canvas.luminance() < .5f)
         SideEffect { onRootVisualChanged(OrganizationRootVisual(visual.icon, palette, rootVisualNode.physicsFrame?.radiusDp ?: rootVisualNode.radiusDp, rootVisualNode.runtimeState)) }
     }
+    if (!embedded && onBack != null) {
+        BackHandler(enabled = uiState.activeDetailNode == null, onBack = onBack)
+    }
     if (uiState.activeDetailNode != null) {
         AgentDetailScreen(node = uiState.activeDetailNode, onBack = onCloseDetail)
         return
@@ -173,16 +177,7 @@ fun OrganizationScreenContent(
                         if (isDemo) Text(stringResource(R.string.organization_demo_badge), Modifier.background(colors.quietSurface, CircleShape).padding(horizontal = 10.dp, vertical = 4.dp), color = colors.primaryContent, fontSize = 12.sp)
                     }
                     Text(uiState.objective.ifBlank { stringResource(R.string.organization_workspace) }, color = colors.primaryContent, fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    val statusText = when (uiState.state.lowercase()) {
-                        "active", "working", "running" -> R.string.organization_state_active
-                        "completed", "done" -> R.string.organization_state_done
-                        "paused" -> R.string.organization_state_paused
-                        "failed" -> R.string.organization_state_failed
-                        "idle" -> R.string.organization_state_idle
-                        "waiting" -> R.string.organization_state_waiting
-                        "blocked" -> R.string.organization_state_blocked
-                        else -> R.string.organization_state_unknown
-                    }
+                    val statusText = resolveOrganizationSubtitleRes(uiState)
                     Text(stringResource(if (isDemo) R.string.organization_demo_explanation else statusText), Modifier.padding(top = 6.dp), color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp, maxLines = 2)
                     uiState.swarmOverview?.let { overview ->
                         SwarmOverviewBar(
@@ -330,5 +325,24 @@ internal fun OrganizationNavigation(
                 }
             }
         } else Spacer(Modifier.size(48.dp))
+    }
+}
+
+internal fun resolveOrganizationSubtitleRes(uiState: OrganizationUiState): Int {
+    val isDone = uiState.isCompleted ||
+        uiState.swarmOverview?.isDone == true ||
+        uiState.swarmBoard?.isDone == true
+    if (isDone && !uiState.state.equals("failed", ignoreCase = true)) {
+        return R.string.organization_state_done
+    }
+    return when (uiState.state.lowercase()) {
+        "active", "working", "running" -> R.string.organization_state_active
+        "completed", "done" -> R.string.organization_state_done
+        "paused" -> R.string.organization_state_paused
+        "failed" -> R.string.organization_state_failed
+        "idle" -> R.string.organization_state_idle
+        "waiting" -> R.string.organization_state_waiting
+        "blocked" -> R.string.organization_state_blocked
+        else -> R.string.organization_state_unknown
     }
 }

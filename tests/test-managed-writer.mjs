@@ -521,6 +521,89 @@ try {
     }
   }
 
+  // ── 7. bounded top-level root reference files are read-only context ───────
+  {
+    const refRoot = makeRoot('ragent-mw-rootref-');
+    write(refRoot, 'README.md', 'workspace overview');
+    write(refRoot, 'inventory.json', '{"items":2}');
+    write(refRoot, '.env', 'SECRET=do-not-copy');
+    write(refRoot, '.env.local', 'TOKEN=do-not-copy');
+    write(refRoot, '.npmrc', '//registry/:_authToken=secret');
+    write(refRoot, '.git/HEAD', 'ref: refs/heads/main');
+    write(refRoot, 'node_modules/pkg/index.js', 'module.exports = 1;');
+    write(refRoot, 'docs/private.md', 'nested non-writable doc');
+    write(refRoot, 'src/existing.txt', 'before');
+    write(refRoot, 'large.bin', 'x'.repeat(2048));
+    let symlinkCreated = false;
+    try {
+      symlinkSync('/etc/passwd', join(refRoot, 'secret-link.txt'));
+      symlinkCreated = true;
+    } catch (error) {
+      if (error?.code !== 'EPERM') throw error;
+    }
+
+    const { stagingDir, mapping } = await createStagingWorkspace(refRoot, ['src'], {
+      maxRootReferenceFileBytes: 1024,
+    });
+    a.deepEqual(mapping.referenceFiles, ['README.md', 'inventory.json'],
+      'bounded top-level regular non-secret reference files are recorded');
+    a.equal(await read(stagingDir, 'README.md'), 'workspace overview', 'top-level README.md copied as read-only context');
+    a.equal(await read(stagingDir, 'inventory.json'), '{"items":2}', 'top-level inventory.json copied as read-only context');
+    a.equal(await exists(stagingDir, '.env'), false, '.env secret skipped');
+    a.equal(await exists(stagingDir, '.env.local'), false, '.env.* secret skipped');
+    a.equal(await exists(stagingDir, '.npmrc'), false, '.npmrc credential skipped');
+    a.equal(await exists(stagingDir, '.git'), false, '.git directory skipped');
+    a.equal(await exists(stagingDir, 'node_modules'), false, 'node_modules skipped');
+    a.equal(await exists(stagingDir, 'docs'), false, 'nested non-writable dir skipped');
+    a.equal(await exists(stagingDir, 'large.bin'), false, 'oversized top-level file skipped by byte bound');
+    if (symlinkCreated) {
+      a.equal(await exists(stagingDir, 'secret-link.txt'), false, 'top-level symlink skipped');
+    }
+
+    // Editing inside writablePaths while keeping root reference files untouched commits cleanly.
+    write(stagingDir, 'src/result.txt', 'delivered');
+    const cleanDiff = await resolveStagingDiff(stagingDir, refRoot, ['src']);
+    a.deepEqual(cleanDiff, [{ path: 'src/result.txt', type: 'add', kind: 'file' }],
+      'unmodified reference files emit no diff and do not raise escape');
+
+    // Modifying a copied root reference file STILL rejects with MANAGED_WRITE_ESCAPE.
+    write(stagingDir, 'README.md', 'tampered');
+    await assert.rejects(
+      resolveStagingDiff(stagingDir, refRoot, ['src']),
+      (error) => escapeCode(error) && error.statusCode === 409 && error.path === 'README.md',
+      'modifying top-level reference file outside writablePaths raises MANAGED_WRITE_ESCAPE',
+    );
+    write(stagingDir, 'README.md', 'workspace overview');
+
+    // Recreating a skipped dot-env secret in staging STILL rejects with MANAGED_WRITE_ESCAPE.
+    write(stagingDir, '.env', 'SECRET=do-not-copy');
+    await assert.rejects(
+      resolveStagingDiff(stagingDir, refRoot, ['src']),
+      (error) => escapeCode(error) && error.statusCode === 409 && error.path === '.env',
+      'writing .env outside writablePaths raises MANAGED_WRITE_ESCAPE even with matching content',
+    );
+    rmSync(join(stagingDir, '.env'));
+
+    // Adding an unrelated top-level file outside writablePaths STILL rejects.
+    write(stagingDir, 'escape.txt', 'nope');
+    await assert.rejects(
+      resolveStagingDiff(stagingDir, refRoot, ['src']),
+      (error) => escapeCode(error) && error.statusCode === 409 && error.path === 'escape.txt',
+      'new top-level file outside writablePaths raises MANAGED_WRITE_ESCAPE',
+    );
+    rmSync(join(stagingDir, 'escape.txt'));
+
+    const committed = await commitStagingToCanonical({
+      stagingDir,
+      canonicalCwd: refRoot,
+      writablePaths: ['src'],
+    });
+    a.equal(committed.committed, true);
+    a.equal(await read(refRoot, 'src/result.txt'), 'delivered');
+    a.equal(await read(refRoot, 'README.md'), 'workspace overview');
+    await assertStagingGone(stagingDir);
+  }
+
   await closeWorkspaceLeaseStore();
   console.log(`test-managed-writer: ok (${assertionCount} assertions)`);
 } finally {

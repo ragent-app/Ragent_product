@@ -77,6 +77,12 @@
     <string name="organization_swarm_killed">已终止</string>
     <string name="organization_swarm_done">已完成</string>
     <string name="organization_swarm_readonly_banner">当前为只读留言板，仅在实时 Ragent 蜂群模式下可发送消息。</string>
+    <string name="organization_swarm_done_readonly_banner">协作已完成，当前留言板为只读模式。</string>
+    <string name="organization_swarm_unread_badge">%1$d 未读</string>
+    <string name="organization_review_needs_changes">需要修改</string>
+    <string name="organization_review_rejected">已拒绝</string>
+    <string name="organization_review_passed">审核通过</string>
+    <string name="organization_review_pending">待审核</string>
     <string name="organization_swarm_empty_board">暂无留言板消息。</string>
     <string name="organization_swarm_composer_placeholder">在 %1$s 发送消息…</string>
     <string name="organization_swarm_send">发送</string>

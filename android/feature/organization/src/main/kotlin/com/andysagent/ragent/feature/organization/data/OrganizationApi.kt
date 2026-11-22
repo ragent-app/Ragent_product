@@ -3,12 +3,30 @@ package com.andysagent.ragent.feature.organization.data
 import android.net.Uri
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.core.network.ApiResponse
 import com.andysagent.ragent.core.network.ApiException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.decodeFromJsonElement
+
+internal fun isOrganizationAuthorizationRevokedStatus(statusCode: Int): Boolean =
+    statusCode == 401 || statusCode == 403
+
+internal fun isOrganizationFeatureUnavailableStatus(statusCode: Int): Boolean =
+    statusCode in setOf(404, 405, 410, 501)
+
+internal fun normalizeOrganizationUnavailableResponse(response: ApiResponse): ApiResponse {
+    if (!isOrganizationFeatureUnavailableStatus(response.statusCode)) return response
+    val parsed = runCatching { Json.parseToJsonElement(response.body) }.getOrNull()
+    if (parsed is JsonObject) return response
+    return response.copy(
+        body = """{"error":"Feature or route unavailable (HTTP ${response.statusCode})","code":"ROUTE_UNAVAILABLE"}""",
+        bodyBytes = null,
+    )
+}
 
 interface OrganizationApi {
     suspend fun getProjection(organizationId: String, version: Int = 2, sinceEventId: Long = 0L): Result<OrganizationProjectionDto>

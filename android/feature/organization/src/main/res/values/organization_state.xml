@@ -77,6 +77,12 @@
     <string name="organization_swarm_killed">Killed</string>
     <string name="organization_swarm_done">Done</string>
     <string name="organization_swarm_readonly_banner">Read-only board view. Owner posting is only enabled for live Ragent swarms.</string>
+    <string name="organization_swarm_done_readonly_banner">Completed swarm · board is read-only.</string>
+    <string name="organization_swarm_unread_badge">%1$d new</string>
+    <string name="organization_review_needs_changes">Changes requested</string>
+    <string name="organization_review_rejected">Rejected</string>
+    <string name="organization_review_passed">Review passed</string>
+    <string name="organization_review_pending">Pending review</string>
     <string name="organization_swarm_empty_board">No board messages yet.</string>
     <string name="organization_swarm_composer_placeholder">Post a message to %1$s…</string>
     <string name="organization_swarm_send">Post</string>

@@ -69,7 +69,17 @@ fun OrganizationBottomSheet(node: NodeDetailUiState, onDismiss: () -> Unit, onVi
                     DetailSection(stringResource(R.string.organization_failure_code), node.failureCode)
                 }
                 if (!node.resultPacketSummary.isNullOrBlank()) {
-                    DetailSection(stringResource(R.string.organization_result_packet), node.resultPacketSummary)
+                    val value = buildString {
+                        append(node.resultPacketSummary)
+                        node.resultPacketId?.takeIf { id ->
+                            id.isNotBlank() && node.resultPacketSummary != "ResultPacket: $id" && !node.resultPacketSummary.contains(id)
+                        }?.let { append(" ($it)") }
+                    }
+                    DetailSection(stringResource(R.string.organization_result_packet), value)
+                }
+                node.reviewState?.trim()?.takeIf { it.isNotEmpty() && !it.equals("not_applicable", ignoreCase = true) }?.let { raw ->
+                    val label = organizationReviewStateRes(raw)?.let { stringResource(it) } ?: raw
+                    DetailSection(stringResource(R.string.org_detail_review), label)
                 }
                 if (!node.harness.isNullOrBlank()) {
                     DetailSection(stringResource(R.string.organization_harness), node.harness)
@@ -93,4 +103,12 @@ private fun DetailSection(label: String, value: String) {
         Text(label, color = colors.secondaryContent, fontSize = 13.sp, lineHeight = 20.sp)
         Text(value, color = colors.primaryContent, fontSize = 13.sp, lineHeight = 20.sp)
     }
+}
+
+internal fun organizationReviewStateRes(reviewState: String?): Int? = when (reviewState?.trim()?.lowercase()) {
+    "needs_changes" -> R.string.organization_review_needs_changes
+    "rejected" -> R.string.organization_review_rejected
+    "passed", "complete", "completed" -> R.string.organization_review_passed
+    "pending" -> R.string.organization_review_pending
+    else -> null
 }

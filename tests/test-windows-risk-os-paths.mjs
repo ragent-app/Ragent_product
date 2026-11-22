@@ -138,3 +138,197 @@ test('an unverified context cannot auto-approve file operations in either main m
     assert.equal(decision.reason, 'run path context is unavailable');
   }
 });
+
+test('attested managedWriter sw__* staging under ProgramData allows Write/PowerShell/Bash inside staging while keeping all other ProgramData paths protected', async () => {
+  const { analyzeWindowsPowerShell } = await import('../chat/windows-powershell-actions.mjs');
+  const { analyzeWindowsBash } = await import('../chat/windows-bash-actions.mjs');
+  const { buildClaudeWindowsRelativeOperationBridge } = await import('../chat/windows-claude-relative-operation-bridge.mjs');
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const path = await import('node:path');
+
+  const tempData = mkdtempSync(path.join(tmpdir(), 'ragent-win-pd-staging-'));
+  try {
+    const programData = path.win32.join(tempData, 'ProgramData');
+    const canonicalOwnerWorkspace = path.win32.join(programData, 'Ragent', 'instances', 'owner', 'workspace');
+    const stagingBase = path.win32.join(canonicalOwnerWorkspace, 'managed-writer-staging');
+    const stagingDir = path.win32.join(stagingBase, 'sw__lead123');
+    const otherStagingDir = path.win32.join(stagingBase, 'sw__other456');
+    const outsideProgramData = path.win32.join(programData, 'other-vendor');
+    const memoryProtected = path.win32.join(programData, 'Ragent', 'instances', 'owner', 'memory');
+    const windowsDir = path.win32.join(tempData, 'Windows');
+    const pfDir = path.win32.join(tempData, 'Program Files');
+    const pf86Dir = path.win32.join(tempData, 'Program Files (x86)');
+    for (const dir of [
+      canonicalOwnerWorkspace,
+      path.win32.join(canonicalOwnerWorkspace, 'out'),
+      stagingDir,
+      path.win32.join(stagingDir, 'out'),
+      otherStagingDir,
+      outsideProgramData,
+      memoryProtected,
+      windowsDir,
+      pfDir,
+      pf86Dir,
+    ]) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(path.win32.join(stagingDir, 'out', 'lead-notes.md'), 'draft', 'utf8');
+    writeFileSync(path.win32.join(stagingDir, '.env'), 'SECRET=1', 'utf8');
+
+    const windowsOsPaths = {
+      windows: windowsDir,
+      programData,
+      programFiles: pfDir,
+      programFilesX86: pf86Dir,
+    };
+
+    // Unattested or mismatched managedWriterStagingRoot must never unlock ProgramData writes.
+    const unattested = buildRunRiskContext({
+      platform: 'win32',
+      workspaceRoot: { realPath: stagingDir },
+      scopeRoot: { realPath: stagingDir },
+      cwd: { realPath: stagingDir },
+    }, { windowsOsPaths, protectedRoots: [memoryProtected] });
+    assert.equal(unattested.managedWriterStagingRoot, undefined);
+
+    const badRoot = buildRunRiskContext({
+      platform: 'win32',
+      workspaceRoot: { realPath: canonicalOwnerWorkspace },
+      scopeRoot: { realPath: canonicalOwnerWorkspace },
+      cwd: { realPath: canonicalOwnerWorkspace },
+    }, { windowsOsPaths, managedWriterStagingRoot: canonicalOwnerWorkspace });
+    assert.equal(badRoot.managedWriterStagingRoot, undefined, 'non-sw__* ProgramData workspace cannot attest staging exception');
+
+    const scope = {
+      platform: 'win32',
+      workspaceRoot: { realPath: stagingDir },
+      scopeRoot: { realPath: stagingDir },
+      cwd: { realPath: stagingDir },
+    };
+    const context = buildRunRiskContext(scope, {
+      windowsOsPaths,
+      protectedRoots: [memoryProtected],
+      managedWriterStagingRoot: stagingDir,
+    });
+    assert.equal(context.managedWriterStagingRoot, path.win32.resolve(stagingDir));
+    scope.riskContext = context;
+    const manifest = { executionScope: scope, executionScopeDigest: computeExecutionScopeDigest(scope) };
+    const binding = resolveRunRiskContext(manifest, { platform: 'win32', windowsOsPaths });
+    assert.equal(binding.valid, true, binding.reason);
+
+    // Tampered / mismatched managedWriterStagingRoot fails sidecar verification.
+    const tamperedScope = { ...scope, riskContext: { ...context, managedWriterStagingRoot: canonicalOwnerWorkspace } };
+    assert.equal(
+      resolveRunRiskContext({ executionScope: tamperedScope, executionScopeDigest: computeExecutionScopeDigest(tamperedScope) }, { platform: 'win32', windowsOsPaths }).reason,
+      'managed-writer-staging-root-invalid',
+    );
+    const crossDirScope = { ...scope, riskContext: { ...context, managedWriterStagingRoot: otherStagingDir } };
+    assert.equal(
+      resolveRunRiskContext({ executionScope: crossDirScope, executionScopeDigest: computeExecutionScopeDigest(crossDirScope) }, { platform: 'win32', windowsOsPaths }).reason,
+      'managed-writer-staging-root-invalid',
+    );
+
+    const stagingFile = path.win32.join(stagingDir, 'out', 'lead-notes.md');
+    const canonicalFile = path.win32.join(canonicalOwnerWorkspace, 'out', 'lead-notes.md');
+    const siblingStagingFile = path.win32.join(otherStagingDir, 'out', 'evil.md');
+    const vendorFile = path.win32.join(outsideProgramData, 'evil.txt');
+    const envFile = path.win32.join(stagingDir, '.env');
+
+    const fsApi = {
+      async lstat(target) {
+        const lower = target.toLowerCase();
+        if ([stagingDir, path.win32.join(stagingDir, 'out'), canonicalOwnerWorkspace, path.win32.join(canonicalOwnerWorkspace, 'out'), otherStagingDir].some((d) => d.toLowerCase() === lower)) {
+          return { isDirectory: () => true, isFile: () => false, isSymbolicLink: () => false, nlink: 1 };
+        }
+        return { isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false, nlink: 1 };
+      },
+      async realpath(target) { return target; },
+      async readdir() { return []; },
+    };
+
+    const allowedWrite = await analyzeWindowsFileChanges([{ kind: 'write', path: stagingFile }], context, { fsApi });
+    assert.equal(allowedWrite.complete, true);
+    assert.equal(allowedWrite.actions[0].protected, false);
+    assert.equal(allowedWrite.actions[0].workspace, true);
+    assert.equal(decideWindowsPowerShellActions(allowedWrite).decision, 'allow');
+
+    // Negative security boundaries stay strictly protected.
+    for (const [label, forbiddenPath] of [
+      ['canonical owner workspace outside sw__', canonicalFile],
+      ['sibling sw__other staging workspace', siblingStagingFile],
+      ['unrelated ProgramData folder', vendorFile],
+      ['sensitive .env inside sw__', envFile],
+      ['protected memory root', path.win32.join(memoryProtected, 'secret.md')],
+    ]) {
+      const denied = await analyzeWindowsFileChanges([{ kind: 'write', path: forbiddenPath }], context, { fsApi });
+      assert.equal(denied.actions[0].protected, true, `${label} write must remain protected`);
+      assert.equal(decideWindowsPowerShellActions(denied).decision, 'review', `${label} must require review`);
+    }
+
+    // Symlink escape whose actual realpath leaves sw__* into ProgramData MUST remain protected.
+    const symlinkEscape = await analyzeWindowsFileChanges([{ kind: 'write', path: path.win32.join(stagingDir, 'escape-link.md') }], context, {
+      fsApi: {
+        ...fsApi,
+        async realpath(target) {
+          return target.toLowerCase().endsWith('escape-link.md') ? canonicalFile : target;
+        },
+      },
+    });
+    assert.equal(symlinkEscape.actions[0].protected, true, 'symlink escape out of sw__* into ProgramData remains protected');
+
+    // Bash write/mkdir inside sw__* (mocked fsApi + relative bridge on real Windows host).
+    const bashResult = await analyzeWindowsBash('mkdir -p out && echo hello > out/lead-notes.md', {
+      ...context,
+      requireAbsolutePaths: false,
+      allowCwdRewrite: true,
+    }, {
+      analyzeFiles: (entries, ctx) => analyzeWindowsFileChanges(entries, ctx, { fsApi }),
+    });
+    assert.equal(bashResult.complete, true, bashResult.reason);
+    assert.equal(decideWindowsPowerShellActions(bashResult).decision, 'allow');
+
+    if (process.platform === 'win32') {
+      const { resolveWindowsSystemPaths } = await import('../chat/windows-system-paths.mjs');
+      for (const riskMode of ['recommended', 'full-auto']) {
+        const state = { riskMode, cwd: stagingDir, turnActive: true, riskContext: context, riskContextValid: true };
+        const writeGate = await decideWindowsApproval({
+          providerMethod: 'can_use_tool',
+          requestClass: 'tool_invocation',
+          kind: 'permissions',
+          params: { tool_name: 'Write', input: { file_path: stagingFile } },
+        }, state);
+        assert.equal(writeGate.decision, 'auto-allow', `${riskMode}: Write inside attested sw__* auto-allows`);
+
+        const psGate = await decideWindowsApproval({
+          kind: 'command',
+          params: {
+            command: [resolveWindowsSystemPaths().powershell, '-NoProfile', '-Command', `Set-Content -LiteralPath '${stagingFile.replaceAll("'", "''")}' -Value 'ok'`],
+          },
+        }, state);
+        assert.equal(psGate.decision, 'auto-allow', `${riskMode}: PowerShell write inside attested sw__* auto-allows`);
+
+        const bashBridge = await buildClaudeWindowsRelativeOperationBridge({
+          approval: {
+            providerMethod: 'can_use_tool',
+            requestClass: 'tool_invocation',
+            kind: 'command',
+            params: { tool_name: 'Bash', input: { command: 'mkdir -p out && echo ok > out/lead-notes.md' } },
+          },
+          state,
+        });
+        assert.ok(bashBridge?.updatedInput?.command, `${riskMode}: relative Bash mkdir+write inside attested sw__* bridges & allows`);
+
+        const escapedWrite = await decideWindowsApproval({
+          providerMethod: 'can_use_tool',
+          requestClass: 'tool_invocation',
+          kind: 'permissions',
+          params: { tool_name: 'Write', input: { file_path: canonicalFile } },
+        }, state);
+        assert.equal(escapedWrite.decision, 'prompt', `${riskMode}: canonical owner/workspace write stays gated`);
+      }
+    }
+  } finally {
+    rmSync(tempData, { recursive: true, force: true });
+  }
+});

@@ -709,8 +709,16 @@ try {
     assert.deepEqual(rootWriteTool.inputSchema.properties.args.properties.visibility.enum, ['org'], 'MCP visibility schema restricts to org-only in Phase 2');
     assertions += 1;
     ok(rootReadActions.includes('swarm.status') && rootReadActions.includes('board.read') && rootReadActions.includes('swarm.channel.list'));
+    ok(rootReadActions.includes('capabilities.get'), 'root tools/list exposes capabilities.get');
     ok(rootWriteActions.includes('swarm.spawn') && rootWriteActions.includes('swarm.kill') && rootWriteActions.includes('swarm.done') && rootWriteActions.includes('board.post'));
     ok(rootWriteActions.includes('swarm.model') && rootWriteActions.includes('swarm.promote_candidate') && rootWriteActions.includes('swarm.complete_work_item'), 'Phase 3 tools/list exposes swarm.model and bridge actions for Coordinator');
+
+    const rootCapsCall = await rootMcp.call(20, 'tools/call', {
+      name: 'ragent_organization_read',
+      arguments: { action: 'capabilities.get' },
+    });
+    equal(Boolean(rootCapsCall.result?.isError), false, 'MCP capabilities.get succeeds on root scope without -32601');
+    equal(JSON.parse(rootCapsCall.result.content[0].text).root, true, 'root capabilities.get returns capability payload');
 
     const mcpStatusCall = await rootMcp.call(3, 'tools/call', {
       name: 'ragent_organization_read',
@@ -733,7 +741,17 @@ try {
     const workerReadActions = workerList.result.tools.find((t) => t.name === 'ragent_organization_read').inputSchema.properties.action.enum;
     const workerWriteActions = workerList.result.tools.find((t) => t.name === 'ragent_organization_action').inputSchema.properties.action.enum;
     ok(workerReadActions.includes('board.read') && workerReadActions.includes('swarm.status'));
+    ok(workerReadActions.includes('capabilities.get'), 'worker tools/list exposes capabilities.get');
     ok(workerWriteActions.includes('board.post') && workerWriteActions.includes('board.wait'));
+
+    const workerCapsCall = await workerMcp.call(20, 'tools/call', {
+      name: 'ragent_organization_read',
+      arguments: { action: 'capabilities.get' },
+    });
+    equal(Boolean(workerCapsCall.result?.isError), false, 'MCP capabilities.get succeeds on node scope without -32601');
+    const workerCapsJson = JSON.parse(workerCapsCall.result.content[0].text);
+    equal(workerCapsJson.canSwarm, true, 'worker capabilities.get returns node capability payload');
+    equal(workerCapsJson.isCoordinator, false, 'worker capabilities.get keeps isCoordinator=false');
     ok(!workerWriteActions.includes('swarm.spawn') && !workerWriteActions.includes('swarm.kill') && !workerWriteActions.includes('swarm.done') && !workerWriteActions.includes('swarm.model') && !workerWriteActions.includes('swarm.promote_candidate'));
 
     const workerPost = await workerMcp.call(2, 'tools/call', {

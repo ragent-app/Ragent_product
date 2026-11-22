@@ -60,6 +60,7 @@ import { resolvePrivilegedExecutorSocketPath } from '../lib/privileged-executor-
 import { ownerWindowsOsPaths } from '../lib/windows-owner-os-paths.mjs';
 import {
   RISK_POLICY_CONTEXT_VERSION,
+  isManagedWriterStagingWorkspacePath,
   systemPathRootsForPlatform,
 } from './risk-policy.mjs';
 
@@ -90,13 +91,33 @@ function uniqueRiskRoots(values, platform) {
  * trusted only when this exact Run snapshot binds it, while Ragent's own
  * control roots remain protected by precedence.
  */
-export function buildRunRiskContext(executionScope, { protectedRoots = [], windowsOsPaths = process.platform === 'win32' ? ownerWindowsOsPaths() : null } = {}) {
+function sameRiskPath(left, right, platform = process.platform) {
+  const normalizedLeft = normalizedRiskRoot(left, platform);
+  const normalizedRight = normalizedRiskRoot(right, platform);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
+}
+
+export function buildRunRiskContext(executionScope, {
+  protectedRoots = [],
+  windowsOsPaths = process.platform === 'win32' ? ownerWindowsOsPaths() : null,
+  managedWriterStagingRoot = '',
+} = {}) {
   const scope = executionScope && typeof executionScope === 'object' ? executionScope : {};
   const platform = typeof scope.platform === 'string' && scope.platform ? scope.platform : process.platform;
   const pathApi = pathApiForRiskPlatform(platform);
   const workspaceRoot = trimString(scope.workspaceRoot?.realPath);
   const trustedWorkspaceRoot = trimString(scope.scopeRoot?.realPath) || workspaceRoot;
   const cwd = trimString(scope.cwd?.realPath) || trustedWorkspaceRoot;
+  const candidateStagingRoot = normalizedRiskRoot(managedWriterStagingRoot || scope.managedWriterStagingRoot, platform);
+  const attestedStagingRoot = (
+    candidateStagingRoot
+    && trustedWorkspaceRoot
+    && isManagedWriterStagingWorkspacePath(candidateStagingRoot, platform)
+    && sameRiskPath(candidateStagingRoot, trustedWorkspaceRoot, platform)
+  ) ? candidateStagingRoot : '';
   const executorSocket = trimString(resolvePrivilegedExecutorSocketPath());
   const providerHomesRoot = CODEX_MANAGED_HOME_DIR ? pathApi.dirname(CODEX_MANAGED_HOME_DIR) : '';
   const defaults = [
@@ -130,6 +151,7 @@ export function buildRunRiskContext(executionScope, { protectedRoots = [], windo
     workspaceRoot,
     trustedWorkspaceRoot,
     cwd,
+    ...(attestedStagingRoot ? { managedWriterStagingRoot: attestedStagingRoot } : {}),
     // The owner workspace can be below ProgramData. Bind that concrete OS
     // root into the signed Run snapshot so reads inside the exact workspace
     // can be distinguished from unrelated ProgramData contents.
@@ -297,6 +319,48 @@ async function resolveIsolatedSwarmWorkspaceRoot({ session, sessionKey, project,
   };
 }
 
+async function resolveManagedWriterStagingRoot({ session, sessionKey, manifest, project, isolatedWorkspace, internalOperation, deps }) {
+  if (isolatedWorkspace?.workspaceMode === 'staging') {
+    return isManagedWriterStagingWorkspacePath(isolatedWorkspace.workspaceRootPath, process.platform)
+      ? isolatedWorkspace.workspaceRootPath
+      : '';
+  }
+  const sessionFolder = trimString(session?.folder);
+  if (!sessionFolder || !isManagedWriterStagingWorkspacePath(sessionFolder, process.platform)) return '';
+  if (session?.sessionPlane !== 'organization' && internalOperation !== 'collaboration_task') return '';
+
+  let realFolder = '';
+  try {
+    realFolder = await resolveRealRoot(sessionFolder);
+  } catch {
+    return '';
+  }
+  if (!realFolder || !isManagedWriterStagingWorkspacePath(realFolder, process.platform)) return '';
+
+  const checkOrgStagingRef = typeof deps.getManagedWriterStagingOrganizationReference === 'function'
+    ? deps.getManagedWriterStagingOrganizationReference
+    : (async (sid, rid) => {
+      const { getManagedWriterStagingOrganizationReference } = await import('./organization-identity-context.mjs');
+      return getManagedWriterStagingOrganizationReference(sid, rid);
+    });
+  const orgStagingRef = await checkOrgStagingRef(sessionKey, trimString(manifest?.requestId)).catch(() => null);
+  const sessionStagingDir = trimString(session?.sourceContext?.managedWriter?.stagingDir);
+  const realSessionStaging = sessionStagingDir ? await resolveRealRoot(sessionStagingDir).catch(() => '') : '';
+  const matchesSessionStaging = Boolean(realSessionStaging) && sameRiskPath(realSessionStaging, realFolder, process.platform);
+  if (orgStagingRef) {
+    if (realSessionStaging && !matchesSessionStaging) return '';
+    return realFolder;
+  }
+  if (!matchesSessionStaging) return '';
+  const canonicalCwd = trimString(session?.sourceContext?.managedWriter?.canonicalCwd);
+  const realProjectRoot = trimString(project?.rootPath) ? await resolveRealRoot(project.rootPath).catch(() => '') : '';
+  if (canonicalCwd && realProjectRoot) {
+    const realCanonical = await resolveRealRoot(canonicalCwd).catch(() => '');
+    if (!realCanonical || !(await scopeContainsPath(realProjectRoot, realCanonical))) return '';
+  }
+  return realFolder;
+}
+
 /**
  * prepareRunExecution({ sessionId, session, manifest, options, deps })
  *
@@ -392,6 +456,12 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
   if (!project && trimString(session?.folder)) {
     project = await findProjectByFolder(session.folder);
   }
+  if (!project
+      && (session?.sessionPlane === 'organization' || internalOperation === 'collaboration_task')
+      && isManagedWriterStagingWorkspacePath(session?.folder, process.platform)
+      && trimString(session?.sourceContext?.managedWriter?.canonicalCwd)) {
+    project = await findProjectByFolder(session.sourceContext.managedWriter.canonicalCwd);
+  }
   if (!project) {
     return legacy('no-project-binding');
   }
@@ -405,10 +475,19 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     internalOperation,
     deps,
   });
+  const managedWriterStagingRoot = await resolveManagedWriterStagingRoot({
+    session,
+    sessionKey,
+    manifest,
+    project,
+    isolatedWorkspace,
+    internalOperation,
+    deps,
+  });
 
   // Workspace: drift-checked ensure (raises WORKSPACE_ROOT_DRIFT when the root
   // moved), then a non-mutating re-read for the revision check.
-  const workspace = await ensureWorkspace(isolatedWorkspace?.workspaceRootPath || project.rootPath);
+  const workspace = await ensureWorkspace(isolatedWorkspace?.workspaceRootPath || managedWriterStagingRoot || project.rootPath);
   if (!workspace || workspace.resolutionState === 'unresolved') {
     throw createAdmissionError(
       'Workspace root is unresolved or not accessible',
@@ -421,19 +500,20 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     ? workspace.revision
     : 1;
 
-  const git = await collectGit(workspace.realRootPath || isolatedWorkspace?.workspaceRootPath || project.rootPath, {
+  const git = await collectGit(workspace.realRootPath || isolatedWorkspace?.workspaceRootPath || managedWriterStagingRoot || project.rootPath, {
     timeoutMs: options.gitTimeoutMs,
     maxOutputBytes: options.gitMaxOutputBytes,
   });
 
-  const scopeMode = isolatedWorkspace?.workspaceMode === 'staging'
+  const scopeMode = (isolatedWorkspace?.workspaceMode === 'staging' || Boolean(managedWriterStagingRoot))
     ? 'shared'
     : (project.scopeMode === 'subpath' ? 'subpath' : 'shared');
   const requestedAccessMode = options.accessMode === 'read' || requiresReadOnly ? 'read' : 'write';
   const executionIsolation = isolatedWorkspace?.executionIsolation
-    || (options.executionIsolation === 'worktree' || options.executionIsolation === 'container'
-      ? options.executionIsolation
-      : 'shared');
+    || (managedWriterStagingRoot ? 'container'
+      : (options.executionIsolation === 'worktree' || options.executionIsolation === 'container'
+        ? options.executionIsolation
+        : 'shared'));
   const agent = options.agent && typeof options.agent === 'object' ? options.agent : undefined;
 
   // S4: runtime read-only certification gate. Resolved BEFORE the snapshot is
@@ -494,13 +574,14 @@ export async function prepareRunExecution({ sessionId, session, manifest, option
     });
     snapshot = built.snapshot;
     const extraProtectedRoots = [];
-    if (isolatedWorkspace?.workspaceRootPath && trimString(project?.rootPath)) {
+    const isolatedRoot = isolatedWorkspace?.workspaceRootPath || managedWriterStagingRoot;
+    if (isolatedRoot && trimString(project?.rootPath)) {
       const realProjectRoot = await resolveRealRoot(project.rootPath).catch(() => '');
-      if (realProjectRoot && !(await scopeContainsPath(realProjectRoot, isolatedWorkspace.workspaceRootPath))) {
+      if (realProjectRoot && !(await scopeContainsPath(realProjectRoot, isolatedRoot))) {
         extraProtectedRoots.push(realProjectRoot);
       }
     }
-    const riskContext = buildRunRiskContext(snapshot, { protectedRoots: extraProtectedRoots });
+    const riskContext = buildRunRiskContext(snapshot, { protectedRoots: extraProtectedRoots, managedWriterStagingRoot });
     // Bind the risk context into the same immutable snapshot/digest as the
     // execution scope. A later observer or sidecar cannot silently replace the
     // protected roots or the trusted workspace with caller-provided values.

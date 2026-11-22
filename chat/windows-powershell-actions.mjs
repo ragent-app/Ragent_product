@@ -2,7 +2,7 @@ import { approvalFact, decideApprovalFacts } from './approval-policy.mjs';
 import path from 'node:path';
 import { lstat, realpath, readdir } from 'node:fs/promises';
 import { expandWindowsPowerShellGlob, parseWindowsPowerShellAst } from './windows-powershell-ast.mjs';
-import { systemPathRootsForPlatform } from './risk-policy.mjs';
+import { isManagedWriterStagingWorkspacePath, systemPathRootsForPlatform } from './risk-policy.mjs';
 import { analyzeWindowsLocalGit, analyzeWindowsReadOnlyGit } from './windows-readonly-git.mjs';
 
 const win = path.win32;
@@ -412,13 +412,24 @@ function isProtected(target, context, {
   const workspaceRoot = typeof context.trustedWorkspaceRoot === 'string' ? context.trustedWorkspaceRoot : '';
   const programDataRoot = context.platform === 'win32' && typeof context.programDataRoot === 'string'
     ? context.programDataRoot : '';
+  const stagingRoot = context.platform === 'win32' && typeof context.managedWriterStagingRoot === 'string'
+    ? context.managedWriterStagingRoot : '';
   const boundProgramDataWorkspaceRead = allowProgramDataWorkspaceRead && programDataRoot && workspaceRoot
     && inside(target.lexical, programDataRoot) && inside(target.actual, programDataRoot)
     && inside(target.lexical, workspaceRoot) && inside(target.actual, workspaceRoot);
+  const boundProgramDataStagingWorkspace = Boolean(
+    programDataRoot
+    && workspaceRoot
+    && stagingRoot
+    && isManagedWriterStagingWorkspacePath(stagingRoot, 'win32')
+    && win.resolve(stagingRoot).toLowerCase() === win.resolve(workspaceRoot).toLowerCase()
+    && inside(target.lexical, programDataRoot) && inside(target.actual, programDataRoot)
+    && inside(target.lexical, stagingRoot) && inside(target.actual, stagingRoot),
+  );
   return [target.lexical, target.actual].some((p) => {
     if (!allowShallowDirectoryListing && protectedRoots.some((root) => inside(p, root))) return true;
     if (systemRoots.some((root) => inside(p, root)
-      && !(boundProgramDataWorkspaceRead && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase())
+      && !((boundProgramDataWorkspaceRead || boundProgramDataStagingWorkspace) && win.resolve(root).toLowerCase() === win.resolve(programDataRoot).toLowerCase())
       && !allowShallowDirectoryListing && !allowOrdinarySystemRead)) return true;
     return !allowShallowDirectoryListing && (WINDOWS_PROFILE_SENSITIVE.test(win.normalize(p))
       || WINDOWS_SYSTEM_SENSITIVE.test(win.normalize(p))

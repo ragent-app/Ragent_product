@@ -1113,6 +1113,7 @@ export function createCollaborationOrchestrator(options = {}) {
         staging = await deps.createStagingWorkspace({
           canonicalCwd: root.folder,
           writablePaths: task.writablePaths,
+          includeRootReferenceFiles: !collaboration.policy?.factoryExecution,
         });
       } else if (collaboration.policy?.workspacePolicy === 'git-worktree') {
       // The worktree path is derived from (collaborationId, taskId). Without

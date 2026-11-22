@@ -17,4 +17,10 @@
     <string name="organization_node_paused">일시 중지</string>
     <string name="organization_node_idle">유휴</string>
     <string name="organization_conversation_close">대화 닫기</string>
+    <string name="organization_swarm_done_readonly_banner">협업이 완료되어 게시판이 읽기 전용입니다.</string>
+    <string name="organization_swarm_unread_badge">새 글 %1$d</string>
+    <string name="organization_review_needs_changes">수정 요청됨</string>
+    <string name="organization_review_rejected">거부됨</string>
+    <string name="organization_review_passed">검토 통과</string>
+    <string name="organization_review_pending">검토 대기 중</string>
 </resources>

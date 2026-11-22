@@ -82,6 +82,32 @@ function publicPhase(phase, phaseEvents = []) {
   };
 }
 
+function deriveV2Phases(phases = []) {
+  if (!Array.isArray(phases)) return [];
+  return phases.map((phase) => {
+    if (!phase || typeof phase !== 'object') return phase;
+    const total = Number(phase.progress?.total || 0);
+    const completed = Number(phase.progress?.completed || 0);
+    const blocked = Number(phase.progress?.blocked || 0);
+    const activeTasks = Number(phase.progress?.activeTasks || 0);
+    const gateState = text(phase.gate?.state);
+    if (
+      phase.state === 'planned'
+      && total > 0
+      && completed === total
+      && blocked === 0
+      && activeTasks === 0
+      && !['open', 'decided', 'needs_changes'].includes(gateState)
+    ) {
+      return {
+        ...phase,
+        state: 'completed',
+      };
+    }
+    return phase;
+  });
+}
+
 export function projectionDigest(projection) {
   const copy = clone(projection, {});
   delete copy.digest;
@@ -157,7 +183,7 @@ async function buildOrganizationProjectionUncached(organizationId, {
     progress: status ? { ...progress, state: status.state } : progress,
     nodes: status?.nodes || safeNodes,
     edges: safeEdges,
-    phases: status?.phases || phases,
+    phases: status?.phases ? deriveV2Phases(status.phases) : phases,
     activeCommunications,
     blockers: status?.blockers || bounded(events.filter((event) => ['blocker.reported', 'blocker.escalated'].includes(event.type)).map((event) => ({ id: event.id, nodeId: event.nodeId || null, type: event.type, createdAt: event.createdAt }))),
     recentEvents: safeEvents,

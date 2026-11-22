@@ -249,4 +249,70 @@ equal(replayedManaged.sessionId, firstManaged.sessionId, 'replacement key replay
 equal((await sessionManager.getSession(firstManaged.sessionId)).organizationNodeId, 'real-node-worker', 'replayed Session keeps organization lineage');
 equal(factory.normalizeManagedSessionName('worker', 'w1'), 'org:worker:w1', 'managed session name is deterministic');
 
+// Root session riskMode inheritance (Item 1a regression).
+const recommendedRoot = await sessionManager.createSession(join(tempHome, 'workspace'), 'claude', 'Recommended Root', {
+  sessionPlane: 'user',
+  sessionClass: 'ROOT_LEADERSHIP',
+  riskMode: 'recommended',
+});
+const recommendedOrg = await store.createOrganization({
+  id: 'org-risk-inherit-rec',
+  rootSessionId: recommendedRoot.id,
+  idempotencyKey: 'org-risk-inherit-rec',
+});
+const recommendedManaged = await factory.createManagedSessionForNode({
+  organizationId: recommendedOrg.id,
+  organizationRevision: 1,
+  organizationNodeId: 'node-rec-1',
+  roleInstanceId: 'role-rec-1',
+  stableKey: 'lead',
+  role: 'manager',
+  agentId: 'chat',
+  sessionClass: 'MANAGER',
+  idempotencyKey: 'rec-risk-1',
+});
+equal((await sessionManager.getSession(recommendedManaged.sessionId)).riskMode, 'recommended', 'managed node session inherits recommended riskMode instead of falling back to full-auto');
+
+const explicitFullAutoRoot = await sessionManager.createSession(join(tempHome, 'workspace'), 'claude', 'FullAuto Root', {
+  sessionPlane: 'user',
+  sessionClass: 'ROOT_LEADERSHIP',
+  riskMode: 'full-auto',
+  riskModeExplicit: true,
+});
+const explicitFullAutoOrg = await store.createOrganization({
+  id: 'org-risk-inherit-full',
+  rootSessionId: explicitFullAutoRoot.id,
+  idempotencyKey: 'org-risk-inherit-full',
+});
+const explicitFullAutoManaged = await factory.createManagedSessionForNode({
+  organizationId: explicitFullAutoOrg.id,
+  organizationRevision: 1,
+  organizationNodeId: 'node-full-1',
+  roleInstanceId: 'role-full-1',
+  stableKey: 'writer',
+  role: 'specialist',
+  agentId: 'chat',
+  sessionClass: 'WORKER',
+  idempotencyKey: 'full-risk-1',
+});
+const fullAutoChildMeta = await sessionManager.getSession(explicitFullAutoManaged.sessionId);
+equal(fullAutoChildMeta.riskMode, 'full-auto', 'explicit full-auto root preserves full-auto on managed child');
+equal(fullAutoChildMeta.riskModeExplicit, true, 'explicit full-auto flag is preserved on managed child');
+
+const unexplicitClamped = factory.inheritSessionRiskOptions({ riskMode: 'full-auto', riskModeExplicit: false });
+equal(unexplicitClamped.riskMode, 'recommended', 'unexplicit full-auto root clamps managed child to recommended');
+equal(unexplicitClamped.riskModeExplicit, undefined, 'clamped full-auto clears riskModeExplicit');
+
+const consultManaged = await factory.createManagedSessionForConsultation({
+  rootSessionId: recommendedRoot.id,
+  consultationRoundId: 'round-rec-1',
+  expertAssignmentId: 'assign-rec-1',
+  controllerSessionId: recommendedRoot.id,
+  agentId: 'chat',
+  role: 'specialist',
+  sessionClass: 'WORKER',
+  idempotencyKey: 'consult-rec-1',
+});
+equal((await sessionManager.getSession(consultManaged.sessionId)).riskMode, 'recommended', 'consultation managed session also inherits recommended riskMode');
+
 console.log(`test-organization-provisioning: ok (${assertions} assertions)`);

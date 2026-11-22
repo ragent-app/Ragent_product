@@ -1,15 +1,20 @@
 package com.andysagent.ragent.feature.organization.domain
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import com.andysagent.ragent.core.model.RuntimeConnectionState
+import com.andysagent.ragent.core.network.ApiResponse
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.feature.organization.ConversationStatus
+import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.data.MemberConversationRefDto
 import com.andysagent.ragent.feature.organization.data.OrganizationApi
 import com.andysagent.ragent.feature.organization.data.OrganizationAttemptDto
 import com.andysagent.ragent.feature.organization.data.OrganizationBindingDto
 import com.andysagent.ragent.feature.organization.data.OrganizationBlockerDto
+import com.andysagent.ragent.feature.organization.data.OrganizationEdgeDto
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
+import com.andysagent.ragent.feature.organization.data.OrganizationPhaseDto
 import com.andysagent.ragent.feature.organization.data.OrganizationProjectionDto
 import com.andysagent.ragent.feature.organization.data.PostBoardMessageResponseDto
 import com.andysagent.ragent.feature.organization.data.RealOrganizationRepository
@@ -24,17 +29,30 @@ import com.andysagent.ragent.feature.organization.data.SwarmStallAlertDto
 import com.andysagent.ragent.feature.organization.data.SwarmStatusDto
 import com.andysagent.ragent.feature.organization.data.UnifiedMemberDto
 import com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto
+import com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus
+import com.andysagent.ragent.feature.organization.data.isOrganizationFeatureUnavailableStatus
+import com.andysagent.ragent.feature.organization.data.normalizeOrganizationUnavailableResponse
 import com.andysagent.ragent.feature.organization.extractEventFailureReason
+import com.andysagent.ragent.feature.organization.extractEventResultPacketInfo
 import com.andysagent.ragent.feature.organization.initialConversationStatusForConnection
 import com.andysagent.ragent.feature.organization.layout.LayoutBounds
 import com.andysagent.ragent.feature.organization.layout.LayoutResult
 import com.andysagent.ragent.feature.organization.layout.NodePosition
 import com.andysagent.ragent.feature.organization.presentation.NodeActionKind
 import com.andysagent.ragent.feature.organization.presentation.OrganizationUiMapper
+import com.andysagent.ragent.feature.organization.presentation.OrganizationUiState
 import com.andysagent.ragent.feature.organization.presentation.OrganizationViewModel
+import com.andysagent.ragent.feature.organization.presentation.SwarmBoardChannelTabUiState
+import com.andysagent.ragent.feature.organization.presentation.SwarmBoardUiState
+import com.andysagent.ragent.feature.organization.presentation.SwarmOverviewUiState
 import com.andysagent.ragent.feature.organization.ui.computeHasCollaborators
+import com.andysagent.ragent.feature.organization.ui.computeNodeCaptionOffset
+import com.andysagent.ragent.feature.organization.ui.formatBoardChannelChipLabel
+import com.andysagent.ragent.feature.organization.ui.rectToSegmentDistance
 import com.andysagent.ragent.feature.organization.ui.resolveFormalRootNodeId
 import com.andysagent.ragent.feature.organization.ui.resolveMemberConversationRef
+import com.andysagent.ragent.feature.organization.ui.resolveOrganizationSubtitleRes
+import com.andysagent.ragent.feature.organization.ui.shouldShowBoardChannelUnreadBadge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -43,8 +61,11 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Before
 import kotlin.test.Test
@@ -437,6 +458,336 @@ class SwarmAndParityTest {
             ),
         )
         assertEquals("MCP_ORGANIZATION_CAPABILITY_MISSING", extractEventFailureReason(events))
+    }
+
+    @Test
+    fun httpUnavailableStatusesDoNotTriggerAuthRevocationAndNormalizeResponse() {
+        assertTrue(isOrganizationAuthorizationRevokedStatus(401))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403))
+        for (status in listOf(404, 405, 410, 501, 500, 200)) {
+            assertFalse(isOrganizationAuthorizationRevokedStatus(status), "status=$status")
+        }
+
+        for (status in listOf(404, 405, 410, 501)) {
+            assertTrue(isOrganizationFeatureUnavailableStatus(status), "status=$status")
+        }
+        for (status in listOf(401, 403, 500, 200)) {
+            assertFalse(isOrganizationFeatureUnavailableStatus(status), "status=$status")
+        }
+
+        val normalized404 = normalizeOrganizationUnavailableResponse(ApiResponse(statusCode = 404, body = ""))
+        assertEquals(404, normalized404.statusCode)
+        val parsed404 = Json.parseToJsonElement(normalized404.body).jsonObject
+        assertEquals("ROUTE_UNAVAILABLE", parsed404["code"]?.jsonPrimitive?.content)
+        assertTrue(parsed404["error"]?.jsonPrimitive?.content?.contains("404") == true)
+
+        val normalizedHtml501 = normalizeOrganizationUnavailableResponse(
+            ApiResponse(statusCode = 501, body = "<html>Not Implemented</html>"),
+        )
+        val parsed501 = Json.parseToJsonElement(normalizedHtml501.body).jsonObject
+        assertEquals("ROUTE_UNAVAILABLE", parsed501["code"]?.jsonPrimitive?.content)
+        assertTrue(parsed501["error"]?.jsonPrimitive?.content?.contains("501") == true)
+
+        val existingJson404 = """{"error":"Feature disabled","code":"FEATURE_DISABLED"}"""
+        assertEquals(
+            existingJson404,
+            normalizeOrganizationUnavailableResponse(ApiResponse(statusCode = 404, body = existingJson404)).body,
+        )
+
+        assertEquals(
+            "",
+            normalizeOrganizationUnavailableResponse(ApiResponse(statusCode = 401, body = "")).body,
+        )
+    }
+
+    @Test
+    fun doneSwarmBoardLocksWritingUpdatesSubtitleAndAvoidsDuplicateChannelCount() = runTest(testDispatcher) {
+        val doneBoardDto = SwarmBoardResponseDto(
+            rootSessionId = "sess_done",
+            organizationId = "org_done",
+            mode = "ragent_swarm",
+            readOnly = false,
+            board = SwarmBoardPayloadDto(
+                mode = "ragent_swarm",
+                readOnly = false,
+                isDone = true,
+                headSeq = 5L,
+                channels = listOf(SwarmBoardChannelDto(id = "main", name = "main", messageCount = 5, unreadCount = 5)),
+                messages = listOf(
+                    SwarmBoardMessageDto(
+                        seq = 1L,
+                        channel = "main",
+                        senderKind = "worker",
+                        senderName = "worker-1",
+                        bodyMarkdown = "[done] finished",
+                        isDoneSignal = true,
+                    ),
+                ),
+            ),
+        )
+        assertFalse(doneBoardDto.isWritable)
+
+        val fakeApi = FakeSwarmOrganizationApi(
+            swarmDto = SwarmStatusDto(
+                rootSessionId = "sess_done",
+                mode = "ragent_swarm",
+                organizationId = "org_done",
+                isDone = true,
+                counts = SwarmCountsDto(working = 0, waiting = 1, stopped = 0, killed = 0, active = 0, total = 1),
+            ),
+            boardDto = doneBoardDto,
+        )
+        val repo = RealOrganizationRepository(fakeApi, this)
+        val vm = OrganizationViewModel(repo)
+        vm.applyProjection(
+            OrganizationProjectionDto(
+                organizationId = "org_done",
+                rootSessionId = "sess_done",
+                state = "active",
+            ),
+        )
+        vm.applySwarmStatus(fakeApi.swarmDto)
+        vm.applyBoardResponse(doneBoardDto)
+        advanceUntilIdle()
+
+        val uiState = vm.uiState.value
+        assertTrue(uiState.isCompleted)
+        assertTrue(uiState.swarmBoard?.isDone == true)
+        assertFalse(uiState.swarmBoard?.isWritable == true)
+        assertEquals(R.string.organization_state_done, resolveOrganizationSubtitleRes(uiState))
+
+        vm.setBoardComposerDraft("follow-up")
+        vm.setBoardReplyToSeq(1L)
+        vm.postBoardMessage("sess_done")
+        advanceUntilIdle()
+        assertTrue(fakeApi.postedMessages.isEmpty())
+
+        assertEquals(
+            R.string.organization_state_active,
+            resolveOrganizationSubtitleRes(
+                OrganizationUiState(
+                    state = "active",
+                    isCompleted = false,
+                    swarmOverview = SwarmOverviewUiState(isDone = false),
+                    swarmBoard = SwarmBoardUiState(isDone = false),
+                ),
+            ),
+        )
+        assertEquals(
+            R.string.organization_state_done,
+            resolveOrganizationSubtitleRes(
+                OrganizationUiState(
+                    state = "active",
+                    isCompleted = false,
+                    swarmOverview = SwarmOverviewUiState(isDone = true),
+                ),
+            ),
+        )
+
+        val allTabDuplicate = SwarmBoardChannelTabUiState(
+            id = "__all__",
+            label = "All",
+            messageCount = 5,
+            unreadCount = 5,
+            selected = true,
+        )
+        assertEquals("All (5)", formatBoardChannelChipLabel(allTabDuplicate))
+        assertFalse(shouldShowBoardChannelUnreadBadge(allTabDuplicate))
+
+        val partialUnreadTab = SwarmBoardChannelTabUiState(
+            id = "backend",
+            label = "#backend",
+            messageCount = 5,
+            unreadCount = 2,
+            selected = false,
+        )
+        assertEquals("#backend (5)", formatBoardChannelChipLabel(partialUnreadTab))
+        assertTrue(shouldShowBoardChannelUnreadBadge(partialUnreadTab))
+
+        val emptyTab = SwarmBoardChannelTabUiState(id = "qa", label = "#qa", messageCount = 0, unreadCount = 0)
+        assertEquals("#qa", formatBoardChannelChipLabel(emptyTab))
+        assertFalse(shouldShowBoardChannelUnreadBadge(emptyTab))
+    }
+
+    @Test
+    fun resultPacketSummaryBlockedDetailsAndCaptionPlacementAvoidManagesEdges() = runTest(testDispatcher) {
+        val repo = RealOrganizationRepository(FakeSwarmOrganizationApi(), this)
+        val vm = OrganizationViewModel(repo)
+        vm.updateViewportSize(900f, 700f, 1f)
+        val projection = OrganizationProjectionDto(
+            organizationId = "org_detail",
+            rootSessionId = "sess_owner",
+            state = "blocked",
+            phases = listOf(
+                OrganizationPhaseDto(
+                    phaseId = "phase_1",
+                    objective = "Verify desktop and mobile builds",
+                    state = "blocked",
+                    reviewRequired = true,
+                    reviewState = "needs_changes",
+                ),
+            ),
+            nodes = listOf(
+                OrganizationNodeDto(
+                    id = "lead",
+                    role = "lead",
+                    displayName = "Lead",
+                    status = "working",
+                    sessionId = "sess_lead",
+                ),
+                OrganizationNodeDto(
+                    id = "worker-1",
+                    parentId = "lead",
+                    role = "worker",
+                    displayName = "Worker One",
+                    phaseId = "phase_1",
+                    status = "blocked",
+                    sessionId = "sess_w1",
+                    reviewState = "not_applicable",
+                    resultPacketId = "rsp_abc123",
+                    resultPacket = buildJsonObject {
+                        put("verdict", JsonPrimitive("needs_changes"))
+                        put("summary", JsonPrimitive("Two verification checks still need clean logs."))
+                        put("blockers", JsonArray(listOf(JsonPrimitive("Missing integration proof on Windows"))))
+                    },
+                    blocker = OrganizationBlockerDto(
+                        id = "blk_1",
+                        nodeId = "worker-1",
+                        reasonCode = "EVIDENCE_GAP",
+                        reason = "Missing integration proof on Windows",
+                    ),
+                    attempt = OrganizationAttemptDto(
+                        id = "att_1",
+                        number = 2,
+                        state = "failed",
+                        failureReasonCode = "EVIDENCE_GAP",
+                        failureReason = "Smoke test timed out after 30s",
+                    ),
+                ),
+                OrganizationNodeDto(
+                    id = "worker-2",
+                    parentId = "lead",
+                    role = "worker",
+                    displayName = "Worker Two",
+                    status = "done",
+                    sessionId = "sess_w2",
+                    resultPacketId = "rsp_only",
+                ),
+            ),
+            edges = listOf(
+                OrganizationEdgeDto(id = "e1", parentId = "lead", childId = "worker-1", type = "MANAGES"),
+                OrganizationEdgeDto(id = "e2", parentId = "lead", childId = "worker-2", type = "MANAGES"),
+            ),
+        )
+        vm.applyProjection(projection)
+        val nodesDeadline = System.currentTimeMillis() + 5_000L
+        while (vm.uiState.value.nodes.none { it.id == "worker-1" } && System.currentTimeMillis() < nodesDeadline) {
+            advanceUntilIdle()
+            Thread.sleep(15)
+        }
+        vm.onNodeClicked("worker-1")
+        val deadline = System.currentTimeMillis() + 5_000L
+        while (vm.uiState.value.selectedSheetNode?.id != "worker-1" && System.currentTimeMillis() < deadline) {
+            advanceUntilIdle()
+            Thread.sleep(15)
+        }
+        advanceUntilIdle()
+
+        val uiState = vm.uiState.value
+        val w1Node = uiState.nodes.firstOrNull { it.id == "worker-1" }
+        assertNotNull(w1Node)
+        assertTrue(w1Node.hasBlocker)
+        assertEquals("EVIDENCE_GAP", w1Node.failureCode)
+        assertEquals("rsp_abc123", w1Node.resultPacketId)
+        assertTrue(w1Node.resultPacketSummary?.contains("Two verification checks still need clean logs.") == true)
+        assertTrue(w1Node.blockerText?.contains("Missing integration proof on Windows") == true)
+        assertEquals("needs_changes", w1Node.reviewState)
+
+        val sheetNode = uiState.selectedSheetNode
+        assertNotNull(sheetNode)
+        assertEquals("rsp_abc123", sheetNode.resultPacketId)
+        assertTrue(sheetNode.resultPacketSummary?.contains("Two verification checks still need clean logs.") == true)
+        assertTrue(sheetNode.blockerText?.contains("Missing integration proof on Windows") == true)
+        assertEquals("EVIDENCE_GAP", sheetNode.failureCode)
+        assertEquals("needs_changes", sheetNode.reviewState)
+
+        val w2Node = uiState.nodes.firstOrNull { it.id == "worker-2" }
+        assertNotNull(w2Node)
+        assertEquals("ResultPacket: rsp_only", w2Node.resultPacketSummary)
+
+        val packetInfo = extractEventResultPacketInfo(
+            listOf(
+                SessionEventDto(
+                    seq = 1L,
+                    type = "assistant.message",
+                    text = "Done\n<result_packet>{\"verdict\":\"blocked\",\"summary\":\"Compiled cleanly; smoke test failed.\",\"blockers\":[\"Port 8787 busy\"],\"acceptanceNotes\":[\"Retry after stopping stale process\"]}</result_packet>",
+                ),
+            ),
+        )
+        assertNotNull(packetInfo)
+        assertEquals("blocked", packetInfo.state)
+        assertEquals("Compiled cleanly; smoke test failed.", packetInfo.summary)
+        assertEquals(listOf("Port 8787 busy"), packetInfo.blockers)
+        assertEquals(listOf("Retry after stopping stale process"), packetInfo.acceptanceNotes)
+
+        val deniedReason = extractEventFailureReason(
+            listOf(
+                SessionEventDto(
+                    seq = 2L,
+                    type = "tool.call",
+                    state = "denied",
+                    payload = buildJsonObject { put("failureReason", JsonPrimitive("Command denied by policy")) },
+                ),
+            ),
+        )
+        assertEquals("Command denied by policy", deniedReason)
+
+        val parentCenter = Offset(400f, 160f)
+        val parentEdges = listOf(
+            parentCenter to Offset(400f, 360f),
+            parentCenter to Offset(260f, 360f),
+            parentCenter to Offset(540f, 360f),
+        )
+        val captionW = 140f
+        val captionH = 44f
+        val parentTopLeft = computeNodeCaptionOffset(
+            center = parentCenter,
+            radius = 40f,
+            captionWidth = captionW,
+            captionHeight = captionH,
+            density = 1f,
+            edgeSegments = parentEdges,
+            viewportWidth = 800f,
+            viewportHeight = 600f,
+        )
+        val parentCaptionRect = Rect(
+            parentTopLeft.x,
+            parentTopLeft.y,
+            parentTopLeft.x + captionW,
+            parentTopLeft.y + captionH,
+        )
+        parentEdges.forEach { (start, end) ->
+            assertTrue(
+                rectToSegmentDistance(parentCaptionRect, start, end) >= 6f,
+                "Parent caption rect $parentCaptionRect overlapped edge $start -> $end",
+            )
+        }
+
+        val leafCenter = Offset(400f, 360f)
+        val leafEdges = listOf(parentCenter to leafCenter)
+        val leafTopLeft = computeNodeCaptionOffset(
+            center = leafCenter,
+            radius = 40f,
+            captionWidth = captionW,
+            captionHeight = captionH,
+            density = 1f,
+            edgeSegments = leafEdges,
+            viewportWidth = 800f,
+            viewportHeight = 600f,
+        )
+        assertTrue(leafTopLeft.y >= leafCenter.y + 40f)
+        val leafCaptionRect = Rect(leafTopLeft.x, leafTopLeft.y, leafTopLeft.x + captionW, leafTopLeft.y + captionH)
+        assertTrue(rectToSegmentDistance(leafCaptionRect, parentCenter, leafCenter) >= 6f)
     }
 
     private data class RecordedBoardPost(

@@ -412,6 +412,21 @@ export function systemPathRootsForPlatform(platform = process.platform, env = pr
   ].map(trimString).filter(Boolean))]);
 }
 
+export function isManagedWriterStagingWorkspacePath(candidatePath, platform = process.platform) {
+  const value = trimString(candidatePath);
+  if (!value) return false;
+  const pathApi = platform === 'win32' ? WIN32_PATH : POSIX_PATH;
+  if (!pathApi.isAbsolute(value)) return false;
+  const normalized = pathApi.normalize(value).replace(/[\\/]+$/, '');
+  const base = pathApi.basename(normalized);
+  const parent = pathApi.basename(pathApi.dirname(normalized));
+  if (!base || !parent) return false;
+  if (platform === 'win32') {
+    return parent.toLowerCase() === 'managed-writer-staging' && /^sw__[A-Za-z0-9._-]+$/i.test(base);
+  }
+  return parent === 'managed-writer-staging' && /^sw__[A-Za-z0-9._-]+$/.test(base);
+}
+
 // 读取即危险（内容为密钥/根策略）。
 export const SENSITIVE_SYSTEM_PATHS = Object.freeze([
   '/etc/shadow', '/etc/gshadow', '/etc/sudoers',

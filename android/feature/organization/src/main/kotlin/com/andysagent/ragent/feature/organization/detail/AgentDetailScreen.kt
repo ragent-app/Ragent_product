@@ -22,6 +22,7 @@ import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.domain.NodeRole
 import com.andysagent.ragent.feature.organization.domain.NodeRuntimeState
 import com.andysagent.ragent.feature.organization.presentation.NodeDetailUiState
+import com.andysagent.ragent.feature.organization.ui.organizationReviewStateRes
 
 @Composable
 fun AgentDetailScreen(node: NodeDetailUiState, onBack: () -> Unit, modifier: Modifier = Modifier) {
@@ -47,7 +48,14 @@ fun AgentDetailScreen(node: NodeDetailUiState, onBack: () -> Unit, modifier: Mod
                 if (node.progressTotal > 0) DetailSection(stringResource(R.string.org_detail_progress)) { DetailText(stringResource(R.string.org_detail_progress_value, node.progressCompleted, node.progressTotal)) }
                 if (node.testsTotal > 0) DetailSection(stringResource(R.string.org_detail_checks)) { DetailText(stringResource(R.string.org_detail_progress_value, node.testsPassed, node.testsTotal)) }
                 if (node.changedFiles.isNotEmpty()) DetailSection(stringResource(R.string.org_detail_files)) { node.changedFiles.forEach { DetailText(it) } }
-                node.resultPacketSummary?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_result)) { DetailText(value) } }
+                node.resultPacketSummary?.takeIf { it.isNotBlank() }?.let { value ->
+                    DetailSection(stringResource(R.string.org_detail_result)) {
+                        DetailText(value)
+                        node.resultPacketId?.takeIf { id ->
+                            id.isNotBlank() && value != "ResultPacket: $id" && !value.contains(id)
+                        }?.let { DetailText(it) }
+                    }
+                }
                 node.failureCode?.takeIf { it.isNotBlank() && it != node.blockerText }?.let { value ->
                     DetailSection(stringResource(R.string.organization_failure_code)) { DetailText(value) }
                 }
@@ -55,7 +63,10 @@ fun AgentDetailScreen(node: NodeDetailUiState, onBack: () -> Unit, modifier: Mod
                 node.harness?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.organization_harness)) { DetailText(value) } }
                 node.workspaceBranch?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.organization_workspace_branch)) { DetailText(value) } }
                 node.latestUpdateText?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_update)) { DetailText(value) } }
-                node.reviewState?.takeIf { it.isNotBlank() }?.let { value -> DetailSection(stringResource(R.string.org_detail_review)) { DetailText(value) } }
+                node.reviewState?.trim()?.takeIf { it.isNotEmpty() && !it.equals("not_applicable", ignoreCase = true) }?.let { value ->
+                    val label = organizationReviewStateRes(value)?.let { stringResource(it) } ?: value
+                    DetailSection(stringResource(R.string.org_detail_review)) { DetailText(label) }
+                }
             }
         }
     }

@@ -216,8 +216,13 @@ fun SwarmBoardPanel(
             }
         }
 
-        val showOwnerComposer = (board.mode == "ragent_swarm" && !board.readOnly && board.isWritable)
+        val showOwnerComposer = (board.mode == "ragent_swarm" && !board.readOnly && board.isWritable && !board.isDone)
         if (!showOwnerComposer) {
+            val bannerRes = if (board.isDone) {
+                R.string.organization_swarm_done_readonly_banner
+            } else {
+                R.string.organization_swarm_readonly_banner
+            }
             Box(
                 modifier = Modifier
                     .testTag("swarm-board-readonly-banner")
@@ -228,7 +233,7 @@ fun SwarmBoardPanel(
                     .padding(horizontal = 12.dp, vertical = 10.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.organization_swarm_readonly_banner),
+                    text = stringResource(bannerRes),
                     color = colors.secondaryContent,
                     fontSize = 12.sp,
                     lineHeight = 16.sp,
@@ -327,6 +332,12 @@ fun SwarmBoardPanel(
     }
 }
 
+internal fun formatBoardChannelChipLabel(tab: SwarmBoardChannelTabUiState): String =
+    if (tab.messageCount > 0) "${tab.label} (${tab.messageCount})" else tab.label
+
+internal fun shouldShowBoardChannelUnreadBadge(tab: SwarmBoardChannelTabUiState): Boolean =
+    tab.unreadCount > 0 && tab.unreadCount < tab.messageCount
+
 @Composable
 private fun BoardChannelChip(
     tab: SwarmBoardChannelTabUiState,
@@ -335,8 +346,8 @@ private fun BoardChannelChip(
     val colors = LocalRagentColors.current
     val bg = if (tab.selected) colors.actionPrimary else colors.strongSurface
     val textColor = if (tab.selected) colors.actionPrimaryContent else colors.primaryContent
-    val countSuffix = if (tab.messageCount > 0) " (${tab.messageCount})" else ""
-    val unreadSuffix = if (tab.unreadCount > 0) " · ${tab.unreadCount}" else ""
+    val labelText = formatBoardChannelChipLabel(tab)
+    val showUnread = shouldShowBoardChannelUnreadBadge(tab)
     Box(
         modifier = Modifier
             .testTag("board-channel-${tab.id}")
@@ -344,17 +355,42 @@ private fun BoardChannelChip(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = "${tab.label}$countSuffix$unreadSuffix",
-            color = textColor,
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            fontWeight = if (tab.selected) FontWeight.SemiBold else FontWeight.Medium,
+        Row(
             modifier = Modifier
                 .clip(AgentoShapes.PillShape)
                 .background(bg)
                 .padding(horizontal = 12.dp, vertical = 7.dp),
-        )
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = labelText,
+                color = textColor,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
+                fontWeight = if (tab.selected) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            if (showUnread) {
+                val badgeBg = if (tab.selected) {
+                    colors.actionPrimaryContent.copy(alpha = 0.18f)
+                } else {
+                    colors.actionPrimary.copy(alpha = 0.14f)
+                }
+                val badgeColor = if (tab.selected) colors.actionPrimaryContent else colors.actionPrimary
+                Text(
+                    text = stringResource(R.string.organization_swarm_unread_badge, tab.unreadCount),
+                    color = badgeColor,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .testTag("board-channel-unread-${tab.id}")
+                        .clip(AgentoShapes.PillShape)
+                        .background(badgeBg)
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
+                )
+            }
+        }
     }
 }
 

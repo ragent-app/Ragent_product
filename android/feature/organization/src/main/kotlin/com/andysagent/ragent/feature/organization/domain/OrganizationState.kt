@@ -176,6 +176,7 @@ data class OrganizationNodeModel(
     val clusterChildren: List<String> = emptyList(),
     val lastChangedAt: Long = 0L,
     val changedFiles: List<String> = emptyList(),
+    val resultPacketId: String? = null,
     val resultPacketSummary: String? = null,
     val failureCode: String? = null,
     val harness: String? = null,
@@ -338,7 +339,7 @@ data class SwarmBoardModel(
     val activeStalls: List<SwarmStallAlertModel> = emptyList(),
 ) {
     val isWritable: Boolean
-        get() = mode == "ragent_swarm" && !readOnly
+        get() = mode == "ragent_swarm" && !readOnly && !isDone
 }
 
 data class OrganizationState(

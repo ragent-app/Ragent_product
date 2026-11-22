@@ -8,6 +8,7 @@ import {
 import { AGY_MANAGED_HOME_DIR } from '../lib/config.mjs';
 import { stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { withDatabase } from './collaboration-store.mjs';
 import { getRun, listDurableSessionRunIndexEntries, readRunSpoolDelta, runSpoolPath, runSpoolGzPath, runSpoolZstPath } from './runs.mjs';
 
 const readers = new Map();
@@ -228,4 +229,113 @@ export function capturedMember(rootSessionId, runId, memberId) {
   if (!entry) return { entries: [], gap: true, availability: 'unavailable' };
   const result = entry.reader.readCapturedMember(memberId);
   return { ...result, generation: entry.generation, gap: entry.gap || result.gap || !entry.complete };
+}
+
+function parseJsonSafe(raw, fallback = null) {
+  try {
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function resolveFormalNodeStagingConversationSession({
+  organizationId,
+  rootSessionId,
+  node,
+  getSessionReadSnapshotFn = null,
+} = {}) {
+  const orgId = typeof organizationId === 'string' ? organizationId.trim() : '';
+  const rootId = typeof rootSessionId === 'string' ? rootSessionId.trim() : '';
+  const nodeId = typeof node?.id === 'string' ? node.id.trim() : '';
+  const managedSessionId = typeof node?.currentSessionId === 'string' ? node.currentSessionId.trim() : '';
+  const bindingGeneration = Number.isInteger(node?.bindingGeneration) ? node.bindingGeneration : null;
+  if (!orgId || !rootId || !nodeId || !managedSessionId) return null;
+
+  const candidateIds = await withDatabase((db) => {
+    for (const table of [
+      'collaborations',
+      'collaboration_plans',
+      'collaboration_tasks',
+      'collaboration_attempts',
+      'collaboration_dispatch_commands',
+    ]) {
+      if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) {
+        return [];
+      }
+    }
+    const rows = db.prepare(`
+      SELECT a.attempt_number,
+             a.session_id AS attempt_session_id,
+             d.session_id AS dispatch_session_id,
+             t.id AS task_id,
+             t.writable_paths_json,
+             c.policy_json,
+             p.plan_json
+      FROM collaborations c
+      JOIN collaboration_tasks t ON t.collaboration_id = c.id
+      JOIN collaboration_attempts a ON a.task_id = t.id
+      LEFT JOIN collaboration_plans p ON p.collaboration_id = c.id AND p.version = c.plan_version
+      LEFT JOIN collaboration_dispatch_commands d ON d.attempt_id = a.id
+      WHERE c.root_session_id = ?
+      ORDER BY a.created_at DESC, a.attempt_number DESC
+    `).all(rootId);
+
+    const matched = [];
+    const seen = new Set();
+    for (const row of rows) {
+      const policy = parseJsonSafe(row.policy_json, null);
+      if (!policy || policy.factoryExecution) continue;
+      if (String(policy.organizationId || '').trim() !== orgId) continue;
+      if (String(policy.organizationNodeId || '').trim() !== nodeId) continue;
+      if (Number.isInteger(policy.organizationBindingGeneration)
+          && Number.isInteger(bindingGeneration)
+          && policy.organizationBindingGeneration !== bindingGeneration) {
+        continue;
+      }
+      const writablePaths = parseJsonSafe(row.writable_paths_json, null);
+      if (!Array.isArray(writablePaths) || writablePaths.length === 0) continue;
+      const plan = parseJsonSafe(row.plan_json, null);
+      const planTask = Array.isArray(plan?.tasks)
+        ? plan.tasks.find((candidate) => candidate && candidate.id === row.task_id)
+        : null;
+      if (String(planTask?.managedSessionId || '').trim() !== managedSessionId) continue;
+
+      const candidateSessionId = String(row.attempt_session_id || row.dispatch_session_id || '').trim();
+      if (!candidateSessionId || candidateSessionId === managedSessionId || seen.has(candidateSessionId)) continue;
+      seen.add(candidateSessionId);
+      matched.push(candidateSessionId);
+    }
+    return matched;
+  });
+
+  if (!candidateIds.length) return null;
+  const readSnapshot = typeof getSessionReadSnapshotFn === 'function'
+    ? getSessionReadSnapshotFn
+    : (await import('./session-manager.mjs')).getSessionReadSnapshot;
+
+  let fallback = null;
+  for (const candidateSessionId of candidateIds) {
+    const snap = await readSnapshot(candidateSessionId);
+    const meta = snap?.sessionMeta;
+    if (!meta || meta.sessionPlane !== 'organization') continue;
+    if (String(meta.organizationId || '').trim() !== orgId) continue;
+    if (String(meta.organizationNodeId || '').trim() !== nodeId) continue;
+    if (meta.organizationRootSessionId && String(meta.organizationRootSessionId).trim() !== rootId) continue;
+
+    const targetFromMeta = String(meta.sourceContext?.managedWriter?.targetSessionId || '').trim();
+    const parentFromMeta = String(meta.parentSessionId || '').trim();
+    if (parentFromMeta !== managedSessionId && targetFromMeta !== managedSessionId) continue;
+
+    const metaGeneration = meta.sourceContext?.managedWriter?.organizationBindingGeneration;
+    if (Number.isInteger(metaGeneration) && Number.isInteger(bindingGeneration) && metaGeneration !== bindingGeneration) {
+      continue;
+    }
+
+    const hasEntries = Number(snap.historyMeta?.latestSeq || 0) > 0;
+    const candidate = { sessionId: candidateSessionId, snapshot: snap, hasEntries };
+    if (hasEntries) return candidate;
+    if (!fallback) fallback = candidate;
+  }
+  return fallback;
 }

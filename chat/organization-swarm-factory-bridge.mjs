@@ -650,7 +650,7 @@ export async function promoteSwarmWorkspaceToCandidate(firstArg, secondArg) {
   // touches only the exact authorized `writablePaths`.
   const stagingWritableScopes = [...new Set(writablePaths.map((p) => (p.includes('/') ? p.split('/')[0] : p)))].sort();
   await preflightFactoryWorkspace({ canonicalCwd: realCanonicalCwd, writablePaths: stagingWritableScopes });
-  const staging = await createStagingWorkspace(realCanonicalCwd, stagingWritableScopes);
+  const staging = await createStagingWorkspace(realCanonicalCwd, stagingWritableScopes, { includeRootReferenceFiles: false });
   const existingIntentBinding = (item.state === 'claimed' && Array.isArray(item.bindings))
     ? item.bindings.find((b) => ['intent', 'running', 'unknown'].includes(b.status))
     : null;

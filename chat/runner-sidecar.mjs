@@ -30,6 +30,7 @@ import {
   createCodexAccountModelCatalog,
 } from './codex-app-server-default-model.mjs';
 import { computeExecutionScopeDigest } from './execution-scope.mjs';
+import { isManagedWriterStagingWorkspacePath } from './risk-policy.mjs';
 import { assertRunPublication, runPublicationError } from './run-publication-contract.mjs';
 import { assertMessageRunBinding } from './message-run-contract.mjs';
 import { assertRunLaunchBoundary } from './run-execution-boundary.mjs';
@@ -433,6 +434,25 @@ export function resolveRunRiskContext(manifest, { platform = process.platform, w
     || !context.trustedWorkspaceRoot.trim()
     || !Array.isArray(context.protectedRoots)) {
     return { riskContext: null, valid: false, reason: 'risk-context-shape-invalid' };
+  }
+  if (context.managedWriterStagingRoot !== undefined) {
+    if (typeof context.managedWriterStagingRoot !== 'string' || !context.managedWriterStagingRoot.trim()) {
+      return { riskContext: null, valid: false, reason: 'managed-writer-staging-root-invalid' };
+    }
+    const stagingPlatform = context.platform === 'win32' ? 'win32' : 'posix';
+    const pathApi = stagingPlatform === 'win32' ? win32 : posix;
+    if (!pathApi.isAbsolute(context.managedWriterStagingRoot)
+      || !isManagedWriterStagingWorkspacePath(context.managedWriterStagingRoot, stagingPlatform)) {
+      return { riskContext: null, valid: false, reason: 'managed-writer-staging-root-invalid' };
+    }
+    const normStaging = pathApi.normalize(context.managedWriterStagingRoot).replace(/[\\/]+$/, '');
+    const normWorkspace = pathApi.normalize(context.trustedWorkspaceRoot).replace(/[\\/]+$/, '');
+    const sameStagingRoot = stagingPlatform === 'win32'
+      ? normStaging.toLowerCase() === normWorkspace.toLowerCase()
+      : normStaging === normWorkspace;
+    if (!sameStagingRoot) {
+      return { riskContext: null, valid: false, reason: 'managed-writer-staging-root-invalid' };
+    }
   }
   if (platform === 'win32') {
     if (context.platform !== 'win32' || !windowsOsPaths || !Array.isArray(context.systemPathRoots)) {
@@ -5201,6 +5221,7 @@ async function main() {
       interactionMode: appServerState.interactionMode, permissionMode: appServerState.permissionMode,
       riskContext: { platform: 'win32', trustedWorkspaceRoot: appServerState.riskContext.trustedWorkspaceRoot,
         programDataRoot: appServerState.riskContext.programDataRoot || '',
+        ...(appServerState.riskContext.managedWriterStagingRoot ? { managedWriterStagingRoot: appServerState.riskContext.managedWriterStagingRoot } : {}),
         protectedRoots: appServerState.riskContext.protectedRoots, systemPathRoots: appServerState.riskContext.systemPathRoots || [] } } });
   }
   const browserChannel = manifest.options?.browserChannel;

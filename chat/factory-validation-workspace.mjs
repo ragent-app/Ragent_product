@@ -70,7 +70,7 @@ export async function prepareFactoryValidationWorkspace({ organizationId, workIt
   await preflightFactoryWorkspace({ canonicalCwd: root, writablePaths: data.base.workspace.writablePaths });
   if (await factoryTargetHead(root) !== data.base.source.head || await factoryTargetBranch(root) !== data.base.source.branch) fail('Candidate base branch changed');
   await checkFactoryBaseline(root, data.base);
-  const staging = await createStagingWorkspace({ canonicalCwd: root, writablePaths: data.base.workspace.writablePaths });
+  const staging = await createStagingWorkspace({ canonicalCwd: root, writablePaths: data.base.workspace.writablePaths, includeRootReferenceFiles: false });
   try {
     await checkFactoryBaseline(staging.stagingDir, data.base);
     const final = new Map(data.base.files.map((file) => [file.path, file]));

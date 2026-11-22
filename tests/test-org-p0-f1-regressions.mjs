@@ -22,6 +22,8 @@ process.env.RAGENT_CONFIG_DIR = configDir;
 process.env.RAGENT_HARNESS_ROOT = harnessRoot;
 process.env.RAGENT_MANAGED_INPUT_ENFORCEMENT = '1';
 process.env.RAGENT_MANAGED_WRITER_ENABLED = '1';
+process.env.RAGENT_ORG_PROJECTION_V1_ENABLED = '1';
+process.env.RAGENT_ORG_PROJECTION_V2_ENABLED = '1';
 process.env.RAGENT_AUTH_SESSION_SECRET = 'test-p0-f1-session-control-secret';
 process.env.RAGENT_RUN_PROVIDER_MAX_CONCURRENT = '1';
 
@@ -758,6 +760,268 @@ try {
       else process.env.RAGENT_RUNNER_LIFECYCLE_REQUIRED = prevLifecycleRequired;
       if (prevLifecycleSocket === undefined) delete process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET;
       else process.env.RAGENT_RUNNER_LIFECYCLE_SOCKET = prevLifecycleSocket;
+    }
+  }
+
+  // ── 4. P0 Windows managedWriter riskMode inheritance + staging admission + Formal Org staging conversation resolution
+  {
+    const { createStagingWorkspace, commitStagingToCanonical, discardStaging } = await import('../chat/managed-writer.mjs');
+    const { createManagedSessionForNode } = await import('../chat/organization-managed-session-factory.mjs');
+    const { makeMemberRef } = await import('../chat/organization-member-reference.mjs');
+    const { handleOrganizationRoutes } = await import('../chat/router-organization-routes.mjs');
+    const { resolveRunRiskContext } = await import('../chat/runner-sidecar.mjs');
+    const { existsSync, realpathSync } = await import('node:fs');
+
+    const rootRec = await sessionManager.createSession(repoDir, 'claude-bidi', 'Recommended Formal Root', {
+      projectId: project.id,
+      templateId: managerApp.id,
+      sessionClass: 'ROOT_LEADERSHIP',
+      sessionPlane: 'user',
+      providerProfile: 'glm-68f6bd41',
+      model: 'glm-5.3@glm-68f6bd41',
+      riskMode: 'recommended',
+    });
+    const orgRec = await orgStore.createOrganization({
+      rootSessionId: rootRec.id,
+      projectId: project.id,
+      state: 'active',
+      currentRevision: 1,
+      idempotencyKey: 'f1-p0-managed-writer-staging-conv',
+    });
+    const leadNodeId = 'node_f1_lead_staging';
+    const managedLead = await createManagedSessionForNode({
+      organizationId: orgRec.id,
+      organizationRevision: 1,
+      organizationNodeId: leadNodeId,
+      roleInstanceId: 'rinst_lead_staging',
+      stableKey: 'lead',
+      role: 'specialist',
+      agentId: specialistApp.id,
+      sessionClass: 'WORKER',
+      idempotencyKey: 'f1-managed-lead-session',
+    });
+    const leadTarget = await sessionManager.getSession(managedLead.sessionId);
+    assert.equal(leadTarget.riskMode, 'recommended', 'managedTarget inherits recommended riskMode from root');
+
+    const leadNode = await orgStore.createNode({
+      id: leadNodeId,
+      organizationId: orgRec.id,
+      stableKey: 'lead',
+      nodeRole: 'specialist',
+      createdRevision: 1,
+      lifecycleState: 'active',
+      lifecycleMode: 'formal_org',
+      grant: { canWrite: true, canDelegate: false, writablePaths: ['work'] },
+      currentSessionId: leadTarget.id,
+      bindingGeneration: 1,
+      roleInstanceId: 'rinst_lead_staging',
+      sessionClass: 'WORKER',
+    });
+    await orgStore.createRevision(orgRec.id, {
+      revision: 1,
+      proposal: {
+        nodes: [{ stableKey: 'lead', nodeRole: 'specialist', displayName: 'Lead', responsibility: 'Write deliverables' }],
+        edges: [],
+        phases: [{ phaseId: 'phase-1', objective: 'Deliver work' }],
+      },
+      compiled: {
+        nodes: [{ stableKey: 'lead', nodeRole: 'specialist', displayName: 'Lead', responsibility: 'Write deliverables', phaseId: 'phase-1' }],
+        edges: [],
+        phases: [{ phaseId: 'phase-1', objective: 'Deliver work' }],
+      },
+    });
+    await orgStore.freezeRevision(orgRec.id, 1);
+
+    let stagingRunId = '';
+    let stagingChildId = '';
+    const stagingOrchestrator = createCollaborationOrchestrator({
+      pollMs: 100000,
+      dependencies: {
+        getSession: sessionManager.getSession,
+        getApp: appsMod.getApp,
+        createSession: sessionManager.createSession,
+        createStagingWorkspace,
+        commitStagingToCanonical,
+        discardStaging,
+        sendMessage: async (sid, text, images, opts) => {
+          const res = await sessionManager.sendMessage(sid, text, images, { ...opts, skipRunnerLaunch: true });
+          if (opts?.internalOperation === 'collaboration_task') {
+            stagingChildId = sid;
+            stagingRunId = res.run.id;
+          }
+          return res;
+        },
+        getRunState: async (id) => runs.getRun(id),
+        getRun: runs.getRun,
+        getRunResult: runs.getRunResult,
+        getRunManifest: runs.getRunManifest,
+        findRunByRequest: runs.findRunByRequest,
+        listRunIds: async () => [],
+        getProject: async () => project,
+        requestRunCancel: async () => null,
+        loadHistory: async (sid, runId) => [{
+          type: 'message',
+          role: 'assistant',
+          runId: runId || stagingRunId,
+          content: 'Lead staging deliverable written.',
+        }],
+      },
+    });
+    try {
+      const stagingCollab = await stagingOrchestrator.dispatch({
+        rootSessionId: rootRec.id,
+        idempotencyKey: 'f1-managed-writer-collab',
+        policy: {
+          ...managerApp.collaborationPolicy,
+          organizationId: orgRec.id,
+          organizationNodeId: leadNode.id,
+          organizationBindingGeneration: 1,
+          organizationRevision: 1,
+          organizationPhaseDispatch: { revision: 1, phaseId: 'phase-1' },
+        },
+        plan: {
+          title: 'staging delivery',
+          workspacePolicy: 'shared-exclusive',
+          tasks: [{
+            id: 'task-lead-stage',
+            agentId: specialistApp.id,
+            role: 'specialist',
+            objective: 'Write staging file',
+            writablePaths: ['work'],
+            managedSessionId: leadTarget.id,
+          }],
+        },
+      });
+      assert.ok(stagingChildId && stagingChildId !== leadTarget.id, 'managedWriter dispatches into staging child session');
+      assert.ok(stagingRunId, 'staging child run created');
+      const stagingChildSession = await sessionManager.getSession(stagingChildId);
+      assert.equal(stagingChildSession.riskMode, 'recommended', 'staging child preserves recommended riskMode from managedTarget');
+
+      const stagingManifest = await runs.getRunManifest(stagingRunId);
+      const realStagingDir = realpathSync(stagingChildSession.folder);
+      assert.equal(
+        stagingManifest.executionScope?.riskContext?.managedWriterStagingRoot,
+        realStagingDir,
+        'Formal Org managedWriter run admission attests managedWriterStagingRoot',
+      );
+      assert.equal(
+        stagingManifest.executionScope?.riskContext?.trustedWorkspaceRoot,
+        realStagingDir,
+        'Formal Org managedWriter run admission scopes trustedWorkspaceRoot to stagingDir rather than canonical project root',
+      );
+      assert.equal(
+        resolveRunRiskContext(stagingManifest).valid,
+        true,
+        'runner-sidecar validates Formal Org managedWriter executionScopeDigest and riskContext',
+      );
+
+      // managedTarget has 0 timeline entries while execution ran in stagingChildId.
+      const stagingMsgText = 'Lead staging deliverable written.';
+      const stagingMsg = await sessionManager.appendAssistantMessage(stagingChildId, stagingMsgText, [], {
+        runId: stagingRunId,
+        requestId: stagingManifest.requestId,
+      });
+
+      const invokeOrgGet = async (pathname) => {
+        let statusCode = 0;
+        let payload = null;
+        await handleOrganizationRoutes({
+          req: { method: 'GET', headers: { host: 'localhost' }, url: pathname },
+          res: { setHeader() {} },
+          pathname: pathname.split('?')[0],
+          authSession: { role: 'owner' },
+          writeJson: (_res, status, body) => { statusCode = status; payload = body; },
+        });
+        return { statusCode, payload };
+      };
+
+      const leadRef = makeMemberRef({ kind: 'formal', root: rootRec.id, id: leadNode.id, generation: 1 });
+      const memberConv = await invokeOrgGet(`/api/sessions/${encodeURIComponent(rootRec.id)}/organization/members/${encodeURIComponent(leadRef)}/conversation?limit=20`);
+      assert.equal(memberConv.statusCode, 200);
+      assert.equal(memberConv.payload.scope, 'full');
+      assert.ok(memberConv.payload.entries.length >= 1, 'members/:ref/conversation resolves staging child entries instead of entries: 0');
+      assert.ok(
+        memberConv.payload.entries.some((entry) => String(entry?.content || '').includes('Lead staging deliverable written.')),
+        'members/:ref/conversation exposes staging child assistant message',
+      );
+
+      const nodeConv = await invokeOrgGet(`/api/organizations/${encodeURIComponent(orgRec.id)}/nodes/${encodeURIComponent(leadNode.id)}/conversation`);
+      assert.equal(nodeConv.statusCode, 200);
+      assert.equal(nodeConv.payload.currentBinding?.sessionId, stagingChildId, 'nodes/:nodeId/conversation resolves verified staging child session when managedTarget is empty');
+
+      // Stale generation still fences strictly.
+      const staleRef = makeMemberRef({ kind: 'formal', root: rootRec.id, id: leadNode.id, generation: 99 });
+      const staleConv = await invokeOrgGet(`/api/sessions/${encodeURIComponent(rootRec.id)}/organization/members/${encodeURIComponent(staleRef)}/conversation?limit=20`);
+      assert.equal(staleConv.statusCode, 409);
+      assert.equal(staleConv.payload.code, 'ORGANIZATION_BINDING_CHANGED');
+
+      // Item 5 (P2 #4): projection v2 transitions completed phase from 'planned' to 'completed'
+      // without fabricating a passed gate.
+      const { buildOrganizationProjection } = await import('../chat/organization-projection.mjs');
+      const { createHash } = await import('node:crypto');
+      mkdirSync(join(stagingChildSession.folder, 'work'), { recursive: true });
+      writeFileSync(join(stagingChildSession.folder, 'work', 'lead-notes.md'), 'delivered via staging\n', 'utf8');
+      const stagingDoneAt = new Date().toISOString();
+      const stagingHash = createHash('sha256').update(stagingMsgText).digest('hex');
+      await history.appendEvent(stagingChildId, {
+        type: 'status',
+        content: 'completed',
+        providerLifecycle: 'completed',
+        runState: 'completed',
+        deliveryContentHash: stagingHash,
+        runId: stagingRunId,
+        requestId: stagingManifest.requestId,
+      });
+      const stagingDoneResult = {
+        exitCode: 0,
+        signal: null,
+        completedAt: stagingDoneAt,
+        finalDelivery: { contentHash: stagingHash, eventSeq: stagingMsg?.seq },
+      };
+      await runs.writeRunResult(stagingRunId, stagingDoneResult);
+      await runs.updateRun(stagingRunId, (current) => ({
+        ...current,
+        state: 'completed',
+        completedAt: stagingDoneAt,
+        finalizedAt: stagingDoneAt,
+        result: stagingDoneResult,
+      }));
+      assert.equal(await stagingOrchestrator.completeRun(stagingRunId), true, 'staging orchestrator completes staging run cleanly');
+      assert.equal(existsSync(join(repoDir, 'work', 'lead-notes.md')), true, 'managedWriter committed staged deliverable to canonical repo');
+      const collabBeforeAgg = await stagingOrchestrator.get(stagingCollab.id);
+      const aggRunId = collabBeforeAgg?.aggregationRunId || await stagingOrchestrator.maybeAggregate(stagingCollab.id);
+      if (aggRunId) {
+        const aggDoneAt = new Date().toISOString();
+        const aggResult = { exitCode: 0, signal: null, completedAt: aggDoneAt };
+        await runs.writeRunResult(aggRunId, aggResult);
+        await runs.updateRun(aggRunId, (current) => ({
+          ...current,
+          state: 'completed',
+          completedAt: aggDoneAt,
+          finalizedAt: aggDoneAt,
+          result: aggResult,
+        }));
+        await stagingOrchestrator.completeAggregation(aggRunId);
+      }
+      const projV2 = await buildOrganizationProjection(orgRec.id, { version: 2 });
+      const projPhase = projV2?.phases?.find((p) => p.phaseId === 'phase-1');
+      const collabAfterComplete = await stagingOrchestrator.get(stagingCollab.id);
+      const failureDiag = JSON.stringify({
+        collabState: collabAfterComplete?.state,
+        taskState: collabAfterComplete?.tasks?.[0]?.state,
+        attemptState: collabAfterComplete?.attempts?.[0]?.state,
+        attemptFailure: collabAfterComplete?.attempts?.[0]?.failureReason,
+        projPhase,
+      });
+      assert.equal(projPhase?.state, 'completed', `P2 #4: completed phase derives state=completed instead of planned (${failureDiag})`);
+      assert.equal(projPhase?.reviewState, 'pending', 'P2 #4: reviewState remains honestly pending without a passed gate');
+      assert.equal(projPhase?.gate ?? null, null, 'P2 #4: gate fact is not fabricated');
+    } finally {
+      if (stagingChildId) {
+        const s = await sessionManager.getSession(stagingChildId).catch(() => null);
+        if (s?.folder) await discardStaging(s.folder).catch(() => {});
+      }
+      stagingOrchestrator.stop();
     }
   }
 

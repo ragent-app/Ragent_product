@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.painterResource
@@ -171,10 +172,17 @@ internal fun OrganizationConversationIsland(
                         AgentoWebIcon(AgentoWebGlyph.Close, contentDescription = null, modifier = Modifier.size(20.dp), tint = colors.secondaryContent)
                     }
                 }
-                val failureSummary = node.failureCode?.takeIf { it.isNotBlank() }
-                    ?: node.blockerText?.takeIf { it.isNotBlank() }
-                val packetSummary = node.resultPacketSummary?.takeIf { it.isNotBlank() }
-                if (failureSummary != null || packetSummary != null) {
+                val failureCode = node.failureCode?.trim()?.takeIf { it.isNotBlank() }
+                val blockerDetail = node.blockerText?.trim()?.takeIf { it.isNotBlank() && it != failureCode }
+                val reviewStatusRes = organizationReviewStateRes(node.reviewState)
+                val isRejectedReview = node.reviewState.equals("needs_changes", ignoreCase = true) ||
+                    node.reviewState.equals("rejected", ignoreCase = true)
+                val showBlockedCard = failureCode != null || blockerDetail != null || isRejectedReview
+                val packetSummary = node.resultPacketSummary?.trim()?.takeIf { it.isNotBlank() }
+                val packetIdMeta = node.resultPacketId?.trim()?.takeIf { id ->
+                    id.isNotBlank() && packetSummary != "ResultPacket: $id" && packetSummary?.contains(id) != true
+                }
+                if (showBlockedCard || packetSummary != null || (reviewStatusRes != null && !isRejectedReview)) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -182,39 +190,99 @@ internal fun OrganizationConversationIsland(
                             .padding(bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        if (failureSummary != null) {
-                            Box(
+                        if (showBlockedCard) {
+                            Column(
                                 modifier = Modifier
+                                    .testTag("island-blocked-detail")
                                     .fillMaxWidth()
                                     .clip(AgentoShapes.SurfaceSmallShape)
                                     .background(colors.error.copy(alpha = 0.12f))
                                     .border(1.dp, colors.error.copy(alpha = 0.28f), AgentoShapes.SurfaceSmallShape)
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
-                                Text(
-                                    text = "${stringResource(R.string.organization_failure_code)}: $failureSummary",
-                                    color = colors.error,
-                                    fontSize = 12.sp,
-                                    lineHeight = 16.sp,
-                                    fontWeight = FontWeight.Medium,
-                                )
+                                if (failureCode != null) {
+                                    Text(
+                                        text = "${stringResource(R.string.organization_failure_code)}: $failureCode",
+                                        color = colors.error,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                if (blockerDetail != null) {
+                                    Text(
+                                        text = if (failureCode != null) {
+                                            "${stringResource(R.string.organization_blocker)}: $blockerDetail"
+                                        } else {
+                                            blockerDetail
+                                        },
+                                        color = colors.primaryContent,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                    )
+                                }
+                                if (isRejectedReview && reviewStatusRes != null) {
+                                    Text(
+                                        text = "${stringResource(R.string.org_detail_review)}: ${stringResource(reviewStatusRes)}",
+                                        color = colors.error,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
                             }
                         }
                         if (packetSummary != null) {
-                            Box(
+                            Column(
                                 modifier = Modifier
+                                    .testTag("island-result-packet")
                                     .fillMaxWidth()
                                     .clip(AgentoShapes.SurfaceSmallShape)
                                     .background(colors.quietSurface)
+                                    .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.organization_result_packet),
+                                        color = colors.secondaryContent,
+                                        fontSize = 11.sp,
+                                        lineHeight = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    if (packetIdMeta != null) {
+                                        Text(
+                                            text = packetIdMeta,
+                                            color = colors.secondaryContent,
+                                            fontSize = 11.sp,
+                                            lineHeight = 14.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
                                 Text(
                                     text = packetSummary,
                                     color = colors.primaryContent,
                                     fontSize = 12.sp,
-                                    lineHeight = 16.sp,
+                                    lineHeight = 17.sp,
                                 )
                             }
+                        }
+                        if (!isRejectedReview && reviewStatusRes != null && packetSummary == null) {
+                            Text(
+                                text = "${stringResource(R.string.org_detail_review)}: ${stringResource(reviewStatusRes)}",
+                                color = colors.secondaryContent,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(horizontal = 4.dp),
+                            )
                         }
                     }
                 }

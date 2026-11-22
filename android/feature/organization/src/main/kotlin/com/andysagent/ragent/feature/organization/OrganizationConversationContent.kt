@@ -2,6 +2,7 @@ package com.andysagent.ragent.feature.organization
 
 import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -12,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -116,6 +119,7 @@ private class ConversationReader(private val transport: RagentTransport, private
     var status by mutableStateOf(initialConversationStatusForConnection(transport.connectionState.value)); private set
     var runtimeState by mutableStateOf("unknown"); private set
     var failureReason by mutableStateOf<String?>(null); private set
+    var resultPacketInfo by mutableStateOf<EventResultPacketInfo?>(null); private set
     var memberScope by mutableStateOf<String?>(null); private set
     var memberGap by mutableStateOf<Boolean?>(null); private set
     var memberCoverage by mutableStateOf<String?>(null); private set
@@ -150,7 +154,7 @@ private class ConversationReader(private val transport: RagentTransport, private
     private suspend fun check(expected: ConversationBinding) {
         if (descriptor() != expected) throw BindingChanged()
     }
-    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; failureReason = null; memberScope = null; memberGap = null; memberCoverage = null; memberActivity = null; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
+    fun clear() { epoch++; binding = null; events = emptyList(); live = LiveTimelineProjector(); items = emptyList(); runtimeState = "unknown"; failureReason = null; resultPacketInfo = null; memberScope = null; memberGap = null; memberCoverage = null; memberActivity = null; latest = 0; before = null; more = false; hasOlder = false; liveCursor = 0; liveStream = null; historyRevision = null; browsingHistory = false; unseen = false }
     private fun memberPage(body: String): MemberConversationPage =
         RagentProtocol.json.decodeFromString<MemberConversationPage>(body).also {
             if (it.reset || it.generation == null || it.generation < 0 || it.scope !in setOf("full", "captured_only", "activity_only", "unavailable")) throw ConversationReset()
@@ -179,6 +183,7 @@ private class ConversationReader(private val transport: RagentTransport, private
         val base = TimelineProjector.project(emptyList(), durable)
         items = if (browsingHistory) base else mergeTimelineItems(base, TimelineProjector.project(emptyList(), live.snapshotEvents()))
         failureReason = extractEventFailureReason(events)
+        resultPacketInfo = extractEventResultPacketInfo(events)
     }
     private fun page(body: String, sid: String): SessionEventsPageDto {
         val page = RagentProtocol.json.decodeFromString<SessionEventsPageDto>(body)
@@ -370,26 +375,106 @@ internal fun initialConversationStatusForConnection(connection: RuntimeConnectio
         else -> ConversationStatus.Offline
     }
 
+internal data class EventResultPacketInfo(
+    val state: String? = null,
+    val summary: String? = null,
+    val blockers: List<String> = emptyList(),
+    val risks: List<String> = emptyList(),
+    val acceptanceNotes: List<String> = emptyList(),
+    val unresolvedItems: List<String> = emptyList(),
+)
+
+private val RESULT_PACKET_BLOCK_REGEX = Regex(
+    "<result_packet>\\s*(\\{.*?\\})\\s*</result_packet>",
+    setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE),
+)
+
+private fun jsonStringList(obj: JsonObject?, key: String): List<String> {
+    val array = obj?.get(key) as? JsonArray ?: return emptyList()
+    return array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty) }
+}
+
+private fun extractEventTextCandidates(event: SessionEventDto): List<String> = buildList {
+    event.text?.takeIf { it.isNotBlank() }?.let(::add)
+    event.bodyMarkdown?.takeIf { it.isNotBlank() }?.let(::add)
+    event.detail?.takeIf { it.isNotBlank() }?.let(::add)
+    when (val c = event.content) {
+        is JsonPrimitive -> c.contentOrNull?.takeIf { it.isNotBlank() }?.let(::add)
+        is JsonArray -> c.forEach { block ->
+            val obj = block as? JsonObject
+            (obj?.get("text") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let(::add)
+        }
+        else -> Unit
+    }
+}
+
+private fun parseResultPacketObject(obj: JsonObject): EventResultPacketInfo? {
+    val state = (obj["verdict"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+        ?: (obj["state"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+    val summary = (obj["summary"] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf(String::isNotEmpty)
+    val blockers = jsonStringList(obj, "blockers")
+    val risks = jsonStringList(obj, "risks")
+    val acceptanceNotes = jsonStringList(obj, "acceptanceNotes")
+    val unresolvedItems = jsonStringList(obj, "unresolvedItems")
+    if (summary == null && blockers.isEmpty() && risks.isEmpty() && acceptanceNotes.isEmpty() && unresolvedItems.isEmpty()) {
+        return null
+    }
+    return EventResultPacketInfo(
+        state = state,
+        summary = summary,
+        blockers = blockers,
+        risks = risks,
+        acceptanceNotes = acceptanceNotes,
+        unresolvedItems = unresolvedItems,
+    )
+}
+
+internal fun extractEventResultPacketInfo(events: List<SessionEventDto>): EventResultPacketInfo? {
+    for (event in events.asReversed()) {
+        val payloadPacket = (event.payload?.get("resultPacket") as? JsonObject)
+            ?: (event.resultRef as? JsonObject)
+        if (payloadPacket != null) {
+            parseResultPacketObject(payloadPacket)?.let { return it }
+        }
+        for (text in extractEventTextCandidates(event)) {
+            val match = RESULT_PACKET_BLOCK_REGEX.findAll(text).lastOrNull() ?: continue
+            val obj = runCatching { RagentProtocol.json.parseToJsonElement(match.groupValues[1]) as? JsonObject }.getOrNull()
+                ?: continue
+            parseResultPacketObject(obj)?.let { return it }
+        }
+    }
+    return null
+}
+
 internal fun extractEventFailureReason(events: List<SessionEventDto>): String? {
     for (event in events.asReversed()) {
         val directCode = event.executorUnavailableReasonCode?.trim()?.takeIf { it.isNotEmpty() }
         if (directCode != null) return directCode
         val isFailureEvent = event.terminalRunState() == "failed" ||
             event.state.equals("failed", ignoreCase = true) ||
+            event.state.equals("denied", ignoreCase = true) ||
+            event.state.equals("rejected", ignoreCase = true) ||
             event.runState.equals("failed", ignoreCase = true) ||
             event.type.equals("run.failed", ignoreCase = true) ||
             event.type.equals("error", ignoreCase = true)
         if (!isFailureEvent) continue
         val candidate = listOfNotNull(
-            event.payload?.get("failureReasonCode")?.jsonPrimitive?.contentOrNull,
-            event.payload?.get("reasonCode")?.jsonPrimitive?.contentOrNull,
-            event.payload?.get("errorCode")?.jsonPrimitive?.contentOrNull,
+            (event.payload?.get("failureReason") as? JsonPrimitive)?.contentOrNull,
+            (event.payload?.get("failureReasonCode") as? JsonPrimitive)?.contentOrNull,
+            (event.payload?.get("reasonCode") as? JsonPrimitive)?.contentOrNull,
+            (event.payload?.get("errorCode") as? JsonPrimitive)?.contentOrNull,
             event.reason,
-            event.payload?.get("reason")?.jsonPrimitive?.contentOrNull,
-            event.payload?.get("error")?.jsonPrimitive?.contentOrNull,
+            (event.payload?.get("reason") as? JsonPrimitive)?.contentOrNull,
+            (event.payload?.get("error") as? JsonPrimitive)?.contentOrNull,
+            event.detail,
             event.message,
         ).firstOrNull { it.isNotBlank() }?.trim()
         if (candidate != null) return candidate
+    }
+    val packet = extractEventResultPacketInfo(events)
+    if (packet != null && (packet.state.equals("blocked", ignoreCase = true) || packet.state.equals("failed", ignoreCase = true))) {
+        val detail = (packet.blockers + packet.unresolvedItems).firstOrNull { it.isNotBlank() }
+        if (detail != null) return detail
     }
     return null
 }
@@ -471,12 +556,56 @@ fun OrganizationConversationContent(
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier
+                    .testTag("conversation-inline-failure")
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 4.dp)
                     .clip(AgentoShapes.SurfaceSmallShape)
                     .background(colors.error.copy(alpha = 0.12f))
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             )
+        }
+        reader.resultPacketInfo?.let { packet ->
+            val detailLines = buildList {
+                packet.summary?.takeIf { it.isNotBlank() }?.let(::add)
+                (packet.blockers + packet.unresolvedItems).filter { it.isNotBlank() && it != inlineFailure && it != knownFailureText }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add("${stringResource(R.string.organization_blocker)}: ${it.joinToString("; ")}") }
+                packet.acceptanceNotes.filter { it.isNotBlank() }
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(it.joinToString("; ")) }
+            }
+            if (detailLines.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .testTag("conversation-result-packet-summary")
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 4.dp)
+                        .clip(AgentoShapes.SurfaceSmallShape)
+                        .background(colors.quietSurface)
+                        .border(0.75.dp, colors.subtleOutline, AgentoShapes.SurfaceSmallShape)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = buildString {
+                            append(stringResource(R.string.organization_result_packet))
+                            packet.state?.let { append(" · $it") }
+                        },
+                        color = colors.secondaryContent,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    detailLines.forEach { line ->
+                        Text(
+                            text = line,
+                            color = colors.primaryContent,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                }
+            }
         }
         if (reader.memberScope == "activity_only") ConversationLabel(R.string.org_conversation_activity_only)
         if (reader.memberScope == "activity_only" && reader.status == ConversationStatus.Ready && reader.memberGap == false) {

@@ -156,6 +156,9 @@ data class OrganizationNodeDto(
     val attemptCount: Int = 1,
     val resultPacketId: String? = null,
     val resultPacketSummary: String? = null,
+    val resultSummary: String? = null,
+    val resultPacket: JsonObject? = null,
+    val blockers: List<OrganizationBlockerDto> = emptyList(),
     val directChildCount: Int = 0,
     val activeChildCount: Int = 0,
     val blockedChildCount: Int = 0,
@@ -209,6 +212,9 @@ data class OrganizationAttemptDto(
     val runState: String? = null,
     val resultPacketId: String? = null,
     val failureReasonCode: String? = null,
+    val failureReason: String? = null,
+    val summary: String? = null,
+    val verdict: String? = null,
     val startedAt: String? = null,
     val completedAt: String? = null,
 )
@@ -487,7 +493,7 @@ data class SwarmBoardResponseDto(
         get() = readOnly || (activeBoard?.readOnly == true) || mode != "ragent_swarm"
 
     val isWritable: Boolean
-        get() = mode == "ragent_swarm" && !effectiveReadOnly
+        get() = mode == "ragent_swarm" && !effectiveReadOnly && activeBoard?.isDone != true
 }
 
 @Serializable

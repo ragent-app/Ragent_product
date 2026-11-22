@@ -56,6 +56,7 @@ object OrganizationUiMapper {
                 val hasBlocker = (runtimeState == NodeRuntimeState.BLOCKED)
                 val blockerText = node?.blockerText
                 val failureCode = node?.failureCode
+                val resultPacketId = node?.resultPacketId
                 val resultPacketSummary = node?.resultPacketSummary
 
                 val effectiveScale = anim?.nodeScale ?: pos.scale
@@ -85,6 +86,11 @@ object OrganizationUiMapper {
                     }
                     if (!failureCode.isNullOrBlank() && failureCode != blockerText) {
                         append(", failure: $failureCode")
+                    }
+                    if (node?.reviewState.equals("needs_changes", ignoreCase = true) ||
+                        node?.reviewState.equals("rejected", ignoreCase = true)
+                    ) {
+                        append(", review: ${node?.reviewState}")
                     }
                     if (!resultPacketSummary.isNullOrBlank()) {
                         append(", $resultPacketSummary")
@@ -116,6 +122,7 @@ object OrganizationUiMapper {
                     testsTotal = node?.testsTotal ?: 0,
                     accessibilityText = a11y,
                     failureCode = failureCode,
+                    resultPacketId = resultPacketId,
                     resultPacketSummary = resultPacketSummary,
                     harness = node?.harness,
                 )
@@ -225,6 +232,7 @@ object OrganizationUiMapper {
             reviewState = node.reviewState,
             attemptCount = node.attemptCount,
             changedFiles = node.changedFiles,
+            resultPacketId = node.resultPacketId,
             resultPacketSummary = node.resultPacketSummary,
             isRootLeader = (node.role == NodeRole.EXECUTIVE),
             failureCode = node.failureCode,

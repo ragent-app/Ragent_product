@@ -43,6 +43,33 @@ import { executeMutation as defaultExecuteMutation } from './mutation-coordinato
 export const MANAGED_WRITE_ESCAPE = 'MANAGED_WRITE_ESCAPE';
 export const STAGING_SCHEMA_VERSION = 1;
 const STAGING_PREFIX = 'sw_';
+const DEFAULT_MAX_ROOT_REF_FILES = 64;
+const DEFAULT_MAX_ROOT_REF_FILE_BYTES = 512 * 1024;
+const DEFAULT_MAX_ROOT_REF_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_ROOT_REF_VERIFY_BYTES = 16 * 1024 * 1024;
+const SKIPPED_ROOT_REF_NAMES = new Set([
+  '.git',
+  'node_modules',
+  '.ragent',
+  '.ssh',
+  '.gnupg',
+  '.aws',
+  '.azure',
+  '.kube',
+  '.npmrc',
+  '.pypirc',
+  '.netrc',
+  '.git-credentials',
+]);
+
+function isSkippedRootReferenceName(name) {
+  const lower = String(name || '').toLowerCase();
+  if (!lower || SKIPPED_ROOT_REF_NAMES.has(lower)) return true;
+  if (lower === '.env' || lower.startsWith('.env.')) return true;
+  if (/\.(?:pem|p12|pfx|key|jks|keystore|dpapi|kdbx)$/i.test(lower)) return true;
+  if (/^id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?$/i.test(lower)) return true;
+  return false;
+}
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -154,8 +181,71 @@ function isWithinWritable(writableRealPaths, realCandidate, paths) {
   return writableRealPaths.some((writableReal) => isContained(writableReal, realCandidate, paths));
 }
 
-function defaultStagingRoot() {
+export function defaultStagingRoot() {
   return join(MANAGED_WORK_ROOT_DIR || tmpdir(), 'managed-writer-staging');
+}
+
+async function copyRootReferenceFiles(realCanonical, stagingDir, writable = [], options = {}, platform = process.platform) {
+  if (options.includeRootReferenceFiles === false) return [];
+  if (writable.some((entry) => entry.relativePath === '.')) return [];
+  const maxFiles = Number.isInteger(options.maxRootReferenceFiles) && options.maxRootReferenceFiles >= 0
+    ? options.maxRootReferenceFiles
+    : DEFAULT_MAX_ROOT_REF_FILES;
+  const maxFileBytes = Number.isInteger(options.maxRootReferenceFileBytes) && options.maxRootReferenceFileBytes >= 0
+    ? options.maxRootReferenceFileBytes
+    : DEFAULT_MAX_ROOT_REF_FILE_BYTES;
+  const maxTotalBytes = Number.isInteger(options.maxRootReferenceTotalBytes) && options.maxRootReferenceTotalBytes >= 0
+    ? options.maxRootReferenceTotalBytes
+    : DEFAULT_MAX_ROOT_REF_TOTAL_BYTES;
+  if (maxFiles === 0 || maxFileBytes === 0 || maxTotalBytes === 0) return [];
+
+  const writableTopLevel = new Set(
+    writable.map((entry) => (platform === 'win32' ? entry.relativePath.toLowerCase() : entry.relativePath)),
+  );
+  const dirents = await readdir(realCanonical, { withFileTypes: true });
+  dirents.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
+
+  const copied = [];
+  let totalBytes = 0;
+  for (const dirent of dirents) {
+    if (copied.length >= maxFiles) break;
+    const name = dirent.name;
+    if (isSkippedRootReferenceName(name)) continue;
+    const comparable = platform === 'win32' ? name.toLowerCase() : name;
+    if (writableTopLevel.has(comparable)) continue;
+    if (dirent.isSymbolicLink() || dirent.isDirectory() || !dirent.isFile()) continue;
+
+    const source = join(realCanonical, name);
+    const st = await lstat(source).catch(() => null);
+    if (!st || st.isSymbolicLink() || !st.isFile()) continue;
+    if (st.size > maxFileBytes || totalBytes + st.size > maxTotalBytes) continue;
+
+    await copyFile(source, join(stagingDir, name));
+    totalBytes += st.size;
+    copied.push(name);
+  }
+  return copied;
+}
+
+async function isUnmodifiedRootReferenceEntry(entry, canonicalTarget) {
+  const rel = entry?.rel || '';
+  if (!rel || rel.includes('/')) return false;
+  if (entry.isDir || entry.isSymlink) return false;
+  if (isSkippedRootReferenceName(rel)) return false;
+
+  const [stagingStats, canonicalStats] = await Promise.all([
+    lstat(entry.abs).catch(() => null),
+    lstat(canonicalTarget).catch(() => null),
+  ]);
+  if (!stagingStats || stagingStats.isSymbolicLink() || !stagingStats.isFile()) return false;
+  if (!canonicalStats || canonicalStats.isSymbolicLink() || !canonicalStats.isFile()) return false;
+  if (stagingStats.size !== canonicalStats.size || canonicalStats.size > MAX_ROOT_REF_VERIFY_BYTES) return false;
+
+  const [stagingContent, canonicalContent] = await Promise.all([
+    readFile(entry.abs),
+    readFile(canonicalTarget),
+  ]);
+  return stagingContent.equals(canonicalContent);
 }
 
 async function copyIntoStaging(source, target) {
@@ -260,6 +350,10 @@ export async function createStagingWorkspace(canonicalCwd, writablePaths = [], o
     for (const entry of writable) {
       const target = join(stagingDir, ...entry.relativePath.split('/'));
       await copyIntoStaging(entry.canonicalAbs, target);
+    }
+    const referenceFiles = await copyRootReferenceFiles(realCanonical, stagingDir, writable, options, platform);
+    if (referenceFiles.length > 0) {
+      mapping.referenceFiles = referenceFiles;
     }
   } catch (error) {
     await rm(stagingDir, { recursive: true, force: true }).catch(() => {});
@@ -371,9 +465,14 @@ export async function resolveStagingDiff(stagingDir, canonicalCwd, writablePaths
 
     // Canonical-target containment: where this change would land must be
     // inside at least one writablePath (deepest-existing-ancestor + tail).
+    // Bounded top-level workspace reference files copied as read-only context
+    // are allowed to sit in staging ONLY when byte-for-byte unmodified.
     const canonicalTarget = resolve(realCanonical, rel);
     const realTarget = await resolveExistingAncestor(canonicalTarget, platform);
     if (!isWithinWritable(writableRealPaths, realTarget, paths)) {
+      if (await isUnmodifiedRootReferenceEntry(entry, canonicalTarget)) {
+        continue;
+      }
       throw writeEscape(`staging diff escapes writablePaths: ${rel}`, {
         path: rel,
         resolved: realTarget,

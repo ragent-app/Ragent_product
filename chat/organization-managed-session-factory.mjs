@@ -25,6 +25,17 @@ export function normalizeManagedSessionName(role, stableKey) {
   return `org:${normalizedRole}:${normalizedKey}`;
 }
 
+export function inheritSessionRiskOptions(sourceSession) {
+  const rawRiskMode = text(sourceSession?.riskMode);
+  if (!rawRiskMode) return {};
+  const explicitRisk = sourceSession?.riskModeExplicit === true;
+  const riskMode = rawRiskMode === 'full-auto' && !explicitRisk ? 'recommended' : rawRiskMode;
+  return {
+    riskMode,
+    ...(explicitRisk && riskMode === rawRiskMode ? { riskModeExplicit: true } : {}),
+  };
+}
+
 export async function createManagedSessionForNode(input = {}) {
   const {
     organizationId,
@@ -106,6 +117,7 @@ export async function createManagedSessionForNode(input = {}) {
     userName: 'Organization Runtime',
     description: `Managed ${text(role) || 'worker'} session for organization node ${text(stableKey) || ''}`,
     suppressBroadcast: true,
+    ...inheritSessionRiskOptions(root),
     ...(text(runtime?.provider) || text(runtime?.providerProfile)
       ? { providerProfile: text(runtime?.provider || runtime?.providerProfile) }
       : {}),
@@ -199,6 +211,7 @@ export async function createManagedSessionForConsultation(input = {}) {
     userName: 'Consultation Runtime',
     description: `Managed consultation expert session for round ${roundId}`,
     suppressBroadcast: true,
+    ...inheritSessionRiskOptions(rootSession),
     idempotencyKey: text(idempotencyKey) || undefined,
   });
 
