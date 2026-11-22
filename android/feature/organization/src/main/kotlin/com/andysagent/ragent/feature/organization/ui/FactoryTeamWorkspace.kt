@@ -21,11 +21,19 @@ import com.andysagent.ragent.feature.organization.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.andysagent.ragent.core.designsystem.*
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.feature.organization.data.FactoryWorkflowRepository
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
+import com.andysagent.ragent.feature.organization.data.RealButlerRepository
+import com.andysagent.ragent.feature.organization.presentation.ButlerViewModel
+import com.andysagent.ragent.feature.organization.voice.AndroidSpeechRecognizerAsrAdapter
+import com.andysagent.ragent.feature.organization.voice.AndroidTextToSpeechAdapter
+import com.andysagent.ragent.feature.organization.voice.resolveButlerDeviceIdentity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
@@ -72,7 +80,29 @@ fun FactoryTeamWorkspace(
     val scope = rememberCoroutineScope()
     val appContext = LocalContext.current
     val colors = LocalRagentColors.current
-    var page by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(if (selectedResponsibilityId != null) "advanced" else "list") }
+    val butlerFactory = remember(transport, appContext) {
+        object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return ButlerViewModel(
+                    repository = RealButlerRepository(transport),
+                    asrAdapter = AndroidSpeechRecognizerAsrAdapter(appContext),
+                    ttsAdapter = AndroidTextToSpeechAdapter(appContext),
+                    deviceIdentity = resolveButlerDeviceIdentity(appContext),
+                ) as T
+            }
+        }
+    }
+    val butlerViewModel: ButlerViewModel = viewModel(
+        key = "butler:$organizationId:$sessionId:${rootSessionId.orEmpty()}",
+        factory = butlerFactory,
+    )
+    val butlerState by butlerViewModel.uiState.collectAsState()
+    LaunchedEffect(butlerViewModel, organizationId, rootSessionId, sessionId) {
+        butlerViewModel.initialize(organizationId, rootSessionId ?: sessionId)
+    }
+    var focusedPlanFromButler by rememberSaveable(organizationId, rootSessionId) { mutableStateOf<String?>(null) }
+    var page by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(if (selectedResponsibilityId != null) "advanced" else "butler") }
     LaunchedEffect(selectedResponsibilityId, responsibilityNavigationKey) {
         if (selectedResponsibilityId != null) page = "advanced"
     }
@@ -203,13 +233,14 @@ fun FactoryTeamWorkspace(
     }
     fun back() {
         when (page) {
-            "list" -> onBack()
-            "advanced" -> page = "list"
+            "butler" -> onBack()
+            "list" -> page = "butler"
+            "advanced" -> { focusedPlanFromButler = null; page = "butler" }
             "detail" -> { selected = null; selectedId = ""; page = "list" }
             else -> page = "list"
         }
     }
-    BackHandler(enabled = page != "list") { if (!loading) back() }
+    BackHandler(enabled = page != "butler") { if (!loading) back() }
     LaunchedEffect(repo, rootSessionId) {
         refresh()
         if (page == "detail" && selectedId.isNotBlank()) open(selectedId)
@@ -244,9 +275,45 @@ fun FactoryTeamWorkspace(
         MotionPreference.Reduced -> tween<Float>(120)
         else -> AgentoMotion.AppleSpring
     }
+    Box(Modifier.fillMaxSize()) {
     Crossfade(targetState = page, animationSpec = animation, label = "team-workspace") { screen ->
-        if (screen == "advanced") {
-            FactoryWorkScreen(transport, organizationId, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, responsibilityNavigationKey, selectedPlanId, sessionId, onBack = { page = "list" })
+        if (screen == "butler") {
+            ButlerOverviewScreen(
+                uiState = butlerState,
+                onBack = onBack,
+                onRefresh = butlerViewModel::refreshOverview,
+                onSelectFilter = butlerViewModel::setFilter,
+                onOpenVoiceButler = { rid, title ->
+                    butlerViewModel.openVoiceButler(responsibilityId = rid, responsibilityTitle = title)
+                },
+                onOpenApproval = butlerViewModel::openApprovalFromOverviewItem,
+                onOpenResponsibilityDetails = { rid, pid ->
+                    focusedPlanFromButler = pid
+                    onResponsibilitySelected(rid)
+                    page = "advanced"
+                },
+                onOpenLegacyReports = { page = "list" },
+                onOpenAllResponsibilities = {
+                    focusedPlanFromButler = null
+                    onResponsibilitySelected(null)
+                    page = "advanced"
+                },
+            )
+        } else if (screen == "advanced") {
+            FactoryWorkScreen(
+                transport = transport,
+                organizationId = organizationId,
+                responsibilityDraft = responsibilityDraft,
+                selectedResponsibilityId = selectedResponsibilityId,
+                onResponsibilitySelected = onResponsibilitySelected,
+                responsibilityNavigationKey = responsibilityNavigationKey,
+                selectedPlanId = focusedPlanFromButler ?: selectedPlanId,
+                sessionId = sessionId,
+                onOpenVoiceButler = { rid, title ->
+                    butlerViewModel.openVoiceButler(responsibilityId = rid, responsibilityTitle = title)
+                },
+                onBack = { focusedPlanFromButler = null; page = "butler" },
+            )
         } else Column(Modifier.fillMaxSize().background(colors.canvas)) {
             AgentoTopBar(title = when (screen) { "list" -> stringResource(R.string.factory_team_00); "detail" -> stringResource(R.string.factory_team_01); "createGoal" -> stringResource(R.string.factory_team_02); else -> stringResource(R.string.factory_team_04) },
                 subtitle = stringResource(R.string.factory_team_05), navigationIcon = { TextButton(enabled = !loading, onClick = { back() }) { Text(stringResource(R.string.factory_team_06)) } })
@@ -443,5 +510,39 @@ fun FactoryTeamWorkspace(
                 }
             }
         }
+    }
+    if (butlerState.voiceSheetOpen) {
+        ButlerVoiceSheet(
+            uiState = butlerState,
+            onDismiss = butlerViewModel::closeVoiceButler,
+            onMicOrBargeIn = butlerViewModel::startListeningOrBargeIn,
+            onInterruptSpeaking = { butlerViewModel.interruptSpeakingOnly() },
+            onToggleContinuousMode = butlerViewModel::setContinuousMode,
+            onDraftTextChange = butlerViewModel::setDraftText,
+            onSubmitTextTurn = { text -> butlerViewModel.submitTypedOrSimulatedTurn(text) },
+            onRefreshSession = butlerViewModel::refreshActiveVoiceSession,
+            onStartNewSession = { butlerViewModel.startNewVoiceSession() },
+            onResumeSession = butlerViewModel::resumeVoiceSession,
+            onRequestHandoff = { id, type, label ->
+                butlerViewModel.requestHandoff(targetDeviceId = id, targetDeviceType = type, targetDeviceLabel = label)
+            },
+            onSelectAdapters = butlerViewModel::selectAdapters,
+            onOpenApprovalCard = butlerViewModel::openVisualApprovalCard,
+        )
+    }
+    butlerState.pendingApprovalCard?.let { card ->
+        ButlerVisualApprovalDialog(
+            card = card,
+            busy = butlerState.approvalConfirmBusy,
+            error = butlerState.approvalConfirmError,
+            onConfirm = butlerViewModel::confirmPendingApproval,
+            onDismiss = butlerViewModel::dismissVisualApprovalCard,
+            onOpenDetails = { rid, pid ->
+                focusedPlanFromButler = pid
+                onResponsibilitySelected(rid)
+                page = "advanced"
+            },
+        )
+    }
     }
 }

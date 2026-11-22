@@ -21,7 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 @Composable
-fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, sessionId: String = "", onBack: () -> Unit) {
+fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, sessionId: String = "", onOpenVoiceButler: ((String, String?) -> Unit)? = null, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -548,6 +548,13 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 }) { Text("Read activity aloud") }
                 TextButton(onClick = { speech?.stop(); audio.abandonAudioFocus(focusListener) }) { Text("Stop reading") }
                 val id = current["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                if (onOpenVoiceButler != null && id.isNotBlank()) {
+                    TextButton(onClick = {
+                        speech?.stop()
+                        audio.abandonAudioFocus(focusListener)
+                        onOpenVoiceButler(id, current["objective"]?.jsonPrimitive?.contentOrNull)
+                    }) { Text("Open Voice Butler (continuous)") }
+                }
                 if (sessionId.isNotBlank()) {
                     if (!confirmSessionContext) TextButton(onClick = { confirmSessionContext = true }) { Text("Review session responsibility") }
                     else {

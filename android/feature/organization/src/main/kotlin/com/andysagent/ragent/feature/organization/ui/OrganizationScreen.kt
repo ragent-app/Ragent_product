@@ -185,6 +185,15 @@ fun OrganizationScreenContent(
                             modifier = Modifier.padding(top = 12.dp),
                         )
                     }
+                    if (!isDemo && onOpenWorkItems != null) {
+                        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AgentoButton(
+                                text = stringResource(R.string.butler_title),
+                                onClick = onOpenWorkItems,
+                                secondary = true,
+                            )
+                        }
+                    }
                 }
                 if (embedded || (navigationHeight > 0 && taskHeight > 0 && activityHeight > 0)) {
                     OrganizationGraph(uiState, onPan, onZoom, { id ->

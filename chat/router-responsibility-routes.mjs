@@ -32,6 +32,16 @@ import { createResponsibilityTrigger, listResponsibilityTriggers, changeResponsi
 import { recordExternalResourceWatermark, listExternalResourceWatermarks } from './responsibility-git-observation.mjs';
 import { listProducerTriggerEvents } from './responsibility-trigger-events.mjs';
 import { getFactoryGoalRevisionArtifacts } from './factory-goal-revision.mjs';
+import {
+  getButlerOverview,
+  listVoiceAdapters,
+  listVoiceSessions,
+  createVoiceSession,
+  getVoiceSession,
+  submitVoiceTurn,
+  interruptVoiceTurn,
+  handoffVoiceSession,
+} from './responsibility-voice-assistant.mjs';
 
 async function loadResponsibilityStage2Summary(responsibility, actor) {
   const [watermarks, links] = await Promise.all([
@@ -136,7 +146,10 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
   const sessionContext=/^\/api\/sessions\/([^/]+)\/responsibility-context$/.exec(String(pathname||''));
   const plans=/^\/api\/responsibilities\/([^/]+)\/plans(?:\/([^/]+)\/(approve))?$/.exec(String(pathname||''));
   const triggerBinding=/^\/api\/responsibilities\/([^/]+)\/trigger-bindings(?:\/([^/]+)\/(revoke|recover))?$/.exec(String(pathname||''));
-  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!ownerUserMemory&&!ownerEpisodicMemory&&!scopedUserMemory&&!scopedEpisodicMemory&&!scopedMemoryAudit&&!plans&&!notificationBinding&&!triggerBinding) return false;
+  const butlerOverview=/^\/api\/responsibilities\/butler-overview$/.exec(String(pathname||''));
+  const voiceAdapters=/^\/api\/responsibilities\/voice\/adapters$/.exec(String(pathname||''));
+  const voiceSessions=/^\/api\/responsibilities\/voice\/sessions(?:\/([^/]+)(?:\/(turn|interrupt|handoff))?)?$/.exec(String(pathname||''));
+  const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!ownerUserMemory&&!ownerEpisodicMemory&&!scopedUserMemory&&!scopedEpisodicMemory&&!scopedMemoryAudit&&!plans&&!notificationBinding&&!triggerBinding&&!butlerOverview&&!voiceAdapters&&!voiceSessions) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
   const actor=await resolveResponsibilityActor(req,authSession);
   if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
@@ -229,6 +242,64 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
       writeJson(res,200,await recordEmailDeliveryReview({runId,targetId,observation:body?.observation,evidence:body?.evidence},actor)); return true;
     }
     if(match?.[1]==='intent'&&!match[2]) { if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;} const raw=await readBody(req,8192); let body; try {body=JSON.parse(raw||'{}');} catch {writeJson(res,400,{error:'Invalid JSON body'});return true;} writeJson(res,200,await proposeResponsibilityIntent({text:body?.text,responsibilityId:body?.responsibilityId},actor));return true; }
+    if(butlerOverview) {
+      if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      const reqUrl=new URL(req.url||pathname,'http://localhost');
+      writeJson(res,200,await getButlerOverview({
+        organizationId:reqUrl.searchParams.get('organizationId')||'',
+        projectId:reqUrl.searchParams.get('projectId')||'',
+        limit:Number(reqUrl.searchParams.get('limit')||100),
+      },actor));
+      return true;
+    }
+    if(voiceAdapters) {
+      if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      writeJson(res,200,listVoiceAdapters());
+      return true;
+    }
+    if(voiceSessions) {
+      const voiceSessionId=voiceSessions[1]?decodeURIComponent(voiceSessions[1]):'';
+      const voiceAction=voiceSessions[2]||'';
+      const reqUrl=new URL(req.url||pathname,'http://localhost');
+      if(!voiceSessionId && !voiceAction) {
+        if(req.method==='GET') {
+          writeJson(res,200,await listVoiceSessions({
+            responsibilityId:reqUrl.searchParams.get('responsibilityId')||'',
+            limit:Number(reqUrl.searchParams.get('limit')||50),
+          },actor));
+          return true;
+        }
+        if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
+        if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
+        const body=await readJsonBodyOrRespond(req,res,writeJson,65536);
+        if(!body) return true;
+        writeJson(res,200,await createVoiceSession(body,actor,authSession));
+        return true;
+      }
+      if(voiceSessionId && !voiceAction) {
+        if(req.method!=='GET') {writeJson(res,405,{error:'Method not allowed'});return true;}
+        writeJson(res,200,await getVoiceSession(voiceSessionId,{
+          turnLimit:Number(reqUrl.searchParams.get('turnLimit')||100),
+        },actor));
+        return true;
+      }
+      if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
+      if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
+      const body=await readJsonBodyOrRespond(req,res,writeJson,voiceAction==='turn'?2*1024*1024:65536);
+      if(!body) return true;
+      if(voiceAction==='turn') {
+        writeJson(res,200,await submitVoiceTurn(voiceSessionId,body,actor,authSession));
+        return true;
+      }
+      if(voiceAction==='interrupt') {
+        writeJson(res,200,await interruptVoiceTurn(voiceSessionId,body,actor,authSession));
+        return true;
+      }
+      if(voiceAction==='handoff') {
+        writeJson(res,200,await handoffVoiceSession(voiceSessionId,body,actor,authSession));
+        return true;
+      }
+    }
     const id=match[1]?decodeURIComponent(match[1]):'', action=match[2]||'', url=new URL(req.url||pathname,'http://localhost'); let result;
     if(action==='code-baseline') {if(req.method!=='POST'||!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}const current=await getResponsibility(id,actor);writeJson(res,200,{schemaVersion:1,baseline:await captureResponsibilityCodeBaseline(current.responsibility.organizationId,current.responsibility.projectId)});return true;}
     if(id&&action==='observations') {
