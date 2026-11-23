@@ -134,7 +134,7 @@ async function readJsonBodyOrRespond(req, res, writeJson, maxBytes = 65536) {
 }
 
 export async function handleResponsibilityRoutes({req,res,pathname,authSession,writeJson,requireSessionAccess}) {
-  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline|observations|external-watermarks|producer-events|goal-revisions))?)?$/.exec(String(pathname||''));
+  const match=/^\/api\/responsibilities(?:\/([^/]+)(?:\/(pause|resume|complete|cancel|archive|wake|activity|context|memory|notifications|github-event|code-baseline|observations|external-watermarks|producer-events|goal-revisions|weekly-report))?)?$/.exec(String(pathname||''));
   const memoryRevision=/^\/api\/responsibilities\/([^/]+)\/memory\/facts\/([^/]+)\/(preview|correct|retract|supersede|valid-until)$/.exec(String(pathname||''));
   const memoryConflicts=/^\/api\/responsibilities\/([^/]+)\/memory\/conflicts(?:\/(preview|commit))?$/.exec(String(pathname||''));
   const ownerUserMemory=/^\/api\/responsibilities\/user-memory(?:\/([^/]+)(?:\/(preview|revise|correct|retract|supersede|valid-until))?)?$/.exec(String(pathname||''));
@@ -333,6 +333,12 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
       const merged=new Map();for(const ev of [...byOrg.events,...bySess.events]) merged.set(ev.sequence,ev);
       const events=[...merged.values()].sort((a,b)=>a.sequence-b.sequence).slice(0,Math.max(1,Math.min(limit||100,500)));
       writeJson(res,200,{schemaVersion:1,responsibilityId:id,events,nextSequence:events.length?events.at(-1).sequence:afterSequence,retention:byOrg.retention,cursorGapDetected:byOrg.cursorGapDetected||bySess.cursorGapDetected});
+      return true;
+    }
+    if (id && action==='weekly-report') {
+      if (req.method!=='GET') { writeJson(res,405,{error:'Method not allowed'}); return true; }
+      const {weeklyReportStatus}=await import('./responsibility-weekly-report.mjs');
+      writeJson(res,200,await weeklyReportStatus(id,actor));
       return true;
     }
     if(id&&action==='goal-revisions') {

@@ -1391,3 +1391,30 @@
   border-color: rgba(16, 185, 129, 0.45);
   background: rgba(16, 185, 129, 0.08);
 }
+
+/* Project report candidates and explicit owner decisions. */
+.org-report-candidate {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid var(--border-color, #d9dee8);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+}
+.org-report-candidate pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 30rem;
+  overflow-y: auto;
+}
+.org-report-candidate select,
+.org-report-candidate input:not([type="checkbox"]),
+.org-report-candidate textarea {
+  display: block;
+  width: 100%;
+  max-width: 48rem;
+  margin: 8px 0;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.org-report-candidate textarea { min-height: 6rem; resize: vertical; }
+.org-report-actions { display: flex; flex-wrap: wrap; gap: 8px; }

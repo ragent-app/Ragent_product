@@ -1082,7 +1082,8 @@ export function createCollaborationOrchestrator(options = {}) {
     let child = null;
     let unstartedAdmissionFailure = '';
     let readOnlyCapability = null;
-    const reviewerReadOnlyRequired = reviewerEnabled && task.role === 'reviewer';
+    const reviewerReadOnlyRequired = task.role === 'reviewer'
+      && (reviewerEnabled || Boolean(collaboration.policy?.factoryExecution));
     const effectiveTaskAccessMode = reviewerReadOnlyRequired ? 'read' : taskAccessMode;
     const readOnlyOrganizationManager = effectiveTaskAccessMode === 'read' && managedTarget?.sessionPlane === 'organization'
       && ['MANAGER', 'PHASE_LEAD'].includes(String(managedTarget.sessionClass || '').toUpperCase());
@@ -1090,6 +1091,15 @@ export function createCollaborationOrchestrator(options = {}) {
       ? (trim(task.runnerId) || REVIEWER_RUNTIME_ID)
       : (trim(task.runnerId) || null);
     try {
+      // Factory review never falls back when the runtime capability service
+      // is absent. A read-only role or workspace copy is not enforcement.
+      if (collaboration.policy?.factoryExecution && task.role === 'reviewer'
+          && typeof deps.resolveRuntimeReadOnlyCapability !== 'function') {
+        unstartedAdmissionFailure = 'read_only_runtime_unavailable';
+        throw Object.assign(new Error('Read-only reviewer capability is unavailable'), {
+          code: 'READ_ONLY_RUNTIME_REFUSED',
+        });
+      }
       // This pure local capability gate runs before workspace or Session
       // creation and before dispatch. Only this explicit refusal can produce
       // an unstarted receipt; a broad catch cannot prove absence of effects.
@@ -1241,6 +1251,12 @@ export function createCollaborationOrchestrator(options = {}) {
         // (and bwrap present) before the reviewer run is dispatched. A failure
         // refuses the reviewer run — the orchestrator never downgrades to an
         // unsandboxed execution.
+        if (reviewerReadOnlyRequired && capability.enforcement !== 'provider-negotiated'
+            && typeof deps.buildReviewerSandbox !== 'function') {
+          throw Object.assign(new Error('Read-only reviewer sandbox builder is unavailable'), {
+            code: 'READ_ONLY_RUNTIME_REFUSED', statusCode: 503,
+          });
+        }
         if (reviewerReadOnlyRequired && capability.enforcement !== 'provider-negotiated' && typeof deps.buildReviewerSandbox === 'function') {
           try {
             await deps.buildReviewerSandbox({

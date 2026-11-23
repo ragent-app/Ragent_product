@@ -72,6 +72,20 @@ internal fun OfflineOrganizationItems(cache: OrganizationOfflineCache, scope: St
                         val contract = item.optJSONObject("contract")
                         Text(contract?.optString("objective")?.takeIf { it.isNotBlank() } ?: "Objective unavailable")
                         Text("State: ${item.optString("state", "unknown")} · control: ${item.optString("controlState", "unknown")}")
+                        Text("Project: ${item.optString("projectId")} · Goal: ${item.optString("goalId")} · Work item: ${item.optString("id")}")
+                        val digest = item.optString("candidateDigest")
+                        Text("Candidate: ${digest.ifBlank { "unverified" }} · version ${item.optString("rowVersion")} · contract ${item.optString("contractRevision")}")
+                        val candidates = item.optJSONArray("candidates")
+                        var reportShown = false
+                        if (candidates != null) for (i in 0 until candidates.length()) {
+                            val candidate = candidates.optJSONObject(i) ?: continue
+                            if (candidate.optString("digest") != digest || digest.isBlank()) continue
+                            val report = candidate.optJSONObject("report") ?: continue
+                            Text(report.optString("visibleText").ifBlank { "Cached report content unavailable" })
+                            reportShown = true
+                        }
+                        if (!reportShown) Text("Report evidence: unverified in this snapshot")
+                        Text("Cached reading does not record acceptance; reconnect for current facts and decisions.")
                         val criteria = contract?.optJSONArray("acceptanceCriteria")
                         if (criteria == null || criteria.length() == 0) Text("Acceptance criteria unavailable")
                         else for (i in 0 until criteria.length()) {

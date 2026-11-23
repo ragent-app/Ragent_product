@@ -1035,7 +1035,7 @@ function createDriveE2EMock() {
 const ownerActor = { kind: 'user', role: 'owner', principalId: OWNER_ID };
 const serviceActor = { kind: 'service', role: 'factory_scheduler', principalId: `factory-scheduler:${OWNER_ID}`, authorizingPrincipalId: OWNER_ID };
 const futureExpiry = new Date(Date.now() + 7 * 86400_000).toISOString();
-const baseNowMs = Date.parse('2026-11-22T14:00:00.000Z');
+const baseNowMs = Date.now();
 
 let sourceScheduler = null;
 let dispatcher = null;

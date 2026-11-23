@@ -39,10 +39,12 @@
           runningEmpty: "目前没有正在运行的工作。",
           upcoming: "已安排的工作",
           upcomingEmpty: "还没有未来一周的定时工作。",
-          recent: "最近完成的工作",
-          recentEmpty: "完成的 Agent 结果会显示在这里。",
+          recent: "近期结果",
+          recentEmpty: "近期可查看的 Agent 结果会显示在这里。",
           open: "打开",
-          markRead: "标记已阅",
+          markRead: "标记会话已阅（不是验收）",
+          findOrganization: "查找组织责任",
+          organizationUnavailable: "此会话没有可用的组织，或暂时无法核实。",
           schedule: "定时",
           working: "进行中",
           waiting: "等待你处理",
@@ -74,10 +76,12 @@
           runningEmpty: "Nothing is running right now.",
           upcoming: "Scheduled work",
           upcomingEmpty: "No work is scheduled for the next week.",
-          recent: "Recently completed",
-          recentEmpty: "Completed agent results will appear here.",
+          recent: "Recent results",
+          recentEmpty: "Recent agent results will appear here.",
           open: "Open",
-          markRead: "Mark read",
+          markRead: "Mark session read (not acceptance)",
+          findOrganization: "Find organization responsibilities",
+          organizationUnavailable: "No organization is available for this session, or it could not be verified.",
           schedule: "Scheduled",
           working: "In progress",
           waiting: "Waiting for you",
@@ -191,6 +195,7 @@
         <button type="button" class="home-action home-action--primary" data-home-action="open" data-session-id="${escapeHtml(item?.sessionId || "")}" title="${escapeHtml(labels.open)}" aria-label="${escapeHtml(labels.open)}">
           <span data-icon="chevron-right" aria-hidden="true"></span>
         </button>
+        ${item?.kind === "result" && item?.sessionId ? `<button type="button" class="home-action home-action--quiet" data-home-action="organization" data-session-id="${escapeHtml(item.sessionId)}" title="${escapeHtml(labels.findOrganization)}" aria-label="${escapeHtml(labels.findOrganization)}"><span data-icon="folder" aria-hidden="true"></span></button>` : ""}
         ${showRead && item?.sessionId ? `<button type="button" class="home-action home-action--quiet" data-home-action="read" data-session-id="${escapeHtml(item.sessionId)}" title="${escapeHtml(labels.markRead)}" aria-label="${escapeHtml(labels.markRead)}"><span data-icon="check" aria-hidden="true"></span></button>` : ""}
       </div>
     </article>`;
@@ -257,12 +262,13 @@
 
   async function markRead(sessionId) {
     if (!sessionId) return;
-    await (root.ragentFetch || fetch)(resolvePath(`/api/sessions/${encodeURIComponent(sessionId)}`), {
+    const response = await (root.ragentFetch || fetch)(resolvePath(`/api/sessions/${encodeURIComponent(sessionId)}`), {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({ lastReviewedAt: new Date().toISOString() }),
     });
+    if (!response.ok) throw new Error(`Mark read failed (${response.status})`);
     await refresh({ force: true });
   }
 
@@ -273,6 +279,24 @@
       return;
     }
     root.location.assign(resolvePath(`/?session=${encodeURIComponent(sessionId)}`));
+  }
+
+  async function findOrganization(sessionId) {
+    if (!sessionId) return;
+    try {
+      const response = await (root.ragentFetch || fetch)(resolvePath(`/api/sessions/${encodeURIComponent(sessionId)}/organization/projection?version=2`), {
+        credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error("Organization unavailable");
+      const payload = await response.json();
+      if (!(payload?.projection || payload)?.organizationId) throw new Error("Organization unavailable");
+      const url = new URL(resolvePath("/"), root.location.href);
+      url.searchParams.set("session", sessionId);
+      url.searchParams.set("organization", "responsibilities");
+      root.location.assign(url.toString());
+    } catch {
+      root.showSystemToast?.(copy().organizationUnavailable, "info");
+    }
   }
 
   function openDeviceWorkspace() {
@@ -297,8 +321,12 @@
       openDeviceWorkspace();
       return;
     }
+    if (action === "organization") {
+      void findOrganization(button.dataset.sessionId);
+      return;
+    }
     if (action === "read") {
-      markRead(button.dataset.sessionId).catch(() => {});
+      markRead(button.dataset.sessionId).catch(() => root.showSystemToast?.(isChinese() ? "未能标记已阅，请重试。" : "Could not mark the session read. Try again.", "error"));
       return;
     }
     if (action === "open") openSession(button.dataset.sessionId);

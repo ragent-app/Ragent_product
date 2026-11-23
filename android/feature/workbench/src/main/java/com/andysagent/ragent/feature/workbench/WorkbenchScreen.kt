@@ -887,6 +887,10 @@ fun WorkbenchScreen(
                     onResponsibilitySelected = { responsibilitySelection = it },
                     responsibilityNavigationKey = activeResponsibilityNavigation?.requestKey,
                     selectedPlanId = activeResponsibilityNavigation?.planId,
+                    onOpenSourceSession = { sourceSession ->
+                        organizationOpen = false
+                        onEvent(WorkbenchEvent.SelectSession(sourceSession))
+                    },
                     onBack = { organizationOpen = false },
                 )
             }

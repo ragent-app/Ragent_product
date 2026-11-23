@@ -225,8 +225,31 @@ export async function getFactoryReconciliation({organizationId,workItemId},actor
   const canVerifyAcceptedRun = Boolean(snapshot.binding && ['intent','unknown'].includes(snapshot.binding.status) && !snapshot.binding.run_id && observation.state === 'found');
   const activeBinding = Boolean(snapshot.binding && ['intent','running','unknown'].includes(snapshot.binding.status));
   const canResolveExplicitly = Boolean(activeBinding && (isUnknown || (r.binding?.status === 'running' && ['cancel_requested','pause_requested'].includes(r.controlState))));
+  // Only Run-bound completion deliveries are associated here. Connector ledger
+  // entries without a durable Run link cannot be attributed to this work item.
+  let externalOutcomes={state:'unavailable',entries:[]};
+  if (observedRun?.runPublication && snapshot.binding?.run_id===observedRun.id
+      && snapshot.attempt?.session_id===observedRun.sessionId) {
+    const targets=observedRun.completionTargets;
+    const entries=targets && typeof targets==='object' && !Array.isArray(targets)
+      ? Object.entries(targets).slice(0,20).map(([targetId,value])=>({
+        targetId,state:value?.state || 'unknown',safeToRetry:value?.state==='failed' && value?.safeToRetry===true && !value?.providerInvokedAt,
+        providerInvokedAt:value?.providerInvokedAt || null,deliveredAt:value?.deliveredAt || null,
+        providerReceipt:value?.state==='sent' && value.delivery
+          && (value.delivery.responseId || Number.isInteger(value.delivery.statusCode)) ? {
+          provider:value.delivery.provider || null,statusCode:value.delivery.statusCode ?? null,
+          responseId:value.delivery.responseId || null,
+        }:null,
+        manualReviews:Array.isArray(value?.manualReviews) ? value.manualReviews.slice(-20).map(review=>({
+          observation:review.observation,source:'human',actorId:review.actorId,
+          evidence:review.evidence,reviewedAt:review.reviewedAt,
+        })) : [],
+      })) : [];
+    externalOutcomes={state:'observed',entries,truncated:targets && typeof targets==='object' && Object.keys(targets).length>20};
+  }
   return {
     ...r,
+    externalOutcomes,
     stopConfirmed: stopStatus === 'stopped',
     stopStatus,
     unknownOutcome: {

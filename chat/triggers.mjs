@@ -586,7 +586,7 @@ export async function getTrigger(triggerId) {
 // trigger creation cannot select this action or change its binding.
 export async function ensureResponsibilityTrigger(binding) {
   const config=JSON.parse(binding.config_json);
-  if(!validTriggerId(binding.trigger_id)||config.type!=='at_time'||!normalizeTimestamp(config.scheduledAt)) throw new Error('Invalid responsibility trigger binding');
+  if(!validTriggerId(binding.trigger_id)||!['at_time','weekly_report'].includes(config.type)||!normalizeTimestamp(config.scheduledAt)) throw new Error('Invalid responsibility trigger binding');
   return withTriggerMutation(async (triggers,saveTriggers)=>{
     const existing=triggers.find(item=>item.id===binding.trigger_id);
     if(existing) {

@@ -1529,7 +1529,7 @@
       }
     }
 
-    async showFactoryWork(initialResponsibilityId = '') {
+    async showFactoryWork(initialResponsibilityId = '', openResponsibilities = false) {
       const organizationId = this.projection?.organizationId;
       if (!organizationId || !this.dom.detailScreen) return;
       this.stopDetailPolling();
@@ -1544,9 +1544,16 @@
       const fetcher = root.ragentFetch || fetch;
       const request = async (path, options = {}) => {
         const response = await fetcher(base + path, { credentials: 'same-origin', cache: 'no-store', ...options });
-        const body = await response.json();
-        if (!response.ok) throw new Error(`${body.error || `Request failed: ${response.status}`}${body.blockers ? ` · ${JSON.stringify(body.blockers)}` : ''}`);
+        let body;
+        try { body = await response.json(); } catch { body = {}; }
+        if (!response.ok) { const error = new Error(`${body.error || `Request failed: ${response.status}`}${body.blockers ? ` · ${JSON.stringify(body.blockers)}` : ''}`); error.status = response.status; throw error; }
         return body;
+      };
+      const requestWithTimeout = async (path, options) => {
+        const controller = new AbortController();
+        const timer = root.setTimeout(() => controller.abort(), 20000);
+        try { return await request(path, {...options, signal:controller.signal}); }
+        finally { root.clearTimeout(timer); }
       };
       const header = add(screen, 'div', '');
       button(header, 'Back', () => { screen.hidden = true; screen.replaceChildren(); });
@@ -1612,6 +1619,30 @@
           for (const responsibility of result.responsibilities || []) {
             button(content, `${responsibility.objective} · ${responsibility.lifecycle}`, () => showResponsibility(responsibility.id));
           }
+          button(content, '准备项目周报', async () => {
+            const panel=add(content,'section',''); panel.className='org-report-candidate';
+            try {
+              const [sessionResponse,projectsResponse]=await Promise.all([
+                fetcher(`/api/sessions/${encodeURIComponent(this.sessionId)}?view=summary`,{credentials:'same-origin',cache:'no-store'}),
+                fetcher('/api/projects',{credentials:'same-origin',cache:'no-store'}),
+              ]);
+              if(!sessionResponse.ok||!projectsResponse.ok) throw new Error('无法读取当前项目');
+              const sessionData=await sessionResponse.json(), projectsData=await projectsResponse.json();
+              const session=sessionData.session, project=(projectsData.projects || []).find(p=>p.id===session?.projectId);
+              if(!project || session.id!==this.sessionId) throw new Error('当前会话的项目无法核实');
+              add(panel,'p',`项目：${project.name || project.title || project.id}。此草案先手动运行，不会启用周期。后续须明确授权读取整个项目、选择网络边界和节点。`);
+              const objective=document.createElement('input'); objective.value='生成项目周报'; objective.setAttribute('aria-label','报告目标'); panel.appendChild(objective);
+              const criterion=document.createElement('input'); criterion.placeholder='填写报告的验收标准'; criterion.setAttribute('aria-label','验收标准'); panel.appendChild(criterion);
+              const expiry=document.createElement('input'); expiry.type='datetime-local'; expiry.setAttribute('aria-label','授权到期时间'); panel.appendChild(expiry);
+              const status=add(panel,'p',''), actions=add(panel,'div',''); status.setAttribute('role','status');actions.className='org-report-actions';
+              button(actions,'创建手动周报草案',()=>{
+                const validUntil=new Date(expiry.value);if(!objective.value.trim()||!criterion.value.trim()||!expiry.value||!Number.isFinite(validUntil.getTime())||validUntil.getTime()<=Date.now()){status.textContent='请填写目标、验收标准和未来的授权到期时间。';return;}
+                const body={organizationId,projectId:project.id,objective:objective.value.trim(),successCriteria:[criterion.value.trim()],policy:{validUntil:validUntil.toISOString()},idempotencyKey:root.crypto.randomUUID()};
+                if(!root.confirm(`创建手动报告草案？\n项目：${project.name || project.title || project.id}\n目标：${body.objective}\n标准：${body.successCriteria[0]}\n到期：${validUntil.toLocaleString()}\n此步骤不授予访问权限，也不启动或安排运行。`))return;actions.replaceChildren();
+                const submit=async()=>{try{const result=await responsibilityRequest('',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!result.responsibility?.id)throw new Error('责任标识不可用');await showResponsibility(result.responsibility.id);}catch(error){status.textContent=`草案未确认：${error.message}`;button(actions,'重试同一请求',submit);}};void submit();
+              });
+            } catch(error) { add(panel,'p',`无法准备周报：${error.message}`); }
+          });
           button(content, 'Create responsibility', () => {
             const projectId = root.prompt('Project ID for this organization'); if (!projectId) return;
             const objective = root.prompt('Responsibility objective'); if (!objective) return;
@@ -1714,10 +1745,64 @@
               });
             } catch(error) { add(content,'p',`Schedules unavailable: ${error.message}`); }
           }
+          if ((detail.policy?.providerId || 'github-ci') === 'github-ci' && detail.policy?.repository && detail.policy?.targetBranch) {
+            const panel=add(content,'section','');panel.className='org-report-candidate';
+            add(panel,'h4','CI 调查与修复');
+            add(panel,'p',`已授权仓库：${detail.policy.repository} · 分支：${detail.policy.targetBranch} · 允许路径：${(detail.policy.allowedPaths || []).join(', ') || '未知'} · 候选范围：${detail.policy.candidateScope || '未知'} · 已注册检查：${detail.policy.checkActionId || '未知'}`);
+            add(panel,'p','选择一次失败运行后，服务端会向 GitHub 核对运行、分支、HEAD 与最新状态；记录观察可能唤醒此责任并产生授权范围内的工作。候选、检查、独立审查和 Owner 决定各自保留证据，观察或修复请求不代表检查通过或已验收。');
+            const run=document.createElement('input');run.inputMode='numeric';run.placeholder='GitHub Actions 失败运行编号';run.setAttribute('aria-label',run.placeholder);panel.appendChild(run);
+            const status=add(panel,'p',''),actions=add(panel,'div','');status.setAttribute('role','status');actions.className='org-report-actions';
+            button(actions,'核对并调查失败运行',()=>{
+              const runId=run.value.trim();if(!/^\d+$/.test(runId)){status.textContent='请输入数字运行编号。';return;}
+              if(!root.confirm(`核对 ${detail.policy.repository} 的失败运行 ${runId} 并在核验成功后请求调查？这会访问 GitHub，可能产生授权范围内的执行用量；不会因此证明修复、检查或验收完成。`))return;
+              const body={repository:detail.policy.repository,runId};actions.replaceChildren();
+              const submit=async()=>{try{const result=await responsibilityRequest(`${path}/github-event`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});status.textContent=`已记录事件 ${result.eventId || '未知'} 和唤醒 ${result.wakeId || '未知'}；实际调查与结果需刷新核实。`;button(actions,'刷新责任',()=>showResponsibility(id));}catch(error){status.textContent=`核对或请求未确认：${error.message}`;button(actions,'重试同一运行',submit);}};void submit();
+            });
+          }
+          if (detail.policy?.providerId === 'project-report') {
+            const zh = String(typeof root.ragentGetActiveUiLanguage === 'function' ? root.ragentGetActiveUiLanguage() : root.navigator?.language || '').toLowerCase().startsWith('zh');
+            const label=(en,cn)=>zh?cn:en, section=add(content,'section',''); section.className='org-report-candidate';
+            add(section,'h4',label('Project weekly report','项目周报'));
+            add(section,'p',label('First run manually and formally accept a report for this responsibility. A weekly schedule can then be enabled explicitly.', '先手动运行并正式验收此责任的报告，之后才能明确启用每周计划。'));
+            if (item.lifecycle === 'draft' || item.lifecycle === 'paused') button(section,label('Activate responsibility','启用责任'),async()=>{
+              if(!root.confirm(label('Activate this responsibility under its current policy? This does not itself prove a report has run.','按当前策略启用此责任？此操作本身不证明报告已经运行。')))return;
+              try{await responsibilityRequest(`${path}/resume`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID(),confirmed:true})});await showResponsibility(id);}catch(error){add(section,'p',`${label('Activation not confirmed','启用未确认')}: ${error.message}`);}
+            });
+            if (item.lifecycle === 'active') button(section,label('Run report manually','手动运行报告'),async()=>{
+              if(!root.confirm(label('Request a manual report under the current scope and budget? This may incur usage; a request does not prove execution.', '按当前范围和预算请求手动运行报告？这可能产生用量；请求不代表已执行。')))return;
+              const body={expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID(),confirmed:true};
+              const submit=async()=>{try{await responsibilityRequest(`${path}/wake`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});add(section,'p',label('Manual request recorded; refresh to see actual work.','手动请求已记录，请刷新查看实际工作。'));button(section,label('Refresh','刷新'),()=>showResponsibility(id));}catch(error){add(section,'p',`${label('Request not confirmed','请求未确认')}: ${error.message}`);button(section,label('Retry same request','重试同一请求'),submit);}};void submit();
+            });
+
+            try {
+              const weekly=await responsibilityRequest(`${path}/weekly-report`), base=weekly.baseline;
+              if(base) {
+                add(section,'p',`${label('Latest accepted version','上一已验收版本')}: ${base.candidateDigest || '—'} · ${label('contract','契约')} ${base.contractRevision ?? '—'} · ${label('execution','执行代次')} ${base.executionEpoch ?? '—'} · ${label('accepted','验收时间')} ${base.acceptedAt || '—'}`);
+                add(section,'p',`${label('Source','来源')}: ${base.source || '—'} · ${label('Run','运行')} ${base.runId || '—'} · ${label('packet','结果包')} ${base.packetId || '—'} / ${base.packetDigest || '—'}`);
+                add(section,'p',`${label('Accepted baseline for comparison','可用于对比的验收基线')}: ${weekly.comparison?.status === 'available' ? label('available; no change comparison established here','可用；此处未核实变化对比') : label('unavailable','不可比')} · ${weekly.comparison?.reason || '—'}`);
+                add(section,'p',label('Report content is a model statement; references, period coverage and changes are only established where supported by the underlying report evidence.', '报告内容是模型陈述；覆盖周期、引用和变化仅在底层报告证据支持时成立。'));
+                if(base.report?.visibleText) add(section,'pre',base.report.visibleText);
+              } else add(section,'p',`${label('No verified accepted baseline','尚无已核实的验收基线')}: ${weekly.reason || label('unavailable','不可用')}`);
+              if (!weekly.eligible) add(section,'p',`${label('Weekly schedule is not available','暂不能启用每周计划')}: ${weekly.reason || label('unverified','未核实')}`);
+              else {
+                add(section,'p',label('The schedule follows local time in the selected time zone. A nonexistent daylight-saving time is skipped that week; a repeated time uses its first occurrence.', '计划按所选时区的当地时间执行；夏令时切换导致该时间不存在时跳过当周，时间重复时使用第一次。'));
+                const form=add(section,'div',''), weekday=document.createElement('select'); weekday.setAttribute('aria-label',label('Day of week','星期'));
+                const days=zh?['星期日','星期一','星期二','星期三','星期四','星期五','星期六']:['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']; days.forEach((day,index)=>{const option=document.createElement('option');option.value=String(index);option.textContent=day;weekday.appendChild(option);});form.appendChild(weekday);
+                const time=document.createElement('input'); time.type='time';time.required=true;time.setAttribute('aria-label',label('Local time','当地时间'));form.appendChild(time);
+                const zone=document.createElement('select'); zone.setAttribute('aria-label',label('Time zone','时区'));const localZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; let zones=[]; try {zones=Intl.supportedValuesOf('timeZone');}catch{} for(const name of [...new Set([localZone,'UTC',...zones])]){const option=document.createElement('option');option.value=name;option.textContent=name;zone.appendChild(option);} zone.value=localZone;form.appendChild(zone);
+                const status=add(section,'p',''); status.setAttribute('role','status'); const actions=add(section,'div','');actions.className='org-report-actions';
+                button(actions,label('Enable weekly reports','启用每周报告'),()=>{const match=/^(\d{2}):(\d{2})$/.exec(time.value);if(!match){status.textContent=label('Select a local time.','请选择当地时间。');return;} const body={type:'weekly_report',confirmed:true,idempotencyKey:root.crypto.randomUUID(),expectedVersion:item.rowVersion,weekday:Number(weekday.value),hour:Number(match[1]),minute:Number(match[2]),timeZone:zone.value}; if(!root.confirm(`${label('Enable this weekly schedule? Each run remains subject to the current authorization and limits.','启用此每周计划？每次运行仍受当前授权和限制约束。')}\n${days[body.weekday]} ${time.value} · ${body.timeZone}`))return;actions.replaceChildren();const submit=async()=>{try{const result=await responsibilityRequest(`${path}/trigger-bindings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});status.textContent=`${label('Schedule recorded; next scheduled time','计划已记录；下次计划时间')}: ${result.binding?.nextScheduledAt || result.binding?.config?.nextScheduledAt || result.binding?.config?.scheduledAt || label('unavailable','不可用')}`;button(actions,label('Refresh','刷新'),()=>showResponsibility(id));}catch(error){status.textContent=`${label('Schedule not confirmed','计划未确认')}: ${error.message}`;button(actions,label('Retry same request','重试同一请求'),submit);}};void submit();});
+              }
+            } catch { add(section,'p',label('Weekly report status is unavailable. No accepted baseline or schedule is assumed.','周报状态不可用，不能假定已有验收基线或计划。')); }
+          }
           try {
             const notifications = await responsibilityRequest(`${path}/notifications`);
             add(content, 'h4', 'Responsibility notifications');
-            add(content, 'p', `Opt-in ${notifications.enabled ? 'on' : 'off'} · delivery ${notifications.deliveryAvailable ? 'configured' : 'not enabled'} · Web Push only; Android FCM responsibility notifications are not supported.`);
+            add(content, 'p', `通知选择：${notifications.enabled ? '已开启' : '已关闭'} · 责任运行时：${notifications.runtimeEnabled ? '已启用' : '未启用'} · 推送投递开关：${notifications.deliveryEnabled ? '已开启' : '已关闭'}。这些设置不代表消息已送达或已读。`);
+            const cloud=notifications.accountCloudPush || {}, web=notifications.channels?.webPush || {};
+            add(content,'p',`Accounts 云推送：${cloud.configured ? '配置就绪' : '配置未齐'} · 当前可用：${notifications.accountCloudPushAvailable ? '是' : '否'} · 账号绑定：${cloud.accountBound ? '是' : '否'} · Accounts 服务：${cloud.accountsConfigured ? '已配置' : '未配置'} · 实例身份：${cloud.instanceReady ? '就绪' : '未就绪'}。`);
+            add(content,'p',`Web Push：绑定设备 ${web.bindingCount ?? '未知'} · 推送开关 ${web.deliveryEnabled ? '开启' : '关闭'}。Accounts 接收只表示云服务接受事件，不证明 Firebase 投递或用户已读。`);
+            if(cloud.outbox) add(content,'p',`云推送队列：待处理 ${cloud.outbox.pending ?? '未知'} · 已接受 ${cloud.outbox.accepted ?? '未知'} · 已拒绝 ${cloud.outbox.rejected ?? '未知'} · 最近尝试 ${cloud.outbox.lastAttemptAt || '未知'} · 最近结果 ${cloud.outbox.lastResult || '未知'}${cloud.outbox.lastLocalError ? ` · 本地错误 ${cloud.outbox.lastLocalError}` : ''}`);
             if (!notifications.registrationSupported) add(content, 'p', notifications.registrationReason || 'Pair and authenticate this owner device before binding a Web Push subscription.');
             else button(content, 'Bind this device’s Web Push subscription', async () => {
               try {
@@ -1734,7 +1819,7 @@
             });
             button(content, notifications.enabled ? 'Disable responsibility notifications' : 'Review enabling responsibility notifications', async () => {
               const enabled = !notifications.enabled;
-              if (!root.confirm(`${enabled ? 'Enable' : 'Disable'} Web Push for this responsibility? Provider acceptance does not mean the notification was read.`)) return;
+              if (!root.confirm(`${enabled ? '开启' : '关闭'}此责任的通知选择？实际渠道仍取决于各自配置和投递状态；服务商接受不代表送达或已读。`)) return;
               try { await responsibilityRequest(`${path}/notifications`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled,expectedVersion:notifications.version,idempotencyKey:root.crypto.randomUUID(),confirmed:true})}); await showResponsibility(id); }
               catch (error) { add(content,'p',`Notification setting not confirmed: ${error.message}`); }
             });
@@ -1743,7 +1828,7 @@
               try { await responsibilityRequest(`/notification-subscriptions/${encodeURIComponent(binding.subscriptionId)}/revoke`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({expectedVersion:binding.version,idempotencyKey:root.crypto.randomUUID(),confirmed:true})}); await showResponsibility(id); }
               catch (error) { add(content,'p',`Revocation not confirmed: ${error.message}`); }
             });
-            for (const receipt of notifications.receipts || []) add(content,'p',`${receipt.type} · ${receipt.state} · ${receipt.updatedAt} (provider status, not proof of reading)`);
+            for (const receipt of notifications.receipts || []) add(content,'p',`${receipt.channel || 'unknown'} · ${receipt.type} · ${receipt.state} · ${receipt.updatedAt}（投递状态，不代表已读）`);
           } catch { add(content, 'p', 'Responsibility notification settings unavailable.'); }
           add(content, 'p', `Policy (not a plan approval): ${JSON.stringify(detail.policy || {})}`);
           if (triggerCatalog?.features?.committedGitChangesOnly === true && ['generic-planner','project-report'].includes(detail.policy?.providerId)) {
@@ -1810,53 +1895,53 @@
             });
             const ci = (catalog.providers || []).find(p => p.id === 'github-ci' && p.version === 1 && p.available === true);
             const ciTemplate = ci?.templates?.find(t => t.id === 'ragent-reviewed-change' && t.version === 3);
-            if (ciTemplate?.digest) button(content, 'Review GitHub CI authorization', () => {
-              const repository = root.prompt('Repository owner/name'); if (!repository) return;
-              const targetBranch = root.prompt('Target branch'); if (!targetBranch) return;
-              const paths = root.prompt('Allowed project-relative paths, comma separated'); if (!paths) return;
-              const allowedPaths = paths.split(',').map(v => v.trim()).filter(Boolean); if (!allowedPaths.length) return;
-              const candidateScope = root.prompt('Candidate path within allowed paths'); if (!candidateScope) return;
-              const checkActionId = root.prompt('Existing registered check action ID (not a shell command)'); if (!checkActionId) return;
-              const nodeBindings = {};
-              for (const key of ['implementation', 'review', 'integration']) {
-                const nodeId = root.prompt(`${key} node ID`); if (!nodeId) return;
-                const generation = Number(root.prompt(`${key} node binding generation`)); if (!Number.isSafeInteger(generation) || generation < 1) return;
-                nodeBindings[key] = { nodeId, bindingGeneration:generation };
-              }
-              const maxAttempts = Number(root.prompt('Maximum attempts (1–10)')); if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return;
-              const maxCost = Number(root.prompt('Maximum cost')); if (!Number.isFinite(maxCost) || maxCost <= 0) return;
-              const timeZone = root.prompt('Daily budget IANA timezone'); if (!timeZone) return;
-              const dailyInput = root.prompt('Maximum daily cost'); if (dailyInput === null || !dailyInput.trim()) return;
-              const dailyCost = Number(dailyInput); if (!Number.isFinite(dailyCost) || dailyCost < 0) return;
-              const validUntil = root.prompt('Authorization expiry (ISO date and time with timezone)', detail.policy?.validUntil || '');
-              if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
-              const policy = {validUntil, repository, templateId:ciTemplate.id, templateVersion:ciTemplate.version, templateDigest:ciTemplate.digest,
-                targetBranch, allowedPaths, candidateScope, checkActionId, nodeBindings, maxAttempts, maxCost, dailyBudget:{timeZone,maxCost:dailyCost}};
-              if (!root.confirm(`Authorize GitHub CI policy?\n${JSON.stringify(policy, null, 2)}\nOnly the registered check action is used. Existing work may continue until separately stopped.`)) return;
-              submitCommand('', {policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID()}, 'PATCH');
+            if (ciTemplate?.digest) button(content, '审阅 GitHub CI 授权', async () => {
+              const panel=add(content,'section','');panel.className='org-report-candidate';
+              try {
+                const available=await request('/available-checks'), checks=available.checks || [], nodes=(this.projection?.nodes || []).filter(node=>node.id && node.currentBinding?.sessionId && Number.isSafeInteger(node.currentBinding?.generation));
+                if(!checks.length || !nodes.length){add(panel,'p','没有可用的已注册检查或已绑定节点；请先完成配置。');return;}
+                add(panel,'p','独立授权 CI 调查和受限变更。服务端会核验节点能力、只读审查、仓库及基线；此界面不发起 GitHub 写入。');
+                const input=(name,type='text')=>{const el=document.createElement('input');el.type=type;el.placeholder=name;el.setAttribute('aria-label',name);panel.appendChild(el);return el;};
+                const repository=input('仓库 owner/name'),branch=input('目标分支'),paths=input('允许的项目相对路径，以逗号分隔'),scope=input('候选范围（位于允许路径内）');
+                const check=document.createElement('select');check.setAttribute('aria-label','已注册检查');for(const entry of checks){const option=document.createElement('option');option.value=entry.id;option.textContent=entry.id;check.appendChild(option);}panel.appendChild(check);if(available.truncated)add(panel,'p','检查列表已截断，未显示的检查不能在此选择。');
+                const selectors={};for(const [key,title] of [['implementation','实现节点'],['review','只读审查节点'],['integration','集成节点']]){const select=document.createElement('select');select.setAttribute('aria-label',title);for(const node of nodes){const option=document.createElement('option');option.value=node.id;option.textContent=`${title}：${node.displayName || node.id} · ${node.role || '角色未知'}`;select.appendChild(option);}panel.appendChild(select);selectors[key]=select;}
+                const attempts=input('最大执行次数（1–10）','number'),cost=input('最高费用','number'),daily=input('每日最高费用','number'),expiry=input('授权到期时间','datetime-local');
+                const zone=document.createElement('select');zone.setAttribute('aria-label','预算时区');const local=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';let zones=[];try{zones=Intl.supportedValuesOf('timeZone');}catch{}for(const value of [...new Set([local,'UTC',...zones])]){const option=document.createElement('option');option.value=value;option.textContent=value;zone.appendChild(option);}zone.value=local;panel.appendChild(zone);
+                const status=add(panel,'p','');status.setAttribute('role','status');
+                button(panel,'审阅并保存 CI 授权',()=>{
+                  const allowedPaths=paths.value.split(',').map(v=>v.trim()).filter(Boolean),candidateScope=scope.value.trim(),maxAttempts=Number(attempts.value),maxCost=Number(cost.value),dailyCost=Number(daily.value),validUntil=new Date(expiry.value),nodeBindings={};
+                  for(const key of ['implementation','review','integration']){const node=nodes.find(n=>n.id===selectors[key].value);if(node)nodeBindings[key]={nodeId:node.id,bindingGeneration:node.currentBinding.generation};}
+                  if(!repository.value.trim()||!branch.value.trim()||!allowedPaths.length||!candidateScope||!check.value||Object.keys(nodeBindings).length!==3||nodeBindings.implementation.nodeId===nodeBindings.review.nodeId||!Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>10||!Number.isFinite(maxCost)||maxCost<=0||!daily.value||!Number.isFinite(dailyCost)||dailyCost<0||!expiry.value||!Number.isFinite(validUntil.getTime())||validUntil.getTime()<=Date.now()){status.textContent='请填写全部范围、不同的实现和审查节点、有效预算及未来到期时间。';return;}
+                  const policy={validUntil:validUntil.toISOString(),repository:repository.value.trim(),templateId:ciTemplate.id,templateVersion:ciTemplate.version,templateDigest:ciTemplate.digest,targetBranch:branch.value.trim(),allowedPaths,candidateScope,checkActionId:check.value,nodeBindings,maxAttempts,maxCost,dailyBudget:{timeZone:zone.value,maxCost:dailyCost}};
+                  if(!root.confirm(`保存此 CI 授权？\n${JSON.stringify(policy,null,2)}\n候选、检查、独立审查及 Owner 决定均需分别核验。保存本身不会向 GitHub 写入。`))return;
+                  submitCommand('',{policy,expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()},'PATCH');
+                });
+              } catch(error){add(panel,'p',`无法读取检查目录：${error.message}`);}
             });
             const provider = (catalog.providers || []).find(p => p.id === 'project-report' && p.version === 1 && p.available === true);
             const template = provider?.templates?.find(t => t.id === 'ragent-project-report' && t.version === 1);
-            if (provider?.digest && template?.digest) button(content, 'Review project report authorization', () => {
-              const nodeId = root.prompt('Authorized report node ID'); if (!nodeId) return;
-              const generation = Number(root.prompt('Current node binding generation')); if (!Number.isSafeInteger(generation) || generation < 1) return;
-              const maxAttempts = Number(root.prompt('Maximum attempts (1–10)')); if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) return;
-              const maxCost = Number(root.prompt('Maximum cost')); if (!Number.isFinite(maxCost) || maxCost <= 0) return;
-              const timeZone = root.prompt('Daily budget IANA timezone'); if (!timeZone) return;
-              const dailyCostInput = root.prompt('Maximum daily cost'); if (dailyCostInput === null || !dailyCostInput.trim()) return;
-              const dailyCost = Number(dailyCostInput); if (!Number.isFinite(dailyCost) || dailyCost < 0) return;
-              const validUntil = root.prompt('Authorization expiry (ISO date and time with timezone)', detail.policy?.validUntil || '');
-              if (!validUntil || !Number.isFinite(Date.parse(validUntil))) return;
-              const networkPolicy = root.prompt('Network policy: deny, or inherit_existing_permissions (no default)');
-              if (!['deny', 'inherit_existing_permissions'].includes(networkPolicy)) return;
-              if (networkPolicy === 'inherit_existing_permissions' && !root.confirm('Separately authorize this node to retain its existing network and tool permissions? Filesystem read-only does not prevent external actions; no domain restriction or network isolation is promised.')) return;
-              const policy = { validUntil, providerId:provider.id, providerVersion:provider.version, providerDigest:provider.digest,
-                templateId:template.id, templateVersion:template.version, templateDigest:template.digest,
-                resource:{ projectId:item.projectId, readScope:'entire_project', networkPolicy }, nodeBindings:{ report:{ nodeId, bindingGeneration:generation } },
-                maxAttempts, maxCost, dailyBudget:{ timeZone, maxCost:dailyCost } };
-              if (networkPolicy === 'inherit_existing_permissions') policy.networkPermissionConfirmed = true;
-              if (!root.confirm(`Authorize this policy?\n${JSON.stringify(policy, null, 2)}\nThe entire project is readable; project file writes are blocked. Other tools remain subject to their existing permissions; network isolation is not established. Manual/interval triggers may automatically start this fixed report; output is a ResultPacket. Results require human review and are not automatically verified facts.`)) return;
-              submitCommand('', { policy, expectedVersion:item.rowVersion, idempotencyKey:root.crypto.randomUUID() }, 'PATCH');
+            if (provider?.digest && template?.digest) button(content, '审阅项目报告授权', () => {
+              const panel=add(content,'section','');panel.className='org-report-candidate';
+              add(panel,'p','此报告读取整个项目，项目文件写入受阻。请选择执行节点与网络边界；节点授权和运行时能力由服务端再次核验。继承现有网络与工具权限时，不承诺网络隔离。');
+              const nodes=(this.projection?.nodes || []).filter(node=>node.id && node.currentBinding?.sessionId && Number.isSafeInteger(node.currentBinding?.generation));
+              if(!nodes.length){add(panel,'p','当前没有可供选择的已绑定节点，无法准备授权。');return;}
+              const nodeSelect=document.createElement('select');nodeSelect.setAttribute('aria-label','报告执行节点');for(const node of nodes){const option=document.createElement('option');option.value=node.id;option.textContent=`${node.displayName || node.id} · ${node.role || '角色未知'}`;nodeSelect.appendChild(option);}panel.appendChild(nodeSelect);
+              const input=(label,type)=>{const el=document.createElement('input');el.type=type;el.placeholder=label;el.setAttribute('aria-label',label);panel.appendChild(el);return el;};
+              const attempts=input('最多执行次数（1–10，含首份）','number');attempts.min='1';attempts.max='10';
+              const cost=input('单次责任最高费用','number');cost.min='0';cost.step='any';
+              const daily=input('每日最高费用','number');daily.min='0';daily.step='any';
+              const expiry=input('授权到期时间','datetime-local');
+              const zone=document.createElement('select');zone.setAttribute('aria-label','预算时区');const localZone=Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';let zones=[];try{zones=Intl.supportedValuesOf('timeZone');}catch{}for(const value of [...new Set([localZone,'UTC',...zones])]){const option=document.createElement('option');option.value=value;option.textContent=value;zone.appendChild(option);}zone.value=localZone;panel.appendChild(zone);
+              const network=document.createElement('select');network.setAttribute('aria-label','网络边界');for(const [value,title] of [['deny','拒绝网络（运行时须支持）'],['inherit_existing_permissions','继承现有网络和工具权限']]){const option=document.createElement('option');option.value=value;option.textContent=title;network.appendChild(option);}panel.appendChild(network);
+              const status=add(panel,'p','');status.setAttribute('role','status');
+              button(panel,'审阅并保存授权',()=>{
+                const selected=nodes.find(node=>node.id===nodeSelect.value),maxAttempts=Number(attempts.value),maxCost=Number(cost.value),dailyCost=Number(daily.value),validUntil=new Date(expiry.value);
+                if(!selected || !Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>10||!Number.isFinite(maxCost)||maxCost<=0||!daily.value||!Number.isFinite(dailyCost)||dailyCost<0||!expiry.value||!Number.isFinite(validUntil.getTime())||validUntil.getTime()<=Date.now()){status.textContent='请填写节点、有效次数、费用及未来的到期时间。';return;}
+                const networkPolicy=network.value;
+                const policy={validUntil:validUntil.toISOString(),providerId:provider.id,providerVersion:provider.version,providerDigest:provider.digest,templateId:template.id,templateVersion:template.version,templateDigest:template.digest,resource:{projectId:item.projectId,readScope:'entire_project',networkPolicy},nodeBindings:{report:{nodeId:selected.id,bindingGeneration:selected.currentBinding.generation}},maxAttempts,maxCost,dailyBudget:{timeZone:zone.value,maxCost:dailyCost},...(networkPolicy==='inherit_existing_permissions'?{networkPermissionConfirmed:true}:{})};
+                if(!root.confirm(`授权此报告策略？\n项目：${item.projectId}；读取整个项目\n节点：${selected.displayName || selected.id}\n网络：${network.options[network.selectedIndex].textContent}\n最多执行：${maxAttempts}；最高费用：${maxCost}；每日上限：${dailyCost}（${zone.value}）\n到期：${validUntil.toLocaleString()}\n输出仍需正式验收；此授权不等于已运行。`))return;
+                submitCommand('',{policy,expectedVersion:item.rowVersion,idempotencyKey:root.crypto.randomUUID()},'PATCH');
+              });
             });
           } catch { /* unavailable catalog never grants authority */ }
           add(content, 'h4', 'Plans awaiting review');
@@ -1969,39 +2054,366 @@
           button(content, 'Refresh', () => showResponsibility(id));
         } catch (error) { content.replaceChildren(); add(content, 'p', `Responsibility unavailable: ${error.message}`); button(content, 'Responsibilities', showResponsibilities); }
       };
-      const showItem = async id => {
+      const showItem = async (id, reportCandidateId = '') => {
         content.replaceChildren(); add(content, 'p', 'Loading…');
         try {
-          const { item, asOf } = await request(`/work-items/${encodeURIComponent(id)}`);
+          const { item, asOf } = await request(`/work-items/${encodeURIComponent(id)}${reportCandidateId ? `?reportCandidateId=${encodeURIComponent(reportCandidateId)}` : ''}`);
           if (this.projection?.organizationId !== organizationId || screen.hidden) return;
           content.replaceChildren(); button(content, 'All work items', showList);
           add(content, 'h3', item.contract?.objective || item.id);
           add(content, 'p', `State ${item.state}; control ${item.controlState}; priority ${item.priority}; version ${item.rowVersion}; contract ${item.contractRevision}; as of ${asOf}`);
+          const recoveryPanel=add(content,'section',''); recoveryPanel.className='org-report-candidate';
+          add(recoveryPanel,'h4','工作状态与恢复');
+          add(recoveryPanel,'p','此处只读取已记录状态；请求停止、提供商回执和人工核实是不同事实。打开页面不会派发工作。');
+          const reconcileStatus=add(recoveryPanel,'p','正在读取执行与停止状态…');reconcileStatus.setAttribute('role','status');
+          const budgetStatus=add(recoveryPanel,'p','正在读取用量与预留…');
+          const reconcileActions=add(recoveryPanel,'div','');reconcileActions.className='org-report-actions';
+
           if (item.controlState === 'cancel_requested') add(content, 'p', 'Cancellation requested — stop is NOT confirmed until a Run cancellation or terminal receipt is verified.');
           else if (item.blockedReason?.code === 'completed_pending_review') add(content, 'p', 'Run completed before stop — pending review, NOT cancelled.');
           else if (item.blockedReason?.code === 'stopped' || item.state === 'cancelled') add(content, 'p', 'Execution confirmed stopped / cancelled.');
-          for (const [label, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', (item.candidates || []).map(({report, ...candidate}) => candidate)], ['Decisions', item.decisions]]) {
-            add(content, 'h4', label); add(content, 'pre', JSON.stringify(value || [], null, 2));
-          }
-          for (const candidate of item.candidates || []) {
-            const report = candidate.report;
-            if (!report) continue;
-            add(content, 'h4', `Report · candidate ${candidate.digest}`);
-            add(content, 'p', `Execution packet: ${report.packetState || 'unverified'}; model declaration: ${report.declaration?.status || 'unavailable'} (model assertion, not acceptance). Source: ${report.source}.`);
-            if (report.visibleText) add(content, 'pre', report.visibleText);
-            if (report.declaration?.status === 'valid') {
-              add(content, 'p', `Model-declared state: ${report.declaration.state}`);
-              if (report.declaration.summary) { add(content, 'p', 'Model-declared summary:'); add(content, 'pre', report.declaration.summary); }
-              for (const field of ['blockers', 'risks', 'unresolvedItems', 'tests', 'acceptanceNotes']) {
-                for (const entry of report.declaration[field] || []) add(content, 'p', `Model-declared ${field}: ${typeof entry === 'string' ? entry : JSON.stringify(entry)}`);
+          {
+            const zh = String(typeof root.ragentGetActiveUiLanguage === 'function' ? root.ragentGetActiveUiLanguage() : root.navigator?.language || '').toLowerCase().startsWith('zh');
+            const label = (en, cn) => zh ? cn : en;
+            const panel = add(content, 'section', ''); panel.className = 'org-report-candidate';
+            add(panel, 'h4', label('Execution and independent review', '执行与独立审查'));
+            add(panel, 'p', label('Review opinions are not owner acceptance. A recorded receipt alone does not establish that the review context remains current.', '审查意见不等于 Owner 验收。已记录回执本身不能证明审查上下文仍然有效。'));
+            const runtimeText = runtime => {
+              if (!runtime || runtime.state === 'unavailable') return label('unavailable', '不可核实');
+              return `${label('Run', '运行')} ${runtime.runId || '—'} · Harness ${runtime.tool || label('unknown', '未知')} · ${label('provider', '提供方')} ${runtime.provider || label('unknown', '未知')} · ${label('session', '会话')} ${runtime.sessionId || '—'} · ${label('state', '状态')} ${runtime.state || label('unknown', '未知')}`;
+            };
+            const binding = (item.bindings || []).find(entry => entry.contractRevision === item.contractRevision && entry.executionEpoch === item.executionEpoch && entry.bindingGeneration === item.bindingGeneration);
+            add(panel, 'p', `${label('Assigned node', '指派节点')}: ${item.assigneeNodeId || label('unknown', '未知')} · ${label('execution binding', '执行绑定')}: ${binding?.status || label('unavailable', '不可用')} · ${label('Run', '运行')}: ${binding?.runId || label('unknown', '未知')}`);
+            add(panel, 'p', `${label('Contract target', '契约目标')}: ${item.contract?.resource?.projectId || item.projectId || label('unknown', '未知')} · ${label('branch', '分支')}: ${item.contract?.targetBranch || label('not specified', '未指定')} · ${label('access', '访问方式')}: ${item.contract?.accessMode || label('unknown', '未知')} · ${label('paths', '路径')}: ${Array.isArray(item.contract?.allowedPaths) ? item.contract.allowedPaths.join(', ') || label('none', '无') : label('unknown', '未知')}`);
+            const handoff = item.reviewHandoff;
+            if (handoff) {
+              add(panel, 'p', `${label('Review handoff', '审查交接')}: ${handoff.state === 'current' ? label('current context verified', '已核实为当前上下文') : label('unavailable or no longer current', '不可核实或已不再为当前')} · ${label('candidate', '候选')} ${handoff.candidate?.workItemId || '—'} / ${handoff.candidate?.digest || '—'} · ${label('contract', '契约')} ${handoff.candidate?.contractRevision ?? '—'} · ${label('execution', '执行代次')} ${handoff.candidate?.executionEpoch ?? '—'}`);
+              add(panel, 'p', `${label('Author execution', '原作者执行')}: ${runtimeText(handoff.candidate?.runtime)}`);
+              add(panel, 'p', `${label('Reviewer', '审查者')}: ${handoff.reviewer?.nodeId || label('unknown', '未知')} · ${label('access', '访问方式')} ${handoff.reviewer?.accessMode || label('unknown', '未知')} · ${label('binding generation', '绑定代次')} ${handoff.reviewer?.bindingGeneration ?? '—'} · ${runtimeText(handoff.reviewer?.runtime)}`);
+              add(panel, 'p', label('A current handoff does not establish that a review ran or that execution moved between devices.', '交接为当前不代表审查已经运行，也不代表执行已在设备间迁移。'));
+              if (handoff.candidate?.workItemId && handoff.candidate.workItemId !== item.id) button(panel,label('Open candidate work','打开候选工作'),()=>showItem(handoff.candidate.workItemId));
+            }
+            const reviewWork = Array.isArray(item.reviewWorkItems) ? item.reviewWorkItems : [];
+            for (const review of reviewWork) {
+              const match = !!review.candidateDigest && review.candidateDigest === item.candidateDigest;
+              add(panel, 'p', `${label('Linked review work', '关联审查工作')}: ${review.workItemId || '—'} · ${label('state', '状态')} ${review.state || '—'} · ${label('control', '控制状态')} ${review.controlState || '—'} · ${label('reviewer node', '审查节点')} ${review.nodeId || '—'} · ${label('candidate binding', '候选绑定')} ${review.candidateDigest || label('not pinned', '未固定')} · ${match ? label('matches current candidate', '与当前候选一致') : label('not established for current candidate', '未确认属于当前候选')}`);
+              if (review.workItemId) button(panel, label('Open linked review work', '打开关联审查工作'), () => showItem(review.workItemId));
+            }
+            if (item.reviewWorkItemsTruncated) add(panel, 'p', label('Additional linked review work exists; this view is limited to 20.', '还有更多关联审查工作；此处最多显示 20 项。'));
+            if (!reviewWork.length) {
+              add(panel, 'p', label('No linked review work is shown. A reviewed-change responsibility creates a separate workflow; it does not automatically review this existing candidate.', '未显示关联审查工作。reviewed-change 责任会创建独立工作流，不会自动审查此已有候选。'));
+              button(panel, label('Find reviewed-change authorization', '查找受控变更授权'), () => item.reportAuthority?.responsibilityId ? showResponsibility(item.reportAuthority.responsibilityId) : showResponsibilities());
+              const reviewerNodes = (this.projection?.nodes || []).filter(node => node.id && node.id !== item.assigneeNodeId);
+              if (item.kind === 'execution' && item.state === 'review' && item.controlState === 'none' && item.candidateDigest && Array.isArray(item.contract?.allowedPaths) && item.contract.allowedPaths.length && reviewerNodes.length && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner') {
+                button(panel, label('Prepare review of this candidate', '准备审查此候选'), () => {
+                  const form=add(panel,'section',''); form.className='org-report-candidate';
+                  add(form,'p',label('Choose a different node. Eligibility, independent identity, read/run/review grants, no write access and runtime availability cannot be established by this selector; the server rechecks them. Responsibility-owned work may require its existing authorization.', '请选择不同节点。此选择器不能证明独立身份、read/run/review 授权、无写入权限或运行时可用性；服务端会重新核验。责任所属工作可能需要其既有授权。'));
+                  const select=document.createElement('select'); select.setAttribute('aria-label',label('Reviewer node','审查节点')); for(const node of reviewerNodes) {const option=document.createElement('option'); option.value=node.id; option.textContent=node.displayName || node.id; select.appendChild(option);} form.appendChild(select);
+                  const attempts=document.createElement('input'); attempts.type='number'; attempts.min='1'; attempts.max='10'; attempts.placeholder=label('Maximum attempts (1–10)','最多执行次数（1–10）'); attempts.setAttribute('aria-label',attempts.placeholder); form.appendChild(attempts);
+                  const cost=document.createElement('input'); cost.type='number'; cost.min='0'; cost.step='any'; cost.placeholder=label('Maximum cost','最高费用'); cost.setAttribute('aria-label',cost.placeholder); form.appendChild(cost);
+                  const status=add(form,'p',''); status.setAttribute('role','status'); const actions=add(form,'div',''); actions.className='org-report-actions';
+                  button(actions,label('Review proposal','审阅草案'),()=>{
+                    const maxAttempts=Number(attempts.value),maxCost=Number(cost.value); if(!Number.isSafeInteger(maxAttempts)||maxAttempts<1||maxAttempts>10||!Number.isFinite(maxCost)||maxCost<=0){status.textContent=label('Enter an attempt limit and a positive cost.','请输入执行次数上限和大于零的费用上限。');return;}
+                    const contract={objective:item.contract.objective,accessMode:'read',allowedPaths:item.contract.allowedPaths,acceptanceCriteria:[{id:'review-recorded',method:'manual'}],retry:{maxAttempts},budget:{maxCost},budgetReservation:{cost:maxCost/maxAttempts},...(item.contract.targetBranch?{targetBranch:item.contract.targetBranch}:{}),...(item.contract.candidateScope?{candidateScope:item.contract.candidateScope}:{})};
+                    if(!root.confirm(`${label('Create a proposed read-only review for this exact candidate? It will not run until separately approved, and eligibility remains subject to server checks.','为此精确候选创建只读审查草案？须另行批准才可运行，资格仍需服务端核验。')}\n${label('Candidate','候选')}: ${item.id} / ${item.candidateDigest}\n${label('Reviewer','审查者')}: ${select.value}\n${JSON.stringify(contract,null,2)}`)) return;
+                    const commandId=root.crypto.randomUUID(),body={type:'CreateWorkItem',commandId,idempotencyKey:commandId,payload:{goalId:item.goalId,kind:'review',assigneeNodeId:select.value,contract,dependencies:[{predecessorId:item.id,milestone:'candidate_ready',candidateDigest:item.candidateDigest}]}}; actions.replaceChildren();
+                    const submit=async()=>{try{const result=await requestWithTimeout('/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!result.item?.id)throw new Error('Work item ID unavailable');await showItem(result.item.id);}catch(error){actions.replaceChildren();status.textContent=`${label('Proposal not confirmed','草案未确认')}: ${error.message}`;if(!error.status||error.status>=500)button(actions,label('Retry same request','重试同一请求'),submit);else button(actions,label('Refresh','刷新'),()=>showItem(item.id));}};void submit();
+                  });
+                });
               }
             }
-            if (!report.readable) add(content, 'p', 'Readable report unavailable or source unverified.');
-            const decisions = (item.decisions || []).filter(decision => decision.candidateDigest === candidate.digest
-              && decision.contractRevision === candidate.contractRevision
-              && (decision.evidence || []).some(entry => entry.kind === 'owner_report_review'));
-            for (const decision of decisions) add(content, 'p', `Owner decision ${decision.criterionId}: ${decision.decision} · contract ${decision.contractRevision} · gate ${decision.gateGeneration}`);
-            if (!decisions.length) add(content, 'p', 'Owner decision: not recorded.');
+            const opinions = Array.isArray(item.reviewOpinions) ? item.reviewOpinions : [];
+            if (!opinions.length) add(panel, 'p', label('No recorded independent review opinion is available for this work.', '此工作暂无可用的已记录独立审查意见。'));
+            for (const opinion of opinions) {
+              const entry=add(panel,'section',''); entry.className='org-report-candidate';
+              const candidate=opinion.candidate || {}, reviewer=opinion.reviewer || {};
+              add(entry,'p',`${label('Candidate', '候选')}: ${candidate.workItemId || '—'} · ${candidate.digest || '—'} · ${label('contract', '契约')} ${candidate.contractRevision ?? '—'} · ${label('execution', '执行代次')} ${candidate.executionEpoch ?? '—'}`);
+              add(entry,'p',`${label('Author execution', '原作者执行')}: ${runtimeText(candidate.runtime)}`);
+              add(entry,'p',`${label('Independent reviewer', '独立审查者')}: ${reviewer.nodeId || label('unknown', '未知')} · ${label('work', '工作项')} ${reviewer.workItemId || '—'} · ${runtimeText(reviewer.runtime)}`);
+              add(entry,'p',`${label('Opinion', '意见')}: ${opinion.verdict || label('unknown', '未知')} · ${opinion.reason || '—'}`);
+              add(entry,'p',`${label('Review receipt', '审查回执')}: ${opinion.verification === 'receipt_recorded' ? label('recorded', '已记录') : label('pending run verification', '等待运行核实')} · ${label('current context', '当前上下文')}: ${opinion.currentContext === 'current' ? label('verified current', '已核实为当前') : label('unavailable or no longer current', '不可核实或已不再为当前')} · ${label('packet', '结果包')}: ${opinion.receipt?.packetId || '—'} · ${opinion.receipt?.packetDigest || '—'}`);
+              add(entry,'p',`${label('Allowed paths in candidate contract', '候选契约允许路径')}: ${Array.isArray(candidate.allowedPaths) ? candidate.allowedPaths.join(', ') || label('none', '无') : label('unknown', '未知')}`);
+              if (candidate.workItemId && candidate.workItemId !== item.id) button(entry,label('Open candidate work','打开候选工作'),()=>showItem(candidate.workItemId));
+              if (reviewer.workItemId && reviewer.workItemId !== item.id) button(entry,label('Open review work','打开审查工作'),()=>showItem(reviewer.workItemId));
+            }
+            if(item.reviewOpinionsTruncated) add(panel,'p',label('Additional review opinions exist; this view is limited to the latest 20.','还有更多审查意见；此处最多显示最近 20 条。'));
+            add(panel,'p',label('Device and target environment are not established by these review records. Check the work contract, device workspace and actual run before relying on capability or availability.', '这些审查记录不证明设备或目标环境。请核对工作契约、设备工作台及实际运行，再判断能力或可用性。'));
+            button(panel,label('Open device workspace','打开设备工作台'),()=>root.RagentCrossDevicePanel?.open?.({view:'devices'}));
+          }
+          const revisionShortcuts = [];
+          const reports = (item.candidates || []).filter(candidate => candidate.report);
+          if (Array.isArray(item.validationWorkItems) || Array.isArray(item.checks)) {
+            const panel=add(content,'section','');panel.className='org-report-candidate'; add(panel,'h4','候选检查');
+            add(panel,'p','下列关联来自候选依赖和已记录工作区。工作区记录不代表当前已验签；只有带提供商退出码和工作目录的检查证据才支持检查结论。');
+            for(const work of item.validationWorkItems || []) {
+              const matches=!!work.candidateDigest && work.candidateDigest===item.candidateDigest;
+              add(panel,'p',`验证工作 ${work.workItemId} · 状态 ${work.state || '未知'} / ${work.controlState || '未知'} · 候选 ${work.candidateDigest || '未固定'}（${matches?'匹配当前候选':'未确认匹配当前候选'}） · 运行 ${work.runId || '未知'} · 工作区 ${work.workspace?.id || '不可用'} / ${work.workspace?.state || '未知'} / ${work.workspace?.provenance || '未知'}`);
+              button(panel,'打开验证工作',()=>showItem(work.workItemId));
+              if(matches && work.state==='running' && work.workspace?.state==='sealed' && work.workspace?.provenance==='candidate_materialized' && item.state==='review' && root.__RAGENT_BOOTSTRAP__?.auth?.role==='owner') for(const criterion of (item.contract?.acceptanceCriteria || []).filter(c=>c.method==='check' && c.actionId)) button(panel,`登记检查 ${criterion.description || criterion.id}`,()=>{
+                if(!root.confirm(`为候选 ${item.candidateDigest} 和验证工作 ${work.workItemId} 登记已配置检查 ${criterion.actionId}？登记不启动命令，也不代表检查通过。`))return;
+                const body={validationWorkItemId:work.workItemId,candidateDigest:item.candidateDigest,criterionId:criterion.id,actionId:criterion.actionId};const receipt=add(panel,'p','');
+                const submit=async()=>{try{const result=await request(`/work-items/${encodeURIComponent(item.id)}/checks/register`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});receipt.textContent=`检查登记：${result.checkId} · ${result.state}；请刷新后核对提供商回执。`;button(panel,'刷新检查',()=>showItem(item.id));}catch(error){receipt.textContent=`检查登记未确认：${error.message}`;button(panel,'重试登记',submit);}};void submit();
+              });
+            }
+            if(item.validationWorkItemsTruncated) add(panel,'p','还有更多验证工作，此处最多显示 20 项。');
+            for(const check of item.checks || []) {
+              const current=check.candidateDigest===item.candidateDigest;
+              add(panel,'p',`检查 ${check.checkId} · 标准 ${check.criterionId} · 动作 ${check.actionId} · 状态 ${check.state} · 候选 ${check.candidateDigest}（${current?'当前':'历史'}） · 提供商证据 ${check.evidence ? `运行 ${check.evidence.runId || '未知'} / 退出码 ${check.evidence.exitCode ?? '未知'} / 工作区 ${check.evidence.workspaceId || '未知'}` : '未取得'}`);
+              button(panel,'核对检查回执',async()=>{const status=add(panel,'p','正在核对…');try{const result=await request(`/checks/${encodeURIComponent(check.checkId)}/reconcile`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});status.textContent=`核对状态：${result.state} · ${result.reason || ''}。请刷新查看已记录证据。`;button(panel,'刷新检查',()=>showItem(item.id));}catch(error){status.textContent=`无法核对：${error.message}`;}});
+              if(current && check.state==='passed' && check.evidence && item.state==='review' && root.__RAGENT_BOOTSTRAP__?.auth?.role==='owner') button(panel,'记录检查标准通过',()=>{
+                if(!root.confirm(`为当前候选记录已核实检查 ${check.checkId} 的标准通过？服务端将再次核验证据。`))return;
+                const commandId=root.crypto.randomUUID(),body={checkId:check.checkId,criterionId:check.criterionId,commandId,idempotencyKey:commandId,expectedVersion:item.rowVersion,contractRevision:item.contractRevision,gateGeneration:item.gateGeneration,candidateDigest:item.candidateDigest};const status=add(panel,'p','');
+                const submit=async()=>{try{await requestWithTimeout(`/work-items/${encodeURIComponent(item.id)}/checks/accept`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await showItem(item.id);}catch(error){status.textContent=`检查决定未确认：${error.message}`;if(!error.status||error.status>=500)button(panel,'重试同一决定',submit);else button(panel,'刷新',()=>showItem(item.id));}};void submit();
+              });
+            }
+            if(item.checksTruncated) add(panel,'p','还有更多检查，此处最多显示 20 项。');
+          }
+          if (item.reportComparison) {
+            const comparison=item.reportComparison, section=add(content,'section','');section.className='org-report-candidate';
+            add(section,'h4','本次执行固定的上一已验收版本');
+            if (comparison.status === 'available' && comparison.baseline) {
+              const base=comparison.baseline;
+              add(section,'p',`候选 ${base.candidateDigest || '未知'} · 契约 ${base.contractRevision ?? '未知'} · 执行代次 ${base.executionEpoch ?? '未知'} · 验收 ${base.acceptedAt || '未知'} · 结果包 ${base.packetId || '未知'} / ${base.packetDigest || '未知'} · 采集时间 ${base.capturedAt || '未知'}`);
+              add(section,'p','这是执行前固定的上一份 Owner 正式验收基线。系统未核实逐项变化；覆盖周期、引用和风险仅是报告中的模型陈述，缺少证据时不可确认为事实。');
+              if(base.report?.visibleText) add(section,'pre',base.report.visibleText);
+              if (base.report?.declaration?.status === 'valid') {
+                for (const [field,title] of [['risks','基线模型声明的风险'],['blockers','基线模型声明的阻塞'],['unresolvedItems','基线模型声明的待决定项']]) {
+                  const entries=base.report.declaration[field];
+                  add(section,'p',title);
+                  if (!Array.isArray(entries)) add(section,'p','未知：该字段不可用。');
+                  else if (!entries.length) add(section,'p','模型未列出条目；不证明不存在。');
+                  else for (const entry of entries) add(section,'p',typeof entry === 'string' ? entry : JSON.stringify(entry));
+                }
+                add(section,'p','下方当前候选的模型声明可供对照；系统未判定这些条目是否解决或变化。');
+              } else add(section,'p','基线的结构化风险、阻塞和待决定项不可用或未核实。');
+              if(base.report?.truncated) add(section,'p','基线正文已截断；请打开原工作查看完整报告。');
+              if(base.workItemId) button(section,'打开已验收基线工作',()=>showItem(base.workItemId));
+            } else add(section,'p',`不可比较：${comparison.reason || '基线不可核实'}。不将最近一次运行当作已验收版本。`);
+          }
+          const reportHistory = item.contract?.resource?.readScope === 'entire_project' ? (item.candidates || []).filter(candidate => candidate.id && !candidate.report) : [];
+          if (reports.length || reportHistory.length) {
+            const zh = String(typeof root.ragentGetActiveUiLanguage === 'function' ? root.ragentGetActiveUiLanguage() : root.navigator?.language || '').toLowerCase().startsWith('zh');
+            const label = (en, cn) => zh ? cn : en;
+            add(content, 'h4', label('Project reports', '项目报告'));
+            add(content, 'p', label('A report is a candidate for review. Reading it or approving execution does not accept it.', '报告是待审阅的候选结果。已读或执行审批不等于正式验收。'));
+            for (const candidate of reportHistory) {
+              button(content, `${label('Load candidate report', '加载候选报告')} · ${candidate.digest || candidate.id} · ${label('contract', '契约')} ${candidate.contractRevision ?? '—'} · ${label('execution', '执行代次')} ${candidate.executionEpoch ?? '—'}`, () => showItem(id, candidate.id));
+            }
+            for (const candidate of reports) {
+              const report = candidate.report;
+              const section = add(content, 'section', '');
+              section.className = 'org-report-candidate';
+              const current = candidate.digest === item.candidateDigest && candidate.contractRevision === item.contractRevision && candidate.executionEpoch === item.executionEpoch;
+              add(section, 'h4', current ? label('Current candidate', '当前候选') : label('Earlier candidate', '历史候选'));
+              add(section, 'p', `${label('Candidate', '候选')}: ${candidate.digest || label('unavailable', '不可用')} · ${label('Contract version', '契约版本')}: ${candidate.contractRevision ?? '—'} · ${label('Execution', '执行代次')}: ${candidate.executionEpoch ?? '—'}`);
+              add(section, 'p', `${label('Source', '来源')}: ${report.source || label('unavailable', '不可用')} · ${label('Packet', '结果包')}: ${report.packetId || '—'} · ${label('Packet digest', '结果包摘要')}: ${report.packetDigest || '—'} · ${label('Packet state', '结果包状态')}: ${report.packetState || label('unverified', '未核实')}`);
+              if(report.producer?.sessionId) {
+                add(section,'p',`${label('Verified source run','已核实来源运行')}: ${report.producer.runId || '—'} · ${label('captured','采集时间')}: ${report.producer.packetCreatedAt || label('unknown','未知')}`);
+                button(section,label('Open source session','打开来源会话'),()=>{const sessionId=report.producer.sessionId; this.toggleOrganizationMode(false); if(typeof root.applyNavigationState==='function') root.applyNavigationState({sessionId,tab:'sessions'}); else root.location.assign(`/?session=${encodeURIComponent(sessionId)}`);});
+              } else add(section,'p',label('Source session is unavailable or unverified.','来源会话不可用或未核实。'));
+
+              const selectionSources = [];
+              if (report.visibleText) selectionSources.push({element:add(section, 'pre', report.visibleText),section:'visibleText'});
+              if (report.declaration?.status === 'valid') {
+                add(section, 'p', `${label('Model-declared state', '模型声明状态')}: ${report.declaration.state || '—'}`);
+                for (const field of ['summary', 'blockers', 'risks', 'changedFiles', 'unresolvedItems', 'tests', 'acceptanceNotes']) {
+                  const value=report.declaration[field]; if(value == null || value === '' || (Array.isArray(value) && !value.length)) continue;
+                  add(section,'p',`${label('Model-declared', '模型声明')} ${field}`);
+                  const text=typeof value === 'string' ? value : JSON.stringify(value);
+                  selectionSources.push({element:add(section,'pre',text),section:'declaration',field});
+                }
+              } else add(section, 'p', `${label('Model declaration', '模型声明')}: ${report.declaration?.status || label('unavailable', '不可用')}`);
+              if (!report.readable) add(section, 'p', label('Readable report unavailable or source unverified.', '报告正文不可用或来源未核实。'));
+              const decisions = (item.decisions || []).filter(decision => decision.candidateDigest === candidate.digest && decision.contractRevision === candidate.contractRevision && (decision.evidence || []).some(entry => entry.kind === 'owner_report_review'));
+              for (const decision of decisions) {
+                const evidence = (decision.evidence || []).find(entry => entry.kind === 'owner_report_review');
+                add(section, 'p', `${label('Owner decision', 'Owner 决定')}: ${decision.criterionId} · ${decision.decision} · ${label('gate', '验收代次')} ${decision.gateGeneration}${evidence?.rationale ? ` · ${evidence.rationale}` : ''}`);
+                for (const target of evidence?.targets || []) add(section,'p',`${label('Returned passage','退回条目')} ${target.section}${target.field ? ` / ${target.field}` : ''}: ${target.excerpt || ''}${target.rationale ? ` · ${target.rationale}` : ''}`);
+              }
+              if (!decisions.length) add(section, 'p', label('No owner acceptance decision recorded for this candidate.', '此候选尚无已记录的 Owner 验收决定。'));
+              if (current) for (const prior of (item.decisions || []).filter(d=>d.decision==='failed' && d.candidateDigest!==candidate.digest)) {
+                const evidence=(prior.evidence || []).find(e=>e.kind==='owner_report_review'); if(!evidence) continue;
+                add(section,'p',`${label('Earlier candidate feedback','历史候选意见')} · ${prior.candidateDigest}: ${evidence.rationale || ''}`);
+                for(const target of evidence.targets || []) add(section,'p',`${target.field || target.section}: ${target.excerpt || ''} · ${target.rationale || ''}`);
+              }
+
+              const criteria = (item.contract?.acceptanceCriteria || []).filter(criterion => criterion.method === 'manual' && !(item.decisions || []).some(decision => decision.criterionId === criterion.id && decision.candidateDigest === candidate.digest && decision.contractRevision === item.contractRevision && decision.gateGeneration === item.gateGeneration));
+              const canDecide = current && item.state === 'review' && item.controlState === 'none' && report.readable && report.packetId && report.packetDigest && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner';
+              if (canDecide && criteria.length) {
+                add(section, 'h4', label('Formal acceptance', '正式验收'));
+                add(section, 'p', label('Record a decision for this candidate and criterion. A failed decision records the need for changes; use the work revision controls below to request revisions.', '针对当前候选和标准记录决定。不通过只记录需要修改；请使用下方工作修订功能提出修改。'));
+                const targets=[];
+                add(section,'p',label('To return specific passages or risks, select text above and use Add selection. Each entry is bound to this report packet.', '如需退回具体段落或风险，请先选中上方文字，再点“添加选中内容”。每条意见绑定此报告结果包。'));
+                const targetList=add(section,'div','');
+                const targetStatus=add(section,'p',''); targetStatus.setAttribute('role','status');
+                const addSelection=button(section,label('Add selection','添加选中内容'),()=>{
+                  const selection=root.getSelection?.();if(!selection || selection.rangeCount!==1 || selection.isCollapsed){targetStatus.textContent=label('Select a passage in this report first.','请先选中此报告中的一段文字。');return;}
+                  const range=selection.getRangeAt(0), source=selectionSources.find(entry=>entry.element.contains(range.startContainer)&&entry.element.contains(range.endContainer));
+                  if(!source || targets.length>=20){targetStatus.textContent=label('Select within one report field; at most 20 entries.','请在同一报告字段内选取，最多 20 条。');return;}
+                  const excerpt=range.toString(), before=range.cloneRange();before.selectNodeContents(source.element);before.setEnd(range.startContainer,range.startOffset);
+                  if(!excerpt || excerpt.length>1200 || new TextEncoder().encode(excerpt).length>12000){targetStatus.textContent=label('Selection is empty or too long.','选中内容为空或过长。');return;}
+                  const entry={section:source.section,...(source.field?{field:source.field}:{}),start:before.toString().length,excerpt}; const row=add(targetList,'div','');add(row,'p',`${entry.field || entry.section}: ${excerpt}`); const note=document.createElement('input');note.maxLength=1200;note.placeholder=label('Reason for this passage','此条目的理由');note.setAttribute('aria-label',note.placeholder);row.appendChild(note);const selected={entry,note};targets.push(selected);button(row,label('Remove','移除'),()=>{targets.splice(targets.indexOf(selected),1);row.remove();});targetStatus.textContent=label('Selection added.','已添加选中内容。');
+                });
+                addSelection.addEventListener('mousedown',event=>event.preventDefault());
+                const criterionSelect = document.createElement('select');
+                criterionSelect.setAttribute('aria-label', label('Acceptance criterion', '验收标准'));
+                for (const criterion of criteria) { const option = document.createElement('option'); option.value = criterion.id; option.textContent = criterion.description || criterion.id; criterionSelect.appendChild(option); }
+                section.appendChild(criterionSelect);
+                const rationale = document.createElement('textarea'); rationale.maxLength = 4096; rationale.placeholder = label('Reason for your decision (required)', '填写决定理由（必填）'); rationale.setAttribute('aria-label', rationale.placeholder); section.appendChild(rationale);
+                const receipt = add(section, 'p', ''); receipt.setAttribute('role', 'status');
+                const actions = add(section, 'div', ''); actions.className = 'org-report-actions';
+                const submitDecision = decision => {
+                  const reason = rationale.value.trim();
+                  if (!reason) { receipt.textContent = label('Enter a reason first.', '请先填写决定理由。'); return; }
+                  const commandId = root.crypto.randomUUID();
+                  if (decision === 'passed' && targets.length) {receipt.textContent=label('Remove selected return entries before accepting.', '通过前请先移除已选退回条目。');return;}
+                  if (decision === 'failed' && targets.some(target=>!target.note.value.trim())) { receipt.textContent=label('Enter a reason for each selected passage.', '请填写每个选中条目的理由。'); return; }
+                  if (decision === 'failed' && new TextEncoder().encode(JSON.stringify(targets.map(target=>({...target.entry,rationale:target.note.value.trim()})))).length > 12000) {receipt.textContent=label('Selected entries exceed the 12 KB limit.', '所选条目超过 12 KB 限制。');return;}
+                  const body = {criterionId:criterionSelect.value, decision, rationale:reason, commandId, idempotencyKey:commandId, expectedVersion:item.rowVersion, contractRevision:item.contractRevision, gateGeneration:item.gateGeneration, candidateDigest:candidate.digest, packetId:report.packetId, packetDigest:report.packetDigest,...(decision === 'failed' && targets.length ? {targets:targets.map(target=>({...target.entry,rationale:target.note.value.trim()}))} : {})};
+                  actions.replaceChildren(); criterionSelect.disabled = true; rationale.disabled = true; addSelection.disabled = true; for (const target of targets) target.note.disabled = true; for (const remove of targetList.querySelectorAll('button')) remove.disabled = true;
+                  const submit = async () => {
+                    receipt.textContent = label('Recording decision…', '正在记录决定…');
+                    try {
+                      await requestWithTimeout(`/work-items/${encodeURIComponent(item.id)}/manual-acceptance`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+                      await showItem(item.id);
+                    } catch (error) {
+                      if (error.status === 409) {
+                        receipt.textContent = label('The candidate or work changed, or its evidence could not be verified. Reload before deciding again.', '候选或工作状态已变化，或证据无法核实。请刷新后重新决定。');
+                        actions.replaceChildren(); button(actions, label('Reload current work', '刷新当前工作'), () => showItem(item.id));
+                      } else {
+                        actions.replaceChildren();
+                        if (!error.status || error.status >= 500) {
+                          const checkReceipt = async () => {
+                            try {
+                              const recorded = await requestWithTimeout(`/commands/${encodeURIComponent(commandId)}`, {});
+                              receipt.textContent = `${label('Decision recorded', '决定已记录')}: ${recorded.operation?.state || label('receipt available', '回执可用')}.`;
+                              actions.replaceChildren(); button(actions, label('Refresh work', '刷新工作'), () => showItem(item.id));
+                            } catch {
+                              receipt.textContent = label('Decision outcome is not yet confirmed. Your reason is preserved here; check the receipt or retry the same request.', '决定结果尚待核实。理由保留在此；可查询回执或重试同一请求。');
+                              actions.replaceChildren(); button(actions, label('Check receipt', '查询回执'), checkReceipt); button(actions, label('Retry same decision', '重试同一决定'), submit);
+                            }
+                          };
+                          await checkReceipt();
+                        } else {
+                          receipt.textContent = `${label('Decision not confirmed', '决定未确认')}: ${error.message}`;
+                          button(actions, label('Reload current work', '刷新当前工作'), () => showItem(item.id));
+                        }
+                      }
+                    }
+                  };
+                  void submit();
+                };
+                button(actions, label('Accept', '通过验收'), () => submitDecision('passed'));
+                button(actions, label('Needs revision', '验收不通过'), () => submitDecision('failed'));
+                const revisionShortcut = button(section, label('Review work revision', '审阅工作修改'), () => content.querySelector('[data-report-revision]')?.click());
+                revisionShortcut.disabled = true; revisionShortcuts.push(revisionShortcut);
+              }
+            }
+          }
+          if ((reports.length || reportHistory.length) && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner') {
+            const zh = String(typeof root.ragentGetActiveUiLanguage === 'function' ? root.ragentGetActiveUiLanguage() : root.navigator?.language || '').toLowerCase().startsWith('zh');
+            const label = (en, cn) => zh ? cn : en;
+            const authority = item.reportAuthority?.kind;
+            const attemptsUsed = Array.isArray(item.bindings) ? item.bindings.length : null;
+            const maxAttempts = item.contract?.retry?.maxAttempts;
+            const attemptsKnown = attemptsUsed !== null && Number.isSafeInteger(maxAttempts) && maxAttempts > 0;
+            const attemptsRemain = attemptsKnown && attemptsUsed < maxAttempts;
+            const returned = item.state === 'review' && item.controlState === 'none' && (item.decisions || []).some(decision => decision.decision === 'failed' && decision.candidateDigest === item.candidateDigest && decision.contractRevision === item.contractRevision && decision.gateGeneration === item.gateGeneration && (decision.evidence || []).some(entry => entry.kind === 'owner_report_review'));
+            const revisionPanel = add(content, 'section', ''); revisionPanel.className = 'org-report-candidate';
+            add(revisionPanel, 'h4', label('Report revision', '报告修订'));
+            const status = add(revisionPanel, 'p', ''); status.setAttribute('role', 'status');
+            const actions = add(revisionPanel, 'div', ''); actions.className = 'org-report-actions';
+            if (attemptsKnown) add(revisionPanel, 'p', `${label('Execution attempts used / authorized', '已用 / 已授权执行次数')}: ${attemptsUsed} / ${maxAttempts}`);
+            else add(revisionPanel, 'p', label('Execution attempt limit unavailable; refresh or review the contract before requesting revision.', '执行次数上限不可用；请求修订前请刷新或检查契约。'));
+            if (returned && attemptsRemain && (authority === 'responsibility' || authority === 'owner')) {
+              status.textContent = label('The report was returned. Record all criterion feedback before requesting another execution. The original attempt and budget limits still apply.', '报告已退回。请先记录各项标准的意见，再请求重新执行；原有次数和预算限制仍然适用。');
+              button(actions, label('Request report revision', '请求修订报告'), () => {
+                if (!root.confirm(label('Request another report execution using the recorded feedback? This may incur additional usage within the existing authorization and limits.', '使用已记录的意见请求再次执行报告？这可能产生额外用量，并受现有授权和限制约束。'))) return;
+                const commandId = root.crypto.randomUUID();
+                const body = {type:'RetryWork', targetId:item.id, expectedVersion:item.rowVersion, commandId, idempotencyKey:commandId, payload:{}};
+                actions.replaceChildren();
+                const submit = async () => {
+                  status.textContent = label('Recording revision request…', '正在记录修订请求…');
+                  try { await requestWithTimeout('/commands', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await showItem(item.id); }
+                  catch (error) {
+                    actions.replaceChildren();
+                    if (!error.status || error.status >= 500) {
+                      const check = async () => { try { const result = await requestWithTimeout(`/commands/${encodeURIComponent(commandId)}`, {}); status.textContent = `${label('Revision request recorded', '修订请求已记录')}: ${result.operation?.state || '—'}.`; actions.replaceChildren(); button(actions, label('Refresh work', '刷新工作'), () => showItem(item.id)); } catch { status.textContent = label('Revision request outcome is not confirmed. Check its receipt or retry the same request.', '修订请求结果尚待核实，可查询回执或重试同一请求。'); actions.replaceChildren(); button(actions,label('Check receipt','查询回执'),check); button(actions,label('Retry same request','重试同一请求'),submit); } };
+                      await check();
+                    } else { status.textContent = `${label('Revision request not accepted', '修订请求未获受理')}: ${error.message}`; button(actions,label('Refresh work','刷新工作'),() => showItem(item.id)); }
+                  }
+                };
+                void submit();
+              });
+            } else if (returned && attemptsKnown && !attemptsRemain) {
+              status.textContent = label('The authorized attempt limit is exhausted. This work cannot be retried. A new report requires a new work item with its own scope, attempt limit, budget and authorization.', '已达到授权执行次数上限，此工作不能再次执行。新报告需要另建工作项，并单独确认范围、执行次数、预算和授权。');
+              if (authority === 'owner' && item.goalId && item.assigneeNodeId && item.projectId && item.contract?.budgetReservation) button(actions, label('Prepare a new report', '准备新报告'), () => {
+                const feedback = (item.decisions || []).filter(d => d.decision === 'failed' && d.candidateDigest === item.candidateDigest && d.contractRevision === item.contractRevision && d.gateGeneration === item.gateGeneration).map(d => `${d.criterionId}: ${(d.evidence || []).find(e => e.kind === 'owner_report_review')?.rationale || ''}`).join('\n');
+                const objective = root.prompt(label('Review or edit the new report objective and prior feedback. The new report is separate from the old candidate.', '检查或修改新报告目标与之前意见。新报告是独立工作项。'), `${item.contract.objective}\n\n${label('Prior review feedback', '此前审阅意见')}:\n${feedback}`);
+                if (!objective?.trim()) return;
+                const attempts = Number(root.prompt(label('Maximum total executions for the new report (1–10), including the first execution', '新报告最多执行次数（1–10，含首次执行）')));
+                if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > 10) { status.textContent = label('Enter a whole number from 1 to 10.', '请输入 1 至 10 的整数。'); return; }
+                const contract = {objective:objective.trim(), accessMode:'read', allowedPaths:[], acceptanceCriteria:item.contract.acceptanceCriteria, resource:{projectId:item.projectId,readScope:'entire_project',networkPolicy:'inherit_existing_permissions'}, budgetReservation:item.contract.budgetReservation, retry:{maxAttempts:attempts}};
+                if (!root.confirm(`${label('Create this proposed report? No execution is authorized yet. Review the exact scope, budget, attempts and feedback:', '创建此报告草案？此步骤尚不授权执行。请核对范围、预算、次数及意见：')}\n${JSON.stringify(contract, null, 2)}`)) return;
+                const commandId=root.crypto.randomUUID(), body={type:'CreateWorkItem',commandId,idempotencyKey:commandId,payload:{goalId:item.goalId,kind:'review',assigneeNodeId:item.assigneeNodeId,contract}};
+                actions.replaceChildren();
+                const submit = async () => { status.textContent=label('Creating report proposal…','正在创建报告草案…'); try { const result=await requestWithTimeout('/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); if (!result.item?.id) throw new Error('Work item ID unavailable'); await showItem(result.item.id); } catch(error) { actions.replaceChildren(); if (!error.status || error.status>=500) { status.textContent=label('Creation outcome is not confirmed. Retry the same request to reconcile it.','创建结果尚待核实，请重试同一请求以核对。'); button(actions,label('Retry same request','重试同一请求'),submit); } else { status.textContent=`${label('Report not created','报告未创建')}: ${error.message}`; button(actions,label('Refresh work','刷新工作'),()=>showItem(item.id)); } } };
+                void submit();
+              });
+              else if (authority === 'responsibility' && item.reportAuthority.responsibilityId) button(actions, label('Open responsibility', '打开责任'), () => showResponsibility(item.reportAuthority.responsibilityId));
+              else if (authority === 'responsibility') button(actions, label('Open responsibilities', '打开责任列表'), showResponsibilities);
+
+            } else if (authority === 'owner' && item.state === 'ready' && !item.candidateDigest && (item.decisions || []).some(decision => decision.decision === 'failed' && (decision.evidence || []).some(entry => entry.kind === 'owner_report_review'))) {
+              const authorized = item.reportAuthority?.nextExecutionAuthorized === true;
+              status.textContent = authorized ? label('Authorization is recorded. Execution is subject to scheduling and remaining limits.', '授权已记录；实际执行仍取决于调度与剩余限制。') : label('Revision is prepared. A separate authorization is needed for the next read-only report execution.', '修订已准备。下一次只读报告执行需要单独授权。');
+              if (!authorized) button(actions, label('Authorize revised report execution', '授权执行修订报告'), () => {
+                if (!root.confirm(label('Authorize the next read-only report execution within the existing scope, budget and attempt limits? This may incur additional usage.', '授权在现有范围、预算和次数限制内再次执行只读报告？这可能产生额外用量。'))) return;
+                const commandId = root.crypto.randomUUID(), body = {commandId,idempotencyKey:commandId,expectedVersion:item.rowVersion}; actions.replaceChildren();
+                const submit = async () => { status.textContent = label('Recording authorization…', '正在记录授权…'); try { await requestWithTimeout(`/work-items/${encodeURIComponent(item.id)}/owner-report-authorization`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); status.textContent = label('Authorization recorded. Execution is subject to scheduling and remaining limits.', '授权已记录；实际执行仍取决于调度与剩余限制。'); button(actions,label('Refresh work','刷新工作'),() => showItem(item.id)); } catch(error) { actions.replaceChildren(); if (!error.status || error.status >= 500) {status.textContent = label('Authorization outcome is not confirmed. Retry the same request to reconcile it.', '授权结果尚待核实，请重试同一请求以核对。'); button(actions,label('Retry same authorization','重试同一授权'),submit);} else {status.textContent = `${label('Authorization not accepted','授权未获受理')}: ${error.message}`; button(actions,label('Refresh work','刷新工作'),() => showItem(item.id));} } };
+                void submit();
+              });
+            } else if (returned) status.textContent = label('Report authority is unavailable; revision cannot be requested here.', '报告授权归属不可用，暂无法在此请求修订。');
+            else status.textContent = label('See the work state and recorded decisions for the current revision status.', '请查看工作状态与已记录决定，确认当前修订状态。');
+          }
+          if (item.kind === 'review' && item.state === 'proposed' && item.reviewHandoff?.state === 'current' && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner') {
+            const panel=add(content,'section',''); panel.className='org-report-candidate';
+            add(panel,'p','审查交接已核实为当前；批准后仍需通过调度、预算和只读运行时检查。审查意见不等于正式验收。');
+            const status=add(panel,'p',''), actions=add(panel,'div',''); status.setAttribute('role','status');
+            button(actions,'批准此审查契约',()=>{if(!root.confirm(`批准针对候选 ${item.reviewHandoff.candidate?.digest || '未知'} 的只读审查？执行可能产生预算内用量。`))return; const commandId=root.crypto.randomUUID(),body={type:'ApproveContract',targetId:item.id,expectedVersion:item.rowVersion,commandId,idempotencyKey:commandId,payload:{}}; actions.replaceChildren(); const submit=async()=>{try{await requestWithTimeout('/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await showItem(item.id);}catch(error){actions.replaceChildren();status.textContent=`批准未确认：${error.message}`;if(!error.status||error.status>=500)button(actions,'重试同一批准',submit);else button(actions,'刷新',()=>showItem(item.id));}};void submit();});
+          }
+          const proposedReport = item.state === 'proposed' && item.contract?.accessMode === 'read' && item.contract?.resource?.readScope === 'entire_project' && item.contract?.resource?.projectId === item.projectId && (item.contract?.acceptanceCriteria || []).length && item.contract.acceptanceCriteria.every(c => c.method === 'manual');
+          if (proposedReport && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner') {
+            const zh = String(typeof root.ragentGetActiveUiLanguage === 'function' ? root.ragentGetActiveUiLanguage() : root.navigator?.language || '').toLowerCase().startsWith('zh');
+            const label=(en,cn)=>zh?cn:en, panel=add(content,'section',''); panel.className='org-report-candidate';
+            add(panel,'h4',label('Proposed report','报告草案')); add(panel,'p',label('Review the scope and limits. Authorization and approval are separate; scheduling and budget checks still apply.','请核对范围与限制。授权和批准是两个独立步骤；仍需通过调度和预算检查。')); add(panel,'pre',JSON.stringify(item.contract,null,2));
+            const status=add(panel,'p',''), actions=add(panel,'div',''); status.setAttribute('role','status'); actions.className='org-report-actions';
+            if (item.reportAuthority?.kind !== 'responsibility' && item.reportAuthority?.nextExecutionAuthorized !== true) button(actions,label('Authorize report scope','授权报告范围'),()=>{
+              if (!root.confirm(label('Authorize this report’s read-only scope and next execution within the displayed limits? This may incur usage after approval.','授权此报告在所示限制内的只读范围和下一次执行？批准后可能产生用量。'))) return;
+              const commandId=root.crypto.randomUUID(), body={commandId,idempotencyKey:commandId,expectedVersion:item.rowVersion}; actions.replaceChildren();
+              const submit=async()=>{try {await requestWithTimeout(`/work-items/${encodeURIComponent(item.id)}/owner-report-authorization`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); status.textContent=label('Authorization recorded. Review the contract before approving.','授权已记录，请审阅契约后批准。'); actions.replaceChildren(); button(actions,label('Refresh','刷新'),()=>showItem(item.id));} catch(error){actions.replaceChildren();status.textContent=`${label('Authorization not confirmed','授权未确认')}: ${error.message}`; if(!error.status||error.status>=500) button(actions,label('Retry same authorization','重试同一授权'),submit); else button(actions,label('Refresh','刷新'),()=>showItem(item.id));}}; void submit();
+            });
+            if (item.reportAuthority?.kind === 'owner' && item.reportAuthority?.nextExecutionAuthorized === true) button(actions,label('Approve report contract','批准报告契约'),()=>{
+              if(!root.confirm(label('Approve this report contract for scheduling? Execution may incur usage within the displayed limits.','批准此报告契约进入调度？执行可能在所示限制内产生用量。'))) return;
+              const commandId=root.crypto.randomUUID(), body={type:'ApproveContract',targetId:item.id,expectedVersion:item.rowVersion,commandId,idempotencyKey:commandId,payload:{}}; actions.replaceChildren();
+              const submit=async()=>{try {await requestWithTimeout('/commands',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); await showItem(item.id);} catch(error){actions.replaceChildren();status.textContent=`${label('Approval not confirmed','批准未确认')}: ${error.message}`;if(!error.status||error.status>=500)button(actions,label('Retry same approval','重试同一批准'),submit);else button(actions,label('Refresh','刷新'),()=>showItem(item.id));}};void submit();
+            });
+          }
+          const technical = add(content, 'details', '');
+          add(technical, 'summary', 'Technical work details');
+          for (const [name, value] of [['Dependencies', item.dependencies], ['Contract', item.contract], ['Executions', item.bindings], ['Candidates', (item.candidates || []).map(({report, ...candidate}) => candidate)], ['Decisions', item.decisions]]) {
+            add(technical, 'h4', name); add(technical, 'pre', JSON.stringify(value || [], null, 2));
+          }
+          if (item.state === 'review' && item.controlState === 'none' && item.candidateDigest && !reports.length && item.contract?.resource?.readScope !== 'entire_project' && root.__RAGENT_BOOTSTRAP__?.auth?.role === 'owner') {
+            const criteria=(item.contract?.acceptanceCriteria || []).filter(c=>c.method==='manual' && !(item.decisions || []).some(d=>d.criterionId===c.id && d.candidateDigest===item.candidateDigest && d.contractRevision===item.contractRevision && d.gateGeneration===item.gateGeneration));
+            if(criteria.length){
+              const panel=add(content,'section','');panel.className='org-report-candidate'; add(panel,'h4','当前候选的 Owner 决定');
+              add(panel,'p','请选择人工标准并填写理由。服务端会重新核验当前候选、运行和证据；审查意见或请求检查本身不等于验收。');
+              const select=document.createElement('select');select.setAttribute('aria-label','人工验收标准');for(const c of criteria){const option=document.createElement('option');option.value=c.id;option.textContent=c.description || c.id;select.appendChild(option);}panel.appendChild(select);
+              const rationale=document.createElement('textarea');rationale.maxLength=4096;rationale.placeholder='决定理由（必填）';rationale.setAttribute('aria-label',rationale.placeholder);panel.appendChild(rationale); const status=add(panel,'p',''),actions=add(panel,'div','');status.setAttribute('role','status');actions.className='org-report-actions';
+              const decide=decision=>{const reason=rationale.value.trim();if(!reason){status.textContent='请填写决定理由。';return;}const commandId=root.crypto.randomUUID(),body={criterionId:select.value,decision,rationale:reason,commandId,idempotencyKey:commandId,expectedVersion:item.rowVersion,contractRevision:item.contractRevision,gateGeneration:item.gateGeneration,candidateDigest:item.candidateDigest};select.disabled=true;rationale.disabled=true;actions.replaceChildren();
+                const submit=async()=>{try{await requestWithTimeout(`/work-items/${encodeURIComponent(item.id)}/manual-acceptance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await showItem(item.id);}catch(error){actions.replaceChildren();if(!error.status||error.status>=500){const check=async()=>{try{await requestWithTimeout(`/commands/${encodeURIComponent(commandId)}`,{});status.textContent='决定已记录；请刷新查看当前工作。';actions.replaceChildren();button(actions,'刷新',()=>showItem(item.id));}catch{status.textContent='决定结果待核实；理由保留，可查询回执或重试同一请求。';actions.replaceChildren();button(actions,'查询回执',check);button(actions,'重试同一请求',submit);}};await check();}else{status.textContent=`决定未确认：${error.message}`;button(actions,'刷新',()=>showItem(item.id));}}};void submit();};
+              button(actions,'通过此标准',()=>decide('passed'));button(actions,'不通过此标准',()=>decide('failed'));
+            }
           }
           add(content, 'h4', 'Delivery evidence');
           for (const candidate of item.candidates || []) add(content, 'p', `Candidate ${candidate.digest || 'unverified'} · contract ${candidate.contractRevision} · execution ${candidate.executionEpoch}`);
@@ -2057,11 +2469,20 @@
               button(content,'Request pause',()=>disposition('pause'));
             }
           } catch(error) { add(content,'p',`Blocker proposals unavailable: ${error.message}`); }
-          const reconcileStatus = add(content, 'p', 'Loading reconciliation state…');
-          const reconcileActions = add(content, 'div', '');
           try {
             const state = await request(`/work-items/${encodeURIComponent(item.id)}/reconcile`);
             const observation = state.acceptedRunObservation;
+            const outcomes=state.externalOutcomes;
+            if(outcomes?.state==='observed') {
+              if(!(outcomes.entries || []).length) add(recoveryPanel,'p','此运行没有可归属的外部动作回执记录；不据此推断其他动作未发生。');
+              for(const outcome of outcomes.entries || []) {
+                add(recoveryPanel,'p',`外部目标 ${outcome.targetId || '未知'} · 状态 ${outcome.state || '未知'} · 可安全重试 ${outcome.safeToRetry === true ? '是' : outcome.safeToRetry === false ? '否' : '未知'} · 调用时间 ${outcome.providerInvokedAt || '未知'} · 投递时间 ${outcome.deliveredAt || '未知'}`);
+                add(recoveryPanel,'p',outcome.providerReceipt ? `提供商回执：${outcome.providerReceipt.provider || '未知'} · 状态码 ${outcome.providerReceipt.statusCode ?? '未知'} · 响应 ${outcome.providerReceipt.responseId || '未知'}` : '提供商回执不可用；不得据此视为已投递。');
+                for(const review of outcome.manualReviews || []) add(recoveryPanel,'p',`人工核实：${review.observation || '未知'} · ${review.actorId || '未知'} · ${review.reviewedAt || '未知'} · 证据 ${typeof review.evidence === 'string' ? review.evidence : JSON.stringify(review.evidence || {})}。人工记录不等于提供商回执，也不自动解除未知结果。`);
+              }
+              if(outcomes.truncated)add(recoveryPanel,'p','外部动作记录已截断。');
+            } else add(recoveryPanel,'p','外部动作结果不可核实；不能判断动作未发生或可以安全重试。');
+
             const stopText = state.stopStatus === 'cancel_requested_pending'
               ? '已请求取消（尚未确认停止）'
               : state.stopStatus === 'completed_before_stop' || state.stopStatus === 'completed_pending_review'
@@ -2128,13 +2549,14 @@
                 });
               }
             }
-          } catch (error) { reconcileStatus.textContent = `Reconciliation state unavailable: ${error.message}`; }
-          const budgetStatus = add(content, 'p', 'Loading budget facts…');
+            if (state.unknownOutcome?.isUnknown) add(recoveryPanel,'p','下一步：先核对已发现的运行或回执；无法核实时保留未知，不要据此重派。');
+            else if (state.stopStatus === 'cancel_requested_pending') add(recoveryPanel,'p','下一步：等待或核对终态回执；停止请求本身不证明执行已停止。');
+          } catch (error) { reconcileStatus.textContent = `执行与停止状态不可用：${error.message}。无法据此判断是否运行或停止。`; }
           try { const budget = await request(`/work-items/${encodeURIComponent(item.id)}/budget`); const reservation = budget.reservation || {}; const wd = budget.windowDetail;
             const windowSummary = wd ? `${wd.windowDay || 'unknown'} (${wd.timeZone || 'unknown'}${wd.rolledOver ? `, rolled over to ${wd.currentDay}` : ''}; totals ${JSON.stringify(wd.totals)}; reserved ${JSON.stringify(wd.reserved)}; limits ${JSON.stringify(wd.limits)})` : (reservation.window ? JSON.stringify(reservation.window) : 'none');
-            budgetStatus.textContent = `Budget: ${reservation.state || 'unavailable'} · enforcement ${budget.costEnforcement || 'admission_estimate_only'} (hard cap available: ${budget.hardCapAvailable === true ? 'yes' : 'no'}) · reserved ${reservation.reserved == null ? 'unknown' : JSON.stringify(reservation.reserved)} · actual usage ${budget.usageState === 'actual' && reservation.actualUsage != null ? JSON.stringify(reservation.actualUsage) : 'unknown'}${budget.reservationRetained ? ' (reservation retained until authoritative usage or verified unstarted receipt)' : ''} · daily window ${windowSummary}. ${budget.budgetBoundary?.note || 'Admission estimates do not enforce a provider spending cap; unavailable facts do not prove work did not run.'}`;
+            budgetStatus.textContent = `用量状态：${budget.usageState || '未知'} · 实际用量：${budget.usageState === 'actual' && reservation.actualUsage != null ? JSON.stringify(reservation.actualUsage) : '未知，不能当作零'} · 预留：${reservation.reserved == null ? '未知' : JSON.stringify(reservation.reserved)} · 预留状态：${reservation.state || '不可用'}${budget.reservationRetained ? '（保留至权威用量或已核实未启动回执）' : ''} · 日预算窗口：${windowSummary} · 执行边界：${budget.costEnforcement || 'admission_estimate_only'}；提供商硬上限${budget.hardCapAvailable === true ? '可用' : '未确认'}。${budget.budgetBoundary?.note || '准入估算不保证提供商费用硬上限；事实不可用不证明工作没有运行。'}`;
           } catch (error) { budgetStatus.textContent = `Budget facts unavailable: ${error.message}. This does not prove work did not run.`; }
-          button(content, '审阅局部目标修改', async () => {
+          const reportRevisionButton = button(content, '审阅局部目标修改', async () => {
             try {
               let cursor = '', goal = null;
               for (let page = 0; page < 10 && !goal; page++) {
@@ -2158,6 +2580,8 @@
               await submit();
             } catch (error) { add(content, 'p', `无法审阅局部修改：${error.message}`); }
           });
+          reportRevisionButton.dataset.reportRevision = 'true';
+          for (const shortcut of revisionShortcuts) shortcut.disabled = false;
           button(content, '审阅多个工作目标修改', async () => {
             const panel = add(content, 'section', '');
             try {
@@ -2325,7 +2749,7 @@
           add(content,'p','Required review remains a proposal; the impact report identifies contracts that need amendment.');
         } catch(error) { content.replaceChildren(); add(content,'p',`Unable to load team configuration: ${error.message}`); button(content,'All work items',showList); }
       };
-      if (initialResponsibilityId) await showResponsibility(initialResponsibilityId); else await showList();
+      if (initialResponsibilityId) await showResponsibility(initialResponsibilityId); else if (openResponsibilities) await showResponsibilities(); else await showList();
     }
 
     // --- Pointer & Gesture Handling (Pan / Pinch / Wheel Zoom) ---
@@ -2577,6 +3001,11 @@
                 url.searchParams.delete("responsibility");
                 root.history?.replaceState?.(root.history.state, "", url);
                 void this.openResponsibilityLink(targetSessionId, responsibilityId);
+              } else if (url.searchParams.get("organization") === "responsibilities" && url.searchParams.get("session") === targetSessionId && (this.projection || proj)?.organizationId) {
+                url.searchParams.delete("organization");
+                root.history?.replaceState?.(root.history.state, "", url);
+                this.toggleOrganizationMode(true);
+                void this.showFactoryWork("", true);
               }
             } catch {
               /* ignore invalid URL in partial environments */

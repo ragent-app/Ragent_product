@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { read, transaction, receipt, recordObservation, activity, newId, now, digest, error } from './responsibility-store.mjs';
+import { weeklyReportStatus, latestAcceptedReport, nextWeeklyReportAt } from './responsibility-weekly-report.mjs';
 
 function principal(actor) {
   if(actor?.kind!=='user'||actor?.role!=='owner'||!actor.principalId) throw error('Owner access required',403);
@@ -18,8 +19,24 @@ export function isResponsibilityTriggerObservationCurrent(db,responsibility,obse
 export async function createResponsibilityTrigger(id,input,actor) {
   const owner=principal(actor);
   if(input?.confirmed!==true||typeof input.idempotencyKey!=='string'||!input.idempotencyKey.trim()||input.idempotencyKey.length>1024) throw error('Confirmation and idempotencyKey are required');
+  let weeklyStatus=null;
+  if (input.type==='weekly_report') {
+    const prior=await read(db=>db.prepare(`SELECT payload_digest,result_json FROM responsibility_receipts
+      WHERE actor_id=? AND operation='trigger_create' AND target_id=? AND idempotency_key=?`)
+      .get(owner,id,input.idempotencyKey));
+    if (prior) {
+      if (prior.payload_digest!==digest(input)) throw error('Idempotency key reused with different input',409,'RESPONSIBILITY_CONFLICT');
+      return {...JSON.parse(prior.result_json),replayed:true};
+    }
+    weeklyStatus=await weeklyReportStatus(id,actor);
+    if (!weeklyStatus.eligible) throw error(`Weekly report is unavailable: ${weeklyStatus.reason}`,409,'WEEKLY_REPORT_UNAVAILABLE');
+  }
   let config;
-  if(input.type==='event') {
+  if(input.type==='weekly_report') {
+    const schedule={weekday:input.weekday,hour:input.hour,minute:input.minute,timeZone:input.timeZone};
+    const scheduledAt=nextWeeklyReportAt(schedule);
+    config={type:'weekly_report',...schedule,scheduledAt,intervalMs:7*86400000};
+  } else if(input.type==='event') {
     if(input.eventType!=='run_terminal'||input.source?.kind!=='root_session'||Object.keys(input.source).length!==1||input.observeFrom!=='binding_created') throw error('Only root session Run terminals after binding creation are supported',400,'RESPONSIBILITY_TRIGGER_UNSUPPORTED');
     config={type:'event',eventType:'run_terminal',source:{kind:'root_session'},observeFrom:'binding_created'};
   } else if(input.type==='at_time') {
@@ -28,9 +45,17 @@ export async function createResponsibilityTrigger(id,input,actor) {
     config={type:'at_time',scheduledAt:new Date(at).toISOString(),...(interval===undefined?{}:{intervalMs:interval})};
   } else throw error('Unsupported trigger type',400,'RESPONSIBILITY_TRIGGER_UNSUPPORTED');
   return transaction(db=>receipt(db,owner,'trigger_create',id,input.idempotencyKey,input,()=>{
-    const r=db.prepare('SELECT r.*,o.root_session_id FROM responsibilities r JOIN organizations o ON o.id=r.organization_id AND o.project_id=r.project_id WHERE r.id=? AND r.owner_principal_id=?').get(id,owner);
+    const r=db.prepare('SELECT r.*,o.root_session_id,o.current_revision AS current_org_revision FROM responsibilities r JOIN organizations o ON o.id=r.organization_id AND o.project_id=r.project_id WHERE r.id=? AND r.owner_principal_id=?').get(id,owner);
     if(!r||!r.root_session_id) throw error('Responsibility not found',404);
     if(!Number.isSafeInteger(input.expectedVersion)||input.expectedVersion!==r.row_version||!['active','paused','draft'].includes(r.lifecycle)) throw error('Responsibility version or state changed',409);
+    if (weeklyStatus) {
+      const current=latestAcceptedReport(db,r);
+      if (r.policy_revision!==weeklyStatus.policyRevision || r.current_org_revision!==weeklyStatus.organizationRevision
+          || !current || current.workItemId!==weeklyStatus.baseline.workItemId
+          || current.candidateDigest!==weeklyStatus.baseline.candidateDigest) {
+        throw error('Accepted report changed; refresh before scheduling',409,'RESPONSIBILITY_CONFLICT');
+      }
+    }
     const bindingId=newId('trigger_binding'), triggerId=`trg_${randomBytes(12).toString('hex')}`,ts=now();
     db.prepare('INSERT INTO responsibility_trigger_bindings VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').run(bindingId,triggerId,id,owner,r.organization_id,r.project_id,r.root_session_id,JSON.stringify(config),digest(config),1,1,ts,ts);
     db.prepare('INSERT INTO responsibility_trigger_bridge_state VALUES(?,?,?,?,?,?)').run(bindingId,config.type==='event'?'ready':'pending',0,null,null,ts);
@@ -41,8 +66,8 @@ export async function createResponsibilityTrigger(id,input,actor) {
   }));
 }
 export async function listResponsibilityTriggers(id,actor) {
-  const owner=principal(actor); const result=await read(db=>{if(!db.prepare('SELECT 1 FROM responsibilities WHERE id=? AND owner_principal_id=?').get(id,owner)) throw error('Responsibility not found',404);const bindings=db.prepare('SELECT b.*,s.state AS bridge_state,s.attempts AS bridge_attempts,s.last_error AS bridge_error FROM responsibility_trigger_bindings b JOIN responsibility_trigger_bridge_state s ON s.binding_id=b.id WHERE b.responsibility_id=? ORDER BY b.created_at,b.id').all(id).map(bindingRow);for(const binding of bindings) if(binding.config.type==='event') {const source=db.prepare('SELECT starts_at,status,last_error FROM responsibility_trigger_event_sources WHERE binding_id=?').get(binding.id);binding.source=source?{observeFrom:source.starts_at,status:source.status,lastError:source.last_error}:null;binding.pendingCount=db.prepare('SELECT COUNT(*) AS n FROM responsibility_trigger_event_queue WHERE binding_id=?').get(binding.id).n;}return {schemaVersion:1,bindings};});
-  const {getTrigger}=await import('./triggers.mjs'); for(const binding of result.bindings) {const trigger=await getTrigger(binding.triggerId); binding.delivery=trigger?{status:trigger.status,attempts:trigger.deliveryAttempts,nextAttemptAt:trigger.nextAttemptAt,lastError:trigger.lastError,occurrence:trigger.occurrence}:null;}return result;
+  const owner=principal(actor); const result=await read(db=>{if(!db.prepare('SELECT 1 FROM responsibilities WHERE id=? AND owner_principal_id=?').get(id,owner)) throw error('Responsibility not found',404);const bindings=db.prepare('SELECT b.*,s.state AS bridge_state,s.attempts AS bridge_attempts,s.last_error AS bridge_error FROM responsibility_trigger_bindings b JOIN responsibility_trigger_bridge_state s ON s.binding_id=b.id WHERE b.responsibility_id=? ORDER BY b.created_at,b.id').all(id).map(bindingRow);for(const binding of bindings) { const schedule=db.prepare('SELECT scheduled_at FROM responsibility_trigger_schedule WHERE binding_id=?').get(binding.id); if(schedule) binding.nextScheduledAt=schedule.scheduled_at; if(binding.config.type==='event') {const source=db.prepare('SELECT starts_at,status,last_error FROM responsibility_trigger_event_sources WHERE binding_id=?').get(binding.id);binding.source=source?{observeFrom:source.starts_at,status:source.status,lastError:source.last_error}:null;binding.pendingCount=db.prepare('SELECT COUNT(*) AS n FROM responsibility_trigger_event_queue WHERE binding_id=?').get(binding.id).n;} } return {schemaVersion:1,bindings};});
+  const {getTrigger}=await import('./triggers.mjs'); for(const binding of result.bindings) {const trigger=await getTrigger(binding.triggerId); binding.delivery=trigger?{nextScheduledAt:trigger.scheduledAt,status:trigger.status,attempts:trigger.deliveryAttempts,nextAttemptAt:trigger.nextAttemptAt,lastError:trigger.lastError,occurrence:trigger.occurrence}:null;}return result;
 }
 export async function changeResponsibilityTrigger(id,bindingId,action,input,actor) {
   const owner=principal(actor);if(input?.confirmed!==true||typeof input.idempotencyKey!=='string'||!input.idempotencyKey.trim()||input.idempotencyKey.length>1024) throw error('Confirmation and idempotencyKey are required');
@@ -50,6 +75,15 @@ export async function changeResponsibilityTrigger(id,bindingId,action,input,acto
 }
 export async function deliverResponsibilityTrigger(trigger) {
   const occurrenceKey=`time:${trigger.occurrence}`, payloadDigest=digest({triggerId:trigger.id,occurrence:trigger.occurrence,scheduledAt:trigger.scheduledAt});
+  const weekly=await read(db=>db.prepare(`SELECT b.responsibility_id,b.owner_id,b.config_json,
+    EXISTS(SELECT 1 FROM responsibility_trigger_receipts r WHERE r.binding_id=b.id AND r.occurrence_key=?) AS recorded
+    FROM responsibility_trigger_bindings b WHERE b.trigger_id=?`).get(occurrenceKey,trigger.id));
+  let weeklyDeliveryStatus=null;
+  if (weekly && !weekly.recorded && JSON.parse(weekly.config_json).type==='weekly_report') {
+    const status=await weeklyReportStatus(weekly.responsibility_id,{kind:'user',role:'owner',principalId:weekly.owner_id});
+    if (!status.eligible) throw error(`Weekly report is unavailable: ${status.reason}`,409,'WEEKLY_REPORT_UNAVAILABLE');
+    weeklyDeliveryStatus=status;
+  }
   return transaction(db=>{
     const b=db.prepare('SELECT b.*,r.lifecycle,r.revision,r.policy_revision,r.owner_principal_id,r.organization_id AS current_organization,r.project_id AS responsibility_project,o.project_id AS current_project,o.root_session_id AS current_session FROM responsibility_trigger_bindings b JOIN responsibilities r ON r.id=b.responsibility_id JOIN organizations o ON o.id=r.organization_id WHERE b.trigger_id=?').get(trigger.id);
     if(!b) throw error('Trigger binding missing',409,'RESPONSIBILITY_TRIGGER_INACTIVE');
@@ -59,7 +93,20 @@ export async function deliverResponsibilityTrigger(trigger) {
     if(old){if(old.payload_digest!==payloadDigest||!schedule||schedule.occurrence!==trigger.occurrence+1)throw error('Occurrence identity conflict',409,'RESPONSIBILITY_TRIGGER_INACTIVE');return {wakeId:old.wake_id,nextScheduledAt:schedule.scheduled_at,replayed:true};}
     if(!b.enabled||b.lifecycle!=='active'||b.owner_id!==b.owner_principal_id||b.organization_id!==b.current_organization||b.project_id!==b.responsibility_project||b.project_id!==b.current_project||b.session_id!==b.current_session) throw error('Trigger binding is inactive',409,'RESPONSIBILITY_TRIGGER_INACTIVE');
     if(!schedule||schedule.occurrence!==trigger.occurrence||schedule.scheduled_at!==trigger.scheduledAt) throw error('Trigger schedule changed',409,'RESPONSIBILITY_TRIGGER_INACTIVE');
-    const ts=now(),wakeId=newId('wake'),nextScheduledAt=config.intervalMs?new Date(Date.parse(ts)+config.intervalMs).toISOString():trigger.scheduledAt;
+    if (config.type==='weekly_report') {
+      const r=db.prepare('SELECT * FROM responsibilities WHERE id=?').get(b.responsibility_id);
+      const baseline=latestAcceptedReport(db,r);
+      const org=db.prepare('SELECT current_revision FROM organizations WHERE id=?').get(r.organization_id);
+      if (!baseline || !weeklyDeliveryStatus || baseline.workItemId!==weeklyDeliveryStatus.baseline.workItemId
+          || baseline.candidateDigest!==weeklyDeliveryStatus.baseline.candidateDigest
+          || r.policy_revision!==weeklyDeliveryStatus.policyRevision
+          || org?.current_revision!==weeklyDeliveryStatus.organizationRevision) {
+        throw error('Accepted report or authorization changed',409,'WEEKLY_REPORT_UNAVAILABLE');
+      }
+    }
+    const ts=now(),wakeId=newId('wake');
+    const nextScheduledAt=config.type==='weekly_report' ? nextWeeklyReportAt(config,Date.parse(ts))
+      : config.intervalMs ? new Date(Date.parse(ts)+config.intervalMs).toISOString() : trigger.scheduledAt;
     db.prepare('INSERT INTO responsibility_wakes VALUES(?,?,?,?,?,?,?,?,?,?)').run(wakeId,b.responsibility_id,b.revision,b.policy_revision,ts,'pending',0,null,ts,ts);
     recordObservation(db,wakeId,'interval',{triggerId:trigger.id,bindingId:b.id,bindingVersion:b.version,occurrence:trigger.occurrence,scheduledAt:trigger.scheduledAt});
     db.prepare('INSERT INTO responsibility_trigger_receipts VALUES(?,?,?,?,?)').run(b.id,occurrenceKey,payloadDigest,wakeId,ts);

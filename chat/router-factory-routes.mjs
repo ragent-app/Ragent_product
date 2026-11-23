@@ -7,7 +7,7 @@ import { getFactoryConcurrencyPolicy, setFactoryConcurrencyPolicy } from './fact
 import { submitFactoryBlockerProposal, listFactoryBlockerProposals, disposeFactoryBlockerProposal } from './factory-blocker-proposals.mjs';
 // Owner-facing Work Graph interface. Managed session input is never exposed here.
 import { readBody } from '../lib/utils.mjs';
-import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems } from './factory-control.mjs';
+import { executeFactoryCommand, getFactoryCommand, getFactoryWorkItem, listFactoryGoals, listFactoryWorkItems, listFactoryCheckActions } from './factory-control.mjs';
 import { listTeamMessages, sendOwnerTeamMessage, respondToTeamMessage, escalateOverdueTeamMessage } from './organization-team-messages.mjs';
 import { compileFactoryWorkflow, instantiateFactoryWorkflow, compileFactoryFanoutWorkflow } from './factory-workflow.mjs';
 import { executeFactoryFanout, getFactoryFanoutWorkflowExecution, listFactoryFanoutWorkflowExecutions } from './factory-fanout-executor.mjs';
@@ -168,7 +168,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const messages = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages$/.exec(String(pathname || ''));
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const fanoutWorkflow = /^\/api\/organizations\/([^/]+)\/factory\/workflows\/fanout(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow)(?:\/([^/]+))?$/.exec(String(pathname || ''));
+  const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow|available-checks)(?:\/([^/]+))?$/.exec(String(pathname || ''));
   if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !reconcileResolve && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
@@ -654,7 +654,8 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
       const runtimeStatus = getFactoryRuntimeStatus(organizationId);
       result = { schemaVersion: 1, asOf: new Date().toISOString(), controlEnabled: process.env.RAGENT_FACTORY_CONTROL_ENABLED === 'true', observationEnabled: true, pauseCancelAvailable: true, ...runtimeStatus, executionReadiness: 'not_verified' };
     }
-    else if (req.method === 'GET' && resource === 'work-items') result = id ? await getFactoryWorkItem(organizationId, id, actor, {includeReport:true}) : await listFactoryWorkItems(organizationId, options, actor);
+    else if (req.method === 'GET' && resource === 'work-items') result = id ? await getFactoryWorkItem(organizationId, id, actor, { includeReport: true, reportCandidateId: text(url.searchParams.get('reportCandidateId')) }) : await listFactoryWorkItems(organizationId, options, actor);
+    else if (req.method === 'GET' && resource === 'available-checks' && !id) result = await listFactoryCheckActions(organizationId,actor);
     else if (req.method === 'GET' && resource === 'goals' && !id) result = await listFactoryGoals(organizationId, options, actor);
     else if (req.method === 'GET' && resource === 'commands' && id) result = await getFactoryCommand(organizationId, id, actor);
     else if (req.method === 'POST' && ((resource === 'commands' && !id) || (resource === 'workflow' && ['preview', 'instantiate'].includes(id)))) {

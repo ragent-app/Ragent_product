@@ -34,7 +34,10 @@ export async function prepareFactoryValidationWorkspace({ organizationId, workIt
     const deps = db.prepare("SELECT * FROM factory_dependencies WHERE successor_id=? AND milestone='candidate_ready'").all(workItemId);
     if (deps.length !== 1 || !deps[0].candidate_digest) fail('Validation requires exactly one pinned candidate input');
     const source = selectItem(db, organizationId, deps[0].predecessor_id);
-    if (source.candidate_digest !== deps[0].candidate_digest) fail('Candidate dependency changed');
+    if (source.candidate_digest !== deps[0].candidate_digest || source.state !== 'review'
+        || source.control_state !== 'none' || source.project_id !== validation.project_id) {
+      fail('Candidate dependency changed or is not available for review');
+    }
     const raw = db.prepare("SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND execution_epoch=? AND binding_generation=? AND status IN ('candidate','remote_candidate')").get(source.id, source.execution_epoch, source.binding_generation);
     const detail = decode(db.prepare('SELECT details_json FROM factory_candidates WHERE work_item_id=? AND digest=? AND contract_revision=? AND execution_epoch=?').get(source.id, source.candidate_digest, source.contract_revision, source.execution_epoch)?.details_json, {});
     const projected = raw && { status: raw.status, dispatchKey: raw.dispatch_key, contractRevision: raw.contract_revision,
@@ -45,6 +48,9 @@ export async function prepareFactoryValidationWorkspace({ organizationId, workIt
     const changes = remote ? remote.changes : decode(db.prepare('SELECT files_json FROM factory_candidate_payloads WHERE candidate_id=?').get(detail.candidateId)?.files_json, null);
     const contract = decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(validation.id, validation.contract_revision)?.contract_json, {});
     const outputPaths = Array.isArray(contract.outputPaths) ? contract.outputPaths : [];
+    if (validation.kind === 'review' && (contract.accessMode !== 'read' || outputPaths.length)) {
+      fail('Review must have a read-only contract without output paths');
+    }
     if (!base?.workspace || !Array.isArray(changes) || outputPaths.some((path) => !validRelative(path))) fail('Validation workspace contract is invalid');
     const prior = db.prepare('SELECT * FROM factory_validation_workspaces WHERE id=?').get(`validation:${binding.id}`);
     if (prior) return { prior, base, changes, remote:!!remote };

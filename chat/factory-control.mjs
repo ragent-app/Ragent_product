@@ -11,6 +11,16 @@ function pageArgs(options) { const limit = Number.isInteger(options?.limit) ? Ma
 function listRows(db, table, org, options, map) { const {limit,cursor}=pageArgs(options); const rows=db.prepare(`SELECT * FROM ${table} WHERE organization_id=? AND (created_at>? OR (created_at=? AND id>?)) ORDER BY created_at,id LIMIT ?`).all(org,cursor[0],cursor[0],cursor[1],limit+1); const more=rows.length>limit; const selected=rows.slice(0,limit); const last=selected.at(-1); return {items:selected.map(map),nextCursor:more?Buffer.from(JSON.stringify([last.created_at,last.id])).toString('base64url'):null,asOf:now(),schemaVersion:1}; }
 function assertClaimGrant(db, organization, node, item) { const reason=factoryGrantDenial(db,organization,node,item); if(reason) throw factoryError('FACTORY_FORBIDDEN',reason,403); }
 export async function listFactoryWorkItems(organizationId,options={},actor) { return factoryRead(db=>{ authorize(db,organizationId,actor,'factory.read'); return listRows(db,'factory_work_items',organizationId,options,r=>itemRow(db,r)); }); }
+export async function listFactoryCheckActions(organizationId,actor) {
+  return factoryRead(db=>{
+    const organization=authorize(db,organizationId,actor,'factory.read');
+    const policy=decode(organization.policy_json,{});
+    const checks=Array.isArray(policy.factoryChecks)?policy.factoryChecks:[];
+    return {checks:checks.filter(entry=>entry && typeof entry.id==='string' && entry.id.trim()
+      && typeof entry.command==='string' && entry.command.trim() && entry.env===undefined)
+      .map(entry=>({id:entry.id})).slice(0,100),truncated:checks.length>100};
+  });
+}
 export async function listFactoryGoals(organizationId,options={},actor) { return factoryRead(db=>{ authorize(db,organizationId,actor,'factory.read'); return listRows(db,'factory_goals',organizationId,options,goalRow); }); }
 async function readFactoryWorkItem(organizationId,id,actor) { return factoryRead(db=>{ authorize(db,organizationId,actor,'factory.read'); const row=selectItem(db,organizationId,id), item=itemRow(db,row); item.dependencies=db.prepare('SELECT predecessor_id AS predecessorId, milestone, candidate_digest AS candidateDigest FROM factory_dependencies WHERE successor_id=? ORDER BY predecessor_id').all(id); item.contracts=db.prepare('SELECT revision,digest,contract_json,created_at FROM factory_work_contracts WHERE work_item_id=? ORDER BY revision').all(id).map(r=>({revision:r.revision,digest:r.digest,contract:decode(r.contract_json),createdAt:r.created_at})); item.bindings=db.prepare('SELECT * FROM factory_execution_bindings WHERE work_item_id=? ORDER BY execution_epoch,binding_generation').all(id).map(bindingRow); item.candidates=db.prepare('SELECT * FROM factory_candidates WHERE work_item_id=? ORDER BY created_at,id').all(id).map(r=>({id:r.id,contractRevision:r.contract_revision,executionEpoch:r.execution_epoch,bindingGeneration:r.binding_generation,digest:r.digest,details:decode(r.details_json,{}),createdAt:r.created_at})); item.milestones=db.prepare('SELECT * FROM factory_delivery_milestones WHERE work_item_id=? ORDER BY created_at,id').all(id).map(r=>({id:r.id,milestone:r.milestone,operationId:r.operation_id,contractRevision:r.contract_revision,executionEpoch:r.execution_epoch,bindingGeneration:r.binding_generation,candidateDigest:r.candidate_digest,target:r.target,sourceDigest:r.source_digest,resultDigest:r.result_digest,evidence:decode(r.evidence_json,{}),createdAt:r.created_at})); item.decisions=db.prepare('SELECT * FROM factory_acceptance_decisions WHERE work_item_id=? ORDER BY created_at,id').all(id).map(r=>({id:r.id,contractRevision:r.contract_revision,candidateDigest:r.candidate_digest,gateGeneration:r.gate_generation,criterionId:r.criterion_id,decision:r.decision,actorId:r.actor_id,evidence:decode(r.evidence_json,[]),createdAt:r.created_at})); return {item,schemaVersion:1,asOf:now()}; }); }
 export async function getFactoryCommand(organizationId,commandId,actor) { return factoryRead(db=>{authorize(db,organizationId,actor,'factory.read'); const r=db.prepare('SELECT * FROM factory_command_receipts WHERE organization_id=? AND command_id=?').get(organizationId,commandId); if (!r) throw factoryError('FACTORY_NOT_FOUND','Command not found',404); return decode(r.result_json,{});}); }
@@ -20,10 +30,101 @@ function bindingRow(r) { return r && {id:r.id,workItemId:r.work_item_id,contract
 export async function getFactoryWorkItem(organizationId,id,actor,options={}) {
   const result=await readFactoryWorkItem(organizationId,id,actor);
   if (options.includeReport!==true || actor?.kind!=='user' || actor?.role!=='owner') return result;
+  const {listFactoryReviewOpinions,getFactoryReviewHandoff}=await import('./factory-review-opinions.mjs');
+  const reviews=await listFactoryReviewOpinions(organizationId,id,actor);
+  result.item.reviewOpinions=reviews.opinions;
+  result.item.reviewOpinionsTruncated=reviews.truncated;
+  if (result.item.kind==='review') {
+    result.item.reviewHandoff=await getFactoryReviewHandoff(organizationId,id,actor);
+  }
+  const linkedReviews=await factoryRead(db=>{
+    authorize(db,organizationId,actor,'factory.read');
+    return db.prepare(`SELECT w.id,w.state,w.control_state,w.assignee_node_id,w.contract_revision,
+      w.execution_epoch,w.binding_generation,d.candidate_digest,n.current_session_id
+      FROM factory_dependencies d
+      JOIN factory_work_items w ON w.id=d.successor_id AND w.organization_id=? AND w.kind='review'
+      LEFT JOIN organization_nodes n ON n.id=w.assignee_node_id AND n.organization_id=w.organization_id
+      WHERE d.predecessor_id=? AND d.milestone='candidate_ready'
+      ORDER BY w.created_at DESC,w.id DESC LIMIT 21`).all(organizationId,id);
+  });
+  result.item.reviewWorkItems=linkedReviews.slice(0,20).map(row=>({
+    workItemId:row.id,state:row.state,controlState:row.control_state,nodeId:row.assignee_node_id,
+    contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,
+    bindingGeneration:row.binding_generation,candidateDigest:row.candidate_digest,
+    managedSessionId:row.current_session_id || null,
+  }));
+  result.item.reviewWorkItemsTruncated=linkedReviews.length>20;
+  const checks=await factoryRead(db=>{
+    authorize(db,organizationId,actor,'factory.read');
+    const has=table=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+    const records=has('factory_check_operations') ? db.prepare(`SELECT id,candidate_digest,criterion_id,action_id,
+      validation_work_item_id,validation_run_id,workspace_id,state,evidence_json,created_at,updated_at
+      FROM factory_check_operations WHERE organization_id=? AND work_item_id=?
+      ORDER BY created_at DESC,id DESC LIMIT 21`).all(organizationId,id) : [];
+    const validation=has('factory_validation_workspaces') ? db.prepare(`SELECT w.id,w.state,w.control_state,
+      w.contract_revision,w.execution_epoch,d.candidate_digest,b.run_id,v.id AS workspace_id,v.state AS workspace_state,
+      v.provenance FROM factory_dependencies d
+      JOIN factory_work_items w ON w.id=d.successor_id AND w.organization_id=?
+      LEFT JOIN factory_execution_bindings b ON b.work_item_id=w.id AND b.contract_revision=w.contract_revision
+        AND b.execution_epoch=w.execution_epoch AND b.binding_generation=w.binding_generation
+      LEFT JOIN factory_validation_workspaces v ON v.validation_work_item_id=w.id AND v.run_id=b.run_id
+        AND v.candidate_digest=d.candidate_digest
+      WHERE d.predecessor_id=? AND d.milestone='candidate_ready'
+      ORDER BY w.created_at DESC,w.id DESC LIMIT 21`).all(organizationId,id) : [];
+    return {records,validation};
+  });
+  result.item.checks=checks.records.slice(0,20).map(row=>({checkId:row.id,candidateDigest:row.candidate_digest,
+    criterionId:row.criterion_id,actionId:row.action_id,validationWorkItemId:row.validation_work_item_id,
+    validationRunId:row.validation_run_id,workspaceId:row.workspace_id,state:row.state,
+    evidence:decode(row.evidence_json,null),createdAt:row.created_at,updatedAt:row.updated_at}));
+  result.item.checksTruncated=checks.records.length>20;
+  result.item.validationWorkItems=checks.validation.slice(0,20).map(row=>({
+    workItemId:row.id,state:row.state,controlState:row.control_state,contractRevision:row.contract_revision,
+    executionEpoch:row.execution_epoch,candidateDigest:row.candidate_digest,runId:row.run_id || null,
+    workspace:row.workspace_id?{id:row.workspace_id,state:row.workspace_state,provenance:row.provenance}:null,
+  }));
+  result.item.validationWorkItemsTruncated=checks.validation.length>20;
+  if (result.item.contract?.accessMode==='read' && result.item.contract?.resource?.readScope==='entire_project') {
+    const {getPinnedReportComparison}=await import('./responsibility-weekly-report.mjs');
+    result.item.reportComparison=await getPinnedReportComparison(organizationId,id,result.item.executionEpoch,actor);
+    const {verifyOwnerReportScope}=await import('./factory-owner-report.mjs');
+    result.item.reportAuthority=await factoryRead(db=>{
+      authorize(db,organizationId,actor,'factory.read');
+      const has=table=>!!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);
+      const direct=has('responsibility_work_links') && db.prepare('SELECT responsibility_id FROM responsibility_work_links WHERE goal_id=?').get(result.item.goalId);
+      const plan=has('responsibility_plan_executions') && db.prepare('SELECT plan_id FROM responsibility_plan_executions WHERE goal_id=?').get(result.item.goalId);
+      if (direct || plan) return {kind:'responsibility',...(direct?.responsibility_id?{responsibilityId:direct.responsibility_id}:{}),...(plan?.plan_id?{planId:plan.plan_id}:{})};
+      const owner = has('factory_owner_report_authorizations') && db.prepare(
+        'SELECT 1 FROM factory_owner_report_authorizations WHERE organization_id=? AND work_item_id=?'
+      ).get(organizationId,id);
+      if (owner) {
+        let nextExecutionAuthorized = null;
+        if (['proposed','ready'].includes(result.item.state)) {
+          const node=db.prepare('SELECT binding_generation FROM organization_nodes WHERE id=? AND organization_id=?')
+            .get(result.item.assigneeNodeId,organizationId);
+          const epoch=result.item.executionEpoch+1;
+          try {
+            nextExecutionAuthorized=!!node && verifyOwnerReportScope(db,
+              {...result.item,executionEpoch:epoch},
+              {contractRevision:result.item.contractRevision,executionEpoch:epoch,bindingGeneration:node.binding_generation});
+          } catch { nextExecutionAuthorized=false; }
+        }
+        return {kind:'owner',nextExecutionAuthorized};
+      }
+      return {kind:'unavailable'};
+    });
+  }
   const {getResultPacket,computeResultPacketDigest}=await import('./result-packets.mjs');
   const {projectFactoryReport}=await import('./factory-report-projection.mjs');
   const {getRunAcceptanceEvidence}=await import('./runs.mjs');
-  for (const candidate of result.item.candidates.filter(c=>c.details?.packetId && c.details?.packetDigest).slice(-1)) {
+  const requestedId = typeof options.reportCandidateId === 'string' ? options.reportCandidateId : '';
+  const selected = requestedId
+    ? result.item.candidates.find(candidate => candidate.id === requestedId)
+    : [...result.item.candidates].reverse().find(candidate =>
+      candidate.digest === result.item.candidateDigest
+      && candidate.contractRevision === result.item.contractRevision
+      && candidate.executionEpoch === result.item.executionEpoch);
+  for (const candidate of selected?.details?.packetId && selected.details.packetDigest ? [selected] : []) {
     const packetId=candidate.details.packetId;
     if (!packetId) continue;
     const unavailable={schemaVersion:1,source:'unverified',declaration:{status:'unavailable'},readable:false};
@@ -44,7 +145,9 @@ export async function getFactoryWorkItem(organizationId,id,actor,options={}) {
       const run=await getRunAcceptanceEvidence(binding.runId);
       if (run?.state!=='completed' || !run.finalizedAt || !run.runPublication
           || run.sessionId!==packet.producer.sessionId) continue;
-      candidate.report={...projectFactoryReport(packet),packetId,packetDigest:packet.digest,packetState:packet.state};
+      candidate.report={...projectFactoryReport(packet),packetId,packetDigest:packet.digest,packetState:packet.state,
+        producer:{projectId:packet.producer.projectId,sessionId:packet.producer.sessionId,runId:packet.producer.runId,
+          taskId:packet.producer.taskId,attemptId:packet.producer.attemptId,packetCreatedAt:packet.createdAt || null}};
     } catch { /* An unavailable projection never changes the candidate. */ }
   }
   return result;

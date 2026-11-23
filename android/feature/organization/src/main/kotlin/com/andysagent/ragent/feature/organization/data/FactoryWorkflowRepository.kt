@@ -41,6 +41,13 @@ class FactoryWorkflowRepository(
     suspend fun listGoals(cursor: String? = null): JsonObject = request("/goals" + (cursor?.let { "?cursor=${Uri.encode(it)}" } ?: ""))
     suspend fun listWorkItems(cursor: String? = null): JsonObject = request("/work-items" + (cursor?.let { "?cursor=${Uri.encode(it)}" } ?: ""))
     suspend fun getWorkItem(id: String): JsonObject = request("/work-items/${Uri.encode(id)}")
+    suspend fun getReconciliation(id: String): JsonObject = request("/work-items/${Uri.encode(id)}/reconcile")
+    suspend fun getBudget(id: String): JsonObject = request("/work-items/${Uri.encode(id)}/budget")
+    suspend fun createHandoff(itemId: String, version: Long, commandId: String): JsonObject =
+        request("/work-items/${Uri.encode(itemId)}/handoffs", buildJsonObject {
+            put("commandId", commandId); put("expectedVersion", version)
+        })
+    suspend fun getHandoff(id: String): JsonObject = request("/handoffs/${Uri.encode(id)}")
     suspend fun getCommand(commandId: String): JsonObject = request("/commands/${Uri.encode(commandId)}")
     suspend fun getSessionProject(sessionId: String): String? {
         val response = request("/api/sessions/${Uri.encode(sessionId)}?view=summary", absolute = true)
@@ -57,8 +64,9 @@ class FactoryWorkflowRepository(
     /** Creates a proposed read-only report. Authorization and approval are separate owner actions. */
     suspend fun createReadOnlyWork(
         commandId: String, key: String, goalId: String, nodeId: String,
-        projectId: String, objective: String, criterion: String, tokens: Long? = null, cost: Double? = null,
+        projectId: String, objective: String, criterion: String, attempts: Int = 1, tokens: Long? = null, cost: Double? = null,
     ): JsonObject {
+        require(attempts in 1..2)
         require((tokens == null && cost == null) || (tokens != null && cost != null
             && tokens > 0 && tokens <= 9_007_199_254_740_991L && cost.isFinite() && cost > 0))
         return command("CreateWorkItem", commandId, key, payload = buildJsonObject {
@@ -73,7 +81,7 @@ class FactoryWorkflowRepository(
                     put("networkPolicy", "inherit_existing_permissions")
                 })
                 if (tokens != null && cost != null) put("budgetReservation", buildJsonObject { put("tokens", tokens); put("cost", cost) })
-                put("retry", buildJsonObject { put("maxAttempts", 1) })
+                put("retry", buildJsonObject { put("maxAttempts", attempts) })
             })
         })
     }
@@ -96,13 +104,16 @@ class FactoryWorkflowRepository(
             put("commandId", commandId); put("idempotencyKey", key); put("expectedVersion", expectedVersion)
         })
 
+    suspend fun retryWork(commandId: String, key: String, itemId: String, expectedVersion: Long): JsonObject =
+        command("RetryWork", commandId, key, itemId, expectedVersion)
+
     suspend fun approveContract(commandId: String, key: String, itemId: String, expectedVersion: Long): JsonObject =
         command("ApproveContract", commandId, key, itemId, expectedVersion)
 
     suspend fun decideManual(
         commandId: String, key: String, itemId: String, expectedVersion: Long,
         contractRevision: Long, gateGeneration: Long, candidateDigest: String,
-        criterionId: String, decision: String, rationale: String,
+        criterionId: String, decision: String, rationale: String, packetId: String, packetDigest: String, targets: kotlinx.serialization.json.JsonArray? = null,
     ): JsonObject {
         require(decision == "passed" || decision == "failed")
         return request("/work-items/${Uri.encode(itemId)}/manual-acceptance", buildJsonObject {
@@ -110,6 +121,8 @@ class FactoryWorkflowRepository(
             put("contractRevision", contractRevision); put("gateGeneration", gateGeneration)
             put("candidateDigest", candidateDigest); put("criterionId", criterionId)
             put("decision", decision); put("rationale", rationale)
+            put("packetId", packetId); put("packetDigest", packetDigest)
+            if (decision == "failed" && targets != null && targets.isNotEmpty()) put("targets", targets)
         })
     }
 

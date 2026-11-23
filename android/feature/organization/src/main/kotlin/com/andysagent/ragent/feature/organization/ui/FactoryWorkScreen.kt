@@ -1,6 +1,7 @@
 package com.andysagent.ragent.feature.organization.ui
 
 import android.net.Uri
+import android.app.TimePickerDialog
 import android.content.Context
 import android.media.AudioManager
 import android.speech.tts.TextToSpeech
@@ -22,18 +23,22 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.data.encodeOrganizationUriComponent
 import com.andysagent.ragent.feature.organization.data.formatOrganizationFeatureUnavailableBanner
 import com.andysagent.ragent.feature.organization.data.isOrganizationFeatureUnavailableStatus
@@ -44,7 +49,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
 @Composable
-fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, sessionId: String = "", onOpenVoiceButler: ((String, String?) -> Unit)? = null, onBack: () -> Unit) {
+fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, responsibilityDraft: String = "", selectedResponsibilityId: String? = null, onResponsibilitySelected: (String?) -> Unit = {}, responsibilityNavigationKey: String? = null, selectedPlanId: String? = null, nodes: List<OrganizationNodeDto> = emptyList(), availableProjectId: String = "", sessionId: String = "", onOpenVoiceButler: ((String, String?) -> Unit)? = null, onOpenWorkItem: ((String) -> Unit)? = null, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val audio = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -78,11 +83,22 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
     var responsibilities by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var responsibility by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityActivity by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
+    var linkedReviews by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var linkedReviewsIncomplete by remember(organizationId) { mutableStateOf(false) }
     var memoryConflictData by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var memoryData by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var memoryChanges by remember(organizationId) { mutableStateOf<Map<String, Pair<String,String>>>(emptyMap()) }
     var memoryPreview by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var responsibilityPolicy by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var weeklyEligibility by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var weeklyDay by remember(organizationId) { mutableIntStateOf(1) }
+    var weeklyHour by remember(organizationId) { mutableIntStateOf(9) }
+    var weeklyMinute by remember(organizationId) { mutableIntStateOf(0) }
+    var weeklyZone by remember(organizationId) { mutableStateOf(java.time.ZoneId.systemDefault().id) }
+    var weeklyDayMenu by remember { mutableStateOf(false) }
+    var weeklyZoneMenu by remember { mutableStateOf(false) }
+    var weeklyReview by remember(organizationId) { mutableStateOf(false) }
+    var weeklyManualReview by remember(organizationId) { mutableStateOf(false) }
     var responsibilityPlans by remember(organizationId) { mutableStateOf<JsonArray?>(null) }
     var responsibilityNotifications by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var pendingNotificationToggle by remember(organizationId) { mutableStateOf<Boolean?>(null) }
@@ -183,16 +199,27 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
     suspend fun submitResponsibility(path: String, body: JsonObject, method: String = "POST") {
         pendingResponsibility = Triple(path, method, body)
         runCatching { executeJsonObject(method, path, body) }
-            .onSuccess { result -> pendingResponsibility = null; proposal = null; form = ""; reviewForm = false; status = "Request recorded; actual stop is not established. Stop requests: ${result["stop"] ?: "none"}. Refresh for current facts." }
+            .onSuccess { result ->
+                pendingResponsibility = null; proposal = null; form = ""; reviewForm = false
+                status = when {
+                    path.endsWith("/wake") -> "Report request recorded; execution has not been established."
+                    path.endsWith("/trigger-bindings") -> "Schedule recorded; a trigger does not prove execution."
+                    else -> "Request recorded; actual stop is not established. Stop requests: ${result["stop"] ?: "none"}. Refresh for current facts."
+                }
+            }
             .onFailure { err ->
                 if (err is CancellationException) throw err
-                status = "Request not confirmed: ${err.message}; retry uses the same key."
+                if (err is ApiException && err.statusCode == 409) {
+                    pendingResponsibility = null; weeklyEligibility = null; weeklyReview = false
+                    status = "The responsibility or authorization changed. Refresh before trying again."
+                } else status = "Request not confirmed: ${err.message}; retry uses the same key."
                 if (err is ApiException && isOrganizationFeatureUnavailableStatus(err.statusCode, err.code, path)) {
                     responsibilityBanner = formatOrganizationFeatureUnavailableBanner(err, "Responsibility action unavailable")
                 }
             }
     }
     suspend fun loadResponsibility(id: String) {
+        linkedReviews = emptyList(); linkedReviewsIncomplete = false; weeklyEligibility = null; weeklyReview = false; weeklyManualReview = false; responsibility = null
         status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null; memoryData = null; memoryConflictData = null; memoryChanges = emptyMap(); memoryPreview = null; responsibilityNotifications = null; pendingNotificationToggle = null
         val path = "/${Uri.encode(id)}"
         runCatching {
@@ -200,6 +227,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             val detail = response["responsibility"]!!.jsonObject
             require(detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
             responsibilityPolicy = response["policy"] as? JsonObject
+            weeklyEligibility = try { responsibilityRequest("$path/weekly-report") } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
             responsibilityPlans = runCatching { responsibilityRequest("$path/plans")["plans"] as? JsonArray }.getOrNull()
             responsibilityNotifications = runCatching { responsibilityRequest("$path/notifications") }.getOrNull()
             if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) triggerBindings = runCatching { responsibilityRequest("$path/trigger-bindings")["bindings"] as? JsonArray }.getOrNull()
@@ -222,6 +250,40 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 }
             }
     }
+    suspend fun resolveNotificationReviews(id: String) {
+        linkedReviews = emptyList(); linkedReviewsIncomplete = false
+        if (onOpenWorkItem == null || selectedPlanId != null) return
+        try {
+            val response = responsibilityRequest("/${Uri.encode(id)}")
+            val detail = response["responsibility"] as? JsonObject ?: error("Responsibility unavailable")
+            require(detail["id"]?.jsonPrimitive?.contentOrNull == id && detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
+            val summary = response["workSummary"] as? JsonArray ?: error("Linked work unavailable")
+            val projectId = detail["projectId"]?.jsonPrimitive?.contentOrNull ?: error("Project unavailable")
+            val ids = summary.mapNotNull { entry ->
+                val row = entry as? JsonObject ?: error("Invalid linked work")
+                if (row["state"]?.jsonPrimitive?.contentOrNull == "review") row["workItemId"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: error("Missing linked work ID") else null
+            }.distinct()
+            if (ids.size > 100) { linkedReviewsIncomplete = true; return }
+            val reviews = ids.mapNotNull { workId ->
+                val work = request("/work-items/${Uri.encode(workId)}")["item"] as? JsonObject ?: error("Work unavailable")
+                require(work["id"]?.jsonPrimitive?.contentOrNull == workId && work["projectId"]?.jsonPrimitive?.contentOrNull == projectId)
+                val contract = work["contract"] as? JsonObject
+                val resource = contract?.get("resource") as? JsonObject
+                val digest = work["candidateDigest"]?.jsonPrimitive?.contentOrNull
+                val candidate = (work["candidates"] as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull {
+                    it["digest"]?.jsonPrimitive?.contentOrNull == digest && it["contractRevision"] == work["contractRevision"] &&
+                        it["executionEpoch"] == work["executionEpoch"] && it["bindingGeneration"] == work["bindingGeneration"]
+                }
+                val isReport = contract?.get("accessMode")?.jsonPrimitive?.contentOrNull == "read" &&
+                    (contract["allowedPaths"] as? JsonArray)?.isEmpty() == true && resource?.get("readScope")?.jsonPrimitive?.contentOrNull == "entire_project" &&
+                    resource["projectId"]?.jsonPrimitive?.contentOrNull == projectId
+                if (work["state"]?.jsonPrimitive?.contentOrNull == "review" && !digest.isNullOrBlank() && candidate != null && isReport) work else null
+            }
+            linkedReviews = reviews
+            if (reviews.size == 1) onOpenWorkItem(reviews.single()["id"]!!.jsonPrimitive.content)
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { linkedReviewsIncomplete = true }
+    }
     suspend fun submit(command: JsonObject) {
         pending = command; status = "Submitting request…"
         runCatching { request("/commands", command) }.onSuccess {
@@ -241,7 +303,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
         lastHandledNavKey = latestNavigationKey.value
         initialized = true
         val resumeId = targetId ?: sessionContext?.takeIf { it["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId }?.get("responsibilityId")?.jsonPrimitive?.contentOrNull
-        if (resumeId == null) reload() else { loadResponsibilities(); loadResponsibility(resumeId) }
+        if (resumeId == null) reload() else { loadResponsibilities(); loadResponsibility(resumeId); if (lastHandledNavKey != null && responsibility?.get("id")?.jsonPrimitive?.contentOrNull == resumeId) resolveNotificationReviews(resumeId) }
     }
     LaunchedEffect(transport, organizationId, selectedResponsibilityId, responsibilityNavigationKey) {
         if (!initialized) return@LaunchedEffect
@@ -252,6 +314,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
         lastHandledNavKey = responsibilityNavigationKey
         if (responsibilities == null) loadResponsibilities()
         loadResponsibility(targetId)
+        if (isNewDeepLink && responsibility?.get("id")?.jsonPrimitive?.contentOrNull == targetId) resolveNotificationReviews(targetId)
     }
     LaunchedEffect(organizationId, item?.get("id")) {
         itemBudget = null; itemReconciliation = null; scopedPreview = null; scopedPending = null; scopedObjective = ""; scopedCriterion = ""; multiObjectives = emptyMap(); multiCriteria = emptyMap(); multiPreview = null; multiPending = null
@@ -291,6 +354,63 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 TextButton(onClick = { form = "create"; reviewForm = false; objective = responsibilityDraft }) { Text("Create responsibility") }
             } else {
                 Text(current["objective"]?.jsonPrimitive?.contentOrNull.orEmpty())
+                if (responsibilityFeatures?.get("timeTriggerBridge")?.jsonPrimitive?.booleanOrNull == true) {
+                    val days = listOf(
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_sunday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_monday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_tuesday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_wednesday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_thursday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_friday),
+                        stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_saturday),
+                    )
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_title), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_gate))
+                    val reportPolicy = responsibilityPolicy?.get("providerId")?.jsonPrimitive?.contentOrNull == "project-report"
+                    val active = current["lifecycle"]?.jsonPrimitive?.contentOrNull == "active"
+                    if (!weeklyManualReview) TextButton(enabled = reportPolicy && active && pendingResponsibility == null, onClick = { weeklyManualReview = true }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_manual)) }
+                    else {
+                        Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_manual_confirm))
+                        TextButton(enabled = reportPolicy && active && pendingResponsibility == null, onClick = {
+                            val body = buildJsonObject { put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()); put("confirmed", true) }
+                            scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/wake", body); weeklyManualReview = false }
+                        }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_manual_submit)) }
+                    }
+                    val baseline = weeklyEligibility?.get("baseline") as? JsonObject
+                    if (baseline != null) {
+                        Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_baseline, baseline["workItemId"]?.jsonPrimitive?.contentOrNull.orEmpty(), baseline["candidateDigest"]?.jsonPrimitive?.contentOrNull.orEmpty(), baseline["acceptedAt"]?.jsonPrimitive?.contentOrNull.orEmpty()))
+                        val source = baseline["source"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val report = baseline["report"] as? JsonObject
+                        Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_baseline_context, baseline["runId"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "—" }, source.ifBlank { "—" }, baseline["packetId"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "—" }))
+                        Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_model_statement))
+                        Text(report?.get("visibleText")?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_content_unknown) })
+                    }
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_comparison_unavailable))
+                    TextButton(onClick = { weeklyDayMenu = true }) { Text(days[weeklyDay]) }
+                    DropdownMenu(expanded = weeklyDayMenu, onDismissRequest = { weeklyDayMenu = false }) {
+                        days.forEachIndexed { index, day -> DropdownMenuItem(text = { Text(day) }, onClick = { weeklyDay = index; weeklyReview = false; weeklyDayMenu = false }) }
+                    }
+                    TextButton(onClick = { TimePickerDialog(context, { _, h, m -> weeklyHour = h; weeklyMinute = m; weeklyReview = false }, weeklyHour, weeklyMinute, true).show() }) { Text("%02d:%02d".format(weeklyHour, weeklyMinute)) }
+                    TextButton(onClick = { weeklyZoneMenu = true }) { Text(weeklyZone) }
+                    DropdownMenu(expanded = weeklyZoneMenu, onDismissRequest = { weeklyZoneMenu = false }) {
+                        java.time.ZoneId.getAvailableZoneIds().sorted().forEach { zone -> DropdownMenuItem(text = { Text(zone) }, onClick = { weeklyZone = zone; weeklyReview = false; weeklyZoneMenu = false }) }
+                    }
+                    val eligible = weeklyEligibility?.get("eligible")?.jsonPrimitive?.booleanOrNull == true
+                    if (!eligible) Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_unavailable) + " " + weeklyEligibility?.get("reason")?.jsonPrimitive?.contentOrNull.orEmpty())
+                    if (!weeklyReview) TextButton(enabled = eligible && pendingResponsibility == null, onClick = { weeklyReview = true }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_review)) }
+                    else {
+                        Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_confirm_details, days[weeklyDay], "%02d:%02d".format(weeklyHour, weeklyMinute), weeklyZone))
+                        TextButton(enabled = eligible && pendingResponsibility == null, onClick = {
+                            val body = buildJsonObject { put("type", "weekly_report"); put("weekday", weeklyDay); put("hour", weeklyHour); put("minute", weeklyMinute); put("timeZone", weeklyZone); put("confirmed", true); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
+                            scope.launch {
+                                val responsibilityId = current["id"]!!.jsonPrimitive.content
+                                submitResponsibility("/api/responsibilities/${Uri.encode(responsibilityId)}/trigger-bindings", body)
+                                weeklyReview = false
+                                if (pendingResponsibility == null) loadResponsibility(responsibilityId)
+                            }
+                        }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_enable)) }
+                    }
+                }
                 Text("Responsibility ${current["lifecycle"]}; version ${current["rowVersion"]}; policy ${current["policyRevision"]}")
                 Text("A paused responsibility stops new admission; existing work may continue.")
                 Text("A stop request is not proof of stopping. Unknown or older active executions need reconciliation; a run that finished first remains pending review. Archived history is retained.")
@@ -326,7 +446,18 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     Text("触发只记录唤醒请求，不代表工作已经启动。")
                     if (triggerBindings == null) Text("Schedules unavailable.")
                     triggerBindings?.forEach { entry -> val binding=entry.jsonObject
-                        Text("Schedule ${binding["config"]} · ${binding["state"]} · delivery ${binding["delivery"] ?: "unknown"} · ${binding["lastError"] ?: ""}")
+                        val config = binding["config"] as? JsonObject
+                        if (config?.get("type")?.jsonPrimitive?.contentOrNull == "weekly_report") {
+                            val days = listOf(
+                                stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_sunday), stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_monday),
+                                stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_tuesday), stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_wednesday),
+                                stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_thursday), stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_friday), stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_saturday))
+                            val day = config["weekday"]?.jsonPrimitive?.intOrNull?.let { days.getOrNull(it) }.orEmpty().ifBlank { "—" }
+                            val hour = config["hour"]?.jsonPrimitive?.intOrNull
+                            val minute = config["minute"]?.jsonPrimitive?.intOrNull
+                            val time = if (hour != null && minute != null) "%02d:%02d".format(hour, minute) else "—"
+                            Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_schedule_status, day, time, config["timeZone"]?.jsonPrimitive?.contentOrNull.orEmpty(), binding["state"]?.jsonPrimitive?.contentOrNull.orEmpty(), binding["nextScheduledAt"]?.jsonPrimitive?.contentOrNull.orEmpty().ifBlank { "—" }))
+                        } else Text("Schedule ${binding["config"]} · ${binding["state"]} · delivery ${binding["delivery"] ?: "unknown"} · ${binding["lastError"] ?: ""}")
                         if ((binding["config"] as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == "event") Text("来源：组织根会话中保留的执行记录，创建后开始观察。来源状态 ${binding["source"] ?: "未知"}；待处理 ${binding["pendingCount"] ?: "未知"}。发现前已删除或漏索引的记录可能遗漏；发现后才持久化。")
                         val sourceError = (binding["source"] as? JsonObject)?.get("lastError")?.jsonPrimitive?.contentOrNull
                         if (sourceError == "receipt_capacity") Text("历史回执已达容量上限；普通恢复无法释放历史。请先核对未收区间，再撤销并重新绑定新的观察起点；可能存在遗漏。")
@@ -525,12 +656,18 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 val reportTemplate = (reportProvider?.get("templates") as? JsonArray)?.mapNotNull { it as? JsonObject }?.firstOrNull { it["id"]?.jsonPrimitive?.contentOrNull == "ragent-project-report" && it["version"]?.jsonPrimitive?.intOrNull == 1 }
                 if (reportProvider?.get("digest") != null && reportTemplate?.get("digest") != null) {
                     Text("Project report authorization: entire project readable; project file writes are blocked. Other tools remain subject to existing permissions; network isolation is not established. Manual or interval triggers may start the fixed report. Results require human review and are not verified facts.")
-                    OutlinedTextField(reportNode, { reportNode = it; reportReview = false; reportNetworkConfirmed = false; plannerReview = false }, label = { Text("Report node ID") })
-                    OutlinedTextField(reportGeneration, { reportGeneration = it; reportReview = false; reportNetworkConfirmed = false; plannerReview = false }, label = { Text("Node binding generation") })
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_project, current["projectId"]?.jsonPrimitive?.contentOrNull.orEmpty()))
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_choose_node))
+                    val reportNodes = nodes.filter { !it.sessionId.isNullOrBlank() && (it.currentBinding?.generation ?: 0L) > 0L && it.status.lowercase() !in setOf("retired", "inactive") }
+                    if (reportNodes.isEmpty()) Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_no_node))
+                    reportNodes.forEach { node -> TextButton(onClick = {
+                        reportNode = node.id; reportGeneration = node.currentBinding!!.generation.toString()
+                        reportReview = false; reportNetworkConfirmed = false; plannerReview = false
+                    }) { Text((if (reportNode == node.id && reportGeneration == node.currentBinding?.generation?.toString()) "✓ " else "") + node.displayName.ifBlank { node.id }) } }
                     OutlinedTextField(reportAttempts, { reportAttempts = it; reportReview = false; plannerReview = false }, label = { Text("Maximum attempts (1–10)") })
                     OutlinedTextField(reportCost, { reportCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum cost") })
                     OutlinedTextField(reportDailyCost, { reportDailyCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum daily cost") })
-                    OutlinedTextField(reportTimeZone, { reportTimeZone = it; reportReview = false; plannerReview = false }, label = { Text("Daily budget IANA timezone") })
+                    TextButton(onClick = { reportTimeZone = weeklyZone; reportReview = false; plannerReview = false }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_use_budget_zone, weeklyZone, reportTimeZone.ifBlank { "—" })) }
                     OutlinedTextField(reportExpiry, { reportExpiry = it; reportReview = false; plannerReview = false }, label = { Text("Authorization expiry (ISO time)") })
                     Text("Network policy: ${reportNetworkPolicy.ifBlank { "not selected" }}")
                     TextButton(onClick = { reportNetworkPolicy = "deny"; reportNetworkConfirmed = false; reportReview = false; plannerReview = false; plannerNetworkConfirmed = false }) { Text("Deny network (requires verified isolation)") }
@@ -543,7 +680,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     val attempts = reportAttempts.toIntOrNull()
                     val cost = reportCost.toDoubleOrNull()
                     val dailyCost = reportDailyCost.toDoubleOrNull()
-                    val validReport = reportNode.isNotBlank() && generation != null && generation > 0 && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && dailyCost != null && dailyCost.isFinite() && dailyCost >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (reportNetworkPolicy == "deny" || (reportNetworkPolicy == "inherit_existing_permissions" && reportNetworkConfirmed))
+                    val validReport = reportNodes.any { it.id == reportNode && it.currentBinding?.generation == generation } && generation != null && generation > 0 && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && dailyCost != null && dailyCost.isFinite() && dailyCost >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (reportNetworkPolicy == "deny" || (reportNetworkPolicy == "inherit_existing_permissions" && reportNetworkConfirmed))
                     if (!reportReview) TextButton(enabled = validReport, onClick = { reportReview = true }) { Text("Review report authorization") }
                     else {
                         Text("Authorize entire project ${current["projectId"]} read-only; node $reportNode generation $reportGeneration; network $reportNetworkPolicy; attempts $reportAttempts; cost $reportCost; daily cost $reportDailyCost in $reportTimeZone; expiry $reportExpiry; provider ${reportProvider["digest"]}; template ${reportTemplate["digest"]}.")
@@ -573,11 +710,23 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     if (plan["state"]?.jsonPrimitive?.contentOrNull == "pending_review" && plan["proposal"] is JsonObject && plan["catalog"] is JsonArray && plan["proposalDigest"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true) TextButton(onClick = { reviewedPlan = plan }) { Text("Review plan") }
                 }
                 (current["successCriteria"] as? JsonArray)?.forEach { Text(it.jsonPrimitive.content) }
+                if (linkedReviewsIncomplete) Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_review_links_incomplete))
+                if (linkedReviews.isNotEmpty()) {
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_review_choose))
+                    linkedReviews.forEach { review ->
+                        val workId = review["id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                        val title = (review["contract"] as? JsonObject)?.get("objective")?.jsonPrimitive?.contentOrNull.orEmpty()
+                        TextButton(onClick = { onOpenWorkItem?.invoke(workId) }) { Text("$title · $workId") }
+                    }
+                }
                 Text("Activity")
                 responsibilityActivity?.forEach { entry -> val activity = entry.jsonObject; val type = activity["type"]?.jsonPrimitive?.contentOrNull; val reason = (activity["details"] as? JsonObject)?.get("reason")?.jsonPrimitive?.contentOrNull
                     val detail=activity["details"] as? JsonObject; val identity="工作 ${detail?.get("workItemId") ?: "未知"} · 执行代次 ${detail?.get("executionEpoch") ?: "未知"} · 绑定 ${detail?.get("bindingId") ?: "未知"}"
                     val message = when { type == "budget_blocked" -> "预算准入被拒绝；不表示执行失败或已扣费。$identity"; type == "execution_attempt_failed" -> "一次执行尝试已核实失败，不代表整个责任失败。$identity"; type == "committed_git_unchanged" -> "已提交 Git 版本未变化，本次周期规划已跳过。"; type == "committed_git_changed_before_admission" -> "规划前后 Git 版本发生变化，本次未准入；需要重新观察。"; type == "decision_waiting" && reason == "committed_git_observation_unavailable" -> "无法核实已提交 Git 版本，等待处理；不视为无变化。"; else -> "$type · ${activity["details"] ?: ""}" }
-                    Text("${activity["createdAt"]} · $message") }
+                    Text("${activity["createdAt"]} · $message")
+                    val workId = detail?.get("workItemId")?.jsonPrimitive?.contentOrNull
+                    if (!workId.isNullOrBlank() && onOpenWorkItem != null) TextButton(onClick = { onOpenWorkItem(workId) }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_review_open_work)) }
+                }
                 val spokenActivity = responsibilityActivity.orEmpty().mapNotNull { entry ->
                     val row = entry as? JsonObject ?: return@mapNotNull null
                     val type = row["type"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
@@ -647,17 +796,23 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                 }
             }
             if (form.isNotEmpty()) {
-                if (form == "create") OutlinedTextField(value = projectId, onValueChange = { projectId = it; reviewForm = false }, label = { Text("Project ID") })
+                if (form == "create") {
+                    Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_choose_project))
+                    if (availableProjectId.isBlank()) Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_no_project))
+                    else TextButton(onClick = { projectId = availableProjectId; reviewForm = false }) {
+                        Text((if (projectId == availableProjectId) "✓ " else "") + availableProjectId)
+                    }
+                }
                 OutlinedTextField(value = objective, onValueChange = { objective = it; reviewForm = false }, label = { Text("Objective") })
                 if (form == "create") {
                     OutlinedTextField(value = criterion, onValueChange = { criterion = it; reviewForm = false }, label = { Text("Success criterion") })
                     OutlinedTextField(value = intervalMinutes, onValueChange = { intervalMinutes = it; reviewForm = false }, label = { Text("Interval minutes (blank for manual)") })
                     OutlinedTextField(value = expiry, onValueChange = { expiry = it; reviewForm = false }, label = { Text("Policy expiry (ISO time with timezone)") })
                 }
-                if (!reviewForm) TextButton(onClick = { reviewForm = true }) { Text("Review") }
+                if (!reviewForm) TextButton(enabled = form != "create" || (availableProjectId.isNotBlank() && projectId == availableProjectId), onClick = { reviewForm = true }) { Text("Review") }
                 else {
                     Text("Review ${if (form == "create") "draft for project $projectId; criterion $criterion; trigger ${intervalMinutes.ifBlank { "manual" }}; expiry $expiry" else "objective change for version ${current?.get("rowVersion")}"}: $objective. This does not grant tool access or approve a plan.")
-                    TextButton(enabled = form != "create" || intervalMinutes.isBlank() || (intervalMinutes.toLongOrNull()?.let { it in 1L..525600L } == true), onClick = {
+                    TextButton(enabled = form != "create" || (projectId == availableProjectId && projectId.isNotBlank() && (intervalMinutes.isBlank() || (intervalMinutes.toLongOrNull()?.let { it in 1L..525600L } == true))), onClick = {
                         val body = if (form == "create") buildJsonObject {
                             put("organizationId", organizationId); put("projectId", projectId); put("objective", objective)
                             put("successCriteria", buildJsonArray { add(criterion) }); put("policy", buildJsonObject { put("validUntil", expiry) }); put("idempotencyKey", UUID.randomUUID().toString())

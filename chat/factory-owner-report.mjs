@@ -23,7 +23,15 @@ export async function authorizeOwnerFactoryReport(input,actor) {
   const prior=db.prepare('SELECT * FROM factory_owner_report_authorizations WHERE command_id=? OR (organization_id=? AND actor_id=? AND idempotency_key=?)').get(commandId,organizationId,actor.principalId,key);
   if(prior){if(prior.command_id!==commandId||prior.organization_id!==organizationId||prior.work_item_id!==workItemId||prior.actor_id!==actor.principalId||prior.idempotency_key!==key||prior.input_digest!==inputDigest)fail('Authorization command or key conflicts');return {operation:{commandId,state:'completed'},contractRevision:prior.contract_revision,executionEpoch:prior.execution_epoch,scope:'owner_read_only_report',sourceSnapshot:'unverified',replayed:true};}
   const raw=selectItem(db,organizationId,workItemId), item=itemRow(db,raw), node=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(item.assigneeNodeId,organizationId);
-  if(raw.row_version!==version||raw.state!=='proposed'||raw.ownership!=='active'||raw.control_state!=='none'||db.prepare('SELECT 1 FROM factory_execution_bindings WHERE work_item_id=?').get(workItemId)) fail('A matching proposed work item without execution is required');
+  const first=raw.state==='proposed' && !db.prepare('SELECT 1 FROM factory_execution_bindings WHERE work_item_id=?').get(workItemId);
+  // After an owner returns a report, RetryWork retains the old candidate and
+  // decisions while fencing the next execution with a fresh epoch.
+  const retry=raw.state==='ready' && !raw.candidate_digest && !!db.prepare(`SELECT 1 FROM factory_execution_bindings b
+    JOIN factory_candidates c ON c.work_item_id=b.work_item_id AND c.contract_revision=b.contract_revision AND c.execution_epoch=b.execution_epoch AND c.binding_generation=b.binding_generation
+    JOIN factory_acceptance_decisions d ON d.work_item_id=c.work_item_id AND d.contract_revision=c.contract_revision AND d.candidate_digest=c.digest AND d.decision='failed'
+    WHERE b.work_item_id=? AND b.contract_revision=? AND b.execution_epoch=? AND b.status='candidate' LIMIT 1`).get(workItemId,raw.contract_revision,raw.execution_epoch-1)
+    && !db.prepare("SELECT 1 FROM factory_execution_bindings WHERE work_item_id=? AND status IN ('intent','running','unknown')").get(workItemId);
+  if(raw.row_version!==version||(!first&&!retry)||raw.ownership!=='active'||raw.control_state!=='none') fail('A matching proposed or returned report ready for retry is required');
   if(!node||node.retired_revision!==null||node.node_role!=='reviewer'||!node.current_session_id) fail('An active reviewer binding is required');
   const contract=item.contract, resource=contract?.resource;
   if(contract?.accessMode!=='read'||!Array.isArray(contract.allowedPaths)||contract.allowedPaths.length||resource?.projectId!==item.projectId||resource.readScope!=='entire_project'||resource.networkPolicy!=='inherit_existing_permissions'||!contract.acceptanceCriteria?.length||contract.acceptanceCriteria.some(x=>x.method!=='manual')||contract.organizationRevision!==org.current_revision) fail('A current read-only project report with manual criteria is required');

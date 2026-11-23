@@ -4,6 +4,8 @@ import { factoryTransaction, factoryRead, factoryError, decode, now } from './wo
 import { authorize } from './work-graph.mjs';
 import { getRunAcceptanceEvidence } from './runs.mjs';
 import { getResultPacket, computeResultPacketDigest } from './result-packets.mjs';
+import { verifyFactoryCandidate } from './factory-candidates.mjs';
+import { factoryGrantDenial } from './factory-grant-authority.mjs';
 
 const fail = message => { throw factoryError('FACTORY_EVIDENCE_UNVERIFIED',message,409); };
 function schema(db) { db.exec(`CREATE TABLE IF NOT EXISTS factory_review_opinions (
@@ -21,17 +23,35 @@ function verifyContext(db, opinion, principal, requireRunning) {
  const org=db.prepare('SELECT * FROM organizations WHERE id=?').get(opinion.organization_id);
  const source=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(opinion.candidate_work_item_id,opinion.organization_id);
  const review=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(opinion.reviewer_work_item_id,opinion.organization_id);
- if (!org || ['archived','lifecycle_pending'].includes(org.state) || !source || !review || review.kind!=='review' || source.state!=='review' || source.control_state!=='none' || source.candidate_digest!==opinion.candidate_digest || source.contract_revision!==opinion.contract_revision || source.execution_epoch!==opinion.execution_epoch || source.assignee_node_id===review.assignee_node_id || review.assignee_node_id!==opinion.reviewer_node_id) fail('Review or candidate changed');
+ if (!org || ['archived','lifecycle_pending'].includes(org.state) || !source || !review || review.kind!=='review' || source.state!=='review' || source.control_state!=='none' || review.control_state!=='none' || source.candidate_digest!==opinion.candidate_digest || source.contract_revision!==opinion.contract_revision || source.execution_epoch!==opinion.execution_epoch || source.project_id!==review.project_id || source.project_id!==org.project_id || source.assignee_node_id===review.assignee_node_id || review.assignee_node_id!==opinion.reviewer_node_id) fail('Review or candidate changed');
  const dep=db.prepare("SELECT 1 FROM factory_dependencies WHERE predecessor_id=? AND successor_id=? AND milestone='candidate_ready' AND candidate_digest=?").get(source.id,review.id,source.candidate_digest); if (!dep) fail('Review does not reference the candidate');
  const author=db.prepare('SELECT n.*,r.agent_id FROM organization_nodes n LEFT JOIN role_instances r ON r.id=n.role_instance_id WHERE n.id=? AND n.organization_id=?').get(source.assignee_node_id,org.id);
  const reviewer=db.prepare('SELECT n.*,r.agent_id FROM organization_nodes n LEFT JOIN role_instances r ON r.id=n.role_instance_id WHERE n.id=? AND n.organization_id=?').get(review.assignee_node_id,org.id);
- if (!author || !reviewer || !author.agent_id || !reviewer.agent_id || author.agent_id===reviewer.agent_id || reviewer.retired_revision!==null || reviewer.binding_generation!==review.binding_generation) fail('Independent reviewer identity unavailable');
+ if (!author || !reviewer || !author.agent_id || !reviewer.agent_id || author.agent_id===reviewer.agent_id || author.retired_revision!==null || reviewer.retired_revision!==null || reviewer.binding_generation!==review.binding_generation) fail('Independent reviewer identity unavailable');
  const grant=decode(reviewer.grant_json,{}); if (grant.canReview!==true || grant.canWrite===true) fail('Reviewer must have read-only node authority');
  const latest=cap=>db.prepare('SELECT * FROM organization_grants WHERE organization_id=? AND node_id=? AND capability=? AND revision<=? ORDER BY revision DESC,id DESC LIMIT 1').get(org.id,reviewer.id,cap,org.current_revision);
  const reviewGrant=latest('review'), writeGrant=latest('write'); if (!reviewGrant?.allow || writeGrant?.allow) fail('Reviewer grant is missing or permits writes');
  const reviewScope=decode(reviewGrant.scope_json,{}); if ((reviewScope.projectId && reviewScope.projectId!==org.project_id) || Object.keys(reviewScope).some(key=>!['projectId','writablePaths'].includes(key))) fail('Reviewer grant scope is unsupported');
  const contract=decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?').get(review.id,review.contract_revision)?.contract_json,{});
- if (contract.accessMode!=='read' || contract.organizationRevision!==org.current_revision) fail('Review contract is not current and read-only');
+ if (contract.accessMode!=='read' || contract.organizationRevision!==org.current_revision
+     || (contract.outputPaths!==undefined && (!Array.isArray(contract.outputPaths) || contract.outputPaths.length))) {
+   fail('Review contract is not current and read-only');
+ }
+ const candidateBinding=db.prepare(`SELECT * FROM factory_execution_bindings
+   WHERE work_item_id=? AND contract_revision=? AND execution_epoch=? AND binding_generation=?
+   AND status IN ('candidate','remote_candidate')`).get(source.id,source.contract_revision,source.execution_epoch,source.binding_generation);
+ const candidate=db.prepare(`SELECT details_json FROM factory_candidates
+   WHERE work_item_id=? AND contract_revision=? AND execution_epoch=? AND binding_generation=? AND digest=?`)
+   .get(source.id,source.contract_revision,source.execution_epoch,source.binding_generation,source.candidate_digest);
+ const candidateId=decode(candidate?.details_json,{})?.candidateId;
+ const sourceBinding=candidateBinding && {
+   status:candidateBinding.status,dispatchKey:candidateBinding.dispatch_key,
+   contractRevision:candidateBinding.contract_revision,executionEpoch:candidateBinding.execution_epoch,
+   bindingGeneration:candidateBinding.binding_generation,runId:candidateBinding.run_id,
+   attemptId:candidateBinding.attempt_id,collaborationId:candidateBinding.collaboration_id,
+ };
+ if (!sourceBinding || !candidateId || !verifyFactoryCandidate({db,item:{id:source.id},binding:sourceBinding,
+   payload:{candidateId,digest:source.candidate_digest}})) fail('Candidate payload is unavailable or changed');
  const binding=db.prepare('SELECT * FROM factory_execution_bindings WHERE work_item_id=? AND contract_revision=? AND execution_epoch=? AND binding_generation=? AND attempt_id=? AND run_id=?').get(review.id,review.contract_revision,review.execution_epoch,review.binding_generation,opinion.reviewer_attempt_id,opinion.reviewer_run_id);
  if (!binding || (requireRunning && (binding.status!=='running' || review.state!=='running' || review.control_state!=='none'))) fail('Review execution binding changed');
  const attempt=db.prepare('SELECT * FROM collaboration_attempts WHERE id=? AND task_id=? AND run_id=?').get(binding.attempt_id,binding.task_id,binding.run_id); if (!attempt) fail('Review attempt missing');
@@ -71,4 +91,124 @@ export function verifyFactoryReviewResult(db,item,binding,payload) {
   const context=verifyContext(db,opinion,null,false);
   return context.binding.id===binding.id && context.attempt.state==='succeeded' && context.attempt.result_packet_id===opinion.packet_id;
  } catch { return false; }
+}
+
+// Owner-facing projection of persisted opinions. A receipt records an earlier
+// verified result; currentContext separately reflects current authorization.
+export async function listFactoryReviewOpinions(organizationId,workItemId,actor) {
+ const rows=await factoryRead(db=>{
+  authorize(db,organizationId,actor,'factory.read');
+  if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_review_opinions'").get()) return [];
+  const source=db.prepare(`SELECT o.*,r.packet_id,r.packet_digest,
+    w.project_id,w.contract_revision AS current_contract_revision,
+    b.run_id AS source_run_id,b.attempt_id AS source_attempt_id,
+    c.contract_json AS source_contract_json
+    FROM factory_review_opinions o
+    JOIN factory_work_items w ON w.id=o.candidate_work_item_id AND w.organization_id=o.organization_id
+    LEFT JOIN factory_review_opinion_receipts r ON r.opinion_id=o.id
+    LEFT JOIN factory_execution_bindings b ON b.work_item_id=w.id AND b.contract_revision=o.contract_revision
+      AND b.execution_epoch=o.execution_epoch AND b.status IN ('candidate','remote_candidate')
+    LEFT JOIN factory_work_contracts c ON c.work_item_id=w.id AND c.revision=o.contract_revision
+    WHERE o.organization_id=? AND (o.candidate_work_item_id=? OR o.reviewer_work_item_id=?)
+    ORDER BY o.created_at DESC,o.id DESC LIMIT 21`).all(organizationId,workItemId,workItemId);
+  return source.map(row=>{
+    let currentContext='unavailable';
+    try { verifyContext(db,row,null,false); currentContext='current'; } catch { /* History remains visible as stale. */ }
+    return {...row,currentContext};
+  });
+ });
+ async function runtime(runId) {
+  if (!runId) return {runId:null,tool:null,provider:null,sessionId:null,state:'unavailable'};
+  try {
+   const run=await getRunAcceptanceEvidence(runId);
+   if (!run || run.id!==runId) throw new Error('missing');
+   return {runId,tool:run.tool || null,provider:run.provider || null,sessionId:run.sessionId || null,state:run.state || 'unknown'};
+  } catch { return {runId,tool:null,provider:null,sessionId:null,state:'unavailable'}; }
+ }
+ const selected=rows.slice(0,20);
+ const opinions=await Promise.all(selected.map(async row=>{
+  const [sourceRuntime,reviewRuntime]=await Promise.all([runtime(row.source_run_id),runtime(row.reviewer_run_id)]);
+  const contract=decode(row.source_contract_json,{});
+  return {
+   opinionId:row.id,projectId:row.project_id,
+   candidate:{workItemId:row.candidate_work_item_id,digest:row.candidate_digest,
+    contractRevision:row.contract_revision,executionEpoch:row.execution_epoch,
+    allowedPaths:Array.isArray(contract.allowedPaths)?contract.allowedPaths:[],runtime:sourceRuntime},
+   reviewer:{workItemId:row.reviewer_work_item_id,nodeId:row.reviewer_node_id,
+    attemptId:row.reviewer_attempt_id,runtime:reviewRuntime},
+   verdict:row.verdict,reason:row.reason,createdAt:row.created_at,
+   receipt:row.packet_id?{packetId:row.packet_id,packetDigest:row.packet_digest}:null,
+   verification:row.packet_id?'receipt_recorded':'pending_run',currentContext:row.currentContext,
+  };
+ }));
+ return {opinions,truncated:rows.length>20};
+}
+
+// Show the exact dependency and live scope before a reviewer produces an opinion.
+export async function getFactoryReviewHandoff(organizationId,workItemId,actor) {
+ const facts=await factoryRead(db=>{
+  const org=authorize(db,organizationId,actor,'factory.read');
+  const review=db.prepare('SELECT * FROM factory_work_items WHERE id=? AND organization_id=?').get(workItemId,organizationId);
+  if (!review || review.kind!=='review') return null;
+  const dependencies=db.prepare(`SELECT d.candidate_digest AS pinned_digest,w.*
+    FROM factory_dependencies d JOIN factory_work_items w ON w.id=d.predecessor_id AND w.organization_id=?
+    WHERE d.successor_id=? AND d.milestone='candidate_ready'`).all(organizationId,workItemId);
+  if (dependencies.length!==1) return {state:'unavailable',reason:'candidate_dependency_unavailable'};
+  const source=dependencies[0];
+  const sourceBinding=db.prepare(`SELECT * FROM factory_execution_bindings WHERE work_item_id=?
+    AND contract_revision=? AND execution_epoch=? AND binding_generation=?
+    AND status IN ('candidate','remote_candidate')`).get(source.id,source.contract_revision,source.execution_epoch,source.binding_generation);
+  const candidate=db.prepare(`SELECT details_json FROM factory_candidates WHERE work_item_id=? AND digest=?
+    AND contract_revision=? AND execution_epoch=? AND binding_generation=?`)
+    .get(source.id,source.candidate_digest,source.contract_revision,source.execution_epoch,source.binding_generation);
+  const sourceContract=decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?')
+    .get(source.id,source.contract_revision)?.contract_json,{});
+  const reviewContract=decode(db.prepare('SELECT contract_json FROM factory_work_contracts WHERE work_item_id=? AND revision=?')
+    .get(review.id,review.contract_revision)?.contract_json,{});
+  const node=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(review.assignee_node_id,organizationId);
+  const author=db.prepare('SELECT * FROM organization_nodes WHERE id=? AND organization_id=?').get(source.assignee_node_id,organizationId);
+  const authorRole=author && db.prepare('SELECT agent_id FROM role_instances WHERE id=?').get(author.role_instance_id);
+  const reviewRole=node && db.prepare('SELECT agent_id FROM role_instances WHERE id=?').get(node.role_instance_id);
+  const reviewBinding=db.prepare(`SELECT run_id FROM factory_execution_bindings WHERE work_item_id=?
+    AND contract_revision=? AND execution_epoch=? AND binding_generation=?`)
+    .get(review.id,review.contract_revision,review.execution_epoch,review.binding_generation);
+  const binding=sourceBinding && {status:sourceBinding.status,dispatchKey:sourceBinding.dispatch_key,
+    contractRevision:sourceBinding.contract_revision,executionEpoch:sourceBinding.execution_epoch,
+    bindingGeneration:sourceBinding.binding_generation,runId:sourceBinding.run_id,
+    attemptId:sourceBinding.attempt_id,collaborationId:sourceBinding.collaboration_id};
+  let verified=false;
+  try {
+   verified=!!binding && !!source.pinned_digest && source.pinned_digest===source.candidate_digest
+    && source.state==='review' && source.control_state==='none' && review.control_state==='none'
+    && source.project_id===review.project_id && !!author && author.retired_revision===null
+    && !!node && node.retired_revision===null && author.id!==node.id
+    && !!authorRole?.agent_id && !!reviewRole?.agent_id && authorRole.agent_id!==reviewRole.agent_id
+    && reviewContract.organizationRevision===org.current_revision
+    && !factoryGrantDenial(db,org,node,{kind:'review',projectId:review.project_id,contract:reviewContract})
+    && !!verifyFactoryCandidate({db,item:{id:source.id},binding,
+      payload:{candidateId:decode(candidate?.details_json,{})?.candidateId,digest:source.candidate_digest}});
+  } catch { verified=false; }
+  return {state:verified?'current':'unavailable',projectId:review.project_id,
+    candidate:{workItemId:source.id,digest:source.pinned_digest || null,
+      contractRevision:source.contract_revision,executionEpoch:source.execution_epoch,
+      allowedPaths:Array.isArray(sourceContract.allowedPaths)?sourceContract.allowedPaths:[],runId:sourceBinding?.run_id || null},
+    reviewer:{workItemId:review.id,nodeId:review.assignee_node_id,managedSessionId:node?.current_session_id || null,
+      bindingGeneration:node?.binding_generation ?? null,runId:reviewBinding?.run_id || null,accessMode:reviewContract.accessMode || null},
+  };
+ });
+ if (!facts?.candidate) return facts;
+ async function runtime(runId) {
+  if (!runId) return {runId:null,tool:null,provider:null,sessionId:null,state:'unavailable'};
+  try {
+   const run=await getRunAcceptanceEvidence(runId);
+   if (!run || run.id!==runId) throw new Error('missing');
+   return {runId,tool:run.tool || null,provider:run.provider || null,sessionId:run.sessionId || null,state:run.state || 'unknown'};
+  } catch { return {runId,tool:null,provider:null,sessionId:null,state:'unavailable'}; }
+ }
+ const [sourceRuntime,reviewRuntime]=await Promise.all([runtime(facts.candidate.runId),runtime(facts.reviewer.runId)]);
+ facts.candidate.runtime=sourceRuntime;
+ facts.reviewer.runtime=reviewRuntime;
+ delete facts.candidate.runId;
+ delete facts.reviewer.runId;
+ return facts;
 }

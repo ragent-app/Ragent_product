@@ -4,11 +4,35 @@ import { getFactoryWorkItem, executeFactoryCommand } from './factory-control.mjs
 import { verifyFactoryCandidate } from './factory-candidates.mjs';
 import { getRunAcceptanceEvidence } from './runs.mjs';
 import { getResultPacket, computeResultPacketDigest } from './result-packets.mjs';
-import { factoryError, decode, digest } from './work-graph-store.mjs';
+import { factoryError, factoryRead, decode, digest } from './work-graph-store.mjs';
+import { authorize } from './work-graph.mjs';
 import { verifyFactoryReviewResult } from './factory-review-opinions.mjs';
+import { projectFactoryReport } from './factory-report-projection.mjs';
 
 function invalid(message, code='FACTORY_EVIDENCE_UNVERIFIED', statusCode=409) { throw factoryError(code,message,statusCode); }
 function text(value,name) { if (typeof value!=='string'||!value.trim()||value.length>4096) invalid(`${name} is required`,'FACTORY_INVALID',400); return value.trim(); }
+
+function reportTargets(input) {
+  if (input.targets===undefined) return undefined;
+  if (input.decision!=='failed' || !Array.isArray(input.targets) || !input.targets.length || input.targets.length>20) {
+    invalid('Returned report targets must be a nonempty array','FACTORY_INVALID',400);
+  }
+  const fields=new Set(['summary','changedFiles','tests','risks','blockers','acceptanceNotes','unresolvedItems']);
+  const targets=input.targets.map(target=>{
+    if (!target || !['visibleText','declaration'].includes(target.section)
+        || !Number.isSafeInteger(target.start) || target.start<0
+        || typeof target.excerpt!=='string' || !target.excerpt.length || target.excerpt.length>1200
+        || typeof target.rationale!=='string' || !target.rationale.trim() || target.rationale.length>1200
+        || (target.section==='declaration' && !fields.has(target.field))
+        || (target.section==='visibleText' && target.field!==undefined)) {
+      invalid('Invalid report target','FACTORY_INVALID',400);
+    }
+    return {section:target.section,...(target.section==='declaration'?{field:target.field}:{}),
+      start:target.start,excerpt:target.excerpt,rationale:target.rationale.trim()};
+  });
+  if (Buffer.byteLength(JSON.stringify(targets),'utf8')>12000) invalid('Report targets exceed limit','FACTORY_INVALID',400);
+  return targets;
+}
 
 export async function decideFactoryManualAcceptance(input,actor) {
   if (actor?.kind!=='user'||actor.role!=='owner') invalid('Owner authorization required','FACTORY_FORBIDDEN',403);
@@ -16,6 +40,20 @@ export async function decideFactoryManualAcceptance(input,actor) {
   const criterionId=text(input?.criterionId,'criterionId'), rationale=text(input?.rationale,'rationale');
   const commandId=text(input?.commandId,'commandId'), idempotencyKey=text(input?.idempotencyKey,'idempotencyKey');
   if (!['passed','failed'].includes(input?.decision)) invalid('Invalid decision','FACTORY_INVALID',400);
+  const targets=reportTargets(input);
+  // Rebuild a previous report command from immutable decision evidence so
+  // retries work after completion, including clients using the digest contract.
+  const prior=await factoryRead(db=>{ authorize(db,organizationId,actor,'factory.DecideAcceptance');
+    const receipt=db.prepare('SELECT 1 FROM factory_command_receipts WHERE actor_id=? AND command_type=? AND target_id=? AND idempotency_key=?').get(actor.principalId,'DecideAcceptance',workItemId,idempotencyKey);
+    if (!receipt) return null;
+    const row=db.prepare('SELECT evidence_json FROM factory_acceptance_decisions WHERE work_item_id=? AND contract_revision=? AND candidate_digest=? AND gate_generation=? AND criterion_id=?').get(workItemId,input.contractRevision,input.candidateDigest,input.gateGeneration,criterionId);
+    return row ? decode(row.evidence_json,[]).find(entry=>entry.kind==='owner_report_review') || null : null;
+  });
+  if (prior) {
+    if ((input.packetId !== undefined || input.packetDigest !== undefined) && (text(input.packetId,'packetId')!==prior.packetId || text(input.packetDigest,'packetDigest')!==prior.packetDigest)) invalid('Report packet changed','FACTORY_CONFLICT');
+    const evidence={kind:'owner_report_review',packetId:prior.packetId,packetDigest:prior.packetDigest,rationale,...(targets?{targets}:{})};
+    return executeFactoryCommand({commandId,idempotencyKey,organizationId,targetId:workItemId,type:'DecideAcceptance',expectedVersion:input.expectedVersion,payload:{criterionId,decision:input.decision,contractRevision:input.contractRevision,candidateDigest:input.candidateDigest,gateGeneration:input.gateGeneration,evidence:[evidence]}},actor);
+  }
   const item=(await getFactoryWorkItem(organizationId,workItemId,actor)).item;
   const criterion=item.contract?.acceptanceCriteria?.find(entry=>entry.id===criterionId);
   if (!criterion || criterion.method!=='manual') invalid('Criterion is not explicitly designated for manual acceptance');
@@ -27,8 +65,20 @@ export async function decideFactoryManualAcceptance(input,actor) {
     const reportRun=binding?.runId ? await getRunAcceptanceEvidence(binding.runId).catch(()=>null) : null;
     const {currentRevisedGrant,revisedGrantMatches}=await import('./factory-execution-adapter.mjs');
     const reportProfile=await currentRevisedGrant(organizationId,item.assigneeNodeId);
-    if(!packet || packet.digest!==`sha256:${item.candidateDigest}`) invalid('Report packet is unavailable');
-    const evidence={kind:'owner_report_review',packetId,packetDigest:packet.digest,rationale};
+    if(!packet || packet.digest!==`sha256:${item.candidateDigest}` || ((input.packetId !== undefined || input.packetDigest !== undefined) && (packet.packetId!==text(input.packetId,'packetId') || packet.digest!==text(input.packetDigest,'packetDigest')))) invalid('Report packet is unavailable or changed','FACTORY_CONFLICT');
+    if (targets) {
+      const report=projectFactoryReport(packet);
+      if (!report.readable) invalid('Report projection is unavailable');
+      for (const target of targets) {
+        const value=target.section==='visibleText' ? report.visibleText
+          : report.declaration?.status==='valid' ? report.declaration[target.field] : undefined;
+        const content=typeof value==='string' ? value : value===undefined ? '' : JSON.stringify(value);
+        if (content.slice(target.start,target.start+target.excerpt.length)!==target.excerpt) {
+          invalid('Selected report content changed','FACTORY_CONFLICT');
+        }
+      }
+    }
+    const evidence={kind:'owner_report_review',packetId,packetDigest:packet.digest,rationale,...(targets?{targets}:{})};
     const command={commandId,idempotencyKey,organizationId,targetId:workItemId,type:'DecideAcceptance',expectedVersion:input.expectedVersion,payload:{criterionId,decision:input.decision,contractRevision:item.contractRevision,candidateDigest:item.candidateDigest,gateGeneration:item.gateGeneration,evidence:[evidence]}};
     return executeFactoryCommand(command,actor,{verifyEvidence({db,item:current,actor:verifiedActor}) {
       if(verifiedActor.kind!=='user'||verifiedActor.role!=='owner'||current.id!==item.id||current.candidateDigest!==item.candidateDigest||current.executionEpoch!==item.executionEpoch||current.bindingGeneration!==item.bindingGeneration) return false;
@@ -36,6 +86,7 @@ export async function decideFactoryManualAcceptance(input,actor) {
       return raw?.status==='candidate' && !!verifyFactoryReportEvidence(db,current,binding,packet,reportRun,(database,reportItem)=>revisedGrantMatches(database,organizationId,reportItem.assigneeNodeId,reportProfile));
     }});
   }
+  if (targets) invalid('Report targets are valid only for reports','FACTORY_INVALID',400);
   if(item.kind==='review' && item.contract.accessMode==='read') {
     const reviewBinding=item.bindings.find(entry=>entry.contractRevision===item.contractRevision && entry.executionEpoch===item.executionEpoch && entry.bindingGeneration===item.bindingGeneration && entry.status==='review_result');
     if(!reviewBinding?.details?.opinionId || reviewBinding.details.digest!==item.candidateDigest) invalid('Verified review result is unavailable');

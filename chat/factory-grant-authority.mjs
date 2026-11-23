@@ -15,6 +15,17 @@ export function factoryGrantDenial(db, organization, node, item) {
   if (declared && !['read','write'].includes(declared)) return 'Unsupported access mode';
   const paths=Array.isArray(contract.allowedPaths) ? contract.allowedPaths : [];
   const writing=declared==='write' || (!declared && paths.length>0);
+  if (item.kind==='review') {
+    if (declared!=='read' || String(node.node_role).toLowerCase()!=='reviewer'
+        || grant.canReview!==true || grant.canWrite===true
+        || (contract.outputPaths!==undefined && (!Array.isArray(contract.outputPaths) || contract.outputPaths.length))) {
+      return 'Review requires a read-only reviewer without output paths';
+    }
+    const writeGrant=db.prepare(`SELECT allow FROM organization_grants
+      WHERE organization_id=? AND node_id=? AND capability='write' AND revision<=?
+      ORDER BY revision DESC,id DESC LIMIT 1`).get(organization.id,node.id,organization.current_revision);
+    if (writeGrant?.allow) return 'Reviewer write authority must be revoked';
+  }
   const required=['read','run',...(writing?['write']:[]),...(String(node.node_role).toLowerCase()==='reviewer'?['review']:[])];
   if (!Array.isArray(grant.allowedCapabilities) || required.some(cap=>!grant.allowedCapabilities.includes(cap))) return 'Assignee capability is missing';
   if (writing && (grant.canWrite!==true || !Array.isArray(grant.writablePaths) || paths.some(p=>!grant.writablePaths.some(root=>within(p,root))))) return 'Assignee write authority is insufficient';

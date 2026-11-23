@@ -75,6 +75,7 @@ fun FactoryTeamWorkspace(
     responsibilityDraft: String, selectedResponsibilityId: String?, onResponsibilitySelected: (String?) -> Unit,
     responsibilityNavigationKey: String? = null, selectedPlanId: String? = null,
     sessionId: String, rootSessionId: String?, stableAccountScope: Boolean, onBack: () -> Unit,
+    onOpenSourceSession: ((String) -> Unit)? = null,
 ) {
     val repo = remember(transport, organizationId) { FactoryWorkflowRepository(transport, organizationId) }
     val scope = rememberCoroutineScope()
@@ -110,7 +111,12 @@ fun FactoryTeamWorkspace(
     var goals by remember(organizationId) { mutableStateOf<List<JsonObject>>(emptyList()) }
     var goalsLoaded by remember(organizationId) { mutableStateOf(false) }
     var selected by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var handoff by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var reconciliation by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var budgetFacts by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    var pendingHandoff by rememberSaveable(organizationId, rootSessionId) { mutableStateOf<String?>(null) }
     var selectedId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
+    var queuedWorkId by remember(organizationId) { mutableStateOf<String?>(null) }
     var error by remember(organizationId) { mutableStateOf<String?>(null) }
     var notice by remember(organizationId) { mutableStateOf<String?>(null) }
     var loading by remember(organizationId) { mutableStateOf(false) }
@@ -124,6 +130,7 @@ fun FactoryTeamWorkspace(
     var nodeId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var objective by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var criterion by rememberSaveable(organizationId, rootSessionId) { mutableStateOf(appContext.getString(R.string.factory_ux_default_criterion)) }
+    var attempts by rememberSaveable(organizationId, rootSessionId) { mutableIntStateOf(1) }
     var tokens by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var cost by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var rationale by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
@@ -159,8 +166,13 @@ fun FactoryTeamWorkspace(
     suspend fun open(id: String) {
         if (loading) return
         loading = true
-        try { selected = repo.getWorkItem(id).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work)); if (selectedId != id) { criterionIdSelected = ""; tokens = ""; cost = ""; startSettings = false }; selectedId = id; error = null; needsRefresh = false; page = "detail"; approvalReview = false; reviewDecision = null }
-        catch (cancel: CancellationException) { throw cancel }
+        try {
+            val loaded = repo.getWorkItem(id).obj("item") ?: throw IllegalStateException(appContext.getString(R.string.factory_team_load_work))
+            if (selectedId != id) { handoff = null; criterionIdSelected = ""; tokens = ""; cost = ""; startSettings = false }
+            selected = loaded; selectedId = id; error = null; needsRefresh = false; page = "detail"; approvalReview = false; reviewDecision = null
+            reconciliation = try { repo.getReconciliation(id) } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
+            budgetFacts = try { repo.getBudget(id) } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
+        } catch (cancel: CancellationException) { throw cancel }
         catch (e: Exception) { error = e.message ?: appContext.getString(R.string.factory_team_load_work) }
         finally { loading = false }
     }
@@ -171,11 +183,12 @@ fun FactoryTeamWorkspace(
         loading = true
         val result = try { if (checkOnly) repo.getCommand(key) else when (action.str("type")) {
             "goal" -> repo.createGoal(key,key,args.str("project"),args.str("objective"))
-            "proposal" -> repo.createReadOnlyWork(key,key,args.str("goal"),args.str("node"),args.str("project"),args.str("objective"),args.str("criterion"))
+            "proposal" -> repo.createReadOnlyWork(key,key,args.str("goal"),args.str("node"),args.str("project"),args.str("objective"),args.str("criterion"), (args.num("attempts") ?: 1).toInt())
             "budget" -> repo.amendReportBudget(key,key,args.str("item"),args.num("version") ?: -1,args.obj("contract") ?: throw IllegalStateException("Missing saved contract"),args.num("tokens") ?: 0,args.str("cost").toDouble())
             "authorization" -> repo.authorizeReport(key,key,args.str("item"),args.num("version") ?: -1)
+            "retry" -> repo.retryWork(key,key,args.str("item"),args.num("version") ?: -1)
             "approval" -> repo.approveContract(key,key,args.str("item"),args.num("version") ?: -1)
-            "decision" -> repo.decideManual(key,key,args.str("item"),args.num("version") ?: -1,args.num("revision") ?: -1,args.num("gate") ?: -1,args.str("candidate"),args.str("criterion"),args.str("decision"),args.str("reason"))
+            "decision" -> repo.decideManual(key,key,args.str("item"),args.num("version") ?: -1,args.num("revision") ?: -1,args.num("gate") ?: -1,args.str("candidate"),args.str("criterion"),args.str("decision"),args.str("reason"),args.str("packetId"),args.str("packetDigest"),args["targets"] as? JsonArray)
             else -> throw IllegalStateException("Unknown saved request")
         } }
         catch (cancel: CancellationException) { loading = false; throw cancel }
@@ -213,6 +226,7 @@ fun FactoryTeamWorkspace(
             loading = false; send(); return
         }
         pending = null
+        reconciliation = null; budgetFacts = null
         if (action.str("type") == "budget") { startSettings = false; tokens = ""; cost = "" }
         notice = appContext.getString(R.string.factory_team_recorded)
         try {
@@ -224,6 +238,19 @@ fun FactoryTeamWorkspace(
         } catch (cancel: CancellationException) { throw cancel }
         catch (e: Exception) { error = appContext.getString(R.string.factory_team_refresh_failed, e.message ?: appContext.getString(R.string.factory_team_connection_error)) }
         finally { loading = false }
+    }
+    suspend fun sendHandoff() {
+        val action = pendingHandoff?.let { Json.parseToJsonElement(it) as? JsonObject } ?: return
+        loading = true
+        try {
+            handoff = repo.createHandoff(action.str("item"), action.num("version") ?: error("Missing version"), action.str("key"))
+            pendingHandoff = null
+            error = null
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (e: Exception) {
+            if (e is ApiException && e.statusCode == 409) { pendingHandoff = null; needsRefresh = true; error = appContext.getString(R.string.factory_team_version_conflict) }
+            else error = appContext.getString(R.string.factory_team_request_uncertain, e.message ?: appContext.getString(R.string.factory_team_connection_error))
+        } finally { loading = false }
     }
     fun prepare(label: String, args: JsonObject) {
         if (pending != null || loading) return
@@ -241,6 +268,10 @@ fun FactoryTeamWorkspace(
         }
     }
     BackHandler(enabled = page != "butler") { if (!loading) back() }
+    LaunchedEffect(queuedWorkId, loading) {
+        val target = queuedWorkId
+        if (!loading && target != null) { queuedWorkId = null; open(target) }
+    }
     LaunchedEffect(repo, rootSessionId) {
         refresh()
         if (page == "detail" && selectedId.isNotBlank()) open(selectedId)
@@ -256,7 +287,7 @@ fun FactoryTeamWorkspace(
         if (objective.isBlank() || !goalsLoaded || sessionProject.isBlank() || pending != null || loading) return
         if (eligibleNodes.none { it.id == nodeId } || (eligibleNodes.size > 1 && !nodeChoiceConfirmed)) { nodeId = ""; nodeChoiceConfirmed = false; page = "createWork"; return }
         val review = criterion.trim().ifEmpty { appContext.getString(R.string.factory_ux_default_criterion) }
-        val draftArgs = buildJsonObject { put("node",nodeId); put("project",sessionProject); put("objective",objective.trim()); put("criterion",review) }
+        val draftArgs = buildJsonObject { put("node",nodeId); put("project",sessionProject); put("objective",objective.trim()); put("criterion",review); put("attempts",attempts) }
         val eligibleGoals = goals.filter { it.str("state") == "active" && it.str("projectId") == sessionProject }
         val selectedGoal = eligibleGoals.firstOrNull { it.str("id") == goalId }
         if ((goalCursor != null || eligibleGoals.size > 1) && selectedGoal == null) { page = "createWork"; return }
@@ -308,10 +339,13 @@ fun FactoryTeamWorkspace(
                 onResponsibilitySelected = onResponsibilitySelected,
                 responsibilityNavigationKey = responsibilityNavigationKey,
                 selectedPlanId = focusedPlanFromButler ?: selectedPlanId,
+                nodes = nodes,
+                availableProjectId = sessionProject,
                 sessionId = sessionId,
                 onOpenVoiceButler = { rid, title ->
                     butlerViewModel.openVoiceButler(responsibilityId = rid, responsibilityTitle = title)
                 },
+                onOpenWorkItem = { id -> queuedWorkId = id },
                 onBack = { focusedPlanFromButler = null; page = "butler" },
             )
         } else Column(Modifier.fillMaxSize().background(colors.canvas)) {
@@ -334,6 +368,10 @@ fun FactoryTeamWorkspace(
                     item { Text(stringResource(R.string.factory_ux_subtitle), color = colors.secondaryContent) }
                     item { OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_ux_question)) }, modifier = Modifier.fillMaxWidth(), minLines = 2) }
                     if (eligibleNodes.size == 1) item { Text(stringResource(R.string.factory_team_assigned, eligibleNodes.single().displayName.ifBlank { eligibleNodes.single().id }), color = colors.secondaryContent) }
+                    item { Text(stringResource(R.string.factory_review_attempts_note), color = colors.secondaryContent)
+                        Row { TextButton(onClick = { attempts = 1 }) { Text(stringResource(R.string.factory_review_attempts_one) + if (attempts == 1) " ✓" else "") }
+                            TextButton(onClick = { attempts = 2 }) { Text(stringResource(R.string.factory_review_attempts_two) + if (attempts == 2) " ✓" else "") } }
+                    }
                     item { TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
                         if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth()) }
                     item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -390,6 +428,9 @@ fun FactoryTeamWorkspace(
                         Text(node.displayName.ifBlank { node.id }, Modifier.padding(12.dp), color = colors.primaryContent)
                     } }
                     OutlinedTextField(objective, { objective = it }, label = { Text(stringResource(R.string.factory_team_20)) }, modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.factory_review_attempts_note), color = colors.secondaryContent)
+                    Row { TextButton(onClick = { attempts = 1 }) { Text(stringResource(R.string.factory_review_attempts_one) + if (attempts == 1) " ✓" else "") }
+                        TextButton(onClick = { attempts = 2 }) { Text(stringResource(R.string.factory_review_attempts_two) + if (attempts == 2) " ✓" else "") } }
                     TextButton(onClick = { settingsOpen = !settingsOpen }) { Text(stringResource(R.string.factory_ux_review_settings)) }
                     if (settingsOpen) OutlinedTextField(criterion, { criterion = it }, label = { Text(stringResource(R.string.factory_ux_criterion)) }, modifier = Modifier.fillMaxWidth())
                     AgentoButton(stringResource(R.string.factory_ux_save), enabled = goalsLoaded && sessionProject.isNotBlank() && eligibleNodes.any { it.id == nodeId } && objective.isNotBlank() && pending == null && !loading, onClick = { saveDraft() })
@@ -398,13 +439,20 @@ fun FactoryTeamWorkspace(
                 "detail" -> selected?.let { work ->
                     val id = work.str("id"); val contract = work.obj("contract"); val candidate = work.str("candidateDigest")
                     val version = work.num("rowVersion"); val rev = work.num("contractRevision"); val gate = work.num("gateGeneration")
+                    var selectedExcerpts by remember(id, candidate) { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+                    var passageReasons by remember(id, candidate) { mutableStateOf<Map<Int, String>>(emptyMap()) }
                     val resource = contract?.obj("resource")
                     val reportType = contract != null && resource != null && contract.str("accessMode") == "read" && (contract["allowedPaths"] as? JsonArray)?.isEmpty() == true &&
-                        resource.str("readScope") == "entire_project" && resource.str("networkPolicy") == "inherit_existing_permissions" &&
+                        resource.str("readScope") == "entire_project" && resource.str("networkPolicy") in setOf("deny", "inherit_existing_permissions") &&
                         resource.str("projectId") == work.str("projectId") && contract.arr("acceptanceCriteria").isNotEmpty() &&
                         contract.arr("acceptanceCriteria").all { it.str("method") == "manual" }
                     Column(Modifier.verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(contract?.str("objective").orEmpty(), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.factory_review_identity, work.str("projectId"), work.str("goalId"), id), color = colors.secondaryContent)
+                        Text(stringResource(R.string.factory_review_version, version?.toString().orEmpty(), rev?.toString().orEmpty(), gate?.toString().orEmpty(), candidate.ifBlank { "—" }), color = colors.secondaryContent)
+                        Text(stringResource(R.string.factory_review_formal_note), color = colors.secondaryContent)
+                        val allowedPaths = (contract?.get("allowedPaths") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                        Text(stringResource(R.string.factory_review_permissions, contract?.str("accessMode").orEmpty().ifBlank { "—" }, allowedPaths?.joinToString(", ")?.ifBlank { "—" } ?: "—"), color = colors.secondaryContent)
                         val control = controlStateLabel(work.str("controlState"))
                         Text(listOf(workStateLabel(work.str("state")), control).filter { it.isNotBlank() }.joinToString(" · "), color = colors.secondaryContent)
                         TextButton(onClick = { scope.launch { open(id) } }) { Text(stringResource(R.string.factory_team_26)) }
@@ -412,6 +460,13 @@ fun FactoryTeamWorkspace(
                         val report = work.arr("candidates").lastOrNull { it.str("digest") == candidate && it.num("contractRevision") == rev && it.num("executionEpoch") == work.num("executionEpoch") && it.num("bindingGeneration") == work.num("bindingGeneration") }?.obj("report")
                         if (report != null) {
                             Text(stringResource(R.string.factory_team_30), style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.factory_review_packet, report.str("packetId"), report.str("packetDigest")), color = colors.secondaryContent)
+                            val producer = report.obj("producer")
+                            if (producer != null) Text(stringResource(R.string.factory_review_producer, producer.str("projectId").ifBlank { "—" }, producer.str("sessionId").ifBlank { "—" }, producer.str("runId").ifBlank { "—" }, producer.str("taskId").ifBlank { "—" }, producer.str("packetCreatedAt").ifBlank { "—" }), color = colors.secondaryContent)
+                            else Text(stringResource(R.string.factory_review_source_unknown), color = colors.secondaryContent)
+                            val sourceSession = producer?.str("sessionId").orEmpty()
+                            if (sourceSession.isNotBlank() && onOpenSourceSession != null) TextButton(onClick = { onOpenSourceSession(sourceSession) }) { Text(stringResource(R.string.factory_review_open_source_session)) }
+                            Text(stringResource(R.string.factory_review_event_unavailable), color = colors.secondaryContent)
                             Text(report.str("visibleText").ifBlank { report.obj("declaration")?.str("summary").orEmpty().ifBlank { appContext.getString(R.string.factory_team_report_empty) } })
                             val declared = report.obj("declaration")
                             if (declared?.str("status") == "valid") {
@@ -427,13 +482,174 @@ fun FactoryTeamWorkspace(
                                 }
                             }
                         } else if (reportType && work.str("state") == "review") Text(stringResource(R.string.factory_team_report_empty), color = colors.secondaryContent)
+                        val comparison = work.obj("reportComparison")
+                        if (comparison != null) {
+                            Text(stringResource(R.string.factory_weekly_compare_title), style = MaterialTheme.typography.titleMedium)
+                            val baseline = comparison.obj("baseline")
+                            if (comparison.str("status") != "available" || baseline == null) {
+                                Text(stringResource(R.string.factory_weekly_compare_unavailable, comparison.str("reason").ifBlank { "unknown" }), color = colors.secondaryContent)
+                            } else {
+                                Text(stringResource(R.string.factory_weekly_compare_baseline, baseline.str("workItemId"), baseline.str("candidateDigest"), baseline.str("acceptedAt").ifBlank { "—" }), color = colors.secondaryContent)
+                                Text(stringResource(R.string.factory_weekly_compare_refs, baseline.str("runId").ifBlank { "—" }, baseline.str("packetId").ifBlank { "—" }, baseline.str("packetDigest").ifBlank { "—" }, baseline.str("capturedAt").ifBlank { "—" }), color = colors.secondaryContent)
+                                val resource = baseline.obj("resource")
+                                Text(stringResource(R.string.factory_weekly_compare_scope, resource?.str("projectId").orEmpty().ifBlank { "—" }, resource?.str("readScope").orEmpty().ifBlank { "—" }, baseline.str("source").ifBlank { "—" }), color = colors.secondaryContent)
+                                val previousReport = baseline.obj("report")
+                                Text(stringResource(R.string.factory_weekly_compare_previous))
+                                Text(previousReport?.str("visibleText").orEmpty().ifBlank { stringResource(R.string.factory_weekly_content_unknown) })
+                                if ((previousReport?.get("truncated") as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_review_more), color = colors.secondaryContent)
+                                listOf(stringResource(R.string.factory_weekly_compare_old_risks) to previousReport?.obj("declaration"), stringResource(R.string.factory_weekly_compare_new_risks) to report?.obj("declaration")).forEach { (label, declaration) ->
+                                    val risks = (declaration?.get("risks") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty()
+                                    Text("$label: ${risks.joinToString("; ").ifBlank { "—" }}", color = colors.secondaryContent)
+                                }
+                                Text(stringResource(R.string.factory_weekly_compare_caution), color = colors.secondaryContent)
+                            }
+                        }
                         work.arr("decisions").forEach {
                             val current = it.str("candidateDigest") == candidate && it.num("contractRevision") == rev && it.num("gateGeneration") == gate
                             val label = when (it.str("decision")) { "passed" -> stringResource(R.string.factory_team_pass); "failed" -> stringResource(R.string.factory_team_fail); else -> stringResource(R.string.factory_state_unknown) }
                             val description = contract?.arr("acceptanceCriteria")?.firstOrNull { c -> c.str("id") == it.str("criterionId") }?.str("description").orEmpty()
                             Text(stringResource(R.string.factory_team_decision, label, description.ifBlank { stringResource(R.string.factory_ux_criterion) }) + if (current) " · " + stringResource(R.string.factory_team_current) else " · " + stringResource(R.string.factory_team_historical))
+                            it.arr("evidence").flatMap { evidence -> evidence.arr("targets") }.forEach { target ->
+                                Text(stringResource(R.string.factory_review_recorded_target, target.str("excerpt"), target.str("rationale")), color = colors.secondaryContent)
+                            }
                         }
-                        if (reportType && work.str("state") == "proposed" && version != null && contract != null) {
+                        Text(stringResource(R.string.factory_review_independent_title), style = MaterialTheme.typography.titleMedium)
+                        work.obj("reviewHandoff")?.let { link ->
+                            val origin = link.obj("candidate")
+                            val reviewer = link.obj("reviewer")
+                            val originRun = origin?.obj("runtime")
+                            val reviewerRun = reviewer?.obj("runtime")
+                            Text(stringResource(R.string.factory_review_handoff_context, link.str("state").ifBlank { "unavailable" }, reviewer?.str("accessMode").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_candidate_trace, origin?.str("workItemId").orEmpty(), origin?.str("digest").orEmpty(), origin?.num("contractRevision")?.toString().orEmpty(), origin?.num("executionEpoch")?.toString().orEmpty()), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_run_trace, originRun?.str("runId").orEmpty().ifBlank { "—" }, originRun?.str("tool").orEmpty().ifBlank { "—" }, originRun?.str("provider").orEmpty().ifBlank { "—" }, originRun?.str("state").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_reviewer_trace, reviewer?.str("workItemId").orEmpty(), reviewer?.str("nodeId").orEmpty(), reviewerRun?.str("runId").orEmpty().ifBlank { "—" }, reviewerRun?.str("tool").orEmpty().ifBlank { "—" }, reviewerRun?.str("provider").orEmpty().ifBlank { "—" }, reviewerRun?.str("state").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_host_unknown), color = colors.secondaryContent)
+                        }
+                        work.arr("reviewWorkItems").forEach { review ->
+                            val reviewId = review.str("workItemId")
+                            Text(stringResource(R.string.factory_review_work_trace, reviewId, review.str("nodeId"), review.str("state"), review.str("controlState"), review.num("contractRevision")?.toString().orEmpty(), review.num("executionEpoch")?.toString().orEmpty()), color = colors.secondaryContent)
+                            TextButton(enabled = !loading && reviewId.isNotBlank(), onClick = { scope.launch { open(reviewId) } }) { Text(stringResource(R.string.factory_review_open_work)) }
+                        }
+                        if ((work["reviewWorkItemsTruncated"] as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_review_more), color = colors.secondaryContent)
+                        val opinions = work.arr("reviewOpinions")
+                        if (opinions.isEmpty()) Text(stringResource(R.string.factory_review_none), color = colors.secondaryContent)
+                        opinions.forEach { opinion ->
+                            val source = opinion.obj("candidate")
+                            val reviewer = opinion.obj("reviewer")
+                            val sourceRun = source?.obj("runtime")
+                            val reviewRun = reviewer?.obj("runtime")
+                            Text(stringResource(R.string.factory_review_opinion, opinion.str("verdict").ifBlank { "—" }, opinion.str("reason").ifBlank { "—" }))
+                            Text(stringResource(R.string.factory_review_candidate_trace, source?.str("workItemId").orEmpty(), source?.str("digest").orEmpty(), source?.num("contractRevision")?.toString().orEmpty(), source?.num("executionEpoch")?.toString().orEmpty()), color = colors.secondaryContent)
+                            val sourcePaths = (source?.get("allowedPaths") as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+                            Text(stringResource(R.string.factory_review_scope, sourcePaths?.joinToString(", ")?.ifBlank { "—" } ?: "—"), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_run_trace, sourceRun?.str("runId").orEmpty().ifBlank { "—" }, sourceRun?.str("tool").orEmpty().ifBlank { "—" }, sourceRun?.str("provider").orEmpty().ifBlank { "—" }, sourceRun?.str("state").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_reviewer_trace, reviewer?.str("workItemId").orEmpty(), reviewer?.str("nodeId").orEmpty(), reviewRun?.str("runId").orEmpty().ifBlank { "—" }, reviewRun?.str("tool").orEmpty().ifBlank { "—" }, reviewRun?.str("provider").orEmpty().ifBlank { "—" }, reviewRun?.str("state").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_receipt_trace, opinion.str("verification").ifBlank { "—" }, opinion.str("currentContext").ifBlank { "—" }, opinion.obj("receipt")?.str("packetId").orEmpty().ifBlank { "—" }, opinion.obj("receipt")?.str("packetDigest").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_review_opinion_note), color = colors.secondaryContent)
+                        }
+                        if ((work["reviewOpinionsTruncated"] as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_review_more), color = colors.secondaryContent)
+                        if (work.arr("validationWorkItems").isNotEmpty() || work.arr("checks").isNotEmpty()) {
+                            Text(stringResource(R.string.factory_validation_title), style = MaterialTheme.typography.titleMedium)
+                            work.arr("validationWorkItems").forEach { validation ->
+                                val workspace = validation.obj("workspace")
+                                Text(stringResource(R.string.factory_validation_work, validation.str("workItemId"), validation.str("state"), validation.str("runId").ifBlank { "—" }, workspace?.str("state").orEmpty().ifBlank { "—" }, workspace?.str("provenance").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                                TextButton(enabled = !loading, onClick = { scope.launch { open(validation.str("workItemId")) } }) { Text(stringResource(R.string.factory_review_open_work)) }
+                            }
+                            work.arr("checks").forEach { check ->
+                                Text(stringResource(R.string.factory_validation_check, check.str("actionId"), check.str("state"), check.str("candidateDigest"), check.str("validationRunId").ifBlank { "—" }), color = colors.secondaryContent)
+                            }
+                            Text(stringResource(R.string.factory_validation_note), color = colors.secondaryContent)
+                            if ((work["checksTruncated"] as? JsonPrimitive)?.booleanOrNull == true || (work["validationWorkItemsTruncated"] as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_review_more), color = colors.secondaryContent)
+                        }
+                        Text(stringResource(R.string.factory_recovery_title), style = MaterialTheme.typography.titleMedium)
+                        val recovery = reconciliation
+                        val observed = recovery?.obj("acceptedRunObservation")
+                        val unknown = recovery?.obj("unknownOutcome")
+                        if (recovery == null) Text(stringResource(R.string.factory_recovery_unavailable), color = colors.secondaryContent)
+                        else {
+                            Text(stringResource(R.string.factory_recovery_execution, observed?.str("expectedRunId").orEmpty().ifBlank { "—" }, observed?.str("state").orEmpty().ifBlank { "unknown" }, observed?.str("runState").orEmpty().ifBlank { "—" }, observed?.str("observedAt").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                            Text(stringResource(R.string.factory_recovery_stop, recovery.str("controlState").ifBlank { "—" }, recovery.str("stopStatus").ifBlank { "unknown" }), color = colors.secondaryContent)
+                            if ((observed?.get("requiresVerification") as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_recovery_verify), color = colors.secondaryContent)
+                            if ((unknown?.get("isUnknown") as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_recovery_unknown, unknown?.str("reason").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                        }
+                        val reservation = budgetFacts?.obj("reservation")
+                        val reserved = reservation?.obj("reserved")
+                        val actual = reservation?.obj("actualUsage")
+                        val actualKnown = budgetFacts?.str("usageState") == "actual" && actual != null
+                        if (reservation == null) Text(stringResource(R.string.factory_recovery_budget_unavailable), color = colors.secondaryContent)
+                        else Text(stringResource(R.string.factory_recovery_budget, reservation.str("state").ifBlank { "unknown" }, reserved?.str("tokens").orEmpty().ifBlank { "—" }, reserved?.str("cost").orEmpty().ifBlank { "—" }, if (actualKnown) actual?.str("tokens").orEmpty().ifBlank { "—" } else "—", if (actualKnown) actual?.str("cost").orEmpty().ifBlank { "—" } else "—"), color = colors.secondaryContent)
+                        val external = recovery?.obj("externalOutcomes")
+                        if (external?.str("state") == "observed") {
+                            external.arr("entries").forEach { entry ->
+                                val receipt = entry.obj("providerReceipt")
+                                Text(stringResource(R.string.factory_external_receipt, entry.str("targetId"), entry.str("state").ifBlank { "unknown" }, receipt?.str("provider").orEmpty().ifBlank { "—" }, receipt?.str("statusCode").orEmpty().ifBlank { "—" }, receipt?.str("responseId").orEmpty().ifBlank { "—" }), color = colors.secondaryContent)
+                                entry.arr("manualReviews").forEach { review -> Text(stringResource(R.string.factory_external_human, review.str("observation"), review.str("reviewedAt")), color = colors.secondaryContent) }
+                            }
+                            if ((external["truncated"] as? JsonPrimitive)?.booleanOrNull == true) Text(stringResource(R.string.factory_review_more), color = colors.secondaryContent)
+                        } else Text(stringResource(R.string.factory_recovery_external), color = colors.secondaryContent)
+                        TextButton(enabled = !loading, onClick = { scope.launch { open(id) } }) { Text(stringResource(R.string.factory_recovery_recheck)) }
+                        Text(stringResource(R.string.factory_handoff_title), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.factory_handoff_note), color = colors.secondaryContent)
+                        work.arr("bindings").forEach { binding ->
+                            Text(stringResource(R.string.factory_handoff_run, binding.num("executionEpoch")?.toString().orEmpty(), binding.str("runId").ifBlank { "—" }, binding.str("status").ifBlank { "—" }), color = colors.secondaryContent)
+                        }
+                        if (work.arr("bindings").isEmpty()) Text(stringResource(R.string.factory_handoff_no_run), color = colors.secondaryContent)
+                        val savedHandoff = pendingHandoff?.let { Json.parseToJsonElement(it) as? JsonObject }
+                        if (savedHandoff != null) {
+                            Text(stringResource(R.string.factory_handoff_pending, savedHandoff.str("item")), color = colors.secondaryContent)
+                            AgentoButton(stringResource(R.string.factory_team_retry), enabled = !loading, secondary = true, onClick = { scope.launch { sendHandoff() } })
+                        } else if (version != null) AgentoButton(stringResource(R.string.factory_handoff_create), enabled = !loading && !needsRefresh, secondary = true, onClick = {
+                            pendingHandoff = buildJsonObject { put("item", id); put("version", version); put("key", UUID.randomUUID().toString()) }.toString()
+                            scope.launch { sendHandoff() }
+                        })
+                        handoff?.takeIf { it.str("workItemId") == id }?.let { snapshot ->
+                            Text(stringResource(R.string.factory_handoff_result, snapshot.str("assessment").ifBlank { "unknown" }, snapshot.str("asOf"), snapshot["staleReasons"]?.toString().orEmpty()), color = colors.secondaryContent)
+                            val snapshotBindings = snapshot.obj("facts")?.obj("sourceRefs")?.arr("bindings").orEmpty()
+                            snapshotBindings.forEach { binding ->
+                                Text(stringResource(R.string.factory_handoff_saved_run, binding.str("execution_epoch").ifBlank { "—" }, binding.str("run_id").ifBlank { "—" }, binding.str("status").ifBlank { "—" }), color = colors.secondaryContent)
+                            }
+                            Text(stringResource(R.string.factory_handoff_no_guarantee), color = colors.secondaryContent)
+                            TextButton(enabled = !loading, onClick = { scope.launch {
+                                loading = true
+                                try { handoff = repo.getHandoff(snapshot.str("id")); error = null }
+                                catch (cancel: CancellationException) { throw cancel }
+                                catch (e: Exception) { error = e.message ?: appContext.getString(R.string.factory_team_connection_error) }
+                                finally { loading = false }
+                            } }) { Text(stringResource(R.string.factory_handoff_refresh)) }
+                        }
+                        val returnedCandidate = work.arr("decisions").any { it.str("decision") == "failed" && it.str("candidateDigest") == candidate && it.num("contractRevision") == rev && it.num("gateGeneration") == gate }
+                        if (reportType && work.str("state") == "review" && returnedCandidate && version != null) {
+                            Text(stringResource(R.string.factory_review_revision_note), color = colors.secondaryContent)
+                            val attemptLimit = contract?.obj("retry")?.num("maxAttempts")
+                            val usedAttempts = work.arr("bindings").size
+                            Text(stringResource(R.string.factory_review_attempts_limit, attemptLimit?.toString() ?: "—", usedAttempts.toString()), color = colors.secondaryContent)
+                            if (attemptLimit == null || usedAttempts >= attemptLimit) Text(stringResource(R.string.factory_review_attempts_exhausted), color = colors.secondaryContent)
+                            AgentoButton(stringResource(R.string.factory_review_request_revision), enabled = pending == null && !loading && !needsRefresh && attemptLimit != null && usedAttempts < attemptLimit, onClick = {
+                                prepare("retry", buildJsonObject { put("item", id); put("version", version) })
+                            }, secondary = true)
+                        }
+                        val priorReturned = work.arr("decisions").any { it.str("decision") == "failed" && it.num("contractRevision") == rev }
+                        val authority = work.obj("reportAuthority")?.str("kind")
+                        if (reportType && work.str("state") == "ready" && candidate.isBlank() && priorReturned && version != null) {
+                            when (authority) {
+                                "owner" -> {
+                                    Text(stringResource(R.string.factory_review_authorize_note), color = colors.secondaryContent)
+                                    val reservation = contract?.obj("budgetReservation")
+                                    val budget = contract?.obj("budget")
+                                    Text(stringResource(R.string.factory_review_budget, reservation?.str("tokens").orEmpty().ifBlank { budget?.str("maxTokens").orEmpty().ifBlank { "—" } }, reservation?.str("cost").orEmpty().ifBlank { budget?.str("maxCost").orEmpty().ifBlank { "—" } }), color = colors.secondaryContent)
+                                    when ((work.obj("reportAuthority")?.get("nextExecutionAuthorized") as? JsonPrimitive)?.booleanOrNull) {
+                                        true -> Text(stringResource(R.string.factory_review_already_authorized), color = colors.secondaryContent)
+                                        false -> AgentoButton(stringResource(R.string.factory_review_authorize), enabled = pending == null && !loading && !needsRefresh, onClick = {
+                                            prepare("authorization", buildJsonObject { put("item", id); put("version", version) })
+                                        })
+                                        null -> Text(stringResource(R.string.factory_review_authority_unknown), color = colors.secondaryContent)
+                                    }
+                                }
+                                "responsibility" -> Text(stringResource(R.string.factory_review_responsibility_authority), color = colors.secondaryContent)
+                                else -> Text(stringResource(R.string.factory_review_authority_unknown), color = colors.secondaryContent)
+                            }
+                        }
+                        if (reportType && resource?.str("networkPolicy") == "inherit_existing_permissions" && work.str("state") == "proposed" && version != null && contract != null) {
                             val reservation = contract.obj("budgetReservation")
                             val budget = contract.obj("budget")
                             val tokenValues = listOfNotNull(reservation?.get("tokens"), budget?.get("maxTokens"))
@@ -487,22 +703,45 @@ fun FactoryTeamWorkspace(
                         if (technicalOpen) contract?.arr("acceptanceCriteria")?.forEach { c -> Text(stringResource(R.string.factory_team_review_criterion, c.str("description").ifBlank { c.str("id") })) }
                         val manualCriteria = contract?.arr("acceptanceCriteria")?.filter { it.str("method") == "manual" }.orEmpty()
                         val manual = manualCriteria.firstOrNull { it.str("id") == criterionIdSelected }
-                        val reportReadable = report != null && report.str("source") == "persisted_assistant_final" && (report["readable"] as? JsonPrimitive)?.booleanOrNull == true
+                        val reportReadable = report != null && report.str("source") == "persisted_assistant_final" && (report["readable"] as? JsonPrimitive)?.booleanOrNull == true && report.str("packetId").isNotBlank() && report.str("packetDigest").isNotBlank()
+                        if (work.str("state") == "review" && !reportReadable) Text(stringResource(R.string.factory_review_unverified), color = colors.secondaryContent)
                         if (reportType && reportReadable && work.str("state") == "review" && candidate.isNotBlank() && version != null && rev != null && gate != null && manualCriteria.isNotEmpty()) {
                             manualCriteria.forEach { criterionEntry -> AgentoRowSurface(selected = criterionIdSelected == criterionEntry.str("id"), onClick = { criterionIdSelected = criterionEntry.str("id"); reviewDecision = null }, modifier = Modifier.fillMaxWidth()) {
                                 Text(criterionEntry.str("description").ifBlank { criterionEntry.str("id") }, Modifier.padding(12.dp))
                             } }
+                            Text(stringResource(R.string.factory_review_select_passages), color = colors.secondaryContent)
+                            val reportText = report?.str("visibleText").orEmpty()
+                            var offset = 0
+                            reportText.split('\n').forEach { line ->
+                                val trimmed = line.trim()
+                                val start = offset + if (trimmed.isEmpty()) 0 else line.indexOf(trimmed)
+                                val prefix = trimmed.take(1000)
+                                val excerpt = if (prefix.lastOrNull()?.isHighSurrogate() == true) prefix.dropLast(1) else prefix
+                                offset += line.length + 1
+                                if (excerpt.isNotBlank()) {
+                                    val selectedPassage = selectedExcerpts.any { it.first == start && it.second == excerpt }
+                                    TextButton(enabled = pending == null && !loading && !needsRefresh, onClick = {
+                                        selectedExcerpts = if (selectedPassage) selectedExcerpts.filterNot { it.first == start && it.second == excerpt }
+                                            else if (selectedExcerpts.size < 20 && selectedExcerpts.sumOf { it.second.toByteArray(Charsets.UTF_8).size } + excerpt.toByteArray(Charsets.UTF_8).size <= 11000) selectedExcerpts + (start to excerpt) else selectedExcerpts
+                                        reviewDecision = null
+                                    }) { Text((if (selectedPassage) "✓ " else "") + excerpt) }
+                                    if (selectedPassage) OutlinedTextField(passageReasons[start].orEmpty(), { passageReasons = passageReasons + (start to it.take(1200)) }, label = { Text(stringResource(R.string.factory_review_passage_reason)) }, modifier = Modifier.fillMaxWidth())
+                                }
+                            }
+                            Text(stringResource(R.string.factory_review_passage_count, selectedExcerpts.size), color = colors.secondaryContent)
                             OutlinedTextField(rationale, { rationale = it }, label = { Text(stringResource(R.string.factory_team_31)) }, modifier = Modifier.fillMaxWidth())
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                AgentoButton(stringResource(R.string.factory_team_32), onClick = { reviewDecision = "passed" }, enabled = pending == null && manual != null, secondary = true)
-                                AgentoButton(stringResource(R.string.factory_team_33), onClick = { reviewDecision = "failed" }, enabled = pending == null && manual != null, secondary = true)
+                                AgentoButton(stringResource(R.string.factory_team_32), onClick = { reviewDecision = "passed" }, enabled = pending == null && !loading && !needsRefresh && manual != null, secondary = true)
+                                AgentoButton(stringResource(R.string.factory_team_33), onClick = { reviewDecision = "failed" }, enabled = pending == null && !loading && !needsRefresh && manual != null, secondary = true)
                             }
+                            val selectedTargets = buildJsonArray { selectedExcerpts.forEach { (start, excerpt) -> add(buildJsonObject { put("section", "visibleText"); put("start", start); put("excerpt", excerpt); put("rationale", passageReasons[start].orEmpty().trim()) }) } }
+                            val validTargets = selectedExcerpts.all { passageReasons[it.first]?.isNotBlank() == true } && selectedTargets.toString().toByteArray(Charsets.UTF_8).size <= 11000
                             reviewDecision?.let { decision ->
                                 val decisionLabel = stringResource(if (decision == "passed") R.string.factory_team_pass else R.string.factory_team_fail)
                                 Text(stringResource(R.string.factory_team_confirm_decision, decisionLabel))
-                                AgentoButton(stringResource(R.string.factory_team_confirm_button, decisionLabel), enabled = manual != null && rationale.isNotBlank() && rationale.length <= 4096 && pending == null && !loading, onClick = {
+                                AgentoButton(stringResource(R.string.factory_team_confirm_button, decisionLabel), enabled = manual != null && rationale.isNotBlank() && rationale.length <= 4096 && (decision != "failed" || validTargets) && pending == null && !loading && !needsRefresh, onClick = {
                                     val reason = rationale; val criterionId = manual?.str("id").orEmpty(); reviewDecision = null
-                                    prepare("decision", buildJsonObject { put("item",id); put("version",version); put("revision",rev); put("gate",gate); put("candidate",candidate); put("criterion",criterionId); put("decision",decision); put("reason",reason) })
+                                    prepare("decision", buildJsonObject { put("item",id); put("version",version); put("revision",rev); put("gate",gate); put("candidate",candidate); put("criterion",criterionId); put("decision",decision); put("reason",reason); put("packetId",report!!.str("packetId")); put("packetDigest",report.str("packetDigest")); if (decision == "failed" && selectedExcerpts.isNotEmpty()) put("targets", selectedTargets) })
                                 })
                             }
                         }
