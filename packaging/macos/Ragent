@@ -44,9 +44,8 @@ if ! ragent_ensure_runtime_shims; then
   exit 1
 fi
 
-# Preserve an explicitly enabled login service when upgrading the app name.
-# Never create a login item on a fresh installation.
-if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ] || [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ]; then
+# Validate an existing login service before starting; never create a login item on a fresh installation.
+if [ -e "$HOME/Library/LaunchAgents/cloud.agenton.ragent.plist" ]; then
   if ! "$RAGENT_NODE_BIN" "$RAGENT_RESOURCES_DIR/ragent-login.cjs" migrate \
     "$RAGENT_RESOURCES_DIR" "$(ragent_config_dir)" "${CHAT_PORT:-7690}"; then
     report_start_failure '无法安全迁移登录自启动服务。原配置已保留，请检查登录项。'
