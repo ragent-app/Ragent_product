@@ -9,6 +9,7 @@ import { organizationHasCreatedSubordinate } from './organization-created-subord
 import { verifiedBirthActor } from './organization-birth-evidence.mjs';
 import { getBudgetCounter } from './organization-governor.mjs';
 import { collectOrganizationStatus } from './organization-status-projection.mjs';
+import { reconcileReviewOptionalPhaseCompletions } from './organization-phase-completion.mjs';
 import { getOrganizationRuntimeCapabilities } from './organization-runtime-capabilities.mjs';
 import {
   organizationProjectionCache,
@@ -129,14 +130,14 @@ async function buildOrganizationProjectionUncached(organizationId, {
   const nodes = await listOrganizationNodes(org.id);
   const edges = await listOrganizationEdges(org.id, { revision: null });
   const itemLimit = Math.min(MAX_ITEMS, Math.max(1, integer(maxItems, MAX_ITEMS)));
-  const eventHistory = await listOrganizationEvents(org.id, {
+  let eventHistory = await listOrganizationEvents(org.id, {
     limit: v2 ? 5000 : itemLimit,
     // V2 status/changes are explicitly recent; fetch the tail directly so a
     // long-lived organization does not waste the 5k-event window on its
     // oldest history.
     latest: v2,
   });
-  const events = v2 ? eventHistory.slice(-itemLimit) : eventHistory.slice(0, itemLimit);
+  let events = v2 ? eventHistory.slice(-itemLimit) : eventHistory.slice(0, itemLimit);
   const envelopes = await listInternalEnvelopes(org.id, { limit: Math.min(MAX_ITEMS, Math.max(1, integer(maxItems, MAX_ITEMS))) });
   const counter = org.currentRevision ? await getBudgetCounter(org.id, org.currentRevision) : null;
   const edgeByChild = new Map(edges.filter((edge) => edge.edgeType === 'MANAGES').map((edge) => [edge.childNodeId, edge.parentNodeId]));
@@ -145,7 +146,7 @@ async function buildOrganizationProjectionUncached(organizationId, {
   const safeEdges = bounded(edges).map((edge) => ({
     id: edge.id, type: edge.edgeType, parentId: edge.parentNodeId, childId: edge.childNodeId, revision: edge.organizationRevision,
   }));
-  const safeEvents = bounded(events).map((event) => publicEvent(event, nodes));
+  let safeEvents = bounded(events).map((event) => publicEvent(event, nodes));
   const eventsByPhase = new Map();
   for (const event of eventHistory) {
     const phaseId = text(event?.phaseId);
@@ -160,14 +161,62 @@ async function buildOrganizationProjectionUncached(organizationId, {
   })));
   const phases = bounded(Array.isArray(compiled.phases) ? compiled.phases : [])
     .map((phase) => publicPhase(phase, eventsByPhase.get(phase.phaseId) || []));
-  const status = v2 ? await collectOrganizationStatus({
+  const gates = v2 ? await listOrganizationGates(org.id) : [];
+  let status = v2 ? await collectOrganizationStatus({
     organizationId: org.id,
     organization: org,
     revision,
     nodes,
     events: eventHistory,
-    gates: await listOrganizationGates(org.id),
+    gates,
   }) : null;
+  const reviewOptionalDisabled = (compiled?.reviewPolicy?.required === false || revision?.proposal?.reviewPolicy?.required === false);
+  if (v2 && status && revision?.state === 'frozen' && reviewOptionalDisabled) {
+    const completedEventPhases = new Set(
+      eventHistory
+        .filter((event) => ['phase.completed', 'phase_completed'].includes(event?.type))
+        .map((event) => text(event?.phaseId))
+        .filter(Boolean),
+    );
+    const candidatePhaseIds = (status.phases || [])
+      .filter((phase) => (
+        !completedEventPhases.has(text(phase.phaseId))
+        && Number(phase.progress?.total || 0) > 0
+        && Number(phase.progress?.completed || 0) === Number(phase.progress?.total || 0)
+        && Number(phase.progress?.blocked || 0) === 0
+        && Number(phase.progress?.activeTasks || 0) === 0
+        && !['open', 'decided', 'needs_changes'].includes(text(phase.gate?.state))
+      ))
+      .map((phase) => text(phase.phaseId))
+      .filter(Boolean);
+    if (candidatePhaseIds.length > 0) {
+      const persisted = await reconcileReviewOptionalPhaseCompletions({
+        organizationId: org.id,
+        revision: org.currentRevision,
+        phaseIds: candidatePhaseIds,
+        allowPendingAggregation: false,
+        organization: org,
+        revisionRow: revision,
+        nodes,
+        gates,
+        events: eventHistory,
+        status,
+      });
+      if (persisted.length > 0) {
+        eventHistory = await listOrganizationEvents(org.id, { limit: 5000, latest: true });
+        events = eventHistory.slice(-itemLimit);
+        safeEvents = bounded(events).map((event) => publicEvent(event, nodes));
+        status = await collectOrganizationStatus({
+          organizationId: org.id,
+          organization: org,
+          revision,
+          nodes,
+          events: eventHistory,
+          gates,
+        });
+      }
+    }
+  }
   const progress = {
     epoch: org.progressEpoch,
     state: org.state,

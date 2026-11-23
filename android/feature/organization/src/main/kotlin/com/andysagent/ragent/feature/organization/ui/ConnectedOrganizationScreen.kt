@@ -329,10 +329,17 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
     val cachedTransport = remember(transport, offlineScope, organizationId, ownerVerified) {
         object : RagentTransport by transport {
             override suspend fun execute(request: ApiRequest): ApiResponse {
-                if (transport.connectionState.value != RuntimeConnectionState.Connected) error("Offline controls are disabled")
-                val requestGeneration = offlineScope?.let { cache.generation(it) }
-                val response = try { transport.execute(request) } catch (error: ApiException) {
-                    if (offlineScope != null && com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus(error.statusCode)) {
+                val scope = offlineScope
+                val requestGeneration = scope?.let { cache.generation(it) }
+                return com.andysagent.ragent.feature.organization.data.executeCachedOrganizationTransportRequest(
+                    transport = transport,
+                    request = request,
+                    hasOfflineScope = scope != null,
+                    requestGeneration = requestGeneration,
+                    ownerGeneration = ownerGeneration,
+                    ownerVerified = ownerVerified,
+                    organizationId = organizationId,
+                    onAuthorizationRevoked = {
                         ownerVerified = false
                         ownerGeneration = null
                         projectionGeneration = null
@@ -343,30 +350,16 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
                         nodes = emptyList()
                         cachedAt = null
                         status = "Organization access changed. Refresh to check current authorization."
-                        cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
-                    }
-                    throw error
-                }
-                if (offlineScope != null && com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus(response.statusCode)) {
-                    ownerVerified = false
-                    ownerGeneration = null
-                    projectionGeneration = null
-                    loaded = false
-                    organizationId = null
-                    baseProjection = null
-                    organizationNotFound = false
-                    nodes = emptyList()
-                    cachedAt = null
-                    status = "Organization access changed. Refresh to check current authorization."
-                    cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(offlineScope) }
-                } else if (offlineScope != null && ownerVerified && requestGeneration == ownerGeneration && request.method == "GET" && response.isSuccessful && organizationId != null) {
-                    val base = "/api/organizations/${android.net.Uri.encode(organizationId)}/factory/"
-                    val tail = request.path.removePrefix(base)
-                    val permitted = request.path.startsWith(base) &&
-                        (tail == "work-items" || tail.matches(Regex("work-items/[^/?]+")) || tail.matches(Regex("nodes/[^/?]+/messages")))
-                    if (permitted && requestGeneration != null) withContext(Dispatchers.IO) { cache.write(offlineScope, response.body, requestGeneration, request.path) }
-                }
-                return com.andysagent.ragent.feature.organization.data.normalizeOrganizationUnavailableResponse(response)
+                        if (scope != null) {
+                            cacheClearFailed = !withContext(Dispatchers.IO) { cache.clear(scope) }
+                        }
+                    },
+                    onCacheFactoryResponse = { body, generation, path ->
+                        if (scope != null) {
+                            withContext(Dispatchers.IO) { cache.write(scope, body, generation, path) }
+                        }
+                    },
+                )
             }
         }
     }

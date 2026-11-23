@@ -3,6 +3,9 @@
 // authorities. No model-owned progress value is accepted here.
 import { getRun } from './runs.mjs';
 import { listCollaborationRecords } from './collaboration-store.mjs';
+import { getResultPacket } from './result-packets.mjs';
+import { extractDelegationResult } from './delegation-result.mjs';
+import { redactSensitiveText } from './tool-call-schema.mjs';
 
 export const ORGANIZATION_STATUS_PROJECTION_SCHEMA_VERSION = 1;
 
@@ -10,6 +13,7 @@ const ACTIVE_TASK_STATES = new Set(['planned', 'ready', 'retrying', 'running']);
 const TERMINAL_TASK_STATES = new Set(['succeeded', 'failed', 'cancelled']);
 const ACTIVE_RUN_STATES = new Set(['queued', 'starting', 'running', 'awaiting_approval', 'cancelling']);
 const TERMINAL_RUN_STATES = new Set(['completed', 'failed', 'cancelled']);
+const MAX_RESULT_PACKET_SUMMARY_CHARS = 400;
 
 function text(value) { return typeof value === 'string' ? value.trim() : ''; }
 function integer(value, fallback = 0) { return Number.isInteger(value) ? value : fallback; }
@@ -47,6 +51,90 @@ function latestByNumber(entries, field = 'attemptNumber') {
 function safeReasonCode(value, fallback = '') {
   const normalized = text(value).replace(/[^A-Za-z0-9_.:-]/g, '_');
   return bounded(normalized, 96) || fallback;
+}
+
+function extractInlinePacketPayload(rawText) {
+  const delegation = extractDelegationResult(rawText);
+  if (delegation) return delegation;
+  const source = typeof rawText === 'string' ? rawText : '';
+  const match = /<result_packet>\s*([\s\S]*?)\s*<\/result_packet>/i.exec(source);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[1].trim());
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function stripPacketTags(value) {
+  return String(value || '')
+    .replace(/<ragent-result-packet>[\s\S]*?<\/ragent-result-packet>/gi, ' ')
+    .replace(/<result_packet>[\s\S]*?<\/result_packet>/gi, ' ');
+}
+
+function redactPacketSummarySecrets(value) {
+  return redactSensitiveText(String(value || ''))
+    .replace(/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g, '[redacted]')
+    .replace(/\b(?:sk-ant|sk|pk|rk)-[A-Za-z0-9_-]{12,}\b/g, '[redacted]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9_-]+)?\b/g, '[redacted]');
+}
+
+function cleanResultPacketSummary(rawSummary) {
+  if (typeof rawSummary !== 'string' || !rawSummary.trim()) return null;
+  const extracted = extractInlinePacketPayload(rawSummary);
+  const candidate = text(extracted?.summary) || stripPacketTags(rawSummary);
+  const normalized = redactPacketSummarySecrets(candidate).replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+  if (normalized.length <= MAX_RESULT_PACKET_SUMMARY_CHARS) return normalized;
+  return `${normalized.slice(0, MAX_RESULT_PACKET_SUMMARY_CHARS - 3).trimEnd()}...`;
+}
+
+function extractResultPacketSummary(attempt, resultPacket) {
+  if (!attempt || !text(attempt.resultPacketId)) return null;
+  const candidates = [
+    resultPacket?.summary,
+    resultPacket?.consultation?.recommendation?.opinion,
+    attempt?.report?.summary,
+  ];
+  for (const candidate of candidates) {
+    const cleaned = cleanResultPacketSummary(candidate);
+    if (cleaned) return cleaned;
+  }
+  return null;
+}
+
+function cleanResultPacketVerdict(attempt, resultPacket) {
+  if (!attempt || !text(attempt.resultPacketId)) return null;
+  const rawSource = typeof resultPacket?.summary === 'string'
+    ? resultPacket.summary
+    : (typeof attempt?.report?.summary === 'string' ? attempt.report.summary : '');
+  const extracted = rawSource ? extractInlinePacketPayload(rawSource) : null;
+  const rawVerdict = text(resultPacket?.verdict)
+    || text(resultPacket?.state)
+    || text(extracted?.verdict)
+    || text(extracted?.state)
+    || text(attempt?.report?.verdict);
+  return rawVerdict ? safeReasonCode(rawVerdict, '') || null : null;
+}
+
+/**
+ * Determines whether a phase requires an explicit review gate before it can
+ * complete. Defaults to `true` unless the frozen revision's reviewPolicy
+ * explicitly disables required review (`required === false`) and the phase
+ * itself does not bind a reviewer node with `reviewRequired: true`.
+ */
+export function isPhaseReviewRequired(compiled = {}, proposal = {}, phase = {}, phaseNodes = []) {
+  const policy = plain(compiled?.reviewPolicy)
+    ? compiled.reviewPolicy
+    : (plain(proposal?.reviewPolicy) ? proposal.reviewPolicy : null);
+  if (!policy || !Object.hasOwn(policy, 'required')) return true;
+  if (policy.required !== false) return true;
+  if (phase?.reviewRequired === true) {
+    return (Array.isArray(phaseNodes) ? phaseNodes : [])
+      .some((node) => text(node?.role || node?.nodeRole).toLowerCase() === 'reviewer');
+  }
+  return false;
 }
 function publicRun(run) {
   if (!run) return null;
@@ -92,8 +180,14 @@ function attemptsForTask(collaboration, taskId) {
     .filter((attempt) => attempt?.taskId === taskId);
 }
 
-function publicAttempt(attempt, run) {
+function publicAttempt(attempt, run, resultPacket = null) {
   if (!attempt) return null;
+  const resultPacketId = text(attempt.resultPacketId) || null;
+  const resultPacketSummary = extractResultPacketSummary(attempt, resultPacket);
+  const resultPacketVerdict = cleanResultPacketVerdict(attempt, resultPacket);
+  const androidVerdict = resultPacketSummary
+    ? resultPacketVerdict
+    : (resultPacketVerdict && !['succeeded', 'completed'].includes(resultPacketVerdict.toLowerCase()) ? resultPacketVerdict : null);
   return {
     id: text(attempt.id),
     number: integer(attempt.attemptNumber),
@@ -101,7 +195,11 @@ function publicAttempt(attempt, run) {
     sessionId: text(attempt.sessionId),
     runId: text(attempt.runId),
     runState: text(run?.state) || null,
-    resultPacketId: text(attempt.resultPacketId) || null,
+    resultPacketId,
+    resultPacketSummary,
+    resultPacketVerdict,
+    ...(resultPacketSummary ? { summary: resultPacketSummary } : {}),
+    ...(androidVerdict ? { verdict: androidVerdict } : {}),
     failureReasonCode: safeReasonCode(attempt.failureKind),
     startedAt: attempt.startedAt || null,
     completedAt: attempt.completedAt || null,
@@ -152,7 +250,7 @@ function deriveNodeState({ node, collaboration, task, run, blockers, gate }) {
   return node.currentSessionId ? 'idle' : 'unbound';
 }
 
-function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, gate, organization, events = [], runtime, display = {} }) {
+function publicNodeStatus({ node, collaboration, task, attempt, run, resultPacket = null, phaseId, gate, organization, events = [], runtime, display = {} }) {
   const tasks = Array.isArray(collaboration?.tasks) ? collaboration.tasks : [];
   const completed = tasks.filter((entry) => entry.state === 'succeeded').length;
   const blockers = deriveBlockers({ node, collaboration, task, attempt, run, events });
@@ -183,6 +281,7 @@ function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, ga
     blockers: deriveBlockers({ node, collaboration, task, attempt, run, events: [] }),
     gate: null,
   }) : 'unknown';
+  const attemptProjection = publicAttempt(attempt, run, resultPacket);
   return {
     id: node.id,
     parentId: node.parentNodeId || null,
@@ -202,7 +301,9 @@ function publicNodeStatus({ node, collaboration, task, attempt, run, phaseId, ga
     } : null,
     currentActivity: runSessionState(run, task, attempt),
     currentTask: publicTask(task, attempt, run, phaseId),
-    attempt: publicAttempt(attempt, run),
+    attempt: attemptProjection,
+    ...(attemptProjection?.resultPacketId ? { resultPacketId: attemptProjection.resultPacketId } : {}),
+    ...(attemptProjection?.resultPacketSummary ? { resultPacketSummary: attemptProjection.resultPacketSummary } : {}),
     progress: {
       state,
       completed,
@@ -267,6 +368,7 @@ export async function collectOrganizationStatus({
   gates = [],
   collaborations = null,
   runResolver = getRun,
+  resultPacketResolver = getResultPacket,
 } = {}) {
   const orgId = text(organizationId || organization?.id);
   if (!orgId || !organization) return null;
@@ -307,14 +409,27 @@ export async function collectOrganizationStatus({
     }
   }
   const runIds = new Set();
+  const packetIds = new Set();
   for (const collaboration of relevant) {
-    for (const attempt of collaboration.attempts || []) if (attempt.runId) runIds.add(attempt.runId);
+    for (const attempt of collaboration.attempts || []) {
+      if (attempt.runId) runIds.add(attempt.runId);
+      const packetId = text(attempt.resultPacketId);
+      if (packetId) packetIds.add(packetId);
+    }
     for (const task of collaboration.tasks || []) if (task.runId) runIds.add(task.runId);
   }
-  const runEntries = await mapWithBoundedConcurrency([...runIds], async (runId) => {
-    try { return [runId, await runResolver(runId)]; } catch { return [runId, null]; }
-  });
+  const [runEntries, packetEntries] = await Promise.all([
+    mapWithBoundedConcurrency([...runIds], async (runId) => {
+      try { return [runId, await runResolver(runId)]; } catch { return [runId, null]; }
+    }),
+    typeof resultPacketResolver === 'function'
+      ? mapWithBoundedConcurrency([...packetIds], async (packetId) => {
+        try { return [packetId, await resultPacketResolver(packetId)]; } catch { return [packetId, null]; }
+      })
+      : Promise.resolve([]),
+  ]);
   const runs = new Map(runEntries);
+  const resultPackets = new Map(packetEntries);
   const latestGates = new Map();
   for (const gate of gates) {
     const current = latestGates.get(gate.phaseId);
@@ -326,6 +441,7 @@ export async function collectOrganizationStatus({
     const attempts = attemptsForTask(collaboration, task?.id);
     const attempt = latestByNumber(attempts);
     const run = runs.get(text(task?.runId) || text(attempt?.runId)) || null;
+    const resultPacket = resultPackets.get(text(attempt?.resultPacketId)) || null;
     const phaseId = nodePhase(node, compiledNodes);
     const compiledNode = compiledNodes.get(node.stableKey) || {};
     return publicNodeStatus({
@@ -334,6 +450,7 @@ export async function collectOrganizationStatus({
       task,
       attempt,
       run,
+      resultPacket,
       phaseId,
       gate: latestGates.get(phaseId),
       organization,
@@ -365,7 +482,7 @@ export async function collectOrganizationStatus({
       acceptance: (Array.isArray(phase.acceptance) ? phase.acceptance : []).slice(0, 128).map((entry) => ({
         criterion: bounded(entry?.criterion, 512), evidenceRequired: entry?.evidenceRequired !== false,
       })).filter((entry) => entry.criterion),
-      reviewRequired: phase.reviewRequired !== false,
+      reviewRequired: isPhaseReviewRequired(compiled, revision?.proposal, phase, phaseNodes),
       reviewState: gate?.state === 'needs_changes' ? 'needs_changes'
         : ['passed', 'completed'].includes(gate?.state) || completedByEvent ? 'complete' : 'pending',
       gate: publicGate(gate),

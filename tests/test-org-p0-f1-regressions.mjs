@@ -1016,6 +1016,590 @@ try {
       assert.equal(projPhase?.state, 'completed', `P2 #4: completed phase derives state=completed instead of planned (${failureDiag})`);
       assert.equal(projPhase?.reviewState, 'pending', 'P2 #4: reviewState remains honestly pending without a passed gate');
       assert.equal(projPhase?.gate ?? null, null, 'P2 #4: gate fact is not fabricated');
+
+      // ── 5. P2 polish #1: publicAttempt emits bounded, secret-redacted resultPacketSummary/Verdict & Android DTO parity
+      const resultPacketsMod = await import('../chat/result-packets.mjs');
+      const collabStoreMod = await import('../chat/collaboration-store.mjs');
+      const messagingMod = await import('../chat/organization-messaging.mjs');
+      const { assertPublicProjection } = await import('../chat/organization-projection.mjs');
+      const { collectOrganizationStatus } = await import('../chat/organization-status-projection.mjs');
+      try {
+        const longText = `${'Implemented server summary cleanly. '.repeat(20)}`;
+        const summaryRunId = 'run_p2_summary_1';
+        await runs.ensureRunDirectory(summaryRunId);
+        await runs.createRun({
+          status: { id: summaryRunId, sessionId: leadTarget.id, requestId: 'req_p2_summary_1', state: 'completed', finalizedAt: stagingDoneAt },
+          manifest: {
+            sessionId: leadTarget.id,
+            requestId: 'req_p2_summary_1',
+            projectId: project.id,
+            executionScopeDigest: 'sha256:p2-summary-scope',
+            executionScope: { projectId: project.id, sessionId: leadTarget.id, workspaceRevision: 1, git: { state: 'not_git' } },
+          },
+        });
+        await runs.writeRunResult(summaryRunId, {
+          summary: `Leaked sk-secretTokenValue987654321 and Authorization: Bearer topsecret_token_999.\n<ragent-result-packet>{"state":"completed","summary":"Summary with sk-secretTokenValue987654321 and Bearer my_bearer_999 ${longText}"}</ragent-result-packet>`,
+        });
+        const richPacket = await resultPacketsMod.createExecutionPacket({
+          runId: summaryRunId,
+          projectId: project.id,
+          sessionId: leadTarget.id,
+          taskId: 'task-p2-rich',
+          attemptId: 'att-p2-rich',
+          organizationId: orgRec.id,
+          nodeId: leadNode.id,
+          revision: 1,
+          phaseId: 'phase-1',
+        });
+
+        // Use collectOrganizationStatus directly to test rich packet, missing packet, and empty-packet cases cleanly.
+        const richStatus = await collectOrganizationStatus({
+          organizationId: orgRec.id,
+          organization: orgRec,
+          revision: await orgStore.getRevision(orgRec.id, 1),
+          nodes: [leadNode],
+          events: await messagingMod.listOrganizationEvents(orgRec.id),
+          gates: await orgStore.listOrganizationGates(orgRec.id),
+          collaborations: [{
+            id: 'col_rich_1',
+            state: 'completed',
+            updatedAt: stagingDoneAt,
+            policy: {
+              organizationId: orgRec.id,
+              organizationNodeId: leadNode.id,
+              organizationBindingGeneration: 1,
+            },
+            tasks: [{ id: 'task-p2-rich', state: 'succeeded', objective: 'Summarize', runId: summaryRunId, updatedAt: stagingDoneAt }],
+            attempts: [{
+              id: 'att-p2-rich',
+              taskId: 'task-p2-rich',
+              attemptNumber: 1,
+              state: 'succeeded',
+              sessionId: leadTarget.id,
+              runId: summaryRunId,
+              resultPacketId: richPacket.packetId,
+              report: { summary: 'Fallback report summary' },
+              startedAt: stagingDoneAt,
+              completedAt: stagingDoneAt,
+              updatedAt: stagingDoneAt,
+            }],
+          }],
+          runResolver: async () => ({ id: summaryRunId, sessionId: leadTarget.id, state: 'completed', startedAt: stagingDoneAt, completedAt: stagingDoneAt }),
+        });
+        const richNode = richStatus.nodes[0];
+        assert.equal(richNode.attempt.resultPacketId, richPacket.packetId);
+        assert.ok(richNode.attempt.resultPacketSummary, 'publicAttempt emits non-empty resultPacketSummary');
+        assert.ok(richNode.attempt.resultPacketSummary.length <= 400, 'resultPacketSummary is bounded to <= 400 chars');
+        assert.equal(richNode.attempt.resultPacketSummary.includes('sk-secretTokenValue987654321'), false, 'raw sk- secret redacted');
+        assert.equal(richNode.attempt.resultPacketSummary.includes('topsecret_token_999'), false, 'raw bearer token redacted');
+        assert.equal(richNode.attempt.resultPacketSummary.includes('my_bearer_999'), false, 'extracted bearer token redacted');
+        assert.equal(richNode.attempt.resultPacketSummary.includes('<ragent-result-packet>'), false, 'raw packet XML tags stripped');
+        assert.ok(richNode.attempt.resultPacketSummary.includes('[redacted]'), 'redaction marker replaces secrets');
+        assert.equal(richNode.attempt.resultPacketVerdict, 'succeeded', 'resultPacketVerdict reflects canonical packet state');
+        assert.equal(richNode.resultPacketId, richPacket.packetId, 'node exposes resultPacketId for Android DTO');
+        assert.equal(richNode.resultPacketSummary, richNode.attempt.resultPacketSummary, 'node exposes resultPacketSummary for Android DTO');
+        assert.equal(richNode.attempt.summary, richNode.attempt.resultPacketSummary, 'attempt exposes Android summary field');
+
+        // Clean summary passes assertPublicProjection end-to-end.
+        const cleanRunId = 'run_p2_clean_1';
+        await runs.ensureRunDirectory(cleanRunId);
+        await runs.createRun({
+          status: { id: cleanRunId, sessionId: leadTarget.id, requestId: 'req_p2_clean_1', state: 'completed', finalizedAt: stagingDoneAt },
+          manifest: {
+            sessionId: leadTarget.id,
+            requestId: 'req_p2_clean_1',
+            projectId: project.id,
+            executionScopeDigest: 'sha256:p2-clean-scope',
+            executionScope: { projectId: project.id, sessionId: leadTarget.id, workspaceRevision: 1, git: { state: 'not_git' } },
+          },
+        });
+        await runs.writeRunResult(cleanRunId, { summary: 'All unit checks passed in work/lead-notes.md.' });
+        const cleanPacket = await resultPacketsMod.createExecutionPacket({
+          runId: cleanRunId,
+          projectId: project.id,
+          sessionId: leadTarget.id,
+          taskId: 'task-p2-clean',
+          attemptId: 'att-p2-clean',
+        });
+        const cleanStatus = await collectOrganizationStatus({
+          organizationId: orgRec.id,
+          organization: orgRec,
+          revision: await orgStore.getRevision(orgRec.id, 1),
+          nodes: [leadNode],
+          events: [],
+          gates: [],
+          collaborations: [{
+            id: 'col_clean_1',
+            state: 'completed',
+            updatedAt: stagingDoneAt,
+            policy: { organizationId: orgRec.id, organizationNodeId: leadNode.id, organizationBindingGeneration: 1 },
+            tasks: [{ id: 'task-p2-clean', state: 'succeeded', objective: 'Clean', runId: cleanRunId, updatedAt: stagingDoneAt }],
+            attempts: [{
+              id: 'att-p2-clean',
+              taskId: 'task-p2-clean',
+              attemptNumber: 1,
+              state: 'succeeded',
+              sessionId: leadTarget.id,
+              runId: cleanRunId,
+              resultPacketId: cleanPacket.packetId,
+              updatedAt: stagingDoneAt,
+            }],
+          }],
+        });
+        assert.equal(cleanStatus.nodes[0].attempt.resultPacketSummary, 'All unit checks passed in work/lead-notes.md.');
+        assertPublicProjection({ schemaVersion: 2, nodes: cleanStatus.nodes, phases: cleanStatus.phases });
+
+        // Missing packet in store + no report summary -> null summary/verdict; no raw failureReason leak.
+        const missingPacketStatus = await collectOrganizationStatus({
+          organizationId: orgRec.id,
+          organization: orgRec,
+          revision: await orgStore.getRevision(orgRec.id, 1),
+          nodes: [leadNode],
+          events: [],
+          gates: [],
+          collaborations: [{
+            id: 'col_missing_1',
+            state: 'completed',
+            updatedAt: stagingDoneAt,
+            policy: { organizationId: orgRec.id, organizationNodeId: leadNode.id, organizationBindingGeneration: 1 },
+            tasks: [{ id: 'task-p2-missing', state: 'succeeded', objective: 'Missing', runId: 'run_none', updatedAt: stagingDoneAt }],
+            attempts: [{
+              id: 'att-p2-missing',
+              taskId: 'task-p2-missing',
+              attemptNumber: 1,
+              state: 'succeeded',
+              sessionId: leadTarget.id,
+              runId: 'run_none',
+              resultPacketId: 'rsp_missing_999',
+              failureReason: 'raw internal error must not leak',
+              updatedAt: stagingDoneAt,
+            }],
+          }],
+        });
+        assert.equal(missingPacketStatus.nodes[0].attempt.resultPacketId, 'rsp_missing_999');
+        assert.equal(missingPacketStatus.nodes[0].attempt.resultPacketSummary, null, 'missing packet cleanly yields null resultPacketSummary');
+        assert.equal(missingPacketStatus.nodes[0].attempt.resultPacketVerdict, null, 'missing packet cleanly yields null resultPacketVerdict');
+        assert.equal(missingPacketStatus.nodes[0].resultPacketSummary, undefined, 'node omits empty resultPacketSummary so Android falls back to ResultPacket ID');
+        assert.equal(JSON.stringify(missingPacketStatus).includes('raw internal error must not leak'), false);
+
+        // Unpacketized failed attempt -> null resultPacketSummary/Verdict even when report exists.
+        const noPacketFailedStatus = await collectOrganizationStatus({
+          organizationId: orgRec.id,
+          organization: orgRec,
+          revision: await orgStore.getRevision(orgRec.id, 1),
+          nodes: [leadNode],
+          events: [],
+          gates: [],
+          collaborations: [{
+            id: 'col_nopkt_1',
+            state: 'failed',
+            updatedAt: stagingDoneAt,
+            policy: { organizationId: orgRec.id, organizationNodeId: leadNode.id, organizationBindingGeneration: 1 },
+            tasks: [{ id: 'task-p2-nopkt', state: 'failed', objective: 'Failed', runId: 'run_fail', updatedAt: stagingDoneAt }],
+            attempts: [{
+              id: 'att-p2-nopkt',
+              taskId: 'task-p2-nopkt',
+              attemptNumber: 1,
+              state: 'failed',
+              failureKind: 'deterministic_failure',
+              failureReason: 'super secret failure',
+              sessionId: leadTarget.id,
+              runId: 'run_fail',
+              resultPacketId: '',
+              report: { summary: 'Raw failed summary' },
+              updatedAt: stagingDoneAt,
+            }],
+          }],
+        });
+        assert.equal(noPacketFailedStatus.nodes[0].attempt.resultPacketId, null);
+        assert.equal(noPacketFailedStatus.nodes[0].attempt.resultPacketSummary, null);
+        assert.equal(noPacketFailedStatus.nodes[0].attempt.resultPacketVerdict, null);
+      } finally {
+        await resultPacketsMod.closeResultPacketStore?.().catch(() => {});
+      }
+
+      // ── 6. P2 polish #2: Auto-persist phase.completed when reviewPolicy.required === false to unblock dependsOn,
+      // while preserving 409 ORG_PHASE_DEPENDENCY_BLOCKED for incomplete or reviewPolicy.required === true phases.
+      {
+        const { dispatchOrganizationPhase, phaseDependenciesCompleted } = await import('../chat/organization-phase-dispatch.mjs');
+        const { reconcileReviewOptionalPhaseCompletions } = await import('../chat/organization-phase-completion.mjs');
+        const { decideGate, completePhase } = await import('../chat/phase-gates.mjs');
+        const seqWriterApp = await appsMod.createApp({
+          name: 'Claude Seq Writer',
+          tool: 'claude-bidi',
+          capabilities: ['read', 'write'],
+          accessMode: 'writer',
+          collaborationPolicy: {
+            role: 'specialist',
+            canDelegate: false,
+            accessMode: 'writer',
+            capabilities: ['read', 'write'],
+            revision: 'seq-w-r1',
+          },
+        });
+
+        const makeSequentialOrg = async ({ keyPrefix, reviewRequiredPolicy }) => {
+          const seqRoot = await sessionManager.createSession(repoDir, 'claude-bidi', `Seq Root ${keyPrefix}`, {
+            projectId: project.id,
+            templateId: managerApp.id,
+            sessionClass: 'ROOT_LEADERSHIP',
+            sessionPlane: 'user',
+            providerProfile: 'glm-68f6bd41',
+            model: 'glm-5.3@glm-68f6bd41',
+            riskMode: 'recommended',
+          });
+          const seqOrg = await orgStore.createOrganization({
+            rootSessionId: seqRoot.id,
+            projectId: project.id,
+            state: 'active',
+            currentRevision: 1,
+            idempotencyKey: `${keyPrefix}-org`,
+          });
+          const seqLeadNodeId = `node_${keyPrefix}_lead`;
+          const seqWorkerNodeId = `node_${keyPrefix}_worker`;
+          const seqLeadSess = await createManagedSessionForNode({
+            organizationId: seqOrg.id,
+            organizationRevision: 1,
+            organizationNodeId: seqLeadNodeId,
+            roleInstanceId: `rinst_${keyPrefix}_lead`,
+            stableKey: 'lead',
+            role: 'specialist',
+            agentId: seqWriterApp.id,
+            sessionClass: 'WORKER',
+            runtime: { tool: 'claude-bidi', provider: 'glm-68f6bd41', model: 'glm-5.3@glm-68f6bd41' },
+            idempotencyKey: `${keyPrefix}-lead-sess`,
+          });
+          const seqWorkerSess = await createManagedSessionForNode({
+            organizationId: seqOrg.id,
+            organizationRevision: 1,
+            organizationNodeId: seqWorkerNodeId,
+            roleInstanceId: `rinst_${keyPrefix}_worker`,
+            stableKey: 'worker',
+            role: 'specialist',
+            agentId: seqWriterApp.id,
+            sessionClass: 'WORKER',
+            runtime: { tool: 'claude-bidi', provider: 'glm-68f6bd41', model: 'glm-5.3@glm-68f6bd41' },
+            idempotencyKey: `${keyPrefix}-worker-sess`,
+          });
+          const seqLeadNode = await orgStore.createNode({
+            id: seqLeadNodeId,
+            organizationId: seqOrg.id,
+            stableKey: 'lead',
+            nodeRole: 'specialist',
+            createdRevision: 1,
+            lifecycleState: 'active',
+            lifecycleMode: 'formal_org',
+            grant: { accessMode: 'writer', canWrite: true, canDelegate: false, writablePaths: ['work'] },
+            currentSessionId: seqLeadSess.sessionId,
+            bindingGeneration: 1,
+            roleInstanceId: `rinst_${keyPrefix}_lead`,
+            sessionClass: 'WORKER',
+          });
+          const seqWorkerNode = await orgStore.createNode({
+            id: seqWorkerNodeId,
+            organizationId: seqOrg.id,
+            stableKey: 'worker',
+            nodeRole: 'specialist',
+            createdRevision: 1,
+            lifecycleState: 'active',
+            lifecycleMode: 'formal_org',
+            grant: { accessMode: 'writer', canWrite: true, canDelegate: false, writablePaths: ['work'] },
+            currentSessionId: seqWorkerSess.sessionId,
+            bindingGeneration: 1,
+            roleInstanceId: `rinst_${keyPrefix}_worker`,
+            sessionClass: 'WORKER',
+          });
+          const reviewPolicy = reviewRequiredPolicy
+            ? { required: true, minReviewers: 1, independent: true }
+            : { required: false, minReviewers: 0, independent: false };
+          const compiled = {
+            schemaVersion: 1,
+            nodes: [
+              {
+                stableKey: 'lead',
+                role: 'specialist',
+                agentId: seqWriterApp.id,
+                phaseId: 'phase_lead',
+                objective: 'Lead delivery',
+                acceptance: [{ criterion: 'lead done', evidenceRequired: false }],
+                scope: { writablePaths: ['work'] },
+                runtime: { tool: 'claude-bidi', provider: 'glm-68f6bd41', model: 'glm-5.3@glm-68f6bd41' },
+                resolver: { selectedAgentId: seqWriterApp.id },
+              },
+              {
+                stableKey: 'worker',
+                role: 'specialist',
+                agentId: seqWriterApp.id,
+                phaseId: 'phase_worker',
+                objective: 'Worker follow-up',
+                acceptance: [{ criterion: 'worker done', evidenceRequired: false }],
+                scope: { writablePaths: ['work'] },
+                runtime: { tool: 'claude-bidi', provider: 'glm-68f6bd41', model: 'glm-5.3@glm-68f6bd41' },
+                resolver: { selectedAgentId: seqWriterApp.id },
+              },
+            ],
+            phases: [
+              {
+                phaseId: 'phase_lead',
+                objective: 'Lead phase',
+                dependsOn: [],
+                acceptance: [{ criterion: 'lead done', evidenceRequired: false }],
+                reviewRequired: reviewRequiredPolicy,
+              },
+              {
+                phaseId: 'phase_worker',
+                objective: 'Worker phase',
+                dependsOn: ['phase_lead'],
+                acceptance: [{ criterion: 'worker done', evidenceRequired: false }],
+                reviewRequired: reviewRequiredPolicy,
+              },
+            ],
+            reviewPolicy,
+          };
+          await orgStore.createRevision(seqOrg.id, {
+            revision: 1,
+            proposal: { objective: `Sequential ${keyPrefix}`, reviewPolicy, phases: compiled.phases, nodes: compiled.nodes },
+            compiled,
+          });
+          await orgStore.freezeRevision(seqOrg.id, 1);
+          return { seqRoot, seqOrg, seqLeadNode, seqWorkerNode, seqLeadSess, seqWorkerSess, compiled };
+        };
+
+        // 6a: reviewPolicy.required === false -> incomplete blocks with 409; completing phase_lead auto-persists phase.completed idempotently and unblocks phase_worker!
+        const opt = await makeSequentialOrg({ keyPrefix: 'opt_seq', reviewRequiredPolicy: false });
+        const workerPhaseDef = opt.compiled.phases[1];
+
+        await assert.rejects(
+          () => phaseDependenciesCompleted(opt.seqOrg.id, 1, workerPhaseDef),
+          (err) => err?.code === 'ORG_PHASE_DEPENDENCY_BLOCKED' && err?.statusCode === 409,
+          'phase_worker is blocked before phase_lead completes',
+        );
+
+        const optDispatches = [];
+        const optStagingChildIds = [];
+        const optOrch = createCollaborationOrchestrator({
+          pollMs: 100000,
+          dependencies: {
+            getSession: sessionManager.getSession,
+            getApp: appsMod.getApp,
+            createSession: sessionManager.createSession,
+            createStagingWorkspace,
+            commitStagingToCanonical,
+            discardStaging,
+            sendMessage: async (sid, text, images, opts) => {
+              const res = await sessionManager.sendMessage(sid, text, images, { ...opts, skipRunnerLaunch: true });
+              if (opts?.internalOperation === 'collaboration_task') {
+                optStagingChildIds.push(sid);
+                optDispatches.push({ sid, runId: res.run.id, taskId: opts?.sourceContext?.taskId || '' });
+              }
+              return res;
+            },
+            getRunState: async (id) => runs.getRun(id),
+            getRun: runs.getRun,
+            getRunResult: runs.getRunResult,
+            getRunManifest: runs.getRunManifest,
+            findRunByRequest: runs.findRunByRequest,
+            listRunIds: async () => [],
+            getProject: async () => project,
+            requestRunCancel: async () => null,
+            loadHistory: async (_sid, runId) => [{ type: 'message', role: 'assistant', runId, content: 'Lead completed.' }],
+          },
+        });
+        try {
+          await dispatchOrganizationPhase({
+            organizationId: opt.seqOrg.id,
+            phaseId: 'phase_lead',
+            revision: 1,
+            idempotencyKey: 'opt-dispatch-lead',
+            orchestrator: optOrch,
+          });
+          const leadEntry = optDispatches.find((d) => d.taskId.endsWith(':phase_lead:lead'));
+          assert.ok(leadEntry?.runId, 'phase_lead dispatched run');
+
+          // Still running -> strictly blocked with 409.
+          await assert.rejects(
+            () => dispatchOrganizationPhase({
+              organizationId: opt.seqOrg.id,
+              phaseId: 'phase_worker',
+              revision: 1,
+              idempotencyKey: 'opt-dispatch-worker-early',
+              orchestrator: optOrch,
+            }),
+            (err) => err?.code === 'ORG_PHASE_DEPENDENCY_BLOCKED' && err?.statusCode === 409,
+            'phase_worker stays blocked while phase_lead is still running',
+          );
+
+          // Complete lead run + aggregation cleanly.
+          const { createHash } = await import('node:crypto');
+          const leadManifest = await runs.getRunManifest(leadEntry.runId);
+          const leadContent = 'Lead finished phase_lead cleanly.';
+          const leadHash = createHash('sha256').update(leadContent).digest('hex');
+          const leadMsg = await sessionManager.appendAssistantMessage(leadEntry.sid, leadContent, [], {
+            runId: leadEntry.runId,
+            requestId: leadManifest.requestId,
+          });
+          const leadDoneAt = new Date().toISOString();
+          await history.appendEvent(leadEntry.sid, {
+            type: 'status',
+            content: 'completed',
+            providerLifecycle: 'completed',
+            runState: 'completed',
+            deliveryContentHash: leadHash,
+            runId: leadEntry.runId,
+            requestId: leadManifest.requestId,
+          });
+          const leadResult = { exitCode: 0, signal: null, completedAt: leadDoneAt, finalDelivery: { contentHash: leadHash, eventSeq: leadMsg?.seq } };
+          await runs.writeRunResult(leadEntry.runId, leadResult);
+          await runs.updateRun(leadEntry.runId, (cur) => ({ ...cur, state: 'completed', completedAt: leadDoneAt, finalizedAt: leadDoneAt, result: leadResult }));
+          assert.equal(await optOrch.completeRun(leadEntry.runId), true);
+
+          const leadCollab = (await collabStoreMod.listCollaborationRecords({ activeOnly: false }))
+            .find((c) => c.policy?.organizationNodeId === opt.seqLeadNode.id);
+          const aggRunId = leadCollab?.aggregationRunId || await optOrch.maybeAggregate(leadCollab.id);
+          if (aggRunId) {
+            const aggDoneAt = new Date().toISOString();
+            const aggRes = { exitCode: 0, signal: null, completedAt: aggDoneAt };
+            await runs.writeRunResult(aggRunId, aggRes);
+            await runs.updateRun(aggRunId, (cur) => ({ ...cur, state: 'completed', completedAt: aggDoneAt, finalizedAt: aggDoneAt, result: aggRes }));
+            await optOrch.completeAggregation(aggRunId);
+          }
+
+          // Auto-persisted phase.completed exists after phase_lead completes!
+          const eventsAfterLead = await messagingMod.listOrganizationEvents(opt.seqOrg.id);
+          const phaseCompletedEvents = eventsAfterLead.filter((e) => e.phaseId === 'phase_lead' && ['phase.completed', 'phase_completed'].includes(e.type));
+          assert.equal(phaseCompletedEvents.length, 1, 'reviewPolicy.required=false auto-persists exactly one phase.completed event');
+
+          // Downstream phase_worker now dispatches cleanly!
+          const workerDispatch = await dispatchOrganizationPhase({
+            organizationId: opt.seqOrg.id,
+            phaseId: 'phase_worker',
+            revision: 1,
+            idempotencyKey: 'opt-dispatch-worker-ready',
+            orchestrator: optOrch,
+          });
+          assert.equal(workerDispatch.state, 'dispatched');
+          assert.equal(workerDispatch.phaseId, 'phase_worker');
+          assert.ok(optDispatches.some((d) => d.taskId.endsWith(':phase_worker:worker')), 'phase_worker dispatched downstream run');
+
+          // Repeated reconciliation / projection / dependency checks must remain idempotent (no duplicate phase.completed spam).
+          await reconcileReviewOptionalPhaseCompletions({ organizationId: opt.seqOrg.id, revision: 1 });
+          await phaseDependenciesCompleted(opt.seqOrg.id, 1, workerPhaseDef);
+          const optProj = await buildOrganizationProjection(opt.seqOrg.id, { version: 2 });
+          assert.equal(optProj.phases.find((p) => p.phaseId === 'phase_lead')?.state, 'completed');
+          assert.equal(optProj.phases.find((p) => p.phaseId === 'phase_lead')?.reviewState, 'complete');
+          const eventsAfterReplay = await messagingMod.listOrganizationEvents(opt.seqOrg.id);
+          assert.equal(
+            eventsAfterReplay.filter((e) => e.phaseId === 'phase_lead' && ['phase.completed', 'phase_completed'].includes(e.type)).length,
+            1,
+            'idempotent checks never duplicate phase.completed events',
+          );
+        } finally {
+          for (const childId of optStagingChildIds) {
+            const s = await sessionManager.getSession(childId).catch(() => null);
+            if (s?.folder) await discardStaging(s.folder).catch(() => {});
+          }
+          optOrch.stop();
+        }
+
+        // 6b: reviewPolicy.required === false while an open/blocking gate exists -> stays blocked 409!
+        const gatedOpt = await makeSequentialOrg({ keyPrefix: 'opt_gated', reviewRequiredPolicy: false });
+        const gatedCollab = await collabStoreMod.createCollaborationRecord({
+          rootSessionId: gatedOpt.seqRoot.id,
+          title: 'gated-opt',
+          policy: {
+            organizationId: gatedOpt.seqOrg.id,
+            organizationNodeId: gatedOpt.seqLeadNode.id,
+            organizationBindingGeneration: 1,
+            role: 'specialist',
+          },
+          idempotencyKey: 'gated-opt-collab',
+          plan: { version: 1, tasks: [{ id: 'task-gated-opt', objective: 'work', agentId: seqWriterApp.id, role: 'specialist', dependsOn: [], acceptance: [], retry: { maxAttempts: 1, retryOn: [] }, timeoutMs: 60000 }] },
+        });
+        await collabStoreMod.markReadyTasks(gatedCollab.id);
+        const gatedAtt = await collabStoreMod.claimTaskAttempt('task-gated-opt', { sessionId: gatedOpt.seqLeadSess.sessionId, runId: 'run-gated-opt' });
+        await collabStoreMod.completeAttempt(gatedAtt.id, { state: 'succeeded', resultPacketId: 'rsp_gated_opt' });
+        await collabStoreMod.finishCollaboration(gatedCollab.id, 'completed');
+        await orgStore.createGate({ organizationId: gatedOpt.seqOrg.id, phaseId: 'phase_lead', generation: 1, state: 'open' });
+        await assert.rejects(
+          () => phaseDependenciesCompleted(gatedOpt.seqOrg.id, 1, gatedOpt.compiled.phases[1]),
+          (err) => err?.code === 'ORG_PHASE_DEPENDENCY_BLOCKED' && err?.statusCode === 409,
+          'open review gate blocks auto-completion even when reviewPolicy.required === false',
+        );
+
+        // 6c: reviewPolicy.required === true -> stays strictly 409 ORG_PHASE_DEPENDENCY_BLOCKED until gate passed + completePhase!
+        const reqOrg = await makeSequentialOrg({ keyPrefix: 'req_seq', reviewRequiredPolicy: true });
+        const reqCollab = await collabStoreMod.createCollaborationRecord({
+          rootSessionId: reqOrg.seqRoot.id,
+          title: 'req-seq',
+          policy: {
+            organizationId: reqOrg.seqOrg.id,
+            organizationNodeId: reqOrg.seqLeadNode.id,
+            organizationBindingGeneration: 1,
+            role: 'specialist',
+          },
+          idempotencyKey: 'req-seq-collab',
+          plan: { version: 1, tasks: [{ id: 'task-req-seq', objective: 'work', agentId: seqWriterApp.id, role: 'specialist', dependsOn: [], acceptance: [], retry: { maxAttempts: 1, retryOn: [] }, timeoutMs: 60000 }] },
+        });
+        await collabStoreMod.markReadyTasks(reqCollab.id);
+        const reqAtt = await collabStoreMod.claimTaskAttempt('task-req-seq', { sessionId: reqOrg.seqLeadSess.sessionId, runId: 'run-req-seq' });
+        await collabStoreMod.completeAttempt(reqAtt.id, { state: 'succeeded', resultPacketId: 'rsp_req_seq' });
+        await collabStoreMod.finishCollaboration(reqCollab.id, 'completed');
+
+        const reqProj = await buildOrganizationProjection(reqOrg.seqOrg.id, { version: 2 });
+        assert.equal(reqProj.phases.find((p) => p.phaseId === 'phase_lead')?.state, 'completed');
+        assert.equal(reqProj.phases.find((p) => p.phaseId === 'phase_lead')?.reviewState, 'pending', 'reviewRequired=true stays pending without gate');
+        await assert.rejects(
+          () => phaseDependenciesCompleted(reqOrg.seqOrg.id, 1, reqOrg.compiled.phases[1]),
+          (err) => err?.code === 'ORG_PHASE_DEPENDENCY_BLOCKED' && err?.statusCode === 409,
+          'reviewPolicy.required === true strictly preserves 409 ORG_PHASE_DEPENDENCY_BLOCKED before approval',
+        );
+        const reqEventsBefore = await messagingMod.listOrganizationEvents(reqOrg.seqOrg.id);
+        assert.equal(
+          reqEventsBefore.filter((e) => e.phaseId === 'phase_lead' && ['phase.completed', 'phase_completed'].includes(e.type)).length,
+          0,
+          'no auto phase.completed event is written when reviewPolicy.required === true',
+        );
+
+        await decideGate({
+          organizationId: reqOrg.seqOrg.id,
+          phaseId: 'phase_lead',
+          fromGeneration: 0,
+          decision: 'passed',
+          decidedByNodeId: reqOrg.seqLeadNode.id,
+          packetId: 'rsp_req_seq',
+          acceptance: [{ criterion: 'lead done', status: 'passed', evidenceRef: 'ev:lead' }],
+        });
+        await completePhase({ organizationId: reqOrg.seqOrg.id, phaseId: 'phase_lead', fromGeneration: 1 });
+        await phaseDependenciesCompleted(reqOrg.seqOrg.id, 1, reqOrg.compiled.phases[1]);
+
+        // 6d: reviewPolicy.required === false during active collaboration_resume (`aggregating` before completeAggregation):
+        // phaseDependenciesCompleted recognizes all phase tasks succeeded and unblocks phase_worker idempotently.
+        const aggOpt = await makeSequentialOrg({ keyPrefix: 'opt_agg', reviewRequiredPolicy: false });
+        const aggCollab = await collabStoreMod.createCollaborationRecord({
+          rootSessionId: aggOpt.seqRoot.id,
+          title: 'agg-opt',
+          policy: {
+            organizationId: aggOpt.seqOrg.id,
+            organizationNodeId: aggOpt.seqLeadNode.id,
+            organizationBindingGeneration: 1,
+            role: 'specialist',
+          },
+          idempotencyKey: 'agg-opt-collab',
+          plan: { version: 1, tasks: [{ id: 'task-agg-opt', objective: 'work', agentId: seqWriterApp.id, role: 'specialist', dependsOn: [], acceptance: [], retry: { maxAttempts: 1, retryOn: [] }, timeoutMs: 60000 }] },
+        });
+        await collabStoreMod.markReadyTasks(aggCollab.id);
+        const aggAtt = await collabStoreMod.claimTaskAttempt('task-agg-opt', { sessionId: aggOpt.seqLeadSess.sessionId, runId: 'run-agg-opt' });
+        await collabStoreMod.completeAttempt(aggAtt.id, { state: 'succeeded', resultPacketId: 'rsp_agg_opt' });
+        await collabStoreMod.refreshBarrier(aggCollab.id);
+        assert.equal((await collabStoreMod.getCollaboration(aggCollab.id)).state, 'waiting_aggregation');
+        await phaseDependenciesCompleted(aggOpt.seqOrg.id, 1, aggOpt.compiled.phases[1]);
+        const aggEvents = await messagingMod.listOrganizationEvents(aggOpt.seqOrg.id);
+        assert.equal(
+          aggEvents.filter((e) => e.phaseId === 'phase_lead' && ['phase.completed', 'phase_completed'].includes(e.type)).length,
+          1,
+          'reviewPolicy.required=false unblocks downstream dependsOn even while lead collaboration awaits root resume aggregation',
+        );
+      }
     } finally {
       if (stagingChildId) {
         const s = await sessionManager.getSession(stagingChildId).catch(() => null);

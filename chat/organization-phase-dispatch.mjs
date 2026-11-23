@@ -15,6 +15,7 @@ import { getToolDefinitionAsync } from '../lib/tools.mjs';
 import { assertRuntimeConstraints } from './organization-runtime-decision.mjs';
 import { createHash } from 'crypto';
 import { recoverOrganizationDispatchEvents } from './organization-dispatch-event-recovery.mjs';
+import { reconcileReviewOptionalPhaseCompletions } from './organization-phase-completion.mjs';
 
 function text(value, max = 512) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
@@ -91,6 +92,12 @@ function runtimeMatches(compiledRuntime, actualRuntime) {
 export async function phaseDependenciesCompleted(organizationId, revision, phase) {
   const dependencies = list(phase?.dependsOn);
   if (dependencies.length === 0) return;
+  await reconcileReviewOptionalPhaseCompletions({
+    organizationId,
+    revision,
+    phaseIds: dependencies,
+    allowPendingAggregation: true,
+  });
   const { withDatabase } = await import('./collaboration-store.mjs');
   const { ensureOrganizationMessageEnvelopeSchema } = await import('./organization-messaging.mjs');
   for (const dependency of dependencies) {

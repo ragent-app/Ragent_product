@@ -1638,6 +1638,9 @@ export function createCollaborationOrchestrator(options = {}) {
         stage: 'run_terminalized',
         runId,
       });
+      if (taskCollaboration.policy?.organizationId) {
+        await reconcileOrganizationPhaseCompletions(taskCollaboration.policy.organizationId);
+      }
     }
     return completed;
   }
@@ -1746,6 +1749,23 @@ export function createCollaborationOrchestrator(options = {}) {
     }
   }
 
+  async function reconcileOrganizationPhaseCompletions(organizationId) {
+    const orgId = trim(organizationId);
+    if (!orgId) return [];
+    try {
+      const { reconcileReviewOptionalPhaseCompletions } = await import('./organization-phase-completion.mjs');
+      return await reconcileReviewOptionalPhaseCompletions({
+        organizationId: orgId,
+        allowPendingAggregation: false,
+        runResolver: deps.getRun,
+        resultPacketResolver: deps.getResultPacket,
+      });
+    } catch (error) {
+      console.warn(`[organization] review-optional phase completion reconciliation skipped: ${error?.message || String(error)}`);
+      return [];
+    }
+  }
+
   async function completeAggregation(runId) {
     const collaboration = (await store.listCollaborationRecords()).find((item) => item.aggregationRunId === runId);
     if (!collaboration) return false;
@@ -1753,6 +1773,9 @@ export function createCollaborationOrchestrator(options = {}) {
     if (!run || !isTerminal(run.state)) return false;
     await store.finishCollaboration(collaboration.id, run.state === 'completed' ? 'completed' : run.state, run.failureReason || '');
     await publishCollaborationTerminal(collaboration.id);
+    if (collaboration.policy?.organizationId) {
+      await reconcileOrganizationPhaseCompletions(collaboration.policy.organizationId);
+    }
     return true;
   }
 

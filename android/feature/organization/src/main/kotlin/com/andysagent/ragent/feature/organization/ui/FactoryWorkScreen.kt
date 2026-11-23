@@ -4,19 +4,42 @@ import android.net.Uri
 import android.content.Context
 import android.media.AudioManager
 import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
+import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.feature.organization.data.encodeOrganizationUriComponent
+import com.andysagent.ragent.feature.organization.data.formatOrganizationFeatureUnavailableBanner
+import com.andysagent.ragent.feature.organization.data.isOrganizationFeatureUnavailableStatus
+import com.andysagent.ragent.feature.organization.data.parseOrganizationApiException
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 
@@ -114,58 +137,65 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
     var reviewForm by remember(organizationId) { mutableStateOf(false) }
     var sessionContext by remember(organizationId, sessionId) { mutableStateOf<JsonObject?>(null) }
     var confirmSessionContext by remember(organizationId, sessionId) { mutableStateOf(false) }
-    suspend fun request(path: String, body: JsonObject? = null): JsonObject {
-        val response = transport.execute(ApiRequest(method = if (body == null) "GET" else "POST", path = base + path,
-            body = body?.toString(), contentType = if (body == null) null else "application/json"))
-        val parsed = Json.parseToJsonElement(response.body).jsonObject
-        if (!response.isSuccessful) error(parsed["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
-        return parsed
+    var responsibilityBanner by remember(organizationId, sessionId) { mutableStateOf<String?>(null) }
+    suspend fun executeJsonObject(method: String, path: String, body: JsonObject? = null): JsonObject {
+        val response = transport.execute(ApiRequest(
+            method = method,
+            path = path,
+            body = body?.toString(),
+            contentType = if (body == null) null else "application/json",
+        ))
+        if (!response.isSuccessful) throw parseOrganizationApiException(response.statusCode, response.body, "HTTP ${response.statusCode}")
+        return Json.parseToJsonElement(response.body).jsonObject
     }
+    suspend fun request(path: String, body: JsonObject? = null): JsonObject =
+        executeJsonObject(if (body == null) "GET" else "POST", base + path, body)
     suspend fun reload() {
         item = null; responsibilities = null; responsibility = null; status = "Loading work items…"
         runCatching { request("/work-items") }.onSuccess { list = it; status = "As of ${it["asOf"]?.jsonPrimitive?.contentOrNull.orEmpty()}" }
-            .onFailure { list = null; status = "Work items unavailable: ${it.message}" }
+            .onFailure { if (it is CancellationException) throw it; list = null; status = "Work items unavailable: ${it.message}" }
     }
-    suspend fun responsibilityRequest(path: String): JsonObject {
-        val response = transport.execute(ApiRequest(method = "GET", path = "/api/responsibilities$path"))
-        val parsed = Json.parseToJsonElement(response.body).jsonObject
-        if (!response.isSuccessful) error(parsed["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
-        return parsed
-    }
+    suspend fun responsibilityRequest(path: String): JsonObject =
+        executeJsonObject("GET", "/api/responsibilities$path")
     suspend fun loadResponsibilities() {
         status = "Loading responsibilities…"; item = null; responsibility = null; proposal = null
-        val catalog = runCatching { responsibilityRequest("/capabilities?organizationId=${Uri.encode(organizationId)}") }.getOrNull()
-        capabilities = catalog?.get("providers") as? JsonArray
-        responsibilityFeatures = catalog?.get("features") as? JsonObject
-        planCatalogDescriptors = catalog?.get("planCatalogDescriptors") as? JsonArray
-        runCatching { responsibilityRequest("?organizationId=${Uri.encode(organizationId)}") }.onSuccess {
-            responsibilities = it["responsibilities"] as? JsonArray ?: JsonArray(emptyList()); status = "Responsibilities"
-        }.onFailure { responsibilities = JsonArray(emptyList()); status = "Responsibilities unavailable: ${it.message}" }
+        val loaded = fetchResponsibilitiesOrBanner(transport, organizationId)
+        capabilities = loaded.capabilities
+        responsibilityFeatures = loaded.features
+        planCatalogDescriptors = loaded.planCatalogDescriptors
+        responsibilities = loaded.responsibilities
+        status = if (loaded.banner == null) "Responsibilities" else "Responsibilities unavailable"
+        responsibilityBanner = loaded.banner
     }
     suspend fun propose(id: String) {
         val body = buildJsonObject { put("text", responsibilityDraft); put("responsibilityId", id) }
-        runCatching {
-            val response = transport.execute(ApiRequest(method = "POST", path = "/api/responsibilities/intent", body = body.toString(), contentType = "application/json"))
-            val parsed = Json.parseToJsonElement(response.body).jsonObject
-            if (!response.isSuccessful) error(parsed["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
-            parsed
-        }.onSuccess { proposal = it; status = "Review the proposal. Voice or draft text is not authorization." }
-            .onFailure { status = "Proposal unavailable: ${it.message}" }
+        val path = "/api/responsibilities/intent"
+        runCatching { executeJsonObject("POST", path, body) }
+            .onSuccess { proposal = it; status = "Review the proposal. Voice or draft text is not authorization." }
+            .onFailure { err ->
+                if (err is CancellationException) throw err
+                status = "Proposal unavailable: ${err.message}"
+                if (err is ApiException && isOrganizationFeatureUnavailableStatus(err.statusCode, err.code, path)) {
+                    responsibilityBanner = formatOrganizationFeatureUnavailableBanner(err, "Proposal unavailable")
+                }
+            }
     }
     suspend fun submitResponsibility(path: String, body: JsonObject, method: String = "POST") {
         pendingResponsibility = Triple(path, method, body)
-        runCatching {
-            val response = transport.execute(ApiRequest(method = method, path = path, body = body.toString(), contentType = "application/json"))
-            val parsed = Json.parseToJsonElement(response.body).jsonObject
-            if (!response.isSuccessful) error(parsed["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
-            parsed
-        }.onSuccess { result -> pendingResponsibility = null; proposal = null; form = ""; reviewForm = false; status = "Request recorded; actual stop is not established. Stop requests: ${result["stop"] ?: "none"}. Refresh for current facts." }
-            .onFailure { status = "Request not confirmed: ${it.message}; retry uses the same key." }
+        runCatching { executeJsonObject(method, path, body) }
+            .onSuccess { result -> pendingResponsibility = null; proposal = null; form = ""; reviewForm = false; status = "Request recorded; actual stop is not established. Stop requests: ${result["stop"] ?: "none"}. Refresh for current facts." }
+            .onFailure { err ->
+                if (err is CancellationException) throw err
+                status = "Request not confirmed: ${err.message}; retry uses the same key."
+                if (err is ApiException && isOrganizationFeatureUnavailableStatus(err.statusCode, err.code, path)) {
+                    responsibilityBanner = formatOrganizationFeatureUnavailableBanner(err, "Responsibility action unavailable")
+                }
+            }
     }
     suspend fun loadResponsibility(id: String) {
         status = "Loading responsibility…"; plannerReview = false; plannerNetworkConfirmed = false; autoReportPlans = false; reportReview = false; reportNetworkConfirmed = false; ciPolicyReviewed = false; codeBaseline = null; includeCode = false; includeReport = false; reviewTrigger = false; reviewRunTrigger = false; reviewGitCondition = false; reviewedBindingAction = null; triggerBindings = null; memoryData = null; memoryConflictData = null; memoryChanges = emptyMap(); memoryPreview = null; responsibilityNotifications = null; pendingNotificationToggle = null
+        val path = "/${Uri.encode(id)}"
         runCatching {
-            val path = "/${Uri.encode(id)}"
             val response = responsibilityRequest(path)
             val detail = response["responsibility"]!!.jsonObject
             require(detail["organizationId"]?.jsonPrimitive?.contentOrNull == organizationId)
@@ -183,26 +213,30 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             }
             reviewedPlan = focusedPlan
             detail to responsibilityRequest("$path/activity")["activity"]!!.jsonArray
-        }.onSuccess { (detail, activity) -> responsibility = detail; responsibilityActivity = activity; onResponsibilitySelected(id); status = "Responsibility" }
-            .onFailure { status = "Responsibility unavailable: ${it.message}" }
+        }.onSuccess { (detail, activity) -> responsibility = detail; responsibilityActivity = activity; onResponsibilitySelected(id); status = "Responsibility"; responsibilityBanner = null }
+            .onFailure { err ->
+                if (err is CancellationException) throw err
+                status = "Responsibility unavailable: ${err.message}"
+                if (err is ApiException && isOrganizationFeatureUnavailableStatus(err.statusCode, err.code, "/api/responsibilities$path")) {
+                    responsibilityBanner = formatOrganizationFeatureUnavailableBanner(err, "Responsibility unavailable")
+                }
+            }
     }
     suspend fun submit(command: JsonObject) {
         pending = command; status = "Submitting request…"
         runCatching { request("/commands", command) }.onSuccess {
             pending = null
             status = "Receipt: ${it["operation"]}; task: ${it["item"]?.jsonObject?.get("controlState")}. Refresh for current facts."
-        }.onFailure { status = "Request not confirmed: ${it.message}. Retry uses the same command ID." }
+        }.onFailure { if (it is CancellationException) throw it; status = "Request not confirmed: ${it.message}. Retry uses the same command ID." }
     }
     val latestSelectedResponsibilityId = rememberUpdatedState(selectedResponsibilityId)
     val latestNavigationKey = rememberUpdatedState(responsibilityNavigationKey)
     var initialized by remember(transport, organizationId) { mutableStateOf(false) }
     var lastHandledNavKey by remember(transport, organizationId) { mutableStateOf<String?>(null) }
     LaunchedEffect(transport, organizationId) {
-        if (sessionId.isNotBlank()) runCatching {
-            val response = transport.execute(ApiRequest(method = "GET", path = "/api/sessions/${Uri.encode(sessionId)}/responsibility-context"))
-            if (!response.isSuccessful) error("HTTP ${response.statusCode}")
-            Json.parseToJsonElement(response.body).jsonObject["context"] as? JsonObject
-        }.onSuccess { sessionContext = it }
+        val (fetchedContext, contextBanner) = fetchResponsibilityContextOrBanner(transport, sessionId)
+        sessionContext = fetchedContext
+        responsibilityBanner = contextBanner
         val targetId = latestSelectedResponsibilityId.value
         lastHandledNavKey = latestNavigationKey.value
         initialized = true
@@ -231,6 +265,15 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
         TextButton(onClick = { if (responsibility != null) { onResponsibilitySelected(null); scope.launch { loadResponsibilities() } } else if (item != null || responsibilities != null) scope.launch { reload() } else onBack() }) { Text("Back") }
         Text("Work items")
         Text(status)
+        responsibilityBanner?.let { banner ->
+            FactoryInlineBanner(
+                text = banner,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp)
+                    .testTag("factory-responsibility-banner"),
+            )
+        }
         if (pending != null) TextButton(onClick = { pending?.let { scope.launch { submit(it) } } }) { Text("Retry same request") }
         val selected = item
         if (responsibilities != null) {
@@ -367,7 +410,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     }
                     TextButton(enabled=memoryChanges.size in 2..20 && memoryChanges.values.all {it.first!="correct" || it.second.isNotBlank()},onClick={scope.launch {runCatching {
                         val changes=JsonArray(memoryChanges.map { (id,choice) -> buildJsonObject {put("factId",id);put("action",choice.first);if(choice.first=="correct")put("value",choice.second)} });val body=buildJsonObject {put("factIds",JsonArray(memoryChanges.keys.map {JsonPrimitive(it)}));put("changes",changes);put("expectedVersion",conflicts["version"]!!)}
-                        val response=transport.execute(ApiRequest(method="POST",path="/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory/conflicts/preview",body=body.toString(),contentType="application/json"));val result=Json.parseToJsonElement(response.body).jsonObject;if(!response.isSuccessful)error(result["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}");buildJsonObject {put("request",body);put("result",result)}
+                        val result=executeJsonObject("POST","/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/memory/conflicts/preview",body);buildJsonObject {put("request",body);put("result",result)}
                     }.onSuccess {memoryPreview=it}.onFailure {status="预览不可用：${it.message}"}}}) {Text("预览事实审阅")}
                     memoryPreview?.let { saved -> val result=saved["result"]!!.jsonObject;val preview=result["preview"]!!.jsonObject
                         Text("事实和来源：${preview["facts"]}\n处理：${preview["changes"]}\n原摘要：${preview["previousSummary"]}\n重建正文：${preview["projectedContent"]}\n重建摘要：${preview["projectedSummary"]}\n到期：${preview["expiresAt"]}。撤回不是物理删除。")
@@ -402,9 +445,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                         Text("Optional code capability requires a clean local baseline, bounded paths, registered check and independent human review. It is separate from project read access.")
                         TextButton(onClick = { scope.launch {
                             runCatching {
-                                val response = transport.execute(ApiRequest(method = "POST", path = "/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/code-baseline", body = "{}", contentType = "application/json"))
-                                val data = Json.parseToJsonElement(response.body).jsonObject
-                                if (!response.isSuccessful) error(data["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
+                                val data = executeJsonObject("POST", "/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}/code-baseline", buildJsonObject { })
                                 data["baseline"]!!.jsonObject
                             }.onSuccess { codeBaseline = it; includeCode = false; plannerReview = false }.onFailure { status = "Code baseline unavailable: ${it.message}" }
                         } }) { Text("Capture clean code baseline") }
@@ -563,13 +604,18 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                             val body = buildJsonObject { put("responsibilityId", id); put("expectedVersion", sessionContext?.get("rowVersion") ?: JsonPrimitive(0));
                                 put("expectedResponsibilityVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString());
                                 put("confirmed", true); put("confirmedIntent", "query"); put("activityCursor", 0) }
+                            val path = "/api/sessions/${Uri.encode(sessionId)}/responsibility-context"
                             runCatching {
-                                val response = transport.execute(ApiRequest(method = "PUT", path = "/api/sessions/${Uri.encode(sessionId)}/responsibility-context", body = body.toString(), contentType = "application/json"))
-                                val result = Json.parseToJsonElement(response.body).jsonObject
-                                if (!response.isSuccessful) error(result["error"]?.jsonPrimitive?.contentOrNull ?: "HTTP ${response.statusCode}")
+                                val result = executeJsonObject("PUT", path, body)
                                 result["context"]?.jsonObject
-                            }.onSuccess { sessionContext = it; confirmSessionContext = false; status = "Session responsibility saved; no action was approved." }
-                                .onFailure { status = "Session context not confirmed: ${it.message}. Reload before retrying." }
+                            }.onSuccess { sessionContext = it; confirmSessionContext = false; responsibilityBanner = null; status = "Session responsibility saved; no action was approved." }
+                                .onFailure { err ->
+                                    if (err is CancellationException) throw err
+                                    status = "Session context not confirmed: ${err.message}. Reload before retrying."
+                                    if (err is ApiException && isOrganizationFeatureUnavailableStatus(err.statusCode, err.code, path)) {
+                                        responsibilityBanner = formatOrganizationFeatureUnavailableBanner(err, "Session context unavailable")
+                                    }
+                                }
                         } }) { Text("Confirm session responsibility") }
                     }
                 }
@@ -734,5 +780,111 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
             }
             TextButton(onClick = { scope.launch { submit(command("RequestCancel")) } }) { Text("Request cancel") }
         }
+    }
+}
+
+internal data class ResponsibilitiesLoadResult(
+    val capabilities: JsonArray?,
+    val features: JsonObject?,
+    val planCatalogDescriptors: JsonArray?,
+    val responsibilities: JsonArray,
+    val banner: String?,
+)
+
+internal suspend fun fetchResponsibilitiesOrBanner(
+    transport: RagentTransport,
+    organizationId: String,
+): ResponsibilitiesLoadResult {
+    val encodedOrg = encodeOrganizationUriComponent(organizationId)
+    val catalog = try {
+        val response = transport.execute(ApiRequest("GET", "/api/responsibilities/capabilities?organizationId=$encodedOrg"))
+        if (!response.isSuccessful) {
+            throw parseOrganizationApiException(response.statusCode, response.body, "HTTP ${response.statusCode}")
+        }
+        Json.parseToJsonElement(response.body) as? JsonObject
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Throwable) {
+        null
+    }
+    val capabilities = catalog?.get("providers") as? JsonArray
+    val features = catalog?.get("features") as? JsonObject
+    val planCatalogDescriptors = catalog?.get("planCatalogDescriptors") as? JsonArray
+    return try {
+        val response = transport.execute(ApiRequest("GET", "/api/responsibilities?organizationId=$encodedOrg"))
+        if (!response.isSuccessful) {
+            throw parseOrganizationApiException(response.statusCode, response.body, "HTTP ${response.statusCode}")
+        }
+        val payload = Json.parseToJsonElement(response.body).jsonObject
+        ResponsibilitiesLoadResult(
+            capabilities = capabilities,
+            features = features,
+            planCatalogDescriptors = planCatalogDescriptors,
+            responsibilities = payload["responsibilities"] as? JsonArray ?: JsonArray(emptyList()),
+            banner = null,
+        )
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        ResponsibilitiesLoadResult(
+            capabilities = capabilities,
+            features = features,
+            planCatalogDescriptors = planCatalogDescriptors,
+            responsibilities = JsonArray(emptyList()),
+            banner = formatOrganizationFeatureUnavailableBanner(error, "Responsibilities unavailable"),
+        )
+    }
+}
+
+internal suspend fun fetchResponsibilityContextOrBanner(
+    transport: RagentTransport,
+    sessionId: String,
+): Pair<JsonObject?, String?> {
+    if (sessionId.isBlank()) return null to null
+    return try {
+        val response = transport.execute(
+            ApiRequest(
+                method = "GET",
+                path = "/api/sessions/${encodeOrganizationUriComponent(sessionId)}/responsibility-context",
+            ),
+        )
+        if (!response.isSuccessful) {
+            throw parseOrganizationApiException(
+                statusCode = response.statusCode,
+                body = response.body,
+                fallback = "HTTP ${response.statusCode}",
+            )
+        }
+        val context = (Json.parseToJsonElement(response.body) as? JsonObject)
+            ?.get("context") as? JsonObject
+        context to null
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        null to formatOrganizationFeatureUnavailableBanner(
+            error = error,
+            fallbackPrefix = "Responsibility context unavailable",
+        )
+    }
+}
+
+@Composable
+private fun FactoryInlineBanner(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalRagentColors.current
+    val accent = colors.error
+    Row(
+        modifier = modifier
+            .clip(AgentoShapes.SurfaceSmallShape)
+            .background(accent.copy(alpha = 0.12f))
+            .border(0.75.dp, accent.copy(alpha = 0.36f), AgentoShapes.SurfaceSmallShape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.ErrorOutline, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+        Text(text = text, style = MaterialTheme.typography.bodySmall, color = colors.primaryContent)
     }
 }

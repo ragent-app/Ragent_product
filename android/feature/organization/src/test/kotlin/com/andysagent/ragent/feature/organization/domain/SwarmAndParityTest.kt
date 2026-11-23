@@ -3,7 +3,11 @@ package com.andysagent.ragent.feature.organization.domain
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import com.andysagent.ragent.core.model.RuntimeConnectionState
+import com.andysagent.ragent.core.network.ApiException
+import com.andysagent.ragent.core.network.ApiRequest
 import com.andysagent.ragent.core.network.ApiResponse
+import com.andysagent.ragent.core.network.InvalidationHint
+import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.feature.organization.ConversationStatus
 import com.andysagent.ragent.feature.organization.R
@@ -29,9 +33,12 @@ import com.andysagent.ragent.feature.organization.data.SwarmStallAlertDto
 import com.andysagent.ragent.feature.organization.data.SwarmStatusDto
 import com.andysagent.ragent.feature.organization.data.UnifiedMemberDto
 import com.andysagent.ragent.feature.organization.data.UnifiedMembersPageDto
+import com.andysagent.ragent.feature.organization.data.executeCachedOrganizationTransportRequest
+import com.andysagent.ragent.feature.organization.data.formatOrganizationFeatureUnavailableBanner
 import com.andysagent.ragent.feature.organization.data.isOrganizationAuthorizationRevokedStatus
 import com.andysagent.ragent.feature.organization.data.isOrganizationFeatureUnavailableStatus
 import com.andysagent.ragent.feature.organization.data.normalizeOrganizationUnavailableResponse
+import com.andysagent.ragent.feature.organization.data.parseOrganizationApiException
 import com.andysagent.ragent.feature.organization.extractEventFailureReason
 import com.andysagent.ragent.feature.organization.extractEventResultPacketInfo
 import com.andysagent.ragent.feature.organization.initialConversationStatusForConnection
@@ -47,6 +54,8 @@ import com.andysagent.ragent.feature.organization.presentation.SwarmBoardUiState
 import com.andysagent.ragent.feature.organization.presentation.SwarmOverviewUiState
 import com.andysagent.ragent.feature.organization.ui.computeHasCollaborators
 import com.andysagent.ragent.feature.organization.ui.computeNodeCaptionOffset
+import com.andysagent.ragent.feature.organization.ui.fetchResponsibilitiesOrBanner
+import com.andysagent.ragent.feature.organization.ui.fetchResponsibilityContextOrBanner
 import com.andysagent.ragent.feature.organization.ui.formatBoardChannelChipLabel
 import com.andysagent.ragent.feature.organization.ui.rectToSegmentDistance
 import com.andysagent.ragent.feature.organization.ui.resolveFormalRootNodeId
@@ -55,6 +64,10 @@ import com.andysagent.ragent.feature.organization.ui.resolveOrganizationSubtitle
 import com.andysagent.ragent.feature.organization.ui.shouldShowBoardChannelUnreadBadge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -498,6 +511,200 @@ class SwarmAndParityTest {
             "",
             normalizeOrganizationUnavailableResponse(ApiResponse(statusCode = 401, body = "")).body,
         )
+    }
+
+    @Test
+    fun featureLevel403DoesNotRevokeOrgAuthWhileGenuine401AndOrgAuth403StillRevoke() {
+        val contextPath = "/api/sessions/sess_1/responsibility-context"
+        val responsibilitiesPath = "/api/responsibilities?organizationId=org_1"
+        val butlerPath = "/api/responsibilities/butler-overview?organizationId=org_1"
+        val coreProjectionPath = "/api/sessions/sess_1/organization/projection?version=2"
+        val coreConversationPath = "/api/organizations/org_1/nodes/lead/conversation"
+
+        // Feature-level 403 on responsibility routes must NOT revoke org authorization.
+        assertFalse(isOrganizationAuthorizationRevokedStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", contextPath))
+        assertTrue(isOrganizationFeatureUnavailableStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", contextPath))
+        assertFalse(isOrganizationAuthorizationRevokedStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", responsibilitiesPath))
+        assertTrue(isOrganizationFeatureUnavailableStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", responsibilitiesPath))
+        assertFalse(isOrganizationAuthorizationRevokedStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", butlerPath))
+        assertFalse(isOrganizationAuthorizationRevokedStatus(403, "RESPONSIBILITY_DEVICE_BINDING_REQUIRED", "/api/responsibilities/notification-subscriptions"))
+        assertFalse(isOrganizationAuthorizationRevokedStatus(403, "FEATURE_DISABLED", contextPath))
+
+        // Genuine 401 and genuine org/session auth 403 MUST still revoke.
+        assertTrue(isOrganizationAuthorizationRevokedStatus(401, "RESPONSIBILITY_OWNER_UNAVAILABLE", contextPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, null, contextPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "", responsibilitiesPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "DEVICE_REVOKED", contextPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "google_required", responsibilitiesPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "OWNER_ACCESS_REQUIRED", responsibilitiesPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, null, coreProjectionPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "RESPONSIBILITY_OWNER_UNAVAILABLE", coreProjectionPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(403, "FEATURE_DISABLED", coreConversationPath))
+        assertTrue(isOrganizationAuthorizationRevokedStatus(401, null, coreProjectionPath))
+
+        // Normalization preserves feature-unavailable 403 JSON and injects fallback error only when missing.
+        val body403 = """{"code":"RESPONSIBILITY_OWNER_UNAVAILABLE","error":"Verified instance owner identity is unavailable"}"""
+        assertEquals(
+            body403,
+            normalizeOrganizationUnavailableResponse(ApiResponse(403, body403), contextPath).body,
+        )
+        val normalizedMissingError = normalizeOrganizationUnavailableResponse(
+            ApiResponse(403, """{"code":"RESPONSIBILITY_OWNER_UNAVAILABLE"}"""),
+            contextPath,
+        )
+        val parsedMissingError = Json.parseToJsonElement(normalizedMissingError.body).jsonObject
+        assertEquals("RESPONSIBILITY_OWNER_UNAVAILABLE", parsedMissingError["code"]?.jsonPrimitive?.content)
+        assertTrue(parsedMissingError["error"]?.jsonPrimitive?.content?.contains("403") == true)
+
+        // Genuine auth 403 is never rewritten into feature unavailable.
+        val genuineAuth403 = """{"error":"Owner access required"}"""
+        assertEquals(
+            genuineAuth403,
+            normalizeOrganizationUnavailableResponse(ApiResponse(403, genuineAuth403), contextPath).body,
+        )
+
+        val parsedException = parseOrganizationApiException(403, body403)
+        assertEquals(403, parsedException.statusCode)
+        assertEquals("RESPONSIBILITY_OWNER_UNAVAILABLE", parsedException.code)
+        assertEquals("Verified instance owner identity is unavailable", parsedException.message)
+        val banner = formatOrganizationFeatureUnavailableBanner(parsedException, "Responsibility context unavailable")
+        assertTrue(banner.contains("Verified instance owner identity is unavailable"))
+        assertTrue(banner.contains("RESPONSIBILITY_OWNER_UNAVAILABLE"))
+    }
+
+    @Test
+    fun cachedOrganizationTransportPreservesStateOnFeature403AndRevokesOnGenuineAuthFailure() = runTest(testDispatcher) {
+        val state = MutableStateFlow(RuntimeConnectionState.Connected)
+        val cachedWrites = mutableListOf<Pair<String, String>>()
+        var revokedCount = 0
+
+        class ScriptedTransport(
+            private val handler: (ApiRequest) -> ApiResponse,
+        ) : RagentTransport {
+            override val invalidations: Flow<InvalidationHint> = emptyFlow()
+            override val connectionState: StateFlow<RuntimeConnectionState> = state
+            override suspend fun execute(request: ApiRequest): ApiResponse = handler(request)
+            override fun connectInvalidationSocket() = Unit
+            override suspend fun close() = Unit
+        }
+
+        // 1. Throwing transport (matching OkHttpRagentTransport) on 403 RESPONSIBILITY_OWNER_UNAVAILABLE:
+        val throwingTransport = ScriptedTransport { req ->
+            when (req.path) {
+                "/api/sessions/sess_1/responsibility-context" -> throw ApiException(
+                    statusCode = 403,
+                    code = "RESPONSIBILITY_OWNER_UNAVAILABLE",
+                    message = "Verified instance owner identity is unavailable",
+                )
+                "/api/organizations/org_1/factory/work-items" -> ApiResponse(200, """{"items":[],"asOf":"2026-11-23T00:00:00Z"}""")
+                else -> ApiResponse(404, """{"error":"not found"}""")
+            }
+        }
+        val scopedThrowing = object : RagentTransport by throwingTransport {
+            override suspend fun execute(request: ApiRequest): ApiResponse =
+                executeCachedOrganizationTransportRequest(
+                    transport = throwingTransport,
+                    request = request,
+                    hasOfflineScope = true,
+                    requestGeneration = 7L,
+                    ownerGeneration = 7L,
+                    ownerVerified = true,
+                    organizationId = "org_1",
+                    onAuthorizationRevoked = { revokedCount++ },
+                    onCacheFactoryResponse = { body, _, path -> cachedWrites += path to body },
+                )
+        }
+
+        val (ctxOnThrow, bannerOnThrow) = fetchResponsibilityContextOrBanner(scopedThrowing, "sess_1")
+        assertNull(ctxOnThrow)
+        assertNotNull(bannerOnThrow)
+        assertTrue(bannerOnThrow.contains("Verified instance owner identity is unavailable"))
+        assertTrue(bannerOnThrow.contains("RESPONSIBILITY_OWNER_UNAVAILABLE"))
+        assertEquals(0, revokedCount)
+
+        // Core factory and conversation requests still work and cache remains intact.
+        val workItems = scopedThrowing.execute(ApiRequest("GET", "/api/organizations/org_1/factory/work-items"))
+        assertEquals(200, workItems.statusCode)
+        assertEquals(1, cachedWrites.size)
+        assertEquals("/api/organizations/org_1/factory/work-items", cachedWrites.single().first)
+
+        // 2. Non-throwing transport returning ApiResponse(403, RESPONSIBILITY_OWNER_UNAVAILABLE):
+        val responseTransport = ScriptedTransport { req ->
+            when (req.path) {
+                "/api/sessions/sess_1/responsibility-context" -> ApiResponse(
+                    statusCode = 403,
+                    body = """{"code":"RESPONSIBILITY_OWNER_UNAVAILABLE","error":"Verified instance owner identity is unavailable"}""",
+                )
+                "/api/responsibilities?organizationId=org_1" -> ApiResponse(
+                    statusCode = 403,
+                    body = """{"code":"RESPONSIBILITY_OWNER_UNAVAILABLE","error":"Verified instance owner identity is unavailable"}""",
+                )
+                else -> ApiResponse(200, "{}")
+            }
+        }
+        val scopedResponse = object : RagentTransport by responseTransport {
+            override suspend fun execute(request: ApiRequest): ApiResponse =
+                executeCachedOrganizationTransportRequest(
+                    transport = responseTransport,
+                    request = request,
+                    hasOfflineScope = true,
+                    requestGeneration = 7L,
+                    ownerGeneration = 7L,
+                    ownerVerified = true,
+                    organizationId = "org_1",
+                    onAuthorizationRevoked = { revokedCount++ },
+                    onCacheFactoryResponse = { _, _, _ -> },
+                )
+        }
+        val (ctxOnResponse, bannerOnResponse) = fetchResponsibilityContextOrBanner(scopedResponse, "sess_1")
+        assertNull(ctxOnResponse)
+        assertNotNull(bannerOnResponse)
+        assertTrue(bannerOnResponse.contains("RESPONSIBILITY_OWNER_UNAVAILABLE"))
+        val responsibilitiesLoaded = fetchResponsibilitiesOrBanner(scopedResponse, "org_1")
+        assertTrue(responsibilitiesLoaded.responsibilities.isEmpty())
+        assertNotNull(responsibilitiesLoaded.banner)
+        assertTrue(responsibilitiesLoaded.banner.contains("RESPONSIBILITY_OWNER_UNAVAILABLE"))
+        assertEquals(0, revokedCount)
+
+        // 3. Genuine 401 and genuine org/session auth 403 MUST still revoke.
+        val authCases = listOf(
+            "401 on responsibility-context" to { _: ApiRequest ->
+                throw ApiException(401, "UNAUTHORIZED", "Authentication required")
+            },
+            "403 without feature code on responsibility-context" to { _: ApiRequest ->
+                throw ApiException(403, null, "Owner access required")
+            },
+            "403 DEVICE_REVOKED on responsibility-context" to { _: ApiRequest ->
+                throw ApiException(403, "DEVICE_REVOKED", "Trusted device is revoked")
+            },
+            "403 on core organization projection" to { _: ApiRequest ->
+                ApiResponse(403, """{"error":"Owner access required"}""")
+            },
+        )
+        val authPaths = listOf(
+            "/api/sessions/sess_1/responsibility-context",
+            "/api/sessions/sess_1/responsibility-context",
+            "/api/sessions/sess_1/responsibility-context",
+            "/api/sessions/sess_1/organization/projection?version=2",
+        )
+        authCases.forEachIndexed { index, (label, fn) ->
+            var caseRevoked = 0
+            val failingTransport = ScriptedTransport(fn)
+            runCatching {
+                executeCachedOrganizationTransportRequest(
+                    transport = failingTransport,
+                    request = ApiRequest("GET", authPaths[index]),
+                    hasOfflineScope = true,
+                    requestGeneration = 7L,
+                    ownerGeneration = 7L,
+                    ownerVerified = true,
+                    organizationId = "org_1",
+                    onAuthorizationRevoked = { caseRevoked++ },
+                    onCacheFactoryResponse = { _, _, _ -> },
+                )
+            }
+            assertEquals(1, caseRevoked, "Expected revocation for $label")
+        }
     }
 
     @Test
