@@ -844,9 +844,15 @@ namespace Ragent.ServiceHost
             // `runner-sidecar.mjs` via RUNNER_ENV_ALLOWLIST) only when explicitly
             // enabled; never expose it to the identity initializer or inherit
             // non-"1" values.
-            if ((role == "control" || role == "supervisor") && !initializing
-                && Environment.GetEnvironmentVariable("RAGENT_CODEX_PROVIDER_READONLY") == "1")
-                info.EnvironmentVariables["RAGENT_CODEX_PROVIDER_READONLY"] = "1";
+            if ((role == "control" || role == "supervisor") && !initializing)
+            {
+                // The installed Owner can opt in for both services without
+                // changing machine-wide environment or another instance.
+                var ownerOptIn = String.Equals(instanceRoot, OwnerInstancePath(), StringComparison.OrdinalIgnoreCase)
+                    && ReadControlFactorySetting("RAGENT_CODEX_PROVIDER_READONLY") == "1";
+                if (ownerOptIn || Environment.GetEnvironmentVariable("RAGENT_CODEX_PROVIDER_READONLY") == "1")
+                    info.EnvironmentVariables["RAGENT_CODEX_PROVIDER_READONLY"] = "1";
+            }
             // An administrative service environment may explicitly enable
             // private temporary-control QA. Never send this feature switch to
             // the executor or identity initializer, or inherit arbitrary flags.

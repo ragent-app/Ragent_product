@@ -38,6 +38,7 @@ import com.andysagent.ragent.core.designsystem.LocalRagentColors
 import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiRequest
+import com.andysagent.ragent.feature.organization.R
 import com.andysagent.ragent.feature.organization.data.OrganizationNodeDto
 import com.andysagent.ragent.feature.organization.data.encodeOrganizationUriComponent
 import com.andysagent.ragent.feature.organization.data.formatOrganizationFeatureUnavailableBanner
@@ -126,6 +127,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
     var reportAttempts by remember(organizationId) { mutableStateOf("1") }
     var reportCost by remember(organizationId) { mutableStateOf("") }
     var reportDailyCost by remember(organizationId) { mutableStateOf("") }
+    var reportDailyRuns by remember(organizationId) { mutableStateOf("") }
+    var reportDailyTokens by remember(organizationId) { mutableStateOf("") }
     var reportTimeZone by remember(organizationId) { mutableStateOf("") }
     var reportExpiry by remember(organizationId) { mutableStateOf("") }
     var reportReview by remember(organizationId) { mutableStateOf(false) }
@@ -667,6 +670,8 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     OutlinedTextField(reportAttempts, { reportAttempts = it; reportReview = false; plannerReview = false }, label = { Text("Maximum attempts (1–10)") })
                     OutlinedTextField(reportCost, { reportCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum cost") })
                     OutlinedTextField(reportDailyCost, { reportDailyCost = it; reportReview = false; plannerReview = false }, label = { Text("Maximum daily cost") })
+                    OutlinedTextField(reportDailyRuns, { reportDailyRuns = it; reportReview = false }, label = { Text(stringResource(R.string.owner_node_daily_runs)) })
+                    OutlinedTextField(reportDailyTokens, { reportDailyTokens = it; reportReview = false }, label = { Text(stringResource(R.string.owner_node_daily_tokens)) })
                     TextButton(onClick = { reportTimeZone = weeklyZone; reportReview = false; plannerReview = false }) { Text(stringResource(com.andysagent.ragent.feature.organization.R.string.factory_weekly_use_budget_zone, weeklyZone, reportTimeZone.ifBlank { "—" })) }
                     OutlinedTextField(reportExpiry, { reportExpiry = it; reportReview = false; plannerReview = false }, label = { Text("Authorization expiry (ISO time)") })
                     Text("Network policy: ${reportNetworkPolicy.ifBlank { "not selected" }}")
@@ -680,10 +685,13 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                     val attempts = reportAttempts.toIntOrNull()
                     val cost = reportCost.toDoubleOrNull()
                     val dailyCost = reportDailyCost.toDoubleOrNull()
-                    val validReport = reportNodes.any { it.id == reportNode && it.currentBinding?.generation == generation } && generation != null && generation > 0 && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && dailyCost != null && dailyCost.isFinite() && dailyCost >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (reportNetworkPolicy == "deny" || (reportNetworkPolicy == "inherit_existing_permissions" && reportNetworkConfirmed))
+                    val dailyRuns = reportDailyRuns.toLongOrNull()
+                    val dailyTokens = reportDailyTokens.toLongOrNull()
+                    val validDailyLimits = (reportDailyRuns.isBlank() || (dailyRuns != null && dailyRuns >= 0 && dailyRuns <= 9007199254740991L)) && (reportDailyTokens.isBlank() || (dailyTokens != null && dailyTokens >= 0 && dailyTokens <= 9007199254740991L))
+                    val validReport = validDailyLimits && reportNodes.any { it.id == reportNode && it.currentBinding?.generation == generation } && generation != null && generation > 0 && attempts != null && attempts in 1..10 && cost != null && cost.isFinite() && cost > 0 && dailyCost != null && dailyCost.isFinite() && dailyCost >= 0 && reportTimeZone.isNotBlank() && reportExpiry.isNotBlank() && (reportNetworkPolicy == "deny" || (reportNetworkPolicy == "inherit_existing_permissions" && reportNetworkConfirmed))
                     if (!reportReview) TextButton(enabled = validReport, onClick = { reportReview = true }) { Text("Review report authorization") }
                     else {
-                        Text("Authorize entire project ${current["projectId"]} read-only; node $reportNode generation $reportGeneration; network $reportNetworkPolicy; attempts $reportAttempts; cost $reportCost; daily cost $reportDailyCost in $reportTimeZone; expiry $reportExpiry; provider ${reportProvider["digest"]}; template ${reportTemplate["digest"]}.")
+                        Text("Authorize entire project ${current["projectId"]} read-only; node $reportNode generation $reportGeneration; network $reportNetworkPolicy; attempts $reportAttempts; cost $reportCost; daily cost $reportDailyCost, daily runs ${reportDailyRuns.ifBlank { "not set" }}, daily tokens ${reportDailyTokens.ifBlank { "not set" }} in $reportTimeZone; expiry $reportExpiry; provider ${reportProvider["digest"]}; template ${reportTemplate["digest"]}.")
                         TextButton(enabled = validReport, onClick = {
                             val policy = buildJsonObject {
                                 put("validUntil", reportExpiry); put("providerId", "project-report"); put("providerVersion", 1); put("providerDigest", reportProvider["digest"]!!)
@@ -691,7 +699,7 @@ fun FactoryWorkScreen(transport: RagentTransport, organizationId: String, respon
                                 put("resource", buildJsonObject { put("projectId", current["projectId"]!!); put("readScope", "entire_project"); put("networkPolicy", reportNetworkPolicy) })
                                 if (reportNetworkPolicy == "inherit_existing_permissions") put("networkPermissionConfirmed", reportNetworkConfirmed)
                                 put("nodeBindings", buildJsonObject { put("report", buildJsonObject { put("nodeId", reportNode); put("bindingGeneration", generation!!) }) })
-                                put("maxAttempts", attempts!!); put("maxCost", cost!!); put("dailyBudget", buildJsonObject { put("timeZone", reportTimeZone); put("maxCost", dailyCost!!) })
+                                put("maxAttempts", attempts!!); put("maxCost", cost!!); put("dailyBudget", buildJsonObject { put("timeZone", reportTimeZone); put("maxCost", dailyCost!!); if (dailyRuns != null) put("maxRuns", dailyRuns); if (dailyTokens != null) put("maxTokens", dailyTokens) })
                             }
                             val body = buildJsonObject { put("policy", policy); put("expectedVersion", current["rowVersion"]!!); put("idempotencyKey", UUID.randomUUID().toString()) }
                             scope.launch { submitResponsibility("/api/responsibilities/${Uri.encode(current["id"]!!.jsonPrimitive.content)}", body, "PATCH"); reportReview = false }

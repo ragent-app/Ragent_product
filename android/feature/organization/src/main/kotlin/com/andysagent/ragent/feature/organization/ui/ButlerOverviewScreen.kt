@@ -70,6 +70,7 @@ fun ButlerOverviewScreen(
     onOpenApproval: (ButlerOverviewItemDto) -> Unit,
     onOpenResponsibilityDetails: (responsibilityId: String, planId: String?) -> Unit,
     onOpenLegacyReports: () -> Unit,
+    onOpenOwnerReportNode: () -> Unit,
     onOpenAllResponsibilities: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -267,6 +268,7 @@ fun ButlerOverviewScreen(
                         onClick = { onSelectFilter(ButlerFilter.BLOCKED_AND_ALERTS) },
                         label = { Text("${stringResource(R.string.butler_bucket_blocked_alerts)} ($blockedCount)") },
                     )
+                    TextButton(onClick = onOpenOwnerReportNode) { Text(stringResource(R.string.owner_node_title)) }
                     TextButton(onClick = onOpenLegacyReports) {
                         Text(stringResource(R.string.butler_legacy_reports))
                     }

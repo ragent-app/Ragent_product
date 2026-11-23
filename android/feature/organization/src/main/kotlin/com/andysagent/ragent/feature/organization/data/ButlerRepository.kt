@@ -247,7 +247,11 @@ class RealButlerRepository(
         val message = obj?.get("error")?.jsonPrimitive?.contentOrNull
             ?: obj?.get("message")?.jsonPrimitive?.contentOrNull
             ?: fallback
-        return ApiException(statusCode, code, message)
+        // Only the server's fixed, non-secret diagnostic codes are shown.
+        val reason = obj?.get("reason")?.jsonPrimitive?.contentOrNull
+        val allowed = setOf("namespace_unavailable", "owner_session_unavailable", "authentication_method_unavailable", "owner_binding_unavailable", "account_binding_mismatch", "authority_unavailable")
+        val detail = if (code == "RESPONSIBILITY_OWNER_UNAVAILABLE" && reason in allowed) "$message ($reason)" else message
+        return ApiException(statusCode, code, detail)
     }
     private fun encodeUriComponent(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")

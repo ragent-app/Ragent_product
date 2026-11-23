@@ -38,6 +38,15 @@ class FactoryWorkflowRepository(
         return parsed ?: error("Invalid server response")
     }
 
+    suspend fun listOwnerResponsibilities(): JsonObject = request("/api/responsibilities?organizationId=${Uri.encode(organizationId)}", absolute = true)
+    suspend fun ownerResponsibility(id: String): JsonObject = request("/api/responsibilities/${Uri.encode(id)}", absolute = true)
+    suspend fun bindOwnerReportScope(body: JsonObject): JsonObject = request("/owner-report-node/bind", body)
+    suspend fun ownerReportNodeCatalog(): JsonObject = request("/owner-report-node/catalog")
+    suspend fun codexModels(): JsonObject = request("/api/models?tool=codex", absolute = true)
+    suspend fun previewOwnerReportNode(body: JsonObject): JsonObject = request("/owner-report-node/preview", body)
+    suspend fun commitOwnerReportNode(body: JsonObject): JsonObject = request("/owner-report-node/commit", body)
+    suspend fun ownerReportNodeOperation(commandId: String): JsonObject = request("/owner-report-node/operations/${Uri.encode(commandId)}")
+
     suspend fun listGoals(cursor: String? = null): JsonObject = request("/goals" + (cursor?.let { "?cursor=${Uri.encode(it)}" } ?: ""))
     suspend fun listWorkItems(cursor: String? = null): JsonObject = request("/work-items" + (cursor?.let { "?cursor=${Uri.encode(it)}" } ?: ""))
     suspend fun getWorkItem(id: String): JsonObject = request("/work-items/${Uri.encode(id)}")

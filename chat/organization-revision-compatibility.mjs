@@ -12,7 +12,12 @@ export function isAppendOnlyRevisionCompatible(db, organizationId, fromRevision,
   const keyed = (values, key) => new Map((Array.isArray(values) ? values : []).map((entry) => [key(entry), entry]));
   try {
     for (let i = 1; i < rows.length; i++) {
-      if (!String(rows[i].idempotency_key || '').startsWith('manager-append:')) return false;
+      if (!['manager-append:', 'owner-report-append:'].some(prefix => String(rows[i].idempotency_key || '').startsWith(prefix))) return false;
+      if (String(rows[i].idempotency_key || '').startsWith('owner-report-append:')) {
+        if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owner_report_setup_operations'").get()) return false;
+        const commandId=String(rows[i].idempotency_key).slice('owner-report-append:'.length);
+        if (!db.prepare('SELECT 1 FROM owner_report_setup_operations WHERE command_id=? AND organization_id=? AND revision=?').get(commandId,organizationId,rows[i].revision)) return false;
+      }
       const before = JSON.parse(rows[i - 1].compiled_json || '{}');
       const after = JSON.parse(rows[i].compiled_json || '{}');
       const previous = JSON.parse(rows[i - 1].proposal_json || '{}');

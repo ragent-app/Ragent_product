@@ -74,7 +74,7 @@ fun FactoryTeamWorkspace(
     transport: RagentTransport, organizationId: String, nodes: List<OrganizationNodeDto>,
     responsibilityDraft: String, selectedResponsibilityId: String?, onResponsibilitySelected: (String?) -> Unit,
     responsibilityNavigationKey: String? = null, selectedPlanId: String? = null,
-    sessionId: String, rootSessionId: String?, stableAccountScope: Boolean, onBack: () -> Unit,
+    sessionId: String, rootSessionId: String?, stableAccountScope: Boolean, ownerScopeKey: String, onBack: () -> Unit,
     onOpenSourceSession: ((String) -> Unit)? = null,
 ) {
     val repo = remember(transport, organizationId) { FactoryWorkflowRepository(transport, organizationId) }
@@ -114,6 +114,12 @@ fun FactoryTeamWorkspace(
     var handoff by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var reconciliation by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
     var budgetFacts by remember(organizationId) { mutableStateOf<JsonObject?>(null) }
+    // Request bodies contain no credentials. Persist before sending so process
+    // death cannot silently create a second command under a new key.
+    val ownerRequestStore = remember(appContext) { appContext.getSharedPreferences("owner_report_setup_requests", android.content.Context.MODE_PRIVATE) }
+    val ownerRequestKey = remember(ownerScopeKey, organizationId) { "${ownerScopeKey}:${organizationId}" }
+    var ownerNodePending by remember(ownerRequestKey) { mutableStateOf(if (stableAccountScope) ownerRequestStore.getString("$ownerRequestKey:setup", "").orEmpty() else "") }
+    var ownerBindPending by remember(ownerRequestKey) { mutableStateOf(if (stableAccountScope) ownerRequestStore.getString("$ownerRequestKey:bind", "").orEmpty() else "") }
     var pendingHandoff by rememberSaveable(organizationId, rootSessionId) { mutableStateOf<String?>(null) }
     var selectedId by rememberSaveable(organizationId, rootSessionId) { mutableStateOf("") }
     var queuedWorkId by remember(organizationId) { mutableStateOf<String?>(null) }
@@ -324,12 +330,23 @@ fun FactoryTeamWorkspace(
                     page = "advanced"
                 },
                 onOpenLegacyReports = { page = "list" },
+                onOpenOwnerReportNode = { page = "ownerNode" },
                 onOpenAllResponsibilities = {
                     focusedPlanFromButler = null
                     onResponsibilitySelected(null)
                     page = "advanced"
                 },
             )
+        } else if (screen == "ownerNode") {
+            OwnerReportNodeScreen(repo, organizationId, sessionProject, stableAccountScope, ownerNodePending, { value ->
+                val saved = stableAccountScope && ownerRequestStore.edit().putString("$ownerRequestKey:setup", value).commit()
+                if (saved) ownerNodePending = value
+                saved
+            }, ownerBindPending, { value ->
+                val saved = stableAccountScope && ownerRequestStore.edit().putString("$ownerRequestKey:bind", value).commit()
+                if (saved) ownerBindPending = value
+                saved
+            }) { page = "butler" }
         } else if (screen == "advanced") {
             FactoryWorkScreen(
                 transport = transport,

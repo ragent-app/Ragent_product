@@ -391,6 +391,18 @@ export async function reserveOrganizationBudget({ organizationId, revision, rese
           normalizedDelta[dimension] = available;
         }
       }
+      // A single-report owner scope is narrower than the organization budget.
+      // Apply it in this same reservation transaction without resetting prior usage.
+      if (factoryWorkItemId && db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='factory_owner_report_scope'").get()) {
+        const scope=db.prepare("SELECT * FROM factory_owner_report_scope WHERE organization_id=? AND state<>'closed'").get(orgId);
+        if (scope) {
+          if (scope.state!=='ready' || scope.work_item_id!==factoryWorkItemId) throw governorError(ORG_BUDGET_INVALID,'Work is outside the owner report scope',403);
+          for (const [dimension, limit] of [['tokens',scope.max_tokens],['cost',scope.max_cost]]) {
+            if (automaticDimensions.includes(dimension)) { if (!(normalizedDelta[dimension]>0)) throw governorError(ORG_BUDGET_EXCEEDED,`${dimension} budget exhausted`,409,{dimension}); normalizedDelta[dimension]=Math.min(normalizedDelta[dimension],limit); }
+            else if (normalizedDelta[dimension]>limit) throw governorError(ORG_BUDGET_EXCEEDED,`${dimension} exceeds the owner report scope`,409,{dimension});
+          }
+        }
+      }
       const responsibilityScope = responsibilityWindow(db,orgId,factoryWorkItemId,normalizedDelta,automaticDimensions,priorReservations);
       assertWithinBudget(cumulative.totals, cumulative.reserved, normalizedDelta, effectiveLimits);
       const nextReserved = add(reservedTotals, normalizedDelta);

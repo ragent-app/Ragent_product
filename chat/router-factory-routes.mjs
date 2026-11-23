@@ -1,3 +1,4 @@
+import { ownerReportCatalog, previewOwnerReportNode, commitOwnerReportNode, getOwnerReportNodeOperation, changeOwnerReportScope } from './organization-owner-report-node.mjs';
 import {authorizeOwnerFactoryReport} from './factory-owner-report.mjs';
 import { previewOwnerOrganization, commitOwnerOrganization, getOwnerOrganizationOperation } from './organization-owner-proposal.mjs';
 import { getOrganizationNodeGrantRevision, reviseOrganizationNodeGrant } from './organization-grant-revision.mjs';
@@ -127,6 +128,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     }
     return true;
   }
+  const ownerReportNode = /^\/api\/organizations\/([^/]+)\/factory\/owner-report-node\/(catalog|preview|commit|operations|bind|close)(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const ownerReport = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/owner-report-authorization$/.exec(String(pathname || ''));
   const ownerProposal = /^\/api\/factory\/organization-proposals\/(preview|commit|operations)(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const steer = /^\/api\/organizations\/([^/]+)\/factory\/work-items\/([^/]+)\/steer$/.exec(String(pathname || ''));
@@ -169,7 +171,7 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
   const escalateMessage = /^\/api\/organizations\/([^/]+)\/factory\/nodes\/([^/]+)\/messages\/([^/]+)\/escalate$/.exec(String(pathname || ''));
   const fanoutWorkflow = /^\/api\/organizations\/([^/]+)\/factory\/workflows\/fanout(?:\/([^/]+))?$/.exec(String(pathname || ''));
   const match = /^\/api\/organizations\/([^/]+)\/factory\/(work-items|goals|commands|status|workflow|available-checks)(?:\/([^/]+))?$/.exec(String(pathname || ''));
-  if (!ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !reconcileResolve && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
+  if (!ownerReportNode && !ownerReport && !ownerProposal && !nodeGrantRevision && !denialObservations && !consultation && !factoryPolicy && !blockerSubmit && !blockerOwner && !fanoutWorkflow && !match && !messages && !escalateMessage && !response && !reviewOpinion && !reconcile && !budget && !taskKnowledge && !reconcileResume && !reconcileVerify && !reconcileResolve && !goalRevision && !scopedRevision && !itemCheck && !checkReconcile && !reviewReconcile && !integrationQueue && !integrationQueueRead && !integrationQueueList && !acceptance && !lifecycle && !nodeRebind && !release && !releaseReconcile && !team && !handoffCreate && !handoffRead && !shadow && !shadowAttempts && !steer && !steerReceipt && !shadowReconciliation && !retirement) return false;
   const directOrg = /^\/api\/organizations\/([^/]+)\/factory(?:\/|$)/.exec(String(pathname || ''));
   let observedOrg = authSession?.organizationMessageScope?.organizationId || '';
   try { if(directOrg) observedOrg=decodeURIComponent(directOrg[1]); } catch { observedOrg=''; }
@@ -214,6 +216,19 @@ export async function handleFactoryRoutes({ req, res, pathname, authSession, wri
     writeJson(res, 403, { error: 'Owner access required' }); return true;
   }
   try {
+    if(ownerReportNode) {
+      const actor=await resolveResponsibilityActor(req,authSession);
+      if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
+      const org=decodeURIComponent(ownerReportNode[1]), action=ownerReportNode[2], id=ownerReportNode[3];
+      if(action==='catalog' && req.method==='GET' && !id) {writeJson(res,200,await ownerReportCatalog(org,actor));return true;}
+      if(action==='operations' && req.method==='GET' && id) {writeJson(res,200,await getOwnerReportNodeOperation(org,decodeURIComponent(id),actor));return true;}
+      if(req.method!=='POST' || id || !['preview','commit','bind','close'].includes(action)) {writeJson(res,405,{error:'Method not allowed'});return true;}
+      if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}
+      if(!mutationSourceAllowed(req)) {writeJson(res,403,{error:'Owner JSON request required'});return true;}
+      const body=JSON.parse(await readBody(req,16384) || '{}');
+      const result=action==='preview'?await previewOwnerReportNode(org,body,actor):action==='commit'?await commitOwnerReportNode(org,body,actor):await changeOwnerReportScope(org,action,body,actor);
+      writeJson(res,200,result);return true;
+    }
     if(ownerReport) {
       if(req.method!=='POST') {writeJson(res,405,{error:'Method not allowed'});return true;}
       if(process.env.RAGENT_FACTORY_CONTROL_ENABLED!=='true') {writeJson(res,503,{code:'FACTORY_CONTROL_DISABLED',error:'Factory control is disabled'});return true;}

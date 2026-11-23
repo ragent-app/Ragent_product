@@ -8,7 +8,7 @@ import { getSession } from './session-manager.mjs';
 import { sanitizeEmailCompletionTargets, recordEmailDeliveryReview } from '../lib/agent-mail-completion-targets.mjs';
 import { observeGithubFailure } from './github-ci-observer.mjs';
 import { proposeResponsibilityIntent } from './responsibility-intent.mjs';
-import { resolveResponsibilityActor } from './responsibility-actor.mjs';
+import { inspectResponsibilityActor } from './responsibility-actor.mjs';
 import { getResponsibilitySessionContext, setResponsibilitySessionContext } from './responsibility-session-context.mjs';
 import {
   previewResponsibilityMemory,
@@ -151,8 +151,15 @@ export async function handleResponsibilityRoutes({req,res,pathname,authSession,w
   const voiceSessions=/^\/api\/responsibilities\/voice\/sessions(?:\/([^/]+)(?:\/(turn|interrupt|handoff))?)?$/.exec(String(pathname||''));
   const notificationBinding=/^\/api\/responsibilities\/notification-subscriptions(?:\/([a-f0-9]{64})\/(revoke))?$/.exec(String(pathname||'')); if(!match&&!review&&!sessionContext&&!memoryRevision&&!memoryConflicts&&!ownerUserMemory&&!ownerEpisodicMemory&&!scopedUserMemory&&!scopedEpisodicMemory&&!scopedMemoryAudit&&!plans&&!notificationBinding&&!triggerBinding&&!butlerOverview&&!voiceAdapters&&!voiceSessions) return false;
   if(authSession?.role!=='owner'||['run_capability','target_runtime_gateway','temporary_device','provisional_device'].includes(authSession?.principalKind)) {writeJson(res,403,{error:'Owner access required'});return true;}
-  const actor=await resolveResponsibilityActor(req,authSession);
-  if(!actor) {writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable'});return true;}
+  const {actor,reason}=await inspectResponsibilityActor(req,authSession);
+  if(!actor) {
+    const trustedDevice=authSession?.principalKind==='trusted_device'
+      && req?._bearerAuthSession?.principalKind==='trusted_device'
+      && !authSession.workspaceAccess;
+    writeJson(res,403,{code:'RESPONSIBILITY_OWNER_UNAVAILABLE',error:'Verified instance owner identity is unavailable',
+      ...(trustedDevice ? {reason} : {})});
+    return true;
+  }
   try {
     if(ownerUserMemory || scopedUserMemory) {
       const responsibilityId = scopedUserMemory ? decodeURIComponent(scopedUserMemory[1]) : '';

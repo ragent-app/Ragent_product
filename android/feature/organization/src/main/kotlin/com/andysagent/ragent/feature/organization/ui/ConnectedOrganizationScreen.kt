@@ -562,7 +562,7 @@ fun ConnectedOrganizationScreen(transport: RagentTransport, sessionId: String, t
             // transport's pending owner request after a change of identity.
             val workScope = "${targetId.orEmpty()}:${scopeKey.ifBlank { transportKey }}:$sessionId:${organizationId.orEmpty()}"
             workStateHolder.SaveableStateProvider(workScope) {
-                FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, responsibilityNavigationKey, selectedPlanId, sessionId, rootSessionId, scopeKey.isNotBlank(), onBack = { workOpen = false }, onOpenSourceSession = onOpenSourceSession)
+                FactoryTeamWorkspace(cachedTransport, organizationId!!, nodes, responsibilityDraft, selectedResponsibilityId, onResponsibilitySelected, responsibilityNavigationKey, selectedPlanId, sessionId, rootSessionId, scopeKey.isNotBlank(), scopeKey, onBack = { workOpen = false }, onOpenSourceSession = onOpenSourceSession)
             }
         }
         else if (loaded && connection == RuntimeConnectionState.Connected && messagesOpen && organizationId != null) TeamMessagesScreen(cachedTransport, organizationId!!, nodes, onBack = { messagesOpen = false })

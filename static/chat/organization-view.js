@@ -2580,7 +2580,7 @@
               await submit();
             } catch (error) { add(content, 'p', `无法审阅局部修改：${error.message}`); }
           });
-          reportRevisionButton.dataset.reportRevision = 'true';
+          reportRevisionButton.setAttribute('data-report-revision', 'true');
           for (const shortcut of revisionShortcuts) shortcut.disabled = false;
           button(content, '审阅多个工作目标修改', async () => {
             const panel = add(content, 'section', '');
