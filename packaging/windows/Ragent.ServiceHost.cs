@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.ServiceProcess;
 using System.Text;
@@ -747,6 +748,51 @@ namespace Ragent.ServiceHost
                 return "0";
             return "1";
         }
+        // Factory identity and scheduling remain opt-in. Only the control
+        // service receives these administrator-supplied non-credential values.
+        // Never synthesize an owner or allow an invalid allowlist to broaden scope.
+        private static string ReadControlFactorySetting(string name)
+        {
+            // Read only this installed control service's administrator-controlled
+            // parameters; machine-wide and inherited environment are ignored.
+            // Expandable values and other registry types are deliberately refused.
+            try
+            {
+                using (var key = Registry.LocalMachine.OpenSubKey(
+                    @"SYSTEM\CurrentControlSet\Services\Ragent-ControlPlane\Parameters", false))
+                {
+                    if (key == null || key.GetValueKind(name) != RegistryValueKind.String) return null;
+                    return key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+                }
+            }
+            catch (IOException) { return null; }
+            catch (UnauthorizedAccessException) { return null; }
+            catch (System.Security.SecurityException) { return null; }
+            catch (ArgumentException) { return null; }
+        }
+        private static void CopyFactoryControlEnvironment(ProcessStartInfo info)
+        {
+            var owner = ReadControlFactorySetting("RAGENT_FACTORY_SCHEDULER_OWNER_ID");
+            if (!String.IsNullOrWhiteSpace(owner))
+            {
+                owner = owner.Trim();
+                if (owner.Length <= 230 && !owner.Any(Char.IsControl))
+                    info.EnvironmentVariables["RAGENT_FACTORY_SCHEDULER_OWNER_ID"] = owner;
+            }
+            var rawOrganizations = ReadControlFactorySetting("RAGENT_FACTORY_ORGANIZATIONS");
+            if (!String.IsNullOrWhiteSpace(rawOrganizations))
+            {
+                var organizations = rawOrganizations.Split(',').Select(value => value.Trim())
+                    .Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+                if (organizations.Length > 0 && organizations.Length <= 100
+                    && organizations.All(value => Regex.IsMatch(value, @"\A[A-Za-z0-9:_-]{1,160}\z")))
+                    info.EnvironmentVariables["RAGENT_FACTORY_ORGANIZATIONS"] = String.Join(",", organizations);
+            }
+            foreach (var name in new[] { "RAGENT_FACTORY_SCHEDULER_ENABLED", "RAGENT_RESPONSIBILITY_RUNTIME_ENABLED" })
+                if (ReadControlFactorySetting(name) == "1") info.EnvironmentVariables[name] = "1";
+            if (ReadControlFactorySetting("RAGENT_FACTORY_CONTROL_ENABLED") == "true")
+                info.EnvironmentVariables["RAGENT_FACTORY_CONTROL_ENABLED"] = "true";
+        }
         internal ProcessStartInfo BuildChildStartInfo()
         {
             return BuildChildStartInfoCore(false);
@@ -786,6 +832,10 @@ namespace Ragent.ServiceHost
             {
                 foreach (var flag in ControlOrganizationRolloutFlags)
                     info.EnvironmentVariables[flag] = ResolvePackagedOptOutFlagValue(flag);
+                // Service-specific settings apply only to the installed Owner instance,
+                // never other control-plane instances on this host.
+                if (String.Equals(instanceRoot, OwnerInstancePath(), StringComparison.OrdinalIgnoreCase))
+                    CopyFactoryControlEnvironment(info);
             }
             // Codex provider-negotiated read-only (`windowsSandbox/readiness`,
             // enforcement: "provider-negotiated") is an explicit server opt-in on
