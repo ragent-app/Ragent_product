@@ -932,5 +932,95 @@ class TimelineEngineTest {
         assertEquals("answered", reconciledAssistant.asyncQuestionsState)
     }
 
+    @Test
+    fun `latestTurnScopedRunId scans only the latest turn and never leaks prior turn runId`() {
+        val turn1User = TimelineItem.Message("u1", 1, TimelineRole.User, "First", true, requestId = "req-1", runId = "run-1")
+        val turn1Reply = TimelineItem.Message("a1", 2, TimelineRole.Agent, "Answer 1", true, requestId = "req-1", runId = "run-1")
+        val turn2User = TimelineItem.Message("u2", 3, TimelineRole.User, "Second", true, requestId = "req-2", runId = null)
+        assertEquals(null, latestTurnScopedRunId(listOf(turn1User, turn1Reply, turn2User)))
+
+        val turn2Op = TimelineItem.Operation(
+            "op2", 4, TimelineOperationKind.Command, "List", "ls",
+            TimelineOperationStatus.InProgress, runId = "run-2",
+        )
+        assertEquals("run-2", latestTurnScopedRunId(listOf(turn1User, turn1Reply, turn2User, turn2Op)))
+
+        val nullRunOverlay = TimelineItem.Message("overlay", 4, TimelineRole.Agent, "Streaming", false, runId = null)
+        val nullThinkingOverlay = TimelineItem.Operation(
+            "think", 4, TimelineOperationKind.Tool, "Thinking", "Reasoning",
+            TimelineOperationStatus.InProgress, runId = null, isReasoning = true,
+        )
+        val settledNullRun = settleLatestTurnMessages(
+            listOf(turn1User, turn1Reply, turn2User, nullThinkingOverlay, nullRunOverlay),
+            terminal = true,
+        )
+        assertEquals(TimelineOperationStatus.Completed, (settledNullRun[3] as TimelineItem.Operation).status)
+        assertTrue((settledNullRun[4] as TimelineItem.Message).completed)
+    }
+
+    @Test
+    fun `timeline projector retires mismatched entityId streaming overlay once durable completes`() {
+        val streamingOverlay = TimelineEvent(
+            id = "live:delta:1",
+            seq = 100L,
+            type = "text_delta",
+            entityId = "message:stream-block-1:assistant",
+            revision = 3L,
+            text = "Final answer",
+            role = TimelineRole.Agent,
+            messageState = "streaming",
+            lastEventSeq = 0L,
+            requestId = "req-1",
+            runId = "run-1",
+            operationStatus = TimelineOperationStatus.InProgress,
+        )
+        val commentaryDurable = Message(
+            id = "durable-commentary",
+            sessionId = "s1",
+            role = "assistant",
+            content = "Let me check the repo.",
+            seq = 2L,
+            requestId = "req-1",
+            runId = "run-1",
+            completed = true,
+            messagePhase = "commentary",
+        )
+        val finalOverlay = streamingOverlay.copy(
+            id = "live:delta:2",
+            seq = 101L,
+            entityId = "message:stream-block-2:assistant",
+            text = "Actual answer in progress",
+            messagePhase = "final_answer",
+        )
+        val withMidRunCommentary = TimelineProjector.project(listOf(commentaryDurable), listOf(finalOverlay))
+            .filterIsInstance<TimelineItem.Message>()
+        assertEquals(2, withMidRunCommentary.size, "completed commentary mid-run must not evict streaming final_answer")
+
+        val finalDurable = Message(
+            id = "durable-final-uuid",
+            sessionId = "s1",
+            role = "assistant",
+            content = "Final answer from server",
+            seq = 3L,
+            requestId = "req-1",
+            runId = "run-1",
+            completed = true,
+            messagePhase = "final_answer",
+        )
+        val stateless = TimelineProjector.project(listOf(finalDurable), listOf(streamingOverlay))
+            .filterIsInstance<TimelineItem.Message>()
+        assertEquals(1, stateless.size)
+        assertEquals("durable-final-uuid", stateless.single().id)
+        assertTrue(stateless.single().completed)
+
+        val incremental = IncrementalTimelineProjector()
+        incremental.project(emptyList(), listOf(streamingOverlay))
+        val rebased = incremental.project(listOf(finalDurable), listOf(streamingOverlay))
+            .filterIsInstance<TimelineItem.Message>()
+        assertEquals(1, rebased.size)
+        assertEquals("durable-final-uuid", rebased.single().id)
+        assertTrue(rebased.single().completed)
+    }
+
     private fun charFor(i: Int): Char = ('a'.code + ((i - 1) % 26)).toChar()
 }

@@ -100,6 +100,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -4550,6 +4551,95 @@ fun RetryCard(
                         maxLines = 1,
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ComposerRuntimeRetryHint(
+    label: String,
+    isError: Boolean,
+    loading: Boolean = false,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+    backdropLayer: GraphicsLayer? = null,
+    backdropOrigin: IntOffset = IntOffset.Zero,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    val borderColor = if (isDark) {
+        AgentoFrostedTokens.SubtleHairline
+    } else {
+        AgentoFrostedTokens.LightSubtleHairline
+    }
+    var backdropOffset by remember { mutableStateOf(IntOffset.Zero) }
+    val contentColor = if (isError) colors.error else colors.accentPrimary
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        AgentoFrostedGlassBox(
+            modifier = Modifier
+                .testTag("composer-runtime-retry")
+                .ragentComposerShadow(shape = AgentoShapes.PillShape)
+                .clip(AgentoShapes.PillShape)
+                .border(0.5.dp, borderColor, AgentoShapes.PillShape)
+                .agentoPressScale(
+                    pressedScale = 0.96f,
+                    onClick = onRetry,
+                )
+                .semantics {
+                    role = Role.Button
+                    contentDescription = label
+                }
+                .onGloballyPositioned { coordinates ->
+                    val position = coordinates.positionInRoot()
+                    backdropOffset = IntOffset(
+                        x = backdropOrigin.x - position.x.roundToInt(),
+                        y = backdropOrigin.y - position.y.roundToInt(),
+                    )
+                },
+            shape = AgentoShapes.PillShape,
+            surface = AgentoGlassSurface.Neutral,
+            blurRadius = AgentoFrostedTokens.BlurNavigation,
+            showTopHairline = true,
+            backdropLayer = backdropLayer,
+            backdropOffset = backdropOffset,
+            backdropTone = AgentoBackdropTone.QuietHeader,
+            material = AgentoGlassMaterial.LiquidClear,
+            specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+            contentAlignment = Alignment.Center,
+            hasShadow = false,
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(13.dp),
+                        strokeWidth = 1.6.dp,
+                        color = contentColor,
+                    )
+                } else {
+                    AgentoWebIcon(
+                        glyph = AgentoWebGlyph.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(13.dp),
+                        tint = contentColor,
+                    )
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Medium),
+                    color = colors.primaryContent,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

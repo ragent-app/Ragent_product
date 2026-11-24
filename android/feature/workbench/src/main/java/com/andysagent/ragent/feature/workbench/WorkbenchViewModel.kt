@@ -83,6 +83,29 @@ import kotlinx.coroutines.sync.withLock
 
 private const val ARTIFACT_PARSE_OFFLOAD_ITEM_COUNT = 24
 private const val ARTIFACT_PARSE_OFFLOAD_TEXT_LENGTH = 12_000
+private val RECOVERABLE_CONNECTION_ERROR_CODES = setOf(
+    "CARRIER_UNAVAILABLE",
+    "NETWORK_ERROR",
+    "P2P_NETWORK_ERROR",
+    "TURN_NETWORK_ERROR",
+    "P2P_REMOTE_ERROR",
+    "TURN_REMOTE_ERROR",
+    "TIMEOUT",
+    "REQUEST_TIMEOUT",
+    "CONNECTION_LOST",
+    "CARRIER_DISCONNECTED",
+)
+private val RECOVERABLE_CONNECTION_ERROR_MESSAGES = listOf(
+    "No verified TURN/P2P carrier",
+    "P2P request failed",
+    "TURN request failed",
+    "timed out",
+    "timeout",
+    "carrier unavailable",
+    "connection reset",
+    "connection closed",
+    "reconnecting",
+)
 
 /** Pure render aggregate used by previews and the current Workbench composable. */
 @Immutable
@@ -190,6 +213,7 @@ data class WorkbenchUiState(
     val planMode: Boolean = false,
     val runMetrics: RunMetricsUiState = RunMetricsUiState(),
     val runDurations: Map<String, Long> = emptyMap(),
+    val authoritativeIdleAtSeq: Long = 0L,
     val stepTraces: List<StepTraceItem> = emptyList(),
     val changedFiles: List<FileDiffDetail> = emptyList(),
     val remoteTargets: List<RemoteTarget> = emptyList(),
@@ -553,6 +577,7 @@ data class ChatUiState(
     val planMode: Boolean = false,
     val runMetrics: RunMetricsUiState = RunMetricsUiState(),
     val runDurations: Map<String, Long> = emptyMap(),
+    val authoritativeIdleAtSeq: Long = 0L,
     val stepTraces: List<StepTraceItem> = emptyList(),
     val changedFiles: List<FileDiffDetail> = emptyList(),
 )
@@ -568,6 +593,7 @@ data class PendingTurnUiState(
     val harnessCapabilityIds: List<String> = emptyList(),
     val state: PendingTurnState = PendingTurnState.Sending,
     val error: String? = null,
+    val errorRecoverable: Boolean = false,
     val attachmentUploadProgress: AttachmentUploadProgress? = null,
 )
 
@@ -815,6 +841,8 @@ class ChatViewModel(
     )
     private var capabilityCatalogKey: CapabilityCatalogKey? = null
     private var capabilityCatalogJob: Job? = null
+    private val inFlightRunProjections = mutableSetOf<Pair<String, String>>()
+    private var lastCatchUpRequested: Triple<SessionRepository, String, Long>? = null
 
     private fun activeRepository(): SessionRepository? =
         if (repository is SwitchingSessionRepository) repository.delegate.value else repository
@@ -890,18 +918,24 @@ class ChatViewModel(
                     runtimeModelCache.clear()
                     updateState { copy(runtimeCatalog = RuntimeCatalog(), runtimeSelectionDisplay = null, runtimeModelsLoading = false, runtimeModelsError = null) }
                 }
-                val recoverSessionId = mutableState.value.sessionId.takeIf { mutableState.value.clearErrorWhenConnected }
+                val recoverSessionId = mutableState.value.sessionId
                 val recoverGeneration = sessionGeneration
                 updateConnection(connection)
                 if (fixed != null && connection == RuntimeConnectionState.Connected) {
-                    if (recoverSessionId != null && selectedRepository === fixed) refreshSession(recoverSessionId, recoverGeneration)
-                    runCatching { fixed.loadRuntimeCatalog() }
-                        .onSuccess { catalog ->
-                            if (activeRepository() !== fixed) return@onSuccess
-                            val mergedCatalog = mergeRuntimeCatalog(catalog, mutableState.value.runtimeCatalog)
-                            updateState { copy(runtimeCatalog = mergedCatalog) }
-                            if (!mutableState.value.runtimePickerOpen) resolveDefaultRuntime(fixed, mergedCatalog)
+                    lastCatchUpRequested = null
+                    coroutineScope {
+                        launch {
+                            runCatching { fixed.refreshSessions() }
+                                .onFailure { if (it is CancellationException) throw it }
+                                .onSuccess {
+                                    if (activeRepository() === fixed) clearRecoverableErrorOnSuccess()
+                                }
                         }
+                        if (recoverSessionId != null && selectedRepository === fixed) {
+                            launch { refreshSession(recoverSessionId, recoverGeneration) }
+                        }
+                        launch { loadAndResolveRuntimeWithRetry(fixed) }
+                    }
                 }
             }
         }
@@ -940,6 +974,19 @@ class ChatViewModel(
                             queuedMessages = selected.queuedMessages.map(::toQueuedMessageUiState),
                             acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queueIds },
                         )
+                    }
+                    if (selected.id == currentId && fixed === selectedRepository &&
+                        fixed.connectionState.value == RuntimeConnectionState.Connected
+                    ) {
+                        val syncedSeq = fixed.lastSyncedSeq(selected.id) ?: 0L
+                        val catchUpKey = Triple(fixed, selected.id, selected.latestSeq)
+                        if (selected.latestSeq > syncedSeq && lastCatchUpRequested != catchUpKey) {
+                            lastCatchUpRequested = catchUpKey
+                            val catchUpGeneration = sessionGeneration
+                            viewModelScope.launch {
+                                refreshSession(selected.id, catchUpGeneration)
+                            }
+                        }
                     }
                     if (previousRunStatus in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
                         selected.status.toAgentStatus() in setOf(AgentRunStatus.Idle, AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)) {
@@ -995,6 +1042,7 @@ class ChatViewModel(
                             stepTraces = emptyList(),
                             changedFiles = emptyList(),
                             runMetrics = RunMetricsUiState(status = AgentRunStatus.Idle),
+                            authoritativeIdleAtSeq = 0L,
                             goalText = "",
                             loadingOlder = false,
                             hasOlder = false,
@@ -1772,7 +1820,9 @@ class ChatViewModel(
                 editingTurnText = null,
                 isLoading = true,
                 error = null,
+                clearErrorWhenConnected = false,
                 runStatus = AgentRunStatus.Working,
+                authoritativeIdleAtSeq = 0L,
                 goalText = effectiveGoalText,
                 autoContinue = nextAutoContinue,
                 pendingTurn = pendingTurn,
@@ -1792,9 +1842,9 @@ class ChatViewModel(
         if (selectedRepository !== fixed) return
         val sessionId = mutableState.value.sessionId
         if (sessionId != null && sessionPendingTurns[fixed to sessionId]?.requestId != pendingTurn.requestId) return
-        val sending = pendingTurn.copy(state = PendingTurnState.Sending, error = null, attachmentUploadProgress = null)
+        val sending = pendingTurn.copy(state = PendingTurnState.Sending, error = null, errorRecoverable = false, attachmentUploadProgress = null)
         if (sessionId != null) sessionPendingTurns[fixed to sessionId] = sending
-        updateState { copy(pendingTurn = sending, error = null, isLoading = true) }
+        updateState { copy(pendingTurn = sending, error = null, clearErrorWhenConnected = false, authoritativeIdleAtSeq = 0L, isLoading = true) }
         deliverPendingTurn(
             pendingTurn = sending,
             initialSessionId = sessionId,
@@ -1902,11 +1952,22 @@ class ChatViewModel(
                     sessionPendingTurns.remove(fixed to resolvedSessionId)
                     pendingTurnChange.tryEmit(Triple(fixed, resolvedSessionId, acceptedRequestId))
                 }
-                if (isCurrentSession(resolvedSessionId, generation) && selectedRepository === fixed) updateState {
-                    if (this.pendingTurn?.requestId == acceptedRequestId) {
-                        copy(pendingTurn = null, acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queuedIds }, historyLoading = false)
-                    } else {
-                        this
+                if (isCurrentSession(resolvedSessionId, generation) && selectedRepository === fixed) {
+                    updateState {
+                        val clearedError = if (clearErrorWhenConnected || error?.startsWith("Message could not be sent:") == true) null else error
+                        if (this.pendingTurn?.requestId == acceptedRequestId) {
+                            copy(
+                                pendingTurn = null,
+                                acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queuedIds },
+                                historyLoading = false,
+                                error = clearedError,
+                                clearErrorWhenConnected = if (clearedError == null) false else clearErrorWhenConnected,
+                            )
+                        } else if (clearedError != error) {
+                            copy(error = clearedError, clearErrorWhenConnected = false)
+                        } else {
+                            this
+                        }
                     }
                 }
                 if (isCurrentSession(resolvedSessionId, generation) && selectedRepository === fixed && sendAfterPendingTurn) {
@@ -1920,8 +1981,13 @@ class ChatViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                val failed = pendingTurn.copy(state = PendingTurnState.Failed,
-                    error = error.message?.takeIf { it.isNotBlank() } ?: "Message could not be sent")
+                val recoverable = isRecoverableConnectionError(error) ||
+                    fixed.connectionState.value != RuntimeConnectionState.Connected
+                val failed = pendingTurn.copy(
+                    state = PendingTurnState.Failed,
+                    error = error.message?.takeIf { it.isNotBlank() } ?: "Message could not be sent",
+                    errorRecoverable = recoverable,
+                )
                 val failedSessionId = sessionId
                 if (discardedInitialTurnRequests.remove(pendingTurn.requestId)) {
                     if (failedSessionId != null &&
@@ -1941,10 +2007,11 @@ class ChatViewModel(
                     (failedSessionId == null && (sessionGeneration != generation || mutableState.value.sessionId != null)) ||
                     mutableState.value.pendingTurn?.requestId != pendingTurn.requestId) return@launch
                 sendAfterPendingTurn = false
-                updateState {
+                updateState(preserveClearErrorWhenConnected = true) {
                     copy(
                         pendingTurn = failed,
                         error = "Message could not be sent: ${failed.error}",
+                        clearErrorWhenConnected = recoverable,
                     )
                 }
             } finally {
@@ -2414,6 +2481,7 @@ class ChatViewModel(
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
                 runMetrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 0L,
             )
         }
     }
@@ -2510,6 +2578,7 @@ class ChatViewModel(
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
                 runMetrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 0L,
             )
         }
     }
@@ -2556,6 +2625,8 @@ class ChatViewModel(
         val initialTurnVisible = restoredPendingTurn != null &&
             uncommittedNewSessions[fixed to sessionId] == restoredPendingTurn.requestId
         val selectedSession = knownSessions.takeIf { knownSessionsRepository === fixed }?.firstOrNull { it.id == sessionId }
+        lastCatchUpRequested = selectedSession?.let { Triple(fixed, sessionId, it.latestSeq) }
+        inFlightRunProjections.clear()
         updateState {
             copy(
                 sessionId = sessionId,
@@ -2597,6 +2668,7 @@ class ChatViewModel(
                 runMetrics = RunMetricsUiState(status = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle),
                 runDurations = emptyMap(),
                 serverRunActivity = null,
+                authoritativeIdleAtSeq = 0L,
                 loadingOlder = false,
                 hasOlder = false,
             )
@@ -2607,12 +2679,26 @@ class ChatViewModel(
                 pendingTurnChange.collectLatest { changed ->
                     if (changed.first !== fixed || changed.second != sessionId || !isCurrentSession(sessionId, generation)) return@collectLatest
                     val key = fixed to sessionId
-                    updateState {
+                    updateState(preserveClearErrorWhenConnected = true) {
                         if (pendingTurn?.requestId != changed.third) this else {
                             val pending = sessionPendingTurns[key]?.takeIf { it.requestId == changed.third }
-                            copy(pendingTurn = pending, isLoading = pending?.state == PendingTurnState.Sending,
+                            val nextError = if (pending?.state == PendingTurnState.Failed) {
+                                "Message could not be sent: ${pending.error}"
+                            } else {
+                                error
+                            }
+                            val nextClear = if (pending?.state == PendingTurnState.Failed) {
+                                pending.errorRecoverable
+                            } else {
+                                clearErrorWhenConnected
+                            }
+                            copy(
+                                pendingTurn = pending,
+                                isLoading = pending?.state == PendingTurnState.Sending,
                                 acceptedTurns = sessionAcceptedTurns[key].orEmpty(),
-                                error = if (pending?.state == PendingTurnState.Failed) "Message could not be sent: ${pending.error}" else error)
+                                error = nextError,
+                                clearErrorWhenConnected = nextClear,
+                            )
                         }
                     }
                 }
@@ -2626,15 +2712,19 @@ class ChatViewModel(
                 } catch (cancelled: CancellationException) { throw cancelled }
             }
             launch {
-                val restoredCatalog = if (mutableState.value.runtimeCatalog.tools.isEmpty()) {
-                    try { fixed.loadRuntimeCatalog() } catch (cancelled: CancellationException) { throw cancelled } catch (_: Throwable) {
-                        if (isCurrentSession(sessionId, generation) && runtimeEditGeneration == editGeneration) updateState { copy(runtimeResolving = false, runtimeModelsError = "Runtime settings could not be loaded") }
-                        return@launch
+                loadAndResolveRuntimeWithRetry(
+                    fixed = fixed,
+                    expectedSessionId = sessionId,
+                    expectedGeneration = generation,
+                    expectedEditGeneration = editGeneration,
+                )
+            }
+            launch {
+                fixed.observeAuthoritativeIdleAtSeq(sessionId).collectLatest { idleSeq ->
+                    if (isCurrentSession(sessionId, generation)) {
+                        updateState { copy(authoritativeIdleAtSeq = idleSeq) }
                     }
-                } else mutableState.value.runtimeCatalog
-                if (!isCurrentSession(sessionId, generation) || runtimeEditGeneration != editGeneration || mutableState.value.runtimePickerOpen) return@launch
-                updateState { copy(runtimeCatalog = mergeRuntimeCatalog(restoredCatalog, runtimeCatalog)) }
-                resolveDefaultRuntime(fixed, mutableState.value.runtimeCatalog)
+                }
             }
             launch {
                 fixed.observeRunActivity(sessionId).collectLatest { activity ->
@@ -2744,9 +2834,26 @@ class ChatViewModel(
                     } }
                         .lastOrNull())
                         ?.let { runId ->
+                            val stateNow = mutableState.value
+                            val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == com.andysagent.ragent.core.timeline.TimelineRole.User }
+                            val latestTurnSlice = if (lastUserIdx >= 0) items.subList(lastUserIdx, items.size) else items
+                            val latestTurnHasUnsettledItems = latestTurnSlice.any { item ->
+                                when (item) {
+                                    is TimelineItem.Message -> item.role == com.andysagent.ragent.core.timeline.TimelineRole.Agent && !item.completed
+                                    is TimelineItem.Operation -> item.status in setOf(
+                                        com.andysagent.ragent.core.timeline.TimelineOperationStatus.Pending,
+                                        com.andysagent.ragent.core.timeline.TimelineOperationStatus.InProgress,
+                                    )
+                                    else -> false
+                                }
+                            }
+                            val terminalStatuses = setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
+                            val metricsUnsettled = stateNow.runMetrics.runId != runId || stateNow.runMetrics.status !in terminalStatuses
+                            val latestTurnUnsettled = latestTurnHasUnsettledItems || metricsUnsettled
                             val now = System.currentTimeMillis()
                             val last = lastRunProjectionRequest
-                            if (last?.first != runId || now - last.second >= 1_000L) {
+                            val bypassThrottle = latestTurnUnsettled && (sessionId to runId) !in inFlightRunProjections
+                            if (last?.first != runId || now - last.second >= 1_000L || bypassThrottle) {
                                 lastRunProjectionRequest = runId to now
                                 loadRunProjection(sessionId, runId, generation)
                             }
@@ -2892,6 +2999,8 @@ class ChatViewModel(
     private fun loadRunProjection(sessionId: String, runId: String, expectedGeneration: Long? = null) {
         val fixed = selectedRepository ?: return
         val generation = expectedGeneration ?: sessionGeneration
+        val key = sessionId to runId
+        inFlightRunProjections += key
         viewModelScope.launch {
             try {
                 if (!isCurrentSession(sessionId, generation)) return@launch
@@ -2910,6 +3019,8 @@ class ChatViewModel(
                 throw error
             } catch (_: Throwable) {
                 // The timeline remains usable when a completed run has expired.
+            } finally {
+                inFlightRunProjections.remove(key)
             }
         }
     }
@@ -2936,9 +3047,19 @@ class ChatViewModel(
                 durationAttempts[runId] = now
                 try {
                     val projection = fixed.loadRunProjection(runId)
-                    val duration = completedRunDuration(projection)
-                    if (duration != null && isCurrentSession(sessionId, generation)) {
-                        fixed.saveRunDuration(sessionId, runId, duration)
+                    if (isCurrentSession(sessionId, generation)) {
+                        val timelineNow = mutableState.value.timelineItems
+                        val targetLatestRun = com.andysagent.ragent.core.timeline.latestTurnScopedRunId(timelineNow)
+                        if (runId == targetLatestRun ||
+                            (targetLatestRun == null && runIds.firstOrNull() == runId &&
+                                timelineNow.none { it is TimelineItem.Message && it.role == com.andysagent.ragent.core.timeline.TimelineRole.User })
+                        ) {
+                            updateRunMetricsFromProjection(projection, runId)
+                        }
+                        val duration = completedRunDuration(projection)
+                        if (duration != null) {
+                            fixed.saveRunDuration(sessionId, runId, duration)
+                        }
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -3151,13 +3272,79 @@ class ChatViewModel(
         }
     }
 
-    private fun resolveDefaultRuntime(fixed: SessionRepository, catalog: RuntimeCatalog, sessionChoice: RuntimeSelection? = null) {
+    private suspend fun loadAndResolveRuntimeWithRetry(
+        fixed: SessionRepository,
+        expectedSessionId: String? = null,
+        expectedGeneration: Long? = null,
+        expectedEditGeneration: Long? = null,
+        maxRetries: Int = 2,
+        backoffMs: LongArray = longArrayOf(350L, 750L),
+    ) {
+        var attempt = 0
+        while (attempt <= maxRetries) {
+            if (activeRepository() !== fixed) return
+            if (expectedSessionId != null && !isCurrentSession(expectedSessionId, expectedGeneration ?: sessionGeneration)) return
+            if (expectedEditGeneration != null && runtimeEditGeneration != expectedEditGeneration) return
+            if (mutableState.value.runtimePickerOpen) return
+            if (fixed.connectionState.value != RuntimeConnectionState.Connected && attempt > 0) return
+
+            val currentCatalog = mutableState.value.runtimeCatalog
+            val loadedCatalog = if (attempt == 0 && currentCatalog.tools.isNotEmpty()) {
+                currentCatalog
+            } else {
+                try {
+                    fixed.loadRuntimeCatalog()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+
+            if (loadedCatalog != null) {
+                if (activeRepository() !== fixed) return
+                if (expectedSessionId != null && !isCurrentSession(expectedSessionId, expectedGeneration ?: sessionGeneration)) return
+                if (expectedEditGeneration != null && runtimeEditGeneration != expectedEditGeneration) return
+                val mergedCatalog = mergeRuntimeCatalog(loadedCatalog, mutableState.value.runtimeCatalog)
+                updateState { copy(runtimeCatalog = mergedCatalog) }
+                if (!mutableState.value.runtimePickerOpen) {
+                    resolveDefaultRuntime(fixed, mergedCatalog).join()
+                } else {
+                    return
+                }
+            }
+
+            val current = mutableState.value
+            val needsRetry = loadedCatalog == null ||
+                current.runtimeCatalog.tools.isEmpty() ||
+                current.runtimeModel == null ||
+                current.runtimeModelsError != null
+            if (!needsRetry) {
+                clearRecoverableErrorOnSuccess()
+                return
+            }
+            if (attempt == maxRetries) {
+                if (loadedCatalog == null && current.runtimeCatalog.tools.isEmpty() &&
+                    (expectedSessionId == null || isCurrentSession(expectedSessionId, expectedGeneration ?: sessionGeneration)) &&
+                    (expectedEditGeneration == null || runtimeEditGeneration == expectedEditGeneration)
+                ) {
+                    updateState { copy(runtimeResolving = false, runtimeModelsError = "Runtime settings could not be loaded") }
+                }
+                return
+            }
+            if (fixed.connectionState.value != RuntimeConnectionState.Connected) return
+            delay(backoffMs.getOrElse(attempt) { backoffMs.last() })
+            attempt++
+        }
+    }
+
+    private fun resolveDefaultRuntime(fixed: SessionRepository, catalog: RuntimeCatalog, sessionChoice: RuntimeSelection? = null): Job {
         val editGeneration = runtimeEditGeneration
         val generation = sessionGeneration
         val sessionId = mutableState.value.sessionId
         val requestGeneration = ++runtimeDefaultGeneration
         updateState { copy(runtimeResolving = true) }
-        viewModelScope.launch {
+        return viewModelScope.launch {
             val cached = fixed.runtimeTargetId?.let { id ->
                 sessionId?.let { runCatching { readRuntimeCache(id, it) }.getOrNull() }
                     ?: runCatching { readRuntimeCache(id, null) }.getOrNull()
@@ -3282,6 +3469,7 @@ class ChatViewModel(
     private suspend fun refreshSessions() {
         try {
             repository.refreshSessions()
+            clearRecoverableErrorOnSuccess()
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -3310,24 +3498,28 @@ class ChatViewModel(
                 val result = fixed.refreshTimeline(sessionId)
                 if (isCurrentSession(sessionId, generation)) {
                     updateState {
+                        val clearRecoverable = result !is RefreshResult.ResetRequired && clearErrorWhenConnected
                         copy(
                             historyLoading = false,
                             error = if (result is RefreshResult.ResetRequired) {
                                 result.reason ?: "Session history needs to be refreshed"
-                            } else if (clearErrorWhenConnected) {
+                            } else if (clearRecoverable) {
                                 null
                             } else {
                                 error
                             },
+                            clearErrorWhenConnected = if (clearRecoverable) false else clearErrorWhenConnected,
                         )
                     }
                 }
             } catch (error: CancellationException) {
+                lastCatchUpRequested = null
                 // Switching sessions deliberately cancels the old refresh.
                 // Cancellation is not a failed load and must never surface in
                 // the new session's error banner.
                 throw error
             } catch (error: Throwable) {
+                lastCatchUpRequested = null
                 if (isCurrentSession(sessionId, generation)) {
                     val connectionInterrupted = fixed.connectionState.value != RuntimeConnectionState.Connected
                     val recoverable = isRecoverableConnectionError(error) || connectionInterrupted
@@ -3355,6 +3547,10 @@ class ChatViewModel(
                             }
                         }
                     }
+                }
+            } finally {
+                if (isCurrentSession(sessionId, generation)) {
+                    updateState { copy(historyLoading = false) }
                 }
             }
         }
@@ -3722,6 +3918,16 @@ class ChatViewModel(
                     }
                 }
                 fixed.refreshSessions()
+                clearRecoverableErrorOnSuccess()
+                val current = mutableState.value
+                if (!current.runtimePickerOpen && (
+                        current.runtimeCatalog.tools.isEmpty() ||
+                            current.runtimeModel == null ||
+                            current.runtimeModelsError != null
+                    )
+                ) {
+                    loadAndResolveRuntimeWithRetry(fixed)
+                }
                 // A successful explicit recheck restores the ability to stop
                 // a task that the computer still reports as running. It never
                 // replays either the original message or the stop command.
@@ -3794,15 +4000,34 @@ class ChatViewModel(
         )
     }
 
-    private fun isRecoverableConnectionError(error: Throwable): Boolean =
-        error is java.io.IOException ||
-            (error is SessionRepositoryException && error.retryable && error.code in setOf(
-                "CARRIER_UNAVAILABLE",
-                "NETWORK_ERROR",
-                "P2P_NETWORK_ERROR",
-                "TURN_NETWORK_ERROR",
-            )) ||
-            error.message.orEmpty().contains("No verified TURN/P2P carrier", ignoreCase = true)
+    private fun clearRecoverableErrorOnSuccess() {
+        if (!mutableState.value.clearErrorWhenConnected) return
+        updateState {
+            copy(error = null, clearErrorWhenConnected = false)
+        }
+    }
+
+    private fun isRecoverableConnectionError(error: Throwable): Boolean {
+        var current: Throwable? = error
+        repeat(4) {
+            val candidate = current ?: return false
+            val recoverable = candidate is java.io.IOException ||
+                (candidate is SessionRepositoryException && (
+                    candidate.code in RECOVERABLE_CONNECTION_ERROR_CODES ||
+                        (candidate.retryable && candidate.statusCode in setOf(0, 408, 429, 500, 502, 503, 504))
+                    )) ||
+                (candidate is com.andysagent.ragent.core.network.ApiException && (
+                    candidate.code in RECOVERABLE_CONNECTION_ERROR_CODES ||
+                        candidate.statusCode in setOf(0, 408, 429, 500, 502, 503, 504)
+                    )) ||
+                RECOVERABLE_CONNECTION_ERROR_MESSAGES.any { marker ->
+                    candidate.message.orEmpty().contains(marker, ignoreCase = true)
+                }
+            if (recoverable) return true
+            current = candidate.cause
+        }
+        return false
+    }
 
     private fun publishError(detail: String, clearWhenConnected: Boolean) {
         mutableState.update { state ->
@@ -3819,7 +4044,10 @@ class ChatViewModel(
         else state.serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
     }
 
-    private fun updateState(transform: ChatUiState.() -> ChatUiState) {
+    private fun updateState(
+        preserveClearErrorWhenConnected: Boolean = false,
+        transform: ChatUiState.() -> ChatUiState,
+    ) {
         val previous = mutableState.value
         val transformed = previous.transform()
         val next = transformed.copy(stopRequest = transformed.sessionId?.let { id ->
@@ -3830,10 +4058,10 @@ class ChatViewModel(
         // A normal error must never inherit the auto-dismiss behavior of an
         // earlier connectivity error merely because an intermediate action
         // cleared the banner first.
-        val normalized = if (next.error != previous.error) {
-            next.copy(clearErrorWhenConnected = false)
-        } else {
-            next
+        val normalized = when {
+            next.error == null -> next.copy(clearErrorWhenConnected = false)
+            next.error != previous.error && !preserveClearErrorWhenConnected -> next.copy(clearErrorWhenConnected = false)
+            else -> next
         }
         mutableState.value = normalized.projectCurrentAction()
     }

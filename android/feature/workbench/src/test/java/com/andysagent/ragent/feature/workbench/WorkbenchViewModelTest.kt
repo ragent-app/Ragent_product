@@ -16,6 +16,12 @@ import com.andysagent.ragent.core.model.RuntimeToolOption
 import com.andysagent.ragent.core.model.SessionStatus
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.timeline.TimelineItem
+import com.andysagent.ragent.core.timeline.TimelineOperationKind
+import com.andysagent.ragent.core.timeline.TimelineOperationStatus
+import com.andysagent.ragent.core.timeline.TimelineRole
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import com.andysagent.ragent.core.model.Session
 import com.andysagent.ragent.core.domain.RefreshResult
 import com.andysagent.ragent.core.domain.OutboundAttachment
@@ -2033,6 +2039,199 @@ class WorkbenchViewModelTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test
+    fun `unsettled turn bypasses projection throttle historical durations populate runMetrics and authoritativeIdle plumbs`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            var projectionResponses = 0
+            val session = Session("s-1", "Task", status = SessionStatus.Working, latestSeq = 3)
+            val unsettledItems = listOf(
+                TimelineItem.Message("u-1", 1, TimelineRole.User, "Run", true, requestId = "req-1", runId = "run-1"),
+                TimelineItem.Message("a-1", 2, TimelineRole.Agent, "Streaming", false, requestId = "req-1", runId = "run-1"),
+            )
+            val repository = FakeSessionRepository(
+                sessions = listOf(session),
+                connection = RuntimeConnectionState.Connected,
+                timelines = mapOf("s-1" to unsettledItems),
+            ).apply {
+                loadRunProjectionImpl = { runId ->
+                    projectionResponses += 1
+                    when (runId) {
+                        "run-old" -> buildJsonObject {
+                            put("id", JsonPrimitive(runId))
+                            put("state", JsonPrimitive("completed"))
+                            put("durationMs", JsonPrimitive(9900L))
+                            put("model", JsonPrimitive("old-model"))
+                        }
+                        "run-latest" -> buildJsonObject {
+                            put("id", JsonPrimitive(runId))
+                            put("state", JsonPrimitive("completed"))
+                            put("durationMs", JsonPrimitive(1500L))
+                            put("model", JsonPrimitive("latest-model"))
+                        }
+                        else -> if (projectionResponses <= 2) {
+                            buildJsonObject {
+                                put("id", JsonPrimitive(runId))
+                                put("state", JsonPrimitive("working"))
+                            }
+                        } else {
+                            buildJsonObject {
+                                put("id", JsonPrimitive(runId))
+                                put("state", JsonPrimitive("completed"))
+                                put("durationMs", JsonPrimitive(2400L))
+                                put("model", JsonPrimitive("gpt-5"))
+                            }
+                        }
+                    }
+                }
+            }
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+            val callsBeforeUpdate = repository.loadRunProjectionCalls
+            assertTrue(callsBeforeUpdate >= 1)
+            assertEquals(com.andysagent.ragent.core.agentui.AgentRunStatus.Working, viewModel.state.value.runMetrics.status)
+
+            // Updating timeline immediately (< 1s later) while latest turn/metrics are unsettled bypasses the 1s throttle.
+            repository.setTimeline(
+                "s-1",
+                listOf(
+                    unsettledItems[0],
+                    (unsettledItems[1] as TimelineItem.Message).copy(completed = true, messageState = "completed", seq = 3),
+                ),
+            )
+            advanceUntilIdle()
+            assertTrue(repository.loadRunProjectionCalls > callsBeforeUpdate)
+            assertEquals(com.andysagent.ragent.core.agentui.AgentRunStatus.Completed, viewModel.state.value.runMetrics.status)
+            assertEquals("00:02", viewModel.state.value.runMetrics.durationFormatted)
+
+            repository.setAuthoritativeIdleAtSeq("s-1", 3L)
+            advanceUntilIdle()
+            assertEquals(3L, viewModel.state.value.authoritativeIdleAtSeq)
+
+            viewModel.onEvent(ChatEvent.CreateSession(null))
+            advanceUntilIdle()
+            assertEquals(0L, viewModel.state.value.authoritativeIdleAtSeq)
+
+            // Historical duration fetch populates runMetrics for the latest turn without letting older turns overwrite it.
+            val historySession = Session("s-2", "History", status = SessionStatus.Completed, latestSeq = 4)
+            repository.setSessions(listOf(session, historySession))
+            repository.setTimeline(
+                "s-2",
+                listOf(
+                    TimelineItem.Message("u-old", 1, TimelineRole.User, "Old", true, requestId = "req-old", runId = "run-old"),
+                    TimelineItem.Message("a-old", 2, TimelineRole.Agent, "Old reply", true, requestId = "req-old", runId = "run-old"),
+                    TimelineItem.Message("u-new", 3, TimelineRole.User, "New", true, requestId = "req-new", runId = "run-latest"),
+                    TimelineItem.Message("a-new", 4, TimelineRole.Agent, "New reply", true, requestId = "req-new", runId = "run-latest"),
+                ),
+            )
+            viewModel.onEvent(ChatEvent.SelectSession("s-2"))
+            advanceUntilIdle()
+            assertEquals("run-latest", viewModel.state.value.runMetrics.runId)
+            assertEquals("00:01", viewModel.state.value.runMetrics.durationFormatted)
+            assertEquals("latest-model", viewModel.state.value.runMetrics.model)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `reconnect refreshes selected session unconditionally catches up seq and retries transient runtime failure`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val catalog = RuntimeCatalog(listOf(RuntimeToolOption("codex", "Codex", models = listOf(RuntimeModelOption("m-1", "Model 1", isDefault = true)))))
+            var catalogAttempt = 0
+            val session = Session("s-1", "Task", status = SessionStatus.Idle, latestSeq = 4)
+            val repository = FakeSessionRepository(
+                sessions = listOf(session),
+                connection = RuntimeConnectionState.Disconnected,
+            ).apply {
+                lastSyncedSeqValue = 4L
+                loadRuntimeCatalogImpl = {
+                    catalogAttempt += 1
+                    if (catalogAttempt == 1) {
+                        throw SessionRepositoryException(0, "TURN_NETWORK_ERROR", "TURN request failed", retryable = true)
+                    }
+                    catalog
+                }
+            }
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+            val detailCallsBeforeReconnect = repository.sessionRefreshDetailCalls
+
+            // Reconnect when clearErrorWhenConnected == false must still refresh sessions, session detail, and retry runtime catalog.
+            repository.setConnection(RuntimeConnectionState.Connected)
+            advanceUntilIdle()
+            assertTrue(repository.sessionRefreshDetailCalls > detailCallsBeforeReconnect)
+            assertTrue(repository.sessionRefreshCalls >= 1)
+            assertEquals("m-1", viewModel.state.value.runtimeModel)
+            assertEquals(null, viewModel.state.value.runtimeModelsError)
+            assertFalse(viewModel.state.value.historyLoading)
+
+            // Advancing latestSeq strictly past lastSyncedSeq triggers catch-up refresh.
+            val eventsBeforeCatchUp = repository.refreshEventsCalls
+            repository.setSessions(listOf(session.copy(latestSeq = 7)))
+            advanceUntilIdle()
+            assertTrue(repository.refreshEventsCalls > eventsBeforeCatchUp)
+
+            // ChatEvent.Retry reloads runtime catalog + default model when runtimeModel == null or runtimeModelsError != null.
+            var failFirstManualRetry = false
+            val brokenRepo = FakeSessionRepository(
+                sessions = listOf(session),
+                connection = RuntimeConnectionState.Connected,
+            ).apply {
+                loadRuntimeCatalogImpl = {
+                    if (!failFirstManualRetry) throw IllegalStateException("Transient catalog outage")
+                    catalog
+                }
+            }
+            val retryModel = ChatViewModel(brokenRepo)
+            advanceUntilIdle()
+            assertEquals(null, retryModel.state.value.runtimeModel)
+            assertNotNull(retryModel.state.value.runtimeModelsError)
+
+            failFirstManualRetry = true
+            retryModel.onEvent(ChatEvent.Retry)
+            advanceUntilIdle()
+            assertEquals("m-1", retryModel.state.value.runtimeModel)
+            assertEquals(null, retryModel.state.value.runtimeModelsError)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `recoverable send failure preserves clearErrorWhenConnected and auto clears on healthy refresh without disconnect`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val catalog = RuntimeCatalog(listOf(RuntimeToolOption("codex", "Codex", models = listOf(RuntimeModelOption("m-1", "Model 1", isDefault = true)))))
+            val session = Session("s-1", "Task", status = SessionStatus.Idle, latestSeq = 1)
+            val repository = FakeSessionRepository(
+                sessions = listOf(session),
+                connection = RuntimeConnectionState.Connected,
+                runtimeCatalog = catalog,
+            ).apply {
+                failMessageSendError = SessionRepositoryException(0, "TURN_NETWORK_ERROR", "TURN request failed", retryable = true)
+            }
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.ComposerChanged("Hello"))
+            viewModel.onEvent(ChatEvent.SendMessage)
+            advanceUntilIdle()
+            assertTrue(viewModel.state.value.error?.contains("TURN request failed") == true)
+            assertTrue(viewModel.state.value.clearErrorWhenConnected)
+
+            // No disconnect edge occurs; triggering a healthy catch-up refresh while Connected must auto-clear the sticky error.
+            repository.lastSyncedSeqValue = 1L
+            repository.setSessions(listOf(session.copy(latestSeq = 2)))
+            advanceUntilIdle()
+            assertEquals(null, viewModel.state.value.error)
+            assertFalse(viewModel.state.value.clearErrorWhenConnected)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 }
 
 private class FakeSessionRepository(
@@ -2047,6 +2246,7 @@ private class FakeSessionRepository(
     var failSessionRefresh: Throwable? = null,
     private val sessionRefreshFailures: Map<String, Throwable> = emptyMap(),
     var failMessageSend: Boolean = false,
+    var failMessageSendError: Throwable? = null,
     private val runtimeCatalog: RuntimeCatalog = RuntimeCatalog(),
     private val capabilities: HarnessCapabilityCatalog = HarnessCapabilityCatalog(tool = "unknown"),
     private val sessionRuntime: Map<String, RuntimeSelection> = emptyMap(),
@@ -2094,6 +2294,14 @@ private class FakeSessionRepository(
     var failProjectsRefresh: Throwable? = null
     var failComputersRefresh: Throwable? = null
     var sessionRefreshCalls: Int = 0
+    var sessionRefreshDetailCalls: Int = 0
+    var refreshEventsCalls: Int = 0
+    var loadRuntimeCatalogCalls: Int = 0
+    var loadRunProjectionCalls: Int = 0
+    var loadRunProjectionImpl: (suspend (String) -> JsonObject)? = null
+    var loadRuntimeCatalogImpl: (suspend () -> RuntimeCatalog)? = null
+    var lastSyncedSeqValue: Long? = null
+    private val authoritativeIdleSeqStates = mutableMapOf<String, MutableStateFlow<Long>>()
     var projectsRefreshGate: CompletableDeferred<Unit>? = null
     var sessionsRefreshGate: CompletableDeferred<Unit>? = null
     private val folders = mutableMapOf(
@@ -2120,6 +2328,8 @@ private class FakeSessionRepository(
     fun clearAcceptedFirstTurn(sessionId: String) { acceptedFirstTurnIds.value = acceptedFirstTurnIds.value - sessionId }
     fun setTimeline(id: String, items: List<TimelineItem>) { timelineStates.getOrPut(id) { MutableStateFlow(emptyList()) }.value = items }
 
+    fun setAuthoritativeIdleAtSeq(id: String, seq: Long) { authoritativeIdleSeqStates.getOrPut(id) { MutableStateFlow(0L) }.value = seq }
+
     fun setConnection(connection: RuntimeConnectionState) {
         connectionStateValue.value = connection
     }
@@ -2129,6 +2339,8 @@ private class FakeSessionRepository(
     override fun observeSessions(): Flow<List<Session>> = sessionState
     override fun observeAcceptedFirstTurnSessionIds(): Flow<Set<String>> = acceptedFirstTurnIds
     override fun observeSession(sessionId: String): Flow<Session?> = MutableStateFlow(sessionState.value.firstOrNull { it.id == sessionId })
+    override fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = authoritativeIdleSeqStates.getOrPut(sessionId) { MutableStateFlow(0L) }
+    override suspend fun lastSyncedSeq(sessionId: String): Long? = lastSyncedSeqValue
     override fun observeMessages(sessionId: String): Flow<List<Message>> = messageState
     override fun observeTimeline(sessionId: String): Flow<List<TimelineItem>> = timelineStates.getOrPut(sessionId) { MutableStateFlow(emptyList()) }
     override fun observePendingApprovals(sessionId: String): Flow<List<Approval>> = MutableStateFlow(approvals.filter { it.sessionId == sessionId })
@@ -2176,7 +2388,10 @@ private class FakeSessionRepository(
         sessionRefreshCalls += 1
         sessionsRefreshGate?.await()
     }
-    override suspend fun loadRuntimeCatalog(): RuntimeCatalog = runtimeCatalog
+    override suspend fun loadRuntimeCatalog(): RuntimeCatalog {
+        loadRuntimeCatalogCalls += 1
+        return loadRuntimeCatalogImpl?.invoke() ?: runtimeCatalog
+    }
     override suspend fun loadHarnessCapabilities(sessionId: String, tool: String?, providerProfile: String?): HarnessCapabilityCatalog = capabilities
     override suspend fun loadSessionRuntimeSelection(sessionId: String): RuntimeSelection? = sessionRuntime[sessionId]
     override suspend fun loadGlobalRuntimeSelection(): RuntimeSelection? { globalGate?.await(); return globalRuntime }
@@ -2187,8 +2402,19 @@ private class FakeSessionRepository(
     override suspend fun loadRuntimeModels(tool: String, providerProfile: String): List<RuntimeModelOption> =
         runtimeCatalog.tools.firstOrNull { it.id == tool }?.models.orEmpty()
             .filter { it.provider == providerProfile }
-    override suspend fun refreshEvents(sessionId: String): RefreshResult = RefreshResult.Applied(0, 0)
+    override suspend fun loadRunProjection(runId: String): JsonObject {
+        loadRunProjectionCalls += 1
+        return loadRunProjectionImpl?.invoke(runId) ?: buildJsonObject {
+            put("id", JsonPrimitive(runId))
+            put("state", JsonPrimitive("completed"))
+        }
+    }
+    override suspend fun refreshEvents(sessionId: String): RefreshResult {
+        refreshEventsCalls += 1
+        return RefreshResult.Applied(0, 0)
+    }
     override suspend fun refreshSessionDetail(sessionId: String): Session? {
+        sessionRefreshDetailCalls += 1
         refreshGate?.await()
         failSessionRefresh?.let { throw it }
         sessionRefreshFailures[sessionId]?.let { throw it }
@@ -2197,6 +2423,7 @@ private class FakeSessionRepository(
     override suspend fun applyLiveEvents(sessionId: String, events: List<SessionEventDto>): RefreshResult = RefreshResult.Applied(events.size, 0)
     override suspend fun sendMessage(sessionId: String, text: String, requestId: String) {
         messageSendGate?.await()
+        failMessageSendError?.let { throw it }
         if (failMessageSend) throw IllegalStateException("send failed")
         sentTexts += text
     }

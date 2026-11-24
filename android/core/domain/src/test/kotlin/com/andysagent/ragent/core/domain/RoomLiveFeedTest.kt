@@ -379,6 +379,75 @@ class RoomLiveFeedTest {
             assertEquals(listOf("Next"), database.dao().getMessages("session-live-2").map { it.content })
         } finally { repo.close(); database.close() }
     }
+
+    @Test fun terminalRunTriggersVisibleRefreshRetiresLiveOverlaysAndTracksAuthoritativeIdleWatermark() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        var visibleRefreshCount = 0
+        var eventsBody = "{}"
+        val transport = HandlerTransport { req ->
+            when {
+                req.path.contains("filter=visible") -> {
+                    visibleRefreshCount += 1
+                    ApiResponse(200, """{"sessionId":"session-live","events":[{"seq":2,"type":"message","role":"assistant","canonicalMessageId":"durable-a","content":"Final answer","runId":"run-a","messageState":"completed"}],"latestSeq":2}""")
+                }
+                req.path.endsWith("/messages") -> ApiResponse(200, """{"ok":true}""")
+                req.path.endsWith("/sessions/session-live") -> ApiResponse(200, """{"session":{"id":"session-live","title":"Live","status":"idle","latestSeq":3}}""")
+                else -> ApiResponse(200, eventsBody)
+            }
+        }
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Live", null, "working", 0, 0)))
+            // Poll 1 injects ephemeral live text + reasoning deltas for run-a.
+            repo.applyLiveEvents("session-live", listOf(
+                com.andysagent.ragent.core.protocol.SessionEventDto(seq = 0, eventId = "live-r", type = "reasoning", text = "Thinking...", runId = "run-a"),
+                com.andysagent.ragent.core.protocol.SessionEventDto(seq = 0, eventId = "live-t", type = "text_delta", role = "assistant", entityId = "live-block", text = "Final answer", runId = "run-a"),
+            ))
+
+            // Poll 2 delivers run_completed without any tool events or Room MessageEntity yet.
+            eventsBody = """{"sessionId":"session-live","events":[{"seq":1,"type":"run_completed","runId":"run-a","runState":"completed"}],"latestSeq":1}"""
+            repo.refreshEvents("session-live")
+            assertTrue("terminalRunState must trigger visible history refresh", visibleRefreshCount >= 1)
+
+            // Poll 3 delivers durable message with a different canonicalMessageId + idle/empty-queue activity.
+            eventsBody = """{"sessionId":"session-live","events":[{"seq":2,"type":"message","role":"assistant","canonicalMessageId":"durable-a","content":"Final answer","runId":"run-a"}],"latestSeq":2,"runActivity":{"state":"idle","queue":{"count":0}}}"""
+            repo.refreshEvents("session-live")
+
+            assertEquals(2L, repo.observeAuthoritativeIdleAtSeq("session-live").first())
+            val items = repo.observeTimeline("session-live").first { list ->
+                list.filterIsInstance<TimelineItem.Message>().any { it.id == "durable-a" && it.completed }
+            }
+            val agentMessages = items.filterIsInstance<TimelineItem.Message>().filter { it.role == TimelineRole.Agent }
+            assertEquals(listOf("durable-a"), agentMessages.map { it.id })
+
+            // Sending clears authoritativeIdleAtSeq back to 0L immediately.
+            repo.sendMessage("session-live", "Follow up", "req-follow")
+            assertEquals(0L, repo.observeAuthoritativeIdleAtSeq("session-live").first())
+        } finally { repo.close(); database.close() }
+    }
+
+    @Test fun authoritativeIdleAtSeqSettlesStaleStreamingMessageInRoom() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        val transport = LiveFeedTransport()
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("s-idle", "Idle", null, "working", 5, 0)))
+            database.dao().upsertMessages(listOf(
+                MessageEntity("u1", "s-idle", "user", "Hi", seq = 4, requestId = "req-1", completed = true, updatedAt = 1L),
+                MessageEntity("a1", "s-idle", "assistant", "Done", seq = 5, requestId = "req-1", runId = "run-1", completed = false, messageState = "streaming", updatedAt = 2L, lastEventSeq = 5L),
+            ))
+            transport.body = """{"sessionId":"s-idle","events":[],"latestSeq":5,"runActivity":{"state":"idle","queue":{"count":0}}}"""
+            repo.refreshEvents("s-idle")
+
+            val settled = database.dao().getMessage("a1")
+            assertNotNull(settled)
+            assertTrue(settled!!.completed)
+            assertEquals("completed", settled.messageState)
+            assertEquals(5L, repo.observeAuthoritativeIdleAtSeq("s-idle").first())
+        } finally { repo.close(); database.close() }
+    }
 }
 
 private class HandlerTransport(

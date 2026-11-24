@@ -284,8 +284,14 @@ class RoomSessionRepository(
     private val terminalApprovalRecoveryOffsets = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val liveTimelineState = MutableStateFlow<Map<String, List<com.andysagent.ragent.core.timeline.TimelineEvent>>>(emptyMap())
     private val runActivityState = MutableStateFlow<Map<String, JsonObject>>(emptyMap())
+    private val authoritativeIdleAtSeqState = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val sessionTerminalRunIds = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
     override fun observeRunActivity(sessionId: String): Flow<JsonObject?> =
         runActivityState.map { it[sessionId] }.distinctUntilChanged()
+    override fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> =
+        authoritativeIdleAtSeqState.map { it[sessionId] ?: 0L }.distinctUntilChanged()
+    override suspend fun lastSyncedSeq(sessionId: String): Long? =
+        dao.getCursor(sessionId)?.lastAppliedSeq
     override fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> =
         dao.observeRunDurations(sessionId).map { rows -> rows.associate { it.runId to it.durationMs } }
     override suspend fun saveRunDuration(sessionId: String, runId: String, durationMs: Long) {
@@ -560,7 +566,8 @@ class RoomSessionRepository(
                     // Detail carries the authoritative run/session state; events
                     // then advance the Room cursor and materialize the reply.
                     val now = android.os.SystemClock.elapsedRealtime()
-                    val detail = if (forceDetailRefresh || now - lastDetailRefresh >= 1_000L || lastDetailRefresh == 0L) {
+                    val detailFromNetwork = forceDetailRefresh || now - lastDetailRefresh >= 1_000L || lastDetailRefresh == 0L
+                    var detail = if (detailFromNetwork) {
                         forceDetailRefresh = false
                         lastDetailRefresh = now
                         refreshSessionDetail(sessionId)
@@ -584,9 +591,16 @@ class RoomSessionRepository(
                         initialResult
                     }
                     if (result is RefreshResult.ResetRequired) return
-                    val terminal = detail == null || detail.status == SessionStatus.Completed ||
+                    var terminal = detail == null || detail.status == SessionStatus.Completed ||
                         detail.status == SessionStatus.Failed || detail.status == SessionStatus.Cancelled ||
                         detail.status == SessionStatus.Idle
+                    if (terminal && !detailFromNetwork) {
+                        lastDetailRefresh = android.os.SystemClock.elapsedRealtime()
+                        detail = refreshSessionDetail(sessionId)
+                        terminal = detail == null || detail.status == SessionStatus.Completed ||
+                            detail.status == SessionStatus.Failed || detail.status == SessionStatus.Cancelled ||
+                            detail.status == SessionStatus.Idle
+                    }
                     // A finished run can still have unread event pages or a failed
                     // visible-history refresh. Keep reconciling until the terminal
                     // message and tool results have actually reached the UI.
@@ -594,7 +608,91 @@ class RoomSessionRepository(
                         result.latestSeq >= (detail?.latestSeq ?: 0L) &&
                         sessionId !in pendingVisibleOperationRefresh
                     ) {
-                        if (dao.getPendingApprovals(sessionId).none { !it.runId.isNullOrBlank() }) return
+                        val unsettledBefore = dao.getMessages(sessionId).filter { !it.completed }
+                        var verifiedStillRunning = false
+                        if (unsettledBefore.isNotEmpty()) {
+                            val knownTerminal = currentTerminalRunIds(sessionId)
+                            val unverifiedRuns = unsettledBefore.mapNotNull { it.runId?.takeIf(String::isNotBlank) }
+                                .distinct()
+                                .filterNot { it in knownTerminal }
+                            val newlyVerifiedTerminal = mutableListOf<String>()
+                            for (runId in unverifiedRuns) {
+                                try {
+                                    val run = loadRunProjection(runId)
+                                    val state = (run["state"] as? JsonPrimitive)?.contentOrNull?.lowercase()
+                                    if (state in TERMINAL_RUN_ACTIVITY_STATES) {
+                                        newlyVerifiedTerminal += runId
+                                    } else if (state != null) {
+                                        verifiedStillRunning = true
+                                    }
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    // Verify via authoritative idle watermark below.
+                                }
+                            }
+                            if (newlyVerifiedTerminal.isNotEmpty()) {
+                                recordTerminalRunIds(sessionId, newlyVerifiedTerminal)
+                            }
+                            if (verifiedStillRunning) {
+                                forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, 5_000L)
+                                continue
+                            }
+                        }
+                        if (detail?.status == SessionStatus.Idle || unsettledBefore.isNotEmpty()) {
+                            val latestTurnMaxSeq = dao.getMessages(sessionId)
+                                .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
+                            val expectedWatermark = maxOf(detail?.latestSeq ?: 0L, latestTurnMaxSeq)
+                            val currentIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
+                            if (detail?.status == SessionStatus.Idle && currentIdleSeq < expectedWatermark) {
+                                try {
+                                    refreshCanonicalRunActivity(sessionId)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    // Transient activity failure; fall back to observed state below.
+                                }
+                            }
+                            val updatedIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
+                            val latestActivity = runActivityState.value[sessionId]
+                            val latestActivityState = runActivityStateName(latestActivity)
+                            val latestQueueCount = runActivityQueueCount(sessionId, latestActivity)
+                            val activeOrQueued = latestQueueCount > 0 ||
+                                detail?.queuedMessages?.isNotEmpty() == true ||
+                                (latestActivityState != null && latestActivityState != "idle" &&
+                                    latestActivityState !in TERMINAL_RUN_ACTIVITY_STATES)
+                            if (activeOrQueued || (updatedIdleSeq > 0L && updatedIdleSeq > result.latestSeq)) {
+                                forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, retryDelayMs)
+                                continue
+                            }
+                        }
+                        val detailTerminalSession = detail != null && detail.status in setOf(
+                            SessionStatus.Completed,
+                            SessionStatus.Failed,
+                            SessionStatus.Cancelled,
+                        )
+                        val settledAny = settleConfirmedMessagesInRoom(
+                            sessionId = sessionId,
+                            cursorSeq = result.latestSeq,
+                            allowExplicitTerminalSession = detailTerminalSession && !verifiedStillRunning,
+                        )
+                        if (settledAny) {
+                            liveProjectionMutex.withLock {
+                                liveProjectors[sessionId]?.let { projector ->
+                                    val durableMessages = dao.getMessages(sessionId)
+                                    projector.reconcileDurableCursor(
+                                        result.latestSeq,
+                                        durableMessages.associate { it.id to it.content },
+                                        durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
+                                        currentTerminalRunIds(sessionId),
+                                        durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+                                    )
+                                    liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
+                                }
+                            }
+                        }
+                        val hasUnsettledMessages = dao.getMessages(sessionId).any { !it.completed }
+                        if (!hasUnsettledMessages && dao.getPendingApprovals(sessionId).none { !it.runId.isNullOrBlank() }) return
                         // Keep retrying missed terminal events or transient run
                         // lookups, without a tight loop on unverifiable requests.
                         forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, 5_000L)
@@ -623,7 +721,121 @@ class RoomSessionRepository(
         val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/events?filter=visible&limit=1"))
         val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
         if (page.sessionId != sessionId) throw SessionRepositoryException(502, "SESSION_SCOPE_INVALID", "Invalid activity scope", false)
-        (page.runActivity as? JsonObject)?.let { activity -> runActivityState.update { it + (sessionId to activity) } }
+        recordRunActivityFromPage(sessionId, page)
+    }
+
+    private fun recordTerminalRunIds(sessionId: String, runIds: Iterable<String>): Set<String> {
+        val set = sessionTerminalRunIds.computeIfAbsent(sessionId) {
+            java.util.concurrent.ConcurrentHashMap.newKeySet()
+        }
+        runIds.forEach { id -> if (id.isNotBlank()) set.add(id) }
+        return set.toSet()
+    }
+
+    private fun currentTerminalRunIds(sessionId: String): Set<String> =
+        sessionTerminalRunIds[sessionId]?.toSet().orEmpty()
+
+    private fun clearAuthoritativeIdle(sessionId: String) {
+        if (sessionId.isBlank()) return
+        authoritativeIdleAtSeqState.update { current ->
+            if (sessionId in current) current - sessionId else current
+        }
+    }
+
+    private fun runActivityStateName(activity: JsonObject?): String? =
+        listOf("state", "status", "runState")
+            .firstNotNullOfOrNull { key -> (activity?.get(key) as? JsonPrimitive)?.contentOrNull }
+            ?.trim()?.lowercase()
+
+    private suspend fun runActivityQueueCount(sessionId: String, activity: JsonObject?): Int {
+        val queueObj = activity?.get("queue") as? JsonObject
+        return (queueObj?.get("count") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+            ?: (activity?.get("queuedCount") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+            ?: (activity?.get("queue") as? JsonArray)?.size
+            ?: (dao.getSession(sessionId)?.let { queuedMessagesFromJson(it.queuedMessagesJson).size } ?: 0)
+    }
+
+    private suspend fun recordRunActivityFromPage(
+        sessionId: String,
+        page: SessionEventsPageDto,
+        cursorSeq: Long? = null,
+    ) {
+        val activity = page.runActivity as? JsonObject ?: return
+        runActivityState.update { it + (sessionId to activity) }
+        val state = runActivityStateName(activity)
+        if (state in TERMINAL_RUN_ACTIVITY_STATES) {
+            val activityRunId = ((activity["runId"] ?: activity["id"]) as? JsonPrimitive)
+                ?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+            if (activityRunId != null) {
+                recordTerminalRunIds(sessionId, listOf(activityRunId))
+            }
+        }
+        val actionRequired = (activity["actionRequired"] as? JsonPrimitive)?.booleanOrNull == true
+        val queueCount = runActivityQueueCount(sessionId, activity)
+        if (state == "idle" && queueCount == 0 && !actionRequired) {
+            val candidateSeq = page.latestSeq
+                ?: page.pagination?.latestSeq
+                ?: page.events.maxOfOrNull { it.boundarySeq() }
+                ?: cursorSeq
+                ?: dao.getCursor(sessionId)?.lastAppliedSeq
+                ?: dao.getSession(sessionId)?.latestSeq
+                ?: 0L
+            val effectiveSeq = if (page.pagination?.hasMoreAfter == true && cursorSeq != null) {
+                minOf(candidateSeq, cursorSeq)
+            } else {
+                candidateSeq
+            }
+            if (effectiveSeq > 0L) {
+                val currentMaxMsgSeq = dao.getMessages(sessionId)
+                    .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
+                if (effectiveSeq >= currentMaxMsgSeq) {
+                    authoritativeIdleAtSeqState.update { current ->
+                        val prev = current[sessionId] ?: 0L
+                        val next = maxOf(prev, effectiveSeq)
+                        if (next == prev && sessionId in current) current else current + (sessionId to next)
+                    }
+                }
+            }
+        } else if (queueCount > 0 || actionRequired || (state != null && state !in TERMINAL_RUN_ACTIVITY_STATES && state != "idle")) {
+            clearAuthoritativeIdle(sessionId)
+        }
+    }
+
+    private suspend fun settleConfirmedMessagesInRoom(
+        sessionId: String,
+        cursorSeq: Long,
+        allowExplicitTerminalSession: Boolean = false,
+    ): Boolean {
+        val messages = dao.getMessages(sessionId)
+        val indexedUnsettled = messages.withIndex().filter { !it.value.completed }
+        if (indexedUnsettled.isEmpty()) return false
+        val terminalRuns = currentTerminalRunIds(sessionId)
+        val idleAtSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
+        val latestTurnMaxSeq = messages.maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
+        val latestUserIndex = messages.indexOfLast { it.role.equals("user", ignoreCase = true) }
+        val latestUserRequestId = messages.getOrNull(latestUserIndex)?.requestId?.takeIf(String::isNotBlank)
+        val lastKnownRunId = messages.lastOrNull { !it.runId.isNullOrBlank() }?.runId
+
+        val toSettle = indexedUnsettled.filter { (index, msg) ->
+            val sharesLatestRequest = latestUserRequestId != null && msg.requestId == latestUserRequestId
+            val isEarlierTurn = (latestUserIndex > index && !sharesLatestRequest) ||
+                (!msg.runId.isNullOrBlank() && lastKnownRunId != null && msg.runId != lastKnownRunId)
+            val isTerminalRun = !msg.runId.isNullOrBlank() && msg.runId in terminalRuns
+            val isAuthoritativelyIdle = idleAtSeq > 0L && latestTurnMaxSeq > 0L && idleAtSeq >= latestTurnMaxSeq
+            isEarlierTurn || isTerminalRun || isAuthoritativelyIdle || allowExplicitTerminalSession
+        }.map { it.value }
+        if (toSettle.isEmpty()) return false
+        val now = System.currentTimeMillis()
+        dao.upsertMessages(toSettle.map { msg ->
+            msg.copy(
+                completed = true,
+                messageState = msg.messageState?.takeUnless { it == "streaming" } ?: "completed",
+                lastEventSeq = maxOf(msg.lastEventSeq, cursorSeq),
+                updatedAt = now,
+            )
+        })
+        return true
     }
 
     override fun observeComputers(): Flow<List<Computer>> = observeRows(dao.observeComputers()).map { items -> items.map(::toDomain) }
@@ -1120,6 +1332,7 @@ class RoomSessionRepository(
         agentId: String?,
         attachments: List<AttachmentItemDto>,
     ): MessageSubmissionReceipt {
+        clearAuthoritativeIdle(sessionId)
         require(sessionId.isNotBlank() && requestId.isNotBlank()) { "Session and request identity are required" }
         require(text.isNotBlank()) { "Message text is required" }
         require(attachments.size <= 16 && attachments.all { !it.assetId.isNullOrBlank() && it.url == null && it.text == null }) { "Only verified file asset references may be submitted" }
@@ -1358,6 +1571,7 @@ class RoomSessionRepository(
     }
 
     override suspend fun regenerateMessage(sessionId: String, parentRequestId: String, requestId: String) {
+        clearAuthoritativeIdle(sessionId)
         require(parentRequestId.isNotBlank()) { "Source request id must not be blank" }
         require(requestId.isNotBlank()) { "Regenerate request id must not be blank" }
         val path = "/api/sessions/${encode(sessionId)}/regenerate"
@@ -1389,6 +1603,7 @@ class RoomSessionRepository(
         requestId: String,
         attachments: List<OutboundAttachment>,
     ) {
+        clearAuthoritativeIdle(sessionId)
         require(parentRequestId.isNotBlank()) { "Source request id must not be blank" }
         require(prompt.trim().isNotBlank()) { "Edited prompt must not be blank" }
         require(requestId.isNotBlank()) { "Edited resend request id must not be blank" }
@@ -1694,6 +1909,9 @@ class RoomSessionRepository(
             }
         }
         val result = toDomain(entity)
+        if (!isAuthoritativelyIdleSession(item) || queuedMessagesFromJson(entity.queuedMessagesJson).isNotEmpty()) {
+            clearAuthoritativeIdle(sessionId)
+        }
         if (result.status in setOf(SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled, SessionStatus.Idle)) {
             liveFeedMuted.remove(sessionId)
         }
@@ -1865,12 +2083,29 @@ class RoomSessionRepository(
         if (updatedArtifacts !== currentArtifacts) {
             durableArtifactState.update { it + (sessionId to updatedArtifacts) }
         }
+        val batchTerminalRunIds = events.filter { it.terminalRunState() != null }
+            .mapNotNull { it.runId?.takeIf(String::isNotBlank) }
+        val accumulatedTerminalRuns = if (batchTerminalRunIds.isNotEmpty()) {
+            recordTerminalRunIds(sessionId, batchTerminalRunIds)
+        } else {
+            currentTerminalRunIds(sessionId)
+        }
+        val hasActiveLiveFrame = events.any { event ->
+            event.terminalRunState() == null && event.type.orEmpty().lowercase() in setOf(
+                "run_started", "text_delta", "reasoning", "thinking_block", "tool_use", "approval_request",
+            )
+        }
+        if (hasActiveLiveFrame && batchTerminalRunIds.isEmpty()) {
+            clearAuthoritativeIdle(sessionId)
+        }
         val projector = liveProjectors.getOrPut(sessionId) { LiveTimelineProjector() }
         val durableMessages = dao.getMessages(sessionId)
         projector.reconcileDurableCursor(
             dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L,
             durableMessages.associate { it.id to it.content },
             durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
+            accumulatedTerminalRuns,
+            durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
         )
         val result = withContext(Dispatchers.Default) {
             projector.apply(events)
@@ -1917,9 +2152,7 @@ class RoomSessionRepository(
                 val response = requestDurableEventPage(eventPagePath(sessionId, after, waitForEvents = false))
                 val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
                 lastPage = page
-                (page.runActivity as? JsonObject)?.let { activity ->
-                    runActivityState.update { it + (sessionId to activity) }
-                }
+                recordRunActivityFromPage(sessionId, page)
                 if (page.resetRequired) {
                     check(!throwOnFailure) { "Timeline history requires reset: ${page.reason}" }
                     return RefreshResult.ResetRequired(page.reason)
@@ -1969,6 +2202,7 @@ class RoomSessionRepository(
                         )
                     }
                     event.terminalRunState()?.let { terminal ->
+                        event.runId?.takeIf(String::isNotBlank)?.let { recordTerminalRunIds(sessionId, listOf(it)) }
                         dao.settleStagedMessages(sessionId, event.runId, event.requestId, terminal)
                     }
                     after = event.boundarySeq()
@@ -2068,9 +2302,6 @@ class RoomSessionRepository(
                 )
             }
             if (page.resetRequired) return RefreshResult.ResetRequired(page.reason)
-            (page.runActivity as? JsonObject)?.let { activity ->
-                runActivityState.update { it + (sessionId to activity) }
-            }
             lastPage = page
             when (val result = engine.apply(
                 page.events,
@@ -2079,10 +2310,9 @@ class RoomSessionRepository(
                 is SyncResult.Applied -> {
                     totalApplied += result.count
                     latestSeq = result.cursor.lastAppliedSeq
+                    recordRunActivityFromPage(sessionId, page, cursorSeq = latestSeq)
                     val activitySnapshot = page.runActivity as? JsonObject
-                    val activityState = listOf("state", "status", "runState")
-                        .firstNotNullOfOrNull { key -> (activitySnapshot?.get(key) as? JsonPrimitive)?.contentOrNull }
-                        ?.lowercase()
+                    val activityState = runActivityStateName(activitySnapshot)
                     if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
                         lastTerminalRunActivity = activitySnapshot
                     } else if (activityState != null) {
@@ -2093,14 +2323,26 @@ class RoomSessionRepository(
                     if (updatedArtifacts !== currentArtifacts) {
                         durableArtifactState.update { it + (sessionId to updatedArtifacts) }
                     }
-                    page.events.filter { it.terminalRunState() != null }
-                        .mapNotNullTo(terminalRunIds) { it.runId?.takeIf(String::isNotBlank) }
-                    // The durable message store does not retain tool operations. Refresh
+                    val pageTerminalRuns = page.events.filter { it.terminalRunState() != null }
+                        .mapNotNullTo(linkedSetOf()) { it.runId?.takeIf(String::isNotBlank) }
+                    if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
+                        ((activitySnapshot?.get("runId") ?: activitySnapshot?.get("id")) as? JsonPrimitive)
+                            ?.contentOrNull?.takeIf(String::isNotBlank)?.let { pageTerminalRuns += it }
+                    }
+                    terminalRunIds.addAll(pageTerminalRuns)
+                    val accumulatedTerminalRuns = recordTerminalRunIds(sessionId, pageTerminalRuns)
+                    // The durable message store does not retain tool operations, and
+                    // terminal events settle the authoritative visible projection. Refresh
                     // the server's canonical visible projection when they change so
-                    // advancing the durable cursor cannot make tool cards disappear.
-                    if (page.events.any { it.type.orEmpty().lowercase() in TOOL_OPERATION_EVENT_TYPES }) {
+                    // advancing the durable cursor cannot leave stale live overlays/spinners.
+                    if (page.events.any {
+                            it.type.orEmpty().lowercase() in TOOL_OPERATION_EVENT_TYPES ||
+                                it.terminalRunState() != null
+                        }
+                    ) {
                         pendingVisibleOperationRefresh += sessionId
                     }
+                    settleConfirmedMessagesInRoom(sessionId, latestSeq)
                     liveProjectionMutex.withLock {
                         liveProjectors[sessionId]?.let { projector ->
                             val durableMessages = dao.getMessages(sessionId)
@@ -2108,7 +2350,7 @@ class RoomSessionRepository(
                                 latestSeq,
                                 durableMessages.associate { it.id to it.content },
                                 durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
-                                terminalRunIds,
+                                accumulatedTerminalRuns,
                                 durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
                             )
                             liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
@@ -2122,10 +2364,24 @@ class RoomSessionRepository(
                     if (!hasMore || !advanced) break
                 }
                 is SyncResult.GapDetected -> {
+                    (page.runActivity as? JsonObject)?.let { activity ->
+                        runActivityState.update { it + (sessionId to activity) }
+                        val state = runActivityStateName(activity)
+                        if (state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES) {
+                            clearAuthoritativeIdle(sessionId)
+                        }
+                    }
                     applyLivePage(sessionId, page)
                     return RefreshResult.Gap(result.expectedSeq, result.receivedSeq)
                 }
                 is SyncResult.InvalidEvent -> {
+                    (page.runActivity as? JsonObject)?.let { activity ->
+                        runActivityState.update { it + (sessionId to activity) }
+                        val state = runActivityStateName(activity)
+                        if (state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES) {
+                            clearAuthoritativeIdle(sessionId)
+                        }
+                    }
                     applyLivePage(sessionId, page)
                     return RefreshResult.Gap(result.event.boundarySeq(), result.event.boundarySeq())
                 }
@@ -2252,6 +2508,7 @@ class RoomSessionRepository(
     }
 
     private suspend fun applyLivePage(sessionId: String, page: SessionEventsPageDto) {
+        recordRunActivityFromPage(sessionId, page)
         val streamId = page.liveStreamId
         val liveCursor = page.liveCursor
         if (streamId != null && liveCursor != null) {
@@ -2296,9 +2553,7 @@ class RoomSessionRepository(
     private suspend fun refreshVisibleTimelineLocked(sessionId: String, preserveLoadedHistory: Boolean = false): RefreshResult {
         val response = execute(ApiRequest("GET", visibleEventPagePath(sessionId, null)))
         val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-        (page.runActivity as? JsonObject)?.let { activity ->
-            runActivityState.update { it + (sessionId to activity) }
-        }
+        recordRunActivityFromPage(sessionId, page)
         recoverVisiblePendingApproval(sessionId, page)
         if (page.resetRequired) {
             timelinePagingState.update { it + (sessionId to TimelinePagingState(error = page.reason)) }
@@ -2386,6 +2641,7 @@ class RoomSessionRepository(
     }
 
     override suspend fun sendMessage(sessionId: String, text: String, requestId: String) {
+        clearAuthoritativeIdle(sessionId)
         val body = codec.encode(serializer<SendMessageRequestDto>(), SendMessageRequestDto(text, requestId))
         val path = "/api/sessions/${encode(sessionId)}/messages"
         executePending(sessionId, requestId, "send_message", path, body) {
@@ -2403,6 +2659,7 @@ class RoomSessionRepository(
         attachments: List<OutboundAttachment>,
         harnessCapabilityIds: List<String>,
     ) {
+        clearAuthoritativeIdle(sessionId)
         val path = "/api/sessions/${encode(sessionId)}/messages"
         if (attachments.isEmpty()) {
             val body = encodeMessage(
@@ -2492,6 +2749,7 @@ class RoomSessionRepository(
     }
 
     override suspend fun steerQueuedFollowUp(sessionId: String, requestId: String): QueueMutationResult {
+        clearAuthoritativeIdle(sessionId)
         require(requestId.isNotBlank()) { "Queued follow-up request id must not be blank" }
         val operationRequestId = newRequestId()
         val path = "/api/sessions/${encode(sessionId)}/queue"
@@ -2523,6 +2781,7 @@ class RoomSessionRepository(
         steerIfRunning: Boolean,
         requestId: String,
     ): Boolean {
+        clearAuthoritativeIdle(sessionId)
         val path = "/api/sessions/${encode(sessionId)}/messages"
         val body = codec.encode(
             serializer<SendMessageRequestDto>(),

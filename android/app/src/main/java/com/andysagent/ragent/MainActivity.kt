@@ -1589,6 +1589,7 @@ class MainActivity : ComponentActivity() {
                     autoContinue = chatState.autoContinue,
                     runMetrics = chatState.runMetrics,
                     runDurations = chatState.runDurations,
+                    authoritativeIdleAtSeq = chatState.authoritativeIdleAtSeq,
                     stepTraces = chatState.stepTraces,
                     changedFiles = chatState.changedFiles,
                     queuedMessages = chatState.queuedMessages,
@@ -2223,7 +2224,11 @@ class MainActivity : ComponentActivity() {
                             }
                             WorkbenchEvent.Retry -> {
                                 app.runtime.retryActiveConnection()
-                                if (!tabletDualPane || !shellState.chatOpen) chat.onEvent(ChatEvent.Retry)
+                                if (!tabletDualPane || !shellState.chatOpen ||
+                                    chatState.error != null || chatState.runtimeModel == null || chatState.runtimeModelsError != null
+                                ) {
+                                    chat.onEvent(ChatEvent.Retry)
+                                }
                                 listActions.onEvent(ChatEvent.DismissListActionError)
                                 projects.onEvent(ProjectsEvent.Retry)
                                 computers.onEvent(ComputersEvent.Retry)
@@ -2231,6 +2236,8 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.RetryChat -> {
                                 app.runtime.retryComputerConnection(detailTargetId)
                                 chat.onEvent(ChatEvent.Retry)
+                                if (projectState.error != null) projects.onEvent(ProjectsEvent.Retry)
+                                if (computerState.error != null) computers.onEvent(ComputersEvent.Retry)
                             }
                             WorkbenchEvent.DismissError -> {
                                 // Workbench renders the first error from three

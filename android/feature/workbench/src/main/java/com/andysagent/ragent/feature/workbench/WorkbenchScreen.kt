@@ -183,7 +183,9 @@ import com.andysagent.ragent.core.agentui.AgentRunStatus
 import com.andysagent.ragent.core.agentui.AgentStreamingMessage
 import com.andysagent.ragent.core.agentui.AgentStatus
 import com.andysagent.ragent.core.agentui.CommandCard
+import com.andysagent.ragent.core.agentui.ComposerRuntimeRetryHint
 import com.andysagent.ragent.core.agentui.ConnectionStatus
+import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.agentui.ErrorCard
 import com.andysagent.ragent.core.agentui.FileEditCard
 import com.andysagent.ragent.core.agentui.PermissionRequestCard
@@ -898,11 +900,22 @@ fun WorkbenchScreen(
                 )
             }
         }
+        val effectiveChatConnection = if (state.chatOpen) (state.chatConnection ?: state.connection) else state.connection
+        val effectiveChatTargetId = if (state.chatOpen) (state.chatTargetId ?: state.activeRemoteTargetId) else state.activeRemoteTargetId
         val listActionError = state.listActionError?.takeIf { it.isNotBlank() }
-        val displayedError = listActionError ?: state.error?.takeUnless(::isTransportConnectionFailure)
+        val displayedError = resolveDisplayedWorkbenchError(
+            error = state.error,
+            listActionError = listActionError,
+            chatOpen = state.chatOpen,
+            chatConnection = effectiveChatConnection,
+            activeRemoteTargetId = effectiveChatTargetId,
+        )
         displayedError?.let { error ->
             val missingRemoteTarget = isMissingRemoteTarget(error)
             val isListActionTransportError = listActionError != null && isTransportConnectionFailure(error)
+            val isChatTransportError = listActionError == null &&
+                effectiveChatConnection != AgentConnectionStatus.Connected &&
+                isTransportConnectionFailure(error)
             RetryCard(
                 state = if (isListActionTransportError) {
                     RetryUiState(
@@ -911,7 +924,7 @@ fun WorkbenchScreen(
                         retryLabel = stringResource(R.string.workbench_reconnect),
                     )
                 } else {
-                    retryPresentation(error, isTransportFailure = false)
+                    retryPresentation(error, isTransportFailure = isChatTransportError)
                 },
                 onRetry = {
                     if (missingRemoteTarget) {
@@ -1033,10 +1046,88 @@ fun WorkbenchScreen(
  * help a person decide what to do in a conversation. Keep the recovery
  * affordance in chat and reserve protocol details for device diagnostics.
  */
-private fun isTransportConnectionFailure(error: String): Boolean {
+internal fun isTransportConnectionFailure(error: String): Boolean {
     val normalized = error.lowercase()
-    return listOf("turn", "p2p", "webrtc", "carrier is available").any(normalized::contains)
+    return listOf(
+        "verified turn/p2p carrier",
+        "carrier is available",
+        "carrier_unavailable",
+        "webrtc carrier",
+        "webrtc connection",
+    ).any(normalized::contains)
 }
+
+internal fun shouldShowChatConnectionBanner(
+    connection: AgentConnectionStatus,
+    activeRemoteTargetId: String?,
+): Boolean = connection != AgentConnectionStatus.Connected && activeRemoteTargetId != null
+
+internal fun shouldShowChatConnectionPill(
+    connection: AgentConnectionStatus,
+    activeRemoteTargetId: String?,
+): Boolean = when (connection) {
+    AgentConnectionStatus.Connected -> false
+    AgentConnectionStatus.Connecting,
+    AgentConnectionStatus.Reconnecting,
+    AgentConnectionStatus.AuthenticationRequired,
+    AgentConnectionStatus.Error,
+    -> true
+    AgentConnectionStatus.Disconnected -> activeRemoteTargetId != null
+}
+
+internal fun resolveDisplayedWorkbenchError(
+    error: String?,
+    listActionError: String?,
+    chatOpen: Boolean,
+    chatConnection: AgentConnectionStatus,
+    activeRemoteTargetId: String?,
+): String? {
+    val normalizedListError = listActionError?.takeIf { it.isNotBlank() }
+    if (normalizedListError != null) return normalizedListError
+    val normalizedError = error?.takeIf { it.isNotBlank() } ?: return null
+    val bannerVisible = chatOpen && shouldShowChatConnectionBanner(chatConnection, activeRemoteTargetId)
+    return if (chatConnection != AgentConnectionStatus.Connected && bannerVisible) null else normalizedError
+}
+
+internal fun hasVisibleChatErrorSurface(
+    error: String?,
+    listActionError: String?,
+    chatOpen: Boolean,
+    chatConnection: AgentConnectionStatus,
+    activeRemoteTargetId: String?,
+): Boolean {
+    val displayed = resolveDisplayedWorkbenchError(
+        error = error,
+        listActionError = listActionError,
+        chatOpen = chatOpen,
+        chatConnection = chatConnection,
+        activeRemoteTargetId = activeRemoteTargetId,
+    )
+    val normalizedError = error?.takeIf { it.isNotBlank() }
+    val bannerVisible = chatOpen && shouldShowChatConnectionBanner(chatConnection, activeRemoteTargetId)
+    return displayed != null || (normalizedError != null && bannerVisible)
+}
+
+internal fun shouldShowRuntimeRetryHint(
+    connection: AgentConnectionStatus,
+    runtimeResolving: Boolean,
+    runtimeModelsError: String?,
+    runtimeModel: String?,
+    hasPendingApproval: Boolean,
+    approvalResolving: Boolean,
+    hasBlockingDecision: Boolean,
+    runtimePickerOpen: Boolean,
+    effortPickerOpen: Boolean,
+    composerFullscreenActive: Boolean,
+): Boolean = connection == AgentConnectionStatus.Connected &&
+    !runtimeResolving &&
+    (runtimeModelsError != null || runtimeModel == null) &&
+    !hasPendingApproval &&
+    !approvalResolving &&
+    !hasBlockingDecision &&
+    !runtimePickerOpen &&
+    !effortPickerOpen &&
+    !composerFullscreenActive
 
 /** A target-selection failure is recoverable setup work, not a retryable run failure. */
 private fun isMissingRemoteTarget(error: String): Boolean =
@@ -1808,8 +1899,31 @@ private fun ChatSurface(
             .toList()
     }
     val turnGroupProjector = remember(state.sessionId) { TurnGroupProjector() }
-    val turnGroups = remember(effectiveTimelineItems, collaborationActions, collaborationLabels, state.pendingTurn, state.acceptedTurns, state.runStatus, state.runMetrics) {
-        val terminal = latestTurnHasTerminalRun(effectiveTimelineItems, state.pendingTurn, state.runStatus, state.runMetrics)
+    val turnGroups = remember(
+        effectiveTimelineItems,
+        collaborationActions,
+        collaborationLabels,
+        state.pendingTurn,
+        state.acceptedTurns,
+        state.queuedMessages,
+        queuedMessages,
+        state.serverRunActivity,
+        state.runStatus,
+        state.runMetrics,
+        state.runDurations,
+        state.authoritativeIdleAtSeq,
+    ) {
+        val terminal = latestTurnHasTerminalRun(
+            items = effectiveTimelineItems,
+            pending = state.pendingTurn,
+            sessionStatus = state.runStatus,
+            metrics = state.runMetrics,
+            acceptedTurns = state.acceptedTurns,
+            queuedMessages = if (state.queuedMessages.isNotEmpty()) state.queuedMessages else queuedMessages,
+            serverRunActivity = state.serverRunActivity,
+            runDurations = state.runDurations,
+            authoritativeIdleAtSeq = state.authoritativeIdleAtSeq,
+        )
         val items = com.andysagent.ragent.core.timeline.settleLatestTurnMessages(effectiveTimelineItems, terminal)
         turnGroupProjector.project(mergeCollaborationActions(items, collaborationActions, collaborationLabels), state.pendingTurn, state.acceptedTurns)
     }
@@ -2362,16 +2476,21 @@ private fun ChatSurface(
             ?: state.computers.firstOrNull()?.name
     }
     var collaborationSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
-    val showChatConnectionPill = state.activeRemoteTargetId != null ||
-        state.activeCarrier != com.andysagent.ragent.core.network.ActiveCarrier.None ||
-        state.connection in setOf(
-            AgentConnectionStatus.Connecting,
-            AgentConnectionStatus.Reconnecting,
-            AgentConnectionStatus.AuthenticationRequired,
-            AgentConnectionStatus.Error,
-        )
-    val showChatConnectionBanner = state.connection != AgentConnectionStatus.Connected &&
-        state.activeRemoteTargetId != null
+    val showChatConnectionPill = shouldShowChatConnectionPill(
+        connection = state.connection,
+        activeRemoteTargetId = state.activeRemoteTargetId,
+    )
+    val showChatConnectionBanner = shouldShowChatConnectionBanner(
+        connection = state.connection,
+        activeRemoteTargetId = state.activeRemoteTargetId,
+    )
+    val hasChatAttentionOrError = hasVisibleChatErrorSurface(
+        error = state.error,
+        listActionError = state.listActionError,
+        chatOpen = true,
+        chatConnection = state.connection,
+        activeRemoteTargetId = state.activeRemoteTargetId,
+    )
     val chatHeaderExtraTop = when {
         showChatConnectionBanner -> 68.dp
         showChatConnectionPill -> 26.dp
@@ -2784,7 +2903,8 @@ private fun ChatSurface(
             JourneyRunFeedback(state, onReconnect = { onEvent(WorkbenchEvent.Retry) },
                 modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth))
             val isTransportFailure = state.error?.let(::isTransportConnectionFailure) == true
-            val isOffline = state.connection == AgentConnectionStatus.Disconnected || isTransportFailure
+            val isOffline = state.connection == AgentConnectionStatus.Disconnected ||
+                (state.connection != AgentConnectionStatus.Connected && isTransportFailure)
             val activeSummary = when {
                 state.pendingTurn?.state == PendingTurnState.Sending -> stringResource(R.string.workbench_status_sending)
                 state.currentAction != null -> state.currentAction?.let { presentRunAction(it) }
@@ -2919,6 +3039,35 @@ private fun ChatSurface(
                 backdropOrigin = chatBackdropOrigin,
                 modifier = Modifier.widthIn(max = RagentSizes.ContentMaxWidth),
             )
+            val hasBlockingDecision = activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true
+            val showRuntimeRetryHint = shouldShowRuntimeRetryHint(
+                connection = state.connection,
+                runtimeResolving = state.runtimeResolving,
+                runtimeModelsError = state.runtimeModelsError,
+                runtimeModel = state.runtimeModel,
+                hasPendingApproval = state.approval != null,
+                approvalResolving = state.approvalResolving,
+                hasBlockingDecision = hasBlockingDecision,
+                runtimePickerOpen = state.runtimePickerOpen,
+                effortPickerOpen = state.effortPickerOpen,
+                composerFullscreenActive = composerFullscreenActive,
+            )
+            if (showRuntimeRetryHint) {
+                ComposerRuntimeRetryHint(
+                    label = stringResource(
+                        if (state.runtimeModelsError != null) R.string.runtime_retry_load_error
+                        else R.string.runtime_retry_missing_model,
+                    ),
+                    isError = state.runtimeModelsError != null,
+                    loading = state.runtimeModelsLoading,
+                    onRetry = { onEvent(WorkbenchEvent.Retry) },
+                    backdropLayer = chatBackdropForControls,
+                    backdropOrigin = chatBackdropOrigin,
+                    modifier = Modifier
+                        .widthIn(max = RagentSizes.ContentMaxWidth)
+                        .padding(bottom = 8.dp),
+                )
+            }
             }
 
             // Insets are applied during layout. Derive the editor target from
@@ -3698,7 +3847,7 @@ private fun ChatSurface(
                         projectTitle = currentProjectName,
                         hostTitle = currentDeviceName,
                         status = state.runStatus,
-                        hasAttentionOrError = state.error != null,
+                        hasAttentionOrError = hasChatAttentionOrError,
                         onBack = { onEvent(WorkbenchEvent.CloseChat) },
                         onMenu = { onEvent(WorkbenchEvent.OpenSessionMenu) },
                         menuEnabled = state.sessionId != null && !state.sessionActionInProgress,
@@ -3716,6 +3865,8 @@ private fun ChatSurface(
                         connection = state.connection,
                         activeCarrier = state.activeCarrier,
                         onClick = { onEvent(WorkbenchEvent.Retry) },
+                        backdropLayer = chatBackdropForControls,
+                        backdropOrigin = chatBackdropOrigin,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -3815,10 +3966,17 @@ private fun ChatSurface(
             backdropLayer = chatBackdropForControls,
             backdropOrigin = chatBackdropOrigin,
             onExpand = ::openRunIsland,
+            connectionStatus = state.connection.takeIf {
+                state.activeRemoteTargetId != null ||
+                    state.activeCarrier != ActiveCarrier.None ||
+                    it != AgentConnectionStatus.Disconnected
+            },
+            activeCarrier = state.activeCarrier,
+            onRetryConnection = { onEvent(WorkbenchEvent.Retry) },
             collapsedContent = { showStatusIndicator ->
                 com.andysagent.ragent.core.agentui.ConversationCapsuleLabel(
                     state.sessionTitle, currentProjectName, currentDeviceName, state.runStatus,
-                    hasAttentionOrError = state.error != null,
+                    hasAttentionOrError = hasChatAttentionOrError,
                     showStatusIndicator = showStatusIndicator,
                 )
             },

@@ -8,6 +8,8 @@ import com.andysagent.ragent.core.timeline.TimelineItem
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
 import com.andysagent.ragent.core.timeline.TimelineRole
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -50,6 +52,137 @@ class TurnTimelineWorkspaceTest {
         assertFalse(latestTurnHasTerminalRun(requestOnly, null, AgentRunStatus.Idle, metrics.copy(runId = "other")))
         val ambiguous = requestOnly + answer.copy(id = "other", requestId = "request-1", runId = "other")
         assertFalse(latestTurnHasTerminalRun(ambiguous, null, AgentRunStatus.Idle, metrics))
+    }
+
+    @Test fun `airtight settlement blocks completion when active turn work or vetoes exist`() {
+        val prompt = TimelineItem.Message("user", 10, TimelineRole.User, "request", true, runId = "run-2")
+        val answer = TimelineItem.Message("answer", 11, TimelineRole.Agent, "partial", false, runId = "run-2")
+        val items = listOf(prompt, answer)
+        val terminalMetrics = RunMetricsUiState(runId = "run-2", status = AgentRunStatus.Completed)
+        val pending = PendingTurnUiState("next", "next", emptyList(), RuntimeSelection("claude"), null)
+
+        assertFalse(latestTurnHasTerminalRun(items, pending, AgentRunStatus.Completed, terminalMetrics, authoritativeIdleAtSeq = 20L))
+        assertFalse(latestTurnHasTerminalRun(items, pending.copy(state = PendingTurnState.Accepted), AgentRunStatus.Completed, terminalMetrics, authoritativeIdleAtSeq = 20L))
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = items,
+                pending = null,
+                sessionStatus = AgentRunStatus.Completed,
+                metrics = terminalMetrics,
+                acceptedTurns = listOf(pending.copy(state = PendingTurnState.Accepted)),
+                authoritativeIdleAtSeq = 20L,
+            ),
+        )
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = items,
+                pending = null,
+                sessionStatus = AgentRunStatus.Completed,
+                metrics = terminalMetrics,
+                queuedMessages = listOf(QueuedMessageUiState(id = "q1", text = "follow up")),
+                authoritativeIdleAtSeq = 20L,
+            ),
+        )
+        assertFalse(latestTurnHasTerminalRun(items, null, AgentRunStatus.Working, terminalMetrics, authoritativeIdleAtSeq = 20L))
+        assertFalse(latestTurnHasTerminalRun(items, null, AgentRunStatus.WaitingApproval, terminalMetrics, authoritativeIdleAtSeq = 20L))
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = items,
+                pending = null,
+                sessionStatus = AgentRunStatus.Completed,
+                metrics = terminalMetrics,
+                serverRunActivity = buildJsonObject {
+                    put("runId", "run-2")
+                    put("state", "running")
+                },
+                authoritativeIdleAtSeq = 20L,
+            ),
+        )
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = items,
+                pending = null,
+                sessionStatus = AgentRunStatus.Completed,
+                metrics = terminalMetrics,
+                serverRunActivity = buildJsonObject {
+                    put("runId", "run-2")
+                    put("state", "waiting_approval")
+                },
+                authoritativeIdleAtSeq = 20L,
+            ),
+        )
+    }
+
+    @Test fun `airtight settlement settles via duration or authoritative idle cursor and scopes to latest turn`() {
+        val turn1Prompt = TimelineItem.Message("u1", 1, TimelineRole.User, "first", true, runId = "run-1")
+        val turn1Answer = TimelineItem.Message("a1", 2, TimelineRole.Agent, "done", true, runId = "run-1")
+        val turn2Prompt = TimelineItem.Message("u2", 10, TimelineRole.User, "second", true, runId = null)
+        val turn2Answer = TimelineItem.Message("a2", 12, TimelineRole.Agent, "stream", false, runId = null, lastEventSeq = 12L)
+        val multiTurnItems = listOf(turn1Prompt, turn1Answer, turn2Prompt, turn2Answer)
+
+        // Prior turn run-1 terminal proofs must never leak into Turn 2.
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = multiTurnItems,
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(runId = "run-1", status = AgentRunStatus.Completed),
+                runDurations = mapOf("run-1" to 400L),
+            ),
+        )
+
+        // Authoritative idle cursor settles Turn 2 only once >= max seq and free of ephemeral deltas.
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = multiTurnItems,
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 11L,
+            ),
+        )
+        assertTrue(
+            latestTurnHasTerminalRun(
+                items = multiTurnItems,
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 12L,
+            ),
+        )
+
+        val ephemeralDeltaZeroSeq = turn2Answer.copy(id = "live-0", seq = 0L, lastEventSeq = 0L)
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = listOf(turn2Prompt, ephemeralDeltaZeroSeq),
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 100L,
+            ),
+        )
+        val ephemeralDeltaNonZeroRenderSeq = turn2Answer.copy(id = "live-delta", seq = 900_000_001L, lastEventSeq = 0L)
+        assertFalse(
+            latestTurnHasTerminalRun(
+                items = listOf(turn2Prompt, ephemeralDeltaNonZeroRenderSeq),
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(),
+                authoritativeIdleAtSeq = 100L,
+            ),
+        )
+
+        // Matching runId in runDurations also settles the latest turn.
+        val scopedTurn2 = listOf(turn1Prompt, turn1Answer, turn2Prompt, turn2Answer.copy(runId = "run-2"))
+        assertTrue(
+            latestTurnHasTerminalRun(
+                items = scopedTurn2,
+                pending = null,
+                sessionStatus = AgentRunStatus.Idle,
+                metrics = RunMetricsUiState(),
+                runDurations = mapOf("run-2" to 650L),
+            ),
+        )
     }
 
     @Test fun `active run stays attached to its own turn when another request is queued`() {

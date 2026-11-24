@@ -149,6 +149,8 @@ interface SessionRepository {
         kotlinx.coroutines.flow.flowOf(emptyMap())
     /** Canonical action projection shared with the Web live activity strip. */
     fun observeRunActivity(sessionId: String): Flow<JsonObject?> = kotlinx.coroutines.flow.flowOf(null)
+    /** Sequence watermark at which the server last confirmed idle state with empty queue. */
+    fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)
     fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = kotlinx.coroutines.flow.flowOf(emptyMap())
     suspend fun saveRunDuration(sessionId: String, runId: String, durationMs: Long) {}
     fun observeTimelinePaging(sessionId: String): Flow<TimelinePagingState> =
@@ -279,6 +281,8 @@ interface SessionRepository {
     suspend fun loadOlderTimeline(sessionId: String): RefreshResult = RefreshResult.Applied(0, 0L)
     /** Refreshes the detail projection, including the server-owned follow-up queue. */
     suspend fun refreshSessionDetail(sessionId: String): Session? = null
+    /** Durable event cursor sequence last synchronized locally for the session, or null if unsynced. */
+    suspend fun lastSyncedSeq(sessionId: String): Long? = null
     /** Exact response identity and project scope, without persisting or reading cached fields. */
     suspend fun readSessionAccessContext(sessionId: String): SessionAccessContext? =
         throw SessionRepositoryException(501, "SESSION_SCOPE_UNSUPPORTED", "Authoritative Session scope is unsupported", false)

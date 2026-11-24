@@ -112,4 +112,51 @@ class LiveTokenRebaseTest {
         projector.reconcileDurableCursor(6, mapOf(id to "Hello"), setOf(id))
         assertTrue(projector.snapshotEvents().isEmpty())
     }
+
+    @Test fun accumulatedTerminalRunIdsRetiresEphemeralTextAndReasoningAcrossReconcileCalls() {
+        val projector = LiveTimelineProjector()
+        projector.reconcileDurableCursor(9)
+        projector.apply(listOf(
+            SessionEventDto(seq = 0, eventId = "r1", type = "reasoning", entityId = "block-r", text = "Thinking...", runId = "run-1"),
+            SessionEventDto(seq = 0, eventId = "t1", type = "text_delta", entityId = "stream-block", role = "assistant", text = "Answer", runId = "run-1"),
+        ))
+        assertEquals(2, projector.snapshotEvents().size)
+
+        // Call 1: durable cursor advances with run_completed before MessageEntity arrives in Room.
+        // Reasoning (messageState == null) retires after durable catch-up; streaming text waits for durableMessageRunIds.
+        projector.reconcileDurableCursor(
+            durableSeq = 10,
+            durableMessages = emptyMap(),
+            completedEntityIds = emptySet(),
+            completedRunIds = setOf("run-1"),
+            durableMessageRunIds = emptySet(),
+        )
+        assertEquals(listOf("message:stream-block:assistant"), projector.snapshotEvents().mapNotNull { it.entityId })
+
+        // Call 2: Room receives durable MessageEntity with different entityId; completedRunIds is empty this call.
+        projector.reconcileDurableCursor(
+            durableSeq = 10,
+            durableMessages = mapOf("durable-msg-1" to "Answer"),
+            completedEntityIds = setOf("durable-msg-1"),
+            completedRunIds = emptySet(),
+            durableMessageRunIds = setOf("run-1"),
+        )
+        assertTrue(projector.snapshotEvents().isEmpty())
+
+        // Late unsequenced reasoning or token for terminal run-1 is dropped, while completed commentary mid-run
+        // on run-2 does not stop active run-2 streaming.
+        projector.apply(listOf(
+            SessionEventDto(seq = 0, eventId = "late-r", type = "reasoning", entityId = "block-r", text = "stale", runId = "run-1"),
+            SessionEventDto(seq = 0, eventId = "late-t", type = "text_delta", entityId = "stream-block", role = "assistant", text = "stale", runId = "run-1"),
+            SessionEventDto(seq = 0, eventId = "r2-t", type = "text_delta", entityId = "stream-2", role = "assistant", text = "Next", runId = "run-2"),
+        ))
+        projector.reconcileDurableCursor(
+            durableSeq = 11,
+            durableMessages = mapOf("durable-msg-1" to "Answer", "commentary-2" to "Checking..."),
+            completedEntityIds = setOf("durable-msg-1", "commentary-2"),
+            completedRunIds = emptySet(),
+            durableMessageRunIds = setOf("run-1", "run-2"),
+        )
+        assertEquals(listOf("Next"), projector.snapshotEvents().mapNotNull { it.text })
+    }
 }

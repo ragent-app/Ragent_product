@@ -2,7 +2,7 @@ package com.andysagent.ragent.feature.workbench
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,50 +19,68 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.andysagent.ragent.core.agentui.AgentConnectionStatus
+import com.andysagent.ragent.core.designsystem.AgentoBackdropTone
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
+import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
+import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
+import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
 import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.LocalRagentColors
+import com.andysagent.ragent.core.designsystem.agentoPressScale
+import com.andysagent.ragent.core.designsystem.ragentComposerShadow
 import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.network.ActiveCarrier
+import kotlin.math.roundToInt
 
-@Composable
-internal fun ConnectionStatusPill(
+internal fun connectionCarrierLabelRes(activeCarrier: ActiveCarrier): Int? = when (activeCarrier) {
+    ActiveCarrier.Direct -> R.string.connection_carrier_direct
+    ActiveCarrier.P2P -> R.string.connection_carrier_p2p
+    ActiveCarrier.Turn -> R.string.connection_carrier_turn
+    ActiveCarrier.None -> null
+}
+
+internal fun connectionStatusLabelRes(
     connection: AgentConnectionStatus,
     activeCarrier: ActiveCarrier,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-) {
+): Int = when (connection) {
+    AgentConnectionStatus.Connected ->
+        connectionCarrierLabelRes(activeCarrier) ?: R.string.connection_status_connected
+    AgentConnectionStatus.Connecting -> R.string.connection_status_connecting
+    AgentConnectionStatus.Reconnecting -> R.string.connection_status_reconnecting
+    AgentConnectionStatus.AuthenticationRequired -> R.string.connection_status_auth_required
+    AgentConnectionStatus.Disconnected,
+    AgentConnectionStatus.Error,
+    -> R.string.connection_status_offline
+}
+
+@Composable
+internal fun connectionStatusAccentColor(connection: AgentConnectionStatus): Color {
     val colors = LocalRagentColors.current
-    val labelRes = when (connection) {
-        AgentConnectionStatus.Connected -> when (activeCarrier) {
-            ActiveCarrier.Direct -> R.string.connection_carrier_direct
-            ActiveCarrier.P2P -> R.string.connection_carrier_p2p
-            ActiveCarrier.Turn -> R.string.connection_carrier_turn
-            ActiveCarrier.None -> R.string.connection_status_connected
-        }
-        AgentConnectionStatus.Connecting -> R.string.connection_status_connecting
-        AgentConnectionStatus.Reconnecting -> R.string.connection_status_reconnecting
-        AgentConnectionStatus.AuthenticationRequired -> R.string.connection_status_auth_required
-        AgentConnectionStatus.Disconnected,
-        AgentConnectionStatus.Error,
-        -> R.string.connection_status_offline
-    }
-    val label = stringResource(labelRes)
-    val accent = when (connection) {
+    return when (connection) {
         AgentConnectionStatus.Connected -> AgentoFrostedTokens.StatusActive
         AgentConnectionStatus.Connecting,
         AgentConnectionStatus.Reconnecting,
@@ -72,42 +90,93 @@ internal fun ConnectionStatusPill(
         -> colors.stateError
         AgentConnectionStatus.Disconnected -> colors.secondaryContent
     }
+}
+
+@Composable
+internal fun ConnectionStatusPill(
+    connection: AgentConnectionStatus,
+    activeCarrier: ActiveCarrier,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    backdropLayer: GraphicsLayer? = null,
+    backdropOrigin: IntOffset = IntOffset.Zero,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    val label = stringResource(connectionStatusLabelRes(connection, activeCarrier))
+    val accent = connectionStatusAccentColor(connection)
     val isConnecting = connection == AgentConnectionStatus.Connecting ||
         connection == AgentConnectionStatus.Reconnecting
     val interactive = onClick != null && connection != AgentConnectionStatus.Connected
+    val borderColor = if (isDark) {
+        AgentoFrostedTokens.SubtleHairline
+    } else {
+        AgentoFrostedTokens.LightSubtleHairline
+    }
+    var backdropOffset by remember { mutableStateOf(IntOffset.Zero) }
 
-    Surface(
-        modifier = modifier
-            .testTag("connection-status-pill")
-            .clip(AgentoShapes.PillShape)
-            .then(if (interactive) Modifier.clickable(onClick = onClick!!) else Modifier),
-        shape = AgentoShapes.PillShape,
-        color = accent.copy(alpha = if (connection == AgentConnectionStatus.Disconnected) 0.12f else 0.14f),
-        border = BorderStroke(0.5.dp, accent.copy(alpha = 0.28f)),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+    Box(modifier = modifier) {
+        AgentoFrostedGlassBox(
+            modifier = Modifier
+                .testTag("connection-status-pill")
+                .ragentComposerShadow(shape = AgentoShapes.PillShape)
+                .clip(AgentoShapes.PillShape)
+                .border(0.5.dp, borderColor, AgentoShapes.PillShape)
+                .then(
+                    if (interactive) {
+                        Modifier
+                            .agentoPressScale(
+                                pressedScale = 0.96f,
+                                onClick = onClick!!,
+                            )
+                            .semantics { role = Role.Button }
+                    } else {
+                        Modifier
+                    },
+                )
+                .onGloballyPositioned { coordinates ->
+                    val position = coordinates.positionInRoot()
+                    backdropOffset = IntOffset(
+                        x = backdropOrigin.x - position.x.roundToInt(),
+                        y = backdropOrigin.y - position.y.roundToInt(),
+                    )
+                },
+            shape = AgentoShapes.PillShape,
+            surface = AgentoGlassSurface.Neutral,
+            blurRadius = AgentoFrostedTokens.BlurNavigation,
+            showTopHairline = true,
+            backdropLayer = backdropLayer,
+            backdropOffset = backdropOffset,
+            backdropTone = AgentoBackdropTone.QuietHeader,
+            material = AgentoGlassMaterial.LiquidClear,
+            specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+            contentAlignment = Alignment.Center,
+            hasShadow = false,
         ) {
-            if (isConnecting) {
-                AgentoBreathingDot(color = accent, size = 6.dp)
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(accent),
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                if (isConnecting) {
+                    AgentoBreathingDot(color = accent, size = 6.dp)
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(accent),
+                    )
+                }
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                    color = if (connection == AgentConnectionStatus.Disconnected) colors.secondaryContent else colors.primaryContent,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-                color = if (connection == AgentConnectionStatus.Disconnected) colors.secondaryContent else accent,
-                maxLines = 1,
-                softWrap = false,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

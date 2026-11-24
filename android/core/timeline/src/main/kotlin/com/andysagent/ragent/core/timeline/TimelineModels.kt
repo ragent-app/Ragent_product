@@ -130,6 +130,52 @@ fun latestTurnRunId(items: List<TimelineItem>): String? {
         .distinct().toList().singleOrNull()
 }
 
+/**
+ * Identify the run for the latest turn, scanning strictly within items[lastUserIdx..]
+ * so a newly submitted or idle turn never inherits Turn N-1's runId.
+ */
+fun latestTurnScopedRunId(items: List<TimelineItem>): String? {
+    latestTurnRunId(items)?.let { return it }
+    val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
+    if (lastUserIdx < 0) {
+        return items.asReversed().firstNotNullOfOrNull { item ->
+            when (item) {
+                is TimelineItem.Message,
+                is TimelineItem.Operation,
+                is TimelineItem.Plan -> item.itemRunId()
+                is TimelineItem.Notice -> null
+            }
+        }
+    }
+    val prompt = items[lastUserIdx] as TimelineItem.Message
+    val promptRequestId = prompt.requestId?.takeIf(String::isNotBlank)
+    val scoped = items.subList(lastUserIdx, items.size)
+    if (promptRequestId != null) {
+        scoped.asReversed().firstNotNullOfOrNull { item ->
+            val itemRequestId = (item as? TimelineItem.Message)?.requestId
+            if (itemRequestId != promptRequestId) null else when (item) {
+                is TimelineItem.Message,
+                is TimelineItem.Operation,
+                is TimelineItem.Plan -> item.itemRunId()
+                is TimelineItem.Notice -> null
+            }
+        }?.let { return it }
+    }
+    return items.subList(lastUserIdx + 1, items.size).asReversed().firstNotNullOfOrNull { item ->
+        val itemRequestId = (item as? TimelineItem.Message)?.requestId?.takeIf(String::isNotBlank)
+        if (promptRequestId != null && itemRequestId != null && itemRequestId != promptRequestId) {
+            null
+        } else {
+            when (item) {
+                is TimelineItem.Message,
+                is TimelineItem.Operation,
+                is TimelineItem.Plan -> item.itemRunId()
+                is TimelineItem.Notice -> null
+            }
+        }
+    }
+}
+
 private fun TimelineItem.itemRunId(): String? = when (this) {
     is TimelineItem.Message -> runId
     is TimelineItem.Operation -> runId
@@ -168,12 +214,19 @@ fun settleLatestTurnMessages(items: List<TimelineItem>, terminal: Boolean): List
         return false
     }
 
+    fun isLatestTurnNullRunOverlay(index: Int, itemRunId: String?, itemRequestId: String?): Boolean {
+        if (!itemRunId.isNullOrBlank()) return false
+        if (latestUserIndex >= 0 && index <= latestUserIndex) return false
+        val normalizedRequestId = itemRequestId?.takeIf(String::isNotBlank)
+        return normalizedRequestId == null || normalizedRequestId == latestUserRequestId
+    }
+
     return items.mapIndexed { index, item ->
         when (item) {
             is TimelineItem.Message -> {
                 val shouldSettle = item.role == TimelineRole.Agent && !item.completed && (
                     isEarlierTurnItem(index, item.runId, item.requestId) ||
-                        (terminal && latestRunId != null && item.runId == latestRunId)
+                        (terminal && ((latestRunId != null && item.runId == latestRunId) || isLatestTurnNullRunOverlay(index, item.runId, item.requestId)))
                 )
                 if (shouldSettle) item.copy(completed = true, messageState = "completed") else item
             }
@@ -181,7 +234,7 @@ fun settleLatestTurnMessages(items: List<TimelineItem>, terminal: Boolean): List
                 val inProgress = item.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
                 val shouldSettle = item.isReasoning && inProgress && (
                     isEarlierTurnItem(index, item.runId, null) ||
-                        (terminal && latestRunId != null && item.runId == latestRunId)
+                        (terminal && ((latestRunId != null && item.runId == latestRunId) || isLatestTurnNullRunOverlay(index, item.runId, null)))
                 )
                 if (shouldSettle) item.copy(status = TimelineOperationStatus.Completed) else item
             }
@@ -267,22 +320,23 @@ class IncrementalTimelineProjector {
         messages: List<com.andysagent.ragent.core.model.Message>,
         liveEvents: List<TimelineEvent>,
     ): List<TimelineItem> {
+        val reconciledLive = TimelineProjector.reconcileLiveEvents(messages, liveEvents)
         // A provider may emit message_start before thinking, then stream the
         // first visible text afterwards. Anchor only a reasoning event that was
         // actually observed before that first text in the same run, with no
         // intervening tool operation. Never infer ordering across runs.
-        liveEvents.filter { it.role == TimelineRole.Agent && it.messageState != null && !it.text.isNullOrBlank() }
+        reconciledLive.filter { it.role == TimelineRole.Agent && it.messageState != null && !it.text.isNullOrBlank() }
             .filter { message -> message.entityId?.let(messagesWithVisibleText::add) == true }
             .forEach { message ->
                 val run = message.runId?.takeIf { it.isNotBlank() } ?: return@forEach
                 val msgRevision = message.revision ?: return@forEach
                 val target = message.entityId ?: return@forEach
-                liveEvents.filter { event ->
+                reconciledLive.filter { event ->
                     event.type in setOf("reasoning", "thinking_block") && event.runId == run &&
                         event.entityId != null && (event.revision ?: Long.MAX_VALUE) < msgRevision
                 }.forEach inner@{ thinking ->
                     val start = thinking.revision ?: return@inner
-                    val hasInterveningTool = liveEvents.any { other ->
+                    val hasInterveningTool = reconciledLive.any { other ->
                         other.runId == run && other.operationKind != null &&
                             other.type !in setOf("reasoning", "thinking_block") &&
                             (other.revision ?: Long.MIN_VALUE) in (start + 1) until msgRevision
@@ -291,8 +345,8 @@ class IncrementalTimelineProjector {
                 }
             }
         val durablePositions = messages.mapNotNull { message -> message.seq?.let { message.id to it } }.toMap()
-        val livePositions = liveEvents.mapNotNull { event -> event.entityId?.let { it to event.seq } }.toMap()
-        val orderedLive = liveEvents.map { event ->
+        val livePositions = reconciledLive.mapNotNull { event -> event.entityId?.let { it to event.seq } }.toMap()
+        val orderedLive = reconciledLive.map { event ->
             val target = event.entityId?.let(reasoningAnchors::get)
             val position = target?.let { id ->
                 durablePositions[id] ?: livePositions[id] ?: event.runId?.let { run ->
@@ -546,10 +600,80 @@ object TimelineProjector {
         messages: List<com.andysagent.ragent.core.model.Message>,
         liveEvents: List<TimelineEvent>,
     ): List<TimelineItem> {
+        val reconciledLive = reconcileLiveEvents(messages, liveEvents)
         val engine = TimelineEngine()
-        engine.apply(durableEvents(messages, liveEvents))
-        engine.apply(anchorProviderThinking(liveEvents))
+        engine.apply(durableEvents(messages, reconciledLive))
+        engine.apply(anchorProviderThinking(reconciledLive))
         return engine.snapshot()
+    }
+
+    /**
+     * Retires live message overlays that have already been finalized in the
+     * durable Room snapshot, including provider-aliased overlays whose entityId
+     * differs from the persisted Message ID.
+     */
+    internal fun reconcileLiveEvents(
+        messages: List<com.andysagent.ragent.core.model.Message>,
+        liveEvents: List<TimelineEvent>,
+    ): List<TimelineEvent> {
+        if (messages.isEmpty() || liveEvents.isEmpty()) return liveEvents
+        val completedAssistants = messages.filter {
+            it.completed && it.role.equals("assistant", ignoreCase = true)
+        }
+        if (completedAssistants.isEmpty()) return liveEvents
+        return liveEvents.filterNot { live ->
+            isSupersededMessageOverlay(live, completedAssistants)
+        }
+    }
+
+    private fun isSupersededMessageOverlay(
+        live: TimelineEvent,
+        completedAssistants: List<com.andysagent.ragent.core.model.Message>,
+    ): Boolean {
+        if (live.role != TimelineRole.Agent) return false
+        if (live.operationKind != null || live.planId != null || live.type.equals("plan", ignoreCase = true)) return false
+        val isMessageOverlay = live.messageState != null || live.type.lowercase() in setOf(
+            "text_delta", "assistant_delta", "message", "assistant_message", "assistant_completed",
+        )
+        if (!isMessageOverlay) return false
+        val liveRunId = live.runId?.takeIf(String::isNotBlank)
+        val liveRequestId = live.requestId?.takeIf(String::isNotBlank)
+        val livePhase = live.messagePhase?.takeIf(String::isNotBlank)
+        val liveText = live.text?.trim().orEmpty()
+        val isStreamingOverlay = live.messageState == "streaming" ||
+            live.operationStatus == TimelineOperationStatus.InProgress
+
+        return completedAssistants.any { durable ->
+            if (sameMessageProjection(durable, live, TimelineRole.Agent)) {
+                // Keep exact-entity overlays when durable text is empty unless durable has equal/newer text,
+                // OR retire stale streaming overlays once durable completed text exists.
+                return@any isStreamingOverlay && (durable.content.isNotBlank() || liveText.isEmpty())
+            }
+            val durableRunId = durable.runId?.takeIf(String::isNotBlank)
+            val durableRequestId = durable.requestId?.takeIf(String::isNotBlank)
+            if (durableRunId != null && liveRunId != null) {
+                if (durableRunId != liveRunId) return@any false
+            } else if (durableRequestId != null && liveRequestId != null) {
+                if (durableRequestId != liveRequestId) return@any false
+            } else {
+                return@any false
+            }
+            if (durableRequestId != null && liveRequestId != null && durableRequestId != liveRequestId) {
+                return@any false
+            }
+            val durablePhase = durable.messagePhase?.takeIf(String::isNotBlank)
+            if (durablePhase != null && livePhase != null && durablePhase != livePhase) {
+                return@any false
+            }
+            val durableText = durable.content.trim()
+            if (durableText.isEmpty() && liveText.isNotEmpty()) return@any false
+            val seqMatched = (live.lastEventSeq ?: 0L) > 0L && durable.lastEventSeq == live.lastEventSeq
+            val finalPhaseMatched = durablePhase == "final_answer" && (livePhase == null || livePhase == "final_answer")
+            val textMatched = liveText.isEmpty() ||
+                durableText == liveText ||
+                durableText.startsWith(liveText)
+            seqMatched || finalPhaseMatched || textMatched
+        }
     }
 
     internal fun durableEvents(

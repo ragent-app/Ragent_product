@@ -608,4 +608,6 @@
     <string name="connection_status_reconnecting">Reconnecting</string>
     <string name="connection_status_offline">Offline</string>
     <string name="connection_status_auth_required">Auth Required</string>
+    <string name="runtime_retry_load_error">Model list failed · Retry</string>
+    <string name="runtime_retry_missing_model">No model loaded · Retry</string>
 </resources>

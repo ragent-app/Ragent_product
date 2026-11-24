@@ -526,4 +526,6 @@
     <string name="connection_status_reconnecting">正在重連</string>
     <string name="connection_status_offline">離線</string>
     <string name="connection_status_auth_required">需重新驗證</string>
+    <string name="runtime_retry_load_error">模型載入失敗 · 點擊重試</string>
+    <string name="runtime_retry_missing_model">未載入模型 · 點擊重試</string>
 </resources>

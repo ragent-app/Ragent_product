@@ -398,4 +398,6 @@
     <string name="workbench_duration_seconds">%1$d초</string>
     <string name="workbench_duration_minutes_seconds">%1$d분 %2$d초</string>
     <string name="timeline_process">활동</string>
+    <string name="runtime_retry_load_error">모델 불러오기 실패 · 재시도</string>
+    <string name="runtime_retry_missing_model">로드된 모델 없음 · 재시도</string>
 </resources>

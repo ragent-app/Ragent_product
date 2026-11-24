@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -53,6 +55,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.constrainWidth
@@ -60,7 +63,10 @@ import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.zIndex
+import com.andysagent.ragent.core.agentui.AgentConnectionStatus
 import com.andysagent.ragent.core.agentui.AgentRunStatus
+import com.andysagent.ragent.core.designsystem.AgentoShapes
+import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
 import com.andysagent.ragent.core.designsystem.ragentComposerShadow
@@ -107,6 +113,9 @@ internal fun RunDetailsIsland(
     collapsedContent: @Composable (showStatusIndicator: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onSideControlsSpaceMeasured: (Float) -> Unit = {},
+    connectionStatus: AgentConnectionStatus? = null,
+    activeCarrier: ActiveCarrier = ActiveCarrier.None,
+    onRetryConnection: (() -> Unit)? = null,
 ) {
     var detailExpanded by remember { mutableStateOf(false) }
     val motion = motionPolicy()
@@ -246,6 +255,9 @@ internal fun RunDetailsIsland(
                                         detailExpanded = detailExpanded,
                                         detailsProgress = { detailsProgress.value },
                                         contentChangeDuration = morphDuration,
+                                        connectionStatus = connectionStatus,
+                                        activeCarrier = activeCarrier,
+                                        onRetryConnection = onRetryConnection,
                                     )
                                 }
                             }
@@ -318,6 +330,9 @@ private fun RunIslandCardContent(
     detailExpanded: Boolean,
     detailsProgress: () -> Float,
     contentChangeDuration: Int,
+    connectionStatus: AgentConnectionStatus? = null,
+    activeCarrier: ActiveCarrier = ActiveCarrier.None,
+    onRetryConnection: (() -> Unit)? = null,
 ) {
     val colors = LocalRagentColors.current
     val (dotColor, labelRes) = if (pendingRequest != null) {
@@ -376,6 +391,47 @@ private fun RunIslandCardContent(
                     style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                     color = colors.secondaryContent,
                 )
+            }
+            connectionStatus?.let { status ->
+                val carrierAccent = connectionStatusAccentColor(status)
+                val statusLabel = stringResource(connectionStatusLabelRes(status, activeCarrier))
+                val carrierText = if (status == AgentConnectionStatus.Connected && activeCarrier != ActiveCarrier.None) {
+                    "${stringResource(R.string.connection_status_connected)} · $statusLabel"
+                } else {
+                    statusLabel
+                }
+                val canRetry = status != AgentConnectionStatus.Connected && onRetryConnection != null
+                Row(
+                    modifier = Modifier
+                        .testTag("run-island-connection-carrier")
+                        .clip(AgentoShapes.PillShape)
+                        .background(colors.quietSurface)
+                        .then(if (canRetry) Modifier.clickable(onClick = onRetryConnection!!) else Modifier)
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    if (status == AgentConnectionStatus.Connecting || status == AgentConnectionStatus.Reconnecting) {
+                        AgentoBreathingDot(color = carrierAccent, size = 5.dp)
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(carrierAccent),
+                        )
+                    }
+                    androidx.compose.material3.Text(
+                        text = carrierText,
+                        style = androidx.compose.material3.MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium,
+                        ),
+                        color = colors.secondaryContent,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         RunIslandDetailsLayout(

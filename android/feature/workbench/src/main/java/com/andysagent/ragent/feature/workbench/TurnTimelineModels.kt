@@ -10,6 +10,10 @@ import com.andysagent.ragent.core.timeline.TimelineOperationKind
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
 import com.andysagent.ragent.core.timeline.TimelineRole
 import com.andysagent.ragent.core.timeline.latestTurnRunId
+import com.andysagent.ragent.core.timeline.latestTurnScopedRunId
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Representation of a user prompt within a Turn.
@@ -86,14 +90,55 @@ internal fun shouldAcceptRunProjection(current: RunMetricsUiState, runId: String
     return current.runId != runId || current.status !in terminal || incoming in terminal
 }
 
-internal fun latestTurnHasTerminalRun(items: List<TimelineItem>, pending: PendingTurnUiState?,
-    sessionStatus: AgentRunStatus, metrics: RunMetricsUiState): Boolean {
+private fun JsonObject.activityString(key: String): String? =
+    this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+private fun serverRunActivityStatus(activity: JsonObject?): AgentRunStatus? {
+    if (activity?.activityString("runId") == null) return null
+    return when (activity.activityString("state")?.lowercase()) {
+        "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
+        "starting", "queued", "working", "running", "streaming" -> AgentRunStatus.Working
+        else -> null
+    }
+}
+
+internal fun latestTurnHasTerminalRun(
+    items: List<TimelineItem>,
+    pending: PendingTurnUiState?,
+    sessionStatus: AgentRunStatus,
+    metrics: RunMetricsUiState,
+    acceptedTurns: List<PendingTurnUiState> = emptyList(),
+    queuedMessages: List<QueuedMessageUiState> = emptyList(),
+    serverRunActivity: JsonObject? = null,
+    runDurations: Map<String, Long> = emptyMap(),
+    authoritativeIdleAtSeq: Long = 0L,
+): Boolean {
     if (pending?.state == PendingTurnState.Sending || pending?.state == PendingTurnState.Accepted) return false
+    if (acceptedTurns.isNotEmpty() || queuedMessages.isNotEmpty()) return false
     if (sessionStatus == AgentRunStatus.Working || sessionStatus == AgentRunStatus.WaitingApproval) return false
+    if (serverRunActivityStatus(serverRunActivity) != null) return false
+
     val terminal = setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
-    val runId = latestTurnRunId(items)
-    val matchingRun = runId != null && runId == metrics.runId && metrics.status in terminal
-    return sessionStatus in terminal || matchingRun
+    val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
+    val latestTurnItems = if (lastUserIdx >= 0) items.subList(lastUserIdx, items.size) else items
+    val turnRunId = latestTurnScopedRunId(items)
+    val matchingRun = turnRunId != null && turnRunId == metrics.runId && metrics.status in terminal
+    val completedByDuration = turnRunId != null && turnRunId in runDurations
+    val latestTurnMaxSeq = latestTurnItems.maxOfOrNull { item ->
+        when (item) {
+            is TimelineItem.Message -> maxOf(item.seq, item.lastEventSeq)
+            else -> item.seq
+        }
+    } ?: 0L
+    val hasEphemeralDelta = latestTurnItems.any { item ->
+        item.seq == 0L || (item is TimelineItem.Message && !item.completed && item.lastEventSeq == 0L)
+    }
+    val settledByCursor = authoritativeIdleAtSeq > 0L &&
+        latestTurnMaxSeq > 0L &&
+        authoritativeIdleAtSeq >= latestTurnMaxSeq &&
+        !hasEphemeralDelta
+
+    return sessionStatus in terminal || matchingRun || completedByDuration || settledByCursor
 }
 
 internal fun TimelineItem.isProtectedAsyncEntry(): Boolean =

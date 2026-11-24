@@ -61,15 +61,22 @@ class LiveTimelineProjector {
     ) {
         if (durableSeq < this.durableSeq) return
         terminalRunIds.addAll(completedRunIds)
+        val durableChanged = durableSeq > this.durableSeq
+            || durableMessages != durableBaseline
+            || completedEntityIds != durableCompletedBaseline
         // Live deltas may use a different provider block identity than the
         // finalized durable snapshot. Once its terminal event is durable, the
         // snapshot is authoritative and the ephemeral overlay must retire.
         renderedEvents.entries.removeIf { (key, event) ->
-            key in ephemeralRenderKeys && event.runId in completedRunIds && event.runId in durableMessageRunIds && event.messageState != null
+            if (key !in ephemeralRenderKeys) return@removeIf false
+            val runId = event.runId ?: return@removeIf false
+            if (runId !in terminalRunIds) return@removeIf false
+            if (event.messageState != null) {
+                runId in durableMessageRunIds
+            } else {
+                durableChanged || runId in durableMessageRunIds
+            }
         }
-        val durableChanged = durableSeq > this.durableSeq
-            || durableMessages != durableBaseline
-            || completedEntityIds != durableCompletedBaseline
         this.durableSeq = durableSeq
         pending.entries.removeIf { it.value.boundarySeq() > 0L && it.value.boundarySeq() <= durableSeq }
         if (durableChanged) {
@@ -114,7 +121,8 @@ class LiveTimelineProjector {
 
     fun apply(events: Iterable<SessionEventDto>): LiveTimelineResult {
         for (event in events) {
-            if (event.boundarySeq() == 0L && event.runId in terminalRunIds && event.isTimelineMessage()) continue
+            val isReasoningType = event.type?.lowercase() in setOf("reasoning", "thinking_block")
+            if (event.boundarySeq() == 0L && event.runId in terminalRunIds && (event.isTimelineMessage() || isReasoningType)) continue
             val start = event.startingSeq()
             val boundary = event.boundarySeq()
             val key = event.dedupeKey() ?: "fingerprint:${event.sessionEventFingerprint()}"
@@ -200,6 +208,15 @@ class LiveTimelineProjector {
                             operationStatus = TimelineOperationStatus.Completed,
                         )
                     }
+                }
+            }
+            renderedEvents.entries.toList().forEach { (key, before) ->
+                if (!key.startsWith("thinking:")) return@forEach
+                val inScope = if (!event.runId.isNullOrBlank()) before.runId == event.runId
+                    else !event.requestId.isNullOrBlank() && before.requestId == event.requestId
+                val inProgress = before.operationStatus in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
+                if (inScope && inProgress) {
+                    renderedEvents[key] = before.copy(operationStatus = TimelineOperationStatus.Completed)
                 }
             }
             return

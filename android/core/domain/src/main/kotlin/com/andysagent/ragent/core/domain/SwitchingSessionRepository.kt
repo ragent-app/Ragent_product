@@ -81,6 +81,7 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         delegateFlow { it.observeAcceptedFirstTurnSessionIds() }
     override fun observeSession(sessionId: String): Flow<Session?> = delegateFlow { it.observeSession(sessionId) }
     override fun observeRunActivity(sessionId: String): Flow<JsonObject?> = delegateFlow { it.observeRunActivity(sessionId) }
+    override fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = delegateFlow { it.observeAuthoritativeIdleAtSeq(sessionId) }
     override fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = delegateFlow { it.observeRunDurations(sessionId) }
     override suspend fun saveRunDuration(sessionId: String, runId: String, durationMs: Long) =
         current().saveRunDuration(sessionId, runId, durationMs)
@@ -139,6 +140,7 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
     override suspend fun refreshTimeline(sessionId: String): RefreshResult = current().refreshTimeline(sessionId)
     override suspend fun loadOlderTimeline(sessionId: String): RefreshResult = current().loadOlderTimeline(sessionId)
     override suspend fun refreshSessionDetail(sessionId: String): Session? = current().refreshSessionDetail(sessionId)
+    override suspend fun lastSyncedSeq(sessionId: String): Long? = current().lastSyncedSeq(sessionId)
     override suspend fun applyLiveEvents(sessionId: String, events: List<SessionEventDto>): RefreshResult = current().applyLiveEvents(sessionId, events)
     override fun startLiveSync() {
         mutableDelegate.value?.startLiveSync()
