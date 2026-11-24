@@ -325,6 +325,101 @@ try {
     assert.equal(history[0].content, 'message 0', 'loadHistory default includeBodies should hydrate inline bodies');
   }
 
+  // --- 9. Phase 0.2: cached reads & includeBodies:false skip historyBackgroundIO ---
+  {
+    const { getAdaptiveConcurrencyBudget } = await import('../chat/adaptive-concurrency-registry.mjs');
+    const historyBudget = getAdaptiveConcurrencyBudget('historyIO');
+    const backgroundBudget = getAdaptiveConcurrencyBudget('historyBackgroundIO');
+
+    // 9a. Cached page reads (both includeBodies:false and inline includeBodies:true)
+    // must NOT acquire historyBackgroundIO or historyIO per cached event.
+    const cachedSessionId = nextSessionId();
+    await appendEvents(cachedSessionId, buildEvents(60, { withBodies: true }));
+
+    const fgBeforeHot = historyBudget.snapshot().totalAcquired;
+    const bgBeforeHot = backgroundBudget.snapshot().totalAcquired;
+    __resetHistoryReadStatsForTest();
+    const hotIndexPage = await readEventsPage(cachedSessionId, { limit: 60, includeBodies: false });
+    assert.equal(hotIndexPage.events.length, 60);
+    assert.equal(getHistoryReadStats().eventFileReads, 0, 'cached session should read zero event files');
+    assert.equal(
+      backgroundBudget.snapshot().totalAcquired,
+      bgBeforeHot,
+      'cached page read with includeBodies:false must not acquire historyBackgroundIO',
+    );
+    assert.equal(
+      historyBudget.snapshot().totalAcquired,
+      fgBeforeHot,
+      'cached page read with includeBodies:false must not acquire historyIO',
+    );
+
+    // 9b. Cold disk reads with priority:'normal' (e.g. loadHistory default) must use
+    // historyIO rather than historyBackgroundIO, and includeBodies:false skips
+    // hydration budget acquisition entirely.
+    const coldNormalSessionId = nextSessionId();
+    await fabricateSessionOnDisk(coldNormalSessionId, 40);
+    const fgBeforeNormal = historyBudget.snapshot().totalAcquired;
+    const bgBeforeNormal = backgroundBudget.snapshot().totalAcquired;
+    const normalLoaded = await loadHistory(coldNormalSessionId, { includeBodies: false });
+    assert.equal(normalLoaded.length, 40);
+    assert.equal(
+      backgroundBudget.snapshot().totalAcquired,
+      bgBeforeNormal,
+      'normal priority loadHistory must not acquire historyBackgroundIO',
+    );
+    assert.equal(
+      historyBudget.snapshot().totalAcquired - fgBeforeNormal,
+      40,
+      'cold normal priority loadHistory with includeBodies:false should acquire historyIO only for event reads (not hydration)',
+    );
+
+    // 9c. Cold background read with includeBodies:false skips hydration budget even when
+    // events carry externalized bodyRefs (1 acquisition per cold event, not 2x).
+    const coldBgSessionId = nextSessionId();
+    const { ensureDir } = await import('../chat/fs-utils.mjs');
+    const bgEventsDir = join(CHAT_HISTORY_DIR, coldBgSessionId, 'events');
+    await ensureDir(bgEventsDir);
+    await writeFile(join(CHAT_HISTORY_DIR, coldBgSessionId, 'meta.json'), JSON.stringify({
+      latestSeq: 20,
+      lastEventAt: Date.now(),
+      lastAssistantMessageAt: null,
+      size: 20,
+      counts: { message_assistant: 20 },
+    }));
+    await Promise.all(Array.from({ length: 20 }, (_, i) => {
+      const seq = i + 1;
+      return writeFile(join(bgEventsDir, `${String(seq).padStart(9, '0')}.json`), JSON.stringify({
+        seq,
+        type: 'message',
+        role: 'assistant',
+        content: `preview ${seq}`,
+        bodyAvailable: true,
+        bodyLoaded: false,
+        bodyField: 'content',
+        bodyRef: `evt_${String(seq).padStart(9, '0')}_content`,
+        bodyBytes: 80000,
+        timestamp: Date.now(),
+      }));
+    }));
+    const bgBeforeColdPage = backgroundBudget.snapshot().totalAcquired;
+    const coldBgPage = await readEventsPage(coldBgSessionId, { limit: 20, includeBodies: false, priority: 'background' });
+    assert.equal(coldBgPage.events.length, 20);
+    assert.equal(
+      backgroundBudget.snapshot().totalAcquired - bgBeforeColdPage,
+      20,
+      'background page read with includeBodies:false must acquire budget only for cold event reads and skip hydration',
+    );
+
+    // 9d. Re-reading that now-cached page acquires zero budget slots.
+    const bgBeforeReRead = backgroundBudget.snapshot().totalAcquired;
+    await readEventsPage(coldBgSessionId, { limit: 20, includeBodies: false, priority: 'background' });
+    assert.equal(
+      backgroundBudget.snapshot().totalAcquired,
+      bgBeforeReRead,
+      're-reading cached page must not acquire historyBackgroundIO',
+    );
+  }
+
   console.log(`history read-concurrency: all ${sessionCounter} sessions passed`);
 } finally {
   rmSync(home, { recursive: true, force: true });

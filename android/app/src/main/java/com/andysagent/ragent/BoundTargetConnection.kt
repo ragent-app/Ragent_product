@@ -258,6 +258,8 @@ internal class BoundTargetConnection(
 
     fun carrierRequestFailed(failed: P2PSession?) = supervisor.carrierRequestFailed(failed)
 
+    fun carrierSuspect(suspect: P2PSession) = supervisor.onCarrierSuspect(suspect)
+
     /** Caller holds refreshLock. The guard prevents publishing to a replaced carrier. */
     private fun renewOnCarrier(session: PlannedTurnSession, current: BootstrapConnectionPlan) {
         if (carrierRenewalJob?.isActive == true) return

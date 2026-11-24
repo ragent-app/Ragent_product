@@ -97,6 +97,7 @@ class OkHttpRagentTransport(
     private val onDirectSocketReconnect: (() -> Unit)? = null,
     private val onDirectSocketUnavailable: (() -> Unit)? = null,
     private val requestAdmission: ((ApiRequest) -> Boolean)? = null,
+    private val onCarrierSuspect: ((P2PSession) -> Unit)? = null,
 ) : RagentTransport {
     private val invalidationEvents = MutableSharedFlow<InvalidationHint>(extraBufferCapacity = 64)
     private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -280,6 +281,7 @@ class OkHttpRagentTransport(
             if (failure is kotlinx.coroutines.CancellationException) throw failure
             recordCarrierFailure("p2p", failure, session.isOpen)
             if (failure !is P2PRequestTimeoutException || !session.isOpen) reportUnavailableCarrier(session)
+            else onCarrierSuspect?.invoke(session)
             throw ApiException(0, "P2P_NETWORK_ERROR", "P2P request failed", retryable = true)
         }
         val remoteError = result.error
@@ -320,8 +322,9 @@ class OkHttpRagentTransport(
             if (failure is kotlinx.coroutines.CancellationException) throw failure
             recordCarrierFailure("turn", failure, session.isOpen)
             // A slow business response does not by itself prove that the TURN
-            // carrier is dead. Its independent health watchdog checks that.
+            // carrier is dead. Wake the non-destructive liveness probe immediately.
             if (failure !is P2PRequestTimeoutException || !session.isOpen) reportUnavailableCarrier(session)
+            else onCarrierSuspect?.invoke(session)
             throw ApiException(0, "TURN_NETWORK_ERROR", "TURN request failed", retryable = true)
         }
         val remoteError = result.error

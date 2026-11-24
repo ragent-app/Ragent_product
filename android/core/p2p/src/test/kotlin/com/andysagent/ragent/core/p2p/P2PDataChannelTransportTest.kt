@@ -1,5 +1,20 @@
 package com.andysagent.ragent.core.p2p
 
+import android.content.Context
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.webrtc.DataChannel
+import java.nio.ByteBuffer
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -10,6 +25,7 @@ import kotlin.test.assertTrue
  * Tests for the [P2PSession] contract using a fake session implementation.
  * Real WebRTC PeerConnection is NOT instantiated in JVM unit tests.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class P2PDataChannelTransportTest {
 
     @Test fun `binary body frame preserves arbitrary bytes and ordered index`() {
@@ -196,6 +212,120 @@ class P2PDataChannelTransportTest {
         session.close()
         session.close() // must not throw
         assertFalse(session.isOpen)
+    }
+
+    @Test
+    fun `probeLiveness sends dc_ping and awaits matching dc_pong when dc_keepalive_v1 is supported`() = runTest {
+        var nowMs = 1_000L
+        val channel = RecordingDataChannel()
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate("https://signal.example.com", "room-1", "secret"),
+            appContext = stubContext(),
+        ).apply { nanoClock = { nowMs * 1_000_000L } }
+        try {
+            val observer = transport.attachDataChannelForTest(channel)
+            assertEquals(Long.MAX_VALUE, transport.lastInboundFrameElapsedMs)
+
+            observer.onMessage(textBuffer("""{"type":"server_ready","version":1,"features":["dc_keepalive_v1"]}"""))
+            assertTrue(transport.supportsKeepaliveProbe)
+            assertEquals(1L, transport.inboundFrameGeneration)
+            assertEquals(0L, transport.lastInboundFrameElapsedMs)
+
+            nowMs += 2_000L
+            assertEquals(2_000L, transport.lastInboundFrameElapsedMs)
+
+            val probe = async { transport.probeLiveness(2_500L) }
+            runCurrent()
+            withTimeout(5_000L) { channel.firstSent.await() }
+            assertEquals(1, channel.sentTexts.size)
+            val sentJson = Json.parseToJsonElement(channel.sentTexts[0]).jsonObject
+            assertEquals("dc_ping", sentJson["type"]?.jsonPrimitive?.content)
+            val pingId = sentJson["id"]?.jsonPrimitive?.content!!
+
+            // Unrelated pong ID must not satisfy our pending probe.
+            observer.onMessage(textBuffer("""{"type":"dc_pong","id":"other-id"}"""))
+            runCurrent()
+            assertFalse(probe.isCompleted)
+
+            nowMs += 50L
+            observer.onMessage(textBuffer("""{"type":"dc_pong","id":"$pingId"}"""))
+            assertTrue(probe.await())
+            assertEquals(0L, transport.lastInboundFrameElapsedMs)
+            assertEquals(0L, transport.successfulResponseGeneration)
+        } finally {
+            transport.close()
+        }
+    }
+
+    @Test
+    fun `probeLiveness returns false on dc_ping timeout without dc_pong`() = runTest {
+        var nowMs = 1_000L
+        val channel = RecordingDataChannel()
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate("https://signal.example.com", "room-1", "secret"),
+            appContext = stubContext(),
+        ).apply { nanoClock = { nowMs * 1_000_000L } }
+        try {
+            val observer = transport.attachDataChannelForTest(channel)
+            observer.onMessage(textBuffer("""{"type":"server_ready","version":1,"features":["dc_keepalive_v1"]}"""))
+
+            val probe = async { transport.probeLiveness(2_500L) }
+            runCurrent()
+            withTimeout(5_000L) { channel.firstSent.await() }
+            assertEquals(1, channel.sentTexts.size)
+            advanceTimeBy(2_501L)
+            assertFalse(probe.await())
+        } finally {
+            transport.close()
+        }
+    }
+
+    @Test
+    fun `probeLiveness falls back to GET auth me when dc_keepalive_v1 is not advertised`() = runBlocking {
+        val channel = RecordingDataChannel()
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate("https://signal.example.com", "room-1", "secret"),
+            appContext = stubContext(),
+        )
+        try {
+            val observer = transport.attachDataChannelForTest(channel)
+            observer.onMessage(textBuffer("""{"type":"server_ready","version":1,"features":["http_request_stream_v1"]}"""))
+            assertFalse(transport.supportsKeepaliveProbe)
+
+            val probe = async { transport.probeLiveness(2_500L) }
+            withTimeout(5_000L) { channel.firstSent.await() }
+            assertEquals(1, channel.sentTexts.size)
+            val sentJson = Json.parseToJsonElement(channel.sentTexts[0]).jsonObject
+            assertEquals("http_request", sentJson["type"]?.jsonPrimitive?.content)
+            assertEquals("GET", sentJson["method"]?.jsonPrimitive?.content)
+            assertEquals("/api/auth/me", sentJson["path"]?.jsonPrimitive?.content)
+            val reqId = sentJson["id"]?.jsonPrimitive?.content!!
+
+            observer.onMessage(textBuffer("""{"id":"$reqId","type":"http_response","status":200}"""))
+            assertTrue(probe.await())
+            assertEquals(1L, transport.successfulResponseGeneration)
+        } finally {
+            transport.close()
+        }
+    }
+}
+
+private fun textBuffer(text: String): DataChannel.Buffer =
+    DataChannel.Buffer(ByteBuffer.wrap(text.toByteArray(Charsets.UTF_8)), false)
+
+private fun stubContext(): Context = android.content.ContextWrapper(null)
+
+private class RecordingDataChannel : DataChannel() {
+    val sentTexts = CopyOnWriteArrayList<String>()
+    val firstSent = CompletableDeferred<Unit>()
+    override fun state(): State = State.OPEN
+    override fun bufferedAmount(): Long = 0L
+    override fun send(buffer: Buffer): Boolean {
+        val bytes = ByteArray(buffer.data.remaining())
+        buffer.data.get(bytes)
+        sentTexts.add(String(bytes, Charsets.UTF_8))
+        firstSent.complete(Unit)
+        return true
     }
 }
 

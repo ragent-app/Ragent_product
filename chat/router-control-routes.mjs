@@ -440,7 +440,10 @@ function createClientSessionDetail(session) {
 }
 
 async function getSessionForClient(id, options = {}) {
-  return createClientSessionDetail(await getSession(id, options));
+  return createClientSessionDetail(await getSession(id, {
+    ...options,
+    priority: options.priority || 'interactive',
+  }));
 }
 
 function parsePositiveInteger(value, fallback) {

@@ -169,3 +169,15 @@ internal data class P2PServerReadyFrame(
     val version: Int = 0,
     val features: List<String> = emptyList(),
 )
+
+@Serializable
+internal data class P2PKeepalivePingFrame(
+    val type: String = "dc_ping",
+    val id: String,
+)
+
+@Serializable
+internal data class P2PKeepalivePongFrame(
+    val type: String = "",
+    val id: String = "",
+)

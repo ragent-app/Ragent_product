@@ -70,7 +70,7 @@ export async function readManagedCodexConversation(readEventsPage, session, code
   let complete = true;
   for (let pageCount = 0; pageCount < 20; pageCount += 1) {
     await assertActive();
-    const page = await readEventsPage(session.id, { afterSeq, direction: 'forward', limit: 200, includeBodies: true, maxBodyBytes: 100_000, strict: true });
+    const page = await readEventsPage(session.id, { afterSeq, direction: 'forward', limit: 200, includeBodies: true, maxBodyBytes: 100_000, strict: true, priority: 'interactive' });
     if (snapshotSeq === null) snapshotSeq = page.pagination.totalLatestSeq;
     for (const event of page.events) {
       if (event.seq > snapshotSeq) break;

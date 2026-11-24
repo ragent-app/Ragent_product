@@ -12,6 +12,9 @@
   const seenSummaryEvents = new Map();
   const MAX_SEEN_SUMMARY_EVENTS = 2048;
   const SUMMARY_CURSOR_STORAGE_KEY = "ragent.target-summary-cursors.v1";
+  const SUMMARY_BACKOFF_STEPS_MS = [15_000, 30_000, 60_000, 120_000, 300_000];
+  const summaryStates = new Map();
+  let currentCatalogRevision = null;
   const neutralExactPaths = new Set([
     "/api/account-policy",
     "/api/account/password",
@@ -345,6 +348,75 @@
     };
   }
 
+  function summaryStateFor(targetId) {
+    const normalized = text(targetId, 160);
+    if (!normalized) return null;
+    let entry = summaryStates.get(normalized);
+    if (!entry) {
+      entry = {
+        failureCount: 0,
+        nextAllowedAt: 0,
+        serverCooldownUntil: 0,
+        endpointless: false,
+        endpointlessRevision: null,
+      };
+      summaryStates.set(normalized, entry);
+    }
+    return entry;
+  }
+
+  function nextSummaryBackoffMs(failureCount) {
+    const index = Math.max(0, Math.min(SUMMARY_BACKOFF_STEPS_MS.length - 1, failureCount - 1));
+    return SUMMARY_BACKOFF_STEPS_MS[index];
+  }
+
+  function recordSummaryFailure(targetId, data = null) {
+    const entry = summaryStateFor(targetId);
+    if (!entry) return;
+    const now = Date.now();
+    if (entry.nextAllowedAt <= now) {
+      entry.failureCount += 1;
+    }
+    const clientDelayMs = nextSummaryBackoffMs(entry.failureCount);
+    const rawRetryAfter = Number(data?.retryAfterMs);
+    const serverDelayMs = Number.isFinite(rawRetryAfter) && rawRetryAfter > 0 ? rawRetryAfter : 0;
+    if (serverDelayMs > 0) {
+      entry.serverCooldownUntil = Math.max(entry.serverCooldownUntil, now + serverDelayMs);
+    }
+    entry.nextAllowedAt = Math.max(now + clientDelayMs, entry.serverCooldownUntil);
+    if (data?.endpointless === true) {
+      entry.endpointless = true;
+      entry.endpointlessRevision = currentCatalogRevision;
+    }
+  }
+
+  function resetSummaryState(targetId, { clearEndpointless = false, preserveCooldown = false } = {}) {
+    const entry = summaryStateFor(targetId);
+    if (!entry) return;
+    const now = Date.now();
+    entry.failureCount = 0;
+    if (!preserveCooldown) {
+      entry.serverCooldownUntil = 0;
+      entry.nextAllowedAt = 0;
+    } else {
+      entry.nextAllowedAt = entry.serverCooldownUntil > now ? entry.serverCooldownUntil : 0;
+    }
+    if (clearEndpointless) {
+      entry.endpointless = false;
+      entry.endpointlessRevision = null;
+    }
+  }
+
+  function shouldSkipSummaryPoll(target) {
+    if (!target || !target.targetId || target.status === "revoked") return true;
+    if (target.targetId === localTargetId) return false;
+    if (target.hasEndpoint === false) return true;
+    const entry = summaryStates.get(text(target.targetId, 160));
+    if (!entry) return false;
+    if (entry.endpointless && entry.endpointlessRevision === currentCatalogRevision) return true;
+    return entry.nextAllowedAt > Date.now();
+  }
+
   async function selectTarget(targetId) {
     const target = store?.getTarget?.(targetId);
     if (!target) throw createError("TARGET_NOT_FOUND", "Target runtime was not found", 404);
@@ -356,6 +428,7 @@
     await adapters.get(previous?.targetId)?.deactivate?.();
     const selected = store.select(target.targetId);
     await adapters.get(selected.targetId)?.activate?.(selected);
+    resetSummaryState(selected.targetId, { clearEndpointless: false, preserveCooldown: true });
     void refreshTargetSummary(selected.targetId);
     if (typeof root.CustomEvent === "function" && typeof root.dispatchEvent === "function") {
       root.dispatchEvent(new root.CustomEvent("ragent:target-selected", {
@@ -380,7 +453,8 @@
 
   async function refreshTargetSummary(targetId, { fetchImpl = root.fetch } = {}) {
     const target = store?.getTarget?.(targetId);
-    if (!target || typeof fetchImpl !== "function") return null;
+    if (!target || typeof fetchImpl !== "function" || shouldSkipSummaryPoll(target)) return null;
+    let recordedFailure = false;
     try {
       const response = await fetchImpl(`/api/target-runtime/summary?targetId=${encodeURIComponent(target.targetId)}`, {
         credentials: "same-origin",
@@ -390,8 +464,29 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         store?.updateTarget?.(target.targetId, { status: response.status >= 500 ? "offline" : "degraded" });
+        recordedFailure = true;
+        recordSummaryFailure(target.targetId, data);
         throw createError(data?.code || "TARGET_SUMMARY_UNAVAILABLE", data?.error || "Target runtime summary is unavailable", response.status);
       }
+      if (data?.reachable === false) {
+        if (data?.sessions || data?.runs || data?.approvals) {
+          summaries.set(target.targetId, data);
+        }
+        if (data?.eventCursor !== undefined || data?.cursor !== undefined) {
+          rememberSummaryCursor(target.targetId, data?.eventCursor ?? data?.cursor ?? 0);
+        }
+        store?.updateTarget?.(target.targetId, {
+          status: data?.state === "offline" || !data?.state ? "offline" : "degraded",
+        });
+        recordSummaryFailure(target.targetId, data);
+        if (typeof root.CustomEvent === "function") {
+          root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary", {
+            detail: { targetId: target.targetId, summary: data, reachable: false },
+          }));
+        }
+        return data;
+      }
+      resetSummaryState(target.targetId, { clearEndpointless: true, preserveCooldown: false });
       summaries.set(target.targetId, data);
       rememberSummaryCursor(target.targetId, data?.eventCursor ?? data?.cursor ?? 0);
       store?.updateTarget?.(target.targetId, {
@@ -402,6 +497,7 @@
       if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary", { detail: { targetId: target.targetId, summary: data } }));
       return data;
     } catch (error) {
+      if (!recordedFailure) recordSummaryFailure(target.targetId, null);
       if (typeof root.CustomEvent === "function") root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary", { detail: { targetId: target.targetId, error } }));
       return null;
     }
@@ -418,12 +514,13 @@
     limit = 100,
   } = {}) {
     const target = store?.getTarget?.(targetId);
-    if (!target || typeof fetchImpl !== "function") return null;
+    if (!target || typeof fetchImpl !== "function" || shouldSkipSummaryPoll(target)) return null;
     const cursor = afterCursor === null ? summaryCursor(target.targetId) : Number(afterCursor);
     const pageSize = Number(limit);
     if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(pageSize) || pageSize < 1) {
       throw createError("TARGET_SUMMARY_EVENTS_INVALID", "Target runtime summary event cursor is invalid", 400);
     }
+    let recordedFailure = false;
     try {
       const query = new URLSearchParams({
         targetId: target.targetId,
@@ -438,8 +535,29 @@
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         store?.updateTarget?.(target.targetId, { status: response.status >= 500 ? "offline" : "degraded" });
+        recordedFailure = true;
+        recordSummaryFailure(target.targetId, data);
         throw createError(data?.code || "TARGET_SUMMARY_EVENTS_UNAVAILABLE", data?.error || "Target runtime summary events are unavailable", response.status);
       }
+      if (data?.reachable === false) {
+        if (data?.cursor !== undefined && data?.cursor !== null) {
+          rememberSummaryCursor(target.targetId, data.cursor);
+        }
+        if (data?.cachedSummary && typeof data.cachedSummary === "object" && !summaries.has(target.targetId)) {
+          summaries.set(target.targetId, data.cachedSummary);
+        }
+        store?.updateTarget?.(target.targetId, {
+          status: data?.state === "offline" || !data?.state ? "offline" : "degraded",
+        });
+        recordSummaryFailure(target.targetId, data);
+        if (typeof root.CustomEvent === "function") {
+          root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary-event", {
+            detail: { targetId: target.targetId, reachable: false, data },
+          }));
+        }
+        return data;
+      }
+      resetSummaryState(target.targetId, { clearEndpointless: true, preserveCooldown: false });
       rememberSummaryCursor(target.targetId, data?.cursor ?? cursor);
       for (const event of Array.isArray(data?.events) ? data.events : []) {
         if (!acceptSummaryEvent(event, target.targetId)) continue;
@@ -471,6 +589,7 @@
       }
       return data;
     } catch (error) {
+      if (!recordedFailure) recordSummaryFailure(target.targetId, null);
       if (typeof root.CustomEvent === "function") {
         root.dispatchEvent?.(new root.CustomEvent("ragent:target-summary-event", {
           detail: { targetId: target.targetId, error },
@@ -508,6 +627,30 @@
       if (!Array.isArray(data?.targets) || data.targets.length === 0) throw createError("TARGET_CONTEXT_INVALID", "Target runtime catalog is invalid", 502);
       const local = data.targets.find((target) => target.targetId === data.activeTargetId) || data.targets[0];
       localTargetId = text(local?.targetId, 160) || localTargetId;
+      const nextRevision = Number.isSafeInteger(Number(data.revision)) ? Number(data.revision) : currentCatalogRevision;
+      const storeRevision = store?.getSnapshot?.()?.revision;
+      const previousRevision = currentCatalogRevision !== null
+        ? currentCatalogRevision
+        : (Number.isSafeInteger(Number(storeRevision)) ? Number(storeRevision) : null);
+      const revisionChanged = previousRevision !== null && nextRevision !== null && nextRevision !== previousRevision;
+      currentCatalogRevision = nextRevision;
+      if (revisionChanged) {
+        for (const targetId of summaryStates.keys()) {
+          resetSummaryState(targetId, { clearEndpointless: true, preserveCooldown: true });
+        }
+      }
+      for (const target of data.targets) {
+        const targetId = text(target?.targetId, 160);
+        if (!targetId || targetId === localTargetId) continue;
+        const entry = summaryStateFor(targetId);
+        if (target.status === "offline" || target.hasEndpoint === false) {
+          entry.endpointless = true;
+          entry.endpointlessRevision = currentCatalogRevision;
+        } else {
+          entry.endpointless = false;
+          entry.endpointlessRevision = null;
+        }
+      }
       const activeTargetId = store?.getSnapshot?.()?.activeTargetId;
       store?.replaceTargets?.(data.targets, {
         activeTargetId: data.targets.some((target) => target.targetId === activeTargetId) ? activeTargetId : data.activeTargetId,
@@ -543,7 +686,11 @@
     selectTarget,
   });
   root.ragentFetch = fetchTarget;
-  root.addEventListener?.("ragent:target-selected", () => {
+  root.addEventListener?.("ragent:target-selected", (event) => {
+    const selectedTargetId = event?.detail?.target?.targetId || getActiveTarget()?.targetId;
+    if (selectedTargetId) {
+      resetSummaryState(selectedTargetId, { clearEndpointless: false, preserveCooldown: true });
+    }
     // The selected target is part of the cache key, but this explicit refresh
     // also clears any older browser cache owned by a pre-target build.
     Promise.resolve(root.queueForegroundRefresh?.({ forceFresh: true })).catch(() => {});

@@ -17,6 +17,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -503,13 +504,13 @@ class ConnectivitySupervisorTest {
             supervisor.start(); supervisor.applyBootstrap(plan()); runCurrent()
             advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
             generation++ // A separate business request completed successfully.
-            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_RETRY_DELAY_MS); runCurrent()
             assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
             assertEquals(0, recoveries)
             assertTrue(carrier.isOpen)
             advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
             assertTrue(carrier.isOpen)
-            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_RETRY_DELAY_MS); runCurrent()
             assertFalse(carrier.isOpen)
             assertEquals(1, recoveries)
         } finally { supervisor.stop() }
@@ -522,7 +523,7 @@ class ConnectivitySupervisorTest {
         val session = object : P2PSession by carrier {
             override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> {
                 reads++
-                if (reads == 2) { delay(12_000); return Result.success(response(200)) }
+                if (reads == 2) { delay(1_800); return Result.success(response(200)) }
                 if (reads == 3) return Result.failure(IllegalStateException("transient"))
                 return Result.success(response(200))
             }
@@ -532,11 +533,11 @@ class ConnectivitySupervisorTest {
         try {
             supervisor.start(); supervisor.applyBootstrap(plan()); runCurrent()
             advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
-            advanceTimeBy(12_000); runCurrent()
+            advanceTimeBy(1_800); runCurrent()
             assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
             advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
             assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
-            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS); runCurrent()
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_RETRY_DELAY_MS); runCurrent()
             assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
             assertEquals(4, reads)
             assertEquals(0, recoveries)
@@ -967,6 +968,333 @@ class ConnectivitySupervisorTest {
         supervisor.stop()
     }
 
+    @Test
+    fun `zombie open channel foreground probe triggers reconnect within 4 seconds`() = runTest {
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            livenessProbeHandler = { delay(60_000); true }
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+            assertTrue(session.isOpen)
+
+            val job = launch { supervisor.verifyForegroundCarrier { true } }
+            runCurrent()
+            advanceTimeBy(2_500)
+            runCurrent()
+            assertEquals(0, recoveries, "First timeout should perform one immediate 1.5s retry")
+            assertTrue(session.isOpen)
+
+            advanceTimeBy(1_500)
+            runCurrent()
+            job.join()
+            assertFalse(session.isOpen)
+            assertEquals(1, recoveries)
+            assertEquals(ConnectionStatus.Degraded, supervisor.state.value.status)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `foreground probe skips active check when inbound frame arrived within 1500ms`() = runTest {
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            inboundElapsedMs = 500L
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            supervisor.verifyForegroundCarrier { true }
+            runCurrent()
+            assertEquals(0, session.livenessProbes)
+            assertEquals(0, recoveries)
+            assertTrue(session.isOpen)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `foreground probe coalesces with hung background probe and preserves 401 auth handling`() = runTest {
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            livenessProbeHandler = { delay(60_000); true }
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            // Start background health probe at t = 3000ms.
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS)
+            runCurrent()
+            assertEquals(1, session.livenessProbes)
+
+            // Foreground resumes at t = 4000ms while background probe is hung: must coalesce, not skip.
+            advanceTimeBy(1_000)
+            val fgJob = launch { supervisor.verifyForegroundCarrier { true } }
+            runCurrent()
+            assertEquals(1, session.livenessProbes, "Foreground must coalesce onto active background probe")
+
+            // Background probe times out at t = 5500ms; foreground immediately launches 1.5s retry.
+            advanceTimeBy(1_500)
+            runCurrent()
+            assertEquals(2, session.livenessProbes)
+            assertTrue(session.isOpen)
+
+            advanceTimeBy(1_500)
+            runCurrent()
+            fgJob.join()
+            assertFalse(session.isOpen)
+            assertEquals(1, recoveries)
+        } finally {
+            supervisor.stop()
+        }
+
+        // Legacy session without dc_keepalive_v1 still triggers auth-required on 401/403 foreground probe.
+        var authRequired = 0
+        var reads = 0
+        val legacy = FakeSession(Result.success(Unit))
+        val legacyWrapper = object : P2PSession by legacy {
+            override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> {
+                reads++
+                return Result.success(response(if (reads == 1) 200 else 401))
+            }
+        }
+        val legacySupervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { legacyWrapper },
+            onAuthenticationRequired = { authRequired++ },
+        )
+        try {
+            legacySupervisor.start()
+            legacySupervisor.applyBootstrap(plan())
+            runCurrent()
+            legacySupervisor.verifyForegroundCarrier { true }
+            runCurrent()
+            assertEquals(1, authRequired)
+            assertEquals(ConnectionStatus.AuthenticationRequired, legacySupervisor.state.value.status)
+            assertFalse(legacy.isOpen)
+        } finally {
+            legacySupervisor.stop()
+        }
+    }
+
+    @Test
+    fun `foreground probe keeps carrier alive if inbound frame arrives during probe window`() = runTest {
+        lateinit var session: FakeSession
+        session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            livenessProbeHandler = {
+                delay(1_000)
+                session.inboundGeneration++
+                session.inboundElapsedMs = 0L
+                false
+            }
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            val fgJob = launch { supervisor.verifyForegroundCarrier { true } }
+            runCurrent()
+            advanceTimeBy(1_500)
+            runCurrent()
+            fgJob.join()
+            assertTrue(session.isOpen)
+            assertEquals(0, recoveries)
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `onCarrierSuspect wakes immediate liveness check without tearing down healthy slow carrier`() = runTest {
+        var healthy = true
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            livenessProbeHandler = {
+                if (healthy) {
+                    delay(20)
+                    true
+                } else {
+                    delay(60_000)
+                    true
+                }
+            }
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            supervisor.onCarrierSuspect(session)
+            advanceTimeBy(25)
+            runCurrent()
+            assertEquals(1, session.livenessProbes)
+            assertTrue(session.isOpen)
+            assertEquals(0, recoveries)
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+
+            // Now simulate a zombie DataChannel where keepalive pings hang.
+            healthy = false
+            supervisor.onCarrierSuspect(session)
+            runCurrent()
+            assertEquals(2, session.livenessProbes)
+            advanceTimeBy(2_500)
+            runCurrent()
+            assertTrue(session.isOpen, "Must retry once after 500ms before closing")
+            advanceTimeBy(500)
+            runCurrent()
+            assertEquals(3, session.livenessProbes)
+            advanceTimeBy(2_000)
+            runCurrent()
+            assertFalse(session.isOpen)
+            assertEquals(1, recoveries)
+            assertEquals(ConnectionStatus.Degraded, supervisor.state.value.status)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `periodic health probe covers p2pSession, skips recent inbound frames, and recovers silent failure under 5s`() = runTest {
+        val p2p = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            inboundElapsedMs = 1_000L
+        }
+        p2p.connect()
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.installP2PSessionForTest(p2p)
+            runCurrent()
+
+            // Recent inbound frame (< 3000ms) skips active probe.
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS)
+            runCurrent()
+            assertEquals(0, p2p.livenessProbes)
+            assertTrue(p2p.isOpen)
+
+            // Once inbound traffic stops, two silent probe failures recover within 5s (2.5s + 0.5s + 2.0s).
+            p2p.inboundElapsedMs = 5_000L
+            p2p.livenessProbeHandler = { delay(60_000); true }
+            advanceTimeBy(ConnectivitySupervisor.CARRIER_HEALTH_INTERVAL_MS)
+            runCurrent()
+            assertEquals(1, p2p.livenessProbes)
+
+            advanceTimeBy(5_000)
+            runCurrent()
+            assertEquals(2, p2p.livenessProbes)
+            assertFalse(p2p.isOpen)
+            assertEquals(1, recoveries)
+            assertEquals(ConnectionStatus.Degraded, supervisor.state.value.status)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `onCapabilitiesChanged triggers debounced non-destructive liveness probe on active carrier`() = runTest {
+        val monitor = FakeNetworkMonitor()
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = monitor,
+            scope = this,
+            turnRecheckIntervalMs = 60_000L,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            // Rapid capability jitter must debounce for >= 2s.
+            monitor.capabilityJitter()
+            advanceTimeBy(500)
+            monitor.capabilityJitter()
+            advanceTimeBy(1_900)
+            runCurrent()
+            assertEquals(0, session.livenessProbes)
+
+            advanceTimeBy(100)
+            runCurrent()
+            assertEquals(1, session.livenessProbes)
+            assertTrue(session.isOpen)
+            assertEquals(0, recoveries)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
     private fun supervisor(
         scope: kotlinx.coroutines.CoroutineScope,
         maxRetries: Int = 0,
@@ -1090,9 +1418,23 @@ class ConnectivitySupervisorTest {
         var hangFirstCommit = false
         var failAllCommits = false
         var commitAttempts = 0
+        var supportsKeepalive = false
+        var inboundElapsedMs: Long = Long.MAX_VALUE
+        var inboundGeneration: Long = 0L
+        var livenessProbes = 0
+        var livenessProbeHandler: (suspend (Long) -> Boolean)? = null
 
         override var isOpen: Boolean = false
             private set
+
+        override val lastInboundFrameElapsedMs: Long get() = inboundElapsedMs
+        override val inboundFrameGeneration: Long get() = inboundGeneration
+        override val supportsKeepaliveProbe: Boolean get() = supportsKeepalive
+
+        override suspend fun probeLiveness(timeoutMs: Long): Boolean {
+            livenessProbes++
+            return livenessProbeHandler?.invoke(timeoutMs) ?: true
+        }
 
         override fun setUnexpectedCloseListener(listener: ((String) -> Unit)?) {
             unexpectedCloseListener = listener

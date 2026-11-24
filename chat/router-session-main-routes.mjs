@@ -137,16 +137,27 @@ function attachBackgroundAiProjection(session) {
 }
 
 async function listSessionListItemsForClient(options = {}) {
-  const sessions = await listSessions({ ...options, listSummary: true });
+  const sessions = await listSessions({
+    ...options,
+    listSummary: true,
+    priority: options.priority || 'interactive',
+  });
   return sessions.map((session) => createSessionListItem(attachBackgroundAiProjection(session)));
 }
 
 async function getSessionForClient(id, options = {}) {
-  return createClientSessionDetail(attachBackgroundAiProjection(await getSession(id, options)));
+  return createClientSessionDetail(attachBackgroundAiProjection(await getSession(id, {
+    ...options,
+    priority: options.priority || 'interactive',
+  })));
 }
 
 async function getSessionListItemForClient(id, options = {}) {
-  return createSessionListItem(attachBackgroundAiProjection(await getSession(id, options)));
+  return createSessionListItem(attachBackgroundAiProjection(await getSession(id, {
+    ...options,
+    listSummary: true,
+    priority: options.priority || 'interactive',
+  })));
 }
 
 function getGrantedCapability(authSession, capability, fallback = false) {

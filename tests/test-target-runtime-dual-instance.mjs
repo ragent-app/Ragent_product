@@ -367,28 +367,44 @@ try {
   assert.equal(executions.length, 1, 'remote failure must not execute against source');
 
   // Summary polling is a high-frequency background path. A dead target must
-  // fail once and then enter a short circuit window instead of keeping one
-  // gateway request in flight for every browser poll.
-  async function summaryRequest() {
+  // fail once and return HTTP 200 degraded offline metadata + cooldown instead
+  // of creating a 503 storm, while action requests keep 503 and unknown targets keep 404.
+  async function summaryRequest(targetId = target.instanceId) {
     const started = performance.now();
-    const response = await fetch(`${gateway.url}/api/target-runtime/summary?targetId=${encodeURIComponent(target.instanceId)}`);
+    const response = await fetch(`${gateway.url}/api/target-runtime/summary?targetId=${encodeURIComponent(targetId)}`);
     return { response, body: await response.json(), elapsedMs: performance.now() - started };
   }
-  async function summaryEventsRequest() {
+  async function summaryEventsRequest(targetId = target.instanceId) {
     const started = performance.now();
-    const response = await fetch(`${gateway.url}/api/target-runtime/summary/events?targetId=${encodeURIComponent(target.instanceId)}&afterCursor=0&limit=100`);
+    const response = await fetch(`${gateway.url}/api/target-runtime/summary/events?targetId=${encodeURIComponent(targetId)}&afterCursor=0&limit=100`);
     return { response, body: await response.json(), elapsedMs: performance.now() - started };
   }
+  const unknownSummary = await summaryRequest('not-in-catalog');
+  assert.equal(unknownSummary.response.status, 404);
+  assert.equal(unknownSummary.body.code, 'TARGET_NOT_FOUND');
+
   const summaryFailure = await summaryRequest();
-  assert.equal(summaryFailure.response.status, 503);
+  assert.equal(summaryFailure.response.status, 200);
+  assert.equal(summaryFailure.body.reachable, false);
+  assert.equal(summaryFailure.body.state, 'offline');
+  assert.equal(summaryFailure.body.degraded, true);
+  assert.equal(summaryFailure.body.retryAfterMs, 30_000);
   assert.equal(summaryFailure.body.code, 'TARGET_RUNTIME_UNAVAILABLE');
   assert.ok(summaryFailure.elapsedMs < 3_500, `summary failure should be bounded, got ${summaryFailure.elapsedMs}ms`);
   const summaryCooldown = await summaryEventsRequest();
-  assert.equal(summaryCooldown.response.status, 503);
+  assert.equal(summaryCooldown.response.status, 200);
+  assert.equal(summaryCooldown.body.reachable, false);
+  assert.equal(summaryCooldown.body.state, 'offline');
+  assert.equal(summaryCooldown.body.degraded, true);
+  assert.ok(summaryCooldown.body.retryAfterMs > 0 && summaryCooldown.body.retryAfterMs <= 30_000);
   assert.equal(summaryCooldown.body.code, 'TARGET_RUNTIME_SUMMARY_COOLDOWN');
   assert.ok(summaryCooldown.elapsedMs < 250, `cooldown should return quickly, got ${summaryCooldown.elapsedMs}ms`);
   const summaryCooldownAgain = await summaryRequest();
-  assert.equal(summaryCooldownAgain.response.status, 503);
+  assert.equal(summaryCooldownAgain.response.status, 200);
+  assert.equal(summaryCooldownAgain.body.reachable, false);
+  assert.equal(summaryCooldownAgain.body.state, 'offline');
+  assert.equal(summaryCooldownAgain.body.degraded, true);
+  assert.ok(summaryCooldownAgain.body.retryAfterMs > 0 && summaryCooldownAgain.body.retryAfterMs <= 30_000);
   assert.equal(summaryCooldownAgain.body.code, 'TARGET_RUNTIME_SUMMARY_COOLDOWN');
   assert.ok(summaryCooldownAgain.elapsedMs < 250, `summary cooldown should return quickly, got ${summaryCooldownAgain.elapsedMs}ms`);
 

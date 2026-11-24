@@ -5,7 +5,7 @@ import {mkdtemp,writeFile,readFile,readdir,rm,realpath,rename} from 'node:fs/pro
 import {join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
 import {renameWithWindowsRetry} from '../lib/windows-file-replace.mjs';
-import {writeJsonAtomic,writeTextAtomic} from '../chat/fs-utils.mjs';
+import {rmWithWindowsRetry,writeJsonAtomic,writeTextAtomic} from '../chat/fs-utils.mjs';
 
 test('Windows sharing failures retry bounded rename; other platforms/errors fail immediately',async()=>{
   for(const code of ['EPERM','EBUSY']){let calls=0;const waits=[];
@@ -51,4 +51,19 @@ test('actual Windows cancelled durable text replacement retains old target and c
   try{timer=setTimeout(()=>abort.abort(),60);await assert.rejects(writeTextAtomic(target,'NEW',{durable:true,signal:abort.signal}),{code:'ABORT_ERR'});
     assert.equal(await readFile(target,'utf8'),'OLD');assert.deepEqual(await readdir(root),['state.txt']);
   }finally{clearTimeout(timer);await held.release();}
+});
+test('rmWithWindowsRetry retries EBUSY/EPERM on win32 with bounded backoff and fails immediately on other platforms/errors',async()=>{
+  for(const code of ['EBUSY','EPERM']){
+    let calls=0;const waits=[];
+    await rmWithWindowsRetry('C:/fake/session',{platform:'win32',jitterImpl:()=>0,rmImpl:async()=>{if(++calls<3)throw Object.assign(new Error(code),{code});},waitImpl:async ms=>{waits.push(ms);}});
+    assert.equal(calls,3);assert.deepEqual(waits,[50,100]);
+  }
+  const persistent=Object.assign(new Error('still locked'),{code:'EBUSY'});let calls=0;const waits=[];
+  await assert.rejects(rmWithWindowsRetry('C:/fake/session',{platform:'win32',jitterImpl:()=>5,rmImpl:async()=>{calls++;throw persistent;},waitImpl:async ms=>{waits.push(ms);}}),value=>value===persistent);
+  assert.equal(calls,6);assert.deepEqual(waits,[55,105,205,405,805]);
+  for(const [platform,code] of [['linux','EBUSY'],['darwin','EPERM'],['win32','EACCES'],['win32','ENOENT']]){
+    const error=Object.assign(new Error(code),{code});let attemptCount=0;
+    await assert.rejects(rmWithWindowsRetry('/fake/session',{platform,rmImpl:async()=>{attemptCount++;throw error;},waitImpl:()=>assert.fail()}),value=>value===error);
+    assert.equal(attemptCount,1);
+  }
 });

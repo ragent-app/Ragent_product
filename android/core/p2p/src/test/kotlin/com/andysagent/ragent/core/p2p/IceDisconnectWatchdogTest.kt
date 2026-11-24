@@ -14,7 +14,7 @@ class IceDisconnectWatchdogTest {
         val watchdog = IceDisconnectWatchdog(this) { failures++ }
         watchdog.channelOpened(iceDisconnected = true)
         runCurrent()
-        advanceTimeBy(8_001)
+        advanceTimeBy(2_501)
         runCurrent()
         assertEquals(1, failures)
     }
@@ -23,7 +23,7 @@ class IceDisconnectWatchdogTest {
         var failures = 0
         val watchdog = IceDisconnectWatchdog(this) { failures++ }
         watchdog.channelOpened(iceDisconnected = false)
-        advanceTimeBy(8_001)
+        advanceTimeBy(2_501)
         runCurrent()
         assertEquals(0, failures)
     }
@@ -33,11 +33,11 @@ class IceDisconnectWatchdogTest {
         val watchdog = IceDisconnectWatchdog(this) { failures++ }
         watchdog.disconnected()
         runCurrent()
-        advanceTimeBy(3_500)
+        advanceTimeBy(1_500)
         runCurrent()
         assertEquals(0, failures, "A brief outage must not destroy the carrier")
         watchdog.recovered()
-        advanceTimeBy(1_000)
+        advanceTimeBy(1_500)
         runCurrent()
         assertEquals(0, failures)
     }
@@ -49,7 +49,7 @@ class IceDisconnectWatchdogTest {
         runCurrent()
         advanceTimeBy(1_000)
         watchdog.disconnected()
-        advanceTimeBy(7_001)
+        advanceTimeBy(1_501)
         runCurrent()
         assertEquals(1, failures)
     }
@@ -66,7 +66,27 @@ class IceDisconnectWatchdogTest {
         advanceTimeBy(1_000)
         runCurrent()
         assertEquals(0, failures)
-        advanceTimeBy(7_001)
+        advanceTimeBy(1_501)
+        runCurrent()
+        assertEquals(1, failures)
+    }
+
+    @Test fun `entering disconnected triggers immediate probe callback once per episode`() = runTest {
+        var probes = 0
+        var failures = 0
+        val watchdog = IceDisconnectWatchdog(
+            scope = this,
+            onDisconnectStarted = { probes++ },
+            onPersistentDisconnect = { failures++ },
+        )
+        watchdog.disconnected()
+        watchdog.disconnected()
+        assertEquals(1, probes)
+        assertEquals(0, failures)
+        watchdog.recovered()
+        watchdog.disconnected()
+        assertEquals(2, probes)
+        advanceTimeBy(2_501)
         runCurrent()
         assertEquals(1, failures)
     }

@@ -20,7 +20,7 @@ open class DataChannel {
         fun onBufferedAmountChange(previousAmount: Long) {}
     }
 
-    class Buffer(val data: java.nio.ByteBuffer, val binary: Boolean) {
+    class Buffer(@JvmField val data: java.nio.ByteBuffer, @JvmField val binary: Boolean) {
         constructor(data: java.nio.ByteBuffer, binary: Boolean, offset: Int, size: Int) :
             this(data, binary)
     }

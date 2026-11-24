@@ -1,7 +1,7 @@
 import { constants } from 'fs';
 import { access, lstat, mkdir, open, readFile, rm, stat, writeFile } from 'fs/promises';
 import { dirname, resolve } from 'path';
-import { renameWithWindowsRetry } from '../lib/windows-file-replace.mjs';
+import { renameWithWindowsRetry, retryWindowsFileAccess } from '../lib/windows-file-replace.mjs';
 
 export async function pathExists(path) {
   try {
@@ -157,8 +157,28 @@ export async function writeTextAtomic(path, value, { mode, durable = false, sign
   }
 }
 
-export async function removePath(path) {
-  await rm(path, { recursive: true, force: true });
+export async function rmWithWindowsRetry(path, {
+  recursive = true,
+  force = true,
+  signal,
+  beforeAttempt,
+  platform = process.platform,
+  rmImpl = rm,
+  waitImpl,
+  jitterImpl,
+} = {}) {
+  return retryWindowsFileAccess(() => rmImpl(path, { recursive, force }), {
+    signal,
+    beforeAttempt,
+    abortMessage: 'Path removal aborted',
+    platform,
+    ...(waitImpl ? { waitImpl } : {}),
+    ...(jitterImpl ? { jitterImpl } : {}),
+  });
+}
+
+export async function removePath(path, options = {}) {
+  await rmWithWindowsRetry(path, options);
 }
 
 export function createSerialTaskQueue() {

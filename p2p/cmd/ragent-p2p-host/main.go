@@ -350,6 +350,37 @@ type httpResponse struct {
 	Error      string            `json:"error,omitempty"`
 }
 
+type dcKeepaliveFrame struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
+func serverReadyFeatures() []string {
+	return []string{
+		"http_request_stream_v1",
+		"http_request_stream_v2",
+		"http_request_binary_chunks_v3",
+		"http_response_stream_v1",
+		"http_bulk_channel_v1",
+		"dc_keepalive_v1",
+	}
+}
+
+func handleKeepalivePing(data []byte, sendText func(string) error) (bool, error) {
+	var ping dcKeepaliveFrame
+	if err := json.Unmarshal(data, &ping); err != nil || ping.Type != "dc_ping" {
+		return false, nil
+	}
+	if ping.ID == "" {
+		return true, nil
+	}
+	encoded, err := json.Marshal(dcKeepaliveFrame{Type: "dc_pong", ID: ping.ID})
+	if err != nil {
+		return true, err
+	}
+	return true, sendText(string(encoded))
+}
+
 var outputMu sync.Mutex
 
 func emit(value any) {
@@ -656,7 +687,7 @@ func main() {
 				emit(map[string]any{"type": "datachannel_open"})
 				fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_open label=%s\n", channel.Label())
 				ready := map[string]any{"type": "server_ready", "version": 1,
-					"features": []string{"http_request_stream_v1", "http_request_stream_v2", "http_request_binary_chunks_v3", "http_response_stream_v1", "http_bulk_channel_v1"}}
+					"features": serverReadyFeatures()}
 				if browserAuth != nil {
 					ready["auth"] = "client_auth_v1"
 					fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent state=AUTHENTICATING\n")
@@ -740,6 +771,10 @@ func main() {
 						encoded, _ := json.Marshal(httpResponse{ID: id, Type: "http_response", Error: "invalid request stream chunk"})
 						_ = channel.SendText(string(encoded))
 					}
+					return
+				}
+				if frameType.Type == "dc_ping" {
+					_, _ = handleKeepalivePing(message.Data, channel.SendText)
 					return
 				}
 				switch frameType.Type {

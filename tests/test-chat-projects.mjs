@@ -9,7 +9,7 @@
 // instance-scope guard in resolveInstanceScopedOverridePath passes the explicit
 // path through unchanged.
 import assert from 'assert/strict';
-import { mkdtempSync, rmSync, unlinkSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, unlinkSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { isAbsolute, join } from 'path';
 
@@ -271,9 +271,59 @@ try {
   assert.equal(deletedResult.deletedSessionCount, 1, 'delete-all should remove every project session');
   assert.ok(!(await loadSessionsMeta()).some((entry) => entry.id === 'sess-delete'),
     'delete-all should remove session metadata');
+  // Immediate meta flush verification: disk JSON must reflect deletion before any 800ms debounce timer.
+  const flushedOnDiskAfterDelete = JSON.parse(readFileSync(CHAT_SESSIONS_FILE, 'utf8'));
+  assert.equal(flushedOnDiskAfterDelete.some((entry) => entry.id === 'sess-delete'), false,
+    'deleteProject(deleteSessions:true) must flush chat-sessions.json immediately');
   await assert.rejects(
     () => import('fs/promises').then(({ stat }) => stat(join(CHAT_HISTORY_DIR, 'sess-delete'))),
     'delete-all should remove session history');
+
+  // Immediate flush for detach mode + non-fatal residual history cleanup on Windows lock errors.
+  const detachFlushRoot = makeRootDir('ragent-prj-detach-flush-');
+  const detachFlushProject = await createProject({ name: 'Detach flush', rootPath: detachFlushRoot });
+  await seedSessions([
+    { id: 'sess-detach-flush', projectId: detachFlushProject.id, folder: detachFlushRoot },
+  ]);
+  await deleteProject(detachFlushProject.id, { deleteSessions: false });
+  const flushedOnDiskAfterDetach = JSON.parse(readFileSync(CHAT_SESSIONS_FILE, 'utf8'));
+  const detachedDiskMeta = flushedOnDiskAfterDetach.find((entry) => entry.id === 'sess-detach-flush');
+  assert.equal(detachedDiskMeta?.projectId, '', 'deleteProject(deleteSessions:false) must flush cleared projectId immediately');
+  assert.equal(detachedDiskMeta?.projectDetached, true, 'deleteProject(deleteSessions:false) must flush projectDetached immediately');
+
+  const lockedCleanupRoot = makeRootDir('ragent-prj-locked-cleanup-');
+  const lockedCleanupProject = await createProject({ name: 'Locked cleanup', rootPath: lockedCleanupRoot });
+  await seedSessions([
+    { id: 'sess-locked-a', projectId: lockedCleanupProject.id, folder: lockedCleanupRoot },
+    { id: 'sess-locked-b', projectId: lockedCleanupProject.id, folder: lockedCleanupRoot },
+  ]);
+  const cleanupAttempts = [];
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const lockedDeleteResult = await deleteProject(lockedCleanupProject.id, {
+      deleteSessions: true,
+      removeSessionHistoryImpl: async (sessionId) => {
+        cleanupAttempts.push(sessionId);
+        if (sessionId === 'sess-locked-a') {
+          throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+        }
+        return true;
+      },
+    });
+    assert.equal(lockedDeleteResult.deletedSessionCount, 2, 'committed project deletion must still return committed result');
+    assert.deepEqual(cleanupAttempts.sort(), ['sess-locked-a', 'sess-locked-b'],
+      'residual cleanup failure on one session must still clean up remaining sessions');
+    assert.ok(warnings.some((entry) => String(entry[0]).includes('Residual session history cleanup failed')),
+      'residual cleanup failure must be logged');
+    assert.equal((await listProjects()).some((p) => p.id === lockedCleanupProject.id), false,
+      'project must remain deleted after post-commit history cleanup warning');
+    assert.equal((await loadSessionsMeta()).some((m) => m.id === 'sess-locked-a' || m.id === 'sess-locked-b'), false,
+      'session metadata must remain deleted after post-commit history cleanup warning');
+  } finally {
+    console.warn = originalWarn;
+  }
 
 
   // ── Execution binding freeze + revision (slice 2) ─────────────────────────

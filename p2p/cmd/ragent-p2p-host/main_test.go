@@ -229,3 +229,157 @@ func TestProxyRequestRejectsBodyAboveTwentyFiveMiBLimit(t *testing.T) {
 		t.Fatalf("oversized body was not rejected: %#v", result)
 	}
 }
+
+func TestServerReadyIncludesKeepaliveFeature(t *testing.T) {
+	features := serverReadyFeatures()
+	for _, feature := range features {
+		if feature == "dc_keepalive_v1" {
+			return
+		}
+	}
+	t.Fatalf("serverReadyFeatures() missing dc_keepalive_v1: %#v", features)
+}
+
+func TestHandleKeepalivePing(t *testing.T) {
+	var sent []string
+	handled, err := handleKeepalivePing([]byte(`{"type":"dc_ping","id":"probe-42"}`), func(msg string) error {
+		sent = append(sent, msg)
+		return nil
+	})
+	if err != nil || !handled {
+		t.Fatalf("expected handled dc_ping without error, got handled=%v err=%v", handled, err)
+	}
+	if len(sent) != 1 {
+		t.Fatalf("expected 1 pong frame, got %d", len(sent))
+	}
+	var pong dcKeepaliveFrame
+	if err := json.Unmarshal([]byte(sent[0]), &pong); err != nil {
+		t.Fatalf("invalid dc_pong JSON: %v", err)
+	}
+	if pong.Type != "dc_pong" || pong.ID != "probe-42" {
+		t.Fatalf("unexpected dc_pong frame: %#v", pong)
+	}
+
+	// Empty id must be consumed without hitting HTTP proxy or emitting an empty pong.
+	sent = nil
+	handled, err = handleKeepalivePing([]byte(`{"type":"dc_ping","id":""}`), func(msg string) error {
+		sent = append(sent, msg)
+		return nil
+	})
+	if err != nil || !handled || len(sent) != 0 {
+		t.Fatalf("empty dc_ping id should be consumed silently, got handled=%v err=%v sent=%v", handled, err, sent)
+	}
+
+	// Non-ping messages fall through cleanly.
+	handled, err = handleKeepalivePing([]byte(`{"type":"http_request","id":"r1"}`), func(msg string) error {
+		sent = append(sent, msg)
+		return nil
+	})
+	if err != nil || handled || len(sent) != 0 {
+		t.Fatalf("non-ping should not be handled by keepalive, got handled=%v err=%v sent=%v", handled, err, sent)
+	}
+}
+
+func TestKeepalivePingPongOverDataChannel(t *testing.T) {
+	var settings webrtc.SettingEngine
+	settings.SetIncludeLoopbackCandidate(true)
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+	client, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	host, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	httpCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpCalls++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	host.OnDataChannel(func(ch *webrtc.DataChannel) {
+		ch.OnMessage(func(msg webrtc.DataChannelMessage) {
+			if msg.IsString {
+				if handled, _ := handleKeepalivePing(msg.Data, ch.SendText); handled {
+					return
+				}
+			}
+			t.Errorf("unexpected non-keepalive message reached fallback: %s", string(msg.Data))
+		})
+	})
+
+	dc, err := client.CreateDataChannel("ragent-http", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies := make(chan []byte, 4)
+	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+		replies <- append([]byte(nil), msg.Data...)
+	})
+	sendErr := make(chan error, 1)
+	dc.OnOpen(func() {
+		sendErr <- dc.SendText(`{"type":"dc_ping","id":"dc-keepalive-1"}`)
+	})
+
+	offer, err := client.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatherClient := webrtc.GatheringCompletePromise(client)
+	if err = client.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gatherClient:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client ICE gathering timed out")
+	}
+	if err = host.SetRemoteDescription(*client.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := host.CreateAnswer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatherHost := webrtc.GatheringCompletePromise(host)
+	if err = host.SetLocalDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gatherHost:
+	case <-time.After(10 * time.Second):
+		t.Fatal("host ICE gathering timed out")
+	}
+	if err = client.SetRemoteDescription(*host.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-sendErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("dc_ping was not sent")
+	}
+	select {
+	case raw := <-replies:
+		var pong dcKeepaliveFrame
+		if err := json.Unmarshal(raw, &pong); err != nil {
+			t.Fatal(err)
+		}
+		if pong.Type != "dc_pong" || pong.ID != "dc-keepalive-1" {
+			t.Fatalf("unexpected dc_pong reply: %#v", pong)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for dc_pong")
+	}
+	if httpCalls != 0 {
+		t.Fatalf("keepalive ping must not hit local HTTP server, got %d calls", httpCalls)
+	}
+}

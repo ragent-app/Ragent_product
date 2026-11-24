@@ -2735,6 +2735,7 @@ class AndroidRuntimeGraph internal constructor(
                 controller.rejectCredential(credential, current, invalidate)
             },
             onCarrierUnavailable = { failed -> controller.carrierRequestFailed(failed) },
+            onCarrierSuspect = { suspect -> controller.carrierSuspect(suspect) },
         )
         val attachmentRelay = AccountAttachmentRelay(application.getString(R.string.accounts_directory_base_url),
             accountsDirectoryTransport, ensureAccount = { accountSessions.ensureActiveCredential(); Unit })

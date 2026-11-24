@@ -1518,6 +1518,7 @@ async function findReusableDelegatedChild(sourceSessionId, task) {
       limit: 256,
       includeBodies: false,
       includeMessageBodies: false,
+      priority: 'interactive',
     });
     const events = Array.isArray(page?.events) ? page.events : [];
     // Delegation records are appended near the end of the source session. Walk
@@ -1676,6 +1677,7 @@ async function loadRunScopedHistory(sessionId, runId, {
   includeAssistantControlBlocks = false,
   responseIds = [],
   maxEvents = MAX_SCOPED_HISTORY_EVENTS,
+  priority = 'normal',
 } = {}) {
   const normalizedRunId = trimString(runId);
   const responseIdSet = new Set((Array.isArray(responseIds) ? responseIds : [])
@@ -1700,6 +1702,7 @@ async function loadRunScopedHistory(sessionId, runId, {
       limit: 256,
       includeBodies: false,
       includeMessageBodies: false,
+      priority,
     }).catch(() => null);
     const events = Array.isArray(page?.events) ? page.events : [];
     if (events.length === 0) break;
@@ -1737,13 +1740,16 @@ async function loadRunScopedHistory(sessionId, runId, {
     : selected;
 }
 
-async function loadRecentDelegationResultEvents(sessionId, expectedCount = 0) {
+async function loadRecentDelegationResultEvents(sessionId, expectedCount = 0, options = {}) {
   const normalizedExpected = Number.isInteger(expectedCount) && expectedCount > 0
     ? expectedCount
     : 4096;
   const cap = Math.min(4096, normalizedExpected);
   const results = [];
   let beforeSeq = 0;
+  const priority = options?.priority === 'interactive' || options?.priority === 'background'
+    ? options.priority
+    : 'normal';
   // Delegation results are append-only. Walk newest-first and stop once the
   // durable child count is covered; a parent with a very large transcript no
   // longer needs a full forward scan merely to rebuild its sidebar summary.
@@ -1754,6 +1760,7 @@ async function loadRecentDelegationResultEvents(sessionId, expectedCount = 0) {
       limit: 256,
       includeBodies: false,
       includeMessageBodies: false,
+      priority,
     }).catch(() => null);
     const events = Array.isArray(page?.events) ? page.events : [];
     if (events.length === 0) break;
@@ -3364,7 +3371,10 @@ async function buildSessionTimelineEvents(sessionId, options = {}) {
   if (activeRunId && !options.skipSync) {
     await syncDetachedRun(sessionId, activeRunId);
   }
-  const events = await loadHistory(sessionId, { includeBodies: options.includeBodies !== false });
+  const events = await loadHistory(sessionId, {
+    includeBodies: options.includeBodies !== false,
+    priority: options.priority === 'background' ? 'background' : 'interactive',
+  });
   return enrichRunCapabilities(await enrichPlanEventIntents(events));
 }
 
@@ -7442,6 +7452,7 @@ async function enrichSessionMeta(meta, options = {}) {
   const snapshot = await getHistorySnapshot(meta.id, {
     ...(listSummary ? { summaryOnly: true } : {}),
     ...(options.strictHistory === true ? { strict: true } : {}),
+    ...(options.priority ? { priority: options.priority } : {}),
   });
   const queuedCount = getFollowUpQueueCount(meta);
   const selectedRun = active.runs.find(run => run.state !== 'unknown') || active.runs[0];
@@ -7478,6 +7489,7 @@ async function enrichSessionMeta(meta, options = {}) {
     const delegationEvents = await loadRecentDelegationResultEvents(
       meta.id,
       Number(meta.delegatedChildCount),
+      { priority: options.priority },
     );
     delegationProjection = projectDelegationResults(
       delegationEvents,
@@ -10435,6 +10447,7 @@ export async function listSessions({
   includeQueuedMessages = false,
   listSummary = false,
   limit = 0,
+  priority = 'normal',
 } = {}) {
   await ensureProjectsInitialized();
   const metas = await loadSessionsMeta();
@@ -10493,6 +10506,7 @@ export async function listSessions({
         includeQueuedMessages,
         hierarchyIndex,
         listSummary,
+        priority,
       });
     }
   };
@@ -10775,8 +10789,12 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
     rawBeforeSeq = nextRawBefore;
   }
 
-  const visibleSources = await hydrateTimelineMessageSnapshots(sessionId, rawEvents,
-    options?.historyMeta?.latestSeq || rawPage?.pagination?.totalLatestSeq || Number.MAX_SAFE_INTEGER);
+  const visibleSources = await hydrateTimelineMessageSnapshots(
+    sessionId,
+    rawEvents,
+    options?.historyMeta?.latestSeq || rawPage?.pagination?.totalLatestSeq || Number.MAX_SAFE_INTEGER,
+    { priority },
+  );
   const displayEvents = buildSessionDisplayEvents(visibleSources, {
     sessionRunning,
     projectRoot: sessionMeta?.folder || '',
@@ -10901,6 +10919,7 @@ async function buildReplyPublicationFromRun(sessionId, rootRun, responseId, hist
     : await loadRunScopedHistory(sessionId, rootRun.id, {
         includeBodies: true,
         responseIds: getRunResponseIds(rootRun),
+        priority: 'interactive',
       });
   const publication = rootRun.replyPublication && typeof rootRun.replyPublication === 'object'
     ? rootRun.replyPublication
@@ -17472,6 +17491,7 @@ async function readHistoricalForkPage(sessionId, afterSeq, throughSeq) {
     direction: 'after',
     includeBodies: true,
     limit: Math.min(HISTORICAL_FORK_PAGE_SIZE, Math.max(1, throughSeq - afterSeq)),
+    priority: 'interactive',
   });
   return {
     events: (page.events || []).filter((event) => Number.isInteger(event?.seq) && event.seq <= throughSeq),

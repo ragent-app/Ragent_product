@@ -9,7 +9,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
@@ -93,12 +96,22 @@ class ConnectivitySupervisor(
         // Legacy interval retained for compatibility; no second offer is made.
         const val TURN_RECHECK_INTERVAL_MS = 30_000L
         const val CARRIER_HEALTH_INTERVAL_MS = 3_000L
-        // Real verified carriers can deliver valid responses after 10 seconds.
-        // Two short probe timeouts must not close a still-working channel.
-        // Explicit channel closure and network changes still recover immediately.
-        const val CARRIER_HEALTH_TIMEOUT_MS = 15_000L
+        const val CARRIER_HEALTH_TIMEOUT_MS = 2_500L
+        const val CARRIER_HEALTH_RETRY_DELAY_MS = 500L
+        const val CARRIER_HEALTH_RETRY_TIMEOUT_MS = 2_000L
+        const val FOREGROUND_PROBE_TIMEOUT_MS = 2_500L
+        const val FOREGROUND_PROBE_RETRY_TIMEOUT_MS = 1_500L
+        const val FOREGROUND_RECENT_INBOUND_SKIP_MS = 1_500L
+        const val PERIODIC_RECENT_INBOUND_SKIP_MS = 3_000L
+        const val CAPABILITY_PROBE_DEBOUNCE_MS = 2_000L
         const val TURN_CONNECT_TIMEOUT_MS = 20_000L
         const val P2P_CONNECT_TIMEOUT_MS = 20_000L
+    }
+
+    private sealed class CarrierProbeOutcome {
+        data object Alive : CarrierProbeOutcome()
+        data class AuthDenied(val statusCode: Int) : CarrierProbeOutcome()
+        data object Failed : CarrierProbeOutcome()
     }
 
     private val _state = MutableStateFlow(
@@ -108,7 +121,6 @@ class ConnectivitySupervisor(
 
     private var probeJob: Job? = null
     private val probeMutex = Mutex()
-    private val carrierHealthProbeMutex = Mutex()
     private val handlingCarrierClose = AtomicBoolean(false)
     private var wasConnected = false
     private var retryCount = 0
@@ -122,6 +134,10 @@ class ConnectivitySupervisor(
     @Volatile private var turnSession: P2PSession? = null
     @Volatile private var activeTurnCarrier: TurnCarrier? = null
     private var turnRecheckJob: Job? = null
+    private var capabilityProbeJob: Job? = null
+    private var healthWakeSignal: Channel<Boolean>? = null
+    private var activeProbeSession: P2PSession? = null
+    private var activeProbeDeferred: Deferred<CarrierProbeOutcome>? = null
     private val carrierHealthLock = Any()
     private var healthSession: P2PSession? = null
     @Volatile private var bootstrapPlan: BootstrapConnectionPlan? = null
@@ -190,8 +206,11 @@ class ConnectivitySupervisor(
 
             override fun onCapabilitiesChanged() {
                 if (stopped) return
-                // Never disrupt an active session or an in-flight probe on capability jitter (e.g. RSSI / link speed changes).
-                if (turnSession != null || p2pSession != null) return
+                val activeSession = p2pSession ?: turnSession
+                if (activeSession != null) {
+                    scheduleCapabilitiesProbe(activeSession)
+                    return
+                }
                 if (probeMutex.isLocked) return
                 // IP change / WiFi <-> 5G — re-probe immediately, don't wait for backoff.
                 retryCount = 0
@@ -229,9 +248,8 @@ class ConnectivitySupervisor(
         monitor.unregister()
         probeJob?.cancel()
         probeJob = null
+        cancelTurnRecheck()
         closeP2PSession()
-        turnRecheckJob?.cancel()
-        turnRecheckJob = null
         closeTurnSession()
         bootstrapTurnAttempted = false
         wasConnected = false
@@ -267,36 +285,96 @@ class ConnectivitySupervisor(
         }
     }
 
+    /**
+     * Non-destructive hint (e.g. request timeout or ICE DISCONNECTED) that [session] may be silent.
+     * Wakes the liveness probe immediately without tearing down a healthy-but-slow carrier.
+     */
+    fun onCarrierSuspect(session: P2PSession) {
+        if (stopped || _state.value.status == ConnectionStatus.AuthenticationRequired) return
+        val active = p2pSession ?: turnSession ?: return
+        if (active !== session) return
+        if (!session.isOpen) {
+            if (session === turnSession && p2pSession == null) handleUnexpectedTurnClose(session, "carrier-closed")
+            else if (session === p2pSession) handleUnexpectedP2PClose(session, "carrier-closed")
+            return
+        }
+        val wake = synchronized(carrierHealthLock) {
+            if (healthSession !== session || turnRecheckJob?.isActive != true) {
+                scheduleCarrierHealthCheckLocked()
+            }
+            healthWakeSignal
+        }
+        wake?.trySend(true)
+    }
+
     /** Check the existing carrier after foregrounding without replacing a healthy session. */
     suspend fun verifyForegroundCarrier(stillForeground: () -> Boolean) {
         if (!stillForeground() || stopped || _state.value.status != ConnectionStatus.Connected) return
         val turn = turnSession
         val session = p2pSession ?: turn ?: return
         val isTurn = session === turn
+        if (session.lastInboundFrameElapsedMs < FOREGROUND_RECENT_INBOUND_SKIP_MS) return
+
+        val startResponseGeneration = session.successfulResponseGeneration
+        val startInboundGeneration = session.inboundFrameGeneration
+        val startInboundElapsed = session.lastInboundFrameElapsedMs
         val credential = credentialProvider()?.takeIf { it.isNotBlank() }
-        val previousGeneration = session.successfulResponseGeneration
-        if (!carrierHealthProbeMutex.tryLock()) return
-        val response = try {
-            withTimeoutOrNull(5_000L) {
-                val headers = credential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
-                session.request(P2PHttpRequest(id = UUID.randomUUID().toString(), method = "GET",
-                    path = "/api/auth/me", headers = headers)).getOrNull()
-            }
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (_: Exception) { null }
-        finally { carrierHealthProbeMutex.unlock() }
+
+        val firstOutcome = try {
+            runSingleFlightProbe(session, FOREGROUND_PROBE_TIMEOUT_MS, credential)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            CarrierProbeOutcome.Failed
+        }
         if (!stillForeground() || stopped || (if (isTurn) turnSession !== session else p2pSession !== session)) return
-        if (credentialProvider()?.takeIf { it.isNotBlank() } != credential) return
-        if (response?.error == null && response?.status in listOf(401, 403)) {
-            handleAuthenticationRequired(requireNotNull(response).status, credential) {
-                if (isTurn) turnSession === session else p2pSession === session
+
+        if (firstOutcome is CarrierProbeOutcome.AuthDenied) {
+            if (credentialProvider()?.takeIf { it.isNotBlank() } == credential) {
+                handleAuthenticationRequired(firstOutcome.statusCode, credential) {
+                    if (isTurn) turnSession === session else p2pSession === session
+                }
             }
             return
         }
-        // A slow response alone is not proof of a dead carrier. Preserve it and
-        // let the existing health policy confirm a failure; explicit closure is
-        // sufficient to start recovery immediately.
-        if (response != null || session.successfulResponseGeneration != previousGeneration || session.isOpen) return
+
+        if (firstOutcome is CarrierProbeOutcome.Alive ||
+            session.successfulResponseGeneration != startResponseGeneration ||
+            session.inboundFrameGeneration != startInboundGeneration ||
+            session.lastInboundFrameElapsedMs < startInboundElapsed
+        ) {
+            return
+        }
+
+        if (session.isOpen && session.lastInboundFrameElapsedMs >= FOREGROUND_RECENT_INBOUND_SKIP_MS) {
+            val retryCredential = credentialProvider()?.takeIf { it.isNotBlank() }
+            val retryOutcome = try {
+                runSingleFlightProbe(session, FOREGROUND_PROBE_RETRY_TIMEOUT_MS, retryCredential)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                CarrierProbeOutcome.Failed
+            }
+            if (!stillForeground() || stopped || (if (isTurn) turnSession !== session else p2pSession !== session)) return
+
+            if (retryOutcome is CarrierProbeOutcome.AuthDenied) {
+                if (credentialProvider()?.takeIf { it.isNotBlank() } == retryCredential) {
+                    handleAuthenticationRequired(retryOutcome.statusCode, retryCredential) {
+                        if (isTurn) turnSession === session else p2pSession === session
+                    }
+                }
+                return
+            }
+
+            if (retryOutcome is CarrierProbeOutcome.Alive ||
+                session.successfulResponseGeneration != startResponseGeneration ||
+                session.inboundFrameGeneration != startInboundGeneration ||
+                session.lastInboundFrameElapsedMs < startInboundElapsed
+            ) {
+                return
+            }
+        }
+
         if (isTurn) handleUnexpectedTurnClose(session, "foreground-probe-failed")
         else handleUnexpectedP2PClose(session, "foreground-probe-failed")
     }
@@ -556,6 +634,7 @@ class ConnectivitySupervisor(
                         p2pSession = session
                         observeUnexpectedClose(session, isTurn = false)
                         onP2PSessionReady?.invoke(session)
+                        scheduleCarrierHealthCheck()
                         ProbeResult.HttpSuccess(response.status)
                     } else {
                         session.close()
@@ -574,8 +653,24 @@ class ConnectivitySupervisor(
         }
     }
 
+    internal fun installP2PSessionForTest(session: P2PSession) {
+        p2pSession = session
+        observeUnexpectedClose(session, isTurn = false)
+        onP2PSessionReady?.invoke(session)
+        wasConnected = true
+        updateState(
+            status = ConnectionStatus.Connected,
+            reachable = true,
+            authenticated = true,
+            transport = TransportKind.P2P,
+            clearLastError = true,
+        )
+        scheduleCarrierHealthCheck()
+    }
+
     private fun closeP2PSession() {
         val session = p2pSession ?: return
+        cancelCarrierHealthCheck(session)
         p2pSession = null
         onP2PSessionClosed?.invoke(session)
         session.close()
@@ -585,6 +680,7 @@ class ConnectivitySupervisor(
         if (isTurn && onTurnHandoffReady != null && onRecoveryRequired != null) {
             session.setCarrierHandoffListener { timeoutMs, handoffId -> beginHandoff(session, timeoutMs, handoffId) }
         }
+        session.setCarrierSuspectListener { onCarrierSuspect(session) }
         session.setUnexpectedCloseListener { reason ->
             scope.launch {
                 if (isTurn) handleUnexpectedTurnClose(session, reason)
@@ -597,8 +693,10 @@ class ConnectivitySupervisor(
         if (stopped || p2pSession !== session || !handlingCarrierClose.compareAndSet(false, true)) return
         try {
             if (stopped || p2pSession !== session) return
+            cancelCarrierHealthCheck(session)
             p2pSession = null
             onP2PSessionClosed?.invoke(session)
+            session.close()
             updateState(
                 status = if (wasConnected) ConnectionStatus.Degraded else ConnectionStatus.Offline,
                 reachable = false,
@@ -612,6 +710,7 @@ class ConnectivitySupervisor(
     private fun closeTurnSession() {
         cancelHandoff()
         val session = turnSession ?: return
+        cancelCarrierHealthCheck(session)
         turnSession = null
         activeTurnCarrier = null
         onTurnSessionClosed?.invoke(session)
@@ -624,7 +723,7 @@ class ConnectivitySupervisor(
             if (stopped || turnSession !== session) return
             cancelHandoff()
             val closedCarrier = activeTurnCarrier
-            cancelTurnRecheck()
+            cancelCarrierHealthCheck(session)
             turnSession = null
             activeTurnCarrier = null
             onTurnSessionClosed?.invoke(session)
@@ -804,52 +903,180 @@ class ConnectivitySupervisor(
         }
     }
 
-    private fun scheduleTurnRecheck() = synchronized(carrierHealthLock) {
-        val session = turnSession ?: return@synchronized
-        if (healthSession === session && turnRecheckJob?.isActive == true) return@synchronized
+    private fun scheduleCapabilitiesProbe(session: P2PSession) = synchronized(carrierHealthLock) {
+        if (stopped || (p2pSession ?: turnSession) !== session) return@synchronized
+        capabilityProbeJob?.cancel()
+        capabilityProbeJob = scope.launch {
+            delay(CAPABILITY_PROBE_DEBOUNCE_MS)
+            if (!isActive || stopped || (p2pSession ?: turnSession) !== session) return@launch
+            if (session.lastInboundFrameElapsedMs < FOREGROUND_RECENT_INBOUND_SKIP_MS) return@launch
+            onCarrierSuspect(session)
+        }
+    }
+
+    private suspend fun runSingleFlightProbe(
+        session: P2PSession,
+        timeoutMs: Long,
+        credential: String?,
+    ): CarrierProbeOutcome {
+        val deferred = synchronized(carrierHealthLock) {
+            val existing = activeProbeDeferred
+            if (activeProbeSession === session && existing != null && existing.isActive) {
+                existing
+            } else {
+                val created = scope.async {
+                    executeBoundedProbe(session, timeoutMs, credential)
+                }
+                activeProbeSession = session
+                activeProbeDeferred = created
+                created.invokeOnCompletion {
+                    synchronized(carrierHealthLock) {
+                        if (activeProbeDeferred === created) {
+                            activeProbeDeferred = null
+                            activeProbeSession = null
+                        }
+                    }
+                }
+                created
+            }
+        }
+        return deferred.await()
+    }
+
+    private suspend fun executeBoundedProbe(
+        session: P2PSession,
+        timeoutMs: Long,
+        credential: String?,
+    ): CarrierProbeOutcome {
+        val attempt = scope.async {
+            try {
+                if (session.supportsKeepaliveProbe) {
+                    if (session.probeLiveness(timeoutMs)) CarrierProbeOutcome.Alive else CarrierProbeOutcome.Failed
+                } else {
+                    val headers = credential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
+                    val response = session.request(
+                        P2PHttpRequest(
+                            id = UUID.randomUUID().toString(),
+                            method = "GET",
+                            path = "/api/auth/me",
+                            headers = headers,
+                        ),
+                    ).getOrNull()
+                    when {
+                        response == null -> CarrierProbeOutcome.Failed
+                        response.error == null && response.status in listOf(401, 403) ->
+                            CarrierProbeOutcome.AuthDenied(response.status)
+                        response.error == null && response.status in 200..299 ->
+                            CarrierProbeOutcome.Alive
+                        else -> CarrierProbeOutcome.Failed
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                CarrierProbeOutcome.Failed
+            }
+        }
+        val cancelHandle = currentCoroutineContext()[Job]?.invokeOnCompletion { attempt.cancel() }
+        return try {
+            val outcome = withTimeoutOrNull(timeoutMs) { attempt.await() }
+            if (outcome == null) {
+                attempt.cancel()
+                CarrierProbeOutcome.Failed
+            } else {
+                outcome
+            }
+        } finally {
+            cancelHandle?.dispose()
+        }
+    }
+
+    private fun scheduleTurnRecheck() = scheduleCarrierHealthCheck()
+
+    private fun scheduleCarrierHealthCheck() = synchronized(carrierHealthLock) {
+        scheduleCarrierHealthCheckLocked()
+    }
+
+    private fun scheduleCarrierHealthCheckLocked() {
+        val session = p2pSession ?: turnSession ?: return
+        if (healthSession === session && turnRecheckJob?.isActive == true) return
         turnRecheckJob?.cancel()
         healthSession = session
+        val wakeChannel = Channel<Boolean>(Channel.CONFLATED)
+        healthWakeSignal = wakeChannel
         turnRecheckJob = scope.launch(start = CoroutineStart.LAZY) {
             var failures = 0
             var lastSuccessfulGeneration = session.successfulResponseGeneration
-            while (isActive && !stopped && turnSession === session) {
-                delay(turnRecheckIntervalMs.coerceAtLeast(1_000L))
-                if (stopped || turnSession !== session) return@launch
+            var lastInboundGeneration = session.inboundFrameGeneration
+            while (isActive && !stopped && (p2pSession ?: turnSession) === session) {
+                val waitMs = if (failures == 1) CARRIER_HEALTH_RETRY_DELAY_MS
+                    else turnRecheckIntervalMs.coerceAtLeast(1_000L)
+                val forcedWake = withTimeoutOrNull(waitMs) { wakeChannel.receiveCatching().getOrNull() } == true
+                if (!isActive || stopped || (p2pSession ?: turnSession) !== session) return@launch
+
+                val isTurn = session === turnSession && p2pSession == null
+                if (!forcedWake && failures == 0 && session.lastInboundFrameElapsedMs < PERIODIC_RECENT_INBOUND_SKIP_MS) {
+                    failures = 0
+                    lastSuccessfulGeneration = session.successfulResponseGeneration
+                    lastInboundGeneration = session.inboundFrameGeneration
+                    val authenticated = !credentialProvider().isNullOrBlank()
+                    updateState(
+                        if (authenticated) ConnectionStatus.Connected else ConnectionStatus.Reachable,
+                        reachable = true,
+                        authenticated = authenticated,
+                        transport = if (isTurn) TransportKind.Turn else TransportKind.P2P,
+                        clearLastError = true,
+                    )
+                    continue
+                }
+
                 val attemptedCredential = credentialProvider()?.takeIf { it.isNotBlank() }
-                val answer = try {
-                    carrierHealthProbeMutex.withLock {
-                        withTimeoutOrNull(CARRIER_HEALTH_TIMEOUT_MS) {
-                            val headers = attemptedCredential?.let { mapOf("Authorization" to "Bearer $it") }.orEmpty()
-                            session.request(P2PHttpRequest(id = UUID.randomUUID().toString(), method = "GET",
-                                path = "/api/auth/me", headers = headers)).getOrNull()
-                        }
-                    }
-                } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { null }
+                val probeTimeoutMs = if (failures == 1) CARRIER_HEALTH_RETRY_TIMEOUT_MS else CARRIER_HEALTH_TIMEOUT_MS
+                val startInboundElapsed = session.lastInboundFrameElapsedMs
+                val outcome = try {
+                    runSingleFlightProbe(session, probeTimeoutMs, attemptedCredential)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    CarrierProbeOutcome.Failed
+                }
+
+                // Drain duplicate wakeups queued while the probe was already running.
+                while (wakeChannel.tryReceive().isSuccess) {}
+
                 // A late response from the former carrier never changes the
                 // state or authority of its replacement.
-                if (!isActive || stopped || turnSession !== session) return@launch
-                if (answer?.error == null && answer?.status in listOf(401, 403)) {
-                    if (handleAuthenticationRequired(requireNotNull(answer).status, attemptedCredential) { turnSession === session }) return@launch
+                if (!isActive || stopped || (p2pSession ?: turnSession) !== session) return@launch
+                if (outcome is CarrierProbeOutcome.AuthDenied) {
+                    failures = 0
+                    if (handleAuthenticationRequired(outcome.statusCode, attemptedCredential) {
+                            (p2pSession ?: turnSession) === session
+                        }) return@launch
                     continue
                 }
                 val successfulGeneration = session.successfulResponseGeneration
+                val inboundGeneration = session.inboundFrameGeneration
                 val otherSuccessfulResponse = successfulGeneration != lastSuccessfulGeneration
+                val inboundFrameArrived = inboundGeneration != lastInboundGeneration ||
+                    session.lastInboundFrameElapsedMs < startInboundElapsed
                 lastSuccessfulGeneration = successfulGeneration
-                if ((answer != null && answer.status in 200..299 && answer.error.isNullOrBlank()) || otherSuccessfulResponse) {
+                lastInboundGeneration = inboundGeneration
+                if (outcome is CarrierProbeOutcome.Alive || otherSuccessfulResponse || inboundFrameArrived) {
                     failures = 0
                     if (credentialProvider()?.takeIf { it.isNotBlank() } != attemptedCredential) continue
                     val authenticated = !attemptedCredential.isNullOrBlank()
-                    updateState(if (authenticated) ConnectionStatus.Connected else ConnectionStatus.Reachable,
-                        reachable = true, authenticated = authenticated,
-                        transport = TransportKind.Turn, clearLastError = true)
+                    updateState(
+                        if (authenticated) ConnectionStatus.Connected else ConnectionStatus.Reachable,
+                        reachable = true,
+                        authenticated = authenticated,
+                        transport = if (isTurn) TransportKind.Turn else TransportKind.P2P,
+                        clearLastError = true,
+                    )
                 } else {
                     failures++
-                    // A single delayed health response does not prove an open
-                    // carrier is down. Business-request failures and explicit
-                    // close callbacks still trigger immediate recovery.
                     if (failures >= 2) {
-                        handleUnexpectedTurnClose(session, "health-probe-failed")
+                        if (isTurn) handleUnexpectedTurnClose(session, "health-probe-failed")
+                        else handleUnexpectedP2PClose(session, "health-probe-failed")
                         return@launch
                     }
                 }
@@ -857,9 +1084,26 @@ class ConnectivitySupervisor(
         }.also { it.start() }
     }
 
-    private fun cancelTurnRecheck() = synchronized(carrierHealthLock) {
+    private fun cancelTurnRecheck() = cancelCarrierHealthCheck()
+
+    private fun cancelCarrierHealthCheck(expectedSession: P2PSession? = null) = synchronized(carrierHealthLock) {
+        if (expectedSession != null && healthSession !== expectedSession) {
+            if (activeProbeSession === expectedSession) {
+                activeProbeDeferred?.cancel()
+                activeProbeDeferred = null
+                activeProbeSession = null
+            }
+            return@synchronized
+        }
+        capabilityProbeJob?.cancel()
+        capabilityProbeJob = null
         turnRecheckJob?.cancel()
         turnRecheckJob = null
+        healthWakeSignal?.close()
+        healthWakeSignal = null
+        activeProbeDeferred?.cancel()
+        activeProbeDeferred = null
+        activeProbeSession = null
         healthSession = null
     }
 

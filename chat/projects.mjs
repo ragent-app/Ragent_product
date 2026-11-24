@@ -36,10 +36,27 @@ let projectStoreCache = null;
 let projectStoreCacheMtimeMs = null;
 const runProjectMutation = createSerialTaskQueue();
 
-async function removeSessionHistoriesBounded(sessionIds = []) {
+async function removeSessionHistoriesBounded(sessionIds = [], {
+  removeSessionHistoryImpl = removeSessionHistory,
+  projectId = '',
+} = {}) {
   const ids = Array.isArray(sessionIds) ? sessionIds : [];
+  const removeOne = async (sessionId) => {
+    try {
+      await removeSessionHistoryImpl(sessionId);
+    } catch (error) {
+      // Project and session metadata are already committed; residual Windows
+      // handle/AV locks on history directories must not fail deleteProject.
+      console.warn('[projects] Residual session history cleanup failed after project deletion', {
+        projectId,
+        sessionId,
+        code: error?.code || '',
+        error: error?.message || String(error),
+      });
+    }
+  };
   if (ids.length <= 1) {
-    await Promise.all(ids.map((sessionId) => removeSessionHistory(sessionId)));
+    await Promise.all(ids.map((sessionId) => removeOne(sessionId)));
     return;
   }
   let cursor = 0;
@@ -50,7 +67,7 @@ async function removeSessionHistoriesBounded(sessionIds = []) {
       const index = cursor;
       cursor += 1;
       if (index >= ids.length) return;
-      await removeSessionHistory(ids[index]);
+      await removeOne(ids[index]);
     }
   });
   await Promise.all(workers);
@@ -815,7 +832,10 @@ export async function migrateProjectsToTargets() {
  * - otherwise the sessions keep their folder but become durable L1 inbox
  *   entries via projectDetached=true.
  */
-export async function deleteProject(projectId, { deleteSessions = false } = {}) {
+export async function deleteProject(projectId, {
+  deleteSessions = false,
+  removeSessionHistoryImpl = removeSessionHistory,
+} = {}) {
   const normalizedProjectId = normalizeProjectId(projectId);
   if (!normalizedProjectId) return null;
   return runProjectMutation(async () => {
@@ -872,7 +892,7 @@ export async function deleteProject(projectId, { deleteSessions = false } = {}) 
         }
         const matchedSet = new Set(matched);
         const kept = metas.filter((meta) => !matchedSet.has(meta));
-        if (kept.length !== metas.length) await saveSessionsMeta(kept);
+        if (kept.length !== metas.length) await saveSessionsMeta(kept, { immediate: true });
       } else {
         let changed = false;
         for (const meta of matched) {
@@ -885,7 +905,7 @@ export async function deleteProject(projectId, { deleteSessions = false } = {}) 
             changed = true;
           }
         }
-        if (changed) await saveSessionsMeta(metas);
+        if (changed) await saveSessionsMeta(metas, { immediate: true });
       }
       return null;
     });
@@ -894,7 +914,10 @@ export async function deleteProject(projectId, { deleteSessions = false } = {}) 
     await saveProjectStoreUnlocked(store);
 
     if (deleteSessions) {
-      await removeSessionHistoriesBounded(matchedSessionIds);
+      await removeSessionHistoriesBounded(matchedSessionIds, {
+        removeSessionHistoryImpl,
+        projectId: project.id,
+      });
     }
     return {
       project,

@@ -53,7 +53,12 @@ export async function createTargetRuntimeSummary({
   const effectiveRevision = revision === null || revision === undefined
     ? await getTargetRuntimeRevision()
     : revision;
-  const sessions = await listSessionsImpl({ includeVisitor: false, includeArchived: false, rootOnly: false });
+  const sessions = await listSessionsImpl({
+    includeVisitor: false,
+    includeArchived: false,
+    rootOnly: false,
+    listSummary: true,
+  });
   const projects = await listProjectsImpl({ includeSessionCounts: false });
   const activeSessions = sessions.filter((session) => text(session?.activeRunId));
   const runs = await Promise.all(activeSessions.map((session) => getRunImpl(session.activeRunId).catch(() => null)));

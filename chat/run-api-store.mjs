@@ -61,7 +61,7 @@ export async function readApiRunEvents(sessionId, runId, scope, { afterSeq, hist
     if (afterSeq > 0 && historyRevision == null)
       throw sessionApiError('INVALID_ARGUMENT', 400, 'A continued event cursor requires the history revision');
     const page = await readEventsPage(sessionId, { strict: true, metaOverride: meta,
-      direction: 'forward', afterSeq, limit: RUN_API_EVENT_SCAN_LIMIT, includeBodies: false, maxResponseBytes: 256 * 1024 });
+      direction: 'forward', afterSeq, limit: RUN_API_EVENT_SCAN_LIMIT, includeBodies: false, maxResponseBytes: 256 * 1024, priority: 'interactive' });
     let scannedThrough = afterSeq; let bytes = 0;
     const events = [];
     for (const event of page.events) {
@@ -88,7 +88,7 @@ async function strictPublicationHistory(sessionId, runId, { allowedRunIds = [run
   const allowed = new Set(allowedRunIds);
   while (scanned < 8192) {
     const page = await readEventsPage(sessionId, { strict: true, metaOverride: meta,
-      direction: 'latest', beforeSeq, limit: 128, includeBodies: false });
+      direction: 'latest', beforeSeq, limit: 128, includeBodies: false, priority: 'interactive' });
     if (!page.events.length) break;
     scanned += page.events.length;
     for (const event of page.events) {

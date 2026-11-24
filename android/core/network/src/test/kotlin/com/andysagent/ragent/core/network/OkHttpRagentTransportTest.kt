@@ -183,6 +183,36 @@ class OkHttpRagentTransportTest {
         }
     }
 
+    @Test fun requestTimeoutWhileOpenInvokesSuspectHookWithoutImmediateTeardown() = runBlocking {
+        for (turn in listOf(true, false)) {
+            var unavailable = 0
+            val suspects = mutableListOf<P2PSession>()
+            val peer = object : P2PSession {
+                override val isOpen = true
+                override suspend fun connect() = Result.success(Unit)
+                override fun close() = Unit
+                override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> =
+                    Result.failure(P2PRequestTimeoutException())
+            }
+            val transport = OkHttpRagentTransport(
+                endpointProvider = { "" },
+                credentialProvider = { "rda_fixture" },
+                requireVerifiedCarrier = true,
+                onCarrierUnavailable = { unavailable++ },
+                onCarrierSuspect = { suspects += it },
+            )
+            try {
+                if (turn) transport.setTurnSession(peer) else transport.setP2PSession(peer)
+                transport.updateCarrierConnectionState(RuntimeConnectionState.Connected)
+                assertFailsWith<ApiException> { transport.execute(ApiRequest("GET", "/api/projects")) }
+                assertEquals(0, unavailable)
+                assertEquals(1, suspects.size)
+                assertTrue(suspects[0] === peer)
+                assertEquals(RuntimeConnectionState.Connected, transport.connectionState.value)
+            } finally { transport.close() }
+        }
+    }
+
     @Test fun carrierHandoffDrainsInFlightRequestsWithoutReplayingWrites() = runBlocking {
         val entered = CompletableDeferred<Unit>()
         val finish = CompletableDeferred<Unit>()

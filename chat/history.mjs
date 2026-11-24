@@ -308,13 +308,19 @@ export async function __mapWithBoundedConcurrency(items, concurrency, fn) {
 
 async function mapWithAdaptiveConcurrency(items, fn, { priority = 'normal' } = {}) {
   if (!Array.isArray(items) || items.length === 0) return [];
-  const normalizedPriority = priority === 'interactive' ? 'interactive' : 'background';
-  const budget = normalizedPriority === 'interactive'
-    ? historyReadBudget
-    : historyBackgroundReadBudget;
-  const fallbackConcurrency = normalizedPriority === 'interactive'
-    ? HISTORY_READ_CONCURRENCY
-    : HISTORY_BACKGROUND_READ_CONCURRENCY;
+  const normalizedPriority = priority === 'interactive' || priority === 'background'
+    ? priority
+    : 'normal';
+  const useBackgroundBudget = normalizedPriority === 'background';
+  const budget = useBackgroundBudget
+    ? historyBackgroundReadBudget
+    : historyReadBudget;
+  const fallbackConcurrency = useBackgroundBudget
+    ? HISTORY_BACKGROUND_READ_CONCURRENCY
+    : HISTORY_READ_CONCURRENCY;
+  const deadlineMs = useBackgroundBudget
+    ? HISTORY_BACKGROUND_ACQUIRE_DEADLINE_MS
+    : HISTORY_INTERACTIVE_ACQUIRE_DEADLINE_MS;
   const workerCount = Math.max(1, Math.min(
     budget.effectiveLimit || fallbackConcurrency,
     items.length,
@@ -327,9 +333,7 @@ async function mapWithAdaptiveConcurrency(items, fn, { priority = 'normal' } = {
       // lane is busy. The error is intentionally propagated so callers can
       // retry/skip the maintenance pass instead of silently returning partial
       // history.
-      deadlineMs: normalizedPriority === 'interactive'
-        ? HISTORY_INTERACTIVE_ACQUIRE_DEADLINE_MS
-        : HISTORY_BACKGROUND_ACQUIRE_DEADLINE_MS,
+      deadlineMs,
     });
     if (!lease) {
       throw Object.assign(new Error(`${budget.name} adaptive budget unavailable`), {
@@ -357,15 +361,49 @@ async function readLogicalEventsBatched(sessionId, seqs, readContext, {
   uncached = false,
   priority = 'normal',
 } = {}) {
-  return mapWithAdaptiveConcurrency(
-    seqs,
-    (seq) => loadLogicalStoredEvent(
-      sessionId,
-      seq,
-      logicalEventOptions(readContext, { uncached }),
-    ),
-    { priority },
-  );
+  if (!Array.isArray(seqs) || seqs.length === 0) return [];
+  const opts = logicalEventOptions(readContext, { uncached });
+  const canFastPathCache = !uncached && readContext?.strict !== true;
+  const usesSharedPrefix = readContext?.meta?.historyStorage === 'shared-prefix-v1';
+  const sharedThroughSeq = usesSharedPrefix ? (readContext.historyBase?.throughSeq || 0) : 0;
+  if (!canFastPathCache) {
+    return mapWithAdaptiveConcurrency(
+      seqs,
+      (seq) => loadLogicalStoredEvent(sessionId, seq, opts),
+      { priority },
+    );
+  }
+  const results = new Array(seqs.length);
+  const cachedIndices = [];
+  const missIndices = [];
+  const missSeqs = [];
+  for (let index = 0; index < seqs.length; index += 1) {
+    const seq = seqs[index];
+    const isLocalSeq = !usesSharedPrefix || seq > sharedThroughSeq;
+    if (isLocalSeq && eventCache.has(eventCacheKey(sessionId, seq))) {
+      cachedIndices.push(index);
+    } else {
+      missIndices.push(index);
+      missSeqs.push(seq);
+    }
+  }
+  const [cachedValues, missValues] = await Promise.all([
+    Promise.all(cachedIndices.map((index) => loadLogicalStoredEvent(sessionId, seqs[index], opts))),
+    missSeqs.length > 0
+      ? mapWithAdaptiveConcurrency(
+        missSeqs,
+        (seq) => loadLogicalStoredEvent(sessionId, seq, opts),
+        { priority },
+      )
+      : Promise.resolve([]),
+  ]);
+  for (let i = 0; i < cachedIndices.length; i += 1) {
+    results[cachedIndices[i]] = cachedValues[i];
+  }
+  for (let i = 0; i < missIndices.length; i += 1) {
+    results[missIndices[i]] = missValues[i];
+  }
+  return results;
 }
 
 // Batch variant of hydrateEvent: bodies for the given stored events are read
@@ -1658,14 +1696,74 @@ async function hydrateLogicalEventsBatched(sessionId, logicalEvents, includeBodi
   strict = false,
 } = {}) {
   if (!Array.isArray(logicalEvents) || logicalEvents.length === 0) return [];
+  if (includeBodies === false) {
+    return Promise.all(logicalEvents.map((logical) => hydrateLogicalEvent(
+      sessionId,
+      logical,
+      false,
+      { maxBodyBytes, strict },
+    )));
+  }
   const includeFor = typeof includeBodies === 'function'
     ? includeBodies
     : () => includeBodies === true;
-  return mapWithAdaptiveConcurrency(
-    logicalEvents,
-    (logical) => hydrateLogicalEvent(sessionId, logical, includeFor(logical), { maxBodyBytes, strict }),
-    { priority },
-  );
+  const tasks = logicalEvents.map((logical) => {
+    const shouldInclude = includeFor(logical);
+    const event = logical?.event;
+    const needsBodyRead = Boolean(
+      shouldInclude
+      && event?.bodyRef
+      && event?.bodyField
+      && !(Number.isFinite(event.bodyBytes) && event.bodyBytes > maxBodyBytes)
+      && (strict || !bodyCache.has(bodyCacheKey(logical.sourceSessionId, event.bodyRef))),
+    );
+    return { logical, shouldInclude, needsBodyRead };
+  });
+  const ioIndices = [];
+  const ioTasks = [];
+  const syncIndices = [];
+  for (let index = 0; index < tasks.length; index += 1) {
+    if (tasks[index].needsBodyRead) {
+      ioIndices.push(index);
+      ioTasks.push(tasks[index]);
+    } else {
+      syncIndices.push(index);
+    }
+  }
+  if (ioTasks.length === 0) {
+    return Promise.all(tasks.map(({ logical, shouldInclude }) => hydrateLogicalEvent(
+      sessionId,
+      logical,
+      shouldInclude,
+      { maxBodyBytes, strict },
+    )));
+  }
+  const results = new Array(tasks.length);
+  const [hydratedIo, hydratedSync] = await Promise.all([
+    mapWithAdaptiveConcurrency(
+      ioTasks,
+      ({ logical, shouldInclude }) => hydrateLogicalEvent(
+        sessionId,
+        logical,
+        shouldInclude,
+        { maxBodyBytes, strict },
+      ),
+      { priority },
+    ),
+    Promise.all(syncIndices.map((index) => hydrateLogicalEvent(
+      sessionId,
+      tasks[index].logical,
+      tasks[index].shouldInclude,
+      { maxBodyBytes, strict },
+    ))),
+  ]);
+  for (let i = 0; i < ioIndices.length; i += 1) {
+    results[ioIndices[i]] = hydratedIo[i];
+  }
+  for (let i = 0; i < syncIndices.length; i += 1) {
+    results[syncIndices[i]] = hydratedSync[i];
+  }
+  return results;
 }
 
 // Select bodies against the response budget before starting hydration. The
@@ -2605,12 +2703,16 @@ export async function readLastTurnEvents(sessionId, options = {}) {
   const readContext = await createHistoryReadContext(sessionId, null, { strict: options.strict === true });
   const { meta } = readContext;
   const includeBodies = options.includeBodies !== false;
+  const priority = options.priority === 'interactive' || options.priority === 'background'
+    ? options.priority
+    : 'normal';
   const events = [];
   let done = false;
   for (const seqs of descSeqRangeChunks(meta.latestSeq, 1, HISTORY_DESC_SCAN_BATCH)) {
     if (done) break;
-    const logicalEvents = await readLogicalEventsBatched(sessionId, seqs, readContext);
+    const logicalEvents = await readLogicalEventsBatched(sessionId, seqs, readContext, { priority });
     const hydrated = await hydrateLogicalEventsBatched(sessionId, logicalEvents, includeBodies, {
+      priority,
       strict: options.strict === true,
     });
     for (const event of hydrated.filter(Boolean)) {
@@ -2629,9 +2731,12 @@ export async function findLatestAssistantMessage(sessionId, options = {}) {
   const readContext = await createHistoryReadContext(sessionId, null, { strict });
   const { meta } = readContext;
   const includeBodies = options.includeBodies !== false;
+  const priority = options.priority === 'interactive' || options.priority === 'background'
+    ? options.priority
+    : 'normal';
   const match = typeof options.match === 'function' ? options.match : null;
   for (const seqs of descSeqRangeChunks(meta.latestSeq, 1, HISTORY_DESC_SCAN_BATCH)) {
-    const logicalEvents = await readLogicalEventsBatched(sessionId, seqs, readContext);
+    const logicalEvents = await readLogicalEventsBatched(sessionId, seqs, readContext, { priority });
     for (const logical of logicalEvents) {
       const stored = await hydrateLogicalEvent(sessionId, logical, false, { strict });
       if (!stored) continue;
@@ -2801,7 +2906,10 @@ async function commitStoredMessagePosition(sessionId, event) {
 }
 
 /** A backward visible page can contain a start whose completion is on a later raw page. */
-export async function hydrateTimelineMessageSnapshots(sessionId, sources, maxSeq = Number.MAX_SAFE_INTEGER) {
+export async function hydrateTimelineMessageSnapshots(sessionId, sources, maxSeq = Number.MAX_SAFE_INTEGER, options = {}) {
+  const priority = options?.priority === 'interactive' || options?.priority === 'normal'
+    ? options.priority
+    : 'background';
   const output = [];
   for (const source of sources) {
     if (!source.canonicalMessageId || source.type !== 'message_start') { output.push(source); continue; }
@@ -2809,7 +2917,10 @@ export async function hydrateTimelineMessageSnapshots(sessionId, sources, maxSeq
     if (!position?.snapshotSeq || position.snapshotSeq <= source.seq || position.snapshotSeq > maxSeq) {
       output.push(source); continue;
     }
-    const [snapshot] = await readEventsRange(sessionId, position.snapshotSeq, position.snapshotSeq, { includeBodies: true });
+    const [snapshot] = await readEventsRange(sessionId, position.snapshotSeq, position.snapshotSeq, {
+      includeBodies: true,
+      priority,
+    });
     if (snapshot?.canonicalMessageId !== source.canonicalMessageId) { output.push(source); continue; }
     output.push({ ...snapshot, seq: source.firstSeq || source.seq, firstSeq: source.firstSeq || source.seq,
       lastEventSeq: snapshot.lastEventSeq || position.snapshotSeq });
@@ -2895,7 +3006,9 @@ export async function appendInitializationEvents(sessionId, events) {
 
 export async function readEventsAfter(sessionId, afterSeq = 0, options = {}) {
   const startedAt = monotonicMs();
-  const priority = options.priority === 'interactive' ? 'interactive' : 'background';
+  const priority = options.priority === 'interactive' || options.priority === 'normal'
+    ? options.priority
+    : 'background';
   const readContext = await createHistoryReadContext(sessionId, options.metaOverride || null, {
     strict: options.strict === true,
   });
@@ -2930,7 +3043,9 @@ export async function readEventsAfter(sessionId, afterSeq = 0, options = {}) {
 // materialized the entire transcript first.
 export async function readEventsRange(sessionId, fromSeq, toSeq, options = {}) {
   const startedAt = monotonicMs();
-  const priority = options.priority === 'interactive' ? 'interactive' : 'background';
+  const priority = options.priority === 'interactive' || options.priority === 'normal'
+    ? options.priority
+    : 'background';
   const readContext = await createHistoryReadContext(sessionId, options.metaOverride || null, {
     strict: options.strict === true,
   });
@@ -2995,7 +3110,9 @@ export async function readEventsPage(sessionId, options = {}) {
   // Low-level page reads default to background because internal compaction,
   // recovery, and dedup scans call this function directly. Public session
   // wrappers opt into `interactive` explicitly below.
-  const priority = options.priority === 'interactive' ? 'interactive' : 'background';
+  const priority = options.priority === 'interactive' || options.priority === 'normal'
+    ? options.priority
+    : 'background';
   // Callers that already loaded the authoritative history metadata for the
   // same request may pass it through. This keeps a timeline request from
   // re-reading meta.json once for the route existence check and again for the
