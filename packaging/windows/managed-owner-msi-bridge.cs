@@ -24,6 +24,103 @@ static class ManagedOwnerMsiBridge {
  [DllImport("msi.dll",CharSet=CharSet.Unicode,EntryPoint="MsiGetProductInfoW",ExactSpelling=true)]
  static extern uint MsiGetProductInfo(string productCode,string property,StringBuilder value,ref uint valueLength);
  static readonly string[] Names={"Ragent-ControlPlane","Ragent-RunnerSupervisor"};
+ const string ParameterKey=@"SYSTEM\CurrentControlSet\Services\Ragent-ControlPlane\Parameters";
+ const string ParameterSnapshotName="owner-msi.control-parameters.json";
+ static readonly string[] PreservedParameters={
+  "RAGENT_FACTORY_SCHEDULER_OWNER_ID","RAGENT_FACTORY_ORGANIZATIONS",
+  "RAGENT_FACTORY_CONTROL_ENABLED","RAGENT_FACTORY_SCHEDULER_ENABLED",
+  "RAGENT_RESPONSIBILITY_RUNTIME_ENABLED","RAGENT_CODEX_PROVIDER_READONLY"
+ };
+ static void CheckParameterAcl(RegistrySecurity acl){
+  Need(Admins.Contains(acl.GetOwner(typeof(SecurityIdentifier)).Value),"OMI_PARAMETERS_ACL_REFUSED");
+  const RegistryRights writes=RegistryRights.SetValue|RegistryRights.CreateSubKey|RegistryRights.Delete|RegistryRights.ChangePermissions|RegistryRights.TakeOwnership;
+  foreach(RegistryAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier))){
+   if(rule.AccessControlType==AccessControlType.Allow && (rule.PropagationFlags&PropagationFlags.InheritOnly)==0 &&
+      !Admins.Contains(rule.IdentityReference.Value) && (rule.RegistryRights&writes)!=0)
+    throw new InvalidOperationException("OMI_PARAMETERS_ACL_REFUSED");
+  }
+ }
+ static void SnapshotParameters(){
+  Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_PARAMETERS_SYSTEM_REQUIRED");
+  ValidateProductRoot();string path=Path.Combine(Product,ParameterSnapshotName);
+  Need(!Present(path),"OMI_PARAMETERS_SNAPSHOT_EXISTS");
+  var values=new Dictionary<string,string>(StringComparer.Ordinal);
+  string sddl=null;
+  using(var key=Registry.LocalMachine.OpenSubKey(ParameterKey,RegistryKeyPermissionCheck.ReadSubTree,RegistryRights.ReadKey)){
+   if(key!=null){
+    var acl=key.GetAccessControl(AccessControlSections.Owner|AccessControlSections.Group|AccessControlSections.Access);
+    CheckParameterAcl(acl);sddl=acl.GetSecurityDescriptorSddlForm(AccessControlSections.Owner|AccessControlSections.Group|AccessControlSections.Access);
+    foreach(string name in PreservedParameters){
+     if(!key.GetValueNames().Contains(name,StringComparer.OrdinalIgnoreCase))continue;
+     Need(key.GetValueKind(name)==RegistryValueKind.String,"OMI_PARAMETERS_TYPE_REFUSED");
+     string value=key.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+     Need(value!=null&&value.Length<=4096,"OMI_PARAMETERS_VALUE_REFUSED");values.Add(name,value);
+    }
+   }
+  }
+  var record=new Dictionary<string,object>{{"version",1},{"purpose","owner-control-parameters"},{"sddl",sddl},{"values",values}};
+  byte[] bytes=new UTF8Encoding(false).GetBytes(new JavaScriptSerializer().Serialize(record));
+  Need(bytes.Length<=65536,"OMI_PARAMETERS_SNAPSHOT_TOO_LARGE");
+  var fileAcl=new FileSecurity();fileAcl.SetAccessRuleProtection(true,false);
+  fileAcl.SetOwner(new SecurityIdentifier("S-1-5-32-544"));
+  foreach(string sid in new[]{"S-1-5-18","S-1-5-32-544"})
+   fileAcl.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(sid),FileSystemRights.FullControl,AccessControlType.Allow));
+  string pending=path+"."+Guid.NewGuid().ToString("N")+".pending";
+  try{
+   using(var stream=new FileStream(pending,FileMode.CreateNew,FileSystemRights.Write,FileShare.None,4096,FileOptions.None,fileAcl)){
+    ServiceDirectoryPin.VerifyFile(stream.SafeFileHandle,pending);Acl(pending,false,false);stream.Write(bytes,0,bytes.Length);stream.Flush(true);
+   }
+   File.Move(pending,path);
+  }finally{if(File.Exists(pending))File.Delete(pending);}
+ }
+ static void RestoreParameters(bool missingAllowed){
+  Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_PARAMETERS_SYSTEM_REQUIRED");
+  ValidateProductRoot();string path=Path.Combine(Product,ParameterSnapshotName);
+  if(!Present(path)){Need(missingAllowed,"OMI_PARAMETERS_SNAPSHOT_MISSING");return;}
+  Dictionary<string,object> record;
+  using(var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)){
+   ServiceDirectoryPin.VerifyFile(stream.SafeFileHandle,path);Acl(path,false,false);
+   Need(stream.Length>0&&stream.Length<=65536,"OMI_PARAMETERS_SNAPSHOT_INVALID");
+   using(var reader=new StreamReader(stream,new UTF8Encoding(false,true)))
+    record=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(reader.ReadToEnd());
+  }
+  Need(record!=null&&record.Count==4&&record.ContainsKey("version")&&record["version"] is int&&(int)record["version"]==1&&
+   record.ContainsKey("purpose")&&(string)record["purpose"]=="owner-control-parameters"&&record.ContainsKey("sddl")&&record.ContainsKey("values"),"OMI_PARAMETERS_SNAPSHOT_INVALID");
+  var values=record["values"] as Dictionary<string,object>;string sddl=record["sddl"] as string;
+  Need(values!=null&&values.Count<=PreservedParameters.Length&&(record["sddl"]==null||sddl!=null),"OMI_PARAMETERS_SNAPSHOT_INVALID");
+  foreach(var item in values)Need(PreservedParameters.Contains(item.Key,StringComparer.Ordinal)&&item.Value is string&&((string)item.Value).Length<=4096,"OMI_PARAMETERS_SNAPSHOT_INVALID");
+  if(sddl==null){Need(values.Count==0,"OMI_PARAMETERS_SNAPSHOT_INVALID");return;}
+  var original=new RegistrySecurity();original.SetSecurityDescriptorSddlForm(sddl,AccessControlSections.Owner|AccessControlSections.Group|AccessControlSections.Access);CheckParameterAcl(original);
+  using(var service=Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Ragent-ControlPlane",RegistryKeyPermissionCheck.ReadWriteSubTree,RegistryRights.FullControl)){
+   Need(service!=null,"OMI_PARAMETERS_SERVICE_MISSING");
+   // Apply the captured descriptor at creation: the SCM service key grants
+   // its service SID inherited write access, which is not a safe staging ACL.
+   using(var key=service.CreateSubKey("Parameters",RegistryKeyPermissionCheck.ReadWriteSubTree,original)){
+    CheckParameterAcl(key.GetAccessControl(AccessControlSections.Owner|AccessControlSections.Access));
+    foreach(string name in PreservedParameters){
+     object value;if(values.TryGetValue(name,out value))key.SetValue(name,(string)value,RegistryValueKind.String);
+     else key.DeleteValue(name,false);
+    }
+    key.SetAccessControl(original);key.Flush();
+    var actual=key.GetAccessControl(AccessControlSections.Owner|AccessControlSections.Group|AccessControlSections.Access);
+    Need(actual.GetSecurityDescriptorSddlForm(AccessControlSections.Owner|AccessControlSections.Group|AccessControlSections.Access)==sddl,"OMI_PARAMETERS_ACL_RESTORE_FAILED");
+    var names=key.GetValueNames();
+    foreach(string name in PreservedParameters){
+     object value;bool expected=values.TryGetValue(name,out value);
+     bool present=names.Contains(name,StringComparer.OrdinalIgnoreCase);
+     Need(present==expected,"OMI_PARAMETERS_RESTORE_FAILED");
+     if(expected)Need(key.GetValueKind(name)==RegistryValueKind.String &&
+      String.Equals(key.GetValue(name,null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string,(string)value,StringComparison.Ordinal),"OMI_PARAMETERS_RESTORE_FAILED");
+    }
+   }
+  }
+ }
+ static void CommitParameters(){
+  Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_PARAMETERS_SYSTEM_REQUIRED");
+  ValidateProductRoot();string path=Path.Combine(Product,ParameterSnapshotName);
+  Need(Present(path),"OMI_PARAMETERS_SNAPSHOT_MISSING");Acl(path,false,false);File.Delete(path);
+  Need(!Present(path),"OMI_PARAMETERS_SNAPSHOT_CLEANUP_FAILED");
+ }
  static string LegacyVoicePath(){
   string value=null;using(var settings=Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Ragent\LocalVoiceSettings",false))
    if(settings!=null)value=settings.GetValue("RuntimeDirectory",null,RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
@@ -211,6 +308,11 @@ static class ManagedOwnerMsiBridge {
  // This action runs after that rollback and restores the verified old Broker.
  static void RestoreBrokerAfterMajorRollback(){
   Need(WindowsIdentity.GetCurrent().User.Value=="S-1-5-18","OMI_BROKER_ROLLBACK_SYSTEM_REQUIRED");
+  bool parameterRestoreFailed=false;
+  try{
+   RestoreParameters(true);
+   if(Present(Path.Combine(Product,ParameterSnapshotName)))CommitParameters();
+  }catch{parameterRestoreFailed=true;}
   ValidateProductRoot();string binary=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.exe"),manifest=Path.Combine(Product,"Broker","Ragent.PrivilegedBroker.manifest.json");
   var pins=new List<IDisposable>();string version,hash;
   try{
@@ -230,6 +332,7 @@ static class ManagedOwnerMsiBridge {
    }
   }
   Console.WriteLine("OMI_BROKER_MAJOR_ROLLBACK_RESTORED");
+  Need(!parameterRestoreFailed,"OMI_PARAMETERS_ROLLBACK_FAILED");
  }
  static void ValidateProductRoot(){
   string target=Path.GetFullPath(Product).TrimEnd('\\');Need(target.Length>2,"OMI_INSTALL_ROOT_REFUSED");
@@ -677,6 +780,12 @@ static class ManagedOwnerMsiBridge {
     ConfigureBrokerService(args[1],args[2]);Console.WriteLine("OMI_BROKER_SERVICE_CONFIGURED");return 0;
    }
    if(args.Length==1&&args[0]=="restore-broker-after-major-rollback"){RestoreBrokerAfterMajorRollback();return 0;}
+   if(args.Length==1&&args[0]=="parameters-admission"){
+    ValidateProductRoot();Need(!Present(Path.Combine(Product,ParameterSnapshotName)),"OMI_PARAMETERS_SNAPSHOT_EXISTS");return 0;
+   }
+   if(args.Length==1&&args[0]=="parameters-snapshot"){SnapshotParameters();return 0;}
+   if(args.Length==1&&args[0]=="parameters-restore"){RestoreParameters(false);return 0;}
+   if(args.Length==1&&args[0]=="parameters-commit"){CommitParameters();return 0;}
    // MSI immediate actions may still impersonate an ordinary client. This
    // admission only reads public state; the deferred non-impersonating Remove
    // repeats all privileged validation before any deletion or RemoveFiles.

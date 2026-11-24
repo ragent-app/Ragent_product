@@ -355,10 +355,10 @@ try {
         # activated-owner major lane and verify every row.
         $installer=$null;$database=$null;$view=$null;$record=$null
         $sequences=[ordered]@{
-            InstallInitialize=1300;ManagedFreshGuard=1310;ManagedRemoveGuard=1320;
+            ManagedParameterAdmission=1290;InstallInitialize=1300;ManagedFreshGuard=1310;ManagedRemoveGuard=1320;
             ManagedMaintenanceRefused=1340;
             ManagedPreValidationRollback=1350;ManagedPreValidationStop=1360;InstallExecute=1370;
-            ManagedUpgradeGuard=1501;ManagedMajorBrokerRollback=1503;
+            ManagedUpgradeGuard=1501;ManagedParameterSnapshot=1502;ManagedMajorBrokerRollback=1503;
             InstallExecuteAgain=1504;RemoveExistingProducts=1505;ManagedUpgradeRollback=1506;ManagedUpgradeBegin=1507
         }
         try{

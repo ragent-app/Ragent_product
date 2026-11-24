@@ -81,6 +81,10 @@
     <CustomAction Id="ManagedUpgradeBegin" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-begin &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedUpgradeRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
     <CustomAction Id="ManagedMajorBrokerRollback" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="restore-broker-after-major-rollback &quot;[RagentMachineRoot].&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="ManagedParameterAdmission" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="parameters-admission &quot;[RagentMachineRoot].&quot;" Execute="immediate" Return="check" />
+    <CustomAction Id="ManagedParameterSnapshot" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="parameters-snapshot &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedParameterRestore" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="parameters-restore &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="ManagedParameterCommit" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="parameters-commit &quot;[RagentMachineRoot].&quot;" Execute="commit" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedPrepareExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-prepare &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedPreparePolicyExisting" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-policy &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
     <CustomAction Id="ManagedUpgradeActivationCheck" BinaryRef="ManagedOwnerMsiBridge" ExeCommand="upgrade-activation-check &quot;[RagentMachineRoot].&quot;" Execute="deferred" Impersonate="no" Return="check" />
@@ -123,12 +127,14 @@
            RemoveExistingProducts can make any change to an existing install. -->
       <?if $(var.MsiUpgradeLane) = "major" ?>
       <?if $(var.ExperimentalMajorUpgrade) = "1" ?>
-      <!-- Flush only the read-only elevated guard before MSI removes the old
-           product; receipts must remain intact for the old uninstall guard. -->
+      <!-- Keep existing receipts intact for the old uninstall guard. The
+           protected parameter snapshot is captured before service removal. -->
+      <Custom Action="ManagedParameterAdmission" Before="InstallInitialize" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <Custom Action="ManagedUpgradeGuard" After="InstallInitialize" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <!-- Rollback is registered before old-product removal, so it runs after
            the predecessor MSI has recreated its Broker service. -->
-      <Custom Action="ManagedMajorBrokerRollback" After="ManagedUpgradeGuard" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+      <Custom Action="ManagedParameterSnapshot" After="ManagedUpgradeGuard" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+      <Custom Action="ManagedMajorBrokerRollback" After="ManagedParameterSnapshot" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <?if $(var.EarlyServiceQuiescence) = "1" ?>
       <InstallExecuteAgain After="ManagedMajorBrokerRollback" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <?else?>
@@ -197,11 +203,13 @@
       <?if $(var.MsiUpgradeLane) = "major" ?>
       <?if $(var.ExperimentalMajorUpgrade) = "1" ?>
         <Custom Action="ManagedConfigureBrokerServiceTrustUpgrade" After="InstallServices" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
-        <Custom Action="ManagedPrepareExisting" After="ManagedConfigureBrokerServiceTrustUpgrade" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
+        <Custom Action="ManagedParameterRestore" After="ManagedConfigureBrokerServiceTrustUpgrade" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
+        <Custom Action="ManagedPrepareExisting" After="ManagedParameterRestore" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
         <Custom Action="ManagedPreparePolicyExisting" After="ManagedPrepareExisting" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
         <Custom Action="ManagedUpgradeActivationCheck" After="ManagedPreparePolicyExisting" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
         <Custom Action="ManagedUpgradeActivate" After="ManagedUpgradeActivationCheck" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
         <Custom Action="ManagedUpgradeCommit" Before="InstallFinalize" Condition="(WIX_UPGRADE_DETECTED AND NOT Installed) OR (Installed AND REINSTALL AND NOT (REMOVE = &quot;ALL&quot;))" />
+        <Custom Action="ManagedParameterCommit" After="ManagedUpgradeCommit" Condition="WIX_UPGRADE_DETECTED AND NOT Installed" />
       <?endif?>
       <?endif?>
       <?if $(var.TestPostActivationRollback) = 1 ?>
