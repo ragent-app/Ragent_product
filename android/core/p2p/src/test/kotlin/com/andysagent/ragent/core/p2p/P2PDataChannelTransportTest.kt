@@ -19,6 +19,10 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.webrtc.DataChannel
 import org.webrtc.PeerConnection
+import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStats
+import org.webrtc.RTCStatsCollectorCallback
+import org.webrtc.RTCStatsReport
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
@@ -617,6 +621,157 @@ class P2PDataChannelTransportTest {
         } finally {
             transport.close()
         }
+    }
+
+    @Test
+    fun `turnOnly false configures IceTransportsType ALL and turnOnly true configures RELAY`() = runBlocking {
+        val turnServer = IceServer("turn:turn.cloudflare.com:50000?transport=udp", "user", "pass")
+        val directCandidate = P2PCandidate(
+            signalingUrl = "https://signal.example.com",
+            roomId = "room-all",
+            secret = "secret",
+            iceServers = listOf(turnServer),
+            turnOnly = false,
+        )
+        val relayCandidate = directCandidate.copy(roomId = "room-relay", turnOnly = true)
+
+        val directTransport = WebRTCDataChannelTransport(directCandidate, stubContext())
+        val relayTransport = WebRTCDataChannelTransport(relayCandidate, stubContext())
+        try {
+            val directConfig = directTransport.buildRtcConfiguration()
+            assertEquals(PeerConnection.IceTransportsType.ALL, directConfig.iceTransportsType)
+            assertEquals(listOf("turn:turn.cloudflare.com:50000?transport=udp"), directConfig.iceServers.map { it.uri })
+
+            val relayConfig = relayTransport.buildRtcConfiguration()
+            assertEquals(PeerConnection.IceTransportsType.RELAY, relayConfig.iceTransportsType)
+            assertEquals(listOf("turn:turn.cloudflare.com:50000?transport=udp"), relayConfig.iceServers.map { it.uri })
+
+            // Verify connect() passes the configured IceTransportsType to PeerConnectionFactory.createPeerConnection.
+            val capturedDirect = mutableListOf<PeerConnection.RTCConfiguration>()
+            val capturedRelay = mutableListOf<PeerConnection.RTCConfiguration>()
+            val probeDirect = WebRTCDataChannelTransport(directCandidate, stubContext()).apply {
+                peerConnectionFactoryProvider = {
+                    object : PeerConnectionFactory() {
+                        override fun createPeerConnection(
+                            configuration: PeerConnection.RTCConfiguration,
+                            observer: PeerConnection.Observer,
+                        ): PeerConnection? {
+                            capturedDirect += configuration
+                            return null
+                        }
+                    }
+                }
+            }
+            val probeRelay = WebRTCDataChannelTransport(relayCandidate, stubContext()).apply {
+                peerConnectionFactoryProvider = {
+                    object : PeerConnectionFactory() {
+                        override fun createPeerConnection(
+                            configuration: PeerConnection.RTCConfiguration,
+                            observer: PeerConnection.Observer,
+                        ): PeerConnection? {
+                            capturedRelay += configuration
+                            return null
+                        }
+                    }
+                }
+            }
+            try {
+                assertTrue(probeDirect.connect().isFailure)
+                assertTrue(probeRelay.connect().isFailure)
+                assertEquals(PeerConnection.IceTransportsType.ALL, capturedDirect.single().iceTransportsType)
+                assertEquals(PeerConnection.IceTransportsType.RELAY, capturedRelay.single().iceTransportsType)
+            } finally {
+                probeDirect.close()
+                probeRelay.close()
+            }
+        } finally {
+            directTransport.close()
+            relayTransport.close()
+        }
+    }
+
+    @Test
+    fun `getStats classifies non-relay candidate pair as P2P and relay pair as Turn`() = runBlocking {
+        val primary = ControllableDataChannel(initialState = DataChannel.State.OPEN)
+        val peerConnection = StatsPeerConnection()
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate(
+                signalingUrl = "https://signal.example.com",
+                roomId = "room-stats",
+                secret = "secret",
+                iceServers = listOf(IceServer("turn:turn.cloudflare.com:50000?transport=udp", "u", "p")),
+                turnOnly = false,
+            ),
+            appContext = stubContext(),
+        )
+        try {
+            assertEquals(P2PIceCarrier.Unknown, transport.resolvedCarrier.value)
+            transport.attachPeerConnectionForTest(peerConnection)
+            val observer = transport.attachDataChannelForTest(primary)
+            val peerObserver = transport.peerObserverForTest()
+
+            // Incomplete stats do not falsely claim P2P.
+            peerConnection.nextReport = RTCStatsReport(1L, emptyMap())
+            observer.onStateChange()
+            assertEquals(P2PIceCarrier.Unknown, transport.resolvedCarrier.value)
+
+            // Relay pair at DataChannel OPEN resolves to Turn.
+            peerConnection.nextReport = statsReport(localType = "relay", remoteType = "host")
+            observer.onStateChange()
+            assertEquals(P2PIceCarrier.Turn, transport.resolvedCarrier.value)
+
+            // Host <-> host upgrade on ICE COMPLETED updates resolvedCarrier to P2P.
+            peerConnection.nextReport = statsReport(localType = "host", remoteType = "host")
+            peerObserver.onIceConnectionChange(PeerConnection.IceConnectionState.COMPLETED)
+            assertEquals(P2PIceCarrier.P2P, transport.resolvedCarrier.value)
+
+            // Remote relay classifies as Turn.
+            peerConnection.nextReport = statsReport(localType = "srflx", remoteType = "relay")
+            peerObserver.onIceConnectionChange(PeerConnection.IceConnectionState.CONNECTED)
+            assertEquals(P2PIceCarrier.Turn, transport.resolvedCarrier.value)
+
+            // WAN srflx <-> prflx classifies as P2P.
+            peerConnection.nextReport = statsReport(localType = "srflx", remoteType = "prflx")
+            peerObserver.onIceConnectionChange(PeerConnection.IceConnectionState.COMPLETED)
+            assertEquals(P2PIceCarrier.P2P, transport.resolvedCarrier.value)
+
+            transport.close()
+            assertEquals(P2PIceCarrier.Unknown, transport.resolvedCarrier.value)
+        } finally {
+            transport.close()
+        }
+    }
+}
+
+private fun statsReport(localType: String, remoteType: String): RTCStatsReport = RTCStatsReport(
+    1_000L,
+    mapOf(
+        "transport-1" to RTCStats(
+            1_000L,
+            "transport",
+            "transport-1",
+            mapOf("selectedCandidatePairId" to "pair-1"),
+        ),
+        "pair-1" to RTCStats(
+            1_000L,
+            "candidate-pair",
+            "pair-1",
+            mapOf(
+                "state" to "succeeded",
+                "nominated" to true,
+                "localCandidateId" to "lc-1",
+                "remoteCandidateId" to "rc-1",
+            ),
+        ),
+        "lc-1" to RTCStats(1_000L, "local-candidate", "lc-1", mapOf("candidateType" to localType)),
+        "rc-1" to RTCStats(1_000L, "remote-candidate", "rc-1", mapOf("candidateType" to remoteType)),
+    ),
+)
+
+private class StatsPeerConnection : PeerConnection() {
+    @Volatile var nextReport: RTCStatsReport = RTCStatsReport(0L, emptyMap())
+    override fun getStats(callback: RTCStatsCollectorCallback) {
+        callback.onStatsDelivered(nextReport)
     }
 }
 

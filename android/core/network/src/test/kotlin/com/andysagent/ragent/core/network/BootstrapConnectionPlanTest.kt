@@ -8,6 +8,7 @@ import com.andysagent.ragent.core.protocol.ConnectionBootstrapPublicKeyDto
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapSignatureDto
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapTurnAuthorizationDto
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapTurnDto
+import com.andysagent.ragent.core.protocol.RagentProtocol
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.test.Test
@@ -88,6 +89,47 @@ class BootstrapConnectionPlanTest {
         assertNull(plan.turnCarrier)
     }
 
+    @Test
+    fun `allowDirectIce true sets turnOnly false while keeping signed TURN iceServers`() {
+        val turn = turn()
+        val contract = contract(turn = turn, allowDirectIce = true)
+        val encoded = RagentProtocol.json.encodeToString(ConnectionBootstrapContractDto.serializer(), contract)
+        val decoded = RagentProtocol.json.decodeFromString(ConnectionBootstrapContractDto.serializer(), encoded)
+        assertEquals(true, decoded.allowDirectIce)
+
+        val plan = BootstrapConnectionPlanFactory.create(
+            verified = VerifiedBootstrap(decoded, ConnectionBootstrapPublicKeyDto("ed25519", "key-1", "pem"), encoded),
+            bootstrapEndpoint = "",
+            p2pCredentials = BootstrapP2PCredentials("paired-secret"),
+        )
+
+        val carrier = assertNotNull(plan.turnCarrier)
+        assertEquals(true, plan.allowDirectIce)
+        assertEquals(false, carrier.p2pCandidate.turnOnly)
+        assertEquals(listOf("turn:turn.cloudflare.com:50000?transport=udp"), carrier.p2pCandidate.iceServers.map { it.url })
+        assertEquals("123:app", carrier.p2pCandidate.iceServers.single().username)
+        assertEquals("signed-password", carrier.p2pCandidate.iceServers.single().password)
+    }
+
+    @Test
+    fun `absent or false allowDirectIce in JSON preserves turnOnly true`() {
+        val baseJson = RagentProtocol.json.encodeToString(ConnectionBootstrapContractDto.serializer(), contract(turn = turn()))
+        val absentContract = RagentProtocol.json.decodeFromString(ConnectionBootstrapContractDto.serializer(), baseJson)
+        val falseJson = baseJson.dropLast(1) + ""","allowDirectIce":false}"""
+        val falseContract = RagentProtocol.json.decodeFromString(ConnectionBootstrapContractDto.serializer(), falseJson)
+
+        listOf(absentContract, falseContract).forEach { decoded ->
+            assertEquals(false, decoded.allowDirectIce)
+            val plan = BootstrapConnectionPlanFactory.create(
+                verified = VerifiedBootstrap(decoded, ConnectionBootstrapPublicKeyDto("ed25519", "key-1", "pem")),
+                bootstrapEndpoint = "",
+                p2pCredentials = BootstrapP2PCredentials("paired-secret"),
+            )
+            assertEquals(false, plan.allowDirectIce)
+            assertEquals(true, assertNotNull(plan.turnCarrier).p2pCandidate.turnOnly)
+        }
+    }
+
     private fun verified(contract: ConnectionBootstrapContractDto) = VerifiedBootstrap(
         contract,
         ConnectionBootstrapPublicKeyDto("ed25519", "key-1", "pem"),
@@ -96,6 +138,7 @@ class BootstrapConnectionPlanTest {
     private fun contract(
         turn: ConnectionBootstrapTurnDto,
         authorization: ConnectionBootstrapTurnAuthorizationDto = authorization("turn-connection-1"),
+        allowDirectIce: Boolean = false,
     ) = ConnectionBootstrapContractDto(
         contractVersion = 2,
         instanceId = "instance-1",
@@ -137,6 +180,7 @@ class BootstrapConnectionPlanTest {
         upgrade = null,
         fallback = null,
         signature = ConnectionBootstrapSignatureDto("ed25519", "key-1", "2098-01-01T00:00:00.000Z", "signature"),
+        allowDirectIce = allowDirectIce,
     )
 
     private fun turn(

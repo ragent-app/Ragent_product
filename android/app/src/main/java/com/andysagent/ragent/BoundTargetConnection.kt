@@ -58,6 +58,7 @@ internal class BoundTargetConnection(
     private val bootstrapClient = ConnectionBootstrapClient(endpointProvider, credentialProvider)
     @Volatile private var plan: BootstrapConnectionPlan? = null
     @Volatile private var lastReportedTransport: String? = null
+    @Volatile private var lastReportedSession: Any? = null
     private var refreshJob: Job? = null
     private var refreshPlanApplied = false
     private var renewalMonitorJob: Job? = null
@@ -111,11 +112,20 @@ internal class BoundTargetConnection(
             lastFailedTurnCarrier = null
             val old = activeTurnSession.getAndSet(it as? PlannedTurnSession)
             signedCandidatePlan?.takeIf { candidate -> candidate.turnCarrier === (it as? PlannedTurnSession)?.carrier }?.let { candidate ->
-                plan = candidate; lastReportedTransport = null
+                plan = candidate; lastReportedTransport = null; lastReportedSession = null
             }
             transport.handoffTurnSession(it)
             scheduleEarlyHandoff(it as? PlannedTurnSession)
             old?.takeIf { previous -> previous !== it }?.let(::closeRetiringSessionAtExpiry)
+            scope.launch {
+                synchronized(refreshLock) {
+                    if (!started || authenticationRequired) return@synchronized
+                    val state = supervisor.state.value
+                    if (state.status == ConnectionStatus.Connected && transport.connectionState.value == RuntimeConnectionState.Connected) {
+                        reportConnectionIfNeeded(effectiveTransportKind(state.transport))
+                    }
+                }
+            }
         },
         onTurnSessionClosed = {
             transport.clearTurnSession(it)
@@ -172,10 +182,30 @@ internal class BoundTargetConnection(
                 transport.updateCarrierConnectionState(supervisor.toRuntimeConnectionState(state))
                 if (state.status == ConnectionStatus.Connected && transport.connectionState.value == RuntimeConnectionState.Connected) {
                     transport.connectInvalidationSocket()
-                    reportConnectionIfNeeded(state.transport)
+                    reportConnectionIfNeeded(effectiveTransportKind(state.transport))
                 }
             }
         }.launchIn(scope)
+        transport.activeCarrier.onEach { carrier ->
+            synchronized(refreshLock) {
+                if (!started || authenticationRequired) return@synchronized
+                val state = supervisor.state.value
+                if (state.status == ConnectionStatus.Connected && transport.connectionState.value == RuntimeConnectionState.Connected) {
+                    val kind = when (carrier) {
+                        ActiveCarrier.P2P -> TransportKind.P2P
+                        ActiveCarrier.Turn -> TransportKind.Turn
+                        ActiveCarrier.Direct, ActiveCarrier.None -> null
+                    }
+                    if (kind != null) reportConnectionIfNeeded(kind)
+                }
+            }
+        }.launchIn(scope)
+    }
+
+    private fun effectiveTransportKind(fallback: TransportKind): TransportKind = when (transport.activeCarrier.value) {
+        ActiveCarrier.P2P -> TransportKind.P2P
+        ActiveCarrier.Turn -> TransportKind.Turn
+        ActiveCarrier.Direct, ActiveCarrier.None -> fallback
     }
 
     override fun start() {
@@ -243,6 +273,7 @@ internal class BoundTargetConnection(
         synchronized(refreshLock) { preferTcpOnNextBootstrap = false }
         this.plan = plan
         lastReportedTransport = null
+        lastReportedSession = null
         onEndpointResolved(plan.preferredEndpoint)
         if (started) {
             authenticationRequired = false
@@ -372,6 +403,7 @@ internal class BoundTargetConnection(
                             refreshPlanApplied = true
                             plan = selectedPlan
                             lastReportedTransport = null
+                            lastReportedSession = null
                             onEndpointResolved(selectedPlan.preferredEndpoint)
                             authenticationRequired = false
                             supervisor.start()
@@ -509,6 +541,7 @@ internal class BoundTargetConnection(
         plan = null
         onEndpointResolved("")
         lastReportedTransport = null
+        lastReportedSession = null
         supervisor.clearBootstrap()
     }
 
@@ -531,6 +564,7 @@ internal class BoundTargetConnection(
                 supervisor.clearBootstrap()
                 plan = null
                 lastReportedTransport = null
+                lastReportedSession = null
                 onEndpointResolved("")
                 transport.markAuthenticationRequired()
                 onAuthenticationRequired()
@@ -575,22 +609,22 @@ internal class BoundTargetConnection(
     }
 
     private fun reportConnectionIfNeeded(transportKind: TransportKind) {
-        val transportName = when (transportKind) {
-            TransportKind.P2P -> "webrtc"
-            TransportKind.Turn -> "turn"
-            TransportKind.None -> null
-        } ?: return
-        if (lastReportedTransport == transportName) return
-        val previous = lastReportedTransport
-        lastReportedTransport = transportName
-        val currentPlan = plan ?: return
-        val turnCarrier = activeTurnSession.get()?.carrier
+        val currentSession = activeTurnSession.get()
+        val decision = nextBootstrapConnectionReport(
+            transportKind = transportKind,
+            currentPlan = plan,
+            currentSession = currentSession,
+            sessionCarrier = currentSession?.carrier,
+            lastReportedSession = lastReportedSession,
+            lastReportedTransport = lastReportedTransport,
+        ) ?: return
+        lastReportedSession = decision.reportedSession
+        lastReportedTransport = decision.transport
         report(
-            phase = if (previous == null) "connected" else "migrated",
-            transport = transportName,
-            connectionId = if (transportKind == TransportKind.Turn) turnCarrier?.connectionId else currentPlan.turnConnectionId,
-            candidateId = if (transportKind == TransportKind.Turn) turnCarrier?.candidateId
-                else currentPlan.contract.candidates.firstOrNull { it.kind == "webrtc" }?.id,
+            phase = decision.phase,
+            transport = decision.transport,
+            connectionId = decision.connectionId,
+            candidateId = decision.candidateId,
         )
     }
 

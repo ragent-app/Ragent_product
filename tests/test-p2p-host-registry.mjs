@@ -131,7 +131,77 @@ assert.equal(restored.attempted, 2);
 assert.equal(restored.started, 2);
 assert.deepEqual(restored.results.map((entry) => entry.deviceId), ['restore-join', 'restore-claim']);
 assert.ok(created.slice(-2).every(({ options }) => options.iceServers[0].urls.startsWith('turn:')));
-assert.ok(created.slice(-2).every(({ options }) => options.relayOnly === true), 'account device recovery must force the broker-issued TURN relay');
+assert.ok(created.slice(-2).every(({ options }) => options.relayOnly === true), 'legacy bootstrap without allowDirectIce must remain relay-only');
+
+created.length = 0;
+const directRestored = await restoreP2PHostsForDevices([
+  { id: 'restore-owner-direct', status: 'bound', enrollmentKind: 'account-join', accountId: 'account-1', revokedAt: '' },
+  {
+    id: 'restore-workspace-shared',
+    status: 'bound',
+    enrollmentKind: 'account-join',
+    accountId: 'account-2',
+    workspaceAccess: { ownerAccountId: 'account-1', grantId: `iag_${'a'.repeat(24)}` },
+    revokedAt: '',
+  },
+], {
+  signalingUrl: 'https://signal.example.test',
+  getP2PAccess: async (deviceId) => ({ roomId: `${deviceId}-${'f'.repeat(40)}`.slice(0, 40), secret: `secret-${deviceId}` }),
+  getBootstrap: async ({ deviceId }) => ({
+    allowDirectIce: deviceId === 'restore-owner-direct',
+    turn: {
+      iceServers: [{ urls: `turn:${deviceId}.example.test`, username: 'u', password: 'p' }],
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
+    },
+  }),
+  runHostAgent: (options) => fakeHostAgent(options),
+});
+assert.equal(directRestored.attempted, 2);
+assert.equal(directRestored.started, 2);
+assert.equal(created[0].options.relayOnly, false, 'owner trusted_device recovery with allowDirectIce must enable direct ICE');
+assert.equal(created[1].options.relayOnly, true, 'shared workspace device recovery must stay relay-only');
+
+await stopAllP2PHosts();
+created.length = 0;
+const onDemandRestored = await restoreP2PHostsForDevices([
+  { id: 'ondemand-owner-direct', status: 'bound', enrollmentKind: 'account-join', accountId: 'account-1', revokedAt: '' },
+  {
+    id: 'ondemand-workspace-shared',
+    status: 'bound',
+    enrollmentKind: 'account-join',
+    accountId: 'account-2',
+    workspaceAccess: { ownerAccountId: 'account-1', grantId: `iag_${'b'.repeat(24)}` },
+    revokedAt: '',
+  },
+], {
+  onDemand: true,
+  signalingUrl: 'https://signal.example.test',
+  getP2PAccess: async (deviceId) => ({ roomId: `${deviceId}-${'e'.repeat(40)}`.slice(0, 40), secret: `secret-${deviceId}` }),
+  getBootstrap: async ({ deviceId }) => ({
+    allowDirectIce: deviceId === 'ondemand-owner-direct',
+    turn: {
+      connectionId: `conn_${deviceId}`,
+      iceServers: [{ urls: `turn:${deviceId}.example.test`, username: 'u', password: 'p' }],
+      expiresAt: new Date(Date.now() + 120_000).toISOString(),
+    },
+  }),
+  runHostAgent: (options) => fakeHostAgent(options),
+});
+assert.equal(onDemandRestored.started, 2);
+assert.equal(created[0].options.relayOnly, false, 'on-demand owner trusted_device watcher must allow direct ICE');
+assert.equal(created[1].options.relayOnly, true, 'on-demand shared workspace watcher must stay relay-only');
+assert.equal((await created[0].options.resolveIceServers()).relayOnly, false);
+assert.equal((await created[1].options.resolveIceServers()).relayOnly, true);
+
+const browserHostResult = await startP2PHostForDevice('browser-device', {
+  p2pAccess: { roomId: 'b'.repeat(40), secret: 'browser-secret' },
+  signalingUrl: 'https://signal.example.test',
+  browserAuth: { publicKeyPem: 'pem', keyId: 'k1', issuer: 'iss', instanceId: 'ins' },
+  relayOnly: false,
+  runHostAgent: (options) => fakeHostAgent(options),
+});
+assert.equal(browserHostResult.started, true);
+assert.equal(created.at(-1).options.relayOnly, true, 'browserAuth hosts must always enforce relayOnly');
 
 let refreshCalls = 0;
 await startP2PHostForDevice('refresh-device', {

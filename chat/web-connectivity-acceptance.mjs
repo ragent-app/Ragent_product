@@ -168,9 +168,10 @@ export async function handleWebConnectivityAcceptanceRoutes({
     }
 
     // 真实生产链：reserve → brokerCredential → TURN mint → 实例签名 bootstrap v2。
+    // Ephemeral browser acceptance connections must remain TURN relay-only.
     let bootstrap;
     try {
-      bootstrap = await buildDeviceConnectionBootstrapContract({ deviceId });
+      bootstrap = await buildDeviceConnectionBootstrapContract({ deviceId, allowDirectIce: false });
     } catch (error) {
       writeJson(res, error?.statusCode || 503, {
         error: error?.message || 'TURN bootstrap failed.',

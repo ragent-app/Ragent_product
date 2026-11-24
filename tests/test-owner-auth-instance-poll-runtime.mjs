@@ -383,8 +383,30 @@ try {
     assert.equal(rendezvousHostStart?.deviceId, rendezvousIntent.deviceId);
     assert.match(rendezvousHostStart?.p2p?.roomId || '', /^[a-f0-9]{40}$/);
     assert.deepEqual(rendezvousHostStart?.iceServers, [{ urls: 'turn:turn.example.test', username: 'u', password: 'p' }]);
-    assert.equal(rendezvousHostStart?.relayOnly, true, 'account rendezvous must make the host match Android relay-only ICE policy');
+    assert.equal(rendezvousHostStart?.relayOnly, true, 'account rendezvous must stay relay-only when allowDirectIce is absent');
     assert.equal(rendezvousHostStart?.expiresAt, new Date(now + 60000).toISOString());
+  });
+  await check('rendezvous forwards relayOnly:false when owner bootstrap sets allowDirectIce:true', async () => {
+    const previousCompletion = rendezvousCompleteBody;
+    let directHostStart = null;
+    try {
+      await pollOwnerAccountRendezvous({
+        fetchImpl: mockFetch,
+        clock: () => now,
+        completeLocal: async () => ({ credential: { token: 'rda_runtime_credential',
+          expiresAt: new Date(now + 900000).toISOString(), scope: 'device-access' } }),
+        readP2PAccess: async () => ({ roomId: 'a'.repeat(40), secret: 'runtime-secret' }),
+        buildBootstrap: async () => ({
+          allowDirectIce: true,
+          turn: {
+            iceServers: [{ urls: 'turn:turn.example.test', username: 'u', password: 'p' }],
+            expiresAt: new Date(now + 60000).toISOString(),
+          },
+        }),
+        startP2PHost: async (options) => { directHostStart = options; return { started: true }; },
+      });
+      assert.equal(directHostStart?.relayOnly, false, 'allowDirectIce:true owner bootstrap must propagate relayOnly:false');
+    } finally { rendezvousCompleteBody = previousCompletion; }
   });
 
   async function failedDelivery(send, { signal, afterSetup } = {}) {

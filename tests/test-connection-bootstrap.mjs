@@ -271,6 +271,7 @@ await test('v2 contract contains only TURN initial carrier and P2P upgrade', () 
   const contract = contractFixture();
   assert.equal(contract.contractVersion, 2);
   assert.equal(contract.connectionMode, 'turn-first');
+  assert.equal(contract.allowDirectIce, false);
   assert.deepEqual(contract.candidates.map((entry) => entry.kind), ['turn', 'webrtc']);
   assert.equal(contract.initialCarrier.kind, 'turn');
   assert.equal(contract.initialCarrier.candidateId, contract.candidates[0].id);
@@ -278,6 +279,18 @@ await test('v2 contract contains only TURN initial carrier and P2P upgrade', () 
   assert.equal(contract.upgrade.retainCurrentWhenNoP2PPath, true);
   assert.equal(contract.fallback, null);
   assert.equal(Object.keys(contract).some((key) => key.toLowerCase().includes('entry')), false);
+
+  const direct = buildConnectionBootstrapContract({
+    instanceId: 'rli_test0001',
+    deviceId: 'rdev_test0001',
+    enrollmentKind: 'account-join',
+    p2p: { signalingEndpoint: 'https://signal.example.com', roomId: 'room-test' },
+    turn: turnFixture(),
+    allowDirectIce: true,
+    issuedAtMs: Date.parse('2026-08-18T00:00:00.000Z'),
+    ttlMs: 600000,
+  });
+  assert.equal(direct.allowDirectIce, true);
 });
 
 await test('v2 signature rejects tampering and shelved transport fields', () => {
@@ -296,6 +309,22 @@ await test('v2 signature rejects tampering and shelved transport fields', () => 
   tampered.candidates[0].endpoint = 'turn:attacker.example';
   const withinTtl = { nowMs: Date.parse('2026-08-18T00:00:02.000Z') };
   assert.equal(verifyConnectionBootstrapContract(tampered, publicKeyPem, withinTtl).valid, false);
+  const tamperedDirect = structuredClone(signed);
+  tamperedDirect.allowDirectIce = true;
+  assert.equal(verifyConnectionBootstrapContract(tamperedDirect, publicKeyPem, withinTtl).valid, false);
+
+  const legacyBase = structuredClone(base);
+  delete legacyBase.allowDirectIce;
+  const legacySigned = attachContractSignature(legacyBase, {
+    keyId: 'test-key-id',
+    signedAt: '2026-08-18T00:00:01.000Z',
+    value: cryptoSign(null, Buffer.from(buildContractSigningPayload(legacyBase)), privateKey).toString('base64url'),
+  });
+  assert.equal(verifyConnectionBootstrapContract(legacySigned, publicKeyPem, withinTtl).valid, true);
+
+  const invalidDirect = structuredClone(signed);
+  invalidDirect.allowDirectIce = 'yes';
+  assert.equal(verifyConnectionBootstrapContract(invalidDirect, publicKeyPem, withinTtl).reason, 'invalid allowDirectIce');
 
   const oldMode = structuredClone(signed);
   oldMode.connectionMode = 'unsupported-mode';
@@ -440,6 +469,7 @@ try {
     assert.equal(contract.instanceId, identity.instanceId);
     assert.equal(contract.contractVersion, 2);
     assert.equal(contract.connectionMode, 'turn-first');
+    assert.equal(contract.allowDirectIce, true);
     assert.equal(contract.turn.provider, 'cloudflare-realtime');
     assert.equal(contract.turn.authorization.status, 'authorized');
     assert.equal(contract.turn.authorization.deviceKind, 'phone');

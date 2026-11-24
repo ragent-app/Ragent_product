@@ -3,6 +3,7 @@ package com.andysagent.ragent.core.network
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.core.p2p.P2PCandidate
 import com.andysagent.ragent.core.p2p.P2PHttpRequest
+import com.andysagent.ragent.core.p2p.P2PIceCarrier
 import com.andysagent.ragent.core.p2p.P2PSession
 import com.andysagent.ragent.core.p2p.P2PSessionFactory
 import kotlinx.coroutines.CoroutineScope
@@ -134,6 +135,8 @@ class ConnectivitySupervisor(
     @Volatile private var turnSession: P2PSession? = null
     @Volatile private var activeTurnCarrier: TurnCarrier? = null
     private var turnRecheckJob: Job? = null
+    private var turnCarrierObserverJob: Job? = null
+    private var p2pCarrierObserverJob: Job? = null
     private var capabilityProbeJob: Job? = null
     private var healthWakeSignal: Channel<Boolean>? = null
     private var activeProbeSession: P2PSession? = null
@@ -249,6 +252,10 @@ class ConnectivitySupervisor(
         probeJob?.cancel()
         probeJob = null
         cancelTurnRecheck()
+        turnCarrierObserverJob?.cancel()
+        turnCarrierObserverJob = null
+        p2pCarrierObserverJob?.cancel()
+        p2pCarrierObserverJob = null
         closeP2PSession()
         closeTurnSession()
         bootstrapTurnAttempted = false
@@ -425,6 +432,10 @@ class ConnectivitySupervisor(
         wasConnected = false
         retryCount = 0
         cancelTurnRecheck()
+        turnCarrierObserverJob?.cancel()
+        turnCarrierObserverJob = null
+        p2pCarrierObserverJob?.cancel()
+        p2pCarrierObserverJob = null
         closeP2PSession()
         closeTurnSession()
         if (!stopped) recheck()
@@ -505,14 +516,28 @@ class ConnectivitySupervisor(
                 when (val result = attemptTurnProbe(carrier, credential)) {
                     is ProbeResult.HttpSuccess -> {
                         val hasCred = !credential.isNullOrBlank()
+                        val activeTurn = turnSession
+                        val initialTransport = if (activeTurn != null) transportKindFor(activeTurn, isTurn = true) else TransportKind.Turn
                         retryCount = 0
                         updateState(
                             status = if (hasCred) ConnectionStatus.Connected else ConnectionStatus.Reachable,
                             reachable = true,
                             authenticated = hasCred,
-                            transport = TransportKind.Turn,
+                            transport = initialTransport,
                             clearLastError = true,
                         )
+                        if (activeTurn != null) {
+                            val currentTransport = transportKindFor(activeTurn, isTurn = true)
+                            if (currentTransport != initialTransport && !stopped && turnSession === activeTurn) {
+                                updateState(
+                                    status = if (hasCred) ConnectionStatus.Connected else ConnectionStatus.Reachable,
+                                    reachable = true,
+                                    authenticated = hasCred,
+                                    transport = currentTransport,
+                                    clearLastError = true,
+                                )
+                            }
+                        }
                         wasConnected = hasCred
                         scheduleTurnRecheck()
                         return
@@ -656,24 +681,65 @@ class ConnectivitySupervisor(
     internal fun installP2PSessionForTest(session: P2PSession) {
         p2pSession = session
         observeUnexpectedClose(session, isTurn = false)
+        observeCarrierResolution(session, isTurn = false)
         onP2PSessionReady?.invoke(session)
         wasConnected = true
         updateState(
             status = ConnectionStatus.Connected,
             reachable = true,
             authenticated = true,
-            transport = TransportKind.P2P,
+            transport = transportKindFor(session, isTurn = false),
             clearLastError = true,
         )
         scheduleCarrierHealthCheck()
     }
 
     private fun closeP2PSession() {
+        p2pCarrierObserverJob?.cancel()
+        p2pCarrierObserverJob = null
         val session = p2pSession ?: return
         cancelCarrierHealthCheck(session)
         p2pSession = null
         onP2PSessionClosed?.invoke(session)
         session.close()
+    }
+
+    private fun transportKindFor(session: P2PSession, isTurn: Boolean): TransportKind =
+        when (session.resolvedCarrier.value) {
+            P2PIceCarrier.P2P -> TransportKind.P2P
+            P2PIceCarrier.Turn -> TransportKind.Turn
+            P2PIceCarrier.Unknown -> if (isTurn) TransportKind.Turn else TransportKind.P2P
+        }
+
+    private fun observeCarrierResolution(session: P2PSession, isTurn: Boolean) {
+        val job = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            session.resolvedCarrier.collect {
+                if (stopped) return@collect
+                val active = if (isTurn) turnSession else p2pSession
+                if (active !== session) return@collect
+                if (isTurn && p2pSession != null) return@collect
+                val current = _state.value
+                if (current.status != ConnectionStatus.Connected && current.status != ConnectionStatus.Reachable) {
+                    return@collect
+                }
+                val desired = transportKindFor(session, isTurn)
+                if (current.transport != desired) {
+                    updateState(
+                        status = current.status,
+                        reachable = current.reachable,
+                        authenticated = current.authenticated,
+                        transport = desired,
+                    )
+                }
+            }
+        }
+        if (isTurn) {
+            turnCarrierObserverJob?.cancel()
+            turnCarrierObserverJob = job
+        } else {
+            p2pCarrierObserverJob?.cancel()
+            p2pCarrierObserverJob = job
+        }
     }
 
     private fun observeUnexpectedClose(session: P2PSession, isTurn: Boolean) {
@@ -693,6 +759,8 @@ class ConnectivitySupervisor(
         if (stopped || p2pSession !== session || !handlingCarrierClose.compareAndSet(false, true)) return
         try {
             if (stopped || p2pSession !== session) return
+            p2pCarrierObserverJob?.cancel()
+            p2pCarrierObserverJob = null
             cancelCarrierHealthCheck(session)
             p2pSession = null
             onP2PSessionClosed?.invoke(session)
@@ -709,6 +777,8 @@ class ConnectivitySupervisor(
 
     private fun closeTurnSession() {
         cancelHandoff()
+        turnCarrierObserverJob?.cancel()
+        turnCarrierObserverJob = null
         val session = turnSession ?: return
         cancelCarrierHealthCheck(session)
         turnSession = null
@@ -722,6 +792,8 @@ class ConnectivitySupervisor(
         try {
             if (stopped || turnSession !== session) return
             cancelHandoff()
+            turnCarrierObserverJob?.cancel()
+            turnCarrierObserverJob = null
             val closedCarrier = activeTurnCarrier
             cancelCarrierHealthCheck(session)
             turnSession = null
@@ -804,10 +876,25 @@ class ConnectivitySupervisor(
                         activeTurnCarrier = carrier
                         if (signed) bootstrapPlan = plan
                         observeUnexpectedClose(candidate, isTurn = true)
+                        observeCarrierResolution(candidate, isTurn = true)
                         ready(candidate)
                         installed = true
                     }
-                    if (installed) scheduleTurnRecheck()
+                    if (installed) {
+                        val current = _state.value
+                        if (current.status == ConnectionStatus.Connected || current.status == ConnectionStatus.Reachable) {
+                            val desired = transportKindFor(candidate, isTurn = true)
+                            if (current.transport != desired) {
+                                updateState(
+                                    status = current.status,
+                                    reachable = current.reachable,
+                                    authenticated = current.authenticated,
+                                    transport = desired,
+                                )
+                            }
+                        }
+                        scheduleTurnRecheck()
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -884,6 +971,7 @@ class ConnectivitySupervisor(
                         turnSession = session
                         activeTurnCarrier = carrier
                         observeUnexpectedClose(session, isTurn = true)
+                        observeCarrierResolution(session, isTurn = true)
                         onTurnSessionReady?.invoke(session)
                         ProbeResult.HttpSuccess(response.status)
                     } else {
@@ -1024,7 +1112,7 @@ class ConnectivitySupervisor(
                         if (authenticated) ConnectionStatus.Connected else ConnectionStatus.Reachable,
                         reachable = true,
                         authenticated = authenticated,
-                        transport = if (isTurn) TransportKind.Turn else TransportKind.P2P,
+                        transport = transportKindFor(session, isTurn = isTurn),
                         clearLastError = true,
                     )
                     continue
@@ -1069,7 +1157,7 @@ class ConnectivitySupervisor(
                         if (authenticated) ConnectionStatus.Connected else ConnectionStatus.Reachable,
                         reachable = true,
                         authenticated = authenticated,
-                        transport = if (isTurn) TransportKind.Turn else TransportKind.P2P,
+                        transport = transportKindFor(session, isTurn = isTurn),
                         clearLastError = true,
                     )
                 } else {

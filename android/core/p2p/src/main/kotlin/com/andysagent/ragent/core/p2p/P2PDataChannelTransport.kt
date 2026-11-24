@@ -6,13 +6,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -29,6 +33,8 @@ import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RTCStats
+import org.webrtc.RTCStatsReport
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import java.util.concurrent.ConcurrentHashMap
@@ -39,6 +45,16 @@ import kotlin.coroutines.resume
 
 /** The individual request expired; this alone does not prove the carrier is dead. */
 class P2PRequestTimeoutException : IllegalStateException("P2P request timed out")
+
+/** Live ICE path resolved from `PeerConnection.getStats()` for a [P2PSession]. */
+enum class P2PIceCarrier {
+    Unknown,
+    P2P,
+    Turn,
+}
+
+private val DefaultUnresolvedCarrierFlow: StateFlow<P2PIceCarrier> =
+    MutableStateFlow(P2PIceCarrier.Unknown).asStateFlow()
 
 /** A P2P transport session that can tunnel HTTP requests over a DataChannel. */
 interface P2PSession {
@@ -61,6 +77,9 @@ interface P2PSession {
 
     /** True when `dc_push_invalidation_v1` has been negotiated with the peer. */
     val supportsPushInvalidations: Boolean get() = false
+
+    /** Live ICE transport path selected by WebRTC (`P2P` for host/srflx/prflx, `Turn` when relayed). */
+    val resolvedCarrier: StateFlow<P2PIceCarrier> get() = DefaultUnresolvedCarrierFlow
 
     /**
      * Receives unexpected transport loss. Explicit [close] calls do not invoke
@@ -317,19 +336,77 @@ class WebRTCDataChannelTransport(
         var blockedPolls = 0L
     }
 
+    private data class SelectedCandidatePairStats(
+        val pair: RTCStats,
+        val local: RTCStats?,
+        val remote: RTCStats?,
+    )
+
+    private fun findSelectedCandidatePair(entries: Map<String, RTCStats>): SelectedCandidatePairStats? {
+        val pairId = entries.values.firstOrNull {
+            it.type == "transport" && it.members["selectedCandidatePairId"] is String
+        }?.members?.get("selectedCandidatePairId") as? String
+        val pair = pairId?.let { entries[it] } ?: entries.values.firstOrNull {
+            it.type == "candidate-pair" &&
+                it.members["state"] == "succeeded" &&
+                (it.members["nominated"] == true || it.members["selected"] == true)
+        } ?: return null
+        val local = (pair.members["localCandidateId"] as? String)?.let { entries[it] }
+        val remote = (pair.members["remoteCandidateId"] as? String)?.let { entries[it] }
+        return SelectedCandidatePairStats(pair, local, remote)
+    }
+
+    internal fun classifySelectedIceCarrier(report: RTCStatsReport): P2PIceCarrier {
+        val selected = findSelectedCandidatePair(report.statsMap) ?: return P2PIceCarrier.Unknown
+        val localType = (selected.local?.members?.get("candidateType") as? String)
+            ?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return P2PIceCarrier.Unknown
+        val remoteType = (selected.remote?.members?.get("candidateType") as? String)
+            ?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return P2PIceCarrier.Unknown
+        return if (localType == "relay" || remoteType == "relay") {
+            P2PIceCarrier.Turn
+        } else {
+            P2PIceCarrier.P2P
+        }
+    }
+
+    private fun refreshResolvedCarrier(connection: PeerConnection? = peerConnection) {
+        if (closeNotified || connection == null || peerConnection !== connection) return
+        runCatching {
+            connection.getStats { report ->
+                if (closeNotified || peerConnection !== connection) return@getStats
+                val classified = classifySelectedIceCarrier(report)
+                if (classified != P2PIceCarrier.Unknown) {
+                    mutableResolvedCarrier.value = classified
+                }
+            }
+        }
+    }
+
+    private fun scheduleCarrierStatsRecheck() {
+        if (closeNotified) return
+        val connection = peerConnection ?: return
+        carrierStatsRecheckJob?.cancel()
+        carrierStatsRecheckJob = scope.launch {
+            for (delayMs in longArrayOf(500L, 1_500L)) {
+                delay(delayMs)
+                if (closeNotified || !isOpen || peerConnection !== connection) return@launch
+                val current = mutableResolvedCarrier.value
+                if (current == P2PIceCarrier.P2P || (candidate.turnOnly && current == P2PIceCarrier.Turn)) return@launch
+                refreshResolvedCarrier(connection)
+            }
+        }
+    }
+
     /** Opt-in diagnostics contain no candidate addresses, credentials, or file data. */
     private fun traceUploadRtcStats() {
         if (!debuggable || !Log.isLoggable("Ragent.Upload", Log.DEBUG)) return
         runCatching {
             peerConnection?.getStats { report ->
                 runCatching {
-                    val entries = report.statsMap
-                    val pairId = entries.values.firstOrNull { it.type == "transport" &&
-                        it.members["selectedCandidatePairId"] is String }?.members?.get("selectedCandidatePairId") as? String
-                    val pair = pairId?.let { entries[it] } ?: entries.values.firstOrNull { it.type == "candidate-pair" &&
-                        it.members["nominated"] == true && it.members["state"] == "succeeded" }
-                    val local = (pair?.members?.get("localCandidateId") as? String)?.let { entries[it] }
-                    val remote = (pair?.members?.get("remoteCandidateId") as? String)?.let { entries[it] }
+                    val selected = findSelectedCandidatePair(report.statsMap)
+                    val pair = selected?.pair
+                    val local = selected?.local
+                    val remote = selected?.remote
                     Log.d("Ragent.Upload", "stage=rtc_stats localType=${local?.members?.get("candidateType")}" +
                         " localProtocol=${local?.members?.get("protocol")} relayProtocol=${local?.members?.get("relayProtocol")}" +
                         " remoteType=${remote?.members?.get("candidateType")} remoteProtocol=${remote?.members?.get("protocol")}" +
@@ -344,13 +421,10 @@ class WebRTCDataChannelTransport(
         runCatching {
             peerConnection?.getStats { report ->
                 runCatching {
-                    val entries = report.statsMap
-                    val pairId = entries.values.firstOrNull { it.type == "transport" &&
-                        it.members["selectedCandidatePairId"] is String }?.members?.get("selectedCandidatePairId") as? String
-                    val pair = pairId?.let { entries[it] } ?: entries.values.firstOrNull { it.type == "candidate-pair" &&
-                        it.members["nominated"] == true && it.members["state"] == "succeeded" }
-                    val local = (pair?.members?.get("localCandidateId") as? String)?.let { entries[it] }
-                    val remote = (pair?.members?.get("remoteCandidateId") as? String)?.let { entries[it] }
+                    val selected = findSelectedCandidatePair(report.statsMap)
+                    val pair = selected?.pair
+                    val local = selected?.local
+                    val remote = selected?.remote
                     fun category(value: Any?, allowed: Set<String>): String =
                         (value as? String)?.lowercase()?.takeIf { it in allowed } ?: "unknown"
                     val types = setOf("host", "srflx", "prflx", "relay")
@@ -457,6 +531,10 @@ class WebRTCDataChannelTransport(
     override val invalidations: Flow<String> = invalidationEvents.asSharedFlow()
     @Volatile override var supportsPushInvalidations: Boolean = false
         private set
+    private val mutableResolvedCarrier = MutableStateFlow(P2PIceCarrier.Unknown)
+    override val resolvedCarrier: StateFlow<P2PIceCarrier> = mutableResolvedCarrier.asStateFlow()
+    @Volatile private var carrierStatsRecheckJob: Job? = null
+    internal var peerConnectionFactoryProvider: (Context) -> PeerConnectionFactory = ::obtainSharedFactory
     private val pendingPongs = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val responseStreams = P2PHttpResponseAssembler()
 
@@ -513,6 +591,7 @@ class WebRTCDataChannelTransport(
                     traceConnect("ice_connected")
                     iceDisconnected = false
                     iceDisconnectWatchdog.recovered()
+                    refreshResolvedCarrier()
                 }
                 PeerConnection.IceConnectionState.FAILED,
                 PeerConnection.IceConnectionState.CLOSED -> {
@@ -548,6 +627,8 @@ class WebRTCDataChannelTransport(
                     iceDisconnectWatchdog.channelOpened(iceDisconnected)
                     traceConnect("channel_open")
                     runCatching { Log.i(TAG, "datachannel_open channel=$debugCarrierId") }
+                    refreshResolvedCarrier()
+                    scheduleCarrierStatsRecheck()
                 }
                 DataChannel.State.CLOSING, DataChannel.State.CLOSED -> {
                     failConnection("DataChannel entered ${dataChannel?.state()}")
@@ -583,6 +664,24 @@ class WebRTCDataChannelTransport(
 
     internal fun attachPeerConnectionForTest(connection: PeerConnection) {
         peerConnection = connection
+    }
+
+    internal fun peerObserverForTest(): PeerConnection.Observer = peerObserver
+
+    internal fun buildRtcConfiguration(): PeerConnection.RTCConfiguration {
+        val iceServers = candidate.iceServers.map { server ->
+            PeerConnection.IceServer.builder(server.url).apply {
+                server.username?.let(::setUsername)
+                server.password?.let(::setPassword)
+            }.createIceServer()
+        }
+        return PeerConnection.RTCConfiguration(iceServers).apply {
+            iceTransportsType = if (candidate.turnOnly) {
+                PeerConnection.IceTransportsType.RELAY
+            } else {
+                PeerConnection.IceTransportsType.ALL
+            }
+        }
     }
 
     private fun receiveFrame(buffer: DataChannel.Buffer) {
@@ -793,6 +892,9 @@ class WebRTCDataChannelTransport(
             bulkChannelSupported = false
             bgChannelSupported = false
             supportsPushInvalidations = false
+            carrierStatsRecheckJob?.cancel()
+            carrierStatsRecheckJob = null
+            mutableResolvedCarrier.value = P2PIceCarrier.Unknown
             bulkPending.clear()
             bgPending.clear()
             serverReadyFeatures = null
@@ -809,20 +911,11 @@ class WebRTCDataChannelTransport(
 
             // 1. Reuse the process-lifetime PeerConnectionFactory (see the
             //    companion note; never initialize or dispose per session).
-            factory = obtainSharedFactory(appContext)
+            factory = peerConnectionFactoryProvider(appContext)
 
             // 2. Create PeerConnection (before signalling to avoid missing
             //    early ICE candidates generated during offer creation).
-            val iceServers = candidate.iceServers.map { server ->
-                PeerConnection.IceServer.builder(server.url).apply {
-                    server.username?.let(::setUsername)
-                    server.password?.let(::setPassword)
-                }.createIceServer()
-            }
-            val config = PeerConnection.RTCConfiguration(iceServers)
-            if (candidate.turnOnly) {
-                config.iceTransportsType = PeerConnection.IceTransportsType.RELAY
-            }
+            val config = buildRtcConfiguration()
             peerConnection = factory!!.createPeerConnection(config, peerObserver)
                 ?: throw IllegalStateException("createPeerConnection returned null")
 
@@ -1296,6 +1389,9 @@ class WebRTCDataChannelTransport(
         iceDisconnected = false
         iceDisconnectWatchdog.recovered()
         supportsPushInvalidations = false
+        carrierStatsRecheckJob?.cancel()
+        carrierStatsRecheckJob = null
+        mutableResolvedCarrier.value = P2PIceCarrier.Unknown
         if (serverReady.complete(emptySet())) serverReadyFeatures = emptySet()
 
         // Fail all pending requests.

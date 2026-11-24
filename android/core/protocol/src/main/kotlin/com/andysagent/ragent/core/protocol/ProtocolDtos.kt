@@ -485,6 +485,7 @@ data class ConnectionBootstrapContractDto(
     val upgrade: ConnectionBootstrapUpgradeDto? = null,
     val fallback: JsonElement? = null,
     val signature: ConnectionBootstrapSignatureDto,
+    val allowDirectIce: Boolean = false,
 )
 
 @Serializable

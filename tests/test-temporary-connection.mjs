@@ -33,6 +33,7 @@ test('PC prepares a signed temporary contract through Accounts and TURN HTTP wit
   const contract = verifyTemporaryConnectionContract(result.bootstrap, await facts(f, phone));
   assert.equal(contract.contractVersion, 3); assert.equal(contract.enrollmentKind, 'temporary-device');
   assert.equal(contract.connectionMode, 'turn-first'); assert.equal(contract.initialCarrier.kind, 'turn');
+  assert.notEqual(contract.allowDirectIce, true, 'temporary bootstrap contracts must never allow direct ICE');
   assert.equal(contract.fallback, null); assert.deepEqual(contract.candidates.map((c) => c.kind), ['turn', 'webrtc']);
   assert.equal(contract.temporaryAccess.grantId, phone.result.grantId);
   assert.equal(Date.parse(contract.expiresAt), initial + 595_000);

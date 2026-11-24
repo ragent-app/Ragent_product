@@ -27,6 +27,7 @@ data class BootstrapConnectionPlan(
     val rawContract: String = "",
 ) {
     val connectionMode: String get() = contract.connectionMode
+    val allowDirectIce: Boolean get() = contract.allowDirectIce
     val turnConnectionId: String?
         get() = contract.turn?.connectionId ?: contract.turnAuthorization?.connectionId
     val preferredEndpoint: String
@@ -69,7 +70,13 @@ object BootstrapConnectionPlanFactory {
 
         val bootstrapCarrier = contract.initialCarrier
         val turn = if (bootstrapCarrier?.kind == "turn") {
-            buildTurnCarrier(bootstrapCarrier, contract.turn, contract.turnAuthorization, p2p)
+            buildTurnCarrier(
+                carrier = bootstrapCarrier,
+                turn = contract.turn,
+                authorization = contract.turnAuthorization,
+                p2p = p2p,
+                allowDirectIce = contract.allowDirectIce,
+            )
         } else {
             null
         }
@@ -89,6 +96,7 @@ object BootstrapConnectionPlanFactory {
         turn: ConnectionBootstrapTurnDto?,
         authorization: ConnectionBootstrapTurnAuthorizationDto?,
         p2p: P2PCandidate?,
+        allowDirectIce: Boolean = false,
     ): TurnCarrier? {
         turn ?: return null
         p2p ?: return null
@@ -116,7 +124,7 @@ object BootstrapConnectionPlanFactory {
             iceServers = turn.iceServers.map { server ->
                 IceServer(server.urls, server.username, server.password)
             },
-            turnOnly = true,
+            turnOnly = !allowDirectIce,
         )
         return TurnCarrier(
             endpoint = carrier.endpoint,

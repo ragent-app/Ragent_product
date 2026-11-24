@@ -171,7 +171,7 @@ async function runRendezvousPoll() {
         if (!authorizationGuard()) throw new Error('Local account association inactive');
         return result;
       },
-      startP2PHost: ({ deviceId, p2p, bootstrap, iceServers, expiresAt }) => {
+      startP2PHost: ({ deviceId, p2p, bootstrap, iceServers, expiresAt, relayOnly }) => {
         if (!authorizationGuard()) throw new Error('Local account association inactive');
         return p2pHostRegistry.startP2PHostForDevice(deviceId, {
         p2pAccess: p2p,
@@ -179,7 +179,7 @@ async function runRendezvousPoll() {
         signalingUrl: P2P_SIGNALING_URL,
         localBaseUrl: `http://127.0.0.1:${CHAT_PORT}`,
         iceServers,
-        relayOnly: true,
+        relayOnly: bootstrap ? bootstrap.allowDirectIce !== true : (relayOnly !== false),
         expiresAt,
         onDemand: true,
         spawnOnInit: true,
@@ -202,6 +202,7 @@ async function runRendezvousPoll() {
             iceServers: bootstrap?.turn?.iceServers || [],
             expiresAt: bootstrap?.turn?.expiresAt,
             connectionId: bootstrap?.turn?.connectionId || '',
+            allowDirectIce: bootstrap?.allowDirectIce === true,
           };
         },
       }); },

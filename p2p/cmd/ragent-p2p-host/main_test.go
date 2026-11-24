@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/turn/v5"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -948,5 +950,194 @@ func TestPushInvalidationNegotiationAndDeliveryOverDataChannel(t *testing.T) {
 	}
 	if pushState.sendPushInvalidation(json.RawMessage(`{"type":"projects_invalidated"}`)) {
 		t.Fatal("sendPushInvalidation must return false after primary channel closes")
+	}
+}
+
+func TestDirectIcePolicyAndBrowserAuthEnforcement(t *testing.T) {
+	turnOnlyServers := []webrtc.ICEServer{{
+		URLs:       []string{"turn:turn.example.test:3478?transport=udp", "turns:turn.example.test:5349?transport=tcp"},
+		Username:   "u",
+		Credential: "p",
+	}}
+	stunServers := []webrtc.ICEServer{{URLs: []string{"stun:127.0.0.1:3478"}}}
+	browserCfg := &browserAuthConfig{issuer: "https://issuer.test", instanceID: "ins_1"}
+
+	for _, tc := range []struct {
+		name        string
+		servers     []webrtc.ICEServer
+		flag        string
+		browserAuth *browserAuthConfig
+		wantRelay   bool
+		wantPolicy  webrtc.ICETransportPolicy
+		wantErr     bool
+	}{
+		{
+			name:        "owner_trusted_device_flag_0_with_turn_uses_all",
+			servers:     turnOnlyServers,
+			flag:        "0",
+			browserAuth: nil,
+			wantRelay:   false,
+			wantPolicy:  webrtc.ICETransportPolicyAll,
+		},
+		{
+			name:        "explicit_flag_1_with_turn_forces_relay",
+			servers:     turnOnlyServers,
+			flag:        "1",
+			browserAuth: nil,
+			wantRelay:   true,
+			wantPolicy:  webrtc.ICETransportPolicyRelay,
+		},
+		{
+			name:        "browser_auth_with_flag_0_forces_relay",
+			servers:     turnOnlyServers,
+			flag:        "0",
+			browserAuth: browserCfg,
+			wantRelay:   true,
+			wantPolicy:  webrtc.ICETransportPolicyRelay,
+		},
+		{
+			name:        "browser_auth_with_empty_flag_and_stun_forces_relay",
+			servers:     stunServers,
+			flag:        "",
+			browserAuth: browserCfg,
+			wantRelay:   true,
+			wantPolicy:  webrtc.ICETransportPolicyRelay,
+		},
+		{
+			name:        "browser_auth_with_nil_servers_forces_relay",
+			servers:     nil,
+			flag:        "0",
+			browserAuth: browserCfg,
+			wantRelay:   true,
+			wantPolicy:  webrtc.ICETransportPolicyRelay,
+		},
+		{
+			name:        "browser_auth_with_invalid_flag_errors",
+			servers:     turnOnlyServers,
+			flag:        "invalid",
+			browserAuth: browserCfg,
+			wantErr:     true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			relayOnly, err := relayOnlyPolicy(tc.servers, tc.flag, tc.browserAuth)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for invalid RAGENT_P2P_RELAY_ONLY, got relayOnly=%v", relayOnly)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if relayOnly != tc.wantRelay {
+				t.Fatalf("relayOnly = %v; want %v", relayOnly, tc.wantRelay)
+			}
+			cfg := peerConnectionConfiguration(tc.servers, relayOnly)
+			if cfg.ICETransportPolicy != tc.wantPolicy {
+				t.Fatalf("ICETransportPolicy = %q; want %q", cfg.ICETransportPolicy.String(), tc.wantPolicy.String())
+			}
+		})
+	}
+}
+
+func TestDirectIceAllWithTurnServerGathersHostAndRelayCandidates(t *testing.T) {
+	listener, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const username, realm, password = "direct-ice-user", "ragent.test", "direct-ice-pass"
+	server, err := turn.NewServer(turn.ServerConfig{
+		Realm: realm,
+		AuthHandler: func(request *turn.RequestAttributes) (string, []byte, bool) {
+			if request.Username != username {
+				return "", nil, false
+			}
+			return username, turn.GenerateAuthKey(username, realm, password), true
+		},
+		PacketConnConfigs: []turn.PacketConnConfig{{
+			PacketConn: listener,
+			RelayAddressGenerator: &turn.RelayAddressGeneratorStatic{
+				RelayAddress: net.ParseIP("127.0.0.1"),
+				Address:      "127.0.0.1",
+			},
+		}},
+	})
+	if err != nil {
+		_ = listener.Close()
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	turnServers := []webrtc.ICEServer{{
+		URLs:       []string{"turn:" + listener.LocalAddr().String() + "?transport=udp"},
+		Username:   username,
+		Credential: password,
+	}}
+
+	gather := func(flag string, browserAuth *browserAuthConfig) (hostCount, relayCount int) {
+		relayOnly, err := relayOnlyPolicy(turnServers, flag, browserAuth)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings webrtc.SettingEngine
+		settings.SetIncludeLoopbackCandidate(true)
+		api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+		pc, err := api.NewPeerConnection(peerConnectionConfiguration(turnServers, relayOnly))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pc.Close()
+		if _, err := pc.CreateDataChannel("probe", nil); err != nil {
+			t.Fatal(err)
+		}
+		candidates := make(chan string, 32)
+		done := make(chan struct{})
+		var once sync.Once
+		pc.OnICECandidate(func(c *webrtc.ICECandidate) {
+			if c == nil {
+				once.Do(func() { close(done) })
+				return
+			}
+			candidates <- c.ToJSON().Candidate
+		})
+		offer, err := pc.CreateOffer(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pc.SetLocalDescription(offer); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("ICE gathering timed out")
+		}
+		close(candidates)
+		for cand := range candidates {
+			lower := strings.ToLower(cand)
+			if strings.Contains(lower, " typ host ") {
+				hostCount++
+			}
+			if strings.Contains(lower, " typ relay ") {
+				relayCount++
+			}
+		}
+		return hostCount, relayCount
+	}
+
+	hostAll, relayAll := gather("0", nil)
+	if hostAll == 0 || relayAll == 0 {
+		t.Fatalf("expected both host and relay candidates when RAGENT_P2P_RELAY_ONLY=0 and browserAuth==nil; got host=%d relay=%d", hostAll, relayAll)
+	}
+
+	hostRelayFlag, relayRelayFlag := gather("1", nil)
+	if hostRelayFlag != 0 || relayRelayFlag == 0 {
+		t.Fatalf("expected only relay candidates when RAGENT_P2P_RELAY_ONLY=1; got host=%d relay=%d", hostRelayFlag, relayRelayFlag)
+	}
+
+	hostBrowser, relayBrowser := gather("0", &browserAuthConfig{issuer: "https://issuer.test", instanceID: "ins_1"})
+	if hostBrowser != 0 || relayBrowser == 0 {
+		t.Fatalf("expected only relay candidates when browserAuth!=nil even with flag=0; got host=%d relay=%d", hostBrowser, relayBrowser)
 	}
 }

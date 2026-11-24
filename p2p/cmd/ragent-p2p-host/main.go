@@ -495,31 +495,39 @@ func emit(value any) {
 	fmt.Println(string(encoded))
 }
 
-// peerConnectionConfiguration makes the network boundary explicit. Account
-// device bootstraps are TURN-only: offering host or reflexive candidates on
-// just one side lets ICE select a route the Android client is forbidden to
-// use. Local/developer callers can explicitly select the all-candidate policy.
+// peerConnectionConfiguration makes the network boundary explicit. Owner
+// trusted_device connections with RAGENT_P2P_RELAY_ONLY=0 use
+// ICETransportPolicyAll so local host/srflx and TURN relay candidates race in
+// a single PeerConnection. Browser auth and relay-only policies force
+// ICETransportPolicyRelay.
 func peerConnectionConfiguration(iceServers []webrtc.ICEServer, relayOnly bool) webrtc.Configuration {
-	config := webrtc.Configuration{ICEServers: iceServers}
+	config := webrtc.Configuration{
+		ICEServers:         iceServers,
+		ICETransportPolicy: webrtc.ICETransportPolicyAll,
+	}
 	if relayOnly {
 		config.ICETransportPolicy = webrtc.ICETransportPolicyRelay
 	}
 	return config
 }
 
-// Older agents supply a TURN-only server list but do not forward the policy
-// flag. Keep those connections on TURN as well. An explicit 0 preserves the
-// local/developer caller's all-candidate choice; an absent STUN configuration
-// keeps its previous behavior.
-func relayOnlyPolicy(iceServers []webrtc.ICEServer, flag string) (bool, error) {
+// relayOnlyPolicy enforces TURN-only ICE when RAGENT_P2P_RELAY_ONLY=1 or
+// browserAuth != nil (ephemeral browser sessions never expose host/WAN IPs).
+// When RAGENT_P2P_RELAY_ONLY=0 and browserAuth == nil, ICETransportPolicyAll is
+// preserved even when iceServers only contain turn:/turns: URLs. Legacy callers
+// without RAGENT_P2P_RELAY_ONLY still stay on TURN when only TURN URLs exist.
+func relayOnlyPolicy(iceServers []webrtc.ICEServer, flag string, browserAuth ...*browserAuthConfig) (bool, error) {
+	if flag != "" && flag != "0" && flag != "1" {
+		return false, fmt.Errorf("RAGENT_P2P_RELAY_ONLY is invalid")
+	}
+	if len(browserAuth) > 0 && browserAuth[0] != nil {
+		return true, nil
+	}
 	if flag == "1" {
 		return true, nil
 	}
 	if flag == "0" {
 		return false, nil
-	}
-	if flag != "" {
-		return false, fmt.Errorf("RAGENT_P2P_RELAY_ONLY is invalid")
 	}
 	hasURL := false
 	for _, server := range iceServers {
@@ -990,17 +998,17 @@ func main() {
 			iceServers = append(iceServers, webrtc.ICEServer{URLs: server.URLs, Username: server.Username, Credential: server.Credential})
 		}
 	}
-	// Current agents forward the policy explicitly. Legacy agents already
-	// supply the broker's TURN-only list, which also requires relay-only ICE.
-	relayOnly, err := relayOnlyPolicy(iceServers, os.Getenv("RAGENT_P2P_RELAY_ONLY"))
-	if err != nil {
-		panic(err)
-	}
-	config := peerConnectionConfiguration(iceServers, relayOnly)
 	browserAuth, err := loadBrowserAuthConfig()
 	if err != nil {
 		panic(err)
 	}
+	// Current agents forward the policy explicitly. Ephemeral browser auth and
+	// legacy TURN-only callers remain locked to relay-only ICE.
+	relayOnly, err := relayOnlyPolicy(iceServers, os.Getenv("RAGENT_P2P_RELAY_ONLY"), browserAuth)
+	if err != nil {
+		panic(err)
+	}
+	config := peerConnectionConfiguration(iceServers, relayOnly)
 	// A mobile app restart creates a new SDP offer. A Pion PeerConnection is
 	// deliberately single-negotiation in this host: it cannot safely accept a
 	// new remote offer after its previous data channel has closed. Keep the

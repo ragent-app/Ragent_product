@@ -102,23 +102,31 @@ open class PeerConnection {
 
     enum class IceGatheringState { NEW, GATHERING, COMPLETE }
 
-    class IceServer(val uri: String) {
+    class IceServer(
+        @JvmField val uri: String,
+        @JvmField val username: String? = null,
+        @JvmField val password: String? = null,
+    ) {
         companion object {
             @JvmStatic fun builder(uri: String): Builder = Builder(uri)
         }
         class Builder(private val uri: String) {
-            fun setUsername(username: String): Builder = this
-            fun setPassword(password: String): Builder = this
-            fun createIceServer(): IceServer = IceServer(uri)
+            private var username: String? = null
+            private var password: String? = null
+            fun setUsername(username: String): Builder = apply { this.username = username }
+            fun setPassword(password: String): Builder = apply { this.password = password }
+            fun createIceServer(): IceServer = IceServer(uri, username, password)
         }
     }
 
     // P2PDataChannelTransport accesses iceServers as `PeerConnection.RTCConfiguration(iceServers)`
     // The actual RTCConfiguration uses `IceServer` list. We provide a compatible constructor.
     open class RTCConfiguration internal constructor() {
-        constructor(iceServers: List<IceServer>) : this()
-        var iceServers: MutableList<IceServer> = mutableListOf()
-        var iceTransportsType: IceTransportsType = IceTransportsType.ALL
+        constructor(iceServers: List<IceServer>) : this() {
+            this.iceServers = iceServers.toMutableList()
+        }
+        @JvmField var iceServers: MutableList<IceServer> = mutableListOf()
+        @JvmField var iceTransportsType: IceTransportsType = IceTransportsType.ALL
     }
 
     enum class IceTransportsType { NONE, RELAY, NOHOST, ALL }
@@ -129,9 +137,34 @@ open class PeerConnection {
     open fun setLocalDescription(observer: SdpObserver, sdp: SessionDescription) {}
     open fun setRemoteDescription(observer: SdpObserver, sdp: SessionDescription) {}
     open fun addIceCandidate(candidate: IceCandidate): Boolean = true
+    open fun getStats(callback: RTCStatsCollectorCallback) {}
     open fun connectionState(): PeerConnectionState = PeerConnectionState.CLOSED
     open fun close() {}
     open fun dispose() {}
+}
+
+// ── RTCStats ──────────────────────────────────────────────────────────
+
+open class RTCStats(
+    open val timestampUs: Double,
+    open val type: String,
+    open val id: String,
+    open val members: Map<String, Any>,
+) {
+    constructor(timestampUs: Long, type: String, id: String, members: Map<String, Any>) :
+        this(timestampUs.toDouble(), type, id, members)
+}
+
+open class RTCStatsReport(
+    open val timestampUs: Double,
+    open val statsMap: Map<String, RTCStats>,
+) {
+    constructor(timestampUs: Long, statsMap: Map<String, RTCStats>) :
+        this(timestampUs.toDouble(), statsMap)
+}
+
+fun interface RTCStatsCollectorCallback {
+    fun onStatsDelivered(report: RTCStatsReport)
 }
 
 // ── PeerConnectionFactory ─────────────────────────────────────────────

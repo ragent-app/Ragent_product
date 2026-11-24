@@ -6,6 +6,7 @@ import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.protocol.WebSocketPushDto
 import com.andysagent.ragent.core.p2p.P2PHttpRequest
 import com.andysagent.ragent.core.p2p.P2PHttpResponse
+import com.andysagent.ragent.core.p2p.P2PIceCarrier
 import com.andysagent.ragent.core.p2p.P2PProtocol
 import com.andysagent.ragent.core.p2p.P2PRequestTimeoutException
 import com.andysagent.ragent.core.p2p.P2PSession
@@ -118,6 +119,8 @@ class OkHttpRagentTransport(
     private val carrierInvalidationLock = Any()
     private var p2pInvalidationJob: Job? = null
     private var turnInvalidationJob: Job? = null
+    private var p2pCarrierJob: Job? = null
+    private var turnCarrierJob: Job? = null
     private val recoveryRequested = java.util.concurrent.atomic.AtomicBoolean(false)
 
     override val invalidations: Flow<InvalidationHint> = invalidationEvents.asSharedFlow()
@@ -137,8 +140,14 @@ class OkHttpRagentTransport(
         val p2p = p2pSession.get()?.takeIf { it.isOpen }
         val turn = turnSession.get()?.takeIf { it.isOpen }
         mutableActiveCarrier.value = when {
-            p2p != null -> ActiveCarrier.P2P
-            turn != null -> ActiveCarrier.Turn
+            p2p != null -> when (p2p.resolvedCarrier.value) {
+                P2PIceCarrier.Turn -> ActiveCarrier.Turn
+                P2PIceCarrier.P2P, P2PIceCarrier.Unknown -> ActiveCarrier.P2P
+            }
+            turn != null -> when (turn.resolvedCarrier.value) {
+                P2PIceCarrier.P2P -> ActiveCarrier.P2P
+                P2PIceCarrier.Turn, P2PIceCarrier.Unknown -> ActiveCarrier.Turn
+            }
             state == RuntimeConnectionState.Connected && !requireVerifiedCarrier && endpointProvider().trimEnd('/').isNotBlank() ->
                 ActiveCarrier.Direct
             else -> ActiveCarrier.None
@@ -152,7 +161,13 @@ class OkHttpRagentTransport(
 
     private fun startCarrierInvalidationCollector(isTurn: Boolean, session: P2PSession) {
         synchronized(carrierInvalidationLock) {
-            if (isTurn) turnInvalidationJob?.cancel() else p2pInvalidationJob?.cancel()
+            if (isTurn) {
+                turnInvalidationJob?.cancel()
+                turnCarrierJob?.cancel()
+            } else {
+                p2pInvalidationJob?.cancel()
+                p2pCarrierJob?.cancel()
+            }
             val job = socketScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 session.invalidations.collect { raw ->
                     val current = if (isTurn) turnSession.get() else p2pSession.get()
@@ -162,7 +177,21 @@ class OkHttpRagentTransport(
                     }
                 }
             }
-            if (isTurn) turnInvalidationJob = job else p2pInvalidationJob = job
+            val carrierJob = socketScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                session.resolvedCarrier.collect {
+                    val current = if (isTurn) turnSession.get() else p2pSession.get()
+                    if (current === session) {
+                        refreshActiveCarrier()
+                    }
+                }
+            }
+            if (isTurn) {
+                turnInvalidationJob = job
+                turnCarrierJob = carrierJob
+            } else {
+                p2pInvalidationJob = job
+                p2pCarrierJob = carrierJob
+            }
         }
     }
 
@@ -171,9 +200,13 @@ class OkHttpRagentTransport(
             if (isTurn) {
                 turnInvalidationJob?.cancel()
                 turnInvalidationJob = null
+                turnCarrierJob?.cancel()
+                turnCarrierJob = null
             } else {
                 p2pInvalidationJob?.cancel()
                 p2pInvalidationJob = null
+                p2pCarrierJob?.cancel()
+                p2pCarrierJob = null
             }
         }
     }

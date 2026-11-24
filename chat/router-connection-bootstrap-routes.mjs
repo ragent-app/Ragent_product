@@ -98,7 +98,13 @@ export async function handleConnectionBootstrapRoutes({ req, res, pathname, auth
 
   if (pathname === '/api/device-auth/bootstrap' && req.method === 'GET') {
     try {
-      const contract = await buildDeviceConnectionBootstrapContract({ deviceId: authSession.deviceId });
+      const allowDirectIce = authSession.principalKind === 'trusted_device'
+        && authSession.role === 'owner'
+        && !authSession.workspaceAccess;
+      const contract = await buildDeviceConnectionBootstrapContract({
+        deviceId: authSession.deviceId,
+        allowDirectIce,
+      });
       res.setHeader('Cache-Control', 'private, no-store, max-age=0, must-revalidate');
       writeJson(res, 200, contract);
     } catch (error) {

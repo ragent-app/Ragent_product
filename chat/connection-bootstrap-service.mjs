@@ -268,8 +268,18 @@ async function resolveInstanceTurnRouting({ device, instanceId, turnAuthorizatio
   }
 }
 
+export function isOwnerTrustedDeviceForDirectIce(device) {
+  if (!device || typeof device !== 'object') return false;
+  if (device.revokedAt) return false;
+  if (device.status !== 'bound' && device.status !== 'legacy_trusted') return false;
+  if (device.temporaryExpiresAt) return false;
+  if (device.workspaceAccess) return false;
+  if (!['account-claim', 'account-join'].includes(trimString(device.enrollmentKind))) return false;
+  return true;
+}
+
 export async function buildDeviceConnectionBootstrapContract({ deviceId, turnAuthorizationProvider = null,
-  rendezvousExpiresAt = '', clock = Date.now, signal, handoff = null } = {}) {
+  rendezvousExpiresAt = '', clock = Date.now, signal, handoff = null, allowDirectIce = undefined } = {}) {
   const normalizedDeviceId = trimString(deviceId);
   if (!normalizedDeviceId) {
     const error = new Error('deviceId is required');
@@ -312,6 +322,7 @@ export async function buildDeviceConnectionBootstrapContract({ deviceId, turnAut
       throw error;
     }
   }
+  const effectiveAllowDirectIce = allowDirectIce !== false && isOwnerTrustedDeviceForDirectIce(device);
   const contract = buildConnectionBootstrapContract({
     instanceId,
     deviceId: normalizedDeviceId,
@@ -322,6 +333,7 @@ export async function buildDeviceConnectionBootstrapContract({ deviceId, turnAut
     },
     turn: turnResult.turn,
     turnAuthorization: turnResult.authorization,
+    allowDirectIce: effectiveAllowDirectIce,
   });
   const publicIdentity = publicInstanceIdentity(instanceIdentity);
   const signatureValue = signWithInstanceIdentity(

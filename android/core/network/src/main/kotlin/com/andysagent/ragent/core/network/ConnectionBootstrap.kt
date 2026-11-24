@@ -1,5 +1,6 @@
 package com.andysagent.ragent.core.network
 
+import com.andysagent.ragent.core.p2p.P2PSession
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapContractDto
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapPublicKeyDto
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapReportAckDto
@@ -130,3 +131,44 @@ class BootstrapException(
     message: String,
     cause: Throwable? = null,
 ) : IOException(message, cause)
+
+data class BootstrapConnectionReportDecision(
+    val phase: String,
+    val transport: String,
+    val connectionId: String?,
+    val candidateId: String?,
+    val reportedSession: Any?,
+)
+
+fun nextBootstrapConnectionReport(
+    transportKind: TransportKind,
+    currentPlan: BootstrapConnectionPlan?,
+    currentSession: P2PSession?,
+    sessionCarrier: TurnCarrier?,
+    lastReportedSession: Any?,
+    lastReportedTransport: String?,
+): BootstrapConnectionReportDecision? {
+    val transportName = when (transportKind) {
+        TransportKind.P2P -> "webrtc"
+        TransportKind.Turn -> "turn"
+        TransportKind.None -> null
+    } ?: return null
+    currentPlan ?: return null
+    val previous = if (lastReportedSession === currentSession) lastReportedTransport else null
+    if (previous == transportName) return null
+    val phase = if (transportKind == TransportKind.P2P || previous != null) "migrated" else "connected"
+    val connectionId = sessionCarrier?.connectionId ?: currentPlan.turnConnectionId
+    val candidateId = when (transportKind) {
+        TransportKind.Turn -> sessionCarrier?.candidateId ?: currentPlan.turnCarrier?.candidateId
+        TransportKind.P2P -> currentPlan.contract.candidates.firstOrNull { it.kind == "webrtc" }?.id
+            ?: sessionCarrier?.candidateId
+        TransportKind.None -> null
+    }
+    return BootstrapConnectionReportDecision(
+        phase = phase,
+        transport = transportName,
+        connectionId = connectionId,
+        candidateId = candidateId,
+        reportedSession = currentSession,
+    )
+}

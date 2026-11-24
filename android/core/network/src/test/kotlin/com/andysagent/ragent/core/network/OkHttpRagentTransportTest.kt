@@ -3,6 +3,7 @@ package com.andysagent.ragent.core.network
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import com.andysagent.ragent.core.p2p.P2PHttpRequest
 import com.andysagent.ragent.core.p2p.P2PHttpResponse
+import com.andysagent.ragent.core.p2p.P2PIceCarrier
 import com.andysagent.ragent.core.p2p.P2PRequestTimeoutException
 import com.andysagent.ragent.core.p2p.P2PSession
 import kotlinx.coroutines.runBlocking
@@ -13,6 +14,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -1173,12 +1177,57 @@ class OkHttpRagentTransportTest {
             transport.close()
         }
     }
+
+    @Test
+    fun activeCarrierReflectsP2PAndTurnFromSessionResolvedCarrier() = runBlocking {
+        val transport = OkHttpRagentTransport({ "" }, { "rda_ok" }, requireVerifiedCarrier = true)
+        try {
+            val turnA = RecordingP2PSession()
+            transport.setTurnSession(turnA)
+            assertEquals(ActiveCarrier.Turn, transport.activeCarrier.value)
+
+            turnA.mutableResolvedCarrier.value = P2PIceCarrier.P2P
+            withTimeout(5_000L) {
+                while (transport.activeCarrier.value != ActiveCarrier.P2P) kotlinx.coroutines.delay(10L)
+            }
+
+            turnA.mutableResolvedCarrier.value = P2PIceCarrier.Turn
+            withTimeout(5_000L) {
+                while (transport.activeCarrier.value != ActiveCarrier.Turn) kotlinx.coroutines.delay(10L)
+            }
+
+            // Handoff to turnB already resolved to P2P immediately reflects P2P and ignores stale turnA changes.
+            val turnB = RecordingP2PSession(initialResolvedCarrier = P2PIceCarrier.P2P)
+            transport.handoffTurnSession(turnB)
+            assertEquals(ActiveCarrier.P2P, transport.activeCarrier.value)
+            turnA.mutableResolvedCarrier.value = P2PIceCarrier.Turn
+            kotlinx.coroutines.delay(30L)
+            assertEquals(ActiveCarrier.P2P, transport.activeCarrier.value)
+
+            turnB.mutableResolvedCarrier.value = P2PIceCarrier.Turn
+            withTimeout(5_000L) {
+                while (transport.activeCarrier.value != ActiveCarrier.Turn) kotlinx.coroutines.delay(10L)
+            }
+
+            // Explicit P2P session slot also honors Turn vs P2P resolvedCarrier.
+            val p2p = RecordingP2PSession(initialResolvedCarrier = P2PIceCarrier.P2P)
+            transport.setP2PSession(p2p)
+            assertEquals(ActiveCarrier.P2P, transport.activeCarrier.value)
+            p2p.mutableResolvedCarrier.value = P2PIceCarrier.Turn
+            withTimeout(5_000L) {
+                while (transport.activeCarrier.value != ActiveCarrier.Turn) kotlinx.coroutines.delay(10L)
+            }
+        } finally {
+            transport.close()
+        }
+    }
 }
 
 private class RecordingP2PSession(
     private val response: P2PHttpResponse = P2PHttpResponse(id = "unused", status = 200),
     private val result: Result<P2PHttpResponse>? = null,
     override val supportsPushInvalidations: Boolean = false,
+    initialResolvedCarrier: P2PIceCarrier = P2PIceCarrier.Unknown,
 ) : P2PSession {
     constructor(
         pushInvalidationsSupported: Boolean,
@@ -1186,6 +1235,8 @@ private class RecordingP2PSession(
 
     private val invalidationFlow = MutableSharedFlow<String>(extraBufferCapacity = 16)
     override val invalidations: Flow<String> = invalidationFlow
+    val mutableResolvedCarrier = MutableStateFlow(initialResolvedCarrier)
+    override val resolvedCarrier: StateFlow<P2PIceCarrier> = mutableResolvedCarrier.asStateFlow()
     override val isOpen = true
     var request: P2PHttpRequest? = null
         private set

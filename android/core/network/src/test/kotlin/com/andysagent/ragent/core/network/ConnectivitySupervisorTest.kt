@@ -4,6 +4,7 @@ import com.andysagent.ragent.core.p2p.IceServer
 import com.andysagent.ragent.core.p2p.P2PCandidate
 import com.andysagent.ragent.core.p2p.P2PHttpRequest
 import com.andysagent.ragent.core.p2p.P2PHttpResponse
+import com.andysagent.ragent.core.p2p.P2PIceCarrier
 import com.andysagent.ragent.core.p2p.P2PSession
 import com.andysagent.ragent.core.p2p.P2PSessionFactory
 import com.andysagent.ragent.core.protocol.ConnectionBootstrapCandidateDto
@@ -17,6 +18,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.test.advanceTimeBy
@@ -1295,6 +1299,104 @@ class ConnectivitySupervisorTest {
         }
     }
 
+    @Test fun `supervisor transport tracks resolvedCarrier across updates and health checks`() = runTest {
+        val session = FakeSession(Result.success(Unit)).apply { supportsKeepalive = true }
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_fixture" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnRecheckIntervalMs = 1_000L,
+            turnSessionFactory = { session },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+            assertEquals(TransportKind.Turn, supervisor.state.value.transport)
+
+            session.mutableResolvedCarrier.value = P2PIceCarrier.P2P
+            runCurrent()
+            assertEquals(TransportKind.P2P, supervisor.state.value.transport)
+
+            // Periodic carrier health check preserves P2P rather than overwriting it with Turn.
+            advanceTimeBy(1_001L)
+            runCurrent()
+            assertEquals(TransportKind.P2P, supervisor.state.value.transport)
+
+            session.mutableResolvedCarrier.value = P2PIceCarrier.Turn
+            runCurrent()
+            assertEquals(TransportKind.Turn, supervisor.state.value.transport)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test fun `bootstrap report deduplicates per session and emits migrated webrtc for direct ICE`() {
+        val currentPlan = plan()
+        val sessionA = FakeSession(Result.success(Unit))
+        val sessionB = FakeSession(Result.success(Unit))
+        val carrier = currentPlan.turnCarrier!!
+
+        val initialTurn = nextBootstrapConnectionReport(
+            transportKind = TransportKind.Turn,
+            currentPlan = currentPlan,
+            currentSession = sessionA,
+            sessionCarrier = carrier,
+            lastReportedSession = null,
+            lastReportedTransport = null,
+        )
+        assertEquals("connected", initialTurn?.phase)
+        assertEquals("turn", initialTurn?.transport)
+
+        val duplicateTurn = nextBootstrapConnectionReport(
+            transportKind = TransportKind.Turn,
+            currentPlan = currentPlan,
+            currentSession = sessionA,
+            sessionCarrier = carrier,
+            lastReportedSession = initialTurn?.reportedSession,
+            lastReportedTransport = initialTurn?.transport,
+        )
+        assertEquals(null, duplicateTurn)
+
+        val migratedWebrtc = nextBootstrapConnectionReport(
+            transportKind = TransportKind.P2P,
+            currentPlan = currentPlan,
+            currentSession = sessionA,
+            sessionCarrier = carrier,
+            lastReportedSession = initialTurn?.reportedSession,
+            lastReportedTransport = initialTurn?.transport,
+        )
+        assertEquals("migrated", migratedWebrtc?.phase)
+        assertEquals("webrtc", migratedWebrtc?.transport)
+        assertEquals("p2p-1", migratedWebrtc?.candidateId)
+        assertEquals("turn-connection-1", migratedWebrtc?.connectionId)
+
+        val duplicateWebrtc = nextBootstrapConnectionReport(
+            transportKind = TransportKind.P2P,
+            currentPlan = currentPlan,
+            currentSession = sessionA,
+            sessionCarrier = carrier,
+            lastReportedSession = migratedWebrtc?.reportedSession,
+            lastReportedTransport = migratedWebrtc?.transport,
+        )
+        assertEquals(null, duplicateWebrtc)
+
+        // Direct P2P confirmed before any Turn report still sends phase="migrated" so TURN lease is released.
+        val directInitialWebrtc = nextBootstrapConnectionReport(
+            transportKind = TransportKind.P2P,
+            currentPlan = currentPlan,
+            currentSession = sessionB,
+            sessionCarrier = carrier,
+            lastReportedSession = migratedWebrtc?.reportedSession,
+            lastReportedTransport = migratedWebrtc?.transport,
+        )
+        assertEquals("migrated", directInitialWebrtc?.phase)
+        assertEquals("webrtc", directInitialWebrtc?.transport)
+        assertEquals(sessionB, directInitialWebrtc?.reportedSession)
+    }
+
     private fun supervisor(
         scope: kotlinx.coroutines.CoroutineScope,
         maxRetries: Int = 0,
@@ -1423,6 +1525,8 @@ class ConnectivitySupervisorTest {
         var inboundGeneration: Long = 0L
         var livenessProbes = 0
         var livenessProbeHandler: (suspend (Long) -> Boolean)? = null
+        val mutableResolvedCarrier = MutableStateFlow(P2PIceCarrier.Unknown)
+        override val resolvedCarrier: StateFlow<P2PIceCarrier> = mutableResolvedCarrier.asStateFlow()
 
         override var isOpen: Boolean = false
             private set
