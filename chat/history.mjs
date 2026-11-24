@@ -2882,6 +2882,11 @@ async function readMessagePosition(sessionId, id) {
   return first?.canonicalMessageId === id ? record : null;
 }
 
+export async function getStoredMessagePosition(sessionId, id) {
+  if (typeof sessionId !== 'string' || !sessionId || typeof id !== 'string' || !id) return null;
+  return readMessagePosition(sessionId, id);
+}
+
 async function prepareStoredMessageIdentity(sessionId, source) {
   const event = withMessageTimelineIdentity(source);
   if (!event.canonicalMessageId) return event;

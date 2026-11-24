@@ -264,6 +264,132 @@ class RoomLiveFeedTest {
             assertEquals("running", database.dao().getSession("session-live")?.status)
         } finally { repo.close(); database.close() }
     }
+
+    @Test fun refreshTimelinePaginatesForwardDurablePagesUntilCaughtUpToLatestSeq() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        val requests = mutableListOf<ApiRequest>()
+        val transport = HandlerTransport { request ->
+            requests += request
+            when {
+                request.path.contains("filter=visible") ->
+                    ApiResponse(200, """{"sessionId":"session-live","events":[],"latestSeq":250}""")
+                request.path.contains("afterSeq=0") -> {
+                    val events = (1..200).joinToString(",") { seq ->
+                        if (seq == 1 || seq == 200) {
+                            """{"seq":$seq,"id":"e-$seq","type":"message","role":"assistant","canonicalMessageId":"msg-$seq","content":"Message $seq"}"""
+                        } else {
+                            """{"seq":$seq,"id":"e-$seq","type":"status","runId":"run-1","state":"working"}"""
+                        }
+                    }
+                    ApiResponse(200, """{"sessionId":"session-live","events":[$events],"latestSeq":250,"pagination":{"hasMoreAfter":true,"latestSeq":250}}""")
+                }
+                request.path.contains("afterSeq=200") -> {
+                    val events = (201..250).joinToString(",") { seq ->
+                        if (seq == 250) {
+                            """{"seq":$seq,"id":"e-$seq","type":"message","role":"assistant","canonicalMessageId":"msg-$seq","content":"Final page 2"}"""
+                        } else {
+                            """{"seq":$seq,"id":"e-$seq","type":"status","runId":"run-1","state":"working"}"""
+                        }
+                    }
+                    ApiResponse(200, """{"sessionId":"session-live","events":[$events],"latestSeq":250,"pagination":{"hasMoreAfter":false,"latestSeq":250}}""")
+                }
+                else -> error("Unexpected request: ${request.path}")
+            }
+        }
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Paged", null, "completed", 250, 0)))
+            val result = repo.refreshTimeline("session-live")
+            assertTrue(result is RefreshResult.Applied)
+            assertEquals(250L, database.dao().getCursor("session-live")?.lastAppliedSeq)
+            val messages = database.dao().getMessages("session-live")
+            assertEquals(listOf("Message 1", "Message 200", "Final page 2"), messages.map { it.content })
+            assertTrue(requests.any { it.path.contains("afterSeq=0") })
+            assertTrue(requests.any { it.path.contains("afterSeq=200") })
+        } finally { repo.close(); database.close() }
+    }
+
+    @Test fun refreshTimelineRecoversFromGapAndPreservesCacheWhenGapIsUnrecoverable() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        var phase = "initial"
+        val transport = HandlerTransport { request ->
+            when {
+                request.path.contains("filter=visible") ->
+                    ApiResponse(200, """{"sessionId":"session-live","events":[],"latestSeq":2}""")
+                phase == "initial" ->
+                    ApiResponse(200, """{"sessionId":"session-live","events":[{"seq":1,"id":"evt_000001","type":"message","role":"user","canonicalMessageId":"m-1","content":"First"}],"latestSeq":1}""")
+                phase == "collision" && request.path.contains("afterSeq=1") ->
+                    // Simulates server restart reusing evt_000001 at seq=2, which hits InvalidEvent -> Gap.
+                    ApiResponse(200, """{"sessionId":"session-live","events":[{"seq":2,"id":"evt_000001","type":"message","role":"assistant","canonicalMessageId":"m-2","content":"Recovered reply"}],"latestSeq":2}""")
+                phase == "collision" && request.path.contains("afterSeq=0") ->
+                    ApiResponse(200, """{"sessionId":"session-live","events":[{"seq":1,"id":"evt_000001","type":"message","role":"user","canonicalMessageId":"m-1","content":"First"},{"seq":2,"id":"evt_000002","type":"message","role":"assistant","canonicalMessageId":"m-2","content":"Recovered reply"}],"latestSeq":2}""")
+                phase == "unrecoverable_gap" ->
+                    ApiResponse(200, """{"sessionId":"session-live","events":[{"seq":4,"id":"evt_000004","type":"message","role":"assistant","canonicalMessageId":"m-4","content":"Skipped"}],"latestSeq":4}""")
+                else -> error("Unexpected request: ${request.path}")
+            }
+        }
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Gap", null, "idle", 1, 0)))
+            assertEquals(RefreshResult.Applied(1, 1), repo.refreshEvents("session-live"))
+
+            phase = "collision"
+            val recovered = repo.refreshTimeline("session-live")
+            assertTrue(recovered is RefreshResult.Applied)
+            assertEquals(2L, database.dao().getCursor("session-live")?.lastAppliedSeq)
+            assertEquals(listOf("First", "Recovered reply"), database.dao().getMessages("session-live").map { it.content })
+
+            phase = "unrecoverable_gap"
+            val unresolved = repo.refreshTimeline("session-live")
+            assertTrue(unresolved is RefreshResult.Gap)
+            assertEquals(2L, database.dao().getCursor("session-live")?.lastAppliedSeq)
+            assertEquals(listOf("First", "Recovered reply"), database.dao().getMessages("session-live").map { it.content })
+        } finally { repo.close(); database.close() }
+    }
+
+    @Test fun invalidLiveFeedResetsAndMutesOnlyLiveOverlayWithoutWipingDurableSync() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        val transport = LiveFeedTransport()
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("session-live", "Live", null, "running", 0, 0)))
+            transport.body = """{"sessionId":"session-live","events":[{"seq":1,"type":"message","role":"user","canonicalMessageId":"u1","content":"Prompt"}],"liveStreamId":"12345678-1234-1234-1234-123456789abc","liveCursor":1,"liveEvents":[{"seq":0,"eventId":"live-1","type":"text_delta","role":"assistant","entityId":"reply-a","text":"Partial","runId":"run-a"}]}"""
+            assertEquals(RefreshResult.Applied(1, 1), repo.refreshEvents("session-live"))
+
+            // Invalid live stream ID or unknown live event must mute only the live overlay, not fail durable sync.
+            transport.body = """{"sessionId":"session-live","events":[{"seq":2,"type":"message","role":"assistant","canonicalMessageId":"a1","content":"Durable answer"}],"liveStreamId":"invalid-stream-id","liveCursor":2,"liveEvents":[{"seq":0,"eventId":"live-2","type":"unknown_bad_frame"}]}"""
+            val durableAfterInvalidLive = repo.refreshEvents("session-live")
+            assertEquals(RefreshResult.Applied(1, 2), durableAfterInvalidLive)
+            assertEquals(2L, database.dao().getCursor("session-live")?.lastAppliedSeq)
+            assertEquals(listOf("Prompt", "Durable answer"), database.dao().getMessages("session-live").map { it.content })
+
+            val timeline = repo.observeTimeline("session-live").first { items ->
+                items.filterIsInstance<TimelineItem.Message>().any { it.text == "Durable answer" }
+            }.filterIsInstance<TimelineItem.Message>()
+            assertEquals(listOf("Prompt", "Durable answer"), timeline.map { it.text })
+
+            // Invalid live frame inside an otherwise well-formed liveStreamId on an unmuted session also mutes without throwing.
+            database.dao().upsertSessions(listOf(SessionEntity("session-live-2", "Live 2", null, "running", 0, 0)))
+            transport.body = """{"sessionId":"session-live-2","events":[{"seq":1,"type":"message","role":"user","canonicalMessageId":"u2","content":"Next"}],"liveStreamId":"12345678-1234-1234-1234-123456789abc","liveCursor":1,"liveEvents":[{"seq":0,"eventId":"live-3","type":"unknown_bad_frame"}]}"""
+            assertEquals(RefreshResult.Applied(1, 1), repo.refreshEvents("session-live-2"))
+            assertEquals(1L, database.dao().getCursor("session-live-2")?.lastAppliedSeq)
+            assertEquals(listOf("Next"), database.dao().getMessages("session-live-2").map { it.content })
+        } finally { repo.close(); database.close() }
+    }
+}
+
+private class HandlerTransport(
+    private val handler: suspend (ApiRequest) -> ApiResponse,
+) : RagentTransport {
+    override val requiresEventPolling = true
+    override val connectionState = MutableStateFlow(RuntimeConnectionState.Connected)
+    override val invalidations: Flow<InvalidationHint> = MutableSharedFlow()
+    override suspend fun execute(request: ApiRequest): ApiResponse = handler(request)
+    override fun connectInvalidationSocket() = Unit
+    override suspend fun close() = Unit
 }
 
 private class IndependentLiveFeedTransport : RagentTransport {

@@ -106,9 +106,9 @@ object RunActionFormatter {
             "Working on the task"
         } else listOf(action, subject.takeUnless { groupedExploration }.orEmpty()).filter { it.isNotBlank() }.joinToString(" ")) +
             if (waiting) " · waiting for provider output" else ""
-        val localizable = modelDescription == null && !waiting && !groupedExploration &&
+        val localizable = modelDescription == null && !waiting &&
             lifecycle in setOf("running", "working", "started", "in_progress")
-        val presentationVerb = if (!localizable) null else if (isGenericTool) "working" else if (subject.isBlank() && kind !in setOf("command", "execute", "execute_composite", "question")) null else when (kind) {
+        val presentationVerb = if (!localizable) null else if (groupedExploration) "exploring" else if (isGenericTool) "working" else if (subject.isBlank() && kind !in setOf("command", "execute", "execute_composite", "question")) null else when (kind) {
             "command", "execute", "execute_composite" -> "execute"
             "question" -> "question"
             "file_edit", "edit" -> "edit"

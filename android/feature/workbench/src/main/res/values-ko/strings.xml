@@ -393,4 +393,9 @@
     <string name="connection_status_reconnecting">재연결 중</string>
     <string name="connection_status_offline">오프라인</string>
     <string name="connection_status_auth_required">인증 필요</string>
+    <string name="workbench_run_elapsed">%1$s 동안 처리 중</string>
+    <string name="workbench_run_finished">%1$s 소요</string>
+    <string name="workbench_duration_seconds">%1$d초</string>
+    <string name="workbench_duration_minutes_seconds">%1$d분 %2$d초</string>
+    <string name="timeline_process">활동</string>
 </resources>

@@ -1,13 +1,15 @@
+import { randomBytes } from 'node:crypto';
 import { normalizeMessageEventAttachments } from './attachment-utils.mjs';
 import { normalizeWorkStateUpdate } from './continuity-work-state.mjs';
 
+const EVENT_ID_BOOT_NONCE = randomBytes(6).toString('hex');
 let counter = 0;
 
 function createEvent(type, fields = {}) {
   counter += 1;
   return {
     type,
-    id: `evt_${String(counter).padStart(6, '0')}`,
+    id: `evt_${EVENT_ID_BOOT_NONCE}_${String(counter).padStart(6, '0')}`,
     timestamp: Date.now(),
     ...fields,
   };

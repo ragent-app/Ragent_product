@@ -35,4 +35,8 @@
     <string name="run_subject_task">the task</string>
     <string name="run_subject_changes">workspace changes</string>
     <string name="run_subject_current_location">current location</string>
+    <plurals name="run_action_exploring_items">
+        <item quantity="one">Exploring %1$d item</item>
+        <item quantity="other">Exploring %1$d items</item>
+    </plurals>
 </resources>

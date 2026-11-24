@@ -674,8 +674,7 @@ fun AgentStreamingMessage(
         else revealStreamingText(text, revealedGraphemes, graphemes)
     Column(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp, bottom = 0.dp),
+            .fillMaxWidth(),
     ) {
         if (streaming || visibleText.isNotBlank()) {
             if (streaming && visibleText.isEmpty()) {

@@ -167,6 +167,32 @@ class RunActionFormatterTest {
         assertEquals(null, RunActionFormatter.forRun(RunActionFormatter.RunActionStatus.Other, null, emptyList()))
     }
 
+    @Test
+    fun groupedExploringActivityEmitsExploringVerbAndRespectsLifecycle() {
+        val json = kotlinx.serialization.json.Json
+        val active = json.parseToJsonElement(
+            """{"state":"working","kind":"read","group":{"kind":"exploring","count":3}}""",
+        ) as kotlinx.serialization.json.JsonObject
+        val formatted = RunActionFormatter.fromServer(active)
+        assertEquals("Exploring 3 items", formatted?.sentence)
+        assertEquals(3, formatted?.groupedCount)
+        assertEquals("exploring", formatted?.presentationVerb)
+
+        val waiting = json.parseToJsonElement(
+            """{"state":"working","kind":"read","group":{"kind":"exploring","count":3},"providerLiveness":{"phase":"awaiting_provider_output"}}""",
+        ) as kotlinx.serialization.json.JsonObject
+        val waitingFormatted = RunActionFormatter.fromServer(waiting)
+        assertEquals("Exploring 3 items · waiting for provider output", waitingFormatted?.sentence)
+        assertEquals(null, waitingFormatted?.presentationVerb)
+
+        val completed = json.parseToJsonElement(
+            """{"state":"completed","kind":"read","group":{"kind":"exploring","count":3}}""",
+        ) as kotlinx.serialization.json.JsonObject
+        val completedFormatted = RunActionFormatter.fromServer(completed)
+        assertEquals("Completed", completedFormatted?.sentence)
+        assertEquals(null, completedFormatted?.presentationVerb)
+    }
+
     private fun format(command: String): RunActionUiState? = RunActionFormatter.forRun(
         status = RunActionFormatter.RunActionStatus.Working,
         phase = null,

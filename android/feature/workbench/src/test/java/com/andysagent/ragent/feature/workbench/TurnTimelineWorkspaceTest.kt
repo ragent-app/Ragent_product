@@ -444,4 +444,183 @@ class TurnTimelineWorkspaceTest {
         assertEquals(listOf(thought), processNoFinal)
         assertEquals(listOf(asyncQuestionMsg), outsideNoFinal)
     }
+
+    @Test
+    fun `steered follow-up sharing runId flushes into separate turn and wins activeRunTurnIndex`() {
+        val firstPrompt = TimelineItem.Message(
+            id = "u-1",
+            seq = 1,
+            role = TimelineRole.User,
+            text = "Initial prompt",
+            completed = true,
+            runId = "run-shared",
+            requestId = "req-1",
+        )
+        val firstReply = TimelineItem.Message(
+            id = "a-1",
+            seq = 2,
+            role = TimelineRole.Agent,
+            text = "First partial answer",
+            completed = true,
+            runId = "run-shared",
+            requestId = "req-1",
+        )
+        val steeredPrompt = TimelineItem.Message(
+            id = "u-2",
+            seq = 3,
+            role = TimelineRole.User,
+            text = "Steer to new topic",
+            completed = true,
+            runId = "run-shared",
+            requestId = "req-2",
+        )
+        val steeredReply = TimelineItem.Message(
+            id = "a-2",
+            seq = 4,
+            role = TimelineRole.Agent,
+            text = "Streaming steered answer",
+            completed = false,
+            runId = "run-shared",
+            requestId = "req-2",
+        )
+
+        val turns = projector.project(listOf(firstPrompt, firstReply, steeredPrompt, steeredReply), null)
+
+        assertEquals(2, turns.size)
+        assertEquals("u-1", turns[0].userPrompt?.id)
+        assertEquals("a-1", turns[0].finalAnswer?.id)
+        assertEquals("u-2", turns[1].userPrompt?.id)
+        assertEquals("a-2", turns[1].streamingAnswer?.id)
+        assertEquals(1, activeRunTurnIndex(turns, "run-shared", "req-2"))
+        assertEquals(1, activeRunTurnIndex(turns, "run-shared", null))
+    }
+
+    @Test
+    fun `uniqueTurnRenderKeys stays stable across pending, orphan reply, and reconciled durable turn`() {
+        val pending = PendingTurnUiState(
+            requestId = "req-reconcile-1",
+            text = "Follow up",
+            attachments = emptyList(),
+            selection = RuntimeSelection(tool = "codex"),
+            agentId = null,
+            state = PendingTurnState.Sending,
+        )
+        val pendingTurn = projector.project(emptyList(), pending).single()
+        val orphanTurn = projector.project(
+            listOf(
+                TimelineItem.Message(
+                    id = "a-orphan",
+                    seq = 10,
+                    role = TimelineRole.Agent,
+                    text = "Streaming before prompt syncs",
+                    completed = false,
+                    runId = "run-reconcile",
+                    requestId = "req-reconcile-1",
+                ),
+            ),
+            null,
+        ).single()
+        val durableTurn = projector.project(
+            listOf(
+                TimelineItem.Message(
+                    id = "u-durable",
+                    seq = 9,
+                    role = TimelineRole.User,
+                    text = "Follow up",
+                    completed = true,
+                    runId = "run-reconcile",
+                    requestId = "req-reconcile-1",
+                ),
+                TimelineItem.Message(
+                    id = "a-durable",
+                    seq = 10,
+                    role = TimelineRole.Agent,
+                    text = "Done",
+                    completed = true,
+                    runId = "run-reconcile",
+                    requestId = "req-reconcile-1",
+                ),
+            ),
+            null,
+        ).single()
+
+        val pendingKey = uniqueTurnRenderKeys(listOf(pendingTurn)).single()
+        val orphanKey = uniqueTurnRenderKeys(listOf(orphanTurn)).single()
+        val durableKey = uniqueTurnRenderKeys(listOf(durableTurn)).single()
+
+        assertEquals(pendingKey, orphanKey)
+        assertEquals(pendingKey, durableKey)
+    }
+
+    @Test
+    fun `splitTurnEntries never folds user messages or uncompleted agent replies into processEntries`() {
+        val thought = TimelineItem.Operation(
+            id = "thought-1",
+            seq = 1,
+            kind = TimelineOperationKind.Tool,
+            title = "Thinking",
+            detail = "Reasoning",
+            status = TimelineOperationStatus.Completed,
+            isReasoning = true,
+        )
+        val streamingReply = TimelineItem.Message(
+            id = "a-live",
+            seq = 2,
+            role = TimelineRole.Agent,
+            text = "Partial reply on reopen",
+            completed = false,
+            messagePhase = "commentary",
+        )
+
+        val (processEntries, outsideEntries) = splitTurnEntries(
+            listOf(thought, streamingReply),
+            allowTerminalFallback = false,
+        )
+        assertEquals(emptyList<TimelineItem>(), processEntries)
+        assertEquals(listOf(thought, streamingReply), outsideEntries)
+
+        val (fallbackProcess, fallbackOutside) = splitTurnEntries(
+            listOf(thought, streamingReply),
+            allowTerminalFallback = true,
+        )
+        assertEquals(emptyList<TimelineItem>(), fallbackProcess)
+        assertEquals(listOf(thought, streamingReply), fallbackOutside)
+
+        val earlyFinal = TimelineItem.Message(
+            id = "a-early-final",
+            seq = 1,
+            role = TimelineRole.Agent,
+            text = "Earlier final",
+            completed = true,
+            messagePhase = "final_answer",
+        )
+        val userMsg = TimelineItem.Message(
+            id = "u-inline",
+            seq = 2,
+            role = TimelineRole.User,
+            text = "Follow-up prompt",
+            completed = true,
+        )
+        val (trailingProcess, trailingOutside) = splitTurnEntries(
+            listOf(thought, earlyFinal, userMsg, streamingReply),
+            allowTerminalFallback = false,
+        )
+        assertEquals(listOf(thought), trailingProcess)
+        assertEquals(listOf(earlyFinal, userMsg, streamingReply), trailingOutside)
+
+        val completedFinal = TimelineItem.Message(
+            id = "a-final",
+            seq = 3,
+            role = TimelineRole.Agent,
+            text = "Final reply",
+            completed = true,
+            messagePhase = "final_answer",
+        )
+        val (processWithUser, outsideWithUser) = splitTurnEntries(
+            listOf(thought, userMsg, completedFinal),
+            allowTerminalFallback = false,
+        )
+        assertEquals(listOf(thought), processWithUser)
+        assertEquals(listOf(userMsg, completedFinal), outsideWithUser)
+    }
 }

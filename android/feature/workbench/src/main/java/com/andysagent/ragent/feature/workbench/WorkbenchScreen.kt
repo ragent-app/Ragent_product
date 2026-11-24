@@ -1816,12 +1816,16 @@ private fun ChatSurface(
     val lastAgentEntryIndex = remember(turnGroups) {
         turnGroups.indexOfLast { it.finalAnswer?.completed == true }
     }
+    val entryAnchorIndex = remember(turnGroups, lastAgentEntryIndex) {
+        if (turnGroups.lastOrNull()?.finalAnswer?.completed == true) lastAgentEntryIndex
+        else turnGroups.lastIndex
+    }
     // An already available history must be measured at its entry anchor, not
     // painted at item zero and corrected after the page has started sliding in.
     val listState = key(state.sessionId) {
         rememberLazyListState(initialFirstVisibleItemIndex =
             if (!state.historyLoading && (state.timelineSessionId == null || state.timelineSessionId == state.sessionId))
-                (lastAgentEntryIndex.takeIf { it >= 0 } ?: turnGroups.lastIndex).coerceAtLeast(0)
+                entryAnchorIndex.coerceAtLeast(0)
             else 0)
     }
     var entryDocuments by remember(state.sessionId) {
@@ -1886,10 +1890,38 @@ private fun ChatSurface(
         activeRunTurnIndex(turnGroups, activityRunId, activityRequestId)
     } else turnGroups.lastIndex
     val activeTurn = turnGroups.getOrNull(activeTurnIndex)
-    val durationTurnKey = activeTurn?.requestId ?: activeTurn?.userPrompt?.id
+    val activeRequestId = activeTurn?.requestId
+    val activePromptId = activeTurn?.userPrompt?.id
+    val currentRunId = activeTurn?.runId ?: activityRunId?.takeIf { activityRequestId != null && activityRequestId == activeRequestId }
+    val durationIdentityTracker = remember(state.sessionId) {
+        object {
+            var key: String? = null
+            var runId: String? = null
+            var requestId: String? = null
+            var promptId: String? = null
+        }
+    }
+    val candidateDurationKey = activeRequestId ?: currentRunId ?: activePromptId
+    val matchesTrackedTurn = durationIdentityTracker.key != null && (
+        (currentRunId != null && currentRunId == durationIdentityTracker.runId) ||
+            (activeRequestId != null && activeRequestId == durationIdentityTracker.requestId) ||
+            (activePromptId != null && activePromptId == durationIdentityTracker.promptId)
+        )
+    val durationTurnKey = if (matchesTrackedTurn) {
+        if (currentRunId != null) durationIdentityTracker.runId = currentRunId
+        if (activeRequestId != null) durationIdentityTracker.requestId = activeRequestId
+        if (activePromptId != null) durationIdentityTracker.promptId = activePromptId
+        durationIdentityTracker.key
+    } else {
+        durationIdentityTracker.key = candidateDurationKey
+        durationIdentityTracker.runId = currentRunId
+        durationIdentityTracker.requestId = activeRequestId
+        durationIdentityTracker.promptId = activePromptId
+        candidateDurationKey
+    }
     var observedActive by remember(state.sessionId, durationTurnKey) { mutableStateOf(false) }
     val terminalStatus = state.runStatus in setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
-    LaunchedEffect(statusActive, terminalStatus, state.connection) {
+    LaunchedEffect(state.sessionId, durationTurnKey, statusActive, terminalStatus, state.connection) {
         if (statusActive) observedActive = true
         else if (terminalStatus && state.connection == AgentConnectionStatus.Connected) observedActive = false
     }
@@ -1897,8 +1929,8 @@ private fun ChatSurface(
         (observedActive && state.connection != AgentConnectionStatus.Connected)
     var runStartedElapsed by remember(state.sessionId, durationTurnKey) { mutableLongStateOf(Long.MAX_VALUE) }
     var runElapsedSeconds by remember(state.sessionId, durationTurnKey) { mutableLongStateOf(-1L) }
-    val currentRunId = activeTurn?.runId ?: activityRunId?.takeIf { activityRequestId != null && activityRequestId == activeTurn?.requestId }
     val activityMatchesTurn = (currentRunId != null && activityRunId == currentRunId) ||
+        (activeRequestId != null && activityRequestId == activeRequestId) ||
         (durationTurnKey != null && activityRequestId == durationTurnKey)
     val serverElapsed = (state.serverRunActivity?.get("runElapsedMs") as? kotlinx.serialization.json.JsonPrimitive)
         ?.content?.toLongOrNull()?.takeIf { it >= 0 && activityMatchesTurn }
@@ -2016,7 +2048,7 @@ private fun ChatSurface(
             // follow-tail effect cannot race this restored position.
             scrollMode = ChatScrollMode.Detached
             sessionEntryBottomPinActive = false
-            val restorationTarget = lastAgentEntryIndex.takeIf { it >= 0 } ?: turnGroups.lastIndex
+            val restorationTarget = entryAnchorIndex
             // Prepare the loaded snapshot, including offscreen older replies:
             // scrolling must not shrink them to provisional loading rows and
             // then grow them back while the reader's gesture is in progress.
@@ -3322,10 +3354,13 @@ private fun ChatSurface(
                     val canMessageAction = canShowMessageActions(state.runStatus, historyTransitioning, state.pendingTurn, state.acceptedTurns.isNotEmpty())
                     val rowMotion = motionPolicy()
 
-                    val isPendingRow = turn.id.startsWith("pending-")
+                    val isPendingRow = turn.id.startsWith("turn-pending-") ||
+                        turn.id.startsWith("pending-") ||
+                        turn.userPrompt?.isPending == true
                     val flightRowRequestId = when {
-                        isPendingRow -> turn.id.removePrefix("pending-")
-                        turn.userPrompt != null && turn.userPrompt.requestId != null -> turn.userPrompt.requestId
+                        turn.userPrompt?.requestId != null -> turn.userPrompt.requestId
+                        turn.id.startsWith("turn-pending-") -> turn.id.removePrefix("turn-pending-")
+                        turn.id.startsWith("pending-") -> turn.id.removePrefix("pending-")
                         else -> null
                     }?.takeIf { it == dockFlight.activeRequestId }
 
@@ -3373,10 +3408,11 @@ private fun ChatSurface(
                             onOpenFileDiff = { diff -> onSetSelectedDiffFile(diff) },
                             onReport = { text -> onEvent(WorkbenchEvent.ReportAgentContent(text)) },
                             showMessageActions = canMessageAction && !organizationCollapsed,
-                            runDuration = if (turn.runId?.let(state.runDurations::containsKey) == true || (isRunTurn && (showActiveRunAction || runElapsedSeconds >= 0L ||
+                            runDuration = if (turn.runId?.let(state.runDurations::containsKey) == true || (isRunTurn && (showActiveRunAction || runElapsedSeconds >= 0L || serverElapsed != null ||
                                 (currentRunId != null && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A")))) {{
-                                val seconds = if (isRunTurn && showActiveRunAction) runElapsedSeconds else
-                                    turn.runId?.let(state.runDurations::get)?.div(1_000) ?: if (isRunTurn) runElapsedSeconds else -1L
+                                val activeFallbackSeconds = runElapsedSeconds.takeIf { it >= 0L } ?: (serverElapsed?.div(1_000L) ?: -1L)
+                                val seconds = if (isRunTurn && showActiveRunAction) activeFallbackSeconds else
+                                    turn.runId?.let(state.runDurations::get)?.div(1_000) ?: if (isRunTurn) activeFallbackSeconds else -1L
                                 val duration = if (seconds >= 0) {
                                     if (seconds < 60) stringResource(R.string.workbench_duration_seconds, seconds)
                                     else stringResource(R.string.workbench_duration_minutes_seconds, seconds / 60, seconds % 60)
@@ -3416,11 +3452,9 @@ private fun ChatSurface(
                             // Keep document geometry synchronous with measurement;
                             // intentional send motion remains in TurnDockFlightShell.
                             placementSpec = null,
-                            fadeOutSpec = if (rowMotion.preference == MotionPreference.None || flightRowRequestId != null) {
-                                null
-                            } else {
-                                tween(rowMotion.duration(120))
-                            },
+                            // Reconciling a pending/steered turn must replace without
+                            // cross-fading old and new rows on top of each other.
+                            fadeOutSpec = null,
                         ),
                     ) {
                         if (flightRowRequestId != null) {

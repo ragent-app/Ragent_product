@@ -27,7 +27,7 @@ import {
   recordApiRequestPhase,
   setApiRequestCorrelation,
 } from './api-request-log.mjs';
-import { createToolInvocation } from './process-runner.mjs';
+import { buildRuntimeInvocation, createToolInvocation } from './process-runner.mjs';
 import {
   buildProviderContractFields,
   normalizeProviderPermissionMode,
@@ -60,6 +60,7 @@ import {
 import {
   appendEvent,
   appendEvents,
+  getStoredMessagePosition,
   prepareLiveMessageTimeline,
   hydrateTimelineMessageSnapshots,
   appendInitializationEvents,
@@ -344,7 +345,9 @@ import { BoundedLruMap } from './cache-utils.mjs';
 import { registerCache } from './memory-registry.mjs';
 import { cacheBudget } from '../lib/cache-budget.mjs';
 import { buildEventBlockEvents, buildSessionDisplayEvents, filterSessionDisplayPushEvents } from './session-display-events.mjs';
-import { projectMessageTimelineIdentities } from './message-timeline.mjs';
+import { MESSAGE_TIMELINE_VERSION, projectMessageTimelineIdentities, withMessageTimelineIdentity } from './message-timeline.mjs';
+import { createAssistantControlBlockStream, stripAssistantControlBlocks } from './assistant-control-blocks.mjs';
+import { publishAllLiveEvents, sessionLiveFeed, sessionRealtimeLiveFeed } from './session-live-feed.mjs';
 import { buildRunActivityProjection } from './run-activity-projection.mjs';
 import {
   buildSessionActivity,
@@ -1050,7 +1053,25 @@ const {
 } = createRunProjectionService({
   buildCodexContextMetricsPayload,
   clipPreview: clipFailurePreview,
-  createToolInvocation,
+  createToolInvocation: async (toolId, prompt = '', options = {}) => {
+    try {
+      return await createToolInvocation(toolId, prompt, options);
+    } catch (error) {
+      // Spool projection and cold-reconnect replay only need the adapter and
+      // runtime contract; tolerate missing local harness binaries when the
+      // runtime family is known.
+      const fallbackFamily = (typeof options?.runtimeFamily === 'string' && options.runtimeFamily.trim())
+        || (toolId === 'claude' ? 'claude-stream-json'
+          : (toolId === 'claude-bidi' ? 'claude-stream-json-bidi'
+            : (toolId === 'codex' ? 'codex-app-server-json' : '')));
+      if (!fallbackFamily) throw error;
+      return {
+        command: '',
+        envOverrides: {},
+        ...buildRuntimeInvocation(fallbackFamily, prompt, options, toolId),
+      };
+    }
+  },
   materializeRunSpoolLine,
   normalizeRunEvents,
   readLatestCodexSessionMetrics,
@@ -3275,6 +3296,7 @@ function stopObservedRun(runId) {
     observed.watcher?.close();
   } catch {}
   observedRuns.delete(runId);
+  recoveredInflightRuns.delete(runId);
   // Drop the per-run delta adapter so its auto-approval suppression Set is
   // released with the run (re-created + re-seeded on any later observation).
   releaseRunRuntimeInvocation(runId);
@@ -3550,6 +3572,7 @@ function timelineBundleKeyFor(sessionId, historyMeta, activeRunId, run) {
     run?.state || '',
     run?.updatedAt || '',
     run?.lastNormalizedAt || '',
+    sessionRealtimeLiveFeed.getInflightRevision(sessionId),
     timelineInvalidationGeneration.get(sessionId)?.gen || 0,
   ].join(':');
 }
@@ -6430,6 +6453,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   }
 
 
+  await ensureActiveRunInflightRecovered(sessionId, { activeRunId: runId });
   const projection = await collectNormalizedRunEventDelta(run, manifest);
   const messageTimeline = await prepareLiveMessageTimeline(sessionId, projection.normalizedEvents);
   const normalizedEvents = messageTimeline.events;
@@ -7004,6 +7028,9 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     });
   }
   if (isTerminalRunState(run.state)) {
+    sessionLiveFeed.clearInflight(sessionId, { runId: run.id });
+    sessionRealtimeLiveFeed.clearInflight(sessionId, { runId: run.id });
+    recoveredInflightRuns.delete(runId);
     await releaseAgyRunSlot(runId, { outcome: harnessOutcomeForRun(run) });
     stopObservedRun(runId);
   } else if (hasPendingRunApproval(run) && harnessRunLeases.has(run.id)) {
@@ -10727,6 +10754,210 @@ function rawTimelinePageStartsAtTurnBoundary(events = []) {
   return first.type === 'message' && first.role === 'user';
 }
 
+const recoveredInflightRuns = new Set();
+const recoveringInflightRunPromises = new Map();
+
+function trimInflightValue(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function hasInflightUpstreamMessageId(event) {
+  return Boolean(trimInflightValue(
+    event?.messageId || event?.providerMessageId || event?.providerItemId || event?.streamItemId || event?.entityId,
+  ));
+}
+
+function extractInflightStreamsFromNormalizedEvents(events = [], run = {}, openStartsByBlock = new Map()) {
+  const openStreams = new Map();
+  const controlStreams = new Map();
+  const seenDeltaIds = new Set();
+  const getControlStream = (key) => {
+    let stream = controlStreams.get(key);
+    if (!stream) {
+      stream = createAssistantControlBlockStream();
+      controlStreams.set(key, stream);
+    }
+    return stream;
+  };
+  for (const raw of Array.isArray(events) ? events : []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const withRun = raw.runId ? raw : { ...raw, runId: run.id };
+    const blockIndex = Number.isInteger(withRun.providerContentBlockIndex)
+      ? withRun.providerContentBlockIndex
+      : (Number.isInteger(withRun.messageBlockIndex)
+        ? withRun.messageBlockIndex
+        : (Number.isInteger(withRun.blockIndex) ? withRun.blockIndex : 0));
+    const hasUpstream = hasInflightUpstreamMessageId(withRun);
+    const anonStart = !hasUpstream ? openStartsByBlock.get(blockIndex) : null;
+    const event = anonStart?.canonicalMessageId && !withRun.canonicalMessageId
+      ? { ...withRun, canonicalMessageId: anonStart.canonicalMessageId, timelineEntityId: anonStart.canonicalMessageId, firstSeq: anonStart.seq }
+      : withMessageTimelineIdentity(withRun);
+
+    if (event.type === 'text_delta' && (!event.role || event.role === 'assistant')) {
+      const providerEventId = trimInflightValue(event.providerEventId);
+      if (providerEventId) {
+        if (seenDeltaIds.has(providerEventId)) continue;
+        seenDeltaIds.add(providerEventId);
+      }
+      const key = trimInflightValue(event.canonicalMessageId || event.timelineEntityId);
+      if (!key) continue;
+      const rawText = typeof event.text === 'string'
+        ? event.text
+        : (typeof event.content === 'string' ? event.content : (typeof event.delta === 'string' ? event.delta : ''));
+      const filteredText = getControlStream(key).push(rawText);
+      if (!filteredText && !openStreams.has(key)) continue;
+      const existing = openStreams.get(key);
+      openStreams.set(key, {
+        canonicalMessageId: key,
+        timelineEntityId: key,
+        firstSeq: existing?.firstSeq || event.firstSeq || 0,
+        blockIndex,
+        anonymous: !hasUpstream,
+        runId: run.id,
+        requestId: trimInflightValue(event.requestId || run.requestId),
+        messagePhase: trimInflightValue(event.messagePhase) || existing?.messagePhase || '',
+        providerMessageId: trimInflightValue(event.providerMessageId) || existing?.providerMessageId || '',
+        providerItemId: trimInflightValue(event.providerItemId) || existing?.providerItemId || '',
+        streamItemId: trimInflightValue(event.streamItemId) || existing?.streamItemId || '',
+        providerContentBlockIndex: Number.isInteger(event.providerContentBlockIndex)
+          ? event.providerContentBlockIndex
+          : existing?.providerContentBlockIndex,
+        messageBlockIndex: Number.isInteger(event.messageBlockIndex)
+          ? event.messageBlockIndex
+          : existing?.messageBlockIndex,
+        text: `${existing?.text || ''}${filteredText}`,
+        timestamp: Number.isFinite(event.timestamp) ? event.timestamp : (existing?.timestamp || Date.now()),
+      });
+      continue;
+    }
+
+    if (event.type === 'message' && (!event.role || event.role === 'assistant')
+      && event.textMode !== 'delta' && event.messageState !== 'streaming') {
+      const key = trimInflightValue(event.canonicalMessageId || event.timelineEntityId);
+      if (key) openStreams.delete(key);
+      const providerIds = [
+        trimInflightValue(event.providerMessageId),
+        trimInflightValue(event.providerItemId),
+        trimInflightValue(event.streamItemId),
+      ].filter(Boolean);
+      for (const [entryKey, entry] of openStreams) {
+        const sharedProvider = providerIds.length > 0 && providerIds.some((id) =>
+          id === entry.providerMessageId || id === entry.providerItemId || id === entry.streamItemId,
+        );
+        const anonymousMatch = !hasUpstream && entry.anonymous && entry.blockIndex === blockIndex;
+        if (sharedProvider || anonymousMatch) openStreams.delete(entryKey);
+      }
+      continue;
+    }
+
+    if (event.type === 'run_terminal' || (['status', 'run_completed', 'run_failed', 'run_cancelled', 'session_completed'].includes(event.type)
+      && ['completed', 'failed', 'cancelled', 'interrupted'].includes(trimInflightValue(event.runState || event.status || event.state).toLowerCase()))) {
+      openStreams.clear();
+    }
+  }
+  return [...openStreams.values()].filter((entry) => stripAssistantControlBlocks(entry.text).trim().length > 0);
+}
+
+export async function ensureActiveRunInflightRecovered(sessionId, sessionMeta = null) {
+  const meta = sessionMeta || await findSessionMeta(sessionId);
+  const activeRunId = trimInflightValue(meta?.activeRunId);
+  if (!activeRunId || recoveredInflightRuns.has(activeRunId)) return;
+  const existingPromise = recoveringInflightRunPromises.get(activeRunId);
+  if (existingPromise) {
+    await existingPromise;
+    return;
+  }
+  const promise = (async () => {
+    const run = await getRun(activeRunId).catch(() => null);
+    if (!run || isTerminalRunState(run.state)) return;
+    if ((Number(run.normalizedByteOffset) || 0) <= 0 && (Number(run.normalizedLineCount) || 0) <= 0) {
+      recoveredInflightRuns.add(run.id);
+      return;
+    }
+    if (sessionRealtimeLiveFeed.getInflightMessages(sessionId, { runId: run.id }).length > 0) {
+      recoveredInflightRuns.add(run.id);
+      return;
+    }
+    const manifest = await getRunManifest(run.id).catch(() => null);
+    if (!manifest) {
+      recoveredInflightRuns.add(run.id);
+      return;
+    }
+    const projection = await collectNormalizedRunEvents(run, manifest).catch(() => null);
+    const normalizedEvents = Array.isArray(projection?.normalizedEvents) ? projection.normalizedEvents : [];
+    if (normalizedEvents.length === 0) {
+      recoveredInflightRuns.add(run.id);
+      return;
+    }
+    const openStartsByBlock = new Map();
+    if (normalizedEvents.some((event) => event?.type === 'text_delta' && !hasInflightUpstreamMessageId(event))) {
+      const recentPage = await readEventsPage(sessionId, { limit: 100, direction: 'latest', includeBodies: false }).catch(() => null);
+      for (const stored of Array.isArray(recentPage?.events) ? recentPage.events : []) {
+        if (stored?.type === 'message_start' && stored.runId === run.id && stored.canonicalMessageId) {
+          const block = Number.isInteger(stored.providerContentBlockIndex)
+            ? stored.providerContentBlockIndex
+            : (Number.isInteger(stored.messageBlockIndex) ? stored.messageBlockIndex : 0);
+          openStartsByBlock.set(block, stored);
+        }
+      }
+    }
+    const streams = extractInflightStreamsFromNormalizedEvents(normalizedEvents, run, openStartsByBlock);
+    const seedEvents = [];
+    for (const entry of streams) {
+      const position = entry.canonicalMessageId
+        ? await getStoredMessagePosition(sessionId, entry.canonicalMessageId).catch(() => null)
+        : null;
+      if (position && Number.isInteger(position.snapshotSeq) && position.snapshotSeq > position.firstSeq) continue;
+      const firstSeq = position?.firstSeq || entry.firstSeq || 0;
+      seedEvents.push({
+        type: 'text_delta',
+        role: 'assistant',
+        textMode: 'snapshot',
+        messageState: 'streaming',
+        text: entry.text,
+        canonicalMessageId: entry.canonicalMessageId,
+        timelineEntityId: entry.timelineEntityId,
+        messageProtocolVersion: MESSAGE_TIMELINE_VERSION,
+        ...(firstSeq > 0 ? { firstSeq } : {}),
+        runId: run.id,
+        ...(entry.requestId ? { requestId: entry.requestId } : {}),
+        ...(entry.messagePhase ? { messagePhase: entry.messagePhase } : {}),
+        ...(entry.providerMessageId ? { providerMessageId: entry.providerMessageId } : {}),
+        ...(entry.providerItemId ? { providerItemId: entry.providerItemId } : {}),
+        ...(entry.streamItemId ? { streamItemId: entry.streamItemId } : {}),
+        ...(Number.isInteger(entry.providerContentBlockIndex) ? { providerContentBlockIndex: entry.providerContentBlockIndex } : {}),
+        ...(Number.isInteger(entry.messageBlockIndex) ? { messageBlockIndex: entry.messageBlockIndex } : {}),
+        timestamp: entry.timestamp,
+      });
+    }
+    if (seedEvents.length > 0) {
+      publishAllLiveEvents(sessionLiveFeed, sessionId, seedEvents);
+      publishAllLiveEvents(sessionRealtimeLiveFeed, sessionId, seedEvents);
+    }
+    recoveredInflightRuns.add(run.id);
+  })().finally(() => {
+    if (recoveringInflightRunPromises.get(activeRunId) === promise) {
+      recoveringInflightRunPromises.delete(activeRunId);
+    }
+  });
+  recoveringInflightRunPromises.set(activeRunId, promise);
+  await promise;
+}
+
+function isCompletedAssistantDurableMessage(event, inflightMsg) {
+  if (event?.type !== 'message' || event.role !== 'assistant') return false;
+  if (event.textMode === 'delta' || event.messageState === 'streaming') return false;
+  if (inflightMsg.canonicalMessageId && event.canonicalMessageId === inflightMsg.canonicalMessageId) return true;
+  if (inflightMsg.runId && event.runId === inflightMsg.runId) {
+    for (const key of ['providerMessageId', 'providerItemId', 'streamItemId']) {
+      const a = trimInflightValue(inflightMsg[key]);
+      const b = trimInflightValue(event[key]);
+      if (a && b && a === b) return true;
+    }
+  }
+  return false;
+}
+
 // Bounded visible projection path.  The legacy bundle is intentionally kept
 // for full exports and compatibility, but normal session entry/refreshes must
 // not materialize an entire 100k-event transcript just to return 50 items.
@@ -10806,6 +11037,52 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
     options?.historyMeta?.latestSeq || rawPage?.pagination?.totalLatestSeq || Number.MAX_SAFE_INTEGER,
     { priority },
   );
+  const isNonTerminalRun = Boolean(run && !isTerminalRunState(run.state));
+  if (isNonTerminalRun) {
+    await ensureActiveRunInflightRecovered(sessionId, sessionMeta);
+  }
+  const rawInflightMessages = (() => {
+    if (isNonTerminalRun) {
+      const rt = sessionRealtimeLiveFeed.getInflightMessages(sessionId, { runId: run.id });
+      if (rt.length > 0) return rt;
+      return sessionLiveFeed.getInflightMessages(sessionId, { runId: run.id });
+    }
+    if (!activeRunId) {
+      const rt = sessionRealtimeLiveFeed.getInflightMessages(sessionId);
+      if (rt.length > 0) return rt;
+      return sessionLiveFeed.getInflightMessages(sessionId);
+    }
+    return [];
+  })();
+  if (rawInflightMessages.length > 0) {
+    const durableTotalLatestSeq = rawPage?.pagination?.totalLatestSeq || options?.historyMeta?.latestSeq || 0;
+    for (const inflightMsg of rawInflightMessages) {
+      if (!activeRunId && inflightMsg.runId) {
+        const inflightRun = await getRun(inflightMsg.runId).catch(() => null);
+        if (inflightRun && isTerminalRunState(inflightRun.state)) continue;
+      }
+      if (visibleSources.some((event) => isCompletedAssistantDurableMessage(event, inflightMsg))) continue;
+      const position = inflightMsg.canonicalMessageId
+        ? await getStoredMessagePosition(sessionId, inflightMsg.canonicalMessageId).catch(() => null)
+        : null;
+      if (position && Number.isInteger(position.snapshotSeq) && position.snapshotSeq > position.firstSeq) continue;
+      const startEvent = inflightMsg.canonicalMessageId
+        ? rawEvents.find((event) => (
+          event?.type === 'message_start' && event.canonicalMessageId === inflightMsg.canonicalMessageId
+        ))
+        : null;
+      const resolvedSeq = inflightMsg.firstSeq
+        || position?.firstSeq
+        || (Number.isInteger(startEvent?.seq) && startEvent.seq > 0 ? startEvent.seq : 0)
+        || durableTotalLatestSeq;
+      if (direction === 'before' && beforeSeq > 0 && resolvedSeq >= beforeSeq) continue;
+      visibleSources.push({
+        ...inflightMsg,
+        ...(resolvedSeq > 0 ? { seq: resolvedSeq, firstSeq: resolvedSeq, lastEventSeq: resolvedSeq } : {}),
+        ...(run?.requestId && !inflightMsg.requestId ? { requestId: run.requestId } : {}),
+      });
+    }
+  }
   const displayEvents = buildSessionDisplayEvents(visibleSources, {
     sessionRunning,
     projectRoot: sessionMeta?.folder || '',
@@ -10830,7 +11107,7 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
       sessionId,
     }),
     latestSeq: rawPage?.pagination?.totalLatestSeq || displayEvents.reduce(
-      (latest, event) => Math.max(latest, getEventBoundarySeq(event)),
+      (latest, event) => (event?.messageState === 'streaming' ? latest : Math.max(latest, getEventBoundarySeq(event))),
       0,
     ),
     pagination: {
@@ -11917,6 +12194,8 @@ export async function deleteSession(id) {
     if (!removed) return null;
 
     stopObservedRun(activeRunId);
+    sessionLiveFeed.clearInflight(sessionId);
+    sessionRealtimeLiveFeed.clearInflight(sessionId);
     await releaseSessionRuntimeState(sessionId, { force: true });
     releaseSessionTimelineCache(sessionId);
     await removeSessionHistory(sessionId);

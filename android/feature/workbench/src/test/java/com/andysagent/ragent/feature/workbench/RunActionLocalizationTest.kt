@@ -69,4 +69,12 @@ class RunActionLocalizationTest {
         rule.onNodeWithText("读取了 acceptance.txt").assertIsDisplayed()
         rule.onNodeWithText("检查了 当前位置").assertIsDisplayed()
     }
+
+    @Test fun groupedExploringCountIsLocalized() {
+        val exploring = RunActionFormatter.fromServer(Json.parseToJsonElement(
+            """{"state":"working","kind":"read","group":{"kind":"exploring","count":3}}""",
+        ) as JsonObject)!!
+        rule.setContent { RagentTheme { Text(presentRunAction(exploring)) } }
+        rule.onNodeWithText("正在探索 3 项").assertIsDisplayed()
+    }
 }

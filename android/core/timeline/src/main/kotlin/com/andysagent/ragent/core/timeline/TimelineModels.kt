@@ -130,17 +130,61 @@ fun latestTurnRunId(items: List<TimelineItem>): String? {
         .distinct().toList().singleOrNull()
 }
 
-/** Settle the latest turn when the authoritative session says its run ended. */
+private fun TimelineItem.itemRunId(): String? = when (this) {
+    is TimelineItem.Message -> runId
+    is TimelineItem.Operation -> runId
+    is TimelineItem.Plan -> runId
+    is TimelineItem.Notice -> runId
+}?.takeIf(String::isNotBlank)
+
+/** Settle earlier turns and, when terminal, the latest turn's streaming replies. */
 fun settleLatestTurnMessages(items: List<TimelineItem>, terminal: Boolean): List<TimelineItem> {
-    if (!terminal) return items
-    val runId = latestTurnRunId(items) ?: return items
-    return items.map { item ->
-        when {
-            item is TimelineItem.Message && item.role == TimelineRole.Agent && item.runId == runId && !item.completed ->
-                item.copy(completed = true, messageState = "completed")
-            item is TimelineItem.Operation && item.isReasoning && item.runId == runId &&
-                item.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress) ->
-                item.copy(status = TimelineOperationStatus.Completed)
+    if (items.isEmpty()) return items
+    val latestUserIndex = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
+    val latestUserRequestId = (items.getOrNull(latestUserIndex) as? TimelineItem.Message)
+        ?.requestId
+        ?.takeIf(String::isNotBlank)
+    val latestRunId = latestTurnRunId(items)
+    val runFirstIndex = mutableMapOf<String, Int>()
+    items.forEachIndexed { index, item ->
+        item.itemRunId()?.let { runId -> runFirstIndex.putIfAbsent(runId, index) }
+    }
+    val newestRunStartIndex = latestRunId?.let(runFirstIndex::get)
+    val fallbackLatestRunId = if (latestUserIndex < 0) {
+        items.asReversed().firstNotNullOfOrNull { it.itemRunId() }
+    } else null
+    val fallbackNewestRunStartIndex = fallbackLatestRunId?.let(runFirstIndex::get)
+
+    fun isEarlierTurnItem(index: Int, itemRunId: String?, itemRequestId: String?): Boolean {
+        val sharesLatestPromptRequest = latestUserRequestId != null && itemRequestId == latestUserRequestId
+        if (latestUserIndex > index && !sharesLatestPromptRequest) return true
+        val normalizedRunId = itemRunId?.takeIf(String::isNotBlank) ?: return false
+        if (latestRunId != null && newestRunStartIndex != null &&
+            normalizedRunId != latestRunId && index < newestRunStartIndex
+        ) return true
+        if (latestUserIndex < 0 && fallbackLatestRunId != null && fallbackNewestRunStartIndex != null &&
+            normalizedRunId != fallbackLatestRunId && index < fallbackNewestRunStartIndex
+        ) return true
+        return false
+    }
+
+    return items.mapIndexed { index, item ->
+        when (item) {
+            is TimelineItem.Message -> {
+                val shouldSettle = item.role == TimelineRole.Agent && !item.completed && (
+                    isEarlierTurnItem(index, item.runId, item.requestId) ||
+                        (terminal && latestRunId != null && item.runId == latestRunId)
+                )
+                if (shouldSettle) item.copy(completed = true, messageState = "completed") else item
+            }
+            is TimelineItem.Operation -> {
+                val inProgress = item.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
+                val shouldSettle = item.isReasoning && inProgress && (
+                    isEarlierTurnItem(index, item.runId, null) ||
+                        (terminal && latestRunId != null && item.runId == latestRunId)
+                )
+                if (shouldSettle) item.copy(status = TimelineOperationStatus.Completed) else item
+            }
             else -> item
         }
     }

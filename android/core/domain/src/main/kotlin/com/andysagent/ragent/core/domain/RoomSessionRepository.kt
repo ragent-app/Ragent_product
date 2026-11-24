@@ -217,6 +217,9 @@ class RoomSessionRepository(
         const val MAX_ATTACHMENT_BYTES = FileAssetUploadClient.MAXIMUM_METADATA_BYTES
         const val DEFAULT_ATTACHMENT_BUFFER_BYTES = 64 * 1024
         const val INTERACTIVE_CRUD_TIMEOUT_MS = 10_000L
+        const val MAX_DURABLE_SYNC_PAGES = 100
+        val TOOL_OPERATION_EVENT_TYPES = setOf("tool_use", "tool_call", "tool_result", "operation", "file_change")
+        val LIVE_STREAM_ID_REGEX = Regex("^[a-f0-9-]{36}$")
     }
 
     private val dao: RagentDao = database.dao()
@@ -533,7 +536,8 @@ class RoomSessionRepository(
             android.util.Log.d("RagentLive", "live-only session=${sessionId.hashCode()} cursor=${page.liveCursor} reset=${page.liveResetRequired} frames=${page.liveEvents.size} chars=${page.liveEvents.sumOf { it.text?.length ?: 0 }}")
         }
         if (page.events.isNotEmpty() || page.sessionId != sessionId || page.liveStreamId == null || page.liveCursor == null) {
-            throw SessionRepositoryException(502, "SESSION_LIVE_INVALID", "Invalid live-only scope", false)
+            resetAndMuteLiveFeedLocked(sessionId, clearCursor = true)
+            return false
         }
         applyLivePage(sessionId, page)
         return true
@@ -561,7 +565,24 @@ class RoomSessionRepository(
                         lastDetailRefresh = now
                         refreshSessionDetail(sessionId)
                     } else dao.getSession(sessionId)?.let(::toDomain)
-                    val result = refreshEvents(sessionId)
+                    val initialResult = refreshEvents(sessionId)
+                    val result = if (initialResult is RefreshResult.Gap) {
+                        sessionSyncMutex(sessionId).withLock {
+                            rebuildDurableTimelineLocked(sessionId).also { rebuilt ->
+                                if (rebuilt is RefreshResult.Applied) {
+                                    try {
+                                        refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
+                                    } catch (cancelled: CancellationException) {
+                                        throw cancelled
+                                    } catch (_: Exception) {
+                                        pendingVisibleOperationRefresh += sessionId
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        initialResult
+                    }
                     if (result is RefreshResult.ResetRequired) return
                     val terminal = detail == null || detail.status == SessionStatus.Completed ||
                         detail.status == SessionStatus.Failed || detail.status == SessionStatus.Cancelled ||
@@ -1764,7 +1785,14 @@ class RoomSessionRepository(
         // a future event before enabling its composer. Background sync owns waits.
         val durableResult = refreshEventsLocked(sessionId, waitForEvents = false)
         if (durableResult is RefreshResult.ResetRequired) return@withLock durableResult
-        refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
+        val resolvedDurable = if (durableResult is RefreshResult.Gap) {
+            rebuildDurableTimelineLocked(sessionId)
+        } else {
+            durableResult
+        }
+        if (resolvedDurable is RefreshResult.ResetRequired) return@withLock resolvedDurable
+        val visibleResult = refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
+        if (resolvedDurable is RefreshResult.Gap) resolvedDurable else visibleResult
     }
 
     override suspend fun loadOlderTimeline(sessionId: String): RefreshResult = sessionSyncMutex(sessionId).withLock {
@@ -1810,129 +1838,206 @@ class RoomSessionRepository(
     override suspend fun applyLiveEvents(sessionId: String, events: List<SessionEventDto>): RefreshResult =
         applyLiveEventsLocked(sessionId, events)
 
-    private suspend fun applyLiveEventsLocked(sessionId: String, events: List<SessionEventDto>): RefreshResult = liveProjectionMutex.withLock {
-        if (events.isEmpty()) return@withLock RefreshResult.Applied(0, dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L)
+    private fun mergeDurableArtifacts(
+        existing: List<SessionEventDto>,
+        events: List<SessionEventDto>,
+    ): List<SessionEventDto> {
         val incomingArtifacts = events.filter { event ->
             val type = event.type.orEmpty().lowercase()
             type == "plan" || event.planId != null || event.artifactId != null
         }
-        if (incomingArtifacts.isNotEmpty()) {
-            val artifacts = durableArtifactState.value[sessionId].orEmpty().toMutableList()
-            incomingArtifacts.forEach { incoming ->
-                val identity = incoming.planId ?: incoming.artifactId ?: incoming.entityId ?: incoming.id
-                val index = artifacts.indexOfFirst { existing ->
-                    (existing.planId ?: existing.artifactId ?: existing.entityId ?: existing.id) == identity
-                }
-                if (index >= 0) artifacts[index] = incoming else artifacts += incoming
+        if (incomingArtifacts.isEmpty()) return existing
+        val artifacts = existing.toMutableList()
+        incomingArtifacts.forEach { incoming ->
+            val identity = incoming.planId ?: incoming.artifactId ?: incoming.entityId ?: incoming.id
+            val index = artifacts.indexOfFirst { existingItem ->
+                (existingItem.planId ?: existingItem.artifactId ?: existingItem.entityId ?: existingItem.id) == identity
             }
-            durableArtifactState.update { it + (sessionId to artifacts) }
+            if (index >= 0) artifacts[index] = incoming else artifacts += incoming
         }
-            val projector = liveProjectors.getOrPut(sessionId) { LiveTimelineProjector() }
-            val durableMessages = dao.getMessages(sessionId)
-            projector.reconcileDurableCursor(
-                dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L,
-                durableMessages.associate { it.id to it.content },
-                durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
+        return artifacts
+    }
+
+    private suspend fun applyLiveEventsLocked(sessionId: String, events: List<SessionEventDto>): RefreshResult = liveProjectionMutex.withLock {
+        if (events.isEmpty()) return@withLock RefreshResult.Applied(0, dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L)
+        val currentArtifacts = durableArtifactState.value[sessionId].orEmpty()
+        val updatedArtifacts = mergeDurableArtifacts(currentArtifacts, events)
+        if (updatedArtifacts !== currentArtifacts) {
+            durableArtifactState.update { it + (sessionId to updatedArtifacts) }
+        }
+        val projector = liveProjectors.getOrPut(sessionId) { LiveTimelineProjector() }
+        val durableMessages = dao.getMessages(sessionId)
+        projector.reconcileDurableCursor(
+            dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L,
+            durableMessages.associate { it.id to it.content },
+            durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
+        )
+        val result = withContext(Dispatchers.Default) {
+            projector.apply(events)
+        }
+        if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
+            android.util.Log.d(
+                "RagentLive",
+                "projection session=${sessionId.hashCode()} durable=${dao.getCursor(sessionId)?.lastAppliedSeq ?: 0} messages=${result.events.filter { it.messageState != null }.take(4).map { "${it.messageState}:${it.text?.length ?: 0}" }} invalid=${result.invalidEvent?.type} gap=${result.gapExpectedSeq}",
             )
-            val result = withContext(Dispatchers.Default) {
-                projector.apply(events)
-            }
-            if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
-                android.util.Log.d("RagentLive", "projection session=${sessionId.hashCode()} durable=${dao.getCursor(sessionId)?.lastAppliedSeq ?: 0} messages=${result.events.filter { it.messageState != null }.take(4).map { "${it.messageState}:${it.text?.length ?: 0}" }} invalid=${result.invalidEvent?.type} gap=${result.gapExpectedSeq}")
-            }
-            liveTimelineState.value = liveTimelineState.value + (sessionId to result.events)
-            val invalidEvent = result.invalidEvent
-            val gapExpectedSeq = result.gapExpectedSeq
-            return@withLock when {
-                invalidEvent != null -> RefreshResult.Gap(result.latestSeq + 1L, invalidEvent.boundarySeq())
-                gapExpectedSeq != null -> RefreshResult.Gap(gapExpectedSeq, result.latestSeq + 1L)
-                else -> RefreshResult.Applied(events.size, result.latestSeq)
-            }
+        }
+        liveTimelineState.value = liveTimelineState.value + (sessionId to result.events)
+        val invalidEvent = result.invalidEvent
+        val gapExpectedSeq = result.gapExpectedSeq
+        return@withLock when {
+            invalidEvent != null -> RefreshResult.Gap(result.latestSeq + 1L, invalidEvent.boundarySeq())
+            gapExpectedSeq != null -> RefreshResult.Gap(gapExpectedSeq, result.latestSeq + 1L)
+            else -> RefreshResult.Applied(events.size, result.latestSeq)
+        }
     }
 
     private suspend fun rebuildLegacyTimeline(sessionId: String) {
+        stageAndPublishRebuildLocked(sessionId, throwOnFailure = true)
+    }
+
+    private suspend fun rebuildDurableTimelineLocked(sessionId: String): RefreshResult =
+        stageAndPublishRebuildLocked(sessionId, throwOnFailure = false)
+
+    private suspend fun stageAndPublishRebuildLocked(sessionId: String, throwOnFailure: Boolean): RefreshResult {
         // Network IO and staging never remove the offline copy. Only a fully
         // validated, fixed high-water prefix may replace that copy atomically.
         dao.clearStagedMessages(sessionId)
         var after = 0L
         var watermark: Long? = null
         var lastEventId: String? = null
+        var rebuiltEvents = 0
         val derivedIds = (dao.pendingOperations() + dao.acknowledgedOperations())
             .filter { it.kind in DERIVED_TURN_KINDS && sessionIdFromPath(it.path) == sessionId }
             .mapTo(mutableSetOf()) { it.requestId }
         val derivedEvents = mutableListOf<SessionEventDto>()
-        while (true) {
-            val response = requestDurableEventPage(eventPagePath(sessionId, after, waitForEvents = false))
-            val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-            check(!page.resetRequired) { "Timeline history requires reset: ${page.reason}" }
-            if (watermark == null) watermark = page.latestSeq
-                ?: dao.getSession(sessionId)?.latestSeq
-                ?: page.events.maxOfOrNull { it.boundarySeq() } ?: 0L
-            val events = page.events.filter { it.boundarySeq() <= watermark!! }
-            if (events.isEmpty()) {
-                check(after >= watermark!!) { "Incomplete timeline rebuild at $after of $watermark" }
-                break
+        var rebuiltArtifacts: List<SessionEventDto> = emptyList()
+        var lastPage: SessionEventsPageDto? = null
+        try {
+            for (pageIndex in 0 until MAX_DURABLE_SYNC_PAGES) {
+                val response = requestDurableEventPage(eventPagePath(sessionId, after, waitForEvents = false))
+                val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
+                lastPage = page
+                (page.runActivity as? JsonObject)?.let { activity ->
+                    runActivityState.update { it + (sessionId to activity) }
+                }
+                if (page.resetRequired) {
+                    check(!throwOnFailure) { "Timeline history requires reset: ${page.reason}" }
+                    return RefreshResult.ResetRequired(page.reason)
+                }
+                if (watermark == null) {
+                    watermark = page.latestSeq
+                        ?: page.pagination?.latestSeq
+                        ?: if (page.pagination?.hasMoreAfter != true) {
+                            page.events.maxOfOrNull { it.boundarySeq() } ?: dao.getSession(sessionId)?.latestSeq ?: 0L
+                        } else null
+                }
+                val events = if (watermark != null) {
+                    page.events.filter { it.boundarySeq() <= watermark }
+                } else {
+                    page.events
+                }
+                if (events.isEmpty()) {
+                    val target = watermark ?: dao.getSession(sessionId)?.latestSeq ?: 0L
+                    if (after < target) {
+                        check(!throwOnFailure) { "Incomplete timeline rebuild at $after of $target" }
+                        return RefreshResult.Gap(after + 1L, target)
+                    }
+                    break
+                }
+                for (event in events) {
+                    if (event.type == "run_regenerate" && event.requestId in derivedIds) derivedEvents.add(event)
+                    if (event.startingSeq() > after + 1 || event.boundarySeq() <= after) {
+                        check(!throwOnFailure) { "Timeline rebuild gap at ${after + 1}" }
+                        return RefreshResult.Gap(after + 1L, event.startingSeq())
+                    }
+                    rebuiltArtifacts = mergeDurableArtifacts(rebuiltArtifacts, listOf(event))
+                    if (event.isTimelineMessage()) {
+                        val old = dao.getStagedMessage(sessionId, event.messageProjectionId())
+                        val previous = old?.let {
+                            ProjectedMessage(
+                                it.id, it.role, it.content, it.seq, it.lastEventSeq,
+                                it.revision, it.messageState, it.requestId, it.runId, it.messagePhase, it.metadataJson,
+                            )
+                        }
+                        val next = reduceMessage(previous, event, event.boundarySeq())
+                        dao.upsertStagedMessage(
+                            TimelineMessageStagingEntity(
+                                sessionId, next.id, next.role, next.text, next.firstSeq,
+                                next.lastEventSeq, next.revision, next.state, next.requestId,
+                                next.runId, next.messagePhase, next.metadataJson,
+                            ),
+                        )
+                    }
+                    event.terminalRunState()?.let { terminal ->
+                        dao.settleStagedMessages(sessionId, event.runId, event.requestId, terminal)
+                    }
+                    after = event.boundarySeq()
+                    lastEventId = event.dedupeKey()
+                    rebuiltEvents += 1
+                }
+                if (watermark != null && after >= watermark) break
+                if (watermark == null && page.pagination?.hasMoreAfter != true) break
+                if (pageIndex == MAX_DURABLE_SYNC_PAGES - 1) {
+                    val target = watermark ?: (after + 1L)
+                    check(!throwOnFailure) { "Incomplete timeline rebuild after $MAX_DURABLE_SYNC_PAGES pages" }
+                    return RefreshResult.Gap(after + 1L, target)
+                }
             }
-            for (event in events) {
-                if (event.type == "run_regenerate" && event.requestId in derivedIds) derivedEvents.add(event)
-                check(event.startingSeq() <= after + 1 && event.boundarySeq() > after) {
-                    "Timeline rebuild gap at ${after + 1}"
-                }
-                if (event.isTimelineMessage()) {
-                    val old = dao.getStagedMessage(sessionId, event.messageProjectionId())
-                    val previous = old?.let { ProjectedMessage(it.id, it.role, it.content,
-                        it.seq, it.lastEventSeq, it.revision, it.messageState, it.requestId, it.runId, it.messagePhase, it.metadataJson) }
-                    val next = reduceMessage(previous, event, event.boundarySeq())
-                    dao.upsertStagedMessage(TimelineMessageStagingEntity(sessionId, next.id,
-                        next.role, next.text, next.firstSeq, next.lastEventSeq, next.revision,
-                        next.state, next.requestId, next.runId, next.messagePhase, next.metadataJson))
-                }
-                event.terminalRunState()?.let { terminal ->
-                    dao.settleStagedMessages(sessionId, event.runId, event.requestId, terminal)
-                }
-                after = event.boundarySeq()
-                lastEventId = event.dedupeKey()
+            val targetWatermark = watermark ?: after
+            if (after < targetWatermark) {
+                check(!throwOnFailure) { "Incomplete timeline rebuild at $after of $targetWatermark" }
+                return RefreshResult.Gap(after + 1L, targetWatermark)
             }
-            if (after >= watermark!!) break
-        }
-        database.withTransaction {
-            dao.deleteSessionMessages(sessionId)
-            dao.publishStagedMessages(sessionId, System.currentTimeMillis())
-            dao.deleteSessionEventProjection(sessionId)
-            for (event in derivedEvents) {
-                val id = event.requestId ?: continue
-                dao.insertSessionEvent(SessionEventEntity(event.storageEventId(sessionId), sessionId,
-                    event.boundarySeq(), id, event.revision, event.clientId, event.type, event.fingerprint(), System.currentTimeMillis()))
-                val operation = dao.getPendingOperation(id)
-                if (operation != null && operation.kind in DERIVED_TURN_KINDS && sessionIdFromPath(operation.path) == sessionId) {
-                    dao.deleteOperation(id)
+            database.withTransaction {
+                dao.deleteSessionMessages(sessionId)
+                dao.publishStagedMessages(sessionId, System.currentTimeMillis())
+                dao.deleteSessionEventProjection(sessionId)
+                for (event in derivedEvents) {
+                    val id = event.requestId ?: continue
+                    dao.insertSessionEvent(
+                        SessionEventEntity(
+                            event.storageEventId(sessionId), sessionId, event.boundarySeq(),
+                            id, event.revision, event.clientId, event.type, event.fingerprint(), System.currentTimeMillis(),
+                        ),
+                    )
+                    val operation = dao.getPendingOperation(id)
+                    if (operation != null && operation.kind in DERIVED_TURN_KINDS && sessionIdFromPath(operation.path) == sessionId) {
+                        dao.deleteOperation(id)
+                    }
                 }
+                dao.upsertCursor(
+                    SyncCursorEntity(
+                        scope = sessionId,
+                        lastAppliedSeq = after,
+                        lastEventId = lastEventId,
+                        lastServerCursor = lastPage?.serverCursor,
+                        lastSnapshotVersion = lastPage?.snapshotVersion,
+                        updatedAt = System.currentTimeMillis(),
+                    ),
+                )
+                dao.markTimelineProjectionCurrent(sessionId)
+                dao.clearStagedMessages(sessionId)
             }
-            dao.upsertCursor(SyncCursorEntity(sessionId, after, lastEventId, updatedAt = System.currentTimeMillis()))
-            dao.markTimelineProjectionCurrent(sessionId)
+            if (rebuiltArtifacts.isNotEmpty()) {
+                durableArtifactState.update { it + (sessionId to rebuiltArtifacts) }
+            }
+            liveProjectionMutex.withLock {
+                liveProjectors.remove(sessionId)
+                liveTimelineState.value = liveTimelineState.value - sessionId
+            }
+            visibleTimelineEvents.remove(sessionId)
+            visibleTimelineState.update { it - sessionId }
+            return RefreshResult.Applied(rebuiltEvents, after)
+        } finally {
             dao.clearStagedMessages(sessionId)
         }
-        liveProjectionMutex.withLock {
-            liveProjectors.remove(sessionId)
-            liveTimelineState.value = liveTimelineState.value - sessionId
-        }
-        visibleTimelineEvents.remove(sessionId)
-        visibleTimelineState.update { it - sessionId }
     }
 
-    private suspend fun refreshEventsLocked(sessionId: String, waitForEvents: Boolean = transport.requiresEventPolling && sessionId !in dedicatedLiveSessions): RefreshResult {
+    private suspend fun refreshEventsLocked(
+        sessionId: String,
+        waitForEvents: Boolean = transport.requiresEventPolling && sessionId !in dedicatedLiveSessions,
+    ): RefreshResult {
         if (dao.getSession(sessionId)?.timelineProjectionVersion == 0) rebuildLegacyTimeline(sessionId)
-        val cursor = dao.getCursor(sessionId)
-        val afterSeq = cursor?.lastAppliedSeq ?: 0L
-        val response = requestDurableEventPage(eventPagePath(sessionId, afterSeq, waitForEvents = waitForEvents))
-        val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-        if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
-            android.util.Log.d("RagentLive", "page session=${sessionId.hashCode()} live=${page.liveCursor} reset=${page.liveResetRequired} frames=${page.liveEvents.size} durable=${page.events.size}")
-        }
-        if (page.resetRequired) return RefreshResult.ResetRequired(page.reason)
-        (page.runActivity as? JsonObject)?.let { activity ->
-            runActivityState.update { it + (sessionId to activity) }
-        }
         val engine = SessionSyncEngine(
             scope = sessionId,
             cursorStore = RoomCursorStore(dao),
@@ -1945,176 +2050,228 @@ class RoomSessionRepository(
                 codec.decode(serializer<SessionEventsPageDto>(), replayResponse.body).events
             },
         )
-        return when (val result = engine.apply(
-            page.events,
-            CursorMetadata(page.serverCursor, page.snapshotVersion),
-        )) {
-            is SyncResult.Applied -> {
-                val activitySnapshot = page.runActivity as? JsonObject
-                val activityState = listOf("state", "status", "runState")
-                    .firstNotNullOfOrNull { key -> (activitySnapshot?.get(key) as? JsonPrimitive)?.contentOrNull }
-                    ?.lowercase()
-                if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
-                    val activityRunId = ((activitySnapshot?.get("runId") ?: activitySnapshot?.get("id")) as? JsonPrimitive)?.contentOrNull
-                    val activityRequestId = ((activitySnapshot?.get("requestId") ?: activitySnapshot?.get("turnId")) as? JsonPrimitive)?.contentOrNull
-                    if (!activityRunId.isNullOrBlank() || !activityRequestId.isNullOrBlank()) {
-                        database.withTransaction {
-                            retirePendingApprovals(sessionId, runId = activityRunId, requestId = activityRequestId)
-                        }
-                    } else {
-                        try {
-                            refreshSessionDetail(sessionId)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            // A later durable event or idle reconciliation retries this fallback.
-                        }
-                    }
-                }
-                val artifacts = durableArtifactState.value[sessionId].orEmpty().toMutableList()
-                page.events.filter { event ->
-                    val type = event.type.orEmpty().lowercase()
-                    type == "plan" || event.planId != null || event.artifactId != null
-                }.forEach { incoming ->
-                    val identity = incoming.planId ?: incoming.artifactId ?: incoming.entityId ?: incoming.id
-                    val index = artifacts.indexOfFirst { existing ->
-                        (existing.planId ?: existing.artifactId ?: existing.entityId ?: existing.id) == identity
-                    }
-                    if (index >= 0) artifacts[index] = incoming else artifacts += incoming
-                }
-                durableArtifactState.update { it + (sessionId to artifacts) }
-                liveProjectionMutex.withLock { liveProjectors[sessionId]?.let { projector ->
-                    val durableMessages = dao.getMessages(sessionId)
-                    projector.reconcileDurableCursor(
-                        result.cursor.lastAppliedSeq,
-                        durableMessages.associate { it.id to it.content },
-                        durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
-                        page.events.filter { it.terminalRunState() != null }.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
-                        durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
-                    )
-                    liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
-                } }
-                // The durable message store does not retain tool operations. Refresh
-                // the server's canonical visible projection when they change so
-                // advancing the durable cursor cannot make tool cards disappear.
-                if (page.events.any { event ->
-                        event.type.orEmpty().lowercase() in setOf("tool_use", "tool_call", "tool_result", "operation", "file_change")
-                    }) pendingVisibleOperationRefresh += sessionId
-                if (sessionId in pendingVisibleOperationRefresh) {
-                    try {
-                        if (refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true) is RefreshResult.Applied) {
-                            pendingVisibleOperationRefresh -= sessionId
-                        }
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        // The durable cursor is already committed. A transient
-                        // history failure must not prevent subsequent syncing.
-                    }
-                }
-                // Background sessions need the same recovery as an opened
-                // conversation when an old cursor skipped its pending event.
-                // A missing row is not evidence that an approval was granted.
-                val activity = page.runActivity as? JsonObject
-                val waitingForApproval = (activity?.get("actionRequired") as? JsonPrimitive)?.booleanOrNull == true &&
-                    (activity["kind"] as? JsonPrimitive)?.contentOrNull == "approval"
-                val now = android.os.SystemClock.elapsedRealtime()
-                val pendingApprovals = if (waitingForApproval) dao.getPendingApprovals(sessionId) else emptyList()
-                val sourceSeq = (activity?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
-                val runId = (activity?.get("runId") as? JsonPrimitive)?.contentOrNull
-                val currentApproval = pendingApprovals.firstOrNull { approval ->
-                    sourceSeq != null && approval.approvalSourceSequence() == sourceSeq &&
-                        (runId.isNullOrBlank() || approval.runId == runId)
-                }
-                val needsRecovery = currentApproval == null || currentApproval.needsExplanationRecovery()
-                val recoveryInterval = if (currentApproval == null) 5_000L else 300_000L
-                if (waitingForApproval && needsRecovery &&
-                    (approvalRecoveryAttempts[sessionId]?.let { now - it >= recoveryInterval } != false)) {
-                    approvalRecoveryAttempts[sessionId] = now
-                    try {
-                        recoverVisiblePendingApproval(sessionId, page)
-                    } catch (cancelled: CancellationException) {
-                        throw cancelled
-                    } catch (_: Exception) {
-                        // A transient failure must not stop durable syncing;
-                        // another poll retries recovery after the cooldown.
-                    }
-                }
-                // A legacy pending approval can keep session metadata in a
-                // waiting state even after its run has ended. Do not gate this
-                // recovery on runActivity being idle: verify each exact run
-                // before retiring its approvals, so stale activity cannot
-                // resurrect an approval after a reconnect or cursor migration.
-                if ((terminalApprovalRecoveryAttempts[sessionId]?.let { now - it >= 5_000L } != false)) {
-                    val pending = dao.getPendingApprovals(sessionId)
-                    if (pending.isNotEmpty()) {
-                        terminalApprovalRecoveryAttempts[sessionId] = now
-                        val runs = pending.mapNotNull { it.runId?.takeIf(String::isNotBlank) }.distinct()
-                        val start = if (runs.isEmpty()) 0 else (terminalApprovalRecoveryOffsets[sessionId] ?: 0) % runs.size
-                        val selected = if (runs.isEmpty()) emptyList() else
-                            (runs.drop(start) + runs.take(start)).take(8)
-                        terminalApprovalRecoveryOffsets[sessionId] = if (runs.isEmpty()) 0 else (start + selected.size) % runs.size
-                        for (runId in selected) {
-                            try {
-                                val run = loadRunProjection(runId)
-                                val state = (run["state"] as? JsonPrimitive)?.contentOrNull?.lowercase()
-                                if ((run["id"] as? JsonPrimitive)?.contentOrNull == runId &&
-                                    (run["sessionId"] as? JsonPrimitive)?.contentOrNull == sessionId &&
-                                    state in setOf("completed", "failed", "cancelled", "canceled", "interrupted")) {
-                                    database.withTransaction {
-                                        val stale = dao.getPendingApprovals(sessionId).filter { it.runId == runId }
-                                        if (stale.isNotEmpty()) dao.upsertApprovals(stale.map {
-                                            it.copy(status = "resolved", updatedAt = System.currentTimeMillis())
-                                        })
-                                    }
-                                }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) { /* Retry on a later sync. */ }
-                        }
-                        if (pending.any { it.runId.isNullOrBlank() }) {
-                            // A stale approval without run identity cannot be
-                            // safely matched to a run endpoint. The session
-                            // detail is the authoritative fallback; a terminal
-                            // session retires the remaining requests.
-                            try {
-                                refreshSessionDetail(sessionId)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) { /* Retry on a later sync. */ }
-                        }
-                    }
-                }
-                RefreshResult.Applied(result.count, result.cursor.lastAppliedSeq)
+        var totalApplied = 0
+        var latestSeq = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
+        var lastPage: SessionEventsPageDto? = null
+        val terminalRunIds = linkedSetOf<String>()
+        var lastTerminalRunActivity: JsonObject? = null
+        for (pageIndex in 0 until MAX_DURABLE_SYNC_PAGES) {
+            val afterSeq = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
+            val response = requestDurableEventPage(
+                eventPagePath(sessionId, afterSeq, waitForEvents = waitForEvents && pageIndex == 0),
+            )
+            val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
+            if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
+                android.util.Log.d(
+                    "RagentLive",
+                    "page session=${sessionId.hashCode()} page=$pageIndex live=${page.liveCursor} reset=${page.liveResetRequired} frames=${page.liveEvents.size} durable=${page.events.size}",
+                )
             }
-            is SyncResult.GapDetected -> RefreshResult.Gap(result.expectedSeq, result.receivedSeq)
-            is SyncResult.InvalidEvent -> RefreshResult.Gap(result.event.boundarySeq(), result.event.boundarySeq())
-        }.also { applyLivePage(sessionId, page) }
+            if (page.resetRequired) return RefreshResult.ResetRequired(page.reason)
+            (page.runActivity as? JsonObject)?.let { activity ->
+                runActivityState.update { it + (sessionId to activity) }
+            }
+            lastPage = page
+            when (val result = engine.apply(
+                page.events,
+                CursorMetadata(page.serverCursor, page.snapshotVersion),
+            )) {
+                is SyncResult.Applied -> {
+                    totalApplied += result.count
+                    latestSeq = result.cursor.lastAppliedSeq
+                    val activitySnapshot = page.runActivity as? JsonObject
+                    val activityState = listOf("state", "status", "runState")
+                        .firstNotNullOfOrNull { key -> (activitySnapshot?.get(key) as? JsonPrimitive)?.contentOrNull }
+                        ?.lowercase()
+                    if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
+                        lastTerminalRunActivity = activitySnapshot
+                    } else if (activityState != null) {
+                        lastTerminalRunActivity = null
+                    }
+                    val currentArtifacts = durableArtifactState.value[sessionId].orEmpty()
+                    val updatedArtifacts = mergeDurableArtifacts(currentArtifacts, page.events)
+                    if (updatedArtifacts !== currentArtifacts) {
+                        durableArtifactState.update { it + (sessionId to updatedArtifacts) }
+                    }
+                    page.events.filter { it.terminalRunState() != null }
+                        .mapNotNullTo(terminalRunIds) { it.runId?.takeIf(String::isNotBlank) }
+                    // The durable message store does not retain tool operations. Refresh
+                    // the server's canonical visible projection when they change so
+                    // advancing the durable cursor cannot make tool cards disappear.
+                    if (page.events.any { it.type.orEmpty().lowercase() in TOOL_OPERATION_EVENT_TYPES }) {
+                        pendingVisibleOperationRefresh += sessionId
+                    }
+                    liveProjectionMutex.withLock {
+                        liveProjectors[sessionId]?.let { projector ->
+                            val durableMessages = dao.getMessages(sessionId)
+                            projector.reconcileDurableCursor(
+                                latestSeq,
+                                durableMessages.associate { it.id to it.content },
+                                durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
+                                terminalRunIds,
+                                durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+                            )
+                            liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
+                        }
+                    }
+                    applyLivePage(sessionId, page)
+                    val targetLatestSeq = page.latestSeq ?: page.pagination?.latestSeq
+                    val hasMore = page.pagination?.hasMoreAfter == true ||
+                        (targetLatestSeq != null && latestSeq < targetLatestSeq)
+                    val advanced = latestSeq > afterSeq && page.events.isNotEmpty()
+                    if (!hasMore || !advanced) break
+                }
+                is SyncResult.GapDetected -> {
+                    applyLivePage(sessionId, page)
+                    return RefreshResult.Gap(result.expectedSeq, result.receivedSeq)
+                }
+                is SyncResult.InvalidEvent -> {
+                    applyLivePage(sessionId, page)
+                    return RefreshResult.Gap(result.event.boundarySeq(), result.event.boundarySeq())
+                }
+            }
+        }
+        lastTerminalRunActivity?.let { activitySnapshot ->
+            val activityRunId = ((activitySnapshot["runId"] ?: activitySnapshot["id"]) as? JsonPrimitive)?.contentOrNull
+            val activityRequestId = ((activitySnapshot["requestId"] ?: activitySnapshot["turnId"]) as? JsonPrimitive)?.contentOrNull
+            if (!activityRunId.isNullOrBlank() || !activityRequestId.isNullOrBlank()) {
+                database.withTransaction {
+                    retirePendingApprovals(sessionId, runId = activityRunId, requestId = activityRequestId)
+                }
+            } else {
+                try {
+                    refreshSessionDetail(sessionId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // A later durable event or idle reconciliation retries this fallback.
+                }
+            }
+        }
+        if (sessionId in pendingVisibleOperationRefresh) {
+            try {
+                if (refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true) is RefreshResult.Applied) {
+                    pendingVisibleOperationRefresh -= sessionId
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // The durable cursor is already committed. A transient
+                // history failure must not prevent subsequent syncing.
+            }
+        }
+        lastPage?.let { page ->
+            recoverApprovalsAfterDurableSync(sessionId, page)
+        }
+        return RefreshResult.Applied(totalApplied, latestSeq)
+    }
+
+    private suspend fun recoverApprovalsAfterDurableSync(sessionId: String, page: SessionEventsPageDto) {
+        // Background sessions need the same recovery as an opened
+        // conversation when an old cursor skipped its pending event.
+        // A missing row is not evidence that an approval was granted.
+        val activity = page.runActivity as? JsonObject
+        val waitingForApproval = (activity?.get("actionRequired") as? JsonPrimitive)?.booleanOrNull == true &&
+            (activity["kind"] as? JsonPrimitive)?.contentOrNull == "approval"
+        val now = android.os.SystemClock.elapsedRealtime()
+        val pendingApprovals = if (waitingForApproval) dao.getPendingApprovals(sessionId) else emptyList()
+        val sourceSeq = (activity?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+        val runId = (activity?.get("runId") as? JsonPrimitive)?.contentOrNull
+        val currentApproval = pendingApprovals.firstOrNull { approval ->
+            sourceSeq != null && approval.approvalSourceSequence() == sourceSeq &&
+                (runId.isNullOrBlank() || approval.runId == runId)
+        }
+        val needsRecovery = currentApproval == null || currentApproval.needsExplanationRecovery()
+        val recoveryInterval = if (currentApproval == null) 5_000L else 300_000L
+        if (waitingForApproval && needsRecovery &&
+            (approvalRecoveryAttempts[sessionId]?.let { now - it >= recoveryInterval } != false)) {
+            approvalRecoveryAttempts[sessionId] = now
+            try {
+                recoverVisiblePendingApproval(sessionId, page)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // A transient failure must not stop durable syncing;
+                // another poll retries recovery after the cooldown.
+            }
+        }
+        // A legacy pending approval can keep session metadata in a
+        // waiting state even after its run has ended. Do not gate this
+        // recovery on runActivity being idle: verify each exact run
+        // before retiring its approvals, so stale activity cannot
+        // resurrect an approval after a reconnect or cursor migration.
+        if ((terminalApprovalRecoveryAttempts[sessionId]?.let { now - it >= 5_000L } != false)) {
+            val pending = dao.getPendingApprovals(sessionId)
+            if (pending.isNotEmpty()) {
+                terminalApprovalRecoveryAttempts[sessionId] = now
+                val runs = pending.mapNotNull { it.runId?.takeIf(String::isNotBlank) }.distinct()
+                val start = if (runs.isEmpty()) 0 else (terminalApprovalRecoveryOffsets[sessionId] ?: 0) % runs.size
+                val selected = if (runs.isEmpty()) emptyList() else
+                    (runs.drop(start) + runs.take(start)).take(8)
+                terminalApprovalRecoveryOffsets[sessionId] = if (runs.isEmpty()) 0 else (start + selected.size) % runs.size
+                for (pendingRunId in selected) {
+                    try {
+                        val run = loadRunProjection(pendingRunId)
+                        val state = (run["state"] as? JsonPrimitive)?.contentOrNull?.lowercase()
+                        if ((run["id"] as? JsonPrimitive)?.contentOrNull == pendingRunId &&
+                            (run["sessionId"] as? JsonPrimitive)?.contentOrNull == sessionId &&
+                            state in setOf("completed", "failed", "cancelled", "canceled", "interrupted")) {
+                            database.withTransaction {
+                                val stale = dao.getPendingApprovals(sessionId).filter { it.runId == pendingRunId }
+                                if (stale.isNotEmpty()) dao.upsertApprovals(stale.map {
+                                    it.copy(status = "resolved", updatedAt = System.currentTimeMillis())
+                                })
+                            }
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) { /* Retry on a later sync. */ }
+                }
+                if (pending.any { it.runId.isNullOrBlank() }) {
+                    // A stale approval without run identity cannot be
+                    // safely matched to a run endpoint. The session
+                    // detail is the authoritative fallback; a terminal
+                    // session retires the remaining requests.
+                    try {
+                        refreshSessionDetail(sessionId)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) { /* Retry on a later sync. */ }
+                }
+            }
+        }
+    }
+
+    private suspend fun resetAndMuteLiveFeedLocked(sessionId: String, clearCursor: Boolean) {
+        liveFeedMuted.add(sessionId)
+        if (clearCursor) liveFeedCursors.remove(sessionId)
+        liveProjectionMutex.withLock {
+            liveProjectors.remove(sessionId)
+            liveTimelineState.value = liveTimelineState.value - sessionId
+        }
     }
 
     private suspend fun applyLivePage(sessionId: String, page: SessionEventsPageDto) {
-            val streamId = page.liveStreamId
-            val liveCursor = page.liveCursor
-            if (streamId != null && liveCursor != null) {
-                if (!streamId.matches(Regex("^[a-f0-9-]{36}$")) || liveCursor < 0 || page.liveEvents.size > 128) {
-                    throw SessionRepositoryException(502, "SESSION_LIVE_INVALID", "Invalid live event page", false)
-                }
-                liveFeedCapable.add(sessionId)
-                if (page.liveResetRequired) {
-                    // A missing token prefix cannot be presented as a complete
-                    // answer. Use durable history until this run settles.
-                    liveFeedMuted.add(sessionId)
-                    liveProjectionMutex.withLock {
-                        liveProjectors.remove(sessionId)
-                        liveTimelineState.value = liveTimelineState.value + (sessionId to emptyList())
-                    }
-                } else if (sessionId !in liveFeedMuted && page.liveEvents.isNotEmpty()) {
-                    val live = applyLiveEventsLocked(sessionId, page.liveEvents)
-                    if (live is RefreshResult.Gap) throw SessionRepositoryException(502,
-                        "SESSION_LIVE_INVALID", "Live event sequence needs reconciliation", false)
-                }
-                liveFeedCursors[sessionId] = streamId to liveCursor
+        val streamId = page.liveStreamId
+        val liveCursor = page.liveCursor
+        if (streamId != null && liveCursor != null) {
+            if (!streamId.matches(LIVE_STREAM_ID_REGEX) || liveCursor < 0 || page.liveEvents.size > 128) {
+                resetAndMuteLiveFeedLocked(sessionId, clearCursor = true)
+                return
             }
+            liveFeedCapable.add(sessionId)
+            if (page.liveResetRequired) {
+                // A missing token prefix cannot be presented as a complete
+                // answer. Use durable history until this run settles.
+                resetAndMuteLiveFeedLocked(sessionId, clearCursor = false)
+            } else if (sessionId !in liveFeedMuted && page.liveEvents.isNotEmpty()) {
+                val live = applyLiveEventsLocked(sessionId, page.liveEvents)
+                if (live is RefreshResult.Gap) {
+                    resetAndMuteLiveFeedLocked(sessionId, clearCursor = false)
+                }
+            }
+            liveFeedCursors[sessionId] = streamId to liveCursor
+        }
     }
 
     private suspend fun requestDurableEventPage(path: String): com.andysagent.ragent.core.network.ApiResponse = try {

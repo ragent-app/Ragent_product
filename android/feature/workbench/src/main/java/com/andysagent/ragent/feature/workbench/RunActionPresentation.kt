@@ -1,6 +1,7 @@
 package com.andysagent.ragent.feature.workbench
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.andysagent.ragent.core.timeline.RunActionUiState
 
@@ -18,6 +19,7 @@ internal fun presentRunAction(action: RunActionUiState): String {
         "execute" -> stringResource(R.string.run_action_execute, subject)
         "delegate" -> stringResource(R.string.run_action_delegate, subject)
         "tool" -> stringResource(R.string.run_action_tool, subject)
+        "exploring" -> pluralStringResource(R.plurals.run_action_exploring_items, action.groupedCount, action.groupedCount)
         "working" -> stringResource(R.string.run_action_working)
         "question" -> stringResource(R.string.run_action_question)
         "thinking" -> stringResource(R.string.run_action_thinking)

@@ -42,11 +42,11 @@ import kotlin.math.ceil
  */
 private val SmoothTopGradientStops = arrayOf(
     0.00f to 1.00f,
-    0.15f to 0.90f,
-    0.30f to 0.75f,
-    0.50f to 0.50f, // Exactly 50% opacity at capsule center
-    0.70f to 0.25f,
-    0.85f to 0.10f,
+    0.15f to 0.98f,
+    0.30f to 0.92f,
+    0.50f to 0.78f, // Stronger masking across capsule center to avoid text bleed-through
+    0.70f to 0.50f,
+    0.85f to 0.20f,
     1.00f to 0.00f,
 )
 

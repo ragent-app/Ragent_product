@@ -3331,12 +3331,15 @@ class ChatViewModel(
                 if (isCurrentSession(sessionId, generation)) {
                     val connectionInterrupted = fixed.connectionState.value != RuntimeConnectionState.Connected
                     val recoverable = isRecoverableConnectionError(error) || connectionInterrupted
+                    val sessionDeleted = (error is SessionRepositoryException && error.statusCode == 404) ||
+                        (error is com.andysagent.ragent.core.network.ApiException && error.statusCode == 404)
                     updateState {
+                        val preserveTimeline = !sessionDeleted && timelineSessionId == sessionId
                         copy(
                             historyLoading = false,
-                            timelineItems = if (recoverable && timelineSessionId == sessionId) timelineItems else emptyList(),
-                            timelineSessionId = if (recoverable && timelineSessionId == sessionId) timelineSessionId else null,
-                            messageCount = if (recoverable && timelineSessionId == sessionId) messageCount else 0,
+                            timelineItems = if (preserveTimeline) timelineItems else emptyList(),
+                            timelineSessionId = if (preserveTimeline) timelineSessionId else null,
+                            messageCount = if (preserveTimeline) messageCount else 0,
                         )
                     }
                     showSessionRefreshError(error, recoverable)

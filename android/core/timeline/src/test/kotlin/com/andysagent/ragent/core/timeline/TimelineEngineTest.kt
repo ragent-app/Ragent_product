@@ -2,6 +2,7 @@ package com.andysagent.ragent.core.timeline
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -123,19 +124,43 @@ class TimelineEngineTest {
         assertEquals("Editing report.md", action("""{"type":"operation","seq":1,"operationId":"one","state":"running","kind":"file_edit","toolName":"Write","input":{"file_path":"/work/report.md"}}"""))
         assertEquals("Listing workspace", action("""{"type":"operation","seq":1,"operationId":"two","state":"running","kind":"execute","input":{"command":"ls -l"}}"""))
     }
-    @Test fun authoritativeTerminalStatusSettlesOnlyTheLatestMatchingRun() {
+    @Test fun authoritativeTerminalStatusSettlesLatestAndEarlierTurns() {
         val old = TimelineItem.Message("old", 1, TimelineRole.Agent, "old", false, runId = "old-run")
         val prompt = TimelineItem.Message("user", 2, TimelineRole.User, "request", true, runId = "run-1")
         val answer = TimelineItem.Message("live", 3, TimelineRole.Agent, "answer", false, runId = "run-1")
         val other = TimelineItem.Message("other", 4, TimelineRole.Agent, "other", false, runId = "run-2")
         val thinking = TimelineItem.Operation("thinking", 5, TimelineOperationKind.Tool, "Thinking", "reason", TimelineOperationStatus.InProgress, runId = "run-1", isReasoning = true)
         val items = listOf(old, prompt, answer, other, thinking)
-        assertEquals(items, settleLatestTurnMessages(items, false))
+        val whileActive = settleLatestTurnMessages(items, false)
+        assertTrue((whileActive[0] as TimelineItem.Message).completed)
+        assertEquals(false, (whileActive[2] as TimelineItem.Message).completed)
+        assertEquals(false, (whileActive[3] as TimelineItem.Message).completed)
+        assertEquals(TimelineOperationStatus.InProgress, (whileActive[4] as TimelineItem.Operation).status)
         val settled = settleLatestTurnMessages(items, true)
+        assertTrue((settled[0] as TimelineItem.Message).completed)
         assertTrue((settled[2] as TimelineItem.Message).completed)
-        assertEquals(false, (settled[0] as TimelineItem.Message).completed)
         assertEquals(false, (settled[3] as TimelineItem.Message).completed)
         assertEquals(TimelineOperationStatus.Completed, (settled[4] as TimelineItem.Operation).status)
+    }
+    @Test fun followUpTurnsAndSteeredPromptsSettleEarlierStreamingMessagesEvenWhileActive() {
+        val turn1User = TimelineItem.Message("u1", 1, TimelineRole.User, "first", true, requestId = "req-1", runId = "run-1")
+        val turn1Reply = TimelineItem.Message("a1", 2, TimelineRole.Agent, "partial 1", false, requestId = "req-1", runId = "run-1")
+        val turn1Thinking = TimelineItem.Operation("t1", 3, TimelineOperationKind.Tool, "Thinking", "detail", TimelineOperationStatus.InProgress, runId = "run-1", isReasoning = true)
+        val turn2UserSteered = TimelineItem.Message("u2", 4, TimelineRole.User, "steer", true, requestId = "req-2", runId = "run-1")
+        val turn2Reply = TimelineItem.Message("a2", 5, TimelineRole.Agent, "streaming 2", false, requestId = "req-2", runId = "run-1")
+        val settled = settleLatestTurnMessages(listOf(turn1User, turn1Reply, turn1Thinking, turn2UserSteered, turn2Reply), terminal = false)
+        assertTrue((settled[1] as TimelineItem.Message).completed)
+        assertEquals("completed", (settled[1] as TimelineItem.Message).messageState)
+        assertEquals(TimelineOperationStatus.Completed, (settled[2] as TimelineItem.Operation).status)
+        assertFalse((settled[4] as TimelineItem.Message).completed)
+
+        val noUserHeader = listOf(
+            TimelineItem.Message("old-msg", 1, TimelineRole.Agent, "older", false, runId = "run-old"),
+            TimelineItem.Message("new-msg", 2, TimelineRole.Agent, "newer", false, runId = "run-new"),
+        )
+        val settledRuns = settleLatestTurnMessages(noUserHeader, terminal = false)
+        assertTrue((settledRuns[0] as TimelineItem.Message).completed)
+        assertFalse((settledRuns[1] as TimelineItem.Message).completed)
     }
     @Test fun terminalRunCanBeResolvedFromAnUnambiguousRequestEvenWhenReplyArrivesFirst() {
         val reply = TimelineItem.Message("reply", 1, TimelineRole.Agent, "answer", false, requestId = "req", runId = "run")

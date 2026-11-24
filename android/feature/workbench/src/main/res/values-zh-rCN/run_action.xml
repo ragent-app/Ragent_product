@@ -35,4 +35,7 @@
     <string name="run_subject_task">任务</string>
     <string name="run_subject_changes">工作区改动</string>
     <string name="run_subject_current_location">当前位置</string>
+    <plurals name="run_action_exploring_items">
+        <item quantity="other">正在探索 %1$d 项</item>
+    </plurals>
 </resources>

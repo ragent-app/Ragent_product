@@ -113,14 +113,23 @@ internal fun splitTurnEntries(
         // Durable reasoning blocks can be emitted after a finalized assistant
         // snapshot even though they belong to its process. They must not hide
         // the actual reply when the turn is complete.
-        entries.indexOfLast { entry ->
+        val candidate = entries.indexOfLast { entry ->
             entry is TimelineItem.Message && entry.role == TimelineRole.Agent && entry.completed &&
                 entry.messagePhase?.lowercase() in setOf(null, "commentary") &&
                 !entry.isProtectedAsyncEntry()
         }
+        val trailingUnsettled = candidate >= 0 && entries.drop(candidate + 1).any { tail ->
+            (tail is TimelineItem.Message && !tail.isProtectedAsyncEntry() &&
+                (tail.role == TimelineRole.User || !tail.completed)) ||
+                (tail is TimelineItem.Operation && !tail.isReasoning) ||
+                tail is TimelineItem.Plan
+        }
+        if (trailingUnsettled) -1 else candidate
     } else -1
     if (finalIndex < 0) {
-        if (!allowTerminalFallback) return emptyList<TimelineItem>() to entries
+        if (!allowTerminalFallback || entries.any { it is TimelineItem.Message && !it.isProtectedAsyncEntry() }) {
+            return emptyList<TimelineItem>() to entries
+        }
         val protected = entries.filter { it.isProtectedAsyncEntry() }
         val process = entries.filterNot { it.isProtectedAsyncEntry() }
         return process to protected
@@ -128,21 +137,31 @@ internal fun splitTurnEntries(
     // Late-arriving entries still belong to the run's process, even if a
     // finalized snapshot was projected before them.
     val afterFinal = entries.drop(finalIndex + 1)
-    val lateCollaboration = afterFinal.filter { it is TimelineItem.Notice && it.id.startsWith("collaboration:") }
-    val protectedBeforeFinal = entries.take(finalIndex).filter { it.isProtectedAsyncEntry() }
-    val protectedAfterFinal = afterFinal.filter { it.isProtectedAsyncEntry() }
-    val processEntries = entries.take(finalIndex).filterNot { it.isProtectedAsyncEntry() } +
-        afterFinal.filterNot { it in lateCollaboration || it.isProtectedAsyncEntry() }
-    val outsideEntries = protectedBeforeFinal + listOf(entries[finalIndex]) + lateCollaboration + protectedAfterFinal
+    fun TimelineItem.isProtectedTrailingEntry(): Boolean =
+        isProtectedAsyncEntry() ||
+            (this is TimelineItem.Message && role == TimelineRole.User) ||
+            (this is TimelineItem.Message && role == TimelineRole.Agent && !completed) ||
+            this is TimelineItem.Notice
+    val protectedBeforeFinal = entries.take(finalIndex).filter {
+        it.isProtectedAsyncEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
+    }
+    val protectedAfterFinal = afterFinal.filter { it.isProtectedTrailingEntry() }
+    val processEntries = entries.take(finalIndex).filterNot { it in protectedBeforeFinal } +
+        afterFinal.filterNot { it in protectedAfterFinal }
+    val outsideEntries = protectedBeforeFinal + listOf(entries[finalIndex]) + protectedAfterFinal
     return processEntries to outsideEntries
 }
 
 internal fun activeRunTurnIndex(turns: List<TurnGroup>, runId: String?, requestId: String?): Int {
-    val match = turns.indexOfFirst { turn ->
-        (!runId.isNullOrBlank() && turn.runId == runId) ||
-            (!requestId.isNullOrBlank() && turn.requestId == requestId)
+    if (!requestId.isNullOrBlank()) {
+        val byRequest = turns.indexOfLast { it.requestId == requestId || it.userPrompt?.requestId == requestId }
+        if (byRequest >= 0) return byRequest
     }
-    return if (match >= 0) match else turns.lastIndex
+    if (!runId.isNullOrBlank()) {
+        val byRun = turns.indexOfLast { it.runId == runId }
+        if (byRun >= 0) return byRun
+    }
+    return turns.lastIndex
 }
 
 /**
@@ -315,13 +334,10 @@ class TurnGroupProjector {
                 !item.requestId.isNullOrBlank() && !currentRequestId.isNullOrBlank() &&
                 item.requestId != currentRequestId &&
                 (item.runId.isNullOrBlank() || item.runId != currentRunId)) flushTurn()
-            if (item !is TimelineItem.Message || item.role != TimelineRole.User ||
-                (currentUserPrompt != null && !item.runId.isNullOrBlank() && item.runId == currentRunId)) currentEntries += item
+            if (item !is TimelineItem.Message || item.role != TimelineRole.User) currentEntries += item
             when (item) {
                 is TimelineItem.Message -> {
                     if (item.role == TimelineRole.User) {
-                        // Additional input for the same run is part of its process.
-                        if (currentUserPrompt != null && !item.runId.isNullOrBlank() && item.runId == currentRunId) continue
                         flushTurn()
                         currentRequestId = item.requestId ?: item.runId
                         currentRunId = item.runId
@@ -441,10 +457,14 @@ fun resolveTurnDockAnchorIndex(turns: List<TurnGroup>, requestId: String): Int {
 fun uniqueTurnRenderKeys(turns: List<TurnGroup>): List<String> {
     val occurrences = mutableMapOf<String, Int>()
     return turns.map { turn ->
-        val occurrence = occurrences.getOrDefault(turn.id, 0)
-        occurrences[turn.id] = occurrence + 1
+        val stableId = (turn.userPrompt?.requestId ?: turn.requestId)
+            ?.takeIf { it.isNotBlank() && it != turn.runId }
+            ?.let { "turn-req-$it" }
+            ?: turn.id
+        val occurrence = occurrences.getOrDefault(stableId, 0)
+        occurrences[stableId] = occurrence + 1
         // A length-delimited namespace prevents an ID from colliding with a
         // generated suffix or a fixed item key in the surrounding LazyColumn.
-        "timeline-turn:${turn.id.length}:${turn.id}:$occurrence"
+        "timeline-turn:${stableId.length}:$stableId:$occurrence"
     }
 }

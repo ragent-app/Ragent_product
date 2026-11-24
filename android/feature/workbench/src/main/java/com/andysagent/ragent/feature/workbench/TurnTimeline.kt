@@ -96,6 +96,7 @@ import com.andysagent.ragent.core.timeline.FileChangeItem
 import com.andysagent.ragent.core.timeline.PlanStepItem
 import com.andysagent.ragent.core.timeline.TimelineItem
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
+import com.andysagent.ragent.core.timeline.TimelineRole
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -150,15 +151,20 @@ fun TurnTimelineView(
         if (turn.entries.isNotEmpty() || runActive || runDuration != null) {
             // Keep the run's process in chronological order, with its final reply outside.
             val (processEntries, outsideEntries) = if (runActive) {
-                val protected = turn.entries.filter { it.isProtectedAsyncEntry() }
-                val process = turn.entries.filterNot { it.isProtectedAsyncEntry() }
+                val protected = turn.entries.filter {
+                    it.isProtectedAsyncEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
+                }
+                val process = turn.entries.filterNot { it in protected }
                 process to protected
             } else {
-                splitTurnEntries(turn.entries, allowTerminalFallback = runDuration != null && !turn.isLive)
+                splitTurnEntries(
+                    turn.entries,
+                    allowTerminalFallback = !turn.isLive && (runDuration != null || turn.finalAnswer?.completed == true),
+                )
             }
             var expanded by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(runActive) }
             var userToggled by rememberSaveable(turn.requestId ?: turn.id) { mutableStateOf(false) }
-            LaunchedEffect(runActive) { if (!runActive && !userToggled) expanded = false }
+            LaunchedEffect(runActive) { if (!userToggled) expanded = runActive }
             val toggleDescription = stringResource(if (expanded) R.string.timeline_details_hide else R.string.timeline_details_show)
             val renderEntry: @Composable (TimelineItem) -> Unit = { item -> key(item.id) {
                 when (item) {
@@ -197,6 +203,9 @@ fun TurnTimelineView(
                                 ResultBlock(
                                     message = item,
                                     isLastTurn = isLastTurn && item.id == turn.agentMessages.lastOrNull { it.completed }?.id,
+                                    allowStreaming = isLastTurn && item.id == turn.entries.lastOrNull {
+                                        it is TimelineItem.Message && it.role == TimelineRole.Agent
+                                    }?.id,
                                     onBranch = onBranch?.takeIf { item.lastEventSeq > 0L }?.let { branch -> { branch(item.lastEventSeq, "assistant-continue") } },
                                     onRestart = item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
                                     onReport = onReport?.let { report -> { report(item.text) } },
@@ -210,7 +219,10 @@ fun TurnTimelineView(
                             item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
                             onReport = onReport?.let { report -> { report(item.text) } },
                             showMessageActions = showMessageActions,
-                            pauseStreaming = runWaitingApproval)
+                            pauseStreaming = runWaitingApproval,
+                            allowStreaming = isLastTurn && item.id == turn.entries.lastOrNull {
+                                it is TimelineItem.Message && it.role == TimelineRole.Agent
+                            }?.id)
                     }
                     is TimelineItem.Plan -> PlanBlock(item, onPlanAction)
                     is TimelineItem.Operation -> {
@@ -273,6 +285,7 @@ fun TurnTimelineView(
                     ResultBlock(
                         message = message,
                         isLastTurn = isLastTurn && index == latestCompleted,
+                        allowStreaming = isLastTurn && index == answers.lastIndex,
                         onBranch = onBranch?.takeIf { message.lastEventSeq > 0L }?.let { branch -> { branch(message.lastEventSeq, "assistant-continue") } },
                         onRestart = turn.requestId?.let { reqId -> onRestart?.let { restart -> { restart(reqId) } } },
                         onReport = onReport?.let { report -> { report(message.text) } },
@@ -903,6 +916,7 @@ fun ResultBlock(
     onReport: (() -> Unit)? = null,
     showMessageActions: Boolean = true,
     pauseStreaming: Boolean = false,
+    allowStreaming: Boolean = true,
 ) {
     val displayText = displayAgentMessageText(message.text)
     if (displayText.isBlank()) return
@@ -911,7 +925,7 @@ fun ResultBlock(
             .fillMaxWidth()
             .padding(top = 2.dp, bottom = 4.dp),
     ) {
-        if (message.completed || pauseStreaming) {
+        if (message.completed || pauseStreaming || !allowStreaming) {
             AgentMarkdown(markdown = displayText, modifier = Modifier.testTag("agent-settled-text"))
         } else {
             AgentStreamingMessage(text = displayText, streaming = true, smoothCatchUp = message.lastEventSeq == 0L,

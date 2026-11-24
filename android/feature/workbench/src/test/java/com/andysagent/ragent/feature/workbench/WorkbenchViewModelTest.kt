@@ -1436,6 +1436,56 @@ class WorkbenchViewModelTest {
         } finally { Dispatchers.resetMain() }
     }
 
+    @Test fun `non-recoverable refresh errors preserve Room timeline while connected unless deleted`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val cached = listOf(
+                TimelineItem.Message("u1", 1, com.andysagent.ragent.core.timeline.TimelineRole.User, "Hi", true),
+                TimelineItem.Message("a1", 2, com.andysagent.ragent.core.timeline.TimelineRole.Agent, "Saved reply", true),
+            )
+            val gate = CompletableDeferred<Unit>()
+            val repository = FakeSessionRepository(
+                sessions = listOf(Session("session-1", "Task")),
+                timelines = mapOf("session-1" to cached),
+                connection = RuntimeConnectionState.Connected,
+                refreshGate = gate,
+                failSessionRefresh = com.andysagent.ragent.core.domain.SessionRepositoryException(
+                    502,
+                    "SESSION_LIVE_INVALID",
+                    "Invalid live event page",
+                    retryable = false,
+                ),
+            )
+            val model = ChatViewModel(repository)
+            runCurrent()
+            assertEquals(cached, model.state.value.timelineItems)
+            assertEquals("session-1", model.state.value.timelineSessionId)
+            assertEquals(2, model.state.value.messageCount)
+
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(cached, model.state.value.timelineItems)
+            assertEquals("session-1", model.state.value.timelineSessionId)
+            assertEquals(2, model.state.value.messageCount)
+            assertFalse(model.state.value.historyLoading)
+            assertTrue(model.state.value.error?.contains("Invalid live event page") == true)
+
+            repository.failSessionRefresh = com.andysagent.ragent.core.domain.SessionRepositoryException(
+                404,
+                "NOT_FOUND",
+                "Session deleted",
+                retryable = false,
+            )
+            model.onEvent(ChatEvent.Retry)
+            advanceUntilIdle()
+
+            assertTrue(model.state.value.timelineItems.isEmpty())
+            assertEquals(null, model.state.value.timelineSessionId)
+            assertEquals(0, model.state.value.messageCount)
+        } finally { Dispatchers.resetMain() }
+    }
+
     @Test fun `project and computer refresh errors clear after reconnect and successful reload`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {

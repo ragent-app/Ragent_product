@@ -111,3 +111,74 @@ while(legacyCursor<609) {
  legacyText+=p.liveEvents.map(e=>e.text).join('');legacyCursor=p.liveCursor;
 }
 assert.equal(legacyText.length,609,'Legacy delivery also retains a complete producer batch');
+
+// Claude sequential text deltas also compact and inflight tracking recovers on cold reconnect.
+const claudeCompact = createSessionLiveFeed({ compactPendingDeltas: true });
+for (let n = 1; n <= 3000; n++) {
+  claudeCompact.publish('claude-sess', [{
+    type: 'text_delta',
+    role: 'assistant',
+    runId: 'run-claude',
+    canonicalMessageId: 'm2:["run-claude","assistant","msg-c",0]',
+    firstSeq: 2,
+    providerMessageId: 'msg-c',
+    providerEventId: `msg-c:text:0:${n}`,
+    text: String(n % 10),
+  }]);
+}
+const claudePage = claudeCompact.read('claude-sess');
+assert.equal(claudePage.liveResetRequired, false, 'Claude sequential deltas compact without ring eviction');
+assert.equal(claudePage.liveEvents.length, 1);
+assert.equal(claudePage.liveEvents[0].text.length, 3000);
+assert.equal(claudeCompact.getInflightMessages('claude-sess').length, 1);
+assert.equal(claudeCompact.getInflightMessages('claude-sess')[0].content.length, 3000);
+assert.equal(claudeCompact.getInflightMessages('claude-sess')[0].firstSeq, 2);
+// Duplicate providerEventId must not append twice.
+claudeCompact.publish('claude-sess', [{
+  type: 'text_delta',
+  role: 'assistant',
+  runId: 'run-claude',
+  canonicalMessageId: 'm2:["run-claude","assistant","msg-c",0]',
+  firstSeq: 2,
+  providerMessageId: 'msg-c',
+  providerEventId: 'msg-c:text:0:3000',
+  text: '0',
+}]);
+assert.equal(claudeCompact.getInflightMessages('claude-sess')[0].content.length, 3000);
+// Finalized message settles the inflight entry.
+claudeCompact.publish('claude-sess', [{
+  seq: 3,
+  type: 'message',
+  role: 'assistant',
+  runId: 'run-claude',
+  canonicalMessageId: 'm2:["run-claude","assistant","msg-c",0]',
+  providerMessageId: 'msg-c',
+  content: 'final',
+}]);
+assert.deepEqual(claudeCompact.getInflightMessages('claude-sess'), [], 'finalized message clears inflight state');
+
+// Cold recovery on evicted ring buffer preserves explicit-stream reset checks.
+const evicted = createSessionLiveFeed({ maximumEvents: 2 });
+for (let n = 1; n <= 4; n++) {
+  evicted.publish('evict', [{
+    type: 'text_delta',
+    role: 'assistant',
+    runId: 'run-evict',
+    canonicalMessageId: 'm2:["run-evict","assistant","item-e",0]',
+    firstSeq: 5,
+    text: `p${n}:`,
+  }]);
+}
+assert.equal(evicted.read('evict').liveResetRequired, true, 'raw read() preserves eviction reset signal');
+const coldRecovered = evicted.readWithInflightRecovery('evict', { afterCursor: 0, requestedStreamId: '' });
+assert.equal(coldRecovered.liveResetRequired, false, 'cold reconnect recovers accumulated inflight text after ring eviction');
+assert.equal(coldRecovered.liveCursor, 4);
+assert.equal(coldRecovered.liveEvents.length, 1);
+assert.equal(coldRecovered.liveEvents[0].textMode, 'snapshot');
+assert.equal(coldRecovered.liveEvents[0].text, 'p1:p2:p3:p4:');
+assert.equal(
+  evicted.readWithInflightRecovery('evict', { afterCursor: 0, requestedStreamId: 'previous-stream' }).liveResetRequired,
+  true,
+  'stale streamId still forces reset',
+);
+console.log('test-session-live-feed: Claude compaction, inflight settlement, and cold recovery PASS');

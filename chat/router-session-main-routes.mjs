@@ -42,6 +42,7 @@ import {
   applyTemplateToSession,
   cancelActiveRun,
   createSessionWithOutcome,
+  ensureActiveRunInflightRecovered,
   findCreatedSession,
   prepareSessionCreationInitialization,
   initializeCreatedSession,
@@ -239,6 +240,7 @@ function getEventBoundarySeq(event) {
 function getLatestEventBoundarySeq(events = []) {
   let latestSeq = 0;
   for (const event of Array.isArray(events) ? events : []) {
+    if (event?.messageState === 'streaming') continue;
     latestSeq = Math.max(latestSeq, getEventBoundarySeq(event));
   }
   return latestSeq;
@@ -812,6 +814,18 @@ export async function handleSessionMainRoutes({
         historyMeta: readSnapshot.historyMeta,
         strict: true,
       });
+      const includeLive = parsedUrl.query.includeLive === '1';
+      const liveAfterCursor = Number(parsedUrl.query.liveAfterCursor || 0);
+      const liveStreamId = String(parsedUrl.query.liveStreamId || '').slice(0, 64);
+      if (includeLive) {
+        await ensureActiveRunInflightRecovered(sessionId, readSnapshot.sessionMeta);
+      }
+      const livePage = includeLive
+        ? sessionLiveFeed.readWithInflightRecovery(sessionId, {
+          afterCursor: liveAfterCursor,
+          requestedStreamId: liveStreamId,
+        })
+        : null;
       // Mobile durable synchronization also uses the current activity to
       // recover pending requests after its event cursor has passed them.
       // A raw event page alone cannot describe that current state.
@@ -824,6 +838,12 @@ export async function handleSessionMainRoutes({
         filter: 'all',
         events: parsedUrl.query.compact === '1' ? compactMobileDurableEvents(events) : events,
         ...(parsedUrl.query.compact === '1' ? { runActivity: mobileActivity } : {}),
+        ...(livePage ? {
+          liveStreamId: livePage.liveStreamId,
+          liveCursor: livePage.liveCursor,
+          liveEvents: livePage.liveEvents || [],
+          liveResetRequired: livePage.liveResetRequired === true,
+        } : {}),
         pagination,
         truncated: pagination?.hasMoreBefore === true || pagination?.hasMoreAfter === true,
         consistency: {
@@ -906,6 +926,7 @@ export async function handleSessionMainRoutes({
         writeJson(res, 404, { error: 'Session not found' });
         return true;
       }
+      await ensureActiveRunInflightRecovered(sessionId);
       const controller = new AbortController();
       const abort = () => controller.abort();
       res.once('close', abort);
@@ -913,7 +934,7 @@ export async function handleSessionMainRoutes({
         const waited = await waitForSessionEvents(sessionId, {
           timeoutMs: parsePositiveInt(parsedUrl.query.timeoutMs, 15_000, { max: 30_000 }),
           signal: controller.signal,
-          readEvents: async () => ({ events: [], ...sessionRealtimeLiveFeed.read(sessionId, {
+          readEvents: async () => ({ events: [], ...sessionRealtimeLiveFeed.readWithInflightRecovery(sessionId, {
             afterCursor: Number(parsedUrl.query.liveAfterCursor || 0),
             requestedStreamId: String(parsedUrl.query.liveStreamId || '').slice(0, 64),
           }) }),
@@ -941,6 +962,9 @@ export async function handleSessionMainRoutes({
     const includeLive = parsedUrl.query.includeLive === '1';
     const liveAfterCursor = Number(parsedUrl.query.liveAfterCursor || 0);
     const liveStreamId = String(parsedUrl.query.liveStreamId || '').slice(0, 64);
+    if (includeLive) {
+      await ensureActiveRunInflightRecovered(sessionId, readSnapshot.sessionMeta);
+    }
     // A long-poll can be notified by an append that happens after the initial
     // snapshot. Never reuse that snapshot's historyMeta: doing so pins the
     // read boundary to the old latestSeq and makes the waiter wake up with an
@@ -960,7 +984,7 @@ export async function handleSessionMainRoutes({
         historyMeta: liveSnapshot.historyMeta,
         strict: true,
       });
-      return includeLive ? { ...page, ...sessionLiveFeed.read(sessionId,
+      return includeLive ? { ...page, ...sessionLiveFeed.readWithInflightRecovery(sessionId,
         { afterCursor: liveAfterCursor, requestedStreamId: liveStreamId }) } : page;
     };
     const abortController = new AbortController();
