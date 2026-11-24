@@ -86,13 +86,35 @@ class SwitchingRagentTransportTest {
         assertEquals(1, computer.closeCount)
         assertEquals(null, facade.delegate.value)
     }
+
+    @Test
+    fun activeCarrierDelegatesAndTracksSelectedTransport() = runBlocking {
+        val facade = SwitchingRagentTransport(CoroutineScope(Dispatchers.Unconfined))
+        val computerA = FakeTransport("a", initialCarrier = ActiveCarrier.P2P)
+        val computerB = FakeTransport("b", initialCarrier = ActiveCarrier.Turn)
+
+        assertEquals(ActiveCarrier.None, facade.activeCarrier.value)
+        facade.switchTo(computerA)
+        assertEquals(ActiveCarrier.P2P, facade.activeCarrier.value)
+
+        computerA.carrierState.value = ActiveCarrier.Direct
+        assertEquals(ActiveCarrier.Direct, facade.activeCarrier.value)
+
+        facade.switchTo(computerB)
+        assertEquals(ActiveCarrier.Turn, facade.activeCarrier.value)
+
+        facade.close()
+        assertEquals(ActiveCarrier.None, facade.activeCarrier.value)
+    }
 }
 
 private class FakeTransport(
     private val responseBody: String,
     override val requiresEventPolling: Boolean = false,
+    initialCarrier: ActiveCarrier = ActiveCarrier.None,
 ) : RagentTransport {
     private val mutableState = MutableStateFlow(RuntimeConnectionState.Connected)
+    val carrierState = MutableStateFlow(initialCarrier)
     var requestCount: Int = 0
         private set
     var closeCount: Int = 0
@@ -100,6 +122,7 @@ private class FakeTransport(
 
     override val invalidations: Flow<InvalidationHint> = emptyFlow()
     override val connectionState = mutableState
+    override val activeCarrier = carrierState
 
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requestCount += 1

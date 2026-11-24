@@ -590,4 +590,12 @@
     <string name="elicitation_json_object_hint">输入 JSON 对象</string>
     <string name="elicitation_array_hint">以逗号分隔多项</string>
     <string name="elicitation_copy_url">复制链接</string>
+    <string name="connection_carrier_direct">直连</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">已连接</string>
+    <string name="connection_status_connecting">正在连接</string>
+    <string name="connection_status_reconnecting">正在重连</string>
+    <string name="connection_status_offline">离线</string>
+    <string name="connection_status_auth_required">需重新认证</string>
 </resources>

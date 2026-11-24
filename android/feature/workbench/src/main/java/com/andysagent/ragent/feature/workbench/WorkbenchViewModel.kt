@@ -45,6 +45,7 @@ import com.andysagent.ragent.core.domain.RuntimeSelection
 import com.andysagent.ragent.core.model.RemoteTarget
 import com.andysagent.ragent.core.model.Session
 import com.andysagent.ragent.core.model.SessionStatus
+import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.navigation.AgentoDestination
 import com.andysagent.ragent.core.timeline.TimelineItem
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
@@ -59,6 +60,9 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +95,7 @@ data class WorkbenchUiState(
     val agentOpen: Boolean = false,
     val sessionSearchQuery: String = "",
     val connection: AgentConnectionStatus = AgentConnectionStatus.Disconnected,
+    val activeCarrier: ActiveCarrier = ActiveCarrier.None,
     /** In a split view the visible conversation can belong to another computer. */
     val chatConnection: AgentConnectionStatus? = null,
     val chatTargetId: String? = null,
@@ -336,6 +341,8 @@ sealed interface WorkbenchEvent {
     data class MarkSessionRead(val sessionId: String) : WorkbenchEvent
     /** Refreshes the Home catalog without replacing the cached surface with a spinner. */
     data object RefreshHome : WorkbenchEvent
+    /** Refreshes the L1/L2 catalog and triggers active carrier verification. */
+    data object RefreshCatalog : WorkbenchEvent
     data object Retry : WorkbenchEvent
     data object RetryChat : WorkbenchEvent
     data object DismissError : WorkbenchEvent
@@ -384,9 +391,22 @@ class AppShellViewModel(private val repository: SessionRepository) : ViewModel()
             repository.observeScopedConnectionStates().collectLatest { (fixed, connection) ->
                 updateState { copy(connection = connection.toAgentConnectionStatus()) }
                 if (fixed != null && connection == RuntimeConnectionState.Connected) {
-                    launch { runCatching { fixed.refreshSessions() } }
+                    launch {
+                        coroutineScope {
+                            val projectsRefresh = async {
+                                try { fixed.refreshProjects() }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Throwable) {}
+                            }
+                            val sessionsRefresh = async {
+                                try { fixed.refreshSessions() }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Throwable) {}
+                            }
+                            awaitAll(projectsRefresh, sessionsRefresh)
+                        }
+                    }
                     launch { runCatching { fixed.refreshComputers() } }
-                    launch { runCatching { fixed.refreshProjects() } }
                 }
             }
         }
@@ -4103,8 +4123,11 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
         allowRecoveryRetry: Boolean = true,
     ) {
         try {
-            target.refreshProjects()
-            target.refreshSessions()
+            coroutineScope {
+                val projectsRefresh = async { target.refreshProjects() }
+                val sessionsRefresh = async { target.refreshSessions() }
+                awaitAll(projectsRefresh, sessionsRefresh)
+            }
             if (repository is SwitchingSessionRepository && repository.delegate.value !== target) return
             val previous = refreshError
             refreshError = null

@@ -146,6 +146,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -210,6 +211,7 @@ class RoomSessionRepository(
         const val LIVE_TIMELINE_UI_INTERVAL_MS = 16L
         const val MAX_ATTACHMENT_BYTES = FileAssetUploadClient.MAXIMUM_METADATA_BYTES
         const val DEFAULT_ATTACHMENT_BUFFER_BYTES = 64 * 1024
+        const val INTERACTIVE_CRUD_TIMEOUT_MS = 10_000L
     }
 
     private val dao: RagentDao = database.dao()
@@ -217,6 +219,34 @@ class RoomSessionRepository(
     // in another. Operations within a single conversation remain ordered.
     private val sessionSyncMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private fun sessionSyncMutex(sessionId: String): Mutex = sessionSyncMutexes.computeIfAbsent(sessionId) { Mutex() }
+    private val projectMutationMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private fun projectMutationMutex(projectId: String): Mutex = projectMutationMutexes.computeIfAbsent(projectId) { Mutex() }
+    private val sessionMutationMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private fun sessionMutationMutex(sessionId: String): Mutex = sessionMutationMutexes.computeIfAbsent(sessionId) { Mutex() }
+    private val pendingMutationLock = Any()
+    private val pendingProjectMutations = mutableMapOf<String, Int>()
+    private val pendingSessionMutations = mutableMapOf<String, Int>()
+    private fun incrementPendingProjectMutation(projectId: String) = synchronized(pendingMutationLock) {
+        pendingProjectMutations[projectId] = (pendingProjectMutations[projectId] ?: 0) + 1
+    }
+    private fun decrementPendingProjectMutation(projectId: String) = synchronized(pendingMutationLock) {
+        val next = (pendingProjectMutations[projectId] ?: 0) - 1
+        if (next <= 0) pendingProjectMutations.remove(projectId) else pendingProjectMutations[projectId] = next
+    }
+    private fun pendingProjectMutationIds(): Set<String> = synchronized(pendingMutationLock) {
+        pendingProjectMutations.keys.toSet()
+    }
+    private fun incrementPendingSessionMutation(sessionId: String) = synchronized(pendingMutationLock) {
+        pendingSessionMutations[sessionId] = (pendingSessionMutations[sessionId] ?: 0) + 1
+    }
+    private fun decrementPendingSessionMutation(sessionId: String) = synchronized(pendingMutationLock) {
+        val next = (pendingSessionMutations[sessionId] ?: 0) - 1
+        if (next <= 0) pendingSessionMutations.remove(sessionId) else pendingSessionMutations[sessionId] = next
+    }
+    private fun pendingSessionMutationIds(): Set<String> = synchronized(pendingMutationLock) {
+        pendingSessionMutations.keys.toSet()
+    }
+    private val projectRefreshMutex = Mutex()
     private val sessionListRefreshMutex = Mutex()
     private val activePendingOperationIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
@@ -702,11 +732,11 @@ class RoomSessionRepository(
         })
     }
 
-    override suspend fun refreshProjects() {
+    override suspend fun refreshProjects() = projectRefreshMutex.withLock {
         val response = execute(ApiRequest("GET", "/api/projects"))
         val payload = codec.decode(serializer<ProjectListResponseDto>(), response.body)
         val now = System.currentTimeMillis()
-        dao.replaceProjects(payload.projects.map { project ->
+        val serverProjects = payload.projects.map { project ->
             ProjectEntity(
                 id = project.string("id").orEmpty(),
                 name = project.string("name") ?: "Unnamed project",
@@ -714,7 +744,19 @@ class RoomSessionRepository(
                 updatedAt = project.string("updatedAt")?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() } ?: now,
                 pinned = (project["pinned"] as? JsonPrimitive)?.booleanOrNull == true,
             )
-        }.filter { it.id.isNotBlank() })
+        }.filter { it.id.isNotBlank() }
+        database.withTransaction {
+            val pendingIds = pendingProjectMutationIds()
+            if (pendingIds.isEmpty()) {
+                dao.replaceProjects(serverProjects)
+            } else {
+                val localPreserved = pendingIds.mapNotNull { id -> dao.getProject(id) }.associateBy { it.id }
+                val merged = serverProjects.mapNotNull { serverRow ->
+                    if (serverRow.id in pendingIds) localPreserved[serverRow.id] else serverRow
+                } + localPreserved.values.filter { local -> serverProjects.none { it.id == local.id } }
+                dao.replaceProjects(merged)
+            }
+        }
     }
 
     override suspend fun createProject(name: String, rootPath: String): Project {
@@ -777,36 +819,182 @@ class RoomSessionRepository(
     override suspend fun updateProject(projectId: String, name: String?, rootPath: String?): Project {
         require(projectId.isNotBlank()) { "Project id must not be blank" }
         require(name != null || rootPath != null) { "A project update is required" }
+        val trimmedName = name?.trim()?.takeIf { it.isNotEmpty() }
+        val trimmedPath = rootPath?.trim()?.takeIf { it.isNotEmpty() }
         val body = buildJsonObject {
-            name?.trim()?.takeIf { it.isNotEmpty() }?.let { put("name", JsonPrimitive(it)) }
-            rootPath?.trim()?.takeIf { it.isNotEmpty() }?.let { put("rootPath", JsonPrimitive(it)) }
+            trimmedName?.let { put("name", JsonPrimitive(it)) }
+            trimmedPath?.let { put("rootPath", JsonPrimitive(it)) }
         }.toString()
-        val response = execute(ApiRequest("PATCH", "/api/projects/${java.net.URLEncoder.encode(projectId, Charsets.UTF_8.name())}", body))
-        val project = codec.decode(serializer<JsonObject>(), response.body)["project"]?.jsonObject
-            ?: error("Project response did not include a project")
-        val entity = ProjectEntity(
-            id = project.string("id").orEmpty().also { require(it.isNotBlank()) { "Updated project has no id" } },
-            name = project.string("name") ?: name.orEmpty(),
-            folder = project.string("rootPath") ?: rootPath,
-            updatedAt = System.currentTimeMillis(),
-            pinned = (project["pinned"] as? JsonPrimitive)?.booleanOrNull == true,
-        )
-        dao.upsertProjects(listOf(entity))
-        return toDomain(entity)
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        return projectMutationMutex(projectId).withLock {
+            var snapshot: ProjectEntity? = null
+            database.withTransaction {
+                snapshot = dao.getProject(projectId)
+                incrementPendingProjectMutation(projectId)
+                snapshot?.let { existing ->
+                    dao.upsertProjects(listOf(existing.copy(
+                        name = trimmedName ?: existing.name,
+                        folder = trimmedPath ?: existing.folder,
+                        updatedAt = System.currentTimeMillis(),
+                    )))
+                }
+            }
+            val response = try {
+                execute(ApiRequest(
+                    method = "PATCH",
+                    path = "/api/projects/${encode(projectId)}",
+                    body = body,
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshot?.let { dao.upsertProjects(listOf(it)) }
+                        decrementPendingProjectMutation(projectId)
+                    }
+                }
+                throw error
+            }
+            val project = codec.decode(serializer<JsonObject>(), response.body)["project"]?.jsonObject
+                ?: error("Project response did not include a project")
+            val entity = ProjectEntity(
+                id = project.string("id").orEmpty().also { require(it.isNotBlank()) { "Updated project has no id" } },
+                name = project.string("name") ?: trimmedName ?: snapshot?.name.orEmpty(),
+                folder = project.string("rootPath") ?: trimmedPath ?: snapshot?.folder,
+                updatedAt = System.currentTimeMillis(),
+                pinned = (project["pinned"] as? JsonPrimitive)?.booleanOrNull ?: snapshot?.pinned ?: false,
+            )
+            database.withTransaction {
+                dao.upsertProjects(listOf(entity))
+                decrementPendingProjectMutation(projectId)
+            }
+            toDomain(entity)
+        }
     }
+
+    private fun parseDeletedProjectSessionIds(body: String): List<String> = runCatching {
+        val element = RagentProtocol.json.parseToJsonElement(body) as? JsonObject ?: return@runCatching emptyList()
+        element["sessionIds"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull?.takeIf(String::isNotBlank) }.orEmpty()
+    }.getOrDefault(emptyList())
 
     override suspend fun deleteProject(projectId: String, deleteSessions: Boolean) {
         require(projectId.isNotBlank()) { "Project id must not be blank" }
         val body = buildJsonObject { put("deleteSessions", JsonPrimitive(deleteSessions)) }.toString()
-        execute(ApiRequest("DELETE", "/api/projects/${java.net.URLEncoder.encode(projectId, Charsets.UTF_8.name())}", body))
-        refreshProjects()
-        refreshSessions()
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        projectMutationMutex(projectId).withLock {
+            var snapshotProject: ProjectEntity? = null
+            var snapshotSessions: List<SessionEntity> = emptyList()
+            database.withTransaction {
+                snapshotProject = dao.getProject(projectId)
+                snapshotSessions = dao.getSessionsByProject(projectId)
+                incrementPendingProjectMutation(projectId)
+                snapshotSessions.forEach { incrementPendingSessionMutation(it.id) }
+                dao.deleteProject(projectId)
+                if (deleteSessions) {
+                    val ids = snapshotSessions.map { it.id }
+                    ids.chunked(500).forEach { chunk -> dao.deleteSessionsByIds(chunk) }
+                } else {
+                    dao.detachSessionsFromProject(projectId)
+                }
+            }
+            val response = try {
+                execute(ApiRequest(
+                    method = "DELETE",
+                    path = "/api/projects/${encode(projectId)}",
+                    body = body,
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshotProject?.let { dao.upsertProjects(listOf(it)) }
+                        if (snapshotSessions.isNotEmpty()) {
+                            dao.upsertSessions(snapshotSessions)
+                        }
+                        decrementPendingProjectMutation(projectId)
+                        snapshotSessions.forEach { decrementPendingSessionMutation(it.id) }
+                    }
+                }
+                throw error
+            }
+            val serverSessionIds = parseDeletedProjectSessionIds(response.body)
+            val allDeletedIds = if (deleteSessions) {
+                (snapshotSessions.map { it.id } + serverSessionIds).distinct()
+            } else {
+                emptyList()
+            }
+            if (allDeletedIds.isNotEmpty()) {
+                allDeletedIds.forEach { id ->
+                    firstTurnCandidates.remove(id)
+                    acceptedFirstTurnSnapshots.remove(id)
+                    dao.deleteRunDurations(id)
+                }
+                acceptedFirstTurnSessionIds.update { it - allDeletedIds.toSet() }
+            }
+            database.withTransaction {
+                if (serverSessionIds.isNotEmpty()) {
+                    if (deleteSessions) {
+                        serverSessionIds.chunked(500).forEach { chunk -> dao.deleteSessionsByIds(chunk) }
+                    } else {
+                        dao.detachSessionsFromProject(projectId)
+                    }
+                }
+                decrementPendingProjectMutation(projectId)
+                snapshotSessions.forEach { decrementPendingSessionMutation(it.id) }
+            }
+            coroutineScope {
+                val projectsRefresh = async {
+                    try { refreshProjects() }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Throwable) {}
+                }
+                val sessionsRefresh = async {
+                    try { refreshSessions() }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Throwable) {}
+                }
+                awaitAll(projectsRefresh, sessionsRefresh)
+            }
+        }
     }
 
     override suspend fun setProjectPinned(projectId: String, pinned: Boolean) {
         require(projectId.isNotBlank()) { "Project id must not be blank" }
-        execute(ApiRequest("PATCH", "/api/projects/${encode(projectId)}", buildJsonObject { put("pinned", JsonPrimitive(pinned)) }.toString()))
-        refreshProjects()
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        val body = buildJsonObject { put("pinned", JsonPrimitive(pinned)) }.toString()
+        projectMutationMutex(projectId).withLock {
+            var snapshot: ProjectEntity? = null
+            database.withTransaction {
+                snapshot = dao.getProject(projectId)
+                incrementPendingProjectMutation(projectId)
+                snapshot?.let { existing ->
+                    dao.upsertProjects(listOf(existing.copy(pinned = pinned)))
+                }
+            }
+            try {
+                execute(ApiRequest(
+                    method = "PATCH",
+                    path = "/api/projects/${encode(projectId)}",
+                    body = body,
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshot?.let { dao.upsertProjects(listOf(it)) }
+                        decrementPendingProjectMutation(projectId)
+                    }
+                }
+                throw error
+            }
+            database.withTransaction { decrementPendingProjectMutation(projectId) }
+            try { refreshProjects() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Throwable) {}
+        }
     }
 
     override suspend fun createSession(name: String, tool: String): Session {
@@ -915,29 +1103,116 @@ class RoomSessionRepository(
     }
 
     override suspend fun renameSession(sessionId: String, name: String) {
-        require(name.trim().isNotBlank()) { "Session name must not be blank" }
-        execute(ApiRequest(
-            "PATCH",
-            "/api/sessions/${encode(sessionId)}",
-            buildJsonObject { put("name", JsonPrimitive(name.trim())) }.toString(),
-        ))
-        refreshSessions()
+        require(sessionId.isNotBlank()) { "Session id must not be blank" }
+        val trimmedName = name.trim()
+        require(trimmedName.isNotBlank()) { "Session name must not be blank" }
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        val body = buildJsonObject { put("name", JsonPrimitive(trimmedName)) }.toString()
+        sessionMutationMutex(sessionId).withLock {
+            var snapshot: SessionEntity? = null
+            database.withTransaction {
+                snapshot = dao.getSession(sessionId)
+                incrementPendingSessionMutation(sessionId)
+                snapshot?.let { existing ->
+                    dao.upsertSessions(listOf(existing.copy(title = trimmedName, updatedAt = System.currentTimeMillis())))
+                }
+            }
+            try {
+                execute(ApiRequest(
+                    method = "PATCH",
+                    path = "/api/sessions/${encode(sessionId)}",
+                    body = body,
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshot?.let { dao.upsertSessions(listOf(it)) }
+                        decrementPendingSessionMutation(sessionId)
+                    }
+                }
+                throw error
+            }
+            database.withTransaction { decrementPendingSessionMutation(sessionId) }
+            try { refreshSessions() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Throwable) {}
+        }
     }
 
     override suspend fun deleteSession(sessionId: String) {
-        execute(ApiRequest("DELETE", "/api/sessions/${encode(sessionId)}"))
-        firstTurnCandidates.remove(sessionId)
-        acceptedFirstTurnSnapshots.remove(sessionId)
-        acceptedFirstTurnSessionIds.update { it - sessionId }
-        dao.deleteRunDurations(sessionId)
-        refreshSessions()
+        require(sessionId.isNotBlank()) { "Session id must not be blank" }
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        sessionMutationMutex(sessionId).withLock {
+            var snapshot: SessionEntity? = null
+            database.withTransaction {
+                snapshot = dao.getSession(sessionId)
+                incrementPendingSessionMutation(sessionId)
+                dao.deleteSession(sessionId)
+            }
+            try {
+                execute(ApiRequest(
+                    method = "DELETE",
+                    path = "/api/sessions/${encode(sessionId)}",
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshot?.let { dao.upsertSessions(listOf(it)) }
+                        decrementPendingSessionMutation(sessionId)
+                    }
+                }
+                throw error
+            }
+            firstTurnCandidates.remove(sessionId)
+            acceptedFirstTurnSnapshots.remove(sessionId)
+            acceptedFirstTurnSessionIds.update { it - sessionId }
+            dao.deleteRunDurations(sessionId)
+            database.withTransaction { decrementPendingSessionMutation(sessionId) }
+            try { refreshSessions() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Throwable) {}
+        }
     }
 
     override suspend fun setSessionPinned(sessionId: String, pinned: Boolean) {
         require(sessionId.isNotBlank()) { "Session id must not be blank" }
-        execute(ApiRequest("PATCH", "/api/sessions/${encode(sessionId)}",
-            buildJsonObject { put("pinned", JsonPrimitive(pinned)) }.toString()))
-        refreshSessions()
+        val idempotencyKey = java.util.UUID.randomUUID().toString()
+        val body = buildJsonObject { put("pinned", JsonPrimitive(pinned)) }.toString()
+        sessionMutationMutex(sessionId).withLock {
+            var snapshot: SessionEntity? = null
+            database.withTransaction {
+                snapshot = dao.getSession(sessionId)
+                incrementPendingSessionMutation(sessionId)
+                snapshot?.let { existing ->
+                    dao.upsertSessions(listOf(existing.copy(pinned = pinned)))
+                }
+            }
+            try {
+                execute(ApiRequest(
+                    method = "PATCH",
+                    path = "/api/sessions/${encode(sessionId)}",
+                    body = body,
+                    idempotencyKey = idempotencyKey,
+                    timeoutMs = INTERACTIVE_CRUD_TIMEOUT_MS,
+                ))
+            } catch (error: Throwable) {
+                withContext(NonCancellable) {
+                    database.withTransaction {
+                        snapshot?.let { dao.upsertSessions(listOf(it)) }
+                        decrementPendingSessionMutation(sessionId)
+                    }
+                }
+                throw error
+            }
+            database.withTransaction { decrementPendingSessionMutation(sessionId) }
+            try { refreshSessions() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Throwable) {}
+        }
     }
 
     /**
@@ -1172,6 +1447,7 @@ class RoomSessionRepository(
             session.copy(status = retainedStatus).also { acceptedFirstTurnSnapshots[session.id] = it }
         }.toMutableList()
         for (sessionId in acceptedIds - canonicalById.keys) {
+            if (sessionId in pendingSessionMutationIds()) continue
             val retained = acceptedFirstTurnSnapshots[sessionId] ?: persistedSnapshots[sessionId] ?: continue
             // A stale list can omit a just-accepted session. A definitive 404
             // is different: another device may have deleted it intentionally.
@@ -1187,7 +1463,18 @@ class RoomSessionRepository(
             }
             if (!deleted) reconciled.add(retained) else completedFirstTurns += sessionId
         }
-        dao.replaceSessions(reconciled)
+        database.withTransaction {
+            val pendingIds = pendingSessionMutationIds()
+            val finalSessions = if (pendingIds.isEmpty()) {
+                reconciled
+            } else {
+                val localPreserved = pendingIds.mapNotNull { id -> dao.getSession(id) }.associateBy { it.id }
+                reconciled.mapNotNull { serverRow ->
+                    if (serverRow.id in pendingIds) localPreserved[serverRow.id] else serverRow
+                } + localPreserved.values.filter { local -> reconciled.none { it.id == local.id } }
+            }
+            dao.replaceSessions(finalSessions)
+        }
         if (completedFirstTurns.isNotEmpty()) {
             completedFirstTurns.forEach(acceptedFirstTurnSnapshots::remove)
             acceptedFirstTurnSessionIds.update { it - completedFirstTurns }

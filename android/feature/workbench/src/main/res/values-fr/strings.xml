@@ -386,4 +386,12 @@
     <string name="list_action_session_target_changed">La conversation ou l’ordinateur a changé ; rouvrez le menu et réessayez</string>
     <string name="windows_broker_enrollment_title">Autoriser les approbations mobiles</string>
     <string name="windows_broker_enrollment_subtitle">Approuver les opérations privilégiées de cet ordinateur avec ce téléphone.</string>
+    <string name="connection_carrier_direct">Direct</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">Connecté</string>
+    <string name="connection_status_connecting">Connexion</string>
+    <string name="connection_status_reconnecting">Reconnexion</string>
+    <string name="connection_status_offline">Hors ligne</string>
+    <string name="connection_status_auth_required">Auth. requise</string>
 </resources>

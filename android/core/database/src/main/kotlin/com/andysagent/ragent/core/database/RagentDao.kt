@@ -35,6 +35,9 @@ interface RagentDao {
     @Query("SELECT * FROM projects ORDER BY name")
     fun observeProjects(): Flow<List<ProjectEntity>>
 
+    @Query("SELECT * FROM projects WHERE id = :projectId LIMIT 1")
+    suspend fun getProject(projectId: String): ProjectEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertProjects(items: List<ProjectEntity>)
 
@@ -55,6 +58,18 @@ interface RagentDao {
 
     @Query("SELECT * FROM sessions WHERE id = :sessionId LIMIT 1")
     suspend fun getSession(sessionId: String): SessionEntity?
+
+    @Query("SELECT * FROM sessions WHERE projectId = :projectId")
+    suspend fun getSessionsByProject(projectId: String): List<SessionEntity>
+
+    @Query("DELETE FROM sessions WHERE id IN (:ids)")
+    suspend fun deleteSessionsByIds(ids: List<String>)
+
+    @Query("UPDATE sessions SET projectId = NULL WHERE projectId = :projectId")
+    suspend fun detachSessionsFromProject(projectId: String)
+
+    @Query("DELETE FROM sessions WHERE id = :sessionId")
+    suspend fun deleteSession(sessionId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSessions(items: List<SessionEntity>)

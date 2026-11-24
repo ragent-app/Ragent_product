@@ -1,5 +1,9 @@
 package com.andysagent.ragent.feature.workbench
 
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 
@@ -71,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.andysagent.ragent.core.agentui.AgentConnectionStatus
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
 import com.andysagent.ragent.core.designsystem.AgentoButton
 import com.andysagent.ragent.core.designsystem.Ragentolors
@@ -95,6 +100,7 @@ import com.andysagent.ragent.core.designsystem.agentoPressScale
 import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.model.Project
 import com.andysagent.ragent.core.model.Session
+import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.navigation.AgentoWindowSizeClass
 import com.andysagent.ragent.core.navigation.R as NavigationR
 import java.time.Instant
@@ -323,6 +329,7 @@ internal fun SessionsSurface(
 /**
  * L1: Projects Workspace Overview
  */
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun CompactProjectsSurface(
     state: WorkbenchUiState,
@@ -335,18 +342,26 @@ private fun CompactProjectsSurface(
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
     val listState = rememberDestinationListState("projects-index-scroll")
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = state.projectCatalogRefreshing,
+        onRefresh = { onEvent(WorkbenchEvent.RefreshCatalog) },
+    )
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(
                 brush = if (isDark) AgentoFrostedTokens.AtmosphericCanvasDark else AgentoFrostedTokens.AtmosphericCanvasLight,
-            ),
+            )
+            .pullRefresh(pullRefreshState),
     ) {
         Column(Modifier.fillMaxSize().imePadding()) {
             // Searching an empty chat collection has no value. Keeping the
             // upper edge clear gives a first conversation the same calm entry
             // point as a new chat instead of a management-screen toolbar.
-            if (state.projectCatalogLoading || groups.isNotEmpty() || state.remoteTargets.isNotEmpty() || state.sessionSearchQuery.isNotBlank()) {
+            if (state.projectCatalogLoading || groups.isNotEmpty() || state.remoteTargets.isNotEmpty() ||
+                state.sessionSearchQuery.isNotBlank() || state.activeRemoteTargetId != null ||
+                state.connection != AgentConnectionStatus.Disconnected
+            ) {
                 SessionsHeader(
                     state = state,
                     onEvent = onEvent,
@@ -354,19 +369,34 @@ private fun CompactProjectsSurface(
                     onSearchQueryChanged = { onEvent(WorkbenchEvent.SessionSearchChanged(it)) },
                 )
             }
+            if (state.connection != AgentConnectionStatus.Connected && state.activeRemoteTargetId != null) {
+                ConnectionStatusBanner(
+                    connection = state.connection,
+                    onReconnect = { onEvent(WorkbenchEvent.Retry) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
             if (state.projectCatalogLoading) {
                 ProjectsCatalogLoadingSkeleton(modifier = Modifier.weight(1f))
             } else if (groups.isEmpty()) {
-                if (state.sessionSearchQuery.isNotBlank()) {
-                    EmptyProjects(
-                        modifier = Modifier.weight(1f),
-                        isSearch = true,
-                    )
-                } else {
-                    EmptyChatList(
-                        modifier = Modifier.weight(1f),
-                        onCreateProject = { onEvent(WorkbenchEvent.OpenProjectDialog) },
-                    )
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    item(key = "l1-empty") {
+                        Box(modifier = Modifier.fillParentMaxSize()) {
+                            if (state.sessionSearchQuery.isNotBlank()) {
+                                EmptyProjects(
+                                    modifier = Modifier.fillMaxSize(),
+                                    isSearch = true,
+                                )
+                            } else {
+                                EmptyChatList(
+                                    modifier = Modifier.fillMaxSize(),
+                                    onCreateProject = { onEvent(WorkbenchEvent.OpenProjectDialog) },
+                                )
+                            }
+                        }
+                    }
                 }
             } else {
                 LazyColumn(
@@ -399,6 +429,19 @@ private fun CompactProjectsSurface(
                 }
             }
         }
+
+        PullRefreshIndicator(
+            refreshing = state.projectCatalogRefreshing,
+            state = pullRefreshState,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 12.dp)
+                .testTag("l1-pull-refresh-indicator"),
+            backgroundColor = colors.quietSurface,
+            contentColor = colors.accentPrimary,
+            scale = true,
+        )
     }
 }
 
@@ -460,6 +503,7 @@ private fun ProjectsCatalogLoadingSkeleton(modifier: Modifier = Modifier) {
 /**
  * L2: Project Sessions Details Page (高信息密度与沉浸工作流)
  */
+@OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun CompactProjectSessionsSurface(
     state: WorkbenchUiState,
@@ -472,6 +516,10 @@ private fun CompactProjectSessionsSurface(
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
     val listState = rememberDestinationListState("project-${group.project.id}-scroll")
+    val pullRefreshState = rememberPullRefreshState(
+        refreshing = state.projectCatalogRefreshing,
+        onRefresh = { onEvent(WorkbenchEvent.RefreshCatalog) },
+    )
 
     // One chronological list keeps the project view about conversations.
     // Running work is already visible through its animated status dot, so it
@@ -493,19 +541,30 @@ private fun CompactProjectSessionsSurface(
             .fillMaxSize()
             .background(
                 brush = if (isDark) AgentoFrostedTokens.AtmosphericCanvasDark else AgentoFrostedTokens.AtmosphericCanvasLight,
-            ),
+            )
+            .pullRefresh(pullRefreshState),
     ) {
         Column(Modifier.fillMaxSize().imePadding()) {
             // The toolbar keeps context after the large title leaves the reader.
             // Both renditions follow the actual list, never an independent tween.
             L2SessionsHeader(
+                state = state,
                 project = group.project,
                 titleProgress = if (group.sessions.isEmpty()) null else titleProgress,
                 searchQuery = state.sessionSearchQuery,
                 onSearchQueryChanged = { onEvent(WorkbenchEvent.SessionSearchChanged(it)) },
                 onBack = { onEvent(WorkbenchEvent.CloseProjectSessions) },
                 onOpenAgents = { onEvent(WorkbenchEvent.OpenAgents) },
+                onReconnect = { onEvent(WorkbenchEvent.Retry) },
             )
+
+            if (state.connection != AgentConnectionStatus.Connected && state.activeRemoteTargetId != null) {
+                ConnectionStatusBanner(
+                    connection = state.connection,
+                    onReconnect = { onEvent(WorkbenchEvent.Retry) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                )
+            }
 
             if (showCreateSession) {
                 AgentoButton(
@@ -521,11 +580,19 @@ private fun CompactProjectSessionsSurface(
             // a stack of Material-style containers.
             if (group.sessions.isEmpty()) {
                 ProjectReadingTitle(group.project, Modifier.padding(horizontal = 28.dp, vertical = 12.dp))
-                EmptyProjects(
-                    modifier = Modifier.weight(1f),
-                    isSearch = state.sessionSearchQuery.isNotBlank(),
-                    isProjectSessionList = true,
-                )
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                ) {
+                    item(key = "l2-empty") {
+                        Box(modifier = Modifier.fillParentMaxSize()) {
+                            EmptyProjects(
+                                modifier = Modifier.fillMaxSize(),
+                                isSearch = state.sessionSearchQuery.isNotBlank(),
+                                isProjectSessionList = true,
+                            )
+                        }
+                    }
+                }
             } else {
                 LazyColumn(
                     state = listState,
@@ -557,6 +624,19 @@ private fun CompactProjectSessionsSurface(
                 }
             }
         }
+
+        PullRefreshIndicator(
+            refreshing = state.projectCatalogRefreshing,
+            state = pullRefreshState,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 12.dp)
+                .testTag("l2-pull-refresh-indicator"),
+            backgroundColor = colors.quietSurface,
+            contentColor = colors.accentPrimary,
+            scale = true,
+        )
     }
 }
 
@@ -633,12 +713,14 @@ private fun L2SessionMetricRow(
 /** Project context remains visible; search is revealed only when requested. */
 @Composable
 private fun L2SessionsHeader(
+    state: WorkbenchUiState,
     project: Project,
     titleProgress: State<Float>?,
     searchQuery: String,
     onSearchQueryChanged: (String) -> Unit,
     onBack: () -> Unit,
     onOpenAgents: () -> Unit,
+    onReconnect: () -> Unit,
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
@@ -653,15 +735,29 @@ private fun L2SessionsHeader(
             .statusBarsPadding()
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            AgentoToolbarIconButton(
+                onClick = onBack,
+                contentDescription = stringResource(R.string.projects_back_to_projects),
+                hasGlassBackdrop = false,
+            ) {
+                AgentoWebIcon(
+                    glyph = AgentoWebGlyph.Back,
+                    contentDescription = null,
+                    tint = colors.accentPrimary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+
             Text(
                 text = project.name,
-                modifier = Modifier.fillMaxWidth().align(Alignment.CenterStart)
-                    .padding(start = 48.dp, end = 112.dp)
+                modifier = Modifier.weight(1f)
+                    .padding(start = 4.dp, end = 8.dp)
                     .testTag("project-detail-compact-title")
                     .then(if (compactTitleVisible) Modifier else Modifier.clearAndSetSemantics { })
                     .graphicsLayer {
@@ -672,25 +768,22 @@ private fun L2SessionsHeader(
                 overflow = TextOverflow.Ellipsis,
                 color = colors.primaryContent,
             )
-            AgentoToolbarIconButton(
-                onClick = onBack,
-                contentDescription = stringResource(R.string.projects_back_to_projects),
-                hasGlassBackdrop = false,
-                modifier = Modifier.align(Alignment.CenterStart),
-            ) {
-                AgentoWebIcon(
-                    glyph = AgentoWebGlyph.Back,
-                    contentDescription = null,
-                    tint = colors.accentPrimary,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
 
             Row(
-                modifier = Modifier.align(Alignment.CenterEnd),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                if (state.activeRemoteTargetId != null ||
+                    state.activeCarrier != ActiveCarrier.None ||
+                    state.connection != AgentConnectionStatus.Disconnected
+                ) {
+                    ConnectionStatusPill(
+                        connection = state.connection,
+                        activeCarrier = state.activeCarrier,
+                        onClick = onReconnect,
+                    )
+                }
+
                 AgentoToolbarIconButton(
                     onClick = { searchOpen = !searchOpen },
                     contentDescription = stringResource(R.string.projects_search_sessions),
@@ -756,6 +849,16 @@ private fun SessionsHeader(
                 color = if (isDark) AgentoFrostedTokens.TextPrimary else colors.primaryContent,
             )
             Spacer(Modifier.weight(1f))
+            if (state.activeRemoteTargetId != null ||
+                state.activeCarrier != ActiveCarrier.None ||
+                state.connection != AgentConnectionStatus.Disconnected
+            ) {
+                ConnectionStatusPill(
+                    connection = state.connection,
+                    activeCarrier = state.activeCarrier,
+                    onClick = { onEvent(WorkbenchEvent.Retry) },
+                )
+            }
             AgentoToolbarIconButton(
                 onClick = { searchOpen = !searchOpen },
                 contentDescription = stringResource(R.string.projects_search_sessions),

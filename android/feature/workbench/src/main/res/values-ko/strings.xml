@@ -385,4 +385,12 @@
     <string name="list_action_session_target_changed">세션 또는 컴퓨터가 변경되었습니다. 메뉴를 다시 연 다음 시도해 주세요</string>
     <string name="windows_broker_enrollment_title">휴대전화 승인 등록</string>
     <string name="windows_broker_enrollment_subtitle">이 휴대전화로 컴퓨터의 권한 작업을 승인합니다.</string>
+    <string name="connection_carrier_direct">직접 연결</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">연결됨</string>
+    <string name="connection_status_connecting">연결 중</string>
+    <string name="connection_status_reconnecting">재연결 중</string>
+    <string name="connection_status_offline">오프라인</string>
+    <string name="connection_status_auth_required">인증 필요</string>
 </resources>

@@ -78,6 +78,7 @@ import com.andysagent.ragent.core.designsystem.theme.AgentoFrostedTokens
 import com.andysagent.ragent.core.model.OtherDeviceProject
 import com.andysagent.ragent.core.model.Project
 import com.andysagent.ragent.core.model.RemoteTarget
+import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.protocol.TargetSummary
 import com.andysagent.ragent.core.model.Session
 import com.andysagent.ragent.core.model.SessionStatus
@@ -286,29 +287,40 @@ fun HomeSurface(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 item(key = "home-large-title") {
-                    Box(
+                    Row(
                         modifier = contentModifier
                             .padding(horizontal = 12.dp, vertical = 2.dp),
-                        contentAlignment = Alignment.CenterStart,
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
                             text = stringResource(NavigationR.string.navigation_home),
+                            modifier = Modifier.weight(1f),
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 fontSize = 30.sp,
                                 fontWeight = FontWeight.SemiBold,
                             ),
                             color = palette.primary,
                         )
+                        if (state.activeRemoteTargetId != null ||
+                            state.activeCarrier != ActiveCarrier.None ||
+                            state.connection != AgentConnectionStatus.Disconnected
+                        ) {
+                            ConnectionStatusPill(
+                                connection = state.connection,
+                                activeCarrier = state.activeCarrier,
+                                onClick = { onEvent(WorkbenchEvent.Retry) },
+                            )
+                        }
                     }
                 }
 
                 // Offline observations must not imply that remote work stopped.
                 if (hasRecoverableConnectionProblem) {
                     item(key = "connection-notice") {
-                        HomeConnectionNotice(
+                        ConnectionStatusBanner(
                             connection = state.connection,
-                            onRetry = { onEvent(WorkbenchEvent.Retry) },
-                            palette = palette,
+                            onReconnect = { onEvent(WorkbenchEvent.Retry) },
                             modifier = contentModifier,
                         )
                     }
@@ -421,7 +433,7 @@ fun HomeSurface(
                 .align(Alignment.TopCenter)
                 .fillMaxWidth(),
         ) {
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(canvasBrush)
@@ -432,16 +444,28 @@ fun HomeSurface(
                         top = 8.dp,
                         bottom = 10.dp,
                     ),
-                contentAlignment = Alignment.CenterStart,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
                     text = stringResource(NavigationR.string.navigation_home),
+                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 17.sp,
                     ),
                     color = palette.primary,
                 )
+                if (state.activeRemoteTargetId != null ||
+                    state.activeCarrier != ActiveCarrier.None ||
+                    state.connection != AgentConnectionStatus.Disconnected
+                ) {
+                    ConnectionStatusPill(
+                        connection = state.connection,
+                        activeCarrier = state.activeCarrier,
+                        onClick = { onEvent(WorkbenchEvent.Retry) },
+                    )
+                }
             }
         }
     }
@@ -533,59 +557,6 @@ private fun HomeCatalogLoadingSkeleton(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun HomeConnectionNotice(
-    connection: AgentConnectionStatus,
-    onRetry: () -> Unit,
-    palette: HomePalette,
-    modifier: Modifier = Modifier,
-) {
-    val message = when (connection) {
-        AgentConnectionStatus.Connecting,
-        AgentConnectionStatus.Reconnecting,
-        AgentConnectionStatus.Disconnected,
-        -> stringResource(R.string.journey_connection_uncertain)
-        AgentConnectionStatus.Connected -> return
-        AgentConnectionStatus.AuthenticationRequired -> stringResource(R.string.home_connection_authentication_required)
-        AgentConnectionStatus.Error -> stringResource(R.string.home_connection_failed)
-    }
-    val accent = if (connection == AgentConnectionStatus.AuthenticationRequired || connection == AgentConnectionStatus.Error) {
-        Color(0xFFFF3B30)
-    } else {
-        palette.secondary
-    }
-
-    HomeSectionGroup(modifier = modifier, palette = palette) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = RagentSizes.CardRowHeight)
-                .padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            AgentoWebIcon(
-                glyph = AgentoWebGlyph.Info,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = accent,
-            )
-            Text(
-                text = message,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyMedium,
-                color = palette.primary,
-            )
-            HomeIconAction(
-                glyph = AgentoWebGlyph.Refresh,
-                contentDescription = stringResource(R.string.workbench_reconnect),
-                tint = palette.action,
-                onClick = onRetry,
-            )
         }
     }
 }

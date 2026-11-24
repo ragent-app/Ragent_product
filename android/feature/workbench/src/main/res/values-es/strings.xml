@@ -386,4 +386,12 @@
     <string name="list_action_session_target_changed">La conversación o el equipo cambió; vuelve a abrir el menú e inténtalo de nuevo</string>
     <string name="windows_broker_enrollment_title">Autorizar aprobaciones del teléfono</string>
     <string name="windows_broker_enrollment_subtitle">Aprueba operaciones privilegiadas del ordenador con este teléfono.</string>
+    <string name="connection_carrier_direct">Directo</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">Conectado</string>
+    <string name="connection_status_connecting">Conectando</string>
+    <string name="connection_status_reconnecting">Reconectando</string>
+    <string name="connection_status_offline">Sin conexión</string>
+    <string name="connection_status_auth_required">Requiere auth.</string>
 </resources>

@@ -1211,6 +1211,7 @@ class MainActivity : ComponentActivity() {
                         ?.let { AvatarImageCache.prefetch(applicationContext, it) }
                 }
                 val runtimeConnectionState by app.runtime.transport.connectionState.collectAsStateWithLifecycle()
+                val activeCarrier by app.runtime.transport.activeCarrier.collectAsStateWithLifecycle()
                 val temporaryControlActive by app.runtime.temporaryControlActive.collectAsStateWithLifecycle()
                 val temporaryControlTargetId = if (temporaryControlActive) app.runtime.temporaryControlInstanceId() else null
                 val otherDeviceProjects by app.runtime.otherDeviceProjects.collectAsStateWithLifecycle()
@@ -1538,6 +1539,7 @@ class MainActivity : ComponentActivity() {
                     agentOpen = shellState.agentOpen,
                     sessionSearchQuery = shellState.sessionSearchQuery,
                     connection = shellState.connection,
+                    activeCarrier = activeCarrier,
                     chatConnection = chatState.connection,
                     chatTargetId = detailTargetId,
                     runStatus = chatState.runStatus,
@@ -2207,11 +2209,17 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.LoadOlderTimeline -> chat.onEvent(ChatEvent.LoadOlderTimeline)
                             is WorkbenchEvent.MarkSessionRead -> projects.onEvent(ProjectsEvent.MarkSessionRead(event.sessionId))
                             WorkbenchEvent.RefreshHome -> {
+                                runtimeScope.launch { runCatching { app.runtime.verifyActiveCarrier() } }
                                 projects.onEvent(ProjectsEvent.Refresh)
                                 computers.onEvent(ComputersEvent.Retry)
                                 runtimeScope.launch {
                                     runCatching { app.runtime.refreshOtherDeviceProjects() }
                                 }
+                            }
+                            WorkbenchEvent.RefreshCatalog -> {
+                                runtimeScope.launch { runCatching { app.runtime.verifyActiveCarrier() } }
+                                projects.onEvent(ProjectsEvent.Refresh)
+                                computers.onEvent(ComputersEvent.Retry)
                             }
                             WorkbenchEvent.Retry -> {
                                 app.runtime.retryActiveConnection()

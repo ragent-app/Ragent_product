@@ -384,4 +384,12 @@
     <string name="list_action_session_target_changed">セッションまたはコンピュータが変更されました。メニューを開き直してからもう一度お試しください</string>
     <string name="windows_broker_enrollment_title">スマートフォンの承認登録</string>
     <string name="windows_broker_enrollment_subtitle">このスマートフォンでパソコンの特権操作を承認。</string>
+    <string name="connection_carrier_direct">直接接続</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">接続済み</string>
+    <string name="connection_status_connecting">接続中</string>
+    <string name="connection_status_reconnecting">再接続中</string>
+    <string name="connection_status_offline">オフライン</string>
+    <string name="connection_status_auth_required">要再認証</string>
 </resources>

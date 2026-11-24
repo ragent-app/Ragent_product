@@ -600,4 +600,12 @@
     <string name="elicitation_json_object_hint">Enter JSON object</string>
     <string name="elicitation_array_hint">Comma-separated values</string>
     <string name="elicitation_copy_url">Copy link</string>
+    <string name="connection_carrier_direct">Direct</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">Connected</string>
+    <string name="connection_status_connecting">Connecting</string>
+    <string name="connection_status_reconnecting">Reconnecting</string>
+    <string name="connection_status_offline">Offline</string>
+    <string name="connection_status_auth_required">Auth Required</string>
 </resources>

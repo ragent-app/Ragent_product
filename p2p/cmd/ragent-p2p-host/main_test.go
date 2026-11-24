@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -232,12 +234,16 @@ func TestProxyRequestRejectsBodyAboveTwentyFiveMiBLimit(t *testing.T) {
 
 func TestServerReadyIncludesKeepaliveFeature(t *testing.T) {
 	features := serverReadyFeatures()
-	for _, feature := range features {
-		if feature == "dc_keepalive_v1" {
-			return
-		}
+	if !slices.Contains(features, "dc_keepalive_v1") {
+		t.Fatalf("serverReadyFeatures() missing dc_keepalive_v1: %#v", features)
 	}
-	t.Fatalf("serverReadyFeatures() missing dc_keepalive_v1: %#v", features)
+}
+
+func TestServerReadyIncludesHttpBgChannelFeature(t *testing.T) {
+	features := serverReadyFeatures()
+	if !slices.Contains(features, "http_bg_channel_v1") {
+		t.Fatalf("serverReadyFeatures() missing http_bg_channel_v1: %#v", features)
+	}
 }
 
 func TestHandleKeepalivePing(t *testing.T) {
@@ -381,5 +387,262 @@ func TestKeepalivePingPongOverDataChannel(t *testing.T) {
 	}
 	if httpCalls != 0 {
 		t.Fatalf("keepalive ping must not hit local HTTP server, got %d calls", httpCalls)
+	}
+}
+
+func TestThreeDataChannelsConcurrentAndChannelLimit(t *testing.T) {
+	bgWaitStarted := make(chan struct{})
+	releaseBgWait := make(chan struct{})
+	var closeBgWait sync.Once
+	defer closeBgWait.Do(func() { close(releaseBgWait) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/events/wait":
+			close(bgWaitStarted)
+			<-releaseBgWait
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"events":[{"seq":1}]}`))
+		case "/api/runtime/summary":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"summary":"ok"}`))
+		case "/api/sessions/history":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"history":"` + strings.Repeat("h", 60000) + `"}`))
+		case "/api/projects/prj_1":
+			if r.Method != http.MethodDelete {
+				w.WriteHeader(http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"deleted":true,"id":"prj_1"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	var settings webrtc.SettingEngine
+	settings.SetIncludeLoopbackCandidate(true)
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+	client, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	host, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	var activeChannels atomic.Int32
+	host.OnDataChannel(func(channel *webrtc.DataChannel) {
+		attachDataChannel(channel, server.URL, nil, &activeChannels, func() bool { return true }, nil)
+	})
+
+	type channelInbox struct {
+		dc    *webrtc.DataChannel
+		ready chan []string
+		msgs  chan []byte
+		open  chan struct{}
+	}
+	openInbox := func(label string) *channelInbox {
+		t.Helper()
+		dc, err := client.CreateDataChannel(label, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbox := &channelInbox{
+			dc:    dc,
+			ready: make(chan []string, 1),
+			msgs:  make(chan []byte, 64),
+			open:  make(chan struct{}),
+		}
+		var openOnce sync.Once
+		dc.OnOpen(func() { openOnce.Do(func() { close(inbox.open) }) })
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			var envelope struct {
+				Type     string   `json:"type"`
+				Features []string `json:"features"`
+			}
+			if json.Unmarshal(msg.Data, &envelope) == nil && envelope.Type == "server_ready" {
+				inbox.ready <- envelope.Features
+				return
+			}
+			inbox.msgs <- append([]byte(nil), msg.Data...)
+		})
+		return inbox
+	}
+
+	interactive := openInbox("ragent-http")
+	bulk := openInbox("ragent-http-bulk")
+	bg := openInbox("ragent-http-bg")
+	extra1 := openInbox("extra-4")
+	extra2 := openInbox("extra-5")
+	extra3 := openInbox("extra-6")
+
+	offer, err := client.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatherClient := webrtc.GatheringCompletePromise(client)
+	if err = client.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gatherClient:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client ICE gathering timed out")
+	}
+	if err = host.SetRemoteDescription(*client.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := host.CreateAnswer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatherHost := webrtc.GatheringCompletePromise(host)
+	if err = host.SetLocalDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gatherHost:
+	case <-time.After(10 * time.Second):
+		t.Fatal("host ICE gathering timed out")
+	}
+	if err = client.SetRemoteDescription(*host.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, inbox := range map[string]*channelInbox{
+		"ragent-http":      interactive,
+		"ragent-http-bulk": bulk,
+		"ragent-http-bg":   bg,
+		"extra-4":          extra1,
+		"extra-5":          extra2,
+		"extra-6":          extra3,
+	} {
+		select {
+		case <-inbox.open:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not open", name)
+		}
+		select {
+		case features := <-inbox.ready:
+			if !slices.Contains(features, "http_bg_channel_v1") {
+				t.Fatalf("%s server_ready missing http_bg_channel_v1: %#v", name, features)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not receive server_ready", name)
+		}
+	}
+	if got := activeChannels.Load(); got != maxActiveDataChannels {
+		t.Fatalf("activeChannels = %d, want %d", got, maxActiveDataChannels)
+	}
+
+	// Opening a 7th DataChannel must exceed maxActiveDataChannels (6) and be closed cleanly.
+	rejectedDC, err := client.CreateDataChannel("extra-7-rejected", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedClosed := make(chan struct{})
+	var rejectedCloseOnce sync.Once
+	rejectedDC.OnClose(func() { rejectedCloseOnce.Do(func() { close(rejectedClosed) }) })
+	select {
+	case <-rejectedClosed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("7th DataChannel was not closed by activeChannels limit")
+	}
+	if got := activeChannels.Load(); got != maxActiveDataChannels {
+		t.Fatalf("activeChannels after 7th channel rejection = %d, want %d", got, maxActiveDataChannels)
+	}
+
+	// Start a blocking long-poll on ragent-http-bg first.
+	if err := bg.dc.SendText(`{"id":"bg-wait","type":"http_request","method":"GET","path":"/events/wait?liveOnly=1"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-bgWaitStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("background long-poll request never reached HTTP server")
+	}
+
+	// While ragent-http-bg has a blocked request, concurrent interactive, bulk, and a second bg request must finish.
+	if err := interactive.dc.SendText(`{"id":"int-del","type":"http_request","method":"DELETE","path":"/api/projects/prj_1"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bulk.dc.SendText(`{"id":"bulk-hist","type":"http_request","method":"GET","path":"/api/sessions/history","acceptResponseStream":true}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bg.dc.SendText(`{"id":"bg-summary","type":"http_request","method":"GET","path":"/api/runtime/summary"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	readHTTPResponse := func(ch <-chan []byte) httpResponse {
+		t.Helper()
+		var streamBuf []byte
+		nextIdx := 0
+		deadline := time.After(15 * time.Second)
+		for {
+			select {
+			case raw := <-ch:
+				var envelope struct {
+					Type string `json:"type"`
+				}
+				if err := json.Unmarshal(raw, &envelope); err != nil {
+					t.Fatal(err)
+				}
+				if envelope.Type == "http_response" {
+					var resp httpResponse
+					if err := json.Unmarshal(raw, &resp); err != nil {
+						t.Fatal(err)
+					}
+					return resp
+				}
+				var frame httpResponseStreamFrame
+				if err := json.Unmarshal(raw, &frame); err != nil {
+					t.Fatal(err)
+				}
+				if frame.Index != nextIdx {
+					t.Fatalf("out-of-order response stream frame: got %d want %d", frame.Index, nextIdx)
+				}
+				chunk, err := base64.StdEncoding.DecodeString(frame.DataBase64)
+				if err != nil {
+					t.Fatal(err)
+				}
+				streamBuf = append(streamBuf, chunk...)
+				nextIdx++
+				if len(streamBuf) == frame.TotalBytes {
+					var resp httpResponse
+					if err := json.Unmarshal(streamBuf, &resp); err != nil {
+						t.Fatal(err)
+					}
+					return resp
+				}
+			case <-deadline:
+				t.Fatal("timed out waiting for HTTP response over DataChannel")
+			}
+		}
+	}
+
+	intResp := readHTTPResponse(interactive.msgs)
+	if intResp.ID != "int-del" || intResp.Status != http.StatusOK {
+		t.Fatalf("unexpected interactive response: %#v", intResp)
+	}
+	bulkResp := readHTTPResponse(bulk.msgs)
+	if bulkResp.ID != "bulk-hist" || bulkResp.Status != http.StatusOK {
+		t.Fatalf("unexpected bulk response: %#v", bulkResp)
+	}
+	bgSummaryResp := readHTTPResponse(bg.msgs)
+	if bgSummaryResp.ID != "bg-summary" || bgSummaryResp.Status != http.StatusOK {
+		t.Fatalf("unexpected bg summary response: %#v", bgSummaryResp)
+	}
+
+	// Now unblock /events/wait and verify it finishes on ragent-http-bg.
+	closeBgWait.Do(func() { close(releaseBgWait) })
+	bgWaitResp := readHTTPResponse(bg.msgs)
+	if bgWaitResp.ID != "bg-wait" || bgWaitResp.Status != http.StatusOK {
+		t.Fatalf("unexpected bg long-poll response: %#v", bgWaitResp)
 	}
 }

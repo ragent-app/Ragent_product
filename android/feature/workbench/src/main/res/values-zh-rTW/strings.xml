@@ -518,4 +518,12 @@
     <string name="approval_safer_target">繼續前確認目標的完整解析結果。</string>
     <string name="approval_safer_backup">繼續前確認目標和可用備份。</string>
     <string name="approval_safer_download">執行前先檢查下載內容及其來源。</string>
+    <string name="connection_carrier_direct">直連</string>
+    <string name="connection_carrier_p2p">P2P</string>
+    <string name="connection_carrier_turn">TURN</string>
+    <string name="connection_status_connected">已連線</string>
+    <string name="connection_status_connecting">正在連線</string>
+    <string name="connection_status_reconnecting">正在重連</string>
+    <string name="connection_status_offline">離線</string>
+    <string name="connection_status_auth_required">需重新驗證</string>
 </resources>

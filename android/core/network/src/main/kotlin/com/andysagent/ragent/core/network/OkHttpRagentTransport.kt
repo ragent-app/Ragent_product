@@ -102,6 +102,7 @@ class OkHttpRagentTransport(
     private val invalidationEvents = MutableSharedFlow<InvalidationHint>(extraBufferCapacity = 64)
     private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableConnectionState = MutableStateFlow(RuntimeConnectionState.Disconnected)
+    private val mutableActiveCarrier = MutableStateFlow(ActiveCarrier.None)
     private var reconnectJob: Job? = null
     private var reconnectAttempt = 0
     @Volatile private var closeRequested = true
@@ -112,8 +113,26 @@ class OkHttpRagentTransport(
 
     override val invalidations: Flow<InvalidationHint> = invalidationEvents.asSharedFlow()
     override val connectionState: StateFlow<RuntimeConnectionState> = mutableConnectionState.asStateFlow()
+    override val activeCarrier: StateFlow<ActiveCarrier> = mutableActiveCarrier.asStateFlow()
     override val requiresEventPolling: Boolean
         get() = requireVerifiedCarrier || hasOpenCarrier() || endpointProvider().trimEnd('/').isBlank()
+
+    private fun refreshActiveCarrier() {
+        val state = mutableConnectionState.value
+        if (state == RuntimeConnectionState.AuthenticationRequired) {
+            mutableActiveCarrier.value = ActiveCarrier.None
+            return
+        }
+        val p2pOpen = p2pSession.get()?.isOpen == true
+        val turnOpen = turnSession.get()?.isOpen == true
+        mutableActiveCarrier.value = when {
+            p2pOpen -> ActiveCarrier.P2P
+            turnOpen -> ActiveCarrier.Turn
+            state == RuntimeConnectionState.Connected && !requireVerifiedCarrier && endpointProvider().trimEnd('/').isNotBlank() ->
+                ActiveCarrier.Direct
+            else -> ActiveCarrier.None
+        }
+    }
 
     fun updateCarrierConnectionState(state: RuntimeConnectionState) {
         if (hasOpenCarrier()) closeInvalidationSocketForCarrier()
@@ -121,35 +140,42 @@ class OkHttpRagentTransport(
         mutableConnectionState.value = if (requireVerifiedCarrier && state == RuntimeConnectionState.Connected && !hasOpenCarrier()) {
             RuntimeConnectionState.Connecting
         } else state
+        refreshActiveCarrier()
     }
 
     fun setP2PSession(session: P2PSession) {
         p2pSession.getAndSet(session)?.takeIf { it !== session }?.close()
         recoveryRequested.set(false)
+        refreshActiveCarrier()
     }
 
     fun clearP2PSession(session: P2PSession? = null) {
         if (session == null) p2pSession.set(null) else p2pSession.compareAndSet(session, null)
+        refreshActiveCarrier()
     }
 
     fun setTurnSession(session: P2PSession) {
         turnSession.replace(session, drain = false)
         recoveryRequested.set(false)
+        refreshActiveCarrier()
     }
 
     fun handoffTurnSession(session: P2PSession) {
         turnSession.replace(session, drain = true)
         recoveryRequested.set(false)
+        refreshActiveCarrier()
     }
 
     fun clearTurnSession(session: P2PSession? = null) {
         turnSession.clear(session)
+        refreshActiveCarrier()
     }
 
     private fun hasOpenCarrier(): Boolean = p2pSession.get()?.isOpen == true || turnSession.get()?.isOpen == true
 
     override fun markAuthenticationRequired() {
         mutableConnectionState.value = RuntimeConnectionState.AuthenticationRequired
+        refreshActiveCarrier()
     }
 
     override suspend fun execute(request: ApiRequest): ApiResponse = withContext(Dispatchers.IO) {
@@ -205,7 +231,7 @@ class OkHttpRagentTransport(
             else -> builder.method(request.method.uppercase(), body)
         }
         try {
-            val apiResponse = executeHttpCancellable(builder.build())
+            val apiResponse = executeHttpCancellable(builder.build(), request.timeoutMs)
             if (!apiResponse.isSuccessful) throw apiResponse.toApiException(codec)
             apiResponse
         } catch (error: ApiException) {
@@ -221,18 +247,24 @@ class OkHttpRagentTransport(
     }
 
     /** Keep cancellation attached until the whole response body has been read. */
-    private suspend fun executeHttpCancellable(request: Request): ApiResponse = suspendCancellableCoroutine { continuation ->
+    private suspend fun executeHttpCancellable(request: Request, timeoutMs: Long? = null): ApiResponse = suspendCancellableCoroutine { continuation ->
         val isUploadChunk = request.method == "PATCH"
             && request.url.encodedPath.matches(Regex("/api/assets/[^/]+/upload"))
         val isAccountAsr = request.url.encodedPath.endsWith("/v1/owner-auth/account/asr/transcriptions")
+        val customTimeoutMs = timeoutMs?.takeIf { it > 0L }
         val requestClient = when {
             isUploadChunk -> client.newBuilder()
                 .readTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .writeTimeout(UPLOAD_CHUNK_HTTP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .apply { if (customTimeoutMs != null) callTimeout(customTimeoutMs, TimeUnit.MILLISECONDS) }
                 .build()
             isAccountAsr -> client.newBuilder()
                 .readTimeout(ACCOUNT_ASR_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 .callTimeout(ACCOUNT_ASR_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .apply { if (customTimeoutMs != null) callTimeout(customTimeoutMs, TimeUnit.MILLISECONDS) }
+                .build()
+            customTimeoutMs != null -> client.newBuilder()
+                .callTimeout(customTimeoutMs, TimeUnit.MILLISECONDS)
                 .build()
             else -> client
         }
@@ -349,13 +381,16 @@ class OkHttpRagentTransport(
         val hash = request.headers.entries.firstOrNull { it.key.equals("X-Ragent-Upload-Sha256", true) }?.value
         val assetChunk = request.method.equals("PATCH", true) &&
             wire.path.substringBefore('?').matches(Regex("^/api/assets/fasset_[a-f0-9]{24}/upload$"))
+        val timeoutMs = request.timeoutMs?.takeIf { it > 0L }
         if (!assetChunk || bytes == null || hash == null || !hash.matches(Regex("^[a-f0-9]{64}$"))) {
-            return session.request(wire)
+            return if (timeoutMs != null) session.request(wire, timeoutMs) else session.request(wire)
         }
         val result = session.requestStream(wire.copy(bodyBase64 = ""), bytes.size.toLong(), hash,
             openBody = { bytes.inputStream() })
-        return if (result.exceptionOrNull() is UnsupportedOperationException)
-            session.request(wire.copy(bodyBase64 = P2PProtocol.encodeBody(bytes))) else result
+        return if (result.exceptionOrNull() is UnsupportedOperationException) {
+            val fallbackWire = wire.copy(bodyBase64 = P2PProtocol.encodeBody(bytes))
+            if (timeoutMs != null) session.request(fallbackWire, timeoutMs) else session.request(fallbackWire)
+        } else result
     }
 
     private fun carrierBody(request: ApiRequest, path: String): String {
@@ -379,6 +414,7 @@ class OkHttpRagentTransport(
         if (failed != null && turnSession.get() !== failed && p2pSession.get() !== failed) return
         if (recoveryRequested.compareAndSet(false, true)) {
             mutableConnectionState.value = RuntimeConnectionState.Reconnecting
+            refreshActiveCarrier()
             onCarrierUnavailable?.invoke(failed)
         }
         // This is a recovery signal only. The failed business request is never replayed here.
@@ -388,6 +424,7 @@ class OkHttpRagentTransport(
         if (hasOpenCarrier()) {
             closeInvalidationSocketForCarrier()
             mutableConnectionState.value = RuntimeConnectionState.Connected
+            refreshActiveCarrier()
             return
         }
         if (requireVerifiedCarrier) return
@@ -395,6 +432,7 @@ class OkHttpRagentTransport(
         val endpoint = endpointProvider().trimEnd('/')
         if (endpoint.isBlank()) {
             mutableConnectionState.value = RuntimeConnectionState.Error
+            refreshActiveCarrier()
             return
         }
         closeRequested = false
@@ -411,6 +449,7 @@ class OkHttpRagentTransport(
             endpoint.startsWith("http://") -> "ws://${endpoint.removePrefix("http://")}/ws"
             else -> {
                 mutableConnectionState.value = RuntimeConnectionState.Error
+                refreshActiveCarrier()
                 return
             }
         }
@@ -419,6 +458,7 @@ class OkHttpRagentTransport(
         } else {
             RuntimeConnectionState.Reconnecting
         }
+        refreshActiveCarrier()
         val attemptedCredential = credentialProvider()?.takeIf { it.isNotBlank() }
         val request = Request.Builder().url(wsUrl).apply {
             attemptedCredential?.let { header("Authorization", "Bearer $it") }
@@ -428,6 +468,7 @@ class OkHttpRagentTransport(
                 if (webSocket !== this@OkHttpRagentTransport.webSocket) return
                 reconnectAttempt = 0
                 mutableConnectionState.value = RuntimeConnectionState.Connected
+                refreshActiveCarrier()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -453,8 +494,10 @@ class OkHttpRagentTransport(
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 if (webSocket !== this@OkHttpRagentTransport.webSocket) return
                 invalidationEvents.tryEmit(InvalidationHint("connection_closed"))
-                if (closeRequested) mutableConnectionState.value = RuntimeConnectionState.Disconnected
-                else scheduleReconnect(endpoint)
+                if (closeRequested) {
+                    mutableConnectionState.value = RuntimeConnectionState.Disconnected
+                    refreshActiveCarrier()
+                } else scheduleReconnect(endpoint)
             }
         })
         webSocket = socket
@@ -485,6 +528,7 @@ class OkHttpRagentTransport(
             if (stillCurrent()) {
                 applied = true
                 mutableConnectionState.value = RuntimeConnectionState.AuthenticationRequired
+                refreshActiveCarrier()
                 onAuthenticationRequired?.invoke()
                 onInvalidated()
             }
@@ -510,6 +554,7 @@ class OkHttpRagentTransport(
         if (closeRequested || reconnectJob?.isActive == true) return
         onDirectSocketUnavailable?.invoke()
         mutableConnectionState.value = RuntimeConnectionState.Reconnecting
+        refreshActiveCarrier()
         val delayMs = minOf(30_000L, 1_000L shl reconnectAttempt.coerceAtMost(5))
         reconnectAttempt += 1
         reconnectJob = socketScope.launch {
@@ -530,6 +575,7 @@ class OkHttpRagentTransport(
         turnSession.closeAll()
         p2pSession.getAndSet(null)?.close()
         mutableConnectionState.value = RuntimeConnectionState.Disconnected
+        refreshActiveCarrier()
     }
 
     private fun parseInvalidation(body: String) {

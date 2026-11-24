@@ -758,6 +758,9 @@ fun WorkbenchScreen(
                     chatState = state.copy(
                         connection = state.chatConnection ?: state.connection,
                         activeRemoteTargetId = state.chatTargetId ?: state.activeRemoteTargetId,
+                        activeCarrier = state.activeCarrier.takeIf {
+                            state.chatTargetId == null || state.chatTargetId == state.activeRemoteTargetId
+                        } ?: com.andysagent.ragent.core.network.ActiveCarrier.None,
                         selectedProjectId = state.selectedProjectId.takeIf { state.chatTargetId == state.activeRemoteTargetId },
                         projects = state.projects.takeIf { state.chatTargetId == state.activeRemoteTargetId }.orEmpty(),
                         sessions = state.sessions.takeIf { state.chatTargetId == state.activeRemoteTargetId }.orEmpty(),
@@ -2327,10 +2330,29 @@ private fun ChatSurface(
             ?: state.computers.firstOrNull()?.name
     }
     var collaborationSettingsOpen by remember(organizationUiScope) { mutableStateOf(false) }
+    val showChatConnectionPill = state.activeRemoteTargetId != null ||
+        state.activeCarrier != com.andysagent.ragent.core.network.ActiveCarrier.None ||
+        state.connection in setOf(
+            AgentConnectionStatus.Connecting,
+            AgentConnectionStatus.Reconnecting,
+            AgentConnectionStatus.AuthenticationRequired,
+            AgentConnectionStatus.Error,
+        )
+    val showChatConnectionBanner = state.connection != AgentConnectionStatus.Connected &&
+        state.activeRemoteTargetId != null
+    val chatHeaderExtraTop = when {
+        showChatConnectionBanner -> 68.dp
+        showChatConnectionPill -> 26.dp
+        else -> 0.dp
+    }
     val turnDockSpacerDp = with(density) { turnDockSpacerPx.toDp() }
-    val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed) {
+    val conversationPadding = remember(dockGeometry, density, topControlsHeight, organizationHasCollaborators, organizationCollapsed, chatHeaderExtraTop) {
         if (organizationCollapsed) dockGeometry.padding(density, extraBottom = 32.dp)
-        else dockGeometry.padding(density, top = if (organizationHasCollaborators) 56.dp else topControlsHeight + 8.dp, extraBottom = 16.dp)
+        else dockGeometry.padding(
+            density,
+            top = (if (organizationHasCollaborators) 56.dp else topControlsHeight + 8.dp) + chatHeaderExtraTop,
+            extraBottom = 16.dp,
+        )
     }
     val jumpPadding = remember(dockGeometry, density) {
         dockGeometry.padding(density, extraBottom = 12.dp)
@@ -3632,6 +3654,7 @@ private fun ChatSurface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Box(modifier = Modifier.fillMaxWidth().onGloballyPositioned {
                     organizationHeaderBottom = it.boundsInRoot().bottom
@@ -3652,6 +3675,23 @@ private fun ChatSurface(
                         sideControlsSpace = topControlGeometry::sideControlsSpace,
                         sideControlsEnabled = !runIslandExpanded,
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                if (showChatConnectionPill) {
+                    ConnectionStatusPill(
+                        connection = state.connection,
+                        activeCarrier = state.activeCarrier,
+                        onClick = { onEvent(WorkbenchEvent.Retry) },
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                if (showChatConnectionBanner) {
+                    ConnectionStatusBanner(
+                        connection = state.connection,
+                        onReconnect = { onEvent(WorkbenchEvent.Retry) },
+                        modifier = Modifier
+                            .padding(horizontal = AgentoSpacing.ComposerMargin, vertical = 4.dp)
+                            .widthIn(max = RagentSizes.ContentMaxWidth),
                     )
                 }
             }

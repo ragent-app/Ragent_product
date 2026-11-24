@@ -94,6 +94,11 @@ interface P2PSession {
      */
     suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse>
 
+    /** Send an HTTP request with an explicit timeout override in milliseconds. */
+    suspend fun request(request: P2PHttpRequest, timeoutMs: Long?): Result<P2PHttpResponse> =
+        if (timeoutMs == null || timeoutMs <= 0L) request(request)
+        else withTimeoutOrNull(timeoutMs) { request(request) } ?: Result.failure(P2PRequestTimeoutException())
+
     /** Streams a bounded binary HTTP body without materializing or Base64-encoding the full body. */
     suspend fun requestStream(request: P2PHttpRequest, totalBytes: Long, sha256: String,
         openBody: () -> java.io.InputStream, onProgress: (sentBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }): Result<P2PHttpResponse> =
@@ -118,7 +123,98 @@ internal fun isBulkReadRequest(request: P2PHttpRequest): Boolean {
     return "filter=all" in query && "liveOnly=1" !in query
 }
 
+/** Background polls and long-polls use the dedicated background channel when available. */
+internal fun isBackgroundReadRequest(request: P2PHttpRequest): Boolean {
+    if (request.method != "GET") return false
+    val path = request.path.substringBefore('?')
+    if (path == "/api/sessions") return true
+    if (path == "/api/runtime/summary" || path.startsWith("/api/runtime/summary/")) return true
+    if (path == "/api/windows-broker" || path.startsWith("/api/windows-broker/")) return true
+    if (path.startsWith("/api/sessions/") && path.endsWith("/events/wait")) {
+        val query = request.path.substringAfter('?', "").split('&').filter { it.isNotEmpty() }.toSet()
+        return "liveOnly=1" in query
+    }
+    return false
+}
+
+internal enum class PrimarySendLane {
+    HIGH,
+    NORMAL,
+}
+
+internal fun primaryLaneForRequest(request: P2PHttpRequest): PrimarySendLane =
+    when (request.method.uppercase()) {
+        "POST", "PATCH", "DELETE", "PUT" -> PrimarySendLane.HIGH
+        else -> PrimarySendLane.NORMAL
+    }
+
+/** Two-lane priority gate on the primary DataChannel so interactive mutations jump ahead of reads. */
+internal class PrimaryLaneGate {
+    private val lock = Any()
+    private var holder: Waiter? = null
+    private val lane0 = ArrayDeque<Waiter>()
+    private val lane1 = ArrayDeque<Waiter>()
+
+    private class Waiter {
+        val ready = CompletableDeferred<Unit>()
+        var cancelled = false
+    }
+
+    suspend fun <T> withLane(lane: PrimarySendLane, block: suspend () -> T): T {
+        val waiter = acquire(lane)
+        try {
+            return block()
+        } finally {
+            release(waiter)
+        }
+    }
+
+    private suspend fun acquire(lane: PrimarySendLane): Waiter {
+        val waiter = synchronized(lock) {
+            val w = Waiter()
+            if (holder == null && lane0.isEmpty() && lane1.isEmpty()) {
+                holder = w
+                return w
+            }
+            if (lane == PrimarySendLane.HIGH) lane0.addLast(w) else lane1.addLast(w)
+            w
+        }
+        try {
+            waiter.ready.await()
+            return waiter
+        } catch (e: Throwable) {
+            val mustRelease = synchronized(lock) {
+                waiter.cancelled = true
+                lane0.remove(waiter)
+                lane1.remove(waiter)
+                holder === waiter
+            }
+            if (mustRelease) release(waiter)
+            throw e
+        }
+    }
+
+    private fun release(waiter: Waiter) {
+        var nextToResume: Waiter? = null
+        synchronized(lock) {
+            if (holder !== waiter) return
+            holder = null
+            while (true) {
+                val candidate = if (lane0.isNotEmpty()) lane0.removeFirst()
+                else if (lane1.isNotEmpty()) lane1.removeFirst()
+                else break
+                if (candidate.cancelled) continue
+                holder = candidate
+                nextToResume = candidate
+                break
+            }
+        }
+        nextToResume?.ready?.complete(Unit)
+    }
+}
+
 internal class BulkChannelClosedException : IllegalStateException("P2P bulk channel closed")
+internal class BgChannelClosedException : IllegalStateException("P2P background channel closed")
 
 internal suspend fun requestWithBulkFallback(
     request: P2PHttpRequest,
@@ -128,6 +224,20 @@ internal suspend fun requestWithBulkFallback(
     if (!isBulkReadRequest(request) || result.exceptionOrNull() !is BulkChannelClosedException) return result
     // The retry uses a fresh wire ID so a late response from the closed
     // channel cannot be mistaken for the response on the primary channel.
+    return attempt(request.copy(id = java.util.UUID.randomUUID().toString()), false)
+        .map { it.copy(id = request.id) }
+}
+
+internal suspend fun requestWithSecondaryFallback(
+    request: P2PHttpRequest,
+    attempt: suspend (P2PHttpRequest, Boolean) -> Result<P2PHttpResponse>,
+): Result<P2PHttpResponse> {
+    val result = attempt(request, true)
+    val failure = result.exceptionOrNull()
+    val secondaryEligible = isBulkReadRequest(request) || isBackgroundReadRequest(request)
+    if (!secondaryEligible || (failure !is BulkChannelClosedException && failure !is BgChannelClosedException)) {
+        return result
+    }
     return attempt(request.copy(id = java.util.UUID.randomUUID().toString()), false)
         .map { it.copy(id = request.id) }
 }
@@ -264,8 +374,9 @@ class WebRTCDataChannelTransport(
             if (isOpen && iceDisconnected) failConnection("ICE connection remained disconnected")
         },
     )
-    private val outboundFrameMutex = Mutex()
+    private val primaryLaneGate = PrimaryLaneGate()
     private val bulkOutboundFrameMutex = Mutex()
+    private val bgOutboundFrameMutex = Mutex()
     private val connectionStateWakeup = ConnectionStateWakeup()
     private val serverReady = CompletableDeferred<Set<String>>()
     @Volatile private var serverReadyFeatures: Set<String>? = null
@@ -284,6 +395,10 @@ class WebRTCDataChannelTransport(
     @Volatile private var bulkChannelSupported = false
     private val bulkRetryGate = BulkChannelRetryGate()
     private val bulkPending = ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var bgChannel: DataChannel? = null
+    @Volatile private var bgChannelSupported = false
+    private val bgRetryGate = BulkChannelRetryGate()
+    private val bgPending = ConcurrentHashMap.newKeySet<String>()
 
     // Signalling
     private var signaling: P2PSignalingClient? = null
@@ -445,6 +560,10 @@ class WebRTCDataChannelTransport(
         return dataChannelObserver
     }
 
+    internal fun attachPeerConnectionForTest(connection: PeerConnection) {
+        peerConnection = connection
+    }
+
     private fun receiveFrame(buffer: DataChannel.Buffer) {
         val data = buffer.data
         if (data !is java.nio.ByteBuffer) return
@@ -499,6 +618,51 @@ class WebRTCDataChannelTransport(
             }
         }
         abandoned.forEach { it.onError(BulkChannelClosedException()) }
+    }
+
+    private fun startBgChannel() {
+        synchronized(pendingRegistrationLock) {
+            if (closeNotified || bgChannel != null || dataChannel?.state() != DataChannel.State.OPEN) return
+            val connection = peerConnection ?: return
+            val channel = connection.createDataChannel("ragent-http-bg", DataChannel.Init().apply { ordered = true }) ?: return
+            bgChannel = channel
+            channel.registerObserver(object : DataChannel.Observer {
+                override fun onStateChange() {
+                    if (channel.state() == DataChannel.State.OPEN) traceConnect("bg_open")
+                    if (channel.state() == DataChannel.State.CLOSED || channel.state() == DataChannel.State.CLOSING) {
+                        traceConnect("bg_closed")
+                        failBgRequests(channel)
+                    }
+                }
+                override fun onMessage(buffer: DataChannel.Buffer) = receiveFrame(buffer)
+                override fun onBufferedAmountChange(previousAmount: Long) = Unit
+            })
+            scope.launch {
+                delay(BULK_OPEN_TIMEOUT_MS)
+                if (bgChannel === channel && channel.state() != DataChannel.State.OPEN) {
+                    runCatching { channel.close() }
+                    failBgRequests(channel)
+                }
+            }
+        }
+    }
+
+    private fun requestBgChannel() {
+        if (!bgChannelSupported || closeNotified || bgChannel != null) return
+        if (!bgRetryGate.tryAcquire(java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(nanoClock()))) return
+        scope.launch { runCatching { startBgChannel() } }
+    }
+
+    private fun failBgRequests(channel: DataChannel) {
+        val abandoned = synchronized(pendingRegistrationLock) {
+            if (bgChannel !== channel) return
+            bgChannel = null
+            bgPending.toList().mapNotNull { id ->
+                bgPending.remove(id)
+                pending.remove(id)?.also { responseStreams.discard(id) }
+            }
+        }
+        abandoned.forEach { it.onError(BgChannelClosedException()) }
     }
 
     // ── Signalling callback ───────────────────────────────────────────
@@ -605,6 +769,10 @@ class WebRTCDataChannelTransport(
             inboundFrames.set(0L)
             lastInboundFrameNanos.set(0L)
             pendingPongs.clear()
+            bulkChannelSupported = false
+            bgChannelSupported = false
+            bulkPending.clear()
+            bgPending.clear()
             serverReadyFeatures = null
             synchronized(localCandidateLock) {
                 offerSignalSent = false
@@ -720,7 +888,7 @@ class WebRTCDataChannelTransport(
                 .toByteArray(Charsets.UTF_8)
             return try {
                 withTimeoutOrNull(remainingMs) {
-                    sendDataChannelFrame(primary, frame)
+                    sendDataChannelFrame(primary, frame, lane = PrimarySendLane.HIGH, maxSendDeadlineMs = remainingMs)
                     pongDeferred.await()
                 } ?: false
             } catch (cancelled: CancellationException) {
@@ -751,18 +919,37 @@ class WebRTCDataChannelTransport(
     }
 
     override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> =
-        requestWithBulkFallback(request, ::requestOnChannel)
+        request(request, timeoutMs = requestTimeoutMs)
 
-    private suspend fun requestOnChannel(request: P2PHttpRequest, allowBulk: Boolean): Result<P2PHttpResponse> {
+    override suspend fun request(request: P2PHttpRequest, timeoutMs: Long?): Result<P2PHttpResponse> =
+        requestWithSecondaryFallback(request) { attemptRequest, allowSecondary ->
+            requestOnChannel(attemptRequest, allowSecondary, timeoutMs ?: requestTimeoutMs)
+        }
+
+    private suspend fun requestOnChannel(
+        request: P2PHttpRequest,
+        allowSecondary: Boolean,
+        requestedTimeoutMs: Long = requestTimeoutMs,
+    ): Result<P2PHttpResponse> {
         val primary = dataChannel
             ?: return Result.failure(IllegalStateException("DataChannel is null"))
         if (primary.state() != DataChannel.State.OPEN) {
             return Result.failure(IllegalStateException("DataChannel is not open"))
         }
-        val bulkRequest = allowBulk && isBulkReadRequest(request)
+        val bgRequest = allowSecondary && isBackgroundReadRequest(request)
+        val bulkRequest = allowSecondary && !bgRequest && isBulkReadRequest(request)
+        if (bgRequest && bgChannel == null) requestBgChannel()
         if (bulkRequest && bulkChannel == null) requestBulkChannel()
-        val channel = bulkChannel?.takeIf { bulkRequest && it.state() == DataChannel.State.OPEN } ?: primary
-        if (channel !== primary) traceConnect("bulk_read_routed")
+        val channel = when {
+            bgRequest -> bgChannel?.takeIf { it.state() == DataChannel.State.OPEN }
+                ?: bulkChannel?.takeIf { it.state() == DataChannel.State.OPEN }
+                ?: primary
+            bulkRequest -> bulkChannel?.takeIf { it.state() == DataChannel.State.OPEN } ?: primary
+            else -> primary
+        }
+        if (channel === bgChannel) traceConnect("bg_read_routed")
+        else if (channel === bulkChannel) traceConnect("bulk_read_routed")
+        val lane = if (channel === primary) primaryLaneForRequest(request) else PrimarySendLane.NORMAL
 
         val id = request.id
         val trace = debuggable && request.method == "GET" && request.path == "/api/projects"
@@ -787,9 +974,10 @@ class WebRTCDataChannelTransport(
         return try {
             val payload = json.encodeToString(P2PHttpRequest.serializer(), request.copy(acceptResponseStream = true))
                 .toByteArray(Charsets.UTF_8)
-            val effectiveTimeoutMs = if (payload.size > P2PHttpRequestStream.MAX_SINGLE_FRAME_BYTES) {
-                maxOf(requestTimeoutMs, LARGE_REQUEST_TIMEOUT_MS)
-            } else requestTimeoutMs
+            val baseTimeoutMs = requestedTimeoutMs.coerceAtLeast(1L)
+            val effectiveTimeoutMs = if (requestedTimeoutMs == requestTimeoutMs && payload.size > P2PHttpRequestStream.MAX_SINGLE_FRAME_BYTES) {
+                maxOf(baseTimeoutMs, LARGE_REQUEST_TIMEOUT_MS)
+            } else baseTimeoutMs
             if (payload.size > P2PHttpRequestStream.MAX_SINGLE_FRAME_BYTES) {
                 val features = withTimeoutOrNull(5_000L) { serverReady.await() }.orEmpty()
                 if ("http_request_stream_v1" !in features) {
@@ -803,11 +991,13 @@ class WebRTCDataChannelTransport(
                     val pendingRequest = PendingRequest(
                         onResponse = { response ->
                             bulkPending.remove(id)
+                            bgPending.remove(id)
                             if (trace) Log.w(TAG, "projects_trace id=$id stage=response")
                             cont.resume(Result.success(response))
                         },
                         onError = { error ->
                             bulkPending.remove(id)
+                            bgPending.remove(id)
                             if (trace) Log.w(TAG, "projects_trace id=$id stage=error")
                             cont.resume(Result.failure(error))
                         },
@@ -822,7 +1012,7 @@ class WebRTCDataChannelTransport(
                     val sendJob = scope.launch {
                         try {
                             for (frame in P2PHttpRequestStream.frames(id, payload)) {
-                                sendDataChannelFrame(channel, frame)
+                                sendDataChannelFrame(channel, frame, lane = lane, maxSendDeadlineMs = effectiveTimeoutMs)
                             }
                             if (trace) runCatching { Log.w(TAG, "projects_trace id=$id stage=sent") }
                             runCatching { Log.i(TAG, "datachannel_request_sent id=$id wireBytes=${payload.size} channel=$debugCarrierId") }
@@ -831,10 +1021,14 @@ class WebRTCDataChannelTransport(
                         } catch (error: Exception) {
                             if (channel !== primary && error is P2PSendTimeoutException) {
                                 runCatching { channel.close() }
-                                failBulkRequests(channel)
+                                if (channel === bgChannel) failBgRequests(channel) else failBulkRequests(channel)
                             }
                             if (pending.remove(id, pendingRequest)) {
-                                pendingRequest.onError(if (channel !== primary && (error is P2PSendTimeoutException || channel.state() != DataChannel.State.OPEN)) BulkChannelClosedException() else error)
+                                pendingRequest.onError(
+                                    if (channel !== primary && (error is P2PSendTimeoutException || channel.state() != DataChannel.State.OPEN)) {
+                                        if (channel === bgChannel) BgChannelClosedException() else BulkChannelClosedException()
+                                    } else error,
+                                )
                             }
                         }
                     }
@@ -842,6 +1036,7 @@ class WebRTCDataChannelTransport(
                         if (trace) Log.w(TAG, "projects_trace id=$id stage=cancelled")
                         pending.remove(id, pendingRequest)
                         bulkPending.remove(id)
+                        bgPending.remove(id)
                         pendingRequest.cancel()
                         responseStreams.discard(id)
                         sendJob.cancel()
@@ -976,18 +1171,32 @@ class WebRTCDataChannelTransport(
         }
     }
 
-    private suspend fun sendDataChannelFrame(channel: DataChannel, frame: ByteArray, binary: Boolean = false,
-        telemetry: UploadSendTelemetry? = null) {
-        val bulk = channel !== dataChannel
+    private suspend fun sendDataChannelFrame(
+        channel: DataChannel,
+        frame: ByteArray,
+        binary: Boolean = false,
+        telemetry: UploadSendTelemetry? = null,
+        lane: PrimarySendLane = PrimarySendLane.NORMAL,
+        maxSendDeadlineMs: Long = Long.MAX_VALUE,
+    ) {
+        val isPrimary = channel === dataChannel
+        val isBg = channel === bgChannel
+        val isBulk = !isPrimary && !isBg
         // Keep the bulk channel's queued data small enough for interactive
         // traffic to share the underlying SCTP association. Slow relays need
         // longer to drain that bounded buffer than the interactive channel.
         // Diagnostic-only A/B switch. Release builds and ordinary debug runs
         // retain the conservative default until real relay evidence is gathered.
-        val highWaterBytes = if (bulk && debuggable && Log.isLoggable("Ragent.FastBulk", Log.DEBUG)) 2L * 1024 * 1024
-            else if (bulk) 64L * 1024 else 512L * 1024
-        withP2PSendDeadline(if (bulk) 60_000L else 15_000L) {
-            (if (channel === dataChannel) outboundFrameMutex else bulkOutboundFrameMutex).withLock {
+        val highWaterBytes = when {
+            isBulk && debuggable && Log.isLoggable("Ragent.FastBulk", Log.DEBUG) -> 2L * 1024 * 1024
+            isBulk -> 64L * 1024
+            isBg -> 64L * 1024
+            else -> 512L * 1024
+        }
+        val baseDeadlineMs = if (isBulk) 60_000L else 15_000L
+        val sendDeadlineMs = minOf(baseDeadlineMs, maxSendDeadlineMs).coerceAtLeast(1L)
+        withP2PSendDeadline(sendDeadlineMs) {
+            val sendBlock: suspend () -> Unit = {
                 while (true) {
                     if (channel.state() != DataChannel.State.OPEN) {
                         throw IllegalStateException("DataChannel closed while sending request")
@@ -1004,16 +1213,23 @@ class WebRTCDataChannelTransport(
                         java.nio.ByteBuffer.wrap(frame),
                         binary,
                     ))
-                    if (sent) return@withLock
+                    if (sent) break
                     delay(10)
                 }
+            }
+            when {
+                isPrimary -> primaryLaneGate.withLane(lane, sendBlock)
+                isBg -> bgOutboundFrameMutex.withLock { sendBlock() }
+                else -> bulkOutboundFrameMutex.withLock { sendBlock() }
             }
         }
     }
 
     private suspend fun sendAbortBestEffort(channel: DataChannel, id: String) {
         try {
-            withTimeoutOrNull(500L) { sendDataChannelFrame(channel, P2PHttpBodyStream.abortFrame(id)) }
+            withTimeoutOrNull(500L) {
+                sendDataChannelFrame(channel, P2PHttpBodyStream.abortFrame(id), lane = PrimarySendLane.HIGH)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -1026,10 +1242,15 @@ class WebRTCDataChannelTransport(
     private fun registerPending(id: String, request: PendingRequest, channel: DataChannel? = null): Exception? = synchronized(pendingRegistrationLock) {
         when {
             closeNotified -> Exception("P2P transport closed")
-            channel != null && channel !== dataChannel && (channel !== bulkChannel || channel.state() != DataChannel.State.OPEN) ->
-                BulkChannelClosedException()
+            channel != null && channel !== dataChannel &&
+                !((channel === bulkChannel || channel === bgChannel) && channel.state() == DataChannel.State.OPEN) ->
+                if (channel === bgChannel) BgChannelClosedException() else BulkChannelClosedException()
             pending.putIfAbsent(id, request) != null -> IllegalStateException("Duplicate P2P request id")
-            else -> { if (channel != null && channel !== dataChannel) bulkPending.add(id); null }
+            else -> {
+                if (channel === bulkChannel) bulkPending.add(id)
+                else if (channel === bgChannel) bgPending.add(id)
+                null
+            }
         }
     }
 
@@ -1039,6 +1260,7 @@ class WebRTCDataChannelTransport(
             closeNotified = true
             isOpen = false
             bulkPending.clear()
+            bgPending.clear()
             val pongs = pendingPongs.entries.mapNotNull { (id, deferred) ->
                 if (pendingPongs.remove(id, deferred)) deferred else null
             }
@@ -1066,6 +1288,8 @@ class WebRTCDataChannelTransport(
         }
         remoteDescriptionSetting = false
 
+        bgChannel?.close()
+        bgChannel = null
         bulkChannel?.close()
         bulkChannel = null
         dataChannel?.close()
@@ -1200,6 +1424,9 @@ class WebRTCDataChannelTransport(
                     if ("http_bulk_channel_v1" in features) {
                         bulkChannelSupported = true
                         requestBulkChannel()
+                    }
+                    if ("http_bg_channel_v1" in features) {
+                        bgChannelSupported = true
                     }
                 }
                 return

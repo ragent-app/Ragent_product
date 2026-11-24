@@ -203,6 +203,124 @@ function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+const CRUD_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
+const CRUD_IDEMPOTENCY_MAX_ENTRIES = 1024;
+const CRUD_IDEMPOTENCY_KEY_MAX_LENGTH = 512;
+
+function readIdempotencyKeyHeader(req) {
+  const headers = req?.headers;
+  if (!headers || typeof headers !== 'object') return '';
+  let raw = headers['idempotency-key'];
+  if (raw === undefined) {
+    for (const [headerName, headerValue] of Object.entries(headers)) {
+      if (String(headerName).toLowerCase() === 'idempotency-key') {
+        raw = headerValue;
+        break;
+      }
+    }
+  }
+  if (Array.isArray(raw)) raw = raw[0];
+  const trimmed = trimString(raw);
+  return trimmed ? trimmed.slice(0, CRUD_IDEMPOTENCY_KEY_MAX_LENGTH) : '';
+}
+
+function cloneJsonPayload(payload) {
+  if (payload === undefined) return undefined;
+  return JSON.parse(JSON.stringify(payload));
+}
+
+export function createCrudIdempotencyStore({
+  ttlMs = CRUD_IDEMPOTENCY_TTL_MS,
+  maxEntries = CRUD_IDEMPOTENCY_MAX_ENTRIES,
+  now = () => Date.now(),
+} = {}) {
+  const receipts = new Map();
+  const inFlight = new Map();
+
+  function pruneExpired(currentTime) {
+    for (const [key, entry] of receipts) {
+      if (entry.expiresAt <= currentTime) {
+        receipts.delete(key);
+      }
+    }
+  }
+
+  function buildKey(method, path, idempotencyKey) {
+    const normalizedKey = trimString(idempotencyKey);
+    if (!normalizedKey) return '';
+    return `${String(method || '').toUpperCase()}:${String(path || '')}:${normalizedKey}`;
+  }
+
+  function get(key) {
+    if (!key) return null;
+    const entry = receipts.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt <= now()) {
+      receipts.delete(key);
+      return null;
+    }
+    return cloneJsonPayload(entry.payload);
+  }
+
+  function set(key, payload) {
+    if (!key || maxEntries <= 0) return;
+    const currentTime = now();
+    pruneExpired(currentTime);
+    if (receipts.has(key)) {
+      receipts.delete(key);
+    }
+    while (receipts.size >= maxEntries) {
+      const oldestKey = receipts.keys().next().value;
+      if (oldestKey === undefined) break;
+      receipts.delete(oldestKey);
+    }
+    receipts.set(key, {
+      expiresAt: currentTime + ttlMs,
+      payload: cloneJsonPayload(payload),
+    });
+  }
+
+  async function run(method, path, idempotencyKey, execute) {
+    const key = buildKey(method, path, idempotencyKey);
+    if (!key) {
+      return { replayed: false, outcome: await execute() };
+    }
+    while (inFlight.has(key)) {
+      await inFlight.get(key).catch(() => {});
+    }
+    const cached = get(key);
+    if (cached !== null) {
+      return { replayed: true, outcome: { status: 200, payload: cached } };
+    }
+    const work = Promise.resolve().then(() => execute());
+    inFlight.set(key, work);
+    try {
+      const outcome = await work;
+      if (outcome?.status === 200 && outcome.payload !== undefined) {
+        set(key, outcome.payload);
+      }
+      return { replayed: false, outcome };
+    } finally {
+      if (inFlight.get(key) === work) {
+        inFlight.delete(key);
+      }
+    }
+  }
+
+  return {
+    buildKey,
+    get,
+    set,
+    run,
+    get size() {
+      pruneExpired(now());
+      return receipts.size;
+    },
+  };
+}
+
+const crudIdempotencyStore = createCrudIdempotencyStore();
+
 function normalizeWorkspaceSessionId(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -878,16 +996,33 @@ export async function handleControlRoutes({
       writeJson(res, 400, { error: 'Invalid request body' });
       return true;
     }
+    const idempotencyKey = readIdempotencyKeyHeader(req);
     if (req.method === 'DELETE' || isProjectDeleteCompat) {
       try {
-        const result = await deleteProject(projectId, { deleteSessions: payload.deleteSessions === true });
-        if (!result) {
-          writeJson(res, 404, { error: 'Project not found' });
-          return true;
+        const { replayed, outcome } = await crudIdempotencyStore.run(
+          req.method,
+          pathname,
+          idempotencyKey,
+          async () => {
+            const result = await deleteProject(projectId, { deleteSessions: payload.deleteSessions === true });
+            if (!result) {
+              if (idempotencyKey) {
+                return {
+                  status: 200,
+                  payload: { deleted: true, alreadyDeleted: true, id: projectId },
+                  alreadyDeleted: true,
+                };
+              }
+              return { status: 404, payload: { error: 'Project not found' } };
+            }
+            return { status: 200, payload: result };
+          },
+        );
+        writeJson(res, outcome.status, outcome.payload);
+        if (!replayed && outcome.status === 200 && !outcome.alreadyDeleted) {
+          broadcastAll({ type: 'projects_invalidated' });
+          broadcastAll({ type: 'sessions_invalidated' });
         }
-        writeJson(res, 200, result);
-        broadcastAll({ type: 'projects_invalidated' });
-        broadcastAll({ type: 'sessions_invalidated' });
       } catch (error) {
         const status = Number.isInteger(error?.statusCode) ? error.statusCode : 400;
         writeJson(res, status, {
@@ -901,23 +1036,32 @@ export async function handleControlRoutes({
       return true;
     }
     try {
-      const project = await updateProject(projectId, {
-        ...(Object.prototype.hasOwnProperty.call(payload, 'name') ? { name: payload.name } : {}),
-        ...(Object.prototype.hasOwnProperty.call(payload, 'archived') ? { archived: payload.archived === true } : {}),
-        ...(Object.prototype.hasOwnProperty.call(payload, 'pinned') ? { pinned: payload.pinned === true } : {}),
-        ...(Object.prototype.hasOwnProperty.call(payload, 'migrateTargetPath')
-          ? { migrateTargetPath: typeof payload.migrateTargetPath === 'string' ? payload.migrateTargetPath : '' }
-          : {}),
-        ...(Object.prototype.hasOwnProperty.call(payload, 'migrateRenames')
-          ? { migrateRenames: payload.migrateRenames }
-          : {}),
-      });
-      if (!project) {
-        writeJson(res, 404, { error: 'Project not found' });
-        return true;
+      const { replayed, outcome } = await crudIdempotencyStore.run(
+        req.method,
+        pathname,
+        idempotencyKey,
+        async () => {
+          const project = await updateProject(projectId, {
+            ...(Object.prototype.hasOwnProperty.call(payload, 'name') ? { name: payload.name } : {}),
+            ...(Object.prototype.hasOwnProperty.call(payload, 'archived') ? { archived: payload.archived === true } : {}),
+            ...(Object.prototype.hasOwnProperty.call(payload, 'pinned') ? { pinned: payload.pinned === true } : {}),
+            ...(Object.prototype.hasOwnProperty.call(payload, 'migrateTargetPath')
+              ? { migrateTargetPath: typeof payload.migrateTargetPath === 'string' ? payload.migrateTargetPath : '' }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(payload, 'migrateRenames')
+              ? { migrateRenames: payload.migrateRenames }
+              : {}),
+          });
+          if (!project) {
+            return { status: 404, payload: { error: 'Project not found' } };
+          }
+          return { status: 200, payload: { project: await getProject(project.id, { client: true }) } };
+        },
+      );
+      writeJson(res, outcome.status, outcome.payload);
+      if (!replayed && outcome.status === 200) {
+        broadcastAll({ type: 'projects_invalidated' });
       }
-      writeJson(res, 200, { project: await getProject(project.id, { client: true }) });
-      broadcastAll({ type: 'projects_invalidated' });
     } catch (error) {
       writeJson(res, 400, { error: error.message || 'Failed to update project' });
     }
@@ -1703,13 +1847,24 @@ export async function handleControlRoutes({
       writeJson(res, 403, { error: 'Access denied' });
       return true;
     }
+    const idempotencyKey = readIdempotencyKeyHeader(req);
     try {
-      const deleted = await deleteSession(sessionId);
-      if (!deleted) {
-        writeJson(res, 404, { error: 'Session not found' });
-        return true;
-      }
-      writeJson(res, 200, { deleted: true, sessionId: deleted.id });
+      const { outcome } = await crudIdempotencyStore.run(
+        req.method,
+        pathname,
+        idempotencyKey,
+        async () => {
+          const deleted = await deleteSession(sessionId);
+          if (!deleted) {
+            if (idempotencyKey) {
+              return { status: 200, payload: { deleted: true, alreadyDeleted: true, id: sessionId } };
+            }
+            return { status: 404, payload: { error: 'Session not found' } };
+          }
+          return { status: 200, payload: { deleted: true, sessionId: deleted.id } };
+        },
+      );
+      writeJson(res, outcome.status, outcome.payload);
     } catch (error) {
       writeJson(res, Number.isInteger(error?.statusCode) ? error.statusCode : 400, {
         error: error?.message || 'Failed to delete session',
@@ -1924,63 +2079,71 @@ export async function handleControlRoutes({
         return true;
       }
     }
-    let session = null;
+    const idempotencyKey = readIdempotencyKeyHeader(req);
     try {
-    if (typeof patch.name === 'string' && patch.name.trim()) {
-      session = await renameSession(sessionId, patch.name.trim());
-    }
-    if (hasPinnedPatch) {
-      session = await setSessionPinned(sessionId, patch.pinned) || session;
-    }
-    if (hasGroupPatch || hasDescriptionPatch || hasSidebarOrderPatch) {
-      session = await updateSessionGrouping(sessionId, {
-        ...(hasGroupPatch ? { group: patch.group ?? '' } : {}),
-        ...(hasDescriptionPatch ? { description: patch.description ?? '' } : {}),
-        ...(hasSidebarOrderPatch ? { sidebarOrder: patch.sidebarOrder ?? null } : {}),
-      }) || session;
-    }
-    if (hasActiveAgreementsPatch) {
-      session = await updateSessionAgreements(sessionId, {
-        activeAgreements: patch.activeAgreements ?? [],
-      }) || session;
-    }
-    if (hasWorkflowStatePatch || hasWorkflowPriorityPatch) {
-      session = await updateSessionWorkflowClassification(sessionId, {
-        ...(hasWorkflowStatePatch ? { workflowState: patch.workflowState || '' } : {}),
-        ...(hasWorkflowPriorityPatch ? { workflowPriority: patch.workflowPriority || '' } : {}),
-      }) || session;
-    }
-    if (hasToolPatch || hasProviderProfilePatch || hasModelPatch || hasEffortPatch || hasServiceTierPatch || hasThinkingPatch || hasPermissionModePatch || hasInteractionModePatch || hasPrivilegedModePatch || hasRiskModePatch) {
-      session = await updateSessionRuntimePreferences(sessionId, {
-        ...(hasToolPatch ? { tool: patch.tool } : {}),
-        ...(hasProviderProfilePatch ? { providerProfile: patch.providerProfile ?? '' } : {}),
-        ...(hasModelPatch ? { model: patch.model } : {}),
-        ...(hasEffortPatch ? { effort: patch.effort } : {}),
-        ...(hasServiceTierPatch ? { serviceTier: patch.serviceTier } : {}),
-        ...(hasThinkingPatch ? { thinking: patch.thinking } : {}),
-        ...(hasPermissionModePatch ? { permissionMode: patch.permissionMode } : {}),
-        ...(hasInteractionModePatch ? { interactionMode: patch.interactionMode } : {}),
-        ...(hasPrivilegedModePatch ? { privilegedMode: patch.privilegedMode } : {}),
-        ...(hasRiskModePatch ? { riskMode: patch.riskMode } : {}),
-      }) || session;
-    }
-    if (hasLastReviewedAtPatch) {
-      session = await updateSessionLastReviewedAt(sessionId, patch.lastReviewedAt || '') || session;
-    }
-    if (hasEntryModePatch) {
-      session = await updateSessionEntryMode(sessionId, patch.entryMode || '') || session;
-    }
-    if (hasGoalPatch) {
-      session = await updateSessionGoal(sessionId, patch.goal) || session;
-    }
-    if (!session) {
-      session = await getSessionForClient(sessionId);
-    }
-    if (!session) {
-      writeJson(res, 404, { error: 'Session not found' });
-      return true;
-    }
-    writeJson(res, 200, { session: createClientSessionDetail(session) });
+      const { outcome } = await crudIdempotencyStore.run(
+        req.method,
+        pathname,
+        idempotencyKey,
+        async () => {
+          let session = null;
+          if (typeof patch.name === 'string' && patch.name.trim()) {
+            session = await renameSession(sessionId, patch.name.trim());
+          }
+          if (hasPinnedPatch) {
+            session = await setSessionPinned(sessionId, patch.pinned) || session;
+          }
+          if (hasGroupPatch || hasDescriptionPatch || hasSidebarOrderPatch) {
+            session = await updateSessionGrouping(sessionId, {
+              ...(hasGroupPatch ? { group: patch.group ?? '' } : {}),
+              ...(hasDescriptionPatch ? { description: patch.description ?? '' } : {}),
+              ...(hasSidebarOrderPatch ? { sidebarOrder: patch.sidebarOrder ?? null } : {}),
+            }) || session;
+          }
+          if (hasActiveAgreementsPatch) {
+            session = await updateSessionAgreements(sessionId, {
+              activeAgreements: patch.activeAgreements ?? [],
+            }) || session;
+          }
+          if (hasWorkflowStatePatch || hasWorkflowPriorityPatch) {
+            session = await updateSessionWorkflowClassification(sessionId, {
+              ...(hasWorkflowStatePatch ? { workflowState: patch.workflowState || '' } : {}),
+              ...(hasWorkflowPriorityPatch ? { workflowPriority: patch.workflowPriority || '' } : {}),
+            }) || session;
+          }
+          if (hasToolPatch || hasProviderProfilePatch || hasModelPatch || hasEffortPatch || hasServiceTierPatch || hasThinkingPatch || hasPermissionModePatch || hasInteractionModePatch || hasPrivilegedModePatch || hasRiskModePatch) {
+            session = await updateSessionRuntimePreferences(sessionId, {
+              ...(hasToolPatch ? { tool: patch.tool } : {}),
+              ...(hasProviderProfilePatch ? { providerProfile: patch.providerProfile ?? '' } : {}),
+              ...(hasModelPatch ? { model: patch.model } : {}),
+              ...(hasEffortPatch ? { effort: patch.effort } : {}),
+              ...(hasServiceTierPatch ? { serviceTier: patch.serviceTier } : {}),
+              ...(hasThinkingPatch ? { thinking: patch.thinking } : {}),
+              ...(hasPermissionModePatch ? { permissionMode: patch.permissionMode } : {}),
+              ...(hasInteractionModePatch ? { interactionMode: patch.interactionMode } : {}),
+              ...(hasPrivilegedModePatch ? { privilegedMode: patch.privilegedMode } : {}),
+              ...(hasRiskModePatch ? { riskMode: patch.riskMode } : {}),
+            }) || session;
+          }
+          if (hasLastReviewedAtPatch) {
+            session = await updateSessionLastReviewedAt(sessionId, patch.lastReviewedAt || '') || session;
+          }
+          if (hasEntryModePatch) {
+            session = await updateSessionEntryMode(sessionId, patch.entryMode || '') || session;
+          }
+          if (hasGoalPatch) {
+            session = await updateSessionGoal(sessionId, patch.goal) || session;
+          }
+          if (!session) {
+            session = await getSessionForClient(sessionId);
+          }
+          if (!session) {
+            return { status: 404, payload: { error: 'Session not found' } };
+          }
+          return { status: 200, payload: { session: createClientSessionDetail(session) } };
+        },
+      );
+      writeJson(res, outcome.status, outcome.payload);
     } catch (error) {
       writeJson(res, Number.isInteger(error?.statusCode) ? error.statusCode : 500, {
         error: error?.message || 'Failed to update session',

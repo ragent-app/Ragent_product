@@ -21,7 +21,8 @@ import com.andysagent.ragent.core.designsystem.LocalRagentColors
 /** Connectivity is an observation limit, never a terminal task status. */
 internal fun journeyFeedbackResource(state: WorkbenchUiState): Int? = when {
     state.connection != AgentConnectionStatus.Connected &&
-        (state.activeRemoteTargetId != null || state.sessionId != null) -> R.string.journey_connection_uncertain
+        state.activeRemoteTargetId == null &&
+        state.sessionId != null -> R.string.journey_connection_uncertain
     state.stopRequest == StopRequestState.AwaitingConfirmation -> R.string.journey_stop_waiting
     state.stopRequest == StopRequestState.OutcomeUnknown -> R.string.journey_stop_unknown
     else -> null

@@ -1030,6 +1030,86 @@ class OkHttpRagentTransportTest {
         assertTrue(authRequired)
         statusTransport.close()
     }
+
+    @Test
+    fun activeCarrierTracksTurnP2PDirectAuthAndCloseTransitions() = runBlocking {
+        val verifiedTransport = OkHttpRagentTransport({ "http://unused.test" }, { "rda_ok" }, requireVerifiedCarrier = true)
+        val turn = RecordingP2PSession()
+        val p2p = RecordingP2PSession()
+        try {
+            assertEquals(ActiveCarrier.None, verifiedTransport.activeCarrier.value)
+            verifiedTransport.updateCarrierConnectionState(RuntimeConnectionState.Connected)
+            assertEquals(ActiveCarrier.None, verifiedTransport.activeCarrier.value)
+
+            verifiedTransport.setTurnSession(turn)
+            assertEquals(ActiveCarrier.Turn, verifiedTransport.activeCarrier.value)
+
+            verifiedTransport.setP2PSession(p2p)
+            assertEquals(ActiveCarrier.P2P, verifiedTransport.activeCarrier.value)
+
+            verifiedTransport.clearP2PSession(p2p)
+            assertEquals(ActiveCarrier.Turn, verifiedTransport.activeCarrier.value)
+
+            verifiedTransport.updateCarrierConnectionState(RuntimeConnectionState.AuthenticationRequired)
+            assertEquals(ActiveCarrier.None, verifiedTransport.activeCarrier.value)
+
+            verifiedTransport.updateCarrierConnectionState(RuntimeConnectionState.Connected)
+            assertEquals(ActiveCarrier.Turn, verifiedTransport.activeCarrier.value)
+            verifiedTransport.clearTurnSession(turn)
+            assertEquals(ActiveCarrier.None, verifiedTransport.activeCarrier.value)
+        } finally {
+            verifiedTransport.close()
+        }
+
+        val directTransport = OkHttpRagentTransport({ "http://example.test" }, { "rda_ok" }, requireVerifiedCarrier = false)
+        val directP2p = RecordingP2PSession()
+        try {
+            assertEquals(ActiveCarrier.None, directTransport.activeCarrier.value)
+            directTransport.updateCarrierConnectionState(RuntimeConnectionState.Connected)
+            assertEquals(ActiveCarrier.Direct, directTransport.activeCarrier.value)
+
+            directTransport.setP2PSession(directP2p)
+            assertEquals(ActiveCarrier.P2P, directTransport.activeCarrier.value)
+
+            directTransport.clearP2PSession(directP2p)
+            assertEquals(ActiveCarrier.Direct, directTransport.activeCarrier.value)
+
+            directTransport.close()
+            assertEquals(ActiveCarrier.None, directTransport.activeCarrier.value)
+        } finally {
+            directTransport.close()
+        }
+    }
+
+    @Test
+    fun forwardsRequestTimeoutMsToCarrierAndDirectHttpCalls() = runBlocking {
+        val session = RecordingP2PSession()
+        val p2pTransport = OkHttpRagentTransport({ "http://unused.test" }, { "rda_ok" }, requireVerifiedCarrier = true)
+        try {
+            p2pTransport.setP2PSession(session)
+            p2pTransport.execute(ApiRequest("DELETE", "/api/projects/p1", timeoutMs = 10_000L))
+            assertEquals(10_000L, session.lastTimeoutMs)
+        } finally {
+            p2pTransport.close()
+        }
+
+        val server = MockWebServer()
+        server.enqueue(MockResponse().setBodyDelay(1_500L, java.util.concurrent.TimeUnit.MILLISECONDS).setBody("{}"))
+        server.start()
+        val directTransport = OkHttpRagentTransport({ server.url("/").toString().trimEnd('/') }, { "rda_ok" })
+        try {
+            val startedMs = System.currentTimeMillis()
+            val error = assertFailsWith<ApiException> {
+                directTransport.execute(ApiRequest("GET", "/api/slow", timeoutMs = 80L))
+            }
+            val elapsedMs = System.currentTimeMillis() - startedMs
+            assertEquals("NETWORK_ERROR", error.code)
+            assertTrue(elapsedMs < 1_000L, "Expected direct per-call timeout near 80ms, took ${elapsedMs}ms")
+        } finally {
+            directTransport.close()
+            server.shutdown()
+        }
+    }
 }
 
 private class RecordingP2PSession(
@@ -1039,13 +1119,19 @@ private class RecordingP2PSession(
     override val isOpen = true
     var request: P2PHttpRequest? = null
         private set
+    var lastTimeoutMs: Long? = null
+        private set
     var closeCount: Int = 0
         private set
 
     override suspend fun connect(): Result<Unit> = Result.success(Unit)
 
-    override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> {
+    override suspend fun request(request: P2PHttpRequest): Result<P2PHttpResponse> =
+        request(request, timeoutMs = null)
+
+    override suspend fun request(request: P2PHttpRequest, timeoutMs: Long?): Result<P2PHttpResponse> {
         this.request = request
+        this.lastTimeoutMs = timeoutMs
         return result ?: Result.success(response.copy(id = request.id))
     }
 

@@ -355,6 +355,8 @@ type dcKeepaliveFrame struct {
 	ID   string `json:"id"`
 }
 
+const maxActiveDataChannels = 6
+
 func serverReadyFeatures() []string {
 	return []string{
 		"http_request_stream_v1",
@@ -362,6 +364,7 @@ func serverReadyFeatures() []string {
 		"http_request_binary_chunks_v3",
 		"http_response_stream_v1",
 		"http_bulk_channel_v1",
+		"http_bg_channel_v1",
 		"dc_keepalive_v1",
 	}
 }
@@ -569,6 +572,269 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 	return httpResponse{ID: request.ID, Type: "http_response", Status: response.StatusCode, Headers: headers, BodyBase64: base64.StdEncoding.EncodeToString(responseBody)}
 }
 
+func attachDataChannel(
+	channel *webrtc.DataChannel,
+	localBase string,
+	browserAuth *browserAuthConfig,
+	activeChannels *atomic.Int32,
+	isCurrentPeer func() bool,
+	emitEvent func(any),
+) {
+	if !isCurrentPeer() {
+		_ = channel.Close()
+		return
+	}
+	// Bound per-peer stream assemblers even when a peer opens channels with
+	// arbitrary labels. Three channels (ragent-http, ragent-http-bulk,
+	// ragent-http-bg) are normally used; extra slots allow secondary channels
+	// to reconnect while their predecessors finish closing.
+	if activeChannels.Add(1) > maxActiveDataChannels {
+		activeChannels.Add(-1)
+		_ = channel.Close()
+		return
+	}
+	authSession := &browserAuthSession{phase: "AUTHENTICATING"}
+	streamAssembler := newRequestStreamAssembler()
+	bodyStreamAssembler := newRequestBodyStreamAssembler()
+	responseSender := newResponseSender(channel, isCurrentPeer)
+	channel.OnClose(func() {
+		if authSession.timer != nil {
+			authSession.timer.Stop()
+		}
+		streamAssembler.close()
+		bodyStreamAssembler.close()
+		activeChannels.Add(-1)
+	})
+	if browserAuth != nil {
+		fmt.Fprintf(os.Stderr, "browser_auth event=datachannel_open state=AUTHENTICATING\n")
+		authSession.timer = time.AfterFunc(browserAuthTimeout, func() {
+			if !isCurrentPeer() {
+				return
+			}
+			authSession.mu.Lock()
+			defer authSession.mu.Unlock()
+			if authSession.phase != "AUTHENTICATED" {
+				fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=auth_timeout\n")
+				_ = channel.Close()
+			}
+		})
+	}
+	channel.OnOpen(func() {
+		if !isCurrentPeer() {
+			return
+		}
+		if emitEvent != nil {
+			emitEvent(map[string]any{"type": "datachannel_open"})
+		}
+		fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_open label=%s\n", channel.Label())
+		ready := map[string]any{"type": "server_ready", "version": 1,
+			"features": serverReadyFeatures()}
+		if browserAuth != nil {
+			ready["auth"] = "client_auth_v1"
+			fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent state=AUTHENTICATING\n")
+		}
+		encoded, _ := json.Marshal(ready)
+		_ = channel.SendText(string(encoded))
+	})
+	channel.OnMessage(func(message webrtc.DataChannelMessage) {
+		if !isCurrentPeer() {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_message bytes=%d binary=%t\n", len(message.Data), message.IsString == false)
+		var frameType struct {
+			Type string `json:"type"`
+		}
+		_ = json.Unmarshal(message.Data, &frameType)
+		streamRequestID := ""
+		if browserAuth != nil {
+			authSession.mu.Lock()
+			defer authSession.mu.Unlock()
+			authMessage, err := decodeBrowserAuthMessage(message.Data, message.IsString, authSession.phase)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=malformed_message\n")
+				_ = channel.Close()
+				return
+			}
+			if authSession.phase != "AUTHENTICATED" {
+				if browserAuthMustGate(authSession.phase, authMessage.Type) {
+					fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=http_before_auth\n")
+					_ = channel.Close()
+					return
+				}
+				switch authMessage.Type {
+				case "client_auth_init_v1":
+					if authMessage.Version != 1 || authMessage.ConnectionGrant == "" || authSession.grant != nil {
+						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=unsupported_or_duplicate_init\n")
+						_ = channel.Close()
+						return
+					}
+					grant, nonce, err := browserAuth.authenticateInit(authMessage.ConnectionGrant)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=%s\n", err.Error())
+						_ = channel.Close()
+						return
+					}
+					authSession.grantToken, authSession.grant, authSession.nonce = authMessage.ConnectionGrant, grant, nonce
+					challenge := map[string]any{"type": "server_challenge", "version": 1, "connectionId": grant.ConnectionID, "instanceId": grant.InstanceID, "grantJti": grant.JTI, "serverNonce": nonce}
+					encoded, _ := json.Marshal(challenge)
+					_ = channel.SendText(string(encoded))
+					fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent connectionId=%s grantJtiPrefix=%s\n", grant.ConnectionID, hashGrantJTI(grant.JTI))
+					return
+				case "client_auth_v1":
+					if authMessage.Version != 1 || authSession.grant == nil || authMessage.ConnectionGrant != authSession.grantToken || authMessage.Proof.Algorithm != "ES256" {
+						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=unsupported_auth_version\n")
+						_ = channel.Close()
+						return
+					}
+					principal, err := browserAuth.authenticateProof(authSession.grant, authSession.nonce, authMessage.Proof.Signature)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=%s\n", err.Error())
+						_ = channel.Close()
+						return
+					}
+					authSession.principal, authSession.phase = principal, "AUTHENTICATED"
+					if authSession.timer != nil {
+						authSession.timer.Stop()
+					}
+					_ = channel.SendText(`{"type":"auth_ok","version":1,"principal":{"type":"browser","scope":"remote.read.health"}}`)
+					fmt.Fprintf(os.Stderr, "browser_auth event=browser_authenticated connectionId=%s grantJtiPrefix=%s\n", principal.ConnectionID, hashGrantJTI(principal.GrantJTI))
+					return
+				default:
+					fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=http_before_auth_or_unknown_message\n")
+					_ = channel.Close()
+					return
+				}
+			}
+		}
+		if !message.IsString {
+			id, err := bodyStreamAssembler.addBinary(message.Data)
+			if err != nil && id != "" {
+				encoded, _ := json.Marshal(httpResponse{ID: id, Type: "http_response", Error: "invalid request stream chunk"})
+				_ = channel.SendText(string(encoded))
+			}
+			return
+		}
+		if frameType.Type == "dc_ping" {
+			_, _ = handleKeepalivePing(message.Data, channel.SendText)
+			return
+		}
+		switch frameType.Type {
+		case "http_request_stream_v2_init":
+			var frame httpRequestStreamV2Init
+			if err := json.Unmarshal(message.Data, &frame); err != nil {
+				return
+			}
+			if err := bodyStreamAssembler.begin(frame); err != nil {
+				encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream metadata"})
+				_ = channel.SendText(string(encoded))
+			}
+			return
+		case "http_request_stream_v2_chunk":
+			var frame httpRequestStreamV2Chunk
+			if err := json.Unmarshal(message.Data, &frame); err != nil {
+				return
+			}
+			if err := bodyStreamAssembler.add(frame); err != nil {
+				encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream chunk"})
+				_ = channel.SendText(string(encoded))
+			}
+			return
+		case "http_request_stream_v2_abort":
+			var frame struct {
+				ID string `json:"id"`
+			}
+			if json.Unmarshal(message.Data, &frame) == nil {
+				bodyStreamAssembler.abort(frame.ID)
+			}
+			return
+		case "http_request_stream_v2_end":
+			var frame httpRequestStreamV2End
+			if err := json.Unmarshal(message.Data, &frame); err != nil {
+				return
+			}
+			request, body, length, err := bodyStreamAssembler.finish(frame)
+			if err != nil {
+				encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "request stream verification failed"})
+				_ = channel.SendText(string(encoded))
+				return
+			}
+			if fault.shouldDrop() {
+				_ = body.Close()
+				return
+			}
+			go func() {
+				defer body.Close()
+				var principal *browserPrincipal
+				if browserAuth != nil {
+					authSession.mu.Lock()
+					principal = authSession.principal
+					authSession.mu.Unlock()
+				}
+				response := proxyRequestBody(localBase, request, body, length, principal)
+				if fault.delayMs > 0 {
+					time.Sleep(time.Duration(fault.delayMs) * time.Millisecond)
+				}
+				if isCurrentPeer() {
+					if err := responseSender.send(request, response); err != nil {
+						fmt.Fprintf(os.Stderr, "[p2p-host] response_send_failed category=stream_or_channel\n")
+					}
+				}
+			}()
+			return
+		}
+		if frameType.Type == "http_request_stream_v1" {
+			var frame httpRequestStreamFrame
+			if err := json.Unmarshal(message.Data, &frame); err != nil {
+				return
+			}
+			payload, complete, err := streamAssembler.add(frame)
+			if err != nil {
+				encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream"})
+				_ = channel.SendText(string(encoded))
+				return
+			}
+			if !complete {
+				return
+			}
+			streamRequestID = frame.ID
+			message.Data = payload
+		}
+		var request httpRequest
+		if err := json.Unmarshal(message.Data, &request); err != nil || request.Type != "http_request" || request.ID == "" {
+			fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_message_decode_failed err=%v type=%s id=%s\n", err, request.Type, request.ID)
+			return
+		}
+		if streamRequestID != "" && request.ID != streamRequestID {
+			encoded, _ := json.Marshal(httpResponse{ID: streamRequestID, Type: "http_response", Error: "request stream identity mismatch"})
+			_ = channel.SendText(string(encoded))
+			return
+		}
+		fmt.Fprintf(os.Stderr, "[p2p-host] http_request id=%s method=%s path=%s\n", request.ID, request.Method, request.Path)
+		if fault.shouldDrop() {
+			// Simulate DataChannel packet loss: the request is never answered.
+			return
+		}
+		go func() {
+			var principal *browserPrincipal
+			if browserAuth != nil {
+				authSession.mu.Lock()
+				principal = authSession.principal
+				authSession.mu.Unlock()
+			}
+			response := proxyRequest(localBase, request, principal)
+			fmt.Fprintf(os.Stderr, "[p2p-host] http_response id=%s status=%d error=%s\n", response.ID, response.Status, response.Error)
+			if fault.delayMs > 0 {
+				time.Sleep(time.Duration(fault.delayMs) * time.Millisecond)
+			}
+			if isCurrentPeer() {
+				if err := responseSender.send(request, response); err != nil {
+					fmt.Fprintf(os.Stderr, "[p2p-host] response_send_failed category=stream_or_channel\n")
+				}
+			}
+		}()
+	})
+}
+
 func main() {
 	if os.Getenv("RAGENT_P2P_PROVIDER_SYNC") == "1" {
 		if err := runProviderSyncPeer(); err != nil {
@@ -649,249 +915,7 @@ func main() {
 			}
 		})
 		createdPeer.OnDataChannel(func(channel *webrtc.DataChannel) {
-			if !isCurrentPeer() {
-				_ = channel.Close()
-				return
-			}
-			// Bound per-peer stream assemblers even when a peer opens channels
-			// with arbitrary labels. Two channels are normally used; extra slots
-			// allow a bulk channel to reconnect while its predecessor closes.
-			if activeChannels.Add(1) > 4 {
-				activeChannels.Add(-1)
-				_ = channel.Close()
-				return
-			}
-			authSession := &browserAuthSession{phase: "AUTHENTICATING"}
-			streamAssembler := newRequestStreamAssembler()
-			bodyStreamAssembler := newRequestBodyStreamAssembler()
-			responseSender := newResponseSender(channel, isCurrentPeer)
-			channel.OnClose(func() { streamAssembler.close(); bodyStreamAssembler.close(); activeChannels.Add(-1) })
-			if browserAuth != nil {
-				fmt.Fprintf(os.Stderr, "browser_auth event=datachannel_open state=AUTHENTICATING\n")
-				authSession.timer = time.AfterFunc(browserAuthTimeout, func() {
-					if !isCurrentPeer() {
-						return
-					}
-					authSession.mu.Lock()
-					defer authSession.mu.Unlock()
-					if authSession.phase != "AUTHENTICATED" {
-						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=auth_timeout\n")
-						_ = channel.Close()
-					}
-				})
-			}
-			channel.OnOpen(func() {
-				if !isCurrentPeer() {
-					return
-				}
-				emit(map[string]any{"type": "datachannel_open"})
-				fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_open label=%s\n", channel.Label())
-				ready := map[string]any{"type": "server_ready", "version": 1,
-					"features": serverReadyFeatures()}
-				if browserAuth != nil {
-					ready["auth"] = "client_auth_v1"
-					fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent state=AUTHENTICATING\n")
-				}
-				encoded, _ := json.Marshal(ready)
-				_ = channel.SendText(string(encoded))
-			})
-			channel.OnMessage(func(message webrtc.DataChannelMessage) {
-				if !isCurrentPeer() {
-					return
-				}
-				fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_message bytes=%d binary=%t\n", len(message.Data), message.IsString == false)
-				var frameType struct {
-					Type string `json:"type"`
-				}
-				_ = json.Unmarshal(message.Data, &frameType)
-				streamRequestID := ""
-				if browserAuth != nil {
-					authSession.mu.Lock()
-					defer authSession.mu.Unlock()
-					authMessage, err := decodeBrowserAuthMessage(message.Data, message.IsString, authSession.phase)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=malformed_message\n")
-						_ = channel.Close()
-						return
-					}
-					if authSession.phase != "AUTHENTICATED" {
-						if browserAuthMustGate(authSession.phase, authMessage.Type) {
-							fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=http_before_auth\n")
-							_ = channel.Close()
-							return
-						}
-						switch authMessage.Type {
-						case "client_auth_init_v1":
-							if authMessage.Version != 1 || authMessage.ConnectionGrant == "" || authSession.grant != nil {
-								fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=unsupported_or_duplicate_init\n")
-								_ = channel.Close()
-								return
-							}
-							grant, nonce, err := browserAuth.authenticateInit(authMessage.ConnectionGrant)
-							if err != nil {
-								fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=%s\n", err.Error())
-								_ = channel.Close()
-								return
-							}
-							authSession.grantToken, authSession.grant, authSession.nonce = authMessage.ConnectionGrant, grant, nonce
-							challenge := map[string]any{"type": "server_challenge", "version": 1, "connectionId": grant.ConnectionID, "instanceId": grant.InstanceID, "grantJti": grant.JTI, "serverNonce": nonce}
-							encoded, _ := json.Marshal(challenge)
-							_ = channel.SendText(string(encoded))
-							fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent connectionId=%s grantJtiPrefix=%s\n", grant.ConnectionID, hashGrantJTI(grant.JTI))
-							return
-						case "client_auth_v1":
-							if authMessage.Version != 1 || authSession.grant == nil || authMessage.ConnectionGrant != authSession.grantToken || authMessage.Proof.Algorithm != "ES256" {
-								fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=unsupported_auth_version\n")
-								_ = channel.Close()
-								return
-							}
-							principal, err := browserAuth.authenticateProof(authSession.grant, authSession.nonce, authMessage.Proof.Signature)
-							if err != nil {
-								fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=%s\n", err.Error())
-								_ = channel.Close()
-								return
-							}
-							authSession.principal, authSession.phase = principal, "AUTHENTICATED"
-							if authSession.timer != nil {
-								authSession.timer.Stop()
-							}
-							_ = channel.SendText(`{"type":"auth_ok","version":1,"principal":{"type":"browser","scope":"remote.read.health"}}`)
-							fmt.Fprintf(os.Stderr, "browser_auth event=browser_authenticated connectionId=%s grantJtiPrefix=%s\n", principal.ConnectionID, hashGrantJTI(principal.GrantJTI))
-							return
-						default:
-							fmt.Fprintf(os.Stderr, "browser_auth event=auth_rejected reason=http_before_auth_or_unknown_message\n")
-							_ = channel.Close()
-							return
-						}
-					}
-				}
-				if !message.IsString {
-					id, err := bodyStreamAssembler.addBinary(message.Data)
-					if err != nil && id != "" {
-						encoded, _ := json.Marshal(httpResponse{ID: id, Type: "http_response", Error: "invalid request stream chunk"})
-						_ = channel.SendText(string(encoded))
-					}
-					return
-				}
-				if frameType.Type == "dc_ping" {
-					_, _ = handleKeepalivePing(message.Data, channel.SendText)
-					return
-				}
-				switch frameType.Type {
-				case "http_request_stream_v2_init":
-					var frame httpRequestStreamV2Init
-					if err := json.Unmarshal(message.Data, &frame); err != nil {
-						return
-					}
-					if err := bodyStreamAssembler.begin(frame); err != nil {
-						encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream metadata"})
-						_ = channel.SendText(string(encoded))
-					}
-					return
-				case "http_request_stream_v2_chunk":
-					var frame httpRequestStreamV2Chunk
-					if err := json.Unmarshal(message.Data, &frame); err != nil {
-						return
-					}
-					if err := bodyStreamAssembler.add(frame); err != nil {
-						encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream chunk"})
-						_ = channel.SendText(string(encoded))
-					}
-					return
-				case "http_request_stream_v2_abort":
-					var frame struct {
-						ID string `json:"id"`
-					}
-					if json.Unmarshal(message.Data, &frame) == nil {
-						bodyStreamAssembler.abort(frame.ID)
-					}
-					return
-				case "http_request_stream_v2_end":
-					var frame httpRequestStreamV2End
-					if err := json.Unmarshal(message.Data, &frame); err != nil {
-						return
-					}
-					request, body, length, err := bodyStreamAssembler.finish(frame)
-					if err != nil {
-						encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "request stream verification failed"})
-						_ = channel.SendText(string(encoded))
-						return
-					}
-					if fault.shouldDrop() {
-						_ = body.Close()
-						return
-					}
-					go func() {
-						defer body.Close()
-						var principal *browserPrincipal
-						if browserAuth != nil {
-							authSession.mu.Lock()
-							principal = authSession.principal
-							authSession.mu.Unlock()
-						}
-						response := proxyRequestBody(localBase, request, body, length, principal)
-						if fault.delayMs > 0 {
-							time.Sleep(time.Duration(fault.delayMs) * time.Millisecond)
-						}
-						if isCurrentPeer() {
-							if err := responseSender.send(request, response); err != nil {
-								fmt.Fprintf(os.Stderr, "[p2p-host] response_send_failed category=stream_or_channel\n")
-							}
-						}
-					}()
-					return
-				}
-				if frameType.Type == "http_request_stream_v1" {
-					var frame httpRequestStreamFrame
-					if err := json.Unmarshal(message.Data, &frame); err != nil {
-						return
-					}
-					payload, complete, err := streamAssembler.add(frame)
-					if err != nil {
-						encoded, _ := json.Marshal(httpResponse{ID: frame.ID, Type: "http_response", Error: "invalid request stream"})
-						_ = channel.SendText(string(encoded))
-						return
-					}
-					if !complete {
-						return
-					}
-					streamRequestID = frame.ID
-					message.Data = payload
-				}
-				var request httpRequest
-				if err := json.Unmarshal(message.Data, &request); err != nil || request.Type != "http_request" || request.ID == "" {
-					fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_message_decode_failed err=%v type=%s id=%s\n", err, request.Type, request.ID)
-					return
-				}
-				if streamRequestID != "" && request.ID != streamRequestID {
-					encoded, _ := json.Marshal(httpResponse{ID: streamRequestID, Type: "http_response", Error: "request stream identity mismatch"})
-					_ = channel.SendText(string(encoded))
-					return
-				}
-				fmt.Fprintf(os.Stderr, "[p2p-host] http_request id=%s method=%s path=%s\n", request.ID, request.Method, request.Path)
-				if fault.shouldDrop() {
-					// Simulate DataChannel packet loss: the request is never answered.
-					return
-				}
-				go func() {
-					var principal *browserPrincipal
-					if browserAuth != nil {
-						authSession.mu.Lock()
-						principal = authSession.principal
-						authSession.mu.Unlock()
-					}
-					response := proxyRequest(localBase, request, principal)
-					fmt.Fprintf(os.Stderr, "[p2p-host] http_response id=%s status=%d error=%s\n", response.ID, response.Status, response.Error)
-					if fault.delayMs > 0 {
-						time.Sleep(time.Duration(fault.delayMs) * time.Millisecond)
-					}
-					if isCurrentPeer() {
-						if err := responseSender.send(request, response); err != nil {
-							fmt.Fprintf(os.Stderr, "[p2p-host] response_send_failed category=stream_or_channel\n")
-						}
-					}
-				}()
-			})
+			attachDataChannel(channel, localBase, browserAuth, &activeChannels, isCurrentPeer, emit)
 		})
 		return createdPeer, nil
 	}

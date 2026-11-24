@@ -9,9 +9,9 @@ package org.webrtc
 
 open class DataChannel {
     open class Init {
-        var ordered: Boolean = true
-        var negotiated: Boolean = false
-        var id: Int = -1
+        @JvmField var ordered: Boolean = true
+        @JvmField var negotiated: Boolean = false
+        @JvmField var id: Int = -1
     }
 
     interface Observer {

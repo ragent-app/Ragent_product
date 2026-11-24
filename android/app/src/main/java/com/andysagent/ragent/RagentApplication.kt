@@ -2077,6 +2077,13 @@ class AndroidRuntimeGraph internal constructor(
         }
     }
 
+    internal suspend fun verifyActiveCarrier() {
+        initialized.await()
+        val controller = activeTargetRuntime()?.controller ?: return
+        retryUnhealthyForegroundConnection(controller)
+        controller.verifyForegroundCarrier { foreground }
+    }
+
     suspend fun selectTarget(instanceId: String) {
         require(instanceId.isNotBlank()) { "Computer target id must not be blank" }
         configStore.selectTarget(instanceId)

@@ -3,7 +3,9 @@ package com.andysagent.ragent.core.network
 import com.andysagent.ragent.core.protocol.SessionEventDto
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -42,6 +44,8 @@ data class ApiRequest(
     val isolateCredentialFailure: Boolean = false,
     /** Reopenable streaming body for direct HTTP uploads; never serialized into carrier metadata. */
     val bodySource: ApiRequestBodySource? = null,
+    /** Optional per-request total call timeout in milliseconds. */
+    val timeoutMs: Long? = null,
 )
 
 data class ApiResponse(
@@ -88,9 +92,20 @@ class ApiException(
     val headers: Map<String, String> = emptyMap(),
 ) : RuntimeException(message)
 
+enum class ActiveCarrier {
+    Direct,
+    P2P,
+    Turn,
+    None,
+}
+
+private val DefaultInactiveCarrierFlow: StateFlow<ActiveCarrier> =
+    MutableStateFlow(ActiveCarrier.None).asStateFlow()
+
 interface RagentTransport {
     val invalidations: Flow<InvalidationHint>
     val connectionState: StateFlow<RuntimeConnectionState>
+    val activeCarrier: StateFlow<ActiveCarrier> get() = DefaultInactiveCarrierFlow
     /** Endpoint-less TURN/P2P carriers need durable event polling. */
     val requiresEventPolling: Boolean get() = false
     suspend fun execute(request: ApiRequest): ApiResponse

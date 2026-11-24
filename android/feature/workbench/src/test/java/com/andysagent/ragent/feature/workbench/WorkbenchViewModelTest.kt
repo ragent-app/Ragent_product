@@ -1803,6 +1803,35 @@ class WorkbenchViewModelTest {
     }
 
     @Test
+    fun `manual project refresh reloads projects and sessions concurrently`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val projectsGate = CompletableDeferred<Unit>()
+            val sessionsGate = CompletableDeferred<Unit>()
+            val repository = FakeSessionRepository(connection = RuntimeConnectionState.Connected).apply {
+                projectsRefreshGate = projectsGate
+                sessionsRefreshGate = sessionsGate
+            }
+            val viewModel = ProjectsViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ProjectsEvent.Refresh)
+            runCurrent()
+
+            assertTrue(viewModel.state.value.refreshing)
+            assertEquals(1, repository.projectRefreshCalls)
+            assertEquals(1, repository.sessionRefreshCalls)
+
+            projectsGate.complete(Unit)
+            sessionsGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(viewModel.state.value.refreshing)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
     fun `delete listed project failure writes to listActionError and survives selectSession and updateConnection`() = runTest {
         Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         try {
@@ -2015,6 +2044,8 @@ private class FakeSessionRepository(
     var failProjectsRefresh: Throwable? = null
     var failComputersRefresh: Throwable? = null
     var sessionRefreshCalls: Int = 0
+    var projectsRefreshGate: CompletableDeferred<Unit>? = null
+    var sessionsRefreshGate: CompletableDeferred<Unit>? = null
     private val folders = mutableMapOf(
         "~" to ProjectFolderBrowser(
             path = "C:\\Workspace",
@@ -2088,10 +2119,12 @@ private class FakeSessionRepository(
     override suspend fun refreshComputers() { failComputersRefresh?.let { throw it } }
     override suspend fun refreshProjects() {
         projectRefreshCalls += 1
+        projectsRefreshGate?.await()
         failProjectsRefresh?.let { throw it }
     }
     override suspend fun refreshSessions() {
         sessionRefreshCalls += 1
+        sessionsRefreshGate?.await()
     }
     override suspend fun loadRuntimeCatalog(): RuntimeCatalog = runtimeCatalog
     override suspend fun loadHarnessCapabilities(sessionId: String, tool: String?, providerProfile: String?): HarnessCapabilityCatalog = capabilities
