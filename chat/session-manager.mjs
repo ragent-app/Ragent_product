@@ -168,6 +168,7 @@ import {
   broadcastOwners,
   broadcastSessionEvents,
   getClientsMatching,
+  notifyOwnerInvalidation,
   sendWithBackpressure,
 } from './ws-clients.mjs';
 import {
@@ -7725,6 +7726,9 @@ function broadcastScopedSessionsInvalidation(session) {
     return isSessionVisibleToAuthSession(authSession, session?.id, session);
   });
   sendToClients(clients, { type: 'sessions_invalidated' });
+  if (shouldExposeSession(session)) {
+    notifyOwnerInvalidation({ type: 'sessions_invalidated' });
+  }
 }
 
 // Exported so tests and diagnostics can drive the invalidation contract
@@ -7752,6 +7756,13 @@ export function broadcastSessionInvalidation(sessionId, {
     ...(eventsPushed === true ? { eventsPushed: true } : {}),
     ...(Number.isInteger(latestSeq) && latestSeq > 0 ? { latestSeq } : {}),
   });
+  if (shouldExposeSession(session)) {
+    notifyOwnerInvalidation({
+      type: 'session_invalidated',
+      sessionId,
+      ...(Number.isInteger(latestSeq) && latestSeq > 0 ? { latestSeq } : {}),
+    });
+  }
 }
 
 async function resolveAppTemplateFreshness(app) {

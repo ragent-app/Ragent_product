@@ -124,6 +124,7 @@ import com.andysagent.ragent.core.protocol.dedupeKey
 import com.andysagent.ragent.core.protocol.sessionEventFingerprint
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -140,6 +141,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.CoroutineScope
@@ -155,6 +157,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
@@ -209,6 +212,8 @@ class RoomSessionRepository(
     override val runtimeTargetId: String? get() = targetId
     private companion object {
         const val LIVE_TIMELINE_UI_INTERVAL_MS = 16L
+        const val LEGACY_LIVE_SYNC_POLL_INTERVAL_MS = 3_000L
+        const val PUSH_LIVE_SYNC_SWEEP_INTERVAL_MS = 30_000L
         const val MAX_ATTACHMENT_BYTES = FileAssetUploadClient.MAXIMUM_METADATA_BYTES
         const val DEFAULT_ATTACHMENT_BUFFER_BYTES = 64 * 1024
         const val INTERACTIVE_CRUD_TIMEOUT_MS = 10_000L
@@ -260,6 +265,8 @@ class RoomSessionRepository(
     private val liveSyncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val liveSyncLock = Any()
     private val liveSyncJobs = mutableMapOf<String, Job>()
+    private val sessionReconcileWakeups = java.util.concurrent.ConcurrentHashMap<String, Channel<Unit>>()
+    @Volatile internal var onLiveSyncPollIntervalSelected: ((Long) -> Unit)? = null
     private var liveSyncCoordinatorJob: Job? = null
     private val retiredLiveSyncJobs = mutableListOf<Job>()
     private val liveProjectors = mutableMapOf<String, LiveTimelineProjector>()
@@ -303,21 +310,72 @@ class RoomSessionRepository(
     override val requiresLiveSync: Boolean
         get() = transport.requiresEventPolling
 
+    private fun wakeSessionReconcile(sessionId: String) {
+        val active = synchronized(liveSyncLock) { liveSyncJobs[sessionId]?.isActive == true }
+        if (active) {
+            sessionReconcileWakeups[sessionId]?.trySend(Unit)
+        }
+    }
+
+    private suspend fun awaitSessionReconcileDelay(wakeChannel: Channel<Unit>, delayMs: Long): Boolean =
+        withTimeoutOrNull(delayMs) { wakeChannel.receive() } != null
+
     override fun startLiveSync() {
         if (!transport.requiresEventPolling) return
         synchronized(liveSyncLock) {
             if (liveSyncCoordinatorJob?.isActive == true) return
             liveSyncCoordinatorJob = liveSyncScope.launch {
+                val sessionsWake = Channel<Unit>(Channel.CONFLATED)
+                val projectsWake = Channel<Unit>(Channel.CONFLATED)
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    var previousPushSupport = transport.carrierSupportsPushInvalidations.value
+                    transport.carrierSupportsPushInvalidations.collect { current ->
+                        if (previousPushSupport && !current) {
+                            sessionsWake.trySend(Unit)
+                        }
+                        previousPushSupport = current
+                    }
+                }
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    transport.invalidations.collect { hint ->
+                        when (hint.type) {
+                            "sessions_invalidated" -> sessionsWake.trySend(Unit)
+                            "projects_invalidated", "project_invalidated" -> projectsWake.trySend(Unit)
+                            "session_invalidated", "session_events" -> {
+                                hint.sessionId?.takeIf { it.isNotBlank() }?.let(::wakeSessionReconcile)
+                            }
+                        }
+                    }
+                }
+                launch {
+                    for (signal in projectsWake) {
+                        connectionState.filter { it == RuntimeConnectionState.Connected }.first()
+                        try { refreshProjects() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { /* Retain the last authoritative list until retry. */ }
+                    }
+                }
                 // Endpoint-less carriers have no directory invalidation socket.
                 // Reconcile even idle sessions so another phone's delete/rename
                 // appears without reconnecting or starting a model run.
+                // When the carrier pushes invalidations over the DataChannel,
+                // relax the unconditional poll to a 30s safety sweep and wake
+                // immediately whenever invalidations arrive.
                 launch {
                     while (isActive) {
                         connectionState.filter { it == RuntimeConnectionState.Connected }.first()
                         try { refreshSessions() }
                         catch (cancelled: CancellationException) { throw cancelled }
                         catch (_: Exception) { /* Retain the last authoritative list until retry. */ }
-                        delay(3_000)
+                        val pollIntervalMs = if (transport.carrierSupportsPushInvalidations.value) {
+                            PUSH_LIVE_SYNC_SWEEP_INTERVAL_MS
+                        } else {
+                            LEGACY_LIVE_SYNC_POLL_INTERVAL_MS
+                        }
+                        onLiveSyncPollIntervalSelected?.invoke(pollIntervalMs)
+                        withTimeoutOrNull(pollIntervalMs) {
+                            sessionsWake.receive()
+                        }
                     }
                 }
                 combine(observeSessions(), observeRows(dao.observeAllPendingApprovals())) { sessions, approvals ->
@@ -484,48 +542,59 @@ class RoomSessionRepository(
     private suspend fun reconcileDurableSessionUntilSettled(sessionId: String, background: Boolean = false) {
         var retryDelayMs = 1_000L
         var lastDetailRefresh = 0L
-        while (liveSyncScope.isActive) {
-            connectionState
-                .filter { it == com.andysagent.ragent.core.model.RuntimeConnectionState.Connected }
-                .first()
-            try {
-                // Detail carries the authoritative run/session state; events
-                // then advance the Room cursor and materialize the reply.
-                val now = android.os.SystemClock.elapsedRealtime()
-                val detail = if (now - lastDetailRefresh >= 1_000L || lastDetailRefresh == 0L) {
-                    lastDetailRefresh = now
-                    refreshSessionDetail(sessionId)
-                } else dao.getSession(sessionId)?.let(::toDomain)
-                val result = refreshEvents(sessionId)
-                if (result is RefreshResult.ResetRequired) return
-                val terminal = detail == null || detail.status == SessionStatus.Completed ||
-                    detail.status == SessionStatus.Failed || detail.status == SessionStatus.Cancelled ||
-                    detail.status == SessionStatus.Idle
-                // A finished run can still have unread event pages or a failed
-                // visible-history refresh. Keep reconciling until the terminal
-                // message and tool results have actually reached the UI.
-                if (terminal && result is RefreshResult.Applied &&
-                    result.latestSeq >= (detail?.latestSeq ?: 0L) &&
-                    sessionId !in pendingVisibleOperationRefresh
-                ) {
-                    if (dao.getPendingApprovals(sessionId).none { !it.runId.isNullOrBlank() }) return
-                    // Keep retrying missed terminal events or transient run
-                    // lookups, without a tight loop on unverifiable requests.
-                    delay(5_000L)
-                    continue
+        var forceDetailRefresh = false
+        val wakeChannel = sessionReconcileWakeups.computeIfAbsent(sessionId) { Channel(Channel.CONFLATED) }
+        while (wakeChannel.tryReceive().isSuccess) {
+            // Discard signals from an earlier reconciliation lifecycle.
+        }
+        try {
+            while (liveSyncScope.isActive) {
+                connectionState
+                    .filter { it == com.andysagent.ragent.core.model.RuntimeConnectionState.Connected }
+                    .first()
+                try {
+                    // Detail carries the authoritative run/session state; events
+                    // then advance the Room cursor and materialize the reply.
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val detail = if (forceDetailRefresh || now - lastDetailRefresh >= 1_000L || lastDetailRefresh == 0L) {
+                        forceDetailRefresh = false
+                        lastDetailRefresh = now
+                        refreshSessionDetail(sessionId)
+                    } else dao.getSession(sessionId)?.let(::toDomain)
+                    val result = refreshEvents(sessionId)
+                    if (result is RefreshResult.ResetRequired) return
+                    val terminal = detail == null || detail.status == SessionStatus.Completed ||
+                        detail.status == SessionStatus.Failed || detail.status == SessionStatus.Cancelled ||
+                        detail.status == SessionStatus.Idle
+                    // A finished run can still have unread event pages or a failed
+                    // visible-history refresh. Keep reconciling until the terminal
+                    // message and tool results have actually reached the UI.
+                    if (terminal && result is RefreshResult.Applied &&
+                        result.latestSeq >= (detail?.latestSeq ?: 0L) &&
+                        sessionId !in pendingVisibleOperationRefresh
+                    ) {
+                        if (dao.getPendingApprovals(sessionId).none { !it.runId.isNullOrBlank() }) return
+                        // Keep retrying missed terminal events or transient run
+                        // lookups, without a tight loop on unverifiable requests.
+                        forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, 5_000L)
+                        continue
+                    }
+                    retryDelayMs = 1_000L
+                    val sleepMs = if (background) 5_000L else if (sessionId in dedicatedLiveSessions) 1_000L else if (sessionId in liveFeedCapable) 200L else retryDelayMs
+                    forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, sleepMs)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: ApiException) {
+                    if (error.statusCode == 401 || error.statusCode == 403) return
+                    forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, retryDelayMs)
+                    retryDelayMs = minOf(5_000L, retryDelayMs * 2L)
+                } catch (_: Throwable) {
+                    forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, retryDelayMs)
+                    retryDelayMs = minOf(5_000L, retryDelayMs * 2L)
                 }
-                retryDelayMs = 1_000L
-                delay(if (background) 5_000L else if (sessionId in dedicatedLiveSessions) 1_000L else if (sessionId in liveFeedCapable) 200L else retryDelayMs)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: ApiException) {
-                if (error.statusCode == 401 || error.statusCode == 403) return
-                delay(retryDelayMs)
-                retryDelayMs = minOf(5_000L, retryDelayMs * 2L)
-            } catch (_: Throwable) {
-                delay(retryDelayMs)
-                retryDelayMs = minOf(5_000L, retryDelayMs * 2L)
             }
+        } finally {
+            sessionReconcileWakeups.remove(sessionId, wakeChannel)
         }
     }
 

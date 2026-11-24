@@ -181,3 +181,16 @@ internal data class P2PKeepalivePongFrame(
     val type: String = "",
     val id: String = "",
 )
+
+@Serializable
+internal data class P2PClientReadyFrame(
+    val type: String = "client_ready",
+    val version: Int = 1,
+    val features: List<String> = emptyList(),
+)
+
+@Serializable
+internal data class P2PPushInvalidationFrame(
+    val type: String = "",
+    val payload: kotlinx.serialization.json.JsonElement? = null,
+)

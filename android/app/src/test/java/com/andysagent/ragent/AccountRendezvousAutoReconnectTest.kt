@@ -112,7 +112,7 @@ class AccountRendezvousAutoReconnectTest {
     }
 
     @Test
-    fun `restart recovery keeps persisted primary out of background connections`() {
+    fun `restart recovery keeps persisted primary and leaves background targets on-demand by default`() {
         val plan = automaticConnectionRecoveryPlan(
             directory = ComputerDirectory(
                 computers = listOf(
@@ -125,15 +125,29 @@ class AccountRendezvousAutoReconnectTest {
         )
 
         assertEquals("windows", plan.primaryInstanceId)
-        assertEquals(listOf("mac"), plan.backgroundInstanceIds)
+        assertEquals(emptyList<String>(), plan.backgroundInstanceIds)
+
+        val eagerPlan = automaticConnectionRecoveryPlan(
+            directory = ComputerDirectory(
+                computers = listOf(
+                    accountTarget,
+                    accountTarget.copy(instanceId = "mac"),
+                ),
+                activeTargetId = "windows",
+            ),
+            maximumConcurrentConnections = 2,
+            includeBackgroundTargets = true,
+        )
+        assertEquals("windows", eagerPlan.primaryInstanceId)
+        assertEquals(listOf("mac"), eagerPlan.backgroundInstanceIds)
     }
 
-    @Test fun `legacy primary without background opt in remains the primary on reopen`() {
+    @Test fun `legacy primary without background opt in remains the primary on reopen with empty background list`() {
         val plan = automaticConnectionRecoveryPlan(ComputerDirectory(
             computers = listOf(accountTarget.copy(autoConnect = false), accountTarget.copy(instanceId = "mac"),
                 accountTarget.copy(instanceId = "paired-only", autoConnect = false)),
             activeTargetId = "windows"), maximumConcurrentConnections = 2)
         assertEquals("windows", plan.primaryInstanceId)
-        assertEquals(listOf("mac"), plan.backgroundInstanceIds)
+        assertEquals(emptyList<String>(), plan.backgroundInstanceIds)
     }
 }

@@ -59,7 +59,7 @@ const [
   managedProcesses,
   { startProjectMemoryRecovery },
   bindingAuthorityRuntime,
-  { closeInvalidBindingClients },
+  { closeInvalidBindingClients, subscribeOwnerInvalidations },
 ] = await Promise.all([
   import('./lib/config.mjs'),
   import('./chat/router.mjs'),
@@ -181,10 +181,19 @@ async function runRendezvousPoll() {
         iceServers,
         relayOnly: true,
         expiresAt,
+        onDemand: true,
+        spawnOnInit: true,
+        subscribeOwnerInvalidations,
         activeConnectionId: bootstrap?.turn?.connectionId || '',
         prepareHandoff: prepareRequestedTurnHandoff,
         commitHandoff: commitRequestedTurnHandoff,
         releaseHandoff: releaseRequestedTurnHandoff,
+        resolveBootstrap: async ({ deviceId: targetDeviceId }) => {
+          if (!authorizationGuard()) throw new Error('Local account association inactive');
+          const contract = await buildDeviceConnectionBootstrapContract({ deviceId: targetDeviceId });
+          if (!authorizationGuard()) throw new Error('Local account association inactive');
+          return contract;
+        },
         refreshHost: async (refreshDeviceId) => {
           if (!authorizationGuard()) throw new Error('Local account association inactive');
           const bootstrap = await buildDeviceConnectionBootstrapContract({ deviceId: refreshDeviceId });
@@ -192,6 +201,7 @@ async function runRendezvousPoll() {
           return {
             iceServers: bootstrap?.turn?.iceServers || [],
             expiresAt: bootstrap?.turn?.expiresAt,
+            connectionId: bootstrap?.turn?.connectionId || '',
           };
         },
       }); },
@@ -252,6 +262,8 @@ async function restoreMissingAccountP2PHosts(generation) {
     signalingUrl: P2P_SIGNALING_URL,
     localBaseUrl: `http://127.0.0.1:${CHAT_PORT}`,
     authorizationGuard,
+    onDemand: true,
+    subscribeOwnerInvalidations,
     getP2PAccess: async deviceId => {
       if (!authorizationGuard()) throw new Error('Local account association inactive');
       const access = await getTrustedDeviceP2PAccess(deviceId);

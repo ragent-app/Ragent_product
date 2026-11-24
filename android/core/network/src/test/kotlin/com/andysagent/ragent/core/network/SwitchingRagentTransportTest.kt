@@ -106,15 +106,40 @@ class SwitchingRagentTransportTest {
         facade.close()
         assertEquals(ActiveCarrier.None, facade.activeCarrier.value)
     }
+
+    @Test
+    fun carrierSupportsPushInvalidationsDelegatesAndTracksSelectedTransport() = runBlocking {
+        val facade = SwitchingRagentTransport(CoroutineScope(Dispatchers.Unconfined))
+        val legacy = FakeTransport("a", initialPushSupport = false)
+        val pushCapable = FakeTransport("b", initialPushSupport = true)
+
+        assertEquals(false, facade.carrierSupportsPushInvalidations.value)
+        facade.switchTo(legacy)
+        assertEquals(false, facade.carrierSupportsPushInvalidations.value)
+
+        legacy.pushSupportState.value = true
+        assertEquals(true, facade.carrierSupportsPushInvalidations.value)
+
+        facade.switchTo(pushCapable)
+        assertEquals(true, facade.carrierSupportsPushInvalidations.value)
+
+        pushCapable.pushSupportState.value = false
+        assertEquals(false, facade.carrierSupportsPushInvalidations.value)
+
+        facade.close()
+        assertEquals(false, facade.carrierSupportsPushInvalidations.value)
+    }
 }
 
 private class FakeTransport(
     private val responseBody: String,
     override val requiresEventPolling: Boolean = false,
     initialCarrier: ActiveCarrier = ActiveCarrier.None,
+    initialPushSupport: Boolean = false,
 ) : RagentTransport {
     private val mutableState = MutableStateFlow(RuntimeConnectionState.Connected)
     val carrierState = MutableStateFlow(initialCarrier)
+    val pushSupportState = MutableStateFlow(initialPushSupport)
     var requestCount: Int = 0
         private set
     var closeCount: Int = 0
@@ -123,6 +148,7 @@ private class FakeTransport(
     override val invalidations: Flow<InvalidationHint> = emptyFlow()
     override val connectionState = mutableState
     override val activeCarrier = carrierState
+    override val carrierSupportsPushInvalidations = pushSupportState
 
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requestCount += 1

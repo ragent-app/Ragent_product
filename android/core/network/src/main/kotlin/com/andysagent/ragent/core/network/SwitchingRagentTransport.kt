@@ -29,6 +29,10 @@ class SwitchingRagentTransport(scope: CoroutineScope, private val closeDelegates
         .flatMapLatest { it?.activeCarrier ?: flowOf(ActiveCarrier.None) }
         .stateIn(scope, SharingStarted.Eagerly, ActiveCarrier.None)
 
+    override val carrierSupportsPushInvalidations: StateFlow<Boolean> = mutableDelegate
+        .flatMapLatest { it?.carrierSupportsPushInvalidations ?: flowOf(false) }
+        .stateIn(scope, SharingStarted.Eagerly, false)
+
     override val invalidations: Flow<InvalidationHint> = mutableDelegate
         .flatMapLatest { it?.invalidations ?: emptyFlow() }
 

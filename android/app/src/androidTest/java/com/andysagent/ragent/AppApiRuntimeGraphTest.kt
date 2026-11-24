@@ -1361,33 +1361,37 @@ class AppApiRuntimeGraphTest {
         assertEquals(1, databaseCloses.getValue("pc-a").get())
     }
 
-    @Test fun reopeningGraphRestoresPrimaryBeforeBackgroundAndLeavesPairedOnlyIdle() = runBlocking {
+    @Test fun reopeningGraphRestoresOnlyPrimaryAndConnectsBackgroundTargetsOnDemand() = runBlocking {
         config.upsertComputer(LinkedComputer("pc-a", "", "Primary", autoConnect = false), select = true)
         config.upsertComputer(LinkedComputer("pc-b", "", "Background", autoConnect = true))
         config.upsertComputer(LinkedComputer("pc-c", "", "Paired only", autoConnect = false))
         var graph = graph()
         connectionStartOrder.clear()
         withContext(Dispatchers.Main) { graph.onStart(owner) }
-        until { carriers["pc-a"]?.starts?.get() == 1 && carriers["pc-b"]?.starts?.get() == 1 }
-        assertEquals(listOf("pc-a", "pc-b"), connectionStartOrder.toList())
-        until { graph.targetConnectionStates.value == mapOf("pc-a" to RuntimeConnectionState.Connected,
-            "pc-b" to RuntimeConnectionState.Connected) }
+        until { carriers["pc-a"]?.starts?.get() == 1 }
+        assertEquals(listOf("pc-a"), connectionStartOrder.toList())
+        until { graph.targetConnectionStates.value == mapOf("pc-a" to RuntimeConnectionState.Connected) }
+        assertNull(carriers["pc-b"])
         assertNull(carriers["pc-c"])
         assertEquals("pc-a", config.directory.first().activeTargetId)
-        val previousA = carriers.getValue("pc-a"); val previousB = carriers.getValue("pc-b")
+        val previousA = carriers.getValue("pc-a")
         graph.close(); graphs.remove(graph)
         assertTrue(graph.targetConnectionStates.value.isEmpty())
-        assertEquals(1, previousA.closes.get()); assertEquals(1, previousB.closes.get())
+        assertEquals(1, previousA.closes.get())
         connectionStartOrder.clear()
         graph = graph()
         withContext(Dispatchers.Main) { graph.onStart(owner) }
-        until { carriers["pc-a"] !== previousA && carriers["pc-a"]?.starts?.get() == 1 &&
-            carriers["pc-b"] !== previousB && carriers["pc-b"]?.starts?.get() == 1 }
-        assertEquals(listOf("pc-a", "pc-b"), connectionStartOrder.toList())
-        until { graph.targetConnectionStates.value == mapOf("pc-a" to RuntimeConnectionState.Connected,
-            "pc-b" to RuntimeConnectionState.Connected) }
+        until { carriers["pc-a"] !== previousA && carriers["pc-a"]?.starts?.get() == 1 }
+        assertEquals(listOf("pc-a"), connectionStartOrder.toList())
+        until { graph.targetConnectionStates.value == mapOf("pc-a" to RuntimeConnectionState.Connected) }
+        assertNull(carriers["pc-b"])
         assertNull(carriers["pc-c"])
         assertEquals("pc-a", config.directory.first().activeTargetId)
+        // On-demand access connects pc-b temporarily and releases it when finished.
+        graph.withTargetRuntime("pc-b") {
+            assertEquals(1, carriers.getValue("pc-b").starts.get())
+        }
+        assertEquals(1, carriers.getValue("pc-b").closes.get())
         assertEquals(0, pcs.values.sumOf { it.posts.get() })
     }
 

@@ -5,6 +5,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.advanceTimeBy
@@ -516,6 +519,101 @@ class P2PDataChannelTransportTest {
             )
             assertEquals(1, primary.sentTexts.size)
             assertTrue(sendElapsed < 3_000L, "Expected send timeout near 120ms, was ${sendElapsed}ms")
+        } finally {
+            transport.close()
+        }
+    }
+
+    @Test
+    fun `dc_push_invalidation_v1 sends client_ready on primary channel and emits dc_push_v1 payloads`() = runBlocking {
+        val primary = ControllableDataChannel(initialState = DataChannel.State.OPEN)
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate("https://signal.example.com", "room-push", "secret"),
+            appContext = stubContext(),
+        )
+        try {
+            val observer = transport.attachDataChannelForTest(primary)
+            assertFalse(transport.supportsPushInvalidations)
+
+            val received = mutableListOf<String>()
+            val collectedThree = CompletableDeferred<Unit>()
+            val collector = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                transport.invalidations.take(3).toList(received)
+                collectedThree.complete(Unit)
+            }
+
+            observer.onMessage(textBuffer("""{"type":"server_ready","version":1,"features":["dc_keepalive_v1","dc_push_invalidation_v1"]}"""))
+            assertTrue(transport.supportsPushInvalidations)
+
+            withTimeout(5_000L) { primary.sentSignal.await() }
+            assertEquals(1, primary.sentTexts.size)
+            val clientReady = Json.parseToJsonElement(primary.sentTexts.single()).jsonObject
+            assertEquals("client_ready", clientReady["type"]?.jsonPrimitive?.content)
+            assertEquals("1", clientReady["version"]?.jsonPrimitive?.content)
+            assertEquals(
+                listOf("dc_push_invalidation_v1"),
+                clientReady["features"]?.let { elem ->
+                    (elem as kotlinx.serialization.json.JsonArray).map { it.jsonPrimitive.content }
+                },
+            )
+
+            observer.onMessage(textBuffer("""{"type":"dc_push_v1","payload":{"type":"sessions_invalidated"}}"""))
+            observer.onMessage(textBuffer("""{"type":"dc_push_v1","payload":{"type":"projects_invalidated"}}"""))
+            observer.onMessage(textBuffer("""{"type":"dc_push_v1","payload":{"type":"session_invalidated","sessionId":"s-1","latestSeq":42}}"""))
+            withTimeout(5_000L) { collectedThree.await() }
+            collector.cancel()
+
+            assertEquals(3, received.size)
+            assertEquals("sessions_invalidated", Json.parseToJsonElement(received[0]).jsonObject["type"]?.jsonPrimitive?.content)
+            assertEquals("projects_invalidated", Json.parseToJsonElement(received[1]).jsonObject["type"]?.jsonPrimitive?.content)
+            val sessionPush = Json.parseToJsonElement(received[2]).jsonObject
+            assertEquals("session_invalidated", sessionPush["type"]?.jsonPrimitive?.content)
+            assertEquals("s-1", sessionPush["sessionId"]?.jsonPrimitive?.content)
+            assertEquals("42", sessionPush["latestSeq"]?.jsonPrimitive?.content)
+            assertEquals(0L, transport.successfulResponseGeneration)
+
+            // Burst > 64 dc_push_v1 frames while collector is paused drops oldest without blocking dispatch.
+            val firstHandled = CompletableDeferred<Unit>()
+            val releaseCollector = CompletableDeferred<Unit>()
+            val burstTypes = mutableListOf<String>()
+            val slowCollector = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                transport.invalidations.collect { raw ->
+                    burstTypes += Json.parseToJsonElement(raw).jsonObject["type"]!!.jsonPrimitive.content
+                    if (burstTypes.size == 1) {
+                        firstHandled.complete(Unit)
+                        releaseCollector.await()
+                    }
+                }
+            }
+            observer.onMessage(textBuffer("""{"type":"dc_push_v1","payload":{"type":"burst_0"}}"""))
+            withTimeout(5_000L) { firstHandled.await() }
+            for (i in 1..70) {
+                observer.onMessage(textBuffer("""{"type":"dc_push_v1","payload":{"type":"burst_$i"}}"""))
+            }
+            releaseCollector.complete(Unit)
+            withTimeout(5_000L) { while (burstTypes.size < 65) delay(10L) }
+            slowCollector.cancel()
+            assertEquals("burst_0", burstTypes.first())
+            assertEquals("burst_7", burstTypes[1])
+            assertEquals("burst_70", burstTypes.last())
+        } finally {
+            transport.close()
+        }
+    }
+
+    @Test
+    fun `server_ready without dc_push_invalidation_v1 keeps push disabled and skips client_ready`() = runBlocking {
+        val primary = ControllableDataChannel(initialState = DataChannel.State.OPEN)
+        val transport = WebRTCDataChannelTransport(
+            candidate = P2PCandidate("https://signal.example.com", "room-legacy", "secret"),
+            appContext = stubContext(),
+        )
+        try {
+            val observer = transport.attachDataChannelForTest(primary)
+            observer.onMessage(textBuffer("""{"type":"server_ready","version":1,"features":["dc_keepalive_v1"]}"""))
+            delay(50L)
+            assertFalse(transport.supportsPushInvalidations)
+            assertTrue(primary.sentTexts.isEmpty())
         } finally {
             transport.close()
         }

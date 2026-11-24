@@ -12,6 +12,132 @@ const MAX_WS_BUFFERED_BYTES = Math.max(
     || 2 * 1024 * 1024,
 );
 const MAX_WS_SLOW_SENDS = 5;
+const OWNER_INVALIDATION_COALESCE_MS = 50;
+const ownerInvalidationListeners = new Set();
+const pendingOwnerInvalidations = new Map();
+
+function positiveInt(value) {
+  return Number.isInteger(value) && value > 0 ? value : 0;
+}
+
+function maxEventSeq(events) {
+  if (!Array.isArray(events)) return 0;
+  let max = 0;
+  for (const event of events) {
+    max = Math.max(max, positiveInt(event?.endSeq), positiveInt(event?.seq));
+  }
+  return max;
+}
+
+function sanitizeOwnerInvalidation(msg) {
+  if (!msg || typeof msg !== 'object') return null;
+  const type = typeof msg.type === 'string' ? msg.type.trim() : '';
+  if (!type) return null;
+  if (type === 'session_events' || type === 'session_invalidated') {
+    const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId.trim() : '';
+    if (!sessionId) return null;
+    const latestSeq = positiveInt(msg.latestSeq) || (type === 'session_events' ? maxEventSeq(msg.events) : 0);
+    return {
+      type: 'session_invalidated',
+      sessionId,
+      ...(latestSeq > 0 ? { latestSeq } : {}),
+    };
+  }
+  if (!type.endsWith('_invalidated')) return null;
+  if (type === 'sessions_invalidated' || type === 'projects_invalidated' || type === 'windows_broker_approvals_invalidated') {
+    return { type };
+  }
+  if (type === 'project_invalidated') {
+    return {
+      type,
+      ...(typeof msg.projectId === 'string' && msg.projectId ? { projectId: msg.projectId } : {}),
+    };
+  }
+  if (type === 'harnesses_invalidated' || type === 'harness_invalidated') {
+    return {
+      type,
+      ...(typeof msg.harness === 'string' && msg.harness ? { harness: msg.harness } : {}),
+    };
+  }
+  if (type === 'target_runtime_summary_invalidated') {
+    return {
+      type,
+      ...(typeof msg.targetId === 'string' && msg.targetId ? { targetId: msg.targetId } : {}),
+      ...(msg.revision != null ? { revision: msg.revision } : {}),
+      ...(msg.cursor != null ? { cursor: msg.cursor } : {}),
+    };
+  }
+  if (type === 'organization_invalidated') {
+    return {
+      type,
+      ...(typeof msg.organizationId === 'string' && msg.organizationId ? { organizationId: msg.organizationId } : {}),
+      ...(Number.isInteger(msg.eventId) ? { eventId: msg.eventId } : {}),
+      ...(Number.isInteger(msg.revision) ? { revision: msg.revision } : {}),
+      ...(Number.isInteger(msg.progressEpoch) ? { progressEpoch: msg.progressEpoch } : {}),
+      ...(msg.projectionDigest != null ? { projectionDigest: msg.projectionDigest } : {}),
+    };
+  }
+  return {
+    type,
+    ...(typeof msg.sessionId === 'string' && msg.sessionId ? { sessionId: msg.sessionId } : {}),
+  };
+}
+
+function ownerInvalidationKey(payload) {
+  return `${payload.type}:${payload.sessionId || payload.organizationId || payload.projectId || ''}`;
+}
+
+function mergeOwnerInvalidation(prev, next) {
+  const latestSeq = Math.max(positiveInt(prev?.latestSeq), positiveInt(next?.latestSeq));
+  return {
+    ...prev,
+    ...next,
+    ...(latestSeq > 0 ? { latestSeq } : {}),
+  };
+}
+
+export function notifyOwnerInvalidation(msg) {
+  if (ownerInvalidationListeners.size === 0) return;
+  const normalized = sanitizeOwnerInvalidation(msg);
+  if (!normalized) return;
+  const key = ownerInvalidationKey(normalized);
+  const existing = pendingOwnerInvalidations.get(key);
+  if (existing) {
+    existing.payload = mergeOwnerInvalidation(existing.payload, normalized);
+    return;
+  }
+  const entry = { payload: normalized, timer: null };
+  entry.timer = setTimeout(() => {
+    if (pendingOwnerInvalidations.get(key) === entry) {
+      pendingOwnerInvalidations.delete(key);
+    }
+    const payload = entry.payload;
+    for (const listener of [...ownerInvalidationListeners]) {
+      try { listener(payload); } catch {}
+    }
+  }, OWNER_INVALIDATION_COALESCE_MS);
+  entry.timer.unref?.();
+  pendingOwnerInvalidations.set(key, entry);
+}
+
+export function subscribeOwnerInvalidations(listener) {
+  if (typeof listener !== 'function') {
+    throw new TypeError('listener must be a function');
+  }
+  ownerInvalidationListeners.add(listener);
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    ownerInvalidationListeners.delete(listener);
+    if (ownerInvalidationListeners.size === 0) {
+      for (const entry of pendingOwnerInvalidations.values()) {
+        clearTimeout(entry.timer);
+      }
+      pendingOwnerInvalidations.clear();
+    }
+  };
+}
 
 export function sendWithBackpressure(client, data, fallbackData = null) {
   if (!allowsRemoteBinding(client?._authSession)) {
@@ -69,6 +195,15 @@ export function closeInvalidBindingClients({ deviceId = '' } = {}) {
 }
 
 export function broadcastMatching(msg, predicate = () => true) {
+  let ownerMatches = false;
+  try {
+    ownerMatches = Boolean(predicate({ readyState: 1, _authSession: { role: 'owner' } }));
+  } catch {
+    ownerMatches = false;
+  }
+  if (ownerMatches) {
+    notifyOwnerInvalidation(msg);
+  }
   if (!wss) return;
   const data = JSON.stringify(msg);
   for (const client of wss.clients) {
@@ -101,6 +236,15 @@ export function broadcastSessionEvents(sessionId, events, {
   const legacyAppended = publishAllLiveEvents(sessionLiveFeed, sessionId, events);
   const realtimeAppended = publishAllLiveEvents(sessionRealtimeLiveFeed, sessionId, events);
   if (legacyAppended || realtimeAppended) notifySessionEvents(sessionId);
+  const resolvedLatestSeq = positiveInt(latestSeq) || maxEventSeq(events);
+  const meta = typeof findSessionMetaCached === 'function' ? findSessionMetaCached(sessionId) : null;
+  if (!meta?.internalRole) {
+    notifyOwnerInvalidation({
+      type: 'session_events',
+      sessionId,
+      ...(resolvedLatestSeq > 0 ? { latestSeq: resolvedLatestSeq } : {}),
+    });
+  }
   if (!wss) return;
   const msg = {
     type: 'session_events',

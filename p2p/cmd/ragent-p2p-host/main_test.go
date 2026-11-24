@@ -646,3 +646,307 @@ func TestThreeDataChannelsConcurrentAndChannelLimit(t *testing.T) {
 		t.Fatalf("unexpected bg long-poll response: %#v", bgWaitResp)
 	}
 }
+
+type stubPushChannel struct {
+	readyState     webrtc.DataChannelState
+	bufferedAmount uint64
+	sent           []string
+}
+
+func (c *stubPushChannel) SendText(s string) error {
+	c.sent = append(c.sent, s)
+	return nil
+}
+
+func (c *stubPushChannel) BufferedAmount() uint64 {
+	return c.bufferedAmount
+}
+
+func (c *stubPushChannel) ReadyState() webrtc.DataChannelState {
+	return c.readyState
+}
+
+func TestServerReadyPushInvalidationFeatureAndBrowserAuthExclusion(t *testing.T) {
+	features := serverReadyFeatures()
+	if !slices.Contains(features, "dc_push_invalidation_v1") {
+		t.Fatalf("serverReadyFeatures() missing dc_push_invalidation_v1: %#v", features)
+	}
+	trustedFeatures := serverReadyFeatures(nil)
+	if !slices.Contains(trustedFeatures, "dc_push_invalidation_v1") {
+		t.Fatalf("serverReadyFeatures(nil) missing dc_push_invalidation_v1: %#v", trustedFeatures)
+	}
+	browserFeatures := serverReadyFeatures(&browserAuthConfig{})
+	if slices.Contains(browserFeatures, "dc_push_invalidation_v1") {
+		t.Fatalf("serverReadyFeatures(browserAuth) must not advertise dc_push_invalidation_v1: %#v", browserFeatures)
+	}
+}
+
+func TestPushInvalidationBackpressureAndBrowserAuthGating(t *testing.T) {
+	ch := &stubPushChannel{
+		readyState:     webrtc.DataChannelStateOpen,
+		bufferedAmount: maxResponseBufferedBytes + 1,
+	}
+	sender := newResponseSender(ch, func() bool { return true })
+	if sender.trySendPush([]byte(`{"type":"dc_push_v1","payload":{"type":"sessions_invalidated"}}`)) {
+		t.Fatal("trySendPush must drop when BufferedAmount exceeds maxResponseBufferedBytes")
+	}
+	if len(ch.sent) != 0 {
+		t.Fatalf("expected no frames sent under backpressure, got %d", len(ch.sent))
+	}
+
+	ch.bufferedAmount = maxResponseBufferedBytes
+	ch.readyState = webrtc.DataChannelStateClosed
+	if sender.trySendPush([]byte(`{"type":"dc_push_v1","payload":{"type":"sessions_invalidated"}}`)) {
+		t.Fatal("trySendPush must drop when channel is closed")
+	}
+
+	ch.readyState = webrtc.DataChannelStateOpen
+	if !sender.trySendPush([]byte(`{"type":"dc_push_v1","payload":{"type":"sessions_invalidated"}}`)) {
+		t.Fatal("trySendPush should send when open and within buffer limit")
+	}
+	if len(ch.sent) != 1 {
+		t.Fatalf("expected 1 pushed frame, got %d", len(ch.sent))
+	}
+
+	// Browser-authenticated channels must never negotiate push invalidation.
+	state := newPeerPushState(func() bool { return true })
+	var settings webrtc.SettingEngine
+	settings.SetIncludeLoopbackCandidate(true)
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	dc, err := pc.CreateDataChannel("ragent-http", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.attachPrimary(dc, sender)
+	handled := state.handleClientReady(dc, &browserAuthConfig{}, []byte(`{"type":"client_ready","version":1,"features":["dc_push_invalidation_v1"]}`))
+	if !handled {
+		t.Fatal("expected client_ready frame to be recognized")
+	}
+	if state.isPushNegotiated() {
+		t.Fatal("browserAuth must block dc_push_invalidation_v1 negotiation")
+	}
+	if state.sendPushInvalidation(json.RawMessage(`{"type":"sessions_invalidated"}`)) {
+		t.Fatal("sendPushInvalidation must return false when not negotiated")
+	}
+}
+
+func TestPushInvalidationNegotiationAndDeliveryOverDataChannel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	var settings webrtc.SettingEngine
+	settings.SetIncludeLoopbackCandidate(true)
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+	client, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	host, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer host.Close()
+
+	var current atomic.Bool
+	current.Store(true)
+	isCurrent := func() bool { return current.Load() }
+	var activeChannels atomic.Int32
+	pushState := newPeerPushState(isCurrent)
+	events := make(chan map[string]any, 16)
+	host.OnDataChannel(func(channel *webrtc.DataChannel) {
+		attachDataChannel(channel, server.URL, nil, &activeChannels, isCurrent, func(ev any) {
+			if m, ok := ev.(map[string]any); ok {
+				events <- m
+			}
+		}, pushState)
+	})
+
+	type testChannel struct {
+		dc    *webrtc.DataChannel
+		open  chan struct{}
+		ready chan []string
+		msgs  chan []byte
+	}
+	openChan := func(label string) *testChannel {
+		t.Helper()
+		dc, err := client.CreateDataChannel(label, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tc := &testChannel{
+			dc:    dc,
+			open:  make(chan struct{}),
+			ready: make(chan []string, 1),
+			msgs:  make(chan []byte, 16),
+		}
+		var once sync.Once
+		dc.OnOpen(func() { once.Do(func() { close(tc.open) }) })
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			var env struct {
+				Type     string   `json:"type"`
+				Features []string `json:"features"`
+			}
+			if json.Unmarshal(msg.Data, &env) == nil && env.Type == "server_ready" {
+				tc.ready <- env.Features
+				return
+			}
+			tc.msgs <- append([]byte(nil), msg.Data...)
+		})
+		return tc
+	}
+
+	primary := openChan("ragent-http")
+	bg := openChan("ragent-http-bg")
+
+	offer, err := client.CreateOffer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gather := webrtc.GatheringCompletePromise(client)
+	if err = client.SetLocalDescription(offer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gather:
+	case <-time.After(10 * time.Second):
+		t.Fatal("client ICE gathering timed out")
+	}
+	if err = host.SetRemoteDescription(*client.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+	answer, err := host.CreateAnswer(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gatherHost := webrtc.GatheringCompletePromise(host)
+	if err = host.SetLocalDescription(answer); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-gatherHost:
+	case <-time.After(10 * time.Second):
+		t.Fatal("host ICE gathering timed out")
+	}
+	if err = client.SetRemoteDescription(*host.LocalDescription()); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, tc := range map[string]*testChannel{"ragent-http": primary, "ragent-http-bg": bg} {
+		select {
+		case <-tc.open:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not open", name)
+		}
+		select {
+		case feats := <-tc.ready:
+			if !slices.Contains(feats, "dc_push_invalidation_v1") {
+				t.Fatalf("%s missing dc_push_invalidation_v1: %#v", name, feats)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s did not receive server_ready", name)
+		}
+	}
+
+	// Before client_ready, push_invalidation must NOT be delivered.
+	if pushState.sendPushInvalidation(json.RawMessage(`{"type":"session_invalidated","sessionId":"s-pre"}`)) {
+		t.Fatal("push_invalidation must not send before client_ready")
+	}
+
+	// Sending client_ready on ragent-http-bg must NOT negotiate push invalidation.
+	if err := bg.dc.SendText(`{"type":"client_ready","version":1,"features":["dc_push_invalidation_v1"]}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := bg.dc.SendText(`{"id":"sync-bg","type":"http_request","method":"GET","path":"/sync"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-bg.msgs:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sync request on bg timed out")
+	}
+	if pushState.isPushNegotiated() || pushState.sendPushInvalidation(json.RawMessage(`{"type":"sessions_invalidated"}`)) {
+		t.Fatal("client_ready on ragent-http-bg must not enable push invalidation")
+	}
+
+	// Sending client_ready without dc_push_invalidation_v1 on ragent-http must NOT negotiate push invalidation.
+	if err := primary.dc.SendText(`{"type":"client_ready","version":1,"features":["dc_keepalive_v1"]}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := primary.dc.SendText(`{"id":"sync-no-feat","type":"http_request","method":"GET","path":"/sync"}`); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-primary.msgs:
+	case <-time.After(5 * time.Second):
+		t.Fatal("sync request on primary timed out")
+	}
+	if pushState.isPushNegotiated() || pushState.sendPushInvalidation(json.RawMessage(`{"type":"sessions_invalidated"}`)) {
+		t.Fatal("client_ready without dc_push_invalidation_v1 must not enable push invalidation")
+	}
+
+	// Sending valid client_ready on ragent-http enables dc_push_v1 delivery.
+	if err := primary.dc.SendText(`{"type":"client_ready","version":1,"features":["dc_push_invalidation_v1"]}`); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !pushState.isPushNegotiated() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !pushState.isPushNegotiated() {
+		t.Fatal("client_ready on ragent-http did not negotiate push invalidation")
+	}
+	if !pushState.sendPushInvalidation(json.RawMessage(`{"type":"session_invalidated","sessionId":"s1","latestSeq":42}`)) {
+		t.Fatal("expected sendPushInvalidation to succeed after client_ready")
+	}
+
+	select {
+	case raw := <-primary.msgs:
+		var push struct {
+			Type    string `json:"type"`
+			Payload struct {
+				Type      string `json:"type"`
+				SessionID string `json:"sessionId"`
+				LatestSeq int    `json:"latestSeq"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(raw, &push); err != nil {
+			t.Fatalf("failed to parse dc_push_v1: %v", err)
+		}
+		if push.Type != "dc_push_v1" || push.Payload.Type != "session_invalidated" ||
+			push.Payload.SessionID != "s1" || push.Payload.LatestSeq != 42 {
+			t.Fatalf("unexpected dc_push_v1 frame: %#v", push)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for dc_push_v1 on ragent-http")
+	}
+
+	// Verify datachannel_close events and non-delivery once closed.
+	_ = primary.dc.Close()
+	_ = bg.dc.Close()
+	sawZeroActive := false
+	closeDeadline := time.After(5 * time.Second)
+	for !sawZeroActive {
+		select {
+		case ev := <-events:
+			if ev["type"] == "datachannel_close" {
+				if n, ok := ev["activeChannels"].(int32); ok && n == 0 {
+					sawZeroActive = true
+				}
+			}
+		case <-closeDeadline:
+			t.Fatal("timed out waiting for datachannel_close activeChannels=0")
+		}
+	}
+	if pushState.sendPushInvalidation(json.RawMessage(`{"type":"projects_invalidated"}`)) {
+		t.Fatal("sendPushInvalidation must return false after primary channel closes")
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,11 +34,12 @@ const maxRequestBodyBytes = 25 << 20
 const maxResponseBodyBytes = 8 << 20
 
 type controlMessage struct {
-	Type          string  `json:"type"`
-	SDP           string  `json:"sdp,omitempty"`
-	Candidate     string  `json:"candidate,omitempty"`
-	SDPMid        *string `json:"sdpMid,omitempty"`
-	SDPMLineIndex *uint16 `json:"sdpMLineIndex,omitempty"`
+	Type          string          `json:"type"`
+	SDP           string          `json:"sdp,omitempty"`
+	Candidate     string          `json:"candidate,omitempty"`
+	SDPMid        *string         `json:"sdpMid,omitempty"`
+	SDPMLineIndex *uint16         `json:"sdpMLineIndex,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
 }
 
 type iceServerConfig struct {
@@ -355,10 +357,106 @@ type dcKeepaliveFrame struct {
 	ID   string `json:"id"`
 }
 
+type clientReadyFrame struct {
+	Type     string   `json:"type"`
+	Version  int      `json:"version"`
+	Features []string `json:"features"`
+}
+
+type peerPushState struct {
+	mu                          sync.Mutex
+	isCurrent                   func() bool
+	primaryChannel              *webrtc.DataChannel
+	primaryResponseSender       *responseSender
+	pushInvalidationsNegotiated bool
+}
+
+func newPeerPushState(isCurrent func() bool) *peerPushState {
+	return &peerPushState{isCurrent: isCurrent}
+}
+
+func (p *peerPushState) attachPrimary(channel *webrtc.DataChannel, sender *responseSender) {
+	if p == nil || channel == nil || channel.Label() != "ragent-http" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.primaryChannel = channel
+	p.primaryResponseSender = sender
+	p.pushInvalidationsNegotiated = false
+}
+
+func (p *peerPushState) detachPrimary(channel *webrtc.DataChannel) {
+	if p == nil || channel == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.primaryChannel == channel {
+		p.primaryChannel = nil
+		p.primaryResponseSender = nil
+		p.pushInvalidationsNegotiated = false
+	}
+}
+
+func (p *peerPushState) handleClientReady(channel *webrtc.DataChannel, browserAuth *browserAuthConfig, data []byte) bool {
+	var frame clientReadyFrame
+	if json.Unmarshal(data, &frame) != nil || frame.Type != "client_ready" {
+		return false
+	}
+	if p == nil || browserAuth != nil || channel == nil || channel.Label() != "ragent-http" {
+		return true
+	}
+	if frame.Version != 1 || !slices.Contains(frame.Features, "dc_push_invalidation_v1") {
+		return true
+	}
+	p.mu.Lock()
+	if p.isCurrent != nil && p.isCurrent() && p.primaryChannel == channel {
+		p.pushInvalidationsNegotiated = true
+	}
+	p.mu.Unlock()
+	return true
+}
+
+func (p *peerPushState) isPushNegotiated() bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.pushInvalidationsNegotiated
+}
+
+func (p *peerPushState) sendPushInvalidation(payload json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(payload)
+	if p == nil || len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || !json.Valid(trimmed) {
+		return false
+	}
+	p.mu.Lock()
+	negotiated := p.pushInvalidationsNegotiated
+	sender := p.primaryResponseSender
+	isCurrent := p.isCurrent
+	p.mu.Unlock()
+	if !negotiated || sender == nil || isCurrent == nil || !isCurrent() {
+		return false
+	}
+	frame, err := json.Marshal(struct {
+		Type    string          `json:"type"`
+		Payload json.RawMessage `json:"payload"`
+	}{
+		Type:    "dc_push_v1",
+		Payload: payload,
+	})
+	if err != nil {
+		return false
+	}
+	return sender.trySendPush(frame)
+}
+
 const maxActiveDataChannels = 6
 
-func serverReadyFeatures() []string {
-	return []string{
+func serverReadyFeatures(browserAuth ...*browserAuthConfig) []string {
+	features := []string{
 		"http_request_stream_v1",
 		"http_request_stream_v2",
 		"http_request_binary_chunks_v3",
@@ -367,6 +465,10 @@ func serverReadyFeatures() []string {
 		"http_bg_channel_v1",
 		"dc_keepalive_v1",
 	}
+	if len(browserAuth) == 0 || browserAuth[0] == nil {
+		features = append(features, "dc_push_invalidation_v1")
+	}
+	return features
 }
 
 func handleKeepalivePing(data []byte, sendText func(string) error) (bool, error) {
@@ -579,10 +681,15 @@ func attachDataChannel(
 	activeChannels *atomic.Int32,
 	isCurrentPeer func() bool,
 	emitEvent func(any),
+	pushStates ...*peerPushState,
 ) {
 	if !isCurrentPeer() {
 		_ = channel.Close()
 		return
+	}
+	var pushState *peerPushState
+	if len(pushStates) > 0 {
+		pushState = pushStates[0]
 	}
 	// Bound per-peer stream assemblers even when a peer opens channels with
 	// arbitrary labels. Three channels (ragent-http, ragent-http-bulk,
@@ -597,13 +704,22 @@ func attachDataChannel(
 	streamAssembler := newRequestStreamAssembler()
 	bodyStreamAssembler := newRequestBodyStreamAssembler()
 	responseSender := newResponseSender(channel, isCurrentPeer)
+	pushState.attachPrimary(channel, responseSender)
 	channel.OnClose(func() {
 		if authSession.timer != nil {
 			authSession.timer.Stop()
 		}
 		streamAssembler.close()
 		bodyStreamAssembler.close()
-		activeChannels.Add(-1)
+		pushState.detachPrimary(channel)
+		remaining := activeChannels.Add(-1)
+		if isCurrentPeer() && emitEvent != nil {
+			emitEvent(map[string]any{
+				"type":           "datachannel_close",
+				"label":          channel.Label(),
+				"activeChannels": remaining,
+			})
+		}
 	})
 	if browserAuth != nil {
 		fmt.Fprintf(os.Stderr, "browser_auth event=datachannel_open state=AUTHENTICATING\n")
@@ -624,11 +740,15 @@ func attachDataChannel(
 			return
 		}
 		if emitEvent != nil {
-			emitEvent(map[string]any{"type": "datachannel_open"})
+			emitEvent(map[string]any{
+				"type":           "datachannel_open",
+				"label":          channel.Label(),
+				"activeChannels": activeChannels.Load(),
+			})
 		}
 		fmt.Fprintf(os.Stderr, "[p2p-host] datachannel_open label=%s\n", channel.Label())
 		ready := map[string]any{"type": "server_ready", "version": 1,
-			"features": serverReadyFeatures()}
+			"features": serverReadyFeatures(browserAuth)}
 		if browserAuth != nil {
 			ready["auth"] = "client_auth_v1"
 			fmt.Fprintf(os.Stderr, "browser_auth event=auth_challenge_sent state=AUTHENTICATING\n")
@@ -716,6 +836,10 @@ func attachDataChannel(
 		}
 		if frameType.Type == "dc_ping" {
 			_, _ = handleKeepalivePing(message.Data, channel.SendText)
+			return
+		}
+		if frameType.Type == "client_ready" {
+			_ = pushState.handleClientReady(channel, browserAuth, message.Data)
 			return
 		}
 		switch frameType.Type {
@@ -883,15 +1007,17 @@ func main() {
 	// current peer replaceable so reconnecting the app never leaves the host
 	// adding fresh ICE candidates to a stale, closed connection.
 	var peer *webrtc.PeerConnection
+	var pushState *peerPushState
 	var peerGeneration atomic.Uint64
-	createPeer := func() (*webrtc.PeerConnection, error) {
+	createPeer := func() (*webrtc.PeerConnection, *peerPushState, error) {
 		createdPeer, err := webrtc.NewPeerConnection(config)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		generation := peerGeneration.Add(1)
 		isCurrentPeer := func() bool { return peerGeneration.Load() == generation }
 		var activeChannels atomic.Int32
+		createdPushState := newPeerPushState(isCurrentPeer)
 
 		createdPeer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 			if !isCurrentPeer() {
@@ -915,9 +1041,9 @@ func main() {
 			}
 		})
 		createdPeer.OnDataChannel(func(channel *webrtc.DataChannel) {
-			attachDataChannel(channel, localBase, browserAuth, &activeChannels, isCurrentPeer, emit)
+			attachDataChannel(channel, localBase, browserAuth, &activeChannels, isCurrentPeer, emit, createdPushState)
 		})
-		return createdPeer, nil
+		return createdPeer, createdPushState, nil
 	}
 	defer func() {
 		peerGeneration.Add(1)
@@ -939,19 +1065,21 @@ func main() {
 			// generation before closing the old peer prevents delayed callbacks
 			// (notably stale ICE candidates) from being sent to the new mobile
 			// session.
-			nextPeer, err := createPeer()
+			nextPeer, nextPushState, err := createPeer()
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[p2p-host] peer rebuild failed err=%v\n", err)
 				continue
 			}
 			previousPeer := peer
 			peer = nextPeer
+			pushState = nextPushState
 			if previousPeer != nil {
 				_ = previousPeer.Close()
 			}
 			if peer.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: message.SDP}) != nil {
 				_ = peer.Close()
 				peer = nil
+				pushState = nil
 				peerGeneration.Add(1)
 				continue
 			}
@@ -968,6 +1096,10 @@ func main() {
 				if err := peer.AddICECandidate(webrtc.ICECandidateInit{Candidate: message.Candidate, SDPMid: message.SDPMid, SDPMLineIndex: message.SDPMLineIndex}); err != nil {
 					fmt.Fprintf(os.Stderr, "[p2p-host] AddICECandidate error: %v\n", err)
 				}
+			}
+		case "push_invalidation":
+			if browserAuth == nil && pushState != nil {
+				pushState.sendPushInvalidation(message.Payload)
 			}
 		}
 	}

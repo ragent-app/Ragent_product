@@ -102,10 +102,15 @@ enum class ActiveCarrier {
 private val DefaultInactiveCarrierFlow: StateFlow<ActiveCarrier> =
     MutableStateFlow(ActiveCarrier.None).asStateFlow()
 
+private val DefaultUnsupportedPushInvalidationsFlow: StateFlow<Boolean> =
+    MutableStateFlow(false).asStateFlow()
+
 interface RagentTransport {
     val invalidations: Flow<InvalidationHint>
     val connectionState: StateFlow<RuntimeConnectionState>
     val activeCarrier: StateFlow<ActiveCarrier> get() = DefaultInactiveCarrierFlow
+    /** True when the active carrier pushes invalidation hints over its DataChannel. */
+    val carrierSupportsPushInvalidations: StateFlow<Boolean> get() = DefaultUnsupportedPushInvalidationsFlow
     /** Endpoint-less TURN/P2P carriers need durable event polling. */
     val requiresEventPolling: Boolean get() = false
     suspend fun execute(request: ApiRequest): ApiResponse

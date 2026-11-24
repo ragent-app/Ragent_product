@@ -218,21 +218,30 @@ internal fun automaticBackgroundTargetIds(
  * Resolve all durable roles before any carrier has been recreated.  This
  * prevents the persisted primary from being briefly treated as a background
  * computer during app relaunch.
+ *
+ * Background devices connect on-demand only by default (`backgroundInstanceIds`
+ * defaults to empty) while keeping `primaryInstanceId` and active
+ * `background-runs` connected.
  */
 internal fun automaticConnectionRecoveryPlan(
     directory: com.andysagent.ragent.core.datastore.ComputerDirectory,
     maximumConcurrentConnections: Int,
+    includeBackgroundTargets: Boolean = false,
 ): AutomaticConnectionRecoveryPlan {
-    // autoConnect controls background retention; the durable selected primary
-    // has always been restored even in legacy directories where it is false.
+    // Background targets are on-demand by default; pass includeBackgroundTargets = true
+    // only when eager background connections are explicitly requested.
     val primaryInstanceId = directory.activeTarget?.instanceId
     return AutomaticConnectionRecoveryPlan(
         primaryInstanceId = primaryInstanceId,
-        backgroundInstanceIds = automaticBackgroundTargetIds(
-            computers = directory.computers,
-            activeInstanceId = primaryInstanceId,
-            maximumConcurrentConnections = maximumConcurrentConnections,
-        ),
+        backgroundInstanceIds = if (includeBackgroundTargets) {
+            automaticBackgroundTargetIds(
+                computers = directory.computers,
+                activeInstanceId = primaryInstanceId,
+                maximumConcurrentConnections = maximumConcurrentConnections,
+            )
+        } else {
+            emptyList()
+        },
     )
 }
 
@@ -1254,9 +1263,9 @@ class AndroidRuntimeGraph internal constructor(
             val capacityFresh = refreshAccountConnectionCapacity(onlyIfNeeded =
                 canReuseAccountCapacity(accountCapacityLastSuccessMs, android.os.SystemClock.elapsedRealtime()))
             val directory = configStore.directory.first()
-            val backgrounds = automaticBackgroundTargetIds(directory.computers, directory.activeTarget?.instanceId, Int.MAX_VALUE)
+            val activeBackgrounds = uiBackgroundTargetIds - setOfNotNull(directory.activeTarget?.instanceId)
             checkBackgroundConnectionCapacity(capacityFresh, instanceId in uiBackgroundTargetIds,
-                backgrounds.size + (if (directory.activeTarget == null) 0 else 1),
+                activeBackgrounds.size + (if (directory.activeTarget == null) 0 else 1),
                 maximumConcurrentAccountConnections, accountCapacityRetry.remainingCooldownMs())
             // A background read can temporarily own this target while the
             // explicit join is still waiting on Accounts. Keep the existing
@@ -2506,17 +2515,19 @@ class AndroidRuntimeGraph internal constructor(
         }
     }
 
-    /** Wait for this specific background computer, without selecting or restarting it. */
+    /** Connect on demand to verify this specific background computer, without selecting it. */
     internal suspend fun awaitBackgroundComputerConnected(instanceId: String) {
-        val outcome = withTimeoutOrNull(connectionWaitTimeoutMs) {
-            combine(targetConnectionStates, targetTurnQuotaFailures) { states, failures ->
-                (states[instanceId] == RuntimeConnectionState.Connected) to failures[instanceId]
-            }.first { (connected, quotaFailure) -> connected || quotaFailure != null }
-        }
-        when {
-            outcome?.first == true -> Unit
-            outcome?.second != null -> throw requireNotNull(outcome.second)
-            else -> throw AppApiException(ApiError(ApiErrorCode.TARGET_OFFLINE, "Computer connection timed out", retryable = true))
+        connectionUses.withTarget(instanceId) {
+            val outcome = withTimeoutOrNull(connectionWaitTimeoutMs) {
+                combine(targetConnectionStates, targetTurnQuotaFailures) { states, failures ->
+                    (states[instanceId] == RuntimeConnectionState.Connected) to failures[instanceId]
+                }.first { (connected, quotaFailure) -> connected || quotaFailure != null }
+            }
+            when {
+                outcome?.first == true -> Unit
+                outcome?.second != null -> throw requireNotNull(outcome.second)
+                else -> throw AppApiException(ApiError(ApiErrorCode.TARGET_OFFLINE, "Computer connection timed out", retryable = true))
+            }
         }
     }
 

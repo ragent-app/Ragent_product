@@ -11,9 +11,11 @@ import com.andysagent.ragent.core.p2p.P2PRequestTimeoutException
 import com.andysagent.ragent.core.p2p.P2PSession
 import com.andysagent.ragent.core.model.RuntimeConnectionState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -99,21 +101,29 @@ class OkHttpRagentTransport(
     private val requestAdmission: ((ApiRequest) -> Boolean)? = null,
     private val onCarrierSuspect: ((P2PSession) -> Unit)? = null,
 ) : RagentTransport {
-    private val invalidationEvents = MutableSharedFlow<InvalidationHint>(extraBufferCapacity = 64)
+    private val invalidationEvents = MutableSharedFlow<InvalidationHint>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     private val socketScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableConnectionState = MutableStateFlow(RuntimeConnectionState.Disconnected)
     private val mutableActiveCarrier = MutableStateFlow(ActiveCarrier.None)
+    private val mutableCarrierSupportsPushInvalidations = MutableStateFlow(false)
     private var reconnectJob: Job? = null
     private var reconnectAttempt = 0
     @Volatile private var closeRequested = true
     private var webSocket: WebSocket? = null
     private val p2pSession = AtomicReference<P2PSession?>(null)
     private val turnSession = TurnSessionSlot()
+    private val carrierInvalidationLock = Any()
+    private var p2pInvalidationJob: Job? = null
+    private var turnInvalidationJob: Job? = null
     private val recoveryRequested = java.util.concurrent.atomic.AtomicBoolean(false)
 
     override val invalidations: Flow<InvalidationHint> = invalidationEvents.asSharedFlow()
     override val connectionState: StateFlow<RuntimeConnectionState> = mutableConnectionState.asStateFlow()
     override val activeCarrier: StateFlow<ActiveCarrier> = mutableActiveCarrier.asStateFlow()
+    override val carrierSupportsPushInvalidations: StateFlow<Boolean> = mutableCarrierSupportsPushInvalidations.asStateFlow()
     override val requiresEventPolling: Boolean
         get() = requireVerifiedCarrier || hasOpenCarrier() || endpointProvider().trimEnd('/').isBlank()
 
@@ -121,16 +131,50 @@ class OkHttpRagentTransport(
         val state = mutableConnectionState.value
         if (state == RuntimeConnectionState.AuthenticationRequired) {
             mutableActiveCarrier.value = ActiveCarrier.None
+            mutableCarrierSupportsPushInvalidations.value = false
             return
         }
-        val p2pOpen = p2pSession.get()?.isOpen == true
-        val turnOpen = turnSession.get()?.isOpen == true
+        val p2p = p2pSession.get()?.takeIf { it.isOpen }
+        val turn = turnSession.get()?.takeIf { it.isOpen }
         mutableActiveCarrier.value = when {
-            p2pOpen -> ActiveCarrier.P2P
-            turnOpen -> ActiveCarrier.Turn
+            p2p != null -> ActiveCarrier.P2P
+            turn != null -> ActiveCarrier.Turn
             state == RuntimeConnectionState.Connected && !requireVerifiedCarrier && endpointProvider().trimEnd('/').isNotBlank() ->
                 ActiveCarrier.Direct
             else -> ActiveCarrier.None
+        }
+        mutableCarrierSupportsPushInvalidations.value = when {
+            p2p != null -> p2p.supportsPushInvalidations
+            turn != null -> turn.supportsPushInvalidations
+            else -> false
+        }
+    }
+
+    private fun startCarrierInvalidationCollector(isTurn: Boolean, session: P2PSession) {
+        synchronized(carrierInvalidationLock) {
+            if (isTurn) turnInvalidationJob?.cancel() else p2pInvalidationJob?.cancel()
+            val job = socketScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                session.invalidations.collect { raw ->
+                    val current = if (isTurn) turnSession.get() else p2pSession.get()
+                    if (current === session) {
+                        refreshActiveCarrier()
+                        parseInvalidation(raw)
+                    }
+                }
+            }
+            if (isTurn) turnInvalidationJob = job else p2pInvalidationJob = job
+        }
+    }
+
+    private fun stopCarrierInvalidationCollector(isTurn: Boolean) {
+        synchronized(carrierInvalidationLock) {
+            if (isTurn) {
+                turnInvalidationJob?.cancel()
+                turnInvalidationJob = null
+            } else {
+                p2pInvalidationJob?.cancel()
+                p2pInvalidationJob = null
+            }
         }
     }
 
@@ -146,28 +190,41 @@ class OkHttpRagentTransport(
     fun setP2PSession(session: P2PSession) {
         p2pSession.getAndSet(session)?.takeIf { it !== session }?.close()
         recoveryRequested.set(false)
+        startCarrierInvalidationCollector(isTurn = false, session = session)
         refreshActiveCarrier()
     }
 
     fun clearP2PSession(session: P2PSession? = null) {
-        if (session == null) p2pSession.set(null) else p2pSession.compareAndSet(session, null)
+        val cleared = if (session == null) {
+            p2pSession.getAndSet(null) != null
+        } else {
+            p2pSession.compareAndSet(session, null)
+        }
+        if (cleared || session == null) {
+            stopCarrierInvalidationCollector(isTurn = false)
+        }
         refreshActiveCarrier()
     }
 
     fun setTurnSession(session: P2PSession) {
         turnSession.replace(session, drain = false)
         recoveryRequested.set(false)
+        startCarrierInvalidationCollector(isTurn = true, session = session)
         refreshActiveCarrier()
     }
 
     fun handoffTurnSession(session: P2PSession) {
         turnSession.replace(session, drain = true)
         recoveryRequested.set(false)
+        startCarrierInvalidationCollector(isTurn = true, session = session)
         refreshActiveCarrier()
     }
 
     fun clearTurnSession(session: P2PSession? = null) {
         turnSession.clear(session)
+        if (turnSession.get() == null) {
+            stopCarrierInvalidationCollector(isTurn = true)
+        }
         refreshActiveCarrier()
     }
 
@@ -572,6 +629,8 @@ class OkHttpRagentTransport(
         reconnectJob = null
         webSocket?.close(1000, "client closed")
         webSocket = null
+        stopCarrierInvalidationCollector(isTurn = false)
+        stopCarrierInvalidationCollector(isTurn = true)
         turnSession.closeAll()
         p2pSession.getAndSet(null)?.close()
         mutableConnectionState.value = RuntimeConnectionState.Disconnected

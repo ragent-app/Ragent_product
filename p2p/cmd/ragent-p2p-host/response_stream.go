@@ -119,6 +119,21 @@ func responseFrames(request httpRequest, response httpResponse, send func([]byte
 	return nil
 }
 
+func (s *responseSender) trySendPush(frame []byte) bool {
+	if s == nil || len(frame) == 0 {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.current() || s.channel.ReadyState() != webrtc.DataChannelStateOpen {
+		return false
+	}
+	if s.channel.BufferedAmount() > maxResponseBufferedBytes {
+		return false
+	}
+	return s.channel.SendText(string(frame)) == nil
+}
+
 func (s *responseSender) send(request httpRequest, response httpResponse) error {
 	err := responseFrames(request, response, s.sendFrame)
 	if err != nil && s.current() && s.channel.ReadyState() == webrtc.DataChannelStateOpen {

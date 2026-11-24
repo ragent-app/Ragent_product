@@ -7,9 +7,15 @@ import com.andysagent.ragent.core.p2p.P2PRequestTimeoutException
 import com.andysagent.ragent.core.p2p.P2PSession
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.mockwebserver.MockResponse
@@ -1110,12 +1116,76 @@ class OkHttpRagentTransportTest {
             server.shutdown()
         }
     }
+
+    @Test
+    fun forwardsCarrierInvalidationsCancelsSupersededCollectorsAndTracksPushCapability() = runBlocking {
+        val transport = OkHttpRagentTransport({ "" }, { "rda_ok" }, requireVerifiedCarrier = true)
+        try {
+            assertFalse(transport.carrierSupportsPushInvalidations.value)
+            val received = mutableListOf<InvalidationHint>()
+            val collector = launch(start = CoroutineStart.UNDISPATCHED) {
+                transport.invalidations.collect { received += it }
+            }
+
+            val turnA = RecordingP2PSession(pushInvalidationsSupported = true)
+            transport.setTurnSession(turnA)
+            assertTrue(transport.carrierSupportsPushInvalidations.value)
+            turnA.emitInvalidation("""{"type":"sessions_invalidated"}""")
+            withTimeout(5_000L) { while (received.size < 1) kotlinx.coroutines.delay(10L) }
+            assertEquals("sessions_invalidated", received.last().type)
+
+            // Handoff to turnB (without push invalidation) replaces turnA collector and updates capability.
+            val turnB = RecordingP2PSession(pushInvalidationsSupported = false)
+            transport.handoffTurnSession(turnB)
+            assertFalse(transport.carrierSupportsPushInvalidations.value)
+            turnA.emitInvalidation("""{"type":"projects_invalidated"}""")
+            turnB.emitInvalidation("""{"type":"session_invalidated","sessionId":"s-turn","latestSeq":7}""")
+            withTimeout(5_000L) { while (received.size < 2) kotlinx.coroutines.delay(10L) }
+            assertEquals(2, received.size)
+            assertEquals("session_invalidated", received[1].type)
+            assertEquals("s-turn", received[1].sessionId)
+
+            // Attaching P2P session with push support takes precedence and forwards invalidations.
+            val p2p = RecordingP2PSession(pushInvalidationsSupported = true)
+            transport.setP2PSession(p2p)
+            assertTrue(transport.carrierSupportsPushInvalidations.value)
+            p2p.emitInvalidation("""{"type":"projects_invalidated"}""")
+            withTimeout(5_000L) { while (received.size < 3) kotlinx.coroutines.delay(10L) }
+            assertEquals("projects_invalidated", received[2].type)
+
+            // Clearing P2P cancels its collector and falls back to open TURN capability.
+            transport.clearP2PSession(p2p)
+            assertFalse(transport.carrierSupportsPushInvalidations.value)
+            p2p.emitInvalidation("""{"type":"sessions_invalidated"}""")
+
+            // Replacing TURN with push-enabled turnC, then clearing TURN resets capability to false.
+            val turnC = RecordingP2PSession(pushInvalidationsSupported = true)
+            transport.setTurnSession(turnC)
+            assertTrue(transport.carrierSupportsPushInvalidations.value)
+            transport.clearTurnSession(turnC)
+            assertFalse(transport.carrierSupportsPushInvalidations.value)
+            turnC.emitInvalidation("""{"type":"sessions_invalidated"}""")
+
+            kotlinx.coroutines.delay(50L)
+            assertEquals(3, received.size)
+            collector.cancel()
+        } finally {
+            transport.close()
+        }
+    }
 }
 
 private class RecordingP2PSession(
     private val response: P2PHttpResponse = P2PHttpResponse(id = "unused", status = 200),
     private val result: Result<P2PHttpResponse>? = null,
+    override val supportsPushInvalidations: Boolean = false,
 ) : P2PSession {
+    constructor(
+        pushInvalidationsSupported: Boolean,
+    ) : this(P2PHttpResponse(id = "unused", status = 200), null, pushInvalidationsSupported)
+
+    private val invalidationFlow = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    override val invalidations: Flow<String> = invalidationFlow
     override val isOpen = true
     var request: P2PHttpRequest? = null
         private set
@@ -1123,6 +1193,10 @@ private class RecordingP2PSession(
         private set
     var closeCount: Int = 0
         private set
+
+    suspend fun emitInvalidation(raw: String) {
+        invalidationFlow.emit(raw)
+    }
 
     override suspend fun connect(): Result<Unit> = Result.success(Unit)
 

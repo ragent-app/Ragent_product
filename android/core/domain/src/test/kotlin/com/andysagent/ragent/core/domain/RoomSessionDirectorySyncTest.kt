@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
@@ -303,5 +304,122 @@ class RoomSessionDirectorySyncTest {
             withTimeout(6_000) { peer.observeSessions().first { it.isEmpty() } }
             Unit
         } finally { first.close(); peer.close(); firstDb.close(); peerDb.close() }
+    }
+
+    @Test fun pushCapableCarrierRelaxesPollingTo30sAndReactsImmediatelyToInvalidations() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        database.dao().upsertApprovals(listOf(
+            ApprovalEntity("appr-1", "s-live", "Approve", "pending", runId = "run-1", updatedAt = 1L),
+        ))
+        val sessionListCalls = AtomicInteger()
+        val projectCalls = AtomicInteger()
+        val detailCalls = AtomicInteger()
+        val firstIntervalObserved = CompletableDeferred<Long>()
+        val fallbackIntervalObserved = CompletableDeferred<Long>()
+        val pushSupport = MutableStateFlow(true)
+        val invalidationFlow = MutableSharedFlow<InvalidationHint>(extraBufferCapacity = 16)
+        val projectJson = java.util.concurrent.atomic.AtomicReference(
+            """{"projects":[{"id":"p1","name":"Initial Project","rootPath":"/p1"}]}"""
+        )
+        val sessionPhase = AtomicInteger(0)
+        val detailPhase = AtomicInteger(0)
+
+        val carrier = object : RagentTransport {
+            override val requiresEventPolling = true
+            override val connectionState = MutableStateFlow(RuntimeConnectionState.Connected)
+            override val carrierSupportsPushInvalidations = pushSupport
+            override val invalidations: Flow<InvalidationHint> = invalidationFlow
+            override suspend fun execute(request: ApiRequest): ApiResponse = when {
+                request.method == "GET" && request.path.substringBefore('?') == "/api/sessions" -> {
+                    sessionListCalls.incrementAndGet()
+                    when (sessionPhase.get()) {
+                        0 -> ApiResponse(200, """{"sessions":[{"id":"s-live","name":"Live","status":"idle","latestSeq":1}]}""")
+                        else -> ApiResponse(200, """{"sessions":[{"id":"s-live","name":"Live Updated","status":"idle","latestSeq":2}]}""")
+                    }
+                }
+                request.method == "GET" && request.path == "/api/projects" -> {
+                    projectCalls.incrementAndGet()
+                    ApiResponse(200, projectJson.get())
+                }
+                request.method == "GET" && request.path == "/api/sessions/s-live" -> {
+                    detailCalls.incrementAndGet()
+                    val seq = if (detailPhase.get() == 0) 1L else 2L
+                    ApiResponse(200, """{"session":{"id":"s-live","name":"Live","status":"completed","latestSeq":$seq}}""")
+                }
+                request.method == "GET" && request.path == "/api/runs/run-1" -> {
+                    val state = if (detailPhase.get() == 0) "running" else "completed"
+                    ApiResponse(200, """{"run":{"id":"run-1","sessionId":"s-live","state":"$state"}}""")
+                }
+                request.method == "GET" && request.path.startsWith("/api/sessions/s-live/events") -> {
+                    if (request.path.contains("liveOnly=1")) {
+                        ApiResponse(200, """{"sessionId":"s-live","events":[],"liveOnly":false}""")
+                    } else if (detailPhase.get() == 0) {
+                        ApiResponse(200, """{"sessionId":"s-live","events":[{"seq":1,"type":"approval_request","approvalId":"appr-1","runId":"run-1","title":"Approve","reason":"Approve"}],"latestSeq":1}""")
+                    } else {
+                        ApiResponse(200, """{"sessionId":"s-live","events":[{"seq":2,"type":"approval_response","approvalId":"appr-1","runId":"run-1","decision":"approved"}],"latestSeq":2}""")
+                    }
+                }
+                else -> error("Unexpected request: ${request.method} ${request.path}")
+            }
+            override fun connectInvalidationSocket() = Unit
+            override suspend fun close() = Unit
+        }
+        val repository = RoomSessionRepository(database, carrier)
+        repository.onLiveSyncPollIntervalSelected = { intervalMs ->
+            if (intervalMs == 30_000L) firstIntervalObserved.complete(intervalMs)
+            if (intervalMs == 3_000L) fallbackIntervalObserved.complete(intervalMs)
+        }
+        try {
+            repository.startLiveSync()
+            // 1. Initial sync selects 30_000ms sweep interval when push invalidation is supported.
+            assertEquals(30_000L, withTimeout(5_000L) { firstIntervalObserved.await() })
+            withTimeout(5_000L) { while (detailCalls.get() < 1) delay(10L) }
+            val initialSessionCalls = sessionListCalls.get()
+
+            // 2. Push sessions_invalidated wakes refreshSessions immediately without waiting 30s.
+            sessionPhase.set(1)
+            invalidationFlow.emit(InvalidationHint("sessions_invalidated"))
+            withTimeout(3_000L) {
+                repository.observeSessions().first { sessions ->
+                    sessions.any { it.id == "s-live" && it.title == "Live Updated" }
+                }
+            }
+            assertTrue(sessionListCalls.get() > initialSessionCalls)
+
+            // 3. Push projects_invalidated triggers refreshProjects immediately.
+            invalidationFlow.emit(InvalidationHint("projects_invalidated"))
+            withTimeout(3_000L) {
+                repository.observeProjects().first { projects ->
+                    projects.any { it.id == "p1" && it.name == "Initial Project" }
+                }
+            }
+            assertEquals(1, projectCalls.get())
+            projectJson.set("""{"projects":[{"id":"p1","name":"Renamed Project","rootPath":"/p1"}]}""")
+            invalidationFlow.emit(InvalidationHint("projects_invalidated"))
+            withTimeout(3_000L) {
+                repository.observeProjects().first { projects ->
+                    projects.any { it.id == "p1" && it.name == "Renamed Project" }
+                }
+            }
+            assertEquals(2, projectCalls.get())
+
+            // 4. Push session_invalidated wakes active reconcileSessionUntilSettled (sleeping 5s on pending approval) immediately.
+            val beforeWakeDetails = detailCalls.get()
+            detailPhase.set(1)
+            invalidationFlow.emit(InvalidationHint("session_invalidated", sessionId = "s-live"))
+            withTimeout(2_000L) {
+                while (database.dao().getApproval("s-live", "appr-1")?.status == "pending") delay(10L)
+            }
+            assertTrue(detailCalls.get() > beforeWakeDetails)
+
+            // 5. Losing push support wakes immediately and falls back to 3_000ms poll interval.
+            pushSupport.value = false
+            assertEquals(3_000L, withTimeout(3_000L) { fallbackIntervalObserved.await() })
+        } finally {
+            repository.stopLiveSync()
+            repository.close()
+            database.close()
+        }
     }
 }

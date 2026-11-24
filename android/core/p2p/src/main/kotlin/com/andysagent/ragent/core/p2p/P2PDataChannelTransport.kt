@@ -8,7 +8,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -17,6 +22,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
@@ -47,6 +55,12 @@ interface P2PSession {
 
     /** True when `dc_keepalive_v1` has been negotiated and [probeLiveness] should be preferred over `/api/auth/me`. */
     val supportsKeepaliveProbe: Boolean get() = false
+
+    /** Serialized JSON invalidation payloads pushed by the peer over the DataChannel. */
+    val invalidations: Flow<String> get() = emptyFlow()
+
+    /** True when `dc_push_invalidation_v1` has been negotiated with the peer. */
+    val supportsPushInvalidations: Boolean get() = false
 
     /**
      * Receives unexpected transport loss. Explicit [close] calls do not invoke
@@ -436,6 +450,13 @@ class WebRTCDataChannelTransport(
     override val inboundFrameGeneration: Long get() = inboundFrames.get()
     override val supportsKeepaliveProbe: Boolean
         get() = serverReadyFeatures?.contains("dc_keepalive_v1") == true
+    private val invalidationEvents = MutableSharedFlow<String>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val invalidations: Flow<String> = invalidationEvents.asSharedFlow()
+    @Volatile override var supportsPushInvalidations: Boolean = false
+        private set
     private val pendingPongs = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val responseStreams = P2PHttpResponseAssembler()
 
@@ -771,6 +792,7 @@ class WebRTCDataChannelTransport(
             pendingPongs.clear()
             bulkChannelSupported = false
             bgChannelSupported = false
+            supportsPushInvalidations = false
             bulkPending.clear()
             bgPending.clear()
             serverReadyFeatures = null
@@ -1273,6 +1295,7 @@ class WebRTCDataChannelTransport(
         connectionStateWakeup.signal()
         iceDisconnected = false
         iceDisconnectWatchdog.recovered()
+        supportsPushInvalidations = false
         if (serverReady.complete(emptySet())) serverReadyFeatures = emptySet()
 
         // Fail all pending requests.
@@ -1375,6 +1398,26 @@ class WebRTCDataChannelTransport(
         }
     }
 
+    private fun sendClientReady(features: List<String>) {
+        val primary = dataChannel ?: return
+        if (closeNotified || primary.state() != DataChannel.State.OPEN) return
+        val frame = json.encodeToString(
+            P2PClientReadyFrame.serializer(),
+            P2PClientReadyFrame(version = 1, features = features),
+        ).toByteArray(Charsets.UTF_8)
+        scope.launch {
+            try {
+                withTimeoutOrNull(5_000L) {
+                    sendDataChannelFrame(primary, frame, lane = PrimarySendLane.HIGH, maxSendDeadlineMs = 5_000L)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Best-effort capability handshake; carrier close handles failure.
+            }
+        }
+    }
+
     /** Dispatch a JSON message received on the DataChannel. */
     internal fun dispatchResponse(raw: String, alreadyRecorded: Boolean = false) {
         if (!alreadyRecorded) recordInboundFrame()
@@ -1382,6 +1425,21 @@ class WebRTCDataChannelTransport(
             val pong = try { json.decodeFromString(P2PKeepalivePongFrame.serializer(), raw) } catch (_: Exception) { null }
             if (pong != null && pong.type == "dc_pong" && pong.id.isNotEmpty()) {
                 pendingPongs.remove(pong.id)?.complete(true)
+                return
+            }
+        }
+        if (raw.contains("\"dc_push_v1\"")) {
+            val push = try { json.decodeFromString(P2PPushInvalidationFrame.serializer(), raw) } catch (_: Exception) { null }
+            if (push != null && push.type == "dc_push_v1") {
+                val payload = push.payload
+                if (payload != null && payload !is JsonNull) {
+                    val serialized = if (payload is JsonPrimitive && payload.isString) {
+                        payload.content
+                    } else {
+                        json.encodeToString(JsonElement.serializer(), payload)
+                    }
+                    invalidationEvents.tryEmit(serialized)
+                }
                 return
             }
         }
@@ -1427,6 +1485,10 @@ class WebRTCDataChannelTransport(
                     }
                     if ("http_bg_channel_v1" in features) {
                         bgChannelSupported = true
+                    }
+                    if ("dc_push_invalidation_v1" in features) {
+                        supportsPushInvalidations = true
+                        sendClientReady(listOf("dc_push_invalidation_v1"))
                     }
                 }
                 return
