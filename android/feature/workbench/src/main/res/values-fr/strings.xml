@@ -382,6 +382,8 @@
     <string name="project_list_delete_detail">Choisissez de conserver les conversations ou de les supprimer avec le projet.</string>
     <string name="project_list_delete_keep">Supprimer le projet, conserver les conversations</string>
     <string name="project_list_delete_all">Supprimer le projet et les conversations</string>
+    <string name="list_action_project_target_changed">Le projet ou l’ordinateur a changé ; rouvrez le menu et réessayez</string>
+    <string name="list_action_session_target_changed">La conversation ou l’ordinateur a changé ; rouvrez le menu et réessayez</string>
     <string name="windows_broker_enrollment_title">Autoriser les approbations mobiles</string>
     <string name="windows_broker_enrollment_subtitle">Approuver les opérations privilégiées de cet ordinateur avec ce téléphone.</string>
 </resources>

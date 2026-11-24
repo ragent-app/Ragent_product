@@ -23,6 +23,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.json.JsonObject
 
@@ -50,6 +51,12 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
     fun switchTo(repository: SessionRepository?) {
         mutableDelegate.value = repository
     }
+
+    /** Emits the active delegate paired with its connection state across Connected -> Connected switches. */
+    fun observeDelegateConnections(): Flow<Pair<SessionRepository?, RuntimeConnectionState>> = mutableDelegate
+        .flatMapLatest { fixed ->
+            fixed?.connectionState?.map { fixed to it } ?: flowOf(null to RuntimeConnectionState.Disconnected)
+        }
 
     override suspend fun createSessionIdempotent(
         request: com.andysagent.ragent.core.protocol.CreateSessionRequestDto,
@@ -234,3 +241,8 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
     private fun <T> delegateFlow(selector: (SessionRepository) -> Flow<T>): Flow<T> = mutableDelegate
         .flatMapLatest { it?.let(selector) ?: emptyFlow() }
 }
+
+/** Observes `(repository, connectionState)` even when switching between two already-Connected delegates. */
+fun SessionRepository.observeScopedConnectionStates(): Flow<Pair<SessionRepository?, RuntimeConnectionState>> =
+    if (this is SwitchingSessionRepository) observeDelegateConnections()
+    else connectionState.map { this to it }

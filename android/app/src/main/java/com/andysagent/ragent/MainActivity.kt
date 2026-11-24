@@ -121,6 +121,7 @@ import com.andysagent.ragent.feature.workbench.AttentionEvent
 import com.andysagent.ragent.feature.workbench.ChatEvent
 import com.andysagent.ragent.feature.workbench.ChatViewModel
 import com.andysagent.ragent.feature.workbench.ChatViewModelFactory
+import com.andysagent.ragent.feature.workbench.dispatchListedActionForTarget
 import com.andysagent.ragent.feature.workbench.NativePasskeyHelper
 import com.andysagent.ragent.feature.workbench.ComputersEvent
 import com.andysagent.ragent.feature.workbench.ComputersViewModel
@@ -1596,7 +1597,9 @@ class MainActivity : ComponentActivity() {
                     isLoading = chatState.isLoading,
                     loadingOlder = chatState.loadingOlder,
                     hasOlder = chatState.hasOlder,
-                    error = chatState.error ?: listActionState.error ?: projectState.error ?: computerState.error,
+                    error = chatState.error ?: projectState.error ?: computerState.error,
+                    listActionError = listActionState.listActionError,
+                    pendingProjectActionId = listActionState.pendingProjectActionId,
                     computers = computerState.computers,
                     projects = projectState.projects,
                     sessions = projectState.sessions,
@@ -2109,30 +2112,70 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.CloseSessionMenu -> chat.onEvent(ChatEvent.CloseSessionMenu)
                             is WorkbenchEvent.RenameSession -> chat.onEvent(ChatEvent.RenameSession(event.name))
                             WorkbenchEvent.DeleteSession -> chat.onEvent(ChatEvent.DeleteSession)
-                            is WorkbenchEvent.PrepareListedSessionAction -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.PrepareListedSessionAction(event.sessionId))
-                            }
-                            is WorkbenchEvent.RenameListedSession -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.RenameListedSession(event.sessionId, event.name))
-                            }
-                            is WorkbenchEvent.DeleteListedSession -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.DeleteListedSession(event.sessionId))
-                            }
-                            is WorkbenchEvent.PinListedSession -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.PinListedSession(event.sessionId, event.pinned))
-                            }
-                            is WorkbenchEvent.PrepareListedProjectAction -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.PrepareListedProjectAction(event.projectId))
-                            }
-                            is WorkbenchEvent.RenameListedProject -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.RenameListedProject(event.projectId, event.name))
-                            }
-                            is WorkbenchEvent.PinListedProject -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.PinListedProject(event.projectId, event.pinned))
-                            }
-                            is WorkbenchEvent.DeleteListedProject -> if (event.targetId == currentWorkbenchTargetId) {
-                                listActions.onEvent(ChatEvent.DeleteListedProject(event.projectId, event.deleteSessions))
-                            }
+                            is WorkbenchEvent.PrepareListedSessionAction -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "prepare_session",
+                                entityId = event.sessionId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_session_target_changed),
+                                event = ChatEvent.PrepareListedSessionAction(event.sessionId),
+                            )
+                            is WorkbenchEvent.RenameListedSession -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "rename_session",
+                                entityId = event.sessionId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_session_target_changed),
+                                event = ChatEvent.RenameListedSession(event.sessionId, event.name),
+                            )
+                            is WorkbenchEvent.DeleteListedSession -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "delete_session",
+                                entityId = event.sessionId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_session_target_changed),
+                                event = ChatEvent.DeleteListedSession(event.sessionId),
+                            )
+                            is WorkbenchEvent.PinListedSession -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "pin_session",
+                                entityId = event.sessionId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_session_target_changed),
+                                event = ChatEvent.PinListedSession(event.sessionId, event.pinned),
+                            )
+                            is WorkbenchEvent.PrepareListedProjectAction -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "prepare_project",
+                                entityId = event.projectId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_project_target_changed),
+                                event = ChatEvent.PrepareListedProjectAction(event.projectId),
+                            )
+                            is WorkbenchEvent.RenameListedProject -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "rename_project",
+                                entityId = event.projectId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_project_target_changed),
+                                event = ChatEvent.RenameListedProject(event.projectId, event.name),
+                            )
+                            is WorkbenchEvent.PinListedProject -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "pin_project",
+                                entityId = event.projectId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_project_target_changed),
+                                event = ChatEvent.PinListedProject(event.projectId, event.pinned),
+                            )
+                            is WorkbenchEvent.DeleteListedProject -> listActions.dispatchListedActionForTarget(
+                                eventTargetId = event.targetId,
+                                currentTargetId = currentWorkbenchTargetId,
+                                actionName = "delete_project",
+                                entityId = event.projectId,
+                                mismatchMessage = getString(WorkbenchR.string.list_action_project_target_changed),
+                                event = ChatEvent.DeleteListedProject(event.projectId, event.deleteSessions),
+                            )
                             WorkbenchEvent.CompactSession -> chat.onEvent(ChatEvent.CompactSession)
                             WorkbenchEvent.DropTools -> chat.onEvent(ChatEvent.DropTools)
                             WorkbenchEvent.ForkSession -> chat.onEvent(ChatEvent.ForkSession)
@@ -2173,6 +2216,7 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.Retry -> {
                                 app.runtime.retryActiveConnection()
                                 if (!tabletDualPane || !shellState.chatOpen) chat.onEvent(ChatEvent.Retry)
+                                listActions.onEvent(ChatEvent.DismissListActionError)
                                 projects.onEvent(ProjectsEvent.Retry)
                                 computers.onEvent(ComputersEvent.Retry)
                             }

@@ -895,10 +895,21 @@ fun WorkbenchScreen(
                 )
             }
         }
-        state.error?.takeUnless(::isTransportConnectionFailure)?.let { error ->
+        val listActionError = state.listActionError?.takeIf { it.isNotBlank() }
+        val displayedError = listActionError ?: state.error?.takeUnless(::isTransportConnectionFailure)
+        displayedError?.let { error ->
             val missingRemoteTarget = isMissingRemoteTarget(error)
+            val isListActionTransportError = listActionError != null && isTransportConnectionFailure(error)
             RetryCard(
-                state = retryPresentation(error, isTransportFailure = false),
+                state = if (isListActionTransportError) {
+                    RetryUiState(
+                        title = stringResource(R.string.workbench_connection_unavailable_title),
+                        detail = error,
+                        retryLabel = stringResource(R.string.workbench_reconnect),
+                    )
+                } else {
+                    retryPresentation(error, isTransportFailure = false)
+                },
                 onRetry = {
                     if (missingRemoteTarget) {
                         // This path is navigation, not a failed task retry.

@@ -1,6 +1,7 @@
 package com.andysagent.ragent.feature.workbench
 
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -144,11 +145,13 @@ internal fun SessionsSurface(
         }
     }
     val openProjectMenu: (String) -> Unit = { id ->
-        state.projects.firstOrNull { it.id == id }?.let { project ->
-            onEvent(WorkbenchEvent.PrepareListedProjectAction(state.activeRemoteTargetId, id))
-            menuProject = project
-            renameText = project.name
-            dialogMode = "project-menu"
+        if (state.pendingProjectActionId != id) {
+            state.projects.firstOrNull { it.id == id }?.let { project ->
+                onEvent(WorkbenchEvent.PrepareListedProjectAction(state.activeRemoteTargetId, id))
+                menuProject = project
+                renameText = project.name
+                dialogMode = "project-menu"
+            }
         }
     }
     // Closing clears the domain's browsing id immediately. The visual stack
@@ -235,16 +238,17 @@ internal fun SessionsSurface(
         }
     }
     menuProject?.let { project ->
+        val projectActionPending = state.pendingProjectActionId == project.id
         when (dialogMode) {
             "project-menu" -> AlertDialog(
                 onDismissRequest = { dialogMode = null; menuProject = null },
                 title = { Text(project.name) },
                 text = { Column(Modifier.fillMaxWidth().testTag("project-list-menu")) {
-                    Text(stringResource(if (project.pinned) R.string.list_unpin else R.string.list_pin), Modifier.fillMaxWidth().testTag("project-list-pin").clickable {
+                    Text(stringResource(if (project.pinned) R.string.list_unpin else R.string.list_pin), Modifier.fillMaxWidth().testTag("project-list-pin").clickable(enabled = !projectActionPending) {
                         onEvent(WorkbenchEvent.PinListedProject(state.activeRemoteTargetId, project.id, !project.pinned)); dialogMode = null; menuProject = null
                     }.padding(vertical = 14.dp))
-                    Text(stringResource(R.string.project_list_rename), Modifier.fillMaxWidth().testTag("project-list-rename").clickable { dialogMode = "project-rename" }.padding(vertical = 14.dp))
-                    Text(stringResource(R.string.project_list_delete), Modifier.fillMaxWidth().testTag("project-list-delete").clickable { dialogMode = "project-delete" }.padding(vertical = 14.dp), color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.project_list_rename), Modifier.fillMaxWidth().testTag("project-list-rename").clickable(enabled = !projectActionPending) { dialogMode = "project-rename" }.padding(vertical = 14.dp))
+                    Text(stringResource(R.string.project_list_delete), Modifier.fillMaxWidth().testTag("project-list-delete").clickable(enabled = !projectActionPending) { dialogMode = "project-delete" }.padding(vertical = 14.dp), color = MaterialTheme.colorScheme.error)
                 } },
                 confirmButton = { TextButton(onClick = { dialogMode = null; menuProject = null }, colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary)) { Text(stringResource(R.string.settings_cancel)) } },
             )
@@ -252,27 +256,63 @@ internal fun SessionsSurface(
                 title = stringResource(R.string.project_list_rename), confirmLabel = stringResource(R.string.settings_save),
                 onConfirm = {
                     val name = renameText.trim()
-                    if (name.isNotEmpty()) onEvent(WorkbenchEvent.RenameListedProject(state.activeRemoteTargetId, project.id, name))
+                    if (name.isNotEmpty() && !projectActionPending) onEvent(WorkbenchEvent.RenameListedProject(state.activeRemoteTargetId, project.id, name))
                     dialogMode = null; menuProject = null
                 },
                 onDismiss = { dialogMode = null; menuProject = null }, dismissLabel = stringResource(R.string.settings_cancel),
-                confirmEnabled = renameText.trim().isNotEmpty(),
+                confirmEnabled = !projectActionPending && renameText.trim().isNotEmpty(),
             ) { AgentoTextField(value = renameText, onValueChange = { renameText = it }, label = stringResource(R.string.project_list_name), modifier = Modifier.fillMaxWidth().testTag("project-list-name")) }
             "project-delete" -> AlertDialog(
                 onDismissRequest = { dialogMode = null; menuProject = null },
                 title = { Text(stringResource(R.string.project_list_delete)) },
-                text = { Text(stringResource(R.string.project_list_delete_detail)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(stringResource(R.string.project_list_delete_detail))
+                        if (projectActionPending) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.testTag("project-delete-progress"),
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = LocalRagentColors.current.accentPrimary,
+                                )
+                            }
+                        }
+                    }
+                },
                 confirmButton = { Column {
-                    TextButton(modifier = Modifier.testTag("project-delete-keep"), onClick = {
-                        onEvent(WorkbenchEvent.DeleteListedProject(state.activeRemoteTargetId, project.id, false)); dialogMode = null; menuProject = null
-                    },
+                    TextButton(
+                        modifier = Modifier.testTag("project-delete-keep"),
+                        enabled = !projectActionPending,
+                        onClick = {
+                            if (!projectActionPending) {
+                                onEvent(WorkbenchEvent.DeleteListedProject(state.activeRemoteTargetId, project.id, false))
+                                dialogMode = null
+                                menuProject = null
+                            }
+                        },
                         colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary),
                     ) { Text(stringResource(R.string.project_list_delete_keep)) }
-                    TextButton(modifier = Modifier.testTag("project-delete-all"), onClick = {
-                        onEvent(WorkbenchEvent.DeleteListedProject(state.activeRemoteTargetId, project.id, true)); dialogMode = null; menuProject = null
-                    },
+                    TextButton(
+                        modifier = Modifier.testTag("project-delete-all"),
+                        enabled = !projectActionPending,
+                        onClick = {
+                            if (!projectActionPending) {
+                                onEvent(WorkbenchEvent.DeleteListedProject(state.activeRemoteTargetId, project.id, true))
+                                dialogMode = null
+                                menuProject = null
+                            }
+                        },
                         colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary),
-                    ) { Text(stringResource(R.string.project_list_delete_all), color = MaterialTheme.colorScheme.error) }
+                    ) {
+                        Text(
+                            stringResource(R.string.project_list_delete_all),
+                            color = if (projectActionPending) MaterialTheme.colorScheme.error.copy(alpha = 0.38f) else MaterialTheme.colorScheme.error,
+                        )
+                    }
                 } },
                 dismissButton = { TextButton(onClick = { dialogMode = null; menuProject = null }, colors = ButtonDefaults.textButtonColors(contentColor = LocalRagentColors.current.accentPrimary)) { Text(stringResource(R.string.settings_cancel)) } },
             )
@@ -341,17 +381,19 @@ private fun CompactProjectsSurface(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     items(groups, key = { it.project.id }) { group ->
+                        val isActionPending = state.pendingProjectActionId == group.project.id
                         ProjectIndexSection(
                             group = group,
                             selectedSessionId = state.sessionId,
-                            onOpenProject = {
+                            actionPending = isActionPending,
+                            onOpenProject = if (isActionPending) null else ({
                                 onEvent(WorkbenchEvent.OpenProjectSessions(group.project.id))
-                            },
+                            }),
                             onSelectSession = { sessionId ->
                                 onEvent(WorkbenchEvent.SelectSession(sessionId))
                             },
                             onLongClickSession = onSessionLongClick,
-                            onLongClickProject = if (state.projects.any { it.id == group.project.id }) ({ onProjectLongClick(group.project.id) }) else null,
+                            onLongClickProject = if (!isActionPending && state.projects.any { it.id == group.project.id }) ({ onProjectLongClick(group.project.id) }) else null,
                         )
                     }
                 }
@@ -795,7 +837,8 @@ private fun SessionsHeader(
 private fun ProjectIndexSection(
     group: ProjectGroupUi,
     selectedSessionId: String?,
-    onOpenProject: () -> Unit,
+    actionPending: Boolean,
+    onOpenProject: (() -> Unit)?,
     onSelectSession: (String) -> Unit,
     onLongClickSession: (String) -> Unit,
     onLongClickProject: (() -> Unit)?,
@@ -817,6 +860,7 @@ private fun ProjectIndexSection(
                     .fillMaxWidth()
                     .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(12.dp))
+                    .graphicsLayer { alpha = if (actionPending) 0.72f else 1f }
                     .agentoPressScale(pressedScale = 0.98f, onClick = onOpenProject, onLongClick = onLongClickProject)
                     .testTag("project-header-${group.project.id}")
                     .semantics(mergeDescendants = true) {
@@ -854,12 +898,22 @@ private fun ProjectIndexSection(
                     color = if (isDark) AgentoFrostedTokens.TextSecondary else colors.secondaryContent,
                     maxLines = 1,
                 )
-                AgentoWebIcon(
-                    glyph = AgentoWebGlyph.ChevronRight,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = if (isDark) AgentoFrostedTokens.TextTertiary else colors.tertiaryContent,
-                )
+                if (actionPending) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .testTag("project-action-progress-${group.project.id}"),
+                        strokeWidth = 2.dp,
+                        color = colors.accentPrimary,
+                    )
+                } else {
+                    AgentoWebIcon(
+                        glyph = AgentoWebGlyph.ChevronRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (isDark) AgentoFrostedTokens.TextTertiary else colors.tertiaryContent,
+                    )
+                }
             }
 
             // Attention/active work first, then recent activity. The full

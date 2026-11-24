@@ -12,6 +12,7 @@ internal fun WorkbenchUiState.navigationProjection(): WorkbenchUiState = copy(
             approvalRechecking = false,
             isLoading = false,
             error = null,
+            listActionError = null,
             runtimePickerOpen = false,
             sessionMenuOpen = false,
             sessionActionInProgress = false,

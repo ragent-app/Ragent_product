@@ -1225,7 +1225,8 @@ class WorkbenchViewModelTest {
             advanceUntilIdle()
             assertTrue(first.deletedSessions.isEmpty())
             assertTrue(second.deletedSessions.isEmpty())
-            assertTrue(viewModel.state.value.error?.contains("changed") == true)
+            assertEquals(null, viewModel.state.value.error)
+            assertTrue(viewModel.state.value.listActionError?.contains("changed") == true)
         } finally { Dispatchers.resetMain() }
     }
 
@@ -1245,7 +1246,8 @@ class WorkbenchViewModelTest {
             advanceUntilIdle()
             assertTrue(first.deletedProjects.isEmpty())
             assertTrue(second.deletedProjects.isEmpty())
-            assertTrue(viewModel.state.value.error?.contains("changed") == true)
+            assertEquals(null, viewModel.state.value.error)
+            assertTrue(viewModel.state.value.listActionError?.contains("changed") == true)
             viewModel.onEvent(ChatEvent.PrepareListedProjectAction("same"))
             viewModel.onEvent(ChatEvent.PinListedProject("same", true))
             advanceUntilIdle()
@@ -1799,6 +1801,159 @@ class WorkbenchViewModelTest {
             Dispatchers.resetMain()
         }
     }
+
+    @Test
+    fun `delete listed project failure writes to listActionError and survives selectSession and updateConnection`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val repository = FakeSessionRepository(
+                sessions = listOf(Session("s1", "First"), Session("s2", "Second")),
+                connection = RuntimeConnectionState.Connected,
+            ).apply {
+                failDeleteProject = SessionRepositoryException(
+                    statusCode = 503,
+                    code = "CARRIER_UNAVAILABLE",
+                    message = "No verified TURN/P2P carrier is available",
+                    retryable = true,
+                )
+            }
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.PrepareListedProjectAction("p1"))
+            viewModel.onEvent(ChatEvent.DeleteListedProject("p1", true))
+            advanceUntilIdle()
+
+            val expectedError = "Project could not be deleted: No verified TURN/P2P carrier is available"
+            assertEquals(expectedError, viewModel.state.value.listActionError)
+            assertEquals(null, viewModel.state.value.error)
+            assertEquals(null, viewModel.state.value.pendingProjectActionId)
+
+            // Unrelated ChatViewModel lifecycle transitions must not clear or overwrite listActionError.
+            viewModel.onEvent(ChatEvent.SelectSession("s2"))
+            advanceUntilIdle()
+            repository.setConnection(RuntimeConnectionState.Disconnected)
+            advanceUntilIdle()
+            repository.setConnection(RuntimeConnectionState.Connected)
+            advanceUntilIdle()
+            assertEquals(expectedError, viewModel.state.value.listActionError)
+
+            viewModel.onEvent(ChatEvent.DismissListActionError)
+            assertEquals(null, viewModel.state.value.listActionError)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `pendingProjectActionId is set during delete blocks duplicates and clears in finally`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val gate = CompletableDeferred<Unit>()
+            val repository = FakeSessionRepository(
+                connection = RuntimeConnectionState.Connected,
+                deleteProjectGate = gate,
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.PrepareListedProjectAction("p1"))
+            viewModel.onEvent(ChatEvent.DeleteListedProject("p1", false))
+            runCurrent()
+
+            assertEquals("p1", viewModel.state.value.pendingProjectActionId)
+
+            // Duplicate tap on the same project while delete is in flight must be ignored.
+            viewModel.onEvent(ChatEvent.PrepareListedProjectAction("p1"))
+            viewModel.onEvent(ChatEvent.DeleteListedProject("p1", false))
+            runCurrent()
+
+            gate.complete(Unit)
+            advanceUntilIdle()
+
+            assertEquals(null, viewModel.state.value.pendingProjectActionId)
+            assertEquals(listOf("p1" to false), repository.deletedProjects)
+
+            // Verify finally also clears pendingProjectActionId when delete throws.
+            val errorGate = CompletableDeferred<Unit>()
+            val failingRepo = FakeSessionRepository(
+                connection = RuntimeConnectionState.Connected,
+                deleteProjectGate = errorGate,
+            ).apply {
+                failDeleteProject = SessionRepositoryException(409, "PROJECT_DELETE_ACTIVE", "Active run", false)
+            }
+            val failingVm = ChatViewModel(failingRepo)
+            advanceUntilIdle()
+
+            failingVm.onEvent(ChatEvent.PrepareListedProjectAction("p2"))
+            failingVm.onEvent(ChatEvent.DeleteListedProject("p2", true))
+            runCurrent()
+            assertEquals("p2", failingVm.state.value.pendingProjectActionId)
+
+            errorGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(null, failingVm.state.value.pendingProjectActionId)
+            assertEquals("Project could not be deleted: Active run", failingVm.state.value.listActionError)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `target mismatch helper sets listActionError instead of silently dropping`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val repository = FakeSessionRepository(connection = RuntimeConnectionState.Connected)
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            val dispatched = viewModel.dispatchListedActionForTarget(
+                eventTargetId = "pc-a",
+                currentTargetId = "pc-b",
+                actionName = "delete_project",
+                entityId = "p1",
+                mismatchMessage = "The project or computer changed; reopen the menu and try again",
+                event = ChatEvent.DeleteListedProject("p1", true),
+            )
+            advanceUntilIdle()
+
+            assertFalse(dispatched)
+            assertTrue(repository.deletedProjects.isEmpty())
+            assertEquals("The project or computer changed; reopen the menu and try again", viewModel.state.value.listActionError)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `switching between two connected computers refreshes projects in shell and projects view models`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val first = FakeSessionRepository(connection = RuntimeConnectionState.Connected, targetId = "pc-a")
+            val second = FakeSessionRepository(connection = RuntimeConnectionState.Connected, targetId = "pc-b")
+            val switching = com.andysagent.ragent.core.domain.SwitchingSessionRepository(backgroundScope)
+            switching.switchTo(first)
+
+            val shell = AppShellViewModel(switching)
+            val projects = ProjectsViewModel(switching)
+            advanceUntilIdle()
+
+            val secondCallsBefore = second.projectRefreshCalls
+            assertEquals(0, secondCallsBefore)
+
+            switching.switchTo(second)
+            advanceUntilIdle()
+
+            assertTrue(
+                second.projectRefreshCalls >= 2,
+                "Expected switching Connected -> Connected to refresh projects on the newly selected computer",
+            )
+            assertEquals(com.andysagent.ragent.core.agentui.AgentConnectionStatus.Connected, shell.state.value.connection)
+            assertEquals(null, projects.state.value.error)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
 }
 
 private class FakeSessionRepository(
@@ -1821,6 +1976,7 @@ private class FakeSessionRepository(
     private val globalGate: CompletableDeferred<Unit>? = null,
     private val cancelGate: CompletableDeferred<Unit>? = null,
     private val cancelFailure: Throwable? = null,
+    private val deleteProjectGate: CompletableDeferred<Unit>? = null,
 ) : SessionRepository {
     override val runtimeTargetId: String? get() = targetId
     private val connectionStateValue = MutableStateFlow(connection)
@@ -1843,7 +1999,8 @@ private class FakeSessionRepository(
     val createdNames = mutableListOf<String>()
     val deletedSessions = mutableListOf<String>()
     val renamedSessions = mutableListOf<Pair<String, String>>()
-    val deletedProjects = mutableListOf<Pair<String, Boolean>>()
+    var deletedProjects = mutableListOf<Pair<String, Boolean>>()
+    var failDeleteProject: Throwable? = null
     val pinnedProjects = mutableListOf<Pair<String, Boolean>>()
     var approvedActionsCall: ApprovedActionsCall? = null
     var approvedActionBatchCall: ApprovedActionBatchCall? = null
@@ -1909,7 +2066,11 @@ private class FakeSessionRepository(
     }
     override suspend fun deleteSession(sessionId: String) { deletedSessions += sessionId }
     override suspend fun renameSession(sessionId: String, name: String) { renamedSessions += sessionId to name }
-    override suspend fun deleteProject(projectId: String, deleteSessions: Boolean) { deletedProjects += projectId to deleteSessions }
+    override suspend fun deleteProject(projectId: String, deleteSessions: Boolean) {
+        deleteProjectGate?.await()
+        failDeleteProject?.let { throw it }
+        deletedProjects += projectId to deleteSessions
+    }
     override suspend fun setProjectPinned(projectId: String, pinned: Boolean) { pinnedProjects += projectId to pinned }
     override suspend fun createProject(name: String, rootPath: String): Project {
         val project = Project("project-created", name.ifBlank { "Project" }, rootPath)

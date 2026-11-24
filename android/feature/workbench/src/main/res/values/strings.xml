@@ -507,6 +507,8 @@
     <string name="project_list_delete_detail">Choose whether to retain the project’s sessions or delete them with the project.</string>
     <string name="project_list_delete_keep">Delete project, keep sessions</string>
     <string name="project_list_delete_all">Delete project and sessions</string>
+    <string name="list_action_project_target_changed">The project or computer changed; reopen the menu and try again</string>
+    <string name="list_action_session_target_changed">The session or computer changed; reopen the menu and try again</string>
     <string name="runtime_none_title">No harness installed</string>
     <string name="runtime_none_detail">Install a harness in settings before starting a conversation.</string>
     <string name="runtime_none_settings">Open harness settings</string>

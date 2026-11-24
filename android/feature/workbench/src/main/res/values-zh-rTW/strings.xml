@@ -465,6 +465,8 @@
     <string name="project_list_delete_detail">請選擇保留專案中的對話，或連同專案一起刪除。</string>
     <string name="project_list_delete_keep">刪除專案，保留對話</string>
     <string name="project_list_delete_all">刪除專案和對話</string>
+    <string name="list_action_project_target_changed">專案或電腦已切換，請重新開啟選單後再試</string>
+    <string name="list_action_session_target_changed">對話或電腦已切換，請重新開啟選單後再試</string>
     <string name="windows_broker_enrollment_title">手機審批授權</string>
     <string name="windows_broker_enrollment_subtitle">用這部手機批准電腦上的特權操作。</string>
     <string name="approval_explanation_summary">通俗解釋</string>

@@ -1,5 +1,6 @@
 package com.andysagent.ragent.feature.workbench
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -23,6 +24,7 @@ import com.andysagent.ragent.core.domain.SessionRepositoryException
 import com.andysagent.ragent.core.domain.isTerminalApprovalFailure
 import com.andysagent.ragent.core.domain.isAmbiguousApprovalSubmission
 import com.andysagent.ragent.core.domain.SwitchingSessionRepository
+import com.andysagent.ragent.core.domain.observeScopedConnectionStates
 import com.andysagent.ragent.core.domain.newRequestId
 import com.andysagent.ragent.core.protocol.WebAuthnProofDto
 import com.andysagent.ragent.core.protocol.TargetSummary
@@ -126,6 +128,8 @@ data class WorkbenchUiState(
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
+    val listActionError: String? = null,
+    val pendingProjectActionId: String? = null,
     val computers: List<Computer> = emptyList(),
     val projects: List<Project> = emptyList(),
     val sessions: List<Session> = emptyList(),
@@ -377,12 +381,12 @@ class AppShellViewModel(private val repository: SessionRepository) : ViewModel()
 
     init {
         viewModelScope.launch {
-            repository.connectionState.collectLatest { connection ->
+            repository.observeScopedConnectionStates().collectLatest { (fixed, connection) ->
                 updateState { copy(connection = connection.toAgentConnectionStatus()) }
-                if (connection == RuntimeConnectionState.Connected) {
-                    launch { runCatching { repository.refreshSessions() } }
-                    launch { runCatching { repository.refreshComputers() } }
-                    launch { runCatching { repository.refreshProjects() } }
+                if (fixed != null && connection == RuntimeConnectionState.Connected) {
+                    launch { runCatching { fixed.refreshSessions() } }
+                    launch { runCatching { fixed.refreshComputers() } }
+                    launch { runCatching { fixed.refreshProjects() } }
                 }
             }
         }
@@ -491,6 +495,9 @@ data class ChatUiState(
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
+    val listActionError: String? = null,
+    val pendingProjectActionId: String? = null,
+    val pendingSessionActionId: String? = null,
     /** A transient carrier error disappears as soon as the carrier is healthy again. */
     val clearErrorWhenConnected: Boolean = false,
     val runtimeTool: String = "codex",
@@ -568,6 +575,8 @@ sealed interface ChatEvent {
     data class CreateSession(val projectId: String? = null) : ChatEvent
     data object Retry : ChatEvent
     data object DismissError : ChatEvent
+    data object DismissListActionError : ChatEvent
+    data class ReportListActionError(val message: String) : ChatEvent
     data object OpenRuntimePicker : ChatEvent
     data object CloseRuntimePicker : ChatEvent
     data object RefreshRuntimeCatalog : ChatEvent
@@ -748,6 +757,8 @@ class ChatViewModel(
     private val provisionalCleanupJobs = mutableMapOf<Pair<SessionRepository, String>, Job>()
     private var listedSessionActionTarget: Pair<SessionRepository, String>? = null
     private var listedProjectActionTarget: Pair<SessionRepository, String>? = null
+    private var listedActionGeneration = 0L
+    private val pendingListActionGenerations = mutableMapOf<String, Long>()
     private var lastRunProjectionRequest: Pair<String, Long>? = null
     private var durationFetchJob: Job? = null
     private val durationAttempts = mutableMapOf<String, Long>()
@@ -840,13 +851,8 @@ class ChatViewModel(
             }
         } else repository.observeSessions().map { repository to it }
 
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun scopedConnections(): Flow<Pair<SessionRepository?, RuntimeConnectionState>> =
-        if (repository is SwitchingSessionRepository) {
-            repository.delegate.flatMapLatest { fixed ->
-                fixed?.connectionState?.map { fixed to it } ?: flowOf(null to RuntimeConnectionState.Disconnected)
-            }
-        } else repository.connectionState.map { repository to it }
+        repository.observeScopedConnectionStates()
 
     private fun saveSelectedDraft() {
         val fixed = selectedRepository ?: return
@@ -1056,7 +1062,9 @@ class ChatViewModel(
             ChatEvent.LoadOlderTimeline -> loadOlderTimeline()
             is ChatEvent.CreateSession -> createSession(event.projectId)
             ChatEvent.Retry -> retry()
-            ChatEvent.DismissError -> updateState { copy(error = null) }
+            ChatEvent.DismissError -> updateState { copy(error = null, listActionError = null) }
+            ChatEvent.DismissListActionError -> updateState { copy(listActionError = null) }
+            is ChatEvent.ReportListActionError -> updateState { copy(listActionError = event.message) }
             ChatEvent.OpenRuntimePicker -> {
                 if (!mutableState.value.runtimePickerOpen) {
                     val current = mutableState.value
@@ -1290,24 +1298,31 @@ class ChatViewModel(
             }
             is ChatEvent.PrepareListedSessionAction -> {
                 val fixed = activeRepository()
-                listedSessionActionTarget = if (fixed != null && knownSessionsRepository === fixed &&
-                    knownSessions.any { it.id == event.sessionId }) fixed to event.sessionId else null
+                val valid = fixed != null && knownSessionsRepository === fixed && knownSessions.any { it.id == event.sessionId }
+                listedSessionActionTarget = if (valid) fixed to event.sessionId else null
+                if (!valid) {
+                    logListWarn("Prepared session action rejected: sessionId=${event.sessionId} hasRepo=${fixed != null}")
+                }
             }
-            is ChatEvent.RenameListedSession -> runListedSessionAction(event.sessionId, "Session could not be renamed") { fixed ->
+            is ChatEvent.RenameListedSession -> runListedSessionAction("rename", event.sessionId, "Session could not be renamed") { fixed ->
                 fixed.renameSession(event.sessionId, event.name)
             }
-            is ChatEvent.DeleteListedSession -> runListedSessionAction(event.sessionId, "Session could not be deleted") { fixed ->
+            is ChatEvent.DeleteListedSession -> runListedSessionAction("delete", event.sessionId, "Session could not be deleted") { fixed ->
                 fixed.deleteSession(event.sessionId)
             }
-            is ChatEvent.PinListedSession -> runListedSessionAction(event.sessionId, "Session could not be pinned") { fixed ->
+            is ChatEvent.PinListedSession -> runListedSessionAction("pin", event.sessionId, "Session could not be pinned") { fixed ->
                 fixed.setSessionPinned(event.sessionId, event.pinned)
             }
             is ChatEvent.PrepareListedProjectAction -> {
-                listedProjectActionTarget = activeRepository()?.let { it to event.projectId }
+                val fixed = activeRepository()
+                if (fixed == null) {
+                    logListWarn("Prepared project action rejected: projectId=${event.projectId} reason=no_active_repository")
+                }
+                listedProjectActionTarget = fixed?.let { it to event.projectId }
             }
-            is ChatEvent.RenameListedProject -> runListedProjectAction(event.projectId, "Project could not be renamed") { it.updateProject(event.projectId, event.name) }
-            is ChatEvent.PinListedProject -> runListedProjectAction(event.projectId, "Project could not be pinned") { it.setProjectPinned(event.projectId, event.pinned) }
-            is ChatEvent.DeleteListedProject -> runListedProjectAction(event.projectId, "Project could not be deleted") { it.deleteProject(event.projectId, event.deleteSessions) }
+            is ChatEvent.RenameListedProject -> runListedProjectAction("rename", event.projectId, "Project could not be renamed") { it.updateProject(event.projectId, event.name) }
+            is ChatEvent.PinListedProject -> runListedProjectAction("pin", event.projectId, "Project could not be pinned") { it.setProjectPinned(event.projectId, event.pinned) }
+            is ChatEvent.DeleteListedProject -> runListedProjectAction("delete", event.projectId, "Project could not be deleted") { it.deleteProject(event.projectId, event.deleteSessions) }
             ChatEvent.CompactSession -> runSessionAction("Session context could not be compacted") {
                 val sessionId = requireSessionId()
                 repository.compactSession(sessionId)
@@ -1382,38 +1397,128 @@ class ChatViewModel(
     private fun requireSessionId(): String = mutableState.value.sessionId
         ?: error("Open a session before using session actions")
 
-    private fun runListedSessionAction(sessionId: String, fallback: String, action: suspend (SessionRepository) -> Unit) {
+    private fun runListedSessionAction(actionName: String, sessionId: String, fallback: String, action: suspend (SessionRepository) -> Unit) {
         val captured = listedSessionActionTarget
         listedSessionActionTarget = null
-        if (captured == null || captured.second != sessionId || activeRepository() !== captured.first ||
-            knownSessionsRepository !== captured.first || knownSessions.none { it.id == sessionId }) {
-            showError(IllegalStateException("The session or computer changed; reopen the menu and try again"), fallback)
+        executeListedAction(
+            kind = "session",
+            actionName = actionName,
+            entityId = sessionId,
+            fallback = fallback,
+            mismatchMessage = "The session or computer changed; reopen the menu and try again",
+            isPending = { it.pendingSessionActionId == sessionId },
+            resolveTarget = {
+                if (captured == null || captured.second != sessionId || activeRepository() !== captured.first ||
+                    knownSessionsRepository !== captured.first || knownSessions.none { it.id == sessionId }) {
+                    null to when {
+                        captured == null -> "no_prepared_target"
+                        captured.second != sessionId -> "session_id_mismatch"
+                        activeRepository() !== captured.first -> "repository_changed"
+                        else -> "session_catalog_changed"
+                    }
+                } else {
+                    captured.first to null
+                }
+            },
+            setPending = { copy(pendingSessionActionId = it) },
+            action = action,
+        )
+    }
+
+    private fun runListedProjectAction(actionName: String, projectId: String, fallback: String, action: suspend (SessionRepository) -> Unit) {
+        val captured = listedProjectActionTarget
+        listedProjectActionTarget = null
+        executeListedAction(
+            kind = "project",
+            actionName = actionName,
+            entityId = projectId,
+            fallback = fallback,
+            mismatchMessage = "The project or computer changed; reopen the menu and try again",
+            isPending = { it.pendingProjectActionId == projectId },
+            resolveTarget = {
+                if (captured == null || captured.second != projectId || activeRepository() !== captured.first) {
+                    null to when {
+                        captured == null -> "no_prepared_target"
+                        captured.second != projectId -> "project_id_mismatch"
+                        else -> "repository_changed"
+                    }
+                } else {
+                    captured.first to null
+                }
+            },
+            setPending = { copy(pendingProjectActionId = it) },
+            action = action,
+        )
+    }
+
+    private fun executeListedAction(
+        kind: String,
+        actionName: String,
+        entityId: String,
+        fallback: String,
+        mismatchMessage: String,
+        isPending: (ChatUiState) -> Boolean,
+        resolveTarget: () -> Pair<SessionRepository?, String?>,
+        setPending: ChatUiState.(String?) -> ChatUiState,
+        action: suspend (SessionRepository) -> Unit,
+    ) {
+        if (isPending(mutableState.value)) {
+            logListWarn("Rejected duplicate listed $kind action while in progress: action=$actionName entityId=$entityId")
             return
         }
-        val fixed = captured.first
+        val (fixed, rejectReason) = resolveTarget()
+        if (fixed == null) {
+            logListWarn("Rejected listed $kind action: action=$actionName entityId=$entityId reason=${rejectReason ?: "unknown"}")
+            showListActionError(IllegalStateException(mismatchMessage), fallback)
+            return
+        }
+        val token = ++listedActionGeneration
+        pendingListActionGenerations[kind] = token
+        logListInfo("Starting listed $kind action: action=$actionName entityId=$entityId targetId=${fixed.runtimeTargetId ?: "unknown"}")
+        updateState { setPending(entityId).copy(listActionError = null) }
         viewModelScope.launch {
             try {
                 action(fixed)
+                logListInfo("Completed listed $kind action: action=$actionName entityId=$entityId targetId=${fixed.runtimeTargetId ?: "unknown"}")
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                if (activeRepository() === fixed) showError(error, fallback)
+                val repoError = error as? SessionRepositoryException
+                val sameRepo = activeRepository() === fixed
+                logListWarn(
+                    "Failed listed $kind action: action=$actionName entityId=$entityId " +
+                        "exception=${error::class.java.simpleName} " +
+                        "status=${repoError?.statusCode ?: -1} code=${repoError?.code ?: "none"} sameRepo=$sameRepo",
+                )
+                if (sameRepo) showListActionError(error, fallback)
+            } finally {
+                updateState {
+                    if (pendingListActionGenerations[kind] == token) setPending(null) else this
+                }
             }
         }
     }
 
-    private fun runListedProjectAction(projectId: String, fallback: String, action: suspend (SessionRepository) -> Unit) {
-        val captured = listedProjectActionTarget
-        listedProjectActionTarget = null
-        if (captured == null || captured.second != projectId || activeRepository() !== captured.first) {
-            showError(IllegalStateException("The project or computer changed; reopen the menu and try again"), fallback)
+    private fun showListActionError(error: Throwable, fallback: String) {
+        if (requiresDeviceReauthentication(error)) {
+            updateState {
+                copy(
+                    connection = AgentConnectionStatus.AuthenticationRequired,
+                    listActionError = "Authentication required. Pair this Android device again.",
+                )
+            }
             return
         }
-        val fixed = captured.first
-        viewModelScope.launch {
-            try { action(fixed) } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Throwable) { if (activeRepository() === fixed) showError(error, fallback) }
-        }
+        val detail = error.message?.takeIf { it.isNotBlank() } ?: fallback
+        updateState { copy(listActionError = "$fallback: $detail") }
+    }
+
+    private fun logListInfo(message: String) {
+        runCatching { Log.i("WorkbenchListActions", message) }
+    }
+
+    private fun logListWarn(message: String) {
+        runCatching { Log.w("WorkbenchListActions", message) }
     }
 
     private fun runSessionAction(fallback: String, action: suspend () -> Unit) {
@@ -3837,8 +3942,24 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
             }
         }
         viewModelScope.launch {
-            repository.connectionState.collectLatest { connection ->
-                if (connection == RuntimeConnectionState.Connected && refreshError != null) refresh()
+            var lastDelegate: SessionRepository? = null
+            var hasObservedDelegate = false
+            var pendingDelegateRefresh = false
+            repository.observeScopedConnectionStates().collectLatest { (fixed, connection) ->
+                val delegateChanged = hasObservedDelegate && fixed !== lastDelegate
+                hasObservedDelegate = true
+                lastDelegate = fixed
+                if (delegateChanged) {
+                    refreshError = null
+                    sessionSnapshots.clear()
+                    pendingDelegateRefresh = repository is SwitchingSessionRepository && fixed != null
+                    updateState { copy(error = null) }
+                }
+                if (fixed != null && connection == RuntimeConnectionState.Connected &&
+                    (refreshError != null || pendingDelegateRefresh)) {
+                    pendingDelegateRefresh = false
+                    refresh(fixed)
+                }
             }
         }
     }
@@ -3977,23 +4098,28 @@ class ProjectsViewModel(private val repository: SessionRepository) : ViewModel()
         }
     }
 
-    private suspend fun refresh(allowRecoveryRetry: Boolean = true) {
+    private suspend fun refresh(
+        target: SessionRepository = repository,
+        allowRecoveryRetry: Boolean = true,
+    ) {
         try {
-            repository.refreshProjects()
-            repository.refreshSessions()
+            target.refreshProjects()
+            target.refreshSessions()
+            if (repository is SwitchingSessionRepository && repository.delegate.value !== target) return
             val previous = refreshError
             refreshError = null
             if (previous != null) updateState { if (error == previous) copy(error = null) else this }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Throwable) {
+            if (repository is SwitchingSessionRepository && repository.delegate.value !== target) return
             val message = failure.message ?: "Projects could not be loaded"
             refreshError = message
             updateState { copy(error = message) }
             // A failed call may finish after the Connected event has already
             // arrived. Recheck once, without an unbounded retry loop.
-            if (allowRecoveryRetry && repository.connectionState.value == RuntimeConnectionState.Connected) {
-                viewModelScope.launch { kotlinx.coroutines.delay(500); refresh(allowRecoveryRetry = false) }
+            if (allowRecoveryRetry && target.connectionState.value == RuntimeConnectionState.Connected) {
+                viewModelScope.launch { kotlinx.coroutines.delay(500); refresh(target = target, allowRecoveryRetry = false) }
             }
         }
     }
@@ -4116,6 +4242,30 @@ class ChatViewModelFactory(
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = ChatViewModel(repository, passkeyProvider, readRuntimeCache, writeRuntimeCache) as T
+}
+
+/** Dispatches a listed project/session event when the target matches, or surfaces a list-action error instead of dropping it. */
+fun ChatViewModel.dispatchListedActionForTarget(
+    eventTargetId: String?,
+    currentTargetId: String?,
+    actionName: String,
+    entityId: String,
+    mismatchMessage: String,
+    event: ChatEvent,
+): Boolean {
+    if (eventTargetId == currentTargetId) {
+        onEvent(event)
+        return true
+    }
+    runCatching {
+        Log.w(
+            "WorkbenchListActions",
+            "Rejected listed action due to target mismatch: action=$actionName entityId=$entityId " +
+                "eventTarget=${eventTargetId ?: "none"} currentTarget=${currentTargetId ?: "none"}",
+        )
+    }
+    onEvent(ChatEvent.ReportListActionError(mismatchMessage))
+    return false
 }
 
 class ProjectsViewModelFactory(private val repository: SessionRepository) : ViewModelProvider.Factory {

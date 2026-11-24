@@ -497,6 +497,8 @@
     <string name="project_list_delete_detail">请选择保留项目中的会话，或连同项目一起删除。</string>
     <string name="project_list_delete_keep">删除项目，保留会话</string>
     <string name="project_list_delete_all">删除项目和会话</string>
+    <string name="list_action_project_target_changed">项目或电脑已切换，请重新打开菜单后再试</string>
+    <string name="list_action_session_target_changed">会话或电脑已切换，请重新打开菜单后再试</string>
     <string name="runtime_none_title">尚未安装运行环境</string>
     <string name="runtime_none_detail">请先在设置中安装运行环境，再开始对话。</string>
     <string name="runtime_none_settings">前往运行环境设置</string>
