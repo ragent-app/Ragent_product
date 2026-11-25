@@ -1,10 +1,10 @@
 package com.andysagent.ragent.feature.workbench
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -92,6 +92,58 @@ internal fun connectionStatusAccentColor(connection: AgentConnectionStatus): Col
     }
 }
 
+/** Shared frosted-glass container for floating connection status chrome. */
+@Composable
+private fun ConnectionStatusFrostedShell(
+    shape: Shape,
+    backdropLayer: GraphicsLayer?,
+    backdropOrigin: IntOffset,
+    modifier: Modifier = Modifier,
+    interactionModifier: Modifier = Modifier,
+    contentAlignment: Alignment = Alignment.TopStart,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
+    val borderColor = if (isDark) {
+        AgentoFrostedTokens.SubtleHairline
+    } else {
+        AgentoFrostedTokens.LightSubtleHairline
+    }
+    var shellPosition by remember { mutableStateOf(IntOffset.Zero) }
+    val backdropOffset = IntOffset(
+        x = backdropOrigin.x - shellPosition.x,
+        y = backdropOrigin.y - shellPosition.y,
+    )
+
+    AgentoFrostedGlassBox(
+        modifier = modifier
+            .ragentComposerShadow(shape = shape)
+            .clip(shape)
+            .border(0.5.dp, borderColor, shape)
+            .then(interactionModifier)
+            .onGloballyPositioned { coordinates ->
+                val position = coordinates.positionInRoot()
+                shellPosition = IntOffset(
+                    x = position.x.roundToInt(),
+                    y = position.y.roundToInt(),
+                )
+            },
+        shape = shape,
+        surface = AgentoGlassSurface.Neutral,
+        blurRadius = AgentoFrostedTokens.BlurNavigation,
+        showTopHairline = true,
+        backdropLayer = backdropLayer,
+        backdropOffset = backdropOffset,
+        backdropTone = AgentoBackdropTone.QuietHeader,
+        material = AgentoGlassMaterial.LiquidClear,
+        specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+        contentAlignment = contentAlignment,
+        hasShadow = false,
+        content = content,
+    )
+}
+
 @Composable
 internal fun ConnectionStatusPill(
     connection: AgentConnectionStatus,
@@ -102,56 +154,29 @@ internal fun ConnectionStatusPill(
     backdropOrigin: IntOffset = IntOffset.Zero,
 ) {
     val colors = LocalRagentColors.current
-    val isDark = colors.canvas.red < 0.5f
     val label = stringResource(connectionStatusLabelRes(connection, activeCarrier))
     val accent = connectionStatusAccentColor(connection)
     val isConnecting = connection == AgentConnectionStatus.Connecting ||
         connection == AgentConnectionStatus.Reconnecting
     val interactive = onClick != null && connection != AgentConnectionStatus.Connected
-    val borderColor = if (isDark) {
-        AgentoFrostedTokens.SubtleHairline
-    } else {
-        AgentoFrostedTokens.LightSubtleHairline
-    }
-    var backdropOffset by remember { mutableStateOf(IntOffset.Zero) }
 
     Box(modifier = modifier) {
-        AgentoFrostedGlassBox(
-            modifier = Modifier
-                .testTag("connection-status-pill")
-                .ragentComposerShadow(shape = AgentoShapes.PillShape)
-                .clip(AgentoShapes.PillShape)
-                .border(0.5.dp, borderColor, AgentoShapes.PillShape)
-                .then(
-                    if (interactive) {
-                        Modifier
-                            .agentoPressScale(
-                                pressedScale = 0.96f,
-                                onClick = onClick!!,
-                            )
-                            .semantics { role = Role.Button }
-                    } else {
-                        Modifier
-                    },
-                )
-                .onGloballyPositioned { coordinates ->
-                    val position = coordinates.positionInRoot()
-                    backdropOffset = IntOffset(
-                        x = backdropOrigin.x - position.x.roundToInt(),
-                        y = backdropOrigin.y - position.y.roundToInt(),
-                    )
-                },
+        ConnectionStatusFrostedShell(
             shape = AgentoShapes.PillShape,
-            surface = AgentoGlassSurface.Neutral,
-            blurRadius = AgentoFrostedTokens.BlurNavigation,
-            showTopHairline = true,
             backdropLayer = backdropLayer,
-            backdropOffset = backdropOffset,
-            backdropTone = AgentoBackdropTone.QuietHeader,
-            material = AgentoGlassMaterial.LiquidClear,
-            specularBrush = if (isDark) AgentoFrostedTokens.SpecularBorderDark else AgentoFrostedTokens.SpecularBorderLight,
+            backdropOrigin = backdropOrigin,
+            modifier = Modifier.testTag("connection-status-pill"),
+            interactionModifier = if (interactive) {
+                Modifier
+                    .agentoPressScale(
+                        pressedScale = 0.96f,
+                        onClick = onClick!!,
+                    )
+                    .semantics { role = Role.Button }
+            } else {
+                Modifier
+            },
             contentAlignment = Alignment.Center,
-            hasShadow = false,
         ) {
             Row(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
@@ -186,6 +211,8 @@ internal fun ConnectionStatusBanner(
     connection: AgentConnectionStatus,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier,
+    backdropLayer: GraphicsLayer? = null,
+    backdropOrigin: IntOffset = IntOffset.Zero,
 ) {
     if (connection == AgentConnectionStatus.Connected) return
     val colors = LocalRagentColors.current
@@ -210,48 +237,50 @@ internal fun ConnectionStatusBanner(
     }
     val reconnectLabel = stringResource(R.string.workbench_reconnect)
 
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .testTag("connection-status-banner"),
-        shape = RoundedCornerShape(14.dp),
-        color = colors.quietSurface,
-        border = BorderStroke(0.5.dp, colors.subtleOutline),
-    ) {
-        Row(
+    Box(modifier = modifier.fillMaxWidth()) {
+        ConnectionStatusFrostedShell(
+            shape = RoundedCornerShape(14.dp),
+            backdropLayer = backdropLayer,
+            backdropOrigin = backdropOrigin,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 44.dp)
-                .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .testTag("connection-status-banner"),
         ) {
-            AgentoWebIcon(
-                glyph = AgentoWebGlyph.Info,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = accent,
-            )
-            Text(
-                text = stringResource(messageRes),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.primaryContent,
-            )
-            TextButton(
-                onClick = onReconnect,
+            Row(
                 modifier = Modifier
-                    .semantics { contentDescription = reconnectLabel }
-                    .testTag("connection-status-reconnect"),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                colors = ButtonDefaults.textButtonColors(contentColor = colors.accentPrimary),
+                    .fillMaxWidth()
+                    .heightIn(min = 44.dp)
+                    .padding(start = 12.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    text = reconnectLabel,
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                    maxLines = 1,
-                    softWrap = false,
+                AgentoWebIcon(
+                    glyph = AgentoWebGlyph.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = accent,
                 )
+                Text(
+                    text = stringResource(messageRes),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.primaryContent,
+                )
+                TextButton(
+                    onClick = onReconnect,
+                    modifier = Modifier
+                        .semantics { contentDescription = reconnectLabel }
+                        .testTag("connection-status-reconnect"),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = colors.accentPrimary),
+                ) {
+                    Text(
+                        text = reconnectLabel,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
         }
     }

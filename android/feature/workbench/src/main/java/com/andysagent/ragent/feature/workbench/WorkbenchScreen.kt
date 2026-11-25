@@ -1065,14 +1065,17 @@ internal fun shouldShowChatConnectionBanner(
 internal fun shouldShowChatConnectionPill(
     connection: AgentConnectionStatus,
     activeRemoteTargetId: String?,
-): Boolean = when (connection) {
-    AgentConnectionStatus.Connected -> false
-    AgentConnectionStatus.Connecting,
-    AgentConnectionStatus.Reconnecting,
-    AgentConnectionStatus.AuthenticationRequired,
-    AgentConnectionStatus.Error,
-    -> true
-    AgentConnectionStatus.Disconnected -> activeRemoteTargetId != null
+): Boolean {
+    if (shouldShowChatConnectionBanner(connection, activeRemoteTargetId)) return false
+    return when (connection) {
+        AgentConnectionStatus.Connected -> false
+        AgentConnectionStatus.Connecting,
+        AgentConnectionStatus.Reconnecting,
+        AgentConnectionStatus.AuthenticationRequired,
+        AgentConnectionStatus.Error,
+        -> true
+        AgentConnectionStatus.Disconnected -> activeRemoteTargetId != null
+    }
 }
 
 internal fun resolveDisplayedWorkbenchError(
@@ -3874,6 +3877,8 @@ private fun ChatSurface(
                     ConnectionStatusBanner(
                         connection = state.connection,
                         onReconnect = { onEvent(WorkbenchEvent.Retry) },
+                        backdropLayer = chatBackdropForControls,
+                        backdropOrigin = chatBackdropOrigin,
                         modifier = Modifier
                             .padding(horizontal = AgentoSpacing.ComposerMargin, vertical = 4.dp)
                             .widthIn(max = RagentSizes.ContentMaxWidth),

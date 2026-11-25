@@ -101,6 +101,7 @@ class ConnectionStatusAndErrorUiTest {
         }
 
         rule.onNodeWithTag("connection-status-banner").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithTag("connection-status-pill").fetchSemanticsNodes().size)
         assertEquals(0, rule.onAllNodesWithText("Connection unavailable").fetchSemanticsNodes().size)
         rule.onNodeWithTag("conversation-status-indicator", useUnmergedTree = true).assertIsDisplayed()
 
@@ -156,20 +157,50 @@ class ConnectionStatusAndErrorUiTest {
             }
         }
 
-        // Degraded states show the floating frosted ConnectionStatusPill.
+        // Remote Reconnecting shows ConnectionStatusBanner and hides ConnectionStatusPill (no stacking).
+        rule.onNodeWithTag("connection-status-banner").assertIsDisplayed()
+        assertEquals(0, rule.onAllNodesWithTag("connection-status-pill").fetchSemanticsNodes().size)
+
+        // Banner-free degraded state (no active remote target) still shows the floating ConnectionStatusPill.
+        rule.runOnIdle {
+            state = state.copy(activeRemoteTargetId = null)
+        }
+        assertEquals(0, rule.onAllNodesWithTag("connection-status-banner").fetchSemanticsNodes().size)
         rule.onNodeWithTag("connection-status-pill").assertIsDisplayed()
         rule.onNodeWithText("Reconnecting").assertIsDisplayed()
 
-        // Option A: hidden in chat reading surface when Connected.
+        // Option A: both pill and banner are hidden in chat reading surface when Connected.
         rule.runOnIdle {
-            state = state.copy(connection = AgentConnectionStatus.Connected)
+            state = state.copy(
+                activeRemoteTargetId = "pc-a",
+                connection = AgentConnectionStatus.Connected,
+            )
         }
         assertEquals(0, rule.onAllNodesWithTag("connection-status-pill").fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodesWithTag("connection-status-banner").fetchSemanticsNodes().size)
 
         // Carrier remains inspectable inside the expandable RunDetailsIsland on tap.
         rule.onNodeWithTag("run-island-persistent-title").performClick()
         rule.onNodeWithTag("run-island-connection-carrier").assertIsDisplayed()
         rule.onNodeWithText("Connected · TURN").assertIsDisplayed()
+    }
+
+    @Test
+    fun chatConnectionPillAndBannerAreStrictlyMutuallyExclusive() {
+        for (targetId in listOf("pc-a", null)) {
+            for (status in AgentConnectionStatus.entries) {
+                val showBanner = shouldShowChatConnectionBanner(status, targetId)
+                val showPill = shouldShowChatConnectionPill(status, targetId)
+                assertFalse(
+                    "Pill and banner must never both be visible for status=$status targetId=$targetId",
+                    showBanner && showPill,
+                )
+            }
+        }
+        assertTrue(shouldShowChatConnectionBanner(AgentConnectionStatus.Reconnecting, "pc-a"))
+        assertFalse(shouldShowChatConnectionPill(AgentConnectionStatus.Reconnecting, "pc-a"))
+        assertFalse(shouldShowChatConnectionBanner(AgentConnectionStatus.Connected, "pc-a"))
+        assertFalse(shouldShowChatConnectionPill(AgentConnectionStatus.Connected, "pc-a"))
     }
 
     @Test
