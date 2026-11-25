@@ -29,7 +29,8 @@ object RunActionFormatter {
         if (status == RunActionStatus.WaitingApproval) return forRun(status, phase, items, runId)
         val canonical = fromServer(activity, runId)
         val activityState = (activity?.get("state") as? JsonPrimitive)?.contentOrNull
-        if (canonical != null && activityState in setOf("queued", "waiting_user", "waiting_approval")) return canonical
+        val actionRequired = (activity?.get("actionRequired") as? JsonPrimitive)?.contentOrNull == "true"
+        if (canonical != null && (actionRequired || activityState in setOf("queued", "waiting_user", "waiting_approval", "approval_requested"))) return canonical
         val current = items.drop(items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User } + 1)
         val active = current.filterIsInstance<TimelineItem.Operation>().lastOrNull {
             (runId.isNullOrBlank() || it.runId == runId) &&
@@ -85,7 +86,8 @@ object RunActionFormatter {
             kind == "question" && rawSubject.equals("question", ignoreCase = true) -> ""
             else -> rawSubject
         }
-        val lifecycle = value("operationState").ifBlank { value("state") }
+        val lifecycle = value("state").takeIf { it in setOf("queued", "waiting_user", "waiting_approval", "approval_requested") }
+            ?: value("operationState").ifBlank { value("state") }
         val group = activity["group"] as? JsonObject
         val count = (group?.get("count") as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 1
         val verb = when (kind) {
@@ -102,6 +104,7 @@ object RunActionFormatter {
             "wait", "waiting" -> "Waiting"; else -> value("label").ifBlank { "Working" }
         }
         val action = when {
+            lifecycle == "queued" -> "Queued"
             lifecycle in setOf("waiting_user", "waiting_approval", "approval_requested") || kind == "approval" -> "Waiting for approval"
             lifecycle in setOf("failed", "error") -> "Failed"
             lifecycle in setOf("declined", "denied") -> "Declined"
@@ -115,7 +118,11 @@ object RunActionFormatter {
             && kind !in setOf("approval", "responding", "waiting")
         val groupedExploration = (group?.get("kind") as? JsonPrimitive)?.contentOrNull == "exploring" && count > 1
         val modelDescription = value("activityDescription").takeIf {
-            lifecycle in setOf("running", "working", "started", "in_progress") && it.isNotBlank()
+            lifecycle in setOf("running", "working", "started", "in_progress") && it.isNotBlank() &&
+                value("activityDescriptionSource") in setOf("tool_input_description", "provider_title") &&
+                listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").any { key -> value(key).isNotBlank() } &&
+                value("state") !in setOf("queued", "waiting_user", "waiting_approval", "approval_requested") &&
+                value("actionRequired") != "true" && kind != "approval"
         }
         val genericName = subject.lowercase().substringAfterLast("__").substringAfterLast('/')
         val isGenericTool = kind in setOf("tool", "mcp", "other") && genericName in setOf("execute", "exec", "tool", "other", "unknown")

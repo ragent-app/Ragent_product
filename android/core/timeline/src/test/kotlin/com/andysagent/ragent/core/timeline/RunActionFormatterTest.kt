@@ -59,10 +59,16 @@ class RunActionFormatterTest {
     }
     @Test fun modelProvidedActivityDescriptionIsShownOnlyWhileRunning() {
         val json = kotlinx.serialization.json.Json
-        val running = json.parseToJsonElement("""{"state":"working","kind":"execute","activityDescription":"Checking project instructions"}""") as kotlinx.serialization.json.JsonObject
+        val running = json.parseToJsonElement("""{"state":"working","kind":"execute","operationId":"op","activityDescription":"Checking project instructions","activityDescriptionSource":"tool_input_description"}""") as kotlinx.serialization.json.JsonObject
         assertEquals("Checking project instructions", RunActionFormatter.fromServer(running)?.sentence)
-        val finished = json.parseToJsonElement("""{"state":"completed","kind":"execute","activityDescription":"Checking project instructions"}""") as kotlinx.serialization.json.JsonObject
+        val finished = json.parseToJsonElement("""{"state":"completed","kind":"execute","activityDescription":"Checking project instructions","activityDescriptionSource":"tool_input_description"}""") as kotlinx.serialization.json.JsonObject
         assertEquals("Completed", RunActionFormatter.fromServer(finished)?.sentence)
+        val unqualified = json.parseToJsonElement("""{"state":"working","kind":"execute","operationId":"op","activityDescription":"Checking project instructions"}""") as kotlinx.serialization.json.JsonObject
+        assertEquals("Running", RunActionFormatter.fromServer(unqualified)?.sentence)
+        val noIdentity = json.parseToJsonElement("""{"state":"working","kind":"execute","activityDescription":"Checking project instructions","activityDescriptionSource":"provider_title"}""") as kotlinx.serialization.json.JsonObject
+        assertEquals("Running", RunActionFormatter.fromServer(noIdentity)?.sentence)
+        val queued = json.parseToJsonElement("""{"state":"queued","operationState":"running","kind":"execute","operationId":"op","activityDescription":"Checking project instructions","activityDescriptionSource":"provider_title"}""") as kotlinx.serialization.json.JsonObject
+        assertEquals("Queued", RunActionFormatter.fromServer(queued)?.sentence)
     }
     @Test fun genericExecuteSnapshotUsesStructuredLiveCommand() {
         val activity = kotlinx.serialization.json.Json.parseToJsonElement(
