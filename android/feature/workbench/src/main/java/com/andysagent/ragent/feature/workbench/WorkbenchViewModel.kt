@@ -1088,6 +1088,12 @@ class ChatViewModel(
                 if (hint.type == "harnesses_invalidated") catalogRequests.trySend(Unit)
                 if (hint.type == "authentication_required") updateConnection(RuntimeConnectionState.AuthenticationRequired)
                 val sessionId = mutableState.value.sessionId
+                // Older carriers may only invalidate the session directory.
+                // Preserve their selected-session catch-up without treating
+                // unrelated project or harness notifications as session work.
+                if (sessionId != null && hint.type == "sessions_invalidated") {
+                    refreshRequests.trySend(sessionId to sessionGeneration)
+                }
                 if (sessionId != null && hint.sessionId == sessionId && hint.type in setOf("session_invalidated", "session_events")) {
                     var needsRefresh = hint.events.isEmpty() || mutableState.value.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval)
                     if (hint.events.isNotEmpty()) {
