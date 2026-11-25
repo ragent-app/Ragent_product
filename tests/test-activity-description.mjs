@@ -16,6 +16,11 @@ const [operation] = buildOperationProjection([claudeTool('Bash', {
 const presentation = operation.presentation;
 assert.equal(presentation.activityDescription, 'Check the project instructions');
 assert.equal(presentation.activityDescriptionSource, 'tool_input_description');
+const [powershell] = buildOperationProjection([claudeTool('PowerShell', {
+  description: 'Read-only two-sample inspection of directory and README.md',
+})]).operations;
+assert.equal(powershell.presentation.activityDescription, 'Read-only two-sample inspection of directory and README.md');
+assert.equal(powershell.presentation.activityDescriptionSource, 'tool_input_description');
 assert.equal(formatToolCall({ kind: 'read' }, { input: { description: 'unrelated' } }).activityDescription, undefined);
 assert.equal(claudeTool('Read', { description: 'unrelated' }).activityDescription, undefined);
 assert.equal(claudeTool('Bash', { description: 'Check API_TOKEN=do-not-display' }).activityDescription.includes('do-not-display'), false);

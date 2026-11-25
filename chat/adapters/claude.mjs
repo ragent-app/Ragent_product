@@ -8,7 +8,7 @@ import { annotateProviderError, getProviderCapabilities } from '../provider-cont
 import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
 import { lookupModelContextWindowTokens } from '../model-context-windows.mjs';
 import { createClaudeFinalizedAssistantReplayFingerprint } from '../provider-event-dedup.mjs';
-import { claudeBashDescription } from '../provider-activity-description.mjs';
+import { claudeShellDescription } from '../provider-activity-description.mjs';
 
 const CLAUDE_FILE_EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const MAX_FILE_DIFF_CELLS = 1_000_000;
@@ -368,7 +368,7 @@ export function createClaudeAdapter() {
                   toolInput,
                   frameProviderFields({
                     ...(block.id ? { providerToolUseId: block.id } : {}),
-                    ...claudeBashDescription(block.name, block.input),
+                    ...claudeShellDescription(block.name, block.input),
                     operationLifecycle: 'started',
                   }),
                 ));

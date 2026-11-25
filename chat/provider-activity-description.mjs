@@ -9,8 +9,8 @@ export function safeActivityDescription(value) {
   return chars.length > 120 ? `${chars.slice(0, 119).join('').trimEnd()}…` : clean;
 }
 
-export function claudeBashDescription(name, input) {
-  if (name !== 'Bash') return {};
+export function claudeShellDescription(name, input) {
+  if (name !== 'Bash' && name !== 'PowerShell') return {};
   let value = input;
   if (typeof value === 'string') { try { value = JSON.parse(value); } catch { return {}; } }
   const description = safeActivityDescription(value?.description);
