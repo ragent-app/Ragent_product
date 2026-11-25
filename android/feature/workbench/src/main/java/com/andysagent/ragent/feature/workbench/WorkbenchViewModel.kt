@@ -1062,15 +1062,34 @@ class ChatViewModel(
             // Cancelling it on every provider event can leave an idle Room row
             // unaware of a Run started from another client until the next sweep.
             val refreshRequests = Channel<Pair<String, Long>>(Channel.CONFLATED)
+            val activityRequests = Channel<Pair<String, Long>>(Channel.CONFLATED)
             val directoryRequests = Channel<Unit>(Channel.CONFLATED)
             val catalogRequests = Channel<Unit>(Channel.CONFLATED)
             launch { for (ignored in directoryRequests) refreshSessions() }
             launch { for (ignored in catalogRequests) refreshRuntimeCatalog() }
             var refreshJob: Job? = null
             var refreshingSession: String? = null
+            var activityJob: Job? = null
+            var activitySession: String? = null
             launch {
                 mutableState.map { it.sessionId }.distinctUntilChanged().collect { selected ->
                     if (refreshingSession != null && refreshingSession != selected) refreshJob?.cancel()
+                    if (activitySession != null && activitySession != selected) activityJob?.cancel()
+                }
+            }
+            launch {
+                for ((sessionId, generation) in activityRequests) {
+                    if (!isCurrentSession(sessionId, generation)) continue
+                    val fixed = selectedRepository ?: continue
+                    activitySession = sessionId
+                    activityJob = launch {
+                        try { fixed.refreshRunActivity(sessionId) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { /* The next authoritative hint or activity poll retries. */ }
+                    }
+                    activityJob?.join()
+                    activityJob = null
+                    activitySession = null
                 }
             }
             launch {
@@ -1092,9 +1111,11 @@ class ChatViewModel(
                 // Preserve their selected-session catch-up without treating
                 // unrelated project or harness notifications as session work.
                 if (sessionId != null && hint.type == "sessions_invalidated") {
+                    activityRequests.trySend(sessionId to sessionGeneration)
                     refreshRequests.trySend(sessionId to sessionGeneration)
                 }
                 if (sessionId != null && hint.sessionId == sessionId && hint.type in setOf("session_invalidated", "session_events")) {
+                    if (hint.type == "session_invalidated") activityRequests.trySend(sessionId to sessionGeneration)
                     var needsRefresh = hint.events.isEmpty() || mutableState.value.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval)
                     if (hint.events.isNotEmpty()) {
                         try { if (repository.applyLiveEvents(sessionId, hint.events) is RefreshResult.Gap) needsRefresh = true }

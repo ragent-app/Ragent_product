@@ -289,6 +289,7 @@ class RoomSessionRepository(
     private val runActivityIssued = mutableMapOf<String, Long>()
     private val runActivityAccepted = mutableMapOf<String, Long>()
     private val runActivityLiveEpoch = mutableMapOf<String, Long>()
+    private val activityRefreshInflight = mutableMapOf<String, kotlinx.coroutines.Deferred<Unit>>()
     private data class TurnProgressBoundary(val runId: String, val threadId: String, val turnId: String, val seq: Long)
     private val turnProgressBoundaries = mutableMapOf<String, TurnProgressBoundary>()
     private val pendingTurnProgress = mutableMapOf<String, JsonObject>()
@@ -740,12 +741,35 @@ class RoomSessionRepository(
         }
     }
 
+    override suspend fun refreshRunActivity(sessionId: String) = refreshCanonicalRunActivity(sessionId)
+
     private suspend fun refreshCanonicalRunActivity(sessionId: String) {
-        val activityRequest = beginActivityRequest(sessionId)
-        val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/events?filter=visible&limit=1"))
-        val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-        if (page.sessionId != sessionId) throw SessionRepositoryException(502, "SESSION_SCOPE_INVALID", "Invalid activity scope", false)
-        recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
+        val request = synchronized(runActivityLock) {
+            activityRefreshInflight[sessionId]?.takeUnless { it.isCompleted } ?: liveSyncScope.async(start = CoroutineStart.LAZY) {
+                val started = android.os.SystemClock.elapsedRealtime()
+                if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) android.util.Log.d("RagentLive", "activity start session=${sessionId.hashCode()}")
+                try {
+                    val activityRequest = beginActivityRequest(sessionId)
+                    val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/events?filter=visible&limit=1"))
+                    val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
+                    if (page.sessionId != sessionId) throw SessionRepositoryException(502, "SESSION_SCOPE_INVALID", "Invalid activity scope", false)
+                    val accepted = recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
+                    if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
+                        val activity = page.runActivity as? JsonObject
+                        fun value(key: String) = (activity?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+                        android.util.Log.d("RagentLive", "activity done session=${sessionId.hashCode()} accepted=$accepted ms=${android.os.SystemClock.elapsedRealtime() - started} state=${value("state")} kind=${value("kind")} webAction=${value("webAction")} sourceSeq=${value("sourceSeq")}")
+                    }
+                } catch (error: Exception) {
+                    if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) android.util.Log.d("RagentLive", "activity failed session=${sessionId.hashCode()} ms=${android.os.SystemClock.elapsedRealtime() - started} error=${error.javaClass.simpleName}")
+                    throw error
+                }
+            }.also { task ->
+                activityRefreshInflight[sessionId] = task
+                task.invokeOnCompletion { synchronized(runActivityLock) { if (activityRefreshInflight[sessionId] === task) activityRefreshInflight.remove(sessionId) } }
+                task.start()
+            }
+        }
+        request.await()
     }
 
     private fun recordTerminalRunIds(sessionId: String, runIds: Iterable<String>): Set<String> {

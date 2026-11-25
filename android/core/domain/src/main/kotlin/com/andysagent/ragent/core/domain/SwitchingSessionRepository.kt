@@ -81,6 +81,7 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
         delegateFlow { it.observeAcceptedFirstTurnSessionIds() }
     override fun observeSession(sessionId: String): Flow<Session?> = delegateFlow { it.observeSession(sessionId) }
     override fun observeRunActivity(sessionId: String): Flow<JsonObject?> = delegateFlow { it.observeRunActivity(sessionId) }
+    override suspend fun refreshRunActivity(sessionId: String) = current().refreshRunActivity(sessionId)
     override fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = delegateFlow { it.observeAuthoritativeIdleAtSeq(sessionId) }
     override fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = delegateFlow { it.observeRunDurations(sessionId) }
     override suspend fun saveRunDuration(sessionId: String, runId: String, durationMs: Long) =

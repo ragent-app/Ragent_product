@@ -149,6 +149,8 @@ interface SessionRepository {
         kotlinx.coroutines.flow.flowOf(emptyMap())
     /** Canonical action projection shared with the Web live activity strip. */
     fun observeRunActivity(sessionId: String): Flow<JsonObject?> = kotlinx.coroutines.flow.flowOf(null)
+    /** Refresh the canonical active-run projection without waiting for timeline reconciliation. */
+    suspend fun refreshRunActivity(sessionId: String) {}
     /** Sequence watermark at which the server last confirmed idle state with empty queue. */
     fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = kotlinx.coroutines.flow.flowOf(0L)
     fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = kotlinx.coroutines.flow.flowOf(emptyMap())
