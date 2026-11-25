@@ -166,6 +166,9 @@ export function getProviderEventDedupKey(event) {
       providerToolUseId,
       trimString(event.toolName),
       readEventBody(event, ['toolInput', 'bodyPreview']),
+      trimString(event.activityDescriptionSource),
+      trimString(event.activityDescription),
+      trimString(event.operationLifecycle),
     ]);
   }
   if (event?.type === 'tool_result' && providerToolUseId) {
@@ -175,6 +178,10 @@ export function getProviderEventDedupKey(event) {
       providerToolUseId,
       Number.isFinite(event.exitCode) ? event.exitCode : null,
       readEventBody(event, ['output', 'bodyPreview']),
+      trimString(event.activityDescriptionSource),
+      trimString(event.activityDescription),
+      trimString(event.operationLifecycle),
+      readEventBody(event, ['toolInput']),
     ]);
   }
   if (event?.type === 'file_change' && providerToolUseId) {

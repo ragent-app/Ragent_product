@@ -148,10 +148,11 @@ export function formatToolCall(toolCall = {}, source = {}) {
   return {
     schemaVersion: 1,
     ...formatted,
-    // Claude's shell description is written by the model for the user. It is
-    // distinct from command output and never used to infer execution success.
-    ...(['command', 'execute'].includes(kind) && typeof input.description === 'string' && input.description.trim()
-      ? { activityDescription: clip(input.description, 120) } : {}),
+    ...(source.activityDescription ? {
+      activityDescription: source.activityDescription,
+      activityDescriptionSource: source.activityDescriptionSource,
+      ...(source.activityDescriptionSeq ? { activityDescriptionSeq: source.activityDescriptionSeq } : {}),
+    } : {}),
     ...(safeOutputPreview(source.outputPreview) ? { outputPreview: safeOutputPreview(source.outputPreview) } : {}),
     ...(safeFileChanges(source.fileChanges).length > 0 ? { fileChanges: safeFileChanges(source.fileChanges) } : {}),
   };

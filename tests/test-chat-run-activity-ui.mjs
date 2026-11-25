@@ -96,7 +96,7 @@ api.noteProgressPlan({
   ],
 });
 assert.equal(api.getPresentation().text, '正在修改 ui.js…', 'Run Sheet activity presentation should stay focused on the current action');
-assert.equal(api.getLivePresentation().text, '1/3 · 修 Live Bar', 'Live Bar should prefer unfinished execution progress over action text without a label prefix');
+assert.equal(api.getLivePresentation().text, '正在修改 ui.js…', 'Live Bar should prefer the specific current action over progress');
 
 api.noteProgressPlan({
   type: 'plan',

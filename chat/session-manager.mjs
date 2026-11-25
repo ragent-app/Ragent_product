@@ -11099,13 +11099,21 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
   const nextBeforeSeq = first
     ? getEventStartSeq(first)
     : (rawPage?.pagination?.oldestSeq || null);
+  // History pages describe different slices, not different current runs.
+  // Read the canonical latest window against this same request snapshot: a
+  // bundle read would sync the run again and could advance past its watermark.
+  const useCanonicalActivity = sessionRunning
+    && (direction !== 'latest' || beforeSeq > 0 || afterSeq > 0 || limit !== TIMELINE_BUNDLE_PAGE_LIMIT);
+  const runActivity = useCanonicalActivity
+    ? (await getSessionTimelinePage(sessionId, {
+      direction: 'latest', limit: TIMELINE_BUNDLE_PAGE_LIMIT,
+      sessionMeta, historyMeta: options?.historyMeta, run, priority,
+      ...(options?.strict ? { strict: true } : {}),
+    })).runActivity
+    : buildRunActivityProjection(displayEvents, { sessionRunning, run, sessionId });
   return {
     events,
-    runActivity: buildRunActivityProjection(displayEvents, {
-      sessionRunning,
-      run,
-      sessionId,
-    }),
+    runActivity,
     latestSeq: rawPage?.pagination?.totalLatestSeq || displayEvents.reduce(
       (latest, event) => (event?.messageState === 'streaming' ? latest : Math.max(latest, getEventBoundarySeq(event))),
       0,

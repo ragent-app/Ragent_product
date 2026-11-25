@@ -763,11 +763,16 @@ async function fetchSessionSnapshot(sessionId, {
   return data;
 }
 
-function syncFetchedRunActivity(runActivity) {
-  renderedEventState.runActivity = runActivity && typeof runActivity === "object"
-    ? runActivity
-    : null;
-  window.RagentRunActivity?.setActivity?.(renderedEventState.runActivity);
+function syncFetchedRunActivity(runActivity, token, latestSeq) {
+  const activity = runActivity && typeof runActivity === "object" ? runActivity : null;
+  const api = window.RagentRunActivity;
+  if (token && api?.applySnapshot) {
+    if (!api.applySnapshot(activity, token, latestSeq)) return;
+    renderedEventState.runActivity = api.getActivity?.() || null;
+  } else {
+    renderedEventState.runActivity = activity;
+    api?.setActivity?.(activity);
+  }
 }
 
 function reconcilePendingMessageState(event) {
@@ -2243,9 +2248,11 @@ async function fetchSessionEventsInternal(
     forceFresh = false,
     signal = null,
     prefetchedData = null,
+    activitySnapshotToken = null,
   } = {},
 ) {
   const requestStartedAt = nowPerfMs();
+  const activityToken = activitySnapshotToken || window.RagentRunActivity?.beginSnapshot?.();
   const normalizedViewportIntent = normalizeSessionViewportIntent(viewportIntent);
   const timelineRuntime = window.RagentTimelineRuntime;
   if (!timelineRuntime?.renderBatch || !timelineRuntime?.renderIncremental) {
@@ -2279,7 +2286,7 @@ async function fetchSessionEventsInternal(
       }
       if (currentSessionId !== sessionId) return delta.events;
       if (!delta.resetRequired) {
-        syncFetchedRunActivity(delta.runActivity);
+        syncFetchedRunActivity(delta.runActivity, activityToken, delta.latestSeq);
         // HTTP is the durable source of truth, including incremental pages.
         // The incremental renderer is reserved for sequence-free WebSocket
         // overlays, exactly like Android's durable-baseline/live-overlay split.
@@ -2411,7 +2418,7 @@ async function fetchSessionEventsInternal(
     error.eventRefreshReason = "projection_failed";
     throw error;
   }
-  syncFetchedRunActivity(data.runActivity);
+  syncFetchedRunActivity(data.runActivity, activityToken, data.latestSeq);
   if (messagesInner.children.length === 0) showEmpty();
   if (typeof restorePreservedComposerEchoesAfterRender === "function") {
     restorePreservedComposerEchoesAfterRender();
@@ -2805,6 +2812,7 @@ async function runCurrentSessionRefresh(
   const useCombinedSnapshot = sessionSnapshotEnabled && !isShareSnapshotReadOnlyMode()
     && (knownRunState !== "running" || !hasRenderedEventSnapshot(sessionId));
   if (useCombinedSnapshot) {
+    const activitySnapshotToken = window.RagentRunActivity?.beginSnapshot?.();
     const snapshot = await fetchSessionSnapshot(sessionId, {
       forceFresh,
       signal,
@@ -2834,6 +2842,7 @@ async function runCurrentSessionRefresh(
       forceFresh,
       signal,
       prefetchedData: snapshot,
+      activitySnapshotToken,
     });
     lastCurrentSessionRefreshAt = Date.now();
     lastCurrentSessionRefreshSessionId = sessionId;

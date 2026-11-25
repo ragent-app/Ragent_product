@@ -51,6 +51,9 @@ function withPresentation(activity, events, sourceEvent = null) {
     ),
     ...(formatted ? { presentation: formatted } : {}),
     ...(formatted?.activityDescription ? { activityDescription: formatted.activityDescription } : {}),
+    ...(formatted?.activityDescriptionSource ? { activityDescriptionSource: formatted.activityDescriptionSource } : {}),
+    ...(Number.isInteger(formatted?.activityDescriptionSeq) && formatted.activityDescriptionSeq > 0
+      ? { activityDescriptionSeq: formatted.activityDescriptionSeq } : {}),
     ...(formatted?.group ? { group: formatted.group } : {}),
     sourceSeq,
     outputBoundarySeq,
@@ -187,12 +190,20 @@ function findPendingApprovedAction(events) {
 
 export function buildRunActivityProjection(displayEvents = [], options = {}) {
   if (options.sessionRunning !== true) return buildIdleActivity();
-  const events = Array.isArray(displayEvents) ? displayEvents : [];
   const run = options.run && typeof options.run === 'object' ? options.run : {};
   const runStart = parseTimestamp(run.startedAt) || parseTimestamp(run.createdAt);
   const observedAt = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
   const runId = trimString(run.id || run.runId);
   const requestId = trimString(run.requestId);
+  // Events without a confirmed run/request identity cannot safely be assigned
+  // to the current run. Keep the identity-free mode for callers projecting an
+  // already scoped collection without a run object.
+  const events = (Array.isArray(displayEvents) ? displayEvents : []).filter((event) => {
+    if (!runId && !requestId) return true;
+    const eventRunId = trimString(event?.runId);
+    if (eventRunId) return Boolean(runId && eventRunId === runId);
+    return Boolean(requestId && trimString(event?.requestId) === requestId);
+  });
   const providerLiveness = normalizeProviderLiveness(run.providerLiveness);
   const present = (activity, sourceEvent) => withPresentation({
     ...activity,
@@ -311,8 +322,14 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
   }
 
   const activeOperations = events
-    .filter((event) => event?.type === 'operation' && ['running', 'waiting_approval'].includes(event.state))
-    .sort((left, right) => eventBoundary(right) - eventBoundary(left));
+    .filter((event) => event?.type === 'operation'
+      && ['running', 'waiting_approval'].includes(event.state)
+      && !(Array.isArray(event.diagnostics) && event.diagnostics.some((item) => item?.code === 'orphan_operation')))
+    .sort((left, right) => {
+      const leftStart = Number.isInteger(left.startSeq) && left.startSeq > 0 ? left.startSeq : 0;
+      const rightStart = Number.isInteger(right.startSeq) && right.startSeq > 0 ? right.startSeq : 0;
+      return rightStart - leftStart || trimString(left.operationId).localeCompare(trimString(right.operationId));
+    });
   const operation = activeOperations[0] || null;
   if (operation) {
     const since = parseTimestamp(operation.startedAt || operation.timestamp);
@@ -327,6 +344,9 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
       ...(operation.presentation ? { presentation: operation.presentation } : {}),
       ...(operation.state === 'waiting_approval' ? { labelKind: 'approval' } : {}),
       operationId: operation.operationId,
+      operationState: operation.state,
+      ...Object.fromEntries(['toolCallId', 'providerItemId', 'providerToolUseId'].filter((key) => trimString(operation[key])).map((key) => [key, operation[key]])),
+      ...(Number.isInteger(operation.startSeq) && operation.startSeq > 0 ? { startSeq: operation.startSeq } : {}),
       since,
       elapsedMs: since && updatedAt ? Math.max(0, updatedAt - since) : 0,
       actionRequired: operation.state === 'waiting_approval',
@@ -360,22 +380,6 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
       elapsedMs: 0,
       actionRequired: false,
       ...activityCapabilities(run),
-    }, latest);
-  }
-  if (latest?.type === 'operation') {
-    const toolCall = latest.toolCall || buildCanonicalToolCall(latest);
-    return present({
-      state: 'working',
-      kind: toolCall.kind,
-      label: trimString(latest.title),
-      detail: trimString(latest.detail || latest.command),
-      toolCall,
-      ...(latest.presentation ? { presentation: latest.presentation } : {}),
-      operationId: latest.operationId || null,
-      since,
-      elapsedMs: 0,
-      actionRequired: false,
-      ...activityCapabilities(run, latest),
     }, latest);
   }
   return present({

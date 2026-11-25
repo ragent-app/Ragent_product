@@ -77,7 +77,7 @@
 
   function normalizeActivityLifecycle(value) {
     const lifecycle = String(value || "running").trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (["pending", "waiting_user", "waiting_approval", "approval_requested"].includes(lifecycle)) {
+    if (["waiting_user", "waiting_approval", "approval_requested"].includes(lifecycle)) {
       return "waiting_approval";
     }
     if (["completed", "complete", "done", "success", "succeeded"].includes(lifecycle)) return "completed";
@@ -103,6 +103,8 @@
     if (!activity || activity.state === "idle") return "";
     const kind = normalizeActivityKind(activity);
     const lifecycle = normalizeActivityLifecycle(activity.operationState || activity.state);
+    const description = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    if (lifecycle === "running" && description) return description;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (group?.kind === "exploring" && Number(group.count) > 1) {
       const exploring = translatedActivityText("activity.action.running.exploring", { count: group.count });
@@ -137,7 +139,8 @@
     const livenessLabel = waitingForOutput
       ? trOrFallback("activity.status.awaitingProviderOutput", "waiting for provider output")
       : "";
-    return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${text || livenessLabel ? "…" : ""}`;
+    const nativeDescription = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${!nativeDescription && (text || livenessLabel) ? "…" : ""}`;
   }
 
   function normalizePlanItemStatus(value) {
@@ -271,10 +274,13 @@
         kind: String(event.kind || "working").trim().toLowerCase() || "working",
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
+        operationState: event.state || "running",
+        activityDescription: event.activityDescription || event.presentation?.activityDescription || "",
+        activityDescriptionSource: event.activityDescriptionSource || event.presentation?.activityDescriptionSource || "",
       };
     }
     if (type === "file_change") return { kind: "file_edit", detail: event.filePath || "" };
-    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "" };
+    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
     if (type === "thinking_block" || type === "reasoning") return { kind: "thinking", detail: "" };
     if (type === "context_operation" || type === "context_barrier") return { kind: "working", detail: "" };
     if (type === "status") return { kind: "working", detail: "" };

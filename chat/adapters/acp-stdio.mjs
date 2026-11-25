@@ -10,6 +10,7 @@ import {
   usageEvent,
 } from '../normalizer.mjs';
 import { explanationForApproval } from '../risk-explanation.mjs';
+import { acpTitleDescription } from '../provider-activity-description.mjs';
 import {
   normalizeProviderToolLifecycle,
   readProviderToolCallId,
@@ -440,11 +441,12 @@ export function parseAcpEvent(line, {
       const input = update.rawInput ?? update.input ?? update.args ?? '';
       const kind = text(update.kind);
       if (toolCallId && toolCalls instanceof Map) {
-        toolCalls.set(toolCallId, { toolName, title: explicitTitle, kind, input });
+        toolCalls.set(toolCallId, { toolName, explicitName, title: explicitTitle, kind, input });
       }
       return [toolUseEvent(toolName, input, {
         ...identity,
         ...(explicitTitle ? { providerTitle: explicitTitle, operationTitle: explicitTitle } : {}),
+        ...acpTitleDescription(explicitTitle, explicitName),
         ...(kind ? { providerToolKind: kind } : {}),
         operationLifecycle: 'started',
       })];
@@ -456,13 +458,20 @@ export function parseAcpEvent(line, {
       const toolName = explicitName || known?.toolName || explicitTitle || 'tool';
       const title = explicitTitle || known?.title || '';
       const kind = text(update.kind) || known?.kind || '';
+      const input = update.rawInput ?? update.input ?? update.args ?? known?.input;
       const lifecycle = normalizeProviderToolLifecycle(update.status || update.state, { update: true });
       const failed = ['failed', 'cancelled'].includes(lifecycle);
       const output = update.rawOutput ?? update.output ?? update.content ?? update.status ?? '';
-      if (toolCallId && toolCalls instanceof Map && lifecycle !== 'delta') toolCalls.delete(toolCallId);
+      if (toolCallId && toolCalls instanceof Map) {
+        if (lifecycle !== 'delta') toolCalls.delete(toolCallId);
+        else toolCalls.set(toolCallId, { toolName, explicitName: explicitName || known?.explicitName || '', title, kind, input });
+      }
+      const changedInput = update.rawInput ?? update.input ?? update.args;
       return [toolResultEvent(toolName, serializeProviderToolValue(output), failed ? 1 : (lifecycle === 'completed' ? 0 : undefined), {
         ...identity,
         ...(title ? { providerTitle: title, operationTitle: title } : {}),
+        ...acpTitleDescription(lifecycle === 'delta' ? explicitTitle : title, explicitName || known?.explicitName || ''),
+        ...(changedInput != null ? { toolInput: serializeProviderToolValue(changedInput), providerInputUpdate: true } : {}),
         ...(kind ? { providerToolKind: kind } : {}),
         operationLifecycle: lifecycle,
       })];

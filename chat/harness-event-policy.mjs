@@ -79,7 +79,8 @@ export function isProviderTransientEvent(event) {
   // Those deltas are live UI updates, not durable tool results.  Persisting
   // every fragment turns a single command into thousands of history files.
   return event?.type === 'tool_result'
-    && trimString(event?.operationLifecycle).toLowerCase() === 'delta';
+    && trimString(event?.operationLifecycle).toLowerCase() === 'delta'
+    && !event?.activityDescription && !event?.providerInputUpdate;
 }
 
 export function isRuntimeProgressEvent(event) {
@@ -153,7 +154,7 @@ export function limitHarnessDurableEvents(events = [], policy = null) {
   const important = [];
   const progress = [];
   for (const event of source) {
-    ((IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) || (event?.type === 'status' && event?.providerLifecycle === 'completed' && event?.runState === 'completed' && /^[a-f0-9]{64}$/.test(event?.deliveryContentHash || ''))) ? important : progress).push(event);
+    ((IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) || (event?.type === 'tool_use' && (event?.activityDescription || event?.providerInputUpdate)) || (event?.type === 'status' && event?.providerLifecycle === 'completed' && event?.runState === 'completed' && /^[a-f0-9]{64}$/.test(event?.deliveryContentHash || ''))) ? important : progress).push(event);
   }
   const room = Math.max(0, limit - important.length);
   const selected = [...(room > 0 ? progress.slice(-room) : []), ...important];

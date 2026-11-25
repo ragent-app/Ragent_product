@@ -4,6 +4,10 @@
   const subscribers = new Set();
   let currentActivity = null;
   let currentProgress = null;
+  let generation = 0;
+  let snapshotRequest = 0;
+  let liveGeneration = 0;
+  let liveEvents = [];
 
   function tr(key, vars = {}) {
     return root.ragentT ? root.ragentT(key, vars) : key;
@@ -56,7 +60,7 @@
 
   function normalizeActivityLifecycle(value) {
     const lifecycle = String(value || "running").trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (["pending", "waiting_user", "waiting_approval", "approval_requested"].includes(lifecycle)) {
+    if (["waiting_user", "waiting_approval", "approval_requested"].includes(lifecycle)) {
       return "waiting_approval";
     }
     if (["completed", "complete", "done", "success", "succeeded"].includes(lifecycle)) return "completed";
@@ -85,6 +89,8 @@
     if (!activity || activity.state === "idle") return "";
     const kind = normalizeActivityKind(activity);
     const lifecycle = normalizeActivityLifecycle(activity.operationState || activity.state);
+    const description = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    if (lifecycle === "running" && description) return description;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (group?.kind === "exploring" && Number(group.count) > 1) {
       const exploring = translatedActivityText("activity.action.running.exploring", { count: group.count });
@@ -119,7 +125,8 @@
     const livenessLabel = waitingForOutput
       ? trOrFallback("activity.status.awaitingProviderOutput", "waiting for provider output")
       : "";
-    return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${text || livenessLabel ? "…" : ""}`;
+    const nativeDescription = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${!nativeDescription && (text || livenessLabel) ? "…" : ""}`;
   }
 
   function normalizePlanItemStatus(value) {
@@ -185,7 +192,13 @@
   }
 
   function getLivePresentation() {
-    return currentProgress
+    const kind = normalizeActivityKind(currentActivity);
+    const hasSpecificAction = currentActivity && currentActivity.state !== "idle"
+      && (currentActivity.state === "waiting_user" || currentActivity.actionRequired === true
+        || !!currentActivity.activityDescription || !!currentActivity.presentation?.activityDescription
+        || (!['thinking', 'think', 'working', 'planning', 'responding', 'waiting', 'other', 'mcp'].includes(kind))
+        || !!subjectForActivity(currentActivity));
+    return currentProgress && !hasSpecificAction
       ? {
         progress: currentProgress,
         text: currentProgress.text || "",
@@ -210,11 +223,17 @@
   }
 
   function setActivity(activity) {
+    const nextRunId = String(activity?.runId || "").trim();
+    if (activity?.state === "idle" || (nextRunId && currentProgress?.runId && nextRunId !== currentProgress.runId)) {
+      currentProgress = null;
+    }
     currentActivity = activity && typeof activity === "object" ? { ...activity } : null;
     notify();
   }
 
   function reset() {
+    generation += 1;
+    liveEvents = [];
     currentActivity = null;
     currentProgress = null;
     notify();
@@ -223,6 +242,8 @@
   function noteProgressPlan(event = {}) {
     if (!isProgressPlanEvent(event)) return false;
     const sourceSeq = eventBoundary(event);
+    if (event.runId && currentActivity?.runId && event.runId !== currentActivity.runId) return false;
+    if (event.runId && currentProgress?.runId && event.runId !== currentProgress.runId) currentProgress = null;
     const currentSeq = Number.isInteger(currentProgress?.sourceSeq) ? currentProgress.sourceSeq : 0;
     if (sourceSeq > 0 && currentSeq > 0 && sourceSeq < currentSeq) return false;
     const nextProgress = buildProgressPresentation(event);
@@ -255,29 +276,85 @@
         kind: String(event.kind || "working").trim().toLowerCase() || "working",
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
+        operationState: event.state || "running",
+        activityDescription: event.activityDescription || event.presentation?.activityDescription || "",
+        activityDescriptionSource: event.activityDescriptionSource || event.presentation?.activityDescriptionSource || "",
       };
     }
     if (type === "file_change") return { kind: "file_edit", detail: event.filePath || "" };
-    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "" };
+    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
     if (type === "thinking_block" || type === "reasoning") return { kind: "thinking", detail: "" };
     if (type === "context_operation" || type === "context_barrier") return { kind: "working", detail: "" };
     if (type === "status") return { kind: "working", detail: "" };
     return null;
   }
 
-  function applyEvent(event = {}) {
-    if (!currentActivity || currentActivity.state === "idle") return;
-    const next = optimisticActivityForEvent(event);
+  function beginSnapshot() {
+    return { generation, request: ++snapshotRequest, liveGeneration };
+  }
+
+  function applySnapshot(activity, token, latestSeq = 0) {
+    if (!token || token.generation !== generation || token.request !== snapshotRequest) return false;
+    const pending = liveEvents.filter((entry) => entry.generation > token.liveGeneration
+      && (!entry.seq || !latestSeq || entry.seq > latestSeq));
+    setActivity(activity);
+    for (const entry of pending) applyEvent(entry.event, false);
+    liveEvents = pending;
+    return true;
+  }
+
+  function applyEvent(event = {}, record = true) {
+    if (!currentActivity || currentActivity.state === "idle") {
+      if (event?.type !== "tool_use" || !event.runId) return;
+      currentActivity = { state: "working", kind: "thinking", runId: event.runId, sourceSeq: 0 };
+    }
+    const runId = String(event.runId || "").trim();
+    if (runId && currentActivity.runId && runId !== currentActivity.runId) return;
+    if (record) {
+      liveEvents.push({ event, seq: eventBoundary(event), generation: ++liveGeneration });
+      if (liveEvents.length > 200) liveEvents.shift();
+    }
+    let next = optimisticActivityForEvent(event);
+    const keys = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"];
+    const sameOperation = keys.some((key) => event[key] && currentActivity[key] && event[key] === currentActivity[key]);
+    const identified = keys.some((key) => event[key]);
+    const currentHasIdentity = keys.some((key) => currentActivity[key]);
+    const operationEvent = ["tool_use", "operation", "tool_result", "file_change"].includes(event.type);
+    if (!operationEvent && currentHasIdentity) return;
+    if (event.type === "tool_result" && sameOperation && String(event.operationLifecycle || "").toLowerCase() === "delta") {
+      next = { kind: currentActivity.kind, detail: currentActivity.detail,
+        activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
+    }
+    if (next && operationEvent && !identified) {
+      next.activityDescription = "";
+      next.activityDescriptionSource = "";
+    }
+    if (currentActivity.state === "waiting_user" && event.state !== "waiting_approval") return;
+    if (operationEvent && !identified && currentHasIdentity) return;
+    const terminal = (event.type === "tool_result" && String(event.operationLifecycle || "").toLowerCase() !== "delta")
+      || ["completed", "complete", "failed", "error", "declined", "denied", "cancelled", "canceled", "interrupted"].includes(String(event.state || "").toLowerCase());
+    if (terminal && sameOperation) {
+      currentActivity = { state: "working", kind: "thinking", runId: currentActivity.runId, requestId: currentActivity.requestId, sourceSeq: eventBoundary(event), inlineEligible: true };
+      notify();
+      return;
+    }
+    if (terminal) return;
     if (!next) return;
     const sourceSeq = eventBoundary(event);
     const currentSourceSeq = Number.isInteger(currentActivity.sourceSeq) ? currentActivity.sourceSeq : 0;
-    if (sourceSeq > 0 && sourceSeq < currentSourceSeq) return;
-    const opChanged = (next.detail && next.detail !== currentActivity.detail)
-      || (next.operationId && currentActivity.operationId && next.operationId !== currentActivity.operationId);
+    const isStart = event.type === "tool_use" && String(event.operationLifecycle || "started").toLowerCase() === "started";
+    const startSeq = Number.isInteger(event.startSeq) ? event.startSeq : (isStart ? sourceSeq : 0);
+    if (operationEvent && !sameOperation && currentHasIdentity
+      && (!startSeq || startSeq <= (currentActivity.startSeq || 0))) return;
+    if (sameOperation && sourceSeq > 0 && sourceSeq < currentSourceSeq) return;
+    const opChanged = operationEvent && !sameOperation;
     currentActivity = {
       ...currentActivity,
+      ...(opChanged ? { subject: "", group: null, presentation: null, activityDescription: "", activityDescriptionSource: "", activityDescriptionSeq: 0, operationState: "running", operationId: "", toolCallId: "", providerItemId: "", providerToolUseId: "" } : {}),
       ...next,
-      ...(opChanged ? { subject: "" } : {}),
+      ...Object.fromEntries(keys.filter((key) => event[key]).map((key) => [key, event[key]])),
+      ...(startSeq && opChanged ? { startSeq } : {}),
+      ...(sameOperation && !next.activityDescription ? { activityDescription: currentActivity.activityDescription, activityDescriptionSource: currentActivity.activityDescriptionSource } : {}),
       state: event?.state === "waiting_approval" ? "waiting_user" : "working",
       sourceSeq: Math.max(sourceSeq, currentSourceSeq),
       inlineEligible: true,
@@ -294,6 +371,8 @@
 
   root.RagentRunActivity = {
     applyEvent,
+    beginSnapshot,
+    applySnapshot,
     format: formatRunActivitySummary,
     formatOperationActivity,
     getActivity: () => currentActivity,

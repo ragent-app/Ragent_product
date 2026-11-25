@@ -931,7 +931,7 @@
 
   function applyAcceptedEventEffects(
     events,
-    { sessionId = currentSession(), historyPrepend = false, renderOptions = {}, runState = "idle" } = {},
+    { sessionId = currentSession(), historyPrepend = false, renderOptions = {}, runState = "idle", durableActivity = false } = {},
   ) {
     if (historyPrepend) return;
     const acceptedEvents = Array.isArray(events) ? events : [];
@@ -1010,7 +1010,7 @@
         // Usage is metadata, not a transcript item. Preserve its context
         // update even though the projector intentionally omits its row.
         root.renderUsageInto?.(null, event, { updateContext: true });
-        root.RagentRunActivity?.applyEvent?.(event);
+        if (!durableActivity) root.RagentRunActivity?.applyEvent?.(event);
         continue;
       }
       if (
@@ -1019,9 +1019,9 @@
         || type === "attachment_delivery"
         || type === "plan"
       ) {
-        root.RagentRunActivity?.noteFormalOutput?.(event);
+        if (!durableActivity) root.RagentRunActivity?.noteFormalOutput?.(event);
       } else {
-        root.RagentRunActivity?.applyEvent?.(event);
+        if (!durableActivity) root.RagentRunActivity?.applyEvent?.(event);
       }
 
       const liveId = renderOptions.approvalRequestLiveId;
@@ -1117,7 +1117,7 @@
         runState,
         historyPrepend,
       });
-    applyAcceptedEventEffects(snapshot.changeSet?.acceptedEvents, { sessionId, historyPrepend, renderOptions, runState });
+    applyAcceptedEventEffects(snapshot.changeSet?.acceptedEvents, { sessionId, historyPrepend, renderOptions, runState, durableActivity: true });
     if (!historyPrepend) {
       root.RagentAsyncQuestions?.setActiveSession?.(sessionId);
     }

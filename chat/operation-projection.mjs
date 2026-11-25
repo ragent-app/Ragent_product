@@ -2,6 +2,7 @@ import { classifyProviderOperation, getOperationTitle } from './provider-operati
 import { formatToolCall } from './tool-call-formatters.mjs';
 import { buildCanonicalToolCall, redactSensitiveText } from './tool-call-schema.mjs';
 import { serializeProviderToolValue } from './provider-tool-normalization.mjs';
+import { safeActivityDescription } from './provider-activity-description.mjs';
 
 const TERMINAL_STATES = new Set(['completed', 'failed', 'declined', 'interrupted']);
 const RAW_OPERATION_TYPES = new Set(['tool_use', 'tool_result', 'file_change']);
@@ -104,6 +105,7 @@ function findFallbackOperation(operations, event, { kind = '' } = {}) {
   const firstIndex = Math.max(0, operations.length - MAX_FALLBACK_OPERATION_SCAN);
   for (let index = operations.length - 1; index >= firstIndex; index -= 1) {
     const operation = operations[index];
+    if (operation._runScope !== readRunScope(event)) continue;
     if (TERMINAL_STATES.has(operation.state)) continue;
     if (kind && operation.kind !== kind) continue;
     if (toolName && operation._toolName && operation._toolName !== toolName) continue;
@@ -132,7 +134,9 @@ function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
   const seq = eventSeq(event);
   const classified = classifyProviderOperation(event);
   const timestamp = eventTimestamp(event);
-  const correlationKey = correlationKeys[0] || '';
+  const requestKey = `provider:${trimString(event?.providerRequestId)}`;
+  const correlationKey = correlationKeys.find((key) => key !== requestKey
+    || [event?.providerItemId, event?.providerToolUseId, event?.toolCallId].some((id) => trimString(id) && key === `provider:${trimString(id)}`)) || '';
   return {
     type: 'operation',
     id: buildOperationId(event, correlationKey, seq),
@@ -145,6 +149,7 @@ function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
     provider: trimString(event?.provider),
     runtimeFamily: trimString(event?.runtimeFamily),
     runId: trimString(event?.runId),
+    _runScope: readRunScope(event),
     providerRequestId: trimString(event?.providerRequestId),
     _providerIdentityConflicts: new Set(),
     providerToolUseId: trimString(event?.providerToolUseId),
@@ -186,6 +191,19 @@ function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
     _orphan: orphan,
     _diagnostics: [],
   };
+}
+
+function updateActivityDescription(operation, event, reliablyAssociated) {
+  if (!reliablyAssociated || TERMINAL_STATES.has(operation.state)) return;
+  const source = trimString(event?.activityDescriptionSource);
+  const priority = source === 'tool_input_description' ? 2 : source === 'provider_title' ? 1 : 0;
+  const description = priority ? safeActivityDescription(event?.activityDescription) : '';
+  if (!description || priority < (operation._activityDescriptionPriority || 0)) return;
+  if (operation.activityDescription === description && operation.activityDescriptionSource === source) return;
+  operation.activityDescription = description;
+  operation.activityDescriptionSource = source;
+  operation._activityDescriptionPriority = priority;
+  operation.activityDescriptionSeq = eventSeq(event) || null;
 }
 
 function updateOperationIdentity(operation, event) {
@@ -245,7 +263,8 @@ function updateOperationClassification(operation, event) {
   if (!operation.title || operation.title === getOperationTitle('other')) operation.title = classified.title;
   if (!operation.detail && classified.detail) operation.detail = classified.detail;
   if (!operation.toolName && classified.toolName) operation.toolName = classified.toolName;
-  if (Object.keys(operation.input || {}).length === 0 && Object.keys(classified.input || {}).length > 0) {
+  if ((event?.providerInputUpdate === true || Object.keys(operation.input || {}).length === 0)
+      && Object.keys(classified.input || {}).length > 0) {
     operation.input = classified.input;
   }
   if (!operation.command && classified.command) operation.command = classified.command;
@@ -537,37 +556,47 @@ export function buildOperationProjection(events = [], options = {}) {
 
   function registerOperation(operation) {
     operations.push(operation);
-    for (const key of operation._correlationKeys) operationByCorrelationKey.set(key, operation);
+    for (const key of operation._correlationKeys) {
+      const scopedKey = `${operation._runScope}\0${key}`;
+      if (!operationByCorrelationKey.has(scopedKey)) operationByCorrelationKey.set(scopedKey, operation);
+    }
     return operation;
   }
 
   function registerCorrelationKeys(operation, keys, event) {
     for (const key of keys) {
-      const existing = operationByCorrelationKey.get(key);
+      const scopedKey = `${readRunScope(event)}\0${key}`;
+      const existing = operationByCorrelationKey.get(scopedKey);
       if (existing && existing !== operation) {
         addDiagnostic(diagnostics, operation, event, 'correlation_conflict');
         continue;
       }
       operation._correlationKeys.add(key);
-      operationByCorrelationKey.set(key, operation);
+      operationByCorrelationKey.set(scopedKey, operation);
     }
   }
 
   function resolveOperation(event, { fallbackKind = '', create = true } = {}) {
     const correlationKeys = readCorrelationKeys(event);
-    const matches = correlationKeys
-      .map((key) => operationByCorrelationKey.get(key))
+    const strongKeys = correlationKeys.filter((key) => key !== `provider:${trimString(event?.providerRequestId)}`
+      || [event?.providerItemId, event?.providerToolUseId, event?.toolCallId].some((id) => trimString(id) && key === `provider:${trimString(id)}`));
+    const lookupKeys = strongKeys.length ? strongKeys : correlationKeys;
+    const matches = lookupKeys
+      .map((key) => operationByCorrelationKey.get(`${readRunScope(event)}\0${key}`))
       .filter(Boolean);
-    let operation = matches[0] || null;
-    if (!operation && correlationKeys.length === 0) {
+    let operation = event?.type === 'tool_use' && !strongKeys.length ? null : (matches[0] || null);
+    let associated = Boolean(operation && strongKeys.length && matches.every((match) => match === operation));
+    if (!operation && correlationKeys.length === 0 && event?.type !== 'tool_use') {
       operation = findFallbackOperation(operations, event, { kind: fallbackKind });
     }
     if (!operation && create) {
       const orphan = event?.type !== 'tool_use';
       operation = registerOperation(createOperation(event, correlationKeys, { orphan }));
+      associated = event?.type === 'tool_use';
       if (orphan) addDiagnostic(diagnostics, operation, event, 'orphan_operation', 'missing tool_use start');
     }
     if (operation) registerCorrelationKeys(operation, correlationKeys, event);
+    if (operation) updateActivityDescription(operation, event, associated);
     return operation;
   }
 

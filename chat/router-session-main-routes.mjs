@@ -755,6 +755,7 @@ export async function handleSessionMainRoutes({
       direction,
       sessionMeta: readSnapshot.sessionMeta,
       historyMeta: readSnapshot.historyMeta,
+      run: readSnapshot.run,
       strict: true,
     });
     const latestSeq = Math.max(
@@ -892,6 +893,7 @@ export async function handleSessionMainRoutes({
       direction,
       sessionMeta: readSnapshot.sessionMeta,
       historyMeta: readSnapshot.historyMeta,
+      run: readSnapshot.run,
       strict: true,
     });
     const { events, pagination, runActivity } = page;
