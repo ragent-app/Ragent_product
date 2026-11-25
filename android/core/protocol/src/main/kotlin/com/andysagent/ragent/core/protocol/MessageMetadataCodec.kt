@@ -1,5 +1,6 @@
 package com.andysagent.ragent.core.protocol
 
+import com.andysagent.ragent.core.model.Attachment
 import com.andysagent.ragent.core.model.AsyncQuestion
 import com.andysagent.ragent.core.model.AsyncQuestionReply
 import com.andysagent.ragent.core.model.Message
@@ -8,6 +9,7 @@ import kotlinx.serialization.encodeToString
 
 @Serializable
 data class MessageMetadataSnapshot(
+    val attachments: List<AttachmentItemDto> = emptyList(),
     val messageDelivery: String? = null,
     val asyncQuestionMessageId: String? = null,
     val asyncQuestions: List<AsyncQuestionDto> = emptyList(),
@@ -24,10 +26,12 @@ fun SessionEventDto.toMessageMetadataSnapshot(): MessageMetadataSnapshot? {
     val hasQuestions = asyncQuestions.isNotEmpty()
     val hasReplies = asyncQuestionReplies.isNotEmpty()
     val hasAnsweredIds = answeredQuestionItemIds.isNotEmpty()
-    if (resolvedDelivery == null && asyncQuestionMessageId == null && !hasQuestions && asyncQuestionsState == null && !hasReplies && !hasAnsweredIds) {
+    val attachments = allAttachments()
+    if (attachments.isEmpty() && resolvedDelivery == null && asyncQuestionMessageId == null && !hasQuestions && asyncQuestionsState == null && !hasReplies && !hasAnsweredIds) {
         return null
     }
     return MessageMetadataSnapshot(
+        attachments = attachments,
         messageDelivery = resolvedDelivery,
         asyncQuestionMessageId = asyncQuestionMessageId,
         asyncQuestions = asyncQuestions,
@@ -48,7 +52,8 @@ fun decodeMessageMetadataJson(metadataJson: String?): MessageMetadataSnapshot? {
 
 fun encodeMessageMetadataSnapshot(snapshot: MessageMetadataSnapshot?): String? {
     if (snapshot == null) return null
-    if (snapshot.messageDelivery == null &&
+    if (snapshot.attachments.isEmpty() &&
+        snapshot.messageDelivery == null &&
         snapshot.asyncQuestionMessageId == null &&
         snapshot.asyncQuestions.isEmpty() &&
         snapshot.asyncQuestionsState == null &&
@@ -70,6 +75,7 @@ fun mergeMessageMetadataJson(existingJson: String?, incomingJson: String?): Stri
     val mergedReplies = if (incoming.asyncQuestionReplies.isNotEmpty()) incoming.asyncQuestionReplies else existing.asyncQuestionReplies
     val mergedAnsweredIds = (existing.answeredQuestionItemIds + incoming.answeredQuestionItemIds).distinct()
     val merged = MessageMetadataSnapshot(
+        attachments = mergeMessageAttachments(existing.attachments, incoming.attachments),
         messageDelivery = incoming.messageDelivery ?: existing.messageDelivery,
         asyncQuestionMessageId = incoming.asyncQuestionMessageId ?: existing.asyncQuestionMessageId,
         asyncQuestions = mergedQuestions,
@@ -80,11 +86,56 @@ fun mergeMessageMetadataJson(existingJson: String?, incomingJson: String?): Stri
     return encodeMessageMetadataSnapshot(merged)
 }
 
+// Snapshots can carry different files for the same message. Preserve earlier
+// assets while allowing a later representation of the same asset to replace it.
+private fun mergeMessageAttachments(existing: List<AttachmentItemDto>, incoming: List<AttachmentItemDto>): List<AttachmentItemDto> {
+    val merged = existing.toMutableList()
+    for (attachment in incoming) {
+        val index = merged.indexOfFirst { previous ->
+            (attachment.assetId?.isNotBlank() == true && attachment.assetId == previous.assetId) ||
+                (attachment.assetId.isNullOrBlank() && previous.assetId.isNullOrBlank() && attachment == previous)
+        }
+        if (index >= 0) {
+            val previous = merged[index]
+            merged[index] = attachment.copy(
+                filename = attachment.filename ?: previous.filename,
+                originalName = attachment.originalName ?: previous.originalName,
+                mimeType = attachment.mimeType ?: previous.mimeType,
+                sizeBytes = attachment.sizeBytes ?: previous.sizeBytes,
+                downloadUrl = attachment.downloadUrl ?: previous.downloadUrl,
+                url = attachment.url ?: previous.url,
+                text = attachment.text ?: previous.text,
+                caption = attachment.caption ?: previous.caption,
+                renderAs = attachment.renderAs ?: previous.renderAs,
+            )
+        } else merged.add(attachment)
+    }
+    return merged
+}
+
+// A late older event may still contain a file, but its unrelated metadata must
+// not overwrite the newer message state.
+fun mergeMessageAttachmentMetadataJson(existingJson: String?, event: SessionEventDto): String? {
+    val attachments = event.allAttachments()
+    if (attachments.isEmpty()) return existingJson
+    val existing = decodeMessageMetadataJson(existingJson) ?: MessageMetadataSnapshot()
+    return encodeMessageMetadataSnapshot(existing.copy(
+        attachments = mergeMessageAttachments(attachments, existing.attachments),
+    ))
+}
+
 fun Message.withDecodedMetadata(metadataJson: String? = this.metadataJson): Message {
     val snapshot = decodeMessageMetadataJson(metadataJson)
     if (snapshot == null) return if (this.metadataJson == metadataJson) this else copy(metadataJson = metadataJson)
     return copy(
         metadataJson = metadataJson,
+        attachments = if (attachments.isNotEmpty()) attachments else snapshot.attachments.map {
+            Attachment(
+                assetId = it.assetId, filename = it.filename, originalName = it.originalName,
+                mimeType = it.mimeType, sizeBytes = it.sizeBytes, downloadUrl = it.downloadUrl,
+                url = it.url, caption = it.caption ?: it.text,
+            )
+        },
         messageDelivery = messageDelivery ?: snapshot.messageDelivery,
         asyncQuestionMessageId = asyncQuestionMessageId ?: snapshot.asyncQuestionMessageId,
         asyncQuestions = if (asyncQuestions.isNotEmpty()) asyncQuestions else snapshot.asyncQuestions.map { it.toDomain() },

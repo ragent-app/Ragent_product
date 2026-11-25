@@ -73,6 +73,7 @@ import com.andysagent.ragent.core.protocol.QueueMutationResponseDto
 import com.andysagent.ragent.core.protocol.QueuedFollowUpDto
 import com.andysagent.ragent.core.protocol.allAttachments
 import com.andysagent.ragent.core.protocol.allOptions
+import com.andysagent.ragent.core.protocol.mergeMessageAttachmentMetadataJson
 import com.andysagent.ragent.core.protocol.reconcileAsyncQuestionStatuses
 import com.andysagent.ragent.core.protocol.toDomain
 import com.andysagent.ragent.core.protocol.toDto
@@ -2257,6 +2258,7 @@ class RoomSessionRepository(
                 timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = false, error = page.reason)) }
                 return@withLock RefreshResult.ResetRequired(page.reason)
             }
+            recoverVisibleMessageAttachments(sessionId, page)
             val existing = visibleTimelineEvents[sessionId].orEmpty()
             val merged = (existing + page.events)
                 .filter { it.boundarySeq() > 0L }
@@ -2783,6 +2785,7 @@ class RoomSessionRepository(
             timelinePagingState.update { it + (sessionId to TimelinePagingState(error = page.reason)) }
             return RefreshResult.ResetRequired(page.reason)
         }
+        recoverVisibleMessageAttachments(sessionId, page)
         val events = page.events
             .filter { it.boundarySeq() > 0L }
             .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
@@ -2803,6 +2806,24 @@ class RoomSessionRepository(
             latestSeq = latestSeq,
         )) }
         return RefreshResult.Applied(events.size, latestSeq)
+    }
+
+    // Older Room projections did not persist attachments. Reuse pages already
+    // fetched for display, without replaying an entire session or advancing its
+    // cursor. Only an exact message identity in this session can be repaired;
+    // a missing row remains available through the visible projection.
+    private suspend fun recoverVisibleMessageAttachments(sessionId: String, page: SessionEventsPageDto) {
+        if (page.resetRequired || page.sessionId != sessionId) return
+        val events = page.events.filter { it.isTimelineMessage() && it.allAttachments().isNotEmpty() }
+        if (events.isEmpty()) return
+        database.withTransaction {
+            for (event in events) {
+                val existing = dao.getMessage(event.messageProjectionId()) ?: continue
+                if (existing.sessionId != sessionId) continue
+                val metadata = mergeMessageAttachmentMetadataJson(existing.metadataJson, event)
+                if (metadata != existing.metadataJson) dao.upsertMessages(listOf(existing.copy(metadataJson = metadata)))
+            }
+        }
     }
 
     // A history migration can advance the durable cursor without materializing

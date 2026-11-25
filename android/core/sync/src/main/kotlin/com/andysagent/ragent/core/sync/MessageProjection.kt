@@ -1,8 +1,10 @@
 package com.andysagent.ragent.core.sync
 
 import com.andysagent.ragent.core.protocol.SessionEventDto
+import com.andysagent.ragent.core.protocol.allAttachments
 import com.andysagent.ragent.core.protocol.boundarySeq
 import com.andysagent.ragent.core.protocol.encodeMessageMetadataJson
+import com.andysagent.ragent.core.protocol.mergeMessageAttachmentMetadataJson
 import com.andysagent.ragent.core.protocol.mergeMessageMetadataJson
 import com.andysagent.ragent.core.protocol.messageEntityKey
 import com.andysagent.ragent.core.protocol.textContent
@@ -57,13 +59,19 @@ fun reduceMessage(previous: ProjectedMessage?, event: SessionEventDto, provision
     require(event.isTimelineMessage())
     val boundary = event.lastEventSeq ?: event.boundarySeq()
     val revision = event.revision ?: boundary
-    if (previous != null && boundary > 0 && previous.lastEventSeq > boundary) return previous
-    if (previous != null && event.revision != null && previous.revision > revision) return previous
+    if (previous != null && ((boundary > 0 && previous.lastEventSeq > boundary) ||
+            (event.revision != null && previous.revision > revision))) {
+        return if (event.allAttachments().isEmpty()) previous
+        else previous.copy(metadataJson = mergeMessageAttachmentMetadataJson(previous.metadataJson, event))
+    }
     val delta = event.textMode == "delta" || (event.textMode == null &&
         (event.type.orEmpty().contains("delta") || event.type.orEmpty().contains("stream")))
     // A terminal message can accept a newer authoritative snapshot, but can
     // never be reopened or changed by a delayed token.
-    if (previous?.completed == true && delta) return previous
+    if (previous?.completed == true && delta) {
+        return if (event.allAttachments().isEmpty()) previous
+        else previous.copy(metadataJson = mergeMessageAttachmentMetadataJson(previous.metadataJson, event))
+    }
     val incoming = event.textContent()
     val text = when {
         event.type == "message_start" -> previous?.text.orEmpty()
