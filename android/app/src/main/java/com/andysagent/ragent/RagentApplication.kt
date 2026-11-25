@@ -846,6 +846,7 @@ class AndroidRuntimeGraph internal constructor(
     // Return only the target-owned transport, never the mutable foreground facade.
     internal fun existingTargetTransport(instanceId: String): com.andysagent.ragent.core.network.RagentTransport? =
         targetRuntimes[instanceId]?.takeIf { it.instanceId == instanceId }?.transport
+    internal fun existingTargetEndpoint(instanceId: String): String? = targetRuntimes[instanceId]?.baseEndpoint
     @Volatile private var tabletChatTargetId: String? = null
     private val connectionUses = TargetConnectionLeases<TargetRuntime> { instanceId ->
         val target = configStore.directory.first().computers.firstOrNull { it.instanceId == instanceId }

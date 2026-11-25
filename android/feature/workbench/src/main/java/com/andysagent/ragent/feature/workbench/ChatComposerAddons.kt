@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,8 +74,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
 import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -141,6 +140,19 @@ data class ComposerAttachment(
     /** Existing server asset that can be reused without reopening a local file. */
     val assetId: String? = null,
 )
+
+// The host supplies authenticated opening and thumbnail loading for timeline assets.
+val LocalTimelineAttachmentOpen = staticCompositionLocalOf<(ComposerAttachment) -> Unit> { {} }
+val LocalTimelineAttachmentThumbnail = staticCompositionLocalOf<suspend (ComposerAttachment) -> ByteArray?> { { null } }
+
+/** A host-owned cache scoped to one authorized target and session. */
+class TimelineThumbnailCache {
+    private val entries = LruCache<String, ImageBitmap>(32)
+    internal fun get(key: String): ImageBitmap? = entries.get(key)
+    internal fun put(key: String, bitmap: ImageBitmap) { entries.put(key, bitmap) }
+    fun clear() { entries.evictAll() }
+}
+val LocalTimelineThumbnailCache = staticCompositionLocalOf<TimelineThumbnailCache?> { null }
 
 @Immutable
 data class QueuedMessageUiState(
@@ -646,24 +658,32 @@ private object AttachmentThumbnailLoader {
     suspend fun loadThumbnail(
         context: Context,
         attachment: ComposerAttachment,
-        reqWidth: Int = 180,
-        reqHeight: Int = 180,
+        remoteThumbnail: suspend (ComposerAttachment) -> ByteArray?,
+        remoteCache: TimelineThumbnailCache?,
+        reqWidth: Int = 240,
+        reqHeight: Int = 240,
     ): ImageBitmap? = withContext(Dispatchers.IO) {
         val pathOrUri = attachment.localPath ?: attachment.previewUrl
-        val cacheKey = pathOrUri ?: attachment.id
-        getCached(cacheKey)?.let { return@withContext it }
+            ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }.orEmpty()
+        val cacheKey = attachment.localPath
+        cacheKey?.let { getCached(it) }?.let { return@withContext it }
+        val remoteKey = if (cacheKey == null) listOfNotNull(attachment.assetId, attachment.previewUrl)
+            .takeIf { it.isNotEmpty() }?.joinToString("\u0000") else null
+        remoteKey?.let { remoteCache?.get(it) }?.let { return@withContext it }
 
         if (pathOrUri.isNullOrBlank()) {
             if (attachment.id.startsWith("qa-")) {
                 val mock = createMockThumbnailBitmap(attachment.name)
-                putCached(cacheKey, mock)
+                cacheKey?.let { putCached(it, mock) }
                 return@withContext mock
             }
-            return@withContext null
         }
 
         val bitmap = runCatching {
-            when {
+            val supplied = if (attachment.localPath.isNullOrBlank()) remoteThumbnail(attachment) else null
+            if (supplied != null && supplied.size <= MAX_REMOTE_THUMBNAIL_SOURCE_BYTES) {
+                decodeSampledBitmap(supplied, reqWidth, reqHeight)
+            } else when {
                 pathOrUri.startsWith("content://") -> {
                     val uri = Uri.parse(pathOrUri)
                     val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -676,35 +696,16 @@ private object AttachmentThumbnailLoader {
                         BitmapFactory.decodeStream(stream, null, options)?.asImageBitmap()
                     }
                 }
-                pathOrUri.startsWith("file://") -> {
-                    val uri = Uri.parse(pathOrUri)
-                    val filePath = uri.path ?: return@withContext null
-                    decodeSampledBitmapFile(filePath, reqWidth, reqHeight)
-                }
-                pathOrUri.startsWith("http://") || pathOrUri.startsWith("https://") -> {
-                    val connection = (URL(pathOrUri).openConnection() as? HttpURLConnection) ?: return@withContext null
-                    try {
-                        connection.connectTimeout = 3000
-                        connection.readTimeout = 3000
-                        connection.doInput = true
-                        connection.connect()
-                        if (connection.responseCode in 200..299 &&
-                            (connection.contentLengthLong < 0L || connection.contentLengthLong <= MAX_REMOTE_THUMBNAIL_SOURCE_BYTES)) {
-                            val bytes = connection.inputStream.use { readThumbnailSourceBounded(it) }
-                            bytes?.let { decodeSampledBitmap(it, reqWidth, reqHeight) }
-                        } else null
-                    } finally {
-                        connection.disconnect()
-                    }
-                }
-                else -> {
-                    val file = File(pathOrUri)
-                    if (file.exists() && file.isFile) {
-                        decodeSampledBitmapFile(file.absolutePath, reqWidth, reqHeight)
-                    } else if (attachment.id.startsWith("qa-")) {
-                        createMockThumbnailBitmap(attachment.name)
+                attachment.localPath != null -> {
+                    val raw = if (pathOrUri.startsWith("file://")) Uri.parse(pathOrUri).path else pathOrUri
+                    val file = raw?.let { File(it).canonicalFile }
+                    val roots = listOfNotNull(context.cacheDir, context.externalCacheDir)
+                        .map { it.canonicalFile }
+                    if (file != null && file.isFile && roots.any { file.path.startsWith(it.path + File.separator) }) {
+                        decodeSampledBitmapFile(file.path, reqWidth, reqHeight)
                     } else null
                 }
+                else -> null
             }
         }.getOrElse { error ->
             if (error is CancellationException) throw error
@@ -713,7 +714,8 @@ private object AttachmentThumbnailLoader {
         currentCoroutineContext().ensureActive()
 
         if (bitmap != null) {
-            putCached(cacheKey, bitmap)
+            if (cacheKey != null) putCached(cacheKey, bitmap)
+            else if (remoteKey != null) remoteCache?.put(remoteKey, bitmap)
         }
         bitmap
     }
@@ -730,14 +732,12 @@ private object AttachmentThumbnailLoader {
     }
 
     private fun decodeSampledBitmapFile(path: String, reqWidth: Int, reqHeight: Int): ImageBitmap? {
-        val options = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
-        }
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, options)
+        if (options.outWidth <= 0 || options.outHeight <= 0) return null
         options.inSampleSize = calculateInSampleSize(options, reqWidth, reqHeight)
         options.inJustDecodeBounds = false
-        val decoded = BitmapFactory.decodeFile(path, options)
-        return decoded?.asImageBitmap()
+        return BitmapFactory.decodeFile(path, options)?.asImageBitmap()
     }
 
     private fun calculateInSampleSize(
@@ -750,7 +750,7 @@ private object AttachmentThumbnailLoader {
         if (height > reqHeight || width > reqWidth) {
             val halfHeight: Int = height / 2
             val halfWidth: Int = width / 2
-            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+            while ((halfHeight / inSampleSize) >= reqHeight || (halfWidth / inSampleSize) >= reqWidth) {
                 inSampleSize *= 2
             }
         }
@@ -800,12 +800,14 @@ private object AttachmentThumbnailLoader {
 @Composable
 fun rememberAttachmentThumbnail(attachment: ComposerAttachment): ImageBitmap? {
     val context = LocalContext.current
-    val key = attachment.localPath ?: attachment.previewUrl ?: attachment.id
-    return key(key) {
-        val initial = remember { AttachmentThumbnailLoader.getCached(key) }
+    val remoteThumbnail = LocalTimelineAttachmentThumbnail.current
+    val remoteCache = LocalTimelineThumbnailCache.current
+    val key = attachment.localPath
+    return key(attachment, remoteThumbnail, remoteCache) {
+        val initial = remember { key?.let { AttachmentThumbnailLoader.getCached(it) } }
         val bitmapState = produceState(initialValue = initial) {
             if (value == null) {
-                value = AttachmentThumbnailLoader.loadThumbnail(context, attachment)
+                value = AttachmentThumbnailLoader.loadThumbnail(context, attachment, remoteThumbnail, remoteCache)
             }
         }
         bitmapState.value

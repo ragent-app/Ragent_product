@@ -631,9 +631,13 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 		return httpResponse{ID: request.ID, Type: "http_response", Error: err.Error()}
 	}
 	req.ContentLength = contentLength
+	manualAssetRedirect := false
 	for key, value := range request.Headers {
 		lower := strings.ToLower(key)
-		if lower == "host" || lower == "connection" || lower == "upgrade" ||
+		if lower == "x-ragent-asset-redirect" && value == "manual" {
+			manualAssetRedirect = true
+		}
+		if lower == "host" || lower == "connection" || lower == "upgrade" || lower == "x-ragent-asset-redirect" ||
 			(principal != nil && (lower == "authorization" || strings.HasPrefix(lower, "x-ragent-browser-"))) {
 			continue
 		}
@@ -657,6 +661,11 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 		timeout = 165 * time.Second
 	}
 	client := &http.Client{Timeout: timeout}
+	// Asset redirects contain signed storage URLs. Return them to the authenticated
+	// client rather than forwarding local credentials or principal headers.
+	if method == http.MethodGet && manualAssetRedirect && strings.HasPrefix(req.URL.Path, "/api/assets/fasset_") && strings.HasSuffix(req.URL.Path, "/download") {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	response, err := client.Do(req)
 	if err != nil {
 		if isUploadChunk || isUploadCheckpoint {

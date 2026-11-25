@@ -1188,15 +1188,18 @@ function buildHeaders(headers = {}) {
   };
 }
 
-function streamResponse(res, filepath, headers = {}) {
-  const stream = createReadStream(filepath);
+function streamResponse(res, filepath, headers = {}, options = {}) {
+  const stream = createReadStream(filepath, options.start == null ? undefined : { start: options.start, end: options.end });
   stream.on('error', () => {
-    if (!res.headersSent) {
-      res.writeHead(500, buildHeaders({ 'Content-Type': 'application/json' }));
+    if (res.headersSent) {
+      res.destroy();
+      return;
     }
+    res.writeHead(500, buildHeaders({ 'Content-Type': 'application/json' }));
     res.end(JSON.stringify({ error: 'Failed to read file' }));
   });
-  res.writeHead(200, buildHeaders(headers));
+  res.once('close', () => stream.destroy());
+  res.writeHead(options.statusCode || 200, buildHeaders(headers));
   stream.pipe(res);
 }
 

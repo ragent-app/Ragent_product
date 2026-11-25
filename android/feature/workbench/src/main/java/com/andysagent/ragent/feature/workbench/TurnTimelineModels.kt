@@ -142,6 +142,31 @@ internal fun latestTurnHasTerminalRun(
     return sessionStatus in terminal || matchingRun || completedByDuration || settledByCursor
 }
 
+// A delivery event and its empty assistant history mirror can carry the same
+// asset under different message IDs. Scope this to one turn and assistant rows.
+internal fun deduplicateAssistantAttachmentMirrors(entries: List<TimelineItem>): List<TimelineItem> {
+    fun identity(attachment: com.andysagent.ragent.core.timeline.AttachmentItem): String? =
+        attachment.assetId?.takeIf { it.isNotBlank() }?.let { "asset:$it" }
+            ?: (attachment.downloadUrl ?: attachment.url)?.takeIf { it.isNotBlank() }?.let { "url:$it" }
+    val textAssets = entries.filterIsInstance<TimelineItem.Message>()
+        .filter { it.role == TimelineRole.Agent && it.text.isNotBlank() }
+        .flatMap { it.attachments }.mapNotNull(::identity).toSet()
+    val seen = mutableSetOf<String>()
+    return entries.mapNotNull { entry ->
+        if (entry !is TimelineItem.Message || entry.role != TimelineRole.Agent) return@mapNotNull entry
+        val kept = entry.attachments.filter { attachment ->
+            val key = identity(attachment) ?: return@filter true
+            if (entry.text.isBlank() && key in textAssets) false else seen.add(key)
+        }
+        if (kept.size == entry.attachments.size) entry
+        else if (kept.isEmpty() && entry.text.isBlank() && !entry.isProtectedAsyncEntry()) null
+        else entry.copy(attachments = kept)
+    }
+}
+
+internal fun TimelineItem.isProtectedAttachmentEntry(): Boolean =
+    this is TimelineItem.Message && attachments.isNotEmpty()
+
 internal fun TimelineItem.isProtectedAsyncEntry(): Boolean =
     this is TimelineItem.Message &&
         (asyncQuestions.isNotEmpty() || messageDelivery.equals("async", ignoreCase = true))
@@ -184,12 +209,12 @@ internal fun splitTurnEntries(
     // finalized snapshot was projected before them.
     val afterFinal = entries.drop(finalIndex + 1)
     fun TimelineItem.isProtectedTrailingEntry(): Boolean =
-        isProtectedAsyncEntry() ||
+        isProtectedAsyncEntry() || isProtectedAttachmentEntry() ||
             (this is TimelineItem.Message && role == TimelineRole.User) ||
             (this is TimelineItem.Message && role == TimelineRole.Agent && !completed) ||
             this is TimelineItem.Notice
     val protectedBeforeFinal = entries.take(finalIndex).filter {
-        it.isProtectedAsyncEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
+        it.isProtectedAsyncEntry() || it.isProtectedAttachmentEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
     }
     val protectedAfterFinal = afterFinal.filter { it.isProtectedTrailingEntry() }
     val processEntries = entries.take(finalIndex).filterNot { it in protectedBeforeFinal } +
@@ -398,6 +423,7 @@ class TurnGroupProjector {
                                     mimeType = att.mimeType ?: "application/octet-stream",
                                     sizeBytes = att.sizeBytes ?: 0L,
                                     previewUrl = att.downloadUrl ?: att.url,
+                                    assetId = att.assetId,
                                 )
                             },
                             timestamp = null,

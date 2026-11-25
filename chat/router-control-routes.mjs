@@ -1782,11 +1782,30 @@ export async function handleControlRoutes({
     try {
       if (asset.storage?.provider === 'local') {
         const localPath = await localizeFileAsset(asset);
-        streamResponse(res, localPath, {
+        const size = (await stat(localPath)).size;
+        const headers = {
           'Content-Type': asset.mimeType || 'application/octet-stream',
           'Content-Disposition': buildAttachmentContentDisposition(asset.originalName, { attachment: downloadRequested }),
           'Cache-Control': 'private, no-store, max-age=0, must-revalidate',
-        });
+          'Accept-Ranges': 'bytes',
+        };
+        const range = req.headers.range;
+        if (range) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+          const suffix = match && !match[1] && match[2] ? Number(match[2]) : null;
+          const start = suffix !== null ? Math.max(0, size - suffix) : match && match[1] ? Number(match[1]) : NaN;
+          const requestedEnd = suffix !== null ? size - 1 : match && match[2] ? Number(match[2]) : size - 1;
+          if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || (suffix !== null && (!Number.isSafeInteger(suffix) || suffix <= 0)) || start >= size || requestedEnd < start) {
+            res.writeHead(416, buildHeaders({ ...headers, 'Content-Range': `bytes */${size}` }));
+            res.end();
+            return true;
+          }
+          const end = Math.min(requestedEnd, size - 1);
+          streamResponse(res, localPath, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`,
+            'Content-Length': String(end - start + 1) }, { start, end, statusCode: 206 });
+        } else {
+          streamResponse(res, localPath, { ...headers, 'Content-Length': String(size) });
+        }
         return true;
       }
       const direct = await buildFileAssetDirectUrl(asset, { attachment: downloadRequested });

@@ -321,8 +321,8 @@ class OkHttpRagentTransport(
             else -> builder.method(request.method.uppercase(), body)
         }
         try {
-            val apiResponse = executeHttpCancellable(builder.build(), request.timeoutMs)
-            if (!apiResponse.isSuccessful) throw apiResponse.toApiException(codec)
+            val apiResponse = executeHttpCancellable(builder.build(), request.timeoutMs, request.rawDownload, request.maxResponseBytes)
+            if (!apiResponse.isSuccessful && !(request.rawDownload && apiResponse.statusCode in 300..399)) throw apiResponse.toApiException(codec)
             apiResponse
         } catch (error: ApiException) {
             currentCoroutineContext().ensureActive()
@@ -336,8 +336,86 @@ class OkHttpRagentTransport(
         }
     }
 
+    /** Direct HTTP uses a single streamed response; verified carriers use bounded ranges. */
+    internal suspend fun downloadDirectAsset(
+        path: String, destination: java.io.File, expectedSize: Long?, expectedSha256: String?,
+        maxBytes: Long?, onProgress: (Long, Long?) -> Unit,
+    ): Boolean {
+        if (requireVerifiedCarrier || hasOpenCarrier()) return false
+        val endpoint = endpointProvider().trimEnd('/')
+        if (endpoint.isBlank()) return false
+        if (requestAdmission?.invoke(ApiRequest("GET", path)) == false) throw IOException("Local runtime identity has not been verified")
+        val initial = Request.Builder().url("$endpoint$path").header("Accept-Encoding", "identity")
+        val attemptedCredential = credentialProvider()?.takeIf { it.isNotBlank() }
+        attemptedCredential?.let { initial.header("Authorization", "Bearer $it") }
+        val downloadClient = client.newBuilder().followRedirects(false).followSslRedirects(false).build()
+        val externalRedirect = java.util.concurrent.atomic.AtomicBoolean(false)
+        try { suspendCancellableCoroutine<Unit> { continuation ->
+            val currentCall = AtomicReference<okhttp3.Call?>()
+            continuation.invokeOnCancellation { currentCall.get()?.cancel() }
+            fun enqueue(request: Request, redirected: Boolean) {
+                val call = downloadClient.newCall(request)
+                currentCall.set(call)
+                if (!continuation.isActive) { call.cancel(); return }
+                call.enqueue(object : okhttp3.Callback {
+                    override fun onFailure(call: okhttp3.Call, e: IOException) {
+                        if (continuation.isActive) continuation.resumeWithException(ApiException(0, "NETWORK_ERROR", "Network request failed", retryable = true))
+                    }
+                    override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                        try {
+                            response.use { reply ->
+                                if (reply.code in 300..399 && !redirected) {
+                                    val location = reply.header("Location") ?: throw IOException("Missing asset redirect")
+                                    val uri = java.net.URI(location)
+                                    if (!uri.scheme.equals("https", true) || uri.host.isNullOrBlank() || uri.userInfo != null || uri.fragment != null)
+                                        throw IOException("Invalid asset redirect")
+                                    externalRedirect.set(true)
+                                    enqueue(Request.Builder().url(location).header("Accept-Encoding", "identity").get().build(), true)
+                                    return
+                                }
+                                if (reply.code != 200) throw ApiException(reply.code, null, "Asset download failed", headers = reply.headers.toMap())
+                                val body = reply.body ?: throw IOException("Missing asset body")
+                                val length = body.contentLength().takeIf { it >= 0L }
+                                if (expectedSize != null && length != null && length != expectedSize) throw IOException("Asset size mismatch")
+                                if (maxBytes != null && length != null && length > maxBytes) throw IOException("Asset exceeds size limit")
+                                val digest = MessageDigest.getInstance("SHA-256")
+                                var written = 0L
+                                destination.outputStream().buffered().use { output ->
+                                    body.byteStream().use { input ->
+                                        val buffer = ByteArray(64 * 1024)
+                                        while (true) {
+                                            if (!continuation.isActive) throw IOException("Asset download cancelled")
+                                            val count = input.read(buffer)
+                                            if (count < 0) break
+                                            written += count
+                                            if (maxBytes != null && written > maxBytes) throw IOException("Asset exceeds size limit")
+                                            output.write(buffer, 0, count); digest.update(buffer, 0, count)
+                                            onProgress(written, length ?: expectedSize)
+                                        }
+                                    }
+                                }
+                                if (length != null && written != length || expectedSize != null && written != expectedSize) throw IOException("Asset size mismatch")
+                                if (expectedSha256 != null && digest.digest().joinToString("") { "%02x".format(it) } != expectedSha256.lowercase())
+                                    throw IOException("Asset digest mismatch")
+                                if (continuation.isActive) continuation.resume(Unit) else destination.delete()
+                            }
+                        } catch (error: Exception) {
+                            destination.delete()
+                            if (continuation.isActive) continuation.resumeWithException(error)
+                        }
+                    }
+                })
+            }
+            enqueue(initial.get().build(), false)
+        } } catch (error: ApiException) {
+            currentCoroutineContext().ensureActive()
+            throw if (externalRedirect.get()) error else handleAuthenticationFailure(error, attemptedCredential)
+        }
+        return true
+    }
+
     /** Keep cancellation attached until the whole response body has been read. */
-    private suspend fun executeHttpCancellable(request: Request, timeoutMs: Long? = null): ApiResponse = suspendCancellableCoroutine { continuation ->
+    private suspend fun executeHttpCancellable(request: Request, timeoutMs: Long? = null, rawDownload: Boolean = false, maxResponseBytes: Long? = null): ApiResponse = suspendCancellableCoroutine { continuation ->
         val isUploadChunk = request.method == "PATCH"
             && request.url.encodedPath.matches(Regex("/api/assets/[^/]+/upload"))
         val isAccountAsr = request.url.encodedPath.endsWith("/v1/owner-auth/account/asr/transcriptions")
@@ -358,7 +436,7 @@ class OkHttpRagentTransport(
                 .build()
             else -> client
         }
-        val call = requestClient.newCall(request)
+        val call = (if (rawDownload) requestClient.newBuilder().followRedirects(false).followSslRedirects(false).build() else requestClient).newCall(request)
         continuation.invokeOnCancellation { call.cancel() }
         call.enqueue(object : okhttp3.Callback {
             override fun onFailure(call: okhttp3.Call, error: IOException) {
@@ -368,7 +446,7 @@ class OkHttpRagentTransport(
             override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
                 try {
                     val result = response.use {
-                        readBoundedHttpResponse(it.code, it.headers.toMap(), it.body)
+                        readBoundedHttpResponse(it.code, it.headers.toMap(), it.body, rawDownload, maxResponseBytes)
                     }
                     continuation.resume(result)
                 } catch (error: Exception) {
@@ -411,8 +489,8 @@ class OkHttpRagentTransport(
             throw ApiException(0, "P2P_REMOTE_ERROR", remoteError,
                 retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
-        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
-        if (!response.isSuccessful) {
+        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers, request.rawDownload, request.maxResponseBytes)
+        if (!response.isSuccessful && !(request.rawDownload && response.statusCode in 300..399)) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
         }
@@ -454,8 +532,8 @@ class OkHttpRagentTransport(
             throw ApiException(0, "TURN_REMOTE_ERROR", remoteError,
                 retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
-        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers)
-        if (!response.isSuccessful) {
+        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers, request.rawDownload, request.maxResponseBytes)
+        if (!response.isSuccessful && !(request.rawDownload && response.statusCode in 300..399)) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
         }
@@ -710,9 +788,10 @@ class OkHttpRagentTransport(
     }
 }
 
-internal fun readBoundedHttpResponse(statusCode: Int, headers: Map<String, String>, body: okhttp3.ResponseBody?): ApiResponse {
+internal fun readBoundedHttpResponse(statusCode: Int, headers: Map<String, String>, body: okhttp3.ResponseBody?, rawDownload: Boolean = false, maxResponseBytes: Long? = null): ApiResponse {
+    val limit = minOf(OkHttpRagentTransport.MAX_HTTP_RESPONSE_BYTES, if (statusCode in 200..299) maxResponseBytes ?: Long.MAX_VALUE else Long.MAX_VALUE)
     val length = body?.contentLength() ?: 0L
-    if (length > OkHttpRagentTransport.MAX_HTTP_RESPONSE_BYTES)
+    if (length > limit)
         throw IOException("HTTP response exceeded the client size limit")
     val buffer = Buffer()
     val source = body?.source()
@@ -722,12 +801,12 @@ internal fun readBoundedHttpResponse(statusCode: Int, headers: Map<String, Strin
             val read = source.read(buffer, 16 * 1024L)
             if (read < 0) break
             total += read
-            if (total > OkHttpRagentTransport.MAX_HTTP_RESPONSE_BYTES)
+            if (total > limit)
                 throw IOException("HTTP response exceeded the client size limit")
         }
     }
     val bytes = buffer.readByteArray()
-    return if (isTextResponse(body?.contentType()?.toString()))
+    return if (!rawDownload && isTextResponse(body?.contentType()?.toString()))
         ApiResponse(statusCode, bytes.toString(Charsets.UTF_8), headers)
     else ApiResponse(statusCode, "", headers, bytes)
 }
@@ -738,12 +817,13 @@ private fun isTextResponse(contentType: String?): Boolean {
         || type == "application/xml" || type.endsWith("+xml") || type == "application/x-www-form-urlencoded"
 }
 
-private fun decodeCarrierResponse(status: Int, bodyBase64: String, headers: Map<String, String>): ApiResponse {
-    val maximumBase64Characters = ((OkHttpRagentTransport.MAX_CARRIER_RESPONSE_BYTES.toLong() * 4L + 2L) / 3L)
+private fun decodeCarrierResponse(status: Int, bodyBase64: String, headers: Map<String, String>, rawDownload: Boolean = false, maxResponseBytes: Long? = null): ApiResponse {
+    val limit = minOf(OkHttpRagentTransport.MAX_CARRIER_RESPONSE_BYTES.toLong(), if (status in 200..299) maxResponseBytes ?: Long.MAX_VALUE else Long.MAX_VALUE)
+    val maximumBase64Characters = ((limit + 2L) / 3L) * 4L
     if (bodyBase64.length.toLong() > maximumBase64Characters) throw IOException("Carrier response exceeded the client size limit")
     val bytes = P2PProtocol.decodeBody(bodyBase64)
-    if (bytes.size > OkHttpRagentTransport.MAX_CARRIER_RESPONSE_BYTES) throw IOException("Carrier response exceeded the client size limit")
-    return if (isTextResponse(headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value))
+    if (bytes.size.toLong() > limit) throw IOException("Carrier response exceeded the client size limit")
+    return if (!rawDownload && isTextResponse(headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value))
         ApiResponse(status, bytes.toString(Charsets.UTF_8), headers)
     else ApiResponse(status, "", headers, bytes)
 }

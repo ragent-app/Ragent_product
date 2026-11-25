@@ -46,6 +46,10 @@ data class ApiRequest(
     val bodySource: ApiRequestBodySource? = null,
     /** Optional per-request total call timeout in milliseconds. */
     val timeoutMs: Long? = null,
+    /** Preserve response bytes and expose redirects for authenticated asset downloads. */
+    val rawDownload: Boolean = false,
+    /** Optional response byte ceiling for bounded binary reads. */
+    val maxResponseBytes: Long? = null,
 )
 
 data class ApiResponse(

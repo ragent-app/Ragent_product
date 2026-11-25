@@ -39,8 +39,6 @@ import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
@@ -533,7 +531,7 @@ class MainActivity : ComponentActivity() {
                     onDismissRequest = { localSetupOpen = false },
                     title = { Text(getString(R.string.local_runtime_title)) },
                     text = {
-                        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        Column {
                             Text(getString(R.string.local_runtime_instructions))
                             if (localRevocationsPending) Text(getString(R.string.local_link_revocation_pending))
                             localLinkDirectory.computers.filter { it.localRuntime }.forEach { target ->
@@ -1723,6 +1721,8 @@ class MainActivity : ComponentActivity() {
                 val organizationTargetTransport = organizationTargetId?.takeIf { id ->
                     organizationProfileAccount != null && computerDirectory.computers.any { it.instanceId == id }
                 }?.let(app.runtime::existingTargetTransport)
+                TimelineAttachmentHost(organizationTargetId, state.sessionId.takeIf { state.chatOpen }, organizationTargetId?.let(app.runtime::existingTargetTransport), organizationTargetId?.let(app.runtime::existingTargetEndpoint),
+                    cacheScope = listOf(organizationProfileAccount, state.connection, state.chatOpen)) {
                 WorkbenchScreen(
                     organizationTransport = organizationTargetTransport ?: if (tabletDualPane) tabletChatBinding.transport else app.runtime.transport,
                     verifiedOrganizationTargetId = organizationTargetId.takeIf { organizationTargetTransport != null },
@@ -2280,6 +2280,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 )
+                }
 
                 }
 

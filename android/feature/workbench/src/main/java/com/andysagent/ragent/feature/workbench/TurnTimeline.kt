@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
@@ -131,6 +133,8 @@ fun TurnTimelineView(
     onSubmitAsyncQuestionReplies: ((List<AsyncQuestionReply>, String) -> Unit)? = null,
     onQuickReplyAsyncFollowup: ((String) -> Unit)? = null,
 ) {
+    val timelineUriHandler = LocalTimelineUriHandler.current ?: LocalUriHandler.current
+    CompositionLocalProvider(LocalUriHandler provides timelineUriHandler) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -149,16 +153,17 @@ fun TurnTimelineView(
         }
 
         if (turn.entries.isNotEmpty() || runActive || runDuration != null) {
+            val timelineEntries = deduplicateAssistantAttachmentMirrors(turn.entries)
             // Keep the run's process in chronological order, with its final reply outside.
             val (processEntries, outsideEntries) = if (runActive) {
-                val protected = turn.entries.filter {
-                    it.isProtectedAsyncEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
+                val protected = timelineEntries.filter {
+                    it.isProtectedAsyncEntry() || it.isProtectedAttachmentEntry() || (it is TimelineItem.Message && it.role == TimelineRole.User)
                 }
-                val process = turn.entries.filterNot { it in protected }
+                val process = timelineEntries.filterNot { it in protected }
                 process to protected
             } else {
                 splitTurnEntries(
-                    turn.entries,
+                    timelineEntries,
                     allowTerminalFallback = !turn.isLive && (runDuration != null || turn.finalAnswer?.completed == true),
                 )
             }
@@ -175,7 +180,7 @@ fun TurnTimelineView(
                                     attachments = item.attachments.mapIndexed { idx, att -> ComposerAttachment(
                                         id = att.assetId ?: "att-$idx", name = att.originalName ?: att.filename ?: "attachment",
                                         mimeType = att.mimeType ?: "application/octet-stream", sizeBytes = att.sizeBytes ?: 0L,
-                                        previewUrl = att.downloadUrl ?: att.url) }),
+                                        previewUrl = att.downloadUrl ?: att.url, assetId = att.assetId) }),
                                 onBranch = onBranch?.takeIf { item.seq > 0L }?.let { branch -> { branch(item.seq, "user-continue") } },
                                 onEditResend = {
                                     item.requestId?.let {
@@ -193,6 +198,10 @@ fun TurnTimelineView(
                                     onSubmitAsyncQuestionReplies?.invoke(replies, note)
                                 },
                                 modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                            if (item.attachments.isNotEmpty()) ResultBlock(
+                                message = item.copy(text = ""), isLastTurn = false,
+                                onBranch = null, onRestart = null, showMessageActions = false,
                             )
                         } else if (item.messageDelivery.equals("async", ignoreCase = true)) {
                             AsyncFollowupMessageCard(
@@ -277,7 +286,7 @@ fun TurnTimelineView(
         // 6. Keep every distinct assistant message, including progress before
         // a final reply. Only an update to the same entity replaces its text.
         val answers = turn.agentMessages.ifEmpty { listOfNotNull(turn.finalAnswer ?: turn.streamingAnswer) }
-            .map { it.copy(text = displayAgentMessageText(it.text)) }.filter { it.text.isNotBlank() }
+            .map { it.copy(text = displayAgentMessageText(it.text)) }.filter { it.text.isNotBlank() || it.attachments.isNotEmpty() }
         val latestCompleted = answers.indexOfLast { it.completed }
         answers.forEachIndexed { index, message ->
             key(message.id) {
@@ -296,6 +305,7 @@ fun TurnTimelineView(
             }
         }
     }
+}
 }
 
 @Composable
@@ -346,6 +356,7 @@ fun UserPromptBlock(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            val openAttachment = LocalTimelineAttachmentOpen.current
             // Attachment preview pills if attached to user message
             if (prompt.attachments.isNotEmpty()) {
                 FlowRow(
@@ -354,7 +365,8 @@ fun UserPromptBlock(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     prompt.attachments.forEach { attachment ->
-                        AttachmentThumbnailCard(attachment = attachment, onRemove = null)
+                        AttachmentThumbnailCard(attachment = attachment, onRemove = null,
+                            modifier = Modifier.clickable { openAttachment(attachment) })
                     }
                 }
             }
@@ -383,7 +395,7 @@ fun UserPromptBlock(
                 )
             }
 
-            Box {
+            if (prompt.text.isNotBlank() || prompt.attachments.isEmpty()) Box {
                 Surface(
                     modifier = Modifier
                         .widthIn(min = 48.dp, max = maxBubbleWidth)
@@ -906,6 +918,7 @@ fun TimelineArtifactBlock(
  * ResultBlock: Direct on content canvas, headings, paragraphs, code blocks.
  * NOT wrapped in thick cards or bubbles.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ResultBlock(
     message: TimelineItem.Message,
@@ -919,20 +932,41 @@ fun ResultBlock(
     allowStreaming: Boolean = true,
 ) {
     val displayText = displayAgentMessageText(message.text)
-    if (displayText.isBlank()) return
+    if (displayText.isBlank() && message.attachments.isEmpty()) return
     Column(
         modifier = modifier
             .fillMaxWidth()
             .padding(top = 2.dp, bottom = 4.dp),
     ) {
-        if (message.completed || pauseStreaming || !allowStreaming) {
+        if (displayText.isNotBlank() && (message.completed || pauseStreaming || !allowStreaming)) {
             AgentMarkdown(markdown = displayText, modifier = Modifier.testTag("agent-settled-text"))
-        } else {
+        } else if (displayText.isNotBlank()) {
             AgentStreamingMessage(text = displayText, streaming = true, smoothCatchUp = message.lastEventSeq == 0L,
                 modifier = Modifier.testTag("agent-live-text"))
         }
 
-        if (showMessageActions && message.completed && (isLastTurn || onReport != null)) {
+        if (message.attachments.isNotEmpty()) {
+            val openAttachment = LocalTimelineAttachmentOpen.current
+            FlowRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                message.attachments.forEachIndexed { index, att ->
+                    val attachment = ComposerAttachment(
+                        id = att.assetId ?: att.downloadUrl ?: att.url ?: "attachment-$index",
+                        assetId = att.assetId,
+                        name = att.originalName ?: att.filename ?: "attachment",
+                        mimeType = att.mimeType ?: "application/octet-stream",
+                        sizeBytes = att.sizeBytes ?: 0L,
+                        previewUrl = att.downloadUrl ?: att.url,
+                    )
+                    AttachmentThumbnailCard(attachment, onRemove = null,
+                        modifier = Modifier.clickable { openAttachment(attachment) })
+                }
+            }
+        }
+        if (displayText.isNotBlank() && showMessageActions && message.completed && (isLastTurn || onReport != null)) {
             AgentMessageActionBar(
                 text = displayText,
                 isLastMessage = isLastTurn,

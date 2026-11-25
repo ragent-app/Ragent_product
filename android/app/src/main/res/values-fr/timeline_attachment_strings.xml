@@ -1,0 +1,17 @@
+<resources>
+    <string name="timeline_attachment_unavailable">Cette pièce jointe est indisponible sur cet ordinateur.</string>
+    <string name="timeline_attachment_download_failed">Impossible de télécharger la pièce jointe. Réessayez.</string>
+    <string name="timeline_attachment_forbidden">Vous n’avez plus accès à cette pièce jointe.</string>
+    <string name="timeline_attachment_missing">Cette pièce jointe n’existe plus.</string>
+    <string name="timeline_attachment_offline">Impossible de joindre cet ordinateur. Vérifiez la connexion et réessayez.</string>
+    <string name="timeline_attachment_save_failed">Impossible d’enregistrer la pièce jointe. Réessayez.</string>
+    <string name="timeline_attachment_no_viewer">Aucune application ne peut ouvrir cette pièce jointe. Vous pouvez l’enregistrer.</string>
+    <string name="timeline_attachment_downloading">Téléchargement…</string>
+    <string name="timeline_attachment_ready">Ouvrir ou enregistrer cette pièce jointe.</string>
+    <string name="timeline_attachment_saved">Enregistré.</string>
+    <string name="timeline_attachment_retry">Réessayer</string>
+    <string name="timeline_attachment_open">Ouvrir</string>
+    <string name="timeline_attachment_save">Enregistrer</string>
+    <string name="timeline_attachment_cancel">Annuler</string>
+    <string name="timeline_attachment_open_with">Ouvrir avec</string>
+</resources>

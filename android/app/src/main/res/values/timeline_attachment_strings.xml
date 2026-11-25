@@ -1,0 +1,17 @@
+<resources>
+    <string name="timeline_attachment_unavailable">This attachment is unavailable on this computer.</string>
+    <string name="timeline_attachment_download_failed">Could not download this attachment. Please try again.</string>
+    <string name="timeline_attachment_forbidden">You no longer have access to this attachment.</string>
+    <string name="timeline_attachment_missing">This attachment no longer exists.</string>
+    <string name="timeline_attachment_offline">Cannot connect to this computer. Check the connection and retry.</string>
+    <string name="timeline_attachment_save_failed">Could not save this attachment. Please try again.</string>
+    <string name="timeline_attachment_no_viewer">No app could open this attachment. You can save it instead.</string>
+    <string name="timeline_attachment_downloading">Downloading…</string>
+    <string name="timeline_attachment_ready">Open or save this attachment.</string>
+    <string name="timeline_attachment_retry">Retry</string>
+    <string name="timeline_attachment_open">Open</string>
+    <string name="timeline_attachment_save">Save</string>
+    <string name="timeline_attachment_cancel">Cancel</string>
+    <string name="timeline_attachment_open_with">Open with</string>
+    <string name="timeline_attachment_saved">Saved.</string>
+</resources>
