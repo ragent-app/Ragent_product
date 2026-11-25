@@ -1590,6 +1590,7 @@ class MainActivity : ComponentActivity() {
                     authoritativeIdleAtSeq = chatState.authoritativeIdleAtSeq,
                     stepTraces = chatState.stepTraces,
                     changedFiles = chatState.changedFiles,
+                    sessionDeliverables = chatState.sessionDeliverables,
                     queuedMessages = chatState.queuedMessages,
                     activeDecision = chatState.activeDecision,
                     submittingAsyncQuestionIds = chatState.submittingAsyncQuestionIds,
@@ -1886,6 +1887,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onEvent = eventHandler@{ event ->
                         when (event) {
+                            WorkbenchEvent.RefreshSessionDeliverables -> chat.onEvent(ChatEvent.RefreshSessionDeliverables)
                             WorkbenchEvent.OpenComputerSetup -> { addComputerFromPairing = false; addComputerChoiceOpen = true }
                             is WorkbenchEvent.SelectDestination -> shell.onEvent(AppShellEvent.SelectDestination(event.destination, keepChat = tabletDualPane))
                             is WorkbenchEvent.OpenSettingsPage -> {

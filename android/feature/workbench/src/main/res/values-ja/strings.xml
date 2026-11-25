@@ -51,6 +51,9 @@
     <string name="run_details_metrics">データ</string>
     <string name="run_details_files">ファイル（%1$d）</string>
     <string name="run_details_trace">ステップ（%1$d）</string>
+    <string name="run_details_session_deliverables">セッションの成果物</string>
+    <string name="run_details_run_changes">今回の実行での変更</string>
+    <string name="run_details_no_session_files">成果物やファイル変更はありません。</string>
     <string name="run_details_no_files">この実行ではファイルの変更は報告されていません。</string>
     <string name="run_details_no_trace">この実行にはステップの記録がありません。</string>
     <string name="run_summary_cancelled_detail">キャンセル前に完了した作業は会話で確認できます。</string>

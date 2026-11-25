@@ -227,6 +227,7 @@ class SwitchingSessionRepository(scope: CoroutineScope) : SessionRepository {
     override suspend fun submitPlanAction(sessionId: String, planId: String, action: String, text: String, requestId: String): JsonObject =
         current().submitPlanAction(sessionId, planId, action, text, requestId)
     override suspend fun loadRunProjection(runId: String): JsonObject = current().loadRunProjection(runId)
+    override suspend fun loadSessionDeliverables(sessionId: String) = current().loadSessionDeliverables(sessionId)
     override suspend fun resumePendingOperations(): Int = current().resumePendingOperations()
     override suspend fun pendingDerivedTurns(sessionId: String): List<PendingDerivedTurn> = current().pendingDerivedTurns(sessionId)
     override suspend fun reconcileDerivedTurn(sessionId: String, parentRequestId: String, edited: Boolean): Boolean =

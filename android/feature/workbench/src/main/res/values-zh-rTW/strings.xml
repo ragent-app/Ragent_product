@@ -53,6 +53,9 @@
     <string name="run_details_metrics">資料</string>
     <string name="run_details_files">檔案（%1$d）</string>
     <string name="run_details_trace">步驟（%1$d）</string>
+    <string name="run_details_session_deliverables">工作階段產物</string>
+    <string name="run_details_run_changes">本次執行的檔案變更</string>
+    <string name="run_details_no_session_files">尚無工作階段產物或檔案變更。</string>
     <string name="run_details_no_files">本次執行尚未回報檔案變更。</string>
     <string name="run_details_no_trace">本次執行尚無步驟記錄。</string>
     <string name="run_summary_cancelled_detail">可在對話中查看取消前已完成的工作。</string>

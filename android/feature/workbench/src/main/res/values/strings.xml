@@ -55,6 +55,9 @@
     <string name="run_details_metrics">Metrics</string>
     <string name="run_details_files">Files (%1$d)</string>
     <string name="run_details_trace">Steps (%1$d)</string>
+    <string name="run_details_session_deliverables">Session deliverables</string>
+    <string name="run_details_run_changes">Changes in this run</string>
+    <string name="run_details_no_session_files">No session deliverables or file changes.</string>
     <string name="run_details_no_files">No changed files reported for this run.</string>
     <string name="run_details_no_trace">No execution steps recorded for this run.</string>
     <string name="run_summary_cancelled_detail">Review any completed work in the conversation.</string>

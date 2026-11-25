@@ -62,6 +62,13 @@ private fun assetId(attachment: ComposerAttachment, endpoint: String?): String? 
 private fun safeName(name: String): String = name.substringAfterLast('/').substringAfterLast('\\')
     .replace(Regex("[\\p{Cntrl}\\\\/:*?\"<>|]"), "_").take(180).ifBlank { "attachment" }
 
+private fun isMarkdown(attachment: ComposerAttachment): Boolean {
+    val mime = attachment.mimeType.substringBefore(';').trim().lowercase()
+    val name = attachment.name.lowercase()
+    return mime in setOf("text/markdown", "text/x-markdown", "application/markdown") ||
+        name.endsWith(".md") || name.endsWith(".markdown")
+}
+
 /** State and transfers are scoped to the displayed target and session, without remounting the workbench. */
 @Composable
 internal fun TimelineAttachmentHost(
@@ -144,7 +151,7 @@ internal fun TimelineAttachmentHost(
                         ?: throw java.io.IOException("Cannot read picker URI")
                 }
                 ensureActive()
-                if (generation == serial) { generation++; file = outputFile; progress = null; if (!resolved.mimeType.startsWith("image/")) showFile(resolved, outputFile) }
+                if (generation == serial) { generation++; file = outputFile; progress = null; if (!resolved.mimeType.startsWith("image/") && !isMarkdown(resolved)) showFile(resolved, outputFile) }
             } catch (cancelled: CancellationException) { withContext(NonCancellable + Dispatchers.IO) { destination?.delete() }; throw cancelled }
             catch (failure: Exception) {
                 withContext(Dispatchers.IO) { destination?.delete() }
@@ -225,47 +232,58 @@ internal fun TimelineAttachmentHost(
         LocalTimelineUriHandler provides uriHandler,
     ) { content() }
     current?.let { attachment ->
-        val preview by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, file, attachment.mimeType) {
-            val source = file
-            if (source != null && attachment.mimeType.startsWith("image/")) value = withContext(Dispatchers.IO) {
-                runCatching {
-                    val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(source.path, options)
-                    if (options.outWidth <= 0 || options.outHeight <= 0) null else {
-                        var sample = 1
-                        while (options.outWidth / sample > 1600 || options.outHeight / sample > 1600) sample *= 2
-                        options.inSampleSize = sample
-                        options.inJustDecodeBounds = false
-                        BitmapFactory.decodeFile(source.path, options)?.asImageBitmap()
-                    }
-                }.getOrNull()
-            }
-        }
-        AlertDialog(
-            onDismissRequest = { generation++; job?.cancel(); current = null; progress = null },
-            title = { Text(safeName(attachment.name)) },
-            text = {
-                when {
-                    progress != null -> {
-                        Text(stringResource(R.string.timeline_attachment_downloading))
-                        val (done, total) = progress!!
-                        if (total != null && total > 0) LinearProgressIndicator(progress = { (done.toFloat() / total).coerceIn(0f, 1f) })
-                        else LinearProgressIndicator()
-                    }
-                    error != null -> Text(stringResource(error!!))
-                    preview != null -> Column { Image(preview!!, contentDescription = attachment.name, modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)); if (saved) Text(stringResource(R.string.timeline_attachment_saved)) }
-                    saved -> Text(stringResource(R.string.timeline_attachment_saved))
-                    else -> Text(stringResource(R.string.timeline_attachment_ready))
+        val markdownFile = file?.takeIf { isMarkdown(attachment) }
+        if (markdownFile != null) {
+            MarkdownAttachmentPreview(
+                name = safeName(attachment.name), file = markdownFile, uriHandler = uriHandler,
+                error = error, saved = saved,
+                onDismiss = { generation++; job?.cancel(); current = null; progress = null },
+                onOpenWith = { showFile(attachment, markdownFile) },
+                onSave = { pendingSave = markdownFile; saveLauncher.launch(safeName(attachment.name)) },
+            )
+        } else {
+            val preview by produceState<androidx.compose.ui.graphics.ImageBitmap?>(null, file, attachment.mimeType) {
+                val source = file
+                if (source != null && attachment.mimeType.startsWith("image/")) value = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeFile(source.path, options)
+                        if (options.outWidth <= 0 || options.outHeight <= 0) null else {
+                            var sample = 1
+                            while (options.outWidth / sample > 1600 || options.outHeight / sample > 1600) sample *= 2
+                            options.inSampleSize = sample
+                            options.inJustDecodeBounds = false
+                            BitmapFactory.decodeFile(source.path, options)?.asImageBitmap()
+                        }
+                    }.getOrNull()
                 }
-            },
-            confirmButton = {
-                if (file != null) TextButton(onClick = { showFile(attachment, file!!) }) { Text(stringResource(R.string.timeline_attachment_open)) }
-                else if (error != null) TextButton(onClick = { download(attachment) }) { Text(stringResource(R.string.timeline_attachment_retry)) }
-            },
-            dismissButton = {
-                if (file != null) TextButton(onClick = { pendingSave = file; saveLauncher.launch(safeName(attachment.name)) }) { Text(stringResource(R.string.timeline_attachment_save)) }
-                else TextButton(onClick = { generation++; job?.cancel(); current = null; progress = null }) { Text(stringResource(R.string.timeline_attachment_cancel)) }
-            },
-        )
+            }
+            AlertDialog(
+                onDismissRequest = { generation++; job?.cancel(); current = null; progress = null },
+                title = { Text(safeName(attachment.name)) },
+                text = {
+                    when {
+                        progress != null -> {
+                            Text(stringResource(R.string.timeline_attachment_downloading))
+                            val (done, total) = progress!!
+                            if (total != null && total > 0) LinearProgressIndicator(progress = { (done.toFloat() / total).coerceIn(0f, 1f) })
+                            else LinearProgressIndicator()
+                        }
+                        error != null -> Text(stringResource(error!!))
+                        preview != null -> Column { Image(preview!!, contentDescription = attachment.name, modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp)); if (saved) Text(stringResource(R.string.timeline_attachment_saved)) }
+                        saved -> Text(stringResource(R.string.timeline_attachment_saved))
+                        else -> Text(stringResource(R.string.timeline_attachment_ready))
+                    }
+                },
+                confirmButton = {
+                    if (file != null) TextButton(onClick = { showFile(attachment, file!!) }) { Text(stringResource(R.string.timeline_attachment_open)) }
+                    else if (error != null) TextButton(onClick = { download(attachment) }) { Text(stringResource(R.string.timeline_attachment_retry)) }
+                },
+                dismissButton = {
+                    if (file != null) TextButton(onClick = { pendingSave = file; saveLauncher.launch(safeName(attachment.name)) }) { Text(stringResource(R.string.timeline_attachment_save)) }
+                    else TextButton(onClick = { generation++; job?.cancel(); current = null; progress = null }) { Text(stringResource(R.string.timeline_attachment_cancel)) }
+                },
+            )
+        }
     }
 }

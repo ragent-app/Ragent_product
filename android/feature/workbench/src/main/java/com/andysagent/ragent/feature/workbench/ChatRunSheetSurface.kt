@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -67,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.andysagent.ragent.core.timeline.AttachmentItem
 import com.andysagent.ragent.core.agentui.AgentRunStatus
 import com.andysagent.ragent.core.agentui.RunStatus
 import com.andysagent.ragent.core.designsystem.AgentoBreathingDot
@@ -135,6 +137,7 @@ internal data class RunSheetPage(
     val tab: RunSheetTab,
     val metrics: RunMetricsUiState,
     val files: List<FileDiffDetail>,
+    val deliverables: List<AttachmentItem>,
     val traces: List<StepTraceItem>,
 )
 
@@ -147,6 +150,7 @@ internal data class RunSheetPage(
 fun RunSheetModalBottomSheet(
     runMetrics: RunMetricsUiState,
     changedFiles: List<FileDiffDetail>,
+    deliverables: List<AttachmentItem> = emptyList(),
     stepTraces: List<StepTraceItem>,
     onDismiss: () -> Unit,
     onOpenFileDiff: (FileDiffDetail) -> Unit,
@@ -165,6 +169,7 @@ fun RunSheetModalBottomSheet(
         RunSheetContent(
             runMetrics = runMetrics,
             changedFiles = changedFiles,
+            deliverables = deliverables,
             stepTraces = stepTraces,
             onOpenFileDiff = onOpenFileDiff,
             modifier = Modifier.heightIn(max = 560.dp).verticalScroll(rememberScrollState()),
@@ -180,6 +185,7 @@ fun RunSheetModalBottomSheet(
 internal fun RunSheetContent(
     runMetrics: RunMetricsUiState,
     changedFiles: List<FileDiffDetail>,
+    deliverables: List<AttachmentItem> = emptyList(),
     stepTraces: List<StepTraceItem>,
     onOpenFileDiff: (FileDiffDetail) -> Unit,
     modifier: Modifier = Modifier,
@@ -187,17 +193,22 @@ internal fun RunSheetContent(
     insetContent: Boolean = true,
     showHeading: Boolean = true,
     contentChangeDuration: Int? = null,
+    onShowFiles: () -> Unit = {},
+    filesVisible: Boolean = true,
 ) {
     val colors = LocalRagentColors.current
     var selectedTab by remember { mutableStateOf(RunSheetTab.Metrics) }
+    LaunchedEffect(selectedTab, filesVisible) {
+        if (selectedTab == RunSheetTab.Files && filesVisible) onShowFiles()
+    }
     val duration = contentChangeDuration ?: when (motionPolicy().preference) {
         MotionPreference.Full -> 300
         MotionPreference.Reduced -> 160
         MotionPreference.None -> 0
     }
     // Retain the displayed data for each page; live same-tab updates stay local.
-    val page = remember(selectedTab, runMetrics, changedFiles, stepTraces) {
-        RunSheetPage(selectedTab, runMetrics, changedFiles.toList(), stepTraces.toList())
+    val page = remember(selectedTab, runMetrics, changedFiles, deliverables, stepTraces) {
+        RunSheetPage(selectedTab, runMetrics, changedFiles.toList(), deliverables.toList(), stepTraces.toList())
     }
     val pages = remember { mutableMapOf<RunSheetTab, RunSheetPage>() }
     pages[selectedTab] = page
@@ -246,7 +257,7 @@ internal fun RunSheetContent(
             }
 
             Box(Modifier.runIslandReadingItem()) {
-                RunSheetTabs(selectedTab, selection, stacked, changedFiles.size, stepTraces.size) { target ->
+                RunSheetTabs(selectedTab, selection, stacked, changedFiles.size + deliverables.size, stepTraces.size) { target ->
                     if (target != selectedTab) {
                         // Never reset a clock still consumed with the previous
                         // source/target by layout. Retarget from the drawn frame
@@ -275,7 +286,7 @@ internal fun RunSheetContent(
                     } else Modifier).testTag("run-tab-page-${displayed.tab.name}")) {
                     when (displayed.tab) {
                         RunSheetTab.Metrics -> RunMetricsSection(displayed.metrics, displayed.files.size, displayed.traces.size, stacked)
-                        RunSheetTab.Files -> ChangedFilesSection(displayed.files, onOpenFileDiff)
+                        RunSheetTab.Files -> ChangedFilesSection(displayed.files, displayed.deliverables, onOpenFileDiff)
                         RunSheetTab.Trace -> ExecutionTraceSection(displayed.traces)
                     }
                 }
@@ -393,77 +404,70 @@ private fun MetricValue(
 @Composable
 private fun ChangedFilesSection(
     files: List<FileDiffDetail>,
+    deliverables: List<AttachmentItem>,
     onOpenFileDiff: (FileDiffDetail) -> Unit,
 ) {
     val colors = LocalRagentColors.current
-    if (files.isEmpty()) {
+    val openAttachment = LocalTimelineAttachmentOpen.current
+    if (files.isEmpty() && deliverables.isEmpty()) {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).runIslandReadingItem(), contentAlignment = Alignment.Center) {
-            Text(
-                text = stringResource(R.string.run_details_no_files),
-                style = MaterialTheme.typography.bodySmall,
-                color = colors.secondaryContent,
-            )
+            Text(stringResource(R.string.run_details_no_session_files), style = MaterialTheme.typography.bodySmall, color = colors.secondaryContent)
         }
         return
     }
 
-    val keys = remember(files) { runSheetOccurrenceKeys(files) { it.path } }
+    val newestDeliverables = remember(deliverables) { deliverables.asReversed() }
+    val deliveryKeys = remember(newestDeliverables) { runSheetOccurrenceKeys(newestDeliverables) { it.assetId ?: it.downloadUrl ?: it.url ?: it.originalName ?: it.filename.orEmpty() } }
+    val changeKeys = remember(files) { runSheetOccurrenceKeys(files) { it.path } }
     LazyColumn(
         modifier = Modifier.fillMaxWidth().heightIn(max = 340.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        itemsIndexed(files, key = { index, _ -> keys[index] }) { _, file ->
-            Surface(
-                onClick = { onOpenFileDiff(file) },
-                shape = AgentoShapes.SquircleS,
-                color = Ragentolors.SurfaceLevel1,
-                contentColor = colors.primaryContent,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .runIslandReadingItem()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        AgentoWebIcon(
-                            glyph = AgentoWebGlyph.File,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = LocalRagentColors.current.accentPrimary,
-                        )
-                        Text(
-                            text = file.path,
-                            style = com.andysagent.ragent.core.designsystem.RagentonversationTypography.Code.copy(
-                                fontSize = 12.sp,
-                            ),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = colors.primaryContent,
-                        )
-                    }
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        AgentoWebIcon(
-                            glyph = AgentoWebGlyph.ChevronRight,
-                            contentDescription = null,
-                            modifier = Modifier.size(14.dp),
-                            tint = colors.secondaryContent,
-                        )
-                    }
-                }
+        if (deliverables.isNotEmpty()) {
+            item(key = "deliverables-heading") { RunFilesHeading(stringResource(R.string.run_details_session_deliverables)) }
+            itemsIndexed(newestDeliverables, key = { index, _ -> "deliverable-${deliveryKeys[index]}" }) { index, att ->
+                val attachment = ComposerAttachment(
+                    id = att.assetId ?: att.downloadUrl ?: att.url ?: "attachment-$index",
+                    assetId = att.assetId,
+                    name = att.originalName ?: att.filename ?: "attachment",
+                    mimeType = att.mimeType ?: "application/octet-stream",
+                    sizeBytes = att.sizeBytes ?: 0L,
+                    previewUrl = att.downloadUrl ?: att.url,
+                )
+                val context = LocalContext.current
+                val size = attachment.sizeBytes.takeIf { it > 0 }?.let { android.text.format.Formatter.formatShortFileSize(context, it) }
+                RunFileRow(attachment.name, size) { openAttachment(attachment) }
             }
+        }
+        if (files.isNotEmpty()) {
+            item(key = "changes-heading") { RunFilesHeading(stringResource(R.string.run_details_run_changes)) }
+            itemsIndexed(files, key = { index, _ -> "change-${changeKeys[index]}" }) { _, file ->
+                RunFileRow(file.path) { onOpenFileDiff(file) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunFilesHeading(text: String) {
+    Text(text, style = MaterialTheme.typography.labelMedium, color = LocalRagentColors.current.secondaryContent,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp))
+}
+
+@Composable
+private fun RunFileRow(name: String, detail: String? = null, onClick: () -> Unit) {
+    val colors = LocalRagentColors.current
+    Surface(onClick = onClick, shape = AgentoShapes.SquircleS, color = Ragentolors.SurfaceLevel1,
+        contentColor = colors.primaryContent, modifier = Modifier.fillMaxWidth().runIslandReadingItem()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AgentoWebIcon(glyph = AgentoWebGlyph.File, contentDescription = null, modifier = Modifier.size(16.dp),
+                tint = colors.accentPrimary)
+            Text(text = name, style = com.andysagent.ragent.core.designsystem.RagentonversationTypography.Code.copy(fontSize = 12.sp),
+                maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.primaryContent, modifier = Modifier.weight(1f))
+            if (detail != null) Text(detail, style = MaterialTheme.typography.labelSmall, color = colors.secondaryContent)
+            AgentoWebIcon(glyph = AgentoWebGlyph.ChevronRight, contentDescription = null, modifier = Modifier.size(14.dp),
+                tint = colors.secondaryContent)
         }
     }
 }

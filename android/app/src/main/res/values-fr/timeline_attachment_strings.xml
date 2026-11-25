@@ -14,4 +14,8 @@
     <string name="timeline_attachment_save">Enregistrer</string>
     <string name="timeline_attachment_cancel">Annuler</string>
     <string name="timeline_attachment_open_with">Ouvrir avec</string>
+    <string name="timeline_attachment_close">Fermer</string>
+    <string name="timeline_attachment_preview_loading">Chargement de l’aperçu…</string>
+    <string name="timeline_attachment_preview_failed">Impossible de prévisualiser ce fichier. Vous pouvez l’enregistrer ou l’ouvrir avec une autre application.</string>
+    <string name="timeline_attachment_preview_truncated">Seul le début du fichier est affiché. Enregistrez-le ou ouvrez-le avec une autre application pour le consulter en entier.</string>
 </resources>

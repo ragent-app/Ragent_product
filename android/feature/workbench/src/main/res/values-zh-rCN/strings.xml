@@ -55,6 +55,9 @@
     <string name="run_details_metrics">数据</string>
     <string name="run_details_files">文件（%1$d）</string>
     <string name="run_details_trace">步骤（%1$d）</string>
+    <string name="run_details_session_deliverables">会话产物</string>
+    <string name="run_details_run_changes">本次运行的文件变更</string>
+    <string name="run_details_no_session_files">暂无会话产物或文件变更。</string>
     <string name="run_details_no_files">本次运行尚未报告文件变更。</string>
     <string name="run_details_no_trace">本次运行尚无执行步骤记录。</string>
     <string name="run_summary_cancelled_detail">可在会话中查看取消前已完成的工作。</string>

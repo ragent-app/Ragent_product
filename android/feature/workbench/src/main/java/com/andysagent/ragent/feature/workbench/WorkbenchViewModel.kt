@@ -48,6 +48,7 @@ import com.andysagent.ragent.core.model.SessionStatus
 import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.navigation.AgentoDestination
 import com.andysagent.ragent.core.timeline.TimelineItem
+import com.andysagent.ragent.core.timeline.AttachmentItem
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
 import com.andysagent.ragent.core.timeline.TimelineRole
@@ -219,6 +220,7 @@ data class WorkbenchUiState(
     val authoritativeIdleAtSeq: Long = 0L,
     val stepTraces: List<StepTraceItem> = emptyList(),
     val changedFiles: List<FileDiffDetail> = emptyList(),
+    val sessionDeliverables: List<AttachmentItem> = emptyList(),
     val remoteTargets: List<RemoteTarget> = emptyList(),
     /** Home-only projects available on background computers; never paths or device diagnostics. */
     val otherDeviceProjects: List<OtherDeviceProject> = emptyList(),
@@ -253,6 +255,7 @@ enum class SettingsPage {
 }
 
 sealed interface WorkbenchEvent {
+    data object RefreshSessionDeliverables : WorkbenchEvent
     data object OpenComputerSetup : WorkbenchEvent
     data class SelectDestination(val destination: AgentoDestination) : WorkbenchEvent
     data class OpenSettingsPage(val page: SettingsPage) : WorkbenchEvent
@@ -583,6 +586,7 @@ data class ChatUiState(
     val authoritativeIdleAtSeq: Long = 0L,
     val stepTraces: List<StepTraceItem> = emptyList(),
     val changedFiles: List<FileDiffDetail> = emptyList(),
+    val sessionDeliverables: List<AttachmentItem> = emptyList(),
 )
 
 @Immutable
@@ -607,6 +611,7 @@ enum class StopRequestState { None, AwaitingConfirmation, OutcomeUnknown }
 private data class PendingStopRequest(val state: StopRequestState)
 
 sealed interface ChatEvent {
+    data object RefreshSessionDeliverables : ChatEvent
     data class ComposerChanged(val text: String) : ChatEvent
     data class AddHarnessCapability(val capability: HarnessCapabilityItem) : ChatEvent
     data class RemoveHarnessCapability(val id: String) : ChatEvent
@@ -795,6 +800,7 @@ class ChatViewModel(
     // A local echo belongs to one target repository and one session, including
     // while a send finishes in the background after navigation.
     private val sessionPendingTurns = mutableMapOf<Pair<SessionRepository, String>, PendingTurnUiState>()
+    private val deliverableRefreshRequests = MutableSharedFlow<Pair<SessionRepository, String>>(extraBufferCapacity = 1)
     private val pendingTurnChange = MutableSharedFlow<Triple<SessionRepository, String, String>>(extraBufferCapacity = 16)
     private val sessionAcceptedTurns = mutableMapOf<Pair<SessionRepository, String>, List<PendingTurnUiState>>()
     private val sessionObservedRequests = mutableMapOf<Pair<SessionRepository, String>, Set<String>>()
@@ -1044,6 +1050,7 @@ class ChatViewModel(
                             selectedDiffFile = null,
                             stepTraces = emptyList(),
                             changedFiles = emptyList(),
+                            sessionDeliverables = emptyList(),
                             runMetrics = RunMetricsUiState(status = AgentRunStatus.Idle),
                             authoritativeIdleAtSeq = 0L,
                             goalText = "",
@@ -1511,6 +1518,11 @@ class ChatViewModel(
             is ChatEvent.SubmitElicitation -> submitElicitation(event.approvalId, event.action, event.contentJson)
 
             // Run Sheet & Diff
+            ChatEvent.RefreshSessionDeliverables -> {
+                val fixed = selectedRepository
+                val sessionId = mutableState.value.sessionId
+                if (fixed != null && sessionId != null && isCurrentSession(sessionId)) deliverableRefreshRequests.tryEmit(fixed to sessionId)
+            }
             ChatEvent.OpenRunSheet -> updateState { copy(runSheetOpen = true) }
             ChatEvent.CloseRunSheet -> updateState { copy(runSheetOpen = false) }
             is ChatEvent.OpenDiffViewer -> updateState { copy(selectedDiffFile = event.file) }
@@ -2536,6 +2548,7 @@ class ChatViewModel(
                 selectedDiffFile = null,
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
+                sessionDeliverables = emptyList(),
                 runMetrics = RunMetricsUiState(),
                 authoritativeIdleAtSeq = 0L,
             )
@@ -2633,6 +2646,7 @@ class ChatViewModel(
                 selectedDiffFile = null,
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
+                sessionDeliverables = emptyList(),
                 runMetrics = RunMetricsUiState(),
                 authoritativeIdleAtSeq = 0L,
             )
@@ -2721,6 +2735,7 @@ class ChatViewModel(
                 selectedDiffFile = null,
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
+                sessionDeliverables = emptyList(),
                 runMetrics = RunMetricsUiState(status = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle),
                 runDurations = emptyMap(),
                 serverRunActivity = null,
@@ -2731,6 +2746,39 @@ class ChatViewModel(
         }
         showCachedRuntime(fixed, sessionId, generation, editGeneration)
         selectedSessionJob = viewModelScope.launch {
+            var remoteDeliverables = emptyList<AttachmentItem>()
+            var timelineDeliverables = emptyList<AttachmentItem>()
+            fun mergedDeliverables(): List<AttachmentItem> = (remoteDeliverables + timelineDeliverables)
+                .distinctBy { it.assetId?.takeIf(String::isNotBlank) ?: it.downloadUrl ?: it.url ?: it }
+            val deliverableRefresh = Channel<Unit>(Channel.CONFLATED)
+            var deliverablesRequested = false
+            launch {
+                deliverableRefreshRequests.collect { (repository, requestedSession) ->
+                    if (repository === fixed && requestedSession == sessionId && isCurrentSession(sessionId, generation)) {
+                        deliverablesRequested = true
+                        deliverableRefresh.trySend(Unit)
+                    }
+                }
+            }
+            launch {
+                for (ignored in deliverableRefresh) {
+                    delay(300)
+                    while (deliverableRefresh.tryReceive().isSuccess) { /* Coalesce changes while waiting. */ }
+                    try {
+                        val fetched = fixed.loadSessionDeliverables(sessionId).map { item ->
+                            AttachmentItem(assetId = item.assetId, filename = item.filename, originalName = item.originalName,
+                                mimeType = item.mimeType, sizeBytes = item.sizeBytes, downloadUrl = item.downloadUrl,
+                                url = item.url, caption = item.caption)
+                        }
+                        if (isCurrentSession(sessionId, generation) && remoteDeliverables != fetched) {
+                            remoteDeliverables = fetched
+                            updateState { copy(sessionDeliverables = mergedDeliverables()) }
+                        }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* Timeline attachments remain available offline or on older servers. */ }
+                }
+            }
+            var previousActivityState: String? = null
             launch {
                 pendingTurnChange.collectLatest { changed ->
                     if (changed.first !== fixed || changed.second != sessionId || !isCurrentSession(sessionId, generation)) return@collectLatest
@@ -2802,6 +2850,11 @@ class ChatViewModel(
                         // item without changing the timeline itself. Refresh
                         // the run when the server transitions to idle so the
                         // final message cannot retain a stale live cursor.
+                        val activityState = activity?.get("state")?.jsonPrimitive?.contentOrNull
+                        if (activityState == "idle" && previousActivityState != null && previousActivityState != "idle") {
+                            if (deliverablesRequested) deliverableRefresh.trySend(Unit)
+                        }
+                        previousActivityState = activityState
                         if (activity?.get("state")?.jsonPrimitive?.contentOrNull == "idle") {
                             latestTimelineRunId(mutableState.value.timelineItems)?.let { runId ->
                                 loadRunProjection(sessionId, runId, generation)
@@ -2845,6 +2898,14 @@ class ChatViewModel(
                     }
                     val (traces, files) = parsedArtifacts
                     if (!isCurrentSession(sessionId, generation)) return@collectLatest
+                    val nextDeliverables = items.asSequence().filterIsInstance<TimelineItem.Message>()
+                        .filter { it.role == TimelineRole.Agent }.flatMap { it.attachments.asSequence() }
+                        .distinctBy { it.assetId?.takeIf(String::isNotBlank) ?: it.downloadUrl ?: it.url ?: it }.toList()
+                    if (timelineDeliverables != nextDeliverables) {
+                        timelineDeliverables = nextDeliverables
+                        if (deliverablesRequested) deliverableRefresh.trySend(Unit)
+                        updateState { copy(sessionDeliverables = mergedDeliverables()) }
+                    }
                     val observedRequests = items.filterIsInstance<TimelineItem.Message>()
                         .filter { it.role == com.andysagent.ragent.core.timeline.TimelineRole.User }
                         .mapNotNull { it.requestId }.toSet()

@@ -3968,6 +3968,29 @@ class RoomSessionRepository(
         return root["run"]?.jsonObject ?: root
     }
 
+    override suspend fun loadSessionDeliverables(sessionId: String): List<AttachmentItemDto> {
+        require(sessionId.isNotBlank()) { "Session id is required" }
+        val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/run-sheet"))
+        val root = codec.decode<JsonObject>(serializer<JsonObject>(), response.body)
+        check(root.string("sessionId") == sessionId) { "Session projection identity mismatch" }
+        val sheet = root["runSheet"] as? JsonObject ?: error("Missing session run sheet")
+        val artifacts = sheet["artifactFiles"] as? JsonArray ?: error("Missing session artifacts")
+        return artifacts.mapNotNull { element ->
+            val item = element as? JsonObject ?: return@mapNotNull null
+            val role = item.string("sourceRole").orEmpty()
+            if (role != "assistant" && !(role.isBlank() && item.string("sourceType") == "attachment_delivery")) return@mapNotNull null
+            val assetId = item.string("assetId")?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            AttachmentItemDto(
+                assetId = assetId,
+                originalName = item.string("name"),
+                mimeType = item.string("mimeType"),
+                sizeBytes = item.long("sizeBytes"),
+                url = item.string("url"),
+                downloadUrl = item.string("downloadUrl"),
+            )
+        }.distinctBy { it.assetId }
+    }
+
     override suspend fun resumePendingOperations(): Int = resumePendingOperationsMatching({ true })
 
     override suspend fun pendingDerivedTurns(sessionId: String): List<PendingDerivedTurn> =

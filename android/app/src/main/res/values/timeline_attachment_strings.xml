@@ -14,4 +14,8 @@
     <string name="timeline_attachment_cancel">Cancel</string>
     <string name="timeline_attachment_open_with">Open with</string>
     <string name="timeline_attachment_saved">Saved.</string>
+    <string name="timeline_attachment_close">Close</string>
+    <string name="timeline_attachment_preview_loading">Loading preview…</string>
+    <string name="timeline_attachment_preview_failed">Could not preview this file. You can save it or open it with another app.</string>
+    <string name="timeline_attachment_preview_truncated">Showing the beginning of this file. Save or open it with another app to see the full file.</string>
 </resources>

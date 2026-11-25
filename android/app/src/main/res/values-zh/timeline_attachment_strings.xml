@@ -14,4 +14,8 @@
     <string name="timeline_attachment_cancel">取消</string>
     <string name="timeline_attachment_open_with">打开方式</string>
     <string name="timeline_attachment_saved">已保存。</string>
+    <string name="timeline_attachment_close">关闭</string>
+    <string name="timeline_attachment_preview_loading">正在加载预览…</string>
+    <string name="timeline_attachment_preview_failed">无法预览此文件；你可以保存或使用其他应用打开。</string>
+    <string name="timeline_attachment_preview_truncated">仅显示文件开头。保存或使用其他应用打开以查看完整文件。</string>
 </resources>

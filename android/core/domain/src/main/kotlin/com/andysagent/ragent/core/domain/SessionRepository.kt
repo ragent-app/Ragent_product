@@ -516,6 +516,10 @@ interface SessionRepository {
     suspend fun loadRunProjection(runId: String): JsonObject {
         error("Run projections are not supported by this repository")
     }
+    /** Session-wide assistant-delivered assets; throws when the projection is unavailable. */
+    suspend fun loadSessionDeliverables(sessionId: String): List<com.andysagent.ragent.core.protocol.AttachmentItemDto> {
+        error("Session deliverables are not supported by this repository")
+    }
     suspend fun resumePendingOperations(): Int
     suspend fun pendingDerivedTurns(sessionId: String): List<PendingDerivedTurn> = emptyList()
     /** Reconcile an unresolved edit/regenerate using its original request identity. */

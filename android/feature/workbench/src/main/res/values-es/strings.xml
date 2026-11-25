@@ -51,6 +51,9 @@
     <string name="run_details_metrics">Datos</string>
     <string name="run_details_files">Archivos (%1$d)</string>
     <string name="run_details_trace">Pasos (%1$d)</string>
+    <string name="run_details_session_deliverables">Entregables de la sesión</string>
+    <string name="run_details_run_changes">Cambios de esta ejecución</string>
+    <string name="run_details_no_session_files">No hay entregables ni cambios de archivos.</string>
     <string name="run_details_no_files">No se han notificado cambios en archivos para esta ejecución.</string>
     <string name="run_details_no_trace">No hay pasos registrados para esta ejecución.</string>
     <string name="run_summary_cancelled_detail">Revisa la conversación para ver el trabajo ya realizado.</string>

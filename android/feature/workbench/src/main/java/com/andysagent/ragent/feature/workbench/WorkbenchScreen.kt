@@ -3966,6 +3966,8 @@ private fun ChatSurface(
             onDismiss = ::dismissRunIsland,
             runMetrics = runMetrics,
             changedFiles = changedFiles,
+            deliverables = state.sessionDeliverables,
+            onShowFiles = { onEvent(WorkbenchEvent.RefreshSessionDeliverables) },
             stepTraces = state.stepTraces,
             onOpenFileDiff = { onSetSelectedDiffFile(it) },
             backdropLayer = chatBackdropForControls,

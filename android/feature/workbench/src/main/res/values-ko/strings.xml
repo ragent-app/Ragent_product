@@ -51,6 +51,9 @@
     <string name="run_details_metrics">데이터</string>
     <string name="run_details_files">파일 (%1$d)</string>
     <string name="run_details_trace">단계 (%1$d)</string>
+    <string name="run_details_session_deliverables">세션 결과물</string>
+    <string name="run_details_run_changes">이번 실행의 파일 변경</string>
+    <string name="run_details_no_session_files">세션 결과물이나 파일 변경이 없습니다.</string>
     <string name="run_details_no_files">이 실행에서 보고된 파일 변경이 없습니다.</string>
     <string name="run_details_no_trace">이 실행에 기록된 단계가 없습니다.</string>
     <string name="run_summary_cancelled_detail">취소 전에 완료된 작업은 대화에서 확인하세요.</string>
