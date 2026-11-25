@@ -1,5 +1,6 @@
 import { buildSessionHierarchyProjection } from './session-hierarchy.mjs';
 import { SESSION_API_PRIVATE_FIELDS } from './session-api-mutation-contract.mjs';
+import { withTurnProgressText } from './session-display-events.mjs';
 
 function cloneJson(value) {
   if (value === null || value === undefined) return value;
@@ -78,9 +79,9 @@ export function createCompactSessionListItem(session) {
 // Keep every event and all other fields intact, including message/tool content.
 export function compactMobileDurableEvents(events) {
   return events.map((event) => {
-    if (!event || typeof event !== 'object' || Array.isArray(event) || !Object.hasOwn(event, 'providerCapabilities')) return event;
+    if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
     const { providerCapabilities, ...rest } = event;
-    return rest;
+    return withTurnProgressText(rest);
   });
 }
 
