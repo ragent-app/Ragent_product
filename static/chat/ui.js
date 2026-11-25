@@ -5454,7 +5454,25 @@ function getOperationActivitySummary(evt) {
     subject: presentation.subject || "",
     detail: presentation.detail || evt?.detail || evt?.command || input.command || input.path || input.query || "",
     ...(presentation.group ? { group: presentation.group } : {}),
+    operationId: evt?.operationId || "",
+    toolCallId: evt?.toolCallId || evt?.toolCall?.toolCallId || "",
+    providerItemId: evt?.providerItemId || "",
+    providerToolUseId: evt?.providerToolUseId || "",
+    runId: evt?.runId || "",
+    webAction: evt?.webAction || presentation.webAction || evt?.toolCall?._meta?.ragent?.webAction || "",
+    operationProgress: evt?.operationProgress || presentation.operationProgress || "",
+    activityDescription: presentation.activityDescription || "",
+    activityDescriptionSource: presentation.activityDescriptionSource || "",
   };
+  const live = globalThis?.RagentRunActivity?.getActivity?.();
+  const sameOperation = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"]
+    .some((key) => activity[key] && live?.[key] && activity[key] === live[key]);
+  if (state === "running" && sameOperation && activity.runId && activity.runId === live.runId) {
+    activity.turnProgress = live.turnProgress;
+    activity.providerTurnId = live.providerTurnId;
+    activity.operationProgress ||= live.operationProgress || "";
+    activity.webAction ||= live.webAction || "";
+  }
   const formatter = globalThis?.RagentRunActivity?.formatOperationActivity;
   if (typeof formatter === "function") {
     const formatted = formatter(activity);
@@ -5591,6 +5609,7 @@ function createOperationBody(evt) {
 }
 
 function renderOperationNodeContent(node, evt, { expanded = false } = {}) {
+  node.__ragentOperationEvent = evt;
   const operationId = getOperationEventId(evt);
   const state = normalizeOperationState(getOperationLifecycle(evt));
   const input = evt?.toolCall?.input && typeof evt.toolCall.input === "object" ? evt.toolCall.input : {};
@@ -5652,7 +5671,19 @@ function renderOperationNodeContent(node, evt, { expanded = false } = {}) {
   label.textContent = getOperationStateLabel(evt);
   const primary = document.createElement("span");
   primary.className = "live-operation-row__summary-text";
-  primary.textContent = activitySummary || detail || getOperationStateLabel(evt);
+  const summaryText = activitySummary || detail || getOperationStateLabel(evt);
+  const prefix = t("activity.turnProgress");
+  const divider = summaryText.lastIndexOf(" · ");
+  if (prefix && summaryText.startsWith(prefix) && divider > 0) {
+    const main = document.createElement("span");
+    main.className = "live-operation-row__summary-main";
+    main.textContent = summaryText.slice(0, divider);
+    const suffix = document.createElement("span");
+    suffix.className = "live-operation-row__summary-suffix";
+    suffix.textContent = summaryText.slice(divider);
+    primary.appendChild(main);
+    primary.appendChild(suffix);
+  } else primary.textContent = summaryText;
   primary.title = activitySummary || detail || getOperationStateLabel(evt);
   copy.appendChild(primary);
   copy.appendChild(label);
@@ -6267,7 +6298,7 @@ function syncMobileLiveActivityLine(presentation = window.RagentRunActivity?.get
     : (label ? label.textContent : "");
   if (label && currentLabelText !== text) {
     if (window.RagentLiveActionTransition?.setText) {
-      window.RagentLiveActionTransition.setText(label, text);
+      window.RagentLiveActionTransition.setText(label, text, { suffix: presentation?.suffix });
     } else {
       label.textContent = text;
     }
@@ -6296,7 +6327,13 @@ function hasActiveMobileRunActivity() {
   return state !== "" && state !== "idle";
 }
 
-window.RagentRunActivity?.subscribe?.(syncMobileLiveActivityLine);
+window.RagentRunActivity?.subscribe?.((presentation) => {
+  syncMobileLiveActivityLine(presentation);
+  for (const node of messagesInner?.querySelectorAll?.(".live-operation-row.state-running") || []) {
+    if (node.__ragentOperationEvent) renderOperationNodeContent(node, node.__ragentOperationEvent,
+      { expanded: node.classList.contains("is-expanded") });
+  }
+});
 
 function getActiveMobileThinkingGroup() {
   if (!shouldCompactMobileThinking()) return null;

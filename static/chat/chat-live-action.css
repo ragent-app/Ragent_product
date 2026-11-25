@@ -84,3 +84,6 @@
     display: none;
   }
 }
+
+.live-action-transition__main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-action-transition__suffix { flex: 0 0 auto; white-space: nowrap; }

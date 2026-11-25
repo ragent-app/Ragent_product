@@ -8,9 +8,51 @@ function trimString(value) {
 }
 
 function eventBoundary(event) {
+  if (Number.isInteger(event?.lastEventSeq) && event.lastEventSeq > 0) return event.lastEventSeq;
   if (Number.isInteger(event?.endSeq) && event.endSeq > 0) return event.endSeq;
   if (Number.isInteger(event?.blockEndSeq) && event.blockEndSeq > 0) return event.blockEndSeq;
   return Number.isInteger(event?.seq) ? event.seq : 0;
+}
+
+export function reduceTurnProgressState(state, events, runId) {
+  let next = state && state.runId === runId ? state : null;
+  for (const event of events) {
+    const seq = eventBoundary(event);
+    if (event?.runId !== runId || seq <= (next?.sourceSeq || 0)) continue;
+    if (event.type === 'provider_turn_started' && trimString(event.providerThreadId) && trimString(event.providerTurnId)) {
+      next = { runId, threadId: event.providerThreadId, turnId: event.providerTurnId, sourceSeq: seq,
+        progress: next?.threadId === event.providerThreadId && next?.turnId === event.providerTurnId ? next.progress : null };
+    } else if (event.type === 'message' && next && event.providerThreadId === next.threadId
+      && event.providerTurnId === next.turnId && trimString(event.providerMessageId) && trimString(event.turnProgressText)) {
+      next = { ...next, sourceSeq: seq, progress: { text: event.turnProgressText, runId,
+        turnId: next.turnId, messageId: event.providerMessageId, sourceSeq: seq } };
+    }
+  }
+  return next;
+}
+
+function currentTurnProgress(events, timeline, runId, storedState) {
+  if (!runId) return null;
+  if (storedState?.runId === runId && Number.isInteger(storedState.sourceSeq)) {
+    const replay = [...(Array.isArray(timeline) ? timeline.filter((event) => event?.type === 'provider_turn_started') : []), ...events]
+      .sort((a, b) => eventBoundary(a) - eventBoundary(b));
+    return reduceTurnProgressState(storedState, replay, runId)?.progress || null;
+  }
+  const boundary = (Array.isArray(timeline) ? timeline : [])
+    .filter((event) => event?.type === 'provider_turn_started' && event.runId === runId
+      && trimString(event.providerThreadId) && trimString(event.providerTurnId)
+      && eventBoundary(event) > 0)
+    .sort((a, b) => eventBoundary(b) - eventBoundary(a))[0];
+  if (!boundary) return null;
+  const candidate = events.filter((event) => event?.type === 'message'
+    && event.runId === runId && event.providerThreadId === boundary.providerThreadId
+    && event.providerTurnId === boundary.providerTurnId
+    && trimString(event.providerMessageId) && trimString(event.turnProgressText)
+    && eventBoundary(event) > eventBoundary(boundary))
+    .sort((a, b) => eventBoundary(b) - eventBoundary(a))[0];
+  return candidate ? { text: candidate.turnProgressText, runId,
+    turnId: candidate.providerTurnId, messageId: candidate.providerMessageId,
+    sourceSeq: eventBoundary(candidate) } : null;
 }
 
 function isFormalAssistantOutput(event) {
@@ -205,8 +247,10 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
     return Boolean(requestId && trimString(event?.requestId) === requestId);
   });
   const providerLiveness = normalizeProviderLiveness(run.providerLiveness);
+  const turnProgress = currentTurnProgress(events, options.timeline, runId, run.turnProgressState);
   const present = (activity, sourceEvent) => withPresentation({
     ...activity,
+    ...(turnProgress ? { turnProgress } : {}),
     ...(runId ? { runId } : {}),
     ...(requestId ? { requestId } : {}),
     ...(runStart && observedAt >= runStart ? { runElapsedMs: observedAt - runStart } : {}),
@@ -345,7 +389,9 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
       ...(operation.state === 'waiting_approval' ? { labelKind: 'approval' } : {}),
       operationId: operation.operationId,
       operationState: operation.state,
-      ...Object.fromEntries(['toolCallId', 'providerItemId', 'providerToolUseId'].filter((key) => trimString(operation[key])).map((key) => [key, operation[key]])),
+      ...(operation.webAction ? { webAction: operation.webAction } : {}),
+      ...(operation.operationProgress ? { operationProgress: operation.operationProgress } : {}),
+      ...Object.fromEntries(['toolCallId', 'providerItemId', 'providerToolUseId', 'providerThreadId', 'providerTurnId'].filter((key) => trimString(operation[key])).map((key) => [key, operation[key]])),
       ...(Number.isInteger(operation.startSeq) && operation.startSeq > 0 ? { startSeq: operation.startSeq } : {}),
       since,
       elapsedMs: since && updatedAt ? Math.max(0, updatedAt - since) : 0,

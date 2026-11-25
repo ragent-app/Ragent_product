@@ -10,7 +10,9 @@ export function withMessageTimelineIdentity(event) {
   const upstream = value(event.messageId || event.providerMessageId || event.providerItemId || event.streamItemId || event.entityId);
   const block = event.providerContentBlockIndex ?? event.messageBlockIndex ?? 0;
   const fallback = value(event.providerReplayFingerprint || event.id || event.eventId || event.providerEventId) || `seq:${event.seq || 0}`;
-  const identity = value(event.canonicalMessageId) || `m2:${JSON.stringify([value(event.runId), role, upstream || fallback, block])}`;
+  const providerScope = event.provider === 'codex' && value(event.providerThreadId) && value(event.providerTurnId)
+    ? [value(event.providerThreadId), value(event.providerTurnId)] : [];
+  const identity = value(event.canonicalMessageId) || `m2:${JSON.stringify([value(event.runId), role, upstream || fallback, block, ...providerScope])}`;
   const delta = event.type.includes('delta');
   return {
     ...event, canonicalMessageId: identity, timelineEntityId: identity,

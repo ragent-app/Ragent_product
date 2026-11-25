@@ -20,6 +20,7 @@ import {
   readCodexAppServerMcpStatusList,
 } from '../codex-app-server-protocol.mjs';
 import { explanationForApproval } from '../risk-explanation.mjs';
+import { safeActivityDescription } from '../provider-activity-description.mjs';
 import { annotateProviderError, getProviderCapabilities } from '../provider-contract.mjs';
 import { getHarnessAdapterCompatibility } from '../harness-compatibility.mjs';
 import { MAC_CLEANUP_SPOOL_TYPE, MAC_CLEANUP_WARNING } from '../macos-codex-cancellation.mjs';
@@ -50,6 +51,7 @@ export function buildCodexAppServerArgs({ cwd, ragentApprovalGate = false, permi
 
 export function createCodexAppServerAdapter() {
   const planTextByItemId = new Map();
+  const activeMcpCalls = new Map();
   const terminalCandidates = new Map();
   // An app-server agentMessage completion can carry only its item id. Keep
   // the live text by item so that completion still produces a durable reply.
@@ -88,6 +90,7 @@ export function createCodexAppServerAdapter() {
 
       return parseAppServerMessage(obj, {
         planTextByItemId,
+        activeMcpCalls,
         terminalCandidates,
         agentMessageTextByItemId,
         reasoningTextByItemId,
@@ -186,10 +189,23 @@ function parseAppServerMessage(message, state = {}) {
       return mode ? [statusEvent(`mode: ${mode}`)] : [];
     }
 
-    case 'turn/started':
-      return [statusEvent('thinking')];
+    case 'turn/started': {
+      const threadId = readPlanThreadId(message.params);
+      const turnId = readPlanTurnId(message.params) || message.params?.turn?.id;
+      const events = [statusEvent('thinking')];
+      if (threadId && typeof turnId === 'string' && turnId.trim()) {
+        events.push({ ...statusEvent('turn started'), type: 'provider_turn_started',
+          provider: 'codex', runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
+          providerThreadId: threadId, providerTurnId: turnId.trim(),
+          providerEventId: `turn-start:${JSON.stringify([threadId, turnId.trim()])}` });
+      }
+      return events;
+    }
 
     case 'turn/completed':
+      for (const [key, call] of state.activeMcpCalls || []) {
+        if (call.threadId === message.params?.threadId && call.turnId === message.params?.turn?.id) state.activeMcpCalls.delete(key);
+      }
       return parseTurnCompleted(message.params, state);
 
     case 'turn/plan/updated':
@@ -249,7 +265,7 @@ function parseAppServerMessage(message, state = {}) {
       return parseMcpOauthLogin(message.params);
 
     case 'item/mcpToolCall/progress':
-      return parseMcpToolCallProgress(message.params);
+      return parseMcpToolCallProgress(message.params, state);
 
     case 'mcpServer/elicitation/request':
       return parseMcpElicitation(message.params);
@@ -393,20 +409,33 @@ function parseMcpOauthLogin(params = {}) {
   })];
 }
 
-function parseMcpToolCallProgress(params = {}) {
-  const item = params?.item || {};
-  const server = String(item.serverName || item.server_name || params?.serverName || '').trim();
-  const tool = String(item.toolName || item.tool || item.name || '').trim();
-  const progress = String(item.progress || item.status || '').trim();
-  const label = [server && `MCP ${server}`, tool].filter(Boolean).join(' · ');
-  if (!label) return [];
-  return [statusEvent(`${label}${progress ? `: ${progress}` : ''}`, {
-    provider: 'codex',
-    runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
-    providerThreadId: params?.threadId,
-    codexMcpServer: server,
-    codexMcpTool: tool,
-  })];
+function mcpCallKey(params = {}, item = null) {
+  const threadId = typeof params.threadId === 'string' ? params.threadId.trim() : '';
+  const turnId = typeof params.turnId === 'string' ? params.turnId.trim() : '';
+  const itemId = readProviderItemId(params, item);
+  return threadId && turnId && itemId ? JSON.stringify([threadId, turnId, itemId]) : '';
+}
+
+function webActionForMcp(item) {
+  if (item.server !== 'codex_apps' || item.tool !== 'search_service.web_run') return '';
+  const args = item.arguments && typeof item.arguments === 'object' && !Array.isArray(item.arguments) ? item.arguments : {};
+  const actions = [['system2_search_query', 'search'], ['open', 'open'], ['find', 'find']]
+    .filter(([key]) => Array.isArray(args[key]) && args[key].length > 0)
+    .map(([, value]) => value);
+  return actions.length > 1 ? 'mixed' : (actions[0] || 'generic');
+}
+
+function parseMcpToolCallProgress(params = {}, state = {}) {
+  const key = mcpCallKey(params);
+  const call = key && state.activeMcpCalls?.get(key);
+  const progress = safeActivityDescription(params.message);
+  if (!call || !progress) return [];
+  return [toolUseEvent(call.toolName, '', buildOperationFields(params, null, 'delta', {
+    providerToolUseId: params.itemId,
+    operationKind: 'mcp',
+    operationProgress: progress,
+    ...(call.webAction ? { webAction: call.webAction } : {}),
+  }))];
 }
 
 function parseMcpElicitation(params = {}) {
@@ -611,16 +640,15 @@ function parseTextDelta(params, state = {}) {
     ...(providerItemId ? { providerItemId } : {}),
     ...(threadId ? { providerThreadId: threadId } : {}),
     ...(turnId ? { providerTurnId: turnId } : {}),
-    providerEventId: `agent-message:${streamId}:${ordinal}`,
+    providerEventId: `agent-message:${providerItemId || `${threadId || 'thread'}:${turnId || 'turn'}:anonymous`}:${ordinal}`,
   })];
 }
 
 function agentMessageStreamId(params = {}, item = null, known = {}) {
   const providerItemId = known.providerItemId || readProviderItemId(params, item);
-  if (providerItemId) return providerItemId;
   const threadId = known.threadId || readPlanThreadId(params);
   const turnId = known.turnId || readPlanTurnId(params);
-  return `${threadId || 'thread'}:${turnId || 'turn'}:anonymous`;
+  return JSON.stringify([threadId || '', turnId || '', providerItemId || 'anonymous']);
 }
 
 function parseReasoningDelta(params, state = {}, method = '') {
@@ -871,6 +899,10 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
             // its stable item id so provider-event dedup can enforce exactly
             // once history publication across a control-plane restart.
             ...(providerItemId ? { providerMessageId: providerItemId } : {}),
+            provider: 'codex', runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
+            ...(readPlanThreadId(params) ? { providerThreadId: readPlanThreadId(params) } : {}),
+            ...(readPlanTurnId(params) ? { providerTurnId: readPlanTurnId(params) } : {}),
+            providerLifecycle: lifecycle,
             ...(normalizedPhase ? { messagePhase: normalizedPhase } : {}),
             ...(isAsyncDelivery ? { messageDelivery: 'async', delivery: 'async' } : {}),
             ...((isAsyncDelivery || hasAsyncQuestions) && providerItemId ? { asyncQuestionMessageId: providerItemId } : {}),
@@ -1023,6 +1055,13 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
 
     case 'mcpToolCall': {
       const toolName = `${item.server}/${item.tool}`;
+      const webAction = webActionForMcp(item);
+      const key = mcpCallKey(params, item);
+      const terminal = lifecycle === 'completed' || ['completed', 'failed', 'declined', 'cancelled'].includes(item.status);
+      if (key && state.activeMcpCalls instanceof Map) {
+        if (terminal) state.activeMcpCalls.delete(key);
+        else state.activeMcpCalls.set(key, { toolName, webAction, threadId: params.threadId, turnId: params.turnId });
+      }
       const operationLifecycle = ['completed', 'failed'].includes(item.status)
         ? item.status
         : 'started';
@@ -1033,6 +1072,7 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
         {
           ...sharedOperationFields,
           operationKind: 'mcp',
+          ...(webAction ? { webAction } : {}),
         },
       )));
       if (['completed', 'failed'].includes(item.status)) {
@@ -1048,6 +1088,7 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
           {
             ...sharedOperationFields,
             operationKind: 'mcp',
+            ...(webAction ? { webAction } : {}),
           },
         )));
       }

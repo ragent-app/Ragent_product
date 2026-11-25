@@ -218,7 +218,7 @@ function renderLiveBarStatusContent(el, status) {
   el.append(label, elapsed);
   const text = status?.label || "";
   if (window.RagentLiveActionTransition?.setText) {
-    window.RagentLiveActionTransition.setText(label, text);
+    window.RagentLiveActionTransition.setText(label, text, { suffix: status?.activitySuffix });
   } else {
     label.textContent = text;
   }
@@ -229,7 +229,7 @@ function updateLiveBarStatusLabel(el, status) {
   if (!label) return false;
   const text = status?.label || "";
   if (window.RagentLiveActionTransition?.setText) {
-    window.RagentLiveActionTransition.setText(label, text);
+    window.RagentLiveActionTransition.setText(label, text, { suffix: status?.activitySuffix });
   } else {
     label.textContent = text;
   }
@@ -254,6 +254,7 @@ function getLiveBarDisplayStatus(status) {
   return {
     ...status,
     label: presentation.text,
+    activitySuffix: presentation.suffix || "",
     activitySourceSeq: presentation.sourceSeq,
     progressSourceSeq: presentation.progress?.sourceSeq || 0,
     progressActive: progressMatchesRun,

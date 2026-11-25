@@ -1,6 +1,6 @@
 import { classifyProviderOperation, getOperationTitle } from './provider-operation-classifier.mjs';
 import { formatToolCall } from './tool-call-formatters.mjs';
-import { buildCanonicalToolCall, redactSensitiveText } from './tool-call-schema.mjs';
+import { buildCanonicalToolCall, redactSensitiveText, redactSensitiveValue } from './tool-call-schema.mjs';
 import { serializeProviderToolValue } from './provider-tool-normalization.mjs';
 import { safeActivityDescription } from './provider-activity-description.mjs';
 
@@ -161,6 +161,7 @@ function createOperation(event, correlationKeys = [], { orphan = false } = {}) {
     rawArgumentsShape: {inline_present:typeof event?.toolInput==='string'&&event.toolInput.length>0,preview_present:typeof event?.bodyPreview==='string'&&event.bodyPreview.length>0,body_available:event?.bodyAvailable===true,bytes_known:Number.isSafeInteger(event?.bodyBytes)},
     _providerRequestIdConflict: false,
     kind: classified.kind,
+    webAction: ['search', 'open', 'find', 'mixed', 'generic'].includes(event?.webAction) ? event.webAction : '',
     state: 'running',
     title: classified.title,
     detail: classified.detail,
@@ -260,6 +261,8 @@ function updateOperationClassification(operation, event) {
   const requestId=trimString(event?.providerRequestId);
   if(requestId&&!operation._providerRequestIdConflict){if(operation.providerRequestId&&operation.providerRequestId!==requestId){operation.providerRequestId='';operation._providerRequestIdConflict=true}else operation.providerRequestId=requestId}
   if (operation.kind === 'other' || event?.type === 'file_change') operation.kind = classified.kind;
+  if (['search', 'open', 'find', 'mixed'].includes(event?.webAction)
+      && (!operation.webAction || operation.webAction === 'generic')) operation.webAction = event.webAction;
   if (!operation.title || operation.title === getOperationTitle('other')) operation.title = classified.title;
   if (!operation.detail && classified.detail) operation.detail = classified.detail;
   if (!operation.toolName && classified.toolName) operation.toolName = classified.toolName;
@@ -495,6 +498,27 @@ function clientUpdatedAt(timestamp) {
   return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
+// Preserve the provider's argument shape at the display boundary while using
+// the same sensitive-key and text rules as the other presentation fields.
+function redactRawArguments(value) {
+  if (!value || typeof value !== 'object') return redactSensitiveValue(value);
+  const root = Array.isArray(value) ? [] : {};
+  const pending = [[value, root]];
+  while (pending.length) {
+    const [source, target] = pending.pop();
+    for (const [key, item] of Object.entries(source)) {
+      let next;
+      if (redactSensitiveValue({ [key]: null })[key] === '[redacted]') next = '[redacted]';
+      else if (item && typeof item === 'object') {
+        next = Array.isArray(item) ? [] : {};
+        pending.push([item, next]);
+      } else next = redactSensitiveValue(item);
+      Object.defineProperty(target, key, { value: next, enumerable: true, configurable: true, writable: true });
+    }
+  }
+  return root;
+}
+
 function toDisplayOperation(operation) {
   const toolCall = buildCanonicalToolCall(operation);
   const presentation = formatToolCall(toolCall, operation);
@@ -517,12 +541,14 @@ function toDisplayOperation(operation) {
     ...(operation.providerToolUseId ? { providerToolUseId: operation.providerToolUseId } : {}),
     ...(operation.providerThreadId ? { providerThreadId: operation.providerThreadId } : {}),
     ...(operation.providerTurnId ? { providerTurnId: operation.providerTurnId } : {}),
-    ...(operation.rawToolEvidence.value !== null ? { rawToolArguments: operation.rawToolEvidence.value } : {}),
+    ...(operation.rawToolEvidence.value !== null ? { rawToolArguments: redactRawArguments(operation.rawToolEvidence.value) } : {}),
     rawArgumentsStatus: operation.rawToolEvidence.status,
     rawArgumentsShape: operation.rawArgumentsShape,
     ...(operation.rawToolEvidence.seq ? { rawArgumentsSeq: operation.rawToolEvidence.seq } : {}),
     ...(Number.isSafeInteger(operation.rawArgumentsBytes) && operation.rawArgumentsBytes >= 0 ? { rawArgumentsBytes: operation.rawArgumentsBytes } : {}),
     ...(operation.toolName ? { toolName: operation.toolName } : {}),
+    ...(operation.webAction ? { webAction: operation.webAction } : {}),
+    ...(!TERMINAL_STATES.has(operation.state) && operation.operationProgress ? { operationProgress: operation.operationProgress } : {}),
     ...(boundedProjectionInput(operation.input) ? { input: operation.input } : {}),
     kind: operation.kind,
     state: operation.state,
@@ -642,6 +668,22 @@ export function buildOperationProjection(events = [], options = {}) {
       continue;
     }
     if (replayKey) processedEventKeys.add(replayKey);
+
+    if (event.type === 'tool_use' && event.operationProgress) {
+      const operation = resolveOperation(event, { create: false });
+      if (operation && !TERMINAL_STATES.has(operation.state)
+          && operation.provider === 'codex' && operation.kind === 'mcp'
+          && ['providerThreadId', 'providerTurnId', 'providerItemId'].every((field) =>
+            trimString(event[field]) && operation[field] === trimString(event[field]))) {
+        const progress = safeActivityDescription(event.operationProgress);
+        if (progress) {
+          operation.operationProgress = progress;
+          updateOperationBoundary(operation, event);
+          if (seq > 0) sourceSeqs.add(seq);
+        }
+      }
+      continue;
+    }
 
     if (event.type === 'tool_use') {
       const operation = resolveOperation(event);

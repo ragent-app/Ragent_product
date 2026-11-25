@@ -18,6 +18,7 @@ import {
   stripAssistantControlBlocks,
 } from './assistant-control-blocks.mjs';
 import { createClaudeFinalizedAssistantReplayFingerprint } from './provider-event-dedup.mjs';
+import { redactSensitiveText } from './tool-call-schema.mjs';
 import {
   extractAnsweredQuestionItemIds,
   normalizeAsyncQuestionReplies,
@@ -41,6 +42,23 @@ function text(value) {
 
 function seqOf(event) {
   return Number.isInteger(event?.seq) && event.seq > 0 ? event.seq : 0;
+}
+
+export function withTurnProgressText(event) {
+  const next = { ...event };
+  delete next.turnProgressText;
+  if (next.type !== 'message' || next.role !== 'assistant'
+    || next.provider !== 'codex' || next.messagePhase !== 'commentary'
+    || next.providerLifecycle !== 'completed' || next.messageDelivery === 'async'
+    || next.delivery === 'async' || !text(next.runId) || !text(next.providerThreadId)
+    || !text(next.providerTurnId) || !text(next.providerMessageId)) return next;
+  const progress = redactSensitiveText(stripAssistantArtifactDeliveryHints(
+    stripAssistantControlBlocks(String(next.content || '')),
+    { rewriteLocalResultFileReferences: false },
+  ))
+    .replace(/\s+/g, ' ').trim().slice(0, 500);
+  if (progress) next.turnProgressText = progress;
+  return next;
 }
 
 function isSuppressed(event) {
@@ -101,7 +119,7 @@ function buildRewriteMap(events, key) {
 }
 
 function sanitize(event, { markdownRewrites, resultRewrites } = {}) {
-  const next = stripEventAttachmentSavedPaths(clone(event));
+  const next = withTurnProgressText(stripEventAttachmentSavedPaths(clone(event)));
   if (!(next && typeof next === 'object')) return next;
   if (next.type === 'message' && next.role === 'assistant' && typeof next.content === 'string') {
     next.content = stripAssistantArtifactDeliveryHints(stripAssistantControlBlocks(next.content), {
@@ -658,7 +676,7 @@ export function filterSessionDisplayPushEvents(events = []) {
       const mergedIds = [...new Set([...explicitIds, ...replyIds, ...envelopeIds].map(text).filter(Boolean))];
       if (mergedIds.length > 0) next.answeredQuestionItemIds = mergedIds;
     }
-    output.push(createApprovedActionClientEventProjection(next));
+    output.push(withTurnProgressText(createApprovedActionClientEventProjection(next)));
   }
   return output;
 }

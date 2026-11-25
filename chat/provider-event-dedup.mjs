@@ -147,6 +147,9 @@ export function getProviderEventDedupKey(event) {
       providerMessageId,
       contentBlockIndex,
       readEventBody(event, ['content', 'bodyPreview']),
+      ...(event.provider === 'codex' && event.providerThreadId && event.providerTurnId
+        ? [event.providerThreadId, event.providerTurnId] : []),
+      ...(event.provider === 'codex' && event.providerLifecycle ? [event.providerLifecycle] : []),
       ...(asyncSummary ? [asyncSummary] : []),
     ]);
   }
@@ -169,6 +172,7 @@ export function getProviderEventDedupKey(event) {
       trimString(event.activityDescriptionSource),
       trimString(event.activityDescription),
       trimString(event.operationLifecycle),
+      trimString(event.operationProgress),
     ]);
   }
   if (event?.type === 'tool_result' && providerToolUseId) {

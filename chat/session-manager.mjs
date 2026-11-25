@@ -344,11 +344,11 @@ import {
 import { BoundedLruMap } from './cache-utils.mjs';
 import { registerCache } from './memory-registry.mjs';
 import { cacheBudget } from '../lib/cache-budget.mjs';
-import { buildEventBlockEvents, buildSessionDisplayEvents, filterSessionDisplayPushEvents } from './session-display-events.mjs';
+import { buildEventBlockEvents, buildSessionDisplayEvents, filterSessionDisplayPushEvents, withTurnProgressText } from './session-display-events.mjs';
 import { MESSAGE_TIMELINE_VERSION, projectMessageTimelineIdentities, withMessageTimelineIdentity } from './message-timeline.mjs';
 import { createAssistantControlBlockStream, stripAssistantControlBlocks } from './assistant-control-blocks.mjs';
 import { publishAllLiveEvents, sessionLiveFeed, sessionRealtimeLiveFeed } from './session-live-feed.mjs';
-import { buildRunActivityProjection } from './run-activity-projection.mjs';
+import { buildRunActivityProjection, reduceTurnProgressState } from './run-activity-projection.mjs';
 import {
   buildSessionActivity,
   getSessionQueueCount,
@@ -3547,6 +3547,7 @@ function buildSessionTimelineBundle(sessionMeta, run, timeline) {
   const runActivity = buildRunActivityProjection(displayEvents, {
     sessionRunning,
     run,
+    timeline,
     sessionId: sessionMeta?.id || '',
   });
   // DS-10: 不把 raw timeline 放进 bundle——displayEvents/runActivity 是唯一被消费的投影，
@@ -6539,6 +6540,9 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     }
   }
   const deltaPushEvents = buildDetachedRunPushEvents(normalizedEvents, uniqueDurableEvents, deltaStoredEvents);
+  const turnProgressEvents = deltaStoredEvents.filter((event) =>
+    event?.type === 'provider_turn_started' || (event?.type === 'message' && event?.messagePhase === 'commentary'))
+    .map(withTurnProgressText);
   const projectionObservedAt = nowIso();
   const reasoningEvents = normalizedEvents.filter((event) => event?.type === 'reasoning');
   const semanticEvents = normalizedEvents.filter((event) => PROVIDER_SEMANTIC_EVENT_TYPES.has(event?.type));
@@ -6617,6 +6621,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
     }
     return {
       ...current,
+      ...(turnProgressEvents.length ? { turnProgressState: reduceTurnProgressState(current.turnProgressState, turnProgressEvents, runId) } : {}),
       ...(newlyPresentedApprovalIds.size && Array.isArray(current.appServerPendingApprovals) ? {
         appServerPendingApprovals: current.appServerPendingApprovals.map(entry => newlyPresentedApprovalIds.has(normalizeRuntimeApprovalId(entry?.approvalId))
           ? { ...entry, approvalPresented: true } : entry),
@@ -11110,7 +11115,7 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
       sessionMeta, historyMeta: options?.historyMeta, run, priority,
       ...(options?.strict ? { strict: true } : {}),
     })).runActivity
-    : buildRunActivityProjection(displayEvents, { sessionRunning, run, sessionId });
+    : buildRunActivityProjection(displayEvents, { sessionRunning, run, timeline: visibleSources, sessionId });
   return {
     events,
     runActivity,

@@ -90,10 +90,14 @@ export function formatToolCall(toolCall = {}, source = {}) {
   const detailPath = firstString(input.path, input.file_path, input.notebook_path, locations[0]);
   let formatted;
 
+  if (['search', 'open', 'find', 'mixed', 'generic'].includes(source.webAction)) {
+    formatted = { kind, labelKind: 'web', subject: '', detail: clip(source.detail, 320) };
+  }
+
   // The action parser is the provider-neutral equivalent of Codex's
   // ParsedCommand/ExecCell presentation layer. Keep the canonical ACP kind
   // stable while allowing the UI to use a semantic display label.
-  if (action && (action.subject || action.semanticKind)) {
+  if (!formatted && action && (action.subject || action.semanticKind)) {
     const semanticKind = trimString(action.semanticKind).toLowerCase();
     const labelKind = [
       'read', 'list', 'search', 'inspect', 'edit', 'execute', 'mcp', 'subagent',
@@ -148,6 +152,8 @@ export function formatToolCall(toolCall = {}, source = {}) {
   return {
     schemaVersion: 1,
     ...formatted,
+    ...(['search', 'open', 'find', 'mixed', 'generic'].includes(source.webAction) ? { webAction: source.webAction } : {}),
+    ...(['running', 'waiting_approval'].includes(source.state) && source.operationProgress ? { operationProgress: redactSensitiveText(source.operationProgress) } : {}),
     ...(source.activityDescription ? {
       activityDescription: source.activityDescription,
       activityDescriptionSource: source.activityDescriptionSource,

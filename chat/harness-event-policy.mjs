@@ -40,7 +40,7 @@ const RUNTIME_PROGRESS_TYPES = new Set(['status', 'usage']);
 const IMPORTANT_HARNESS_EVENT_TYPES = new Set([
   'message', 'tool_result', 'approval_request', 'approval_response',
   'privileged_batch_request', 'privileged_batch_response', 'privileged_exec_result',
-  'file_change', 'plan', 'reasoning',
+  'file_change', 'plan', 'reasoning', 'provider_turn_started',
 ]);
 
 function trimString(value) {
@@ -153,10 +153,10 @@ export function limitHarnessDurableEvents(events = [], policy = null) {
   if (source.length <= limit) return source.map((event) => prepareHarnessEventForPersistence(event, resolved));
   const important = [];
   const progress = [];
-  for (const event of source) {
-    ((IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) || (event?.type === 'tool_use' && (event?.activityDescription || event?.providerInputUpdate)) || (event?.type === 'status' && event?.providerLifecycle === 'completed' && event?.runState === 'completed' && /^[a-f0-9]{64}$/.test(event?.deliveryContentHash || ''))) ? important : progress).push(event);
+  for (const [index, event] of source.entries()) {
+    ((IMPORTANT_HARNESS_EVENT_TYPES.has(event?.type) || (event?.type === 'tool_use' && (event?.activityDescription || event?.providerInputUpdate)) || (event?.type === 'status' && event?.providerLifecycle === 'completed' && event?.runState === 'completed' && /^[a-f0-9]{64}$/.test(event?.deliveryContentHash || ''))) ? important : progress).push({ index, event });
   }
   const room = Math.max(0, limit - important.length);
   const selected = [...(room > 0 ? progress.slice(-room) : []), ...important];
-  return selected.map((event) => prepareHarnessEventForPersistence(event, resolved));
+  return selected.sort((a, b) => a.index - b.index).map(({ event }) => prepareHarnessEventForPersistence(event, resolved));
 }

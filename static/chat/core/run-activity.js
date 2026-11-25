@@ -54,6 +54,7 @@
   }
 
   function subjectForActivity(activity) {
+    if (webActionForActivity(activity)) return "";
     const explicit = activity?.subject;
     if (typeof explicit === "string" && explicit.trim()) return clip(explicit);
     const kind = String(activity?.labelKind || activity?.kind || "").trim().toLowerCase();
@@ -121,13 +122,46 @@
     return { activityDescription: "", activityDescriptionSource: "" };
   }
 
+  function webActionForActivity(activity) {
+    const value = activity?.webAction || activity?.presentation?.webAction || activity?.toolCall?._meta?.ragent?.webAction;
+    return ["search", "open", "find", "mixed", "generic"].includes(value) ? value : "";
+  }
+
+  function operationProgressForActivity(activity) {
+    if (!activity || activity.actionRequired === true || activity.state === "queued" || activity.state === "waiting_user"
+      || normalizeActivityLifecycle(activity.operationState || activity.state) !== "running"
+      || !["operationId", "toolCallId", "providerItemId", "providerToolUseId"].some((key) => String(activity[key] || "").trim())) return "";
+    const value = activity.operationProgress || activity.presentation?.operationProgress || activity.toolCall?._meta?.ragent?.operationProgress;
+    return typeof value === "string" ? clip(value, 120) : "";
+  }
+
+  function currentTurnProgress(activity) {
+    const progress = activity?.turnProgress;
+    if (!progress || typeof progress.text !== "string" || !progress.text.trim()
+      || !progress.runId || !progress.turnId || !progress.messageId || !Number.isInteger(progress.sourceSeq) || progress.sourceSeq <= 0
+      || !activity.runId || activity.runId !== progress.runId
+      || (activity.providerTurnId && activity.providerTurnId !== progress.turnId)) return "";
+    return clip(progress.text, 72);
+  }
+
   function formatOperationActivity(activity = {}, { trailing = false } = {}) {
     if (!activity || activity.state === "idle") return "";
+    if (activity.state === "queued") return translatedActivityText("activity.label.waiting");
     const kind = normalizeActivityKind(activity);
     const lifecycle = activity.actionRequired === true || activity.state === "waiting_user"
       ? "waiting_approval" : normalizeActivityLifecycle(activity.operationState || activity.state);
     const description = trustedActivityDescription(activity);
     if (lifecycle === "running" && description) return description;
+    const progress = lifecycle === "running" ? operationProgressForActivity(activity) : "";
+    if (progress) return progress;
+    const webAction = webActionForActivity(activity);
+    const webText = webAction ? translatedActivityText(`activity.web.${webAction}`) : "";
+    const turnText = lifecycle === "running" && activity.state !== "queued" ? currentTurnProgress(activity) : "";
+    if (turnText) {
+      const prefix = translatedActivityText("activity.turnProgress");
+      return `${prefix} ${turnText}${webText ? ` · ${webText}` : ""}`.trim();
+    }
+    if (lifecycle === "running" && webText) return webText;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (lifecycle === "running" && group?.kind === "exploring" && Number(group.count) > 1) {
       const exploring = translatedActivityText("activity.action.running.exploring", { count: group.count });
@@ -162,7 +196,7 @@
     const livenessLabel = waitingForOutput
       ? trOrFallback("activity.status.awaitingProviderOutput", "waiting for provider output")
       : "";
-    const nativeDescription = trustedActivityDescription(activity);
+    const nativeDescription = trustedActivityDescription(activity) || operationProgressForActivity(activity) || currentTurnProgress(activity);
     return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${!nativeDescription && (text || livenessLabel) ? "…" : ""}`;
   }
 
@@ -299,11 +333,13 @@
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
         operationState: event.state || "running",
+        webAction: webActionForActivity(event),
+        operationProgress: event.operationProgress || event.presentation?.operationProgress || "",
         ...descriptionFields(event),
       };
     }
     if (type === "file_change") return { kind: "file_edit", detail: event.filePath || "" };
-    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", ...descriptionFields(event) };
+    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", webAction: webActionForActivity(event), operationProgress: event.operationProgress || "", ...descriptionFields(event) };
     if (type === "thinking_block" || type === "reasoning") return { kind: "thinking", detail: "" };
     if (type === "context_operation" || type === "context_barrier") return { kind: "working", detail: "" };
     if (type === "status") return { kind: "working", detail: "" };

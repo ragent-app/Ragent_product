@@ -158,6 +158,8 @@ function ragentMeta(operation) {
   const meta = {
     schemaVersion: 1,
     lifecycle: trimString(operation.state) || 'pending',
+    ...(['search', 'open', 'find', 'mixed', 'generic'].includes(operation.webAction) ? { webAction: operation.webAction } : {}),
+    ...(['running', 'waiting_approval'].includes(operation.state) && trimString(operation.operationProgress) ? { operationProgress: redactSensitiveText(operation.operationProgress) } : {}),
     ...(trimString(operation.approvalId) ? { approval: { approvalId: trimString(operation.approvalId) } } : {}),
     ...(Number.isInteger(operation.startSeq) && operation.startSeq > 0 ? { startSeq: operation.startSeq } : {}),
     ...(Number.isInteger(operation.endSeq) && operation.endSeq > 0 ? { endSeq: operation.endSeq } : {}),

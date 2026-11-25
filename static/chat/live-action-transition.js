@@ -9,10 +9,19 @@
   const DURATION_MS = 260;
   const CLEANUP_MS = DURATION_MS + 24;
 
-  function makeItem(text, className) {
+  function makeItem(text, className, suffix = "") {
     const item = document.createElement("span");
     item.className = `live-action-transition__item ${className}`;
-    item.textContent = text;
+    const tail = suffix && text.endsWith(` · ${suffix}`) ? ` · ${suffix}` : "";
+    if (tail) {
+      const main = document.createElement("span");
+      main.className = "live-action-transition__main";
+      main.textContent = text.slice(0, -tail.length);
+      const ending = document.createElement("span");
+      ending.className = "live-action-transition__suffix";
+      ending.textContent = tail;
+      item.append(main, ending);
+    } else item.textContent = text;
     return item;
   }
 
@@ -46,13 +55,15 @@
     return String(element.textContent || "").trim();
   }
 
-  function setText(element, value) {
+  function setText(element, value, { suffix = "" } = {}) {
     if (!element || typeof element !== "object") return;
     const nextText = String(value || "").trim();
     const state = ensureState(element);
     if (state.text === nextText) return;
     if (!state.text && !state.current.textContent) {
-      state.current.textContent = nextText;
+      const incoming = makeItem(nextText, "is-current", suffix);
+      state.current.replaceWith(incoming);
+      state.current = incoming;
       state.text = nextText;
       if (!element.ownerDocument) element.textContent = nextText;
       return;
@@ -64,7 +75,7 @@
     oldExiting.forEach((item) => item.remove());
 
     const previous = state.current;
-    const incoming = makeItem(nextText, "is-entering");
+    const incoming = makeItem(nextText, "is-entering", suffix);
     previous?.classList.remove("is-current", "is-entering", "is-visible");
     previous?.classList.add("is-exiting");
     previous?.setAttribute("aria-hidden", "true");

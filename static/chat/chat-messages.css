@@ -4090,3 +4090,7 @@ body.message-image-viewer-open { overflow: hidden; }
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.live-operation-row__summary-text:has(.live-operation-row__summary-main) { display: flex; }
+.live-operation-row__summary-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-operation-row__summary-suffix { flex: 0 0 auto; white-space: nowrap; }
