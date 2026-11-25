@@ -272,6 +272,7 @@
     if (type === "operation") {
       return {
         kind: String(event.kind || "working").trim().toLowerCase() || "working",
+        labelKind: String(event.labelKind || event.presentation?.labelKind || "").trim(),
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
         operationState: event.state || "running",

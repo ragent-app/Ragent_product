@@ -274,6 +274,7 @@
     if (type === "operation") {
       return {
         kind: String(event.kind || "working").trim().toLowerCase() || "working",
+        labelKind: String(event.labelKind || event.presentation?.labelKind || "").trim(),
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
         operationState: event.state || "running",
@@ -304,14 +305,31 @@
   }
 
   function applyEvent(event = {}, record = true) {
+    const eventType = String(event?.type || "");
+    const operationEvent = ["tool_use", "tool_result", "operation", "file_change"].includes(eventType);
     if (!currentActivity || currentActivity.state === "idle") {
       if (event?.type !== "tool_use" || !event.runId) return;
       currentActivity = { state: "working", kind: "thinking", runId: event.runId, sourceSeq: 0 };
     }
     const runId = String(event.runId || "").trim();
     if (runId && currentActivity.runId && runId !== currentActivity.runId) return;
-    if (record) {
-      liveEvents.push({ event, seq: eventBoundary(event), generation: ++liveGeneration });
+    if (record && operationEvent) {
+      // Only keep the bounded display state needed to replay an in-flight
+      // snapshot. Never retain tool arguments, output, or transcript bodies.
+      const displayEvent = {};
+      for (const key of ["type", "runId", "requestId", "operationId", "toolCallId", "providerItemId", "providerToolUseId", "state", "operationLifecycle", "toolName", "kind", "labelKind", "filePath", "detail", "command", "activityDescription", "activityDescriptionSource"]) {
+        if (typeof event[key] === "string") displayEvent[key] = event[key].slice(0, 512);
+      }
+      for (const key of ["seq", "endSeq", "startSeq"]) {
+        if (Number.isInteger(event[key])) displayEvent[key] = event[key];
+      }
+      if (event.presentation && typeof event.presentation === "object") {
+        displayEvent.presentation = {};
+        for (const key of ["labelKind", "activityDescription", "activityDescriptionSource"]) {
+          if (typeof event.presentation[key] === "string") displayEvent.presentation[key] = event.presentation[key].slice(0, 512);
+        }
+      }
+      liveEvents.push({ event: displayEvent, seq: eventBoundary(event), generation: ++liveGeneration });
       if (liveEvents.length > 200) liveEvents.shift();
     }
     let next = optimisticActivityForEvent(event);
@@ -319,20 +337,22 @@
     const sameOperation = keys.some((key) => event[key] && currentActivity[key] && event[key] === currentActivity[key]);
     const identified = keys.some((key) => event[key]);
     const currentHasIdentity = keys.some((key) => currentActivity[key]);
-    const operationEvent = ["tool_use", "operation", "tool_result", "file_change"].includes(event.type);
     if (!operationEvent && currentHasIdentity) return;
-    if (event.type === "tool_result" && sameOperation && String(event.operationLifecycle || "").toLowerCase() === "delta") {
+    const lifecycle = String(event.operationLifecycle || "").toLowerCase();
+    if (event.type === "tool_result" && sameOperation && ["delta", "waiting_approval"].includes(lifecycle)) {
       next = { kind: currentActivity.kind, detail: currentActivity.detail,
+        operationState: lifecycle === "waiting_approval" ? "waiting_approval" : currentActivity.operationState,
         activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
     }
     if (next && operationEvent && !identified) {
       next.activityDescription = "";
       next.activityDescriptionSource = "";
     }
-    if (currentActivity.state === "waiting_user" && event.state !== "waiting_approval") return;
     if (operationEvent && !identified && currentHasIdentity) return;
-    const terminal = (event.type === "tool_result" && String(event.operationLifecycle || "").toLowerCase() !== "delta")
+    const terminal = (event.type === "tool_result" && !["delta", "waiting_approval"].includes(lifecycle))
       || ["completed", "complete", "failed", "error", "declined", "denied", "cancelled", "canceled", "interrupted"].includes(String(event.state || "").toLowerCase());
+    if (currentActivity.state === "waiting_user" && !(terminal && sameOperation)
+      && event.state !== "waiting_approval" && lifecycle !== "waiting_approval") return;
     if (terminal && sameOperation) {
       currentActivity = { state: "working", kind: "thinking", runId: currentActivity.runId, requestId: currentActivity.requestId, sourceSeq: eventBoundary(event), inlineEligible: true };
       notify();
@@ -350,12 +370,12 @@
     const opChanged = operationEvent && !sameOperation;
     currentActivity = {
       ...currentActivity,
-      ...(opChanged ? { subject: "", group: null, presentation: null, activityDescription: "", activityDescriptionSource: "", activityDescriptionSeq: 0, operationState: "running", operationId: "", toolCallId: "", providerItemId: "", providerToolUseId: "" } : {}),
+      ...(opChanged ? { subject: "", labelKind: "", group: null, presentation: null, activityDescription: "", activityDescriptionSource: "", activityDescriptionSeq: 0, operationState: "running", operationId: "", toolCallId: "", providerItemId: "", providerToolUseId: "" } : {}),
       ...next,
       ...Object.fromEntries(keys.filter((key) => event[key]).map((key) => [key, event[key]])),
       ...(startSeq && opChanged ? { startSeq } : {}),
       ...(sameOperation && !next.activityDescription ? { activityDescription: currentActivity.activityDescription, activityDescriptionSource: currentActivity.activityDescriptionSource } : {}),
-      state: event?.state === "waiting_approval" ? "waiting_user" : "working",
+      state: event?.state === "waiting_approval" || lifecycle === "waiting_approval" ? "waiting_user" : "working",
       sourceSeq: Math.max(sourceSeq, currentSourceSeq),
       inlineEligible: true,
     };
