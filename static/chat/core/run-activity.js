@@ -99,11 +99,25 @@
     return value && value !== key ? String(value).trim() : "";
   }
 
+  function trustedActivityDescription(activity) {
+    if (!activity || activity.actionRequired === true || activity.state === "queued"
+      || activity.state === "waiting_user" || normalizeActivityKind(activity) === "approval"
+      || normalizeActivityLifecycle(activity.operationState || activity.state) !== "running") return "";
+    if (!["operationId", "toolCallId", "providerItemId", "providerToolUseId"].some((key) => String(activity[key] || "").trim())) return "";
+    for (const candidate of [activity, activity.presentation]) {
+      if (!["tool_input_description", "provider_title"].includes(candidate?.activityDescriptionSource)) continue;
+      const text = typeof candidate.activityDescription === "string" ? candidate.activityDescription.trim() : "";
+      if (text) return text;
+    }
+    return "";
+  }
+
   function formatOperationActivity(activity = {}, { trailing = false } = {}) {
     if (!activity || activity.state === "idle") return "";
     const kind = normalizeActivityKind(activity);
-    const lifecycle = normalizeActivityLifecycle(activity.operationState || activity.state);
-    const description = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    const lifecycle = activity.actionRequired === true || activity.state === "waiting_user"
+      ? "waiting_approval" : normalizeActivityLifecycle(activity.operationState || activity.state);
+    const description = trustedActivityDescription(activity);
     if (lifecycle === "running" && description) return description;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (group?.kind === "exploring" && Number(group.count) > 1) {
@@ -139,7 +153,7 @@
     const livenessLabel = waitingForOutput
       ? trOrFallback("activity.status.awaitingProviderOutput", "waiting for provider output")
       : "";
-    const nativeDescription = String(activity?.activityDescription || activity?.presentation?.activityDescription || "").trim();
+    const nativeDescription = trustedActivityDescription(activity);
     return `${text}${livenessLabel ? ` · ${livenessLabel}` : ""}${!nativeDescription && (text || livenessLabel) ? "…" : ""}`;
   }
 
