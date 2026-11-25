@@ -312,6 +312,15 @@ class RoomSessionRepository(
         }
     }
     private val durableArtifactState = MutableStateFlow<Map<String, List<SessionEventDto>>>(emptyMap())
+    // Compact durable tool facts bridge the gap until the visible page has
+    // caught up. They never advance the cursor or retain full provider input.
+    private data class DurableToolFact(
+        val start: SessionEventDto,
+        var description: SessionEventDto? = null,
+        var state: SessionEventDto? = null,
+    )
+    private val durableToolFacts = java.util.concurrent.ConcurrentHashMap<String, LinkedHashMap<String, DurableToolFact>>()
+    private val durableToolTimelineState = MutableStateFlow<Map<String, List<TimelineItem>>>(emptyMap())
     // Retry a failed visible projection on
     // the next sync without rewinding the durable event cursor.
     private val pendingVisibleOperationRefresh = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -924,7 +933,8 @@ class RoomSessionRepository(
         liveTimelineState.map { it[sessionId].orEmpty() },
         durableArtifactState.map { artifacts -> artifacts[sessionId].orEmpty() },
         visibleTimelineState.map { it[sessionId].orEmpty() },
-    ) { durable, live, artifacts, visible -> TimelineProjectionInput(durable, live, artifacts, visible) }
+        durableToolTimelineState.map { it[sessionId].orEmpty() },
+    ) { durable, live, artifacts, visible, tools -> TimelineProjectionInput(durable, live, artifacts, visible, tools) }
         // A WS burst can contain one delta per token. Keep the protocol/live
         // state current, but give Compose one projection at most every frame
         // or two while streaming. Durable changes are also bounded to this
@@ -946,7 +956,7 @@ class RoomSessionRepository(
                     .mapLatest { input ->
                         projector.project(input.durable, input.live)
                             .let { base ->
-                                val withVisible = mergeTimelineItems(input.visible, base)
+                                val withVisible = mergeTimelineItems(mergeTimelineItems(input.visible, base), input.tools)
                                 if (input.artifacts.isEmpty()) {
                                     if (previousArtifactKeys.isNotEmpty()) {
                                         artifactProjector = com.andysagent.ragent.core.timeline.LiveTimelineProjector()
@@ -1511,6 +1521,10 @@ class RoomSessionRepository(
             acceptedFirstTurnSnapshots.remove(sessionId)
             acceptedFirstTurnSessionIds.update { it - sessionId }
             dao.deleteRunDurations(sessionId)
+            sessionSyncMutex(sessionId).withLock {
+                durableToolFacts.remove(sessionId)
+                durableToolTimelineState.update { it - sessionId }
+            }
             database.withTransaction { decrementPendingSessionMutation(sessionId) }
             try { refreshSessions() }
             catch (cancelled: CancellationException) { throw cancelled }
@@ -2340,6 +2354,8 @@ class RoomSessionRepository(
             }
             visibleTimelineEvents.remove(sessionId)
             visibleTimelineState.update { it - sessionId }
+            durableToolFacts.remove(sessionId)
+            durableToolTimelineState.update { it - sessionId }
             return RefreshResult.Applied(rebuiltEvents, after)
         } finally {
             dao.clearStagedMessages(sessionId)
@@ -2411,6 +2427,7 @@ class RoomSessionRepository(
                     }
                     terminalRunIds.addAll(pageTerminalRuns)
                     val accumulatedTerminalRuns = recordTerminalRunIds(sessionId, pageTerminalRuns)
+                    projectDurableToolFacts(sessionId, page.events, accumulatedTerminalRuns)
                     // The durable message store does not retain tool operations, and
                     // terminal events settle the authoritative visible projection. Refresh
                     // the server's canonical visible projection when they change so
@@ -2699,6 +2716,69 @@ class RoomSessionRepository(
         val projectedEvents = projector.projectPage(events)
         val projectedItems = TimelineProjector.project(emptyList(), projectedEvents)
         visibleTimelineState.update { it + (sessionId to projectedItems) }
+    }
+
+    // Called under sessionSyncMutex only after the page is durably applied.
+    // No guessed association: a start, same run, and provider call ID are
+    // required. Terminal facts remain until the run ends so a stale visible
+    // page cannot revive a completed operation.
+    private fun projectDurableToolFacts(sessionId: String, events: List<SessionEventDto>, terminalRuns: Set<String>) {
+        val facts = durableToolFacts[sessionId] ?: run {
+            if (events.none { it.type == "tool_use" && !it.runId.isNullOrBlank() &&
+                    !it.providerToolUseId.isNullOrBlank() && it.runId !in terminalRuns }) return
+            durableToolFacts.getOrPut(sessionId) { linkedMapOf() }
+        }
+        var changed = false
+        fun isTerminal(event: SessionEventDto): Boolean {
+            val state = (event.operationLifecycle ?: event.status ?: event.state).orEmpty().lowercase()
+            return state in setOf("completed", "failed", "declined", "denied", "interrupted", "cancelled", "canceled") ||
+                (event.type == "tool_result" && state !in setOf("delta", "started", "running", "in_progress", "pending", "waiting_approval", "waiting_user", "approval_requested"))
+        }
+        fun rank(event: SessionEventDto?): Int = if (event?.activityDescription.isNullOrBlank()) 0 else when (event?.activityDescriptionSource) {
+            "tool_input_description" -> 2
+            "provider_title" -> 1
+            else -> 0
+        }
+        for (event in events.sortedBy { it.boundarySeq() }) {
+            val runId = event.runId?.takeIf { it.isNotBlank() } ?: continue
+            if (runId in terminalRuns) continue
+            val id = event.providerToolUseId?.takeIf { it.isNotBlank() } ?: continue
+            val type = event.type.orEmpty().lowercase()
+            if (type != "tool_use" && type != "tool_result") continue
+            val key = "$runId\u0000$id"
+            val existing = facts[key]
+            if (existing == null && type != "tool_use") continue
+            if (existing != null && isTerminal(existing.state ?: existing.start)) continue
+            val safeEvent = SessionEventDto(
+                seq = event.seq, startSeq = event.startSeq, endSeq = event.endSeq,
+                eventId = event.eventId, id = event.id, type = event.type, runId = runId,
+                requestId = event.requestId, operationId = event.operationId,
+                providerItemId = event.providerItemId, providerToolUseId = id,
+                toolName = event.toolName, kind = event.kind, status = event.status, state = event.state,
+                operationLifecycle = event.operationLifecycle, exitCode = event.exitCode,
+                activityDescription = event.activityDescription, activityDescriptionSource = event.activityDescriptionSource,
+                activityDescriptionSeq = event.activityDescriptionSeq,
+            )
+            val fact = existing ?: DurableToolFact(safeEvent).also { facts[key] = it; changed = true }
+            if (existing != null && rank(safeEvent) > 0 && rank(safeEvent) >= rank(fact.description ?: fact.start)) {
+                fact.description = safeEvent
+                changed = true
+            }
+            val lifecycle = (event.operationLifecycle ?: event.status ?: event.state).orEmpty().lowercase()
+            if (existing != null && (isTerminal(safeEvent) || lifecycle in setOf("waiting_approval", "waiting_user", "approval_requested", "pending", "running", "in_progress", "started"))) {
+                fact.state = safeEvent
+                changed = true
+            }
+            while (facts.size > 256) { facts.remove(facts.keys.first()); changed = true }
+        }
+        if (facts.entries.removeAll { (_, fact) -> fact.start.runId in terminalRuns }) changed = true
+        if (!changed) return
+        if (facts.isEmpty()) durableToolFacts.remove(sessionId, facts)
+        val projected = LiveTimelineProjector().projectPage(facts.values.flatMap { fact ->
+            listOfNotNull(fact.start, fact.description, fact.state).distinctBy { it.boundarySeq() }
+        })
+        val items = TimelineProjector.project(emptyList(), projected)
+        durableToolTimelineState.update { it + (sessionId to items) }
     }
 
     private fun visibleEventPagePath(sessionId: String, beforeSeq: Long?): String = buildString {
@@ -4226,6 +4306,7 @@ private data class TimelineProjectionInput(
     val live: List<com.andysagent.ragent.core.timeline.TimelineEvent>,
     val artifacts: List<SessionEventDto> = emptyList(),
     val visible: List<TimelineItem> = emptyList(),
+    val tools: List<TimelineItem> = emptyList(),
 )
 
 private class RoomCursorStore(private val dao: RagentDao) : CursorStore {

@@ -493,12 +493,15 @@ class LiveTimelineProjector {
         val isMultiSelect = event.isMultiSelect ?: previous?.isMultiSelect ?: false
         val requiresApproval = operationState in setOf("waiting_approval", "waiting_user", "approval_requested") || type.contains("approval") || type.contains("confirmation") || (previous?.requiresApproval == true && !isComplete && !isToolResult)
 
-        val candidateDescription = event.activityDescription
-            ?: (event.presentation?.get("activityDescription") as? JsonPrimitive)?.contentOrNull
-        val candidateSource = event.activityDescriptionSource
-            ?: (event.presentation?.get("activityDescriptionSource") as? JsonPrimitive)?.contentOrNull
-        val candidateSeq = event.activityDescriptionSeq
-            ?: (event.presentation?.get("activityDescriptionSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+        val topDescription = event.activityDescription?.takeIf { it.isNotBlank() }
+        val topSource = event.activityDescriptionSource?.takeIf { it.isNotBlank() }
+        val presentationDescription = (event.presentation?.get("activityDescription") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        val presentationSource = (event.presentation?.get("activityDescriptionSource") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+        val useTopLevel = topDescription != null && topSource in setOf("provider_title", "tool_input_description")
+        val candidateDescription = if (useTopLevel) topDescription else presentationDescription
+        val candidateSource = if (useTopLevel) topSource else presentationSource
+        val candidateSeq = (if (useTopLevel) event.activityDescriptionSeq else
+            (event.presentation?.get("activityDescriptionSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull())
             ?: event.boundarySeq().takeIf { it > 0L }
         val sourceRank = mapOf("provider_title" to 1, "tool_input_description" to 2)
         val reliableDescriptionIdentity = !event.operationId.isNullOrBlank() || !event.providerToolUseId.isNullOrBlank() ||

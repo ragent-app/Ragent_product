@@ -822,6 +822,12 @@ fun reconcileTimelineAsyncQuestions(items: List<TimelineItem>): List<TimelineIte
 }
 
 private fun timelineMergeKey(item: TimelineItem): String {
+    if (item is TimelineItem.Operation && !item.runId.isNullOrBlank() && (item.durableStartSeq ?: 0L) > 0L) {
+        return "operation-start:${item.runId}:${item.durableStartSeq}"
+    }
+    if (item is TimelineItem.Operation && !item.runId.isNullOrBlank() && !item.providerToolUseId.isNullOrBlank()) {
+        return "provider-operation:${item.runId}:${item.providerToolUseId}"
+    }
     if (item !is TimelineItem.Message) return "item:${item.id}"
     val role = when (item.role) { TimelineRole.User -> "user"; TimelineRole.System -> "system"; else -> "assistant" }
     return messageTimelineId(item.id.removePrefix("message:$role:"), item.role)
@@ -848,6 +854,15 @@ private fun preferTimelineItem(current: TimelineItem, incoming: TimelineItem): T
             else -> current
         }
         val other = if (newer === current) incoming else current
+        fun descriptionRank(item: TimelineItem.Operation): Int = if (item.activityDescription.isNullOrBlank()) 0 else when (item.activityDescriptionSource) {
+            "tool_input_description" -> 2
+            "provider_title" -> 1
+            else -> 0
+        }
+        val newerRank = descriptionRank(newer)
+        val otherRank = descriptionRank(other)
+        val descriptionOwner = if (otherRank > newerRank || (otherRank > 0 && otherRank == newerRank &&
+                (other.activityDescriptionSeq ?: 0L) > (newer.activityDescriptionSeq ?: 0L))) other else newer
         return newer.copy(
             seq = minOf(current.seq, incoming.seq),
             toolName = newer.toolName ?: other.toolName,
@@ -857,6 +872,12 @@ private fun preferTimelineItem(current: TimelineItem, incoming: TimelineItem): T
             durationMs = newer.durationMs ?: other.durationMs,
             fileChanges = newer.fileChanges.ifEmpty { other.fileChanges },
             runId = newer.runId ?: other.runId,
+            activityDescription = descriptionOwner.activityDescription.takeIf { descriptionRank(descriptionOwner) > 0 },
+            activityDescriptionSource = descriptionOwner.activityDescriptionSource.takeIf { descriptionRank(descriptionOwner) > 0 },
+            activityDescriptionSeq = descriptionOwner.activityDescriptionSeq.takeIf { descriptionRank(descriptionOwner) > 0 },
+            providerToolUseId = newer.providerToolUseId ?: other.providerToolUseId,
+            providerItemId = newer.providerItemId ?: other.providerItemId,
+            durableStartSeq = listOfNotNull(newer.durableStartSeq, other.durableStartSeq).minOrNull(),
             beforeAssistantAtSameSeq = current.beforeAssistantAtSameSeq || incoming.beforeAssistantAtSameSeq,
         )
     }
