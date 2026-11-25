@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { decideRiskGate } from '../chat/privileged-gate.mjs';
+import { readClaudeBidiApprovalRequest } from '../chat/claude-bidi-protocol.mjs';
 import { classifyRisk } from '../chat/risk-classifier.mjs';
 import { RISK_POLICY_VERSION } from '../chat/risk-policy.mjs';
 
@@ -111,11 +112,11 @@ function approvalFor(record) {
   const toolInput = record.toolInput && typeof record.toolInput === 'object'
     ? record.toolInput
     : { command: record.command || '' };
-  return {
-    approvalId: `benchmark:${record.caseId}`,
-    kind: toolName === 'Bash' ? 'command' : 'permissions',
-    params: { tool_name: toolName, input: toolInput },
-  };
+  return readClaudeBidiApprovalRequest({
+    type: 'control_request',
+    request_id: `benchmark:${record.caseId}`,
+    request: { subtype: 'can_use_tool', tool_name: toolName, input: toolInput },
+  });
 }
 
 function expectedRoute(gate) {
