@@ -95,6 +95,15 @@
     return "";
   }
 
+  function descriptionFields(event) {
+    for (const candidate of [event, event?.presentation]) {
+      if (!["tool_input_description", "provider_title"].includes(candidate?.activityDescriptionSource)) continue;
+      if (typeof candidate.activityDescription !== "string" || !candidate.activityDescription.trim()) continue;
+      return { activityDescription: candidate.activityDescription, activityDescriptionSource: candidate.activityDescriptionSource };
+    }
+    return { activityDescription: "", activityDescriptionSource: "" };
+  }
+
   // Codex presents tool work as a short verb plus its target. Keep that
   // language-neutral shape here so the Live Bar, Run Sheet and desktop row
   // cannot drift into separate descriptions of the same operation.
@@ -106,7 +115,7 @@
     const description = trustedActivityDescription(activity);
     if (lifecycle === "running" && description) return description;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
-    if (group?.kind === "exploring" && Number(group.count) > 1) {
+    if (lifecycle === "running" && group?.kind === "exploring" && Number(group.count) > 1) {
       const exploring = translatedActivityText("activity.action.running.exploring", { count: group.count });
       if (exploring) return trailing ? `${exploring}…` : exploring;
     }
@@ -292,12 +301,11 @@
         detail: event.detail || event.command || "",
         operationId: event.operationId || "",
         operationState: event.state || "running",
-        activityDescription: event.activityDescription || event.presentation?.activityDescription || "",
-        activityDescriptionSource: event.activityDescriptionSource || event.presentation?.activityDescriptionSource || "",
+        ...descriptionFields(event),
       };
     }
     if (type === "file_change") return { kind: "file_edit", detail: event.filePath || "" };
-    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
+    if (type === "tool_use") return { kind: inferToolKind(event), detail: event.filePath || "", ...descriptionFields(event) };
     if (type === "thinking_block" || type === "reasoning") return { kind: "thinking", detail: "" };
     if (type === "context_operation" || type === "context_barrier") return { kind: "working", detail: "" };
     if (type === "status") return { kind: "working", detail: "" };
@@ -356,7 +364,7 @@
     if (event.type === "tool_result" && sameOperation && ["delta", "waiting_approval"].includes(lifecycle)) {
       next = { kind: currentActivity.kind, detail: currentActivity.detail,
         operationState: lifecycle === "waiting_approval" ? "waiting_approval" : currentActivity.operationState,
-        activityDescription: event.activityDescription || "", activityDescriptionSource: event.activityDescriptionSource || "" };
+        ...descriptionFields(event) };
     }
     if (next && operationEvent && !identified) {
       next.activityDescription = "";
