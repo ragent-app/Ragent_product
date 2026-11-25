@@ -1700,7 +1700,7 @@ class RoomSessionRepository(
                 throw error
             }
         }
-        runCatching { refreshSessionDetail(sessionId) }
+        runCatching { refreshSessionDetail(sessionId, recordAuthoritativeIdle = false) }
     }
 
     override suspend fun forkSessionAt(
@@ -1914,7 +1914,10 @@ class RoomSessionRepository(
         return SessionAccessContext(id, project)
     }
 
-    override suspend fun refreshSessionDetail(sessionId: String): Session? {
+    override suspend fun refreshSessionDetail(sessionId: String): Session? =
+        refreshSessionDetail(sessionId, recordAuthoritativeIdle = true)
+
+    private suspend fun refreshSessionDetail(sessionId: String, recordAuthoritativeIdle: Boolean): Session? {
         val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}"))
         val root = codec.decode<JsonObject>(serializer<JsonObject>(), response.body)
         val item = root["session"]?.jsonObject ?: root
@@ -1946,8 +1949,43 @@ class RoomSessionRepository(
             }
         }
         val result = toDomain(entity)
-        if (!isAuthoritativelyIdleSession(item) || queuedMessagesFromJson(entity.queuedMessagesJson).isNotEmpty()) {
+        val hasQueuedRuns = queuedMessagesFromJson(entity.queuedMessagesJson).isNotEmpty() ||
+            runActivityQueueCount(sessionId, activity) > 0
+        val hasActiveRuns = (item["activeRuns"] as? JsonArray)?.isNotEmpty() == true
+        val authoritativelyIdle = isAuthoritativelyIdleSession(item) &&
+            !isAcceptedFirstTurnStatus(entity.status) &&
+            !hasQueuedRuns &&
+            !hasActiveRuns
+        if (!authoritativelyIdle) {
             clearAuthoritativeIdle(sessionId)
+        } else {
+            val durableCursorSeq = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
+            val currentMaxMsgSeq = dao.getMessages(sessionId)
+                .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
+            val durableSeq = maxOf(durableCursorSeq, currentMaxMsgSeq)
+            val detailLatestSeq = entity.latestSeq
+            if (recordAuthoritativeIdle && detailLatestSeq > 0L && detailLatestSeq >= currentMaxMsgSeq) {
+                authoritativeIdleAtSeqState.update { current ->
+                    val prev = current[sessionId] ?: 0L
+                    val next = maxOf(prev, detailLatestSeq)
+                    if (next == prev && sessionId in current) current else current + (sessionId to next)
+                }
+            }
+            if (durableSeq >= detailLatestSeq || (activityRunState == "idle" && !hasActiveRuns)) {
+                val retiredRunIds = liveProjectionMutex.withLock {
+                    liveProjectors[sessionId]?.let { projector ->
+                        val retired = projector.retireEphemeralTextOverlays()
+                        liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
+                        retired
+                    }.orEmpty()
+                }
+                if (retiredRunIds.isNotEmpty()) {
+                    recordTerminalRunIds(sessionId, retiredRunIds)
+                }
+                if (detailLatestSeq > 0L && durableSeq >= detailLatestSeq) {
+                    settleConfirmedMessagesInRoom(sessionId, durableSeq)
+                }
+            }
         }
         if (result.status in setOf(SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled, SessionStatus.Idle)) {
             liveFeedMuted.remove(sessionId)
@@ -2676,7 +2714,7 @@ class RoomSessionRepository(
         executePending(sessionId, requestId, "send_message", path, body) {
             execute(ApiRequest("POST", path, body, requestId, requestId))
         }
-        refreshSessionDetail(sessionId)
+        refreshSessionDetail(sessionId, recordAuthoritativeIdle = false)
     }
 
     override suspend fun sendMessage(
@@ -2702,7 +2740,7 @@ class RoomSessionRepository(
             executePending(sessionId, requestId, "send_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
-            refreshSessionDetail(sessionId)
+            refreshSessionDetail(sessionId, recordAuthoritativeIdle = false)
             return
         }
 
@@ -2744,7 +2782,7 @@ class RoomSessionRepository(
                 throw error
             }
         }
-        runCatching { refreshSessionDetail(sessionId) }
+        runCatching { refreshSessionDetail(sessionId, recordAuthoritativeIdle = false) }
     }
 
     private suspend fun markFirstTurnAccepted(sessionId: String) = sessionListRefreshMutex.withLock {
@@ -2791,7 +2829,7 @@ class RoomSessionRepository(
         }
         val payload = codec.decode(serializer<QueueMutationResponseDto>(), response.body)
         val session = payload.session?.let { persistSessionJson(it, sessionId) }
-            ?: refreshSessionDetail(sessionId)
+            ?: refreshSessionDetail(sessionId, recordAuthoritativeIdle = false)
         return QueueMutationResult(
             session = session,
             requestId = payload.requestId ?: requestId,
@@ -2837,7 +2875,7 @@ class RoomSessionRepository(
                 codec.decode(serializer<SendMessageResponseDto>(), response.body).steered
             }.getOrDefault(false)
         }
-        runCatching { refreshSessionDetail(sessionId) }
+        runCatching { refreshSessionDetail(sessionId, recordAuthoritativeIdle = false) }
         return steered
     }
 
@@ -4308,9 +4346,10 @@ private class RoomEventSink(
         if (session != null) {
             val terminal = event.terminalRunState()
             val currentRunId = activeRunId(scope)
-            val isOtherRunTerminal = terminal != null && !event.runId.isNullOrBlank() &&
-                (if (type == "run_terminal") event.runId != currentRunId
-                 else !currentRunId.isNullOrBlank() && event.runId != currentRunId)
+            val isOtherRunTerminal = terminal != null &&
+                !event.runId.isNullOrBlank() &&
+                !currentRunId.isNullOrBlank() &&
+                event.runId != currentRunId
             val status = (if (isOtherRunTerminal) null else terminal)?.let { if (it == "interrupted") "cancelled" else it } ?: when {
                 isOtherRunTerminal -> session.status
                 type.contains("approval_request") -> if (event.isBlocking == false) session.status else "waiting_approval"
@@ -4469,19 +4508,33 @@ private fun hasTerminalSessionDetail(item: JsonObject): Boolean {
     return reportedState.trim().lowercase() in TERMINAL_SESSION_STATUS_NAMES
 }
 
-/** Idle detail is authoritative only when it also says there is no active wait or run. */
+/** Idle detail is authoritative only when it also says there is no active wait, queue, or run. */
 private fun isAuthoritativelyIdleSession(item: JsonObject): Boolean {
-    val sessionState = (item.string("status") ?: item.string("workflowState"))?.trim()?.lowercase()
-    if (sessionState != "idle") return false
+    val status = item.string("status")?.trim()?.lowercase()
     val workflowState = item.string("workflowState")?.trim()?.lowercase()
-    if (workflowState in WAITING_SESSION_STATES) return false
+    if (status in WAITING_SESSION_STATES || workflowState in WAITING_SESSION_STATES) return false
+    val sessionState = status ?: workflowState
+    if (sessionState != null && sessionState != "idle") return false
     val attention = item.string("waitingAction") ?: item.string("attentionKind")
     if (!attention.isNullOrBlank()) return false
+    val activeRuns = item["activeRuns"] as? JsonArray
+    if (activeRuns != null && activeRuns.isNotEmpty()) return false
+    val queuedMessages = item["queuedMessages"] as? JsonArray
+    if (queuedMessages != null && queuedMessages.isNotEmpty()) return false
     val activity = item["activity"] as? JsonObject
-    if ((activity?.get("actionRequired") as? JsonPrimitive)?.booleanOrNull == true) return false
-    val run = activity?.get("run") as? JsonObject ?: return true
-    val runState = (run["state"] ?: run["status"])?.let { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
-    return runState == "idle" || runState in TERMINAL_RUN_ACTIVITY_STATES
+        ?: return sessionState == "idle"
+    if ((activity["actionRequired"] as? JsonPrimitive)?.booleanOrNull == true) return false
+    val queueObj = activity["queue"] as? JsonObject
+    val queueCount = (queueObj?.get("count") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        ?: (activity["queuedCount"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
+        ?: (activity["queue"] as? JsonArray)?.size
+        ?: 0
+    if (queueCount > 0) return false
+    val queueState = (queueObj?.get("state") as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()
+    if (queueState != null && queueState != "idle") return false
+    val run = activity["run"] as? JsonObject ?: return sessionState == "idle"
+    val runState = (run["state"] ?: run["status"])?.let { (it as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase() }
+    return runState == "idle" || (sessionState == "idle" && runState in TERMINAL_RUN_ACTIVITY_STATES)
 }
 
 private fun ApprovalEntity.requestIdFromDetails(): String? = runCatching {

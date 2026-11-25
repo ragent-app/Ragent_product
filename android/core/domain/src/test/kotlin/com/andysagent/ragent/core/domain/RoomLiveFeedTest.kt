@@ -448,6 +448,106 @@ class RoomLiveFeedTest {
             assertEquals(5L, repo.observeAuthoritativeIdleAtSeq("s-idle").first())
         } finally { repo.close(); database.close() }
     }
+
+    @Test fun realSessionDetailIdlePayloadPreservesWatermarkRetiresLiveOverlaysAndSettlesRunTerminalAfterIdleActivity() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val database = Room.inMemoryDatabaseBuilder(context, RagentDatabase::class.java).allowMainThreadQueries().build()
+        var eventsBody = "{}"
+        val realIdleSessionDetailJson = """
+            {
+              "session": {
+                "id": "s-real",
+                "title": "Real session",
+                "latestSeq": 205,
+                "activity": {
+                  "run": { "state": "idle", "runId": null },
+                  "queue": { "state": "idle", "count": 0 }
+                },
+                "activeRuns": [],
+                "queuedMessages": []
+              }
+            }
+        """.trimIndent()
+        val transport = HandlerTransport { req ->
+            when {
+                req.path == "/api/sessions/s-real" -> ApiResponse(200, realIdleSessionDetailJson)
+                req.path.contains("filter=visible") -> ApiResponse(200, """{"sessionId":"s-real","events":[],"latestSeq":205}""")
+                else -> ApiResponse(200, eventsBody)
+            }
+        }
+        val repo = RoomSessionRepository(database, transport)
+        try {
+            database.dao().upsertSessions(listOf(SessionEntity("s-real", "Real session", null, "working", 203L, 0L)))
+            database.dao().upsertCursor(com.andysagent.ragent.core.database.SyncCursorEntity("s-real", 203L, null, null, null, 0L))
+            eventsBody = """
+                {
+                  "sessionId": "s-real",
+                  "events": [
+                    {"seq": 204, "type": "message", "role": "user", "canonicalMessageId": "u-204", "content": "Prompt", "requestId": "req-204"},
+                    {"seq": 205, "type": "message", "role": "assistant", "canonicalMessageId": "a-205", "content": "Final answer", "runId": "run_x", "messageState": "completed"}
+                  ],
+                  "latestSeq": 205,
+                  "runActivity": { "state": "idle", "runId": null, "queue": { "count": 0 } }
+                }
+            """.trimIndent()
+            assertEquals(RefreshResult.Applied(2, 205L), repo.refreshEvents("s-real"))
+            assertEquals(205L, repo.observeAuthoritativeIdleAtSeq("s-real").first())
+
+            // Real /api/sessions/:id omits "status" and "workflowState"; refreshSessionDetail must preserve authoritativeIdleAtSeq.
+            val detail = repo.refreshSessionDetail("s-real")
+            assertEquals(com.andysagent.ragent.core.model.SessionStatus.Idle, detail?.status)
+            assertEquals(205L, repo.observeAuthoritativeIdleAtSeq("s-real").first())
+
+            // Simulate stale liveOnly text_delta arriving with a different entityId and unmerged delta text after durable completion.
+            repo.applyLiveEvents("s-real", listOf(
+                com.andysagent.ragent.core.protocol.SessionEventDto(
+                    seq = 0,
+                    eventId = "live-stale-205",
+                    type = "text_delta",
+                    role = "assistant",
+                    entityId = "stream-block-stale",
+                    text = "Stale trailing delta",
+                    runId = "run_x",
+                    messageState = "streaming",
+                ),
+            ))
+            withTimeout(5_000) {
+                repo.observeTimeline("s-real").first { items ->
+                    items.filterIsInstance<TimelineItem.Message>().any {
+                        it.id.contains("stream-block-stale") && it.text == "Stale trailing delta" && !it.completed
+                    }
+                }
+            }
+
+            // refreshSessionDetail on the real idle payload restores authoritativeIdleAtSeq and retires stale live text_delta overlays.
+            repo.refreshSessionDetail("s-real")
+            assertEquals(205L, repo.observeAuthoritativeIdleAtSeq("s-real").first())
+            val settledTimeline = withTimeout(5_000) {
+                repo.observeTimeline("s-real").first { items ->
+                    val messages = items.filterIsInstance<TimelineItem.Message>()
+                    messages.any { it.id == "a-205" && it.completed } &&
+                        messages.none { it.id.contains("stream-block-stale") || !it.completed }
+                }
+            }.filterIsInstance<TimelineItem.Message>()
+            assertEquals(listOf("u-204", "a-205"), settledTimeline.map { it.id })
+
+            // run_terminal arriving after activityJob already flipped runActivityState to idle (currentRunId == null) must settle SessionEntity.status.
+            database.dao().upsertSessions(listOf(SessionEntity("s-real", "Real session", null, "working", 205L, 0L)))
+            eventsBody = """
+                {
+                  "sessionId": "s-real",
+                  "events": [
+                    {"seq": 206, "id": "term-206", "type": "run_terminal", "runId": "run_x", "state": "completed"}
+                  ],
+                  "latestSeq": 206,
+                  "runActivity": { "state": "idle", "runId": null, "queue": { "count": 0 } }
+                }
+            """.trimIndent()
+            assertEquals(RefreshResult.Applied(1, 206L), repo.refreshEvents("s-real"))
+            assertEquals("completed", database.dao().getSession("s-real")?.status)
+            assertEquals(com.andysagent.ragent.core.model.SessionStatus.Completed, repo.observeSession("s-real").first()?.status)
+        } finally { repo.close(); database.close() }
+    }
 }
 
 private class HandlerTransport(

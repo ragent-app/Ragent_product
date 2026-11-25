@@ -119,6 +119,52 @@ class LiveTimelineProjector {
         revisionClock = renderedEvents.values.mapNotNull { it.revision }.maxOrNull() ?: 0L
     }
 
+    /**
+     * Retires stale ephemeral live text/thinking overlays once the session is
+     * authoritatively idle or durable history has caught up, and marks their
+     * run IDs terminal so replayed live frames cannot resurrect them.
+     */
+    fun retireEphemeralTextOverlays(): Set<String> {
+        val retiredRunIds = linkedSetOf<String>()
+        val retiredKeys = mutableListOf<String>()
+        renderedEvents.entries.forEach { (key, event) ->
+            if (key !in ephemeralRenderKeys) return@forEach
+            val isEphemeralTextDelta = event.type == "text_delta" ||
+                (event.messageState == "streaming" && event.role == TimelineRole.Agent)
+            val isEphemeralThinking = key.startsWith("thinking:") &&
+                event.operationStatus in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
+            if (isEphemeralTextDelta || isEphemeralThinking) {
+                retiredKeys += key
+                event.runId?.takeIf(String::isNotBlank)?.let {
+                    terminalRunIds += it
+                    retiredRunIds += it
+                }
+            }
+        }
+        retiredKeys.forEach { key ->
+            val removed = renderedEvents.remove(key)
+            ephemeralRenderKeys.remove(key)
+            messageStates.remove(key)
+            val entityId = removed?.entityId ?: key
+            textByEntity.remove(entityId)
+            textByEntity.remove(key)
+            if (key.startsWith("thinking:")) {
+                val raw = key.removePrefix("thinking:")
+                accumulator.clear("$raw:reasoning")
+            } else {
+                accumulator.clear(entityId)
+                accumulator.clear(key)
+            }
+        }
+        if (retiredKeys.isNotEmpty()) {
+            latestSeq = maxOf(
+                durableSeq,
+                renderedEvents.filterKeys { it !in ephemeralRenderKeys }.values.maxOfOrNull { it.seq } ?: 0L,
+            )
+        }
+        return retiredRunIds
+    }
+
     fun apply(events: Iterable<SessionEventDto>): LiveTimelineResult {
         for (event in events) {
             val isReasoningType = event.type?.lowercase() in setOf("reasoning", "thinking_block")

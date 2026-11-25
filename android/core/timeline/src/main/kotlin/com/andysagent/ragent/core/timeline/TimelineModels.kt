@@ -157,19 +157,23 @@ fun latestTurnScopedRunId(items: List<TimelineItem>): String? {
     val promptRequestId = prompt.requestId?.takeIf(String::isNotBlank)
     val scoped = items.subList(lastUserIdx, items.size)
     if (promptRequestId != null) {
+        val requestRunIds = items.asSequence()
+            .filterIsInstance<TimelineItem.Message>()
+            .filter { it.role == TimelineRole.Agent && it.requestId == promptRequestId }
+            .mapNotNull { it.runId?.takeIf(String::isNotBlank) }
+            .distinct()
+            .toList()
+        if (requestRunIds.size > 1) return null
+        if (requestRunIds.size == 1) return requestRunIds.single()
         scoped.asReversed().firstNotNullOfOrNull { item ->
-            val itemRequestId = (item as? TimelineItem.Message)?.requestId
-            if (itemRequestId != promptRequestId) null else when (item) {
-                is TimelineItem.Message,
-                is TimelineItem.Operation,
-                is TimelineItem.Plan -> item.itemRunId()
-                is TimelineItem.Notice -> null
-            }
+            (item as? TimelineItem.Message)
+                ?.takeIf { it.requestId == promptRequestId }
+                ?.itemRunId()
         }?.let { return it }
     }
     return items.subList(lastUserIdx + 1, items.size).asReversed().firstNotNullOfOrNull { item ->
         val itemRequestId = (item as? TimelineItem.Message)?.requestId?.takeIf(String::isNotBlank)
-        if (promptRequestId != null && itemRequestId != null && itemRequestId != promptRequestId) {
+        if (itemRequestId != null && itemRequestId != promptRequestId) {
             null
         } else {
             when (item) {
@@ -196,7 +200,7 @@ fun settleLatestTurnMessages(items: List<TimelineItem>, terminal: Boolean): List
     val latestUserRequestId = (items.getOrNull(latestUserIndex) as? TimelineItem.Message)
         ?.requestId
         ?.takeIf(String::isNotBlank)
-    val latestRunId = latestTurnRunId(items)
+    val latestRunId = latestTurnScopedRunId(items)
     val runFirstIndex = mutableMapOf<String, Int>()
     items.forEachIndexed { index, item ->
         item.itemRunId()?.let { runId -> runFirstIndex.putIfAbsent(runId, index) }

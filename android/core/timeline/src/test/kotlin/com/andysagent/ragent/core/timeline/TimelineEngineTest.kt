@@ -1022,5 +1022,29 @@ class TimelineEngineTest {
         assertTrue(rebased.single().completed)
     }
 
+    @Test
+    fun `settleLatestTurnMessages settles assistant messages with runId and null requestId when user prompt lacks runId`() {
+        val prevUser = TimelineItem.Message("u-prev", 100, TimelineRole.User, "Earlier", true, requestId = "req-prev", runId = "run-prev")
+        val prevAgent = TimelineItem.Message("a-prev", 101, TimelineRole.Agent, "Earlier reply", true, requestId = "req-prev", runId = "run-prev")
+        val latestUser = TimelineItem.Message("u-latest", 167, TimelineRole.User, "Latest prompt", true, requestId = "req-latest", runId = null)
+        val latestAgent = TimelineItem.Message("a-latest", 168, TimelineRole.Agent, "Live reply", false, requestId = null, runId = "run_x")
+        val latestFollowUp = TimelineItem.Message("a-latest-2", 205, TimelineRole.Agent, "Final reply", false, requestId = null, runId = "run_x")
+        val items = listOf(prevUser, prevAgent, latestUser, latestAgent, latestFollowUp)
+
+        val active = settleLatestTurnMessages(items, terminal = false)
+        assertFalse((active[3] as TimelineItem.Message).completed)
+        assertFalse((active[4] as TimelineItem.Message).completed)
+
+        val settled = settleLatestTurnMessages(items, terminal = true)
+        assertTrue((settled[3] as TimelineItem.Message).completed)
+        assertEquals("completed", (settled[3] as TimelineItem.Message).messageState)
+        assertTrue((settled[4] as TimelineItem.Message).completed)
+        assertEquals("completed", (settled[4] as TimelineItem.Message).messageState)
+
+        val noPromptIds = listOf(latestUser.copy(requestId = null, runId = null), latestAgent)
+        val settledNoPromptIds = settleLatestTurnMessages(noPromptIds, terminal = true)
+        assertTrue((settledNoPromptIds[1] as TimelineItem.Message).completed)
+    }
+
     private fun charFor(i: Int): Char = ('a'.code + ((i - 1) % 26)).toChar()
 }
