@@ -272,7 +272,7 @@ class LiveTimelineProjector {
             || type.contains("done")
             || type.contains("finished")
             || (isReasoning && event.state == "completed")
-            || type == "tool_result"
+            || (type == "tool_result" && event.operationLifecycle != "delta")
 
         val operationState = event.status ?: event.state ?: event.operationLifecycle
         val isToolUse = type == "tool_use" || type == "tool_call" || (type == "operation" && operationState in setOf("in_progress", "running", "started"))
@@ -421,8 +421,10 @@ class LiveTimelineProjector {
 
         val operationStatus = when {
             isReasoning -> if (isComplete || lateDelta) TimelineOperationStatus.Completed else TimelineOperationStatus.InProgress
+            previous?.operationStatus in setOf(TimelineOperationStatus.Completed, TimelineOperationStatus.Failed) &&
+                operationState in setOf("delta", "started", "running", "in_progress") -> previous?.operationStatus
             operationState in setOf("waiting_approval", "waiting_user", "approval_requested", "pending") -> TimelineOperationStatus.Pending
-            operationState in setOf("started", "running", "in_progress") -> TimelineOperationStatus.InProgress
+            operationState in setOf("delta", "started", "running", "in_progress") -> TimelineOperationStatus.InProgress
             isToolResult -> if ((exitCode != null && exitCode != 0) || operationState in setOf(
                 "failed", "error", "declined", "denied", "interrupted", "cancelled", "canceled",
             )) TimelineOperationStatus.Failed else TimelineOperationStatus.Completed
@@ -445,6 +447,19 @@ class LiveTimelineProjector {
         val isMultiSelect = event.isMultiSelect ?: previous?.isMultiSelect ?: false
         val requiresApproval = operationState in setOf("waiting_approval", "waiting_user", "approval_requested") || type.contains("approval") || type.contains("confirmation") || (previous?.requiresApproval == true && !isComplete && !isToolResult)
 
+        val candidateDescription = event.activityDescription
+            ?: (event.presentation?.get("activityDescription") as? JsonPrimitive)?.contentOrNull
+        val candidateSource = event.activityDescriptionSource
+            ?: (event.presentation?.get("activityDescriptionSource") as? JsonPrimitive)?.contentOrNull
+        val candidateSeq = event.activityDescriptionSeq
+            ?: (event.presentation?.get("activityDescriptionSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull()
+            ?: event.boundarySeq().takeIf { it > 0L }
+        val sourceRank = mapOf("provider_title" to 1, "tool_input_description" to 2)
+        val reliableDescriptionIdentity = !event.operationId.isNullOrBlank() || !event.providerToolUseId.isNullOrBlank() ||
+            !event.providerItemId.isNullOrBlank() || (previous == null && isToolUse)
+        val useCandidate = reliableDescriptionIdentity && !candidateDescription.isNullOrBlank() && sourceRank.containsKey(candidateSource) &&
+            (sourceRank[candidateSource] ?: 0) >= (sourceRank[previous?.activityDescriptionSource] ?: 0) &&
+            (candidateSeq == null || previous?.activityDescriptionSeq == null || candidateSeq >= previous.activityDescriptionSeq)
         return TimelineEvent(
             id = event.dedupeKey() ?: "live:${event.boundarySeq()}",
             seq = renderSeq,
@@ -460,6 +475,10 @@ class LiveTimelineProjector {
             operationKind = operationKind ?: previous?.operationKind,
             operationTitle = operationTitle,
             operationStatus = operationStatus,
+            activityDescription = if (useCandidate) candidateDescription else previous?.activityDescription,
+            activityDescriptionSource = if (useCandidate) candidateSource else previous?.activityDescriptionSource,
+            activityDescriptionSeq = if (useCandidate) candidateSeq else previous?.activityDescriptionSeq,
+            durableStartSeq = previous?.durableStartSeq ?: event.startingSeq().takeIf { it > 0L },
             requiresApproval = requiresApproval,
             toolName = toolName,
             inputJson = inputJson,
@@ -476,8 +495,8 @@ class LiveTimelineProjector {
             streamItemId = event.streamItemId,
             providerMessageId = event.providerMessageId ?: previous?.providerMessageId,
             providerBlockId = event.providerBlockId ?: previous?.providerBlockId,
-            providerItemId = event.providerItemId,
-            providerToolUseId = event.providerToolUseId,
+            providerItemId = event.providerItemId ?: previous?.providerItemId,
+            providerToolUseId = event.providerToolUseId ?: previous?.providerToolUseId,
             responseId = event.responseId,
             metadataJson = mergeMessageMetadataJson(previous?.metadataJson, event.encodeMessageMetadataJson()),
         )

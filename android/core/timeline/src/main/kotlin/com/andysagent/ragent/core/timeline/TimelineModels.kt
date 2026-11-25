@@ -89,6 +89,12 @@ sealed interface TimelineItem {
         val runId: String? = null,
         val beforeAssistantAtSameSeq: Boolean = false,
         val isReasoning: Boolean = false,
+        val activityDescription: String? = null,
+        val activityDescriptionSource: String? = null,
+        val activityDescriptionSeq: Long? = null,
+        val providerToolUseId: String? = null,
+        val providerItemId: String? = null,
+        val durableStartSeq: Long? = null,
     ) : TimelineItem
 
     data class Notice(
@@ -256,6 +262,10 @@ data class TimelineEvent(
     val operationKind: TimelineOperationKind? = null,
     val operationTitle: String? = null,
     val operationStatus: TimelineOperationStatus? = null,
+    val activityDescription: String? = null,
+    val activityDescriptionSource: String? = null,
+    val activityDescriptionSeq: Long? = null,
+    val durableStartSeq: Long? = null,
     val requiresApproval: Boolean = false,
     val toolName: String? = null,
     val inputJson: String? = null,
@@ -526,6 +536,12 @@ class TimelineEngine {
                 runId = event.runId,
                 beforeAssistantAtSameSeq = event.beforeAssistantAtSameSeq,
                 isReasoning = type == "reasoning" || type == "thinking_block",
+                activityDescription = event.activityDescription,
+                activityDescriptionSource = event.activityDescriptionSource,
+                activityDescriptionSeq = event.activityDescriptionSeq,
+                providerToolUseId = event.providerToolUseId,
+                providerItemId = event.providerItemId,
+                durableStartSeq = event.durableStartSeq,
             )
         }
         if (type.contains("approval") || type.contains("confirmation") || type.contains("error") || type.contains("system")) {

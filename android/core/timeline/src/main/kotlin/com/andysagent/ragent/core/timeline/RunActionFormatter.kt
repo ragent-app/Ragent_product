@@ -28,21 +28,38 @@ object RunActionFormatter {
         if (status == RunActionStatus.Other) return null
         if (status == RunActionStatus.WaitingApproval) return forRun(status, phase, items, runId)
         val canonical = fromServer(activity, runId)
+        val activityState = (activity?.get("state") as? JsonPrimitive)?.contentOrNull
+        if (canonical != null && activityState in setOf("queued", "waiting_user", "waiting_approval")) return canonical
         val current = items.drop(items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User } + 1)
         val active = current.filterIsInstance<TimelineItem.Operation>().lastOrNull {
-            (runId.isNullOrBlank() || it.runId.isNullOrBlank() || it.runId == runId) &&
+            (runId.isNullOrBlank() || it.runId == runId) &&
                 it.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
         }
-        val sourceSeq = (activity?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
-        val liveToolIsNewer = active != null && (sourceSeq == 0L || active.seq == 0L || active.seq > sourceSeq)
+        fun activityValue(key: String) = (activity?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val sourceSeq = activityValue("startSeq").toLongOrNull() ?: activityValue("sourceSeq").toLongOrNull() ?: 0L
+        val sameOperation = active != null && (
+            (canonical?.operationId != null && canonical.operationId == active.id) ||
+            (active.providerToolUseId?.isNotBlank() == true && active.providerToolUseId == activityValue("providerToolUseId")) ||
+            (active.providerItemId?.isNotBlank() == true && active.providerItemId == activityValue("providerItemId"))
+        )
+        val liveStartSeq = active?.durableStartSeq ?: 0L
+        val liveToolIsNewer = active != null && !sameOperation && liveStartSeq > 0L && (sourceSeq == 0L || liveStartSeq > sourceSeq)
+        val descriptionSeq = activityValue("activityDescriptionSeq").toLongOrNull() ?: 0L
+        val descriptionRank = mapOf("provider_title" to 1, "tool_input_description" to 2)
+        if (sameOperation && active != null && !active.activityDescription.isNullOrBlank() &&
+            (descriptionRank[active.activityDescriptionSource] ?: 0) >= (descriptionRank[activityValue("activityDescriptionSource")] ?: 0) &&
+            (activityValue("activityDescription").isBlank() || (active.activityDescriptionSeq ?: 0L) > descriptionSeq)) {
+            return fromActiveOperation(active)
+        }
         val genericSubject = (activity?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty().trim().lowercase()
             .substringAfterLast("__").substringAfterLast('/')
         val genericTool = canonical?.kind in setOf("tool", "mcp", "other") && genericSubject in setOf("execute", "exec", "tool", "other", "unknown")
-        if ((liveToolIsNewer || genericTool) && active != null &&
-            (canonical == null || genericTool || canonical.kind in setOf("working", "thinking", "think", "responding", "other", "tool"))) {
-            return fromOperation(active!!)
+        if (active != null && (canonical == null || liveToolIsNewer || (genericTool && canonical.operationId == null))) {
+            return fromActiveOperation(active)
         }
-        return fromProgressPlan(items, runId) ?: canonical ?: forRun(status, phase, items, runId)
+        val genericActivity = canonical?.kind in setOf("working", "thinking", "think", "responding", "other") && canonical?.operationId == null
+        return (if (genericActivity) fromProgressPlan(items, runId) else null)
+            ?: canonical ?: fromProgressPlan(items, runId) ?: forRun(status, phase, items, runId)
     }
 
     /** Same canonical activity and subject/lifecycle rules as Web run-activity. */
@@ -85,7 +102,7 @@ object RunActionFormatter {
             "wait", "waiting" -> "Waiting"; else -> value("label").ifBlank { "Working" }
         }
         val action = when {
-            lifecycle in setOf("pending", "waiting_user", "waiting_approval", "approval_requested") || kind == "approval" -> "Waiting for approval"
+            lifecycle in setOf("waiting_user", "waiting_approval", "approval_requested") || kind == "approval" -> "Waiting for approval"
             lifecycle in setOf("failed", "error") -> "Failed"
             lifecycle in setOf("declined", "denied") -> "Declined"
             lifecycle in setOf("interrupted", "cancelled", "canceled") -> "Interrupted"
@@ -142,11 +159,11 @@ object RunActionFormatter {
         if (status !in setOf(RunActionStatus.Working, RunActionStatus.WaitingApproval)) return null
         val operations = items.drop(items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User } + 1)
             .filterIsInstance<TimelineItem.Operation>()
-            .filter { runId.isNullOrBlank() || it.runId.isNullOrBlank() || it.runId == runId }
+            .filter { runId.isNullOrBlank() || it.runId == runId }
         val active = operations.asReversed().firstOrNull {
             it.status == TimelineOperationStatus.InProgress || it.status == TimelineOperationStatus.Pending
         }
-        val action = active?.let(::fromOperation)
+        val action = active?.let(::fromActiveOperation)
         if (status == RunActionStatus.WaitingApproval) {
             return RunActionUiState(
                 kind = "approval",
@@ -179,6 +196,14 @@ object RunActionFormatter {
 
     /** Historical rows describe their own operation regardless of lifecycle. */
     fun forOperation(operation: TimelineItem.Operation): RunActionUiState = fromOperation(operation)
+
+    private fun fromActiveOperation(operation: TimelineItem.Operation): RunActionUiState {
+        val fallback = fromOperation(operation)
+        val description = operation.activityDescription?.takeIf { it.isNotBlank() }
+        return if (description != null && operation.activityDescriptionSource in setOf("provider_title", "tool_input_description"))
+            fallback.copy(sentence = description.safeDisplay(), presentationVerb = null, presentationSubject = "")
+        else fallback
+    }
 
     private fun fromOperation(operation: TimelineItem.Operation): RunActionUiState {
         if (operation.isReasoning) return RunActionUiState("thinking", "Thinking through the task", operationId = operation.id, presentationVerb = "thinking")

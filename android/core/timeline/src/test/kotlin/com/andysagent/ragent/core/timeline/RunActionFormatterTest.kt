@@ -92,11 +92,11 @@ class RunActionFormatterTest {
             """{"state":"working","kind":"responding","sourceSeq":10,"runId":"run-a"}"""
         ) as kotlinx.serialization.json.JsonObject
         val tool = TimelineItem.Operation("read", 11, TimelineOperationKind.Command, "Read", "cat README.md",
-            TimelineOperationStatus.InProgress, runId = "run-a")
+            TimelineOperationStatus.InProgress, runId = "run-a", durableStartSeq = 11)
         fun project(status: RunActionFormatter.RunActionStatus, event: TimelineItem.Operation) =
             RunActionFormatter.project(status, null, listOf(event), activity, "run-a")
         assertEquals("Reading README.md", project(RunActionFormatter.RunActionStatus.Working, tool)?.sentence)
-        assertEquals("Responding", project(RunActionFormatter.RunActionStatus.Working, tool.copy(seq = 9))?.sentence)
+        assertEquals("Responding", project(RunActionFormatter.RunActionStatus.Working, tool.copy(seq = 9, durableStartSeq = 9))?.sentence)
         assertEquals("Waiting for approval", project(RunActionFormatter.RunActionStatus.WaitingApproval, tool)?.sentence)
         assertEquals(null, project(RunActionFormatter.RunActionStatus.Other, tool))
     }

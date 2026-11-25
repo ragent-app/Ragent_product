@@ -284,6 +284,18 @@ class RoomSessionRepository(
     private val terminalApprovalRecoveryOffsets = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val liveTimelineState = MutableStateFlow<Map<String, List<com.andysagent.ragent.core.timeline.TimelineEvent>>>(emptyMap())
     private val runActivityState = MutableStateFlow<Map<String, JsonObject>>(emptyMap())
+    private val runActivityHighWater = mutableMapOf<String, Long>()
+    private val runActivityLock = Any()
+    private val runActivityIssued = mutableMapOf<String, Long>()
+    private val runActivityAccepted = mutableMapOf<String, Long>()
+    private val runActivityLiveEpoch = mutableMapOf<String, Long>()
+    private data class ActivityRequest(val generation: Long, val liveEpoch: Long)
+
+    private fun beginActivityRequest(sessionId: String): ActivityRequest = synchronized(runActivityLock) {
+        val generation = (runActivityIssued[sessionId] ?: 0L) + 1L
+        runActivityIssued[sessionId] = generation
+        ActivityRequest(generation, runActivityLiveEpoch[sessionId] ?: 0L)
+    }
     private val authoritativeIdleAtSeqState = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val sessionTerminalRunIds = java.util.concurrent.ConcurrentHashMap<String, MutableSet<String>>()
     override fun observeRunActivity(sessionId: String): Flow<JsonObject?> =
@@ -531,6 +543,7 @@ class RoomSessionRepository(
     }
 
     private suspend fun readDedicatedLivePage(sessionId: String, probe: Boolean = false): Boolean {
+        val activityRequest = beginActivityRequest(sessionId)
         val cursor = liveFeedCursors[sessionId]
         val path = "/api/sessions/${encode(sessionId)}/events/wait?includeLive=1&liveOnly=1" +
             "&timeoutMs=${if (probe) 1 else 15000}&liveAfterCursor=${cursor?.second ?: 0}" +
@@ -545,7 +558,7 @@ class RoomSessionRepository(
             resetAndMuteLiveFeedLocked(sessionId, clearCursor = true)
             return false
         }
-        applyLivePage(sessionId, page)
+        applyLivePage(sessionId, page, activityRequest)
         return true
     }
 
@@ -718,10 +731,11 @@ class RoomSessionRepository(
     }
 
     private suspend fun refreshCanonicalRunActivity(sessionId: String) {
+        val activityRequest = beginActivityRequest(sessionId)
         val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}/events?filter=visible&limit=1"))
         val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
         if (page.sessionId != sessionId) throw SessionRepositoryException(502, "SESSION_SCOPE_INVALID", "Invalid activity scope", false)
-        recordRunActivityFromPage(sessionId, page)
+        recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
     }
 
     private fun recordTerminalRunIds(sessionId: String, runIds: Iterable<String>): Set<String> {
@@ -759,14 +773,36 @@ class RoomSessionRepository(
         sessionId: String,
         page: SessionEventsPageDto,
         cursorSeq: Long? = null,
-    ) {
-        val activity = page.runActivity as? JsonObject ?: return
-        runActivityState.update { it + (sessionId to activity) }
+        activityRequest: ActivityRequest? = null,
+    ): Boolean {
+        val activity = page.runActivity as? JsonObject ?: return false
         val state = runActivityStateName(activity)
+        val activityRunId = ((activity["runId"] ?: activity["id"]) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+        val pageSeq = page.latestSeq ?: page.pagination?.latestSeq ?: cursorSeq ?: 0L
+        val accepted = synchronized(runActivityLock) {
+            val previous = runActivityState.value[sessionId]
+            val previousState = runActivityStateName(previous)
+            val previousRun = ((previous?.get("runId") ?: previous?.get("id")) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+            val stale = pageSeq > 0L && pageSeq < (runActivityHighWater[sessionId] ?: 0L)
+            val staleRequest = activityRequest != null && activityRequest.generation < (runActivityAccepted[sessionId] ?: 0L)
+            val newerLiveAction = activityRequest != null && state == "idle" && activityRunId == null &&
+                ((runActivityLiveEpoch[sessionId] ?: 0L) > activityRequest.liveEpoch || page.liveEvents.any {
+                    it.terminalRunState() == null && it.type.orEmpty().lowercase() in setOf("run_started", "tool_use", "approval_request")
+                })
+            val resurrected = state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES &&
+                activityRunId != null && activityRunId in currentTerminalRunIds(sessionId)
+            if (stale || staleRequest || newerLiveAction || resurrected) false else {
+                if ((state == "idle" || state in TERMINAL_RUN_ACTIVITY_STATES) && previousState != "idle" && previousRun != null) {
+                    recordTerminalRunIds(sessionId, listOf(previousRun))
+                }
+                if (pageSeq > 0L) runActivityHighWater[sessionId] = maxOf(runActivityHighWater[sessionId] ?: 0L, pageSeq)
+                if (activityRequest != null) runActivityAccepted[sessionId] = maxOf(runActivityAccepted[sessionId] ?: 0L, activityRequest.generation)
+                runActivityState.update { it + (sessionId to activity) }
+                true
+            }
+        }
+        if (!accepted) return false
         if (state in TERMINAL_RUN_ACTIVITY_STATES) {
-            val activityRunId = ((activity["runId"] ?: activity["id"]) as? JsonPrimitive)
-                ?.contentOrNull
-                ?.takeIf(String::isNotBlank)
             if (activityRunId != null) {
                 recordTerminalRunIds(sessionId, listOf(activityRunId))
             }
@@ -800,6 +836,7 @@ class RoomSessionRepository(
         } else if (queueCount > 0 || actionRequired || (state != null && state !in TERMINAL_RUN_ACTIVITY_STATES && state != "idle")) {
             clearAuthoritativeIdle(sessionId)
         }
+        return true
     }
 
     private suspend fun settleConfirmedMessagesInRoom(
@@ -2096,6 +2133,9 @@ class RoomSessionRepository(
             )
         }
         if (hasActiveLiveFrame && batchTerminalRunIds.isEmpty()) {
+            synchronized(runActivityLock) {
+                runActivityLiveEpoch[sessionId] = (runActivityLiveEpoch[sessionId] ?: 0L) + 1L
+            }
             clearAuthoritativeIdle(sessionId)
         }
         val projector = liveProjectors.getOrPut(sessionId) { LiveTimelineProjector() }
@@ -2149,10 +2189,11 @@ class RoomSessionRepository(
         var lastPage: SessionEventsPageDto? = null
         try {
             for (pageIndex in 0 until MAX_DURABLE_SYNC_PAGES) {
+                val activityRequest = beginActivityRequest(sessionId)
                 val response = requestDurableEventPage(eventPagePath(sessionId, after, waitForEvents = false))
                 val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
                 lastPage = page
-                recordRunActivityFromPage(sessionId, page)
+                recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
                 if (page.resetRequired) {
                     check(!throwOnFailure) { "Timeline history requires reset: ${page.reason}" }
                     return RefreshResult.ResetRequired(page.reason)
@@ -2291,6 +2332,7 @@ class RoomSessionRepository(
         var lastTerminalRunActivity: JsonObject? = null
         for (pageIndex in 0 until MAX_DURABLE_SYNC_PAGES) {
             val afterSeq = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
+            val activityRequest = beginActivityRequest(sessionId)
             val response = requestDurableEventPage(
                 eventPagePath(sessionId, afterSeq, waitForEvents = waitForEvents && pageIndex == 0),
             )
@@ -2310,8 +2352,8 @@ class RoomSessionRepository(
                 is SyncResult.Applied -> {
                     totalApplied += result.count
                     latestSeq = result.cursor.lastAppliedSeq
-                    recordRunActivityFromPage(sessionId, page, cursorSeq = latestSeq)
-                    val activitySnapshot = page.runActivity as? JsonObject
+                    val activityAccepted = recordRunActivityFromPage(sessionId, page, cursorSeq = latestSeq, activityRequest = activityRequest)
+                    val activitySnapshot = (page.runActivity as? JsonObject).takeIf { activityAccepted }
                     val activityState = runActivityStateName(activitySnapshot)
                     if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
                         lastTerminalRunActivity = activitySnapshot
@@ -2356,7 +2398,7 @@ class RoomSessionRepository(
                             liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
                         }
                     }
-                    applyLivePage(sessionId, page)
+                    applyLivePage(sessionId, page, activityRequest)
                     val targetLatestSeq = page.latestSeq ?: page.pagination?.latestSeq
                     val hasMore = page.pagination?.hasMoreAfter == true ||
                         (targetLatestSeq != null && latestSeq < targetLatestSeq)
@@ -2364,25 +2406,11 @@ class RoomSessionRepository(
                     if (!hasMore || !advanced) break
                 }
                 is SyncResult.GapDetected -> {
-                    (page.runActivity as? JsonObject)?.let { activity ->
-                        runActivityState.update { it + (sessionId to activity) }
-                        val state = runActivityStateName(activity)
-                        if (state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES) {
-                            clearAuthoritativeIdle(sessionId)
-                        }
-                    }
-                    applyLivePage(sessionId, page)
+                    applyLivePage(sessionId, page, activityRequest)
                     return RefreshResult.Gap(result.expectedSeq, result.receivedSeq)
                 }
                 is SyncResult.InvalidEvent -> {
-                    (page.runActivity as? JsonObject)?.let { activity ->
-                        runActivityState.update { it + (sessionId to activity) }
-                        val state = runActivityStateName(activity)
-                        if (state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES) {
-                            clearAuthoritativeIdle(sessionId)
-                        }
-                    }
-                    applyLivePage(sessionId, page)
+                    applyLivePage(sessionId, page, activityRequest)
                     return RefreshResult.Gap(result.event.boundarySeq(), result.event.boundarySeq())
                 }
             }
@@ -2507,8 +2535,8 @@ class RoomSessionRepository(
         }
     }
 
-    private suspend fun applyLivePage(sessionId: String, page: SessionEventsPageDto) {
-        recordRunActivityFromPage(sessionId, page)
+    private suspend fun applyLivePage(sessionId: String, page: SessionEventsPageDto, activityRequest: ActivityRequest) {
+        recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
         val streamId = page.liveStreamId
         val liveCursor = page.liveCursor
         if (streamId != null && liveCursor != null) {
@@ -2551,9 +2579,10 @@ class RoomSessionRepository(
     }
 
     private suspend fun refreshVisibleTimelineLocked(sessionId: String, preserveLoadedHistory: Boolean = false): RefreshResult {
+        val activityRequest = beginActivityRequest(sessionId)
         val response = execute(ApiRequest("GET", visibleEventPagePath(sessionId, null)))
         val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-        recordRunActivityFromPage(sessionId, page)
+        recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
         recoverVisiblePendingApproval(sessionId, page)
         if (page.resetRequired) {
             timelinePagingState.update { it + (sessionId to TimelinePagingState(error = page.reason)) }

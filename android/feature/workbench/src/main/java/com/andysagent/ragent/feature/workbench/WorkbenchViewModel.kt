@@ -4069,8 +4069,13 @@ class ChatViewModel(
     private fun ChatUiState.projectCurrentAction(): ChatUiState {
         // Run metrics may still describe the previous turn until the first
         // tool projection arrives. Bind activity to the current turn instead.
-        val currentRunId = serverRunActivity?.stringValue("runId") ?: timelineItems.filterIsInstance<TimelineItem.Message>()
-            .lastOrNull { it.role == com.andysagent.ragent.core.timeline.TimelineRole.User }?.runId
+        val currentRunId = com.andysagent.ragent.core.timeline.latestTurnScopedRunId(timelineItems)
+        val latestPrompt = timelineItems.filterIsInstance<TimelineItem.Message>()
+            .lastOrNull { it.role == com.andysagent.ragent.core.timeline.TimelineRole.User }
+        val scopedActivity = serverRunActivity?.takeIf { activity ->
+            currentRunId != null || latestPrompt == null ||
+                (!latestPrompt.requestId.isNullOrBlank() && latestPrompt.requestId == activity.stringValue("requestId"))
+        }
         return copy(
             currentAction = RunActionFormatter.project(
                 status = when (runStatus) {
@@ -4079,7 +4084,7 @@ class ChatViewModel(
                     else -> RunActionFormatter.RunActionStatus.Other
                 },
                 phase = runMetrics.phase, items = timelineItems,
-                activity = serverRunActivity, runId = currentRunId,
+                activity = scopedActivity, runId = currentRunId,
             ),
     )
     }
