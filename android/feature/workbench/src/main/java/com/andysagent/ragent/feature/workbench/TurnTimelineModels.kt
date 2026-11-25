@@ -93,14 +93,15 @@ internal fun shouldAcceptRunProjection(current: RunMetricsUiState, runId: String
 private fun JsonObject.activityString(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
-private fun serverRunActivityStatus(activity: JsonObject?): AgentRunStatus? {
-    if (activity?.activityString("runId") == null) return null
-    return when (activity.activityString("state")?.lowercase()) {
+internal fun activeRunStatus(state: String?): AgentRunStatus? =
+    when (state?.lowercase()) {
         "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
-        "starting", "queued", "working", "running", "streaming" -> AgentRunStatus.Working
+        "starting", "queued", "working", "running", "streaming", "started", "in_progress" -> AgentRunStatus.Working
         else -> null
     }
-}
+
+internal fun activeRunActivityStatus(activity: JsonObject?): AgentRunStatus? =
+    activeRunStatus(activity?.activityString("state"))
 
 internal fun latestTurnHasTerminalRun(
     items: List<TimelineItem>,
@@ -116,7 +117,7 @@ internal fun latestTurnHasTerminalRun(
     if (pending?.state == PendingTurnState.Sending || pending?.state == PendingTurnState.Accepted) return false
     if (acceptedTurns.isNotEmpty() || queuedMessages.isNotEmpty()) return false
     if (sessionStatus == AgentRunStatus.Working || sessionStatus == AgentRunStatus.WaitingApproval) return false
-    if (serverRunActivityStatus(serverRunActivity) != null) return false
+    if (activeRunActivityStatus(serverRunActivity) != null) return false
 
     val terminal = setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
     val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }

@@ -45,6 +45,7 @@ class LiveTimelineProjector {
     private val renderedEvents = linkedMapOf<String, TimelineEvent>()
     private val ephemeralRenderKeys = mutableSetOf<String>()
     private val terminalRunIds = mutableSetOf<String>()
+    private val idleRetiredRunIds = mutableSetOf<String>()
     private val accumulator = StreamingAccumulator()
     private val messageStates = linkedMapOf<String, ProjectedMessage>()
     private var durableSeq = 0L
@@ -122,7 +123,8 @@ class LiveTimelineProjector {
     /**
      * Retires stale ephemeral live text/thinking overlays once the session is
      * authoritatively idle or durable history has caught up, and marks their
-     * run IDs terminal so replayed live frames cannot resurrect them.
+     * run IDs as idle-retired so late frames cannot resurrect them until a
+     * newer authoritative activity snapshot confirms that run is active.
      */
     fun retireEphemeralTextOverlays(): Set<String> {
         val retiredRunIds = linkedSetOf<String>()
@@ -136,7 +138,7 @@ class LiveTimelineProjector {
             if (isEphemeralTextDelta || isEphemeralThinking) {
                 retiredKeys += key
                 event.runId?.takeIf(String::isNotBlank)?.let {
-                    terminalRunIds += it
+                    idleRetiredRunIds += it
                     retiredRunIds += it
                 }
             }
@@ -165,10 +167,15 @@ class LiveTimelineProjector {
         return retiredRunIds
     }
 
+    /** A newer authoritative active snapshot supersedes idle retirement, but not a real terminal. */
+    fun confirmActiveRun(runId: String) {
+        idleRetiredRunIds.remove(runId)
+    }
+
     fun apply(events: Iterable<SessionEventDto>): LiveTimelineResult {
         for (event in events) {
             val isReasoningType = event.type?.lowercase() in setOf("reasoning", "thinking_block")
-            if (event.boundarySeq() == 0L && event.runId in terminalRunIds && (event.isTimelineMessage() || isReasoningType)) continue
+            if (event.boundarySeq() == 0L && (event.runId in terminalRunIds || event.runId in idleRetiredRunIds) && (event.isTimelineMessage() || isReasoningType)) continue
             val start = event.startingSeq()
             val boundary = event.boundarySeq()
             val key = event.dedupeKey() ?: "fingerprint:${event.sessionEventFingerprint()}"

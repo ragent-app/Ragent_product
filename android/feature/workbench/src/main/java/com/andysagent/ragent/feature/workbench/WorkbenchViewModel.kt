@@ -3119,15 +3119,6 @@ class ChatViewModel(
 
     private fun JsonObject.stringValue(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
 
-    private fun activeRunActivityStatus(activity: JsonObject?): AgentRunStatus? {
-        if (activity?.stringValue("runId") == null) return null
-        return when (activity.stringValue("state")?.lowercase()) {
-            "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
-            "starting", "queued", "working", "running", "streaming" -> AgentRunStatus.Working
-            else -> null
-        }
-    }
-
     private fun JsonObject.longValue(key: String): Long? = this[key]?.jsonPrimitive?.longOrNull
 
     private fun JsonObject.timestampValue(key: String): Long? = stringValue(key)?.let { value ->
@@ -3139,9 +3130,7 @@ class ChatViewModel(
         return "%02d:%02d".format(totalSeconds / 60L, totalSeconds % 60L)
     }
 
-    private fun String.toRunStatus(): AgentRunStatus = when (lowercase()) {
-        "working", "running", "started", "in_progress" -> AgentRunStatus.Working
-        "waiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
+    private fun String.toRunStatus(): AgentRunStatus = activeRunStatus(this) ?: when (lowercase()) {
         "completed", "finished", "success", "succeeded" -> AgentRunStatus.Completed
         "failed", "error" -> AgentRunStatus.Failed
         "cancelled", "canceled", "interrupted" -> AgentRunStatus.Cancelled

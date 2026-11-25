@@ -664,32 +664,30 @@ class RoomSessionRepository(
                                 continue
                             }
                         }
-                        if (detail?.status == SessionStatus.Idle || unsettledBefore.isNotEmpty()) {
-                            val latestTurnMaxSeq = dao.getMessages(sessionId)
-                                .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
-                            val expectedWatermark = maxOf(detail?.latestSeq ?: 0L, latestTurnMaxSeq)
-                            val currentIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
-                            if (detail?.status == SessionStatus.Idle && currentIdleSeq < expectedWatermark) {
-                                try {
-                                    refreshCanonicalRunActivity(sessionId)
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (_: Exception) {
-                                    // Transient activity failure; fall back to observed state below.
-                                }
+                        val latestTurnMaxSeq = dao.getMessages(sessionId)
+                            .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
+                        val expectedWatermark = maxOf(detail?.latestSeq ?: 0L, latestTurnMaxSeq)
+                        val currentIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
+                        if (detail?.status == SessionStatus.Idle && currentIdleSeq < expectedWatermark) {
+                            try {
+                                refreshCanonicalRunActivity(sessionId)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                // Transient activity failure; fall back to observed state below.
                             }
-                            val updatedIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
-                            val latestActivity = runActivityState.value[sessionId]
-                            val latestActivityState = runActivityStateName(latestActivity)
-                            val latestQueueCount = runActivityQueueCount(sessionId, latestActivity)
-                            val activeOrQueued = latestQueueCount > 0 ||
-                                detail?.queuedMessages?.isNotEmpty() == true ||
-                                (latestActivityState != null && latestActivityState != "idle" &&
-                                    latestActivityState !in TERMINAL_RUN_ACTIVITY_STATES)
-                            if (activeOrQueued || (updatedIdleSeq > 0L && updatedIdleSeq > result.latestSeq)) {
-                                forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, retryDelayMs)
-                                continue
-                            }
+                        }
+                        val updatedIdleSeq = authoritativeIdleAtSeqState.value[sessionId] ?: 0L
+                        val latestActivity = runActivityState.value[sessionId]
+                        val latestActivityState = runActivityStateName(latestActivity)
+                        val latestQueueCount = runActivityQueueCount(sessionId, latestActivity)
+                        val activeOrQueued = latestQueueCount > 0 ||
+                            detail?.queuedMessages?.isNotEmpty() == true ||
+                            (latestActivityState != null && latestActivityState != "idle" &&
+                                latestActivityState !in TERMINAL_RUN_ACTIVITY_STATES)
+                        if (activeOrQueued || (updatedIdleSeq > 0L && updatedIdleSeq > result.latestSeq)) {
+                            forceDetailRefresh = awaitSessionReconcileDelay(wakeChannel, retryDelayMs)
+                            continue
                         }
                         val detailTerminalSession = detail != null && detail.status in setOf(
                             SessionStatus.Completed,
@@ -831,6 +829,36 @@ class RoomSessionRepository(
             ?: (dao.getSession(sessionId)?.let { queuedMessagesFromJson(it.queuedMessagesJson).size } ?: 0)
     }
 
+    // An unscoped terminal snapshot cannot identify the run it claims has ended. Verify a
+    // known active run without holding the activity lock, then recheck that
+    // neither its projection nor the live epoch changed during the request.
+    private suspend fun confirmUnscopedTerminal(sessionId: String, terminalEvidence: Set<String> = emptySet()): Boolean {
+        val snapshot = synchronized(runActivityLock) {
+            val activity = runActivityState.value[sessionId]
+            val state = runActivityStateName(activity)
+            val runId = ((activity?.get("runId") ?: activity?.get("id")) as? JsonPrimitive)
+                ?.contentOrNull?.takeIf(String::isNotBlank)
+            if (state == null || state == "idle" || state in TERMINAL_RUN_ACTIVITY_STATES || runId == null) null
+            else Triple(runId, activity, runActivityLiveEpoch[sessionId] ?: 0L)
+        } ?: return true
+        val runId = snapshot.first
+        val terminal = runId in terminalEvidence || runId in currentTerminalRunIds(sessionId) || try {
+            val run = loadRunProjection(runId)
+            (run["state"] as? JsonPrimitive)?.contentOrNull?.lowercase() in TERMINAL_RUN_ACTIVITY_STATES
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+        if (!terminal) return false
+        return synchronized(runActivityLock) {
+            val unchanged = runActivityState.value[sessionId] == snapshot.second &&
+                (runActivityLiveEpoch[sessionId] ?: 0L) == snapshot.third
+            if (unchanged) recordTerminalRunIds(sessionId, listOf(runId))
+            unchanged
+        }
+    }
+
     private suspend fun recordRunActivityFromPage(
         sessionId: String,
         page: SessionEventsPageDto,
@@ -841,10 +869,12 @@ class RoomSessionRepository(
         val state = runActivityStateName(activity)
         val activityRunId = ((activity["runId"] ?: activity["id"]) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
         val pageSeq = page.latestSeq ?: page.pagination?.latestSeq ?: cursorSeq ?: 0L
+        if (state == "idle" && activityRunId == null) {
+            val terminalEvidence = page.events.filter { it.terminalRunState() != null }
+                .mapNotNull { it.runId?.takeIf(String::isNotBlank) }.toSet()
+            if (!confirmUnscopedTerminal(sessionId, terminalEvidence)) return false
+        }
         val accepted = synchronized(runActivityLock) {
-            val previous = runActivityState.value[sessionId]
-            val previousState = runActivityStateName(previous)
-            val previousRun = ((previous?.get("runId") ?: previous?.get("id")) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
             val stale = pageSeq > 0L && pageSeq < (runActivityHighWater[sessionId] ?: 0L)
             val staleRequest = activityRequest != null && activityRequest.generation < (runActivityAccepted[sessionId] ?: 0L)
             val newerLiveAction = activityRequest != null && state == "idle" && activityRunId == null &&
@@ -854,9 +884,6 @@ class RoomSessionRepository(
             val resurrected = state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES &&
                 activityRunId != null && activityRunId in currentTerminalRunIds(sessionId)
             if (stale || staleRequest || newerLiveAction || resurrected) false else {
-                if ((state == "idle" || state in TERMINAL_RUN_ACTIVITY_STATES) && previousState != "idle" && previousRun != null) {
-                    recordTerminalRunIds(sessionId, listOf(previousRun))
-                }
                 if (pageSeq > 0L) runActivityHighWater[sessionId] = maxOf(runActivityHighWater[sessionId] ?: 0L, pageSeq)
                 if (activityRequest != null) runActivityAccepted[sessionId] = maxOf(runActivityAccepted[sessionId] ?: 0L, activityRequest.generation)
                 var acceptedActivity = activity
@@ -874,6 +901,9 @@ class RoomSessionRepository(
             }
         }
         if (!accepted) return false
+        if (activityRunId != null && state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES) {
+            liveProjectionMutex.withLock { liveProjectors[sessionId]?.confirmActiveRun(activityRunId) }
+        }
         if (state in TERMINAL_RUN_ACTIVITY_STATES) {
             if (activityRunId != null) {
                 recordTerminalRunIds(sessionId, listOf(activityRunId))
@@ -1995,6 +2025,7 @@ class RoomSessionRepository(
         refreshSessionDetail(sessionId, recordAuthoritativeIdle = true)
 
     private suspend fun refreshSessionDetail(sessionId: String, recordAuthoritativeIdle: Boolean): Session? {
+        val activityRequest = beginActivityRequest(sessionId)
         val response = execute(ApiRequest("GET", "/api/sessions/${encode(sessionId)}"))
         val root = codec.decode<JsonObject>(serializer<JsonObject>(), response.body)
         val item = root["session"]?.jsonObject ?: root
@@ -2005,6 +2036,30 @@ class RoomSessionRepository(
             (!isAcceptedFirstTurnStatus(initial.status) && isAuthoritativelyIdleSession(item))
         val activity = item["activity"] as? JsonObject
         val activityRun = activity?.get("run") as? JsonObject
+        val unscopedTerminalConfirmed = if (terminalSession && runId == null) {
+            confirmUnscopedTerminal(sessionId)
+        } else true
+        // Reject only terminal state evidence overtaken by a newer activity or
+        // live event, or explicitly referring to a different active run.
+        val conflictsWithLiveActivity = synchronized(runActivityLock) {
+            val current = runActivityState.value[sessionId]
+            val currentState = runActivityStateName(current)
+            val activeId = ((current?.get("runId") ?: current?.get("id")) as? JsonPrimitive)?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+            val active = currentState != null && currentState != "idle" && currentState !in TERMINAL_RUN_ACTIVITY_STATES
+            val detailSeq = initial.latestSeq
+            (runActivityLiveEpoch[sessionId] ?: 0L) > activityRequest.liveEpoch ||
+                (active && (runActivityAccepted[sessionId] ?: 0L) > activityRequest.generation) ||
+                (detailSeq > 0L && detailSeq < (runActivityHighWater[sessionId] ?: 0L)) ||
+                (active && runId != null && activeId != null && runId != activeId)
+        }
+        if (terminalSession && (!unscopedTerminalConfirmed || conflictsWithLiveActivity)) {
+            val previous = dao.getSession(sessionId) ?: return null
+            val retained = initial.copy(status = previous.status, latestSeq = maxOf(initial.latestSeq, previous.latestSeq),
+                workflowState = previous.workflowState, waitingAction = previous.waitingAction)
+            dao.upsertSessions(listOf(retained))
+            return toDomain(retained)
+        }
         val activityRunState = (activityRun?.get("state") ?: activityRun?.get("status"))
             ?.let { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
         val terminalActivityRun = activityRunState in TERMINAL_RUN_ACTIVITY_STATES
@@ -2049,15 +2104,11 @@ class RoomSessionRepository(
                 }
             }
             if (durableSeq >= detailLatestSeq || (activityRunState == "idle" && !hasActiveRuns)) {
-                val retiredRunIds = liveProjectionMutex.withLock {
+                liveProjectionMutex.withLock {
                     liveProjectors[sessionId]?.let { projector ->
-                        val retired = projector.retireEphemeralTextOverlays()
+                        projector.retireEphemeralTextOverlays()
                         liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
-                        retired
-                    }.orEmpty()
-                }
-                if (retiredRunIds.isNotEmpty()) {
-                    recordTerminalRunIds(sessionId, retiredRunIds)
+                    }
                 }
                 if (detailLatestSeq > 0L && durableSeq >= detailLatestSeq) {
                     settleConfirmedMessagesInRoom(sessionId, durableSeq)
@@ -2245,9 +2296,9 @@ class RoomSessionRepository(
         val hasActiveLiveFrame = events.any { event ->
             event.terminalRunState() == null && event.type.orEmpty().lowercase() in setOf(
                 "run_started", "text_delta", "reasoning", "thinking_block", "tool_use", "approval_request",
-            )
+            ) && (event.runId.isNullOrBlank() || event.runId !in batchTerminalRunIds)
         }
-        if (hasActiveLiveFrame && batchTerminalRunIds.isEmpty()) {
+        if (hasActiveLiveFrame) {
             synchronized(runActivityLock) {
                 runActivityLiveEpoch[sessionId] = (runActivityLiveEpoch[sessionId] ?: 0L) + 1L
             }
@@ -4505,9 +4556,6 @@ private class RoomEventSink(
                 type.contains("approval_response") || type.contains("confirmation_response")
                     || type == "privileged_batch_response" || type == "approved_action_batch_response"
                     || type == "approved_action_state" || type.contains("decision") -> "working"
-                type.contains("failed") || type.contains("error") -> "failed"
-                type.contains("cancel") -> "cancelled"
-                type.contains("completed") || type.contains("done") || type.contains("finished") -> "completed"
                 type.contains("started") || type.contains("running") || type.contains("delta") -> "working"
                 else -> session.status
             }
