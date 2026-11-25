@@ -394,4 +394,11 @@
     <string name="connection_status_reconnecting">Reconnexion</string>
     <string name="connection_status_offline">Hors ligne</string>
     <string name="connection_status_auth_required">Auth. requise</string>
+    <string name="run_web_search">Recherche sur le Web</string>
+    <string name="run_web_open">Ouverture de la page</string>
+    <string name="run_web_find">Recherche dans la page</string>
+    <string name="run_web_mixed">Recherche sur le Web</string>
+    <string name="run_web_generic">Navigation sur le Web</string>
+    <string name="run_turn_progress">%1$s · Progression du tour : %2$s</string>
+    <string name="run_turn_progress_only">Progression du tour : %1$s</string>
 </resources>

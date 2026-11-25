@@ -600,4 +600,11 @@
     <string name="connection_status_auth_required">需重新认证</string>
     <string name="runtime_retry_load_error">模型加载失败 · 点击重试</string>
     <string name="runtime_retry_missing_model">未加载模型 · 点击重试</string>
+    <string name="run_web_search">搜索网页</string>
+    <string name="run_web_open">打开网页</string>
+    <string name="run_web_find">在网页中查找</string>
+    <string name="run_web_mixed">检索和查看网页</string>
+    <string name="run_web_generic">浏览网页</string>
+    <string name="run_turn_progress">%1$s · 本轮进度：%2$s</string>
+    <string name="run_turn_progress_only">本轮进度：%1$s</string>
 </resources>

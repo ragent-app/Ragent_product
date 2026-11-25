@@ -394,4 +394,11 @@
     <string name="connection_status_reconnecting">Reconectando</string>
     <string name="connection_status_offline">Sin conexión</string>
     <string name="connection_status_auth_required">Requiere auth.</string>
+    <string name="run_web_search">Buscando en la web</string>
+    <string name="run_web_open">Abriendo página</string>
+    <string name="run_web_find">Buscando en la página</string>
+    <string name="run_web_mixed">Investigando en la web</string>
+    <string name="run_web_generic">Navegando por la web</string>
+    <string name="run_turn_progress">%1$s · Progreso del turno: %2$s</string>
+    <string name="run_turn_progress_only">Progreso del turno: %1$s</string>
 </resources>

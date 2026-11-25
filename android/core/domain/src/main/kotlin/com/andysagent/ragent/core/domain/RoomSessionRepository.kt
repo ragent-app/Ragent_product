@@ -289,6 +289,9 @@ class RoomSessionRepository(
     private val runActivityIssued = mutableMapOf<String, Long>()
     private val runActivityAccepted = mutableMapOf<String, Long>()
     private val runActivityLiveEpoch = mutableMapOf<String, Long>()
+    private data class TurnProgressBoundary(val runId: String, val threadId: String, val turnId: String, val seq: Long)
+    private val turnProgressBoundaries = mutableMapOf<String, TurnProgressBoundary>()
+    private val pendingTurnProgress = mutableMapOf<String, JsonObject>()
     private data class ActivityRequest(val generation: Long, val liveEpoch: Long)
 
     private fun beginActivityRequest(sessionId: String): ActivityRequest = synchronized(runActivityLock) {
@@ -770,6 +773,56 @@ class RoomSessionRepository(
             .firstNotNullOfOrNull { key -> (activity?.get(key) as? JsonPrimitive)?.contentOrNull }
             ?.trim()?.lowercase()
 
+    private fun applyTurnProgressEvents(sessionId: String, events: List<SessionEventDto>) = synchronized(runActivityLock) {
+        var activity = runActivityState.value[sessionId]?.takeUnless {
+            val state = runActivityStateName(it)
+            state == "idle" || state in TERMINAL_RUN_ACTIVITY_STATES
+        }
+        val activeRun = (activity?.get("runId") as? JsonPrimitive)?.contentOrNull
+        var boundary = turnProgressBoundaries[sessionId]?.takeIf { activeRun == null || it.runId == activeRun }
+        val snapshot = activity?.get("turnProgress") as? JsonObject
+        val snapshotTurn = (snapshot?.get("turnId") as? JsonPrimitive)?.contentOrNull
+        val snapshotRun = (snapshot?.get("runId") as? JsonPrimitive)?.contentOrNull
+        val snapshotSeq = (snapshot?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+        if (boundary == null && snapshotRun == activeRun && !activeRun.isNullOrBlank() && !snapshotTurn.isNullOrBlank() && snapshotSeq > 0) {
+            boundary = TurnProgressBoundary(activeRun, "", snapshotTurn, snapshotSeq)
+        }
+        var pending = pendingTurnProgress[sessionId]
+        var progressSeq = maxOf(snapshotSeq, (pending?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L)
+        for (event in events.sortedBy { it.boundarySeq() }) {
+            val seq = event.boundarySeq()
+            val thread = event.providerThreadId.orEmpty()
+            val turn = event.providerTurnId.orEmpty()
+            val eventRun = event.runId?.takeIf { it.isNotBlank() } ?: continue
+            if ((activeRun != null && eventRun != activeRun) || eventRun in currentTerminalRunIds(sessionId) || seq <= 0 || thread.isBlank() || turn.isBlank()) continue
+            if (event.type == "provider_turn_started" && seq > (boundary?.seq ?: 0L)) {
+                if (boundary?.turnId != turn || boundary?.threadId != thread) {
+                    if (seq > progressSeq) { activity = activity?.let { JsonObject(it - "turnProgress") }; pending = null; progressSeq = seq }
+                }
+                boundary = TurnProgressBoundary(eventRun, thread, turn, seq)
+            } else if (event.type == "message" && event.messagePhase == "commentary" && event.providerLifecycle == "completed" &&
+                !event.providerMessageId.isNullOrBlank() && !event.turnProgressText.isNullOrBlank() && seq > progressSeq &&
+                boundary?.runId == eventRun && (boundary.threadId.isBlank() || boundary.threadId == thread) && boundary.turnId == turn && seq > boundary.seq) {
+                val progress = buildJsonObject {
+                    put("text", JsonPrimitive(event.turnProgressText)); put("runId", JsonPrimitive(eventRun))
+                    put("turnId", JsonPrimitive(turn)); put("messageId", JsonPrimitive(event.providerMessageId)); put("sourceSeq", JsonPrimitive(seq))
+                }
+                pending = progress
+                if (activity != null && activeRun == eventRun) activity = JsonObject(activity + ("turnProgress" to progress))
+                progressSeq = seq
+            }
+        }
+        if (boundary != null) {
+            turnProgressBoundaries[sessionId] = boundary
+            if (activity != null) runActivityHighWater[sessionId] = maxOf(runActivityHighWater[sessionId] ?: 0L, boundary.seq, progressSeq)
+        }
+        if (pending == null) pendingTurnProgress.remove(sessionId) else pendingTurnProgress[sessionId] = pending
+        if (activity != null && activity != runActivityState.value[sessionId]) {
+            runActivityState.update { it + (sessionId to activity) }
+            runActivityLiveEpoch[sessionId] = (runActivityLiveEpoch[sessionId] ?: 0L) + 1L
+        }
+    }
+
     private suspend fun runActivityQueueCount(sessionId: String, activity: JsonObject?): Int {
         val queueObj = activity?.get("queue") as? JsonObject
         return (queueObj?.get("count") as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
@@ -806,7 +859,17 @@ class RoomSessionRepository(
                 }
                 if (pageSeq > 0L) runActivityHighWater[sessionId] = maxOf(runActivityHighWater[sessionId] ?: 0L, pageSeq)
                 if (activityRequest != null) runActivityAccepted[sessionId] = maxOf(runActivityAccepted[sessionId] ?: 0L, activityRequest.generation)
-                runActivityState.update { it + (sessionId to activity) }
+                var acceptedActivity = activity
+                val localBoundary = turnProgressBoundaries[sessionId]?.takeIf { it.runId == activityRunId }
+                val pendingSeq = (pendingTurnProgress[sessionId]?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+                if (state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES && localBoundary != null && maxOf(localBoundary.seq, pendingSeq) > pageSeq) {
+                    acceptedActivity = JsonObject(acceptedActivity - "turnProgress")
+                    val pending = pendingTurnProgress[sessionId]
+                    if ((pending?.get("runId") as? JsonPrimitive)?.contentOrNull == activityRunId) {
+                        acceptedActivity = JsonObject(acceptedActivity + ("turnProgress" to pending!!))
+                    }
+                }
+                runActivityState.update { it + (sessionId to acceptedActivity) }
                 true
             }
         }
@@ -2202,6 +2265,7 @@ class RoomSessionRepository(
         val result = withContext(Dispatchers.Default) {
             projector.apply(events)
         }
+        if (result.invalidEvent == null && result.gapExpectedSeq == null) applyTurnProgressEvents(sessionId, events)
         if (android.util.Log.isLoggable("RagentLive", android.util.Log.DEBUG)) {
             android.util.Log.d(
                 "RagentLive",
@@ -2407,6 +2471,7 @@ class RoomSessionRepository(
                     totalApplied += result.count
                     latestSeq = result.cursor.lastAppliedSeq
                     val activityAccepted = recordRunActivityFromPage(sessionId, page, cursorSeq = latestSeq, activityRequest = activityRequest)
+                    applyTurnProgressEvents(sessionId, page.events)
                     val activitySnapshot = (page.runActivity as? JsonObject).takeIf { activityAccepted }
                     val activityState = runActivityStateName(activitySnapshot)
                     if (activityState in TERMINAL_RUN_ACTIVITY_STATES) {
@@ -2758,9 +2823,10 @@ class RoomSessionRepository(
                 operationLifecycle = event.operationLifecycle, exitCode = event.exitCode,
                 activityDescription = event.activityDescription, activityDescriptionSource = event.activityDescriptionSource,
                 activityDescriptionSeq = event.activityDescriptionSeq,
+                operationProgress = event.operationProgress, webAction = event.webAction,
             )
             val fact = existing ?: DurableToolFact(safeEvent).also { facts[key] = it; changed = true }
-            if (existing != null && rank(safeEvent) > 0 && rank(safeEvent) >= rank(fact.description ?: fact.start)) {
+            if (existing != null && ((rank(safeEvent) > 0 && rank(safeEvent) >= rank(fact.description ?: fact.start)) || !safeEvent.operationProgress.isNullOrBlank())) {
                 fact.description = safeEvent
                 changed = true
             }

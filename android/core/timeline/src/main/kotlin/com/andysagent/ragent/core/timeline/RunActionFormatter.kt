@@ -20,6 +20,7 @@ data class RunActionUiState(
     /** Set only for deterministic templates; provider prose stays untouched. */
     val presentationVerb: String? = null,
     val presentationSubject: String = "",
+    val turnProgressText: String? = null,
 )
 
 object RunActionFormatter {
@@ -52,15 +53,32 @@ object RunActionFormatter {
             (activityValue("activityDescription").isBlank() || (active.activityDescriptionSeq ?: 0L) > descriptionSeq)) {
             return fromActiveOperation(active)
         }
+        if (sameOperation && active != null && !active.operationProgress.isNullOrBlank() &&
+            activityValue("activityDescription").isBlank() &&
+            (activityValue("operationProgress").isBlank() || (active.operationProgressSeq ?: 0L) > sourceSeq)) {
+            return fromActiveOperation(active)
+        }
         val genericSubject = (activity?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty().trim().lowercase()
             .substringAfterLast("__").substringAfterLast('/')
         val genericTool = canonical?.kind in setOf("tool", "mcp", "other") && genericSubject in setOf("execute", "exec", "tool", "other", "unknown")
-        if (active != null && (canonical == null || liveToolIsNewer || (genericTool && canonical.operationId == null))) {
-            return fromActiveOperation(active)
-        }
+        val livePreferred = active != null && (canonical == null || liveToolIsNewer || (genericTool && canonical.operationId == null))
         val genericActivity = canonical?.kind in setOf("working", "thinking", "think", "responding", "other") && canonical?.operationId == null
-        return (if (genericActivity) fromProgressPlan(items, runId) else null)
-            ?: canonical ?: fromProgressPlan(items, runId) ?: forRun(status, phase, items, runId)
+        val selected = (if (livePreferred) active?.let(::fromActiveOperation) else null)
+            ?: (if (genericActivity) fromProgressPlan(items, runId) else null)
+            ?: canonical ?: fromProgressPlan(items, runId) ?: forRun(status, phase, items, runId) ?: return null
+        val activeMatches = active != null && (livePreferred || sameOperation)
+        val activeDescription = activeMatches && active != null &&
+            ((!active.activityDescription.isNullOrBlank() && active.activityDescriptionSource in setOf("provider_title", "tool_input_description")) || !active.operationProgress.isNullOrBlank())
+        val canonicalDescription = !livePreferred && canonical != null && listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").any { activityValue(it).isNotBlank() } &&
+            ((!activityValue("activityDescription").isBlank() && activityValue("activityDescriptionSource") in setOf("provider_title", "tool_input_description")) || activityValue("operationProgress").isNotBlank())
+        if (activeDescription || canonicalDescription) return selected
+        val progress = activity?.get("turnProgress") as? JsonObject
+        fun progressValue(key: String) = (progress?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val currentRun = runId?.takeIf { it.isNotBlank() } ?: activityValue("runId").takeIf { it.isNotBlank() }
+        val text = progressValue("text")
+        return if (currentRun != null && progressValue("runId") == currentRun && progressValue("turnId").isNotBlank() &&
+            progressValue("messageId").isNotBlank() && (progressValue("sourceSeq").toLongOrNull() ?: 0L) > 0 && text.isNotBlank())
+            selected.copy(turnProgressText = text) else selected
     }
 
     /** Same canonical activity and subject/lifecycle rules as Web run-activity. */
@@ -117,9 +135,9 @@ object RunActionFormatter {
         val waiting = (liveness?.get("phase") as? JsonPrimitive)?.contentOrNull == "awaiting_provider_output"
             && kind !in setOf("approval", "responding", "waiting")
         val groupedExploration = (group?.get("kind") as? JsonPrimitive)?.contentOrNull == "exploring" && count > 1
-        val modelDescription = value("activityDescription").takeIf {
+        val modelDescription = (value("activityDescription").takeIf { it.isNotBlank() && value("activityDescriptionSource") in setOf("tool_input_description", "provider_title") } ?: value("operationProgress")).takeIf {
             lifecycle in setOf("running", "working", "started", "in_progress") && it.isNotBlank() &&
-                value("activityDescriptionSource") in setOf("tool_input_description", "provider_title") &&
+                (value("operationProgress").isNotBlank() || value("activityDescriptionSource") in setOf("tool_input_description", "provider_title")) &&
                 listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").any { key -> value(key).isNotBlank() } &&
                 value("state") !in setOf("queued", "waiting_user", "waiting_approval", "approval_requested") &&
                 value("actionRequired") != "true" && kind != "approval"
@@ -132,7 +150,8 @@ object RunActionFormatter {
             if (waiting) " · waiting for provider output" else ""
         val localizable = modelDescription == null && !waiting &&
             lifecycle in setOf("running", "working", "started", "in_progress")
-        val presentationVerb = if (!localizable) null else if (groupedExploration) "exploring" else if (isGenericTool) "working" else if (subject.isBlank() && kind !in setOf("command", "execute", "execute_composite", "question")) null else when (kind) {
+        val webAction = value("webAction").takeIf { it in setOf("search", "open", "find", "mixed", "generic") }
+        val presentationVerb = if (!localizable) null else if (webAction != null) "web_$webAction" else if (groupedExploration) "exploring" else if (isGenericTool) "working" else if (subject.isBlank() && kind !in setOf("command", "execute", "execute_composite", "question")) null else when (kind) {
             "command", "execute", "execute_composite" -> "execute"
             "question" -> "question"
             "file_edit", "edit" -> "edit"
@@ -209,7 +228,9 @@ object RunActionFormatter {
         val description = operation.activityDescription?.takeIf { it.isNotBlank() }
         return if (description != null && operation.activityDescriptionSource in setOf("provider_title", "tool_input_description"))
             fallback.copy(sentence = description.safeDisplay(), presentationVerb = null, presentationSubject = "")
-        else fallback
+        else if (!operation.operationProgress.isNullOrBlank()) fallback.copy(sentence = operation.operationProgress.safeDisplay(), presentationVerb = null, presentationSubject = "")
+        else operation.webAction?.takeIf { it in setOf("search", "open", "find", "mixed", "generic") }
+            ?.let { fallback.copy(presentationVerb = "web_$it", presentationSubject = "") } ?: fallback
     }
 
     private fun fromOperation(operation: TimelineItem.Operation): RunActionUiState {

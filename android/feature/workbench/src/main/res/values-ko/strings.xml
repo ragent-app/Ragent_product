@@ -400,4 +400,11 @@
     <string name="timeline_process">활동</string>
     <string name="runtime_retry_load_error">모델 불러오기 실패 · 재시도</string>
     <string name="runtime_retry_missing_model">로드된 모델 없음 · 재시도</string>
+    <string name="run_web_search">웹 검색 중</string>
+    <string name="run_web_open">페이지 여는 중</string>
+    <string name="run_web_find">페이지에서 찾는 중</string>
+    <string name="run_web_mixed">웹 조사 중</string>
+    <string name="run_web_generic">웹 탐색 중</string>
+    <string name="run_turn_progress">%1$s · 이번 턴 진행: %2$s</string>
+    <string name="run_turn_progress_only">이번 턴 진행: %1$s</string>
 </resources>

@@ -9,7 +9,7 @@ import com.andysagent.ragent.core.timeline.RunActionUiState
 @Composable
 internal fun presentRunAction(action: RunActionUiState): String {
     val subject = presentActionSubject(action.presentationSubject.ifBlank { if (action.presentationVerb == "execute") "command" else "" })
-    return when (action.presentationVerb) {
+    val text = when (action.presentationVerb) {
         "read" -> stringResource(R.string.run_action_read, subject)
         "list" -> stringResource(R.string.run_action_list, subject)
         "search" -> stringResource(R.string.run_action_search, subject)
@@ -26,8 +26,15 @@ internal fun presentRunAction(action: RunActionUiState): String {
         "planning" -> stringResource(R.string.run_action_planning)
         "starting" -> stringResource(R.string.run_action_starting)
         "approval" -> stringResource(R.string.run_action_approval)
+        "web_search" -> stringResource(R.string.run_web_search)
+        "web_open" -> stringResource(R.string.run_web_open)
+        "web_find" -> stringResource(R.string.run_web_find)
+        "web_mixed" -> stringResource(R.string.run_web_mixed)
+        "web_generic" -> stringResource(R.string.run_web_generic)
         else -> action.sentence
     }
+    return action.turnProgressText?.takeIf { it.isNotBlank() }
+        ?.let { stringResource(R.string.run_turn_progress, text, it) } ?: text
 }
 
 @Composable

@@ -610,4 +610,11 @@
     <string name="connection_status_auth_required">Auth Required</string>
     <string name="runtime_retry_load_error">Model list failed · Retry</string>
     <string name="runtime_retry_missing_model">No model loaded · Retry</string>
+    <string name="run_web_search">Searching the web</string>
+    <string name="run_web_open">Opening a page</string>
+    <string name="run_web_find">Finding on a page</string>
+    <string name="run_web_mixed">Researching the web</string>
+    <string name="run_web_generic">Browsing the web</string>
+    <string name="run_turn_progress">%1$s · Turn progress: %2$s</string>
+    <string name="run_turn_progress_only">Turn progress: %1$s</string>
 </resources>

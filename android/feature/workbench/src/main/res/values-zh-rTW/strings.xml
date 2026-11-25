@@ -528,4 +528,11 @@
     <string name="connection_status_auth_required">需重新驗證</string>
     <string name="runtime_retry_load_error">模型載入失敗 · 點擊重試</string>
     <string name="runtime_retry_missing_model">未載入模型 · 點擊重試</string>
+    <string name="run_web_search">搜尋網頁</string>
+    <string name="run_web_open">開啟網頁</string>
+    <string name="run_web_find">在網頁中尋找</string>
+    <string name="run_web_mixed">搜尋和查看網頁</string>
+    <string name="run_web_generic">瀏覽網頁</string>
+    <string name="run_turn_progress">%1$s · 本輪進度：%2$s</string>
+    <string name="run_turn_progress_only">本輪進度：%1$s</string>
 </resources>

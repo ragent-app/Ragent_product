@@ -267,7 +267,7 @@ class LiveTimelineProjector {
             }
             return
         }
-        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled", "run_terminal")) return
+        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled", "run_terminal", "provider_turn_started")) return
         if (event.isTimelineMessage()) {
             val id = event.messageProjectionId()
             val before = messageStates[id] ?: textByEntity[id]?.let { baseline ->
@@ -534,6 +534,9 @@ class LiveTimelineProjector {
             outputJson = outputJson,
             exitCode = exitCode,
             durationMs = event.durationMs ?: previous?.durationMs,
+            operationProgress = event.operationProgress?.takeIf { it.isNotBlank() } ?: previous?.operationProgress,
+            operationProgressSeq = if (!event.operationProgress.isNullOrBlank()) event.boundarySeq().takeIf { it > 0L } ?: previous?.operationProgressSeq else previous?.operationProgressSeq,
+            webAction = event.webAction?.takeIf { it in setOf("search", "open", "find", "mixed", "generic") } ?: previous?.webAction,
             beforeAssistantAtSameSeq = event.beforeAssistantAtSameSeq || previous?.beforeAssistantAtSameSeq == true,
             options = options,
             isMultiSelect = isMultiSelect,
