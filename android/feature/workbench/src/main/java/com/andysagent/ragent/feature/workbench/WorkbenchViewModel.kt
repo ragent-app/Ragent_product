@@ -69,6 +69,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -1055,18 +1058,44 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
-            repository.invalidations.collectLatest { hint ->
-                if (hint.type == "sessions_invalidated") refreshSessions()
-                if (hint.type == "harnesses_invalidated") refreshRuntimeCatalog()
+            // Keep a running detail refresh alive while coalescing later hints.
+            // Cancelling it on every provider event can leave an idle Room row
+            // unaware of a Run started from another client until the next sweep.
+            val refreshRequests = Channel<Pair<String, Long>>(Channel.CONFLATED)
+            val directoryRequests = Channel<Unit>(Channel.CONFLATED)
+            val catalogRequests = Channel<Unit>(Channel.CONFLATED)
+            launch { for (ignored in directoryRequests) refreshSessions() }
+            launch { for (ignored in catalogRequests) refreshRuntimeCatalog() }
+            var refreshJob: Job? = null
+            var refreshingSession: String? = null
+            launch {
+                mutableState.map { it.sessionId }.distinctUntilChanged().collect { selected ->
+                    if (refreshingSession != null && refreshingSession != selected) refreshJob?.cancel()
+                }
+            }
+            launch {
+                for ((sessionId, generation) in refreshRequests) {
+                    if (!isCurrentSession(sessionId, generation)) continue
+                    refreshingSession = sessionId
+                    refreshJob = launch { refreshSession(sessionId, generation) }
+                    refreshJob?.join()
+                    refreshJob = null
+                    refreshingSession = null
+                }
+            }
+            repository.invalidations.collect { hint ->
+                if (hint.type == "sessions_invalidated") directoryRequests.trySend(Unit)
+                if (hint.type == "harnesses_invalidated") catalogRequests.trySend(Unit)
                 if (hint.type == "authentication_required") updateConnection(RuntimeConnectionState.AuthenticationRequired)
                 val sessionId = mutableState.value.sessionId
-                if (sessionId != null && (hint.sessionId == null || hint.sessionId == sessionId)) {
-                    if (hint.events.isNotEmpty() && hint.sessionId == sessionId) {
-                        val liveResult = runCatching { repository.applyLiveEvents(sessionId, hint.events) }.getOrNull()
-                        if (liveResult is RefreshResult.Gap) refreshSession(sessionId)
-                    } else {
-                        refreshSession(sessionId)
+                if (sessionId != null && hint.sessionId == sessionId && hint.type in setOf("session_invalidated", "session_events")) {
+                    var needsRefresh = hint.events.isEmpty() || mutableState.value.runStatus !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval)
+                    if (hint.events.isNotEmpty()) {
+                        try { if (repository.applyLiveEvents(sessionId, hint.events) is RefreshResult.Gap) needsRefresh = true }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { needsRefresh = true }
                     }
+                    if (needsRefresh) refreshRequests.trySend(sessionId to sessionGeneration)
                 }
             }
         }
