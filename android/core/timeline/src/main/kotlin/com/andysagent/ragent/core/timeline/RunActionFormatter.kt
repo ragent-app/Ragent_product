@@ -33,6 +33,9 @@ object RunActionFormatter {
         val actionRequired = (activity?.get("actionRequired") as? JsonPrimitive)?.contentOrNull == "true"
         if (canonical != null && (actionRequired || activityState in setOf("queued", "waiting_user", "waiting_approval", "approval_requested"))) return canonical
         val current = items.drop(items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User } + 1)
+        if (current.filterIsInstance<TimelineItem.Message>().any { message ->
+                (runId.isNullOrBlank() || message.runId == runId) && message.asyncQuestions.any { !it.isAnswered }
+            }) return RunActionUiState("question", "Waiting for an answer", presentationVerb = "answer")
         val active = current.filterIsInstance<TimelineItem.Operation>().lastOrNull {
             (runId.isNullOrBlank() || it.runId == runId) &&
                 it.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)

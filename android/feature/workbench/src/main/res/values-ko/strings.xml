@@ -407,4 +407,5 @@
     <string name="run_web_generic">웹 탐색 중</string>
     <string name="run_turn_progress">%1$s · 이번 턴 진행: %2$s</string>
     <string name="run_turn_progress_only">이번 턴 진행: %1$s</string>
+    <string name="run_action_answer">답변 대기 중</string>
 </resources>

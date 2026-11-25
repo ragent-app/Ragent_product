@@ -22,6 +22,7 @@ internal fun presentRunAction(action: RunActionUiState): String {
         "exploring" -> pluralStringResource(R.plurals.run_action_exploring_items, action.groupedCount, action.groupedCount)
         "working" -> stringResource(R.string.run_action_working)
         "question" -> stringResource(R.string.run_action_question)
+        "answer" -> stringResource(R.string.run_action_answer)
         "thinking" -> stringResource(R.string.run_action_thinking)
         "planning" -> stringResource(R.string.run_action_planning)
         "starting" -> stringResource(R.string.run_action_starting)

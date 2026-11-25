@@ -401,4 +401,5 @@
     <string name="run_web_generic">Navigation sur le Web</string>
     <string name="run_turn_progress">%1$s · Progression du tour : %2$s</string>
     <string name="run_turn_progress_only">Progression du tour : %1$s</string>
+    <string name="run_action_answer">En attente d’une réponse</string>
 </resources>

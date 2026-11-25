@@ -401,4 +401,5 @@
     <string name="run_web_generic">Navegando por la web</string>
     <string name="run_turn_progress">%1$s · Progreso del turno: %2$s</string>
     <string name="run_turn_progress_only">Progreso del turno: %1$s</string>
+    <string name="run_action_answer">Esperando una respuesta</string>
 </resources>

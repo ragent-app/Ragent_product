@@ -607,4 +607,5 @@
     <string name="run_web_generic">浏览网页</string>
     <string name="run_turn_progress">%1$s · 本轮进度：%2$s</string>
     <string name="run_turn_progress_only">本轮进度：%1$s</string>
+    <string name="run_action_answer">等待回答</string>
 </resources>
