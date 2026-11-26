@@ -50,6 +50,7 @@ class ProviderOAuthFlowTest {
         val transport = OAuthTransport().apply { failReads = true }
         val vm = WebParityViewModel(WebParityRepository(transport))
         vm.onEvent(WebParityEvent.StartProviderOAuth("codex", "Phone account")); runCurrent()
+        advanceTimeBy(15_000); runCurrent()
         assertFalse(vm.state.value.providerOAuthPolling)
         assertNotNull(vm.state.value.error)
         vm.onEvent(WebParityEvent.StartProviderOAuth("codex", "Duplicate")); runCurrent()
@@ -58,6 +59,41 @@ class ProviderOAuthFlowTest {
         vm.onEvent(WebParityEvent.CheckProviderOAuth); runCurrent()
         assertEquals("completed", vm.state.value.providerOAuthJob!!.state)
         assertEquals(1, transport.requests.count { it.method == "POST" })
+    }
+
+    @Test fun `agy credential submission error is not cleared by non-terminal poll and strips newlines`() = runTest(dispatcher) {
+        val transport = OAuthTransport().apply {
+            agentType = "agy"
+            phase = "awaiting-input"
+            requiresInput = true
+            url = "https://accounts.google.com/o/oauth2/v2/auth?state=agy-test"
+            failInput = true
+        }
+        val vm = WebParityViewModel(WebParityRepository(transport))
+        vm.onEvent(WebParityEvent.StartProviderOAuth("agy", "AGY account")); runCurrent()
+        vm.onEvent(WebParityEvent.SubmitProviderOAuthCredential("http://localhost:43123/auth/callback?code=abc\r\n&state=xyz")); runCurrent()
+        val inputReq = transport.requests.last { it.path.endsWith("/input") }
+        assertEquals(
+            "http://localhost:43123/auth/callback?code=abc&state=xyz",
+            Json.parseToJsonElement(inputReq.body!!).jsonObject["credential"]!!.jsonPrimitive.content,
+        )
+        assertEquals("Invalid callback", vm.state.value.error)
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals("Invalid callback", vm.state.value.error)
+    }
+
+    @Test fun `transient poll failures recover without stopping monitorProviderOAuth`() = runTest(dispatcher) {
+        val transport = OAuthTransport().apply { transientPollFailures = 2 }
+        val vm = WebParityViewModel(WebParityRepository(transport))
+        vm.onEvent(WebParityEvent.StartProviderOAuth("codex", "Phone account")); runCurrent()
+        assertTrue(vm.state.value.providerOAuthPolling)
+        assertNull(vm.state.value.error)
+        advanceTimeBy(3_500); runCurrent()
+        transport.phase = "completed"
+        advanceTimeBy(1_500); runCurrent()
+        assertEquals("completed", vm.state.value.providerOAuthJob!!.state)
+        assertFalse(vm.state.value.providerOAuthPolling)
+        assertNull(vm.state.value.error)
     }
 
     @Test fun `reauthentication targets original provider and does not create another slot`() = runTest(dispatcher) {
@@ -106,18 +142,31 @@ private class OAuthTransport : RagentTransport {
     override fun connectInvalidationSocket() = Unit
     override suspend fun close() = Unit
     val requests = mutableListOf<ApiRequest>()
+    var agentType = "codex"
     var code = ""
     var phase = "pending"
     var jobId = "login_1"
     var url = "https://auth.openai.com/codex/device"
+    var requiresInput = false
     var failReads = false
+    var failInput = false
+    var transientPollFailures = 0
     override suspend fun execute(request: ApiRequest): ApiResponse {
         requests += request
+        if (request.path.endsWith("/input") && failInput) {
+            return ApiResponse(400, """{"error":"Invalid callback"}""")
+        }
         if (request.path.startsWith("/api/native-provider-oauth/jobs")) {
-            if (request.method == "GET" && failReads) return ApiResponse(503, "{}");
+            if (request.method == "GET") {
+                if (failReads) return ApiResponse(503, "{}")
+                if (transientPollFailures > 0) {
+                    transientPollFailures--
+                    return ApiResponse(503, "{}")
+                }
+            }
             return ApiResponse(200, buildJsonObject { put("job", buildJsonObject {
-                put("id", jobId); put("agentType", "codex"); put("state", if (request.method == "POST") "pending" else phase)
-                put("url", url); put("code", code); put("requiresInput", false)
+                put("id", jobId); put("agentType", agentType); put("state", if (request.method == "POST") "pending" else phase)
+                put("url", url); put("code", code); put("requiresInput", requiresInput)
                 put("providerId", if (phase == "completed") "saved-provider" else "")
                 if (phase == "failed") put("error", "LOGIN_FINALIZE_FAILED: synthetic fixture")
             }) }.toString())

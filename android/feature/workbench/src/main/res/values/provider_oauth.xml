@@ -2,7 +2,7 @@
     <string name="provider_oauth_title">Official account login</string>
     <string name="provider_oauth_remote_vault">Sign in using the official page. Credentials are saved only in the connected computer’s Provider vault, not on this phone.</string>
     <string name="provider_oauth_generating">Generating the device code…</string>
-    <string name="provider_oauth_agy_instructions">Open the login page, complete authorization, then copy the text shown on the page and paste it below. AgY may time out after 60 seconds.</string>
+    <string name="provider_oauth_agy_instructions">Open the login page and complete sign-in. If the browser redirects to a localhost page that cannot load, copy the full URL from the address bar (or the code shown on the page) and paste it below.</string>
     <string name="provider_oauth_waiting">Enter this device code on the official page. Return here after authorization; the app checks whether the account was saved.</string>
     <string name="provider_oauth_saving">Saving the account on the connected computer…</string>
     <string name="provider_oauth_saved">Account saved on the connected computer.</string>

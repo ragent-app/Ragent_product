@@ -2,7 +2,7 @@
     <string name="provider_oauth_title">官方帳號登入</string>
     <string name="provider_oauth_remote_vault">請在官方頁面授權。憑證僅儲存在已連線電腦的 Provider 保險庫中，不儲存在手機上。</string>
     <string name="provider_oauth_generating">正在產生裝置碼…</string>
-    <string name="provider_oauth_agy_instructions">請開啟登入頁面並完成授權，然後複製網頁上顯示的文字，貼到下方。AgY 可能在 60 秒後逾時。</string>
+    <string name="provider_oauth_agy_instructions">請開啟登入頁面並完成授權。如果瀏覽器跳轉至無法開啟的 localhost 頁面，請複製瀏覽器網址列中的完整網址（或網頁顯示的授權碼）並貼到下方。</string>
     <string name="provider_oauth_waiting">在官方頁面輸入此裝置碼。授權後返回 App，App 會檢查帳號是否已儲存。</string>
     <string name="provider_oauth_saving">正在已連線的電腦上儲存帳號…</string>
     <string name="provider_oauth_saved">帳號已儲存到已連線的電腦。</string>

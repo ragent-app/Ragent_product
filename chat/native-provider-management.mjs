@@ -382,13 +382,47 @@ async function commitCredentialMutation({
   };
 }
 
-export function projectLoginOutput(value) {
-  const text = String(value || '').slice(-12_000).replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
-  const url = text.match(/https?:\/\/[^\s"'<>\u001b]+/i)?.[0]?.replace(/[),.;]+$/, '') || '';
+function unwrapPtyUrls(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const out = [];
+  for (const line of lines) {
+    const prev = out.length > 0 ? out[out.length - 1] : '';
+    const prevUrl = prev.match(/https?:\/\/[^\s"'<>]+$/i)?.[0] || '';
+    if (
+      prevUrl.length >= 60
+      && /^[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/.test(line)
+      && !/^https?:\/\//i.test(line)
+      && !/^[A-Z0-9]{4,}(?:-[A-Z0-9]{3,})+$/.test(line)
+    ) {
+      out[out.length - 1] = `${prev}${line}`;
+    } else {
+      out.push(line);
+    }
+  }
+  return out.join('\n');
+}
+
+export function projectLoginOutput(value, { agentType = '' } = {}) {
+  const stripped = String(value || '')
+    .slice(-12_000)
+    .replace(/\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  const text = unwrapPtyUrls(stripped);
+  const urls = [...text.matchAll(/https?:\/\/[^\s"'<>\u001b]+/gi)]
+    .map((match) => match[0].replace(/[),.;]+$/, ''))
+    .filter(Boolean);
+  const url = agentType === 'agy'
+    ? (urls.find((candidate) => /^https:\/\/accounts\.google\.com\//i.test(candidate))
+      || urls.find((candidate) => /^https:\/\//i.test(candidate))
+      || urls[0]
+      || '')
+    : (urls[0] || '');
   // Codex prints "command-line" in its welcome banner before the actual
   // device code. Device codes are uppercase; keep the match case-sensitive
   // so prose cannot become a sticky false-positive.
-  const code = text.match(/\b[A-Z0-9]{4,}(?:-[A-Z0-9]{3,})+\b/)?.[0] || '';
+  const code = agentType === 'agy'
+    ? ''
+    : (text.match(/\b[A-Z0-9]{4,}(?:-[A-Z0-9]{3,})+\b/)?.[0] || '');
   return { url, code };
 }
 
@@ -1495,7 +1529,12 @@ export async function deleteNativeProvider({ registry, secretStore, ledger, cred
 async function finalizeOAuthJob(job, { registry, secretStore, ledger, credentialLedger, sourceInstanceId, configDir = CONFIG_DIR }) {
   if (job.agentType === 'agy') {
     const auth = await inspectAgyAuth({ homeDir: job.authHomeDir });
-    if (!auth.loggedIn) throw new Error('agy login did not produce a usable authentication token');
+    if (!auth.loggedIn) {
+      if (process.platform === 'win32' && !job.url) {
+        throw new Error('agy exited without starting browser sign-in or writing an isolated token file (Windows Credential Manager may already hold an existing desktop agy login). Run Ragent as the Windows service or sign out of the desktop agy CLI and retry.');
+      }
+      throw new Error('agy login did not produce a usable authentication token');
+    }
     if (job.baselineAuthSignature && auth.signature === job.baselineAuthSignature) {
       throw new Error('agy login did not change the linked account');
     }
@@ -1802,7 +1841,7 @@ export async function startNativeOAuthLogin({
       const launcherCommand = buildAgyRuntimeShellCommand({ command, args });
       // The PTY is necessary for the CLI's interactive input, but its
       // default echo would copy the authorization text into captured output.
-      const terminalCommand = `stty -echo || exit 1; exec ${launcherCommand}`;
+      const terminalCommand = `stty cols 2048 -echo 2>/dev/null || stty -echo || exit 1; exec ${launcherCommand}`;
       const scriptArgs = process.platform === 'darwin'
         ? ['-q', '/dev/null', 'sh', '-c', terminalCommand]
         : ['-q', '-e', '-f', '-c', terminalCommand, '/dev/null'];
@@ -1821,7 +1860,9 @@ export async function startNativeOAuthLogin({
   loginJobs.set(id, job);
   const capture = (chunk) => {
     job.raw = `${job.raw}${chunk}`.slice(-12_000);
-    Object.assign(job, projectLoginOutput(job.raw));
+    const projected = projectLoginOutput(job.raw, { agentType: job.agentType });
+    if (projected.url) job.url = projected.url;
+    if (job.agentType !== 'agy' && projected.code) job.code = projected.code;
     if (job.agentType === 'codex') {
       job.phase = job.code ? 'awaiting-device-auth' : job.url ? 'generating-device-code' : 'starting';
     }
@@ -1936,9 +1977,20 @@ export function getNativeOAuthLoginJob(id) {
 }
 
 export function normalizeAgyLoginInput(rawInput) {
-  const input = trim(rawInput);
+  let input = trim(rawInput);
   if (!input) throw new Error('credential is required');
-  if (/[\r\n]/.test(input)) throw new Error('credential must be a single line');
+  if (/[\r\n]/.test(input)) {
+    const lines = input.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) throw new Error('credential is required');
+    if (lines.some((line) => /\s/.test(line))) {
+      throw new Error('credential must be a single line');
+    }
+    const joined = lines.join('');
+    if (!/^https?:\/\//i.test(joined) && !/^[A-Za-z0-9._~:/?#[\]@!$&'()*+,;=%-]+$/.test(joined)) {
+      throw new Error('credential must be a single line');
+    }
+    input = joined;
+  }
   if (input.length > 64 * 1024) throw new Error('credential is too large');
   return input;
 }

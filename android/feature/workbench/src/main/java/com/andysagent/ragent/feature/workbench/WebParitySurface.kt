@@ -203,7 +203,13 @@ fun WebParitySurface(
                             )
                             WebParityPage.Files -> FilesPage(state, onEvent)
                             WebParityPage.Triggers -> TriggersPage(state, onEvent)
-                            WebParityPage.Usage -> UsagePage(state.usage)
+                            WebParityPage.Usage -> UsageStatsPage(
+                                usage = state.usage,
+                                selectedDays = state.usageDays,
+                                selectedDate = state.usageSelectedDate,
+                                onSelectDays = { onEvent(WebParityEvent.SelectUsageDays(it)) },
+                                onSelectDate = { onEvent(WebParityEvent.SelectUsageDate(it)) },
+                            )
                         }
                     }
                 },
@@ -213,6 +219,19 @@ fun WebParitySurface(
                     }
                 },
             )
+            if (page == WebParityPage.ModelProviders) {
+                val uriHandler = LocalUriHandler.current
+                val clipboard = LocalClipboardManager.current
+                LaunchedEffect(state.externalUrl) {
+                    state.externalUrl?.let { url ->
+                        state.providerOAuthJob?.takeIf { it.agentType != "agy" && it.url == url && it.code.isNotBlank() }?.let {
+                            clipboard.setText(AnnotatedString(it.code))
+                        }
+                        runCatching { uriHandler.openUri(url) }.onFailure { onEvent(WebParityEvent.ProviderOAuthBrowserFailed) }
+                        onEvent(WebParityEvent.ClearExternalUrl)
+                    }
+                }
+            }
             if (crossProviders && !LocalRestrictedDemoEnvironment.current) ProviderOAuthDialog(state, onEvent)
             state.error?.let { AgentoErrorText(localizedParityError(it), Modifier.fillMaxWidth().padding(RagentSpacing.Gutter)) }
         }
@@ -248,7 +267,7 @@ private fun RemoteSettingsDialog(title: String, confirmLabel: String, onConfirm:
 
 /** Translate app-owned fallback messages while preserving unrecognized server diagnostics. */
 @Composable
-private fun localizedParityError(message: String): String {
+internal fun localizedParityError(message: String): String {
     val resource = when (message) {
         "Account device actions require a verified account session." -> R.string.sp_error_account_required
         "Only account devices can be renamed." -> R.string.sp_error_rename_account_only
@@ -820,9 +839,9 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
     var dialog by remember { mutableStateOf(false) }
     var submitted by remember { mutableStateOf(false) }
     var setupToken by remember { mutableStateOf("") }
-    LaunchedEffect(state.actionInProgress, state.error, state.providerSavedTarget) {
+    LaunchedEffect(state.actionInProgress, state.error, state.providerSavedTarget, state.providerOAuthJob) {
         if (submitted && !state.actionInProgress) {
-            if (state.error == null || state.providerSavedTarget != null) {
+            if (state.error == null || state.providerSavedTarget != null || state.providerOAuthJob != null) {
                 dialog = false
                 setupToken = ""
             }
@@ -840,16 +859,6 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
     var editingProvider by remember { mutableStateOf<WebProvider?>(null) }
     var deletingProvider by remember { mutableStateOf<WebProvider?>(null) }
     val availableHarnesses = remember(state.harnesses) { installedProviderHarnessChoices(state.harnesses) }
-    val clipboard = LocalClipboardManager.current
-    LaunchedEffect(state.externalUrl) {
-        state.externalUrl?.let { url ->
-            state.providerOAuthJob?.takeIf { it.url == url && it.code.isNotBlank() }?.let {
-                clipboard.setText(AnnotatedString(it.code))
-            }
-            runCatching { uriHandler.openUri(url) }.onFailure { onEvent(WebParityEvent.ProviderOAuthBrowserFailed) }
-            onEvent(WebParityEvent.ClearExternalUrl)
-        }
-    }
     Column(Modifier.fillMaxSize().background(LocalRagentColors.current.surfaceLow)) {
       FlowRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp),
           horizontalArrangement = Arrangement.SpaceBetween, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -987,8 +996,7 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
             confirmModifier = Modifier.testTag("provider-save"),
             onConfirm = {
                 val current = editingProvider
-                submitted = current != null || authMode != "oauth"
-                if (!submitted) dialog = false
+                submitted = true
                 if (agentType == "claude" && authMode == "oauth-token") {
                     onEvent(WebParityEvent.SaveClaudeSetupTokenProvider(current?.id, name, setupToken, model))
                 } else if (current != null) {
@@ -1064,7 +1072,12 @@ private fun ProvidersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> 
                             if (editingProvider?.authType == "oauth-token") Text(stringResource(R.string.sp_claude_setup_token_keep), style = MaterialTheme.typography.bodySmall)
                             ManagementField(model, { model = it }, stringResource(R.string.sp_default_model), enabled = !state.actionInProgress)
                         } else {
-                            Text(stringResource(R.string.sp_oauth_hint), style = MaterialTheme.typography.bodySmall)
+                            if (agentType == "agy" && !state.harnesses.any { it.id == "agy" && it.installed }) {
+                                Text(stringResource(R.string.pi_harness_missing), style = MaterialTheme.typography.bodySmall,
+                                    color = LocalRagentColors.current.secondaryContent)
+                            } else {
+                                Text(stringResource(R.string.sp_oauth_hint), style = MaterialTheme.typography.bodySmall)
+                            }
                         }
                     }
                 }
@@ -1081,7 +1094,7 @@ private fun WebParityPage.titleRes(): Int = when (this) {
     WebParityPage.Devices -> R.string.settings_manage_devices
     WebParityPage.Files -> R.string.settings_workspace_files
     WebParityPage.Triggers -> R.string.settings_scheduled_work
-    WebParityPage.Usage -> R.string.settings_usage
+    WebParityPage.Usage -> R.string.usage_stats_title
 }
 
 @OptIn(ExperimentalLayoutApi::class)

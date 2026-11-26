@@ -57,7 +57,7 @@ internal fun ProviderOAuthDialog(state: WebParityUiState, onEvent: (WebParityEve
                 "finalizing" -> R.string.provider_oauth_saving
                 else -> if (job.agentType == "agy") R.string.provider_oauth_agy_instructions else if (job.code.isBlank()) R.string.provider_oauth_generating else R.string.provider_oauth_waiting
             }))
-            if (job.code.isNotBlank()) {
+            if (job.code.isNotBlank() && job.agentType != "agy") {
                 SelectionContainer { Text(job.code, style = MaterialTheme.typography.headlineSmall) }
                 AgentoButton(stringResource(R.string.provider_oauth_copy), { clipboard.setText(AnnotatedString(job.code)) }, secondary = true)
             }
@@ -68,7 +68,7 @@ internal fun ProviderOAuthDialog(state: WebParityUiState, onEvent: (WebParityEve
                     onEvent(WebParityEvent.SubmitProviderOAuthCredential(credential))
                 }, enabled = credential.isNotBlank() && !state.actionInProgress)
             }
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.error?.let { Text(localizedParityError(it), color = MaterialTheme.colorScheme.error) }
         }
     }
 }

@@ -2,7 +2,7 @@
     <string name="provider_oauth_title">官方账号登录</string>
     <string name="provider_oauth_remote_vault">请在官方页面授权。凭据仅保存在已连接电脑的 Provider 保险库中，不保存在手机上。</string>
     <string name="provider_oauth_generating">正在生成设备码…</string>
-    <string name="provider_oauth_agy_instructions">请打开登录页面并完成授权，然后复制网页上显示的文本，粘贴到下方。AgY 可能在 60 秒后超时。</string>
+    <string name="provider_oauth_agy_instructions">请打开登录页面并完成授权。如果浏览器跳转到无法打开的 localhost 页面，请复制浏览器地址栏中的完整网址（或网页显示的授权码）并粘贴到下方。</string>
     <string name="provider_oauth_waiting">在官方页面输入此设备码。授权后返回 App，App 会检查账号是否已保存。</string>
     <string name="provider_oauth_saving">正在已连接的电脑上保存账号…</string>
     <string name="provider_oauth_saved">账号已保存到已连接的电脑。</string>

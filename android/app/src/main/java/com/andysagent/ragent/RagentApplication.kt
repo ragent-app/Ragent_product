@@ -2379,10 +2379,14 @@ class AndroidRuntimeGraph internal constructor(
     suspend fun listProviderInstances(): List<com.andysagent.ragent.feature.workbench.ProviderInstance> {
         initialized.await()
         controlWorkbench?.let { return listOf(com.andysagent.ragent.feature.workbench.ProviderInstance(it.instanceId, it.instanceId)) }
+        val localInstances = configStore.directory.first().computers.filter { it.localRuntime }.map {
+            com.andysagent.ragent.feature.workbench.ProviderInstance(it.instanceId, it.label.ifBlank { it.instanceId })
+        }
         if (configStore.accountSession.first() != null) {
-            return listAccountDirectoryDevices().filter {
+            val remoteInstances = listAccountDirectoryDevices().filter {
                 it.deviceKind.equals("computer", ignoreCase = true) && it.unboundAt.isNullOrBlank()
             }.map { com.andysagent.ragent.feature.workbench.ProviderInstance(it.instanceId, it.alias.ifBlank { it.instanceId }) }
+            return (remoteInstances + localInstances).distinctBy { it.id }
         }
         return configStore.directory.first().computers.map {
             com.andysagent.ragent.feature.workbench.ProviderInstance(it.instanceId, it.label.ifBlank { it.instanceId })

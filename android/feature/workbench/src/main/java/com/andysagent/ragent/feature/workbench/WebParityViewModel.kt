@@ -253,6 +253,8 @@ data class WebParityUiState(
     val triggers: List<WebTrigger> = emptyList(),
     val usageSummary: String? = null,
     val usage: JsonObject? = null,
+    val usageDays: Int = 180,
+    val usageSelectedDate: String? = null,
     /** Current chat context for web-parity pages such as scheduled work. */
     val openSessionId: String? = null,
     /** One-time request to reveal a session created from a web-parity action. */
@@ -274,6 +276,8 @@ sealed interface WebParityEvent {
     data class RetryProviderInstance(val id: String) : WebParityEvent
     data class OpenPage(val page: WebParityPage) : WebParityEvent
     data object Refresh : WebParityEvent
+    data class SelectUsageDays(val days: Int) : WebParityEvent
+    data class SelectUsageDate(val date: String) : WebParityEvent
     data class RefreshAfterReconnect(val targetId: String) : WebParityEvent
     data class TargetChanged(val targetId: String?) : WebParityEvent
     data class CreateAgent(
@@ -388,7 +392,13 @@ sealed interface WebParityEvent {
  */
 class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiResponse) {
     constructor(transport: RagentTransport) : this({ request -> transport.execute(request) })
-    suspend fun load(page: WebParityPage, sessionId: String? = null, codexProviderId: String? = null): WebParitySnapshot = when (page) {
+    suspend fun load(
+        page: WebParityPage,
+        sessionId: String? = null,
+        codexProviderId: String? = null,
+        usageDays: Int = 180,
+        usageSelectedDate: String? = null,
+    ): WebParitySnapshot = when (page) {
         WebParityPage.Agents -> WebParitySnapshot(agents = loadAgents(), availableTools = loadTools())
         WebParityPage.Connectors -> loadConnectors(sessionId, codexProviderId)
         WebParityPage.ModelProviders -> {
@@ -402,7 +412,7 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
         WebParityPage.Devices -> WebParitySnapshot()
         WebParityPage.Files -> WebParitySnapshot(files = loadFiles())
         WebParityPage.Triggers -> WebParitySnapshot(triggers = loadTriggers())
-        WebParityPage.Usage -> WebParitySnapshot(usage = loadUsage())
+        WebParityPage.Usage -> WebParitySnapshot(usage = loadUsage(usageDays, usageSelectedDate))
     }
 
     suspend fun createAgent(name: String, systemPrompt: String, tool: String, welcomeMessage: String, skills: List<String>, perMessageSystemPrompt: JsonObject? = null, templateContext: JsonObject? = null, collaborationPolicy: JsonObject? = null) {
@@ -480,9 +490,10 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
             ?: error("OAuth job could not be read")).also { require(it.id == jobId) { "Provider login job changed" } }
 
     suspend fun submitProviderOAuthCredential(jobId: String, credential: String) {
-        require(credential.trim().isNotEmpty()) { "Credential is required" }
+        val normalized = credential.replace("\r", "").replace("\n", "").trim()
+        require(normalized.isNotEmpty()) { "Credential is required" }
         request("POST", "/api/native-provider-oauth/jobs/${path(jobId)}/input", jsonObject {
-            put("credential", credential.trim())
+            put("credential", normalized)
         })
     }
 
@@ -935,7 +946,17 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
 
     private suspend fun loadTextSummary(path: String): String = request("GET", path).entries.joinToString("\n") { (key, value) -> "$key: ${value.display()}" }
 
-    private suspend fun loadUsage(): JsonObject = request("GET", "/api/usage/summary?days=7&top=10")
+    private suspend fun loadUsage(days: Int = 180, hourlyDate: String? = null): JsonObject {
+        val tzOffsetMinutes = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
+        val query = buildString {
+            append("/api/usage/summary?days=").append(days.coerceIn(1, 366))
+            append("&top=20&heatmapDays=180&tzOffsetMinutes=").append(tzOffsetMinutes)
+            if (!hourlyDate.isNullOrBlank()) {
+                append("&hourlyDate=").append(path(hourlyDate))
+            }
+        }
+        return request("GET", query)
+    }
 
     private suspend fun request(method: String, path: String, body: JsonObject? = null): JsonObject {
         val response = execute(ApiRequest(method, path, body?.toString()))
@@ -1071,6 +1092,18 @@ class WebParityViewModel(
                 refresh(event.page)
             }
             WebParityEvent.Refresh -> mutableState.value.page?.let { refresh(it, preserveTargetId = loadedPageTargetId) }
+            is WebParityEvent.SelectUsageDays -> {
+                if (mutableState.value.usageDays != event.days) {
+                    mutableState.update { it.copy(usageDays = event.days) }
+                    refresh(WebParityPage.Usage, preserveTargetId = loadedPageTargetId)
+                }
+            }
+            is WebParityEvent.SelectUsageDate -> {
+                if (mutableState.value.usageSelectedDate != event.date) {
+                    mutableState.update { it.copy(usageSelectedDate = event.date) }
+                    refresh(WebParityPage.Usage, preserveTargetId = loadedPageTargetId)
+                }
+            }
             is WebParityEvent.RefreshAfterReconnect -> mutableState.value.page?.let {
                 refresh(it, preserveTargetId = event.targetId)
             }
@@ -1445,35 +1478,55 @@ class WebParityViewModel(
         providerOAuthMonitor?.cancel()
         providerOAuthMonitor = viewModelScope.launch {
             var opened = providerOAuthOpenedJobId == id
+            var consecutiveFailures = 0
             mutableState.update { it.copy(providerOAuthPolling = true, error = null) }
             try {
+                var lastPollFailed = false
                 repeat(600) {
-                    val job = (providerOAuthRepository ?: repository).loadProviderOAuthJob(id)
-                    if (mutableState.value.providerOAuthJob?.id != id) return@launch
-                    val open = job.canOpenBrowser && !opened
-                    if (open) { opened = true; providerOAuthOpenedJobId = id }
-                    mutableState.update { it.copy(providerOAuthJob = job,
-                        externalUrl = if (open) job.url else it.externalUrl,
-                        statusMessage = when (job.state) {
-                            "completed" -> "Official account saved on the connected computer"
-                            "failed" -> "Official login failed"
-                            "cancelled" -> "Official login cancelled"
-                            "finalizing" -> "Saving provider on the connected computer"
-                            else -> "Waiting for official login"
-                        }, error = job.error.takeIf { job.state == "failed" }) }
-                    if (job.terminal) {
-                        mutableState.update { it.copy(externalUrl = null) }
-                        if (job.state == "completed") {
-                            if (mutableState.value.page == WebParityPage.ModelProviders) refresh(WebParityPage.ModelProviders)
-                            onRuntimeCatalogChanged?.invoke()
+                    try {
+                        val job = (providerOAuthRepository ?: repository).loadProviderOAuthJob(id)
+                        consecutiveFailures = 0
+                        lastPollFailed = false
+                        if (mutableState.value.providerOAuthJob?.id != id) return@launch
+                        val open = job.canOpenBrowser && !opened
+                        if (open) { opened = true; providerOAuthOpenedJobId = id }
+                        mutableState.update { it.copy(providerOAuthJob = job,
+                            externalUrl = if (open) job.url else it.externalUrl,
+                            statusMessage = when (job.state) {
+                                "completed" -> "Official account saved on the connected computer"
+                                "failed" -> "Official login failed"
+                                "cancelled" -> "Official login cancelled"
+                                "finalizing" -> "Saving provider on the connected computer"
+                                else -> "Waiting for official login"
+                            },
+                            error = when (job.state) {
+                                "failed" -> job.error.ifBlank { "Official login failed" }
+                                "completed", "cancelled" -> null
+                                else -> it.error
+                            }) }
+                        if (job.terminal) {
+                            mutableState.update { it.copy(externalUrl = null) }
+                            if (job.state == "completed") {
+                                if (mutableState.value.page == WebParityPage.ModelProviders) refresh(WebParityPage.ModelProviders)
+                                onRuntimeCatalogChanged?.invoke()
+                            }
+                            return@launch
                         }
-                        return@launch
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        val statusCode = (error as? ApiException)?.statusCode
+                        val terminalHttp = statusCode == 401 || statusCode == 403 || statusCode == 404
+                        if (terminalHttp || ++consecutiveFailures >= 10) {
+                            mutableState.update { it.copy(error = "Login status could not be checked. Check status after reconnecting; no new login was started.") }
+                            return@launch
+                        }
+                        lastPollFailed = true
                     }
-                    delay(1000)
+                    delay(if (lastPollFailed) 1500 else 1000)
                 }
                 mutableState.update { it.copy(error = "Login status is not confirmed. Check status to continue; no new login was started.") }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { mutableState.update { it.copy(error = "Login status could not be checked. Check status after reconnecting; no new login was started.") } }
             finally { mutableState.update { it.copy(providerOAuthPolling = false) } }
         }
     }
@@ -1544,7 +1597,13 @@ class WebParityViewModel(
                 } else if (page == WebParityPage.Files && directory.isNotBlank()) {
                     WebParitySnapshot(files = repository.loadWorkspaceFiles(directory))
                 } else {
-                    repository.load(page, mutableState.value.openSessionId, mutableState.value.codexManagementProviderId)
+                    repository.load(
+                        page = page,
+                        sessionId = mutableState.value.openSessionId,
+                        codexProviderId = mutableState.value.codexManagementProviderId,
+                        usageDays = mutableState.value.usageDays,
+                        usageSelectedDate = mutableState.value.usageSelectedDate,
+                    )
                 }
             }
                 .onSuccess { snapshot ->
