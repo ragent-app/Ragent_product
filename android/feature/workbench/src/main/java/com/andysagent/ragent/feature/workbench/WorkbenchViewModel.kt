@@ -48,6 +48,7 @@ import com.andysagent.ragent.core.model.SessionStatus
 import com.andysagent.ragent.core.network.ActiveCarrier
 import com.andysagent.ragent.core.navigation.AgentoDestination
 import com.andysagent.ragent.core.timeline.TimelineItem
+import com.andysagent.ragent.core.timeline.latestTurnScopedRunId
 import com.andysagent.ragent.core.timeline.AttachmentItem
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
@@ -979,7 +980,16 @@ class ChatViewModel(
                             sessionId = selected.id,
                             sessionTitle = selected.title.ifBlank { "New session" },
                             selectedAgentId = selected.templateId,
-                            runStatus = activeRunActivityStatus(serverRunActivity) ?: selected.status.toAgentStatus(),
+                            // A cached session summary can lag an active turn, including
+                            // while the carrier is connected but activity requests fail.
+                            runStatus = activeRunActivityStatus(serverRunActivity) ?: selected.status.toAgentStatus().let { summary ->
+                                val turnObserved = pendingTurn != null || acceptedTurns.isNotEmpty() ||
+                                    activeRunActivityStatus(serverRunActivity) != null || timelineItems.any {
+                                        it is TimelineItem.Message && it.role == com.andysagent.ragent.core.timeline.TimelineRole.User
+                                    }
+                                if (turnObserved && runStatus in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
+                                    summary !in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval)) runStatus else summary
+                            },
                             queuedMessages = selected.queuedMessages.map(::toQueuedMessageUiState),
                             acceptedTurns = sessionAcceptedTurns[key].orEmpty().filterNot { it.requestId in queueIds },
                         )
@@ -2088,7 +2098,7 @@ class ChatViewModel(
                         sessionId == null && mutableState.value.sessionId == null && sessionGeneration == generation)) {
                     val currentStatus = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus() ?: AgentRunStatus.Idle
                     updateState { copy(isLoading = this.pendingTurn?.state == PendingTurnState.Sending,
-                        runStatus = if (this.pendingTurn?.state == PendingTurnState.Sending) AgentRunStatus.Working else currentStatus) }
+                        runStatus = if (this.pendingTurn?.state == PendingTurnState.Failed) currentStatus else runStatus) }
                 }
             }
         }
@@ -2695,6 +2705,17 @@ class ChatViewModel(
         val initialTurnVisible = restoredPendingTurn != null &&
             uncommittedNewSessions[fixed to sessionId] == restoredPendingTurn.requestId
         val selectedSession = knownSessions.takeIf { knownSessionsRepository === fixed }?.firstOrNull { it.id == sessionId }
+        val queuedRequestIds = selectedSession?.queuedMessages.orEmpty().map { it.requestId }.toSet()
+        val restoredAcceptedTurns = sessionAcceptedTurns[fixed to sessionId].orEmpty()
+            .filterNot { it.requestId in queuedRequestIds }
+        val selectedStatus = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle
+        val initialRunStatus = when {
+            selectedStatus == AgentRunStatus.WaitingApproval -> selectedStatus
+            restoredPendingTurn?.state == PendingTurnState.Sending ||
+                (restoredPendingTurn?.state == PendingTurnState.Accepted && restoredPendingTurn.requestId !in queuedRequestIds) ||
+                restoredAcceptedTurns.isNotEmpty() -> AgentRunStatus.Working
+            else -> selectedStatus
+        }
         lastCatchUpRequested = selectedSession?.let { Triple(fixed, sessionId, it.latestSeq) }
         inFlightRunProjections.clear()
         updateState {
@@ -2704,14 +2725,14 @@ class ChatViewModel(
                 runtimeResolving = true,
                 sessionTitle = selectedSession?.title?.ifBlank { "New session" } ?: "Session",
                 selectedAgentId = selectedSession?.templateId,
-                runStatus = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle,
+                runStatus = initialRunStatus,
                 composerText = restoredDraft,
                 harnessCapabilities = emptyList(),
                 selectedHarnessCapabilities = emptyList(),
                 harnessCapabilitiesLoading = false,
                 harnessCapabilitiesError = null,
                 pendingTurn = restoredPendingTurn,
-                acceptedTurns = sessionAcceptedTurns[fixed to sessionId].orEmpty().filterNot { accepted -> selectedSession?.queuedMessages.orEmpty().any { it.requestId == accepted.requestId } },
+                acceptedTurns = restoredAcceptedTurns,
                 isLoading = restoredPendingTurn?.state == PendingTurnState.Sending,
                 goalText = "",
                 // Never display another session's messages under the newly selected title.
@@ -2736,7 +2757,7 @@ class ChatViewModel(
                 stepTraces = emptyList(),
                 changedFiles = emptyList(),
                 sessionDeliverables = emptyList(),
-                runMetrics = RunMetricsUiState(status = selectedSession?.status?.toAgentStatus() ?: AgentRunStatus.Idle),
+                runMetrics = RunMetricsUiState(status = initialRunStatus),
                 runDurations = emptyMap(),
                 serverRunActivity = null,
                 authoritativeIdleAtSeq = 0L,
@@ -2835,13 +2856,17 @@ class ChatViewModel(
                     if (isCurrentSession(sessionId, generation)) {
                         val activityStatus = activeRunActivityStatus(activity)
                         updateState {
-                            val summaryStatus = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
+                            val activityRunId = activity?.stringValue("runId")
+                            val terminalStatus = (activity?.stringValue("state") ?: activity?.stringValue("status"))?.toRunStatus()
+                            val scopedRunId = latestTurnScopedRunId(timelineItems)
+                            val previousActiveId = serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+                            val noUserTurn = timelineItems.none { it is TimelineItem.Message && it.role == com.andysagent.ragent.core.timeline.TimelineRole.User }
+                            val matchesTurn = activityRunId != null && (activityRunId == scopedRunId ||
+                                (scopedRunId == null && noUserTurn && activityRunId == previousActiveId))
+                            val terminal = terminalStatus in setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
                             copy(serverRunActivity = activity,
-                                runStatus = activityStatus ?: if (activity?.stringValue("state") == "idle" &&
-                                    pendingTurn == null && acceptedTurns.isEmpty()) {
-                                    summaryStatus?.takeUnless { it == AgentRunStatus.Working || it == AgentRunStatus.WaitingApproval }
-                                        ?: AgentRunStatus.Idle
-                                } else runStatus)
+                                runStatus = activityStatus ?: if (terminal && matchesTurn && pendingTurn == null &&
+                                    acceptedTurns.isEmpty() && queuedMessages.isEmpty()) terminalStatus!! else runStatus)
                         }
                         if (activityStatus != null) {
                             activity?.stringValue("runId")?.let { loadRunProjection(sessionId, it, generation) }
@@ -3121,6 +3146,7 @@ class ChatViewModel(
         viewModelScope.launch {
             try {
                 if (!isCurrentSession(sessionId, generation)) return@launch
+                val requestedActivity = mutableState.value.serverRunActivity
                 val projection = fixed.loadRunProjection(runId)
                 if (projection.stringValue("state")?.lowercase() in setOf("completed", "finished", "succeeded", "success", "failed", "error", "interrupted", "cancelled", "canceled")) {
                     stopRequests.remove(Triple(fixed, sessionId, runId))
@@ -3128,7 +3154,20 @@ class ChatViewModel(
                 }
                 val state = mutableState.value
                 val activeRunId = state.serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
-                if (isCurrentSession(sessionId, generation) && (activeRunId ?: latestTimelineRunId(state.timelineItems)) == runId) {
+                if (isCurrentSession(sessionId, generation) && (activeRunId ?: latestTurnScopedRunId(state.timelineItems)) == runId) {
+                    val projectedStatus = (projection.stringValue("state") ?: projection.stringValue("status"))?.toRunStatus()
+                    if (projectedStatus in setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)) {
+                        updateState {
+                            val currentActiveId = serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+                            if (serverRunActivity == requestedActivity &&
+                                activeRunActivityStatus(serverRunActivity) != AgentRunStatus.WaitingApproval &&
+                                approval == null && activeDecision == null && (currentActiveId == null || currentActiveId == runId) &&
+                                pendingTurn == null && acceptedTurns.isEmpty() && queuedMessages.isEmpty() &&
+                                latestTurnScopedRunId(timelineItems) == runId) {
+                                copy(runStatus = projectedStatus!!, serverRunActivity = null)
+                            } else this
+                        }
+                    }
                     updateRunMetricsFromProjection(projection, runId)
                     completedRunDuration(projection)?.let { fixed.saveRunDuration(sessionId, runId, it) }
                 }
@@ -4169,7 +4208,24 @@ class ChatViewModel(
             next.error != previous.error && !preserveClearErrorWhenConnected -> next.copy(clearErrorWhenConnected = false)
             else -> next
         }
-        mutableState.value = normalized.projectCurrentAction()
+        val idleEvidenceChanged = normalized.sessionId != previous.sessionId ||
+            normalized.timelineItems !== previous.timelineItems ||
+            normalized.pendingTurn?.state != previous.pendingTurn?.state ||
+            normalized.acceptedTurns != previous.acceptedTurns || normalized.queuedMessages != previous.queuedMessages ||
+            normalized.serverRunActivity != previous.serverRunActivity ||
+            normalized.authoritativeIdleAtSeq != previous.authoritativeIdleAtSeq || normalized.runStatus != previous.runStatus ||
+            normalized.approval != previous.approval || normalized.activeDecision != previous.activeDecision
+        val pending = normalized.pendingTurn?.state in setOf(PendingTurnState.Sending, PendingTurnState.Accepted)
+        val settled = if (idleEvidenceChanged &&
+            normalized.runStatus in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
+            normalized.authoritativeIdleAtSeq > 0L && !pending &&
+            normalized.acceptedTurns.isEmpty() && normalized.queuedMessages.isEmpty() &&
+            normalized.approval == null && normalized.activeDecision == null &&
+            activeRunActivityStatus(normalized.serverRunActivity) == null &&
+            latestTurnSettledByIdleCursor(normalized.timelineItems, normalized.authoritativeIdleAtSeq, allowEmpty = true)) {
+            normalized.copy(runStatus = AgentRunStatus.Idle)
+        } else normalized
+        mutableState.value = settled.projectCurrentAction()
     }
 
     private fun ChatUiState.projectCurrentAction(): ChatUiState {

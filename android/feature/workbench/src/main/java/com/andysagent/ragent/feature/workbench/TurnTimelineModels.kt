@@ -120,26 +120,27 @@ internal fun latestTurnHasTerminalRun(
     if (activeRunActivityStatus(serverRunActivity) != null) return false
 
     val terminal = setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
-    val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
-    val latestTurnItems = if (lastUserIdx >= 0) items.subList(lastUserIdx, items.size) else items
     val turnRunId = latestTurnScopedRunId(items)
     val matchingRun = turnRunId != null && turnRunId == metrics.runId && metrics.status in terminal
     val completedByDuration = turnRunId != null && turnRunId in runDurations
-    val latestTurnMaxSeq = latestTurnItems.maxOfOrNull { item ->
-        when (item) {
-            is TimelineItem.Message -> maxOf(item.seq, item.lastEventSeq)
-            else -> item.seq
-        }
-    } ?: 0L
-    val hasEphemeralDelta = latestTurnItems.any { item ->
-        item.seq == 0L || (item is TimelineItem.Message && !item.completed && item.lastEventSeq == 0L)
-    }
-    val settledByCursor = authoritativeIdleAtSeq > 0L &&
-        latestTurnMaxSeq > 0L &&
-        authoritativeIdleAtSeq >= latestTurnMaxSeq &&
-        !hasEphemeralDelta
+    val settledByCursor = latestTurnSettledByIdleCursor(items, authoritativeIdleAtSeq)
 
     return sessionStatus in terminal || matchingRun || completedByDuration || settledByCursor
+}
+
+internal fun latestTurnSettledByIdleCursor(
+    items: List<TimelineItem>, idleSeq: Long, allowEmpty: Boolean = false,
+): Boolean {
+    if (idleSeq <= 0L) return false
+    val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
+    val turn = if (lastUserIdx >= 0) items.subList(lastUserIdx, items.size) else items
+    if (turn.isEmpty()) return allowEmpty
+    val maxSeq = turn.maxOf { item ->
+        if (item is TimelineItem.Message) maxOf(item.seq, item.lastEventSeq) else item.seq
+    }
+    return maxSeq > 0L && idleSeq >= maxSeq && turn.none { item ->
+        item.seq == 0L || (item is TimelineItem.Message && !item.completed && item.lastEventSeq == 0L)
+    }
 }
 
 // A delivery event and its empty assistant history mirror can carry the same

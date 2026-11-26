@@ -2037,6 +2037,17 @@ private fun ChatSurface(
         candidateDurationKey
     }
     var observedActive by remember(state.sessionId, durationTurnKey) { mutableStateOf(false) }
+    val confirmedTerminal = latestTurnHasTerminalRun(
+        items = effectiveTimelineItems,
+        pending = state.pendingTurn,
+        sessionStatus = AgentRunStatus.Idle,
+        metrics = state.runMetrics,
+        acceptedTurns = state.acceptedTurns,
+        queuedMessages = if (state.queuedMessages.isNotEmpty()) state.queuedMessages else queuedMessages,
+        serverRunActivity = state.serverRunActivity,
+        runDurations = state.runDurations,
+        authoritativeIdleAtSeq = state.authoritativeIdleAtSeq,
+    )
     val terminalStatus = state.runStatus in setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
     LaunchedEffect(state.sessionId, durationTurnKey, statusActive, terminalStatus, state.connection) {
         if (statusActive) observedActive = true
@@ -3569,8 +3580,10 @@ private fun ChatSurface(
                                     if (seconds < 60) stringResource(R.string.workbench_duration_seconds, seconds)
                                     else stringResource(R.string.workbench_duration_minutes_seconds, seconds / 60, seconds % 60)
                                 } else if (isRunTurn && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A") state.runMetrics.durationFormatted else ""
+                                val hasTerminalDuration = turn.runId?.let(state.runDurations::containsKey) == true ||
+                                    (isRunTurn && confirmedTerminal)
                                 val label = if (duration.isEmpty()) stringResource(R.string.workbench_status_processing) else
-                                    stringResource(if (isRunTurn && showActiveRunAction) R.string.workbench_run_elapsed else R.string.workbench_run_finished, duration)
+                                    stringResource(if (!(isRunTurn && showActiveRunAction) && hasTerminalDuration) R.string.workbench_run_finished else R.string.workbench_run_elapsed, duration)
                                 Text(label,
                                     style = MaterialTheme.typography.labelSmall, color = colors.secondaryContent,
                                     modifier = Modifier.testTag("run-elapsed"))
