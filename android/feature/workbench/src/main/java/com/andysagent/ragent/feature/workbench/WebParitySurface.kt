@@ -203,13 +203,7 @@ fun WebParitySurface(
                             )
                             WebParityPage.Files -> FilesPage(state, onEvent)
                             WebParityPage.Triggers -> TriggersPage(state, onEvent)
-                            WebParityPage.Usage -> UsageStatsPage(
-                                usage = state.usage,
-                                selectedDays = state.usageDays,
-                                selectedDate = state.usageSelectedDate,
-                                onSelectDays = { onEvent(WebParityEvent.SelectUsageDays(it)) },
-                                onSelectDate = { onEvent(WebParityEvent.SelectUsageDate(it)) },
-                            )
+                            WebParityPage.Usage -> UsagePage(state.usage)
                         }
                     }
                 },
@@ -1094,7 +1088,7 @@ private fun WebParityPage.titleRes(): Int = when (this) {
     WebParityPage.Devices -> R.string.settings_manage_devices
     WebParityPage.Files -> R.string.settings_workspace_files
     WebParityPage.Triggers -> R.string.settings_scheduled_work
-    WebParityPage.Usage -> R.string.usage_stats_title
+    WebParityPage.Usage -> R.string.settings_usage
 }
 
 @OptIn(ExperimentalLayoutApi::class)

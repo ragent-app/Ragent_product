@@ -18,6 +18,7 @@ import {
   buildAgyRuntimeEnv,
   buildAgyRuntimeLaunchSpec,
   buildAgyRuntimeShellCommand,
+  shellQuote,
 } from '../lib/agy-runtime.mjs';
 import { resolveToolCommandPathAsync } from '../lib/tools.mjs';
 import { getHarnessDefinition } from '../lib/harness-registry.mjs';
@@ -1842,10 +1843,23 @@ export async function startNativeOAuthLogin({
       // The PTY is necessary for the CLI's interactive input, but its
       // default echo would copy the authorization text into captured output.
       const terminalCommand = `stty cols 2048 -echo 2>/dev/null || stty -echo || exit 1; exec ${launcherCommand}`;
-      const scriptArgs = process.platform === 'darwin'
-        ? ['-q', '/dev/null', 'sh', '-c', terminalCommand]
-        : ['-q', '-e', '-f', '-c', terminalCommand, '/dev/null'];
-      spawnSpec = buildPlatformSpawnSpec(scriptCommand, scriptArgs, { env });
+      if (process.platform === 'darwin') {
+        // macOS script(1) rejects both Node's AF_UNIX socketpair stdio and
+        // named FIFOs with ENOTSUP ("Operation not supported on socket"),
+        // whereas an anonymous kernel pipe(2) returns ENOTTY and enters
+        // non-tty input mode. Feed script via `cat | script` and pass cat's
+        // PID over a short-lived FIFO so `cat` is killed when script exits.
+        const darwinPipeline = [
+          'p=$(mktemp -d "${TMPDIR:-/tmp}/ragent-pty-XXXXXX") || exit 1',
+          'f="$p/pid"',
+          'mkfifo -m 600 "$f" || { rm -rf "$p"; exit 1; }',
+          `/bin/sh -c 'printf "%s\\n" "$$" > "$1"; exec cat 2>/dev/null' _ "$f" | { read -r cp < "$f"; rm -rf "$p"; ${shellQuote(scriptCommand)} -q /dev/null sh -c ${shellQuote(terminalCommand)}; rc=$?; [ -n "$cp" ] && kill "$cp" 2>/dev/null || true; exit "$rc"; }`,
+        ].join('; ');
+        spawnSpec = buildPlatformSpawnSpec('/bin/sh', ['-c', darwinPipeline], { env });
+      } else {
+        const scriptArgs = ['-q', '-e', '-f', '-c', terminalCommand, '/dev/null'];
+        spawnSpec = buildPlatformSpawnSpec(scriptCommand, scriptArgs, { env });
+      }
     }
   }
   if (!spawnSpec) {
@@ -1855,6 +1869,7 @@ export async function startNativeOAuthLogin({
   }
   const child = await spawnManagedProviderProcess(spawnSpec, {
     stdio: ['pipe', 'pipe', 'pipe'],
+    ...(process.platform !== 'win32' ? { detached: true } : {}),
   });
   job.child = child;
   loginJobs.set(id, job);

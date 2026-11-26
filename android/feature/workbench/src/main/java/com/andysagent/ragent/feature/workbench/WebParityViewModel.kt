@@ -253,8 +253,6 @@ data class WebParityUiState(
     val triggers: List<WebTrigger> = emptyList(),
     val usageSummary: String? = null,
     val usage: JsonObject? = null,
-    val usageDays: Int = 180,
-    val usageSelectedDate: String? = null,
     /** Current chat context for web-parity pages such as scheduled work. */
     val openSessionId: String? = null,
     /** One-time request to reveal a session created from a web-parity action. */
@@ -276,8 +274,6 @@ sealed interface WebParityEvent {
     data class RetryProviderInstance(val id: String) : WebParityEvent
     data class OpenPage(val page: WebParityPage) : WebParityEvent
     data object Refresh : WebParityEvent
-    data class SelectUsageDays(val days: Int) : WebParityEvent
-    data class SelectUsageDate(val date: String) : WebParityEvent
     data class RefreshAfterReconnect(val targetId: String) : WebParityEvent
     data class TargetChanged(val targetId: String?) : WebParityEvent
     data class CreateAgent(
@@ -392,13 +388,7 @@ sealed interface WebParityEvent {
  */
 class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiResponse) {
     constructor(transport: RagentTransport) : this({ request -> transport.execute(request) })
-    suspend fun load(
-        page: WebParityPage,
-        sessionId: String? = null,
-        codexProviderId: String? = null,
-        usageDays: Int = 180,
-        usageSelectedDate: String? = null,
-    ): WebParitySnapshot = when (page) {
+    suspend fun load(page: WebParityPage, sessionId: String? = null, codexProviderId: String? = null): WebParitySnapshot = when (page) {
         WebParityPage.Agents -> WebParitySnapshot(agents = loadAgents(), availableTools = loadTools())
         WebParityPage.Connectors -> loadConnectors(sessionId, codexProviderId)
         WebParityPage.ModelProviders -> {
@@ -412,7 +402,7 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
         WebParityPage.Devices -> WebParitySnapshot()
         WebParityPage.Files -> WebParitySnapshot(files = loadFiles())
         WebParityPage.Triggers -> WebParitySnapshot(triggers = loadTriggers())
-        WebParityPage.Usage -> WebParitySnapshot(usage = loadUsage(usageDays, usageSelectedDate))
+        WebParityPage.Usage -> WebParitySnapshot(usage = loadUsage())
     }
 
     suspend fun createAgent(name: String, systemPrompt: String, tool: String, welcomeMessage: String, skills: List<String>, perMessageSystemPrompt: JsonObject? = null, templateContext: JsonObject? = null, collaborationPolicy: JsonObject? = null) {
@@ -946,17 +936,7 @@ class WebParityRepository(private val execute: suspend (ApiRequest) -> ApiRespon
 
     private suspend fun loadTextSummary(path: String): String = request("GET", path).entries.joinToString("\n") { (key, value) -> "$key: ${value.display()}" }
 
-    private suspend fun loadUsage(days: Int = 180, hourlyDate: String? = null): JsonObject {
-        val tzOffsetMinutes = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 60_000
-        val query = buildString {
-            append("/api/usage/summary?days=").append(days.coerceIn(1, 366))
-            append("&top=20&heatmapDays=180&tzOffsetMinutes=").append(tzOffsetMinutes)
-            if (!hourlyDate.isNullOrBlank()) {
-                append("&hourlyDate=").append(path(hourlyDate))
-            }
-        }
-        return request("GET", query)
-    }
+    private suspend fun loadUsage(): JsonObject = request("GET", "/api/usage/summary?days=7&top=10")
 
     private suspend fun request(method: String, path: String, body: JsonObject? = null): JsonObject {
         val response = execute(ApiRequest(method, path, body?.toString()))
@@ -1092,18 +1072,6 @@ class WebParityViewModel(
                 refresh(event.page)
             }
             WebParityEvent.Refresh -> mutableState.value.page?.let { refresh(it, preserveTargetId = loadedPageTargetId) }
-            is WebParityEvent.SelectUsageDays -> {
-                if (mutableState.value.usageDays != event.days) {
-                    mutableState.update { it.copy(usageDays = event.days) }
-                    refresh(WebParityPage.Usage, preserveTargetId = loadedPageTargetId)
-                }
-            }
-            is WebParityEvent.SelectUsageDate -> {
-                if (mutableState.value.usageSelectedDate != event.date) {
-                    mutableState.update { it.copy(usageSelectedDate = event.date) }
-                    refresh(WebParityPage.Usage, preserveTargetId = loadedPageTargetId)
-                }
-            }
             is WebParityEvent.RefreshAfterReconnect -> mutableState.value.page?.let {
                 refresh(it, preserveTargetId = event.targetId)
             }
@@ -1597,13 +1565,7 @@ class WebParityViewModel(
                 } else if (page == WebParityPage.Files && directory.isNotBlank()) {
                     WebParitySnapshot(files = repository.loadWorkspaceFiles(directory))
                 } else {
-                    repository.load(
-                        page = page,
-                        sessionId = mutableState.value.openSessionId,
-                        codexProviderId = mutableState.value.codexManagementProviderId,
-                        usageDays = mutableState.value.usageDays,
-                        usageSelectedDate = mutableState.value.usageSelectedDate,
-                    )
+                    repository.load(page, mutableState.value.openSessionId, mutableState.value.codexManagementProviderId)
                 }
             }
                 .onSuccess { snapshot ->
