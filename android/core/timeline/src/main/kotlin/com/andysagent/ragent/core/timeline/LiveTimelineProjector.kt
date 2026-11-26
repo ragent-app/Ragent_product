@@ -274,7 +274,7 @@ class LiveTimelineProjector {
             }
             return
         }
-        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled", "run_terminal", "provider_turn_started")) return
+        if (statusError || event.type in setOf("status", "usage", "run_started", "run_completed", "run_failed", "run_cancelled", "run_terminal", "provider_turn_started", "provider_turn_completed", "codex_summary_title")) return
         if (event.isTimelineMessage()) {
             val id = event.messageProjectionId()
             val before = messageStates[id] ?: textByEntity[id]?.let { baseline ->

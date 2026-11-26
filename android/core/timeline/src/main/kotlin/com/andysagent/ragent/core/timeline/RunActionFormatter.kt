@@ -20,7 +20,6 @@ data class RunActionUiState(
     /** Set only for deterministic templates; provider prose stays untouched. */
     val presentationVerb: String? = null,
     val presentationSubject: String = "",
-    val turnProgressText: String? = null,
 )
 
 object RunActionFormatter {
@@ -36,10 +35,11 @@ object RunActionFormatter {
         if (current.filterIsInstance<TimelineItem.Message>().any { message ->
                 (runId.isNullOrBlank() || message.runId == runId) && message.asyncQuestions.any { !it.isAnswered }
             }) return RunActionUiState("question", "Waiting for an answer", presentationVerb = "answer")
-        val active = current.filterIsInstance<TimelineItem.Operation>().lastOrNull {
+        val activeOperations = current.filterIsInstance<TimelineItem.Operation>().filter {
             (runId.isNullOrBlank() || it.runId == runId) &&
                 it.status in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
         }
+        val active = activeOperations.lastOrNull { !it.isReasoning } ?: activeOperations.lastOrNull()
         fun activityValue(key: String) = (activity?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
         val sourceSeq = activityValue("startSeq").toLongOrNull() ?: activityValue("sourceSeq").toLongOrNull() ?: 0L
         val sameOperation = active != null && (
@@ -51,12 +51,12 @@ object RunActionFormatter {
         val liveToolIsNewer = active != null && !sameOperation && liveStartSeq > 0L && (sourceSeq == 0L || liveStartSeq > sourceSeq)
         val descriptionSeq = activityValue("activityDescriptionSeq").toLongOrNull() ?: 0L
         val descriptionRank = mapOf("provider_title" to 1, "tool_input_description" to 2)
-        if (sameOperation && active != null && !active.activityDescription.isNullOrBlank() &&
+        if (sameOperation && active != null && !active.isReasoning && !active.activityDescription.isNullOrBlank() &&
             (descriptionRank[active.activityDescriptionSource] ?: 0) >= (descriptionRank[activityValue("activityDescriptionSource")] ?: 0) &&
             (activityValue("activityDescription").isBlank() || (active.activityDescriptionSeq ?: 0L) > descriptionSeq)) {
             return fromActiveOperation(active)
         }
-        if (sameOperation && active != null && !active.operationProgress.isNullOrBlank() &&
+        if (sameOperation && active != null && !active.isReasoning && !active.operationProgress.isNullOrBlank() &&
             activityValue("activityDescription").isBlank() &&
             (activityValue("operationProgress").isBlank() || (active.operationProgressSeq ?: 0L) > sourceSeq)) {
             return fromActiveOperation(active)
@@ -64,24 +64,32 @@ object RunActionFormatter {
         val genericSubject = (activity?.get("subject") as? JsonPrimitive)?.contentOrNull.orEmpty().trim().lowercase()
             .substringAfterLast("__").substringAfterLast('/')
         val genericTool = canonical?.kind in setOf("tool", "mcp", "other") && genericSubject in setOf("execute", "exec", "tool", "other", "unknown")
-        val livePreferred = active != null && (canonical == null || liveToolIsNewer || (genericTool && canonical.operationId == null))
+        val livePreferred = active != null && (canonical == null || liveToolIsNewer || (genericTool && canonical.operationId == null) ||
+            (!active.isReasoning && canonical.kind in setOf("working", "thinking", "think") &&
+                activityState in setOf("running", "working", "started", "in_progress") && !actionRequired))
         val genericActivity = canonical?.kind in setOf("working", "thinking", "think", "responding", "other") && canonical?.operationId == null
         val selected = (if (livePreferred) active?.let(::fromActiveOperation) else null)
             ?: (if (genericActivity) fromProgressPlan(items, runId) else null)
             ?: canonical ?: fromProgressPlan(items, runId) ?: forRun(status, phase, items, runId) ?: return null
-        val activeMatches = active != null && (livePreferred || sameOperation)
-        val activeDescription = activeMatches && active != null &&
-            ((!active.activityDescription.isNullOrBlank() && active.activityDescriptionSource in setOf("provider_title", "tool_input_description")) || !active.operationProgress.isNullOrBlank())
-        val canonicalDescription = !livePreferred && canonical != null && listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").any { activityValue(it).isNotBlank() } &&
-            ((!activityValue("activityDescription").isBlank() && activityValue("activityDescriptionSource") in setOf("provider_title", "tool_input_description")) || activityValue("operationProgress").isNotBlank())
-        if (activeDescription || canonicalDescription) return selected
+        // Only a scoped Codex summary title may supply a generic running status;
+        // legacy turnProgress is commentary and belongs in the transcript.
         val progress = activity?.get("turnProgress") as? JsonObject
         fun progressValue(key: String) = (progress?.get(key) as? JsonPrimitive)?.contentOrNull.orEmpty()
         val currentRun = runId?.takeIf { it.isNotBlank() } ?: activityValue("runId").takeIf { it.isNotBlank() }
-        val text = progressValue("text")
-        return if (currentRun != null && progressValue("runId") == currentRun && progressValue("turnId").isNotBlank() &&
-            progressValue("messageId").isNotBlank() && (progressValue("sourceSeq").toLongOrNull() ?: 0L) > 0 && text.isNotBlank())
-            selected.copy(turnProgressText = text) else selected
+        val title = progressValue("text")
+        return if ((active == null || active.isReasoning) && canonical?.kind in setOf("working", "thinking", "think") &&
+            (listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").all { activityValue(it).isBlank() } ||
+                (canonical?.kind in setOf("thinking", "think") && activityValue("providerItemId").isNotBlank() &&
+                    activityValue("providerItemId") == progressValue("itemId"))) &&
+            selected.kind in setOf("working", "thinking", "think") &&
+            activityState in setOf("running", "working", "started", "in_progress") && !actionRequired &&
+            activityValue("operationState") !in setOf("completed", "complete", "done", "success", "succeeded", "failed", "error", "declined", "denied", "interrupted", "cancelled", "canceled") &&
+            currentRun != null && progressValue("runId") == currentRun &&
+            progressValue("source") == "codex_summary_title" && progressValue("turnId").isNotBlank() &&
+            progressValue("turnId") == activityValue("providerTurnId") &&
+            progressValue("itemId").isNotBlank() && (progressValue("sourceSeq").toLongOrNull() ?: 0L) > 0L && title.isNotBlank()) {
+            selected.copy(sentence = title.safeDisplay(), presentationVerb = null, presentationSubject = "")
+        } else selected
     }
 
     /** Same canonical activity and subject/lifecycle rules as Web run-activity. */
@@ -143,7 +151,7 @@ object RunActionFormatter {
                 (value("operationProgress").isNotBlank() || value("activityDescriptionSource") in setOf("tool_input_description", "provider_title")) &&
                 listOf("operationId", "toolCallId", "providerItemId", "providerToolUseId").any { key -> value(key).isNotBlank() } &&
                 value("state") !in setOf("queued", "waiting_user", "waiting_approval", "approval_requested") &&
-                value("actionRequired") != "true" && kind != "approval"
+                value("actionRequired") != "true" && kind !in setOf("approval", "thinking", "think")
         }
         val genericName = subject.lowercase().substringAfterLast("__").substringAfterLast('/')
         val isGenericTool = kind in setOf("tool", "mcp", "other") && genericName in setOf("execute", "exec", "tool", "other", "unknown")
@@ -189,9 +197,10 @@ object RunActionFormatter {
         val operations = items.drop(items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User } + 1)
             .filterIsInstance<TimelineItem.Operation>()
             .filter { runId.isNullOrBlank() || it.runId == runId }
-        val active = operations.asReversed().firstOrNull {
+        val activeOperations = operations.asReversed().filter {
             it.status == TimelineOperationStatus.InProgress || it.status == TimelineOperationStatus.Pending
         }
+        val active = activeOperations.firstOrNull { !it.isReasoning } ?: activeOperations.firstOrNull()
         val action = active?.let(::fromActiveOperation)
         if (status == RunActionStatus.WaitingApproval) {
             return RunActionUiState(
@@ -228,6 +237,7 @@ object RunActionFormatter {
 
     private fun fromActiveOperation(operation: TimelineItem.Operation): RunActionUiState {
         val fallback = fromOperation(operation)
+        if (operation.isReasoning) return fallback
         val description = operation.activityDescription?.takeIf { it.isNotBlank() }
         return if (description != null && operation.activityDescriptionSource in setOf("provider_title", "tool_input_description"))
             fallback.copy(sentence = description.safeDisplay(), presentationVerb = null, presentationSubject = "")

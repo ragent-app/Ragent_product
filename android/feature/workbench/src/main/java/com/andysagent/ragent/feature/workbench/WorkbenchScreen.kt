@@ -4461,13 +4461,8 @@ internal fun ActiveRunActionBar(
     actionState: com.andysagent.ragent.core.timeline.RunActionUiState? = null,
 ) {
     val colors = LocalRagentColors.current
-    val turnProgress = actionState?.turnProgressText?.takeIf { !sending && status == AgentRunStatus.Working && it.isNotBlank() }
-    val shortAction = actionState?.takeUnless {
-        it.presentationVerb == null && it.kind in setOf("responding", "thinking", "think", "working")
-    }?.let { presentRunAction(it.copy(turnProgressText = null)) }
     val sentence = when {
         sending -> stringResource(R.string.workbench_status_sending)
-        turnProgress != null && shortAction == null -> stringResource(R.string.run_turn_progress_only, turnProgress)
         actionState != null -> presentRunAction(actionState)
         !actionSummary.isNullOrBlank() -> actionSummary
         status == AgentRunStatus.WaitingApproval -> stringResource(R.string.workbench_status_awaiting_approval)
@@ -4496,24 +4491,7 @@ internal fun ActiveRunActionBar(
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (turnProgress != null) {
-            Text(
-                text = stringResource(R.string.run_turn_progress_only, turnProgress),
-                modifier = Modifier.weight(1f).padding(end = 8.dp),
-                style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.5.sp),
-                color = colors.secondaryContent,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            if (shortAction != null) {
-                Text(
-                    text = shortAction,
-                    modifier = Modifier.width(112.dp),
-                    style = MaterialTheme.typography.labelMedium.copy(fontSize = 12.5.sp),
-                    color = colors.secondaryContent,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-        } else AnimatedContent(
+        AnimatedContent(
             targetState = sentence,
             modifier = Modifier.weight(1f, fill = false),
             transitionSpec = {

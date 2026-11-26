@@ -59,6 +59,8 @@ export function createCodexAppServerAdapter() {
   // as the client refreshes from history.
   const agentMessageTextByItemId = new Map();
   const reasoningTextByItemId = new Map();
+  const summaryTitleBySection = new Map();
+  const summaryTitleTails = new Map();
   // App-server text deltas have no transport event id. Keep a monotonic
   // ordinal per provider item so reconnect/replay can identify an immutable
   // delta without collapsing legitimate repeated characters.
@@ -94,6 +96,8 @@ export function createCodexAppServerAdapter() {
         terminalCandidates,
         agentMessageTextByItemId,
         reasoningTextByItemId,
+        summaryTitleBySection,
+        summaryTitleTails,
         autoApprovedIds,
         approvalIdByRequestId,
         resolvedApprovalIds,
@@ -206,7 +210,19 @@ function parseAppServerMessage(message, state = {}) {
       for (const [key, call] of state.activeMcpCalls || []) {
         if (call.threadId === message.params?.threadId && call.turnId === message.params?.turn?.id) state.activeMcpCalls.delete(key);
       }
-      return parseTurnCompleted(message.params, state);
+      for (const cache of [state.summaryTitleBySection, state.summaryTitleTails]) {
+        for (const key of cache?.keys() || []) {
+          const [thread, turn] = JSON.parse(key);
+          if (thread === readPlanThreadId(message.params) && turn === (readPlanTurnId(message.params) || message.params?.turn?.id)) cache.delete(key);
+        }
+      }
+      return [
+        ...parseTurnCompleted(message.params, state),
+        ...(readPlanThreadId(message.params) && (readPlanTurnId(message.params) || message.params?.turn?.id) ? [{
+          type: 'provider_turn_completed', provider: 'codex', runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
+          providerThreadId: readPlanThreadId(message.params), providerTurnId: readPlanTurnId(message.params) || message.params.turn.id,
+        }] : []),
+      ];
 
     case 'turn/plan/updated':
       return [parseTurnPlanUpdated(message.params)];
@@ -665,7 +681,10 @@ function parseReasoningDelta(params, state = {}, method = '') {
     sections.set(index, `${sections.get(index) || ''}${delta}`.slice(0, 256 * 1024));
     state.reasoningTextByItemId.set(providerItemId, current);
   }
-  return [reasoningEvent(delta, {
+  const titleEvent = method === 'item/reasoning/summaryTextDelta'
+    ? streamCodexSummaryTitle(params, delta, state)
+    : null;
+  return [...(titleEvent ? [titleEvent] : []), reasoningEvent(delta, {
     provider: 'codex',
     runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
     ...(providerItemId ? { providerItemId, providerMessageId: providerItemId } : {}),
@@ -678,6 +697,56 @@ function parseReasoningDelta(params, state = {}, method = '') {
     operationLifecycle: 'delta',
     state: 'running',
   })];
+}
+
+function streamCodexSummaryTitle(params, delta, state) {
+  const thread = readPlanThreadId(params), turn = readPlanTurnId(params), item = readProviderItemId(params);
+  const cache = state.summaryTitleTails;
+  if (!thread || !turn || !item || !cache) return null;
+  const key = JSON.stringify([thread, turn, item, params.summaryIndex ?? 0]);
+  const previous = cache.get(key) || { tail: '', fenced: false };
+  // A long line cannot qualify as a short title; retain only an overflow marker
+  // until its newline rather than repeatedly rescanning an unbounded buffer.
+  const parts = (previous.tail + delta).split(/\r?\n/);
+  const tail = parts.pop() || '';
+  let fenced = previous.fenced;
+  let title = null;
+  for (const line of parts) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (!fenced && !title) title = codexSummaryTitleEvent(params, line, true, state);
+  }
+  cache.set(key, { tail: tail.length > 1024 ? '\u0000' : tail, fenced });
+  while (cache.size > 512) cache.delete(cache.keys().next().value);
+  return title;
+}
+
+// Only explicit, complete headings from the provider's public summary qualify.
+// Do not infer a title from summary prose or raw reasoning content.
+function codexSummaryTitleEvent(params, summary, completed = false, state = {}) {
+  const thread = readPlanThreadId(params), turn = readPlanTurnId(params), item = readProviderItemId(params);
+  if (!thread || !turn || !item || typeof summary !== 'string') return null;
+  let fenced = false;
+  const lines = summary.split(/\r?\n/);
+  for (const [index, line] of lines.entries()) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    if (!completed && index === lines.length - 1) continue;
+    const match = line.match(/^\s*\*\*([^*\r\n]+)\*\*\s*$/u)
+      || line.match(/^\s*#{1,6}\s+([^#\r\n]+?)\s*#*\s*$/u);
+    if (!match) continue;
+    const title = match[1].trim();
+    if (!title || Array.from(title).length > 120 || /[\x00-\x1f\x7f-\x9f\u2028\u2029<>]/u.test(title)) continue;
+    const safe = safeActivityDescription(title);
+    if (!safe || safe !== title.replace(/\s+/gu, ' ')) continue;
+    const key = JSON.stringify([thread, turn, item, params.summaryIndex ?? 0]);
+    if (state.summaryTitleBySection?.get(key) === safe) return null;
+    state.summaryTitleBySection?.set(key, safe);
+    while (state.summaryTitleBySection?.size > 512) state.summaryTitleBySection.delete(state.summaryTitleBySection.keys().next().value);
+    return { type: 'codex_summary_title', source: 'codex_summary_title', provider: 'codex',
+      runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY, providerThreadId: thread, providerTurnId: turn,
+      providerItemId: item, turnProgressText: safe };
+  }
+  return null;
 }
 
 function readProviderItemId(params = {}, item = null) {
@@ -936,6 +1005,12 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
     }
 
     case 'reasoning': {
+      if (lifecycle === 'completed' && Array.isArray(item.summary)) {
+        for (const [summaryIndex, part] of item.summary.entries()) {
+          const title = codexSummaryTitleEvent({ ...params, itemId: providerItemId, summaryIndex }, typeof part === 'string' ? part : part?.text, true, state);
+          if (title) events.push(title);
+        }
+      }
       const parts = [
         ...(Array.isArray(item.summary) ? item.summary : []),
         ...(Array.isArray(item.content) ? item.content : []),
@@ -947,6 +1022,14 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
         }
       }
       if (lifecycle === 'completed' && providerItemId) state.reasoningTextByItemId?.delete(providerItemId);
+      if (lifecycle === 'completed' && providerItemId) {
+        for (const cache of [state.summaryTitleBySection, state.summaryTitleTails]) {
+          for (const key of cache?.keys() || []) {
+            const [thread, turn, itemId] = JSON.parse(key);
+            if (thread === readPlanThreadId(params) && turn === readPlanTurnId(params) && itemId === providerItemId) cache.delete(key);
+          }
+        }
+      }
       if (parts.length > 0) events.push(reasoningEvent(parts.join('\n\n'), {
         ...(providerItemId ? { providerMessageId: providerItemId, providerBlockId: providerItemId } : {}),
         reasoningLifecycle: lifecycle === 'completed' ? 'completed' : 'delta',

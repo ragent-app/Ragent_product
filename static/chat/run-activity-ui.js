@@ -120,13 +120,33 @@
     return typeof value === "string" ? clip(value, 120) : "";
   }
 
-  function currentTurnProgress(activity) {
+  function hasActiveOperationIdentity(activity) {
+    const identified = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"]
+      .some((key) => String(activity?.[key] || "").trim());
+    if (!identified) return false;
+    // A reasoning item's own identity is not a tool call.
+    const reasoningItem = ["thinking", "think"].includes(normalizeActivityKind(activity))
+      && activity?.providerItemId && activity.providerItemId === activity.turnProgress?.itemId
+      && !activity.toolCall && !activity.toolCallId && !activity.providerToolUseId
+      && !trustedActivityDescription(activity) && !operationProgressForActivity(activity) && !webActionForActivity(activity);
+    return !reasoningItem;
+  }
+
+  function validTurnProgress(activity) {
     const progress = activity?.turnProgress;
-    if (!progress || typeof progress.text !== "string" || !progress.text.trim()
-      || !progress.runId || !progress.turnId || !progress.messageId || !Number.isInteger(progress.sourceSeq) || progress.sourceSeq <= 0
-      || !activity.runId || activity.runId !== progress.runId
-      || (activity.providerTurnId && activity.providerTurnId !== progress.turnId)) return "";
-    return clip(progress.text, 72);
+    return !!(progress && progress.source === "codex_summary_title" && typeof progress.text === "string" && progress.text.trim()
+      && progress.runId && progress.turnId && progress.itemId && Number.isInteger(progress.sourceSeq) && progress.sourceSeq > 0
+      && activity.runId && activity.runId === progress.runId
+      && activity.providerTurnId && activity.providerTurnId === progress.turnId);
+  }
+
+  function currentTurnProgress(activity) {
+    if (!validTurnProgress(activity) || !["working", "running"].includes(activity.state)
+      || activity.actionRequired === true || !["thinking", "think", "working"].includes(normalizeActivityKind(activity))
+      || normalizeActivityLifecycle(activity.operationState || activity.state) !== "running"
+      || webActionForActivity(activity) || subjectForActivity(activity) || activity.group
+      || hasActiveOperationIdentity(activity)) return "";
+    return clip(activity.turnProgress.text, 72);
   }
 
   // Codex presents tool work as a short verb plus its target. Keep that
@@ -142,13 +162,10 @@
     if (lifecycle === "running" && description) return description;
     const progress = lifecycle === "running" ? operationProgressForActivity(activity) : "";
     if (progress) return progress;
+    const title = currentTurnProgress(activity);
+    if (title) return title;
     const webAction = webActionForActivity(activity);
     const webText = webAction ? translatedActivityText(`activity.web.${webAction}`) : "";
-    const turnText = lifecycle === "running" && activity.state !== "queued" ? currentTurnProgress(activity) : "";
-    if (turnText) {
-      const prefix = translatedActivityText("activity.turnProgress");
-      return `${prefix} ${turnText}${webText ? ` · ${webText}` : ""}`.trim();
-    }
     if (lifecycle === "running" && webText) return webText;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (lifecycle === "running" && group?.kind === "exploring" && Number(group.count) > 1) {
@@ -239,21 +256,12 @@
     };
   }
 
-  function activitySuffix(activity) {
-    if (!currentTurnProgress(activity) || trustedActivityDescription(activity) || operationProgressForActivity(activity)
-      || activity?.actionRequired === true || activity?.state === "waiting_user"
-      || normalizeActivityLifecycle(activity?.operationState || activity?.state) !== "running") return "";
-    const action = webActionForActivity(activity);
-    return action ? translatedActivityText(`activity.web.${action}`) : "";
-  }
-
   function getPresentation() {
     const sourceSeq = Math.max(Number.isInteger(currentActivity?.sourceSeq) ? currentActivity.sourceSeq : 0,
       currentTurnProgress(currentActivity) ? currentActivity.turnProgress.sourceSeq : 0);
     return {
       activity: currentActivity,
       text: formatRunActivitySummary(currentActivity),
-      suffix: activitySuffix(currentActivity),
       inlineVisible: !!currentActivity
         && currentActivity.state !== "idle",
       sourceSeq,
@@ -265,8 +273,7 @@
     const hasSpecificAction = currentActivity && currentActivity.state !== "idle"
       && (currentActivity.state === "waiting_user" || currentActivity.actionRequired === true
         || !!trustedActivityDescription(currentActivity)
-        || !!operationProgressForActivity(currentActivity)
-        || !!currentTurnProgress(currentActivity)
+        || hasActiveOperationIdentity(currentActivity)
         || !!webActionForActivity(currentActivity)
         || (!['thinking', 'think', 'working', 'planning', 'responding', 'waiting', 'other', 'mcp'].includes(kind))
         || !!subjectForActivity(currentActivity));
@@ -279,7 +286,6 @@
       : {
         progress: null,
         text: formatRunActivitySummary(currentActivity),
-        suffix: activitySuffix(currentActivity),
         sourceSeq: Math.max(Number.isInteger(currentActivity?.sourceSeq) ? currentActivity.sourceSeq : 0,
           currentTurnProgress(currentActivity) ? currentActivity.turnProgress.sourceSeq : 0),
       };
@@ -307,10 +313,19 @@
     }
     const next = activity && typeof activity === "object" ? { ...activity } : null;
     const progress = next?.turnProgress;
-    const validSnapshotProgress = currentTurnProgress(next);
+    let validSnapshotProgress = validTurnProgress(next);
+    if (next && !validSnapshotProgress) next.turnProgress = null;
     const sameRun = next?.runId && currentTurn?.runId === next.runId;
+    if (validSnapshotProgress && sameRun && progress.sourceSeq <= currentTurn.sourceSeq
+      && (currentTurn.completed || currentTurn.turnId !== progress.turnId)) {
+      next.turnProgress = null;
+      next.providerTurnId = currentTurn.completed ? "" : currentTurn.turnId;
+      next.providerThreadId = currentTurn.threadId;
+      validSnapshotProgress = false;
+    }
     if (!next || next.state === "idle" || (currentTurn && next.runId && !sameRun)) currentTurn = null;
-    if (validSnapshotProgress && (!currentTurn || !sameRun || progress.sourceSeq > currentTurn.sourceSeq)) {
+    if (validSnapshotProgress && !(currentTurn?.completed && sameRun && currentTurn.turnId === progress.turnId)
+      && (!currentTurn || !sameRun || progress.sourceSeq > currentTurn.sourceSeq)) {
       currentTurn = { runId: progress.runId, turnId: progress.turnId, threadId: next.providerThreadId || "", sourceSeq: progress.sourceSeq, progress };
     } else if (currentTurn && sameRun && next?.providerTurnId && next.providerTurnId !== currentTurn.turnId
       && Number.isInteger(next.sourceSeq) && next.sourceSeq > currentTurn.sourceSeq) {
@@ -319,9 +334,10 @@
     } else if (!currentTurn && next?.providerTurnId && next?.runId) {
       currentTurn = { runId: next.runId, turnId: next.providerTurnId, threadId: next.providerThreadId || "", sourceSeq: 0 };
     }
+    if (next && currentTurn?.completed && sameRun && next.providerTurnId === currentTurn.turnId) next.turnProgress = null;
     if (next && currentTurn && currentTurn.runId === next.runId && currentTurn.progress
       && (!next.providerTurnId || next.providerTurnId === currentTurn.turnId)
-      && (!progress || currentTurn.progress.sourceSeq > (progress.sourceSeq || 0))) next.turnProgress = currentTurn.progress;
+      && (!validSnapshotProgress || currentTurn.progress.sourceSeq > (progress.sourceSeq || 0))) next.turnProgress = currentTurn.progress;
     currentActivity = next;
     notify();
   }
@@ -354,7 +370,7 @@
 
   function recordLiveEvent(event) {
     const displayEvent = {};
-    for (const key of ["type", "role", "runId", "requestId", "operationId", "toolCallId", "providerItemId", "providerToolUseId", "providerThreadId", "providerTurnId", "providerMessageId", "providerLifecycle", "state", "operationLifecycle", "toolName", "kind", "labelKind", "filePath", "detail", "command", "activityDescription", "activityDescriptionSource", "webAction", "operationProgress", "turnProgressText"]) {
+    for (const key of ["type", "role", "runId", "requestId", "operationId", "toolCallId", "providerItemId", "providerToolUseId", "providerThreadId", "providerTurnId", "providerMessageId", "providerLifecycle", "state", "operationLifecycle", "toolName", "kind", "labelKind", "filePath", "detail", "command", "activityDescription", "activityDescriptionSource", "webAction", "operationProgress", "turnProgressText", "source", "provider", "runtimeFamily"]) {
       if (typeof event[key] === "string") displayEvent[key] = event[key].slice(0, 512);
     }
     for (const key of ["seq", "endSeq", "startSeq"]) if (Number.isInteger(event[key])) displayEvent[key] = event[key];
@@ -368,21 +384,8 @@
     if (liveEvents.length > 200) liveEvents.shift();
   }
 
-  function noteFormalOutput(event = {}, record = true) {
-    if (event.type !== "message" || event.role !== "assistant" || event.providerLifecycle !== "completed"
-      || typeof event.turnProgressText !== "string" || !event.turnProgressText.trim()
-      || !event.runId || !event.providerThreadId || !event.providerTurnId || !event.providerMessageId
-      || !eventBoundary(event) || closedRuns.has(event.runId)
-      || (currentActivity?.runId && event.runId !== currentActivity.runId) || !currentTurn || currentTurn.runId !== event.runId
-      || currentTurn.turnId !== event.providerTurnId || (currentTurn.threadId && currentTurn.threadId !== event.providerThreadId)
-      || eventBoundary(event) < currentTurn.sourceSeq) return;
-    if (record) recordLiveEvent(event);
-    const progress = { text: event.turnProgressText, runId: event.runId,
-      turnId: event.providerTurnId, messageId: event.providerMessageId, sourceSeq: eventBoundary(event) };
-    currentTurn = { ...currentTurn, threadId: event.providerThreadId, sourceSeq: eventBoundary(event), progress };
-    if (currentActivity?.runId === event.runId) currentActivity = { ...currentActivity, turnProgress: progress };
-    notify();
-  }
+  // Assistant messages are chat content, never a source for activity titles.
+  function noteFormalOutput() {}
 
   function inferToolKind(event) {
     const toolName = String(event?.toolName || "").trim().toLowerCase();
@@ -429,8 +432,7 @@
       setActivity(activity);
     }
     for (const entry of pending) {
-      if (entry.event.type === "message") noteFormalOutput(entry.event, false);
-      else applyEvent(entry.event, false);
+      applyEvent(entry.event, false);
     }
     liveEvents = pending;
     return true;
@@ -439,12 +441,41 @@
   function applyEvent(event = {}, record = true) {
     const eventType = String(event?.type || "");
     const operationEvent = ["tool_use", "tool_result", "operation", "file_change"].includes(eventType);
+    if (eventType === "codex_summary_title") {
+      const seq = eventBoundary(event);
+      if (event.source !== "codex_summary_title" || event.provider !== "codex"
+        || event.runtimeFamily !== "codex-app-server-json" || typeof event.turnProgressText !== "string"
+        || !event.turnProgressText.trim() || !event.runId || !event.providerThreadId || !event.providerTurnId
+        || !event.providerItemId || !seq || closedRuns.has(event.runId) || !currentTurn || currentTurn.completed
+        || currentTurn.runId !== event.runId || currentTurn.threadId !== event.providerThreadId
+        || currentTurn.turnId !== event.providerTurnId || seq <= currentTurn.sourceSeq
+        || (currentActivity?.runId && currentActivity.runId !== event.runId)) return;
+      if (record) recordLiveEvent(event);
+      const progress = { source: event.source, text: event.turnProgressText, runId: event.runId,
+        turnId: event.providerTurnId, itemId: event.providerItemId, sourceSeq: seq };
+      currentTurn = { ...currentTurn, sourceSeq: seq, progress };
+      if (currentActivity?.runId === event.runId) currentActivity = { ...currentActivity,
+        ...(hasActiveOperationIdentity({ ...currentActivity, turnProgress: progress }) ? {} : { providerTurnId: event.providerTurnId }), turnProgress: progress };
+      notify();
+      return;
+    }
+    if (eventType === "provider_turn_completed") {
+      const seq = eventBoundary(event);
+      if (!seq || !currentTurn || currentTurn.runId !== event.runId || currentTurn.threadId !== event.providerThreadId
+        || currentTurn.turnId !== event.providerTurnId || seq < currentTurn.sourceSeq) return;
+      if (record) recordLiveEvent(event);
+      currentTurn = { ...currentTurn, sourceSeq: seq, completed: true, progress: null };
+      if (currentActivity?.runId === event.runId) currentActivity = { ...currentActivity, turnProgress: null };
+      notify();
+      return;
+    }
     if (eventType === "provider_turn_started") {
       const runId = String(event.runId || "").trim();
       const sourceSeq = eventBoundary(event);
       if (!runId || closedRuns.has(runId) || !event.providerThreadId || !event.providerTurnId || !sourceSeq
         || (currentActivity?.runId && currentActivity.runId !== runId)
         || (currentTurn && currentTurn.runId === runId && sourceSeq < currentTurn.sourceSeq)) return;
+      if (currentTurn?.completed && currentTurn.runId === runId && currentTurn.turnId === event.providerTurnId) return;
       if (record) recordLiveEvent(event);
       const sameTurn = currentTurn?.runId === runId && currentTurn.turnId === event.providerTurnId
         && (!currentTurn.threadId || currentTurn.threadId === event.providerThreadId);
@@ -466,7 +497,7 @@
     const keys = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"];
     const sameOperation = keys.some((key) => event[key] && currentActivity[key] && event[key] === currentActivity[key]);
     const identified = keys.some((key) => event[key]);
-    const currentHasIdentity = keys.some((key) => currentActivity[key]);
+    const currentHasIdentity = hasActiveOperationIdentity(currentActivity);
     if (event.operationProgress && (!sameOperation || !event.providerThreadId || !event.providerTurnId || !event.providerItemId
       || event.providerThreadId !== currentActivity.providerThreadId || event.providerTurnId !== currentActivity.providerTurnId
       || event.providerItemId !== currentActivity.providerItemId)) return;
@@ -496,7 +527,7 @@
     if (currentActivity.state === "waiting_user" && !(terminal && sameOperation)
       && event.state !== "waiting_approval" && lifecycle !== "waiting_approval") return;
     if (terminal && sameOperation) {
-      currentActivity = { state: "working", kind: "thinking", runId: currentActivity.runId, requestId: currentActivity.requestId, sourceSeq: eventBoundary(event), inlineEligible: true, turnProgress: currentActivity.turnProgress };
+      currentActivity = { state: "working", kind: "thinking", runId: currentActivity.runId, requestId: currentActivity.requestId, sourceSeq: eventBoundary(event), inlineEligible: true, providerTurnId: currentTurn?.completed ? "" : currentTurn?.turnId || "", turnProgress: currentActivity.turnProgress };
       notify();
       return;
     }
@@ -514,7 +545,7 @@
       ...currentActivity,
       ...(opChanged ? { subject: "", labelKind: "", group: null, presentation: null, activityDescription: "", activityDescriptionSource: "", activityDescriptionSeq: 0, webAction: "", operationProgress: "", providerThreadId: "", providerTurnId: "", operationState: "running", operationId: "", toolCallId: "", providerItemId: "", providerToolUseId: "" } : {}),
       ...next,
-      ...Object.fromEntries([...keys, "providerThreadId", "providerTurnId"].filter((key) => event[key]).map((key) => [key, event[key]])),
+      ...(operationEvent ? Object.fromEntries([...keys, "providerThreadId", "providerTurnId"].filter((key) => event[key]).map((key) => [key, event[key]])) : {}),
       ...(sameOperation && !next.webAction ? { webAction: currentActivity.webAction } : {}),
       ...(sameOperation && !next.operationProgress ? { operationProgress: currentActivity.operationProgress } : {}),
       ...(startSeq && opChanged ? { startSeq } : {}),

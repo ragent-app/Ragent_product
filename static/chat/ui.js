@@ -5445,6 +5445,9 @@ function getOperationStateLabel(evt) {
 function getOperationActivitySummary(evt) {
   const presentation = evt?.presentation && typeof evt.presentation === "object" ? evt.presentation : {};
   const input = evt?.toolCall?.input && typeof evt.toolCall.input === "object" ? evt.toolCall.input : {};
+  const description = [evt, presentation].find((candidate) =>
+    ["tool_input_description", "provider_title"].includes(candidate?.activityDescriptionSource)
+      && typeof candidate.activityDescription === "string" && candidate.activityDescription.trim()) || {};
   const state = normalizeOperationState(getOperationLifecycle(evt));
   const activity = {
     state,
@@ -5461,15 +5464,17 @@ function getOperationActivitySummary(evt) {
     runId: evt?.runId || "",
     webAction: evt?.webAction || presentation.webAction || evt?.toolCall?._meta?.ragent?.webAction || "",
     operationProgress: evt?.operationProgress || presentation.operationProgress || "",
-    activityDescription: presentation.activityDescription || "",
-    activityDescriptionSource: presentation.activityDescriptionSource || "",
+    activityDescription: description.activityDescription || "",
+    activityDescriptionSource: description.activityDescriptionSource || "",
   };
   const live = globalThis?.RagentRunActivity?.getActivity?.();
   const sameOperation = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"]
     .some((key) => activity[key] && live?.[key] && activity[key] === live[key]);
   if (state === "running" && sameOperation && activity.runId && activity.runId === live.runId) {
-    activity.turnProgress = live.turnProgress;
-    activity.providerTurnId = live.providerTurnId;
+    if (!activity.activityDescription && live.activityDescription) {
+      activity.activityDescription = live.activityDescription;
+      activity.activityDescriptionSource = live.activityDescriptionSource;
+    }
     activity.operationProgress ||= live.operationProgress || "";
     activity.webAction ||= live.webAction || "";
   }
@@ -5672,18 +5677,7 @@ function renderOperationNodeContent(node, evt, { expanded = false } = {}) {
   const primary = document.createElement("span");
   primary.className = "live-operation-row__summary-text";
   const summaryText = activitySummary || detail || getOperationStateLabel(evt);
-  const prefix = t("activity.turnProgress");
-  const divider = summaryText.lastIndexOf(" · ");
-  if (prefix && summaryText.startsWith(prefix) && divider > 0) {
-    const main = document.createElement("span");
-    main.className = "live-operation-row__summary-main";
-    main.textContent = summaryText.slice(0, divider);
-    const suffix = document.createElement("span");
-    suffix.className = "live-operation-row__summary-suffix";
-    suffix.textContent = summaryText.slice(divider);
-    primary.appendChild(main);
-    primary.appendChild(suffix);
-  } else primary.textContent = summaryText;
+  primary.textContent = summaryText;
   primary.title = activitySummary || detail || getOperationStateLabel(evt);
   copy.appendChild(primary);
   copy.appendChild(label);

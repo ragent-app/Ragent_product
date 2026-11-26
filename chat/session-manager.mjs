@@ -6541,7 +6541,7 @@ async function syncDetachedRunUnlocked(sessionId, runId) {
   }
   const deltaPushEvents = buildDetachedRunPushEvents(normalizedEvents, uniqueDurableEvents, deltaStoredEvents);
   const turnProgressEvents = deltaStoredEvents.filter((event) =>
-    event?.type === 'provider_turn_started' || (event?.type === 'message' && event?.messagePhase === 'commentary'))
+    ['provider_turn_started', 'provider_turn_completed', 'codex_summary_title'].includes(event?.type))
     .map(withTurnProgressText);
   const projectionObservedAt = nowIso();
   const reasoningEvents = normalizedEvents.filter((event) => event?.type === 'reasoning');

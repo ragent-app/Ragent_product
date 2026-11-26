@@ -18,7 +18,6 @@ import {
   stripAssistantControlBlocks,
 } from './assistant-control-blocks.mjs';
 import { createClaudeFinalizedAssistantReplayFingerprint } from './provider-event-dedup.mjs';
-import { redactSensitiveText } from './tool-call-schema.mjs';
 import {
   extractAnsweredQuestionItemIds,
   normalizeAsyncQuestionReplies,
@@ -46,18 +45,8 @@ function seqOf(event) {
 
 export function withTurnProgressText(event) {
   const next = { ...event };
-  delete next.turnProgressText;
-  if (next.type !== 'message' || next.role !== 'assistant'
-    || next.provider !== 'codex' || next.messagePhase !== 'commentary'
-    || next.providerLifecycle !== 'completed' || next.messageDelivery === 'async'
-    || next.delivery === 'async' || !text(next.runId) || !text(next.providerThreadId)
-    || !text(next.providerTurnId) || !text(next.providerMessageId)) return next;
-  const progress = redactSensitiveText(stripAssistantArtifactDeliveryHints(
-    stripAssistantControlBlocks(String(next.content || '')),
-    { rewriteLocalResultFileReferences: false },
-  ))
-    .replace(/\s+/g, ' ').trim().slice(0, 500);
-  if (progress) next.turnProgressText = progress;
+  if (next.type !== 'codex_summary_title' || next.source !== 'codex_summary_title'
+    || next.provider !== 'codex' || next.runtimeFamily !== 'codex-app-server-json') delete next.turnProgressText;
   return next;
 }
 

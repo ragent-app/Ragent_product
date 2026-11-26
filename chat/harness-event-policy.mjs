@@ -40,7 +40,7 @@ const RUNTIME_PROGRESS_TYPES = new Set(['status', 'usage']);
 const IMPORTANT_HARNESS_EVENT_TYPES = new Set([
   'message', 'tool_result', 'approval_request', 'approval_response',
   'privileged_batch_request', 'privileged_batch_response', 'privileged_exec_result',
-  'file_change', 'plan', 'reasoning', 'provider_turn_started',
+  'file_change', 'plan', 'reasoning', 'provider_turn_started', 'provider_turn_completed', 'codex_summary_title',
 ]);
 
 function trimString(value) {

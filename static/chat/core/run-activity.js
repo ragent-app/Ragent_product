@@ -135,13 +135,33 @@
     return typeof value === "string" ? clip(value, 120) : "";
   }
 
-  function currentTurnProgress(activity) {
+  function hasActiveOperationIdentity(activity) {
+    const identified = ["operationId", "toolCallId", "providerItemId", "providerToolUseId"]
+      .some((key) => String(activity?.[key] || "").trim());
+    if (!identified) return false;
+    // A reasoning item's own identity is not a tool call.
+    const reasoningItem = ["thinking", "think"].includes(normalizeActivityKind(activity))
+      && activity?.providerItemId && activity.providerItemId === activity.turnProgress?.itemId
+      && !activity.toolCall && !activity.toolCallId && !activity.providerToolUseId
+      && !trustedActivityDescription(activity) && !operationProgressForActivity(activity) && !webActionForActivity(activity);
+    return !reasoningItem;
+  }
+
+  function validTurnProgress(activity) {
     const progress = activity?.turnProgress;
-    if (!progress || typeof progress.text !== "string" || !progress.text.trim()
-      || !progress.runId || !progress.turnId || !progress.messageId || !Number.isInteger(progress.sourceSeq) || progress.sourceSeq <= 0
-      || !activity.runId || activity.runId !== progress.runId
-      || (activity.providerTurnId && activity.providerTurnId !== progress.turnId)) return "";
-    return clip(progress.text, 72);
+    return !!(progress && progress.source === "codex_summary_title" && typeof progress.text === "string" && progress.text.trim()
+      && progress.runId && progress.turnId && progress.itemId && Number.isInteger(progress.sourceSeq) && progress.sourceSeq > 0
+      && activity.runId && activity.runId === progress.runId
+      && activity.providerTurnId && activity.providerTurnId === progress.turnId);
+  }
+
+  function currentTurnProgress(activity) {
+    if (!validTurnProgress(activity) || !["working", "running"].includes(activity.state)
+      || activity.actionRequired === true || !["thinking", "think", "working"].includes(normalizeActivityKind(activity))
+      || normalizeActivityLifecycle(activity.operationState || activity.state) !== "running"
+      || webActionForActivity(activity) || subjectForActivity(activity) || activity.group
+      || hasActiveOperationIdentity(activity)) return "";
+    return clip(activity.turnProgress.text, 72);
   }
 
   function formatOperationActivity(activity = {}, { trailing = false } = {}) {
@@ -154,13 +174,10 @@
     if (lifecycle === "running" && description) return description;
     const progress = lifecycle === "running" ? operationProgressForActivity(activity) : "";
     if (progress) return progress;
+    const title = currentTurnProgress(activity);
+    if (title) return title;
     const webAction = webActionForActivity(activity);
     const webText = webAction ? translatedActivityText(`activity.web.${webAction}`) : "";
-    const turnText = lifecycle === "running" && activity.state !== "queued" ? currentTurnProgress(activity) : "";
-    if (turnText) {
-      const prefix = translatedActivityText("activity.turnProgress");
-      return `${prefix} ${turnText}${webText ? ` · ${webText}` : ""}`.trim();
-    }
     if (lifecycle === "running" && webText) return webText;
     const group = activity?.group && typeof activity.group === "object" ? activity.group : null;
     if (lifecycle === "running" && group?.kind === "exploring" && Number(group.count) > 1) {

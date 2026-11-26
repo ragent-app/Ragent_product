@@ -291,7 +291,7 @@ class RoomSessionRepository(
     private val runActivityAccepted = mutableMapOf<String, Long>()
     private val runActivityLiveEpoch = mutableMapOf<String, Long>()
     private val activityRefreshInflight = mutableMapOf<String, kotlinx.coroutines.Deferred<Unit>>()
-    private data class TurnProgressBoundary(val runId: String, val threadId: String, val turnId: String, val seq: Long)
+    private data class TurnProgressBoundary(val runId: String, val threadId: String, val turnId: String, val seq: Long, val completed: Boolean = false)
     private val turnProgressBoundaries = mutableMapOf<String, TurnProgressBoundary>()
     private val pendingTurnProgress = mutableMapOf<String, JsonObject>()
     private data class ActivityRequest(val generation: Long, val liveEpoch: Long)
@@ -818,20 +818,30 @@ class RoomSessionRepository(
             val turn = event.providerTurnId.orEmpty()
             val eventRun = event.runId?.takeIf { it.isNotBlank() } ?: continue
             if ((activeRun != null && eventRun != activeRun) || eventRun in currentTerminalRunIds(sessionId) || seq <= 0 || thread.isBlank() || turn.isBlank()) continue
-            if (event.type == "provider_turn_started" && seq > (boundary?.seq ?: 0L)) {
+            if (event.type == "provider_turn_started" && seq > (boundary?.seq ?: 0L) &&
+                !(boundary?.completed == true && boundary.turnId == turn && (boundary.threadId.isBlank() || boundary.threadId == thread))) {
                 if (boundary?.turnId != turn || boundary?.threadId != thread) {
                     if (seq > progressSeq) { activity = activity?.let { JsonObject(it - "turnProgress") }; pending = null; progressSeq = seq }
                 }
                 boundary = TurnProgressBoundary(eventRun, thread, turn, seq)
-            } else if (event.type == "message" && event.messagePhase == "commentary" && event.providerLifecycle == "completed" &&
-                !event.providerMessageId.isNullOrBlank() && !event.turnProgressText.isNullOrBlank() && seq > progressSeq &&
-                boundary?.runId == eventRun && (boundary.threadId.isBlank() || boundary.threadId == thread) && boundary.turnId == turn && seq > boundary.seq) {
+            } else if (event.type == "provider_turn_completed" && boundary?.runId == eventRun &&
+                (boundary.threadId.isBlank() || boundary.threadId == thread) && boundary.turnId == turn && seq > boundary.seq) {
+                activity = activity?.let { JsonObject(it - "turnProgress") }
+                pending = null
+                progressSeq = maxOf(progressSeq, seq)
+                boundary = TurnProgressBoundary(eventRun, thread, turn, seq, completed = true)
+            } else if (event.type == "codex_summary_title" && event.source == "codex_summary_title" &&
+                !event.providerItemId.isNullOrBlank() && !event.turnProgressText.isNullOrBlank() && seq > progressSeq &&
+                boundary?.runId == eventRun && !boundary.completed && (boundary.threadId.isBlank() || boundary.threadId == thread) && boundary.turnId == turn && seq > boundary.seq) {
                 val progress = buildJsonObject {
                     put("text", JsonPrimitive(event.turnProgressText)); put("runId", JsonPrimitive(eventRun))
-                    put("turnId", JsonPrimitive(turn)); put("messageId", JsonPrimitive(event.providerMessageId)); put("sourceSeq", JsonPrimitive(seq))
+                    put("source", JsonPrimitive("codex_summary_title")); put("turnId", JsonPrimitive(turn))
+                    put("itemId", JsonPrimitive(event.providerItemId)); put("sourceSeq", JsonPrimitive(seq))
                 }
                 pending = progress
-                if (activity != null && activeRun == eventRun) activity = JsonObject(activity + ("turnProgress" to progress))
+                if (activity != null && activeRun == eventRun) activity = JsonObject(activity + mapOf(
+                    "turnProgress" to progress, "providerTurnId" to JsonPrimitive(turn),
+                ))
                 progressSeq = seq
             }
         }
@@ -914,11 +924,18 @@ class RoomSessionRepository(
                 var acceptedActivity = activity
                 val localBoundary = turnProgressBoundaries[sessionId]?.takeIf { it.runId == activityRunId }
                 val pendingSeq = (pendingTurnProgress[sessionId]?.get("sourceSeq") as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L
+                val snapshotTurn = ((activity["turnProgress"] as? JsonObject)?.get("turnId") as? JsonPrimitive)?.contentOrNull
+                if (localBoundary?.completed == true && localBoundary.turnId == snapshotTurn) {
+                    acceptedActivity = JsonObject(acceptedActivity - "turnProgress")
+                }
                 if (state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES && localBoundary != null && maxOf(localBoundary.seq, pendingSeq) > pageSeq) {
                     acceptedActivity = JsonObject(acceptedActivity - "turnProgress")
                     val pending = pendingTurnProgress[sessionId]
                     if ((pending?.get("runId") as? JsonPrimitive)?.contentOrNull == activityRunId) {
-                        acceptedActivity = JsonObject(acceptedActivity + ("turnProgress" to pending!!))
+                        acceptedActivity = JsonObject(acceptedActivity + mapOf(
+                            "turnProgress" to pending!!,
+                            "providerTurnId" to JsonPrimitive(localBoundary.turnId),
+                        ))
                     }
                 }
                 runActivityState.update { it + (sessionId to acceptedActivity) }

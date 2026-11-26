@@ -34,8 +34,7 @@ internal fun presentRunAction(action: RunActionUiState): String {
         "web_generic" -> stringResource(R.string.run_web_generic)
         else -> action.sentence
     }
-    return action.turnProgressText?.takeIf { it.isNotBlank() }
-        ?.let { stringResource(R.string.run_turn_progress, text, it) } ?: text
+    return text
 }
 
 @Composable

@@ -15,44 +15,38 @@ function eventBoundary(event) {
 }
 
 export function reduceTurnProgressState(state, events, runId) {
-  let next = state && state.runId === runId ? state : null;
+  let next = state && state.runId === runId ? { ...state,
+    progress: state.progress?.source === 'codex_summary_title' ? state.progress : null } : null;
   for (const event of events) {
     const seq = eventBoundary(event);
     if (event?.runId !== runId || seq <= (next?.sourceSeq || 0)) continue;
     if (event.type === 'provider_turn_started' && trimString(event.providerThreadId) && trimString(event.providerTurnId)) {
-      next = { runId, threadId: event.providerThreadId, turnId: event.providerTurnId, sourceSeq: seq,
+      next = { runId, threadId: event.providerThreadId, turnId: event.providerTurnId, sourceSeq: seq, completed: false,
         progress: next?.threadId === event.providerThreadId && next?.turnId === event.providerTurnId ? next.progress : null };
-    } else if (event.type === 'message' && next && event.providerThreadId === next.threadId
-      && event.providerTurnId === next.turnId && trimString(event.providerMessageId) && trimString(event.turnProgressText)) {
-      next = { ...next, sourceSeq: seq, progress: { text: event.turnProgressText, runId,
-        turnId: next.turnId, messageId: event.providerMessageId, sourceSeq: seq } };
+    } else if (event.type === 'provider_turn_completed' && next && event.providerThreadId === next.threadId && event.providerTurnId === next.turnId) {
+      next = { ...next, sourceSeq: seq, completed: true, progress: null };
+    } else if (event.type === 'codex_summary_title' && event.source === 'codex_summary_title'
+      && event.provider === 'codex' && event.runtimeFamily === 'codex-app-server-json' && next && !next.completed
+      && event.providerThreadId === next.threadId && event.providerTurnId === next.turnId
+      && trimString(event.providerItemId) && trimString(event.turnProgressText)) {
+      next = { ...next, sourceSeq: seq, progress: { text: event.turnProgressText, source: 'codex_summary_title', runId,
+        turnId: next.turnId, itemId: event.providerItemId, sourceSeq: seq } };
     }
   }
   return next;
 }
 
-function currentTurnProgress(events, timeline, runId, storedState) {
+function currentTurnState(events, timeline, runId, storedState) {
   if (!runId) return null;
+  const relevant = (event) => ['provider_turn_started', 'provider_turn_completed', 'codex_summary_title'].includes(event?.type);
   if (storedState?.runId === runId && Number.isInteger(storedState.sourceSeq)) {
-    const replay = [...(Array.isArray(timeline) ? timeline.filter((event) => event?.type === 'provider_turn_started') : []), ...events]
+    const replay = [...(Array.isArray(timeline) ? timeline.filter(relevant) : []), ...events.filter(relevant)]
       .sort((a, b) => eventBoundary(a) - eventBoundary(b));
-    return reduceTurnProgressState(storedState, replay, runId)?.progress || null;
+    return reduceTurnProgressState(storedState, replay, runId);
   }
-  const boundary = (Array.isArray(timeline) ? timeline : [])
-    .filter((event) => event?.type === 'provider_turn_started' && event.runId === runId
-      && trimString(event.providerThreadId) && trimString(event.providerTurnId)
-      && eventBoundary(event) > 0)
-    .sort((a, b) => eventBoundary(b) - eventBoundary(a))[0];
-  if (!boundary) return null;
-  const candidate = events.filter((event) => event?.type === 'message'
-    && event.runId === runId && event.providerThreadId === boundary.providerThreadId
-    && event.providerTurnId === boundary.providerTurnId
-    && trimString(event.providerMessageId) && trimString(event.turnProgressText)
-    && eventBoundary(event) > eventBoundary(boundary))
-    .sort((a, b) => eventBoundary(b) - eventBoundary(a))[0];
-  return candidate ? { text: candidate.turnProgressText, runId,
-    turnId: candidate.providerTurnId, messageId: candidate.providerMessageId,
-    sourceSeq: eventBoundary(candidate) } : null;
+  const replay = [...(Array.isArray(timeline) ? timeline.filter(relevant) : []), ...events.filter(relevant)]
+    .sort((a, b) => eventBoundary(a) - eventBoundary(b));
+  return reduceTurnProgressState(null, replay, runId);
 }
 
 function isFormalAssistantOutput(event) {
@@ -247,9 +241,11 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
     return Boolean(requestId && trimString(event?.requestId) === requestId);
   });
   const providerLiveness = normalizeProviderLiveness(run.providerLiveness);
-  const turnProgress = currentTurnProgress(events, options.timeline, runId, run.turnProgressState);
+  const turnState = currentTurnState(events, options.timeline, runId, run.turnProgressState);
+  const turnProgress = turnState?.completed ? null : turnState?.progress;
   const present = (activity, sourceEvent) => withPresentation({
     ...activity,
+    ...(!turnState?.completed && turnState?.threadId && turnState?.turnId ? { providerThreadId: turnState.threadId, providerTurnId: turnState.turnId } : {}),
     ...(turnProgress ? { turnProgress } : {}),
     ...(runId ? { runId } : {}),
     ...(requestId ? { requestId } : {}),
