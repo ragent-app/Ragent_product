@@ -46,6 +46,9 @@ class LiveTimelineProjector {
     private val ephemeralRenderKeys = mutableSetOf<String>()
     private val terminalRunIds = mutableSetOf<String>()
     private val idleRetiredRunIds = mutableSetOf<String>()
+    private val idleRetiredReasoningRunIds = mutableSetOf<String>()
+    private val terminalRunsWithDurableAssistant = mutableSetOf<String>()
+    private var requireDurableAssistantForTerminalText = false
     private val accumulator = StreamingAccumulator()
     private val messageStates = linkedMapOf<String, ProjectedMessage>()
     private var durableSeq = 0L
@@ -59,9 +62,14 @@ class LiveTimelineProjector {
         completedEntityIds: Set<String> = emptySet(),
         completedRunIds: Set<String> = emptySet(),
         durableMessageRunIds: Set<String> = completedRunIds,
+        completedAssistantTextByRun: Map<String, Set<String>>? = null,
+        completedAssistantEntityIds: Set<String>? = null,
     ) {
         if (durableSeq < this.durableSeq) return
         terminalRunIds.addAll(completedRunIds)
+        if (completedAssistantTextByRun != null) {
+            requireDurableAssistantForTerminalText = true
+        }
         val durableChanged = durableSeq > this.durableSeq
             || durableMessages != durableBaseline
             || completedEntityIds != durableCompletedBaseline
@@ -73,10 +81,26 @@ class LiveTimelineProjector {
             val runId = event.runId ?: return@removeIf false
             if (runId !in terminalRunIds) return@removeIf false
             if (event.messageState != null) {
-                runId in durableMessageRunIds
+                if (completedAssistantTextByRun == null) runId in durableMessageRunIds
+                else event.entityId in (completedAssistantEntityIds ?: completedEntityIds) ||
+                    (event.text?.takeIf(String::isNotBlank)?.let { text ->
+                        text in completedAssistantTextByRun[runId].orEmpty()
+                    } == true)
             } else {
                 durableChanged || runId in durableMessageRunIds
             }
+        }
+        if (completedAssistantTextByRun != null) {
+            // One run can contain several assistant messages. Do not freeze a
+            // later unmatched live message merely because an earlier final is
+            // already durable for that run.
+            val unmatchedRuns = renderedEvents.asSequence().filter { (key, event) ->
+                key in ephemeralRenderKeys && event.messageState != null && event.runId in terminalRunIds &&
+                    event.entityId !in (completedAssistantEntityIds ?: completedEntityIds) &&
+                    (event.text.isNullOrBlank() || event.text !in completedAssistantTextByRun[event.runId.orEmpty()].orEmpty())
+            }.mapNotNull { it.value.runId }.toSet()
+            terminalRunsWithDurableAssistant.removeAll(terminalRunIds)
+            terminalRunsWithDurableAssistant.addAll(completedAssistantTextByRun.keys.intersect(terminalRunIds) - unmatchedRuns)
         }
         this.durableSeq = durableSeq
         pending.entries.removeIf { it.value.boundarySeq() > 0L && it.value.boundarySeq() <= durableSeq }
@@ -93,7 +117,10 @@ class LiveTimelineProjector {
             durableCompletedBaseline = completedEntityIds.toSet()
             renderedEvents.entries.removeIf { (key, event) ->
                 (key !in ephemeralRenderKeys && (event.messageState == null || (event.lastEventSeq ?: 0L) > 0L) && (event.lastEventSeq ?: event.seq) <= durableSeq)
-                    || event.entityId?.let(completedEntityIds::contains) == true
+                    || event.entityId?.let { entityId ->
+                        if (key in ephemeralRenderKeys) entityId in (completedAssistantEntityIds ?: completedEntityIds)
+                        else entityId in completedEntityIds
+                    } == true
             }
             renderedEvents.values.forEach { event ->
                 val entityId = event.entityId
@@ -126,7 +153,11 @@ class LiveTimelineProjector {
      * run IDs as idle-retired so late frames cannot resurrect them until a
      * newer authoritative activity snapshot confirms that run is active.
      */
-    fun retireEphemeralTextOverlays(): Set<String> {
+    fun retireEphemeralTextOverlays(
+        completedAssistantEntityIds: Set<String>? = null,
+        completedAssistantTextByRun: Map<String, Set<String>>? = null,
+        completedAssistantRunIds: Set<String> = emptySet(),
+    ): Set<String> {
         val retiredRunIds = linkedSetOf<String>()
         val retiredKeys = mutableListOf<String>()
         renderedEvents.entries.forEach { (key, event) ->
@@ -135,10 +166,16 @@ class LiveTimelineProjector {
                 (event.messageState == "streaming" && event.role == TimelineRole.Agent)
             val isEphemeralThinking = key.startsWith("thinking:") &&
                 event.operationStatus in setOf(TimelineOperationStatus.Pending, TimelineOperationStatus.InProgress)
-            if (isEphemeralTextDelta || isEphemeralThinking) {
+            val confirmedText = completedAssistantEntityIds == null ||
+                event.runId in completedAssistantRunIds || event.entityId in completedAssistantEntityIds ||
+                (event.runId != null && event.text?.takeIf(String::isNotBlank)?.let { text ->
+                    text in completedAssistantTextByRun?.get(event.runId).orEmpty()
+                } == true)
+            if ((isEphemeralTextDelta && confirmedText) || isEphemeralThinking) {
                 retiredKeys += key
                 event.runId?.takeIf(String::isNotBlank)?.let {
-                    idleRetiredRunIds += it
+                    if (isEphemeralTextDelta) idleRetiredRunIds += it
+                    if (isEphemeralThinking) idleRetiredReasoningRunIds += it
                     retiredRunIds += it
                 }
             }
@@ -170,12 +207,18 @@ class LiveTimelineProjector {
     /** A newer authoritative active snapshot supersedes idle retirement, but not a real terminal. */
     fun confirmActiveRun(runId: String) {
         idleRetiredRunIds.remove(runId)
+        idleRetiredReasoningRunIds.remove(runId)
     }
 
     fun apply(events: Iterable<SessionEventDto>): LiveTimelineResult {
         for (event in events) {
             val isReasoningType = event.type?.lowercase() in setOf("reasoning", "thinking_block")
-            if (event.boundarySeq() == 0L && (event.runId in terminalRunIds || event.runId in idleRetiredRunIds) && (event.isTimelineMessage() || isReasoningType)) continue
+            if (event.boundarySeq() == 0L && (
+                (event.runId in terminalRunIds && (isReasoningType ||
+                    (event.isTimelineMessage() && (!requireDurableAssistantForTerminalText || event.runId in terminalRunsWithDurableAssistant)))) ||
+                    (event.isTimelineMessage() && event.runId in idleRetiredRunIds) ||
+                    (isReasoningType && event.runId in idleRetiredReasoningRunIds)
+                )) continue
             val start = event.startingSeq()
             val boundary = event.boundarySeq()
             val key = event.dedupeKey() ?: "fingerprint:${event.sessionEventFingerprint()}"

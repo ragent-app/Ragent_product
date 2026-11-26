@@ -144,6 +144,8 @@ data class WorkbenchUiState(
     val sessionId: String? = null,
     /** True while the selected session's durable timeline is being replaced. */
     val historyLoading: Boolean = false,
+    val visibleHistoryLoaded: Boolean = false,
+    val visibleHistoryStale: Boolean = false,
     /** Session id that owns the currently rendered timeline. */
     val timelineSessionId: String? = null,
     val initialTurnEntry: Boolean = false,
@@ -376,6 +378,7 @@ sealed interface WorkbenchEvent {
     data object RefreshCatalog : WorkbenchEvent
     data object Retry : WorkbenchEvent
     data object RetryChat : WorkbenchEvent
+    data object RetryHistory : WorkbenchEvent
     data object DismissError : WorkbenchEvent
 }
 
@@ -534,6 +537,12 @@ data class ChatUiState(
     val sessionId: String? = null,
     /** True while the selected session's durable timeline is being replaced. */
     val historyLoading: Boolean = false,
+    val visibleHistoryLoaded: Boolean = false,
+    val visibleHistoryPageLoaded: Boolean = false,
+    val visibleHistoryPageEmpty: Boolean = false,
+    val visibleHistoryRefreshFailed: Boolean = false,
+    val visibleHistoryConfirmedSeq: Long = 0L,
+    val visibleHistoryStale: Boolean = false,
     /** Session id that owns the currently rendered timeline. */
     val timelineSessionId: String? = null,
     val selectedAgentId: String? = null,
@@ -629,6 +638,7 @@ sealed interface ChatEvent {
     data object LoadOlderTimeline : ChatEvent
     data class CreateSession(val projectId: String? = null) : ChatEvent
     data object Retry : ChatEvent
+    data object RetryHistory : ChatEvent
     data object DismissError : ChatEvent
     data object DismissListActionError : ChatEvent
     data class ReportListActionError(val message: String) : ChatEvent
@@ -979,6 +989,7 @@ class ChatViewModel(
                         copy(
                             sessionId = selected.id,
                             sessionTitle = selected.title.ifBlank { "New session" },
+                            visibleHistoryStale = visibleHistoryRefreshFailed && selected.latestSeq > visibleHistoryConfirmedSeq,
                             selectedAgentId = selected.templateId,
                             // A cached session summary can lag an active turn, including
                             // while the carrier is connected but activity requests fail.
@@ -1039,6 +1050,12 @@ class ChatViewModel(
                             sessionTitle = "New session",
                             timelineItems = emptyList(),
                             historyLoading = false,
+                            visibleHistoryLoaded = false,
+                            visibleHistoryPageLoaded = false,
+                            visibleHistoryPageEmpty = false,
+                            visibleHistoryRefreshFailed = false,
+                            visibleHistoryConfirmedSeq = 0L,
+                            visibleHistoryStale = false,
                             timelineSessionId = null,
                             messageCount = 0,
                             composerText = "",
@@ -1203,6 +1220,10 @@ class ChatViewModel(
             ChatEvent.LoadOlderTimeline -> loadOlderTimeline()
             is ChatEvent.CreateSession -> createSession(event.projectId)
             ChatEvent.Retry -> retry()
+            ChatEvent.RetryHistory -> mutableState.value.sessionId?.let { id ->
+                val generation = sessionGeneration
+                viewModelScope.launch { refreshSession(id, generation) }
+            }
             ChatEvent.DismissError -> updateState { copy(error = null, listActionError = null) }
             ChatEvent.DismissListActionError -> updateState { copy(listActionError = null) }
             is ChatEvent.ReportListActionError -> updateState { copy(listActionError = event.message) }
@@ -2742,6 +2763,12 @@ class ChatViewModel(
                 initialTurnEntry = initialTurnVisible,
                 messageCount = 0,
                 historyLoading = !initialTurnVisible,
+                visibleHistoryLoaded = false,
+                visibleHistoryPageLoaded = false,
+                visibleHistoryPageEmpty = false,
+                visibleHistoryRefreshFailed = false,
+                visibleHistoryConfirmedSeq = 0L,
+                visibleHistoryStale = false,
                 approval = null,
                 resolvingApprovalId = null,
                 approvalOutcomeUnknownId = uncertainApprovals[fixed to sessionId]?.firstOrNull(),
@@ -2953,6 +2980,7 @@ class ChatViewModel(
                         copy(
                             timelineItems = items,
                             timelineSessionId = sessionId,
+                            visibleHistoryLoaded = visibleHistoryPageLoaded && (visibleHistoryPageEmpty || items.isNotEmpty()),
                             historyLoading = if (items.isNotEmpty()) false else historyLoading,
                             acceptedTurns = sessionAcceptedTurns[fixed to sessionId].orEmpty().filterNot { accepted -> queuedMessages.any { it.id == accepted.requestId } },
                             pendingTurn = pendingTurn?.takeUnless { it == acknowledgedPendingTurn },
@@ -3047,6 +3075,15 @@ class ChatViewModel(
                     if (isCurrentSession(sessionId, generation)) {
                         updateState {
                             copy(
+                                visibleHistoryPageLoaded = paging.initialPageLoaded,
+                                visibleHistoryPageEmpty = paging.initialPageEmpty,
+                                visibleHistoryRefreshFailed = paging.latestRefreshFailed,
+                                visibleHistoryConfirmedSeq = paging.latestSeq,
+                                visibleHistoryStale = paging.latestRefreshFailed &&
+                                    (knownSessions.takeIf { knownSessionsRepository === fixed }
+                                        ?.firstOrNull { it.id == sessionId }?.latestSeq ?: 0L) > paging.latestSeq,
+                                visibleHistoryLoaded = paging.initialPageLoaded &&
+                                    (paging.initialPageEmpty || (timelineSessionId == sessionId && timelineItems.isNotEmpty())),
                                 loadingOlder = paging.loadingOlder,
                                 hasOlder = paging.hasOlder,
                                 error = paging.error ?: error,
@@ -3638,9 +3675,9 @@ class ChatViewModel(
         lock.withLock {
             if (!isCurrentSession(sessionId, generation)) return
             try {
-                fixed.refreshSessionDetail(sessionId)
-                if (!isCurrentSession(sessionId, generation)) return
                 val result = fixed.refreshTimeline(sessionId)
+                if (!isCurrentSession(sessionId, generation)) return
+                fixed.refreshSessionDetail(sessionId)
                 if (isCurrentSession(sessionId, generation)) {
                     updateState {
                         val clearRecoverable = result !is RefreshResult.ResetRequired && clearErrorWhenConnected

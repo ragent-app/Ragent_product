@@ -63,6 +63,9 @@ data class RuntimeSelection(
 )
 
 data class TimelinePagingState(
+    val initialPageLoaded: Boolean = false,
+    val initialPageEmpty: Boolean = false,
+    val latestRefreshFailed: Boolean = false,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val nextBeforeSeq: Long? = null,

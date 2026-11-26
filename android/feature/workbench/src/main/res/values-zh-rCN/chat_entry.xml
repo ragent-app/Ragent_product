@@ -1,3 +1,5 @@
 <resources>
     <string name="chat_history_loading">正在加载会话…</string>
+    <string name="chat_history_unavailable">会话历史尚未加载。</string>
+    <string name="chat_history_stale">部分较新的消息可能尚未显示。</string>
 </resources>

@@ -1,3 +1,5 @@
 <resources>
     <string name="chat_history_loading">Chargement de la conversation…</string>
+    <string name="chat_history_unavailable">L’historique de la conversation n’est pas encore chargé.</string>
+    <string name="chat_history_stale">Certains messages récents peuvent ne pas être affichés.</string>
 </resources>

@@ -1557,6 +1557,8 @@ class MainActivity : ComponentActivity() {
                     unseenCount = chatState.unseenCount,
                     sessionId = chatState.sessionId,
                     historyLoading = chatState.historyLoading,
+                    visibleHistoryLoaded = chatState.visibleHistoryLoaded,
+                    visibleHistoryStale = chatState.visibleHistoryStale,
                     timelineSessionId = chatState.timelineSessionId,
                     initialTurnEntry = chatState.initialTurnEntry,
                     selectedAgentId = chatState.selectedAgentId,
@@ -2234,6 +2236,10 @@ class MainActivity : ComponentActivity() {
                                 listActions.onEvent(ChatEvent.DismissListActionError)
                                 projects.onEvent(ProjectsEvent.Retry)
                                 computers.onEvent(ComputersEvent.Retry)
+                            }
+                            WorkbenchEvent.RetryHistory -> {
+                                app.runtime.retryComputerConnection(detailTargetId)
+                                chat.onEvent(ChatEvent.RetryHistory)
                             }
                             WorkbenchEvent.RetryChat -> {
                                 app.runtime.retryComputerConnection(detailTargetId)

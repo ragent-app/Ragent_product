@@ -1,0 +1,4 @@
+<resources>
+    <string name="chat_history_unavailable">会話履歴はまだ読み込まれていません。</string>
+    <string name="chat_history_stale">新しいメッセージの一部が表示されていない可能性があります。</string>
+</resources>

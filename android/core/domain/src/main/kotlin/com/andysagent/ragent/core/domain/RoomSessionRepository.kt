@@ -226,8 +226,23 @@ class RoomSessionRepository(
     private val dao: RagentDao = database.dao()
     // A long-poll for one conversation must not delay approvals or history
     // in another. Operations within a single conversation remain ordered.
+    private data class AssistantEvidence(
+        val cursor: Long, val rows: List<MessageEntity>, val entityIds: Set<String>, val textByRun: Map<String, Set<String>>,
+        val completedRunIds: Set<String>,
+    )
+    private val assistantEvidenceCache = java.util.concurrent.ConcurrentHashMap<String, AssistantEvidence>()
+    private fun assistantEvidence(sessionId: String, cursor: Long, rows: List<MessageEntity>): AssistantEvidence =
+        assistantEvidenceCache.compute(sessionId) { _, previous ->
+            if (previous != null && previous.cursor == cursor && previous.rows == rows) previous
+            else AssistantEvidence(cursor, rows.toList(), rows.completedAssistantEntityIds(), rows.completedAssistantTextByRun(),
+                rows.completedAssistantRunIds())
+        }!!
+
     private val sessionSyncMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private fun sessionSyncMutex(sessionId: String): Mutex = sessionSyncMutexes.computeIfAbsent(sessionId) { Mutex() }
+    private val visibleSyncMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    private fun visibleSyncMutex(sessionId: String): Mutex = visibleSyncMutexes.computeIfAbsent(sessionId) { Mutex() }
+    private val visibleRefreshGeneration = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val projectMutationMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private fun projectMutationMutex(projectId: String): Mutex = projectMutationMutexes.computeIfAbsent(projectId) { Mutex() }
     private val sessionMutationMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
@@ -329,6 +344,7 @@ class RoomSessionRepository(
     // Retry a failed visible projection on
     // the next sync without rewinding the durable event cursor.
     private val pendingVisibleOperationRefresh = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val pendingVisibleRebuildRefresh = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val visibleTimelineState = MutableStateFlow<Map<String, List<TimelineItem>>>(emptyMap())
     private val attachmentUploadProgressState = MutableStateFlow<Map<String, AttachmentUploadProgress>>(emptyMap())
     override fun observeAttachmentUploadProgress(sessionId: String): Flow<Map<String, AttachmentUploadProgress>> =
@@ -605,7 +621,10 @@ class RoomSessionRepository(
                             rebuildDurableTimelineLocked(sessionId).also { rebuilt ->
                                 if (rebuilt is RefreshResult.Applied) {
                                     try {
-                                        refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
+                                        if (refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = false) is RefreshResult.Applied) {
+                                            pendingVisibleRebuildRefresh -= sessionId
+                                            pendingVisibleOperationRefresh -= sessionId
+                                        }
                                     } catch (cancelled: CancellationException) {
                                         throw cancelled
                                     } catch (_: Exception) {
@@ -705,12 +724,15 @@ class RoomSessionRepository(
                             liveProjectionMutex.withLock {
                                 liveProjectors[sessionId]?.let { projector ->
                                     val durableMessages = dao.getMessages(sessionId)
+                                    val evidence = assistantEvidence(sessionId, result.latestSeq, durableMessages)
                                     projector.reconcileDurableCursor(
                                         result.latestSeq,
                                         durableMessages.associate { it.id to it.content },
                                         durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
                                         currentTerminalRunIds(sessionId),
                                         durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+                                        evidence.textByRun,
+                                        evidence.entityIds,
                                     )
                                     liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
                                 }
@@ -1002,8 +1024,14 @@ class RoomSessionRepository(
             val sharesLatestRequest = latestUserRequestId != null && msg.requestId == latestUserRequestId
             val isEarlierTurn = (latestUserIndex > index && !sharesLatestRequest) ||
                 (!msg.runId.isNullOrBlank() && lastKnownRunId != null && msg.runId != lastKnownRunId)
-            val isTerminalRun = !msg.runId.isNullOrBlank() && msg.runId in terminalRuns
-            val isAuthoritativelyIdle = idleAtSeq > 0L && latestTurnMaxSeq > 0L && idleAtSeq >= latestTurnMaxSeq
+            // Live terminal/idle observations can arrive before their durable
+            // message. Do not settle an empty message_start ahead of the
+            // continuous cursor: later deltas must remain applicable.
+            val cursorCoversIdle = idleAtSeq > 0L && cursorSeq >= idleAtSeq
+            val rowCoversIdle = idleAtSeq > 0L && msg.content.isNotBlank() && msg.lastEventSeq >= idleAtSeq
+            val hasDurableCoverage = cursorCoversIdle || rowCoversIdle
+            val isTerminalRun = hasDurableCoverage && !msg.runId.isNullOrBlank() && msg.runId in terminalRuns
+            val isAuthoritativelyIdle = hasDurableCoverage && latestTurnMaxSeq > 0L && idleAtSeq >= latestTurnMaxSeq
             isEarlierTurn || isTerminalRun || isAuthoritativelyIdle || allowExplicitTerminalSession
         }.map { it.value }
         if (toSettle.isEmpty()) return false
@@ -1503,6 +1531,9 @@ class RoomSessionRepository(
         check(payload.creationContractVersion == 1) { "Target did not acknowledge idempotent creation" }
         val entity = sessionEntityFromClientJson(payload.session)
         dao.upsertSessions(listOf(entity))
+        if (!payload.duplicate && entity.latestSeq == 0L) {
+            timelinePagingState.update { it + (entity.id to TimelinePagingState(initialPageLoaded = true, initialPageEmpty = true)) }
+        }
         return SessionCreationReceipt(toDomain(entity), idempotencyKey, payload.duplicate)
     }
 
@@ -1558,7 +1589,10 @@ class RoomSessionRepository(
             waitingAction = item.string("waitingAction") ?: item.string("attentionKind"),
         )
         dao.upsertSessions(listOf(session))
-        if (session.latestSeq == 0L) firstTurnCandidates[session.id] = session
+        if (session.latestSeq == 0L) {
+            firstTurnCandidates[session.id] = session
+            if (!payload.duplicate) timelinePagingState.update { it + (session.id to TimelinePagingState(initialPageLoaded = true, initialPageEmpty = true)) }
+        }
         return toDomain(session)
     }
 
@@ -2136,7 +2170,6 @@ class RoomSessionRepository(
             val durableCursorSeq = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
             val currentMaxMsgSeq = dao.getMessages(sessionId)
                 .maxOfOrNull { maxOf(it.seq ?: 0L, it.lastEventSeq) } ?: 0L
-            val durableSeq = maxOf(durableCursorSeq, currentMaxMsgSeq)
             val detailLatestSeq = entity.latestSeq
             if (recordAuthoritativeIdle && detailLatestSeq > 0L && detailLatestSeq >= currentMaxMsgSeq) {
                 authoritativeIdleAtSeqState.update { current ->
@@ -2145,16 +2178,17 @@ class RoomSessionRepository(
                     if (next == prev && sessionId in current) current else current + (sessionId to next)
                 }
             }
-            if (durableSeq >= detailLatestSeq || (activityRunState == "idle" && !hasActiveRuns)) {
+            // Idle alone cannot prove the reply has reached Room. The durable
+            // cursor must cover the detail watermark before removing live text.
+            if (detailLatestSeq > 0L && durableCursorSeq >= detailLatestSeq) {
                 liveProjectionMutex.withLock {
                     liveProjectors[sessionId]?.let { projector ->
-                        projector.retireEphemeralTextOverlays()
+                        val evidence = assistantEvidence(sessionId, durableCursorSeq, dao.getMessages(sessionId))
+                        projector.retireEphemeralTextOverlays(evidence.entityIds, evidence.textByRun, evidence.completedRunIds)
                         liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
                     }
                 }
-                if (detailLatestSeq > 0L && durableSeq >= detailLatestSeq) {
-                    settleConfirmedMessagesInRoom(sessionId, durableSeq)
-                }
+                settleConfirmedMessagesInRoom(sessionId, durableCursorSeq)
             }
         }
         if (result.status in setOf(SessionStatus.Completed, SessionStatus.Failed, SessionStatus.Cancelled, SessionStatus.Idle)) {
@@ -2243,59 +2277,86 @@ class RoomSessionRepository(
         summary
     }
 
-    override suspend fun refreshTimeline(sessionId: String): RefreshResult = sessionSyncMutex(sessionId).withLock {
-        // Opening an idle/new conversation must not wait fifteen seconds for
-        // a future event before enabling its composer. Background sync owns waits.
-        val durableResult = refreshEventsLocked(sessionId, waitForEvents = false)
-        if (durableResult is RefreshResult.ResetRequired) return@withLock durableResult
-        val resolvedDurable = if (durableResult is RefreshResult.Gap) {
-            rebuildDurableTimelineLocked(sessionId)
-        } else {
-            durableResult
+    override suspend fun refreshTimeline(sessionId: String): RefreshResult {
+        // Visible history is independent of durable replay, including when an
+        // existing replay holds the per-session durable lock.
+        var visibleFailure: Exception? = null
+        val visibleResult = try {
+            refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true, coalesceConcurrent = true)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: ApiException) {
+            if (error.statusCode == 401 || error.statusCode == 403) throw error
+            visibleFailure = error
+            null
+        } catch (error: SessionRepositoryException) {
+            if (error.statusCode == 401 || error.statusCode == 403) throw error
+            visibleFailure = error
+            null
+        } catch (error: Exception) {
+            visibleFailure = error
+            null
         }
-        if (resolvedDurable is RefreshResult.ResetRequired) return@withLock resolvedDurable
-        val visibleResult = refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true)
-        if (resolvedDurable is RefreshResult.Gap) resolvedDurable else visibleResult
+        if (visibleResult is RefreshResult.ResetRequired) return visibleResult
+        return sessionSyncMutex(sessionId).withLock {
+            val durableResult = refreshEventsLocked(sessionId, waitForEvents = false)
+            if (durableResult is RefreshResult.ResetRequired) return@withLock durableResult
+            val resolvedDurable = if (durableResult is RefreshResult.Gap) {
+                rebuildDurableTimelineLocked(sessionId)
+            } else durableResult
+            if (resolvedDurable is RefreshResult.ResetRequired || resolvedDurable is RefreshResult.Gap) return@withLock resolvedDurable
+            visibleFailure?.let { throw it }
+            if (durableResult is RefreshResult.Gap && resolvedDurable is RefreshResult.Applied && visibleResult != null) {
+                refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = false).also {
+                    if (it is RefreshResult.Applied) {
+                        pendingVisibleRebuildRefresh -= sessionId
+                        pendingVisibleOperationRefresh -= sessionId
+                    }
+                }
+            } else visibleResult ?: resolvedDurable
+        }
     }
 
     override suspend fun loadOlderTimeline(sessionId: String): RefreshResult = sessionSyncMutex(sessionId).withLock {
-        val current = timelinePagingState.value[sessionId] ?: TimelinePagingState()
-        val beforeSeq = current.nextBeforeSeq
-        if (current.loadingOlder || !current.hasOlder || beforeSeq == null || beforeSeq <= 1L) {
-            return@withLock RefreshResult.Applied(0, current.latestSeq)
-        }
-        timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = true, error = null)) }
-        try {
-            val response = execute(ApiRequest(
-                "GET",
-                visibleEventPagePath(sessionId, beforeSeq),
-            ))
-            val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-            if (page.resetRequired) {
-                timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = false, error = page.reason)) }
-                return@withLock RefreshResult.ResetRequired(page.reason)
+        visibleSyncMutex(sessionId).withLock visible@ {
+            val current = timelinePagingState.value[sessionId] ?: TimelinePagingState()
+            val beforeSeq = current.nextBeforeSeq
+            if (current.loadingOlder || !current.hasOlder || beforeSeq == null || beforeSeq <= 1L) {
+                return@visible RefreshResult.Applied(0, current.latestSeq)
             }
-            recoverVisibleMessageAttachments(sessionId, page)
-            val existing = visibleTimelineEvents[sessionId].orEmpty()
-            val merged = (existing + page.events)
-                .filter { it.boundarySeq() > 0L }
-                .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
-                .sortedBy { it.boundarySeq() }
-            visibleTimelineEvents[sessionId] = merged
-            updateVisibleTimelineProjection(sessionId, merged)
-            val nextBefore = page.pagination?.nextBeforeSeq ?: page.pagination?.oldestSeq
-            val hasOlder = page.pagination?.hasMoreBefore == true && nextBefore != null && nextBefore < beforeSeq
-            timelinePagingState.update { it + (sessionId to current.copy(
-                loadingOlder = false,
-                hasOlder = hasOlder,
-                nextBeforeSeq = nextBefore,
-                latestSeq = maxOf(current.latestSeq, page.latestSeq ?: merged.maxOfOrNull { it.boundarySeq() } ?: 0L),
-                error = null,
-            )) }
-            RefreshResult.Applied(page.events.size, page.latestSeq ?: current.latestSeq)
-        } catch (error: Throwable) {
-            timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = false, error = error.message)) }
-            throw error
+            timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = true, error = null)) }
+            try {
+                val response = execute(ApiRequest(
+                    "GET",
+                    visibleEventPagePath(sessionId, beforeSeq),
+                ))
+                val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
+                if (page.resetRequired) {
+                    timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = false, error = page.reason)) }
+                    return@visible RefreshResult.ResetRequired(page.reason)
+                }
+                recoverVisibleMessageAttachments(sessionId, page)
+                val existing = visibleTimelineEvents[sessionId].orEmpty()
+                val merged = (existing + page.events)
+                    .filter { it.boundarySeq() > 0L }
+                    .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
+                    .sortedBy { it.boundarySeq() }
+                visibleTimelineEvents[sessionId] = merged
+                updateVisibleTimelineProjection(sessionId, merged)
+                val nextBefore = page.pagination?.nextBeforeSeq ?: page.pagination?.oldestSeq
+                val hasOlder = page.pagination?.hasMoreBefore == true && nextBefore != null && nextBefore < beforeSeq
+                timelinePagingState.update { it + (sessionId to current.copy(
+                    loadingOlder = false,
+                    hasOlder = hasOlder,
+                    nextBeforeSeq = nextBefore,
+                    latestSeq = maxOf(current.latestSeq, page.latestSeq ?: merged.maxOfOrNull { it.boundarySeq() } ?: 0L),
+                    error = null,
+                )) }
+                RefreshResult.Applied(page.events.size, page.latestSeq ?: current.latestSeq)
+            } catch (error: Throwable) {
+                timelinePagingState.update { it + (sessionId to current.copy(loadingOlder = false, error = error.message)) }
+                throw error
+            }
         }
     }
 
@@ -2349,12 +2410,16 @@ class RoomSessionRepository(
         }
         val projector = liveProjectors.getOrPut(sessionId) { LiveTimelineProjector() }
         val durableMessages = dao.getMessages(sessionId)
+        val durableCursor = dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L
+        val evidence = assistantEvidence(sessionId, durableCursor, durableMessages)
         projector.reconcileDurableCursor(
-            dao.getCursor(sessionId)?.lastAppliedSeq ?: 0L,
+            durableCursor,
             durableMessages.associate { it.id to it.content },
             durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
             accumulatedTerminalRuns,
             durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+            evidence.textByRun,
+            evidence.entityIds,
         )
         val result = withContext(Dispatchers.Default) {
             projector.apply(events)
@@ -2409,11 +2474,24 @@ class RoomSessionRepository(
                     return RefreshResult.ResetRequired(page.reason)
                 }
                 if (watermark == null) {
-                    watermark = page.latestSeq
-                        ?: page.pagination?.latestSeq
+                    // pagination.latestSeq is the last event in this page,
+                    // not the session's high-water mark. Freeze the server's
+                    // total before paging so later appended events do not
+                    // extend this rebuild indefinitely. Older servers without
+                    // a total must be read until they report the last page.
+                    watermark = page.pagination?.totalLatestSeq?.takeIf { it >= 0L }
+                        ?: page.latestSeq?.takeIf { it >= 0L }
                         ?: if (page.pagination?.hasMoreAfter != true) {
                             page.events.maxOfOrNull { it.boundarySeq() } ?: dao.getSession(sessionId)?.latestSeq ?: 0L
                         } else null
+                }
+                // An inconsistent initial watermark must not publish an
+                // empty prefix over an existing offline timeline.
+                if (after == 0L && watermark != null && page.events.isNotEmpty() &&
+                    page.events.minOf { it.startingSeq() } > watermark
+                ) {
+                    check(!throwOnFailure) { "Timeline rebuild watermark precedes its first event" }
+                    return RefreshResult.Gap(1L, page.events.minOf { it.startingSeq() })
                 }
                 val events = if (watermark != null) {
                     page.events.filter { it.boundarySeq() <= watermark }
@@ -2421,6 +2499,10 @@ class RoomSessionRepository(
                     page.events
                 }
                 if (events.isEmpty()) {
+                    if (page.events.isEmpty() && page.pagination?.hasMoreAfter == true) {
+                        check(!throwOnFailure) { "Timeline rebuild cannot advance while more events are reported" }
+                        return RefreshResult.Gap(after + 1L, after + 1L)
+                    }
                     val target = watermark ?: dao.getSession(sessionId)?.latestSeq ?: 0L
                     if (after < target) {
                         check(!throwOnFailure) { "Incomplete timeline rebuild at $after of $target" }
@@ -2509,9 +2591,11 @@ class RoomSessionRepository(
             liveProjectionMutex.withLock {
                 liveProjectors.remove(sessionId)
                 liveTimelineState.value = liveTimelineState.value - sessionId
+                assistantEvidenceCache.remove(sessionId)
             }
-            visibleTimelineEvents.remove(sessionId)
-            visibleTimelineState.update { it - sessionId }
+            // Keep the last good visible page until a replacement is fetched.
+            pendingVisibleRebuildRefresh += sessionId
+            pendingVisibleOperationRefresh += sessionId
             durableToolFacts.remove(sessionId)
             durableToolTimelineState.update { it - sessionId }
             return RefreshResult.Applied(rebuiltEvents, after)
@@ -2602,12 +2686,15 @@ class RoomSessionRepository(
                     liveProjectionMutex.withLock {
                         liveProjectors[sessionId]?.let { projector ->
                             val durableMessages = dao.getMessages(sessionId)
+                            val evidence = assistantEvidence(sessionId, latestSeq, durableMessages)
                             projector.reconcileDurableCursor(
                                 latestSeq,
                                 durableMessages.associate { it.id to it.content },
                                 durableMessages.filter { it.completed }.mapTo(mutableSetOf()) { it.id },
                                 accumulatedTerminalRuns,
                                 durableMessages.mapNotNullTo(mutableSetOf()) { it.runId?.takeIf(String::isNotBlank) },
+                                evidence.textByRun,
+                                evidence.entityIds,
                             )
                             liveTimelineState.value = liveTimelineState.value + (sessionId to projector.snapshotEvents())
                         }
@@ -2648,7 +2735,8 @@ class RoomSessionRepository(
         }
         if (sessionId in pendingVisibleOperationRefresh) {
             try {
-                if (refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = true) is RefreshResult.Applied) {
+                if (refreshVisibleTimelineLocked(sessionId, preserveLoadedHistory = sessionId !in pendingVisibleRebuildRefresh) is RefreshResult.Applied) {
+                    pendingVisibleRebuildRefresh -= sessionId
                     pendingVisibleOperationRefresh -= sessionId
                 }
             } catch (cancelled: CancellationException) {
@@ -2792,37 +2880,59 @@ class RoomSessionRepository(
         return "$route?filter=all&limit=200&afterSeq=$afterSeq&direction=forward&compact=1$waitQuery"
     }
 
-    private suspend fun refreshVisibleTimelineLocked(sessionId: String, preserveLoadedHistory: Boolean = false): RefreshResult {
-        val activityRequest = beginActivityRequest(sessionId)
-        val response = execute(ApiRequest("GET", visibleEventPagePath(sessionId, null)))
-        val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
-        recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
-        recoverVisiblePendingApproval(sessionId, page)
-        if (page.resetRequired) {
-            timelinePagingState.update { it + (sessionId to TimelinePagingState(error = page.reason)) }
-            return RefreshResult.ResetRequired(page.reason)
+    private suspend fun refreshVisibleTimelineLocked(
+        sessionId: String, preserveLoadedHistory: Boolean = false, coalesceConcurrent: Boolean = false,
+    ): RefreshResult {
+        val observedGeneration = visibleRefreshGeneration[sessionId] ?: 0L
+        return try {
+            visibleSyncMutex(sessionId).withLock {
+                if (coalesceConcurrent && (visibleRefreshGeneration[sessionId] ?: 0L) != observedGeneration) {
+                    return@withLock RefreshResult.Applied(0, timelinePagingState.value[sessionId]?.latestSeq ?: 0L)
+                }
+                val activityRequest = beginActivityRequest(sessionId)
+                val response = execute(ApiRequest("GET", visibleEventPagePath(sessionId, null)))
+                val page = codec.decode(serializer<SessionEventsPageDto>(), response.body)
+                if (page.sessionId != sessionId) throw SessionRepositoryException(502, "SESSION_SCOPE_INVALID", "Invalid history scope", false)
+                if (page.resetRequired) {
+                    timelinePagingState.update { it + (sessionId to TimelinePagingState(error = page.reason)) }
+                    return@withLock RefreshResult.ResetRequired(page.reason)
+                }
+                val events = page.events
+                    .filter { it.boundarySeq() > 0L }
+                    .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
+                    .sortedBy { it.boundarySeq() }
+                val firstNewSeq = events.minOfOrNull { it.startingSeq() }
+                val older = if (preserveLoadedHistory) {
+                    visibleTimelineEvents[sessionId].orEmpty().filter { firstNewSeq == null || it.boundarySeq() < firstNewSeq }
+                } else emptyList()
+                val merged = older + events
+                visibleTimelineEvents[sessionId] = merged
+                updateVisibleTimelineProjection(sessionId, merged)
+                val nextBefore = page.pagination?.nextBeforeSeq ?: page.pagination?.oldestSeq
+                val latestSeq = page.latestSeq ?: events.maxOfOrNull { it.boundarySeq() } ?: 0L
+                val priorPaging = timelinePagingState.value[sessionId]
+                timelinePagingState.update { it + (sessionId to TimelinePagingState(
+                    initialPageLoaded = true,
+                    initialPageEmpty = visibleTimelineState.value[sessionId].orEmpty().isEmpty(),
+                    hasOlder = if (older.isNotEmpty() && priorPaging != null) priorPaging.hasOlder else page.pagination?.hasMoreBefore == true && nextBefore != null && nextBefore > 1L,
+                    nextBeforeSeq = if (older.isNotEmpty() && priorPaging != null) priorPaging.nextBeforeSeq else nextBefore,
+                    latestSeq = latestSeq,
+                )) }
+                recordRunActivityFromPage(sessionId, page, activityRequest = activityRequest)
+                recoverVisiblePendingApproval(sessionId, page)
+                recoverVisibleMessageAttachments(sessionId, page)
+                visibleRefreshGeneration[sessionId] = (visibleRefreshGeneration[sessionId] ?: 0L) + 1L
+                RefreshResult.Applied(events.size, latestSeq)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            timelinePagingState.update { current ->
+                val previous = current[sessionId] ?: TimelinePagingState()
+                current + (sessionId to previous.copy(latestRefreshFailed = true))
+            }
+            throw error
         }
-        recoverVisibleMessageAttachments(sessionId, page)
-        val events = page.events
-            .filter { it.boundarySeq() > 0L }
-            .distinctBy { it.dedupeKey() ?: "fingerprint:${it.sessionEventFingerprint()}" }
-            .sortedBy { it.boundarySeq() }
-        val firstNewSeq = events.minOfOrNull { it.startingSeq() }
-        val older = if (preserveLoadedHistory) {
-            visibleTimelineEvents[sessionId].orEmpty().filter { firstNewSeq == null || it.boundarySeq() < firstNewSeq }
-        } else emptyList()
-        val merged = older + events
-        visibleTimelineEvents[sessionId] = merged
-        updateVisibleTimelineProjection(sessionId, merged)
-        val nextBefore = page.pagination?.nextBeforeSeq ?: page.pagination?.oldestSeq
-        val latestSeq = page.latestSeq ?: events.maxOfOrNull { it.boundarySeq() } ?: 0L
-        val priorPaging = timelinePagingState.value[sessionId]
-        timelinePagingState.update { it + (sessionId to TimelinePagingState(
-            hasOlder = if (older.isNotEmpty() && priorPaging != null) priorPaging.hasOlder else page.pagination?.hasMoreBefore == true && nextBefore != null && nextBefore > 1L,
-            nextBeforeSeq = if (older.isNotEmpty() && priorPaging != null) priorPaging.nextBeforeSeq else nextBefore,
-            latestSeq = latestSeq,
-        )) }
-        return RefreshResult.Applied(events.size, latestSeq)
     }
 
     // Older Room projections did not persist attachments. Reuse pages already
@@ -4529,6 +4639,23 @@ private class RoomCursorStore(private val dao: RagentDao) : CursorStore {
 }
 
 private val DERIVED_TURN_KINDS = setOf("regenerate_message", "resend_edited_message", "resend_edited_message_with_attachments")
+
+// A run may already have its user prompt, commentary, or an empty
+// message_start in Room while its final live answer has not landed. Only a
+// completed assistant snapshot can corroborate a differently keyed live text.
+private fun List<MessageEntity>.completedAssistantEntityIds(): Set<String> =
+    asSequence().filter { it.completed && it.role.equals("assistant", ignoreCase = true) && it.content.isNotBlank() }
+        .mapTo(mutableSetOf()) { it.id }
+
+private fun List<MessageEntity>.completedAssistantRunIds(): Set<String> =
+    asSequence().filter { it.completed && it.role.equals("assistant", ignoreCase = true) &&
+        !it.messagePhase.equals("commentary", ignoreCase = true) && it.content.isNotBlank() }
+        .mapNotNull { it.runId?.takeIf(String::isNotBlank) }.toSet()
+
+private fun List<MessageEntity>.completedAssistantTextByRun(): Map<String, Set<String>> =
+    asSequence().filter { it.completed && it.role.equals("assistant", ignoreCase = true) &&
+        it.messagePhase?.lowercase() in setOf("final", "final_answer") && it.content.isNotBlank() && !it.runId.isNullOrBlank() }
+        .groupBy({ it.runId!! }, { it.content }).mapValues { (_, texts) -> texts.toSet() }
 
 private class RoomEventSink(
     private val database: RagentDatabase,

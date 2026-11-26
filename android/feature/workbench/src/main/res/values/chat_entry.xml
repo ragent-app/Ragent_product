@@ -1,3 +1,5 @@
 <resources>
     <string name="chat_history_loading">Loading conversation…</string>
+    <string name="chat_history_unavailable">Conversation history has not loaded yet.</string>
+    <string name="chat_history_stale">Some newer messages may not be shown.</string>
 </resources>

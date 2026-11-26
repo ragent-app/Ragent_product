@@ -76,6 +76,7 @@ class HeroDemoSessionRepository : SessionRepository {
     private val timelineFlow = MutableStateFlow(buildOlderTimeline() + buildRecentTimeline())
     private val timelinePagingFlow = MutableStateFlow(
         TimelinePagingState(
+            initialPageLoaded = true,
             hasOlder = false,
             nextBeforeSeq = null,
             latestSeq = nextSeq,

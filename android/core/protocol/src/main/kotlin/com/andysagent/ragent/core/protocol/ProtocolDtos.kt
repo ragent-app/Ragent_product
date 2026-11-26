@@ -982,6 +982,7 @@ data class PaginationDto(
     val nextBeforeSeq: Long? = null,
     val oldestSeq: Long? = null,
     val latestSeq: Long? = null,
+    val totalLatestSeq: Long? = null,
     val totalEvents: Long? = null,
 )
 

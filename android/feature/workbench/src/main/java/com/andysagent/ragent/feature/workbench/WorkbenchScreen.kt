@@ -2774,6 +2774,7 @@ private fun ChatSurface(
     // writing the first message.
     val showComposerSuggestions =
         turnGroups.isEmpty() &&
+            (state.sessionId == null || state.visibleHistoryLoaded) &&
             !showActiveRunAction && state.stopRequest == StopRequestState.None &&
             !historyTransitioning &&
             state.error == null &&
@@ -2891,6 +2892,38 @@ private fun ChatSurface(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (!composerFullscreenActive) {
+            if (turnGroups.isNotEmpty() && state.visibleHistoryStale) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().widthIn(max = RagentSizes.ContentMaxWidth),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.chat_history_stale),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalRagentColors.current.secondaryContent,
+                    )
+                    AgentoButton(
+                        text = stringResource(R.string.project_retry),
+                        onClick = { onEvent(WorkbenchEvent.RetryHistory) },
+                        secondary = true,
+                    )
+                }
+            }
+            if (turnGroups.isEmpty() && state.sessionId != null && !state.visibleHistoryLoaded &&
+                !historyTransitioning && state.error == null) {
+                Text(
+                    stringResource(R.string.chat_history_unavailable),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalRagentColors.current.secondaryContent,
+                )
+                AgentoButton(
+                    text = stringResource(R.string.project_retry),
+                    onClick = { onEvent(WorkbenchEvent.RetryHistory) },
+                    secondary = true,
+                )
+            }
             AnimatedVisibility(
                 visible = showComposerSuggestions,
                 enter = fadeIn(tween(motionPolicy().duration(160))) +

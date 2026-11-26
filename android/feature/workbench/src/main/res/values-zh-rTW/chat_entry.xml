@@ -1,0 +1,4 @@
+<resources>
+    <string name="chat_history_unavailable">對話記錄尚未載入。</string>
+    <string name="chat_history_stale">部分較新的訊息可能尚未顯示。</string>
+</resources>
