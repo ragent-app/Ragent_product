@@ -187,4 +187,28 @@ class PrimaryPageLayerTest {
         rule.waitForIdle()
         assertEquals(AgentoDestination.Settings, selected.value)
     }
+
+    @Test fun externalSelectedChangeDoesNotReemitOnDestinationSelected() {
+        val callbacks = mutableListOf<AgentoDestination>()
+        val target = mutableStateOf(AgentoDestination.Home)
+        rule.setContent {
+            RagentTheme(darkTheme = false, motionPreference = MotionPreference.None) {
+                AgentoAdaptiveScaffold(
+                    selected = target.value,
+                    onDestinationSelected = {
+                        callbacks += it
+                        target.value = it
+                    },
+                    onCreateProject = {},
+                ) { modifier, destination, _, _ ->
+                    Box(modifier.testTag("content-${destination.route}"))
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.runOnUiThread { target.value = AgentoDestination.Settings }
+        rule.waitForIdle()
+        rule.onNodeWithTag("primary-page-settings").assertIsDisplayed()
+        assertTrue("External selection should not re-emit onDestinationSelected, got $callbacks", callbacks.isEmpty())
+    }
 }

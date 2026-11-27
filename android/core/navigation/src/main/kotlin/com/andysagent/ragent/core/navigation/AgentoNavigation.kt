@@ -212,10 +212,7 @@ fun AgentoAdaptiveScaffold(
         SideEffect { acknowledgedSelection = selected }
     }
 
-    fun navigateTo(destination: AgentoDestination) {
-        // Keep the state machine and the visual navigation stack in sync for
-        // both nav-item taps and links emitted by a destination surface.
-        onDestinationSelected(destination)
+    fun syncNavController(destination: AgentoDestination) {
         val currentVisit = navController.currentBackStackEntry
         if (currentVisit?.destination?.route == destination.route) return
         val enteringVisit = peerClockStore.clock
@@ -241,13 +238,22 @@ fun AgentoAdaptiveScaffold(
         }
     }
 
+    fun navigateTo(destination: AgentoDestination) {
+        // Keep the state machine and the visual navigation stack in sync for
+        // nav-item taps.
+        onDestinationSelected(destination)
+        syncNavController(destination)
+    }
+
     // A surface can request a destination directly (for example Home ->
-    // Projects). Reconcile state changes into the navigation stack. Keep this
-    // effect keyed only by the requested destination so a system-back pop is
-    // not immediately pushed forward again by stale selected state.
+    // Projects or Home -> Usage). Reconcile state changes into the navigation
+    // stack without re-emitting onDestinationSelected, which would clear
+    // destination subpage state (e.g. SettingsPage.Usage -> Overview). Keep
+    // this effect keyed only by the requested destination so a system-back pop
+    // is not immediately pushed forward again by stale selected state.
     LaunchedEffect(selected) {
         if (currentRoute != null && currentRoute != selected.route) {
-            navigateTo(selected)
+            syncNavController(selected)
         }
     }
 
