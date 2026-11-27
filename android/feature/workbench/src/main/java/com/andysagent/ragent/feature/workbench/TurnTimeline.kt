@@ -451,8 +451,20 @@ fun UserPromptBlock(
                                 )
                                 if (!isExpanded && isClipped) {
                                     Box(Modifier.matchParentSize()) {
-                                        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
-                                            .background(Brush.verticalGradient(listOf(Color.Transparent, bubbleColor))))
+                                        Box(
+                                            Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .fillMaxWidth()
+                                                .height(44.dp)
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        0.0f to Color.Transparent,
+                                                        0.58f to bubbleColor.copy(alpha = 0.92f),
+                                                        0.82f to bubbleColor,
+                                                        1.0f to bubbleColor,
+                                                    ),
+                                                ),
+                                        )
                                     }
                                 }
                             }

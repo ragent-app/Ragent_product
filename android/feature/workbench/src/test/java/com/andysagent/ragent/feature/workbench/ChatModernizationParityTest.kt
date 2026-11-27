@@ -22,6 +22,7 @@ import com.andysagent.ragent.core.timeline.TimelineItem
 import com.andysagent.ragent.core.timeline.TimelineOperationKind
 import com.andysagent.ragent.core.timeline.TimelineOperationStatus
 import com.andysagent.ragent.core.timeline.TimelineRole
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -32,8 +33,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -275,6 +280,124 @@ class ChatModernizationParityTest {
             assertEquals(listOf(attachment), viewModel.state.value.attachments)
             assertFalse(viewModel.state.value.isLoading)
             assertNotNull(viewModel.state.value.error)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `edit resend preserves optimistic working status and clears stale idle cursor`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val editGate = CompletableDeferred<Unit>()
+            val completedTurn = listOf(
+                TimelineItem.Message(
+                    id = "msg-1",
+                    seq = 1L,
+                    role = TimelineRole.User,
+                    text = "Original prompt",
+                    completed = true,
+                    requestId = "req-1",
+                ),
+                TimelineItem.Message(
+                    id = "msg-2",
+                    seq = 2L,
+                    role = TimelineRole.Agent,
+                    text = "Old reply",
+                    completed = true,
+                    runId = "run-1",
+                    requestId = "req-1",
+                ),
+            )
+            val staleTerminalActivity = buildJsonObject {
+                put("runId", JsonPrimitive("run-1"))
+                put("requestId", JsonPrimitive("req-1"))
+                put("state", JsonPrimitive("completed"))
+                put("runElapsedMs", JsonPrimitive(301_000L))
+            }
+            val repository = TestSessionRepository(
+                sessions = listOf(Session("s1", "Completed Run", status = SessionStatus.Idle)),
+                timelines = mapOf("s1" to completedTurn),
+                initialAuthoritativeIdleAtSeq = 2L,
+                initialRunActivity = staleTerminalActivity,
+                beforeEditResend = { editGate.await() },
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            assertEquals(AgentRunStatus.Idle, viewModel.state.value.runStatus)
+            assertEquals(2L, viewModel.state.value.authoritativeIdleAtSeq)
+
+            viewModel.onEvent(ChatEvent.SubmitEditTurn("req-1", "Edited prompt"))
+            runCurrent()
+
+            assertTrue(viewModel.state.value.submittingDerivedTurn)
+            assertEquals(1L, viewModel.state.value.derivedTurnNonce)
+            assertEquals(AgentRunStatus.Working, viewModel.state.value.runStatus)
+            assertEquals(0L, viewModel.state.value.authoritativeIdleAtSeq)
+            assertNull(viewModel.state.value.serverRunActivity)
+
+            // Re-emitting stale idle cursor or terminal activity mid-flight must not flip back to Idle.
+            repository.emitAuthoritativeIdleAtSeq(2L)
+            repository.emitRunActivity(staleTerminalActivity)
+            runCurrent()
+
+            assertEquals(AgentRunStatus.Working, viewModel.state.value.runStatus)
+            assertEquals(0L, viewModel.state.value.authoritativeIdleAtSeq)
+
+            editGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(viewModel.state.value.submittingDerivedTurn)
+        } finally {
+            Dispatchers.resetMain()
+        }
+    }
+
+    @Test
+    fun `regenerate preserves optimistic working status and increments derived nonce`() = runTest {
+        Dispatchers.setMain(kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        try {
+            val regenGate = CompletableDeferred<Unit>()
+            val completedTurn = listOf(
+                TimelineItem.Message(
+                    id = "msg-1",
+                    seq = 1L,
+                    role = TimelineRole.User,
+                    text = "Original prompt",
+                    completed = true,
+                    requestId = "req-1",
+                ),
+                TimelineItem.Message(
+                    id = "msg-2",
+                    seq = 2L,
+                    role = TimelineRole.Agent,
+                    text = "Old reply",
+                    completed = true,
+                    runId = "run-1",
+                    requestId = "req-1",
+                ),
+            )
+            val repository = TestSessionRepository(
+                sessions = listOf(Session("s1", "Completed Run", status = SessionStatus.Idle)),
+                timelines = mapOf("s1" to completedTurn),
+                initialAuthoritativeIdleAtSeq = 2L,
+                beforeRegenerate = { regenGate.await() },
+            )
+            val viewModel = ChatViewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onEvent(ChatEvent.RegenerateMessage("req-1"))
+            runCurrent()
+
+            assertTrue(viewModel.state.value.submittingDerivedTurn)
+            assertEquals(1L, viewModel.state.value.derivedTurnNonce)
+            assertEquals(AgentRunStatus.Working, viewModel.state.value.runStatus)
+            assertEquals(0L, viewModel.state.value.authoritativeIdleAtSeq)
+            assertNull(viewModel.state.value.serverRunActivity)
+
+            regenGate.complete(Unit)
+            advanceUntilIdle()
+            assertFalse(viewModel.state.value.submittingDerivedTurn)
         } finally {
             Dispatchers.resetMain()
         }
@@ -957,7 +1080,15 @@ private class TestSessionRepository(
     private val runProjections: Map<String, kotlinx.serialization.json.JsonObject> = emptyMap(),
     private val beforeGoalUpdate: suspend () -> Unit = {},
     private val failEditedResend: Throwable? = null,
+    initialAuthoritativeIdleAtSeq: Long = 0L,
+    initialRunActivity: JsonObject? = null,
+    private val beforeEditResend: suspend () -> Unit = {},
+    private val beforeRegenerate: suspend () -> Unit = {},
 ) : SessionRepository {
+    private val authoritativeIdleSeqState = MutableStateFlow(initialAuthoritativeIdleAtSeq)
+    private val runActivityState = MutableStateFlow(initialRunActivity)
+    fun emitAuthoritativeIdleAtSeq(seq: Long) { authoritativeIdleSeqState.value = seq }
+    fun emitRunActivity(activity: JsonObject?) { runActivityState.value = activity }
     private val connectionStateValue = MutableStateFlow(connection)
     override val connectionState: StateFlow<RuntimeConnectionState> = connectionStateValue.asStateFlow()
     override val invalidations: Flow<SessionInvalidation> = MutableSharedFlow()
@@ -974,6 +1105,8 @@ private class TestSessionRepository(
 
     private val timelineState = MutableStateFlow(timelines)
     private val durationsState = MutableStateFlow<Map<String, Long>>(emptyMap())
+    override fun observeRunActivity(sessionId: String): Flow<JsonObject?> = runActivityState
+    override fun observeAuthoritativeIdleAtSeq(sessionId: String): Flow<Long> = authoritativeIdleSeqState
     override fun observeRunDurations(sessionId: String): Flow<Map<String, Long>> = durationsState
     override suspend fun saveRunDuration(sessionId: String, runId: String, durationMs: Long) {
         durationsState.value = durationsState.value + (runId to durationMs)
@@ -1051,6 +1184,12 @@ private class TestSessionRepository(
         sessionState.value = updated
         return QueueMutationResult(updated.firstOrNull { it.id == sessionId }, requestId, steered = true)
     }
+    override suspend fun regenerateMessage(sessionId: String, parentRequestId: String, requestId: String) {
+        beforeRegenerate()
+        sessionState.value = sessionState.value.map {
+            if (it.id == sessionId) it.copy(status = SessionStatus.Idle) else it
+        }
+    }
     override suspend fun resendEditedMessage(
         sessionId: String,
         parentRequestId: String,
@@ -1058,6 +1197,7 @@ private class TestSessionRepository(
         selection: RuntimeSelection,
         requestId: String,
     ) {
+        beforeEditResend()
         editedPrompts += prompt
         failEditedResend?.let { throw it }
         sessionState.value = sessionState.value.map {

@@ -984,11 +984,13 @@ fun MarkdownBlockRenderer(
 
                                     is ListItem.Ordered -> {
                                         Box(
-                                            modifier = Modifier.width(AgentoMarkdownTokens.ListMarkerWidth),
+                                            modifier = Modifier.widthIn(min = 28.dp),
                                             contentAlignment = Alignment.TopEnd,
                                         ) {
                                             Text(
                                                 text = "${item.number}.",
+                                                maxLines = 1,
+                                                softWrap = false,
                                                 style = TextStyle(
                                                     fontFamily = FontFamily.Monospace,
                                                     fontSize = AgentoMarkdownTokens.BodyFontSize,

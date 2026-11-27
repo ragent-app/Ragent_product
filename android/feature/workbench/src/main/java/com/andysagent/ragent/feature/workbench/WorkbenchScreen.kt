@@ -1999,7 +1999,8 @@ private fun ChatSurface(
         )
     }
     val latestTurnGroups = rememberUpdatedState(turnGroups)
-    val statusActive = state.pendingTurn?.state == PendingTurnState.Sending ||
+    val statusActive = state.submittingDerivedTurn ||
+        state.pendingTurn?.state == PendingTurnState.Sending ||
         state.acceptedTurns.isNotEmpty() ||
         state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval
     val activityRunId = (state.serverRunActivity?.get("runId") as? kotlinx.serialization.json.JsonPrimitive)?.content
@@ -2064,15 +2065,21 @@ private fun ChatSurface(
     }
     val showActiveRunAction = statusActive ||
         (observedActive && state.connection != AgentConnectionStatus.Connected)
-    var runStartedElapsed by remember(state.sessionId, durationTurnKey) { mutableLongStateOf(Long.MAX_VALUE) }
-    var runElapsedSeconds by remember(state.sessionId, durationTurnKey) { mutableLongStateOf(-1L) }
+    var runStartedElapsed by remember(state.sessionId, durationTurnKey, state.derivedTurnNonce) { mutableLongStateOf(Long.MAX_VALUE) }
+    var runElapsedSeconds by remember(state.sessionId, durationTurnKey, state.derivedTurnNonce) { mutableLongStateOf(-1L) }
     val activityMatchesTurn = (currentRunId != null && activityRunId == currentRunId) ||
         (activeRequestId != null && activityRequestId == activeRequestId) ||
         (durationTurnKey != null && activityRequestId == durationTurnKey)
     val serverElapsed = (state.serverRunActivity?.get("runElapsedMs") as? kotlinx.serialization.json.JsonPrimitive)
-        ?.content?.toLongOrNull()?.takeIf { it >= 0 && activityMatchesTurn }
-    LaunchedEffect(state.sessionId, durationTurnKey, showActiveRunAction, serverElapsed) {
-        if (!showActiveRunAction) return@LaunchedEffect
+        ?.content?.toLongOrNull()?.takeIf { it >= 0 && activityMatchesTurn && !state.submittingDerivedTurn }
+    LaunchedEffect(state.sessionId, durationTurnKey, state.derivedTurnNonce, showActiveRunAction, serverElapsed, confirmedTerminal) {
+        if (!showActiveRunAction) {
+            if (confirmedTerminal) {
+                runStartedElapsed = Long.MAX_VALUE
+                runElapsedSeconds = -1L
+            }
+            return@LaunchedEffect
+        }
         val now = android.os.SystemClock.elapsedRealtime()
         runStartedElapsed = updateRunElapsedAnchor(runStartedElapsed, serverElapsed, now)
         if (runStartedElapsed == Long.MAX_VALUE) return@LaunchedEffect
@@ -3647,7 +3654,7 @@ private fun ChatSurface(
                                 val duration = if (seconds >= 0) {
                                     if (seconds < 60) stringResource(R.string.workbench_duration_seconds, seconds)
                                     else stringResource(R.string.workbench_duration_minutes_seconds, seconds / 60, seconds % 60)
-                                } else if (isRunTurn && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A") state.runMetrics.durationFormatted else ""
+                                } else if (isRunTurn && !state.submittingDerivedTurn && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A") state.runMetrics.durationFormatted else ""
                                 val hasTerminalDuration = turn.runId?.let(state.runDurations::containsKey) == true ||
                                     (isRunTurn && confirmedTerminal)
                                 val label = if (duration.isEmpty()) stringResource(R.string.workbench_status_processing) else

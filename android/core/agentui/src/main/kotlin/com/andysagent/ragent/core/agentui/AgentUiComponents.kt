@@ -391,6 +391,22 @@ fun UserMessage(
                             isStreaming = false,
                             modifier = Modifier.fillMaxWidth(),
                         )
+                        if (!isExpanded && isCollapsible) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .fillMaxWidth()
+                                    .height(44.dp)
+                                    .background(
+                                        Brush.verticalGradient(
+                                            0.0f to Color.Transparent,
+                                            0.58f to bubbleColor.copy(alpha = 0.92f),
+                                            0.82f to bubbleColor,
+                                            1.0f to bubbleColor,
+                                        ),
+                                    ),
+                            )
+                        }
                     }
 
                     if (isCollapsible) {

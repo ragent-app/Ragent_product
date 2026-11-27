@@ -161,6 +161,7 @@ data class WorkbenchUiState(
     val pairingInProgress: Boolean = false,
     val isLoading: Boolean = false,
     val submittingDerivedTurn: Boolean = false,
+    val derivedTurnNonce: Long = 0L,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
@@ -583,6 +584,7 @@ data class ChatUiState(
     val initialTurnEntry: Boolean = false,
     val isLoading: Boolean = false,
     val submittingDerivedTurn: Boolean = false,
+    val derivedTurnNonce: Long = 0L,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
@@ -1025,7 +1027,7 @@ class ChatViewModel(
                             // A cached session summary can lag an active turn, including
                             // while the carrier is connected but activity requests fail.
                             runStatus = activeRunActivityStatus(serverRunActivity) ?: selected.status.toAgentStatus().let { summary ->
-                                val turnObserved = pendingTurn != null || acceptedTurns.isNotEmpty() ||
+                                val turnObserved = submittingDerivedTurn || pendingTurn != null || acceptedTurns.isNotEmpty() ||
                                     activeRunActivityStatus(serverRunActivity) != null || timelineItems.any {
                                         it is TimelineItem.Message && it.role == com.andysagent.ragent.core.timeline.TimelineRole.User
                                     }
@@ -1758,7 +1760,16 @@ class ChatViewModel(
         val fixed = selectedRepository ?: return
         val generation = sessionGeneration
         if (fixed !== activeRepository() || parentRequestId.isBlank() || current.runStatus == AgentRunStatus.Working) return
-        updateState { copy(submittingDerivedTurn = true, error = null, runStatus = AgentRunStatus.Working) }
+        updateState {
+            copy(
+                submittingDerivedTurn = true,
+                derivedTurnNonce = derivedTurnNonce + 1L,
+                error = null,
+                runStatus = AgentRunStatus.Working,
+                authoritativeIdleAtSeq = 0L,
+                serverRunActivity = null,
+            )
+        }
         viewModelScope.launch {
             var submitted = false
             try {
@@ -1827,8 +1838,11 @@ class ChatViewModel(
                 editingTurnText = null,
                 attachments = emptyList(),
                 submittingDerivedTurn = true,
+                derivedTurnNonce = derivedTurnNonce + 1L,
                 error = null,
                 runStatus = AgentRunStatus.Working,
+                authoritativeIdleAtSeq = 0L,
+                serverRunActivity = null,
             )
         }
         viewModelScope.launch {
@@ -2920,7 +2934,7 @@ class ChatViewModel(
             launch {
                 fixed.observeAuthoritativeIdleAtSeq(sessionId).collectLatest { idleSeq ->
                     if (isCurrentSession(sessionId, generation)) {
-                        updateState { copy(authoritativeIdleAtSeq = idleSeq) }
+                        updateState { copy(authoritativeIdleAtSeq = if (submittingDerivedTurn) 0L else idleSeq) }
                     }
                 }
             }
@@ -2938,7 +2952,7 @@ class ChatViewModel(
                                 (scopedRunId == null && noUserTurn && activityRunId == previousActiveId))
                             val terminal = terminalStatus in setOf(AgentRunStatus.Completed, AgentRunStatus.Failed, AgentRunStatus.Cancelled)
                             copy(serverRunActivity = activity,
-                                runStatus = activityStatus ?: if (terminal && matchesTurn && pendingTurn == null &&
+                                runStatus = activityStatus ?: if (!submittingDerivedTurn && terminal && matchesTurn && pendingTurn == null &&
                                     acceptedTurns.isEmpty() && queuedMessages.isEmpty()) terminalStatus!! else runStatus)
                         }
                         if (activityStatus != null) {
@@ -3245,7 +3259,7 @@ class ChatViewModel(
                             if (serverRunActivity == requestedActivity &&
                                 activeRunActivityStatus(serverRunActivity) != AgentRunStatus.WaitingApproval &&
                                 approval == null && activeDecision == null && (currentActiveId == null || currentActiveId == runId) &&
-                                pendingTurn == null && acceptedTurns.isEmpty() && queuedMessages.isEmpty() &&
+                                !submittingDerivedTurn && pendingTurn == null && acceptedTurns.isEmpty() && queuedMessages.isEmpty() &&
                                 latestTurnScopedRunId(timelineItems) == runId) {
                                 copy(runStatus = projectedStatus!!, serverRunActivity = null)
                             } else this
@@ -4317,11 +4331,13 @@ class ChatViewModel(
         val idleEvidenceChanged = normalized.sessionId != previous.sessionId ||
             normalized.timelineItems !== previous.timelineItems ||
             normalized.pendingTurn?.state != previous.pendingTurn?.state ||
+            normalized.submittingDerivedTurn != previous.submittingDerivedTurn ||
             normalized.acceptedTurns != previous.acceptedTurns || normalized.queuedMessages != previous.queuedMessages ||
             normalized.serverRunActivity != previous.serverRunActivity ||
             normalized.authoritativeIdleAtSeq != previous.authoritativeIdleAtSeq || normalized.runStatus != previous.runStatus ||
             normalized.approval != previous.approval || normalized.activeDecision != previous.activeDecision
-        val pending = normalized.pendingTurn?.state in setOf(PendingTurnState.Sending, PendingTurnState.Accepted)
+        val pending = normalized.submittingDerivedTurn ||
+            normalized.pendingTurn?.state in setOf(PendingTurnState.Sending, PendingTurnState.Accepted)
         val settled = if (idleEvidenceChanged &&
             normalized.runStatus in setOf(AgentRunStatus.Working, AgentRunStatus.WaitingApproval) &&
             normalized.authoritativeIdleAtSeq > 0L && !pending &&

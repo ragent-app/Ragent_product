@@ -1600,6 +1600,7 @@ class MainActivity : ComponentActivity() {
                     goalDialogOpen = chatState.goalDialogOpen,
                     isLoading = chatState.isLoading,
                     submittingDerivedTurn = chatState.submittingDerivedTurn,
+                    derivedTurnNonce = chatState.derivedTurnNonce,
                     loadingOlder = chatState.loadingOlder,
                     hasOlder = chatState.hasOlder,
                     error = chatState.error ?: projectState.error ?: computerState.error,
