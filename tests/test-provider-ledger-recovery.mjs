@@ -62,3 +62,36 @@ if(process.platform==='win32'){
   console.log('PASS: native OAuth fully saves a new Provider, secret and matching CAS version after repair; fence survives');
 }
 await assert.rejects(repairProviderLedgers({...options,apply:true}),/changed since repair preflight/,'stale repair plans cannot overwrite current facts');
+const {chmod,link,rename,rm,unlink}=await import('node:fs/promises');
+const {createProviderSyncKeyStore}=await import('../lib/provider-runtime/sync.mjs');
+const flushDir=join(root,'flush-check');
+const assertFlushedBeforeCommit=async(commitOp,run)=>{
+  const ops=[];
+  const fsDeps={
+    readFileImpl:readFile,
+    mkdirImpl:mkdir,
+    chmodImpl:chmod,
+    unlinkImpl:unlink,
+    writeFileImpl:async(filePath,data,options)=>{ops.push({op:'write',filePath,options:{...options}});return writeFile(filePath,data,options);},
+    renameImpl:async(fromPath,toPath)=>{ops.push({op:'rename',fromPath,toPath});return rename(fromPath,toPath);},
+    linkImpl:async(fromPath,toPath)=>{ops.push({op:'link',fromPath,toPath});return link(fromPath,toPath);},
+  };
+  await run(fsDeps);
+  const commitIndex=ops.findIndex(entry=>entry.op===commitOp);
+  assert.notEqual(commitIndex,-1,`expected ${commitOp} call`);
+  const commitEvent=ops[commitIndex];
+  const writeIndex=ops.findIndex((entry,index)=>index<commitIndex&&entry.op==='write'&&entry.filePath===commitEvent.fromPath);
+  assert.notEqual(writeIndex,-1,`expected writeFileImpl before ${commitOp}`);
+  assert.equal(ops[writeIndex].options.flush,true,`expected flush: true before ${commitOp}`);
+  assert.equal(ops[writeIndex].options.mode,0o600,`expected mode 0o600 before ${commitOp}`);
+};
+try{
+  await assertFlushedBeforeCommit('rename',fsDeps=>createProviderSyncLedger({configDir:flushDir,...fsDeps}).nextVersion('flush-fixture'));
+  await assertFlushedBeforeCommit('rename',fsDeps=>createCredentialMutationLedger({configDir:flushDir,...fsDeps}).submit({accountKey:'provider:codex:flush',credentialInstanceId:'instance-flush',expectedVersion:0,secretPayload:{authType:'api-key',apiKey:'fixture-flush-key'},sourceDeviceId:'flush-fixture'}));
+  await assertFlushedBeforeCommit('rename',fsDeps=>createNativeProviderRegistry({configDir:flushDir,...fsDeps}).upsertProviderProfile({id:'flush-provider',agentType:'codex',protocol:'openai-responses',baseUrl:'https://example.invalid/v1',authProfileId:'auth-flush'}));
+  await assertFlushedBeforeCommit('rename',fsDeps=>createSecretStore({configDir:flushDir,...fsDeps}).writeSecret('secret-flush',{authType:'api-key',apiKey:'fixture-flush-key'}));
+  await assertFlushedBeforeCommit('link',fsDeps=>createProviderSyncKeyStore({configDir:flushDir,...fsDeps}).getKeyPair());
+  console.log('PASS: provider runtime files pass flush: true before atomic rename/link');
+}finally{
+  await rm(flushDir,{recursive:true,force:true});
+}
