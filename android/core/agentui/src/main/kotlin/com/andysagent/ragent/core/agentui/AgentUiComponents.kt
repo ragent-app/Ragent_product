@@ -618,6 +618,29 @@ fun AgentMessage(
     }
 }
 
+private class IncrementalGraphemeRangesCache {
+    private var cachedText: String = ""
+    private var cachedRanges: List<IntRange> = emptyList()
+
+    fun resolve(text: String): List<IntRange> {
+        if (text == cachedText) return cachedRanges
+        val next = if (cachedText.isNotEmpty() && text.startsWith(cachedText)) {
+            val keepCount = (cachedRanges.size - 2).coerceAtLeast(0)
+            val rescanFrom = if (keepCount < cachedRanges.size) cachedRanges[keepCount].first else 0
+            val suffixRanges = streamingGraphemeRanges(text.substring(rescanFrom))
+            buildList(keepCount + suffixRanges.size) {
+                for (i in 0 until keepCount) add(cachedRanges[i])
+                for (range in suffixRanges) add((range.first + rescanFrom)..(range.last + rescanFrom))
+            }
+        } else {
+            streamingGraphemeRanges(text)
+        }
+        cachedText = text
+        cachedRanges = next
+        return next
+    }
+}
+
 @Composable
 fun AgentStreamingMessage(
     text: String,
@@ -631,7 +654,8 @@ fun AgentStreamingMessage(
     // Pace only actual live deltas, as in the Web renderer. Completed/history
     // messages always paint immediately; no synthetic final-response typing.
     var revealedGraphemes by rememberSaveable { mutableIntStateOf(0) }
-    val graphemes = remember(text) { streamingGraphemeRanges(text) }
+    val graphemeCache = remember { IncrementalGraphemeRangesCache() }
+    val graphemes = remember(text) { graphemeCache.resolve(text) }
     val latestRanges by rememberUpdatedState(graphemes)
     LaunchedEffect(streaming, smoothCatchUp, motion.preference) {
         if (!streaming || !smoothCatchUp || motion.preference != MotionPreference.Full) return@LaunchedEffect

@@ -1199,26 +1199,46 @@ async function fetchSessionsList({ forceFresh = false, essential = false } = {})
     intent: { forceFresh },
     essential,
     run: async ({ signal }) => {
+      let networkSettled = false;
+      if (!forceFresh && (!Array.isArray(sessions) || sessions.length === 0) && typeof readSessionListSwrCache === "function") {
+        void readSessionListSwrCache().then((cached) => {
+          if (networkSettled || signal?.aborted || visitorMode) return;
+          if (!cached || !Array.isArray(cached.sessions) || cached.sessions.length === 0) return;
+          if (Array.isArray(sessions) && sessions.length > 0) return;
+          applySessionListState(cached.sessions);
+        }).catch(() => {});
+      }
       if (typeof window.ragentEnsureProjectsReady === "function") {
-        await window.ragentEnsureProjectsReady({ force: forceFresh });
+        // Run project catalog sync in parallel with session list fetch.
       }
       // Cross-project catalog: the session bar is not scoped to one workspace.
       // The first level groups every project and the second level filters by the
       // browsed project client-side, so the fetch must carry no projectId/folder
       // filter (project-scoped fetches replaced the shared catalog and left the
       // browsed project's list empty after a switch).
-      const data = await fetchJsonOrRedirect(
-        SESSION_LIST_URL,
-        {
-          ...buildSessionRefreshRequestOptions(forceFresh, signal),
-          ...(!forceFresh ? { cacheMaxAgeMs: 5_000 } : {}),
-        },
-      );
+      const projectsPromise = typeof window.ragentEnsureProjectsReady === "function"
+        ? window.ragentEnsureProjectsReady({ force: forceFresh })
+        : Promise.resolve();
+      const [, data] = await Promise.all([
+        projectsPromise,
+        fetchJsonOrRedirect(
+          SESSION_LIST_URL,
+          {
+            ...buildSessionRefreshRequestOptions(forceFresh, signal),
+            ...(!forceFresh ? { cacheMaxAgeMs: 5_000 } : {}),
+          },
+        ),
+      ]);
+      networkSettled = true;
       // Stale-response guard: a response landing after this request was
       // superseded (or the session list detached) must not overwrite fresher
       // state with an older snapshot.
       if (signal?.aborted) return null;
-      applySessionListState(data.sessions || []);
+      const freshSessions = data.sessions || [];
+      applySessionListState(freshSessions);
+      if (typeof writeSessionListSwrCache === "function") {
+        void writeSessionListSwrCache(freshSessions);
+      }
       // The archive section is no longer fetched as a separate list, but an
       // active-list refresh still completes any shell loading state left by a
       // pre-refresh navigation or an older client bundle.
@@ -1412,7 +1432,8 @@ function applyAttachedSessionState(id, session, { hasAttachedSession: explicitHa
   }
 
   restoreDraft();
-  renderSessionList();
+  if (typeof scheduleSessionListRender === "function") scheduleSessionListRender();
+  else renderSessionList();
   syncBrowserState();
   syncForkButton();
   syncShareButton();
@@ -2927,7 +2948,8 @@ async function refreshSidebarSession(sessionId, { forceFresh = false, essential 
       try {
         const session = await fetchSessionSidebar(sessionId, { forceFresh, signal });
         if (session) {
-          renderSessionList();
+          if (typeof scheduleSessionListRender === "function") scheduleSessionListRender();
+          else renderSessionList();
         }
         return session;
       } catch (error) {
@@ -2969,18 +2991,20 @@ async function refreshRealtimeViews({
   const shouldRefreshSessionsList = useForegroundPlan
     ? shouldRefreshForegroundSessionList({ forceFresh })
     : true;
-  if (shouldRefreshSessionsList) {
-    await fetchSessionsList({ forceFresh, essential }).catch(() => {});
-  }
-  if (pendingNavigationState) {
-    restoreOwnerSessionSelection();
-  }
   const shouldRefreshCurrent = useForegroundPlan
     ? shouldRefreshForegroundCurrentSession({ forceFresh })
     : Boolean(currentSessionId);
-  if (currentSessionId && shouldRefreshCurrent) {
-    await refreshCurrentSession({ viewportIntent, forceFresh, essential }).catch(() => {});
+  const sessionsPromise = shouldRefreshSessionsList
+    ? fetchSessionsList({ forceFresh, essential }).catch(() => {})
+    : Promise.resolve();
+  const currentPromise = (currentSessionId && shouldRefreshCurrent)
+    ? refreshCurrentSession({ viewportIntent, forceFresh, essential }).catch(() => {})
+    : Promise.resolve();
+  await sessionsPromise;
+  if (pendingNavigationState) {
+    restoreOwnerSessionSelection();
   }
+  await currentPromise;
 }
 
 function startParallelCurrentSessionBootstrap() {
@@ -3104,9 +3128,6 @@ async function ensureServiceWorkerRegistration() {
       { updateViaCache: "none" },
     );
     await reg.update().catch(() => {});
-    reg.installing?.postMessage({ type: "ragent:clear-caches" });
-    reg.waiting?.postMessage({ type: "ragent:clear-caches" });
-    reg.active?.postMessage({ type: "ragent:clear-caches" });
     await navigator.serviceWorker.ready.catch(() => {});
     return reg;
   } catch (err) {

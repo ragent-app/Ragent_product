@@ -9,8 +9,15 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** A native offer callback can arrive after its carrier has been closed. */
-internal suspend fun createWebRtcOffer(connection: PeerConnection, isCurrent: () -> Boolean): String =
+internal suspend fun createWebRtcOffer(
+    connection: PeerConnection,
+    iceRestart: Boolean = false,
+    isCurrent: () -> Boolean,
+): String =
     suspendCancellableCoroutine { cont ->
+        val constraints = MediaConstraints().apply {
+            if (iceRestart) mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+        }
         connection.createOffer(object : SdpObserver {
             override fun onCreateSuccess(sdp: SessionDescription?) {
                 if (!cont.isActive) return
@@ -45,5 +52,5 @@ internal suspend fun createWebRtcOffer(connection: PeerConnection, isCurrent: ()
             override fun onCreateFailure(reason: String?) {
                 if (cont.isActive) cont.resumeWithException(IllegalStateException("createOffer failed: $reason"))
             }
-        }, MediaConstraints())
+        }, constraints)
     }

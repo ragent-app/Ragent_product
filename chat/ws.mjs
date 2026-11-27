@@ -90,21 +90,38 @@ function configuredBrowserSignalAuthorizer() {
   return localInstanceBrowserSignalAuthorizer();
 }
 
+const WS_HEARTBEAT_INTERVAL_MS = 20_000;
+
 export function attachWebSocket(server, { authorizeP2PJoin = configuredBrowserSignalAuthorizer(), onP2PEvent = null } = {}) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
   setWss(wss);
   // 元数据信令：与主服务同端口提供 /signal（Caddy catch-all 已把公网 /signal
   // upgrade 转发到 7690），只转发 HMAC 签名 envelope，不承载数据。
   const p2pSignaling = createP2PSignaling({ authorizeJoin: authorizeP2PJoin, onEvent: onP2PEvent });
-  wss.once('close', () => p2pSignaling.close());
+  const heartbeatTimer = setInterval(() => {
+    for (const client of wss.clients) {
+      if (client.readyState !== 1) continue;
+      if (client._isAlive === false) {
+        try { client.terminate(); } catch {}
+        continue;
+      }
+      client._isAlive = false;
+      try { client.ping(); } catch {}
+    }
+  }, WS_HEARTBEAT_INTERVAL_MS);
+  heartbeatTimer.unref?.();
+  wss.once('close', () => {
+    clearInterval(heartbeatTimer);
+    p2pSignaling.close();
+  });
 
   server.on('upgrade', async (req, socket, head) => {
-    if (isProotRuntime && (req.url !== '/ws' || (!(await authenticateProotRequest(req)) && !(await authenticateBearerToken(req))))) {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (isProotRuntime && (url.pathname !== '/ws' || (!(await authenticateProotRequest(req)) && !(await authenticateBearerToken(req))))) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
       socket.destroy();
       return;
     }
-    const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === '/signal') {
       p2pSignaling.handleUpgrade(req, socket, head);
       return;
@@ -131,6 +148,10 @@ export function attachWebSocket(server, { authorizeP2PJoin = configuredBrowserSi
 
   wss.on('connection', (ws) => {
     const role = ws._authSession?.role || 'owner';
+    ws._isAlive = true;
+    ws.on('pong', () => {
+      ws._isAlive = true;
+    });
     console.log(`[ws] Client connected (role=${role})`);
     void sendBuildInfo(ws);
     let deviceExpiryTimer;

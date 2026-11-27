@@ -56,6 +56,7 @@ type httpRequest struct {
 	Headers              map[string]string `json:"headers"`
 	BodyBase64           string            `json:"bodyBase64"`
 	AcceptResponseStream bool              `json:"acceptResponseStream,omitempty"`
+	AcceptBinaryResponse bool              `json:"acceptBinaryResponse,omitempty"`
 }
 
 type browserGrantPublicKey struct {
@@ -350,6 +351,7 @@ type httpResponse struct {
 	Headers    map[string]string `json:"headers,omitempty"`
 	BodyBase64 string            `json:"bodyBase64,omitempty"`
 	Error      string            `json:"error,omitempty"`
+	rawBody    []byte
 }
 
 type dcKeepaliveFrame struct {
@@ -461,6 +463,7 @@ func serverReadyFeatures(browserAuth ...*browserAuthConfig) []string {
 		"http_request_stream_v2",
 		"http_request_binary_chunks_v3",
 		"http_response_stream_v1",
+		"http_response_binary_v2",
 		"http_bulk_channel_v1",
 		"http_bg_channel_v1",
 		"dc_keepalive_v1",
@@ -687,6 +690,9 @@ func proxyRequestBody(localBase string, request httpRequest, streamedBody io.Rea
 		if len(values) > 0 {
 			headers[key] = values[0]
 		}
+	}
+	if request.AcceptBinaryResponse {
+		return httpResponse{ID: request.ID, Type: "http_response", Status: response.StatusCode, Headers: headers, rawBody: responseBody}
 	}
 	return httpResponse{ID: request.ID, Type: "http_response", Status: response.StatusCode, Headers: headers, BodyBase64: base64.StdEncoding.EncodeToString(responseBody)}
 }
@@ -1105,6 +1111,25 @@ func main() {
 				continue
 			}
 			if peer.SetLocalDescription(answer) != nil {
+				continue
+			}
+			emit(controlMessage{Type: "answer", SDP: answer.SDP})
+		case "ice_restart_offer":
+			if peer == nil || peer.ConnectionState() == webrtc.PeerConnectionStateClosed || peer.ConnectionState() == webrtc.PeerConnectionStateFailed {
+				fmt.Fprintf(os.Stderr, "[p2p-host] ice_restart_offer ignored: no active peer\n")
+				continue
+			}
+			if err := peer.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: message.SDP}); err != nil {
+				fmt.Fprintf(os.Stderr, "[p2p-host] ice_restart SetRemoteDescription failed: %v\n", err)
+				continue
+			}
+			answer, err := peer.CreateAnswer(nil)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "[p2p-host] ice_restart CreateAnswer failed: %v\n", err)
+				continue
+			}
+			if err := peer.SetLocalDescription(answer); err != nil {
+				fmt.Fprintf(os.Stderr, "[p2p-host] ice_restart SetLocalDescription failed: %v\n", err)
 				continue
 			}
 			emit(controlMessage{Type: "answer", SDP: answer.SDP})

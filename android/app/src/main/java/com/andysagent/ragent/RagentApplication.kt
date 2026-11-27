@@ -127,6 +127,7 @@ class RagentApplication : Application(), com.andysagent.ragent.integration.appfu
             oldHandler?.uncaughtException(t, e)
         }
         if (isDocumentExportProcess()) return
+        com.andysagent.ragent.core.network.SharedOkHttpClient.initialize(cacheDir)
         PushRegistrationSchedule.ensure(this)
         // Background API/notification delivery must not spend Android's process
         // bind/start timeout loading the entire runtime on the main thread.
@@ -2798,6 +2799,7 @@ class AndroidRuntimeGraph internal constructor(
             onTurnQuotaExceeded = { error ->
                 mutableTargetTurnQuotaFailures.update { failures -> failures + (target.instanceId to error) }
             },
+            isForeground = { foreground },
         )
         runtime = TargetRuntime(target.instanceId, target.endpoint.trimEnd('/'), "", targetTransport, repository, controller,
             childScope, relay = attachmentRelay,

@@ -89,6 +89,9 @@ class ConnectivitySupervisor(
     private val useSignedHandoff: () -> Boolean = { false },
     private val signedHandoffPlan: (suspend (String) -> BootstrapConnectionPlan?)? = null,
     private val onSignedHandoffFinished: ((Boolean) -> Unit)? = null,
+    private val isForeground: () -> Boolean = { true },
+    private val foregroundProbeTimeoutMs: Long = FOREGROUND_PROBE_TIMEOUT_MS,
+    private val foregroundProbeRetryTimeoutMs: Long = FOREGROUND_PROBE_RETRY_TIMEOUT_MS,
 ) {
     companion object {
         // Visible for testing.
@@ -97,11 +100,14 @@ class ConnectivitySupervisor(
         // Legacy interval retained for compatibility; no second offer is made.
         const val TURN_RECHECK_INTERVAL_MS = 30_000L
         const val CARRIER_HEALTH_INTERVAL_MS = 3_000L
+        const val BACKGROUND_CARRIER_HEALTH_INTERVAL_MS = 15_000L
         const val CARRIER_HEALTH_TIMEOUT_MS = 2_500L
         const val CARRIER_HEALTH_RETRY_DELAY_MS = 500L
         const val CARRIER_HEALTH_RETRY_TIMEOUT_MS = 2_000L
         const val FOREGROUND_PROBE_TIMEOUT_MS = 2_500L
         const val FOREGROUND_PROBE_RETRY_TIMEOUT_MS = 1_500L
+        const val FOREGROUND_FAST_PROBE_TIMEOUT_MS = 800L
+        const val FOREGROUND_FAST_PROBE_RETRY_TIMEOUT_MS = 700L
         const val FOREGROUND_RECENT_INBOUND_SKIP_MS = 1_500L
         const val PERIODIC_RECENT_INBOUND_SKIP_MS = 3_000L
         const val CAPABILITY_PROBE_DEBOUNCE_MS = 2_000L
@@ -121,6 +127,7 @@ class ConnectivitySupervisor(
     val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
     private var probeJob: Job? = null
+    private var iceRestartJob: Job? = null
     private val probeMutex = Mutex()
     private val handlingCarrierClose = AtomicBoolean(false)
     private var wasConnected = false
@@ -191,6 +198,8 @@ class ConnectivitySupervisor(
             override fun onLost() {
                 if (stopped) return
                 observedOffline = true
+                iceRestartJob?.cancel()
+                iceRestartJob = null
                 cancelBackoff()
                 cancelTurnRecheck()
                 bootstrapTurnAttempted = false
@@ -225,17 +234,25 @@ class ConnectivitySupervisor(
                 if (stopped) return
                 observedOffline = false
                 probeJob?.cancel()
+                iceRestartJob?.cancel()
+                iceRestartJob = null
                 cancelBackoff()
                 cancelTurnRecheck()
-                closeP2PSession()
-                closeTurnSession()
-                bootstrapTurnAttempted = false
-                retryCount = 0
-                updateState(ConnectionStatus.Degraded, reachable = false,
-                    transport = TransportKind.None, lastError = "Default network changed")
-                // Wi-Fi/mobile transitions are not capability jitter. Obtain
-                // a fresh fixed-target contract when a controller owns one.
-                onRecoveryRequired?.invoke("default-network-changed") ?: scheduleProbe(delayMs = 0)
+                val activeSession = p2pSession ?: turnSession
+                if (activeSession != null && activeSession.supportsIceRestart) {
+                    iceRestartJob = scope.launch {
+                        val restarted = runCatching { activeSession.restartIce(2_500L) }.getOrDefault(false)
+                        if (stopped || (p2pSession ?: turnSession) !== activeSession) return@launch
+                        if (restarted) {
+                            retryCount = 0
+                            onCarrierSuspect(activeSession)
+                            return@launch
+                        }
+                        teardownOnDefaultNetworkChange()
+                    }
+                    return
+                }
+                teardownOnDefaultNetworkChange()
             }
         })
 
@@ -243,10 +260,28 @@ class ConnectivitySupervisor(
         scheduleProbe(delayMs = 0)
     }
 
+    private fun teardownOnDefaultNetworkChange() {
+        closeP2PSession()
+        closeTurnSession()
+        bootstrapTurnAttempted = false
+        retryCount = 0
+        updateState(
+            ConnectionStatus.Degraded,
+            reachable = false,
+            transport = TransportKind.None,
+            lastError = "Default network changed",
+        )
+        // Wi-Fi/mobile transitions are not capability jitter. Obtain
+        // a fresh fixed-target contract when a controller owns one.
+        onRecoveryRequired?.invoke("default-network-changed") ?: scheduleProbe(delayMs = 0)
+    }
+
     fun stop() {
         if (!started) return
         started = false
         stopped = true
+        iceRestartJob?.cancel()
+        iceRestartJob = null
         cancelHandoff()
         monitor.unregister()
         probeJob?.cancel()
@@ -328,7 +363,7 @@ class ConnectivitySupervisor(
         val credential = credentialProvider()?.takeIf { it.isNotBlank() }
 
         val firstOutcome = try {
-            runSingleFlightProbe(session, FOREGROUND_PROBE_TIMEOUT_MS, credential)
+            runSingleFlightProbe(session, foregroundProbeTimeoutMs, credential)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
@@ -356,7 +391,7 @@ class ConnectivitySupervisor(
         if (session.isOpen && session.lastInboundFrameElapsedMs >= FOREGROUND_RECENT_INBOUND_SKIP_MS) {
             val retryCredential = credentialProvider()?.takeIf { it.isNotBlank() }
             val retryOutcome = try {
-                runSingleFlightProbe(session, FOREGROUND_PROBE_RETRY_TIMEOUT_MS, retryCredential)
+                runSingleFlightProbe(session, foregroundProbeRetryTimeoutMs, retryCredential)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -1097,13 +1132,23 @@ class ConnectivitySupervisor(
             var lastSuccessfulGeneration = session.successfulResponseGeneration
             var lastInboundGeneration = session.inboundFrameGeneration
             while (isActive && !stopped && (p2pSession ?: turnSession) === session) {
+                val effectiveIntervalMs = if (isForeground()) {
+                    turnRecheckIntervalMs.coerceAtLeast(1_000L)
+                } else {
+                    maxOf(turnRecheckIntervalMs, BACKGROUND_CARRIER_HEALTH_INTERVAL_MS)
+                }
                 val waitMs = if (failures == 1) CARRIER_HEALTH_RETRY_DELAY_MS
-                    else turnRecheckIntervalMs.coerceAtLeast(1_000L)
+                    else effectiveIntervalMs
                 val forcedWake = withTimeoutOrNull(waitMs) { wakeChannel.receiveCatching().getOrNull() } == true
                 if (!isActive || stopped || (p2pSession ?: turnSession) !== session) return@launch
 
                 val isTurn = session === turnSession && p2pSession == null
-                if (!forcedWake && failures == 0 && session.lastInboundFrameElapsedMs < PERIODIC_RECENT_INBOUND_SKIP_MS) {
+                val recentInboundSkipMs = if (isForeground()) {
+                    PERIODIC_RECENT_INBOUND_SKIP_MS
+                } else {
+                    maxOf(PERIODIC_RECENT_INBOUND_SKIP_MS, effectiveIntervalMs)
+                }
+                if (!forcedWake && failures == 0 && session.lastInboundFrameElapsedMs < recentInboundSkipMs) {
                     failures = 0
                     lastSuccessfulGeneration = session.successfulResponseGeneration
                     lastInboundGeneration = session.inboundFrameGeneration

@@ -4,7 +4,8 @@
 (function initMarkdownComposerWorker() {
   "use strict";
 
-  const luteUrl = new URL("vendor/vditor/dist/js/lute/lute.min.js", self.location.href).toString();
+  const luteVersionSearch = self.location?.search || "";
+  const luteUrl = new URL(`vendor/vditor/dist/js/lute/lute.min.js${luteVersionSearch}`, self.location.href).toString();
   importScripts(luteUrl);
 
   const lute = self.Lute.New({

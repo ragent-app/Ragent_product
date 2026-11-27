@@ -10,6 +10,5 @@
 @import url("chat-responsive.css");
 @import url("custom-select.css");
 @import url("chat-glass.css");
-@import url("chat-goal-ui.css");
-@import url("chat-sheet-actions.css?v=20260808-sheet-v9");
-@import url("chat-sidebar-motion.css?v=20260808");
+@import url("chat-sheet-actions.css");
+@import url("chat-sidebar-motion.css");

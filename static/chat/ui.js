@@ -4489,6 +4489,7 @@ function renderMessageInto(container, evt, {
   finalizeActiveThinkingBlock = false,
   mergeAssistantRunMessages = true,
   preservePosition = false,
+  deferEnhance = false,
 } = {}) {
   if (!container) return null;
   const role = evt.role || "assistant";
@@ -4608,7 +4609,7 @@ function renderMessageInto(container, evt, {
       content.className = "msg-assistant-body";
       let shouldAppendContent = false;
       if (evt.content) {
-        const didRender = renderMarkdownIntoNode(content, evt.content);
+        const didRender = renderMarkdownIntoNode(content, evt.content, { deferEnhance });
         if (didRender) {
           shouldAppendContent = true;
         } else if (!hasAttachments) {
@@ -4616,7 +4617,7 @@ function renderMessageInto(container, evt, {
         }
       } else if (evt.bodyAvailable) {
         if (evt.bodyPreview) {
-          renderMarkdownIntoNode(content, evt.bodyPreview);
+          renderMarkdownIntoNode(content, evt.bodyPreview, { deferEnhance });
         }
         shouldAppendContent = true;
       }

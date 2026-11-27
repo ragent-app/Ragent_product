@@ -267,18 +267,15 @@ class TunnelServer {
       response: res,
       headApplied: false,
       downQueue: [],
+      downQueueBytes: 0,
       downFlushing: false,
       upQueue: [],
+      upQueueBytes: 0,
       upFlushing: false,
       closed: false,
       receive(payload) {
         if (this.closed) return;
-        if (this.upQueue.length === 0) {
-          this.writeUp(payload);
-        } else {
-          this.upQueue.push(payload);
-          this.flushUp();
-        }
+        this.writeUp(payload);
       },
       applyHead(head) {
         if (this.closed || this.headApplied) return;
@@ -294,12 +291,14 @@ class TunnelServer {
       },
       writeUp(payload) {
         if (this.closed) return;
-        if (this.upQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (this.upQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           log('server', `stream ${this.id} up-queue overflow, aborting`);
           this.abort();
           return;
         }
         this.upQueue.push(payload);
+        this.upQueueBytes += size;
         this.flushUp();
       },
       flushUp() {
@@ -311,6 +310,7 @@ class TunnelServer {
             // are already buffered, so shift before writing to avoid
             // duplicating data.
             const chunk = this.upQueue.shift();
+            this.upQueueBytes = Math.max(0, this.upQueueBytes - (chunk?.length || 0));
             if (!this.response.write(chunk)) {
               this.response.once('drain', flush);
               return;
@@ -323,12 +323,14 @@ class TunnelServer {
       },
       writeDown(payload) {
         if (this.closed) return;
-        if (this.downQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (this.downQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           log('server', `stream ${this.id} down-queue overflow, aborting`);
           this.abort();
           return;
         }
         this.downQueue.push(payload);
+        this.downQueueBytes += size;
         this.flushDown();
       },
       flushDown() {
@@ -340,6 +342,7 @@ class TunnelServer {
             // are already buffered, so shift before writing to avoid
             // duplicating frames.
             const chunk = this.downQueue.shift();
+            this.downQueueBytes = Math.max(0, this.downQueueBytes - (chunk?.length || 0));
             if (!control.res.write(encodeFrame(TYPE_DATA, this.id, chunk))) {
               control.res.once('drain', flush);
               return;
@@ -439,8 +442,10 @@ class TunnelServer {
       rawSocket: socket,
       headApplied: false,
       downQueue: [],
+      downQueueBytes: 0,
       downFlushing: false,
       upQueue: [],
+      upQueueBytes: 0,
       upFlushing: false,
       closed: false,
       receive(payload) {
@@ -472,12 +477,14 @@ class TunnelServer {
       },
       writeUp(payload) {
         if (this.closed) return;
-        if (this.upQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (this.upQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           log('server', `stream ${this.id} up-queue overflow, aborting`);
           this.abort();
           return;
         }
         this.upQueue.push(payload);
+        this.upQueueBytes += size;
         this.flushUp();
       },
       flushUp() {
@@ -489,6 +496,7 @@ class TunnelServer {
             // are already buffered, so shift before writing to avoid
             // duplicating data.
             const chunk = this.upQueue.shift();
+            this.upQueueBytes = Math.max(0, this.upQueueBytes - (chunk?.length || 0));
             if (!this.rawSocket.write(chunk)) {
               this.rawSocket.once('drain', flush);
               return;
@@ -501,11 +509,13 @@ class TunnelServer {
       },
       writeDown(payload) {
         if (this.closed) return;
-        if (this.downQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (this.downQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           this.abort();
           return;
         }
         this.downQueue.push(payload);
+        this.downQueueBytes += size;
         this.flushDown();
       },
       flushDown() {
@@ -517,6 +527,7 @@ class TunnelServer {
             // are already buffered, so shift before writing to avoid
             // duplicating frames.
             const chunk = this.downQueue.shift();
+            this.downQueueBytes = Math.max(0, this.downQueueBytes - (chunk?.length || 0));
             if (!control.res.write(encodeFrame(TYPE_DATA, this.id, chunk))) {
               control.res.once('drain', flush);
               return;

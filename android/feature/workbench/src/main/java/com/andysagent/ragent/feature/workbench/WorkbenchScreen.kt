@@ -2187,7 +2187,9 @@ private fun ChatSurface(
                 turn.agentMessages.ifEmpty { listOfNotNull(turn.finalAnswer ?: turn.streamingAnswer) }
                     .map { if (it.completed) it.text else autoCloseMarkdownSyntax(it.text) }
             }.distinct()
-            entryDocuments = entryDocuments + prepareMarkdownDocuments(documentsAt(turnGroups.indices.toList()))
+            val anchorIndices = ((restorationTarget - 2).coerceAtLeast(0)..(restorationTarget + 2).coerceAtMost(turnGroups.lastIndex)).toList()
+            val anchorDocs = documentsAt(anchorIndices)
+            entryDocuments = entryDocuments + prepareMarkdownDocuments(anchorDocs)
             // A clock delay alone cannot prove that the prepared documents
             // reached the LazyColumn's composition. Wait for that actual apply
             // before forcing its anchor measurement.
@@ -2197,6 +2199,20 @@ private fun ChatSurface(
             // exchanges naturally clamp/backfill; tall replies retain the top.
             withFrameNanos { }
             initiallyPositionedSessionId = sessionId
+            val remainingIndices = turnGroups.indices
+                .filter { it !in anchorIndices }
+                .sortedBy { kotlin.math.abs(it - restorationTarget) }
+            if (remainingIndices.isNotEmpty()) {
+                val remainingDocs = documentsAt(remainingIndices)
+                if (remainingDocs.isNotEmpty()) {
+                    launch {
+                        val preparedRemaining = prepareMarkdownDocuments(remainingDocs)
+                        if (state.sessionId == sessionId && preparedRemaining.isNotEmpty()) {
+                            entryDocuments = entryDocuments + preparedRemaining
+                        }
+                    }
+                }
+            }
         }
     }
     val entryPreparing = turnGroups.isNotEmpty() && !initialLocalTimeline &&

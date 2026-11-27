@@ -489,7 +489,7 @@ class OkHttpRagentTransport(
             throw ApiException(0, "P2P_REMOTE_ERROR", remoteError,
                 retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
-        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers, request.rawDownload, request.maxResponseBytes)
+        val response = decodeCarrierResponse(result, request.rawDownload, request.maxResponseBytes)
         if (!response.isSuccessful && !(request.rawDownload && response.statusCode in 300..399)) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
@@ -532,7 +532,7 @@ class OkHttpRagentTransport(
             throw ApiException(0, "TURN_REMOTE_ERROR", remoteError,
                 retryable = isRetryableUploadLocalFailure(request, remoteError))
         }
-        val response = decodeCarrierResponse(result.status, result.bodyBase64, result.headers, request.rawDownload, request.maxResponseBytes)
+        val response = decodeCarrierResponse(result, request.rawDownload, request.maxResponseBytes)
         if (!response.isSuccessful && !(request.rawDownload && response.statusCode in 300..399)) {
             val error = response.toApiException(codec)
             throw if (request.isolateCredentialFailure) error else handleAuthenticationFailure(error, attemptedCredential)
@@ -779,7 +779,7 @@ class OkHttpRagentTransport(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val EMPTY_BODY = "".toRequestBody(JSON_MEDIA_TYPE)
 
-        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        private fun defaultClient(): OkHttpClient = SharedOkHttpClient.newBuilder()
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -817,15 +817,17 @@ private fun isTextResponse(contentType: String?): Boolean {
         || type == "application/xml" || type.endsWith("+xml") || type == "application/x-www-form-urlencoded"
 }
 
-private fun decodeCarrierResponse(status: Int, bodyBase64: String, headers: Map<String, String>, rawDownload: Boolean = false, maxResponseBytes: Long? = null): ApiResponse {
-    val limit = minOf(OkHttpRagentTransport.MAX_CARRIER_RESPONSE_BYTES.toLong(), if (status in 200..299) maxResponseBytes ?: Long.MAX_VALUE else Long.MAX_VALUE)
-    val maximumBase64Characters = ((limit + 2L) / 3L) * 4L
-    if (bodyBase64.length.toLong() > maximumBase64Characters) throw IOException("Carrier response exceeded the client size limit")
-    val bytes = P2PProtocol.decodeBody(bodyBase64)
+private fun decodeCarrierResponse(result: P2PHttpResponse, rawDownload: Boolean = false, maxResponseBytes: Long? = null): ApiResponse {
+    val limit = minOf(OkHttpRagentTransport.MAX_CARRIER_RESPONSE_BYTES.toLong(), if (result.status in 200..299) maxResponseBytes ?: Long.MAX_VALUE else Long.MAX_VALUE)
+    val bytes = result.rawBodyBytes ?: run {
+        val maximumBase64Characters = ((limit + 2L) / 3L) * 4L
+        if (result.bodyBase64.length.toLong() > maximumBase64Characters) throw IOException("Carrier response exceeded the client size limit")
+        P2PProtocol.decodeBody(result.bodyBase64)
+    }
     if (bytes.size.toLong() > limit) throw IOException("Carrier response exceeded the client size limit")
-    return if (!rawDownload && isTextResponse(headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value))
-        ApiResponse(status, bytes.toString(Charsets.UTF_8), headers)
-    else ApiResponse(status, "", headers, bytes)
+    return if (!rawDownload && isTextResponse(result.headers.entries.firstOrNull { it.key.equals("Content-Type", true) }?.value))
+        ApiResponse(result.status, bytes.toString(Charsets.UTF_8), result.headers)
+    else ApiResponse(result.status, "", result.headers, bytes)
 }
 
 private class StreamingRequestBody(

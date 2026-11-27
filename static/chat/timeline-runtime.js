@@ -458,6 +458,7 @@
             finalizeActiveThinkingBlock: false,
             mergeAssistantRunMessages: false,
             preservePosition: true,
+            deferEnhance: isAssistantMessageItem(item, event) && item.completed !== true,
           })
           : null;
       }

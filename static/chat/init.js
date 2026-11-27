@@ -742,6 +742,7 @@ async function initApp() {
   }
 
   if (isAgentScopedMode()) {
+    connect();
     const sessionsPromise = bootstrapViaHttp({ deferOwnerRestore: true });
     let toolsPromise = Promise.resolve();
     if (canChangeRuntimeSelection()) {
@@ -749,7 +750,6 @@ async function initApp() {
     }
     await Promise.all([toolsPromise, sessionsPromise]);
     restoreOwnerSessionSelection();
-    connect();
     setupForegroundRefreshHandlers();
     if (canChangeRuntimeSelection()) {
       void loadModelsForCurrentTool();
@@ -760,6 +760,7 @@ async function initApp() {
   if (typeof hydratePreferredRuntimeSelection === 'function') {
     await hydratePreferredRuntimeSelection();
   }
+  connect();
   const toolsPromise = loadInlineTools({ skipModelLoad: true });
   const sessionsPromise = bootstrapViaHttp({ deferOwnerRestore: true });
   await Promise.all([toolsPromise, sessionsPromise]);
@@ -769,7 +770,6 @@ async function initApp() {
   if (!launchHandled) {
     restoreOwnerSessionSelection();
   }
-  connect();
   setupForegroundRefreshHandlers();
   void loadModelsForCurrentTool();
 }

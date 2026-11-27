@@ -4,7 +4,7 @@ import { access, copyFile, mkdir, readdir, stat } from 'fs/promises';
 import { basename, dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 
-import { CHAT_PROJECTS_FILE } from '../lib/config.mjs';
+import { CHAT_PROJECTS_FILE, CHAT_SESSIONS_FILE } from '../lib/config.mjs';
 import {
   createSerialTaskQueue,
   readJson,
@@ -34,7 +34,26 @@ const HAS_PROJECT_RUNS_SCAN_CAP = 5000;
 
 let projectStoreCache = null;
 let projectStoreCacheMtimeMs = null;
+let projectsInitializedSignature = '';
+let projectsInitializedStore = null;
 const runProjectMutation = createSerialTaskQueue();
+
+function formatStatSignature(stats) {
+  return stats ? `${stats.mtimeMs}:${stats.size}` : 'none';
+}
+
+async function readProjectsInitSignature() {
+  const [projectsStat, sessionsStat] = await Promise.all([
+    statOrNull(CHAT_PROJECTS_FILE),
+    statOrNull(CHAT_SESSIONS_FILE),
+  ]);
+  return `${formatStatSignature(projectsStat)}|${formatStatSignature(sessionsStat)}`;
+}
+
+function invalidateProjectsInitMemo() {
+  projectsInitializedSignature = '';
+  projectsInitializedStore = null;
+}
 
 async function removeSessionHistoriesBounded(sessionIds = [], {
   removeSessionHistoryImpl = removeSessionHistory,
@@ -289,6 +308,7 @@ async function saveProjectStoreUnlocked(store) {
   await writeJsonAtomic(CHAT_PROJECTS_FILE, normalized);
   projectStoreCache = normalized;
   projectStoreCacheMtimeMs = (await statOrNull(CHAT_PROJECTS_FILE))?.mtimeMs ?? null;
+  invalidateProjectsInitMemo();
   return projectStoreCache;
 }
 
@@ -350,7 +370,15 @@ async function isSessionRunningFromMeta(meta) {
 }
 
 export async function ensureProjectsInitialized() {
+  const fastSignature = await readProjectsInitSignature();
+  if (projectsInitializedStore && projectsInitializedSignature === fastSignature) {
+    return projectsInitializedStore;
+  }
   return runProjectMutation(async () => {
+    const lockedSignature = await readProjectsInitSignature();
+    if (projectsInitializedStore && projectsInitializedSignature === lockedSignature) {
+      return projectsInitializedStore;
+    }
     const store = await loadProjectStoreUnlocked();
     const usedNames = new Set(store.projects.map((project) => project.name.toLowerCase()));
     let projectsChanged = false;
@@ -419,6 +447,8 @@ export async function ensureProjectsInitialized() {
       await saveProjectStoreUnlocked(store);
     }
 
+    projectsInitializedSignature = await readProjectsInitSignature();
+    projectsInitializedStore = store;
     return store;
   });
 }

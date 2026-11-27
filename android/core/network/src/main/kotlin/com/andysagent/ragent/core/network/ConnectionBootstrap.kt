@@ -118,7 +118,7 @@ class ConnectionBootstrapClient(
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
-        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+        private fun defaultClient(): OkHttpClient = SharedOkHttpClient.newBuilder()
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)

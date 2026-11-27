@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,6 +30,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.OkHttpClient
 import org.webrtc.DataChannel
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
@@ -89,6 +91,12 @@ interface P2PSession {
 
     /** Receives a non-destructive suspect signal (e.g. ICE entered DISCONNECTED while open). */
     fun setCarrierSuspectListener(listener: (() -> Unit)?) {}
+
+    /** True when the session can attempt an in-place WebRTC ICE restart without tearing down DataChannels. */
+    val supportsIceRestart: Boolean get() = false
+
+    /** Attempts an in-place WebRTC ICE restart over signaling, returning true if ICE recovers cleanly. */
+    suspend fun restartIce(timeoutMs: Long = 2_500L): Boolean = false
 
     /**
      * Probe carrier liveness within [timeoutMs].
@@ -295,6 +303,7 @@ class WebRTCDataChannelTransport(
     private val appContext: Context,
     private val connectTimeoutMs: Long = 15_000L,
     private val requestTimeoutMs: Long = 60_000L,
+    private val sharedHttpClient: OkHttpClient? = null,
 ) : P2PSession {
 
     private companion object {
@@ -537,6 +546,14 @@ class WebRTCDataChannelTransport(
     internal var peerConnectionFactoryProvider: (Context) -> PeerConnectionFactory = ::obtainSharedFactory
     private val pendingPongs = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val responseStreams = P2PHttpResponseAssembler()
+    private val binaryResponseStreams = P2PBinaryResponseAssembler()
+    @Volatile private var binaryResponseSupported = false
+    @Volatile private var awaitingIceRestartAnswer = false
+    @Volatile private var iceRestartCompleted: CompletableDeferred<Boolean>? = null
+    private val iceRestartMutex = Mutex()
+    private val primaryBufferWakeup = Channel<Unit>(Channel.CONFLATED)
+    private val bulkBufferWakeup = Channel<Unit>(Channel.CONFLATED)
+    private val bgBufferWakeup = Channel<Unit>(Channel.CONFLATED)
 
     // ICE gathering can produce candidates before createOfferSuspend() returns.
     // Keep them behind the offer so the signaling sequence cannot deliver
@@ -591,6 +608,9 @@ class WebRTCDataChannelTransport(
                     traceConnect("ice_connected")
                     iceDisconnected = false
                     iceDisconnectWatchdog.recovered()
+                    if (!awaitingIceRestartAnswer) {
+                        iceRestartCompleted?.complete(true)
+                    }
                     refreshResolvedCarrier()
                 }
                 PeerConnection.IceConnectionState.FAILED,
@@ -643,9 +663,7 @@ class WebRTCDataChannelTransport(
         }
 
         override fun onBufferedAmountChange(previousAmount: Long) {
-            // The Java WebRTC artifact in use reports buffered-amount changes
-            // but does not expose a configurable low-water threshold. The
-            // sender polls only while the channel is above its high-water mark.
+            primaryBufferWakeup.trySend(Unit)
         }
     }
 
@@ -692,6 +710,30 @@ class WebRTCDataChannelTransport(
         recordInboundFrame()
         runCatching { Log.i(TAG, "datachannel_response_frame bytes=${bytes.size}") }
         if (debuggable) runCatching { Log.d(TAG, "projects_carrier_frame channel=$debugCarrierId bytes=${bytes.size}") }
+        if (buffer.binary && P2PBinaryResponseAssembler.isAgr2Frame(bytes)) {
+            val frame = try {
+                P2PBinaryResponseAssembler.parseAgr2Frame(bytes)
+            } catch (_: Exception) {
+                return
+            }
+            if (!pending.containsKey(frame.id)) return
+            try {
+                val response = binaryResponseStreams.addChunk(frame)
+                if (!pending.containsKey(frame.id)) {
+                    binaryResponseStreams.discard(frame.id)
+                    return
+                }
+                if (response == null) return
+                val request = pending.remove(frame.id) ?: return
+                responseStreams.discard(frame.id)
+                if (response.error == null && response.status in 200..299) successfulResponses.incrementAndGet()
+                request.onResponse(response)
+            } catch (_: Exception) {
+                binaryResponseStreams.discard(frame.id)
+                pending.remove(frame.id)?.onError(Exception("Invalid AGR2 binary response stream"))
+            }
+            return
+        }
         dispatchResponse(String(bytes, Charsets.UTF_8), alreadyRecorded = true)
     }
 
@@ -710,7 +752,9 @@ class WebRTCDataChannelTransport(
                     }
                 }
                 override fun onMessage(buffer: DataChannel.Buffer) = receiveFrame(buffer)
-                override fun onBufferedAmountChange(previousAmount: Long) = Unit
+                override fun onBufferedAmountChange(previousAmount: Long) {
+                    bulkBufferWakeup.trySend(Unit)
+                }
             })
             scope.launch {
                 delay(BULK_OPEN_TIMEOUT_MS)
@@ -734,7 +778,10 @@ class WebRTCDataChannelTransport(
             bulkChannel = null
             bulkPending.toList().mapNotNull { id ->
                 bulkPending.remove(id)
-                pending.remove(id)?.also { responseStreams.discard(id) }
+                pending.remove(id)?.also {
+                    responseStreams.discard(id)
+                    binaryResponseStreams.discard(id)
+                }
             }
         }
         abandoned.forEach { it.onError(BulkChannelClosedException()) }
@@ -755,7 +802,9 @@ class WebRTCDataChannelTransport(
                     }
                 }
                 override fun onMessage(buffer: DataChannel.Buffer) = receiveFrame(buffer)
-                override fun onBufferedAmountChange(previousAmount: Long) = Unit
+                override fun onBufferedAmountChange(previousAmount: Long) {
+                    bgBufferWakeup.trySend(Unit)
+                }
             })
             scope.launch {
                 delay(BULK_OPEN_TIMEOUT_MS)
@@ -794,10 +843,12 @@ class WebRTCDataChannelTransport(
         override fun onAnswer(sdp: String) {
             traceConnect("answer_received")
             Log.i(TAG, "signaling_answer_received sdpBytes=" + sdp.length)
-            if (remoteDescriptionSet || remoteDescriptionSetting) return
+            val restarting = awaitingIceRestartAnswer
+            if (!restarting && (remoteDescriptionSet || remoteDescriptionSetting)) return
             val connection = peerConnection
                 ?: run {
-                    failConnection("Received answer without a PeerConnection")
+                    if (restarting) iceRestartCompleted?.complete(false)
+                    else failConnection("Received answer without a PeerConnection")
                     return
                 }
             remoteDescriptionSetting = true
@@ -808,13 +859,25 @@ class WebRTCDataChannelTransport(
                         synchronized(remoteCandidateLock) {
                             remoteDescriptionSet = true
                         }
+                        if (restarting) {
+                            awaitingIceRestartAnswer = false
+                            if (connection.iceConnectionState() == PeerConnection.IceConnectionState.CONNECTED ||
+                                connection.iceConnectionState() == PeerConnection.IceConnectionState.COMPLETED) {
+                                iceRestartCompleted?.complete(true)
+                            }
+                        }
                         Log.i(TAG, "remote_sdp_set_success")
                         traceConnect("remote_description_set")
                         drainRemoteCandidates()
                     }
                     override fun onSetFailure(reason: String?) {
                         remoteDescriptionSetting = false
-                        failConnection("setRemoteDescription failed: $reason")
+                        if (restarting) {
+                            awaitingIceRestartAnswer = false
+                            iceRestartCompleted?.complete(false)
+                        } else {
+                            failConnection("setRemoteDescription failed: $reason")
+                        }
                     }
                     override fun onCreateSuccess(sdp: SessionDescription?) {}
                     override fun onCreateFailure(reason: String?) {}
@@ -927,13 +990,24 @@ class WebRTCDataChannelTransport(
 
             // 4. Open signalling while preparing the local offer. Local ICE
             // candidates stay queued until the joined socket sends the offer.
-            signaling = P2PSignalingClient(
-                signalingBaseUrl = candidate.signalingUrl,
-                roomId = candidate.roomId,
-                secret = candidate.secret,
-                callback = signalingCallback,
-                scope = scope,
-            )
+            signaling = if (sharedHttpClient != null) {
+                P2PSignalingClient(
+                    signalingBaseUrl = candidate.signalingUrl,
+                    roomId = candidate.roomId,
+                    secret = candidate.secret,
+                    callback = signalingCallback,
+                    scope = scope,
+                    sharedClient = sharedHttpClient,
+                )
+            } else {
+                P2PSignalingClient(
+                    signalingBaseUrl = candidate.signalingUrl,
+                    roomId = candidate.roomId,
+                    secret = candidate.secret,
+                    callback = signalingCallback,
+                    scope = scope,
+                )
+            }
             val sdp = prepareOfferAndSignaling(
                 openSignaling = { signaling!!.connect() },
                 createOffer = { createOfferSuspend() },
@@ -1087,7 +1161,7 @@ class WebRTCDataChannelTransport(
             Log.w(TAG, "projects_trace id=$id stage=start channel=$debugCarrierId")
         }
         return try {
-            val payload = json.encodeToString(P2PHttpRequest.serializer(), request.copy(acceptResponseStream = true))
+            val payload = json.encodeToString(P2PHttpRequest.serializer(), request.copy(acceptResponseStream = true, acceptBinaryResponse = binaryResponseSupported))
                 .toByteArray(Charsets.UTF_8)
             val baseTimeoutMs = requestedTimeoutMs.coerceAtLeast(1L)
             val effectiveTimeoutMs = if (requestedTimeoutMs == requestTimeoutMs && payload.size > P2PHttpRequestStream.MAX_SINGLE_FRAME_BYTES) {
@@ -1154,6 +1228,7 @@ class WebRTCDataChannelTransport(
                         bgPending.remove(id)
                         pendingRequest.cancel()
                         responseStreams.discard(id)
+                        binaryResponseStreams.discard(id)
                         sendJob.cancel()
                     }
                 }
@@ -1226,7 +1301,7 @@ class WebRTCDataChannelTransport(
                         val enqueueStartedAt = System.nanoTime()
                         val digest = java.security.MessageDigest.getInstance("SHA-256")
                         try {
-                            sendDataChannelFrame(channel, P2PHttpBodyStream.initFrame(request.copy(acceptResponseStream = true), totalBytes, sha256))
+                            sendDataChannelFrame(channel, P2PHttpBodyStream.initFrame(request.copy(acceptResponseStream = true, acceptBinaryResponse = binaryResponseSupported), totalBytes, sha256))
                             input = openBody()
                             val buffer = ByteArray(P2PHttpBodyStream.CHUNK_BYTES)
                             while (true) {
@@ -1275,6 +1350,7 @@ class WebRTCDataChannelTransport(
                         bulkPending.remove(id)
                         pendingRequest.cancel()
                         responseStreams.discard(id)
+                        binaryResponseStreams.discard(id)
                         sendJob.cancel()
                     }
                 }
@@ -1304,23 +1380,29 @@ class WebRTCDataChannelTransport(
         // retain the conservative default until real relay evidence is gathered.
         val highWaterBytes = when {
             isBulk && debuggable && Log.isLoggable("Ragent.FastBulk", Log.DEBUG) -> 2L * 1024 * 1024
-            isBulk -> 64L * 1024
-            isBg -> 64L * 1024
+            isBulk -> 256L * 1024
+            isBg -> 256L * 1024
             else -> 512L * 1024
         }
         val baseDeadlineMs = if (isBulk) 60_000L else 15_000L
         val sendDeadlineMs = minOf(baseDeadlineMs, maxSendDeadlineMs).coerceAtLeast(1L)
         withP2PSendDeadline(sendDeadlineMs) {
+            val wakeup = when {
+                isPrimary -> primaryBufferWakeup
+                isBg -> bgBufferWakeup
+                else -> bulkBufferWakeup
+            }
             val sendBlock: suspend () -> Unit = {
                 while (true) {
                     if (channel.state() != DataChannel.State.OPEN) {
                         throw IllegalStateException("DataChannel closed while sending request")
                     }
+                    wakeup.tryReceive()
                     val buffered = channel.bufferedAmount()
                     telemetry?.let { it.peakBufferedBytes = maxOf(it.peakBufferedBytes, buffered) }
                     if (buffered > highWaterBytes) {
                         val blockedAt = if (telemetry != null) System.nanoTime() else 0L
-                        delay(10)
+                        withTimeoutOrNull(10L) { wakeup.receive() }
                         telemetry?.let { it.blockedNanos += System.nanoTime() - blockedAt; it.blockedPolls++ }
                         continue
                     }
@@ -1369,8 +1451,44 @@ class WebRTCDataChannelTransport(
         }
     }
 
+    override val supportsIceRestart: Boolean
+        get() = isOpen && peerConnection != null && !closeNotified
+
+    override suspend fun restartIce(timeoutMs: Long): Boolean {
+        if (!supportsIceRestart) return false
+        val sig = signaling ?: return false
+        return iceRestartMutex.withLock {
+            val connection = peerConnection
+            if (!isOpen || connection == null || closeNotified) return@withLock false
+            val waitSignal = CompletableDeferred<Boolean>()
+            iceRestartCompleted = waitSignal
+            awaitingIceRestartAnswer = true
+            try {
+                if (!sig.reconnectNow()) return@withLock false
+                val sdp = createWebRtcOffer(connection, iceRestart = true) {
+                    !closeNotified && peerConnection === connection
+                }
+                if (!sig.sendSignal(P2PProtocol.iceRestartOfferPayloadJson(sdp))) {
+                    return@withLock false
+                }
+                withTimeoutOrNull(timeoutMs) { waitSignal.await() } == true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "ice_restart_failed reason=${error.message}")
+                false
+            } finally {
+                awaitingIceRestartAnswer = false
+                if (iceRestartCompleted === waitSignal) iceRestartCompleted = null
+            }
+        }
+    }
+
     override fun close() {
         carrierSuspectListener = null
+        awaitingIceRestartAnswer = false
+        iceRestartCompleted?.complete(false)
+        iceRestartCompleted = null
         val (abandonedPongs, abandoned) = synchronized(pendingRegistrationLock) {
             closeNotified = true
             isOpen = false
@@ -1397,6 +1515,7 @@ class WebRTCDataChannelTransport(
         // Fail all pending requests.
         for (req in abandoned) req.onError(Exception("P2P transport closed"))
         responseStreams.clear()
+        binaryResponseStreams.clear()
         synchronized(localCandidateLock) {
             pendingLocalCandidates.clear()
             offerSignalSent = false
@@ -1539,6 +1658,26 @@ class WebRTCDataChannelTransport(
                 return
             }
         }
+        if (raw.startsWith("{\"type\":\"http_response_binary_v2_head\",")) {
+            val head = try { json.decodeFromString(P2PHttpResponseBinaryHeadFrame.serializer(), raw) } catch (_: Exception) { return }
+            if (!pending.containsKey(head.id)) return
+            try {
+                val immediate = binaryResponseStreams.begin(head)
+                if (!pending.containsKey(head.id)) {
+                    binaryResponseStreams.discard(head.id)
+                    return
+                }
+                if (immediate == null) return
+                val request = pending.remove(head.id) ?: return
+                responseStreams.discard(head.id)
+                if (immediate.error == null && immediate.status in 200..299) successfulResponses.incrementAndGet()
+                request.onResponse(immediate)
+            } catch (_: Exception) {
+                binaryResponseStreams.discard(head.id)
+                pending.remove(head.id)?.onError(Exception("Invalid P2P binary response head"))
+            }
+            return
+        }
         // Go's response frame puts type first. Avoid parsing every large legacy
         // response twice, while keeping chunk assembly scoped to pending calls.
         if (raw.startsWith("{\"type\":\"http_response_stream_v1\",")) {
@@ -1582,6 +1721,9 @@ class WebRTCDataChannelTransport(
                     if ("http_bg_channel_v1" in features) {
                         bgChannelSupported = true
                     }
+                    if ("http_response_binary_v2" in features) {
+                        binaryResponseSupported = true
+                    }
                     if ("dc_push_invalidation_v1" in features) {
                         supportsPushInvalidations = true
                         sendClientReady(listOf("dc_push_invalidation_v1"))
@@ -1596,6 +1738,7 @@ class WebRTCDataChannelTransport(
             val response = json.decodeFromString(P2PHttpResponse.serializer(), raw)
             val pendingRequest = pending.remove(response.id) ?: return
             responseStreams.discard(response.id)
+            binaryResponseStreams.discard(response.id)
             runCatching { Log.i(TAG, "datachannel_response id=${response.id} status=${response.status} error=${response.error != null} channel=$debugCarrierId") }
             if (response.error == null && response.status in 200..299) successfulResponses.incrementAndGet()
             pendingRequest.onResponse(response)

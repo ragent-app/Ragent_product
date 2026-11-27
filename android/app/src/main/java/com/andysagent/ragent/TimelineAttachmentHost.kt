@@ -62,6 +62,36 @@ private fun assetId(attachment: ComposerAttachment, endpoint: String?): String? 
 private fun safeName(name: String): String = name.substringAfterLast('/').substringAfterLast('\\')
     .replace(Regex("[\\p{Cntrl}\\\\/:*?\"<>|]"), "_").take(180).ifBlank { "attachment" }
 
+private const val TIMELINE_ASSET_CACHE_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000L
+private const val TIMELINE_ASSET_CACHE_MAX_BYTES = 150L * 1024 * 1024
+
+private fun persistentAssetFile(cacheDir: File, id: String, sha256: String?, name: String): File {
+    val shaPrefix = sha256?.trim()?.takeIf { it.isNotEmpty() }?.take(16) ?: "nosha"
+    return File(cacheDir, "${id}-${shaPrefix}-${safeName(name)}")
+}
+
+private fun prunePersistentAssetCache(cacheDir: File) {
+    cacheDir.mkdirs()
+    val now = System.currentTimeMillis()
+    val entries = cacheDir.listFiles()?.filter { it.isFile }?.toMutableList() ?: return
+    val retained = mutableListOf<File>()
+    for (entry in entries) {
+        if (entry.name.startsWith(".tmp-") || now - entry.lastModified() > TIMELINE_ASSET_CACHE_MAX_AGE_MS) {
+            entry.delete()
+        } else {
+            retained += entry
+        }
+    }
+    var totalBytes = retained.sumOf { it.length() }
+    if (totalBytes <= TIMELINE_ASSET_CACHE_MAX_BYTES) return
+    retained.sortBy { it.lastModified() }
+    for (entry in retained) {
+        if (totalBytes <= TIMELINE_ASSET_CACHE_MAX_BYTES) break
+        val len = entry.length()
+        if (entry.delete()) totalBytes -= len
+    }
+}
+
 private fun isMarkdown(attachment: ComposerAttachment): Boolean {
     val mime = attachment.mimeType.substringBefore(';').trim().lowercase()
     val name = attachment.name.lowercase()
@@ -89,10 +119,12 @@ internal fun TimelineAttachmentHost(
     var job by remember(targetId, sessionId, transport) { mutableStateOf<Job?>(null) }
     var generation by remember(targetId, sessionId, transport) { mutableIntStateOf(0) }
     val directory = remember { File(context.cacheDir, "shared/timeline") }
+    val persistentAssetDir = remember { File(context.cacheDir, "shared/timeline-assets") }
     DisposableEffect(scope) { onDispose { scope.cancel() } }
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) {
         directory.mkdirs()
         directory.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 24 * 60 * 60 * 1000L }?.forEach { it.delete() }
+        prunePersistentAssetCache(persistentAssetDir)
     } }
     fun showFile(attachment: ComposerAttachment, source: File) {
         try {
@@ -132,26 +164,59 @@ internal fun TimelineAttachmentHost(
                 val metadata = if (id != null) transport!!.getAssetMetadata(id, sessionId!!) else null
                 val resolved = if (metadata != null) attachment.copy(name = metadata.originalName, mimeType = metadata.mimeType) else attachment
                 current = resolved
-                val outputFile = File(directory, "${UUID.randomUUID()}-${safeName(resolved.name)}")
-                destination = outputFile
-                withContext(Dispatchers.IO) { directory.mkdirs() }
-                if (id != null) transport!!.downloadAsset("/api/assets/$id/download", outputFile,
-                    expectedSize = metadata!!.sizeBytes, expectedSha256 = metadata.sha256) { done, total ->
-                    scope.launch { if (generation == serial) progress = done to total }
-                } else withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(local!!)?.use { input -> outputFile.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
+                if (id != null) {
+                    val cachedFile = persistentAssetFile(persistentAssetDir, id, metadata?.sha256, resolved.name)
+                    val cacheHit = withContext(Dispatchers.IO) {
+                        persistentAssetDir.mkdirs()
+                        cachedFile.isFile && (metadata?.sizeBytes == null || cachedFile.length() == metadata.sizeBytes)
+                    }
+                    if (cacheHit) {
+                        withContext(Dispatchers.IO) { cachedFile.setLastModified(System.currentTimeMillis()) }
+                        ensureActive()
+                        if (generation == serial) {
+                            generation++; file = cachedFile; progress = null
+                            if (!resolved.mimeType.startsWith("image/") && !isMarkdown(resolved)) showFile(resolved, cachedFile)
                         }
-                    } }
-                        ?: throw java.io.IOException("Cannot read picker URI")
+                        return@launch
+                    }
+                    val tempFile = File(persistentAssetDir, ".tmp-${UUID.randomUUID()}-${safeName(resolved.name)}")
+                    destination = tempFile
+                    transport!!.downloadAsset("/api/assets/$id/download", tempFile,
+                        expectedSize = metadata!!.sizeBytes, expectedSha256 = metadata.sha256) { done, total ->
+                        scope.launch { if (generation == serial) progress = done to total }
+                    }
+                    withContext(Dispatchers.IO) {
+                        if (!tempFile.renameTo(cachedFile)) {
+                            tempFile.copyTo(cachedFile, overwrite = true)
+                            tempFile.delete()
+                        }
+                        cachedFile.setLastModified(System.currentTimeMillis())
+                    }
+                    destination = null
+                    ensureActive()
+                    if (generation == serial) {
+                        generation++; file = cachedFile; progress = null
+                        if (!resolved.mimeType.startsWith("image/") && !isMarkdown(resolved)) showFile(resolved, cachedFile)
+                    }
+                } else {
+                    val outputFile = File(directory, "${UUID.randomUUID()}-${safeName(resolved.name)}")
+                    destination = outputFile
+                    withContext(Dispatchers.IO) { directory.mkdirs() }
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(local!!)?.use { input -> outputFile.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                output.write(buffer, 0, count)
+                            }
+                        } }
+                            ?: throw java.io.IOException("Cannot read picker URI")
+                    }
+                    ensureActive()
+                    if (generation == serial) { generation++; file = outputFile; progress = null; if (!resolved.mimeType.startsWith("image/") && !isMarkdown(resolved)) showFile(resolved, outputFile) }
                 }
-                ensureActive()
-                if (generation == serial) { generation++; file = outputFile; progress = null; if (!resolved.mimeType.startsWith("image/") && !isMarkdown(resolved)) showFile(resolved, outputFile) }
             } catch (cancelled: CancellationException) { withContext(NonCancellable + Dispatchers.IO) { destination?.delete() }; throw cancelled }
             catch (failure: Exception) {
                 withContext(Dispatchers.IO) { destination?.delete() }
@@ -208,15 +273,39 @@ internal fun TimelineAttachmentHost(
         val id = assetId(attachment, endpoint)
         if (id == null || transport == null || targetId == null || sessionId == null || attachment.sizeBytes > 8 * 1024 * 1024) null
         else {
-            val temp = File(directory, "thumb-${UUID.randomUUID()}")
+            var temp: File? = null
             try {
                 val meta = transport.getAssetMetadata(id, sessionId)
-                withContext(Dispatchers.IO) { directory.mkdirs() }
-                transport.downloadAsset("/api/assets/$id/download", temp, expectedSize = meta.sizeBytes, expectedSha256 = meta.sha256, maxBytes = 8L * 1024 * 1024)
-                withContext(Dispatchers.IO) { temp.readBytes() }
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-            finally { withContext(NonCancellable + Dispatchers.IO) { temp.delete() } }
+                val cachedFile = persistentAssetFile(persistentAssetDir, id, meta.sha256, meta.originalName)
+                val existingBytes = withContext(Dispatchers.IO) {
+                    persistentAssetDir.mkdirs()
+                    if (cachedFile.isFile && cachedFile.length() == meta.sizeBytes) {
+                        cachedFile.setLastModified(System.currentTimeMillis())
+                        cachedFile.readBytes()
+                    } else null
+                }
+                if (existingBytes != null) {
+                    existingBytes
+                } else {
+                    temp = File(persistentAssetDir, ".tmp-thumb-${UUID.randomUUID()}")
+                    transport.downloadAsset("/api/assets/$id/download", temp, expectedSize = meta.sizeBytes, expectedSha256 = meta.sha256, maxBytes = 8L * 1024 * 1024)
+                    withContext(Dispatchers.IO) {
+                        val bytes = temp.readBytes()
+                        if (!temp.renameTo(cachedFile)) {
+                            temp.copyTo(cachedFile, overwrite = true)
+                            temp.delete()
+                        }
+                        cachedFile.setLastModified(System.currentTimeMillis())
+                        bytes
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                withContext(NonCancellable + Dispatchers.IO) { temp?.delete() }
+                throw cancelled
+            } catch (_: Exception) {
+                withContext(Dispatchers.IO) { temp?.delete() }
+                null
+            }
         }
     }
     }

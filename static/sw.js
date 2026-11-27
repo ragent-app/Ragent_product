@@ -1,23 +1,43 @@
 'use strict';
 
+const IMMUTABLE_CACHE_NAME = 'ragent-immutable-v1';
+
 function resolveScopeUrl(pathname) {
   return new URL(pathname, self.registration.scope).toString();
 }
 
-async function clearLegacyCaches() {
+async function clearLegacyCaches({ includeImmutable = false } = {}) {
   const cacheNames = await self.caches.keys();
-  await Promise.all(cacheNames
-    .map((cacheName) => self.caches.delete(cacheName)));
+  await Promise.all(
+    cacheNames
+      .filter((cacheName) => includeImmutable || cacheName !== IMMUTABLE_CACHE_NAME)
+      .map((cacheName) => self.caches.delete(cacheName)),
+  );
+}
+
+function isCacheableImmutableAssetRequest(request) {
+  if (!request || request.method !== 'GET') return false;
+  if (request.headers.has('range')) return false;
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return false;
+  }
+  if (url.origin !== self.location.origin) return false;
+  if (url.pathname.startsWith('/api/') || url.pathname.endsWith('/sw.js') || url.pathname === '/sw.js') return false;
+  if (!url.searchParams.has('v')) return false;
+  return /\.(?:js|mjs|css|woff2?|svg|png|webp|ico)$/i.test(url.pathname);
 }
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
-  event.waitUntil(clearLegacyCaches());
+  event.waitUntil(clearLegacyCaches({ includeImmutable: false }));
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
-    await clearLegacyCaches();
+    await clearLegacyCaches({ includeImmutable: false });
     if (self.registration.navigationPreload) {
       await self.registration.navigationPreload.disable().catch(() => {});
     }
@@ -27,7 +47,25 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
   if (event.data?.type !== 'ragent:clear-caches') return;
-  event.waitUntil(clearLegacyCaches());
+  event.waitUntil(clearLegacyCaches({ includeImmutable: true }));
+});
+
+self.addEventListener('fetch', (event) => {
+  if (!isCacheableImmutableAssetRequest(event.request)) return;
+  event.respondWith((async () => {
+    try {
+      const cache = await self.caches.open(IMMUTABLE_CACHE_NAME);
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response && response.ok && response.type === 'basic') {
+        cache.put(event.request, response.clone()).catch(() => {});
+      }
+      return response;
+    } catch {
+      return fetch(event.request);
+    }
+  })());
 });
 
 self.addEventListener('push', (event) => {

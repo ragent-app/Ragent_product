@@ -273,6 +273,7 @@ class RoomSessionRepository(
     private val projectRefreshMutex = Mutex()
     private val sessionListRefreshMutex = Mutex()
     private val activePendingOperationIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    @Volatile private var dedicatedLiveSupported: Boolean? = null
 
     private suspend fun <T> withPendingOperationClaim(requestId: String, action: suspend () -> T): T {
         check(activePendingOperationIds.add(requestId)) { "Pending operation is already executing" }
@@ -489,6 +490,7 @@ class RoomSessionRepository(
     }
 
     override fun stopLiveSync() {
+        dedicatedLiveSupported = null
         synchronized(liveSyncLock) {
             retiredLiveSyncJobs.removeAll { it.isCompleted }
             liveSyncCoordinatorJob?.let { it.cancel(); retiredLiveSyncJobs.add(it) }
@@ -528,8 +530,10 @@ class RoomSessionRepository(
     private suspend fun reconcileSessionUntilSettled(sessionId: String) {
         coroutineScope {
             connectionState.filter { it == com.andysagent.ragent.core.model.RuntimeConnectionState.Connected }.first()
-            val liveSupported = try {
-                readDedicatedLivePage(sessionId, probe = true)
+            val liveSupported = dedicatedLiveSupported ?: try {
+                readDedicatedLivePage(sessionId, probe = true).also { supported ->
+                    dedicatedLiveSupported = supported
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) { false }
@@ -3671,7 +3675,7 @@ class RoomSessionRepository(
     override suspend fun loadRuntimeModels(tool: String, providerProfile: String): List<RuntimeModelOption> {
         val response = execute(ApiRequest(
             "GET",
-            "/api/models?tool=${encode(tool)}&provider=${encode(providerProfile)}&refresh=1",
+            "/api/models?tool=${encode(tool)}&provider=${encode(providerProfile)}",
         ))
         val root = codec.decode(serializer<JsonObject>(), response.body)
         val models = parseRuntimeModels(root)

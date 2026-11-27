@@ -1568,32 +1568,35 @@ function createBoundedClientCache({ maxEntries = 128, maxBytes = 8 * 1024 * 1024
     get size() { return entries.size; },
     has(key) { return entries.has(key); },
     get(key) {
-      if (!entries.has(key)) return undefined;
-      const value = entries.get(key);
+      const entry = entries.get(key);
+      if (!entry) return undefined;
       entries.delete(key);
-      entries.set(key, value);
-      return value;
+      entries.set(key, entry);
+      return entry.value;
     },
     set(key, value) {
       const entryBytes = estimate(value);
       if (entryBytes > maxBytes) return this;
-      if (entries.has(key)) {
-        bytes -= estimate(entries.get(key));
+      const existing = entries.get(key);
+      if (existing) {
+        bytes -= existing.bytes;
         entries.delete(key);
       }
-      entries.set(key, value);
+      entries.set(key, { value, bytes: entryBytes });
       bytes += entryBytes;
       while (entries.size > maxEntries || bytes > maxBytes) {
-        const oldest = entries.keys().next().value;
-        if (oldest === undefined) break;
-        bytes -= estimate(entries.get(oldest));
-        entries.delete(oldest);
+        const oldestKey = entries.keys().next().value;
+        if (oldestKey === undefined) break;
+        const oldest = entries.get(oldestKey);
+        bytes -= oldest ? oldest.bytes : 0;
+        entries.delete(oldestKey);
       }
       return this;
     },
     delete(key) {
-      if (!entries.has(key)) return false;
-      bytes -= estimate(entries.get(key));
+      const existing = entries.get(key);
+      if (!existing) return false;
+      bytes -= existing.bytes;
       return entries.delete(key);
     },
     clear() {
@@ -1606,6 +1609,94 @@ function createBoundedClientCache({ maxEntries = 128, maxBytes = 8 * 1024 * 1024
       }
     },
   };
+}
+
+const SESSION_LIST_SWR_DB_NAME = "ragent-swr-v1";
+const SESSION_LIST_SWR_STORE = "sessions";
+const SESSION_LIST_SWR_MAX_ITEMS = 200;
+
+function getSessionListSwrKey() {
+  const origin = typeof window !== "undefined" && window.location ? window.location.origin : "local";
+  const who = typeof principalId === "string" && principalId ? principalId : (surfaceMode || "owner");
+  return `${origin}::${who}`;
+}
+
+function openSessionListSwrDb() {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(SESSION_LIST_SWR_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        try {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(SESSION_LIST_SWR_STORE)) {
+            db.createObjectStore(SESSION_LIST_SWR_STORE);
+          }
+        } catch {}
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+      req.onblocked = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function readSessionListSwrCache() {
+  const db = await openSessionListSwrDb();
+  if (!db) return null;
+  try {
+    return await new Promise((resolve) => {
+      const tx = db.transaction(SESSION_LIST_SWR_STORE, "readonly");
+      const req = tx.objectStore(SESSION_LIST_SWR_STORE).get(getSessionListSwrKey());
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  } finally {
+    try { db.close(); } catch {}
+  }
+}
+
+async function writeSessionListSwrCache(sessionList) {
+  if (!Array.isArray(sessionList)) return;
+  const db = await openSessionListSwrDb();
+  if (!db) return;
+  try {
+    const payload = {
+      updatedAt: Date.now(),
+      sessions: sessionList.slice(0, SESSION_LIST_SWR_MAX_ITEMS),
+    };
+    await new Promise((resolve) => {
+      const tx = db.transaction(SESSION_LIST_SWR_STORE, "readwrite");
+      tx.objectStore(SESSION_LIST_SWR_STORE).put(payload, getSessionListSwrKey());
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch {
+  } finally {
+    try { db.close(); } catch {}
+  }
+}
+
+async function clearSessionListSwrCache() {
+  const db = await openSessionListSwrDb();
+  if (!db) return;
+  try {
+    await new Promise((resolve) => {
+      const tx = db.transaction(SESSION_LIST_SWR_STORE, "readwrite");
+      tx.objectStore(SESSION_LIST_SWR_STORE).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
+    });
+  } catch {
+  } finally {
+    try { db.close(); } catch {}
+  }
 }
 
 const jsonResponseCache = createBoundedClientCache({ maxEntries: 256, maxBytes: 16 * 1024 * 1024 });

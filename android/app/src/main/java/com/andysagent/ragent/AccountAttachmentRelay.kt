@@ -7,6 +7,7 @@ import com.andysagent.ragent.core.network.RagentTransport
 import com.andysagent.ragent.core.network.ApiException
 import com.andysagent.ragent.core.network.ApiRequest
 import com.andysagent.ragent.core.network.ApiRequestBodySource
+import com.andysagent.ragent.core.network.SharedOkHttpClient
 import com.andysagent.ragent.core.protocol.RagentProtocol
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.NonCancellable
@@ -33,7 +34,7 @@ internal class AccountAttachmentRelay(
     private val baseUrl: String,
     private val accounts: RagentTransport,
     private val ensureAccount: suspend () -> Unit,
-    private val client: OkHttpClient = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+    private val client: OkHttpClient = SharedOkHttpClient.newBuilder().followRedirects(false).followSslRedirects(false)
         .connectTimeout(15, TimeUnit.SECONDS).writeTimeout(120, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).build(),
 ) : AttachmentRelayTransport {
     private data class Capabilities(val epoch: String, val maxLifetimeMs: Long, val cachedAt: Long)

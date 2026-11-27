@@ -89,6 +89,12 @@ if (typeof window !== "undefined") {
     try {
       window.ragentClearSessionEventCaches?.();
     } catch {}
+    try {
+      if (typeof clearSessionListSwrCache === "function") void clearSessionListSwrCache();
+    } catch {}
+    try {
+      navigator.serviceWorker?.controller?.postMessage({ type: "ragent:clear-caches" });
+    } catch {}
   };
   window.addEventListener?.("ragent:target-change", () => {
     window.ragentInvalidateSessionHttpCache?.();

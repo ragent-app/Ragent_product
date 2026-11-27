@@ -53,10 +53,17 @@ class P2PSignalingClient(
     private val secret: String,
     private val callback: SignalingCallback,
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    sharedClient: OkHttpClient = sharedOkHttpClient,
 ) {
     companion object {
         private const val RECONNECT_BASE_MS = 2_000L
         private const val RECONNECT_MAX_MS = 30_000L
+
+        private val sharedOkHttpClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
+                .build()
+        }
     }
 
     /** Callers interested in verified signalling payloads. */
@@ -69,7 +76,7 @@ class P2PSignalingClient(
 
     // ── State ─────────────────────────────────────────────────────────
 
-    private val okHttpClient = OkHttpClient.Builder()
+    private val okHttpClient = sharedClient.newBuilder()
         .pingInterval(20, TimeUnit.SECONDS) // keep-alive through NAT/proxies
         .build()
 
@@ -109,6 +116,19 @@ class P2PSignalingClient(
         incomingSeq = 0
         incomingJoinId = 0
         openSocket()
+    }
+
+    /** Re-establish the signaling WebSocket immediately (e.g. before ICE restart on network change). */
+    suspend fun reconnectNow(): Boolean {
+        if (stopped) return false
+        return try {
+            connect()
+            true
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
     }
 
     /**

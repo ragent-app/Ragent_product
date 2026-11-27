@@ -54,6 +54,7 @@ internal class BoundTargetConnection(
     private val releaseAccountReservation: (suspend (String) -> Unit)? = null,
     private val onNetworkRestored: () -> Unit = {},
     private val onTurnQuotaExceeded: (AccountSessionException) -> Unit = {},
+    private val isForeground: () -> Boolean = { true },
 ) : TargetConnectionController {
     private val bootstrapClient = ConnectionBootstrapClient(endpointProvider, credentialProvider)
     @Volatile private var plan: BootstrapConnectionPlan? = null
@@ -91,7 +92,7 @@ internal class BoundTargetConnection(
         },
         p2pCandidateProvider = { plan?.p2pCandidate },
         p2pSessionFactory = P2PSessionFactory { candidate ->
-            WebRTCDataChannelTransport(candidate, application)
+            WebRTCDataChannelTransport(candidate, application, sharedHttpClient = SharedOkHttpClient.baseClient)
         },
         onP2PSessionReady = { transport.setP2PSession(it) },
         onP2PSessionClosed = { transport.clearP2PSession(it) },
@@ -99,7 +100,7 @@ internal class BoundTargetConnection(
             try {
                 val window = (signedCandidatePlan?.takeIf { it.turnCarrier === carrier }
                     ?: plan?.takeIf { it.turnCarrier === carrier })?.retentionWindow()
-                PlannedTurnSession(carrier, window, WebRTCDataChannelTransport(carrier.p2pCandidate, application)) { id ->
+                PlannedTurnSession(carrier, window, WebRTCDataChannelTransport(carrier.p2pCandidate, application, sharedHttpClient = SharedOkHttpClient.baseClient)) { id ->
                     releaseTurnConnection(id, "turn-session-closed")
                 }
             } catch (error: Exception) {
@@ -143,6 +144,9 @@ internal class BoundTargetConnection(
         useSignedHandoff = { signedHandoffRequested },
         signedHandoffPlan = ::fetchSignedHandoffPlan,
         onSignedHandoffFinished = { signedHandoffRequested = false; signedCandidatePlan = null },
+        isForeground = isForeground,
+        foregroundProbeTimeoutMs = ConnectivitySupervisor.FOREGROUND_FAST_PROBE_TIMEOUT_MS,
+        foregroundProbeRetryTimeoutMs = ConnectivitySupervisor.FOREGROUND_FAST_PROBE_RETRY_TIMEOUT_MS,
     )
     override val connectivityState get() = supervisor.state
 

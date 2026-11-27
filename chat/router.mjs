@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { join, resolve, dirname, basename, extname, relative, isAbsolute, sep } from 'path';
 import { parse as parseUrl, fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'zlib';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { CHAT_IMAGES_DIR, MANAGED_WORK_ROOT_DIR } from '../lib/config.mjs';
@@ -87,7 +88,7 @@ import { cacheBudget } from '../lib/cache-budget.mjs';
 const staticAssetCache = new BoundedLruMap({
   maxEntries: 160,
   maxBytes: cacheBudget('router.staticAssets', 1),
-  bytesOf: (entry) => entry?.bytes?.length || 0,
+  bytesOf: (entry) => (entry?.bytes?.length || 0) + (entry?.brBytes?.length || 0) + (entry?.gzipBytes?.length || 0),
 });
 // Memory registry (DS-06): static asset read-through cache.
 registerLruOrMap('router.staticAssets', staticAssetCache, { kind: 'static-assets' });
@@ -1111,6 +1112,8 @@ function findQuotedImportUrl(line) {
   };
 }
 
+const CSS_RELATIVE_FONT_URL_RE = /url\(\s*(['"]?)([^'")]+?\.(?:woff2?|ttf|otf|eot))\1\s*\)/gi;
+
 function rewriteCssImportUrls(content, versionTag) {
   const normalizedTag = String(versionTag || '').trim();
   if (!normalizedTag) return content;
@@ -1118,25 +1121,42 @@ function rewriteCssImportUrls(content, versionTag) {
   const source = Buffer.isBuffer(content)
     ? content.toString('utf8')
     : String(content || '');
-  if (!source.includes('@import')) return content;
+  const hasImports = source.includes('@import');
+  const hasFontUrls = CSS_RELATIVE_FONT_URL_RE.test(source);
+  CSS_RELATIVE_FONT_URL_RE.lastIndex = 0;
+  if (!hasImports && !hasFontUrls) return content;
 
   let changed = false;
-  const rewrittenSource = source
-    .split('\n')
-    .map((line) => {
-      if (!line.includes('@import')) return line;
-      const quotedImport = findQuotedImportUrl(line);
-      if (!quotedImport?.url) return line;
+  let rewrittenSource = source;
+  if (hasImports) {
+    rewrittenSource = rewrittenSource
+      .split('\n')
+      .map((line) => {
+        if (!line.includes('@import')) return line;
+        const quotedImport = findQuotedImportUrl(line);
+        if (!quotedImport?.url) return line;
 
-      const versionedAssetUrl = appendVersionTagToAssetUrl(quotedImport.url, normalizedTag);
-      if (!versionedAssetUrl || versionedAssetUrl === quotedImport.url) {
-        return line;
-      }
+        const versionedAssetUrl = appendVersionTagToAssetUrl(quotedImport.url, normalizedTag);
+        if (!versionedAssetUrl || versionedAssetUrl === quotedImport.url) {
+          return line;
+        }
 
+        changed = true;
+        return `${line.slice(0, quotedImport.startIndex + 1)}${versionedAssetUrl}${line.slice(quotedImport.endIndex)}`;
+      })
+      .join('\n');
+  }
+
+  if (hasFontUrls) {
+    rewrittenSource = rewrittenSource.replace(CSS_RELATIVE_FONT_URL_RE, (fullMatch, quote, rawUrl) => {
+      const trimmed = String(rawUrl || '').trim();
+      if (!trimmed || /^(?:data:|https?:|\/\/|#)/i.test(trimmed)) return fullMatch;
+      const versioned = appendVersionTagToAssetUrl(trimmed, normalizedTag);
+      if (!versioned || versioned === trimmed) return fullMatch;
       changed = true;
-      return `${line.slice(0, quotedImport.startIndex + 1)}${versionedAssetUrl}${line.slice(quotedImport.endIndex)}`;
-    })
-    .join('\n');
+      return `url(${quote}${versioned}${quote})`;
+    });
+  }
 
   return changed ? rewrittenSource : content;
 }
@@ -1172,6 +1192,7 @@ async function resolveStaticAsset(pathname, query = {}) {
 
   return {
     filepath,
+    stats: stat,
     cacheControl: filename === 'sw.js'
       ? 'no-store, max-age=0, must-revalidate'
       : hasVersionedAssetTag(query)
@@ -1231,6 +1252,57 @@ function requestHasFreshEtag(req, etag) {
   return candidates.includes(normalizeEtag(etag));
 }
 
+const MIN_COMPRESS_BYTES = 1024;
+
+function isCompressibleContentType(contentType) {
+  const normalized = String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (!normalized) return false;
+  return normalized.startsWith('text/')
+    || normalized === 'application/javascript'
+    || normalized === 'application/json'
+    || normalized === 'application/manifest+json'
+    || normalized === 'image/svg+xml';
+}
+
+function negotiateAcceptEncoding(req) {
+  const raw = String(req?.headers?.['accept-encoding'] || '').toLowerCase();
+  if (!raw) return '';
+  if (/\bbr\b(?!\s*;\s*q\s*=\s*0(?:\.0+)?\b)/.test(raw)) return 'br';
+  if (/\bgzip\b(?!\s*;\s*q\s*=\s*0(?:\.0+)?\b)/.test(raw)) return 'gzip';
+  return '';
+}
+
+function mergeVaryHeader(existingVary, token) {
+  const parts = String(existingVary || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.some((part) => part.toLowerCase() === token.toLowerCase())) {
+    parts.push(token);
+  }
+  return parts.join(', ');
+}
+
+function deriveEncodingEtag(baseEtag, encoding) {
+  if (!encoding) return baseEtag;
+  const suffix = encoding === 'br' ? '-br' : '-gz';
+  return baseEtag.endsWith('"')
+    ? `${baseEtag.slice(0, -1)}${suffix}"`
+    : `${baseEtag}${suffix}`;
+}
+
+function compressBuffer(rawBuffer, encoding) {
+  if (encoding === 'br') {
+    return brotliCompressSync(rawBuffer, {
+      params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 4 },
+    });
+  }
+  if (encoding === 'gzip') {
+    return gzipSync(rawBuffer, { level: 6 });
+  }
+  return rawBuffer;
+}
+
 function writeCachedResponse(req, res, {
   statusCode = 200,
   contentType,
@@ -1238,25 +1310,64 @@ function writeCachedResponse(req, res, {
   cacheControl,
   vary,
   headers: extraHeaders = {},
+  precomputedEtag = '',
+  cachedEntry = null,
 } = {}) {
-  const etag = createEtag(body);
+  const rawBuffer = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ''), 'utf8');
+  const baseEtag = precomputedEtag || createEtag(rawBuffer);
+  const compressible = rawBuffer.length >= MIN_COMPRESS_BYTES && isCompressibleContentType(contentType);
+  const negotiatedEncoding = compressible ? negotiateAcceptEncoding(req) : '';
+  const effectiveEtag = deriveEncodingEtag(baseEtag, negotiatedEncoding);
+
   const headers = {
     'Cache-Control': cacheControl,
-    ETag: etag,
+    ETag: effectiveEtag,
     'X-Ragent-Build': BUILD_INFO.title,
     ...extraHeaders,
   };
-  if (vary) headers.Vary = vary;
+  const effectiveVary = compressible ? mergeVaryHeader(vary, 'Accept-Encoding') : vary;
+  if (effectiveVary) headers.Vary = effectiveVary;
 
-  if (requestHasFreshEtag(req, etag)) {
+  if (requestHasFreshEtag(req, effectiveEtag) || (negotiatedEncoding && requestHasFreshEtag(req, baseEtag))) {
     res.writeHead(304, headers);
     res.end();
     return;
   }
 
+  let responseBody = rawBuffer;
+  if (negotiatedEncoding) {
+    let compressed = null;
+    if (cachedEntry) {
+      if (negotiatedEncoding === 'br') {
+        if (!cachedEntry.brChecked) {
+          const candidate = compressBuffer(rawBuffer, 'br');
+          cachedEntry.brBytes = candidate.length < rawBuffer.length ? candidate : null;
+          cachedEntry.brChecked = true;
+        }
+        compressed = cachedEntry.brBytes;
+      } else if (negotiatedEncoding === 'gzip') {
+        if (!cachedEntry.gzipChecked) {
+          const candidate = compressBuffer(rawBuffer, 'gzip');
+          cachedEntry.gzipBytes = candidate.length < rawBuffer.length ? candidate : null;
+          cachedEntry.gzipChecked = true;
+        }
+        compressed = cachedEntry.gzipBytes;
+      }
+    } else {
+      const candidate = compressBuffer(rawBuffer, negotiatedEncoding);
+      if (candidate.length < rawBuffer.length) {
+        compressed = candidate;
+      }
+    }
+    if (compressed && compressed.length < rawBuffer.length) {
+      responseBody = compressed;
+      headers['Content-Encoding'] = negotiatedEncoding;
+    }
+  }
+
   if (contentType) headers['Content-Type'] = contentType;
   res.writeHead(statusCode, headers);
-  res.end(body);
+  res.end(responseBody);
 }
 
 function writeJsonCached(req, res, payload, {
@@ -1295,6 +1406,8 @@ function writeFileCached(req, res, contentType, body, {
   cacheControl = 'public, no-cache',
   vary,
   headers,
+  precomputedEtag = '',
+  cachedEntry = null,
 } = {}) {
   writeCachedResponse(req, res, {
     statusCode: 200,
@@ -1303,6 +1416,8 @@ function writeFileCached(req, res, contentType, body, {
     cacheControl,
     vary,
     headers,
+    precomputedEtag,
+    cachedEntry,
   });
 }
 
@@ -1480,9 +1595,60 @@ async function proxyAdminRequest(req, res, parsedUrl) {
 
 export async function handleRequest(req, res) {
   if (rejectUnadaptedTemporaryRequest(req, res)) return;
-  await authenticateAccountCookie(req);
   const parsedUrl = parseUrl(req.url, true);
   const pathname = parsedUrl.pathname;
+
+  // Serve public static assets before SQLite cookie auth to avoid 100+ sync
+  // DB reads per page load. Skip short-circuit for admin proxy or target grant requests.
+  if (!req.headers?.['x-ragent-target-grant'] && !isAdminProxyPath(pathname)) {
+    const staticAsset = await resolveStaticAsset(pathname, parsedUrl.query);
+    if (staticAsset) {
+      try {
+        const versionTag = getSingleQueryValue(parsedUrl.query?.v).trim();
+        const cacheKey = `${staticAsset.filepath}:${versionTag}`;
+        const stats = staticAsset.stats;
+        const cached = staticAssetCache.get(cacheKey);
+        if (isStaticAssetCacheVersionEqual(cached, stats)) {
+          writeFileCached(req, res, staticAsset.contentType, cached.bytes, {
+            cacheControl: staticAsset.cacheControl,
+            precomputedEtag: cached.etag,
+            cachedEntry: cached,
+          });
+          return;
+        }
+        const rawContent = rewriteCssImportUrls(
+          await readFile(staticAsset.filepath),
+          staticAsset.contentType.startsWith('text/css') ? versionTag : '',
+        );
+        const contentBuffer = Buffer.isBuffer(rawContent) ? rawContent : Buffer.from(String(rawContent), 'utf8');
+        const etag = createEtag(contentBuffer);
+        const entry = stats ? {
+          bytes: contentBuffer,
+          etag,
+          brBytes: null,
+          brChecked: false,
+          gzipBytes: null,
+          gzipChecked: false,
+          mtimeFingerprint: staticAssetMtimeFingerprint(stats.mtimeMs),
+          size: stats.size,
+        } : null;
+        if (entry) {
+          staticAssetCache.set(cacheKey, entry);
+        }
+        writeFileCached(req, res, staticAsset.contentType, contentBuffer, {
+          cacheControl: staticAsset.cacheControl,
+          precomputedEtag: etag,
+          cachedEntry: entry,
+        });
+      } catch {
+        res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
+        res.end('Not Found');
+      }
+      return;
+    }
+  }
+
+  await authenticateAccountCookie(req);
 
   // Target-runtime requests use an Accounts-signed grant instead of an owner
   // cookie. Reject mixed credentials so the effective principal is explicit.
@@ -1527,44 +1693,6 @@ export async function handleRequest(req, res) {
       return;
     }
     await proxyAdminRequest(req, res, parsedUrl);
-    return;
-  }
-
-  // Static assets. Previously read from disk (plus CSS URL rewrite) on every
-  // request; now cached in memory keyed by file path + version tag, with an
-  // mtime+size check per hit so the hot-reload contract is preserved (a
-  // frontend build changes mtime → next request re-reads).
-  const staticAsset = await resolveStaticAsset(pathname, parsedUrl.query);
-  if (staticAsset) {
-    try {
-      const versionTag = getSingleQueryValue(parsedUrl.query?.v).trim();
-      const cacheKey = `${staticAsset.filepath}:${versionTag}`;
-      const stats = await statOrNull(staticAsset.filepath);
-      const cached = staticAssetCache.get(cacheKey);
-      if (isStaticAssetCacheVersionEqual(cached, stats)) {
-        writeFileCached(req, res, staticAsset.contentType, cached.bytes, {
-          cacheControl: staticAsset.cacheControl,
-        });
-        return;
-      }
-      const content = rewriteCssImportUrls(
-        await readFile(staticAsset.filepath),
-        staticAsset.contentType.startsWith('text/css') ? versionTag : '',
-      );
-      if (stats) {
-        staticAssetCache.set(cacheKey, {
-          bytes: content,
-          mtimeFingerprint: staticAssetMtimeFingerprint(stats.mtimeMs),
-          size: stats.size,
-        });
-      }
-      writeFileCached(req, res, staticAsset.contentType, content, {
-        cacheControl: staticAsset.cacheControl,
-      });
-    } catch {
-      res.writeHead(404, buildHeaders({ 'Content-Type': 'text/plain' }));
-      res.end('Not Found');
-    }
     return;
   }
 

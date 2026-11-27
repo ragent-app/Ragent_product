@@ -318,7 +318,18 @@ function syncRealtimeNetworkConnection() {
     startTargetRuntimePolling();
     return;
   }
-  if (!ws || ws.readyState !== WebSocket.OPEN) scheduleReconnect();
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    reconnectAttempt = 0;
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      connect();
+    } else {
+      scheduleReconnect();
+    }
+  }
 }
 
 // WS 断线重连失败时自动尝试 P2P 第二通道（仅当本会话已配对并持有凭据）。
@@ -1298,7 +1309,6 @@ function handleWsMessage(msg) {
         const latestSeq = Number.isInteger(msg.latestSeq) ? msg.latestSeq : 0;
         const projectedLatestSeq = Number(window.RagentTimelineRuntime?.getSnapshot?.()?.latestSeq) || 0;
         if (msg.eventsPushed === true && latestSeq > 0 && projectedLatestSeq >= latestSeq) {
-          scheduleEventPushReconcile(msg.sessionId);
           break;
         }
         refreshCurrentSession({ forceFresh: true }).catch(() => {});
@@ -1504,6 +1514,10 @@ function syncConnectionRecoveryIndicator(connState) {
 // Reflect network transitions into a visible pill without re-showing it
 // (offline → "网络已断开", back online → "重连中…").
 function syncConnectionRecoveryIndicatorNetworkState() {
+  if (isNetworkOffline()) {
+    showConnectionRecoveryIndicator();
+    return;
+  }
   const el = typeof document !== "undefined" ? document.getElementById("reconnectIndicator") : null;
   if (!el || !el.classList.contains("is-visible")) return;
   renderConnectionRecoveryIndicatorLabel(el);

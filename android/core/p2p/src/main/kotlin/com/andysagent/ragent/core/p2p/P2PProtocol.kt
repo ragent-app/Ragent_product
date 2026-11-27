@@ -195,6 +195,13 @@ object P2PProtocol {
         return """{"type":"offer","sdp":"${escapeJsonString(sdp)}"$handoff}"""
     }
 
+    /** {"type":"ice_restart_offer","sdp":"..."} */
+    fun iceRestartOfferPayloadJson(sdp: String, handoffId: String? = null): String {
+        require(handoffId == null || handoffId.matches(Regex("[a-f0-9]{32}")))
+        val handoff = handoffId?.let { ",\"handoffId\":\"$it\"" }.orEmpty()
+        return """{"type":"ice_restart_offer","sdp":"${escapeJsonString(sdp)}"$handoff}"""
+    }
+
     /** {"type":"answer","sdp":"..."} */
     fun answerPayloadJson(sdp: String): String =
         """{"type":"answer","sdp":"${escapeJsonString(sdp)}"}"""
@@ -283,6 +290,7 @@ data class P2PHttpRequest(
     val headers: Map<String, String> = emptyMap(),
     val bodyBase64: String = "",
     val acceptResponseStream: Boolean = false,
+    val acceptBinaryResponse: Boolean = false,
 )
 
 /**
@@ -300,7 +308,11 @@ data class P2PHttpResponse(
     val headers: Map<String, String> = emptyMap(),
     val bodyBase64: String = "",
     val error: String? = null,
-)
+    @kotlinx.serialization.Transient val rawBodyBytes: ByteArray? = null,
+) {
+    fun decodedBodyBytes(): ByteArray =
+        rawBodyBytes ?: if (bodyBase64.isEmpty()) ByteArray(0) else P2PProtocol.decodeBody(bodyBase64)
+}
 
 // ── Configuration types ───────────────────────────────────────────────
 

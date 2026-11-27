@@ -376,9 +376,21 @@ fun AgentMarkdown(
     )
 }
 
-/** Returns the UTF-16 range of the last user-perceived character. */
+/** Returns the UTF-16 range of the last user-perceived character in O(1) from the tail. */
 fun latestGraphemeRange(text: String): IntRange? {
-    return streamingGraphemeRanges(text).lastOrNull()
+    if (text.isEmpty()) return null
+    val iterator = BreakIterator.getCharacterInstance(Locale.ROOT)
+    iterator.setText(text)
+    val end = iterator.last()
+    var start = iterator.previous()
+    if (start == BreakIterator.DONE) return null
+    while (start > 0) {
+        if (!shouldJoinGrapheme(text, start, start)) break
+        val previousStart = iterator.previous()
+        if (previousStart == BreakIterator.DONE) break
+        start = previousStart
+    }
+    return if (end > start) start until end else null
 }
 
 /**

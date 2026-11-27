@@ -11,8 +11,10 @@
   const LONG_PASTE_FAST_PATH_THRESHOLD = 8 * 1024;
   const MOBILE_LONG_PASTE_FAST_PATH_THRESHOLD = 4 * 1024;
   const scriptUrl = document.currentScript?.src || "";
+  const buildAssetVersion = String(window.__RAGENT_BUILD__?.assetVersion || "").trim();
+  const assetVersionQuery = buildAssetVersion ? `?v=${encodeURIComponent(buildAssetVersion)}` : "";
   const assetBase = new URL("vendor/vditor", scriptUrl || document.baseURI).toString().replace(/\/$/, "");
-  const workerUrl = new URL("markdown-composer-worker.js", scriptUrl || document.baseURI).toString();
+  const workerUrl = new URL(`markdown-composer-worker.js${assetVersionQuery}`, scriptUrl || document.baseURI).toString();
   let markdownWorker = null;
   let markdownWorkerRequestId = 0;
   const markdownWorkerRequests = new Map();
@@ -788,7 +790,7 @@
       theme: instance.theme,
       lang: "zh_CN",
       cdn: assetBase,
-      _lutePath: `${assetBase}/dist/js/lute/lute.min.js`,
+      _lutePath: `${assetBase}/dist/js/lute/lute.min.js${assetVersionQuery}`,
       height: "auto",
       minHeight: 0,
       toolbar: [],
@@ -978,8 +980,37 @@
     setHeight: (textarea, height) => mounted.get(textarea)?.setHeight?.(height),
   });
 
-  mountComposer(
-    document.getElementById("msgInput"),
-    document.getElementById("composerEditor"),
-  );
+  const isDesktopManagerMode = (() => {
+    try {
+      return new URLSearchParams(window.location?.search || "").get("desktop") === "manager";
+    } catch {
+      return false;
+    }
+  })();
+
+  if (!isDesktopManagerMode) {
+    const initialTextarea = document.getElementById("msgInput");
+    const initialEditor = document.getElementById("composerEditor");
+    let initialMounted = false;
+    const ensureInitialMount = () => {
+      if (initialMounted) return;
+      initialMounted = true;
+      mountComposer(initialTextarea, initialEditor);
+    };
+    const attachDeferredMountListeners = (target) => {
+      if (!target || typeof target.addEventListener !== "function") return;
+      for (const eventName of ["focus", "pointerdown", "keydown"]) {
+        target.addEventListener(eventName, ensureInitialMount, { once: true, passive: true });
+      }
+    };
+    attachDeferredMountListeners(initialTextarea);
+    attachDeferredMountListeners(initialEditor);
+    if (typeof window.requestIdleCallback === "function") {
+      window.requestIdleCallback(ensureInitialMount, { timeout: 250 });
+    } else if (typeof window.setTimeout === "function") {
+      window.setTimeout(ensureInitialMount, 16);
+    } else {
+      ensureInitialMount();
+    }
+  }
 })();

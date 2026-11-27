@@ -17,7 +17,7 @@ fun contentReportTransport(accountsEndpoint: String): RagentTransport {
     )
 }
 
-internal fun contentReportHttpClient(): OkHttpClient = OkHttpClient.Builder()
+internal fun contentReportHttpClient(): OkHttpClient = SharedOkHttpClient.newBuilder()
     .retryOnConnectionFailure(false)
     .followRedirects(false)
     .followSslRedirects(false)

@@ -436,4 +436,27 @@ class AgentMarkdownTest {
         assertEquals(4f, AgentoMarkdownTokens.ListItemToListItem.value)
         assertEquals(4f, AgentoMarkdownTokens.HeadingToNestedHeading.value)
     }
+
+    @Test
+    fun `latestGraphemeRange matches streamingGraphemeRanges lastOrNull in O(1)`() {
+        val samples = listOf(
+            "",
+            "a",
+            "hello world!",
+            "你好，世界。",
+            "e\u0301",
+            "👍🏽",
+            "👨‍👩‍👧‍👦",
+            "🇺🇸",
+            "flag 🇺🇸🇯🇵 end",
+            "text 👨‍👩‍👧 middle 👍🏽!",
+        )
+        for (sample in samples) {
+            assertEquals(
+                streamingGraphemeRanges(sample).lastOrNull(),
+                latestGraphemeRange(sample),
+                "Mismatch for sample: $sample",
+            )
+        }
+    }
 }

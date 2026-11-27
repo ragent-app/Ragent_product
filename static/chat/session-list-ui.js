@@ -85,6 +85,7 @@ function captureSessionItemPositions(container) {
   // linger as ghost cleanup on stale nodes.
   cancelActiveFlipAnimations();
   const byContainer = new Map();
+  const orderedIds = [];
   let count = 0;
   for (const listEl of container.querySelectorAll(".pinned-items, .folder-group-items, .archived-items")) {
     const className = getSessionItemContainerClass(listEl);
@@ -93,6 +94,7 @@ function captureSessionItemPositions(container) {
     for (const item of listEl.children) {
       const id = item.getAttribute("data-session-id");
       if (!id) continue;
+      orderedIds.push(`${className}:${id}`);
       const rect = item.getBoundingClientRect();
       positions.set(id, { top: rect.top, left: rect.left });
       count += 1;
@@ -104,7 +106,7 @@ function captureSessionItemPositions(container) {
   const sessionId = typeof currentSessionId === "string" ? currentSessionId : null;
   const sessionSwitched = _flipLastRenderSessionId !== null && _flipLastRenderSessionId !== sessionId;
   _flipLastRenderSessionId = sessionId;
-  return { sessionSwitched, count, byContainer };
+  return { sessionSwitched, count, orderedIds, byContainer };
 }
 
 function playSessionItemFlip(container, before) {
@@ -117,9 +119,27 @@ function playSessionItemFlip(container, before) {
   }
   if (typeof document !== "undefined" && document.hidden) return;
   if (container.dataset.userScrolling === "true") return;
+  if (before.count > FLIP_MAX_SNAPSHOT_ITEMS) return;
+
+  const afterOrderedIds = [];
+  for (const listEl of container.querySelectorAll(".pinned-items, .folder-group-items, .archived-items")) {
+    const className = getSessionItemContainerClass(listEl);
+    if (!className) continue;
+    for (const item of listEl.children) {
+      const id = item.getAttribute("data-session-id");
+      if (id) afterOrderedIds.push(`${className}:${id}`);
+    }
+  }
+  if (
+    Array.isArray(before.orderedIds)
+    && afterOrderedIds.length === before.orderedIds.length
+    && afterOrderedIds.every((entry, idx) => entry === before.orderedIds[idx])
+  ) {
+    return;
+  }
+
   const containerRect = container.getBoundingClientRect();
   if (!(containerRect.width > 0 && containerRect.height > 0)) return;
-  if (before.count > FLIP_MAX_SNAPSHOT_ITEMS) return;
 
   // Delta per item that exists in both snapshots, matched by container class.
   const moved = [];

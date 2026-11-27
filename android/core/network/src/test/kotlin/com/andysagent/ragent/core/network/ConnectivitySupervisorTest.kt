@@ -1397,6 +1397,153 @@ class ConnectivitySupervisorTest {
         assertEquals(sessionB, directInitialWebrtc?.reportedSession)
     }
 
+    @Test
+    fun `fast foreground probe triggers reconnect within 1500ms`() = runTest {
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+            livenessProbeHandler = { delay(60_000); true }
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            onRecoveryRequired = { recoveries++ },
+            foregroundProbeTimeoutMs = ConnectivitySupervisor.FOREGROUND_FAST_PROBE_TIMEOUT_MS,
+            foregroundProbeRetryTimeoutMs = ConnectivitySupervisor.FOREGROUND_FAST_PROBE_RETRY_TIMEOUT_MS,
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            val job = launch { supervisor.verifyForegroundCarrier { true } }
+            runCurrent()
+            advanceTimeBy(800)
+            runCurrent()
+            assertEquals(0, recoveries, "First 800ms timeout should trigger immediate 700ms retry")
+            assertTrue(session.isOpen)
+
+            advanceTimeBy(700)
+            runCurrent()
+            job.join()
+            assertFalse(session.isOpen)
+            assertEquals(1, recoveries)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `background health check relaxes interval to 15 seconds`() = runTest {
+        var inForeground = false
+        val session = FakeSession(Result.success(Unit)).apply {
+            supportsKeepalive = true
+        }
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "" },
+            credentialProvider = { "rda_test" },
+            monitor = FakeNetworkMonitor(),
+            scope = this,
+            turnSessionFactory = { session },
+            isForeground = { inForeground },
+        )
+        try {
+            supervisor.start()
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+
+            advanceTimeBy(3_000)
+            runCurrent()
+            assertEquals(0, session.livenessProbes, "Background mode must not probe every 3s")
+
+            advanceTimeBy(12_000)
+            runCurrent()
+            assertEquals(1, session.livenessProbes, "Background mode should probe at 15s")
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `default network change keeps active session when ice restart succeeds`() = runTest {
+        val monitor = FakeNetworkMonitor()
+        val session = FakeSession(connectResult = Result.success(Unit)).apply {
+            iceRestartSupported = true
+            iceRestartResult = true
+        }
+        var recoveries = 0
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "https://control.example.com" },
+            credentialProvider = { "rda_test" },
+            monitor = monitor,
+            scope = this,
+            maxRetries = 0,
+            backoffBaseMs = 100,
+            turnSessionFactory = { session },
+            p2pCandidateProvider = { null },
+            p2pSessionFactory = null,
+            onRecoveryRequired = { recoveries++ },
+        )
+
+        supervisor.start()
+        try {
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+
+            monitor.changeDefaultNetwork()
+            runCurrent()
+
+            assertEquals(1, session.iceRestartAttempts)
+            assertEquals(0, recoveries, "Successful ICE restart must avoid teardown recovery")
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+            assertEquals(true, session.isOpen)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
+    @Test
+    fun `default network change falls back to recovery when ice restart fails`() = runTest {
+        val monitor = FakeNetworkMonitor()
+        val session = FakeSession(connectResult = Result.success(Unit)).apply {
+            iceRestartSupported = true
+            iceRestartResult = false
+        }
+        val reasons = mutableListOf<String>()
+        val supervisor = ConnectivitySupervisor(
+            endpointProvider = { "https://control.example.com" },
+            credentialProvider = { "rda_test" },
+            monitor = monitor,
+            scope = this,
+            maxRetries = 0,
+            backoffBaseMs = 100,
+            turnSessionFactory = { session },
+            p2pCandidateProvider = { null },
+            p2pSessionFactory = null,
+            onRecoveryRequired = { reasons += it },
+        )
+
+        supervisor.start()
+        try {
+            supervisor.applyBootstrap(plan())
+            runCurrent()
+            assertEquals(ConnectionStatus.Connected, supervisor.state.value.status)
+
+            monitor.changeDefaultNetwork()
+            runCurrent()
+
+            assertEquals(1, session.iceRestartAttempts)
+            assertEquals(listOf("default-network-changed"), reasons)
+            assertEquals(false, session.isOpen)
+        } finally {
+            supervisor.stop()
+        }
+    }
+
     private fun supervisor(
         scope: kotlinx.coroutines.CoroutineScope,
         maxRetries: Int = 0,
@@ -1525,6 +1672,9 @@ class ConnectivitySupervisorTest {
         var inboundGeneration: Long = 0L
         var livenessProbes = 0
         var livenessProbeHandler: (suspend (Long) -> Boolean)? = null
+        var iceRestartSupported = false
+        var iceRestartResult = false
+        var iceRestartAttempts = 0
         val mutableResolvedCarrier = MutableStateFlow(P2PIceCarrier.Unknown)
         override val resolvedCarrier: StateFlow<P2PIceCarrier> = mutableResolvedCarrier.asStateFlow()
 
@@ -1534,6 +1684,12 @@ class ConnectivitySupervisorTest {
         override val lastInboundFrameElapsedMs: Long get() = inboundElapsedMs
         override val inboundFrameGeneration: Long get() = inboundGeneration
         override val supportsKeepaliveProbe: Boolean get() = supportsKeepalive
+        override val supportsIceRestart: Boolean get() = iceRestartSupported && isOpen
+
+        override suspend fun restartIce(timeoutMs: Long): Boolean {
+            iceRestartAttempts++
+            return iceRestartResult
+        }
 
         override suspend fun probeLiveness(timeoutMs: Long): Boolean {
             livenessProbes++

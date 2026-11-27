@@ -15,6 +15,8 @@ if (!/^[0-9]{1,5}$/.test(configuredPort) || Number(configuredPort) < 1 || Number
 const SERVICE_ORIGIN = `http://127.0.0.1:${Number(configuredPort)}`;
 const MANAGER_URL = `${SERVICE_ORIGIN}/?desktop=manager`;
 const RETRY_INTERVAL_MS = 1800;
+const STEADY_POLL_INTERVAL_MS = 10_000;
+const MAX_CONSECUTIVE_FAILURES = 3;
 const AUTH_HOSTS = new Set([
   "accounts.google.com",
   "auth.openai.com",
@@ -26,6 +28,7 @@ let mainWindow = null;
 let pollTimer = null;
 let pollInProgress = false;
 let managerLoaded = false;
+let consecutiveFailures = 0;
 let updateState = { status: "checking" };
 let updatePending = null;
 let updateTimer = null;
@@ -298,8 +301,19 @@ function createMainWindow() {
 
   const waitPage = path.join(appRoot, "wait.html");
   void mainWindow.loadFile(waitPage);
-  pollTimer = setInterval(() => void checkService(), RETRY_INTERVAL_MS);
   void checkService();
+}
+
+function scheduleNextPoll() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const delayMs = managerLoaded && consecutiveFailures === 0
+    ? STEADY_POLL_INTERVAL_MS
+    : RETRY_INTERVAL_MS;
+  pollTimer = setTimeout(() => void checkService(), delayMs);
 }
 
 function serviceIsReady() {
@@ -332,7 +346,12 @@ async function checkService() {
   pollInProgress = true;
   try {
     const ready = await serviceIsReady();
-    trayServiceReady = ready;
+    if (ready) {
+      consecutiveFailures = 0;
+    } else {
+      consecutiveFailures += 1;
+    }
+    trayServiceReady = ready || (managerLoaded && consecutiveFailures < MAX_CONSECUTIVE_FAILURES);
     updateTrayMenu();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (ready && !managerLoaded) {
@@ -340,16 +359,18 @@ async function checkService() {
       await mainWindow.loadURL(MANAGER_URL);
       return;
     }
-    if (!ready && managerLoaded) {
+    if (!ready && managerLoaded && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       managerLoaded = false;
       await mainWindow.loadFile(path.join(app.getAppPath(), "wait.html"));
     }
   } catch {
-    if (mainWindow && !mainWindow.isDestroyed() && managerLoaded) {
+    consecutiveFailures += 1;
+    if (mainWindow && !mainWindow.isDestroyed() && managerLoaded && consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       managerLoaded = false;
       await mainWindow.loadFile(path.join(app.getAppPath(), "wait.html"));
     }
   } finally {
     pollInProgress = false;
+    scheduleNextPoll();
   }
 }

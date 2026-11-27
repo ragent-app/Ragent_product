@@ -253,8 +253,10 @@ class TunnelClient {
       upReq: null,
       rawSocket: null,
       upQueue: [],
+      upQueueBytes: 0,
       upFlushing: false,
       downQueue: [],
+      downQueueBytes: 0,
       downFlushing: false,
       closed: false,
       receive: (payload) => {
@@ -271,12 +273,7 @@ class TunnelClient {
           return;
         }
         if (stream.rawSocket) {
-          if (stream.downQueue.length === 0) {
-            stream.writeDown(payload);
-          } else {
-            stream.downQueue.push(payload);
-            stream.flushDown();
-          }
+          stream.writeDown(payload);
           return;
         }
         if (stream.upReq) stream.upReq.write(payload);
@@ -366,12 +363,14 @@ class TunnelClient {
       },
       writeDown: (payload) => {
         if (stream.closed || !stream.rawSocket) return;
-        if (stream.downQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (stream.downQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           log('client', `stream ${stream.id} down-queue overflow, aborting`);
           stream.abort();
           return;
         }
         stream.downQueue.push(payload);
+        stream.downQueueBytes += size;
         stream.flushDown();
       },
       flushDown: () => {
@@ -383,6 +382,7 @@ class TunnelClient {
             // are already buffered, so shift before writing to avoid
             // duplicating data.
             const chunk = stream.downQueue.shift();
+            stream.downQueueBytes = Math.max(0, stream.downQueueBytes - (chunk?.length || 0));
             if (!stream.rawSocket.write(chunk)) {
               stream.rawSocket.once('drain', flush);
               return;
@@ -394,12 +394,14 @@ class TunnelClient {
       },
       writeUp: (payload) => {
         if (stream.closed) return;
-        if (stream.upQueue.length >= STREAM_QUEUE_LIMIT_BYTES) {
+        const size = payload?.length || 0;
+        if (stream.upQueueBytes + size > STREAM_QUEUE_LIMIT_BYTES) {
           log('client', `stream ${stream.id} up-queue overflow, aborting`);
           stream.abort();
           return;
         }
         stream.upQueue.push(payload);
+        stream.upQueueBytes += size;
         stream.flushUp();
       },
       flushUp: () => {
@@ -410,7 +412,9 @@ class TunnelClient {
             // write() returning false only signals backpressure; the bytes
             // are already buffered, so shift before writing to avoid
             // duplicating frames.
-            const frame = encodeFrame(TYPE_DATA, stream.id, stream.upQueue.shift());
+            const chunk = stream.upQueue.shift();
+            stream.upQueueBytes = Math.max(0, stream.upQueueBytes - (chunk?.length || 0));
+            const frame = encodeFrame(TYPE_DATA, stream.id, chunk);
             if (!client.req || !client.req.write(frame)) {
               if (client.req) client.req.once('drain', flush);
               return;

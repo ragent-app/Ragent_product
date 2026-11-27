@@ -828,7 +828,7 @@ if (isProotRuntime && !prootRemoteAccountActive()) {
   const { recoverOwnerAuthPollers } = await import('./lib/owner-account-auth.mjs');
   await recoverOwnerAuthPollers();
 }
-server.requestTimeout = 30000;
+server.requestTimeout = 65000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 5000;
 
