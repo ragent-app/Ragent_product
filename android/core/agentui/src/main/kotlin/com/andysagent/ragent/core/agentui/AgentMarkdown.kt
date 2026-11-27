@@ -195,6 +195,7 @@ private fun markdownBodyStyle(): TextStyle = RagentonversationTypography.Body.co
     fontSize = AgentoMarkdownTokens.BodyFontSize,
     lineHeight = AgentoMarkdownTokens.BodyLineHeight,
     letterSpacing = AgentoMarkdownTokens.BodyLetterSpacing,
+    lineBreak = androidx.compose.ui.text.style.LineBreak.Simple,
 )
 
 @Composable
@@ -203,16 +204,19 @@ private fun markdownListStyle(): TextStyle = RagentonversationTypography.ListIte
     fontSize = AgentoMarkdownTokens.BodyFontSize,
     lineHeight = AgentoMarkdownTokens.BodyLineHeight,
     letterSpacing = AgentoMarkdownTokens.BodyLetterSpacing,
+    lineBreak = androidx.compose.ui.text.style.LineBreak.Simple,
 )
 
 @Composable
 private fun markdownQuoteStyle(): TextStyle = RagentonversationTypography.Blockquote.copy(
     fontWeight = LocalAgentMarkdownBodyWeight.current,
+    lineBreak = androidx.compose.ui.text.style.LineBreak.Simple,
 )
 
 @Composable
 private fun markdownTableCellStyle(): TextStyle = RagentonversationTypography.TableCell.copy(
     fontWeight = LocalAgentMarkdownBodyWeight.current,
+    lineBreak = androidx.compose.ui.text.style.LineBreak.Simple,
 )
 
 private data class MarkdownHeadingSpec(

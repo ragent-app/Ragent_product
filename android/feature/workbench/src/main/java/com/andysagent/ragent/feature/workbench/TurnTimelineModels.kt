@@ -96,7 +96,7 @@ private fun JsonObject.activityString(key: String): String? =
 internal fun activeRunStatus(state: String?): AgentRunStatus? =
     when (state?.lowercase()) {
         "waiting_user", "waiting_approval", "awaiting_approval", "awaiting_decision" -> AgentRunStatus.WaitingApproval
-        "starting", "queued", "working", "running", "streaming", "started", "in_progress" -> AgentRunStatus.Working
+        "preparing", "accepted", "starting", "queued", "working", "running", "streaming", "started", "in_progress" -> AgentRunStatus.Working
         else -> null
     }
 
@@ -135,6 +135,7 @@ internal fun latestTurnSettledByIdleCursor(
     val lastUserIdx = items.indexOfLast { it is TimelineItem.Message && it.role == TimelineRole.User }
     val turn = if (lastUserIdx >= 0) items.subList(lastUserIdx, items.size) else items
     if (turn.isEmpty()) return allowEmpty
+    if (lastUserIdx >= 0 && turn.size == 1) return false
     val maxSeq = turn.maxOf { item ->
         if (item is TimelineItem.Message) maxOf(item.seq, item.lastEventSeq) else item.seq
     }
@@ -143,17 +144,44 @@ internal fun latestTurnSettledByIdleCursor(
     }
 }
 
-// A delivery event and its empty assistant history mirror can carry the same
-// asset under different message IDs. Scope this to one turn and assistant rows.
+// A delivery event, empty assistant history mirror, or duplicate final reply
+// across item/completed and turn/completed can carry the same content or asset
+// under different message IDs. Scope this to one turn and assistant rows.
 internal fun deduplicateAssistantAttachmentMirrors(entries: List<TimelineItem>): List<TimelineItem> {
     fun identity(attachment: com.andysagent.ragent.core.timeline.AttachmentItem): String? =
         attachment.assetId?.takeIf { it.isNotBlank() }?.let { "asset:$it" }
             ?: (attachment.downloadUrl ?: attachment.url)?.takeIf { it.isNotBlank() }?.let { "url:$it" }
-    val textAssets = entries.filterIsInstance<TimelineItem.Message>()
+    val normalizedTextOf: (TimelineItem.Message) -> String? = { msg ->
+        if (msg.role == TimelineRole.Agent && msg.completed && !msg.isProtectedAsyncEntry()) {
+            displayAgentMessageText(msg.text).trim().takeIf { it.isNotEmpty() }
+        } else null
+    }
+    val lastCompletedIndexByText = mutableMapOf<String, Int>()
+    entries.forEachIndexed { index, entry ->
+        if (entry is TimelineItem.Message) {
+            normalizedTextOf(entry)?.let { lastCompletedIndexByText[it] = index }
+        }
+    }
+    val foldedAttachmentsByText = mutableMapOf<String, MutableList<com.andysagent.ragent.core.timeline.AttachmentItem>>()
+    val collapsed = entries.mapIndexedNotNull { index, entry ->
+        if (entry !is TimelineItem.Message) return@mapIndexedNotNull entry
+        val norm = normalizedTextOf(entry)
+        if (norm != null) {
+            val lastIdx = lastCompletedIndexByText[norm]
+            if (lastIdx != null && index < lastIdx) {
+                foldedAttachmentsByText.getOrPut(norm) { mutableListOf() }.addAll(entry.attachments)
+                return@mapIndexedNotNull null
+            }
+            val extra = foldedAttachmentsByText.remove(norm)
+            if (!extra.isNullOrEmpty()) return@mapIndexedNotNull entry.copy(attachments = extra + entry.attachments)
+        }
+        entry
+    }
+    val textAssets = collapsed.filterIsInstance<TimelineItem.Message>()
         .filter { it.role == TimelineRole.Agent && it.text.isNotBlank() }
         .flatMap { it.attachments }.mapNotNull(::identity).toSet()
     val seen = mutableSetOf<String>()
-    return entries.mapNotNull { entry ->
+    return collapsed.mapNotNull { entry ->
         if (entry !is TimelineItem.Message || entry.role != TimelineRole.Agent) return@mapNotNull entry
         val kept = entry.attachments.filter { attachment ->
             val key = identity(attachment) ?: return@filter true

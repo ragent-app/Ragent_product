@@ -53,6 +53,7 @@ export function createCodexAppServerAdapter() {
   const planTextByItemId = new Map();
   const activeMcpCalls = new Map();
   const terminalCandidates = new Map();
+  const emittedCompletedMessageIds = new Set();
   // An app-server agentMessage completion can carry only its item id. Keep
   // the live text by item so that completion still produces a durable reply.
   // Without this, text_delta is visible while streaming but vanishes as soon
@@ -94,6 +95,7 @@ export function createCodexAppServerAdapter() {
         planTextByItemId,
         activeMcpCalls,
         terminalCandidates,
+        emittedCompletedMessageIds,
         agentMessageTextByItemId,
         reasoningTextByItemId,
         summaryTitleBySection,
@@ -957,10 +959,13 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
         const isAsyncDelivery = item.delivery === 'async';
         const asyncQuestions = normalizeAsyncQuestions(item.questions, providerItemId);
         const hasAsyncQuestions = asyncQuestions.length > 0;
-        if (content && lifecycle === 'completed' && normalizedPhase === 'final_answer' && !isAsyncDelivery && providerItemId && params?.turnId) {
-          const candidates = state.terminalCandidates?.get(params.turnId) || new Map();
+        const providerThreadId = readPlanThreadId(params);
+        const providerTurnId = readPlanTurnId(params);
+        if (content && lifecycle === 'completed' && normalizedPhase === 'final_answer' && !isAsyncDelivery && providerItemId && (providerTurnId || params?.turnId)) {
+          const turnKey = providerTurnId || params.turnId;
+          const candidates = state.terminalCandidates?.get(turnKey) || new Map();
           candidates.set(providerItemId, content);
-          state.terminalCandidates?.set(params.turnId, candidates);
+          state.terminalCandidates?.set(turnKey, candidates);
         }
         if (content || isAsyncDelivery || hasAsyncQuestions) {
           events.push(messageEvent('assistant', content, undefined, {
@@ -969,14 +974,17 @@ function parseThreadItem(item, lifecycle = 'completed', params = {}, state = {})
             // once history publication across a control-plane restart.
             ...(providerItemId ? { providerMessageId: providerItemId } : {}),
             provider: 'codex', runtimeFamily: CODEX_APP_SERVER_RUNTIME_FAMILY,
-            ...(readPlanThreadId(params) ? { providerThreadId: readPlanThreadId(params) } : {}),
-            ...(readPlanTurnId(params) ? { providerTurnId: readPlanTurnId(params) } : {}),
+            ...(providerThreadId ? { providerThreadId } : {}),
+            ...(providerTurnId ? { providerTurnId } : {}),
             providerLifecycle: lifecycle,
             ...(normalizedPhase ? { messagePhase: normalizedPhase } : {}),
             ...(isAsyncDelivery ? { messageDelivery: 'async', delivery: 'async' } : {}),
             ...((isAsyncDelivery || hasAsyncQuestions) && providerItemId ? { asyncQuestionMessageId: providerItemId } : {}),
             ...(hasAsyncQuestions ? { asyncQuestions, asyncQuestionsState: 'pending' } : {}),
           }));
+          if (lifecycle === 'completed' && providerItemId && state.emittedCompletedMessageIds instanceof Set) {
+            state.emittedCompletedMessageIds.add(`${providerTurnId}\u0000${providerItemId}`);
+          }
         }
         if (lifecycle === 'completed') state.agentMessageTextByItemId?.delete(streamId);
       }
@@ -1290,8 +1298,26 @@ function parseTurnCompleted(params, state = {}) {
       : providerFields,
   )];
   if (Array.isArray(params?.turn?.items)) {
+    const turnParams = {
+      ...(providerThreadId ? { threadId: providerThreadId } : {}),
+      ...(providerTurnId ? { turnId: providerTurnId } : {}),
+    };
     for (const item of params.turn.items) {
-      events.push(...parseThreadItem(item, status === 'completed' ? 'completed' : 'started'));
+      const itemLifecycle = status === 'completed' ? 'completed' : 'started';
+      const itemId = readProviderItemId(turnParams, item);
+      if (itemLifecycle === 'completed'
+        && item?.type === 'agentMessage'
+        && itemId
+        && state.emittedCompletedMessageIds?.has(`${providerTurnId}\u0000${itemId}`)) {
+        continue;
+      }
+      events.push(...parseThreadItem(item, itemLifecycle, turnParams, state));
+    }
+  }
+  if (state.emittedCompletedMessageIds instanceof Set) {
+    const prefix = `${providerTurnId}\u0000`;
+    for (const key of state.emittedCompletedMessageIds) {
+      if (key.startsWith(prefix)) state.emittedCompletedMessageIds.delete(key);
     }
   }
   return events;

@@ -2000,6 +2000,7 @@ private fun ChatSurface(
     }
     val latestTurnGroups = rememberUpdatedState(turnGroups)
     val statusActive = state.pendingTurn?.state == PendingTurnState.Sending ||
+        state.acceptedTurns.isNotEmpty() ||
         state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval
     val activityRunId = (state.serverRunActivity?.get("runId") as? kotlinx.serialization.json.JsonPrimitive)?.content
     val activityRequestId = (state.serverRunActivity?.get("requestId") as? kotlinx.serialization.json.JsonPrimitive)?.content
@@ -2019,7 +2020,15 @@ private fun ChatSurface(
         }
     }
     val candidateDurationKey = activeRequestId ?: currentRunId ?: activePromptId
-    val matchesTrackedTurn = durationIdentityTracker.key != null && (
+    val distinctRunStarted = currentRunId != null &&
+        durationIdentityTracker.runId != null &&
+        currentRunId != durationIdentityTracker.runId
+    val distinctRequestStarted = activeRequestId != null &&
+        durationIdentityTracker.requestId != null &&
+        activeRequestId != durationIdentityTracker.requestId
+    val matchesTrackedTurn = durationIdentityTracker.key != null &&
+        !distinctRunStarted &&
+        !distinctRequestStarted && (
         (currentRunId != null && currentRunId == durationIdentityTracker.runId) ||
             (activeRequestId != null && activeRequestId == durationIdentityTracker.requestId) ||
             (activePromptId != null && activePromptId == durationIdentityTracker.promptId)
@@ -3196,10 +3205,11 @@ private fun ChatSurface(
                     (state.runStatus == AgentRunStatus.WaitingApproval && activeDecision == null),
                 onAddAttachment = { onSetComposerActionSheetOpen(true) },
                 enabled = (!state.isLoading || state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval) &&
-                    !state.historyLoading,
+                    !state.historyLoading && !state.submittingDerivedTurn,
                 disabledPlaceholder = stringResource(
                     if (state.approval != null || state.approvalResolving) AgentUiR.string.agentui_resolve_approval
-                    else AgentUiR.string.agentui_loading_conversation,
+                    else if (state.historyLoading) AgentUiR.string.agentui_loading_conversation
+                    else AgentUiR.string.agentui_composer_prompt,
                 ),
                 actionEnabled = state.connection == AgentConnectionStatus.Connected && state.stopRequest == StopRequestState.None &&
                     (state.approval != null || (activeDecision?.takeUnless { it.isSubmitted }?.isBlocking == true) ||
@@ -3370,7 +3380,11 @@ private fun ChatSurface(
                         val upInsideComposer = positionInRoot?.let(composerBounds::contains) == true
                         val tappedInsideComposer = downInsideComposer || upInsideComposer
                         if (!moved && !tappedInsideComposer) {
-                            composerExpanded = false
+                            val preserveExpanded = editingTurnId != null ||
+                                editingQueuedMessageId != null ||
+                                state.composerText.isNotBlank() ||
+                                attachments.isNotEmpty()
+                            if (!preserveExpanded) composerExpanded = false
                             onEvent(WorkbenchEvent.CloseRuntimePicker)
                             onEvent(WorkbenchEvent.CloseEffortPicker)
                         }
@@ -3610,16 +3624,21 @@ private fun ChatSurface(
                                 val msgId = turn.requestId ?: "turn-edit"
                                 onSetEditingTurn(msgId, text)
                                 onEvent(WorkbenchEvent.ComposerChanged(text))
+                                composerExpanded = true
                             },
                             onEditAdditional = { requestId, text ->
                                 onSetEditingTurn(requestId, text)
                                 onEvent(WorkbenchEvent.ComposerChanged(text))
+                                composerExpanded = true
                             },
                             onPlanAction = { planId, action -> onEvent(WorkbenchEvent.PlanAction(planId, action)) },
                             onRetryPendingTurn = { onEvent(WorkbenchEvent.RetryPendingTurn) },
                             onOpenFileDiff = { diff -> onSetSelectedDiffFile(diff) },
                             onReport = { text -> onEvent(WorkbenchEvent.ReportAgentContent(text)) },
                             showMessageActions = canMessageAction && !organizationCollapsed,
+                            showReadOnlyActions = !isLastTurn && !historyTransitioning && !organizationCollapsed,
+                            canEditResend = (!state.isLoading || state.runStatus == AgentRunStatus.Working || state.runStatus == AgentRunStatus.WaitingApproval) &&
+                                !state.historyLoading && !state.submittingDerivedTurn,
                             runDuration = if (turn.runId?.let(state.runDurations::containsKey) == true || (isRunTurn && (showActiveRunAction || runElapsedSeconds >= 0L || serverElapsed != null ||
                                 (currentRunId != null && currentRunId == state.runMetrics.runId && state.runMetrics.durationFormatted != "N/A")))) {{
                                 val activeFallbackSeconds = runElapsedSeconds.takeIf { it >= 0L } ?: (serverElapsed?.div(1_000L) ?: -1L)

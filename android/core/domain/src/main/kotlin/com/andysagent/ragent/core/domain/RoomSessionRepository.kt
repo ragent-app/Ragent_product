@@ -73,6 +73,7 @@ import com.andysagent.ragent.core.protocol.QueueMutationResponseDto
 import com.andysagent.ragent.core.protocol.QueuedFollowUpDto
 import com.andysagent.ragent.core.protocol.allAttachments
 import com.andysagent.ragent.core.protocol.allOptions
+import com.andysagent.ragent.core.protocol.encodeMessageMetadataJson
 import com.andysagent.ragent.core.protocol.mergeMessageAttachmentMetadataJson
 import com.andysagent.ragent.core.protocol.reconcileAsyncQuestionStatuses
 import com.andysagent.ragent.core.protocol.toDomain
@@ -817,6 +818,71 @@ class RoomSessionRepository(
         }
     }
 
+    private fun markLocalTurnSubmitted(sessionId: String) {
+        if (sessionId.isBlank()) return
+        clearAuthoritativeIdle(sessionId)
+        synchronized(runActivityLock) {
+            val nextGen = (runActivityIssued[sessionId] ?: 0L) + 1L
+            runActivityIssued[sessionId] = nextGen
+            runActivityAccepted[sessionId] = maxOf(runActivityAccepted[sessionId] ?: 0L, nextGen)
+            runActivityLiveEpoch[sessionId] = (runActivityLiveEpoch[sessionId] ?: 0L) + 1L
+        }
+    }
+
+    private suspend fun recordAcceptedRunFromResponse(
+        sessionId: String,
+        responseBody: String,
+        fallbackRequestId: String = "",
+    ) {
+        if (sessionId.isBlank() || responseBody.isBlank()) return
+        val root = runCatching { codec.decode(serializer<JsonObject>(), responseBody) }.getOrNull() ?: return
+        (root["session"] as? JsonObject)?.let { sessionJson ->
+            runCatching { persistSessionJson(sessionJson, sessionId) }
+        }
+        val runObj = root["run"] as? JsonObject ?: return
+        val runId = (runObj.string("id") ?: runObj.string("runId"))?.takeIf(String::isNotBlank) ?: return
+        val rawState = (runObj.string("state") ?: runObj.string("status"))?.lowercase() ?: return
+        if (rawState == "idle" || rawState in TERMINAL_RUN_ACTIVITY_STATES) return
+        val effectiveRequestId = runObj.string("requestId") ?: root.string("requestId") ?: fallbackRequestId.takeIf(String::isNotBlank)
+        val sessionLatestSeq = (root["session"] as? JsonObject)?.get("latestSeq")?.toString()?.trim('"')?.toLongOrNull() ?: 0L
+        val syntheticState = when (rawState) {
+            "preparing", "accepted", "starting" -> "starting"
+            "queued" -> "queued"
+            "waiting_approval", "waiting_user", "awaiting_approval", "awaiting_decision" -> "waiting_approval"
+            else -> "working"
+        }
+        val syntheticActivity = buildJsonObject {
+            put("state", JsonPrimitive(syntheticState))
+            put("runId", JsonPrimitive(runId))
+            if (effectiveRequestId != null) put("requestId", JsonPrimitive(effectiveRequestId))
+            put("kind", JsonPrimitive(if (syntheticState == "queued") "queue" else "starting"))
+            put("label", JsonPrimitive(if (syntheticState == "queued") "Queued" else "Starting"))
+        }
+        val recorded = synchronized(runActivityLock) {
+            if (runId in currentTerminalRunIds(sessionId)) return@synchronized false
+            val nextGen = (runActivityIssued[sessionId] ?: 0L) + 1L
+            runActivityIssued[sessionId] = nextGen
+            runActivityAccepted[sessionId] = maxOf(runActivityAccepted[sessionId] ?: 0L, nextGen)
+            runActivityLiveEpoch[sessionId] = (runActivityLiveEpoch[sessionId] ?: 0L) + 1L
+            if (sessionLatestSeq > 0L) {
+                runActivityHighWater[sessionId] = maxOf(runActivityHighWater[sessionId] ?: 0L, sessionLatestSeq)
+            }
+            val current = runActivityState.value[sessionId]
+            val currentRunId = ((current?.get("runId") ?: current?.get("id")) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+            val currentState = runActivityStateName(current)
+            val currentActive = currentState != null && currentState != "idle" && currentState !in TERMINAL_RUN_ACTIVITY_STATES
+            val keepExistingRunning = currentActive && (currentRunId == runId || rawState == "queued")
+            if (!keepExistingRunning) {
+                runActivityState.update { it + (sessionId to syntheticActivity) }
+            }
+            true
+        }
+        if (recorded) {
+            clearAuthoritativeIdle(sessionId)
+            liveProjectionMutex.withLock { liveProjectors[sessionId]?.confirmActiveRun(runId) }
+        }
+    }
+
     private fun runActivityStateName(activity: JsonObject?): String? =
         listOf("state", "status", "runState")
             .firstNotNullOfOrNull { key -> (activity?.get(key) as? JsonPrimitive)?.contentOrNull }
@@ -1074,9 +1140,10 @@ class RoomSessionRepository(
                 // Older app versions persisted compaction handoffs as assistant
                 // messages without retaining their source. Hide the distinctive
                 // internal envelope while preserving the stored history.
-                it.role == "assistant" && it.runId.isNullOrBlank() &&
-                    it.content.trimStart().startsWith("# Auto Compress\n") &&
-                    it.content.contains("## Kept in current context")
+                it.messageState.equals("superseded", ignoreCase = true) ||
+                    (it.role == "assistant" && it.runId.isNullOrBlank() &&
+                        it.content.trimStart().startsWith("# Auto Compress\n") &&
+                        it.content.contains("## Kept in current context"))
             }.map {
                 Message(
                     id = it.id,
@@ -1795,7 +1862,7 @@ class RoomSessionRepository(
     }
 
     override suspend fun regenerateMessage(sessionId: String, parentRequestId: String, requestId: String) {
-        clearAuthoritativeIdle(sessionId)
+        markLocalTurnSubmitted(sessionId)
         require(parentRequestId.isNotBlank()) { "Source request id must not be blank" }
         require(requestId.isNotBlank()) { "Regenerate request id must not be blank" }
         val path = "/api/sessions/${encode(sessionId)}/regenerate"
@@ -1803,9 +1870,10 @@ class RoomSessionRepository(
             serializer<RegenerateMessageRequestDto>(),
             RegenerateMessageRequestDto(requestId = parentRequestId, newRequestId = requestId),
         )
-        executePending(sessionId, requestId, "regenerate_message", path, body) {
+        val response = executePendingResponse(sessionId, requestId, "regenerate_message", path, body) {
             execute(ApiRequest("POST", path, body, requestId, requestId))
         }
+        recordAcceptedRunFromResponse(sessionId, response.body, requestId)
         refreshEvents(sessionId)
     }
 
@@ -1827,7 +1895,7 @@ class RoomSessionRepository(
         requestId: String,
         attachments: List<OutboundAttachment>,
     ) {
-        clearAuthoritativeIdle(sessionId)
+        markLocalTurnSubmitted(sessionId)
         require(parentRequestId.isNotBlank()) { "Source request id must not be blank" }
         require(prompt.trim().isNotBlank()) { "Edited prompt must not be blank" }
         require(requestId.isNotBlank()) { "Edited resend request id must not be blank" }
@@ -1845,9 +1913,10 @@ class RoomSessionRepository(
                     serviceTier = selection.serviceTier,
                 ),
             )
-            executePending(sessionId, requestId, "resend_edited_message", path, body) {
+            val response = executePendingResponse(sessionId, requestId, "resend_edited_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
+            recordAcceptedRunFromResponse(sessionId, response.body, requestId)
         } else withPendingOperationClaim(requestId) {
             var operation = PendingOperationEntity(
                 requestId = requestId,
@@ -1880,7 +1949,8 @@ class RoomSessionRepository(
                     attachments = materialized.second,
                 )
                 dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
-                execute(ApiRequest("POST", path, body, requestId, requestId))
+                val response = execute(ApiRequest("POST", path, body, requestId, requestId))
+                recordAcceptedRunFromResponse(sessionId, response.body, requestId)
                 acknowledgeDerivedTurn(operation)
             } catch (error: Throwable) {
                 persistOperationFailure(operation, error)
@@ -1926,6 +1996,16 @@ class RoomSessionRepository(
         val now = System.currentTimeMillis()
         val persistedSnapshots = dao.observeSessions().first()
             .filter { isAcceptedFirstTurnStatus(it.status) }.associateBy { it.id }
+        val localActiveBySession = synchronized(runActivityLock) {
+            runActivityState.value.mapNotNull { (id, activity) ->
+                val state = runActivityStateName(activity)
+                val activeRunId = ((activity["runId"] ?: activity["id"]) as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank)
+                if (state != null && state != "idle" && state !in TERMINAL_RUN_ACTIVITY_STATES &&
+                    activeRunId != null && activeRunId !in currentTerminalRunIds(id)) {
+                    id to (state to (runActivityHighWater[id] ?: 0L))
+                } else null
+            }.toMap()
+        }
         val canonical = payload.sessions.map { item ->
             val existing = item.string("id")?.let { dao.getSession(it) }
             val activity = item["activity"]?.jsonObject
@@ -1933,7 +2013,15 @@ class RoomSessionRepository(
             val workflowState = item.string("workflowState")
             val rawStatus = chooseSessionSummaryStatus(item.string("status"), workflowState, run?.string("state"))
             val sessionId = item.string("id").orEmpty()
-            val status = preservePendingApprovalStatus(sessionId, rawStatus, sessionRunId(item))
+            val itemLatestSeq = item["latestSeq"]?.toString()?.trim('"')?.toLongOrNull() ?: 0L
+            val preservedStatus = preservePendingApprovalStatus(sessionId, rawStatus, sessionRunId(item))
+            val status = if (sessionStatusFromRaw(preservedStatus) == SessionStatus.Idle) {
+                localActiveBySession[sessionId]?.let { (localState, highWater) ->
+                    if (itemLatestSeq <= highWater) {
+                        if (localState == "waiting_approval") "waiting_approval" else "working"
+                    } else preservedStatus
+                } ?: preservedStatus
+            } else preservedStatus
             val waitingAction = item.string("waitingAction")
                 ?: item.string("attentionKind")
                 ?: run?.string("kind")?.takeIf { it.equals("approval", ignoreCase = true) }
@@ -2403,7 +2491,7 @@ class RoomSessionRepository(
         }
         val hasActiveLiveFrame = events.any { event ->
             event.terminalRunState() == null && event.type.orEmpty().lowercase() in setOf(
-                "run_started", "text_delta", "reasoning", "thinking_block", "tool_use", "approval_request",
+                "run_started", "run_regenerate", "text_delta", "reasoning", "thinking_block", "tool_use", "approval_request",
             ) && (event.runId.isNullOrBlank() || event.runId !in batchTerminalRunIds)
         }
         if (hasActiveLiveFrame) {
@@ -2521,6 +2609,50 @@ class RoomSessionRepository(
                         return RefreshResult.Gap(after + 1L, event.startingSeq())
                     }
                     rebuiltArtifacts = mergeDurableArtifacts(rebuiltArtifacts, listOf(event))
+                    if (event.type.equals("run_regenerate", ignoreCase = true)) {
+                        val staged = dao.getStagedMessages(sessionId)
+                        val superseded = staged.filter { message ->
+                            message.role.equals("assistant", ignoreCase = true) &&
+                                !message.messageState.equals("superseded", ignoreCase = true) &&
+                                when {
+                                    !event.parentRunId.isNullOrBlank() ->
+                                        message.runId == event.parentRunId && message.runId != event.runId
+                                    !event.parentRequestId.isNullOrBlank() ->
+                                        message.requestId == event.parentRequestId &&
+                                            (event.runId.isNullOrBlank() || message.runId != event.runId)
+                                    else -> false
+                                }
+                        }.map {
+                            it.copy(
+                                messageState = "superseded",
+                                lastEventSeq = maxOf(it.lastEventSeq, event.boundarySeq()),
+                            )
+                        }
+                        superseded.forEach { dao.upsertStagedMessage(it) }
+                        if (event.editResend == true) {
+                            val editedPrompt = event.prompt?.trim()?.takeIf { it.isNotEmpty() }
+                                ?: event.textContent()?.trim()?.takeIf { it.isNotEmpty() }
+                            val parentUser = staged.lastOrNull { message ->
+                                message.role.equals("user", ignoreCase = true) && (
+                                    (!event.parentRequestId.isNullOrBlank() && message.requestId == event.parentRequestId) ||
+                                        (!event.parentRunId.isNullOrBlank() && message.runId == event.parentRunId)
+                                    )
+                            }
+                            if (parentUser != null) {
+                                dao.upsertStagedMessage(
+                                    parentUser.copy(
+                                        content = editedPrompt ?: parentUser.content,
+                                        requestId = event.requestId ?: parentUser.requestId,
+                                        runId = event.runId ?: parentUser.runId,
+                                        lastEventSeq = maxOf(parentUser.lastEventSeq, event.boundarySeq()),
+                                        metadataJson = if (event.allAttachments().isNotEmpty()) {
+                                            event.encodeMessageMetadataJson()
+                                        } else parentUser.metadataJson,
+                                    ),
+                                )
+                            }
+                        }
+                    }
                     if (event.isTimelineMessage()) {
                         val old = dao.getStagedMessage(sessionId, event.messageProjectionId())
                         val previous = old?.let {
@@ -3003,9 +3135,65 @@ class RoomSessionRepository(
         }
     }
 
+    private fun applyRegenerateToVisibleEvents(events: List<SessionEventDto>): List<SessionEventDto> {
+        if (events.none { it.type.equals("run_regenerate", ignoreCase = true) }) return events
+        val result = mutableListOf<SessionEventDto>()
+        for (event in events) {
+            if (!event.type.equals("run_regenerate", ignoreCase = true)) {
+                result.add(event)
+                continue
+            }
+            val parentRunId = event.parentRunId?.takeIf { it.isNotBlank() }
+            val parentRequestId = event.parentRequestId?.takeIf { it.isNotBlank() }
+            val currentRunId = event.runId?.takeIf { it.isNotBlank() }
+            val currentRequestId = event.requestId?.takeIf { it.isNotBlank() }
+            val editedPrompt = if (event.editResend == true) {
+                event.prompt?.trim()?.takeIf { it.isNotEmpty() } ?: event.textContent()?.trim()?.takeIf { it.isNotEmpty() }
+            } else null
+            fun matchesParent(candidate: SessionEventDto): Boolean = when {
+                parentRunId != null && candidate.runId == parentRunId && candidate.runId != currentRunId -> true
+                parentRequestId != null && candidate.requestId == parentRequestId &&
+                    (currentRunId == null || candidate.runId != currentRunId) -> true
+                else -> false
+            }
+            var updatedUserIndex = -1
+            if (event.editResend == true) {
+                updatedUserIndex = result.indexOfLast { candidate ->
+                    candidate.isTimelineMessage() &&
+                        (candidate.role.equals("user", ignoreCase = true) || candidate.type == "user_message") &&
+                        matchesParent(candidate)
+                }
+                if (updatedUserIndex >= 0) {
+                    val originalUser = result[updatedUserIndex]
+                    val nextText = editedPrompt ?: originalUser.textContent() ?: originalUser.text
+                    result[updatedUserIndex] = originalUser.copy(
+                        text = nextText,
+                        content = nextText?.let(::JsonPrimitive) ?: originalUser.content,
+                        requestId = currentRequestId ?: originalUser.requestId,
+                        runId = currentRunId ?: originalUser.runId,
+                        attachments = if (event.allAttachments().isNotEmpty()) event.allAttachments() else originalUser.attachments,
+                        images = if (event.allAttachments().isNotEmpty()) emptyList() else originalUser.images,
+                    )
+                }
+            }
+            val iterator = result.listIterator()
+            while (iterator.hasNext()) {
+                val idx = iterator.nextIndex()
+                val candidate = iterator.next()
+                if (idx == updatedUserIndex) continue
+                val isUserMessage = candidate.isTimelineMessage() &&
+                    (candidate.role.equals("user", ignoreCase = true) || candidate.type == "user_message")
+                if (!isUserMessage && matchesParent(candidate)) {
+                    iterator.remove()
+                }
+            }
+        }
+        return result
+    }
+
     private fun updateVisibleTimelineProjection(sessionId: String, events: List<SessionEventDto>) {
         val projector = LiveTimelineProjector()
-        val projectedEvents = projector.projectPage(events)
+        val projectedEvents = projector.projectPage(applyRegenerateToVisibleEvents(events))
         val projectedItems = TimelineProjector.project(emptyList(), projectedEvents)
         visibleTimelineState.update { it + (sessionId to projectedItems) }
     }
@@ -3081,12 +3269,13 @@ class RoomSessionRepository(
     }
 
     override suspend fun sendMessage(sessionId: String, text: String, requestId: String) {
-        clearAuthoritativeIdle(sessionId)
+        markLocalTurnSubmitted(sessionId)
         val body = codec.encode(serializer<SendMessageRequestDto>(), SendMessageRequestDto(text, requestId))
         val path = "/api/sessions/${encode(sessionId)}/messages"
-        executePending(sessionId, requestId, "send_message", path, body) {
+        val response = executePendingResponse(sessionId, requestId, "send_message", path, body) {
             execute(ApiRequest("POST", path, body, requestId, requestId))
         }
+        recordAcceptedRunFromResponse(sessionId, response.body, requestId)
         refreshSessionDetail(sessionId, recordAuthoritativeIdle = false)
     }
 
@@ -3099,7 +3288,7 @@ class RoomSessionRepository(
         attachments: List<OutboundAttachment>,
         harnessCapabilityIds: List<String>,
     ) {
-        clearAuthoritativeIdle(sessionId)
+        markLocalTurnSubmitted(sessionId)
         val path = "/api/sessions/${encode(sessionId)}/messages"
         if (attachments.isEmpty()) {
             val body = encodeMessage(
@@ -3110,9 +3299,10 @@ class RoomSessionRepository(
                 attachments = emptyList(),
                 harnessCapabilityIds = harnessCapabilityIds,
             )
-            executePending(sessionId, requestId, "send_message", path, body) {
+            val response = executePendingResponse(sessionId, requestId, "send_message", path, body) {
                 execute(ApiRequest("POST", path, body, requestId, requestId))
             }
+            recordAcceptedRunFromResponse(sessionId, response.body, requestId)
             refreshSessionDetail(sessionId, recordAuthoritativeIdle = false)
             return
         }
@@ -3121,6 +3311,7 @@ class RoomSessionRepository(
         // every finalized asset id before starting it, so a process death after
         // upload but before message POST can resume with the same refs instead
         // of silently losing the user's message or creating duplicate assets.
+        var postResponseBody: String? = null
         withPendingOperationClaim(requestId) {
             var operation = PendingOperationEntity(
                 requestId = requestId,
@@ -3146,7 +3337,7 @@ class RoomSessionRepository(
                     harnessCapabilityIds = harnessCapabilityIds,
                 )
                 dao.upsertOperation(operation.copy(state = "sending", updatedAt = System.currentTimeMillis()))
-                execute(ApiRequest("POST", path, body, requestId, requestId))
+                postResponseBody = execute(ApiRequest("POST", path, body, requestId, requestId)).body
                 markFirstTurnAccepted(sessionId)
                 dao.deleteOperation(requestId)
             } catch (error: Throwable) {
@@ -3155,6 +3346,7 @@ class RoomSessionRepository(
                 throw error
             }
         }
+        postResponseBody?.let { recordAcceptedRunFromResponse(sessionId, it, requestId) }
         runCatching { refreshSessionDetail(sessionId, recordAuthoritativeIdle = false) }
     }
 
@@ -3221,7 +3413,7 @@ class RoomSessionRepository(
         steerIfRunning: Boolean,
         requestId: String,
     ): Boolean {
-        clearAuthoritativeIdle(sessionId)
+        markLocalTurnSubmitted(sessionId)
         val path = "/api/sessions/${encode(sessionId)}/messages"
         val body = codec.encode(
             serializer<SendMessageRequestDto>(),
@@ -3241,13 +3433,13 @@ class RoomSessionRepository(
                 steerIfRunning = steerIfRunning,
             ),
         )
-        var steered = false
-        executePending(sessionId, requestId, "send_message", path, body) {
-            val response = execute(ApiRequest("POST", path, body, requestId, requestId))
-            steered = runCatching {
-                codec.decode(serializer<SendMessageResponseDto>(), response.body).steered
-            }.getOrDefault(false)
+        val response = executePendingResponse(sessionId, requestId, "send_message", path, body) {
+            execute(ApiRequest("POST", path, body, requestId, requestId))
         }
+        val steered = runCatching {
+            codec.decode(serializer<SendMessageResponseDto>(), response.body).steered
+        }.getOrDefault(false)
+        recordAcceptedRunFromResponse(sessionId, response.body, requestId)
         runCatching { refreshSessionDetail(sessionId, recordAuthoritativeIdle = false) }
         return steered
     }
@@ -4726,6 +4918,52 @@ private class RoomEventSink(
         val type = event.type.orEmpty().lowercase()
         val requestId = event.requestKey()
         val text = event.textContent() ?: event.content?.toString()
+        if (type == "run_regenerate") {
+            val allMessages = dao.getMessages(scope)
+            val superseded = allMessages.filter { message ->
+                message.role.equals("assistant", ignoreCase = true) &&
+                    !message.messageState.equals("superseded", ignoreCase = true) &&
+                    when {
+                        !event.parentRunId.isNullOrBlank() ->
+                            message.runId == event.parentRunId && message.runId != event.runId
+                        !event.parentRequestId.isNullOrBlank() ->
+                            message.requestId == event.parentRequestId &&
+                                (event.runId.isNullOrBlank() || message.runId != event.runId)
+                        else -> false
+                    }
+            }.map {
+                it.copy(
+                    completed = true,
+                    messageState = "superseded",
+                    lastEventSeq = maxOf(it.lastEventSeq, event.boundarySeq()),
+                    updatedAt = System.currentTimeMillis(),
+                )
+            }
+            val updates = superseded.toMutableList()
+            if (event.editResend == true) {
+                val editedPrompt = event.prompt?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: event.textContent()?.trim()?.takeIf { it.isNotEmpty() }
+                val parentUser = allMessages.lastOrNull { message ->
+                    message.role.equals("user", ignoreCase = true) && (
+                        (!event.parentRequestId.isNullOrBlank() && message.requestId == event.parentRequestId) ||
+                            (!event.parentRunId.isNullOrBlank() && message.runId == event.parentRunId)
+                        )
+                }
+                if (parentUser != null) {
+                    updates += parentUser.copy(
+                        content = editedPrompt ?: parentUser.content,
+                        requestId = event.requestId ?: parentUser.requestId,
+                        runId = event.runId ?: parentUser.runId,
+                        lastEventSeq = maxOf(parentUser.lastEventSeq, event.boundarySeq()),
+                        metadataJson = if (event.allAttachments().isNotEmpty()) {
+                            event.encodeMessageMetadataJson()
+                        } else parentUser.metadataJson,
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
+            }
+            if (updates.isNotEmpty()) dao.upsertMessages(updates)
+        }
         if (event.isTimelineMessage()) {
             val id = event.messageProjectionId()
             val existing = dao.getMessage(id)?.takeIf { it.sessionId == scope }
@@ -4772,7 +5010,8 @@ private class RoomEventSink(
                 type.contains("approval_response") || type.contains("confirmation_response")
                     || type == "privileged_batch_response" || type == "approved_action_batch_response"
                     || type == "approved_action_state" || type.contains("decision") -> "working"
-                type.contains("started") || type.contains("running") || type.contains("delta") -> "working"
+                type.contains("started") || type.contains("running") || type.contains("delta") ||
+                    type == "run_regenerate" -> "working"
                 else -> session.status
             }
             dao.upsertSessions(listOf(session.copy(status = status, latestSeq = maxOf(session.latestSeq, event.boundarySeq()), updatedAt = System.currentTimeMillis())))

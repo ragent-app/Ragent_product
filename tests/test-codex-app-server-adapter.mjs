@@ -1262,4 +1262,39 @@ assert.deepEqual(
   { id: 602, result: { action: 'decline' } },
 );
 
+const dedupTurnAdapter = createCodexAppServerAdapter();
+const itemCompletedEvents = dedupTurnAdapter.parseLine(JSON.stringify({
+  method: 'item/completed',
+  params: {
+    threadId: 'thr-dedup',
+    turnId: 'turn-dedup',
+    item: {
+      id: 'msg-dedup-1',
+      type: 'agentMessage',
+      phase: 'final_answer',
+      text: 'Final summary once.',
+    },
+  },
+}));
+assert.equal(itemCompletedEvents.filter((e) => e.type === 'message' && e.role === 'assistant').length, 1);
+const turnCompletedEvents = dedupTurnAdapter.parseLine(JSON.stringify({
+  method: 'turn/completed',
+  params: {
+    threadId: 'thr-dedup',
+    turn: {
+      id: 'turn-dedup',
+      status: 'completed',
+      items: [
+        {
+          id: 'msg-dedup-1',
+          type: 'agentMessage',
+          phase: 'final_answer',
+          text: 'Final summary once.',
+        },
+      ],
+    },
+  },
+}));
+assert.equal(turnCompletedEvents.filter((e) => e.type === 'message' && e.role === 'assistant').length, 0);
+
 console.log('test-codex-app-server-adapter: ok');

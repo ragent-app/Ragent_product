@@ -119,6 +119,7 @@ data class RunMetricsUiState(
     val status: AgentRunStatus = AgentRunStatus.Idle,
     val promptTokens: Int = 0,
     val completionTokens: Int = 0,
+    val totalTokens: Int = 0,
     val totalCostUsd: Double = 0.0,
     val toolCallsCount: Int = 0,
     val filesChangedCount: Int = 0,
@@ -285,7 +286,7 @@ internal fun RunSheetContent(
                         }
                     } else Modifier).testTag("run-tab-page-${displayed.tab.name}")) {
                     when (displayed.tab) {
-                        RunSheetTab.Metrics -> RunMetricsSection(displayed.metrics, displayed.files.size, displayed.traces.size, stacked)
+                        RunSheetTab.Metrics -> RunMetricsSection(displayed.metrics, displayed.files.size + displayed.deliverables.size, displayed.traces.size, stacked)
                         RunSheetTab.Files -> ChangedFilesSection(displayed.files, displayed.deliverables, onOpenFileDiff)
                         RunSheetTab.Trace -> ExecutionTraceSection(displayed.traces)
                     }
@@ -322,7 +323,7 @@ private fun RunMetricsSection(metrics: RunMetricsUiState, fileCount: Int, traceC
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        val totalTokens = metrics.promptTokens + metrics.completionTokens
+        val totalTokens = maxOf(metrics.totalTokens, metrics.promptTokens + metrics.completionTokens)
         val cards = listOf(
             stringResource(R.string.run_metric_time) to (metrics.durationFormatted.takeUnless { it.isBlank() || it == "N/A" } ?: "—"),
             stringResource(R.string.run_metric_tools) to maxOf(metrics.toolCallsCount, traceCount).toString(),

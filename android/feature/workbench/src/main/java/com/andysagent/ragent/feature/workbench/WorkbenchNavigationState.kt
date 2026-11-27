@@ -11,6 +11,7 @@ internal fun WorkbenchUiState.navigationProjection(): WorkbenchUiState = copy(
             approvalOutcomeUnknown = false,
             approvalRechecking = false,
             isLoading = false,
+            submittingDerivedTurn = false,
             error = null,
             listActionError = null,
             runtimePickerOpen = false,

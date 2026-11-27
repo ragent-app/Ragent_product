@@ -92,6 +92,9 @@ interface RagentDao {
     @Query("SELECT * FROM timeline_message_staging WHERE sessionId = :sessionId AND id = :id")
     suspend fun getStagedMessage(sessionId: String, id: String): TimelineMessageStagingEntity?
 
+    @Query("SELECT * FROM timeline_message_staging WHERE sessionId = :sessionId")
+    suspend fun getStagedMessages(sessionId: String): List<TimelineMessageStagingEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertStagedMessage(message: TimelineMessageStagingEntity)
 

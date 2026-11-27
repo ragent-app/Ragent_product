@@ -122,6 +122,8 @@ fun TurnTimelineView(
     modifier: Modifier = Modifier,
     onReport: ((String) -> Unit)? = null,
     showMessageActions: Boolean = true,
+    showReadOnlyActions: Boolean = showMessageActions,
+    canEditResend: Boolean = true,
     runDuration: (@Composable () -> Unit)? = null,
     runActive: Boolean = false,
     runWaitingApproval: Boolean = false,
@@ -149,6 +151,8 @@ fun TurnTimelineView(
                 onEditResend = { onEditResend(QuestionReplyEnvelopeCodec.formatEditableComposerText(prompt.text)) },
                 onRetry = onRetryPendingTurn,
                 showMessageActions = showMessageActions,
+                showReadOnlyActions = showReadOnlyActions,
+                canEditResend = canEditResend,
             )
         }
 
@@ -189,6 +193,8 @@ fun TurnTimelineView(
                                 },
                                 onRetry = onRetryPendingTurn,
                                 showMessageActions = showMessageActions && item.requestId != null && onEditAdditional != null,
+                                showReadOnlyActions = showReadOnlyActions,
+                                canEditResend = canEditResend && item.requestId != null && onEditAdditional != null,
                             )
                         } else if (item.asyncQuestions.isNotEmpty()) {
                             AsyncQuestionsCardContent(
@@ -219,6 +225,7 @@ fun TurnTimelineView(
                                     onRestart = item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
                                     onReport = onReport?.let { report -> { report(item.text) } },
                                     showMessageActions = showMessageActions,
+                                    showReadOnlyActions = showReadOnlyActions,
                                     pauseStreaming = runWaitingApproval,
                                 )
                             }
@@ -228,6 +235,7 @@ fun TurnTimelineView(
                             item.requestId?.let { request -> onRestart?.let { restart -> { restart(request) } } },
                             onReport = onReport?.let { report -> { report(item.text) } },
                             showMessageActions = showMessageActions,
+                            showReadOnlyActions = showReadOnlyActions,
                             pauseStreaming = runWaitingApproval,
                             allowStreaming = isLastTurn && item.id == turn.entries.lastOrNull {
                                 it is TimelineItem.Message && it.role == TimelineRole.Agent
@@ -264,9 +272,10 @@ fun TurnTimelineView(
                         AnimatedVisibility(expanded) { renderEntry(entry) }
                     }
                 }
-                if (activeAction != null) AnimatedVisibility(expanded) { activeAction() }
+                if (!runActive && activeAction != null) AnimatedVisibility(expanded) { activeAction() }
             }
             outsideEntries.forEach { renderEntry(it) }
+            if (runActive && activeAction != null) AnimatedVisibility(expanded) { activeAction() }
             return@Column
         }
 
@@ -299,6 +308,7 @@ fun TurnTimelineView(
                         onRestart = turn.requestId?.let { reqId -> onRestart?.let { restart -> { restart(reqId) } } },
                         onReport = onReport?.let { report -> { report(message.text) } },
                         showMessageActions = showMessageActions,
+                        showReadOnlyActions = showReadOnlyActions,
                         pauseStreaming = runWaitingApproval,
                     )
                 }
@@ -335,6 +345,8 @@ fun UserPromptBlock(
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
     showMessageActions: Boolean = true,
+    showReadOnlyActions: Boolean = showMessageActions,
+    canEditResend: Boolean = true,
 ) {
     val colors = LocalRagentColors.current
     val isDark = colors.canvas.red < 0.5f
@@ -366,6 +378,7 @@ fun UserPromptBlock(
                 ) {
                     prompt.attachments.forEach { attachment ->
                         AttachmentThumbnailCard(attachment = attachment, onRemove = null,
+                            maxWidth = 340.dp,
                             modifier = Modifier.clickable { openAttachment(attachment) })
                     }
                 }
@@ -399,11 +412,10 @@ fun UserPromptBlock(
                 Surface(
                     modifier = Modifier
                         .widthIn(min = 48.dp, max = maxBubbleWidth)
-                        .width(IntrinsicSize.Max)
                         .testTag("user-message-bubble-${prompt.id}")
                         .clip(AgentoShapes.UserBubble)
                         .agentoPressScale(pressedScale = 0.985f, onClick = {},
-                            onLongClick = if (showMessageActions) ({ menuExpanded = true }) else null),
+                            onLongClick = if (showMessageActions || showReadOnlyActions) ({ menuExpanded = true }) else null),
                     shape = AgentoShapes.UserBubble,
                     color = bubbleColor,
                     contentColor = colors.primaryContent,
@@ -424,7 +436,6 @@ fun UserPromptBlock(
                         if (markdownBody.isNotBlank()) {
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
                                     .then(
                                         if (!isExpanded) {
                                             Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(4.dp))
@@ -434,13 +445,15 @@ fun UserPromptBlock(
                                 AgentMarkdown(
                                     markdown = markdownBody,
                                     isStreaming = false,
-                                    modifier = Modifier.fillMaxWidth().onSizeChanged { size ->
+                                    modifier = Modifier.onSizeChanged { size ->
                                         if (!isExpanded) isClipped = size.height >= collapsedHeightPx
                                     },
                                 )
                                 if (!isExpanded && isClipped) {
-                                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
-                                        .background(Brush.verticalGradient(listOf(Color.Transparent, bubbleColor))))
+                                    Box(Modifier.matchParentSize()) {
+                                        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(28.dp)
+                                            .background(Brush.verticalGradient(listOf(Color.Transparent, bubbleColor))))
+                                    }
                                 }
                             }
                         }
@@ -475,7 +488,7 @@ fun UserPromptBlock(
 
                 // Long-press context dropdown
                 AgentoDropdownMenu(
-                    expanded = menuExpanded && showMessageActions,
+                    expanded = menuExpanded && (showMessageActions || showReadOnlyActions),
                     onDismissRequest = { menuExpanded = false },
                     opaqueFallback = true,
                 ) {
@@ -489,12 +502,12 @@ fun UserPromptBlock(
                         },
                         leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Copy, null) },
                     )
-                    if (onBranch != null) AgentoDropdownMenuItem(
+                    if (showMessageActions && onBranch != null) AgentoDropdownMenuItem(
                         text = stringResource(AgentUiR.string.agentui_branch),
                         onClick = { menuExpanded = false; onBranch() },
                         leadingIcon = { AgentoWebIcon(AgentoWebGlyph.Fork, null, modifier = Modifier.size(16.dp)) },
                     )
-                    AgentoDropdownMenuItem(
+                    if (showMessageActions && canEditResend) AgentoDropdownMenuItem(
                         text = stringResource(AgentUiR.string.agentui_edit_and_resend),
                         onClick = {
                             menuExpanded = false
@@ -928,6 +941,7 @@ fun ResultBlock(
     modifier: Modifier = Modifier,
     onReport: (() -> Unit)? = null,
     showMessageActions: Boolean = true,
+    showReadOnlyActions: Boolean = showMessageActions,
     pauseStreaming: Boolean = false,
     allowStreaming: Boolean = true,
 ) {
@@ -962,16 +976,20 @@ fun ResultBlock(
                         previewUrl = att.downloadUrl ?: att.url,
                     )
                     AttachmentThumbnailCard(attachment, onRemove = null,
+                        maxWidth = 340.dp,
                         modifier = Modifier.clickable { openAttachment(attachment) })
                 }
             }
         }
-        if (displayText.isNotBlank() && showMessageActions && message.completed && (isLastTurn || onReport != null)) {
+        val showActionBar = displayText.isNotBlank() && message.completed &&
+            (showMessageActions || showReadOnlyActions) &&
+            (isLastTurn || (onReport != null && message.attachments.isEmpty()))
+        if (showActionBar) {
             AgentMessageActionBar(
                 text = displayText,
-                isLastMessage = isLastTurn,
-                onBranch = onBranch.takeIf { isLastTurn },
-                onRestart = onRestart.takeIf { isLastTurn },
+                isLastMessage = isLastTurn && showMessageActions,
+                onBranch = onBranch.takeIf { isLastTurn && showMessageActions },
+                onRestart = onRestart.takeIf { isLastTurn && showMessageActions },
                 onReport = onReport,
             )
         }

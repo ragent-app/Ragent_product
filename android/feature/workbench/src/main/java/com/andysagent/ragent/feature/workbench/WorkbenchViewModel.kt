@@ -160,6 +160,7 @@ data class WorkbenchUiState(
     val pairingDeviceName: String = "Android device",
     val pairingInProgress: Boolean = false,
     val isLoading: Boolean = false,
+    val submittingDerivedTurn: Boolean = false,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
@@ -581,6 +582,7 @@ data class ChatUiState(
     val approvalRechecking: Boolean = false,
     val initialTurnEntry: Boolean = false,
     val isLoading: Boolean = false,
+    val submittingDerivedTurn: Boolean = false,
     val loadingOlder: Boolean = false,
     val hasOlder: Boolean = false,
     val error: String? = null,
@@ -1092,6 +1094,7 @@ class ChatViewModel(
                             pendingTurn = null,
                             acceptedTurns = emptyList(),
                             isLoading = false,
+                            submittingDerivedTurn = false,
                             activeDecision = null,
                             submittingAsyncQuestionIds = emptySet(),
                             optimisticallyAnsweredAsyncQuestions = emptyMap(),
@@ -1755,8 +1758,9 @@ class ChatViewModel(
         val fixed = selectedRepository ?: return
         val generation = sessionGeneration
         if (fixed !== activeRepository() || parentRequestId.isBlank() || current.runStatus == AgentRunStatus.Working) return
-        updateState { copy(isLoading = true, error = null, runStatus = AgentRunStatus.Working) }
+        updateState { copy(submittingDerivedTurn = true, error = null, runStatus = AgentRunStatus.Working) }
         viewModelScope.launch {
+            var submitted = false
             try {
                 val key = Triple(fixed, sessionId, "regenerate:$parentRequestId")
                 val retained = fixed.reconcileDerivedTurn(sessionId, parentRequestId, edited = false)
@@ -1767,6 +1771,7 @@ class ChatViewModel(
                     return@launch
                 }
                 fixed.regenerateMessage(sessionId, parentRequestId)
+                submitted = true
                 if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) refreshSession(sessionId, generation)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1777,9 +1782,13 @@ class ChatViewModel(
                 if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) showError(error, "Message could not be regenerated")
             } finally {
                 if (selectedRepository === fixed && isCurrentSession(sessionId, generation)) {
-                    val status = knownSessions.takeIf { knownSessionsRepository === fixed }
-                        ?.firstOrNull { it.id == sessionId }?.status?.toAgentStatus() ?: AgentRunStatus.Idle
-                    updateState { copy(isLoading = false, runStatus = status) }
+                    if (submitted) {
+                        updateState { copy(submittingDerivedTurn = false) }
+                    } else {
+                        val status = knownSessions.takeIf { knownSessionsRepository === fixed }
+                            ?.firstOrNull { it.id == sessionId }?.status?.toAgentStatus() ?: AgentRunStatus.Idle
+                        updateState { copy(submittingDerivedTurn = false, runStatus = status) }
+                    }
                 }
             }
         }
@@ -1816,13 +1825,15 @@ class ChatViewModel(
                 composerText = "",
                 editingTurnId = null,
                 editingTurnText = null,
-                isLoading = true,
+                attachments = emptyList(),
+                submittingDerivedTurn = true,
                 error = null,
                 runStatus = AgentRunStatus.Working,
             )
         }
         viewModelScope.launch {
             var attempted = false
+            var submitted = false
             try {
                 val key = Triple(repositoryAtStart, sessionId, "edit:$parentRequestId")
                 val retained = repositoryAtStart.reconcileDerivedTurn(sessionId, parentRequestId, edited = true)
@@ -1859,6 +1870,7 @@ class ChatViewModel(
                     selection = selection,
                     attachments = outboundAttachments,
                 )
+                submitted = true
                 if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) refreshSession(sessionId, generation)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -1876,9 +1888,13 @@ class ChatViewModel(
                 }
             } finally {
                 if (selectedRepository === repositoryAtStart && isCurrentSession(sessionId, generation)) {
-                    val status = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
-                        ?: AgentRunStatus.Idle
-                    updateState { copy(isLoading = false, runStatus = status) }
+                    if (submitted) {
+                        updateState { copy(submittingDerivedTurn = false) }
+                    } else {
+                        val status = knownSessions.firstOrNull { it.id == sessionId }?.status?.toAgentStatus()
+                            ?: AgentRunStatus.Idle
+                        updateState { copy(submittingDerivedTurn = false, runStatus = status) }
+                    }
                 }
             }
         }
@@ -2784,6 +2800,7 @@ class ChatViewModel(
                 pendingTurn = restoredPendingTurn,
                 acceptedTurns = restoredAcceptedTurns,
                 isLoading = restoredPendingTurn?.state == PendingTurnState.Sending,
+                submittingDerivedTurn = false,
                 goalText = "",
                 // Never display another session's messages under the newly selected title.
                 // Show the history loading state until this session's snapshot arrives.
@@ -3318,11 +3335,33 @@ class ChatViewModel(
             ?: projection.timestampValue("finalizedAt")
         val duration = projection.longValue("durationMs") ?: if (started != null && finished != null) finished - started else null
         val usage = projection["usage"] as? JsonObject
+        val tokenUsage = projection["tokenUsage"] as? JsonObject
+        val nextPromptTokens = (projection.longValue("promptTokens")
+            ?: projection.longValue("inputTokens")
+            ?: usage?.longValue("promptTokens")
+            ?: usage?.longValue("inputTokens")
+            ?: usage?.longValue("prompt_tokens")
+            ?: tokenUsage?.longValue("promptTokens")
+            ?: tokenUsage?.longValue("inputTokens"))?.toInt()
+        val nextCompletionTokens = (projection.longValue("completionTokens")
+            ?: projection.longValue("outputTokens")
+            ?: usage?.longValue("completionTokens")
+            ?: usage?.longValue("outputTokens")
+            ?: usage?.longValue("completion_tokens")
+            ?: tokenUsage?.longValue("completionTokens")
+            ?: tokenUsage?.longValue("outputTokens"))?.toInt()
+        val nextTotalTokens = (projection.longValue("totalTokens")
+            ?: usage?.longValue("totalTokens")
+            ?: usage?.longValue("total_tokens")
+            ?: tokenUsage?.longValue("totalTokens"))?.toInt()
         updateState {
-            val incomingStatus = state?.toRunStatus()
             val activeRunId = serverRunActivity?.takeIf { activeRunActivityStatus(it) != null }?.stringValue("runId")
+            val incomingStatus = state?.toRunStatus()
             if (activeRunId != runId && !shouldAcceptRunProjection(runMetrics, runId, incomingStatus)) return@updateState this
             val previous = if (runMetrics.runId == runId) runMetrics else RunMetricsUiState()
+            val resolvedPrompt = nextPromptTokens ?: previous.promptTokens
+            val resolvedCompletion = nextCompletionTokens ?: previous.completionTokens
+            val resolvedTotal = nextTotalTokens ?: maxOf(previous.totalTokens, resolvedPrompt + resolvedCompletion)
             copy(runMetrics = previous.copy(
                 runId = runId,
                 phase = projection.stringValue("phase"),
@@ -3331,8 +3370,9 @@ class ChatViewModel(
                 runtimeFamily = projection.stringValue("runtimeFamily"),
                 failureReason = projection.stringValue("failureReason") ?: projection.stringValue("error"),
                 durationFormatted = duration?.let(::formatDuration) ?: previous.durationFormatted,
-                promptTokens = (projection.longValue("promptTokens") ?: usage?.longValue("promptTokens"))?.toInt() ?: previous.promptTokens,
-                completionTokens = (projection.longValue("completionTokens") ?: usage?.longValue("completionTokens"))?.toInt() ?: previous.completionTokens,
+                promptTokens = resolvedPrompt,
+                completionTokens = resolvedCompletion,
+                totalTokens = resolvedTotal,
                 status = (if (activeRunId == runId) activeRunActivityStatus(serverRunActivity) else null)
                     ?: incomingStatus ?: previous.status,
             ))

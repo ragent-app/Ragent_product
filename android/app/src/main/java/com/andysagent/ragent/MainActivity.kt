@@ -1599,6 +1599,7 @@ class MainActivity : ComponentActivity() {
                     optimisticallyAnsweredAsyncQuestions = chatState.optimisticallyAnsweredAsyncQuestions,
                     goalDialogOpen = chatState.goalDialogOpen,
                     isLoading = chatState.isLoading,
+                    submittingDerivedTurn = chatState.submittingDerivedTurn,
                     loadingOlder = chatState.loadingOlder,
                     hasOlder = chatState.hasOlder,
                     error = chatState.error ?: projectState.error ?: computerState.error,

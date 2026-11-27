@@ -160,11 +160,14 @@ internal fun RunDetailsIsland(
     // through the visible card can cancel a run or move the transcript.
     val blocksBackground = expanded || islandTransition.currentState != RunIslandStage.Collapsed ||
         islandTransition.isRunning
+    val colors = LocalRagentColors.current
+    val isDark = colors.canvas.red < 0.5f
     Box(modifier = modifier.fillMaxSize().zIndex(if (blocksBackground) 2.6f else 2.35f)) {
         if (blocksBackground) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
+                    .background(Color.Black.copy(alpha = (if (isDark) 0.36f else 0.18f) * shellGeometry.shellProgress))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -172,8 +175,6 @@ internal fun RunDetailsIsland(
                     ),
             )
         }
-        val colors = LocalRagentColors.current
-        val isDark = colors.canvas.red < 0.5f
         var backdropOffset by remember { mutableStateOf(IntOffset.Zero) }
         Box(
             modifier = Modifier
@@ -357,13 +358,17 @@ private fun RunIslandCardContent(
         AgentRunStatus.Cancelled -> colors.secondaryContent to com.andysagent.ragent.core.agentui.R.string.agentui_status_cancelled
         else -> colors.secondaryContent to R.string.run_summary_idle
     }
+    val hasHistory = runMetrics.runId != null ||
+        stepTraces.isNotEmpty() ||
+        changedFiles.isNotEmpty() ||
+        deliverables.isNotEmpty()
     val fallback = stringResource(when (runMetrics.status) {
         AgentRunStatus.Working -> R.string.run_summary_working_detail
         AgentRunStatus.WaitingApproval -> R.string.run_summary_approval_detail
         AgentRunStatus.Completed -> R.string.run_summary_completed_detail
         AgentRunStatus.Failed -> R.string.run_summary_failed_detail
         AgentRunStatus.Cancelled -> R.string.run_summary_cancelled_detail
-        else -> R.string.run_summary_idle_detail
+        else -> if (hasHistory) R.string.run_summary_completed_detail else R.string.run_summary_idle_detail
     })
     val summary = pendingRequest?.summary?.takeIf { it.isNotBlank() } ?: when (runMetrics.status) {
         AgentRunStatus.Working -> activitySummary?.takeIf { it.isNotBlank() }

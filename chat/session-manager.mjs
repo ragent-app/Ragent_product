@@ -1209,6 +1209,12 @@ function deriveRunStateFromResult(run, result) {
   return 'failed';
 }
 
+const ACTIVE_SESSION_RUN_STATES = new Set(['preparing', 'accepted', 'starting', 'queued', 'running']);
+
+function isActiveSessionRun(run) {
+  return ACTIVE_SESSION_RUN_STATES.has(run?.state) || hasPendingApprovedActionPause(run);
+}
+
 function hasPendingApprovedActionPause(run) {
   return Boolean(
     run?.approvedActionPending?.batchId
@@ -3536,7 +3542,7 @@ function estimateBundleBytes(bundle) {
 }
 
 function buildSessionTimelineBundle(sessionMeta, run, timeline) {
-  const sessionRunning = run?.state === 'running' || hasPendingApprovedActionPause(run);
+  const sessionRunning = isActiveSessionRun(run);
   // projectRoot/home 供 operation 投影做风险分级（tier/arbitrate），
   // sessionId 供 LLM 增强完成回调回推（broadcastSessionInvalidation）。
   const displayEvents = buildSessionDisplayEvents(timeline, {
@@ -3614,7 +3620,7 @@ async function getSessionTimelineBundleInternal(sessionId, options = {}) {
     return {
       displayEvents: Array.isArray(page?.events) ? page.events : [],
       runActivity: page?.runActivity || null,
-      sessionRunning: run?.state === 'running' || hasPendingApprovedActionPause(run),
+      sessionRunning: isActiveSessionRun(run),
       pagination: page?.pagination || null,
     };
   }
@@ -3649,7 +3655,7 @@ async function getSessionTimelineBundleInternal(sessionId, options = {}) {
     const bundle = {
       displayEvents: Array.isArray(page?.events) ? page.events : [],
       runActivity: page?.runActivity || null,
-      sessionRunning: run?.state === 'running' || hasPendingApprovedActionPause(run),
+      sessionRunning: isActiveSessionRun(run),
       pagination: page?.pagination || null,
     };
     const estimateBytes = estimateBundleBytes({ displayEvents: bundle.displayEvents, runActivity: bundle.runActivity });
@@ -10985,7 +10991,7 @@ export async function getSessionTimelinePage(sessionId, options = {}) {
   const run = activeRunId
     ? (options?.run || await getRun(activeRunId).catch(() => null))
     : null;
-  const sessionRunning = run?.state === 'running' || hasPendingApprovedActionPause(run);
+  const sessionRunning = isActiveSessionRun(run);
   let rawEvents = [];
   let rawPage = null;
   let rawBeforeSeq = beforeSeq;

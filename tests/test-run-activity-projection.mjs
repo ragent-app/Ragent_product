@@ -233,4 +233,18 @@ assert.equal(respondingActivity.kind, 'responding');
 assert.equal(respondingActivity.outputBoundarySeq, 4);
 assert.equal(respondingActivity.inlineEligible, true, 'an active run keeps the live activity row visible while responding');
 
+const acceptedActivity = buildRunActivityProjection([], {
+  sessionRunning: true,
+  run: {
+    id: 'run-accepted-1',
+    requestId: 'req-accepted-1',
+    state: 'accepted',
+    createdAt: '2026-11-27T06:00:00.000Z',
+  },
+});
+assert.equal(acceptedActivity.state, 'starting');
+assert.equal(acceptedActivity.kind, 'starting');
+assert.equal(acceptedActivity.runId, 'run-accepted-1');
+assert.equal(acceptedActivity.requestId, 'req-accepted-1');
+
 console.log('test-run-activity-projection: ok');

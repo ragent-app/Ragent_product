@@ -199,6 +199,33 @@ class RunActionFormatterTest {
         assertEquals(null, completedFormatted?.presentationVerb)
     }
 
+    @Test
+    fun powershellPreambleStatementsAreStrippedBeforeParsingCommand() {
+        val withPreamble = TimelineItem.Operation(
+            id = "ps-preamble",
+            seq = 1,
+            kind = TimelineOperationKind.Command,
+            title = "Command",
+            detail = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \$ErrorActionPreference = 'Stop'; python -u script.py",
+            status = TimelineOperationStatus.InProgress,
+        )
+        val parsed = RunActionFormatter.forOperation(withPreamble)
+        assertEquals("execute", parsed.presentationVerb)
+        assertEquals("python", parsed.presentationSubject)
+
+        val wrappedPreamble = withPreamble.copy(
+            id = "ps-wrapped",
+            detail = "powershell -NoProfile -Command \"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; python script.py\"",
+        )
+        assertEquals("python", RunActionFormatter.forOperation(wrappedPreamble).presentationSubject)
+
+        val preambleOnly = withPreamble.copy(
+            id = "ps-only",
+            detail = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \$ErrorActionPreference = 'Stop'",
+        )
+        assertEquals("command", RunActionFormatter.forOperation(preambleOnly).presentationSubject)
+    }
+
     private fun format(command: String): RunActionUiState? = RunActionFormatter.forRun(
         status = RunActionFormatter.RunActionStatus.Working,
         phase = null,

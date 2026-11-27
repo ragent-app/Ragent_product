@@ -424,6 +424,19 @@ export function buildRunActivityProjection(displayEvents = [], options = {}) {
       ...activityCapabilities(run),
     }, latest);
   }
+  if (['preparing', 'accepted', 'starting'].includes(trimString(run?.state))) {
+    return present({
+      state: 'starting',
+      kind: 'starting',
+      label: 'Starting',
+      detail: '',
+      operationId: null,
+      since: parseTimestamp(run?.startedAt) || parseTimestamp(run?.createdAt) || parseTimestamp(latest?.timestamp),
+      elapsedMs: 0,
+      actionRequired: false,
+      ...activityCapabilities(run),
+    }, latest);
+  }
   return present({
     state: 'working',
     kind: 'thinking',

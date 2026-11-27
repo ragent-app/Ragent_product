@@ -34,8 +34,8 @@ fun Modifier.agentoReadingEdges(
 ): Modifier = composed {
     val density = LocalDensity.current
     val revision = LocalAgentoBackdropRevision.current
-    val bandPx = with(density) { 24.dp.toPx() }
-    val fadePx = with(density) { 8.dp.toPx() }
+    val bandPx = with(density) { 28.dp.toPx() }
+    val fadePx = with(density) { 16.dp.toPx() }
     val radii = with(density) { listOf(4.dp.toPx(), 12.dp.toPx()) }
     val effects = remember(density) {
         radii.map { radius ->

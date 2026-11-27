@@ -2,6 +2,7 @@ package com.andysagent.ragent.feature.workbench
 
 import com.andysagent.ragent.core.agentui.AgentRunStatus
 import com.andysagent.ragent.core.domain.RuntimeSelection
+import com.andysagent.ragent.core.timeline.AttachmentItem
 import com.andysagent.ragent.core.timeline.FileChangeItem
 import com.andysagent.ragent.core.timeline.PlanStepItem
 import com.andysagent.ragent.core.timeline.TimelineItem
@@ -755,5 +756,49 @@ class TurnTimelineWorkspaceTest {
         )
         assertEquals(listOf(thought), processWithUser)
         assertEquals(listOf(userMsg, completedFinal), outsideWithUser)
+    }
+
+    @Test fun `user-only turn is never settled by idle cursor and duplicate completed replies collapse`() {
+        val userOnlyTurn = listOf(
+            TimelineItem.Message("u-only", 15, TimelineRole.User, "Just sent", true, requestId = "req-new"),
+        )
+        assertFalse(latestTurnSettledByIdleCursor(userOnlyTurn, idleSeq = 20L, allowEmpty = false))
+
+        val attachment = AttachmentItem(
+            assetId = "asset-1",
+            filename = "report.pdf",
+            originalName = "report.pdf",
+            mimeType = "application/pdf",
+            sizeBytes = 1024L,
+        )
+        val deliveryMirror = TimelineItem.Message(
+            id = "delivery-1",
+            seq = 17,
+            role = TimelineRole.Agent,
+            text = "",
+            completed = true,
+            attachments = listOf(attachment),
+        )
+        val copy1 = TimelineItem.Message(
+            id = "msg-1",
+            seq = 16,
+            role = TimelineRole.Agent,
+            text = "All finished.",
+            completed = true,
+            lastEventSeq = 16L,
+        )
+        val copy2 = TimelineItem.Message(
+            id = "msg-2",
+            seq = 18,
+            role = TimelineRole.Agent,
+            text = "All finished.",
+            completed = true,
+            lastEventSeq = 18L,
+        )
+        val deduped = deduplicateAssistantAttachmentMirrors(listOf(copy1, deliveryMirror, copy2))
+        val textReplies = deduped.filterIsInstance<TimelineItem.Message>().filter { it.text.isNotBlank() }
+        assertEquals(1, textReplies.size)
+        assertEquals("msg-2", textReplies.single().id)
+        assertEquals(listOf(deliveryMirror.id, "msg-2"), deduped.map { it.id })
     }
 }

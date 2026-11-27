@@ -326,8 +326,37 @@ object RunActionFormatter {
         return keys.firstNotNullOfOrNull { key -> (input[key] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
     }
 
+    private fun stripShellPreambleStatements(command: String): String {
+        val parts = mutableListOf<String>()
+        val current = StringBuilder()
+        var inSingle = false
+        var inDouble = false
+        var escaped = false
+        for (ch in command) {
+            when {
+                escaped -> { current.append(ch); escaped = false }
+                ch == '\\' && !inSingle -> { current.append(ch); escaped = true }
+                ch == '\'' && !inDouble -> { inSingle = !inSingle; current.append(ch) }
+                ch == '"' && !inSingle -> { inDouble = !inDouble; current.append(ch) }
+                (ch == ';' || ch == '\n') && !inSingle && !inDouble -> {
+                    val stmt = current.toString().trim()
+                    if (stmt.isNotEmpty()) parts.add(stmt)
+                    current.clear()
+                }
+                else -> current.append(ch)
+            }
+        }
+        val tail = current.toString().trim()
+        if (tail.isNotEmpty()) parts.add(tail)
+        val preamblePattern = Regex(
+            "^(?:\\[console\\]::outputencoding\\s*=|\\$[a-z0-9_:]+\\s*=|chcp\\b|set-strictmode\\b|set\\s+[+-]|export\\s+[a-z_][a-z0-9_]*=)",
+            RegexOption.IGNORE_CASE,
+        )
+        return parts.dropWhile { preamblePattern.containsMatchIn(it.trimStart()) }.joinToString("; ")
+    }
+
     private fun parseCommand(raw: String): Pair<String, String> {
-        val command = raw.trim().compact()
+        val command = stripShellPreambleStatements(raw.trim()).compact()
         val tokens = Regex("(?:\\\"([^\\\"]+)\\\"|'([^']+)'|([^\\s]+))").findAll(command)
             .map { it.groups[1]?.value ?: it.groups[2]?.value ?: it.groups[3]?.value.orEmpty() }
             .toList()

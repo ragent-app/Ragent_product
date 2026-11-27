@@ -1098,6 +1098,7 @@ fun DocumentAttachmentThumbnailCard(
     onRemove: (() -> Unit)?,
     backdropLayer: GraphicsLayer? = null,
     backdropOrigin: IntOffset = IntOffset.Zero,
+    maxWidth: Dp = 220.dp,
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalRagentColors.current
@@ -1128,7 +1129,7 @@ fun DocumentAttachmentThumbnailCard(
 
     Box(
         modifier = modifier
-            .widthIn(min = 140.dp, max = 220.dp)
+            .widthIn(min = 140.dp, max = maxWidth)
             .height(54.dp)
             .ragentComposerShadow(shape = cardShape)
             .onGloballyPositioned { coords ->
@@ -1187,13 +1188,40 @@ fun DocumentAttachmentThumbnailCard(
 
                 // Name and size
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = attachment.name,
-                        style = RagentTextStyles.caption.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = colors.primaryContent,
-                    )
+                    val dotIndex = attachment.name.lastIndexOf('.')
+                    val hasPreservedExt = dotIndex > 0 && dotIndex < attachment.name.length - 1 &&
+                        (attachment.name.length - dotIndex) <= 8
+                    val titleStyle = RagentTextStyles.caption.copy(fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                    if (hasPreservedExt) {
+                        val stem = attachment.name.substring(0, dotIndex)
+                        val ext = attachment.name.substring(dotIndex)
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = stem,
+                                style = titleStyle,
+                                modifier = Modifier.weight(1f, fill = false),
+                                maxLines = 1,
+                                softWrap = false,
+                                overflow = TextOverflow.Ellipsis,
+                                color = colors.primaryContent,
+                            )
+                            Text(
+                                text = ext,
+                                style = titleStyle,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = colors.primaryContent,
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = attachment.name,
+                            style = titleStyle,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = colors.primaryContent,
+                        )
+                    }
                     val subText = buildString {
                         if (extension.isNotBlank()) {
                             append(extension)
@@ -1244,6 +1272,7 @@ fun AttachmentThumbnailCard(
     onRemove: (() -> Unit)?,
     backdropLayer: GraphicsLayer? = null,
     backdropOrigin: IntOffset = IntOffset.Zero,
+    maxWidth: Dp = 220.dp,
     modifier: Modifier = Modifier,
 ) {
     if (isImageAttachment(attachment)) {
@@ -1260,6 +1289,7 @@ fun AttachmentThumbnailCard(
             onRemove = onRemove,
             backdropLayer = backdropLayer,
             backdropOrigin = backdropOrigin,
+            maxWidth = maxWidth,
             modifier = modifier,
         )
     }

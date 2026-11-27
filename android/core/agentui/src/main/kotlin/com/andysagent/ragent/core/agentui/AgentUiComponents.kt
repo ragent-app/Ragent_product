@@ -121,14 +121,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.StrokeCap
@@ -2185,7 +2190,29 @@ fun AgentComposer(
                             } else Modifier)
                             .semantics {
                                 if (!enabled) this.contentDescription = approvalPendingDescription
-                            },
+                            }
+                            .then(
+                                if (compactEditor && value.isNotEmpty() && !isExpanded) {
+                                    Modifier
+                                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                                        .drawWithContent {
+                                            drawContent()
+                                            val fadePx = 16.dp.toPx().coerceAtMost(size.width * 0.25f)
+                                            if (fadePx > 1f) {
+                                                drawRect(
+                                                    brush = Brush.horizontalGradient(
+                                                        colorStops = arrayOf(
+                                                            0f to Color.Black,
+                                                            ((size.width - fadePx) / size.width).coerceIn(0f, 1f) to Color.Black,
+                                                            1f to Color.Transparent,
+                                                        ),
+                                                    ),
+                                                    blendMode = BlendMode.DstIn,
+                                                )
+                                            }
+                                        }
+                                } else Modifier,
+                            ),
                         contentAlignment = Alignment.TopStart,
                     ) {
                         MarkdownComposerEditor(
@@ -2360,9 +2387,9 @@ fun AgentComposer(
                                     AgentoSpeedometerIcon(
                                         effort = effort,
                                         modifier = Modifier.size(24.dp),
-                                        primaryColor = LocalRagentColors.current.accentPrimary,
+                                        primaryColor = if (enabled) colors.accentPrimary else colors.disabledContent,
                                         trackColor = if (isDark) Color(0x408E8E93) else Color(0x308E8E93),
-                                        needleColor = if (isDark) Color.White else Color(0xFF1C1C1E),
+                                        needleColor = if (!enabled) colors.disabledContent else if (isDark) Color.White else Color(0xFF1C1C1E),
                                     )
                                 }
                                     EffortSliderPopover(
@@ -3918,6 +3945,9 @@ fun ScrollToBottomFab(
         modifier = modifier,
     ) {
         val colors = LocalRagentColors.current
+        val isDark = colors.canvas.red < 0.5f
+        val fabSurface = colors.canvas.copy(alpha = if (isDark) 0.92f else 0.96f)
+        val fabBorder = colors.primaryContent.copy(alpha = if (isDark) 0.18f else 0.14f)
         // Remove the input modifier as soon as exit begins. The fading pixels
         // must not retain a Surface's hit target over the transcript.
         val interaction = if (visible) Modifier
@@ -3929,7 +3959,8 @@ fun ScrollToBottomFab(
             Box(
                 modifier = Modifier
                     .agentoAmbientShadow(elevation = 8.dp, shape = AgentoShapes.PillShape)
-                    .background(colors.floatingControl, AgentoShapes.PillShape)
+                    .background(fabSurface, AgentoShapes.PillShape)
+                    .border(0.5.dp, fabBorder, AgentoShapes.PillShape)
                     .then(interaction)
                     .height(38.dp),
                 contentAlignment = Alignment.Center,
@@ -3957,7 +3988,8 @@ fun ScrollToBottomFab(
                 modifier = Modifier
                     .size(40.dp)
                     .agentoAmbientShadow(elevation = 8.dp, shape = CircleShape)
-                    .background(colors.floatingControl, CircleShape)
+                    .background(fabSurface, CircleShape)
+                    .border(0.5.dp, fabBorder, CircleShape)
                     .then(interaction),
                 contentAlignment = Alignment.Center,
             ) {
@@ -3966,7 +3998,7 @@ fun ScrollToBottomFab(
                         glyph = AgentoWebGlyph.ChevronDown,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp).testTag("scroll-to-bottom-glyph"),
-                        tint = colors.floatingControlContent,
+                        tint = colors.primaryContent,
                     )
                 }
             }
@@ -4158,9 +4190,11 @@ fun ConversationCapsuleLabel(
     } else {
         stringResource(R.string.agentui_conversation_project_title, displayTitle, subtitleText)
     }
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val capsuleMaxWidth = (screenWidthDp.dp - 176.dp).coerceIn(185.dp, 236.dp)
             Column(
                 modifier = Modifier
-                    .widthIn(min = 100.dp, max = 185.dp)
+                    .widthIn(min = 100.dp, max = capsuleMaxWidth)
                     .heightIn(min = 48.dp)
                     .semantics { contentDescription = conversationDescription }
                     .padding(

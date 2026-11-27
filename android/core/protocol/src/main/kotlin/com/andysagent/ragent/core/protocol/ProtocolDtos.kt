@@ -911,6 +911,10 @@ data class SessionEventDto(
     val asyncQuestionsState: String? = null,
     val asyncQuestionReplies: List<AsyncQuestionReplyDto> = emptyList(),
     val answeredQuestionItemIds: List<String> = emptyList(),
+    val parentRequestId: String? = null,
+    val parentRunId: String? = null,
+    val editResend: Boolean? = null,
+    val prompt: String? = null,
 )
 
 @Serializable
@@ -1397,6 +1401,10 @@ fun SessionEventDto.sessionEventFingerprint(): String = listOf(
     asyncQuestions,
     asyncQuestionsState,
     asyncQuestionReplies,
+    parentRequestId,
+    parentRunId,
+    editResend,
+    prompt,
     answeredQuestionItemIds,
     questions,
 ).joinToString("|")
