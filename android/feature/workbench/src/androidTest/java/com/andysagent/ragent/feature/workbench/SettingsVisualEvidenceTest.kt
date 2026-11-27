@@ -95,7 +95,61 @@ class SettingsVisualEvidenceTest {
             files = listOf(WebFile("example.md", false, "2 KB")),
             openSessionId = "session",
             triggers = listOf(WebTrigger("trigger", "Example scheduled task", "Example message", "2026-10-29 12:30", "pending", true, sessionId = "session")),
-            usage = Json.parseToJsonElement("""{"window":{"days":7},"totals":{"runCount":2,"totalTokens":1234},"byDay":[{"day":"2026-10-29","runCount":2,"totalTokens":1234}]}""").jsonObject,
+            usage = Json.parseToJsonElement(
+                """
+                {
+                  "window": {"days": 180},
+                  "totals": {
+                    "runCount": 148,
+                    "foregroundRuns": 112,
+                    "inputTokens": 25320000000,
+                    "cachedInputTokens": 19240000000,
+                    "cachedInputShare": 0.76,
+                    "outputTokens": 253490000,
+                    "totalTokens": 25573490000
+                  },
+                  "heatmap": {
+                    "days": 10,
+                    "startDay": "2026-11-17",
+                    "endDay": "2026-11-26",
+                    "daily": [
+                      {"day": "2026-11-17", "totalTokens": 120000000, "runCount": 5},
+                      {"day": "2026-11-18", "totalTokens": 450000000, "runCount": 12},
+                      {"day": "2026-11-19", "totalTokens": 0, "runCount": 0},
+                      {"day": "2026-11-20", "totalTokens": 920000000, "runCount": 20},
+                      {"day": "2026-11-21", "totalTokens": 1400000000, "runCount": 25},
+                      {"day": "2026-11-22", "totalTokens": 310000000, "runCount": 8},
+                      {"day": "2026-11-23", "totalTokens": 780000000, "runCount": 16},
+                      {"day": "2026-11-24", "totalTokens": 2200000000, "runCount": 32},
+                      {"day": "2026-11-25", "totalTokens": 1750000000, "runCount": 22},
+                      {"day": "2026-11-26", "totalTokens": 640000000, "runCount": 8}
+                    ]
+                  },
+                  "hourly": {
+                    "date": "2026-11-26",
+                    "buckets": [
+                      {"hour": 0, "totalTokens": 140000000, "runCount": 3},
+                      {"hour": 1, "totalTokens": 95000000, "runCount": 2},
+                      {"hour": 2, "totalTokens": 60000000, "runCount": 1},
+                      {"hour": 11, "totalTokens": 85000000, "runCount": 2}
+                    ]
+                  },
+                  "byProject": [
+                    {"key": "proj_a", "projectId": "proj_a", "label": "Ragent", "totalTokens": 14910000000, "runCount": 70, "cachedInputShare": 0.78, "isOther": false},
+                    {"key": "proj_b", "projectId": "proj_b", "label": "Workspace", "totalTokens": 5430000000, "runCount": 42, "cachedInputShare": 0.72, "isOther": false},
+                    {"key": "__other__", "projectId": "", "label": "Other", "totalTokens": 1470000000, "runCount": 36, "cachedInputShare": 0.65, "isOther": true}
+                  ],
+                  "byTool": [
+                    {"key": "codex", "label": "codex", "totalTokens": 18150000000, "runCount": 90, "cachedInputShare": 0.79},
+                    {"key": "claude", "label": "claude", "totalTokens": 7420000000, "runCount": 58, "cachedInputShare": 0.68}
+                  ],
+                  "byModel": [
+                    {"key": "gpt-5.4", "label": "gpt-5.4", "totalTokens": 18150000000, "runCount": 90, "cachedInputShare": 0.79},
+                    {"key": "claude-sonnet", "label": "claude-sonnet", "totalTokens": 7420000000, "runCount": 58, "cachedInputShare": 0.68}
+                  ]
+                }
+                """.trimIndent(),
+            ).jsonObject,
         )
         rule.setContent {
             CompositionLocalProvider(LocalContext provides context) {

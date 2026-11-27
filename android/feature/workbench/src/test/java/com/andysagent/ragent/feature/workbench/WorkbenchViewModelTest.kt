@@ -362,6 +362,16 @@ class WorkbenchViewModelTest {
             shell.onEvent(AppShellEvent.OpenSettingsPage(SettingsPage.Theme))
             shell.onEvent(AppShellEvent.CloseSettingsPage)
             assertEquals(SettingsPage.Overview, shell.state.value.settingsPage)
+
+            shell.onEvent(AppShellEvent.SelectDestination(com.andysagent.ragent.core.navigation.AgentoDestination.Home))
+            shell.onEvent(AppShellEvent.OpenSettingsPage(SettingsPage.Usage, returnToOrigin = true))
+            assertEquals(com.andysagent.ragent.core.navigation.AgentoDestination.Settings, shell.state.value.destination)
+            assertEquals(SettingsPage.Usage, shell.state.value.settingsPage)
+            assertEquals(com.andysagent.ragent.core.navigation.AgentoDestination.Home, shell.state.value.settingsReturnDestination)
+            shell.onEvent(AppShellEvent.CloseSettingsPage)
+            assertEquals(com.andysagent.ragent.core.navigation.AgentoDestination.Home, shell.state.value.destination)
+            assertEquals(SettingsPage.Overview, shell.state.value.settingsPage)
+            assertEquals(null, shell.state.value.settingsReturnDestination)
         } finally { Dispatchers.resetMain() }
     }
 

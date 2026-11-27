@@ -212,7 +212,7 @@ async function main() {
     assert.equal(run.state, 'completed', 'fake claude run should complete');
 
     const summary = await waitFor(async () => {
-      const res = await request(port, 'GET', '/api/usage/summary?days=1&top=5');
+      const res = await request(port, 'GET', '/api/usage/summary?days=1&top=5&heatmapDays=180&tzOffsetMinutes=480');
       if (res.status !== 200) return false;
       const byOperation = Array.isArray(res.json?.byOperation) ? res.json.byOperation : [];
       if (!byOperation.find((entry) => entry.key === 'user_turn')) return false;
@@ -226,6 +226,10 @@ async function main() {
     assert.equal(userTurnBucket?.totalTokens, 1280, 'user_turn bucket should expose input + output totals');
     assert.equal(userTurnBucket?.costUsd, 0.012345, 'user_turn bucket should preserve provider cost');
     assert.equal(summary.byTool[0].key, 'fake-claude', 'tool breakdown should include the session tool');
+    assert.equal(summary.heatmap?.days, 180, 'HTTP summary should expose requested heatmap days');
+    assert.equal(summary.heatmap?.daily?.length, 180, 'HTTP summary should return dense 180-day heatmap');
+    assert.equal(summary.hourly?.buckets?.length, 24, 'HTTP summary should return 24 hourly buckets');
+    assert.ok(Array.isArray(summary.byProject) && summary.byProject.length >= 1, 'HTTP summary should return byProject breakdown');
     assert.ok(summary.byOperation.find((entry) => entry.key === 'user_turn'), 'normal chat runs should be tagged as user turns');
     assert.equal(summary.byOperationGroup.find((entry) => entry.key === 'foreground')?.totalTokens, 1280, 'normal chat runs should count as foreground usage');
     assert.equal(summary.byOperationCategory.find((entry) => entry.key === 'user_chat')?.totalTokens, 1280, 'normal chat runs should be categorized as user chat');

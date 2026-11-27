@@ -203,7 +203,13 @@ fun WebParitySurface(
                             )
                             WebParityPage.Files -> FilesPage(state, onEvent)
                             WebParityPage.Triggers -> TriggersPage(state, onEvent)
-                            WebParityPage.Usage -> UsagePage(state.usage)
+                            WebParityPage.Usage -> UsageStatsPage(
+                                usage = state.usage,
+                                selectedDays = state.usageDays,
+                                selectedDate = state.usageSelectedDate,
+                                onSelectDays = { onEvent(WebParityEvent.SelectUsageDays(it)) },
+                                onSelectDate = { onEvent(WebParityEvent.SelectUsageDate(it)) },
+                            )
                         }
                     }
                 },
@@ -1088,7 +1094,7 @@ private fun WebParityPage.titleRes(): Int = when (this) {
     WebParityPage.Devices -> R.string.settings_manage_devices
     WebParityPage.Files -> R.string.settings_workspace_files
     WebParityPage.Triggers -> R.string.settings_scheduled_work
-    WebParityPage.Usage -> R.string.settings_usage
+    WebParityPage.Usage -> R.string.usage_stats_title
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1686,62 +1692,6 @@ private fun TriggersPage(state: WebParityUiState, onEvent: (WebParityEvent) -> U
 private fun TextPage(text: String) {
     LazyColumn(contentPadding = navigationContentPadding()) { item { Text(text, style = MaterialTheme.typography.bodyMedium) } }
 }
-
-@Composable
-private fun UsagePage(usage: JsonObject?) {
-    val totals = usage?.get("totals")?.jsonObject
-    val sections = listOf(
-        stringResource(R.string.sp_by_day) to usage?.get("byDay")?.jsonArray,
-        stringResource(R.string.sp_by_session) to usage?.get("bySession")?.jsonArray,
-        stringResource(R.string.sp_by_model) to usage?.get("byModel")?.jsonArray,
-    )
-    LazyColumn(contentPadding = navigationContentPadding(), verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
-        if (usage == null) {
-            item { AgentoEmptyState(stringResource(R.string.sp_usage_unavailable), stringResource(R.string.sp_usage_unavailable_detail)) }
-            return@LazyColumn
-        }
-        item {
-          SettingsContentCard(Modifier.fillMaxWidth()) {
-            Column(Modifier.fillMaxWidth().padding(RagentSpacing.Standard), verticalArrangement = Arrangement.spacedBy(RagentSpacing.Compact)) {
-            Text(stringResource(R.string.sp_last_days, usage["window"]?.jsonObject?.get("days")?.jsonPrimitive?.contentOrNull ?: "7"), style = MaterialTheme.typography.titleMedium)
-            Text(
-                listOfNotNull(
-                    totals?.get("runCount")?.let { stringResource(R.string.sp_runs, usageDisplay(it)) },
-                    totals?.get("inputTokens")?.let { stringResource(R.string.sp_input_tokens, usageDisplay(it)) },
-                    totals?.get("outputTokens")?.let { stringResource(R.string.sp_output_tokens, usageDisplay(it)) },
-                    totals?.get("totalTokens")?.let { stringResource(R.string.sp_total_tokens, usageDisplay(it)) },
-                    totals?.get("costUsd")?.let { stringResource(R.string.sp_cost, usageDisplay(it)) },
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            }
-          }
-        }
-        sections.forEach { (title, values) ->
-            if (!values.isNullOrEmpty()) {
-                item { Text(title, style = MaterialTheme.typography.titleSmall) }
-                items(values, key = { value -> "$title:${value.hashCode()}" }) { value ->
-                    val row = value.jsonObject
-                    val unknownLabel = stringResource(R.string.sp_unknown)
-                    val label = row["label"]?.jsonPrimitive?.contentOrNull
-                        ?: row["sessionName"]?.jsonPrimitive?.contentOrNull
-                        ?: row["day"]?.jsonPrimitive?.contentOrNull
-                        ?: unknownLabel
-                    SettingsContentCard(Modifier.fillMaxWidth()) {
-                        Text(
-                            stringResource(R.string.sp_usage_row, label, row["runCount"]?.let(::usageDisplay) ?: "0", row["totalTokens"]?.let(::usageDisplay) ?: "0"),
-                            modifier = Modifier.padding(RagentSpacing.Standard),
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun usageDisplay(value: kotlinx.serialization.json.JsonElement): String =
-    value.jsonPrimitive.contentOrNull ?: value.toString()
 
 // Settings detail pages cover the primary dock, so content only needs to
 // clear the system navigation bar plus a breathing gap — not the dock.

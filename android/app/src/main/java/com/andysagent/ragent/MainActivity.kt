@@ -1893,7 +1893,13 @@ class MainActivity : ComponentActivity() {
                             WorkbenchEvent.OpenComputerSetup -> { addComputerFromPairing = false; addComputerChoiceOpen = true }
                             is WorkbenchEvent.SelectDestination -> shell.onEvent(AppShellEvent.SelectDestination(event.destination, keepChat = tabletDualPane))
                             is WorkbenchEvent.OpenSettingsPage -> {
-                                shell.onEvent(AppShellEvent.OpenSettingsPage(event.page, keepChat = tabletDualPane))
+                                shell.onEvent(
+                                    AppShellEvent.OpenSettingsPage(
+                                        page = event.page,
+                                        keepChat = tabletDualPane,
+                                        returnToOrigin = event.returnToOrigin,
+                                    ),
+                                )
                                 if (event.page == SettingsPage.ComputerManagement && accounts.state.value.hasVerifiedAccountSession) {
                                     runtimeScope.launch { runCatching { refreshAccountDirectory(app) } }
                                 }

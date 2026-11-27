@@ -203,4 +203,25 @@
     <string name="sp_claude_console_hint">在浏览器中登录 Claude Console，创建 API 密钥，然后粘贴到这里。</string>
     <string name="sp_claude_console_open">打开 Claude Console</string>
     <string name="sp_claude_console_open_failed">无法打开浏览器，请重试。</string>
+    <string name="usage_stats_title">用量统计</string>
+    <string name="usage_heatmap">用量热力图</string>
+    <string name="usage_less">少</string>
+    <string name="usage_more">多</string>
+    <string name="usage_month_label">%1$d月</string>
+    <string name="usage_hourly_title">小时分布 · %1$s</string>
+    <string name="usage_window_days">%1$d天</string>
+    <string name="usage_kpi_total">总用量</string>
+    <string name="usage_kpi_gross_input">总输入</string>
+    <string name="usage_kpi_new_input">新增输入</string>
+    <string name="usage_kpi_cache_hit">缓存命中</string>
+    <string name="usage_kpi_cache_rate">缓存命中率</string>
+    <string name="usage_kpi_output">输出</string>
+    <string name="usage_kpi_turns">对话轮次</string>
+    <string name="usage_kpi_runs">总运行数</string>
+    <string name="usage_by_project">按项目分布</string>
+    <string name="usage_project_total">项目总计</string>
+    <string name="usage_other">其它</string>
+    <string name="usage_by_tool">按工具分布</string>
+    <string name="usage_by_model">按模型分布</string>
+    <string name="usage_cache_badge">缓存 %1$s</string>
 </resources>

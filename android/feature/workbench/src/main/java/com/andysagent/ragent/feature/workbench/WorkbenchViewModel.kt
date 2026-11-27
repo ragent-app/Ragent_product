@@ -261,7 +261,7 @@ sealed interface WorkbenchEvent {
     data object RefreshSessionDeliverables : WorkbenchEvent
     data object OpenComputerSetup : WorkbenchEvent
     data class SelectDestination(val destination: AgentoDestination) : WorkbenchEvent
-    data class OpenSettingsPage(val page: SettingsPage) : WorkbenchEvent
+    data class OpenSettingsPage(val page: SettingsPage, val returnToOrigin: Boolean = false) : WorkbenchEvent
     data object CloseSettingsPage : WorkbenchEvent
     data object OpenAppApiSettings : WorkbenchEvent
     data object OpenPushDiagnostics : WorkbenchEvent
@@ -390,6 +390,7 @@ data class AppShellUiState(
     val destination: AgentoDestination = AgentoDestination.Home,
     val settingsPage: SettingsPage = SettingsPage.Overview,
     val settingsBackStack: List<SettingsPage> = emptyList(),
+    val settingsReturnDestination: AgentoDestination? = null,
     val chatOpen: Boolean = false,
     val agentOpen: Boolean = false,
     val sessionSearchQuery: String = "",
@@ -403,7 +404,11 @@ data class AppShellUiState(
 
 sealed interface AppShellEvent {
     data class SelectDestination(val destination: AgentoDestination, val keepChat: Boolean = false) : AppShellEvent
-    data class OpenSettingsPage(val page: SettingsPage, val keepChat: Boolean = false) : AppShellEvent
+    data class OpenSettingsPage(
+        val page: SettingsPage,
+        val keepChat: Boolean = false,
+        val returnToOrigin: Boolean = false,
+    ) : AppShellEvent
     data object CloseSettingsPage : AppShellEvent
     data class SelectTheme(val theme: AppTheme) : AppShellEvent
     data class SelectLanguage(val language: AppLanguage) : AppShellEvent
@@ -453,6 +458,7 @@ class AppShellViewModel(private val repository: SessionRepository) : ViewModel()
                     destination = event.destination,
                     settingsPage = SettingsPage.Overview,
                     settingsBackStack = emptyList(),
+                    settingsReturnDestination = null,
                     chatOpen = chatOpen && event.keepChat,
                     agentOpen = false,
                     projectSessionsOpen = false,
@@ -461,12 +467,18 @@ class AppShellViewModel(private val repository: SessionRepository) : ViewModel()
                 )
             }
             is AppShellEvent.OpenSettingsPage -> updateState {
+                val nextReturnDestination = if (event.returnToOrigin) {
+                    settingsReturnDestination ?: destination.takeUnless { it == AgentoDestination.Settings }
+                } else {
+                    null
+                }
                 copy(
                     destination = AgentoDestination.Settings,
                     settingsPage = event.page,
                     settingsBackStack = if (event.page == settingsPage) settingsBackStack
                         else if (event.page == SettingsPage.Overview) emptyList()
                         else settingsBackStack + settingsPage,
+                    settingsReturnDestination = nextReturnDestination,
                     chatOpen = chatOpen && event.keepChat,
                     agentOpen = false,
                     projectSessionsOpen = false,
@@ -475,8 +487,25 @@ class AppShellViewModel(private val repository: SessionRepository) : ViewModel()
                 )
             }
             AppShellEvent.CloseSettingsPage -> updateState {
-                copy(settingsPage = settingsBackStack.lastOrNull() ?: SettingsPage.Overview,
-                    settingsBackStack = settingsBackStack.dropLast(1))
+                val previousPage = settingsBackStack.lastOrNull()
+                if (previousPage != null && previousPage != SettingsPage.Overview) {
+                    copy(
+                        settingsPage = previousPage,
+                        settingsBackStack = settingsBackStack.dropLast(1),
+                    )
+                } else if (settingsReturnDestination != null) {
+                    copy(
+                        destination = settingsReturnDestination,
+                        settingsPage = SettingsPage.Overview,
+                        settingsBackStack = emptyList(),
+                        settingsReturnDestination = null,
+                    )
+                } else {
+                    copy(
+                        settingsPage = SettingsPage.Overview,
+                        settingsBackStack = emptyList(),
+                    )
+                }
             }
             is AppShellEvent.SelectTheme -> updateState { copy(appTheme = event.theme) }
             is AppShellEvent.SelectLanguage -> updateState { copy(appLanguage = event.language) }

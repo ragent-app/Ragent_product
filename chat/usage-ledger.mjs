@@ -1,6 +1,6 @@
 import { createReadStream, createWriteStream } from 'fs';
-import { readdir } from 'fs/promises';
-import { join } from 'path';
+import { readdir, stat } from 'fs/promises';
+import { basename, join } from 'path';
 import readline from 'readline';
 
 import { USAGE_LEDGER_DIR } from '../lib/config.mjs';
@@ -8,13 +8,16 @@ import { estimateUsageCost } from '../lib/model-pricing.mjs';
 import { ensureDir } from './fs-utils.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
 const DEFAULT_DAYS = 7;
 const DEFAULT_TOP = 10;
+const MAX_HISTORICAL_CACHE_FILES = 240;
 
 let currentDateKey = '';
 let currentStream = null;
 let loggingDisabled = false;
 let detachedUsageSequence = 0;
+const historicalLedgerFileCache = new Map();
 
 function trimString(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -29,6 +32,58 @@ function formatDateKey(date = new Date()) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function normalizeTzOffsetMinutes(value) {
+  const fallback = -new Date().getTimezoneOffset();
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = typeof value === 'number' ? value : Number.parseInt(String(value).trim(), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  const rounded = Math.trunc(parsed);
+  if (rounded < -840 || rounded > 840) return fallback;
+  return rounded;
+}
+
+function formatDayKeyAtOffset(timestampMs, tzOffsetMinutes = -new Date().getTimezoneOffset()) {
+  const shifted = new Date(timestampMs + tzOffsetMinutes * MINUTE_MS);
+  const year = shifted.getUTCFullYear();
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getHourAtOffset(timestampMs, tzOffsetMinutes = -new Date().getTimezoneOffset()) {
+  const shifted = new Date(timestampMs + tzOffsetMinutes * MINUTE_MS);
+  return shifted.getUTCHours();
+}
+
+function shiftDayKey(dayKey, deltaDays) {
+  const [y, m, d] = dayKey.split('-').map((n) => Number.parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d + deltaDays));
+  const year = dt.getUTCFullYear();
+  const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(dt.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function dayKeyStartMsAtOffset(dayKey, tzOffsetMinutes = 0) {
+  const [y, m, d] = dayKey.split('-').map((n) => Number.parseInt(n, 10));
+  return Date.UTC(y, m - 1, d) - tzOffsetMinutes * MINUTE_MS;
+}
+
+function normalizeDayKey(value) {
+  const trimmed = trimString(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return '';
+  const [y, m, d] = trimmed.split('-').map((n) => Number.parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (
+    dt.getUTCFullYear() !== y
+    || dt.getUTCMonth() !== m - 1
+    || dt.getUTCDate() !== d
+  ) {
+    return '';
+  }
+  return trimmed;
 }
 
 function pickNonNegativeInt(value) {
@@ -414,6 +469,8 @@ export function buildUsageLedgerRecord({
     sessionId: trimString(session.id),
     sessionName: trimString(session.name),
     ...(trimString(session.group) ? { sessionGroup: trimString(session.group) } : {}),
+    ...(trimString(session.projectId) ? { projectId: trimString(session.projectId) } : {}),
+    ...(trimString(session.projectName) ? { projectName: trimString(session.projectName) } : {}),
     ...(trimString(session.rootSessionId) ? { rootSessionId: trimString(session.rootSessionId) } : {}),
     principalType: principal.principalType,
     principalId: principal.principalId,
@@ -517,6 +574,8 @@ export function buildDetachedUsageLedgerRecord({
     sessionId: trimString(session.id),
     sessionName: trimString(tracking.sessionName || session.name),
     ...(trimString(tracking.sessionGroup || session.group) ? { sessionGroup: trimString(tracking.sessionGroup || session.group) } : {}),
+    ...(trimString(tracking.projectId || session.projectId) ? { projectId: trimString(tracking.projectId || session.projectId) } : {}),
+    ...(trimString(tracking.projectName || session.projectName) ? { projectName: trimString(tracking.projectName || session.projectName) } : {}),
     ...(trimString(tracking.rootSessionId || session.rootSessionId) ? { rootSessionId: trimString(tracking.rootSessionId || session.rootSessionId) } : {}),
     principalType: principal.principalType,
     principalId: principal.principalId,
@@ -616,6 +675,8 @@ function normalizeLedgerRecord(record) {
     sessionId,
     sessionName: trimString(record.sessionName),
     sessionGroup: trimString(record.sessionGroup),
+    projectId: trimString(record.projectId),
+    projectName: trimString(record.projectName),
     rootSessionId: trimString(record.rootSessionId),
     principalType,
     principalId,
@@ -734,6 +795,9 @@ function sortBuckets(map, limit = Infinity) {
       ...bucket,
       costUsd: roundUsd(bucket.costUsd || 0),
       estimatedCostUsd: roundUsd(bucket.estimatedCostUsd || 0),
+      cachedInputShare: bucket.inputTokens > 0
+        ? roundRatio((bucket.cachedInputTokens || 0) / bucket.inputTokens)
+        : null,
     }))
     .sort((left, right) => {
       if ((right.totalTokens || 0) !== (left.totalTokens || 0)) {
@@ -783,8 +847,8 @@ async function listLedgerFiles(startMs, endMs, ledgerDir = USAGE_LEDGER_DIR) {
     return [];
   }
 
-  const minKey = formatDateKey(new Date(startMs));
-  const maxKey = formatDateKey(new Date(endMs));
+  const minKey = formatDateKey(new Date(startMs - DAY_MS));
+  const maxKey = formatDateKey(new Date(endMs + DAY_MS));
   return entries
     .filter((entry) => entry.isFile() && /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(entry.name))
     .map((entry) => entry.name)
@@ -794,6 +858,61 @@ async function listLedgerFiles(startMs, endMs, ledgerDir = USAGE_LEDGER_DIR) {
     })
     .sort((left, right) => left.localeCompare(right))
     .map((name) => join(resolveLedgerDir(ledgerDir), name));
+}
+
+async function readLedgerFileRecords(filePath, todayServerKey) {
+  const fileName = basename(filePath);
+  const fileDayKey = fileName.endsWith('.jsonl') ? fileName.slice(0, -'.jsonl'.length) : '';
+  const isHistorical = !!fileDayKey && fileDayKey < todayServerKey;
+  let fileStat = null;
+  if (isHistorical) {
+    try {
+      fileStat = await stat(filePath);
+      const cached = historicalLedgerFileCache.get(filePath);
+      if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
+        return cached.records;
+      }
+    } catch {
+      fileStat = null;
+    }
+  }
+
+  const parsedRecords = [];
+  const stream = createReadStream(filePath, { encoding: 'utf8' });
+  const input = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const rawLine of input) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      let parsed;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        continue;
+      }
+
+      const record = normalizeLedgerRecord(parsed);
+      if (record) parsedRecords.push(record);
+    }
+  } finally {
+    input.close();
+    stream.destroy();
+  }
+
+  if (isHistorical && fileStat) {
+    if (historicalLedgerFileCache.size >= MAX_HISTORICAL_CACHE_FILES) {
+      const oldestKey = historicalLedgerFileCache.keys().next().value;
+      if (oldestKey) historicalLedgerFileCache.delete(oldestKey);
+    }
+    historicalLedgerFileCache.set(filePath, {
+      mtimeMs: fileStat.mtimeMs,
+      size: fileStat.size,
+      records: parsedRecords,
+    });
+  }
+
+  return parsedRecords;
 }
 
 function matchesRecordFilters(record, filters = {}) {
@@ -846,6 +965,19 @@ export async function queryUsageLedger(options = {}) {
   const top = parsePositiveInteger(options.top, DEFAULT_TOP);
   const { startMs, endMs, days } = normalizeWindow(options);
   const ledgerDir = resolveLedgerDir(options.ledgerDir);
+  const tzOffsetMinutes = normalizeTzOffsetMinutes(options.tzOffsetMinutes);
+  const resolvedHeatmapDays = options.heatmapDays !== undefined && options.heatmapDays !== null && options.heatmapDays !== ''
+    ? Math.min(366, parsePositiveInteger(options.heatmapDays, 180))
+    : Math.min(366, days);
+  const endDay = formatDayKeyAtOffset(endMs, tzOffsetMinutes);
+  const heatmapStartDay = shiftDayKey(endDay, -(resolvedHeatmapDays - 1));
+  const heatmapStartMs = dayKeyStartMsAtOffset(heatmapStartDay, tzOffsetMinutes);
+  const resolvedHourlyDate = normalizeDayKey(options.hourlyDate) || endDay;
+  const hourlyStartMs = dayKeyStartMsAtOffset(resolvedHourlyDate, tzOffsetMinutes);
+  const scanStartMs = Math.min(startMs, heatmapStartMs, hourlyStartMs);
+  const projectLookup = options.projectLookup && typeof options.projectLookup === 'object'
+    ? options.projectLookup
+    : null;
   const filters = {
     principalType: trimString(options.principalType),
     principalId: trimString(options.principalId),
@@ -855,40 +987,58 @@ export async function queryUsageLedger(options = {}) {
     operationId: trimString(options.operationId),
   };
 
-  const files = await listLedgerFiles(startMs, endMs, ledgerDir);
+  const todayServerKey = formatDateKey(new Date());
+  const files = await listLedgerFiles(scanStartMs, endMs, ledgerDir);
   const deduped = new Map();
   let recordsScanned = 0;
 
   for (const filePath of files) {
-    const stream = createReadStream(filePath, { encoding: 'utf8' });
-    const input = readline.createInterface({ input: stream, crlfDelay: Infinity });
-    try {
-      for await (const rawLine of input) {
-        const line = rawLine.trim();
-        if (!line) continue;
-
-        let parsed;
-        try {
-          parsed = JSON.parse(line);
-        } catch {
-          continue;
-        }
-
-        const record = normalizeLedgerRecord(parsed);
-        if (!record) continue;
-        if (record.timestampMs < startMs || record.timestampMs > endMs) continue;
-
-        recordsScanned += 1;
-        deduped.set(record.runId, record);
-      }
-    } finally {
-      input.close();
-      stream.destroy();
+    const fileRecords = await readLedgerFileRecords(filePath, todayServerKey);
+    for (const record of fileRecords) {
+      if (record.timestampMs < scanStartMs || record.timestampMs > endMs) continue;
+      recordsScanned += 1;
+      deduped.set(record.runId, record);
     }
   }
 
-  const records = [...deduped.values()]
-    .filter((record) => matchesRecordFilters(record, filters))
+  const filteredAll = [...deduped.values()]
+    .filter((record) => matchesRecordFilters(record, filters));
+
+  const heatmapDayMap = new Map();
+  const hourlyBuckets = Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    totalTokens: 0,
+    runCount: 0,
+  }));
+
+  for (const record of filteredAll) {
+    const dayKey = formatDayKeyAtOffset(record.timestampMs, tzOffsetMinutes);
+    if (dayKey >= heatmapStartDay && dayKey <= endDay) {
+      let entry = heatmapDayMap.get(dayKey);
+      if (!entry) {
+        entry = { day: dayKey, totalTokens: 0, runCount: 0 };
+        heatmapDayMap.set(dayKey, entry);
+      }
+      entry.totalTokens += record.totalTokens || 0;
+      entry.runCount += 1;
+    }
+    if (dayKey === resolvedHourlyDate) {
+      const hour = getHourAtOffset(record.timestampMs, tzOffsetMinutes);
+      if (hour >= 0 && hour < 24) {
+        hourlyBuckets[hour].totalTokens += record.totalTokens || 0;
+        hourlyBuckets[hour].runCount += 1;
+      }
+    }
+  }
+
+  const heatmapDaily = [];
+  for (let index = 0; index < resolvedHeatmapDays; index += 1) {
+    const dayKey = shiftDayKey(heatmapStartDay, index);
+    heatmapDaily.push(heatmapDayMap.get(dayKey) || { day: dayKey, totalTokens: 0, runCount: 0 });
+  }
+
+  const records = filteredAll
+    .filter((record) => record.timestampMs >= startMs && record.timestampMs <= endMs)
     .sort((left, right) => {
       if ((right.totalTokens || 0) !== (left.totalTokens || 0)) {
         return (right.totalTokens || 0) - (left.totalTokens || 0);
@@ -903,6 +1053,7 @@ export async function queryUsageLedger(options = {}) {
 
   const totals = createTotals();
   const byPrincipal = new Map();
+  const byProject = new Map();
   const byTool = new Map();
   const byModel = new Map();
   const byOperation = new Map();
@@ -936,6 +1087,30 @@ export async function queryUsageLedger(options = {}) {
     );
     appendMetrics(principalBucket, record);
     touchLatest(principalBucket, record);
+
+    const lookupProject = projectLookup?.sessionToProject?.get(record.sessionId);
+    const resolvedProjectId = trimString(record.projectId) || trimString(lookupProject?.projectId);
+    if (resolvedProjectId) {
+      const resolvedProjectName = trimString(projectLookup?.projectNames?.get(resolvedProjectId))
+        || trimString(record.projectName)
+        || trimString(lookupProject?.projectName)
+        || resolvedProjectId;
+      const projectBucket = getOrCreateBucket(byProject, resolvedProjectId, {
+        projectId: resolvedProjectId,
+        label: resolvedProjectName,
+        isOther: false,
+      });
+      appendMetrics(projectBucket, record);
+      touchLatest(projectBucket, record);
+    } else {
+      const otherProjectBucket = getOrCreateBucket(byProject, '__other__', {
+        projectId: '',
+        label: 'Other',
+        isOther: true,
+      });
+      appendMetrics(otherProjectBucket, record);
+      touchLatest(otherProjectBucket, record);
+    }
 
     const toolBucket = getOrCreateBucket(byTool, record.tool || '(unknown)', { label: record.tool || '(unknown)' });
     appendMetrics(toolBucket, record);
@@ -1020,7 +1195,19 @@ export async function queryUsageLedger(options = {}) {
         ? roundAverage(backgroundTokens / totals.totalTokens)
         : null,
     },
+    heatmap: {
+      days: resolvedHeatmapDays,
+      startDay: heatmapStartDay,
+      endDay,
+      daily: heatmapDaily,
+    },
+    hourly: {
+      date: resolvedHourlyDate,
+      tzOffsetMinutes,
+      buckets: hourlyBuckets,
+    },
     byPrincipal: sortBuckets(byPrincipal, top),
+    byProject: sortBuckets(byProject, top),
     byTool: sortBuckets(byTool, top),
     byModel: sortBuckets(byModel, top),
     byOperation: sortBuckets(byOperation, top),

@@ -313,6 +313,84 @@ try {
   assert.equal(visitorOnly.runCount, 1, 'principal filters should constrain the summary');
   assert.equal(visitorOnly.totals.totalTokens, 360);
 
+  // Verify heatmap, hourly, byProject, and bucket cachedInputShare
+  appendBuiltRecord({
+    session: {
+      id: 'sess_proj_direct',
+      name: 'Project Session',
+      tool: 'codex',
+      projectId: 'proj_alpha',
+      projectName: 'Alpha Project',
+    },
+    run: {
+      id: 'run_proj_direct',
+      tool: 'codex',
+      model: 'gpt-5.4',
+      state: 'completed',
+      completedAt: '2026-04-05T17:30:00.000Z', // 2026-04-06 01:30 at UTC+8 (+480)
+    },
+    usageEvent: {
+      inputTokens: 2000,
+      cachedInputTokens: 1200,
+      outputTokens: 400,
+    },
+    manifest: {},
+  });
+  await usageLedger.closeUsageLedger();
+
+  const extendedSummary = await usageLedger.queryUsageLedger({
+    days: 2,
+    heatmapDays: 180,
+    hourlyDate: '2026-04-06',
+    tzOffsetMinutes: 480,
+    endMs: Date.parse('2026-04-06T12:00:00.000Z'),
+    top: 2,
+    projectLookup: {
+      sessionToProject: new Map([
+        ['sess_owner', { projectId: 'proj_legacy', projectName: 'Legacy Project' }],
+      ]),
+      projectNames: new Map([
+        ['proj_alpha', 'Alpha Renamed'],
+        ['proj_legacy', 'Legacy Project'],
+      ]),
+    },
+  });
+
+  assert.equal(extendedSummary.heatmap.days, 180, 'heatmap should preserve requested heatmapDays');
+  assert.equal(extendedSummary.heatmap.daily.length, 180, 'heatmap daily array should be dense and not truncated by top');
+  assert.equal(extendedSummary.heatmap.endDay, '2026-04-06');
+  const april6Heatmap = extendedSummary.heatmap.daily.find((d) => d.day === '2026-04-06');
+  assert.ok(april6Heatmap && april6Heatmap.totalTokens >= 2400, 'timezone-shifted midnight record should fall into 2026-04-06 at UTC+8');
+
+  assert.equal(extendedSummary.hourly.date, '2026-04-06');
+  assert.equal(extendedSummary.hourly.buckets.length, 24, 'hourly should always return 24 buckets');
+  assert.equal(extendedSummary.hourly.buckets[1].totalTokens, 2400, '2026-04-05T17:30Z should land in hour 1 at UTC+8');
+
+  assert.ok(Array.isArray(extendedSummary.byProject), 'byProject should be included');
+  const alphaProject = extendedSummary.byProject.find((b) => b.projectId === 'proj_alpha');
+  assert.equal(alphaProject?.label, 'Alpha Renamed', 'projectLookup projectNames should provide latest project display name');
+  assert.equal(alphaProject?.cachedInputShare, 0.6, 'bucket cachedInputShare should be computed');
+
+  const fullExtended = await usageLedger.queryUsageLedger({
+    days: 3,
+    heatmapDays: 10,
+    tzOffsetMinutes: 0,
+    endMs: Date.parse('2026-04-06T12:00:00.000Z'),
+    top: 20,
+    projectLookup: {
+      sessionToProject: new Map([
+        ['sess_owner', { projectId: 'proj_legacy', projectName: 'Legacy Project' }],
+      ]),
+      projectNames: new Map([
+        ['proj_legacy', 'Legacy Project'],
+      ]),
+    },
+  });
+  const legacyProject = fullExtended.byProject.find((b) => b.projectId === 'proj_legacy');
+  const otherProject = fullExtended.byProject.find((b) => b.isOther === true);
+  assert.equal(legacyProject?.totalTokens, 200, 'historical session without projectId in ledger should resolve via projectLookup');
+  assert.ok(otherProject && otherProject.totalTokens > 0, 'unattributed sessions should group into Other');
+
   console.log('test-usage-ledger: ok');
 } finally {
   await usageLedger.closeUsageLedger();

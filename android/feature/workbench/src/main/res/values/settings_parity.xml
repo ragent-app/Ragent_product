@@ -203,4 +203,25 @@
     <string name="sp_claude_console_hint">Sign in to the Claude Console in your browser, create an API key, then paste it here.</string>
     <string name="sp_claude_console_open">Open Claude Console</string>
     <string name="sp_claude_console_open_failed">Could not open the browser. Try again.</string>
+    <string name="usage_stats_title">Usage Stats</string>
+    <string name="usage_heatmap">Usage Heatmap</string>
+    <string name="usage_less">Less</string>
+    <string name="usage_more">More</string>
+    <string name="usage_month_label">M%1$d</string>
+    <string name="usage_hourly_title">Hourly · %1$s</string>
+    <string name="usage_window_days">%1$dD</string>
+    <string name="usage_kpi_total">Total Usage</string>
+    <string name="usage_kpi_gross_input">Gross Input</string>
+    <string name="usage_kpi_new_input">New Input</string>
+    <string name="usage_kpi_cache_hit">Cache Hit</string>
+    <string name="usage_kpi_cache_rate">Cache Rate</string>
+    <string name="usage_kpi_output">Output</string>
+    <string name="usage_kpi_turns">Turns</string>
+    <string name="usage_kpi_runs">Runs</string>
+    <string name="usage_by_project">Usage by Project</string>
+    <string name="usage_project_total">Project Total</string>
+    <string name="usage_other">Other</string>
+    <string name="usage_by_tool">Usage by Tool</string>
+    <string name="usage_by_model">Usage by Model</string>
+    <string name="usage_cache_badge">Cache %1$s</string>
 </resources>

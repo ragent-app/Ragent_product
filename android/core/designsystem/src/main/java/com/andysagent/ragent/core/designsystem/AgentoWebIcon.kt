@@ -60,6 +60,7 @@ enum class AgentoWebGlyph(@DrawableRes val resource: Int) {
     Image(R.drawable.agento_image),
     Microphone(R.drawable.agento_microphone),
     Trash(R.drawable.agento_trash),
+    UsageStats(R.drawable.agento_usage_stats),
 }
 
 @Composable

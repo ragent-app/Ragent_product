@@ -68,6 +68,7 @@ import com.andysagent.ragent.core.designsystem.AgentoGlassSurface
 import com.andysagent.ragent.core.designsystem.AgentoGlassMaterial
 import com.andysagent.ragent.core.designsystem.AgentoShapes
 import com.andysagent.ragent.core.designsystem.AgentoSurface
+import com.andysagent.ragent.core.designsystem.AgentoToolbarIconButton
 import com.andysagent.ragent.core.designsystem.AgentoWebGlyph
 import com.andysagent.ragent.core.designsystem.AgentoWebIcon
 import com.andysagent.ragent.core.designsystem.RagentSizes
@@ -312,6 +313,18 @@ fun HomeSurface(
                                 onClick = { onEvent(WorkbenchEvent.Retry) },
                             )
                         }
+                        AgentoToolbarIconButton(
+                            onClick = { onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Usage, returnToOrigin = true)) },
+                            contentDescription = stringResource(R.string.settings_usage),
+                            modifier = Modifier.testTag("home-usage-button"),
+                        ) {
+                            AgentoWebIcon(
+                                glyph = AgentoWebGlyph.UsageStats,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = palette.primary,
+                            )
+                        }
                     }
                 }
 
@@ -464,6 +477,18 @@ fun HomeSurface(
                         connection = state.connection,
                         activeCarrier = state.activeCarrier,
                         onClick = { onEvent(WorkbenchEvent.Retry) },
+                    )
+                }
+                AgentoToolbarIconButton(
+                    onClick = { onEvent(WorkbenchEvent.OpenSettingsPage(SettingsPage.Usage, returnToOrigin = true)) },
+                    contentDescription = stringResource(R.string.settings_usage),
+                    modifier = Modifier.testTag("home-collapsed-usage-button"),
+                ) {
+                    AgentoWebIcon(
+                        glyph = AgentoWebGlyph.UsageStats,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = palette.primary,
                     )
                 }
             }

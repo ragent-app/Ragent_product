@@ -27,6 +27,7 @@ import {
   createProject,
   deleteProject,
   getProject,
+  listProjectRecords,
   listProjects,
   migrateProjectsToTargets,
   normalizeProjectId,
@@ -109,7 +110,7 @@ import {
   getTargetRuntimeSummaryEvents,
 } from '../lib/target-runtime-state.mjs';
 import { createTargetRuntimeSummary } from './target-runtime-summary.mjs';
-import { mutateSessionMeta } from './session-meta-store.mjs';
+import { loadSessionsMeta, mutateSessionMeta } from './session-meta-store.mjs';
 import { readSessionApiScopeHeader, SESSION_API_SCOPE_HEADER } from './session-api-scope-contract.mjs';
 import {
   normalizeSessionGoal,
@@ -1841,9 +1842,61 @@ export async function handleControlRoutes({
     const model = typeof parsedUrl?.query?.model === 'string'
       ? parsedUrl.query.model.trim()
       : '';
+    const rawHeatmapDays = typeof parsedUrl?.query?.heatmapDays === 'string'
+      ? parsedUrl.query.heatmapDays.trim()
+      : '';
+    const heatmapDays = rawHeatmapDays
+      ? parsePositiveInteger(rawHeatmapDays, 180)
+      : undefined;
+    const rawHourlyDate = typeof parsedUrl?.query?.hourlyDate === 'string'
+      ? parsedUrl.query.hourlyDate.trim()
+      : '';
+    const hourlyDate = /^\d{4}-\d{2}-\d{2}$/.test(rawHourlyDate) ? rawHourlyDate : '';
+    const rawTzOffset = typeof parsedUrl?.query?.tzOffsetMinutes === 'string'
+      ? parsedUrl.query.tzOffsetMinutes.trim()
+      : '';
+    const parsedTzOffset = rawTzOffset ? Number.parseInt(rawTzOffset, 10) : Number.NaN;
+    const tzOffsetMinutes = Number.isInteger(parsedTzOffset) && parsedTzOffset >= -840 && parsedTzOffset <= 840
+      ? parsedTzOffset
+      : undefined;
+
+    const [projectRecords, sessionMetas] = await Promise.all([
+      listProjectRecords({ includeArchived: true }).catch(() => []),
+      loadSessionsMeta().catch(() => []),
+    ]);
+    const projectNames = new Map();
+    const projectByRootPath = new Map();
+    for (const project of projectRecords) {
+      if (!project?.id) continue;
+      const projectName = trimString(project.name) || project.id;
+      projectNames.set(project.id, projectName);
+      const rootPath = trimString(project.rootPath);
+      if (rootPath) {
+        projectByRootPath.set(rootPath, { projectId: project.id, projectName });
+      }
+    }
+    const sessionToProject = new Map();
+    for (const meta of sessionMetas) {
+      if (!meta?.id) continue;
+      const pid = trimString(meta.projectId);
+      if (pid) {
+        sessionToProject.set(meta.id, {
+          projectId: pid,
+          projectName: projectNames.get(pid) || pid,
+        });
+      } else if (meta.projectDetached !== true && trimString(meta.folder)) {
+        const matched = projectByRootPath.get(trimString(meta.folder));
+        if (matched) sessionToProject.set(meta.id, matched);
+      }
+    }
+
     const summary = await queryUsageLedger({
       days: parsePositiveInteger(parsedUrl?.query?.days, 7),
       top: parsePositiveInteger(parsedUrl?.query?.top, 10),
+      ...(heatmapDays !== undefined ? { heatmapDays } : {}),
+      ...(hourlyDate ? { hourlyDate } : {}),
+      ...(tzOffsetMinutes !== undefined ? { tzOffsetMinutes } : {}),
+      projectLookup: { sessionToProject, projectNames },
       principalType,
       principalId,
       sessionId,
