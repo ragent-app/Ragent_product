@@ -315,6 +315,32 @@ private fun UserMessageAttachmentStrip(
     }
 }
 
+/** Fades the bottom edge of a collapsed bubble using an offscreen alpha mask so translucent surfaces stay clean. */
+fun Modifier.collapsedBubbleFadeMask(enabled: Boolean): Modifier = if (!enabled) this else {
+    this
+        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+        .drawWithContent {
+            drawContent()
+            val fadeHeight = 44.dp.toPx().coerceAtMost(size.height)
+            if (fadeHeight > 0f) {
+                val startY = size.height - fadeHeight
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Black,
+                        0.50f to Color.Black.copy(alpha = 0.18f),
+                        0.78f to Color.Transparent,
+                        1f to Color.Transparent,
+                        startY = startY,
+                        endY = size.height,
+                    ),
+                    topLeft = Offset(0f, startY),
+                    size = Size(size.width, fadeHeight),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun UserMessage(
@@ -384,29 +410,14 @@ fun UserMessage(
                                 } else {
                                     Modifier
                                 },
-                            ),
+                            )
+                            .collapsedBubbleFadeMask(!isExpanded && isCollapsible),
                     ) {
                         AgentMarkdown(
                             markdown = text,
                             isStreaming = false,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        if (!isExpanded && isCollapsible) {
-                            Box(
-                                Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth()
-                                    .height(44.dp)
-                                    .background(
-                                        Brush.verticalGradient(
-                                            0.0f to Color.Transparent,
-                                            0.58f to bubbleColor.copy(alpha = 0.92f),
-                                            0.82f to bubbleColor,
-                                            1.0f to bubbleColor,
-                                        ),
-                                    ),
-                            )
-                        }
                     }
 
                     if (isCollapsible) {

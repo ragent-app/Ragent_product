@@ -72,6 +72,7 @@ import com.andysagent.ragent.core.agentui.AgentMessageActionBar
 import com.andysagent.ragent.core.agentui.AgentStreamingMessage
 import com.andysagent.ragent.core.agentui.ClassicForkIcon
 import com.andysagent.ragent.core.agentui.FinalizedMarkdownMessage
+import com.andysagent.ragent.core.agentui.collapsedBubbleFadeMask
 import com.andysagent.ragent.core.agentui.R as AgentUiR
 import com.andysagent.ragent.core.designsystem.AgentoButton
 import com.andysagent.ragent.core.designsystem.AgentoFrostedGlassBox
@@ -440,7 +441,8 @@ fun UserPromptBlock(
                                         if (!isExpanded) {
                                             Modifier.heightIn(max = 160.dp).clip(RoundedCornerShape(4.dp))
                                         } else Modifier
-                                    ),
+                                    )
+                                    .collapsedBubbleFadeMask(!isExpanded && isClipped),
                             ) {
                                 AgentMarkdown(
                                     markdown = markdownBody,
@@ -449,24 +451,6 @@ fun UserPromptBlock(
                                         if (!isExpanded) isClipped = size.height >= collapsedHeightPx
                                     },
                                 )
-                                if (!isExpanded && isClipped) {
-                                    Box(Modifier.matchParentSize()) {
-                                        Box(
-                                            Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .fillMaxWidth()
-                                                .height(44.dp)
-                                                .background(
-                                                    Brush.verticalGradient(
-                                                        0.0f to Color.Transparent,
-                                                        0.58f to bubbleColor.copy(alpha = 0.92f),
-                                                        0.82f to bubbleColor,
-                                                        1.0f to bubbleColor,
-                                                    ),
-                                                ),
-                                        )
-                                    }
-                                }
                             }
                         }
 
